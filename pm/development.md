@@ -232,7 +232,7 @@ DESCRIBE("功能名称", () => {
    - 方法注释（参数、返回值）
    - 复杂逻辑注释
 
-2. **更新 DOCS/API.MD**
+2. **更新 docs/API.md**
    - 新增 API 说明
    - 更新类型定义
 
@@ -284,7 +284,7 @@ CONST RESULT = AGENT.METHOD(PARAM);
    - 新增架构设计
    - 更新状态流转
 
-3. **DOCS/SOUL.MD**（如需要）
+3. **docs/SOUL.md**（如需要）
 
 ---
 

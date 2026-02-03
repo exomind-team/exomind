@@ -4,7 +4,7 @@
 > **版本**: 2.0
 > **创建时间**: 2026-01-29
 > **最后更新**: 2026-01-29
-> **参考**: [ExoMind 知识库](../docs/ExoMind-KNOWLEDGE-BASE.md)
+> **参考**: [ExoMind 知识库](../docs/02_ExoMind-KNOWLEDGE-BASE.md)
 
 ---
 
@@ -347,4 +347,4 @@
 *创建时间: 2026-01-29*
 *版本: 2.0*
 *下次更新: ~2026-04-29*
-*参考: [ExoMind 知识库](../docs/ExoMind-KNOWLEDGE-BASE.md)*
+*参考: [ExoMind 知识库](../docs/02_ExoMind-KNOWLEDGE-BASE.md)*
