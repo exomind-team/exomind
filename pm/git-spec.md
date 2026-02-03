@@ -1,4 +1,4 @@
-# Git 使用规范整合文档
+# git-spec.md
 
 > **生效日期**: 2026-02-03
 > **版本**: v1.0
@@ -10,14 +10,14 @@
 ## 目录
 
 1. [分支管理规范](#分支管理规范)
-2. [Worktree 使用规范](#worktree-使用规范)
-3. [AI 生成内容管理](#ai-生成内容管理)
+2. [worktree 使用规范](#worktree-使用规范)
+3. [ai 生成内容管理](#ai-生成内容管理)
 
 ---
 
 # 分支管理规范
 
-> 整合自 `docs/GIT_FLOW.md`
+> 本文档为 git 使用规范，整合了分支管理、worktree 使用等内容。
 
 ## 分支结构
 
@@ -621,6 +621,6 @@ git commit -m "docs: 添加 SPEC-023 AI Agent 设计规格"
 ## 链接
 
 - GitHub: https://github.com/exomind-team/exomind
-- Git Flow 原始文章: https://nvie.com/posts/a-successful-git-branching-model/
+- git flow 原始文章: https://nvie.com/posts/a-successful-git-branching-model/
 - 语义化版本: https://semver.org/
-- Conventional Commits: https://www.conventionalcommits.org/
+- conventional commits: https://www.conventionalcommits.org/
