@@ -205,6 +205,8 @@ $Config = @{
 
 ## 参考文档
 
+- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - 完整架构设计文档
+- [ARCHITECTURE_7LAYER.md](docs/ARCHITECTURE_7LAYER.md) - 7层架构详解
 - [Tauri 官方文档](https://tauri.app/)
 - [README-Scripts.md](README-Scripts.md) - 脚本详细文档
 - [React 文档](https://react.dev/)
