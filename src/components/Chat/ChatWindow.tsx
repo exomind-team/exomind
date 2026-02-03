@@ -41,15 +41,17 @@ export function ChatWindow({
   };
 
   React.useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+    if (messagesEndRef.current && typeof messagesEndRef.current.scrollIntoView === 'function') {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
   }, [messages]);
 
   const getConnectionStatusText = () => {
     switch (connectionStatus) {
-      case 'connected': return 'ÒÑÁ¬½Ó';
-      case 'connecting': return 'Á¬½ÓÖÐ...';
-      case 'offline': return 'ÀëÏßÄ£Ê½';
-      case 'error': return 'Á¬½Ó´íÎó';
+      case 'connected': return 'å·²è¿žæŽ¥';
+      case 'connecting': return 'è¿žæŽ¥ä¸­...';
+      case 'offline': return 'ç¦»çº¿æ¨¡å¼';
+      case 'error': return 'è¿žæŽ¥é”™è¯¯';
       default: return '';
     }
   };
@@ -83,11 +85,11 @@ export function ChatWindow({
             value={inputValue}
             onChange={e => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder='ÊäÈëÏûÏ¢...'
+            placeholder='è¾“å…¥æ¶ˆæ¯...'
             rows={1}
           />
           <button onClick={handleSend} disabled={connectionStatus === 'offline'}>
-            ·¢ËÍ
+            å‘é€
           </button>
         </div>
       </div>
