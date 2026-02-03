@@ -274,6 +274,47 @@ DevOps: 构建 + 部署 + 验证
 
 ---
 
+### 2.7 网络代理配置
+
+#### Telegram Bot 代理
+
+由于国内网络无法直接访问 Telegram API，需要配置代理：
+
+```bash
+# 启动命令
+export TELEGRAM_BOT_TOKEN="你的bot token"
+export TELEGRAM_PROXY="http://127.0.0.1:7890"
+bun run src/living-agent.ts
+```
+
+**代理配置：**
+
+- 端口: `7890`
+- 环境变量: `TELEGRAM_PROXY`
+
+#### MiniMax API 代理
+
+通过 Claude Code MCP 代理访问，无需额外配置。
+
+---
+
+### 2.8 自动重连机制
+
+#### 问题
+
+国内网络访问 Telegram API 不稳定，`ECONNRESET` 错误频繁。
+
+#### 重连策略
+
+| 参数 | 值 | 说明 |
+| ---- | ---- | ---- |
+| 初始延迟 | 1秒 | 快速重试 |
+| 最大延迟 | 30秒 | 避免过长等待 |
+| 最大次数 | 10次 | 防止无限重试 |
+| 退避策略 | 指数退避 | 2^n 秒递增 |
+
+---
+
 ## 3. 认知生命科学指导原则
 
 ### 3.1 能量模型
