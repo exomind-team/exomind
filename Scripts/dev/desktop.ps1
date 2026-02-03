@@ -1,49 +1,42 @@
 <#
 .SYNOPSIS
-    Windows 桌面端开发启动脚本
-
+    Desktop development mode
 .DESCRIPTION
-    启动桌面端开发服务器，支持热重载
-
+    Start desktop dev server with hot reload support
 .PARAMETER NoInstall
-    跳过依赖安装
+    Skip dependency installation
 #>
-param(
-    [switch]$NoInstall
-)
+param([switch]$NoInstall)
 
-$ErrorActionPreference = "Stop"
+$ErrorActionPreference = 'Stop'
 
-# 导入共享配置
 . "$PSScriptRoot/../_shared/config.ps1"
 
 Clear-Host
-Write-Header "ExoMind 桌面端开发模式"
+Write-Header 'ExoMind Desktop Dev Mode'
 
-# 切换到项目根目录
 Set-Location $Global:EMConfig.ProjectRoot
 
-# 检查项目目录
 Test-ProjectRoot
 
-# 安装依赖
 if (-not $NoInstall) {
-    if (-not (Test-Path (Join-Path $Global:EMConfig.ProjectRoot "node_modules"))) {
-        Write-Host "[1/2] 安装依赖..." -ForegroundColor Yellow
+    $nodeModules = Join-Path $Global:EMConfig.ProjectRoot 'node_modules'
+    if (-not (Test-Path $nodeModules)) {
+        Write-Host '[1/2] Installing dependencies...' -ForegroundColor Yellow
         bun install
     }
 }
 
-Write-Host ""
-Write-Host "=== 启动桌面端开发服务器 ===" -ForegroundColor Green
-Write-Host ""
-Write-Host "特性:" -ForegroundColor Gray
-Write-Host "  - 本地运行，无需额外设备"
-Write-Host "  - 前端代码自动热重载 (HMR)"
-Write-Host "  - Rust 代码修改后需要重启"
-Write-Host ""
-Write-Host "快捷键:" -ForegroundColor Gray
-Write-Host "  Ctrl+C - 停止服务器"
-Write-Host ""
+Write-Host ''
+Write-Host '=== Starting Desktop Dev Server ===' -ForegroundColor Green
+Write-Host ''
+Write-Host 'Features:' -ForegroundColor Gray
+Write-Host '  - Local run, no device needed'
+Write-Host '  - Frontend hot reload (HMR)'
+Write-Host '  - Rust changes require restart'
+Write-Host ''
+Write-Host 'Shortcuts:' -ForegroundColor Gray
+Write-Host '  Ctrl+C - Stop server'
+Write-Host ''
 
 bun run tauri dev
