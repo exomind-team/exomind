@@ -34,10 +34,17 @@ describe('MessageList', () => {
   it('should distinguish sent vs received messages', () => {
     render(<MessageList messages={mockMessages} currentDevice="device-001" />);
     
-    // 发送的消息在右边（自己发的），接收的在左边
-    const messages = screen.getAllByTestId(/message-/);
-    expect(messages[0]).toHaveClass('message-received');
-    expect(messages[1]).toHaveClass('message-sent');
+    // 通过 data-testid 找到消息元素
+    const helloMsg = screen.getByTestId('message-1');
+    const worldMsg = screen.getByTestId('message-2');
+    
+    // Hello 是从 device-002 发给 device-001（当前设备是接收者）
+    expect(helloMsg).toHaveClass('message-received');
+    expect(helloMsg).not.toHaveClass('message-sent');
+    
+    // World 是从 device-001（当前设备）发给 device-002
+    expect(worldMsg).toHaveClass('message-sent');
+    expect(worldMsg).not.toHaveClass('message-received');
   });
   
   it('should load more on scroll to top', async () => {
