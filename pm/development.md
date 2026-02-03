@@ -238,7 +238,7 @@ DESCRIBE("功能名称", () => {
 
 ### 6.2 模板
 
-```markdown
+````markdown
 ### 方法名
 
 **功能描述**
@@ -253,7 +253,7 @@ DESCRIBE("功能名称", () => {
 ```typescript
 CONST RESULT = AGENT.METHOD(PARAM);
 ```
-```
+````
 
 ---
 
@@ -545,32 +545,11 @@ this.bot.api.config.use(async (prev, method, payload, signal) => {
 ## 17. 常用命令
 
 ```bash
-# 运行测试
-bun test
-
-# 开发模式
-bun run src/api-server.ts
-
-# 服务模式
-systemctl --user start exomind
-systemctl --user enable exomind
-
-# 查看状态
-systemctl --user status exomind
-journalctl --user -u exomind -f
+见 scripts/ 的脚本
 ```
 
 ---
 
 ## 18. 相关文档
 
-- [Life OS 入口](life-os/README.md)
-- [多 Agent 协作规范](life-os/agents/MULTI_AGENT_COLLABORATION.md)
-- [Ralph Loop 提示词](life-os/agents/RALPH_LOOP_PROMPT.md)
-- [Agent 模板](life-os/agents/AGENT_TEMPLATE.md)
-- [项目 CLAUDE.md 模板](life-os/agents/PROJECT_CLAUDE_TEMPLATE.md)
 
----
-
-*最后更新: 2026-01-29（从 CLAUDE.md 拆分）*
-*版本: 1.0*
