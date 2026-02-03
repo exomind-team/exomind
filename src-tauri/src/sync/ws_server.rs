@@ -7,7 +7,18 @@ use tungstenite::{Message, WebSocket};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::net::SocketAddr;
-use futures_util::{StreamExt, SinkExt};
+use futures_util::StreamExt;
+
+/// WebSocket 客户端包装（支持 Arc）
+struct WsClient {
+    ws: WebSocket<tokio::net::TcpStream>,
+}
+
+impl WsClient {
+    fn new(ws: WebSocket<tokio::net::TcpStream>) -> Self {
+        Self { ws }
+    }
+}
 
 /// WebSocket 服务器
 pub struct WsServer {
@@ -18,7 +29,7 @@ pub struct WsServer {
     /// 运行状态标志
     running: Arc<AtomicBool>,
     /// 活跃的客户端连接
-    clients: Arc<parking_lot::Mutex<Vec<WebSocket<tokio::net::TcpStream>>>>,
+    clients: Arc<parking_lot::Mutex<Vec<Arc<parking_lot::Mutex<WsClient>>>>>,
 }
 
 impl WsServer {
@@ -47,9 +58,8 @@ impl WsServer {
 
         while self.running.load(Ordering::SeqCst) {
             if let Ok((stream, _)) = listener.accept().await {
-                let ws = tokio_tungstenite::accept_async(stream).await?;
-                let client = self.handle_connection(ws).await;
-                if let Some(client) = client {
+                if let Ok(ws) = tokio_tungstenite::accept_async(stream).await {
+                    let client = Arc::new(parking_lot::Mutex::new(WsClient::new(ws)));
                     self.clients.lock().push(client);
                 }
             }
@@ -58,61 +68,21 @@ impl WsServer {
         Ok(())
     }
 
-    /// 处理客户端连接
-    async fn handle_connection(
-        &self,
-        mut ws: WebSocket<tokio::net::TcpStream>,
-    ) -> Option<WebSocket<tokio::net::TcpStream>> {
-        // 发送欢迎消息
-        if let Ok(msg) = serde_json::to_string(&serde_json::json!({
-            "type": "connected",
-            "message": "Welcome to ExoMind WebSocket Server"
-        })) {
-            let _ = ws.send(Message::Text(msg)).await;
-        }
-
-        // 心跳检测循环
-        while let Some(result) = ws.next().await {
-            match result {
-                Ok(Message::Text(text)) => {
-                    if let Ok(parsed) = serde_json::from_str::<serde_json::Value>(&text) {
-                        if parsed.get("type") == Some(&serde_json::json!("ping")) {
-                            let pong = serde_json::to_string(&serde_json::json!({
-                                "type": "pong",
-                                "timestamp": chrono::Utc::now().timestamp_millis()
-                            })).unwrap();
-                            let _ = ws.send(Message::Text(pong)).await;
-                        } else {
-                            let _ = self.tx.send(Message::Text(text)).await;
-                        }
-                    }
-                }
-                Ok(Message::Close(_)) => {
-                    return None;
-                }
-                Ok(_) => {}
-                Err(_) => {
-                    return None;
-                }
-            }
-        }
-
-        None
-    }
-
     /// 广播消息到所有客户端
     pub async fn broadcast(&self, msg: Message) {
         let clients = self.clients.lock().clone();
-        let mut failed_clients = Vec::new();
+        let mut failed_indices = Vec::new();
 
-        for (i, client) in clients.into_iter().enumerate() {
-            if client.send(msg.clone()).await.is_err() {
-                failed_clients.push(i);
+        for (i, client) in clients.iter().enumerate() {
+            let mut client = client.lock();
+            if client.ws.send(msg.clone()).await.is_err() {
+                failed_indices.push(i);
             }
         }
 
+        // 移除断开的客户端
         let mut clients = self.clients.lock();
-        for i in failed_clients.into_iter().rev() {
+        for i in failed_indices.into_iter().rev() {
             clients.remove(i);
         }
     }

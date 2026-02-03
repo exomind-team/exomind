@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi, beforeAll, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest';
 
 // Types for the sender
 interface Message {
@@ -58,7 +58,7 @@ describe('Message Sender', () => {
   };
 
   beforeAll(async () => {
-    const module = await import('../../../../src/lib/sync/sender');
+    const module = await import('../../../src/lib/sync/sender');
     MessageSender = module.MessageSender;
   });
 
