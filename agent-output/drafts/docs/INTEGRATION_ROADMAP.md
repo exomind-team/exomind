@@ -54,7 +54,7 @@
 | 原则 | 说明 |
 |------|------|
 | **每日产出** | 每个阶段 1 天，必须产出可运行的成果 |
-| **并行开发** | 多个 Agent/分支同时推进不同任务 |
+| **并行开发** | 多个任务同时推进，WorkTree 隔离 |
 | **复用优先** | 优先复用现有项目的成熟代码 |
 | **多端适配** | Web/Tauri/Android 同一功能多端体验一致 |
 
@@ -70,99 +70,59 @@
 
 ---
 
-## 2. 分支规划总览
+## 2. 每日开发计划
 
-### 2.1 分支策略
+### 2.1 第一周：核心框架
 
-```
-main (生产环境) ─────────────────────────────────────────────●──
-    │                                                          │
-dev (开发主干) ─────────────────────────────────●──────────────
-    │                                              │           │
-    │                                              ▼           │
-    │  feature/core     →  feature/exobuffer  →  feature/web
-    │  feature/memory  →  feature/voice      →  feature/mobile
-    │  feature/health  →  feature/sync       →  feature/tests
-```
+| 日期 | 任务 | 产出 |
+|------|------|------|
+| **Day 1** | 项目初始化、TypeScript 配置 | 脚手架代码 |
+| **Day 2** | Agent 基类、消息处理 | Agent.ts 基类 |
+| **Day 3** | Claude Code 集成、流式响应解析 | Claude 客户端 |
+| **Day 4** | 数据模型定义、JSONL 存储 | Fact/Analysis 接口 |
+| **Day 5** | REST API (Fact CRUD) | API 服务 |
+| **Day 5** | 记忆系统初始化 | 记忆目录结构 |
 
-### 2.2 分支任务分配表
+### 2.2 第二周：功能完善
 
-| 分支 | 负责人 | 任务范围 | 依赖 |
-|------|--------|----------|------|
-| `feature/core` | Agent-A | Agent 基类、消息队列、Claude 集成 | 无 |
-| `feature/exobuffer` | Agent-B | Fact/Analysis 数据模型、SSE 广播、API 服务 | `feature/core` |
-| `feature/memory` | Agent-C | 记忆系统（短期+长期）、边界规则 | `feature/exobuffer` |
-| `feature/health` | Agent-D | 健康监控指标、报告生成 | `feature/core` |
-| `feature/voice` | Agent-E | ASR/TTS 集成、多端语音适配 | `feature/exobuffer` |
-| `feature/web` | Agent-F | Web SPA、响应式布局、认证 | `feature/core` |
-| `feature/mobile` | Agent-G | Tauri Desktop、Android 打包 | `feature/web` |
-| `feature/sync` | Agent-H | 多端数据同步、离线存储 | `feature/web`, `feature/mobile` |
-| `feature/tests` | Agent-I | 单元测试、集成测试、E2E 测试 | 所有 feature 分支 |
+| 日期 | 任务 | 产出 |
+|------|------|------|
+| **Day 6** | SSE 实时广播 | SSE 服务 |
+| **Day 7** | 短期记忆模块 | short-term.md |
+| **Day 8** | 长期记忆模块（9 领域） | 9 个 md 文件 |
+| **Day 9** | 健康指标采集 | 指标计算模块 |
+| **Day 10** | 健康报告生成 | 报告模板 |
+| **Day 10** | ASR 集成 | 语音识别模块 |
 
-### 2.3 并行开发规则
+### 2.3 第三周：多端开发
 
-| 规则 | 说明 |
-|------|------|
-| **独立开发** | 无依赖的分支可并行开发 |
-| **依赖顺序** | 有依赖的分支必须按顺序合并 |
-| **每日合并** | 每日完成合并到 dev 分支 |
-| **冲突处理** | 冲突由对应 Agent 协商解决 |
+| 日期 | 任务 | 产出 |
+|------|------|------|
+| **Day 11** | TTS 集成、事件集成 | 语音合成模块 |
+| **Day 12** | Web SPA 脚手架 | React 应用骨架 |
+| **Day 13** | 终端页面、对话页面 | 前端页面 |
+| **Day 14** | 用户认证、JWT | 认证模块 |
+| **Day 15** | 响应式布局 | 适配完成 |
 
----
+### 2.4 第四周：移动端与同步
 
-## 3. 每日开发计划
+| 日期 | 任务 | 产出 |
+|------|------|------|
+| **Day 16** | Tauri Desktop 配置 | 桌面应用 |
+| **Day 17** | 系统通知、托盘 | 系统集成 |
+| **Day 18** | 多端数据同步服务 | 同步模块 |
+| **Day 19** | 离线存储 (IndexedDB) | 离线支持 |
+| **Day 20** | PWA 支持 (Service Worker) | PWA 配置 |
 
-### 3.1 第一周：核心框架
+### 2.5 第五周：测试与优化
 
-| 日期 | 分支 | 任务 | 产出 |
-|------|------|------|------|
-| **Day 1** | `feature/core` | 项目初始化、TypeScript 配置 | 脚手架代码 |
-| **Day 2** | `feature/core` | Agent 基类、消息处理 | Agent.ts 基类 |
-| **Day 3** | `feature/core` | Claude Code 集成、流式响应解析 | Claude 客户端 |
-| **Day 4** | `feature/exobuffer` | 数据模型定义、JSONL 存储 | Fact/Analysis 接口 |
-| **Day 5** | `feature/exobuffer` | REST API (Fact CRUD) | API 服务 |
-| **Day 5** | `feature/memory` | 记忆系统初始化 | 记忆目录结构 |
-
-### 3.2 第二周：功能完善
-
-| 日期 | 分支 | 任务 | 产出 |
-|------|------|------|------|
-| **Day 6** | `feature/exobuffer` | SSE 实时广播 | SSE 服务 |
-| **Day 7** | `feature/memory` | 短期记忆模块 | short-term.md |
-| **Day 8** | `feature/memory` | 长期记忆模块（9 领域） | 9 个 md 文件 |
-| **Day 9** | `feature/health` | 健康指标采集 | 指标计算模块 |
-| **Day 10** | `feature/health` | 健康报告生成 | 报告模板 |
-| **Day 10** | `feature/voice` | ASR 集成 | 语音识别模块 |
-
-### 3.3 第三周：多端开发
-
-| 日期 | 分支 | 任务 | 产出 |
-|------|------|------|------|
-| **Day 11** | `feature/voice` | TTS 集成、事件集成 | 语音合成模块 |
-| **Day 12** | `feature/web` | Web SPA 脚手架 | React 应用骨架 |
-| **Day 13** | `feature/web` | 终端页面、对话页面 | 前端页面 |
-| **Day 14** | `feature/web` | 用户认证、JWT | 认证模块 |
-| **Day 15** | `feature/web` | 响应式布局 | 适配完成 |
-
-### 3.4 第四周：移动端与同步
-
-| 日期 | 分支 | 任务 | 产出 |
-|------|------|------|------|
-| **Day 16** | `feature/mobile` | Tauri Desktop 配置 | 桌面应用 |
-| **Day 17** | `feature/mobile` | 系统通知、托盘 | 系统集成 |
-| **Day 18** | `feature/sync` | 多端数据同步服务 | 同步模块 |
-| **Day 19** | `feature/sync` | 离线存储 (IndexedDB) | 离线支持 |
-| **Day 20** | `feature/sync` | PWA 支持 (Service Worker) | PWA 配置 |
-
-### 3.5 第五周：测试与优化
-
-| 日期 | 分支 | 任务 | 产出 |
-|------|------|------|------|
-| **Day 21** | `feature/tests` | 单元测试 (100% 覆盖) | 测试用例 |
-| **Day 22** | `feature/tests` | 集成测试 | 测试报告 |
-| **Day 23** | `feature/tests` | E2E 测试 | 测试脚本 |
-| **Day 24** | 所有分支 | 性能优化 | 优化报告 |
-| **Day 25** | 所有分支 | 安全审计、文档完善 | 安全报告 |
+| 日期 | 任务 | 产出 |
+|------|------|------|
+| **Day 21** | 单元测试 (100% 覆盖) | 测试用例 |
+| **Day 22** | 集成测试 | 测试报告 |
+| **Day 23** | E2E 测试 | 测试脚本 |
+| **Day 24** | 性能优化 | 优化报告 |
+| **Day 25** | 安全审计、文档完善 | 安全报告 |
 
 ---
 
@@ -172,7 +132,6 @@ dev (开发主干) ────────────────────�
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/core` |
 | **任务** | 初始化项目结构、TypeScript 配置 |
 | **产出** | `package.json`, `tsconfig.json`, 目录结构 |
 
@@ -187,7 +146,6 @@ dev (开发主干) ────────────────────�
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/core` |
 | **任务** | 实现 Agent 基类、消息处理 |
 | **产出** | `src/core/agent.ts` |
 
@@ -226,7 +184,6 @@ export class Agent {
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/core` |
 | **任务** | Claude Code 集成、流式响应解析 |
 | **产出** | `src/core/claude.ts` |
 
@@ -241,7 +198,6 @@ export class Agent {
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/exobuffer` |
 | **任务** | Fact/Analysis 数据模型、JSONL 存储 |
 | **产出** | `src/models/fact.ts`, `src/models/analysis.ts` |
 
@@ -282,7 +238,6 @@ export class FactStore {
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/exobuffer` |
 | **任务** | REST API (Fact CRUD)、记忆系统初始化 |
 | **产出** | `src/api/fact.ts`, `memory/` 目录 |
 
@@ -307,7 +262,6 @@ export class FactStore {
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/exobuffer` |
 | **任务** | SSE 实时广播 |
 | **产出** | `src/sse/broadcast.ts` |
 
@@ -341,7 +295,6 @@ export class SSEBroadcaster {
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/memory` |
 | **任务** | 短期记忆模块 |
 | **产出** | `src/memory/short-term.ts` |
 
@@ -384,7 +337,6 @@ export class ShortTermMemoryStore {
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/memory` |
 | **任务** | 长期记忆模块（9 领域） |
 | **产出** | `memory/*.md` (9 个文件) |
 
@@ -416,7 +368,6 @@ memory/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/health` |
 | **任务** | 健康指标采集 |
 | **产出** | `src/health/metrics.ts` |
 
@@ -440,7 +391,6 @@ memory/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/health`, `feature/voice` |
 | **任务** | 健康报告生成、ASR 集成 |
 | **产出** | `src/health/report.ts`, `src/voice/asr.ts` |
 
@@ -455,7 +405,6 @@ memory/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/voice` |
 | **任务** | TTS 集成、语音事件集成 |
 | **产出** | `src/voice/tts.ts` |
 
@@ -470,7 +419,6 @@ memory/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/web` |
 | **任务** | Web SPA 脚手架 |
 | **产出** | `web/` 目录结构 |
 
@@ -507,7 +455,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/web` |
 | **任务** | 终端页面、对话页面 |
 | **产出** | `src/pages/Terminal.tsx`, `src/pages/Chat.tsx` |
 
@@ -522,7 +469,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/web` |
 | **任务** | 用户认证、JWT |
 | **产出** | `src/lib/auth.ts` |
 
@@ -537,7 +483,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/web` |
 | **任务** | 响应式布局 |
 | **产出** | Tailwind 配置完成 |
 
@@ -552,7 +497,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/mobile` |
 | **任务** | Tauri Desktop 配置 |
 | **产出** | `src-tauri/` 配置完成 |
 
@@ -567,7 +511,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/mobile` |
 | **任务** | 系统通知、托盘 |
 | **产出** | 系统集成模块 |
 
@@ -582,7 +525,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/sync` |
 | **任务** | 多端数据同步服务 |
 | **产出** | `src/sync/service.ts` |
 
@@ -597,7 +539,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/sync` |
 | **任务** | 离线存储 (IndexedDB) |
 | **产出** | `src/sync/offline.ts` |
 
@@ -612,7 +553,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/sync` |
 | **任务** | PWA 支持 (Service Worker) |
 | **产出** | `public/sw.ts`, `public/manifest.json` |
 
@@ -627,7 +567,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | `feature/tests` |
 | **任务** | 单元测试、集成测试、E2E 测试 |
 | **产出** | 测试用例、测试报告 |
 
@@ -647,7 +586,6 @@ web/
 
 | 项目 | 内容 |
 |------|------|
-| **分支** | 所有分支 |
 | **任务** | 性能优化、安全审计、文档完善 |
 | **产出** | 优化报告、安全报告、文档 |
 
