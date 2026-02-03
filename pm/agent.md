@@ -16,13 +16,13 @@
 
 ### 1.2 能力边界
 
-| 能力 | 描述 |
-| ---- | ---- |
+| 能力     | 描述                                    |
+| -------- | --------------------------------------- |
 | 代码开发 | typescript/javascript、node.js 生态系统 |
-| 架构设计 | actor 架构、消息队列、状态管理 |
-| 测试工程 | 单元测试、集成测试、e2e 测试 |
-| 文档编写 | spec 文档、api 文档、技术方案 |
-| 项目管理 | 任务规划、进度跟踪、版本控制 |
+| 架构设计 | actor 架构、消息队列、状态管理          |
+| 测试工程 | 单元测试、集成测试、e2e 测试            |
+| 文档编写 | spec 文档、api 文档、技术方案           |
+| 项目管理 | 任务规划、进度跟踪、版本控制            |
 
 ### 1.3 工作模式
 
@@ -38,12 +38,12 @@
 
 **每次修改文件后立即提交 git commit**
 
-| 原则 | 说明 |
-| ---- | ---- |
-| **触发时机** | 任何文件修改后立即提交 |
-| **提交粒度** | 按文件/功能，小步提交 |
-| **提交信息** | `[类型]: [简短描述] [修改文件]` |
-| **分支** | 在 feature 分支上提交，不影响主分支 |
+| 原则               | 说明                                     |
+| ------------------ | ---------------------------------------- |
+| **触发时机** | 任何文件修改后立即提交                   |
+| **提交粒度** | 按文件/功能，小步提交                    |
+| **提交信息** | `[类型]: [简短描述] [修改文件]`        |
+| **分支**     | 在对应 feature 分支上提交，不影响主分支 |
 
 **示例**：
 
@@ -58,6 +58,7 @@ git commit -m "docs: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
 ```
 
 **为什么？**
+
 1. git 成为 agent 的完整历史
 2. 每次变更可追溯、可回滚
 3. 便于 code review 和审计
@@ -86,38 +87,58 @@ git commit -m "docs: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
 └─────────────────────────────────────────────────────────────────┘
 ```
 
-**能量管理**
-- 活跃：能量 > 50%，全力处理
-- 节能：20% < 能量 < 50%，减少探索
-- 待机：能量 < 20%，仅监听
-- 休眠：能量 = 0，停止活动
-
 ---
 
-### 2.3 双终端工作模式
+### 2.3 基于 WorkTree 的多分支并行开发
 
-**一个对话终端 + 一个编码终端**
+**核心原则**: 功能开发使用 Git WorkTree 隔离工作区，开发完成后合并到 dev 分支。
 
-| 终端 | 用途 | 特点 |
-| ---- | ---- | ---- |
-| **对话终端** | 对话、思考、想法执行 | 即时响应，想到就做 |
-| **编码终端** | 专注代码开发 | ralph loop 迭代开发 |
-
-**工作流程**：
 ```
-对话终端 ←→ pm/logs/yyyy-mm-dd.jsonl（记录想法）
-     ↓
-编码终端读取日志 → 执行编码任务 → git 提交
+┌─────────────────────────────────────────────────────────────────┐
+│              基于 WorkTree 的多分支并行开发模式                       │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                 │
+│  feature/claude-runner (WorkTree) ──→ 合并 ──→ dev 分支        │
+│         ↓                                                      │
+│  feature/terminal-executor (WorkTree) ──→ 合并                  │
+│         ↓                                                      │
+│  feature/ui-components (WorkTree) ──→ 合并                     │
+│                                                                 │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+**WorkTree 使用规范**（详细规范参考 `pm/git-spec.md`）：
+
+| 场景 | 操作方式 |
+|------|----------|
+| **功能开发** | 创建 WorkTree → 隔离开发 → 合并到 dev |
+| **DV 分支（线性）** | 直接在 dev 分支上修改 |
+| **评审/实验** | 创建 WorkTree → 完成后删除 |
+
+**WorkTree 工作流程**：
+
+```bash
+# 1. 创建功能分支的 WorkTree
+git worktree add ../exomind-feature-xxx main
+
+# 2. 在 WorkTree 中开发
+cd ../exomind-feature-xxx
+bun dev
+
+# 3. 完成后合并到 dev
+git checkout dev
+git merge feature/xxx
+git worktree remove ../exomind-feature-xxx
 ```
 
 **核心原则**：
-- 对话终端负责"想到"，即时记录
-- 编码终端负责"做到"，专注执行
-- 两个终端共享 memory 系统
+- 每个功能独立 WorkTree，隔离工作区
+- 功能完成后合并到 dev，保持主分支整洁
+- 评审文件写入 `agent-output/drafts/docs`，评审后删除（保留 git 历史快照）
 
 ---
 
-### ralph loop 提示词
+### 2.4 ralph loop 提示词
 
 ```
 /ralph-loop: 读取 pm/agent.md 和 pm/development.md，记住你是谁和工作流程。
@@ -138,13 +159,13 @@ head -10 pm/development.md
 
 ### 本项目特定配置
 
-| 配置项 | 值 | 说明 |
-| ---- | ---- | ---- |
-| 测试框架 | vitest + bun test | 单元测试框架 |
-| 包管理 | bun | node.js 包管理器 |
-| 服务端口 | **1949** | api 服务端口 |
-| 服务名称 | **exomind** | systemd 服务名 |
-| 测试覆盖率 | **100%** | 单元测试覆盖率要求 |
+| 配置项     | 值                                                      | 说明               |
+| ---------- | ------------------------------------------------------- | ------------------ |
+| 测试框架   | vitest + bun test + tauri mcp test E2E 测试 + Rust test | 单元测试框架       |
+| 包管理     | bun                                                     | node.js 包管理器   |
+| 服务端口   | **1949**                                          | api 服务端口       |
+| 服务名称   | **exomind**                                       | systemd 服务名     |
+| 测试覆盖率 | **100%**                                          | 单元测试覆盖率要求 |
 
 ---
 
@@ -154,8 +175,7 @@ head -10 pm/development.md
 
 ```
 能量 = minimax api 使用额度（真实资源）
-奖励 = 用户充值（像人屯脂肪）
-成长 = 信任度提升（像婴儿→成人）
+
 ```
 
 ### 3.2 actor 架构
@@ -176,36 +196,49 @@ head -10 pm/development.md
 
 ## 4. 技术栈
 
-### 4.1 核心语言
+### 4.1 前端技术栈（参考 `docs/FRONTEND_STACK.md`）
+
+| 层级 | 技术 | 版本 | 说明 |
+|------|------|------|------|
+| **前端框架** | React | 18.3.1 | UI 框架 |
+| **前端语言** | TypeScript | 5.6.2 | 类型安全 |
+| **构建工具** | Vite | 6.0.3 | 快速构建 |
+| **UI 库** | shadcn/ui | - | 现代化组件库 |
+| **样式** | Tailwind CSS | 3.4 | 原子化样式 |
+| **状态管理** | zustand | 5.0+ | 轻量状态管理 |
+| **图标** | lucide-react | - | 现代化图标 |
+| **路由** | @tanstack/react-router | 1.0+ | 类型安全路由 |
+| **包管理器** | bun | - | JS 包管理 |
+| **测试框架** | vitest | - | 单元测试框架 |
+
+### 4.2 核心语言
 
 | 语言 | 用途 |
-| ---- | ---- |
+|------|------|
 | typescript | 主开发语言 |
 | javascript | 脚本和工具 |
 | markdown | 文档编写 |
-
-### 4.2 运行时
-
-| 运行时 | 用途 |
-| ---- | ---- |
-| bun | 主运行时（快速、类型安全） |
-| node.js | 备选运行时 |
+| rust | Tauri 后端核心逻辑 |
 
 ### 4.3 框架与库
 
 | 框架 | 用途 |
-| ---- | ---- |
+|------|------|
 | react | 前端框架 |
-| tauri | 跨平台框架 |
+| tauri | 跨平台框架（桌面 + Android） |
 | vitest | 测试框架 |
+| zustand | 状态管理 |
+| @tanstack/react-router | 路由 |
+| shadcn/ui | UI 组件库 |
 
 ### 4.4 开发工具
 
 | 工具 | 用途 |
-| ---- | ---- |
-| claude code | ai 编程助手 |
+|------|------|
+| claude code | AI 编程助手 |
 | git | 版本控制 |
 | vs code | 代码编辑 |
+| bun | 包管理 + 运行 |
 
 ---
 
@@ -214,25 +247,52 @@ head -10 pm/development.md
 ```
 exomind/
 ├── src/                      # 前端源代码 (react + typescript)
-├── src-tauri/                # tauri 后端 (rust)
+│   ├── components/          # 组件目录
+│   │   ├── ui/             # shadcn/ui 基础组件
+│   │   ├── Terminal/       # Terminal 页面组件
+│   │   ├── Chat/           # Chat 页面组件
+│   │   ├── Notification/   # 通知面板组件
+│   │   └── Settings/        # 设置页面组件
+│   ├── features/           # 业务功能模块
+│   ├── hooks/              # 自定义 Hooks
+│   ├── stores/             # zustand stores
+│   ├── lib/                # 工具函数
+│   ├── pages/              # 页面组件
+│   ├── App.tsx            # 主应用组件
+│   └── main.tsx            # 入口文件
+│
+├── src-tauri/              # Tauri 后端 (Rust)
 │   ├── src/
-│   │   ├── core/            # 核心模块
-│   │   └── commands/        # tauri 命令
-│   └── tauri.conf.json      # tauri 配置
-├── docs/                     # 文档目录
-│   ├── ARCHITECTURE.md      # 架构设计文档
-│   └── specs/                # 详细规格文档
-├── pm/                       # 项目管理
-│   ├── git-spec.md          # git 使用规范
-│   ├── prd.md               # 产品需求文档
-│   ├── roadmap.md           # 产品路线图
-│   ├── development.md       # 开发规范
-│   ├── agent.md             # agent 配置（本文件）
-│   ├── tasks_plan.md        # 任务计划
-│   ├── input.md             # 任务输入
-│   └── memory/              # 长期记忆
-│       └── long-term.md     # 核心决策记录
-└── package.json
+│   │   ├── core/          # 核心模块
+│   │   └── commands/      # Tauri 命令
+│   ├── Cargo.toml          # Rust 依赖配置
+│   └── tauri.conf.json    # Tauri 配置
+│
+├── docs/                   # 文档目录
+│   ├── ARCHITECTURE.md    # 架构设计文档
+│   ├── specs/              # 详细规格文档
+│   │   ├── SPEC-201-SignalPool.md
+│   │   ├── SPEC-202-AgentLayer.md
+│   │   ├── SPEC-204-ResourcePool.md
+│   │   └── TEMPLATE.md
+│   └── FRONTEND_STACK.md  # 前端技术栈规划
+│
+├── pm/                     # 项目管理
+│   ├── git-spec.md        # Git 使用规范（含 WorkTree）
+│   ├── prd.md             # 产品需求文档
+│   ├── roadmap.md         # 产品路线图
+│   ├── development.md      # 开发规范
+│   ├── agent.md           # Agent 配置（本文件）
+│   ├── tasks_plan.md      # 任务计划
+│   ├── input.md           # 任务输入
+│   └── memory/            # 长期记忆
+│       └── long-term.md   # 核心决策记录
+│
+├── modules/                # 可独立部署模块
+│   └── ExoMind-NLS-Guardian/  # Android 通知守护模块
+│
+├── package.json            # 前端依赖配置
+└── Cargo.toml             # Rust 根依赖配置
 ```
 
 ---
@@ -304,7 +364,7 @@ journalctl --user -u exomind -f
 ### 8.4 部署后测试
 
 ```bash
-# api 健康检查
+# API 健康检查
 curl http://localhost:1949/health
 ```
 
@@ -312,18 +372,22 @@ curl http://localhost:1949/health
 
 ## 9. 外部资源
 
-### 9.1 api 文档
+### 9.1 API 文档
 
 - minimax api: https://api.minimaxi.com
 - tauri: https://tauri.app/
+- react: https://react.dev/
+- tanstack router: https://tanstack.com/router
 
 ### 9.2 项目文档
 
-- prd: `pm/prd.md`
+- PRD: `pm/prd.md`
 - 任务计划: `pm/tasks_plan.md`
 - 开发规范: `pm/development.md`
-- git 规范: `pm/git-spec.md`
+- Git 规范（含 WorkTree）: `pm/git-spec.md`
 - 架构设计: `docs/ARCHITECTURE.md`
+- 前端技术栈: `docs/FRONTEND_STACK.md`
+- 7 层架构: `docs/ARCHITECTURE_7LAYER.md`
 
 ---
 
