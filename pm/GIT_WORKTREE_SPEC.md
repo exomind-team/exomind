@@ -21,7 +21,7 @@
 ## 分支结构
 
 ```
-master (生产环境)
+main (生产环境)
   ↑     ↑
   │     └── hotfix/v1.2.1 (紧急修复)
   │
@@ -36,11 +36,11 @@ master (生产环境)
 
 | 分支 | 角色 | 保护 | 生命周期 | 合并来源 |
 |------|------|------|----------|----------|
-| `master` | 生产环境 | ✅ 强制保护 | 永久 | `dev`, `hotfix/*` |
+| `main` | 生产环境 | ✅ 强制保护 | 永久 | `dev`, `hotfix/*` |
 | `dev` | 开发主干 | ✅ 保护 | 永久 | `feature/*`, `release/*` |
 | `feature/*` | 功能开发 | ❌ 可强制推送 | 临时 | `dev` |
 | `release/*` | 预发布 | ❌ 可强制推送 | 临时 | `dev` |
-| `hotfix/*` | 紧急修复 | ❌ 可强制推送 | 临时 | `master` |
+| `hotfix/*` | 紧急修复 | ❌ 可强制推送 | 临时 | `main` |
 
 ---
 
@@ -169,17 +169,17 @@ npm version major # 1.2.0 → 2.0.0
 # 5. 更新 CHANGELOG
 # 使用 conventional-changelog 自动生成
 
-# 6. 合并到 master (重要：先删除 agent-output!)
-git checkout master
+# 6. 合并到 main (重要：先删除 agent-output!)
+git checkout main
 rm -rf agent-output  # 删除 AI 生成内容（已在 dev 记录历史）
-git commit -m "chore: 删除 agent-output 目录 (仅 master 分支)" --allow-empty
+git commit -m "chore: 删除 agent-output 目录 (仅 main 分支)" --allow-empty
 git merge release/v1.2.0 --no-ff -m "Release: v1.2.0"
 
 # 7. 打标签
 git tag -a v1.2.0 -m "Version 1.2.0"
 
 # 8. 推送
-git push origin master --tags
+git push origin main --tags
 
 # 9. 删除预发布分支
 git branch -d release/v1.2.0
@@ -220,23 +220,23 @@ v2.1.3
 当生产环境出现 **紧急 bug** 时，使用 hotfix 分支：
 
 ```bash
-# 1. 从 master 创建 hotfix 分支
-git checkout master
-git pull origin master
+# 1. 从 main 创建 hotfix 分支
+git checkout main
+git pull origin main
 git checkout -b hotfix/v1.2.1
 
 # 2. 修复问题
 git commit -m "FIX: 修复登录页面崩溃问题"
 
-# 3. 合并到 master (紧急修复，可跳过测试)
-git checkout master
+# 3. 合并到 main (紧急修复，可跳过测试)
+git checkout main
 git merge hotfix/v1.2.1 --no-ff -m "Hotfix: v1.2.1"
 
 # 4. 打标签
 git tag -a v1.2.1 -m "Hotfix v1.2.1"
 
 # 5. 推送
-git push origin master --tags
+git push origin main --tags
 
 # 6. 合并回 dev (重要！)
 git checkout dev
@@ -252,9 +252,9 @@ git branch -d hotfix/v1.2.1
 
 | 禁止 | 说明 |
 |------|------|
-| ❌ 直接推送到 master | 只能通过 PR 合并 |
-| ❌ 强制推送 master/dev | 保护分支禁止 force push |
-| ❌ 在 master 上开发 | 功能开发只能在 feature 分支 |
+| ❌ 直接推送到 main | 只能通过 PR 合并 |
+| ❌ 强制推送 main/dev | 保护分支禁止 force push |
+| ❌ 在 main 上开发 | 功能开发只能在 feature 分支 |
 | ❌ 长期存在的功能分支 | 功能完成后立即删除 |
 | ❌ 跳过代码审查 | PR 必须经过 review |
 
@@ -552,16 +552,16 @@ agent-output/
 - ✅ `agent-output/` **在 dev 分支被 Git 追踪**
 - ✅ 所有内容需 **人工审核** 后才能进入项目正式代码
 - ✅ 审核通过的移动到 `docs/`、`src/` 等正式目录
-- ⚠️ **master 分支不包含 `agent-output/`**（发版时删除）
+- ⚠️ **main 分支不包含 `agent-output/`**（发版时删除）
 
 ## 版本历史
 
 ```
 dev 分支:     包含 agent-output/ (完整历史)
      ↓
-合并到 master: 先删除 agent-output/ 再合并
+合并到 main: 先删除 agent-output/ 再合并
      ↓
-master 分支:  无 agent-output，但 Git 历史中保留记录
+main 分支:  无 agent-output，但 Git 历史中保留记录
 ```
 
 ## 示例
@@ -574,7 +574,7 @@ mv agent-output/drafts/specs/SPEC-023.md docs/specs/SPEC-023.md
 git add docs/specs/SPEC-023.md
 git commit -m "DOCS: 添加 SPEC-023 AI Agent 设计规格"
 
-# 发版时合并到 master（会自动删除 agent-output）
+# 发版时合并到 main（会自动删除 agent-output）
 ```
 
 ---
