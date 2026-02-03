@@ -16,7 +16,7 @@ ExoMind 是一个具备**自主运行、自主决策、真实责任能力**的�
 - **自主决策**：基于信任度等级自主决定行动边界
 - **真实责任**：能量消耗真实不可回滚，失败留下伤疤
 
-**生命体判据**（来源: `docs/ExoMind-KNOWLEDGE-BASE.md` 生命科学理论）：
+**生命体判据**（来源: `docs/02_ExoMind-KNOWLEDGE-BASE.md` 生命科学理论）：
 > "可存活区间：一旦跌出，生命过程不可逆中断或退化" —— 否决式判据
 
 ### 1.2 个人生命成长
@@ -40,14 +40,14 @@ ExoMind 以**人的成长为核心目标**，而非单纯的任务管理。
 
 **定义**：不把感知和学习作为后加功能，而是从单细胞阶段就作为存活优势存在。
 
-**来源**: `docs/ExoMind-KNOWLEDGE-BASE.md` 愿景与目标提炼
+**来源**: `docs/02_ExoMind-KNOWLEDGE-BASE.md` 愿景与目标提炼
 > "生命-认知一体化：不把感知和学习作为后加功能，而是从单细胞阶段就作为存活优势存在"
 
 ### 2.2 可存活区间
 
 **定义**：一旦跌出，生命过程不可逆中断或退化的硬判据。
 
-**来源**: `docs/ExoMind-KNOWLEDGE-BASE.md` 生命科学理论
+**来源**: `docs/02_ExoMind-KNOWLEDGE-BASE.md` 生命科学理论
 > "可存活区间：一旦跌出，生命过程不可逆中断或退化"
 
 ### 2.3 能量 = 真实资源
@@ -77,14 +77,14 @@ ExoMind 以**人的成长为核心目标**，而非单纯的任务管理。
 
 **定义**：死亡不是 episode reset，错误会留下不可抹平的后果。
 
-**来源**: `docs/ExoMind-KNOWLEDGE-BASE.md` 愿景与目标提炼
+**来源**: `docs/02_ExoMind-KNOWLEDGE-BASE.md` 愿景与目标提炼
 > "失败不可回滚：死亡不是 episode reset，错误会留下不可抹平的后果"
 
 ### 2.6 伤疤机制
 
 **定义**：失败产生不可逆退化，压缩未来行动空间。
 
-**来源**: `docs/ExoMind-KNOWLEDGE-BASE.md` 愿景与目标提炼
+**来源**: `docs/02_ExoMind-KNOWLEDGE-BASE.md` 愿景与目标提炼
 > "伤疤机制：失败产生不可逆退化，压缩未来行动空间"
 
 ---
@@ -227,7 +227,7 @@ draft → pending → in_progress → pending_review → completed
 
 ### 4.4 成长验证（Day 7 六问）
 
-**验收标准**（来源: `docs/ExoMind-KNOWLEDGE-BASE.md` 成功指标）：
+**验收标准**（来源: `docs/02_ExoMind-KNOWLEDGE-BASE.md` 成功指标）：
 > "闭环有效性：体感变好，Day 7 验证6问题至少4个为是"
 
 | # | 问题 | 成长层级 |
@@ -308,7 +308,7 @@ draft → pending → in_progress → pending_review → completed
 
 ### 5.4 存储与持久化
 
-**EventLog 标准格式**（来源: `docs/ExoMind-KNOWLEDGE-BASE.md` 数据架构）：
+**EventLog 标准格式**（来源: `docs/02_ExoMind-KNOWLEDGE-BASE.md` 数据架构）：
 
 ```yaml
 ---
@@ -440,7 +440,7 @@ duration: Xm
 
 ### 7.1 生命系统约束
 
-**来源**: `docs/ExoMind-KNOWLEDGE-BASE.md` 约束与风险
+**来源**: `docs/02_ExoMind-KNOWLEDGE-BASE.md` 约束与风险
 
 | 约束 | 说明 |
 |------|------|
@@ -496,25 +496,25 @@ duration: Xm
 | EventLog标准 | 外心四Agent快速实施计划.md | 4. 数据格式规范 | "制定EventLog标准,所有Agent遵守统一格式" | ✅ |
 | ralph loop | `pm/development.md` | 流程概览 | "10步标准开发流程" | ✅ |
 | 修改即提交 | `CLAUDE.md` | 工作流程 | "每次修改文件后立即提交 Git commit" | ✅ |
-| 可存活区间 | `docs/ExoMind-KNOWLEDGE-BASE.md` | 生命科学理论 | "一旦跌出，生命过程不可逆中断或退化" | ✅ |
-| 失败不可回滚 | ExoMind-KNOWLEDGE-BASE.md | 愿景与目标提炼 | "死亡不是 episode reset" | ✅ |
-| 伤疤机制 | ExoMind-KNOWLEDGE-BASE.md | 愿景与目标提炼 | "失败产生不可逆退化，压缩未来行动空间" | ✅ |
+| 可存活区间 | `docs/02_ExoMind-KNOWLEDGE-BASE.md` | 生命科学理论 | "一旦跌出，生命过程不可逆中断或退化" | ✅ |
+| 失败不可回滚 | 02_ExoMind-KNOWLEDGE-BASE.md | 愿景与目标提炼 | "死亡不是 episode reset" | ✅ |
+| 伤疤机制 | 02_ExoMind-KNOWLEDGE-BASE.md | 愿景与目标提炼 | "失败产生不可逆退化，压缩未来行动空间" | ✅ |
 | Governor原则 | 外心四Agent快速实施计划.md | 7.2 核心治理原则 | "默认短、默认可跳过、失败不羞辱" | ✅ |
 
 ### 8.2 术语定义来源
 
 | 术语 | 定义 | 来源文档 |
 |------|------|----------|
-| 生命-认知一体化 | 不把感知和学习作为后加功能 | ExoMind-KNOWLEDGE-BASE.md |
-| 可存活区间 | 一旦跌出，生命过程不可逆中断 | ExoMind-KNOWLEDGE-BASE.md |
-| 否决式判据 | 任一关键约束不成立即可否决 | ExoMind-KNOWLEDGE-BASE.md |
-| 过程性存在 | 生命不是实体，而是时间中持续展开的过程 | ExoMind-KNOWLEDGE-BASE.md |
-| 边界归因 | 没有边界就没有内部/外部、没有归因 | ExoMind-KNOWLEDGE-BASE.md |
-| 物质不可逆性 | 物质系统提供稳定性、代价不可绕过性 | ExoMind-KNOWLEDGE-BASE.md |
-| 能量前提论 | 能量是生命持续的物理前提 | ExoMind-KNOWLEDGE-BASE.md |
-| 代谢成本 | 清理、维护要消耗真实资源 | ExoMind-KNOWLEDGE-BASE.md |
-| Actor模型 | Mailbox、输入缓冲区、思考引擎、执行器 | ExoMind-KNOWLEDGE-BASE.md |
-| World Daemon | 环境层：Lifecycle Manager、Resource Governor | ExoMind-KNOWLEDGE-BASE.md |
+| 生命-认知一体化 | 不把感知和学习作为后加功能 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| 可存活区间 | 一旦跌出，生命过程不可逆中断 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| 否决式判据 | 任一关键约束不成立即可否决 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| 过程性存在 | 生命不是实体，而是时间中持续展开的过程 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| 边界归因 | 没有边界就没有内部/外部、没有归因 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| 物质不可逆性 | 物质系统提供稳定性、代价不可绕过性 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| 能量前提论 | 能量是生命持续的物理前提 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| 代谢成本 | 清理、维护要消耗真实资源 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| Actor模型 | Mailbox、输入缓冲区、思考引擎、执行器 | 02_ExoMind-KNOWLEDGE-BASE.md |
+| World Daemon | 环境层：Lifecycle Manager、Resource Governor | 02_ExoMind-KNOWLEDGE-BASE.md |
 
 ---
 
@@ -526,7 +526,7 @@ duration: Xm
 | 自主生命规范 | `docs/AUTONOMOUS_LIFE_SPEC.md` | 能量模型、Actor架构、信任度阶梯 |
 | 四Agent实施计划 | `docs/ExoMind/外心四Agent快速实施计划.md` | 四Agent职责、成长验证、EventLog标准 |
 | MVP最小闭环 | `docs/ExoMind/mvp/【方案】外心MVP最小闭环设计.md` | 信息通道、MCP验收、关机仪式 |
-| 知识库 | `docs/ExoMind-KNOWLEDGE-BASE.md` | 生命科学理论、认知科学理论、成功指标 |
+| 知识库 | `docs/02_ExoMind-KNOWLEDGE-BASE.md` | 生命科学理论、认知科学理论、成功指标 |
 | 整体架构 | `docs/ARCHITECTURE.md` | Claude Runner、平台适配、通知拦截 |
 | 七层架构 | `docs/ARCHITECTURE_7LAYER.md` | 七层模型、SignalPool、Resource Fetcher |
 | 前端技术栈 | `docs/FRONTEND_STACK.md` | React、shadcn/ui、zustand、Tailwind |
