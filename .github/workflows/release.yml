@@ -6,19 +6,26 @@ on:
   workflow_dispatch:
     inputs:
       version:
-        description: "Release version (e.g., 0.1.0)"
+        description: 'Release version (e.g., 0.1.0)'
         required: true
-        default: "0.1.0"
+        default: '0.1.0'
+
+env:
+  RUST_TOOLCHAIN: stable
 
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          node-version: "20"
-      - uses: actions/setup-rust@v1
+          node-version: '20'
+      
+      - name: Setup Rust
+        uses: actions/setup-rust@v1
         with:
           toolchain: stable
       
@@ -30,21 +37,54 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       
-      - name: Upload Windows Artifact
+      - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi
           path: src-tauri/target/release/bundle/msi/
 
-  create-release:
-    needs: build-windows
+  build-android:
+    runs-on: ubuntu-latest
+    container: nix-community/nix:latest
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Build Android
+        run: |
+          nix-shell --pure shell.nix --run "bun tauri android build"
+      
+      - name: Upload Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk
+          path: src-tauri/gen/android/app/build/outputs/apk/
+
+  test-e2e:
     runs-on: ubuntu-latest
     steps:
-      - name: Download Windows Artifact
+      - uses: actions/checkout@v4
+      
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Install dependencies
+        run: bun install
+      
+      - name: Run E2E Tests
+        run: bun test tests/e2e/
+
+  create-release:
+    needs: [build-windows, build-android]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.version != ''
+    steps:
+      - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
-          name: windows-msi
-          path: release-files/
+          path: release-files
+        merge-multiple: true
       
       - name: List Files
         run: ls -la release-files/
