@@ -158,7 +158,7 @@ git commit -m "DOCS: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
 
 ## 分支管理
 
-参考 `docs/GIT_FLOW.md` 获取完整的分支策略：
+参考 `pm/GIT_WORKTREE_SPEC.md` 获取完整的分支策略和工作流规范：
 
 ```
 master (生产环境) ─────────────●────────────────●──
@@ -176,6 +176,13 @@ dev (开发主干) ─────●──●──●──●──●──�
 | `release/*` | 预发布 | 临时 |
 | `hotfix/*` | 紧急修复 | 临时 |
 ```
+
+**完整文档包含**：
+- 分支结构与保护规则
+- 开发、重构、发布、热修复流程
+- Worktree 使用规范（隔离工作区、多分支并行）
+- AI 生成内容管理（agent-output/）
+- Git 提交类型速查
 
 ## systemd 服务管理
 
@@ -228,7 +235,6 @@ exomind/
 ├── docs/                     # 文档目录
 │   ├── ARCHITECTURE.md       # 架构设计文档
 │   ├── ARCHITECTURE_7LAYER.md # 7层架构详解
-│   ├── GIT_FLOW.md          # 分支管理规范
 │   ├── FRONTEND_STACK.md    # 前端技术栈规划
 │   └── specs/                # 详细规格文档
 │       ├── SPEC-200.md       # 核心架构
@@ -237,6 +243,8 @@ exomind/
 │       └── ...
 │
 ├── pm/                       # 项目管理
+│   ├── GIT_WORKTREE_SPEC.md  # Git 使用规范（分支管理 + Worktree）
+│   ├── REQUIREMENTS.md       # 需求规格文档
 │   ├── PRD.md                # 产品需求文档
 │   ├── roadmap.md            # 产品路线图
 │   ├── development.md        # 开发规范
@@ -312,7 +320,7 @@ exomind/
 |------|------|
 | 架构设计 | `docs/ARCHITECTURE.md` |
 | 7层架构详解 | `docs/ARCHITECTURE_7LAYER.md` |
-| 分支管理规范 | `docs/GIT_FLOW.md` |
+| Git 使用规范 | `pm/GIT_WORKTREE_SPEC.md` |
 | 开发规范 | `pm/development.md` |
 | Agent 配置 | `pm/agent.md` |
 | 产品需求文档 | `pm/PRD.md` |
