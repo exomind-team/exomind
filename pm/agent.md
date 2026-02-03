@@ -174,9 +174,9 @@ journalctl --user -u exomind -f
 curl http://localhost:1949/health
 ```
 
-> **更多流程细节**: 详见 [RALPH_LOOP.md](life-os/agents/RALPH_LOOP.md)
+> **更多流程细节**: 详见 [RALPH_LOOP.md](pm/agent.md)
 >
-> - Git 分支策略（master/develop/feature/fix/docs）
+> - Git 分支策略（main/dev/feature/fix/docs）
 > - 测试标准（单元/集成/E2E + 质量红线）
 > - 决策原则（P0 > P1 > P2 > P3）
 > - 长期记忆更新时机
@@ -349,6 +349,8 @@ journalctl --user -u exomind -n 20
 
 ## 9. 外部资源
 
+### 外部资源
+
 ### 9.1 API 文档
 
 - MiniMax API: https://api.minimaxi.com
@@ -356,8 +358,8 @@ journalctl --user -u exomind -n 20
 
 ### 9.2 项目文档
 
-- PRD: pm/PRD.md
-- 任务计划: pm/PLAN.md
+- PRD: pm/prd.md
+- 任务计划: pm/tasks_plan.md
 - 架构设计: docs/ARCHITECTURE.md
 
 ---

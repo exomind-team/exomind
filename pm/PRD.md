@@ -370,7 +370,7 @@ duration: Xm
 | shadcn/ui 组件库 | 现代化 UI 组件 | FRONTEND_STACK.md |
 | zustand 状态管理 | 轻量级状态管理 | FRONTEND_STACK.md |
 | Ralph Loop 开发流程 | 10步标准开发流程 | DEVELOPMENT_PROCESS.md |
-| Git Flow 分支管理 | master/dev/feature/release/hotfix | GIT_FLOW.md |
+| Git Flow 分支管理 | master/dev/feature/release/hotfix | pm/git-spec.md |
 
 ### 6.2 P1 - 重要功能（应该实现）
 
@@ -494,9 +494,9 @@ duration: Xm
 | MCP验收机制 | 外心MVP最小闭环设计.md | 4. MCP 验收接口 | "文件操作是破坏性的，接口可以验证、审计、幂等" | ✅ |
 | 关机仪式 | 外心MVP最小闭环设计.md | 6. 关机仪式设计 | "5分钟关机 = 今日回顾 + 一句话复盘 + 明日准备" | ✅ |
 | EventLog标准 | 外心四Agent快速实施计划.md | 4. 数据格式规范 | "制定EventLog标准,所有Agent遵守统一格式" | ✅ |
-| Ralph Loop | DEVELOPMENT_PROCESS.md | 流程概览 | "10步标准开发流程" | ✅ |
-| 修改即提交 | CLAUDE.md | 工作流程 | "每次修改文件后立即提交 Git commit" | ✅ |
-| 可存活区间 | ExoMind-KNOWLEDGE-BASE.md | 生命科学理论 | "一旦跌出，生命过程不可逆中断或退化" | ✅ |
+| Ralph Loop | `docs/DEVELOPMENT_PROCESS.md` | 流程概览 | "10步标准开发流程" | ✅ |
+| 修改即提交 | `CLAUDE.md` | 工作流程 | "每次修改文件后立即提交 Git commit" | ✅ |
+| 可存活区间 | `docs/ExoMind-KNOWLEDGE-BASE.md` | 生命科学理论 | "一旦跌出，生命过程不可逆中断或退化" | ✅ |
 | 失败不可回滚 | ExoMind-KNOWLEDGE-BASE.md | 愿景与目标提炼 | "死亡不是 episode reset" | ✅ |
 | 伤疤机制 | ExoMind-KNOWLEDGE-BASE.md | 愿景与目标提炼 | "失败产生不可逆退化，压缩未来行动空间" | ✅ |
 | Governor原则 | 外心四Agent快速实施计划.md | 7.2 核心治理原则 | "默认短、默认可跳过、失败不羞辱" | ✅ |
@@ -531,7 +531,7 @@ duration: Xm
 | 七层架构 | `docs/ARCHITECTURE_7LAYER.md` | 七层模型、SignalPool、Resource Fetcher |
 | 前端技术栈 | `docs/FRONTEND_STACK.md` | React、shadcn/ui、zustand、Tailwind |
 | 开发流程 | `docs/DEVELOPMENT_PROCESS.md` | Ralph Loop、测试标准、文档规范 |
-| 分支管理 | `docs/GIT_FLOW.md` | Git Flow、版本发布、AI内容管理 |
+| 分支管理 | `pm/git-spec.md` | Git Flow、版本发布、AI内容管理 |
 
 ---
 

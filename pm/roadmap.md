@@ -326,9 +326,9 @@
 |------|--------|------|
 | **docs/ExoMind-KNOWLEDGE-BASE.md** | P0 | 知识库，整合所有相关文档 |
 | **roadmap.md** | P0 | 本文档，产品路线图（季度更新） |
-| **PRD.md** | P1 | 详细需求和技术规格（月度更新） |
+| **prd.md** | P1 | 详细需求和技术规格（月度更新） |
 | **development.md** | P2 | 开发流程规范 |
-| **RALPH_LOOP.md** | P1 | Ralph Loop 流程（跨项目复用） |
+| **pm/agent.md** | P1 | Ralph Loop 流程（跨项目复用） |
 | **input.md** | P3 | 任务队列（日更新） |
 
 > **Ralph Loop 读取优先级**: `pm/input.md` > `pm/PRD.md` > `pm/roadmap.md` > `pm/development.md`
