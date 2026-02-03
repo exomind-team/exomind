@@ -111,11 +111,11 @@ ExoMind 是一个以 Claude Code 为核心的跨平台自主生命体系统，�
 ```bash
 # 修改一个文件后
 git add pm/memory.md
-git commit -m "DOCS: 添加修改即提交原则 [pm/memory.md]"
+git commit -m "docs: 添加修改即提交原则 [pm/memory.md]"
 
 # 修改多个相关文件
 git add pm/memory.md pm/agent.md
-git commit -m "DOCS: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
+git commit -m "docs: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
 ```
 
 **为什么？**
@@ -126,19 +126,21 @@ git commit -m "DOCS: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
 
 ### Git 提交类型
 
+> **注意**: 类型使用小写，描述首字母小写
+
 | 类型 | 说明 |
 |------|------|
-| `FEAT` | 新功能 |
-| `FIX` | Bug 修复 |
-| `REFACTOR` | 重构 (不改变外在行为) |
-| `PERF` | 性能优化 |
-| `DOCS` | 文档更新 |
-| `CHORE` | 其他维护 (构建、依赖等) |
-| `TEST` | 测试相关 |
-| `STYLE` | 代码格式 (不影响语义) |
-| `BUILD` | 构建系统相关 |
-| `CI` | CI 配置相关 |
-| `REVERT` | 回滚提交 |
+| `feat` | 新功能 |
+| `fix` | Bug 修复 |
+| `refactor` | 重构 (不改变外在行为) |
+| `perf` | 性能优化 |
+| `docs` | 文档更新 |
+| `chore` | 其他维护 (构建、依赖等) |
+| `test` | 测试相关 |
+| `style` | 代码格式 (不影响语义) |
+| `build` | 构建系统相关 |
+| `ci` | CI 配置相关 |
+| `revert` | 回滚提交 |
 
 ## 测试标准
 
@@ -158,10 +160,10 @@ git commit -m "DOCS: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
 
 ## 分支管理
 
-参考 `pm/GIT_WORKTREE_SPEC.md` 获取完整的分支策略和工作流规范：
+参考 `pm/git-spec.md` 获取完整的分支策略和工作流规范：
 
 ```
-master (生产环境) ─────────────●────────────────●──
+main (生产环境) ─────────────●────────────────●──
                                └── hotfix/v1.x.y
                                │
 dev (开发主干) ─────●──●──●──●──●──●──●──●──●──●──
@@ -170,7 +172,7 @@ dev (开发主干) ─────●──●──●──●──●──�
 
 | 分支 | 角色 | 生命周期 |
 |------|------|----------|
-| `master` | 生产环境 | 永久 |
+| `main` | 生产环境 | 永久 |
 | `dev` | 开发主干 | 永久 |
 | `feature/*` | 功能开发 | 临时 |
 | `release/*` | 预发布 | 临时 |
@@ -243,7 +245,7 @@ exomind/
 │       └── ...
 │
 ├── pm/                       # 项目管理
-│   ├── GIT_WORKTREE_SPEC.md  # Git 使用规范（分支管理 + Worktree）
+│   ├── git-spec.md           # Git 使用规范（分支管理 + Worktree）
 │   ├── REQUIREMENTS.md       # 需求规格文档
 │   ├── PRD.md                # 产品需求文档
 │   ├── roadmap.md            # 产品路线图

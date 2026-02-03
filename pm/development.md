@@ -325,16 +325,16 @@ CONST RESULT = AGENT.METHOD(PARAM);
    ```
 
 2. **TYPE 类型**
-   - `FEAT`: 新功能
-   - `FIX`: BUG 修复
-   - `DOCS`: 文档
-   - `TEST`: 测试
-   - `REFACTOR`: 重构
+   - `feat`: 新功能
+   - `fix`: BUG 修复
+   - `docs`: 文档
+   - `test`: 测试
+   - `refactor`: 重构
 
 ### 10.2 示例
 
 ```
-FEAT: 实现能量额度系统
+feat: 实现能量额度系统
 
 - 添加5小时重置机制
 - 每日额度2000K TOKENS
@@ -352,17 +352,17 @@ CLOSES: #XXX
 | **触发时机** | 任何文件修改后立即提交 |
 | **提交粒度** | 按文件/功能，小步提交 |
 | **提交信息** | `[类型]: [简短描述] [修改文件]` |
-| **分支** | 在 PR 分支上提交，不影响主分支 |
+| **分支** | 在 feature 分支上提交，不影响主分支 |
 
 **示例**：
 ```bash
 # 修改一个文件后
 git add pm/memory.md
-git commit -m "DOCS: 添加修改即提交原则 [pm/memory.md]"
+git commit -m "docs: 添加修改即提交原则 [pm/memory.md]"
 
 # 修改多个相关文件
 git add pm/memory.md pm/agent.md
-git commit -m "DOCS: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
+git commit -m "docs: 记录工作流程原则 [pm/memory.md, pm/agent.md]"
 ```
 
 **为什么？**
