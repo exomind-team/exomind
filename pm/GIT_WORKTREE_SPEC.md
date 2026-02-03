@@ -34,13 +34,13 @@ main (生产环境)
 
 ### 分支说明
 
-| 分支 | 角色 | 保护 | 生命周期 | 合并来源 |
-|------|------|------|----------|----------|
-| `main` | 生产环境 | ✅ 强制保护 | 永久 | `dev`, `hotfix/*` |
-| `dev` | 开发主干 | ✅ 保护 | 永久 | `feature/*`, `release/*` |
-| `feature/*` | 功能开发 | ❌ 可强制推送 | 临时 | `dev` |
-| `release/*` | 预发布 | ❌ 可强制推送 | 临时 | `dev` |
-| `hotfix/*` | 紧急修复 | ❌ 可强制推送 | 临时 | `main` |
+| 分支          | 角色     | 保护          | 生命周期 | 合并来源                     |
+| ------------- | -------- | ------------- | -------- | ---------------------------- |
+| `main`      | 生产环境 | ✅ 强制保护   | 永久     | `dev`, `hotfix/*`        |
+| `dev`       | 开发主干 | ✅ 保护       | 永久     | `feature/*`, `release/*` |
+| `feature/*` | 功能开发 | ❌ 可强制推送 | 临时     | `dev`                      |
+| `release/*` | 预发布   | ❌ 可强制推送 | 临时     | `dev`                      |
+| `hotfix/*`  | 紧急修复 | ❌ 可强制推送 | 临时     | `main`                     |
 
 ---
 
@@ -105,11 +105,11 @@ git push origin --delete feature/xxx-功能名称
 
 ### 重构类型
 
-| 类型 | 影响范围 | 流程 |
-|------|----------|------|
-| **代码级重构** | 单个文件/函数 | 直接在 feature 分支开发 → PR 到 dev |
+| 类型                 | 影响范围      | 流程                                                   |
+| -------------------- | ------------- | ------------------------------------------------------ |
+| **代码级重构** | 单个文件/函数 | 直接在 feature 分支开发 → PR 到 dev                   |
 | **模块级重构** | 多个文件/模块 | 创建 `refactor/模块名` 分支 → 充分测试 → PR 到 dev |
-| **架构级重构** | 整个系统 | 参考 7层架构重构经验，分阶段进行 |
+| **架构级重构** | 整个系统      | 参考 7层架构重构经验，分阶段进行                       |
 
 ### 重构最佳实践
 
@@ -197,10 +197,10 @@ v2.1.3
 └── MAJOR (2): 不兼容的 API 变更
 ```
 
-| 场景 | 版本号 | 示例 |
-|------|--------|------|
-| 首次发布 | 1.0.0 | - |
-| 新功能 | MINOR +1 | 1.0.0 → 1.1.0 |
+| 场景     | 版本号   | 示例           |
+| -------- | -------- | -------------- |
+| 首次发布 | 1.0.0    | -              |
+| 新功能   | MINOR +1 | 1.0.0 → 1.1.0 |
 | Bug 修复 | PATCH +1 | 1.1.0 → 1.1.1 |
 | 重大变更 | MAJOR +1 | 1.x.x → 2.0.0 |
 
@@ -250,13 +250,13 @@ git branch -d hotfix/v1.2.1
 
 ## 禁止操作
 
-| 禁止 | 说明 |
-|------|------|
-| ❌ 直接推送到 main | 只能通过 PR 合并 |
-| ❌ 强制推送 main/dev | 保护分支禁止 force push |
-| ❌ 在 main 上开发 | 功能开发只能在 feature 分支 |
-| ❌ 长期存在的功能分支 | 功能完成后立即删除 |
-| ❌ 跳过代码审查 | PR 必须经过 review |
+| 禁止                  | 说明                        |
+| --------------------- | --------------------------- |
+| ❌ 直接推送到 main    | 只能通过 PR 合并            |
+| ❌ 强制推送 main/dev  | 保护分支禁止 force push     |
+| ❌ 在 main 上开发     | 功能开发只能在 feature 分支 |
+| ❌ 长期存在的功能分支 | 功能完成后立即删除          |
+| ❌ 跳过代码审查       | PR 必须经过 review          |
 
 ---
 
@@ -268,12 +268,12 @@ Git Worktree 允许在**同一仓库的不同分支上并行工作**，而无需
 
 ### 核心优势
 
-| 优势 | 说明 |
-|------|------|
+| 优势                 | 说明                                     |
+| -------------------- | ---------------------------------------- |
 | **隔离工作区** | 在独立目录工作，不干扰主分支的未提交更改 |
-| **多分支并行** | 同时在多个分支上开发，无需频繁切换 |
-| **资源共享** | 共享 `.git` 目录，节省磁盘空间 |
-| **独立环境** | 每个 worktree 有独立的工作目录和索引 |
+| **多分支并行** | 同时在多个分支上开发，无需频繁切换       |
+| **资源共享**   | 共享 `.git` 目录，节省磁盘空间         |
+| **独立环境**   | 每个 worktree 有独立的工作目录和索引     |
 
 ### 使用场景
 
@@ -313,13 +313,13 @@ D:\project\
 
 ### 命名规范
 
-| 类型 | 命名规则 | 示例 |
-|------|----------|------|
-| 功能分支 | `feature/xxx-功能名` → `feature-xxx-功能名` | `feature-voice-recognition` |
-| 重构分支 | `refactor/模块名` → `refactor-模块名` | `refactor-signalpool` |
-| Spec 分支 | `specs/名称` → `specs-名称` | `specs-consolidation` |
-| 发布分支 | `release/v1.2.0` → `release-v1.2.0` | `release-v1.2.0` |
-| 热修复分支 | `hotfix/v1.2.1` → `hotfix-v1.2.1` | `hotfix-v1.2.1` |
+| 类型       | 命名规则                                         | 示例                          |
+| ---------- | ------------------------------------------------ | ----------------------------- |
+| 功能分支   | `feature/xxx-功能名` → `feature-xxx-功能名` | `feature-voice-recognition` |
+| 重构分支   | `refactor/模块名` → `refactor-模块名`       | `refactor-signalpool`       |
+| Spec 分支  | `specs/名称` → `specs-名称`                 | `specs-consolidation`       |
+| 发布分支   | `release/v1.2.0` → `release-v1.2.0`         | `release-v1.2.0`            |
+| 热修复分支 | `hotfix/v1.2.1` → `hotfix-v1.2.1`           | `hotfix-v1.2.1`             |
 
 **规则**: 将分支名中的 `/` 替换为 `-`，确保目录名合法且易于识别。
 
@@ -441,28 +441,28 @@ code .worktrees/feature-new
 
 ### 基础操作
 
-| 命令 | 说明 |
-|------|------|
-| `git worktree list` | 列出所有 worktree |
-| `git worktree add <path> <branch>` | 创建新的 worktree |
-| `git worktree remove <path>` | 删除 worktree |
-| `git worktree prune` | 清理无效的 worktree 引用 |
+| 命令                                 | 说明                     |
+| ------------------------------------ | ------------------------ |
+| `git worktree list`                | 列出所有 worktree        |
+| `git worktree add <path> <branch>` | 创建新的 worktree        |
+| `git worktree remove <path>`       | 删除 worktree            |
+| `git worktree prune`               | 清理无效的 worktree 引用 |
 
 ### 进阶操作
 
-| 命令 | 说明 |
-|------|------|
-| `git worktree add -b <branch> <path>` | 创建新分支的 worktree |
-| `git worktree add <path> <commit>` | 基于指定 commit 创建 |
-| `git worktree lock <path>` | 锁定 worktree 防止被删除 |
-| `git worktree unlock <path>` | 解锁 worktree |
+| 命令                                    | 说明                     |
+| --------------------------------------- | ------------------------ |
+| `git worktree add -b <branch> <path>` | 创建新分支的 worktree    |
+| `git worktree add <path> <commit>`    | 基于指定 commit 创建     |
+| `git worktree lock <path>`            | 锁定 worktree 防止被删除 |
+| `git worktree unlock <path>`          | 解锁 worktree            |
 
 ### 状态查看
 
-| 命令 | 说明 |
-|------|------|
+| 命令                              | 说明                     |
+| --------------------------------- | ------------------------ |
 | `git worktree list --porcelain` | 机器可读的 worktree 列表 |
-| `git status` | 查看当前 worktree 状态 |
+| `git status`                    | 查看当前 worktree 状态   |
 
 ---
 
@@ -471,6 +471,7 @@ code .worktrees/feature-new
 ### 最佳实践
 
 1. **始终从主仓库操作 worktree**
+
    ```bash
    # 正确
    cd D:\project\exomind
@@ -480,8 +481,8 @@ code .worktrees/feature-new
    cd .worktrees/feature-x
    git worktree remove .
    ```
-
 2. **删除前确保已提交更改**
+
    ```bash
    # 检查状态
    git status
@@ -490,8 +491,8 @@ code .worktrees/feature-new
    git add .
    git commit -m "WIP: 暂存"
    ```
-
 3. **使用有意义的路径名**
+
    ```bash
    # 推荐
    git worktree add .worktrees/feature-voice-recognition feature/voice-recognition
@@ -499,8 +500,8 @@ code .worktrees/feature-new
    # 避免
    git worktree add .worktrees/w1 feature/voice-recognition
    ```
-
 4. **定期清理**
+
    ```bash
    # 清理已删除分支的引用
    git worktree prune
@@ -583,29 +584,29 @@ git commit -m "DOCS: 添加 SPEC-023 AI Agent 设计规格"
 
 ## 分支管理
 
-| 场景 | 命令 |
-|------|------|
-| 开始新功能 | `git checkout -b feature/xxx` |
-| 开始重构 | `git checkout -b refactor/xxx` |
-| 开始热修复 | `git checkout -b hotfix/v1.2.1` |
-| 切换到 dev | `git checkout dev` |
-| 更新 dev | `git pull origin dev` |
-| 查看所有分支 | `git branch -a` |
-| 删除本地分支 | `git branch -d feature/xxx` |
-| 强制删除分支 | `git branch -D feature/xxx` |
-| 创建标签 | `git tag -a v1.2.0 -m "Version 1.2.0"` |
-| 推送标签 | `git push origin --tags` |
+| 场景         | 命令                                     |
+| ------------ | ---------------------------------------- |
+| 开始新功能   | `git checkout -b feature/xxx`          |
+| 开始重构     | `git checkout -b refactor/xxx`         |
+| 开始热修复   | `git checkout -b hotfix/v1.2.1`        |
+| 切换到 dev   | `git checkout dev`                     |
+| 更新 dev     | `git pull origin dev`                  |
+| 查看所有分支 | `git branch -a`                        |
+| 删除本地分支 | `git branch -d feature/xxx`            |
+| 强制删除分支 | `git branch -D feature/xxx`            |
+| 创建标签     | `git tag -a v1.2.0 -m "Version 1.2.0"` |
+| 推送标签     | `git push origin --tags`               |
 
 ## Worktree 操作
 
-| 场景 | 命令 |
-|------|------|
-| 列出所有 worktree | `git worktree list` |
-| 创建 worktree | `git worktree add .worktrees/<name> <branch>` |
-| 删除 worktree | `git worktree remove .worktrees/<name>` |
-| 清理无效引用 | `git worktree prune` |
-| 锁定 worktree | `git worktree lock .worktrees/<name>` |
-| 解锁 worktree | `git worktree unlock .worktrees/<name>` |
+| 场景              | 命令                                            |
+| ----------------- | ----------------------------------------------- |
+| 列出所有 worktree | `git worktree list`                           |
+| 创建 worktree     | `git worktree add .worktrees/<name> <branch>` |
+| 删除 worktree     | `git worktree remove .worktrees/<name>`       |
+| 清理无效引用      | `git worktree prune`                          |
+| 锁定 worktree     | `git worktree lock .worktrees/<name>`         |
+| 解锁 worktree     | `git worktree unlock .worktrees/<name>`       |
 
 ---
 
