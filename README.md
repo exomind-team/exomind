@@ -207,10 +207,13 @@ $Config = @{
 
 - [ARCHITECTURE.md](docs/ARCHITECTURE.md) - 完整架构设计文档
 - [ARCHITECTURE_7LAYER.md](docs/ARCHITECTURE_7LAYER.md) - 7层架构详解
-- [Tauri 官方文档](https://tauri.app/)
-- [README-Scripts.md](README-Scripts.md) - 脚本详细文档
-- [React 文档](https://react.dev/)
-- [Vite 文档](https://vitejs.dev/)
+- [ExoMind-Notification-Permission-Guard.md](docs/ExoMind-Notification-Permission-Guard.md) - Android 通知权限守护模块
+
+### 模块
+
+| 模块 | 说明 |
+|------|------|
+| [modules/ExoMind-NLS-Guardian/](modules/ExoMind-NLS-Guardian/) | Android 通知权限守护模块 |
 
 ## License
 
