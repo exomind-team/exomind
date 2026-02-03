@@ -3,19 +3,20 @@
 
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
-use tungstenite::{Message, WebSocket};
+use tungstenite::{Message};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::net::SocketAddr;
-use futures_util::StreamExt;
+use futures_util::{StreamExt, SinkExt};
+use tokio_tungstenite::WebSocketStream;
 
-/// WebSocket 客户端包装（支持 Arc）
+/// WebSocket 客户端包装
 struct WsClient {
-    ws: WebSocket<tokio::net::TcpStream>,
+    ws: WebSocketStream<tokio::net::TcpStream>,
 }
 
 impl WsClient {
-    fn new(ws: WebSocket<tokio::net::TcpStream>) -> Self {
+    fn new(ws: WebSocketStream<tokio::net::TcpStream>) -> Self {
         Self { ws }
     }
 }
