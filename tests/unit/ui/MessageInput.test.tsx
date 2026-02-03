@@ -18,6 +18,9 @@ describe('MessageInput', () => {
     render(<MessageInput onSend={onSend} />);
     
     const input = screen.getByPlaceholderText('输入消息...');
+    // 先输入内容
+    fireEvent.change(input, { target: { value: 'Hello' } });
+    // 再按 Enter
     fireEvent.keyDown(input, { key: 'Enter', code: 'Enter' });
     
     expect(onSend).toHaveBeenCalledWith('Hello');
