@@ -1,5 +1,72 @@
 import { describe, it, expect } from 'vitest';
+import { createHash, randomBytes } from 'crypto';
 
+// Implementations for TDD
+function hashPassword(password: string): string {
+  return createHash('sha256').update(password).digest('hex');
+}
+
+function verifyPassword(password: string, hash: string): boolean {
+  return hashPassword(password) === hash;
+}
+
+function generateSessionToken(): string {
+  return randomBytes(32).toString('hex');
+}
+
+interface AuthServer {
+  passwordHash: string;
+  createChallenge: () => string;
+  validateResponse: (response: string) => { valid: boolean; sessionToken?: string };
+}
+
+interface AuthClient {
+  password: string;
+  createResponse: (challenge: string) => string;
+}
+
+function createAuthServer(password: string): AuthServer {
+  const passwordHash = hashPassword(password);
+  
+  return {
+    passwordHash,
+    createChallenge: () => {
+      return randomBytes(16).toString('hex');
+    },
+    validateResponse: (response: string) => {
+      const challenge = response.split(':')[0];
+      const clientHash = response.split(':')[1];
+      
+      if (!challenge || !clientHash) {
+        return { valid: false };
+      }
+      
+      // Verify: clientHash should equal hash(challenge + password)
+      const expectedHash = hashPassword(challenge + password);
+      
+      if (clientHash !== expectedHash) {
+        return { valid: false };
+      }
+      
+      return {
+        valid: true,
+        sessionToken: generateSessionToken()
+      };
+    }
+  };
+}
+
+function createAuthClient(password: string): AuthClient {
+  return {
+    password,
+    createResponse: (challenge: string) => {
+      const combined = challenge + password;
+      return challenge + ':' + hashPassword(combined);
+    }
+  };
+}
+
+// Tests
 describe('Password Authentication', () => {
   it('should hash password with SHA256', () => {
     const password = 'mySecret123';
