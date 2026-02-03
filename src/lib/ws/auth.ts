@@ -34,7 +34,7 @@ export interface AuthServer {
  * Auth client for challenge-response handshake
  */
 export interface AuthClient {
-  passwordHash: string;
+  password: string;
   createResponse: (challenge: string) => string;
 }
 
@@ -57,7 +57,10 @@ export function createAuthServer(password: string): AuthServer {
         return { valid: false };
       }
       
-      if (clientHash !== passwordHash) {
+      // Verify: clientHash should equal hash(challenge + password)
+      const expectedHash = hashPassword(challenge + password);
+      
+      if (clientHash !== expectedHash) {
         return { valid: false };
       }
       
@@ -73,12 +76,10 @@ export function createAuthServer(password: string): AuthServer {
  * Create auth client instance
  */
 export function createAuthClient(password: string): AuthClient {
-  const passwordHash = hashPassword(password);
-  
   return {
-    passwordHash,
+    password,
     createResponse: (challenge: string) => {
-      const combined = challenge + passwordHash;
+      const combined = challenge + password;
       return challenge + ':' + hashPassword(combined);
     }
   };
