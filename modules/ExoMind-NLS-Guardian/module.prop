@@ -1,0 +1,7 @@
+id=exomind-nls-guardian
+name=ExoMind 通知权限守护
+version=v1.0.0
+versionCode=1
+author=ExoMind Team
+description=确保 ExoMind 始终拥有通知监听权限，绕过 DND 权限丢失问题
+minSdkVersion=26
