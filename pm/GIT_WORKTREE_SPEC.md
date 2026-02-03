@@ -60,22 +60,29 @@ git checkout -b feature/xxx-功能名称
 ### 2. 开发与提交
 
 ```bash
-# 提交格式: [类型]: [简短描述]
-git commit -m "FEAT: 添加用户登录功能"
+# 提交格式: [类型]: [简短描述] (类型使用小写)
+git commit -m "feat: 添加用户登录功能"
+git commit -m "docs: 更新项目文档"
+git commit -m "fix: 修复登录页面崩溃问题"
 
-# 常用类型
-# FEAT    - 新功能
-# FIX     - Bug 修复
-# REFACTOR - 重构 (不改变外在行为)
-# PERF    - 性能优化
-# DOCS    - 文档更新
-# CHORE   - 其他维护 (构建、依赖等)
-# TEST    - 测试相关
-# STYLE   - 代码格式 (不影响语义)
-# BUILD   - 构建系统相关
-# CI      - CI 配置相关
-# REVERT  - 回滚提交
+# 常用类型 (小写)
+# feat    - 新功能
+# fix     - Bug 修复
+# refactor - 重构 (不改变外在行为)
+# perf    - 性能优化
+# docs    - 文档更新
+# chore   - 其他维护 (构建、依赖等)
+# test    - 测试相关
+# style   - 代码格式 (不影响语义)
+# build   - 构建系统相关
+# ci      - CI 配置相关
+# revert  - 回滚提交
 ```
+
+**提交规范**：
+- ✅ 类型使用小写
+- ✅ 描述简洁明了，首字母小写
+- ✅ 冒号后有一个空格
 
 ### 3. 推送与合并
 
@@ -123,7 +130,7 @@ git checkout -b refactor/模块名
 npm test  # 或 bun test
 
 # 3. 小步重构，每次 commit 都要能运行
-git commit -m "REFACTOR: 提取 xxx 函数 [src/utils.ts]"
+git commit -m "refactor: 提取 xxx 函数 [src/utils.ts]"
 
 # 4. 完成重构后
 git push origin refactor/模块名
@@ -226,7 +233,7 @@ git pull origin main
 git checkout -b hotfix/v1.2.1
 
 # 2. 修复问题
-git commit -m "FIX: 修复登录页面崩溃问题"
+git commit -m "fix: 修复登录页面崩溃问题"
 
 # 3. 合并到 main (紧急修复，可跳过测试)
 git checkout main
@@ -364,7 +371,7 @@ bun dev
 
 # 提交更改
 git add .
-git commit -m "FEAT: 添加语音识别功能"
+git commit -m "feat: 添加语音识别功能"
 
 # 推送到远程
 git push origin feature/voice-recognition
@@ -573,7 +580,7 @@ mv agent-output/drafts/specs/SPEC-023.md docs/specs/SPEC-023.md
 
 # 提交
 git add docs/specs/SPEC-023.md
-git commit -m "DOCS: 添加 SPEC-023 AI Agent 设计规格"
+git commit -m "docs: 添加 SPEC-023 AI Agent 设计规格"
 
 # 发版时合并到 main（会自动删除 agent-output）
 ```
