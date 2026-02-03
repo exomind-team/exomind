@@ -199,13 +199,10 @@ Write-Header "Build Summary" "Green"
 Write-Host "`nStage Timings:" -ForegroundColor Cyan
 Write-Host "----------------------------------------"
 foreach ($stage in $Global:StageTimers) {
-    $bar = "█" * [math]::Min([math]::Floor($stage.Duration.TotalSeconds / 5), 20)
-    Write-Host "  $($stage.Name.PadRight(15)) $bar $(Format-Duration $stage.Duration)"
+    Write-Host "  $($stage.Name.PadRight(15)) $(Format-Duration $stage.Duration)"
 }
 Write-Host "----------------------------------------"
-Write-Host "  TOTAL".PadRight(15) -NoNewline
-Write-Host ("█" * [math]::Min([math]::Floor($totalTime.TotalSeconds / 5), 20)) -NoNewline -ForegroundColor Green
-Write-Host " $(Format-Duration $totalTime)" -ForegroundColor Green
+Write-Host "  TOTAL                          $(Format-Duration $totalTime)" -ForegroundColor Green
 
 Write-Host "`nOutput:" -ForegroundColor Cyan
 Write-Host "  File: $apkPath"

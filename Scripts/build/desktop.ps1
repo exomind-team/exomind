@@ -119,16 +119,13 @@ Write-Host "----------------------------------------"
 
 foreach ($stage in $Global:StageTimers) {
     $duration = $stage.Duration
-    $barLength = [math]::Min([math]::Floor($duration.TotalSeconds / 3), 25)
-    $bar = "█" * $barLength
     $timeStr = Format-Duration $duration
-    Write-Host "  $($stage.Name.PadRight(20)) $bar $timeStr"
+    Write-Host "  $($stage.Name.PadRight(20)) $timeStr"
 }
 
 Write-Host "----------------------------------------"
-Write-Host "  TOTAL".PadRight(20) -NoNewline
-Write-Host ("█" * [math]::Min([math]::Floor($totalTime.TotalSeconds / 3), 25)) -NoNewline -ForegroundColor Green
-Write-Host " $(Format-Duration $totalTime)" -ForegroundColor Green
+Write-Host "  TOTAL" -NoNewline
+Write-Host "                          $(Format-Duration $totalTime)" -ForegroundColor Green
 
 Write-Host ""
 Write-Host "Time Info:" -ForegroundColor Cyan
