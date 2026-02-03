@@ -78,7 +78,7 @@ class Database {
                       trimmedSql.startsWith('DROP TABLE') ||
                       trimmedSql.startsWith('ALTER TABLE');
         return {
-          run: (...params: any[]) => {
+          run: (..._params: any[]) => {
             console.log('[DB.prepare.run] isDDL:', isDDL);
             if (isDDL) {
               return this.exec(sql);
@@ -90,7 +90,7 @@ class Database {
             }
             return { changes: 0 };
           },
-          get: (...params: any[]) => {
+          get: () => {
             if (sql.includes('COUNT')) {
               const parts = sql.split('FROM');
               if (parts[1]) {
@@ -116,7 +116,6 @@ class Database {
   }
 
   execute(sql: string, params?: any[]): QueryResult {
-    console.log('[DB.execute] params:', params);
     if (params !== undefined) {
       const stmt = this.db.prepare?.(sql);
       if (stmt && typeof stmt.run === 'function') {
@@ -126,7 +125,7 @@ class Database {
     return this.exec(sql);
   }
 
-  query(sql: string, params?: any[]): Row[] {
+  query(sql: string, _params?: any[]): Row[] {
     console.log('[DB.query] sql:', sql);
     console.log('[DB.query] this.tables:', JSON.stringify(Object.keys(this.tables)));
     
@@ -136,7 +135,7 @@ class Database {
         return stmt.all();
       }
       if (stmt.get) {
-        const row = stmt.get(...(params || []));
+        const row = stmt.get();
         console.log('[DB.query] get result:', JSON.stringify(row));
         return row ? [row] : [];
       }
@@ -154,7 +153,7 @@ class Database {
     if (sql.includes('COUNT')) {
       const parts = sql.split('FROM');
       if (parts[1]) {
-        const tableName = parts[1(' ')[0].trim().split].trim();
+        const tableName = parts[1].trim().split(' ')[0].trim();
         const count = this.tables[tableName]?.length || 0;
         return [{ count }];
       }
@@ -176,4 +175,4 @@ class Database {
   }
 }
 
-export { Database, QueryResult, Row };
+export type { Database, QueryResult, Row };

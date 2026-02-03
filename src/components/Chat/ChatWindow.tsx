@@ -1,5 +1,4 @@
 import React from 'react';
-import { Device } from './DevicePanel';
 
 export interface Message {
   id: string;
@@ -10,16 +9,12 @@ export interface Message {
 
 export interface ChatWindowProps {
   messages: Message[];
-  devices: Device[];
-  currentDevice: string;
   connectionStatus: 'connected' | 'connecting' | 'offline' | 'error';
   onSend: (content: string) => void;
 }
 
 export function ChatWindow({ 
   messages, 
-  devices, 
-  currentDevice,
   connectionStatus,
   onSend 
 }: ChatWindowProps): React.ReactElement {
