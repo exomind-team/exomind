@@ -46,31 +46,31 @@ export function ChatWindow({
 
   const getConnectionStatusText = () => {
     switch (connectionStatus) {
-      case 'connected': return 'å·²è¿æ¥';
-      case 'connecting': return 'è¿æ¥ä¸­...';
-      case 'offline': return 'ç¦»çº¿æ¨¡å¼';
-      case 'error': return 'è¿æ¥é”™è¯¯';
+      case 'connected': return 'ÒÑÁ¬½Ó';
+      case 'connecting': return 'Á¬½ÓÖĞ...';
+      case 'offline': return 'ÀëÏßÄ£Ê½';
+      case 'error': return 'Á¬½Ó´íÎó';
       default: return '';
     }
   };
 
   return (
-    <div className="chat-window">
-      <div className="chat-header">
-        <span className={`connection-status ${connectionStatus}`}>
+    <div className='chat-window'>
+      <div className='chat-header'>
+        <span className={'connection-status ' + connectionStatus}>
           {getConnectionStatusText()}
         </span>
       </div>
 
-      <div className="chat-content">
-        <div className="message-list" data-testid="message-list">
+      <div className='chat-content'>
+        <div className='message-list' data-testid='message-list'>
           {messages.map(msg => (
             <div 
               key={msg.id}
-              className={`message ${msg.sender}`}
+              className={'message ' + msg.sender}
             >
-              <div className="message-content">{msg.content}</div>
-              <div className="message-time">
+              <div className='message-content'>{msg.content}</div>
+              <div className='message-time'>
                 {new Date(msg.timestamp).toLocaleTimeString()}
               </div>
             </div>
@@ -78,16 +78,16 @@ export function ChatWindow({
           <div ref={messagesEndRef} />
         </div>
 
-        <div className="message-input-wrapper" data-testid="message-input">
+        <div className='message-input-wrapper' data-testid='message-input'>
           <textarea
             value={inputValue}
             onChange={e => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="è¾“å…¥æ¶ˆæ¯..."
+            placeholder='ÊäÈëÏûÏ¢...'
             rows={1}
           />
           <button onClick={handleSend} disabled={connectionStatus === 'offline'}>
-            å‘é€
+            ·¢ËÍ
           </button>
         </div>
       </div>

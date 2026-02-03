@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest';
 
 // Types for the offline queue
 interface Message {
@@ -58,13 +58,14 @@ describe('Offline Queue', () => {
     clear: () => void;
   };
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeAll(async () => {
+    const module = await import('../../../src/lib/sync/offline');
+    OfflineQueue = module.OfflineQueue;
+  });
+
+  beforeEach(() => {
     mockStorage = createMockStorage();
     onOnlineCallback = vi.fn();
-
-    const module = await import('../../../../src/lib/sync/offline');
-    OfflineQueue = module.OfflineQueue;
   });
 
   it('should store message when offline', async () => {

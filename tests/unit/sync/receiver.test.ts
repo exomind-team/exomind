@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, vi, beforeAll } from 'vitest';
 
 // Types for the receiver
 interface Message {
@@ -59,14 +59,15 @@ describe('Message Receiver', () => {
     onDeliveryConfirmation: (data: unknown) => void;
   };
 
-  beforeEach(async () => {
-    vi.resetModules();
+  beforeAll(async () => {
+    const module = await import('../../../src/lib/sync/receiver');
+    MessageReceiver = module.MessageReceiver;
+  });
+
+  beforeEach(() => {
     mockWsServer = createMockWsServer();
     mockEventLog = createMockEventLog();
     mockUiCallback = createMockUiCallback();
-
-    const module = await import('../../../../src/lib/sync/receiver');
-    MessageReceiver = module.MessageReceiver;
   });
 
   it('should receive and store message', async () => {
