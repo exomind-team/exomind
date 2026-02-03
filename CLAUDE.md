@@ -320,9 +320,9 @@ exomind/
 |------|------|
 | 架构设计 | `docs/ARCHITECTURE.md` |
 | 7层架构详解 | `docs/ARCHITECTURE_7LAYER.md` |
-| Git 使用规范 | `pm/GIT_WORKTREE_SPEC.md` |
+| git 使用规范 | `pm/git-spec.md` |
 | 开发规范 | `pm/development.md` |
-| Agent 配置 | `pm/agent.md` |
-| 产品需求文档 | `pm/PRD.md` |
+| agent 配置 | `pm/agent.md` |
+| 产品需求文档 | `pm/prd.md` |
 | 产品路线图 | `pm/roadmap.md` |
 | 长期记忆 | `pm/memory/long-term.md` |
