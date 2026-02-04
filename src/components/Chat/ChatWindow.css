@@ -425,3 +425,121 @@
   flex-direction: column;
   gap: 0.25rem;
 }
+
+/* ========== 暗色模式支持 ========== */
+@media (prefers-color-scheme: dark) {
+  /* 整体背景 */
+  .chat-window {
+    background-color: #0f172a;
+  }
+
+  /* 头部 */
+  .chat-header {
+    background-color: #1e293b;
+    border-bottom-color: #334155;
+  }
+
+  .device-name {
+    color: #f1f5f9;
+  }
+
+  /* 空状态 */
+  .chat-empty-state {
+    color: #94a3b8;
+  }
+
+  .chat-empty-state h3 {
+    color: #e2e8f0;
+  }
+
+  /* 日期分隔符 */
+  .date-label {
+    background-color: #334155;
+    color: #94a3b8;
+  }
+
+  /* 消息列表 */
+  .chat-messages {
+    background-color: #0f172a;
+  }
+
+  .no-messages {
+    color: #64748b;
+  }
+
+  .no-messages .hint {
+    color: #475569;
+  }
+
+  /* 发送的消息气泡 - 暗色保持绿色 */
+  .message-item.sent .message-bubble {
+    background-color: #95ec69;
+    color: #1a1a1a;
+  }
+
+  /* 接收的消息气泡 - 暗色用深灰 */
+  .message-item.received .message-bubble {
+    background-color: #334155;
+    color: #f1f5f9;
+  }
+
+  /* 消息内容 */
+  .message-content {
+    color: inherit;
+  }
+
+  /* 时间戳 */
+  .message-time {
+    color: #64748b;
+  }
+
+  /* 输入区域 */
+  .chat-input-wrapper {
+    background-color: #1e293b;
+    border-top-color: #334155;
+  }
+
+  /* 附件按钮 */
+  .attach-button {
+    background-color: #334155;
+    color: #94a3b8;
+  }
+
+  .attach-button:hover {
+    background-color: #475569;
+    color: #e2e8f0;
+  }
+
+  /* 输入框 */
+  .chat-input-wrapper textarea {
+    background-color: #334155;
+    border-color: #475569;
+    color: #f1f5f9;
+  }
+
+  .chat-input-wrapper textarea:focus {
+    border-color: #07c160;
+  }
+
+  .chat-input-wrapper textarea:disabled {
+    background-color: #1e293b;
+    color: #64748b;
+  }
+
+  .chat-input-wrapper textarea::placeholder {
+    color: #64748b;
+  }
+
+  /* 发送按钮 */
+  .send-button {
+    background-color: #07c160;
+  }
+
+  .send-button:hover:not(:disabled) {
+    background-color: #06ae56;
+  }
+
+  .send-button:disabled {
+    background-color: #475569;
+  }
+}

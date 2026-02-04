@@ -14,6 +14,9 @@ const tauriFs = {
   readTextFile: async (path: string) => {
     return await invoke('read_file', { path }) as string;
   },
+  appendFile: async (path: string, data: string) => {
+    await invoke('append_file', { path, content: data });
+  },
 };
 
 // Message storage singleton
