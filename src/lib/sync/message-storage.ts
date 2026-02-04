@@ -14,7 +14,7 @@ export interface ChatMessage {
   timestamp: number;
   senderId: string;
   receiverId: string;
-  status: 'sending' | 'sent' | 'delivered' | 'failed';
+  status: 'pending' | 'sending' | 'sent' | 'delivered' | 'failed';
 }
 
 export interface SyncMessage {
