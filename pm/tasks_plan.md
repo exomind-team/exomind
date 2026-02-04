@@ -18,17 +18,14 @@
 - [x] 代码: components.json, tailwind.config.js, src/index.css, src/lib/utils.ts
 - **测试结果**: 17 pass / 0 fail
 
-#### Round 2: shadcn 组件安装（进行中）
-- [ ] 安装 Button, Card, Input, Switch, Label, Tabs, Badge, Dialog, Toast
-- [ ] 测试: components/ui/*.test.tsx
-- [ ] 代码: src/components/ui/*.tsx
+#### Round 2: shadcn 组件安装（已完成）
+- [x] 手动创建 10 个组件（避免 CLI 配置问题）
+- [x] Button, Card, Input, Switch, Label, Tabs, Badge, Dialog, Toast, Avatar
+- [x] 测试: components/ui/*.test.tsx
+- [x] 代码: src/components/ui/*.tsx
+- **测试结果**: 10 pass / 0 fail
 
-#### Round 2: shadcn 组件安装
-- [ ] 安装 Button, Card, Input, Switch, Label, Tabs, Badge, Dialog, Toast
-- **测试**: components/ui/*.test.tsx
-- **代码**: src/components/ui/*.tsx
-
-#### Round 3: 路由系统
+#### Round 3: 路由系统（进行中）
 - [ ] 配置 @tanstack/react-router
 - [ ] 创建路由结构
 - **测试**: routes/*.test.tsx

@@ -169,4 +169,51 @@
 
 ---
 
+## [2026-02-04] Phase 1 Round 2 - shadcn 组件手动创建
+
+### 执行摘要
+- **任务**：手动创建 10 个 shadcn/ui 基础组件
+- **结果**：完成，10 测试通过
+- **主要变更**：
+  - 手动创建组件（避免 shadcn CLI 配置冲突）
+  - Button, Card, Input, Switch, Label, Tabs, Badge, Dialog, Toast, Avatar
+  - 添加 Radix UI primitives 和 class-variance-authority 依赖
+
+### 遇到的问题
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| shadcn CLI 报错 Invalid configuration | components.json 格式与 CLI 期望不一致 | 改为手动复制组件源码 |
+| React.forwardRef 返回对象而非函数 | 测试期望 typeof === 'function' | 改为检查 displayName 属性 |
+| Toast/Toaster 分散在多个文件 | 组件分布在 toast.tsx, toaster.tsx, toast-hook.tsx | 创建 index.ts 统一导出 |
+
+### 测试结果
+- ✅ components.test.ts: 10 pass / 0 fail
+- **总计**: 10 pass / 0 fail
+
+### 有价值发现
+1. **Radix UI primitives**：无头组件，只提供交互逻辑，所有样式由 Tailwind CSS 定制
+2. **class-variance-authority (cva)**：用于管理组件 variant（default/destructive/outline 等）
+3. **手动复制 vs CLI 安装**：复制方式让我们完全掌控组件代码，便于定制和调试
+
+### Round 2 完成文件清单
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `src/components/ui/button.tsx` | 新建 | Button 组件 (cva + Slot) |
+| `src/components/ui/card.tsx` | 新建 | Card 组件系列 |
+| `src/components/ui/input.tsx` | 新建 | Input 组件 |
+| `src/components/ui/switch.tsx` | 新建 | Switch (Radix) |
+| `src/components/ui/label.tsx` | 新建 | Label (Radix + cva) |
+| `src/components/ui/tabs.tsx` | 新建 | Tabs (Radix) |
+| `src/components/ui/badge.tsx` | 新建 | Badge (cva variants) |
+| `src/components/ui/dialog.tsx` | 新建 | Dialog (Radix + lucide) |
+| `src/components/ui/toast.tsx` | 新建 | Toast (Radix) |
+| `src/components/ui/toast-hook.tsx` | 新建 | useToast hook |
+| `src/components/ui/toaster.tsx` | 新建 | Toaster 组件 |
+| `src/components/ui/avatar.tsx` | 新建 | Avatar 组件 |
+| `src/components/ui/index.ts` | 新建 | 统一导出入口 |
+| `tests/unit/ui/components.test.ts` | 新建 | 组件导入测试 |
+
+---
+
 *格式模板：时间、摘要、问题表、测试结果、发现*
