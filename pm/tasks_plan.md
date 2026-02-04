@@ -25,17 +25,18 @@
 - [x] 代码: src/components/ui/*.tsx
 - **测试结果**: 10 pass / 0 fail
 
-#### Round 3: 路由系统（进行中）
-- [ ] 配置 @tanstack/react-router
-- [ ] 创建路由结构
-- **测试**: routes/*.test.tsx
-- **代码**: src/routes/*.tsx
+#### Round 3: 路由系统（已完成）
+- [x] 配置 @tanstack/react-router
+- [x] 创建路由结构
+- [x] 测试: routes/*.test.tsx
+- [x] 代码: src/routes/*.tsx
+- **测试结果**: 10 pass / 0 fail
 
-#### Round 4: 侧边栏布局
+#### Round 4: 侧边栏布局（进行中）
 - [ ] 创建 Sidebar 组件
 - [ ] 创建 Header 组件
-- **测试**: Layout/*.test.tsx
-- **代码**: src/components/Layout/*.tsx
+- [ ] 测试: Layout/*.test.tsx
+- [ ] 代码: src/components/Layout/*.tsx
 
 #### Round 5: P2P 设置页面
 - [ ] 创建 P2PSettings 主页面
