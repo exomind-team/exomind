@@ -7,10 +7,10 @@ use tungstenite::{Message};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::net::SocketAddr;
-use futures_util::{StreamExt, SinkExt};
 use tokio_tungstenite::WebSocketStream;
 
 /// WebSocket 客户端包装
+#[allow(dead_code)]
 struct WsClient {
     ws: WebSocketStream<tokio::net::TcpStream>,
 }
@@ -22,10 +22,11 @@ impl WsClient {
 }
 
 /// WebSocket 服务器
+#[allow(dead_code)]
 pub struct WsServer {
     /// 服务器地址
     addr: SocketAddr,
-    /// 消息发送通道
+    /// 消息发送通道 (预留用于未来功能)
     tx: mpsc::Sender<Message>,
     /// 运行状态标志
     running: Arc<AtomicBool>,
