@@ -5,17 +5,12 @@ import { invoke } from '@tauri-apps/api/core';
 
 export type { ChatMessage };
 
-interface TauriFS {
-  writeFile: (path: string, data: string) => Promise<void>;
-  readTextFile: (path: string) => Promise<string>;
-}
-
 // Tauri file system implementation
-const tauriFs: TauriFS = {
-  writeFile: async (path, data) => {
+const tauriFs = {
+  writeFile: async (path: string, data: string) => {
     await invoke('write_file', { path, content: data });
   },
-  readTextFile: async (path) => {
+  readTextFile: async (path: string) => {
     return await invoke('read_file', { path }) as string;
   },
 };
@@ -23,13 +18,20 @@ const tauriFs: TauriFS = {
 // Message storage singleton
 const messageStorage = getMessageStorage(tauriFs);
 
+interface NetworkState {
+  isOnline: boolean;
+  isSyncing: boolean;
+}
+
 interface ChatState {
   messages: ChatMessage[];
+  pendingMessages: ChatMessage[];  // 待同步的消息（离线时）
   devices: DiscoveredDevice[];
   pairedDevices: DiscoveredDevice[];
   selectedDevice: DiscoveredDevice | null;
   isConnected: boolean;
   isConnecting: boolean;
+  network: NetworkState;
 
   // Actions
   addMessage: (msg: ChatMessage) => void;
@@ -40,21 +42,29 @@ interface ChatState {
   selectDevice: (device: DiscoveredDevice | null) => void;
   setConnected: (connected: boolean) => void;
   setConnecting: (connecting: boolean) => void;
+  setNetwork: (network: Partial<NetworkState>) => void;
   clearMessages: () => void;
 
-  // Message flow actions
-  sendMessage: (content: string) => Promise<void>;
+  // Core actions - 本地优先
+  sendMessage: (content: string, receiverId?: string) => Promise<void>;
+  syncPendingMessages: () => Promise<void>;
   loadMessages: () => Promise<void>;
   loadMessagesWithDevice: (deviceId: string) => Promise<void>;
+  markMessageDelivered: (id: string) => Promise<void>;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
   messages: [],
+  pendingMessages: [],
   devices: [],
   pairedDevices: [],
   selectedDevice: null,
   isConnected: false,
   isConnecting: false,
+  network: {
+    isOnline: true,
+    isSyncing: false,
+  },
 
   addMessage: (msg) => set((state) => ({
     messages: [...state.messages, msg],
@@ -62,6 +72,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   updateMessageStatus: (id, status) => set((state) => ({
     messages: state.messages.map((m) =>
+      m.id === id ? { ...m, status } : m
+    ),
+    pendingMessages: state.pendingMessages.map((m) =>
       m.id === id ? { ...m, status } : m
     ),
   })),
@@ -92,38 +105,135 @@ export const useChatStore = create<ChatState>((set, get) => ({
 
   setConnecting: (connecting) => set({ isConnecting: connecting }),
 
-  clearMessages: () => set({ messages: [] }),
+  setNetwork: (network) => set((state) => ({
+    network: { ...state.network, ...network },
+  })),
 
-  sendMessage: async (content: string) => {
-    const { selectedDevice, addMessage, updateMessageStatus } = get();
+  clearMessages: () => set({ messages: [], pendingMessages: [] }),
 
-    if (!selectedDevice) {
-      throw new Error('No device selected');
-    }
+  // ========== 本地优先核心方法 ==========
 
-    // Create outgoing message
+  /**
+   * 发送消息 - 本地优先架构
+   * 1. 立即创建消息（乐观更新）
+   * 2. 离线时加入待发送队列
+   * 3. 在线时尝试发送
+   * 4. 监听网络恢复自动同步
+   */
+  sendMessage: async (content: string, receiverId?: string) => {
+    const { network, selectedDevice, addMessage, updateMessageStatus } = get();
+
+    // 确定接收者：优先使用传入的 receiverId，其次是 selectedDevice
+    const targetReceiver = receiverId || selectedDevice?.id;
+
+    // 创建消息
     const message = messageStorage.createOutgoingMessage(
       content,
-      selectedDevice.id
+      targetReceiver || 'local'  // 如果没有指定接收者，标记为本地消息
     );
 
-    // Add to store (sending state)
+    // 乐观更新：立即添加到本地列表（状态为 sending）
     addMessage(message);
 
-    // Save to local storage
+    // 保存到本地存储
     await messageStorage.saveMessage(message);
 
-    try {
-      // Send via WebSocket
-      const syncMsg = messageStorage.createSyncMessage(message);
-      await invoke('ws_send', { message: JSON.stringify(syncMsg) });
+    // 根据网络状态决定下一步
+    if (network.isOnline && targetReceiver) {
+      // 在线且有接收者，尝试发送
+      try {
+        const syncMsg = messageStorage.createSyncMessage(message);
+        await invoke('ws_send', { message: JSON.stringify(syncMsg) });
+        updateMessageStatus(message.id, 'sent');
+      } catch (error) {
+        console.error('Failed to send message:', error);
+        updateMessageStatus(message.id, 'failed');
+        // 发送失败，加入待发送队列
+        set((state) => ({
+          pendingMessages: [...state.pendingMessages, message],
+        }));
+      }
+    } else {
+      // 离线或无接收者，加入待发送队列
+      updateMessageStatus(message.id, 'pending');
+      set((state) => ({
+        pendingMessages: [...state.pendingMessages, message],
+      }));
+    }
 
-      // Update status to sent
-      updateMessageStatus(message.id, 'sent');
-    } catch (error) {
-      console.error('Failed to send message:', error);
-      updateMessageStatus(message.id, 'failed');
-      throw error;
+    // 监听网络恢复
+    window.addEventListener('online', handleOnline);
+    window.addEventListener('offline', handleOffline);
+  },
+
+  /**
+   * 同步待发送消息
+   * 当网络恢复时调用
+   */
+  syncPendingMessages: async () => {
+    const { pendingMessages, network, updateMessageStatus } = get();
+
+    if (pendingMessages.length === 0) return;
+
+    if (!network.isOnline) {
+      console.log('Still offline, cannot sync');
+      return;
+    }
+
+    // 标记正在同步
+    set((state) => ({
+      network: { ...state.network, isSyncing: true },
+    }));
+
+    const stillPending: ChatMessage[] = [];
+
+    for (const msg of pendingMessages) {
+      // 检查消息是否有有效的接收者
+      if (!msg.receiverId || msg.receiverId === 'local') {
+        // 本地消息不需要同步
+        updateMessageStatus(msg.id, 'sent');
+        continue;
+      }
+
+      try {
+        const syncMsg = messageStorage.createSyncMessage(msg);
+        await invoke('ws_send', { message: JSON.stringify(syncMsg) });
+        updateMessageStatus(msg.id, 'sent');
+      } catch (error) {
+        console.error('Failed to sync message:', msg.id, error);
+        stillPending.push(msg);
+      }
+    }
+
+    // 更新待发送队列
+    set((state) => ({
+      pendingMessages: stillPending,
+      network: { ...state.network, isSyncing: false },
+    }));
+  },
+
+  /**
+   * 标记消息已送达
+   */
+  markMessageDelivered: async (id: string) => {
+    const { updateMessageStatus } = get();
+    const message = get().messages.find(m => m.id === id);
+    if (message) {
+      updateMessageStatus(id, 'delivered');
+      // 发送 ACK
+      if (message.senderId !== messageStorage.getDeviceId()) {
+        const ackMsg: any = {
+          type: 'ACK',
+          payload: { messageId: id },
+          timestamp: Date.now(),
+          deviceId: messageStorage.getDeviceId(),
+        };
+        try {
+          await invoke('ws_send', { message: JSON.stringify(ackMsg) });
+        } catch (e) {
+          console.error('Failed to send ACK:', e);
+        }
+      }
     }
   },
 
@@ -145,6 +255,29 @@ export const useChatStore = create<ChatState>((set, get) => ({
     }
   },
 }));
+
+// 网络状态监听
+function handleOnline() {
+  console.log('Network online - syncing pending messages');
+  useChatStore.getState().setNetwork({ isOnline: true });
+  useChatStore.getState().syncPendingMessages();
+}
+
+function handleOffline() {
+  console.log('Network offline');
+  useChatStore.getState().setNetwork({ isOnline: false });
+}
+
+// 初始化网络监听
+if (typeof window !== 'undefined') {
+  window.addEventListener('online', handleOnline);
+  window.addEventListener('offline', handleOffline);
+
+  // 初始化时检查网络状态
+  useChatStore.setState({
+    network: { isOnline: navigator.onLine, isSyncing: false }
+  });
+}
 
 // Initialize message handlers for incoming messages
 if (typeof window !== 'undefined') {
