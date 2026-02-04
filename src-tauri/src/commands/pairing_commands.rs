@@ -41,7 +41,7 @@ pub struct PairedDevice {
 #[tauri::command]
 pub async fn generate_pairing_code(
     _app: AppHandle,
-    state: State<'_, PairingState>,
+    state: State<'_, Arc<PairingState>>,
     device_name: String,
     device_ip: String,
     public_key: String,
@@ -72,7 +72,7 @@ pub async fn generate_pairing_code(
 /// 确认配对请求
 #[tauri::command]
 pub async fn confirm_pairing(
-    state: State<'_, PairingState>,
+    state: State<'_, Arc<PairingState>>,
     code: String,
     accept: bool,
 ) -> Result<bool, String> {
@@ -118,7 +118,7 @@ pub async fn confirm_pairing(
 /// 获取所有待确认的配对请求
 #[tauri::command]
 pub async fn get_pairing_requests(
-    state: State<'_, PairingState>,
+    state: State<'_, Arc<PairingState>>,
 ) -> Result<Vec<PairingRequest>, String> {
     let requests = state.pending_requests.lock()
         .map_err(|e| format!("获取配对状态失败: {}", e))?;
@@ -140,7 +140,7 @@ pub async fn get_pairing_requests(
 /// 获取所有已配对的设备
 #[tauri::command]
 pub async fn get_paired_devices(
-    state: State<'_, PairingState>,
+    state: State<'_, Arc<PairingState>>,
 ) -> Result<Vec<PairedDevice>, String> {
     let devices = state.paired_devices.lock()
         .map_err(|e| format!("获取已配对设备失败: {}", e))?;
@@ -151,7 +151,7 @@ pub async fn get_paired_devices(
 /// 取消配对（移除已配对的设备）
 #[tauri::command]
 pub async fn remove_paired_device(
-    state: State<'_, PairingState>,
+    state: State<'_, Arc<PairingState>>,
     device_id: String,
 ) -> Result<bool, String> {
     let mut devices = state.paired_devices.lock()
@@ -167,7 +167,7 @@ pub async fn remove_paired_device(
 /// 清除所有待确认的配对请求
 #[tauri::command]
 pub async fn clear_pairing_requests(
-    state: State<'_, PairingState>,
+    state: State<'_, Arc<PairingState>>,
 ) -> Result<(), String> {
     let mut requests = state.pending_requests.lock()
         .map_err(|e| format!("获取配对状态失败: {}", e))?;

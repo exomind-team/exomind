@@ -193,8 +193,6 @@ pub async fn export_messages_to_markdown<R: Runtime>(
     title: String,
     messages: String, // JSON 序列化的消息数组
 ) -> Result<(), String> {
-    use std::io::Write;
-
     let data_dir = get_data_dir(&app);
     let mut full_path = data_dir.join(&filename);
 
@@ -239,7 +237,7 @@ pub async fn export_messages_to_markdown<R: Runtime>(
         let re = regex::Regex::new(msg_pattern).unwrap();
 
         for cap in re.captures_iter(&messages) {
-            let id = cap.get(1).unwrap().as_str();
+            let _id = cap.get(1).unwrap().as_str();
             let content = cap.get(2).unwrap().as_str();
             let timestamp: i64 = cap.get(3).unwrap().as_str().parse().unwrap_or(0);
             let direction = cap.get(4).unwrap().as_str();
