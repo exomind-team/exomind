@@ -4,8 +4,8 @@ import { ChatWindow } from '../../src/components/Chat/ChatWindow';
 import type { ChatMessage } from '../../lib/stores/chat-store';
 
 const mockMessages: ChatMessage[] = [
-  { id: '1', content: 'Hello', timestamp: Date.now() - 60000, sender: 'device-a', status: 'delivered' },
-  { id: '2', content: 'Hi there!', timestamp: Date.now() - 30000, sender: 'device-b', status: 'delivered' },
+  { id: '1', type: 'chat', content: 'Hello', timestamp: Date.now() - 60000, senderId: 'device-a', receiverId: 'device-b', status: 'delivered' },
+  { id: '2', type: 'chat', content: 'Hi there!', timestamp: Date.now() - 30000, senderId: 'device-b', receiverId: 'device-a', status: 'delivered' },
 ];
 
 describe('ChatWindow', () => {

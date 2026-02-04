@@ -11,9 +11,9 @@ Write-Host "Building ExoMind Desktop..." -ForegroundColor Cyan
 Push-Location $projectRoot
 try {
     if ($Release) {
-        bun tauri build
+        bunx tauri build
     } else {
-        bun tauri build --debug
+        bunx tauri build --debug
     }
     
     if ($LASTEXITCODE -ne 0) {
