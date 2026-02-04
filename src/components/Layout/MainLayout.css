@@ -1,0 +1,161 @@
+/* MainLayout 响应式布局样式 */
+
+.main-layout {
+  display: flex;
+  height: 100vh;
+  width: 100vw;
+  overflow: hidden;
+}
+
+/* 桌面端侧边栏 */
+.sidebar {
+  width: 64px;
+  min-width: 64px;
+  background: linear-gradient(180deg, #1a1a2e 0%, #16213e 100%);
+  display: flex;
+  flex-direction: column;
+  padding: 16px 0;
+  box-shadow: 2px 0 8px rgba(0, 0, 0, 0.1);
+  z-index: 100;
+}
+
+.sidebar-nav {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  flex: 1;
+}
+
+/* 导航按钮通用样式 */
+.nav-button {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  width: 48px;
+  height: 48px;
+  border: none;
+  border-radius: 12px;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  background: transparent;
+  color: #9ca3af;
+}
+
+.nav-button:hover {
+  background: rgba(255, 255, 255, 0.1);
+  color: #ffffff;
+}
+
+.nav-button.active {
+  background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+  color: #ffffff;
+  box-shadow: 0 4px 12px rgba(59, 130, 246, 0.4);
+}
+
+.nav-label {
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* 主内容区 */
+.main-content {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #f8fafc;
+}
+
+/* 移动端底部导航 */
+.mobile-nav {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 64px;
+  min-height: 64px;
+  background: #ffffff;
+  border-top: 1px solid #e5e7eb;
+  display: flex;
+  justify-content: space-around;
+  align-items: center;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+  box-shadow: 0 -2px 8px rgba(0, 0, 0, 0.05);
+  z-index: 100;
+}
+
+.mobile-nav .nav-button {
+  flex: 1;
+  height: 100%;
+  border-radius: 0;
+  gap: 2px;
+}
+
+.mobile-nav .nav-label {
+  font-size: 11px;
+}
+
+/* 响应式断点 */
+@media (min-width: 768px) {
+  .sidebar {
+    display: flex;
+  }
+
+  .mobile-nav {
+    display: none;
+  }
+
+  .main-layout {
+    flex-direction: row;
+  }
+}
+
+@media (max-width: 767px) {
+  .sidebar {
+    display: none;
+  }
+
+  .mobile-nav {
+    display: flex;
+  }
+
+  .main-layout {
+    flex-direction: column;
+  }
+}
+
+/* 触摸友好 */
+@media (hover: none) and (pointer: coarse) {
+  .nav-button {
+    min-height: 44px;
+    min-width: 44px;
+  }
+
+  .nav-button:active {
+    transform: scale(0.95);
+    opacity: 0.8;
+  }
+}
+
+/* 暗色模式支持 */
+@media (prefers-color-scheme: dark) {
+  .sidebar {
+    background: linear-gradient(180deg, #0f172a 0%, #1e293b 100%);
+  }
+
+  .mobile-nav {
+    background: #1e293b;
+    border-color: #334155;
+  }
+
+  .mobile-nav .nav-button:not(.active) {
+    color: #94a3b8;
+  }
+
+  .main-content {
+    background: #0f172a;
+  }
+}
