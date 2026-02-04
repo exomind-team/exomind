@@ -1,8 +1,8 @@
-import { MainLayout } from './components/Layout/MainLayout';
-import './App.css';
+import { RouterProvider } from "@/routes";
+import "./App.css";
 
 function App() {
-  return <MainLayout />;
+  return <RouterProvider />;
 }
 
 export default App;

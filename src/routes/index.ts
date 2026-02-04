@@ -1,0 +1,1 @@
+export { IndexRoute } from "./index";
