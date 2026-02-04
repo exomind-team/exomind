@@ -153,7 +153,12 @@ export function ChatWindow() {
 
       {/* 输入区域 - 固定底部 */}
       <div className="chat-input-wrapper">
-        <button className="attach-button">
+        <button
+          className="attach-button"
+          title="添加附件"
+          aria-label="添加附件"
+          onClick={() => alert('附件功能待实现')}
+        >
           <Plus size={24} />
         </button>
         <textarea

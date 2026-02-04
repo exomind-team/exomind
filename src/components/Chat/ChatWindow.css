@@ -176,15 +176,15 @@
   position: relative;
 }
 
-/* 发送的消息 - 右边蓝色气泡 */
-.message.sent .message-bubble {
+/* 发送的消息 - 右边绿色气泡 */
+.message-item.sent .message-bubble {
   background-color: #95ec69;
   color: #1a1a1a;
   border-top-right-radius: 0.125rem;
 }
 
-/* 接收的消息 - 左边灰色气泡 */
-.message.received .message-bubble {
+/* 接收的消息 - 左边白色气泡 */
+.message-item.received .message-bubble {
   background-color: #ffffff;
   color: #1a1a1a;
   border-top-left-radius: 0.125rem;
