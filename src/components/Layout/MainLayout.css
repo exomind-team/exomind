@@ -21,6 +21,7 @@
   z-index: 100;
   transition: width 0.25s ease, min-width 0.25s ease;
   position: relative;
+  overflow: hidden;
 }
 
 .sidebar.collapsed {
@@ -104,6 +105,7 @@
   gap: 4px;
   flex: 1;
   overflow-y: auto;
+  overflow-x: hidden;
 }
 
 /* 导航分组 */
