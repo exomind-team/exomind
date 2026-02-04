@@ -1,108 +1,77 @@
 /**
- * SQLite 基础封装
- * 提供数据库连接、执行、查询、事务等基础操作
+ * SQLite Database Wrapper - 参数化查询防止 SQL 注入
  */
 
-interface QueryResult {
+export interface QueryResult {
   changes: number;
   lastInsertRowid?: number;
 }
 
-interface Row {
-  [key: string]: any;
+export interface Row {
+  [key: string]: unknown;
 }
 
-class Database {
-  private db: any;
-  private tables: Record<string, any[]>;
+export class SQLiteDatabase {
+  private db: unknown;
+  private tables: Record<string, Row[]>;
   private lastChanges: number = 0;
 
-  constructor(path: string) {
-    console.log('[DB] Constructor called, path:', path);
+  constructor(path: string = ':memory:') {
     this.tables = {};
     try {
+      // 尝试使用真正的 better-sqlite3
       const DatabaseImpl = require('better-sqlite3');
       this.db = new DatabaseImpl(path);
-    } catch (e) {
-      console.log('[DB] Using in-memory DB');
+    } catch {
+      // 回退到内存数据库模拟
       this.db = this.createInMemoryDB();
     }
   }
 
-  private createInMemoryDB() {
+  private createInMemoryDB(): Record<string, unknown> {
     const self = this;
-    console.log('[DB] createInMemoryDB called');
-    
+
     return {
       exec: (sql: string) => {
-        console.log('[DB.exec] sql:', sql);
-        console.log('[DB.exec] tables before:', JSON.stringify(Object.keys(self.tables)));
         sql = sql.trim();
-
         if (sql.startsWith('CREATE TABLE')) {
-          // 手动解析表名
-          const afterCreate = sql.substring(13).trim();
-          const firstSpace = afterCreate.indexOf(' ');
-          const parenIndex = afterCreate.indexOf('(');
-          let tableName: string;
-          
-          if (firstSpace > 0 && (parenIndex < 0 || firstSpace < parenIndex)) {
-            tableName = afterCreate.substring(0, firstSpace);
-          } else if (parenIndex > 0) {
-            tableName = afterCreate.substring(0, parenIndex);
-          } else {
-            tableName = afterCreate;
-          }
-          
-          tableName = tableName.trim();
-          console.log('[DB.exec] parsed tableName:', tableName);
-          
+          const tableName = this.parseTableName(sql);
           if (tableName) {
             self.tables[tableName] = [];
           }
-          self.lastChanges = 0;
-          console.log('[DB.exec] tables after:', JSON.stringify(Object.keys(self.tables)));
-        } else if (sql.startsWith('INSERT')) {
-          self.lastChanges = 1;
-        } else if (sql.startsWith('UPDATE')) {
-          self.lastChanges = 1;
-        } else if (sql.startsWith('DELETE')) {
-          self.lastChanges = 1;
         }
-
+        self.lastChanges = 0;
         return { changes: self.lastChanges };
       },
       prepare: (sql: string) => {
         const trimmedSql = sql.trim();
-        const isDDL = trimmedSql.startsWith('CREATE TABLE') || 
-                      trimmedSql.startsWith('DROP TABLE') ||
-                      trimmedSql.startsWith('ALTER TABLE');
+        const isDDL = this.isDDL(trimmedSql);
+
         return {
-          run: (..._params: any[]) => {
-            console.log('[DB.prepare.run] isDDL:', isDDL);
+          run: (...params: unknown[]) => {
             if (isDDL) {
-              return this.exec(sql);
+              return self.run(sql);
             }
+            // 执行 INSERT/UPDATE/DELETE 操作
             const op = trimmedSql.split(' ')[0].toUpperCase();
             if (['INSERT', 'UPDATE', 'DELETE'].includes(op)) {
               self.lastChanges = 1;
-              return { changes: self.lastChanges };
             }
-            return { changes: 0 };
+            return { changes: self.lastChanges };
           },
-          get: () => {
-            if (sql.includes('COUNT')) {
-              const parts = sql.split('FROM');
-              if (parts[1]) {
-                const tableName = parts[1].trim().split(' ')[0].trim();
+          get: (...params: unknown[]) => {
+            // SELECT 查询
+            if (trimmedSql.includes('COUNT')) {
+              const tableName = this.parseTableNameFromSql(trimmedSql);
+              if (tableName) {
                 const count = self.tables[tableName]?.length || 0;
-                return { count: count };
+                return { count };
               }
-              return { count: 0 };
             }
-            return {};
+            return null;
           },
-          all: () => {
+          all: (..._params: unknown[]) => {
+            // SELECT * 查询
             return [];
           }
         };
@@ -110,69 +79,115 @@ class Database {
     };
   }
 
-  private exec(sql: string): QueryResult {
-    console.log('[DB.this.exec] calling db.exec');
-    return this.db.exec(sql);
+  private parseTableName(sql: string): string | null {
+    const afterCreate = sql.substring(13).trim();
+    const firstSpace = afterCreate.indexOf(' ');
+    const parenIndex = afterCreate.indexOf('(');
+    let tableName: string;
+
+    if (firstSpace > 0 && (parenIndex < 0 || firstSpace < parenIndex)) {
+      tableName = afterCreate.substring(0, firstSpace);
+    } else if (parenIndex > 0) {
+      tableName = afterCreate.substring(0, parenIndex);
+    } else {
+      tableName = afterCreate;
+    }
+
+    return tableName.trim() || null;
   }
 
-  execute(sql: string, params?: any[]): QueryResult {
-    if (params !== undefined) {
-      const stmt = this.db.prepare?.(sql);
-      if (stmt && typeof stmt.run === 'function') {
-        return stmt.run(...params);
-      }
+  private parseTableNameFromSql(sql: string): string | null {
+    const parts = sql.split('FROM');
+    if (parts[1]) {
+      return parts[1].trim().split(' ')[0].trim() || null;
     }
-    return this.exec(sql);
+    return null;
   }
 
-  query(sql: string, _params?: any[]): Row[] {
-    console.log('[DB.query] sql:', sql);
-    console.log('[DB.query] this.tables:', JSON.stringify(Object.keys(this.tables)));
-    
-    if (this.db.prepare) {
-      const stmt = this.db.prepare(sql);
-      if (stmt.all) {
-        return stmt.all();
-      }
-      if (stmt.get) {
-        const row = stmt.get();
-        console.log('[DB.query] get result:', JSON.stringify(row));
-        return row ? [row] : [];
+  private isDDL(sql: string): boolean {
+    const upper = sql.trim().toUpperCase();
+    return (
+      upper.startsWith('CREATE TABLE') ||
+      upper.startsWith('DROP TABLE') ||
+      upper.startsWith('ALTER TABLE')
+    );
+  }
+
+  /**
+   * 执行 SQL 语句（支持参数化查询）
+   */
+  run(sql: string, params?: unknown[]): QueryResult {
+    if (params !== undefined && this.db && typeof (this.db as Record<string, unknown>).prepare === 'function') {
+      const stmt = (this.db as Record<string, unknown>).prepare(sql);
+      if (stmt && typeof (stmt as Record<string, unknown>).run === 'function') {
+        return (stmt as Record<string, ( ...args: unknown[]) => QueryResult>).run(...params);
       }
     }
 
-    if (sql.includes('sqlite_master')) {
-      const tableNames = Object.keys(this.tables);
-      console.log('[DB.query] sqlite_master tables:', tableNames);
-      if (tableNames.length > 0) {
-        return tableNames.map(name => ({ name }));
+    // 不使用参数，直接执行
+    return this.executeDirect(sql);
+  }
+
+  /**
+   * 查询数据（支持参数化查询）
+   */
+  query<T extends Row = Row>(sql: string, params?: unknown[]): T[] {
+    if (params !== undefined && this.db && typeof (this.db as Record<string, unknown>).prepare === 'function') {
+      const stmt = (this.db as Record<string, unknown>).prepare(sql);
+      if (stmt && typeof (stmt as Record<string, unknown>).all === 'function') {
+        return (stmt as Record<string, ( ...args: unknown[]) => T[]>).all(...params);
       }
-      return [];
     }
 
-    if (sql.includes('COUNT')) {
-      const parts = sql.split('FROM');
-      if (parts[1]) {
-        const tableName = parts[1].trim().split(' ')[0].trim();
+    return this.queryDirect(sql);
+  }
+
+  /**
+   * 查询单行（支持参数化查询）
+   */
+  get<T extends Row = Row>(sql: string, params?: unknown[]): T | null {
+    if (params !== undefined && this.db && typeof (this.db as Record<string, unknown>).prepare === 'function') {
+      const stmt = (this.db as Record<string, unknown>).prepare(sql);
+      if (stmt && typeof (stmt as Record<string, unknown>).get === 'function') {
+        return (stmt as Record<string, ( ...args: unknown[]) => T | undefined>).get(...params) as T | null;
+      }
+    }
+
+    return this.queryDirect<T>(sql)[0] || null;
+  }
+
+  private executeDirect(sql: string): QueryResult {
+    const trimmedSql = sql.trim();
+    if (trimmedSql.startsWith('CREATE TABLE')) {
+      const tableName = this.parseTableName(trimmedSql);
+      if (tableName && !this.tables[tableName]) {
+        this.tables[tableName] = [];
+      }
+    }
+    return { changes: 0 };
+  }
+
+  private queryDirect<T extends Row = Row>(sql: string): T[] {
+    const trimmedSql = sql.trim();
+
+    if (trimmedSql.includes('COUNT')) {
+      const tableName = this.parseTableNameFromSql(trimmedSql);
+      if (tableName) {
         const count = this.tables[tableName]?.length || 0;
-        return [{ count }];
+        return [{ count } as T];
       }
-      return [{ count: 0 }];
     }
 
     return [];
   }
 
-  transaction(callback: () => void): void {
-    callback();
-  }
-
+  /**
+   * 关闭数据库连接
+   */
   close(): void {
-    if (this.db.close) {
-      this.db.close();
+    if (this.db && typeof (this.db as Record<string, unknown>).close === 'function') {
+      (this.db as Record<string, () => void>).close();
     }
     this.db = null;
   }
 }
-
-export type { Database, QueryResult, Row };
