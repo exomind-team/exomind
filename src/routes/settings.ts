@@ -1,1 +1,0 @@
-export { SettingsRoute } from "./settings";
