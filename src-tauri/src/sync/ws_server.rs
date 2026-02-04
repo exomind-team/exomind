@@ -7,6 +7,7 @@ use tungstenite::{Message};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::net::SocketAddr;
+use futures_util::{SinkExt, StreamExt};
 use tokio_tungstenite::WebSocketStream;
 
 /// WebSocket 客户端包装
