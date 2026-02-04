@@ -8,8 +8,12 @@ import {
   Network,
   Smartphone,
   Monitor,
-  Server
+  Server,
+  Download,
+  FileText
 } from 'lucide-react';
+import { useChatStore } from '../../lib/stores/chat-store';
+import { exportMessagesToMarkdown } from '../../hooks/useMarkdownExport';
 
 interface SettingsPageProps {
   connectionStatus: 'connected' | 'connecting' | 'disconnected';
@@ -18,12 +22,15 @@ interface SettingsPageProps {
 }
 
 export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: SettingsPageProps) {
+  const { messages } = useChatStore();
   const [localIP, setLocalIP] = useState<string>('获取中...');
   const [remoteIP, setRemoteIP] = useState('');
   const [ipCopied, setIpCopied] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
   const [pairedDevices, setPairedDevices] = useState<Array<{id: string; name: string; ip: string; type: string}>>([]);
   const [error, setError] = useState<string | null>(null);
+  const [exportSuccess, setExportSuccess] = useState(false);
+  const [isExporting, setIsExporting] = useState(false);
 
   // 模拟获取本机 IP
   useEffect(() => {
@@ -110,6 +117,38 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
         return <Monitor size={20} />;
       default:
         return <Server size={20} />;
+    }
+  };
+
+  // 导出消息到 Markdown 文件
+  const handleExportMessages = async () => {
+    if (messages.length === 0) {
+      setError('没有消息可导出');
+      return;
+    }
+
+    setIsExporting(true);
+    setError(null);
+    setExportSuccess(false);
+
+    try {
+      // 生成带时间戳的文件名
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `exomind-messages-${timestamp}.md`;
+      const title = `ExoMind 消息导出 (${new Date().toLocaleDateString('zh-CN')})`;
+
+      // 将消息转换为 JSON 字符串
+      const messagesJson = JSON.stringify(messages);
+
+      // 调用 Rust 命令导出
+      await exportMessagesToMarkdown(filename, title, messagesJson);
+
+      setExportSuccess(true);
+      setTimeout(() => setExportSuccess(false), 3000);
+    } catch (err) {
+      setError('导出失败: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsExporting(false);
     }
   };
 
@@ -277,6 +316,42 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
               </button>
             )}
           </div>
+        </section>
+
+        {/* 消息导出 */}
+        <section className="bg-white rounded-lg p-6 shadow-sm">
+          <h2 className="flex items-center gap-2 text-lg font-semibold mb-4">
+            <FileText size={20} className="text-blue-600" />
+            消息导出
+          </h2>
+          <p className="text-gray-600 text-sm mb-4">
+            将所有消息导出为 Markdown 格式，方便备份和查看
+          </p>
+
+          {exportSuccess && (
+            <div className="mb-4 p-3 bg-green-50 text-green-600 rounded-lg text-sm flex items-center gap-2">
+              <Check size={16} />
+              消息已成功导出到 Markdown 文件
+            </div>
+          )}
+
+          <button
+            onClick={handleExportMessages}
+            disabled={isExporting || messages.length === 0}
+            className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center gap-2"
+          >
+            {isExporting ? (
+              <>
+                <RefreshCw size={16} className="animate-spin" />
+                导出中...
+              </>
+            ) : (
+              <>
+                <Download size={16} />
+                导出消息 ({messages.length} 条)
+              </>
+            )}
+          </button>
         </section>
 
         {/* 安全说明 */}
