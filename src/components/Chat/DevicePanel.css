@@ -1,8 +1,12 @@
+/* Device Panel Styles - 移动端优先设计 */
+
+/* ========== 基础样式 ========== */
 .device-panel {
   padding: 1rem;
   height: 100%;
   display: flex;
   flex-direction: column;
+  box-sizing: border-box;
 }
 
 .device-panel-header {
@@ -10,11 +14,12 @@
   justify-content: space-between;
   align-items: center;
   margin-bottom: 1rem;
+  flex-shrink: 0;
 }
 
 .device-panel-header h2 {
   margin: 0;
-  font-size: 1.125rem;
+  font-size: 1rem;
   font-weight: 600;
   color: #1e293b;
 }
@@ -25,8 +30,11 @@
   cursor: pointer;
   font-size: 1.25rem;
   padding: 0.5rem;
-  border-radius: 0.375rem;
+  border-radius: 0.5rem;
   transition: background-color 0.2s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .refresh-btn:hover {
@@ -34,14 +42,15 @@
 }
 
 .device-section {
-  margin-bottom: 1.5rem;
+  margin-bottom: 1rem;
+  flex-shrink: 0;
 }
 
 .device-section h3 {
-  font-size: 0.875rem;
+  font-size: 0.75rem;
   font-weight: 500;
   color: #64748b;
-  margin: 0 0 0.75rem 0;
+  margin: 0 0 0.5rem 0;
   text-transform: uppercase;
   letter-spacing: 0.05em;
 }
@@ -61,6 +70,8 @@
   cursor: pointer;
   transition: all 0.2s;
   margin-bottom: 0.25rem;
+  min-height: 44px;
+  box-sizing: border-box;
 }
 
 .device-item:hover {
@@ -74,6 +85,7 @@
 
 .device-icon {
   font-size: 1.25rem;
+  flex-shrink: 0;
 }
 
 .device-info {
@@ -81,12 +93,16 @@
   display: flex;
   flex-direction: column;
   gap: 0.125rem;
+  min-width: 0;
 }
 
 .device-name {
   font-size: 0.875rem;
   font-weight: 500;
   color: #1e293b;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 
 .device-ip {
@@ -97,6 +113,7 @@
 .selected-indicator {
   color: #0ea5e9;
   font-weight: 600;
+  flex-shrink: 0;
 }
 
 .empty-message {
@@ -105,4 +122,49 @@
   font-style: italic;
   margin: 0;
   padding: 0.5rem 0;
+}
+
+/* ========== 移动端布局 (< 768px) ========== */
+@media (max-width: 767px) {
+  .device-panel {
+    padding: 0.75rem;
+  }
+
+  .device-panel-header h2 {
+    font-size: 0.875rem;
+  }
+
+  .device-section h3 {
+    font-size: 0.625rem;
+  }
+
+  .device-item {
+    padding: 0.625rem;
+    min-height: 48px;
+  }
+
+  .device-icon {
+    font-size: 1rem;
+  }
+
+  .device-name {
+    font-size: 0.8125rem;
+  }
+
+  .device-ip {
+    font-size: 0.6875rem;
+  }
+}
+
+/* ========== 触摸优化 ========== */
+@media (hover: none) and (pointer: coarse) {
+  .device-item {
+    min-height: 48px;
+    padding: 0.875rem;
+  }
+
+  .refresh-btn {
+    min-width: 44px;
+    min-height: 44px;
+  }
 }

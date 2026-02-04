@@ -15,6 +15,7 @@ function App() {
     pairedDevices,
     messages,
     sendMessage,
+    network,
   } = useChatStore();
 
   const { connect, disconnect } = useMessageFlow();
@@ -46,17 +47,17 @@ function App() {
     <div className="app-container">
       <header className="app-header">
         <h1>ExoMind</h1>
-        <div className="connection-status">
+        <div className="connection-status" data-testid="connection-status">
           <span
             className={`status ${isConnected ? 'connected' : 'disconnected'}`}
           >
-            {isConnecting ? '连接中...' : isConnected ? '已连接' : '未连接'}
+            {isConnecting ? '连接中...' : isConnected ? '已连接' : '离线模式'}
           </span>
         </div>
       </header>
 
       <main className="app-main">
-        <aside className="sidebar">
+        <aside className="sidebar" data-testid="device-panel">
           <DevicePanel
             devices={devices}
             pairedDevices={pairedDevices}
@@ -71,6 +72,7 @@ function App() {
             selectedDevice={selectedDevice}
             isConnected={isConnected}
             isConnecting={isConnecting}
+            network={network}
             onSend={sendMessage}
           />
         </section>
