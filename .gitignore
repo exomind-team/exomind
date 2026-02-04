@@ -66,6 +66,9 @@ coverage/
 *.html
 htmlcov/
 
+# === Vite Entry (required) ===
+!index.html
+
 # === Temporary ===
 *.tmp
 *.temp
