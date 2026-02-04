@@ -56,7 +56,7 @@ export function ChatWindow({
   };
 
   const isOwnMessage = (msg: ChatMessage) => {
-    return msg.sender === selectedDevice?.id;
+    return msg.senderId === selectedDevice?.id;
   };
 
   if (!selectedDevice) {
