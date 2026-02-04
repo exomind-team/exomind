@@ -477,10 +477,10 @@
     color: #1a1a1a;
   }
 
-  /* 接收的消息气泡 - 暗色用深灰 */
+  /* 接收的消息气泡 - 暗色用稍浅的灰色 */
   .message-item.received .message-bubble {
-    background-color: #334155;
-    color: #f1f5f9;
+    background-color: #475569;
+    color: #f8fafc;
   }
 
   /* 消息内容 */
