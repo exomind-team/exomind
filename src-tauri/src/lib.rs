@@ -6,7 +6,8 @@ mod sync;
 use std::sync::Arc;
 use commands::{WsClientState, ws_connect, ws_disconnect, ws_send, ws_get_state};
 use commands::file_commands::{
-    write_file, read_file, read_file_binary, delete_file, file_exists, list_files
+    write_file, read_file, read_file_binary, delete_file, file_exists, list_files,
+    append_to_markdown, export_messages_to_markdown
 };
 
 // 导出 WsClientState 以便在 AppHandle 中使用
@@ -38,6 +39,8 @@ pub fn run() {
             delete_file,
             file_exists,
             list_files,
+            append_to_markdown,
+            export_messages_to_markdown,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
