@@ -64,7 +64,7 @@ export function MainLayout() {
     switch (view) {
       case 'home': return '🏠';
       case 'moment': return '⚡';
-      case 'profile': return '👤';
+      case 'settings': return '⚙️';
       default: return '⚙️';
     }
   };
@@ -73,7 +73,7 @@ export function MainLayout() {
     switch (view) {
       case 'home': return '欢迎使用 ExoMind';
       case 'moment': return '当下';
-      case 'profile': return '个人中心';
+      case 'settings': return '设置';
       default: return '设置';
     }
   };
