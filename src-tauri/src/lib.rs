@@ -15,6 +15,7 @@ use commands::pairing_commands::{
     PairingState, generate_pairing_code, confirm_pairing,
     get_pairing_requests, get_paired_devices, remove_paired_device, clear_pairing_requests,
 };
+use commands::network_commands::{get_local_ip_with_current_port, get_local_ip_with_random_port, check_network_status};
 
 // 导出 WsClientState 和 PairingState 以便在 AppHandle 中使用
 pub use commands::ws_commands::ConnectionState;
@@ -58,6 +59,10 @@ pub fn run() {
             get_paired_devices,
             remove_paired_device,
             clear_pairing_requests,
+            // 网络命令
+            get_local_ip_with_current_port,
+            get_local_ip_with_random_port,
+            check_network_status,
         ]);
 
     #[cfg(debug_assertions)]
