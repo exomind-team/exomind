@@ -15,6 +15,8 @@ export interface ChatMessage {
   senderId: string;
   receiverId: string;
   status: 'pending' | 'sending' | 'sent' | 'delivered' | 'failed';
+  direction?: 'outgoing' | 'incoming';
+  deviceId?: string;
 }
 
 export interface SyncMessage {
@@ -78,15 +80,20 @@ export class MessageStorage {
         .filter(evt => evt.type === 'message_send')
         .slice(-limit);
 
-      return events.map(evt => ({
-        id: evt.metadata?.messageId as string || evt.id,
-        type: 'chat' as const,
-        content: evt.content,
-        timestamp: new Date(evt.timestamp).getTime(),
-        senderId: evt.device_id,
-        receiverId: (evt.metadata?.receiverId as string) || '',
-        status: (evt.metadata?.status as ChatMessage['status']) || 'sent',
-      }));
+      return events.map(evt => {
+        const isOutgoing = evt.device_id === this.deviceId;
+        return {
+          id: evt.metadata?.messageId as string || evt.id,
+          type: 'chat' as const,
+          content: evt.content,
+          timestamp: new Date(evt.timestamp).getTime(),
+          senderId: evt.device_id,
+          receiverId: (evt.metadata?.receiverId as string) || '',
+          status: (evt.metadata?.status as ChatMessage['status']) || 'sent',
+          direction: isOutgoing ? 'outgoing' : 'incoming',
+          deviceId: this.deviceId,
+        };
+      });
     } catch {
       return [];
     }

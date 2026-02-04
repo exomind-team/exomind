@@ -16,9 +16,15 @@ function App() {
     messages,
     sendMessage,
     network,
+    loadMessages,
   } = useChatStore();
 
   const { connect, disconnect } = useMessageFlow();
+
+  // 应用启动时加载本地消息历史
+  useEffect(() => {
+    loadMessages();
+  }, [loadMessages]);
 
   // Handle device selection with auto-connect
   const handleSelectDevice = useCallback(
