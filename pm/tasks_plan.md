@@ -32,17 +32,18 @@
 - [x] 代码: src/routes/*.tsx
 - **测试结果**: 10 pass / 0 fail
 
-#### Round 4: 侧边栏布局（进行中）
-- [ ] 创建 Sidebar 组件
-- [ ] 创建 Header 组件
-- [ ] 测试: Layout/*.test.tsx
-- [ ] 代码: src/components/Layout/*.tsx
+#### Round 4: 侧边栏布局（已完成）
+- [x] 创建 Sidebar 组件
+- [x] 创建 Header 组件（集成在 Sidebar）
+- [x] 测试: Layout/*.test.tsx
+- [x] 代码: src/components/Layout/*.tsx
+- **测试结果**: 5 pass / 0 fail
 
-#### Round 5: P2P 设置页面
+#### Round 5: P2P 设置页面（进行中）
 - [ ] 创建 P2PSettings 主页面
 - [ ] 创建设备列表组件
-- **测试**: Settings/*.test.tsx
-- **代码**: src/components/Settings/*.tsx
+- [ ] 测试: Settings/*.test.tsx
+- [ ] 代码: src/components/Settings/*.tsx
 
 #### Round 6-10: IPC 集成与测试
 - [ ] Rust 后端 P2P 模块
