@@ -8,6 +8,10 @@ interface ChatWindowProps {
   selectedDevice: DiscoveredDevice | null;
   isConnected: boolean;
   isConnecting: boolean;
+  network?: {
+    isOnline: boolean;
+    isSyncing: boolean;
+  };
   onSend: (content: string) => void;
 }
 
@@ -16,6 +20,7 @@ export function ChatWindow({
   selectedDevice,
   isConnected,
   isConnecting,
+  network,
   onSend,
 }: ChatWindowProps) {
   const [inputValue, setInputValue] = React.useState('');
@@ -49,7 +54,9 @@ export function ChatWindow({
   };
 
   const getConnectionStatusText = () => {
+    // 移动端简化显示
     if (!selectedDevice) return '未选择设备';
+    if (!network?.isOnline) return '离线模式';
     if (isConnecting) return '连接中...';
     if (isConnected) return '已连接';
     return '连接断开';
@@ -59,13 +66,43 @@ export function ChatWindow({
     return msg.senderId === selectedDevice?.id;
   };
 
+  const getStatusIcon = (status: ChatMessage['status']) => {
+    switch (status) {
+      case 'pending': return '⏳';
+      case 'sending': return '...';
+      case 'sent': return '✓';
+      case 'delivered': return '✓✓';
+      case 'failed': return '❌';
+      default: return '';
+    }
+  };
+
+  // 移动端空状态优化
   if (!selectedDevice) {
     return (
       <div className="chat-window">
         <div className="chat-empty-state">
-          <div className="empty-icon">📱</div>
-          <h3>选择一个设备开始对话</h3>
-          <p>从左侧面板选择一个已配对的设备</p>
+          <div className="empty-icon">💬</div>
+          <h3>欢迎使用 ExoMind</h3>
+          <p>选择一个设备开始对话，或直接发送消息</p>
+          <div className="message-input-wrapper" style={{ marginTop: '1rem', border: 'none' }}>
+            <textarea
+              value={inputValue}
+              onChange={(e) => setInputValue(e.target.value)}
+              onKeyPress={handleKeyPress}
+              placeholder="记录你的想法..."
+              rows={1}
+              data-testid="message-input"
+            />
+            <button
+              onClick={handleSend}
+              disabled={!inputValue.trim()}
+              className="send-button"
+              data-testid="send-button"
+            >
+              发送
+            </button>
+          </div>
         </div>
       </div>
     );
@@ -97,7 +134,8 @@ export function ChatWindow({
             messages.map((msg) => (
               <div
                 key={msg.id}
-                className={`message ${isOwnMessage(msg) ? 'sent' : 'received'}`}
+                className={`message ${msg.status === 'pending' ? 'pending' : ''} ${isOwnMessage(msg) ? 'sent' : 'received'}`}
+                data-testid={`message-${msg.status}`}
               >
                 <div className="message-content">{msg.content}</div>
                 <div className="message-meta">
@@ -106,10 +144,7 @@ export function ChatWindow({
                   </span>
                   {isOwnMessage(msg) && (
                     <span className={`message-status ${msg.status}`}>
-                      {msg.status === 'sending' && '...'}
-                      {msg.status === 'sent' && '✓'}
-                      {msg.status === 'delivered' && '✓✓'}
-                      {msg.status === 'failed' && '❌'}
+                      {getStatusIcon(msg.status)}
                     </span>
                   )}
                 </div>
@@ -124,14 +159,16 @@ export function ChatWindow({
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
             onKeyPress={handleKeyPress}
-            placeholder="输入消息..."
+            placeholder={network?.isOnline ? "输入消息..." : "离线模式 - 消息稍后发送"}
             rows={1}
-            disabled={!isConnected}
+            disabled={!network?.isOnline && messages.length === 0}
+            enterKeyHint="send"
           />
           <button
             onClick={handleSend}
-            disabled={!isConnected || !inputValue.trim()}
+            disabled={!inputValue.trim()}
             className="send-button"
+            data-testid="send-button"
           >
             发送
           </button>
