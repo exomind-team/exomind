@@ -30,7 +30,7 @@ pub fn run() {
     let ws_client_state = Arc::new(WsClientState::default());
     let pairing_state = Arc::new(PairingState::default());
 
-    tauri::Builder::default()
+    let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ws_client_state.clone())
         .manage(pairing_state.clone())
@@ -57,7 +57,14 @@ pub fn run() {
             get_paired_devices,
             remove_paired_device,
             clear_pairing_requests,
-        ])
+        ]);
+
+    #[cfg(debug_assertions)]
+    {
+        builder = builder.plugin(tauri_plugin_mcp_bridge::init());
+    }
+
+    builder
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
