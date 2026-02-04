@@ -47,6 +47,12 @@
 - [x] 代码: src/components/Settings/*.tsx
 - **测试结果**: 7 pass / 0 fail
 
+#### Round 6: P2P IPC 集成（已完成）
+- [x] 创建前端 P2P IPC 库 (src/lib/p2p.ts)
+- [x] 创建 P2P 测试文件 (tests/p2p-ipc.test.ts)
+- [x] 创建 Rust 后端命令 (src-tauri/src/commands/p2p_commands.rs)
+- [x] 更新 lib.rs 导入新命令
+
 #### Round 6-10: IPC 集成与测试
 - [ ] Rust 后端 P2P 模块
 - [ ] 前端 IPC 封装
