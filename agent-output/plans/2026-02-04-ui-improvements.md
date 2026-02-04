@@ -1115,9 +1115,9 @@ D:\project\exomind-dev-chat\run-android-build.bat
 
 | Task | 描述 | 状态 |
 |------|------|------|
-| 1 | MainLayout 响应式布局 | ⏳ |
-| 2 | ChatWindow 微信式界面 | ⏳ |
-| 3 | SettingsPage UI 改进 | ⏳ |
-| 4 | Rust 配对命令 | ⏳ |
-| 5 | 前端配对 UI | ⏳ |
-| 6 | 重新构建应用 | ⏳ |
+| 1 | MainLayout 响应式布局 | ✅ 已完成 |
+| 2 | ChatWindow 微信式界面 | ✅ 已完成 |
+| 3 | SettingsPage UI 改进 | ✅ 已完成 |
+| 4 | Rust 配对命令 | ✅ 已完成 |
+| 5 | 前端配对 UI | ✅ 已完成 |
+| 6 | 重新构建应用 | 🔄 进行中 |
