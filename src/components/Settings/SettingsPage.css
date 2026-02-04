@@ -554,6 +554,10 @@
     background: #0f172a;
   }
 
+  .settings-content {
+    color: #e2e8f0;
+  }
+
   .settings-section {
     background: #1e293b;
     box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3);
@@ -619,6 +623,116 @@
 
   .security-list li::before {
     color: #3b82f6;
+  }
+
+  /* 按钮暗色模式 */
+  .btn-primary {
+    background: #3b82f6;
+  }
+
+  .btn-primary:hover:not(:disabled) {
+    background: #2563eb;
+  }
+
+  .btn-secondary {
+    background: #334155;
+    color: #e2e8f0;
+  }
+
+  .btn-secondary:hover:not(:disabled) {
+    background: #475569;
+  }
+
+  .btn-success {
+    background: #22c55e;
+  }
+
+  .btn-success:hover:not(:disabled) {
+    background: #16a34a;
+  }
+
+  .btn:disabled {
+    background: #475569;
+    color: #64748b;
+  }
+
+  /* 刷新按钮 */
+  .btn-refresh {
+    color: #60a5fa;
+  }
+
+  .btn-refresh:hover {
+    color: #3b82f6;
+    background: #1e3a5f;
+  }
+
+  /* 移除按钮 */
+  .remove-btn {
+    color: #94a3b8;
+  }
+
+  .remove-btn:hover {
+    background: #7f1d1d;
+    color: #fca5a5;
+  }
+
+  /* 状态徽章 */
+  .status-badge.connected {
+    background: #064e3b;
+    color: #6ee7b7;
+  }
+
+  .status-badge.connecting {
+    background: #713f12;
+    color: #fcd34d;
+  }
+
+  .status-badge.disconnected {
+    background: #334155;
+    color: #94a3b8;
+  }
+
+  /* 提示框 */
+  .alert-error {
+    background: #7f1d1d;
+    border-color: #991b1b;
+    color: #fecaca;
+  }
+
+  .alert-success {
+    background: #14532d;
+    border-color: #166534;
+    color: #bbf7d0;
+  }
+
+  .alert-info {
+    background: #1e3a5f;
+    border-color: #1e40af;
+    color: #93c5fd;
+  }
+
+  /* 空状态 */
+  .empty-state {
+    color: #64748b;
+  }
+
+  /* 版本信息 */
+  .version-info {
+    color: #64748b;
+  }
+
+  /* 在线指示 */
+  .device-online {
+    color: #22c55e;
+  }
+
+  .online-dot {
+    background: #22c55e;
+  }
+
+  /* 导出统计 */
+  .export-stats {
+    color: #94a3b8;
   }
 }
 

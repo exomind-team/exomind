@@ -30,6 +30,7 @@ export interface SyncMessage {
 interface FileSystem {
   writeFile: (path: string, data: string) => Promise<void>;
   readTextFile: (path: string) => Promise<string>;
+  appendFile: (path: string, data: string) => Promise<void>;
 }
 
 // Message Storage class
@@ -65,7 +66,8 @@ export class MessageStorage {
     };
 
     const line = JSON.stringify(event) + '\n';
-    await this.fs.writeFile(`${this.storagePath}/messages.jsonl`, line);
+    // 使用 append_file 追加写入，永不覆盖
+    await this.fs.appendFile(`${this.storagePath}/messages.jsonl`, line);
   }
 
   async getMessages(limit: number = 50): Promise<ChatMessage[]> {

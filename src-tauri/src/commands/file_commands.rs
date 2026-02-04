@@ -21,7 +21,46 @@ fn get_data_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
     path
 }
 
-/// 写入文件
+/// 追加内容到文件（永覆盖）
+/// 用于消息日志等需要追加的场景
+#[tauri::command]
+pub async fn append_file<R: Runtime>(
+    app: AppHandle<R>,
+    path: String,
+    content: String,
+) -> Result<(), String> {
+    let data_dir = get_data_dir(&app);
+
+    // 处理路径：如果path是相对路径，则相对于数据目录
+    let full_path = if PathBuf::from(&path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        data_dir.join(path)
+    };
+
+    // 确保父目录存在
+    if let Some(parent) = full_path.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create directory: {}", e))?;
+    }
+
+    // 追加内容（使用 OpenOptions 以追加模式打开）
+    let mut file = fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&full_path)
+        .map_err(|e| format!("Failed to open file for append: {}", e))?;
+
+    // 写入内容
+    use std::io::Write;
+    writeln!(file, "{}", content)
+        .map_err(|e| format!("Failed to append to file: {}", e))?;
+
+    Ok(())
+}
+
+/// 写入文件（覆盖模式）
+/// 用于配置文件等需要覆盖的场景
 #[tauri::command]
 pub async fn write_file<R: Runtime>(
     app: AppHandle<R>,
@@ -43,7 +82,7 @@ pub async fn write_file<R: Runtime>(
             .map_err(|e| format!("Failed to create directory: {}", e))?;
     }
 
-    // 写入文件
+    // 写入文件（覆盖）
     fs::write(&full_path, content)
         .map_err(|e| format!("Failed to write file: {}", e))?;
 

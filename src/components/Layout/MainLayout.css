@@ -30,23 +30,22 @@
   min-width: 72px;
 }
 
-/* 收起时：品牌图标居中，隐藏文字，显示 toggle */
+/* 收起时：品牌图标隐藏，toggle 放在图标位置 */
 .sidebar.collapsed .sidebar-header {
-  padding: 16px 8px;
+  padding: 12px 8px;
   flex-direction: column;
-  gap: 8px;
+  gap: 4px;
 }
 
 .sidebar.collapsed .brand-icon {
-  width: 40px;
-  height: 40px;
+  display: none;
 }
 
 .sidebar.collapsed .brand-text {
   display: none;
 }
 
-/* toggle 按钮始终显示 */
+/* toggle 按钮始终显示，收起时放在原来图标位置 */
 .sidebar-toggle {
   width: 28px;
   height: 28px;
@@ -67,13 +66,13 @@
   color: #ffffff;
 }
 
-/* 收起时 toggle 移到顶部居中 */
+/* 收起时 toggle 居中显示在顶部 */
 .sidebar.collapsed .sidebar-toggle {
-  position: absolute;
-  top: 16px;
-  left: 50%;
-  transform: translateX(-50%);
-  margin-left: 0;
+  position: relative;
+  top: auto;
+  left: auto;
+  transform: none;
+  margin: 0 auto;
 }
 
 /* 收起时设置按钮固定在底部 */
