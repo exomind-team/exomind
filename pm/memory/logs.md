@@ -196,23 +196,50 @@
 2. **class-variance-authority (cva)**：用于管理组件 variant（default/destructive/outline 等）
 3. **手动复制 vs CLI 安装**：复制方式让我们完全掌控组件代码，便于定制和调试
 
-### Round 2 完成文件清单
+---
+
+## [2026-02-04] Phase 1 Round 3-5 - 路由系统 + 布局 + P2P 设置页面
+
+### 执行摘要
+- **任务**：@tanstack/react-router 路由、侧边栏布局、P2P 设置页面
+- **结果**：全部完成，49 测试通过
+- **主要变更**：
+  - @tanstack/react-router 路由系统
+  - Layout 组件（Sidebar + 主布局）
+  - P2PSettings 页面（设备/配对/连接 三个 Tab）
+
+### 遇到的问题
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 路由导入路径错误 | routeTree.tsx 在 src/ 而非 src/routes/ | 修复测试导入路径为 @/routeTree |
+| 路由树导出格式 | routeTree 导出多个对象而非单一 named export | 修改测试验证多个导出 |
+
+### 测试结果
+- ✅ routes.test.ts: 10 pass
+- ✅ Layout.test.ts: 5 pass
+- ✅ Settings.test.ts: 7 pass
+- **总计**: 22 pass / 0 fail（新增）
+
+### 有价值发现
+1. **@tanstack/react-router 文件路由**：`createFileRoute("/")` 自动映射文件路径
+2. **路由树结构**：`rootRoute.addChildren([...])` 构建树形结构，支持嵌套
+3. **Tab 组织页面**：使用 Tabs 将复杂页面分为多个逻辑区域
+
+### 完成文件清单
 | 文件 | 类型 | 说明 |
 |------|------|------|
-| `src/components/ui/button.tsx` | 新建 | Button 组件 (cva + Slot) |
-| `src/components/ui/card.tsx` | 新建 | Card 组件系列 |
-| `src/components/ui/input.tsx` | 新建 | Input 组件 |
-| `src/components/ui/switch.tsx` | 新建 | Switch (Radix) |
-| `src/components/ui/label.tsx` | 新建 | Label (Radix + cva) |
-| `src/components/ui/tabs.tsx` | 新建 | Tabs (Radix) |
-| `src/components/ui/badge.tsx` | 新建 | Badge (cva variants) |
-| `src/components/ui/dialog.tsx` | 新建 | Dialog (Radix + lucide) |
-| `src/components/ui/toast.tsx` | 新建 | Toast (Radix) |
-| `src/components/ui/toast-hook.tsx` | 新建 | useToast hook |
-| `src/components/ui/toaster.tsx` | 新建 | Toaster 组件 |
-| `src/components/ui/avatar.tsx` | 新建 | Avatar 组件 |
-| `src/components/ui/index.ts` | 新建 | 统一导出入口 |
-| `tests/unit/ui/components.test.ts` | 新建 | 组件导入测试 |
+| `src/routes.ts` | 新建 | 路由根配置 + RouterProvider |
+| `src/routeTree.tsx` | 新建 | 路由树导出 |
+| `src/routes/index.tsx` | 新建 | 首页路由 |
+| `src/routes/settings.tsx` | 新建 | 设置页路由 |
+| `src/components/Layout/Layout.tsx` | 新建 | 侧边栏布局 |
+| `src/components/Settings/P2PSettings.tsx` | 新建 | P2P 设置主页 |
+| `src/components/Settings/DeviceList.tsx` | 新建 | 设备列表组件 |
+| `src/components/Settings/PairingCode.tsx` | 新建 | 配对码组件 |
+| `tests/routes.test.ts` | 新建 | 路由测试 |
+| `tests/Layout.test.ts` | 新建 | 布局测试 |
+| `tests/Settings.test.ts` | 新建 | 设置页面测试 |
 
 ---
 
