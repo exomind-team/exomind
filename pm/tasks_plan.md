@@ -39,11 +39,13 @@
 - [x] 代码: src/components/Layout/*.tsx
 - **测试结果**: 5 pass / 0 fail
 
-#### Round 5: P2P 设置页面（进行中）
-- [ ] 创建 P2PSettings 主页面
-- [ ] 创建设备列表组件
-- [ ] 测试: Settings/*.test.tsx
-- [ ] 代码: src/components/Settings/*.tsx
+#### Round 5: P2P 设置页面（已完成）
+- [x] 创建 P2PSettings 主页面
+- [x] 创建设备列表组件
+- [x] 创建配对码组件
+- [x] 测试: Settings/*.test.tsx
+- [x] 代码: src/components/Settings/*.tsx
+- **测试结果**: 7 pass / 0 fail
 
 #### Round 6-10: IPC 集成与测试
 - [ ] Rust 后端 P2P 模块
