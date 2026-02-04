@@ -1,44 +1,71 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { ChatWindow } from '../Chat/ChatWindow';
 import { SettingsPage } from '../Settings/SettingsPage';
 import { MessageSquare, Settings } from 'lucide-react';
+import './MainLayout.css';
 
 export type ViewType = 'chat' | 'settings';
+
+interface NavButtonProps {
+  active: boolean;
+  onClick: () => void;
+  icon: React.ReactNode;
+  label: string;
+}
+
+function NavButton({ active, onClick, icon, label }: NavButtonProps) {
+  return (
+    <button
+      onClick={onClick}
+      className={`nav-button ${active ? 'active' : ''}`}
+      title={label}
+    >
+      {icon}
+      <span className="nav-label">{label}</span>
+    </button>
+  );
+}
 
 export function MainLayout() {
   const [currentView, setCurrentView] = useState<ViewType>('chat');
   const [connectionStatus, setConnectionStatus] = useState<'connected' | 'connecting' | 'disconnected'>('disconnected');
+  const [isMobile, setIsMobile] = useState(false);
+
+  // 检测是否为移动端
+  useEffect(() => {
+    const checkMobile = () => {
+      setIsMobile(window.innerWidth < 768);
+    };
+
+    checkMobile();
+    window.addEventListener('resize', checkMobile);
+    return () => window.removeEventListener('resize', checkMobile);
+  }, []);
 
   return (
-    <div className="flex h-screen bg-gray-50">
-      {/* 左侧菜单栏 */}
-      <nav className="w-16 bg-gray-900 flex flex-col items-center py-4 space-y-4">
-        <button
-          onClick={() => setCurrentView('chat')}
-          className={`p-3 rounded-lg transition-colors ${
-            currentView === 'chat'
-              ? 'bg-blue-600 text-white'
-              : 'text-gray-400 hover:text-white hover:bg-gray-800'
-          }`}
-          title="消息"
-        >
-          <MessageSquare size={24} />
-        </button>
-        <button
-          onClick={() => setCurrentView('settings')}
-          className={`p-3 rounded-lg transition-colors ${
-            currentView === 'settings'
-              ? 'bg-blue-600 text-white'
-              : 'text-gray-400 hover:text-white hover:bg-gray-800'
-          }`}
-          title="设置"
-        >
-          <Settings size={24} />
-        </button>
-      </nav>
+    <div className="main-layout">
+      {/* 桌面端：左侧侧边栏 */}
+      {!isMobile && (
+        <aside className="sidebar">
+          <nav className="sidebar-nav">
+            <NavButton
+              active={currentView === 'chat'}
+              onClick={() => setCurrentView('chat')}
+              icon={<MessageSquare size={24} />}
+              label="消息"
+            />
+            <NavButton
+              active={currentView === 'settings'}
+              onClick={() => setCurrentView('settings')}
+              icon={<Settings size={24} />}
+              label="设置"
+            />
+          </nav>
+        </aside>
+      )}
 
       {/* 主内容区 */}
-      <main className="flex-1 overflow-hidden flex flex-col">
+      <main className="main-content">
         {currentView === 'chat' ? (
           <ChatWindow
             onConnectionChange={(status: 'connected' | 'connecting' | 'disconnected') => {
@@ -53,6 +80,24 @@ export function MainLayout() {
           />
         )}
       </main>
+
+      {/* 移动端：底部导航栏 */}
+      {isMobile && (
+        <nav className="mobile-nav">
+          <NavButton
+            active={currentView === 'chat'}
+            onClick={() => setCurrentView('chat')}
+            icon={<MessageSquare size={24} />}
+            label="消息"
+          />
+          <NavButton
+            active={currentView === 'settings'}
+            onClick={() => setCurrentView('settings')}
+            icon={<Settings size={24} />}
+            label="设置"
+          />
+        </nav>
+      )}
     </div>
   );
 }

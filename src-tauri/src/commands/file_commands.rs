@@ -218,7 +218,7 @@ pub async fn export_messages_to_markdown<R: Runtime>(
     md_content.push_str(&chrono::Utc::now().to_rfc3339());
     md_content.push_str("\nmessage_count: ");
     // 计算消息数量（粗略估算）
-    let count = messages.matches("\"id\"").len() / 3;
+    let count = messages.matches("\"id\"").count() / 3;
     md_content.push_str(&count.to_string());
     md_content.push_str("\n---\n\n");
 
@@ -248,7 +248,7 @@ pub async fn export_messages_to_markdown<R: Runtime>(
 
             let dt = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp)
                 .map(|dt| dt.with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap()))
-                .unwrap_or_else(|| chrono::Utc::now());
+                .unwrap_or_else(|| chrono::Utc::now().into());
 
             // 判断发送者方向
             let is_outgoing = direction == "outgoing";
