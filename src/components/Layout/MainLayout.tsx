@@ -1,10 +1,10 @@
 import { useState, useEffect } from 'react';
 import { ChatWindow } from '../Chat/ChatWindow';
 import { SettingsPage } from '../Settings/SettingsPage';
-import { MessageSquare, Settings, Home, Brain, User, ChevronLeft, ChevronRight } from 'lucide-react';
+import { MessageSquare, Settings, Home, Zap, ChevronLeft, ChevronRight } from 'lucide-react';
 import './MainLayout.css';
 
-export type ViewType = 'home' | 'chat' | 'growth' | 'profile' | 'settings';
+export type ViewType = 'home' | 'chat' | 'moment' | 'settings';
 
 interface NavButtonProps {
   active: boolean;
@@ -52,16 +52,31 @@ export function MainLayout() {
     setSidebarCollapsed(!sidebarCollapsed);
   };
 
+  // 统一 4 个导航项
   const navItems = [
     { id: 'home' as ViewType, icon: <Home size={22} />, label: '首页' },
     { id: 'chat' as ViewType, icon: <MessageSquare size={22} />, label: '消息' },
-    { id: 'growth' as ViewType, icon: <Brain size={22} />, label: '成长' },
-    { id: 'profile' as ViewType, icon: <User size={22} />, label: '个人' },
-  ];
-
-  const bottomNavItems = [
+    { id: 'moment' as ViewType, icon: <Zap size={22} />, label: '当下' },
     { id: 'settings' as ViewType, icon: <Settings size={22} />, label: '设置' },
   ];
+
+  const getEmptyStateIcon = (view: ViewType) => {
+    switch (view) {
+      case 'home': return '🏠';
+      case 'moment': return '⚡';
+      case 'profile': return '👤';
+      default: return '⚙️';
+    }
+  };
+
+  const getEmptyStateTitle = (view: ViewType) => {
+    switch (view) {
+      case 'home': return '欢迎使用 ExoMind';
+      case 'moment': return '当下';
+      case 'profile': return '个人中心';
+      default: return '设置';
+    }
+  };
 
   return (
     <div className="main-layout">
@@ -97,16 +112,6 @@ export function MainLayout() {
               ))}
             </div>
           </nav>
-
-          {/* 底部导航 */}
-          <div className="sidebar-footer">
-            <NavButton
-              active={currentView === 'settings'}
-              onClick={() => setCurrentView('settings')}
-              icon={<Settings size={22} />}
-              label="设置"
-            />
-          </div>
         </aside>
       )}
 
@@ -122,8 +127,8 @@ export function MainLayout() {
           />
         ) : (
           <div className="chat-empty-state">
-            <div className="empty-icon">{currentView === 'home' ? '🏠' : currentView === 'growth' ? '🌱' : '👤'}</div>
-            <h3>{currentView === 'home' ? '欢迎使用 ExoMind' : currentView === 'growth' ? '个人成长' : '个人中心'}</h3>
+            <div className="empty-icon">{getEmptyStateIcon(currentView)}</div>
+            <h3>{getEmptyStateTitle(currentView)}</h3>
             <p>功能开发中</p>
           </div>
         )}
@@ -132,16 +137,7 @@ export function MainLayout() {
       {/* 移动端：底部导航栏 */}
       {isMobile && (
         <nav className="mobile-nav">
-          {navItems.slice(0, 2).map((item) => (
-            <NavButton
-              key={item.id}
-              active={currentView === item.id}
-              onClick={() => setCurrentView(item.id)}
-              icon={item.icon}
-              label={item.label}
-            />
-          ))}
-          {bottomNavItems.map((item) => (
+          {navItems.map((item) => (
             <NavButton
               key={item.id}
               active={currentView === item.id}
