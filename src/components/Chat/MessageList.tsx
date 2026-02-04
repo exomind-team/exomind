@@ -1,5 +1,5 @@
 import { useRef } from 'react';
-import { escapeHtml } from '@/lib/utils/html-sanitize';
+import { escapeHtml } from '../../lib/utils/html-sanitize';
 
 export interface Message {
   id: string;
