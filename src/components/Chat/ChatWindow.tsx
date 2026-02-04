@@ -1,18 +1,10 @@
-import React, { useRef, useEffect, useMemo } from 'react';
-import { DiscoveredDevice } from '../../lib/sync/device-discovery';
-import { ChatMessage } from '../../lib/stores/chat-store';
+import { useRef, useEffect, useMemo, useCallback, useState } from 'react';
+import { useChatStore, ChatMessage } from '../../lib/stores/chat-store';
 import './ChatWindow.css';
 
+// 简化的 ChatWindow Props
 interface ChatWindowProps {
-  messages: ChatMessage[];
-  selectedDevice: DiscoveredDevice | null;
-  isConnected: boolean;
-  isConnecting: boolean;
-  network?: {
-    isOnline: boolean;
-    isSyncing: boolean;
-  };
-  onSend: (content: string) => void;
+  onConnectionChange?: (status: 'connected' | 'connecting' | 'disconnected') => void;
 }
 
 // 按日期分组消息
@@ -36,37 +28,58 @@ function groupMessagesByDate(messages: ChatMessage[]): Map<string, ChatMessage[]
   return groups;
 }
 
-export function ChatWindow({
-  messages,
-  selectedDevice,
-  isConnected,
-  isConnecting,
-  network,
-  onSend,
-}: ChatWindowProps) {
-  const [inputValue, setInputValue] = React.useState('');
+export function ChatWindow({ onConnectionChange }: ChatWindowProps) {
+  const [inputValue, setInputValue] = useState('');
   const messagesEndRef = useRef<HTMLDivElement>(null);
+
+  const {
+    messages,
+    isConnected,
+    isConnecting,
+    network,
+    sendMessage,
+    loadMessages,
+    getDeviceId,
+    connectedDeviceCount
+  } = useChatStore();
+
+  const deviceId = getDeviceId();
 
   // 按日期分组消息
   const groupedMessages = useMemo(() => groupMessagesByDate(messages), [messages]);
 
-  // 滚动到底部
-  const scrollToBottom = () => {
-    if (messagesEndRef.current) {
-      const el = messagesEndRef.current;
-      if (typeof el.scrollIntoView === 'function') {
-        el.scrollIntoView({ behavior: 'smooth' });
+  // 通知连接状态变化
+  useEffect(() => {
+    if (onConnectionChange) {
+      if (isConnecting) {
+        onConnectionChange('connecting');
+      } else if (isConnected) {
+        onConnectionChange('connected');
+      } else {
+        onConnectionChange('disconnected');
       }
     }
-  };
+  }, [isConnected, isConnecting, onConnectionChange]);
+
+  // 滚动到底部
+  const scrollToBottom = useCallback(() => {
+    if (messagesEndRef.current) {
+      messagesEndRef.current.scrollIntoView({ behavior: 'smooth' });
+    }
+  }, []);
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages]);
+  }, [messages, scrollToBottom]);
+
+  // 加载消息
+  useEffect(() => {
+    loadMessages();
+  }, [loadMessages]);
 
   const handleSend = () => {
     if (inputValue.trim()) {
-      onSend(inputValue.trim());
+      sendMessage(inputValue.trim());
       setInputValue('');
     }
   };
@@ -79,22 +92,23 @@ export function ChatWindow({
   };
 
   const getConnectionStatusText = () => {
-    if (!selectedDevice) return '未选择设备';
+    if (connectedDeviceCount > 0) {
+      if (isConnecting) return '连接中...';
+      if (isConnected) return `已连接 ${connectedDeviceCount} 个设备`;
+    }
     if (!network?.isOnline) return '离线模式';
-    if (isConnecting) return '连接中...';
-    if (isConnected) return '已连接';
-    return '连接断开';
+    return '准备就绪';
   };
 
-  // 判断是否是自己的消息
-  const isOwnMessage = (msg: ChatMessage) => {
-    // 如果有选中的设备，判断是否发给该设备
-    if (selectedDevice) {
-      return msg.receiverId === selectedDevice.id;
+  const getConnectionStatusClass = () => {
+    if (connectedDeviceCount > 0) {
+      return isConnected ? 'connected' : isConnecting ? 'connecting' : 'disconnected';
     }
-    // 没有选中设备时，检查 senderId 是否是本地设备
-    // 这里简化处理：发送出去的消息都是"自己的"
-    return msg.direction === 'outgoing' || msg.senderId === msg.deviceId;
+    return network?.isOnline ? 'ready' : 'offline';
+  };
+
+  const isOwnMessage = (msg: ChatMessage) => {
+    return msg.direction === 'outgoing' || msg.senderId === deviceId;
   };
 
   const getStatusIcon = (status: ChatMessage['status']) => {
@@ -124,39 +138,21 @@ export function ChatWindow({
     });
   };
 
-  // 没有消息时的空状态
   const hasNoMessages = messages.length === 0;
 
   return (
     <div className="chat-window">
-      {/* 设备选择提示头部 */}
-      {!selectedDevice && (
-        <header className="chat-header device-select-header">
-          <div className="device-info">
-            <span className="device-name">💡 提示</span>
-          </div>
-          <div className="connection-badge disconnected">
-            未选择设备
-          </div>
-        </header>
-      )}
-
-      {/* 已选设备头部 */}
-      {selectedDevice && (
-        <header className="chat-header">
-          <div className="device-info">
-            <span className="device-name">
-              {selectedDevice.name}
-              {selectedDevice.type === 'desktop' ? ' 🖥️' : ' 📱'}
-            </span>
-            <span className="device-ip">{selectedDevice.ip}</span>
-          </div>
-          <div className={`connection-badge ${isConnected ? 'connected' : isConnecting ? 'connecting' : 'disconnected'}`}>
+      {/* 头部 */}
+      <header className="chat-header">
+        <div className="chat-title">
+          <h1>消息</h1>
+          <span className={`connection-badge ${getConnectionStatusClass()}`}>
             {getConnectionStatusText()}
-          </div>
-        </header>
-      )}
+          </span>
+        </div>
+      </header>
 
+      {/* 消息区域 */}
       <div className="chat-content">
         <div className="message-list" data-testid="message-list">
           {hasNoMessages ? (
@@ -167,7 +163,6 @@ export function ChatWindow({
             </div>
           ) : (
             <>
-              {/* 日期分组 */}
               {Array.from(groupedMessages.entries()).map(([date, dateMessages]) => (
                 <div key={date} className="message-group">
                   <div className="date-divider">
@@ -199,6 +194,7 @@ export function ChatWindow({
           <div ref={messagesEndRef} />
         </div>
 
+        {/* 输入区域 */}
         <div className="message-input-wrapper" data-testid="message-input">
           <textarea
             value={inputValue}

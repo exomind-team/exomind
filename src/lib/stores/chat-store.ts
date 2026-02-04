@@ -33,6 +33,7 @@ interface ChatState {
   isConnected: boolean;
   isConnecting: boolean;
   network: NetworkState;
+  connectedDeviceCount: number;  // 已连接设备数量
 
   // Actions
   addMessage: (msg: ChatMessage) => void;
@@ -52,6 +53,9 @@ interface ChatState {
   loadMessages: () => Promise<void>;
   loadMessagesWithDevice: (deviceId: string) => Promise<void>;
   markMessageDelivered: (id: string) => Promise<void>;
+
+  // Helpers
+  getDeviceId: () => string;
 }
 
 export const useChatStore = create<ChatState>((set, get) => ({
@@ -255,6 +259,18 @@ export const useChatStore = create<ChatState>((set, get) => ({
       console.error('Failed to load messages:', error);
     }
   },
+
+  /**
+   * 获取本机设备 ID
+   */
+  getDeviceId: () => {
+    return messageStorage.getDeviceId();
+  },
+
+  /**
+   * 获取已连接设备数量
+   */
+  connectedDeviceCount: 0,
 }));
 
 // 网络状态监听
