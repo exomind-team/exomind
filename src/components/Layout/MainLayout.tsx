@@ -67,11 +67,7 @@ export function MainLayout() {
       {/* 主内容区 */}
       <main className="main-content">
         {currentView === 'chat' ? (
-          <ChatWindow
-            onConnectionChange={(status: 'connected' | 'connecting' | 'disconnected') => {
-              setConnectionStatus(status);
-            }}
-          />
+          <ChatWindow />
         ) : (
           <SettingsPage
             connectionStatus={connectionStatus}
