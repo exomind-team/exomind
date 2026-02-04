@@ -1,93 +1,101 @@
-import React, { useState } from 'react';
+import { DiscoveredDevice } from '../../lib/sync/device-discovery';
+import './DevicePanel.css';
 
-export interface Device {
-  id: string;
-  name: string;
-  type: 'mobile' | 'desktop' | 'tablet';
-  status: 'online' | 'offline';
+interface DevicePanelProps {
+  devices: DiscoveredDevice[];
+  pairedDevices: DiscoveredDevice[];
+  selectedDevice: DiscoveredDevice | null;
+  onSelectDevice: (device: DiscoveredDevice | null) => void;
 }
 
-export interface DevicePanelProps {
-  devices: Device[];
-  currentDevice: string;
-  onDeviceSelect?: (deviceId: string) => void;
-  onAddDevice?: () => void;
-}
-
-export function DevicePanel({ 
-  devices, 
-  currentDevice, 
-  onDeviceSelect,
-  onAddDevice 
-}: DevicePanelProps): React.ReactElement {
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [password, setPassword] = useState('');
-
-  const handleAddDevice = () => {
-    setShowAddDialog(true);
-    onAddDevice?.();
-  };
-
-  const handleConfirmAdd = () => {
-    setShowAddDialog(false);
-    setPassword('');
-  };
-
-  const getDeviceIcon = (type: Device['type']) => {
-    switch (type) {
-      case 'mobile': return '??';
-      case 'desktop': return '???';
-      case 'tablet': return '??';
-      default: return '??';
+export function DevicePanel({
+  devices,
+  pairedDevices,
+  selectedDevice,
+  onSelectDevice,
+}: DevicePanelProps) {
+  const handleDeviceClick = (device: DiscoveredDevice) => {
+    if (selectedDevice?.id === device.id) {
+      onSelectDevice(null);
+    } else {
+      onSelectDevice(device);
     }
   };
 
+  const getDeviceIcon = (type: DiscoveredDevice['type']) => {
+    return type === 'desktop' ? 'ğŸ–¥ï¸' : 'ğŸ“±';
+  };
+
   return (
-    <div className='device-panel'>
-      <div className='device-panel-header'>
-        <h3>Éè±¸¹ÜÀí</h3>
-        <button onClick={handleAddDevice}>Ìí¼ÓÉè±¸</button>
+    <div className="device-panel">
+      <div className="device-panel-header">
+        <h2>è®¾å¤‡</h2>
+        <button
+          className="refresh-btn"
+          onClick={() => {
+            console.log('Refresh devices...');
+          }}
+          title="åˆ·æ–°è®¾å¤‡åˆ—è¡¨"
+        >
+          ğŸ”„
+        </button>
       </div>
 
-      <div className='device-list'>
-        {devices.map(device => (
-          <div 
-            key={device.id}
-            className={'device-item ' + (device.id === currentDevice ? 'current' : '')}
-            onClick={() => onDeviceSelect?.(device.id)}
-          >
-            <span className='device-icon'>{getDeviceIcon(device.type)}</span>
-            <span className='device-name'>{device.name}</span>
-            <span className={'device-status ' + device.status}>
-              {device.status === 'online' ? 'ÔÚÏß' : 'ÀëÏß'}
-            </span>
-            {device.id === currentDevice && (
-              <span className='current-badge'>µ±Ç°Éè±¸</span>
-            )}
-          </div>
-        ))}
-      </div>
+      <section className="device-section">
+        <h3>å·²é…å¯¹è®¾å¤‡</h3>
+        {pairedDevices.length === 0 ? (
+          <p className="empty-message">æš‚æ— é…å¯¹è®¾å¤‡</p>
+        ) : (
+          <ul className="device-list">
+            {pairedDevices.map((device) => (
+              <li
+                key={device.id}
+                className={`device-item ${
+                  selectedDevice?.id === device.id ? 'selected' : ''
+                }`}
+                onClick={() => handleDeviceClick(device)}
+              >
+                <span className="device-icon">{getDeviceIcon(device.type)}</span>
+                <div className="device-info">
+                  <span className="device-name">{device.name}</span>
+                  <span className="device-ip">{device.ip}</span>
+                </div>
+                {selectedDevice?.id === device.id && (
+                  <span className="selected-indicator">âœ“</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
 
-      {showAddDialog && (
-        <div className='dialog-overlay'>
-          <div className='dialog'>
-            <h4>Ìí¼ÓÉè±¸</h4>
-            <p>ÊäÈëÁ¬½ÓÃÜÂë</p>
-            <input
-              type='password'
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder='ÇëÊäÈëÃÜÂë'
-            />
-            <div className='dialog-actions'>
-              <button onClick={() => setShowAddDialog(false)}>È¡Ïû</button>
-              <button onClick={handleConfirmAdd}>È·ÈÏ</button>
-            </div>
-          </div>
-        </div>
-      )}
+      <section className="device-section">
+        <h3>å‘ç°è®¾å¤‡</h3>
+        {devices.length === 0 ? (
+          <p className="empty-message">æ­£åœ¨æœç´¢è®¾å¤‡...</p>
+        ) : (
+          <ul className="device-list">
+            {devices.map((device) => (
+              <li
+                key={device.id}
+                className={`device-item ${
+                  selectedDevice?.id === device.id ? 'selected' : ''
+                }`}
+                onClick={() => handleDeviceClick(device)}
+              >
+                <span className="device-icon">{getDeviceIcon(device.type)}</span>
+                <div className="device-info">
+                  <span className="device-name">{device.name}</span>
+                  <span className="device-ip">{device.ip}</span>
+                </div>
+                {selectedDevice?.id === device.id && (
+                  <span className="selected-indicator">âœ“</span>
+                )}
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
     </div>
   );
 }
-
-export default DevicePanel;

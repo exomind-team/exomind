@@ -51,4 +51,69 @@
 
 ---
 
+## [2026-02-04] Ralph Loop - 移动端 WebSocket 客户端 + 多端消息同步
+
+### 执行摘要
+- **任务**：实现移动端 WebSocket 客户端 + 聊天 UI，实现完整的多端消息同步功能
+- **结果**：完成 PR #10，提交 97 文件变更，+14,847 / -2,887 行代码
+- **主要变更**：
+  - 聊天 UI（ChatWindow、DevicePanel、MessageList）
+  - WebSocket 客户端命令（ws_connect, ws_send, ws_disconnect）
+  - 消息持久化（append_file, read_file）
+  - 设备配对系统（generate_pairing_code, confirm_pairing）
+  - 本地 IP 获取（原生 UDP Socket，排除 VPN）
+  - GitHub Actions CI/CD（build/* / release/* tag 触发）
+
+### 遇到的问题
+
+| 问题 | 原因 | 解决方案 | 优化建议 |
+|------|------|----------|----------|
+| local-ip-address crate 返回 VPN IP | 198.18.x.x 是 TUN 虚拟接口 | 使用原生 UDP Socket 方案，添加 198.18.x.x 过滤 | 验证阶段用独立 test_ip.rs 测试 |
+| GitHub Actions build-android 失败 | 缺少 bun 安装 | 添加 oven-sh/setup-bun@v1 | CI 脚本需要完整验证 |
+| GitHub Actions build-windows 失败 | actions/setup-rust@v1 不存在 | 改用 dtolnay/rust-toolchain@stable | 使用官方推荐的 Action |
+| Android tauri android init 缺失 | Android 项目未初始化 | 添加 tauri android init 步骤 | Android 构建需要完整流程 |
+| TypeScript ViewType 类型错误 | switch 语句用了 'profile' 但类型只有 4 个值 | 移除 'profile' case | 保持类型定义与使用一致 |
+
+### 有价值发现
+
+1. **Tauri 命令设计模式**
+   ```
+   #[tauri::command]
+   async fn ws_connect(url: String) -> Result<String, String>
+   ```
+   - 返回 Result<T, String>，错误信息用中文
+   - 前端通过 invoke() 调用，Promise 包装
+
+2. **原生 UDP 获取本机 IP**
+   ```rust
+   let socket = UdpSocket::bind(("0.0.0.0", port))?;
+   socket.connect("8.8.8.8:53")?;
+   let local_addr = socket.local_addr()?;
+   // 排除 VPN (198.18.x.x) 和回环 (127.x.x.x)
+   ```
+
+3. **CI/CD Tag 触发规范**
+   - `build/*` = 只构建，产出 Artifact
+   - `release/*` = 构建 + GitHub Release
+   - 使用 6 位 commit hash 区分版本
+
+4. **文档更新计划**
+   - API.md: 完整命令参考
+   - README.md: 功能特性 + CI/CD 说明
+   - BUILD.md: 本地构建 + GitHub Actions 流程
+
+### 流程优化点
+
+- [x] 文档更新与代码实现同步进行
+- [x] 使用独立 Rust 测试程序验证 IP 获取逻辑
+- [x] PR 保持 Draft 状态便于查看进度
+
+### 待归档知识点
+
+- [ ] GitHub Actions 工作流设计
+- [ ] Tauri Android CI 构建流程
+- [ ] 本地优先架构设计模式
+
+---
+
 *格式模板：时间、摘要、问题表、优化点、发现*

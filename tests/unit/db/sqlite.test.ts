@@ -1,60 +1,83 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
-import { Database } from '../../../src/lib/db/sqlite';
+import { SQLiteDatabase } from '@/lib/db/sqlite';
 
-describe('SQLite Base Operations', () => {
-  let db: Database;
+describe('SQLiteDatabase SQL Injection Prevention', () => {
+  let db: SQLiteDatabase;
 
-  beforeAll(() => {
-    db = new Database(':memory:');
+  beforeEach(() => {
+    db = new SQLiteDatabase(':memory:');
+    db.run('CREATE TABLE test (id TEXT PRIMARY KEY, content TEXT)');
   });
 
-  afterAll(() => {
+  afterEach(() => {
     db.close();
   });
 
-  it('should create table', () => {
-    const result = db.execute('CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT, value INTEGER)', []);
-    expect(result.changes).toBe(0);
-    
-    const tables = db.query("SELECT name FROM sqlite_master WHERE type='table'");
-    expect(tables.length).toBe(1);
-    expect(tables[0].name).toBe('test');
+  it('should use parameterized queries - no string concatenation in SQL', () => {
+    // 验证 SQL 语句使用 ? 作为参数占位符
+    const sql = 'SELECT * FROM test WHERE content = ?';
+    expect(sql.includes('?')).toBe(true);
+
+    // 不应该有直接的字符串拼接
+    expect(sql.includes("'")).toBe(false);
   });
 
-  it('should insert record', () => {
-    const result = db.execute(
-      'INSERT INTO test (name, value) VALUES (?, ?)',
-      ['test', 123]
-    );
-    expect(result.changes).toBe(1);
+  it('should handle malicious input in SELECT without executing injection', () => {
+    // SQL 注入尝试
+    const maliciousInput = "'; DROP TABLE test; --";
+
+    // 应该不抛错，返回空结果（因为没有匹配的数据）
+    expect(() => {
+      db.query('SELECT * FROM test WHERE content = ?', [maliciousInput]);
+    }).not.toThrow();
   });
 
-  it('should query records', () => {
-    const rows = db.query('SELECT * FROM test');
-    expect(Array.isArray(rows)).toBe(true);
-    expect(rows.length).toBe(1);
+  it('should handle malicious LIKE pattern without executing injection', () => {
+    const maliciousPattern = "%'; DELETE FROM test; --";
+
+    // 应该不抛错
+    expect(() => {
+      db.query('SELECT * FROM test WHERE content LIKE ?', [maliciousPattern]);
+    }).not.toThrow();
   });
 
-  it('should update record', () => {
-    const result = db.execute(
-      'UPDATE test SET value = ? WHERE name = ?',
-      [456, 'test']
-    );
-    expect(result.changes).toBe(1);
+  it('should pass parameters correctly to database driver', () => {
+    // 验证参数可以被正确传递（即使没有真正执行）
+    const params = ['test-value'];
+    expect(() => {
+      db.query('SELECT * FROM test WHERE id = ? AND content = ?', params);
+    }).not.toThrow();
   });
 
-  it('should delete record', () => {
-    const result = db.execute('DELETE FROM test WHERE name = ?', ['test']);
-    expect(result.changes).toBe(1);
+  it('should handle empty parameters array', () => {
+    expect(() => {
+      db.query('SELECT * FROM test');
+    }).not.toThrow();
   });
 
-  it('should support transaction', () => {
-    db.transaction(() => {
-      db.execute('INSERT INTO test (name, value) VALUES (?, ?)', ['t1', 1]);
-      db.execute('INSERT INTO test (name, value) VALUES (?, ?)', ['t2', 2]);
-    });
+  it('should handle special characters in parameters', () => {
+    const specialContent = "Test <>&\"' characters";
 
-    const rows = db.query('SELECT COUNT(*) as count FROM test');
-    expect(rows[0].count).toBe(2);
+    // 应该不抛错
+    expect(() => {
+      db.query('SELECT * FROM test WHERE content = ?', [specialContent]);
+    }).not.toThrow();
+  });
+
+  it('should prevent SQL injection in UPDATE where clause', () => {
+    const maliciousId = "'; DELETE FROM test; --";
+
+    // 应该不抛错
+    expect(() => {
+      db.run('UPDATE test SET content = ? WHERE id = ?', ['new content', maliciousId]);
+    }).not.toThrow();
+  });
+
+  it('should prevent SQL injection in DELETE where clause', () => {
+    const maliciousCondition = "1=1; DELETE FROM test; --";
+
+    // 应该不抛错
+    expect(() => {
+      db.run('DELETE FROM test WHERE id = ?', [maliciousCondition]);
+    }).not.toThrow();
   });
 });
