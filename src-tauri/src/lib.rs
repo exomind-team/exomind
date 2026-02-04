@@ -1,10 +1,12 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
 
 mod commands;
-mod sync;
+// mod sync; // 预留：WebSocket 服务器端实现，用于电脑端接收移动端连接
 
 use std::sync::Arc;
-use commands::{WsClientState, ws_connect, ws_disconnect, ws_send, ws_get_state};
+use commands::ws_commands::{
+    WsClientState, ws_connect, ws_disconnect, ws_send, ws_get_state,
+};
 use commands::file_commands::{
     write_file, read_file, read_file_binary, delete_file, file_exists, list_files,
     append_to_markdown, export_messages_to_markdown
