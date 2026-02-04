@@ -1,138 +1,46 @@
-/* App Layout Styles - 移动端优先设计 */
+/* App Layout Styles - 基础样式（布局由 MainLayout 处理） */
 
-/* ========== 基础布局 ========== */
+/* ========== 基础样式 ========== */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+html, body {
+  height: 100%;
+  overflow: hidden;
+}
+
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  background: #f8fafc;
+}
+
 .app-container {
   display: flex;
   flex-direction: column;
-  height: 100vh;
+  height: 100%;
   width: 100%;
   overflow: hidden;
+  background: #f8fafc;
 }
 
-.app-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0.75rem 1rem;
-  border-bottom: 1px solid #e2e8f0;
-  background-color: #ffffff;
-  flex-shrink: 0;
+/* 滚动条美化 */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
 }
 
-.app-header h1 {
-  margin: 0;
-  font-size: 1.25rem;
-  color: #1e293b;
+::-webkit-scrollbar-track {
+  background: transparent;
 }
 
-.connection-status .status {
-  padding: 0.25rem 0.75rem;
-  border-radius: 9999px;
-  font-size: 0.75rem;
-  font-weight: 500;
+::-webkit-scrollbar-thumb {
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 3px;
 }
 
-.connection-status .status.connected {
-  background-color: #dcfce7;
-  color: #22c55e;
-}
-
-.connection-status .status.disconnected {
-  background-color: #fee2e2;
-  color: #ef4444;
-}
-
-.app-main {
-  display: flex;
-  flex: 1;
-  overflow: hidden;
-}
-
-.sidebar {
-  width: 280px;
-  border-right: 1px solid #e2e8f0;
-  overflow-y: auto;
-  background-color: #f8fafc;
-  flex-shrink: 0;
-}
-
-.chat-area {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  background-color: #ffffff;
-  overflow: hidden;
-}
-
-/* ========== 移动端布局 (< 768px) ========== */
-@media (max-width: 767px) {
-  .app-header {
-    padding: 0.5rem 0.75rem;
-  }
-
-  .app-header h1 {
-    font-size: 1rem;
-  }
-
-  .app-main {
-    flex-direction: column;
-  }
-
-  .sidebar {
-    width: 100%;
-    height: auto;
-    max-height: 200px;
-    border-right: none;
-    border-bottom: 1px solid #e2e8f0;
-  }
-
-  .chat-area {
-    flex: 1;
-    min-height: 0;
-  }
-}
-
-/* ========== 平板布局 (768px - 1023px) ========== */
-@media (min-width: 768px) and (max-width: 1023px) {
-  .sidebar {
-    width: 240px;
-  }
-}
-
-/* ========== 桌面端布局 (>= 1024px) ========== */
-@media (min-width: 1024px) {
-  .app-header {
-    padding: 1rem 2rem;
-  }
-
-  .app-header h1 {
-    font-size: 1.5rem;
-  }
-
-  .sidebar {
-    width: 300px;
-  }
-}
-
-/* ========== 触摸目标优化 ========== */
-@media (hover: none) and (pointer: coarse) {
-  /* 移动端触摸优化 */
-  .device-item {
-    min-height: 48px;
-    padding: 0.875rem;
-  }
-
-  .send-button {
-    min-height: 48px;
-    min-width: 80px;
-  }
-
-  .message-input-wrapper textarea {
-    min-height: 48px;
-  }
-
-  .refresh-btn {
-    min-width: 44px;
-    min-height: 44px;
-  }
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(0, 0, 0, 0.25);
 }
