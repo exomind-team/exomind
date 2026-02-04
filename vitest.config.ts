@@ -10,9 +10,9 @@ export default defineConfig({
     },
   },
   test: {
-    environment: 'happy-dom',
+    environment: 'jsdom',
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
-    setupFiles: ['tests/jsdom-setup.ts'],
+    setupFiles: ['tests/setup.ts', 'tests/jsdom-setup.ts'],
     globals: true,
   },
 });

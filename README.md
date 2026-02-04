@@ -1,6 +1,29 @@
 # Exomind
 
-基于 Tauri v2 的跨平台桌面应用，使用 React + TypeScript 构建前端，Rust 构建原生后端。
+> 个人/集体的生命成长助手
+> ExoMind - 帮助用户主动地掌控自己的生命过程
+
+## 核心定位
+
+**ExoMind** 是一个**个人/集体的生命成长助手**，基于 Tauri v2 的跨平台桌面/移动应用，使用 React + TypeScript 构建前端，Rust 构建原生后端。
+
+## 核心特性
+
+### 生命系统
+| 特性 | 描述 |
+|------|------|
+| **消息历史** | 本地持久化存储，启动时自动加载 |
+| **多端同步** | WebSocket 设备直连，消息实时同步 |
+| **本地优先** | 乐观更新，离线可用，网络恢复自动同步 |
+| **设备配对** | 6 位数字配对码，安全设备发现 |
+
+### 技术特性
+| 特性 | 描述 |
+|------|------|
+| **跨平台** | Windows / macOS / Linux / Android |
+| **本地 IP 获取** | 原生 UDP Socket，排除 VPN 虚拟接口 |
+| **随机端口** | 1949-2026 端口段，碰撞检测 |
+| **暗色模式** | 完整 UI 暗色主题支持 |
 
 ## 项目标识
 
@@ -40,11 +63,18 @@ bun install
 
 ```powershell
 # 桌面端开发
-.\dev.ps1 desktop
+bun run tauri dev
 
-# 或 Android 开发（需要 Android Studio）
-.\dev.ps1 android
+# Android 开发（需要 Android Studio + JDK 17）
+bun run tauri android dev
 ```
+
+### 消息同步使用
+
+1. **桌面端**：启动后在设置页面查看本机 IP 和端口
+2. **移动端**：连接同一局域网，输入桌面端 IP 和端口
+3. **配对**：使用 6 位数字配对码完成设备认证
+4. **同步**：消息自动同步，历史记录本地存储
 
 ## 自动化构建脚本
 
@@ -76,39 +106,85 @@ bun install
 exomind/
 ├── src/                      # 前端源代码
 │   ├── App.tsx              # 主应用组件
-│   ├── main.tsx             # React 入口
-│   ├── App.css              # 样式文件
-│   └── assets/              # 静态资源
+│   ├── main.tsx              # React 入口
+│   ├── components/           # React 组件
+│   │   ├── Chat/            # 聊天界面
+│   │   │   ├── ChatWindow.tsx    # 微信风格对话界面
+│   │   │   ├── DevicePanel.tsx   # 设备列表面板
+│   │   │   └── MessageList.tsx   # 消息列表组件
+│   │   └── Settings/        # 设置页面
+│   ├── lib/
+│   │   └── stores/          # 状态管理
+│   │       └── chat-store.ts     # 聊天状态管理
+│   └── components/ui/       # shadcn/ui 基础组件
 ├── src-tauri/               # Tauri 后端代码
 │   ├── src/
-│   │   ├── lib.rs          # Rust 核心代码（包名：exomind_lib）
-│   │   └── main.rs         # 程序入口
-│   ├── capabilities/       # 权限配置
-│   ├── gen/android/       # Android 项目（包名：com.exomind.app）
-│   ├── Cargo.toml         # Rust 配置（crate：exomind）
-│   └── tauri.conf.json    # Tauri 配置（productName：exomind）
-├── build-*.ps1            # 自动化构建脚本
-├── dev.ps1               # 开发启动脚本
-└── README.md             # 本文件
+│   │   ├── lib.rs          # Rust 核心库
+│   │   ├── main.rs         # 程序入口
+│   │   └── commands/       # Tauri 命令
+│   │       ├── ws_commands.rs     # WebSocket 连接命令
+│   │       ├── file_commands.rs   # 文件操作命令
+│   │       ├── pairing_commands.rs # 设备配对命令
+│   │       └── network_commands.rs # 网络命令
+│   ├── capabilities/        # 权限配置
+│   ├── gen/android/        # Android 项目
+│   ├── Cargo.toml          # Rust 配置
+│   └── tauri.conf.json    # Tauri 配置
+├── docs/                   # 文档
+│   ├── API.md             # API 参考文档
+│   ├── commands/          # 命令详细文档
+│   ├── specs/             # 模块规格文档
+│   └── ARCHITECTURE_7LAYER.md # 7层架构设计
+├── tests/                 # 测试文件
+│   ├── components/        # 组件测试
+│   ├── sync/              # 同步协议测试
+│   └── e2e/              # 端到端测试
+└── README.md              # 本文件
 ```
 
 ## 前端-后端通信
+
+### 调用 Tauri 命令
 
 **前端调用 Rust：**
 ```typescript
 import { invoke } from "@tauri-apps/api/core";
 
-const response = await invoke("greet", { name: "World" });
-console.log(response); // "Hello, World! You've been greeted from Rust!"
+// WebSocket 连接
+const result = await invoke('ws_connect', {
+  url: 'ws://192.168.1.100:1949'
+});
+
+// 获取本机 IP
+const ip = await invoke('get_local_ip_with_current_port', {
+  port: 1949
+});
 ```
 
 **Rust 定义命令：**
 ```rust
 #[tauri::command]
 fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
+    format!("Hello, {}!", name)
 }
 ```
+
+### API 参考
+
+| 模块 | 命令 | 功能 |
+|------|------|------|
+| WebSocket | `ws_connect` | 连接 WebSocket 服务器 |
+| WebSocket | `ws_disconnect` | 断开连接 |
+| WebSocket | `ws_send` | 发送消息 |
+| WebSocket | `ws_get_state` | 获取连接状态 |
+| 文件 | `append_file` | 追加文件（永覆盖） |
+| 文件 | `read_file` | 读取文件 |
+| 配对 | `generate_pairing_code` | 生成 6 位配对码 |
+| 配对 | `confirm_pairing` | 确认配对 |
+| 网络 | `get_local_ip_with_current_port` | 获取本机 IP（指定端口） |
+| 网络 | `get_local_ip_with_random_port` | 获取本机 IP（随机端口） |
+
+完整 API 文档: [docs/API.md](docs/API.md)
 
 ## 配置详情
 
@@ -146,13 +222,67 @@ name = "exomind_lib"
 ## 构建输出
 
 ### 桌面端
-- **可执行文件**: `src-tauri\target\release\exomind.exe`
-- **MSI 安装包**: `src-tauri\target\release\bundle\msi\exomind_0.1.0_x64_en-US.msi`
-- **NSIS 安装包**: `src-tauri\target\release\bundle\nsis\exomind_0.1.0_x64-setup.exe`
+- **可执行文件**: `src-tauri/target/release/exomind.exe`
+- **MSI 安装包**: `src-tauri/target/release/bundle/msi/exomind_0.1.0_x64_en-US.msi`
+- **NSIS 安装包**: `src-tauri/target/release/bundle/nsis/exomind_0.1.0_x64-setup.exe`
 
 ### Android
-- **Debug APK**: `src-tauri\gen\android\app\build\outputs\apk\debug\app-debug.apk`
-- **Release APK**: `src-tauri\gen\android\app\build\outputs\apk\release\app-release-unsigned.apk`
+- **Debug APK**: `src-tauri/gen/android/app/build/outputs/apk/debug/app-debug.apk`
+- **Release APK**: `src-tauri/gen/android/app/build/outputs/apk/release/app-release-unsigned.apk`
+
+## CI/CD 自动化构建
+
+### GitHub Actions
+
+项目使用 GitHub Actions 实现自动化构建和发布。
+
+#### 构建触发方式
+
+| Tag 模式 | 触发条件 | 产出 |
+|----------|----------|------|
+| `build/v*` | 推送 build tag | 构建产物 (Artifact) |
+| `release/v*` | 推送 release tag | 构建产物 + GitHub Release |
+
+#### 使用方法
+
+```bash
+# 触发构建（仅构建，不发布）
+git tag build/v0.1.0-alpha-abc123
+git push origin build/v0.1.0-alpha-abc123
+
+# 触发发布（构建 + GitHub Release）
+git tag release/v0.1.0
+git push origin release/v0.1.0
+```
+
+#### 版本号格式
+
+```
+build/v{主}.{次}.{修订}-{commit_hash}
+release/v{主}.{次}.{修订}
+```
+
+示例：
+- `build/v0.1.0-alpha-eef7afc` - v0.1.0 开发构建
+- `release/v0.1.0` - v0.1.0 正式发布
+
+#### 构建产物
+
+| 平台 | 产物 | 下载位置 |
+|------|------|----------|
+| Windows | MSI 安装包 | Actions Artifacts |
+| Android | Debug APK | Actions Artifacts |
+
+### 本地构建
+
+```powershell
+# 桌面端构建
+bun run tauri build --bundles msi
+
+# Android 构建
+bun run tauri android init    # 首次需要初始化
+bun run tauri android build   # Debug 构建
+```
 
 ## 脚本配置
 
@@ -205,9 +335,12 @@ $Config = @{
 
 ## 参考文档
 
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - 完整架构设计文档
-- [ARCHITECTURE_7LAYER.md](docs/ARCHITECTURE_7LAYER.md) - 7层架构详解
-- [ExoMind-Notification-Permission-Guard.md](docs/ExoMind-Notification-Permission-Guard.md) - Android 通知权限守护模块
+| 文档 | 描述 |
+|------|------|
+| [API.md](docs/API.md) | Tauri 命令 API 参考 |
+| [ARCHITECTURE_7LAYER.md](docs/ARCHITECTURE_7LAYER.md) | 7层架构详解 |
+| [ARCHITECTURE.md](docs/ARCHITECTURE.md) | 完整架构设计 |
+| [CLAUDE.md](CLAUDE.md) | 项目开发规范 |
 
 ### 模块
 

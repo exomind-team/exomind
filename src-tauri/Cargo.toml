@@ -28,5 +28,9 @@ tungstenite = "0.21"
 futures-util = { version = "0.3", features = ["sink"] }
 async-trait = "0.1"
 parking_lot = "0.12"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 tokio-tungstenite = "0.21"
+url = "2"
+regex = "1"
+rand = "0.8"
+tauri-plugin-mcp-bridge= "0.8"

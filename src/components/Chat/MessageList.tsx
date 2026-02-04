@@ -1,4 +1,5 @@
 import { useRef } from 'react';
+import { escapeHtml } from '../../lib/utils/html-sanitize';
 
 export interface Message {
   id: string;
@@ -62,7 +63,11 @@ export function MessageList({
               color: isSent ? '#fff' : '#000',
             }}
           >
-            {message.content}
+            <div
+              data-testid={`message-content-${message.id}`}
+              className="break-words"
+              dangerouslySetInnerHTML={{ __html: escapeHtml(message.content) }}
+            />
           </div>
         );
       })}
