@@ -1,4 +1,3 @@
-import React from 'react';
 import { DiscoveredDevice } from '../../lib/sync/device-discovery';
 import './DevicePanel.css';
 

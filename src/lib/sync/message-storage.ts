@@ -4,7 +4,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
-import { EventLog, createWriter, createReader } from '../eventlog';
+import type { EventLog } from '../eventlog/format';
 
 // Message types
 export interface ChatMessage {
@@ -25,19 +25,17 @@ export interface SyncMessage {
 }
 
 // FileSystem interface for Tauri
-interface TauriFileSystem {
+interface FileSystem {
   writeFile: (path: string, data: string) => Promise<void>;
   readTextFile: (path: string) => Promise<string>;
 }
 
 // Message Storage class
 export class MessageStorage {
-  private writer: ReturnType<typeof createWriter> | null = null;
-  private reader: ReturnType<typeof createReader> | null = null;
   private deviceId: string = '';
   private messageHandlers: ((msg: ChatMessage) => void)[] = [];
 
-  constructor(private fs: TauriFileSystem, private storagePath: string = '.exomind') {
+  constructor(private fs: FileSystem, private storagePath: string = '.exomind') {
     this.initDeviceId();
   }
 
@@ -50,41 +48,22 @@ export class MessageStorage {
     }
   }
 
-  private ensureWriter(): void {
-    if (!this.writer) {
-      this.writer = createWriter({
-        path: `${this.storagePath}/messages.jsonl`,
-        fs: {
-          writeFile: async (path, data) => {
-            await this.fs.writeFile(path, data);
-          },
-        },
-      });
-    }
-  }
-
-  private ensureReader(): void {
-    if (!this.reader) {
-      this.reader = createReader({
-        path: `${this.storagePath}/messages.jsonl`,
-        fs: {
-          readFile: (_path, _encoding) => '', // Will be replaced with actual read
-        },
-      });
-    }
-  }
-
   async saveMessage(message: ChatMessage): Promise<void> {
-    this.ensureWriter();
-
     const event: EventLog = {
       id: `evt-${message.id}`,
-      type: 'message_saved',
-      timestamp: message.timestamp,
-      data: message,
+      type: 'message_send',
+      content: message.content,
+      device_id: message.senderId,
+      timestamp: new Date(message.timestamp).toISOString(),
+      metadata: {
+        messageId: message.id,
+        receiverId: message.receiverId,
+        status: message.status,
+      },
     };
 
-    await this.writer!.append(event);
+    const line = JSON.stringify(event) + '\n';
+    await this.fs.writeFile(`${this.storagePath}/messages.jsonl`, line);
   }
 
   async getMessages(limit: number = 50): Promise<ChatMessage[]> {
@@ -96,10 +75,18 @@ export class MessageStorage {
         .split('\n')
         .filter(line => line.trim())
         .map(line => JSON.parse(line) as EventLog)
-        .filter(evt => evt.type === 'message_saved')
+        .filter(evt => evt.type === 'message_send')
         .slice(-limit);
 
-      return events.map(evt => evt.data as ChatMessage);
+      return events.map(evt => ({
+        id: evt.metadata?.messageId as string || evt.id,
+        type: 'chat' as const,
+        content: evt.content,
+        timestamp: new Date(evt.timestamp).getTime(),
+        senderId: evt.device_id,
+        receiverId: (evt.metadata?.receiverId as string) || '',
+        status: (evt.metadata?.status as ChatMessage['status']) || 'sent',
+      }));
     } catch {
       return [];
     }
@@ -172,7 +159,7 @@ export class MessageStorage {
 // Singleton instance
 let storageInstance: MessageStorage | null = null;
 
-export function getMessageStorage(fs: TauriFileSystem): MessageStorage {
+export function getMessageStorage(fs: FileSystem): MessageStorage {
   if (!storageInstance) {
     storageInstance = new MessageStorage(fs);
   }

@@ -1,7 +1,7 @@
-import { useEffect, useCallback } from 'react';
+import { useCallback } from 'react';
 import { useChatStore } from '../stores/chat-store';
-import { messageStorage } from '../sync/message-storage';
 import { invoke } from '@tauri-apps/api/core';
+import type { DiscoveredDevice } from '../sync/device-discovery';
 
 /**
  * Message Flow Hook
@@ -13,22 +13,10 @@ export function useMessageFlow() {
     isConnected,
     setConnected,
     setConnecting,
-    addMessage,
-    updateMessageStatus,
   } = useChatStore();
 
-  // Handle incoming messages from WebSocket
-  const handleIncomingMessage = useCallback((rawMessage: string) => {
-    try {
-      const syncMsg = messageStorage.parseSyncMessage(JSON.parse(rawMessage));
-      messageStorage.handleIncomingMessage(syncMsg);
-    } catch (error) {
-      console.error('Failed to handle incoming message:', error);
-    }
-  }, []);
-
   // Connect to WebSocket when device is selected
-  const connect = useCallback(async (device: typeof selectedDevice) => {
+  const connect = useCallback(async (device: DiscoveredDevice | null) => {
     if (!device || isConnected) return;
 
     setConnecting(true);
@@ -54,19 +42,11 @@ export function useMessageFlow() {
     }
   }, [setConnected]);
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      disconnect();
-    };
-  }, [disconnect]);
-
   return {
     selectedDevice,
     isConnected,
     connect,
     disconnect,
-    handleIncomingMessage,
   };
 }
 

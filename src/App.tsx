@@ -1,6 +1,6 @@
-import { useEffect, useCallback } from 'react';
+import { useCallback, useEffect } from 'react';
 import { useChatStore } from './lib/stores/chat-store';
-import { useMessageFlow, useConnectionStatus } from './lib/hooks/useMessageFlow';
+import { useMessageFlow } from './lib/hooks/useMessageFlow';
 import { DevicePanel } from './components/Chat/DevicePanel';
 import { ChatWindow } from './components/Chat/ChatWindow';
 import './App.css';
@@ -15,11 +15,9 @@ function App() {
     pairedDevices,
     messages,
     sendMessage,
-    setConnected,
   } = useChatStore();
 
   const { connect, disconnect } = useMessageFlow();
-  const { status, statusText } = useConnectionStatus();
 
   // Handle device selection with auto-connect
   const handleSelectDevice = useCallback(
