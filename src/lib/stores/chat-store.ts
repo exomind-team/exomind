@@ -3,17 +3,8 @@ import { DiscoveredDevice } from '../sync/device-discovery';
 import { ChatMessage, getMessageStorage } from '../sync/message-storage';
 import { invoke } from '@tauri-apps/api/core';
 
-export interface ChatMessage {
-  id: string;
-  type: 'chat';
-  content: string;
-  timestamp: number;
-  senderId: string;
-  receiverId: string;
-  status: 'pending' | 'sending' | 'sent' | 'delivered' | 'failed';
-  direction?: 'outgoing' | 'incoming';
-  deviceId?: string;
-}
+// Re-export for external usage
+export type { ChatMessage } from '../sync/message-storage';
 
 // Tauri file system implementation
 const tauriFs = {
