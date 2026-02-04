@@ -355,10 +355,50 @@
   background: #16a34a;
 }
 
+.btn-secondary {
+  background: #f3f4f6;
+  color: #374151;
+}
+
+.btn-secondary:hover:not(:disabled) {
+  background: #e5e7eb;
+}
+
 .btn:disabled {
   background: #d1d5db;
   color: #9ca3af;
   cursor: not-allowed;
+}
+
+/* 设备操作按钮 */
+.device-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.remove-btn {
+  width: 32px;
+  height: 32px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: transparent;
+  color: #9ca3af;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.remove-btn:hover {
+  background: #fef2f2;
+  color: #dc2626;
+}
+
+.is-mobile .remove-btn {
+  width: 36px;
+  height: 36px;
 }
 
 /* 危险操作区 */

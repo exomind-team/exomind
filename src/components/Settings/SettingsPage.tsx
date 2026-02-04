@@ -10,10 +10,16 @@ import {
   Monitor,
   Server,
   Download,
-  FileText
+  FileText,
+  QrCode,
+  Users,
+  Plus,
+  Trash2
 } from 'lucide-react';
 import { useChatStore } from '../../lib/stores/chat-store';
 import { exportMessagesToMarkdown } from '../../hooks/useMarkdownExport';
+import { usePairing, PairedDevice as PairedDeviceType } from '../../hooks/usePairing';
+import { PairingModal } from '../Pairing';
 import './SettingsPage.css';
 
 interface SettingsPageProps {
@@ -28,11 +34,24 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
   const [remoteIP, setRemoteIP] = useState('');
   const [ipCopied, setIpCopied] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
-  const [pairedDevices, setPairedDevices] = useState<Array<{id: string; name: string; ip: string; type: string}>>([]);
   const [error, setError] = useState<string | null>(null);
   const [exportSuccess, setExportSuccess] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
+  const [pairedDevices, setPairedDevices] = useState<PairedDeviceType[]>([]);
+
+  // 配对相关状态
+  const [pairingModal, setPairingModal] = useState<{mode: 'generate' | 'input', code?: string} | null>(null);
+  const [generatedCode, setGeneratedCode] = useState<string>('');
+  const [pairingError, setPairingError] = useState<string | null>(null);
+  const [isPairing, setIsPairing] = useState(false);
+
+  const {
+    generatePairingCode,
+    confirmPairing,
+    getPairedDevices: fetchPairedDevices,
+    removePairedDevice,
+  } = usePairing();
 
   // 检测是否为移动端
   const checkIsMobile = useCallback(() => {
@@ -45,11 +64,11 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
     return () => window.removeEventListener('resize', checkIsMobile);
   }, [checkIsMobile]);
 
-  // 模拟获取本机 IP
+  // 获取本机 IP
   useEffect(() => {
     const fetchIP = async () => {
       try {
-        // 实际实现中，这里应该调用 Rust 后端命令
+        // 实际实现中调用 Rust 后端命令
         // const ip = await invoke<string>('get_local_ip');
         // setLocalIP(`${ip}:1949`);
 
@@ -64,14 +83,19 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
     fetchIP();
   }, []);
 
-  // 模拟获取已配对设备
+  // 获取已配对设备
+  const loadPairedDevices = useCallback(async () => {
+    try {
+      const devices = await fetchPairedDevices();
+      setPairedDevices(devices);
+    } catch (err) {
+      console.error('加载已配对设备失败:', err);
+    }
+  }, [fetchPairedDevices]);
+
   useEffect(() => {
-    // 实际实现中，这里应该从 store 读取已配对设备
-    setPairedDevices([
-      { id: '1', name: '我的手机', ip: '192.168.1.101:1949', type: 'phone' },
-      { id: '2', name: '办公室电脑', ip: '192.168.1.102:1949', type: 'desktop' },
-    ]);
-  }, []);
+    loadPairedDevices();
+  }, [loadPairedDevices]);
 
   const copyIP = async () => {
     if (localIP !== '获取中...' && localIP !== '无法获取') {
@@ -92,7 +116,7 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
     setError(null);
 
     try {
-      // 实际实现中，这里应该调用 Rust 后端命令
+      // 实际实现中调用 Rust 后端命令
       // await invoke('connect_to_peer', { ip: remoteIP.trim() });
 
       // 模拟连接
@@ -111,25 +135,60 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
     onDisconnect?.();
   };
 
-  const handleRefresh = () => {
-    // 模拟刷新
-    setPairedDevices([]);
-    setTimeout(() => {
-      setPairedDevices([
-        { id: '1', name: '我的手机', ip: '192.168.1.101:1949', type: 'phone' },
-        { id: '2', name: '办公室电脑', ip: '192.168.1.102:1949', type: 'desktop' },
-      ]);
-    }, 500);
+  // 生成配对码
+  const handleGeneratePairingCode = async () => {
+    setIsPairing(true);
+    setPairingError(null);
+
+    try {
+      // 模拟生成配对码（实际应调用 Rust 命令）
+      const code = await generatePairingCode(
+        '本机设备',
+        localIP || '192.168.1.100:1949',
+        'mock-public-key'
+      );
+
+      if (code) {
+        setGeneratedCode(code);
+        setPairingModal({ mode: 'generate', code });
+      } else {
+        setPairingError('生成配对码失败');
+      }
+    } catch (err) {
+      setPairingError(err instanceof Error ? err.message : '生成配对码失败');
+    } finally {
+      setIsPairing(false);
+    }
   };
 
-  const getDeviceIcon = (type: string) => {
-    switch (type) {
-      case 'phone':
-        return <Smartphone size={20} />;
-      case 'desktop':
-        return <Monitor size={20} />;
-      default:
-        return <Server size={20} />;
+  // 确认配对
+  const handleConfirmPairing = async (code: string) => {
+    setIsPairing(true);
+    setPairingError(null);
+
+    try {
+      const success = await confirmPairing(code, true);
+
+      if (success) {
+        setPairingModal(null);
+        await loadPairedDevices();
+      } else {
+        setPairingError('配对失败，请检查配对码是否正确');
+      }
+    } catch (err) {
+      setPairingError(err instanceof Error ? err.message : '配对失败');
+    } finally {
+      setIsPairing(false);
+    }
+  };
+
+  // 移除已配对设备
+  const handleRemoveDevice = async (deviceId: string) => {
+    try {
+      await removePairedDevice(deviceId);
+      await loadPairedDevices();
+    } catch (err) {
+      setError('移除设备失败');
     }
   };
 
@@ -145,15 +204,11 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
     setExportSuccess(false);
 
     try {
-      // 生成带时间戳的文件名
       const timestamp = new Date().toISOString().slice(0, 10);
       const filename = `exomind-messages-${timestamp}.md`;
       const title = `ExoMind 消息导出 (${new Date().toLocaleDateString('zh-CN')})`;
-
-      // 将消息转换为 JSON 字符串
       const messagesJson = JSON.stringify(messages);
 
-      // 调用 Rust 命令导出
       await exportMessagesToMarkdown(filename, title, messagesJson);
 
       setExportSuccess(true);
@@ -173,8 +228,29 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
     }
   };
 
+  const getDeviceIcon = (type: string) => {
+    switch (type) {
+      case 'phone':
+        return <Smartphone size={20} />;
+      case 'desktop':
+        return <Monitor size={20} />;
+      default:
+        return <Server size={20} />;
+    }
+  };
+
   return (
     <div className={`settings-page ${isMobile ? 'mobile' : 'desktop'}`}>
+      {/* 配对弹窗 */}
+      {pairingModal && (
+        <PairingModal
+          mode={pairingModal.mode}
+          pairingCode={generatedCode}
+          onClose={() => setPairingModal(null)}
+          onPair={handleConfirmPairing}
+        />
+      )}
+
       <div className={`settings-container ${isMobile ? 'is-mobile' : ''}`}>
         <div className={`settings-content ${isMobile ? 'is-mobile' : ''}`}>
           {/* 标题 */}
@@ -231,15 +307,15 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
             </div>
           </section>
 
-          {/* 已连接设备 */}
+          {/* 已配对设备 */}
           <section className={`settings-section ${isMobile ? 'is-mobile' : ''}`}>
             <div className={`ip-row ${isMobile ? 'is-mobile' : ''}`}>
               <h2 className={`section-title ${isMobile ? 'is-mobile' : ''}`}>
-                <Monitor size={20} className="section-icon" />
+                <Users size={20} className="section-icon" />
                 已配对设备 ({pairedDevices.length})
               </h2>
               <button
-                onClick={handleRefresh}
+                onClick={loadPairedDevices}
                 className={`btn-refresh ${isMobile ? 'is-mobile' : ''}`}
               >
                 <RefreshCw size={16} />
@@ -260,31 +336,84 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
                   >
                     <div className="device-info">
                       <span className="device-icon">
-                        {getDeviceIcon(device.type)}
+                        {getDeviceIcon(device.name.toLowerCase().includes('手机') ? 'phone' : 'desktop')}
                       </span>
                       <div>
                         <p className="device-name">{device.name}</p>
                         <p className="device-ip">{device.ip}</p>
                       </div>
                     </div>
-                    <span className="device-online">
-                      <span className="online-dot"></span>
-                      在线
-                    </span>
+                    <div className="device-actions">
+                      <span className="device-online">
+                        <span className="online-dot"></span>
+                        在线
+                      </span>
+                      <button
+                        onClick={() => handleRemoveDevice(device.id)}
+                        className="remove-btn"
+                        aria-label={`移除 ${device.name}`}
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   </li>
                 ))}
               </ul>
             )}
           </section>
 
-          {/* 添加连接 */}
+          {/* 设备配对 */}
+          <section className={`settings-section ${isMobile ? 'is-mobile' : ''}`}>
+            <h2 className={`section-title ${isMobile ? 'is-mobile' : ''}`}>
+              <QrCode size={20} className="section-icon" />
+              设备配对
+            </h2>
+            <p className="section-description">
+              通过配对码将其他设备添加到您的网络
+            </p>
+
+            {pairingError && (
+              <div className={`alert alert-error ${isMobile ? 'is-mobile' : ''}`}>
+                {pairingError}
+              </div>
+            )}
+
+            <div className={`input-group ${isMobile ? 'is-mobile' : ''}`}>
+              <button
+                onClick={handleGeneratePairingCode}
+                disabled={isPairing}
+                className={`btn btn-primary ${isMobile ? 'is-mobile' : ''}`}
+              >
+                {isPairing ? (
+                  <>
+                    <RefreshCw size={16} className="animate-spin" />
+                    生成中...
+                  </>
+                ) : (
+                  <>
+                    <QrCode size={16} />
+                    生成配对码
+                  </>
+                )}
+              </button>
+              <button
+                onClick={() => setPairingModal({ mode: 'input' })}
+                className={`btn btn-secondary ${isMobile ? 'is-mobile' : ''}`}
+              >
+                <Plus size={16} />
+                输入配对码
+              </button>
+            </div>
+          </section>
+
+          {/* 添加连接（IP 直连，保留兼容） */}
           <section className={`settings-section ${isMobile ? 'is-mobile' : ''}`}>
             <h2 className={`section-title ${isMobile ? 'is-mobile' : ''}`}>
               <Network size={20} className="section-icon" />
-              添加连接
+              IP 直连
             </h2>
             <p className="section-description">
-              输入另一台设备的地址进行连接（格式: IP地址:端口）
+              直接输入 IP 地址进行连接（不经过配对流程）
             </p>
 
             {error && (
