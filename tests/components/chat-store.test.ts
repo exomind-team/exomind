@@ -21,16 +21,19 @@ describe('useChatStore Logic', () => {
   });
 
   it('should validate message structure', () => {
-    const message = {
+    const message: {id: string; content: string; timestamp: number; senderId: string; receiverId: string; type: 'chat'; status: 'sending'} = {
       id: '1',
       content: 'Hello',
       timestamp: Date.now(),
-      sender: 'device-a',
-      status: 'sending' as const,
+      senderId: 'device-a',
+      receiverId: 'device-b',
+      type: 'chat',
+      status: 'sending',
     };
     expect(message.id).toBe('1');
     expect(message.content).toBe('Hello');
     expect(message.status).toBe('sending');
+    expect(message.type).toBe('chat');
   });
 
   it('should validate device structure', () => {
