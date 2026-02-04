@@ -2,13 +2,9 @@ name: Build & Release
 
 on:
   push:
-    branches: [dev]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Release version (e.g., 0.1.0)'
-        required: true
-        default: '0.1.0'
+    tags:
+      - 'build/**'      # 构建触发：只构建，不发布
+      - 'release/**'     # 发布触发：构建 + GitHub Release
 
 env:
   RUST_TOOLCHAIN: stable
@@ -18,29 +14,33 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
+
       - name: Setup Rust
         uses: actions/setup-rust@v1
         with:
           toolchain: stable
-      
+
+      - name: Get short commit hash
+        id: hash
+        run: echo "HASH=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+
       - name: Install dependencies
         run: bun install
-      
+
       - name: Build Windows
         run: bun tauri build --bundles msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: windows-msi
+          name: windows-msi-${{ steps.hash.outputs.HASH }}
           path: src-tauri/target/release/bundle/msi/
 
   build-android:
@@ -48,54 +48,61 @@ jobs:
     container: nix-community/nix:latest
     steps:
       - uses: actions/checkout@v4
-      
+
+      - name: Get short commit hash
+        id: hash
+        run: echo "HASH=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+
       - name: Build Android
         run: |
           nix-shell --pure shell.nix --run "bun tauri android build"
-      
+
       - name: Upload Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk
-          path: src-tauri/gen/android/app/build/outputs/apk/
+          name: android-apk-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/gen/android/app/build/outputs/apk/debug/
 
   test-e2e:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-      
+
       - name: Install dependencies
         run: bun install
-      
+
       - name: Run E2E Tests
         run: bun test tests/e2e/
 
   create-release:
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
-    if: startsWith(github.ref, 'refs/tags/') || github.event.inputs.version != ''
+    # 只对 release/* tag 执行发布步骤
+    if: startsWith(github.ref, 'refs/tags/release/')
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
         with:
           path: release-files
         merge-multiple: true
-      
+
       - name: List Files
         run: ls -la release-files/
-      
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: release-files/**
-          tag_name: v${{ github.event.inputs.version || '0.1.0' }}
-          name: Release v${{ github.event.inputs.version || '0.1.0' }}
+          # 从 tag 名称提取版本号 (去掉 release/ 前缀)
+          tag_name: ${{ github.ref_name }}
+          name: Release ${{ github.ref_name }}
           draft: false
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -549,6 +549,76 @@ git push origin feature/signal-pool
 
 ---
 
+### CI/CD Tag 规范 ⭐
+
+**核心原则：打特定标识的 tag 才触发自动构建**
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                    Tag 触发规范                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                     │
+│  构建专用：  git tag build/v0.1.0    ──→ 只构建，产出 Artifact     │
+│             git push origin build/v0.1.0                            │
+│                                                                     │
+│  发布专用：  git tag release/v0.1.0   ──→ 构建 + GitHub Release     │
+│             git push origin release/v0.1.0                          │
+│                                                                     │
+│  版本号格式：遵循 semver (主.次.修订)                                │
+│  示例：                                                             │
+│    - build/v0.1.0     → v0.1.0 的开发构建                           │
+│    - build/v0.1.1+abc1234 → 包含 6位 commit hash                    │
+│    - release/v0.1.0   → 正式发布 v0.1.0                             │
+│                                                                     │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+**GitHub Actions 触发条件**：
+
+| Tag 模式 | 触发 | 产出 | 说明 |
+|----------|------|------|------|
+| `build/**` | 构建 jobs | Artifact | 快速验证构建是否成功 |
+| `release/**` | 构建 + Release jobs | GitHub Release | 完整发布流程 |
+
+**使用流程**：
+
+```bash
+# 场景 1：验证构建
+# 1. 确保代码可以正常构建
+git tag build/v0.1.0
+git push origin build/v0.1.0
+# → GitHub Actions 自动构建，产出 Artifact
+
+# 场景 2：正式发布
+# 1. 测试通过后打发布 tag
+git tag release/v0.1.0
+git push origin release/v0.1.0
+# → GitHub Actions 构建 + 创建 GitHub Release
+```
+
+**删除错误 tag**：
+
+```bash
+# 删除本地 tag
+git tag -d build/v0.1.0
+
+# 删除远程 tag
+git push origin :refs/tags/build/v0.1.0
+# 或
+git push origin --delete build/v0.1.0
+```
+
+**为什么？**
+
+1. **可控性**：只有明确标记的 tag 才触发构建，避免意外触发
+2. **可追溯**：每次构建对应唯一 tag，可以回溯到具体代码
+3. **分离关注**：`build/*` 快速验证，`release/*` 正式发布
+4. **符合习惯**：很多开源项目（如 Docker、Go 项目）使用类似模式
+
+---
+
+---
+
 ### Git 提交类型
 
 > **注意**: 类型使用小写，描述首字母小写
