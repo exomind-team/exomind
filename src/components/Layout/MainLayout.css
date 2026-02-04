@@ -24,26 +24,84 @@
   overflow: hidden;
 }
 
+/* 收起状态：72px */
 .sidebar.collapsed {
   width: 72px;
   min-width: 72px;
 }
 
-.sidebar.collapsed .nav-label,
-.sidebar.collapsed .brand-text,
-.sidebar.collapsed .sidebar-footer {
-  opacity: 0;
-  visibility: hidden;
+/* 收起时：品牌图标居中，隐藏文字，显示 toggle */
+.sidebar.collapsed .sidebar-header {
+  padding: 16px 8px;
+  flex-direction: column;
+  gap: 8px;
 }
 
-.sidebar.collapsed .sidebar-header {
-  padding: 16px 12px;
+.sidebar.collapsed .brand-icon {
+  width: 40px;
+  height: 40px;
+}
+
+.sidebar.collapsed .brand-text {
+  display: none;
+}
+
+/* toggle 按钮始终显示 */
+.sidebar-toggle {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: none;
+  background: rgba(255, 255, 255, 0.08);
+  color: #9ca3af;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
   justify-content: center;
+  transition: all 0.2s ease;
+  flex-shrink: 0;
+}
+
+.sidebar-toggle:hover {
+  background: rgba(255, 255, 255, 0.15);
+  color: #ffffff;
+}
+
+/* 收起时 toggle 移到顶部居中 */
+.sidebar.collapsed .sidebar-toggle {
+  position: absolute;
+  top: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  margin-left: 0;
+}
+
+/* 收起时设置按钮固定在底部 */
+.sidebar.collapsed .sidebar-footer {
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  padding: 12px 8px;
+  background: linear-gradient(0deg, #1a1a2e 20%, transparent 100%);
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+.sidebar.collapsed .nav-button.settings {
+  width: 44px;
+  height: 44px;
+  margin: 0 auto;
+}
+
+/* 收起时导航文字隐藏 */
+.sidebar.collapsed .nav-label {
+  display: none;
 }
 
 .sidebar.collapsed .nav-button {
   width: 44px;
   height: 44px;
+  margin: 0 auto;
 }
 
 /* 侧边栏头部 */
@@ -53,6 +111,7 @@
   gap: 12px;
   padding: 16px 20px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  flex-shrink: 0;
 }
 
 .brand-icon {
@@ -75,26 +134,7 @@
   color: #ffffff;
   letter-spacing: -0.5px;
   transition: opacity 0.2s ease;
-}
-
-.sidebar-toggle {
-  margin-left: auto;
-  width: 28px;
-  height: 28px;
-  border-radius: 6px;
-  border: none;
-  background: rgba(255, 255, 255, 0.08);
-  color: #9ca3af;
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
-
-.sidebar-toggle:hover {
-  background: rgba(255, 255, 255, 0.15);
-  color: #ffffff;
+  flex: 1;
 }
 
 /* 导航区域 */
@@ -223,10 +263,19 @@
   height: 100%;
   border-radius: 0;
   gap: 2px;
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
 }
 
 .mobile-nav .nav-label {
   font-size: 11px;
+}
+
+.mobile-nav .nav-icon {
+  width: 24px;
+  height: 24px;
 }
 
 /* ========== 响应式断点 ========== */
@@ -255,6 +304,11 @@
 
   .main-layout {
     flex-direction: column;
+  }
+
+  /* 移动端：主内容区避开状态栏 */
+  .main-content {
+    padding-top: env(safe-area-inset-top, 0px);
   }
 }
 
@@ -292,6 +346,11 @@
 
   .sidebar-toggle {
     background: rgba(255, 255, 255, 0.08);
+  }
+
+  .sidebar.collapsed .sidebar-footer {
+    background: linear-gradient(0deg, #0f172a 20%, transparent 100%);
+    border-color: rgba(255, 255, 255, 0.08);
   }
 }
 
