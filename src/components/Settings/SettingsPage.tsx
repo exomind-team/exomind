@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import {
   RefreshCw,
   Copy,
@@ -31,6 +32,9 @@ interface SettingsPageProps {
 export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: SettingsPageProps) {
   const { messages } = useChatStore();
   const [localIP, setLocalIP] = useState<string>('获取中...');
+  const [currentPort, setCurrentPort] = useState<number>(0);
+  const [isRefreshingIP, setIsRefreshingIP] = useState(false);
+  const [isRefreshingPort, setIsRefreshingPort] = useState(false);
   const [remoteIP, setRemoteIP] = useState('');
   const [ipCopied, setIpCopied] = useState(false);
   const [isConnecting, setIsConnecting] = useState(false);
@@ -65,23 +69,49 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
   }, [checkIsMobile]);
 
   // 获取本机 IP
-  useEffect(() => {
-    const fetchIP = async () => {
-      try {
-        // 实际实现中调用 Rust 后端命令
-        // const ip = await invoke<string>('get_local_ip');
-        // setLocalIP(`${ip}:1949`);
-
-        // 模拟获取 IP
-        setTimeout(() => {
-          setLocalIP('192.168.1.100:1949');
-        }, 1000);
-      } catch {
-        setLocalIP('无法获取');
+  const fetchIP = useCallback(async (refreshPort: boolean = false, port?: number) => {
+    try {
+      let ip: string;
+      if (refreshPort) {
+        // 刷新端口 - 获取新随机端口
+        ip = await invoke<string>('get_local_ip_with_random_port');
+      } else if (port && port > 0) {
+        // 保留端口 - 使用当前端口
+        ip = await invoke<string>('get_local_ip_with_current_port', { port });
+      } else {
+        // 首次获取 - 随机端口
+        ip = await invoke<string>('get_local_ip_with_random_port');
       }
-    };
-    fetchIP();
+      setLocalIP(ip);
+      // 提取端口号
+      const portMatch = ip.match(/:(\d+)$/);
+      if (portMatch) {
+        setCurrentPort(parseInt(portMatch[1], 10));
+      }
+    } catch (e) {
+      console.error('获取 IP 失败:', e);
+      setLocalIP('无法获取');
+    }
   }, []);
+
+  // 刷新本机地址（保留端口）
+  const refreshIP = async () => {
+    setIsRefreshingIP(true);
+    await fetchIP(false, currentPort || undefined);
+    setTimeout(() => setIsRefreshingIP(false), 500);
+  };
+
+  // 刷新端口（获取新端口）
+  const refreshPort = async () => {
+    setIsRefreshingPort(true);
+    await fetchIP(true);
+    setTimeout(() => setIsRefreshingPort(false), 500);
+  };
+
+  // 初始化获取 IP（获取随机端口）
+  useEffect(() => {
+    fetchIP(true);
+  }, [fetchIP]);
 
   // 获取已配对设备
   const loadPairedDevices = useCallback(async () => {
@@ -280,6 +310,26 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
                 <span className="ip-label">本机地址</span>
                 <div className="ip-value">
                   <code className="ip-code">{localIP}</code>
+                  <button
+                    onClick={refreshIP}
+                    className={`btn btn-refresh ${isMobile ? 'is-mobile' : ''}`}
+                    title="刷新地址"
+                    disabled={isRefreshingIP}
+                    aria-label="刷新本机地址"
+                    style={{ animation: isRefreshingIP ? 'spin 1s linear infinite' : 'none' }}
+                  >
+                    <RefreshCw size={16} />
+                  </button>
+                  <button
+                    onClick={refreshPort}
+                    className={`btn btn-refresh ${isMobile ? 'is-mobile' : ''}`}
+                    title="刷新端口"
+                    disabled={isRefreshingPort || localIP === '无法获取'}
+                    aria-label="刷新端口"
+                    style={{ animation: isRefreshingPort ? 'spin 1s linear infinite' : 'none' }}
+                  >
+                    <Network size={16} />
+                  </button>
                   <button
                     onClick={copyIP}
                     className={`btn btn-refresh ${isMobile ? 'is-mobile' : ''}`}
