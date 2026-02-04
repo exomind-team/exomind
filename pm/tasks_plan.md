@@ -1,28 +1,75 @@
 # 任务计划
 
-> 文档版本：v1.3
+> 文档版本：v1.4
 > 创建时间：2026-01-29
-> 最后更新：2026-02-03
+> 最后更新：2026-02-04
 
 ---
 
-## 当前任务
+## Agent 工作日志
 
-### 人类编写的
+### 2026-02-04 - Phase 1: P2P 设置页面基础框架
 
-> 【最高信念】这部分Agent只能读，不可修改。只能由人修改并确认完全情况 @HailayLin @wzy
+#### Round 1: 基础配置（已完成）
+- [x] 初始化 shadcn/ui
+- [x] 配置 Tailwind CSS
+- [x] 创建 utils.ts 工具函数
+- [x] 测试: components/ui/*.test.tsx
+- [x] 代码: components.json, tailwind.config.js, src/index.css, src/lib/utils.ts
+- **测试结果**: 17 pass / 0 fail
 
-- [ ] 整合wzy的**[Exo Agents 多代理系统](D:\project\wzy-agents-260203\PROJECT_ANALYSIS_REPORT.md)**，优先实现一个agent运行好，能用stream-json流式claude code的输入输出并解析
-- [ ] 整合exomind-model `D:\project\exomind-model`  的功能，优先实现云端语音识别和TTS API的使用，不考虑本地模型运行的难题。  文档在本项目的 `docs\03_exomind-model_PRD.md`
-- [ ] 整合wzy的exomind-connector 的功能  文档在 D:\project\ExoBuffer-Connector\REQUIREMENTS_REPORT.md
+#### Round 2: shadcn 组件安装（进行中）
+- [ ] 安装 Button, Card, Input, Switch, Label, Tabs, Badge, Dialog, Toast
+- [ ] 测试: components/ui/*.test.tsx
+- [ ] 代码: src/components/ui/*.tsx
 
-### Agent编写的
+#### Round 2: shadcn 组件安装
+- [ ] 安装 Button, Card, Input, Switch, Label, Tabs, Badge, Dialog, Toast
+- **测试**: components/ui/*.test.tsx
+- **代码**: src/components/ui/*.tsx
 
-> 【次高信念】这部分Agent可以读，可以修改。修改前需要给人类审阅
->
-> - [ ] （等待Agent编写）
+#### Round 3: 路由系统
+- [ ] 配置 @tanstack/react-router
+- [ ] 创建路由结构
+- **测试**: routes/*.test.tsx
+- **代码**: src/routes/*.tsx
+
+#### Round 4: 侧边栏布局
+- [ ] 创建 Sidebar 组件
+- [ ] 创建 Header 组件
+- **测试**: Layout/*.test.tsx
+- **代码**: src/components/Layout/*.tsx
+
+#### Round 5: P2P 设置页面
+- [ ] 创建 P2PSettings 主页面
+- [ ] 创建设备列表组件
+- **测试**: Settings/*.test.tsx
+- **代码**: src/components/Settings/*.tsx
+
+#### Round 6-10: IPC 集成与测试
+- [ ] Rust 后端 P2P 模块
+- [ ] 前端 IPC 封装
+- [ ] 单元测试与集成测试
 
 ---
 
-*最后更新: 2026-02-03*
-*版本: 1.3
+## 人类编写的
+
+> 【最高信念】这部分 Agent 只能读，不可修改。只能由人修改并确认完全情况
+
+- [ ] 整合 wzy 的 **Exo Agents 多代理系统**
+- [ ] 整合 exomind-model 的功能
+- [ ] 整合 exomind-connector 的功能
+
+---
+
+## Agent 编写的
+
+> 【次高信念】这部分 Agent 可以读，可以修改。修改前需要给人类审阅
+
+- [ ] Phase 1: P2P 设置页面基础框架（进行中）
+
+---
+
+*最后更新: 2026-02-04*
+*版本: 1.4*

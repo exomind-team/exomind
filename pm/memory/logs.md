@@ -116,4 +116,57 @@
 
 ---
 
-*格式模板：时间、摘要、问题表、优化点、发现*
+## [2026-02-04] Phase 1 Round 1 - P2P 设置页面基础配置
+
+### 执行摘要
+- **任务**：初始化 shadcn/ui + Tailwind CSS + utils.ts
+- **结果**：完成配置，17 测试通过
+- **主要变更**：
+  - 添加 clsx, tailwind-merge, autoprefixer 依赖
+  - 创建 src/lib/utils.ts (cn 函数)
+  - 创建 tailwind.config.js (Tailwind 配置)
+  - 创建 src/index.css (CSS 变量)
+  - 创建 components.json (shadcn 配置)
+  - 创建 postcss.config.js (PostCSS 配置)
+  - 更新 tsconfig.json paths 别名配置
+
+### 遇到的问题
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 测试报错 Cannot find module '@/lib/utils' | tsconfig.json 未配置 paths 别名 | 添加 "paths": {"@/*": ["src/*"]} 配置 |
+| tailwind.config.js 缺少 components 路径 | content 数组缺少 components 路径 | 添加 "./components/**/*.{js,ts,jsx,tsx}" |
+| shadcn components.json tailwind 配置格式 | 期望布尔值，实际是对象 | 更新测试验证 config/css 属性 |
+| PostCSS 缺失 | Tailwind 需要 PostCSS 处理 | 创建 postcss.config.js |
+
+### 测试结果
+- ✅ cn.test.ts: 5 pass / 0 fail
+- ✅ tailwind-config.test.ts: 3 pass / 0 fail
+- ✅ css-variables.test.ts: 5 pass / 0 fail
+- ✅ components.test.ts: 4 pass / 0 fail
+- **总计**: 17 pass / 0 fail
+
+### 有价值发现
+1. **TDD 流程**：先写测试（红）→ 写代码（绿）→ 运行验证
+2. **路径别名**：Vite 已配置 @ 别名，需同步更新 tsconfig.json
+3. **shadcn 配置**：tailwind 配置在 JSON 中是对象格式 `{config: ..., css: ...}`
+4. **PostCSS 必需**：Tailwind CSS 需要 postcss.config.js + autoprefixer
+
+### Round 1 完成文件清单
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `src/lib/utils.ts` | 新建 | cn() 函数 |
+| `tailwind.config.js` | 新建 | Tailwind 配置 |
+| `src/index.css` | 新建 | CSS 变量 |
+| `components.json` | 新建 | shadcn 配置 |
+| `postcss.config.js` | 新建 | PostCSS 配置 |
+| `tsconfig.json` | 修改 | 添加 paths 别名 |
+| `package.json` | 修改 | 添加依赖 |
+| `tests/unit/utils/cn.test.ts` | 新建 | cn 函数测试 |
+| `tests/unit/ui/tailwind-config.test.ts` | 新建 | Tailwind 配置测试 |
+| `tests/unit/ui/css-variables.test.ts` | 新建 | CSS 变量测试 |
+| `tests/unit/shadcn/components.test.ts` | 新建 | shadcn 配置测试 |
+
+---
+
+*格式模板：时间、摘要、问题表、测试结果、发现*
