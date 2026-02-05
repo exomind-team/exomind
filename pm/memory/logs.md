@@ -116,4 +116,131 @@
 
 ---
 
-*格式模板：时间、摘要、问题表、优化点、发现*
+## [2026-02-04] Phase 1 Round 1 - P2P 设置页面基础配置
+
+### 执行摘要
+- **任务**：初始化 shadcn/ui + Tailwind CSS + utils.ts
+- **结果**：完成配置，17 测试通过
+- **主要变更**：
+  - 添加 clsx, tailwind-merge, autoprefixer 依赖
+  - 创建 src/lib/utils.ts (cn 函数)
+  - 创建 tailwind.config.js (Tailwind 配置)
+  - 创建 src/index.css (CSS 变量)
+  - 创建 components.json (shadcn 配置)
+  - 创建 postcss.config.js (PostCSS 配置)
+  - 更新 tsconfig.json paths 别名配置
+
+### 遇到的问题
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 测试报错 Cannot find module '@/lib/utils' | tsconfig.json 未配置 paths 别名 | 添加 "paths": {"@/*": ["src/*"]} 配置 |
+| tailwind.config.js 缺少 components 路径 | content 数组缺少 components 路径 | 添加 "./components/**/*.{js,ts,jsx,tsx}" |
+| shadcn components.json tailwind 配置格式 | 期望布尔值，实际是对象 | 更新测试验证 config/css 属性 |
+| PostCSS 缺失 | Tailwind 需要 PostCSS 处理 | 创建 postcss.config.js |
+
+### 测试结果
+- ✅ cn.test.ts: 5 pass / 0 fail
+- ✅ tailwind-config.test.ts: 3 pass / 0 fail
+- ✅ css-variables.test.ts: 5 pass / 0 fail
+- ✅ components.test.ts: 4 pass / 0 fail
+- **总计**: 17 pass / 0 fail
+
+### 有价值发现
+1. **TDD 流程**：先写测试（红）→ 写代码（绿）→ 运行验证
+2. **路径别名**：Vite 已配置 @ 别名，需同步更新 tsconfig.json
+3. **shadcn 配置**：tailwind 配置在 JSON 中是对象格式 `{config: ..., css: ...}`
+4. **PostCSS 必需**：Tailwind CSS 需要 postcss.config.js + autoprefixer
+
+### Round 1 完成文件清单
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `src/lib/utils.ts` | 新建 | cn() 函数 |
+| `tailwind.config.js` | 新建 | Tailwind 配置 |
+| `src/index.css` | 新建 | CSS 变量 |
+| `components.json` | 新建 | shadcn 配置 |
+| `postcss.config.js` | 新建 | PostCSS 配置 |
+| `tsconfig.json` | 修改 | 添加 paths 别名 |
+| `package.json` | 修改 | 添加依赖 |
+| `tests/unit/utils/cn.test.ts` | 新建 | cn 函数测试 |
+| `tests/unit/ui/tailwind-config.test.ts` | 新建 | Tailwind 配置测试 |
+| `tests/unit/ui/css-variables.test.ts` | 新建 | CSS 变量测试 |
+| `tests/unit/shadcn/components.test.ts` | 新建 | shadcn 配置测试 |
+
+---
+
+## [2026-02-04] Phase 1 Round 2 - shadcn 组件手动创建
+
+### 执行摘要
+- **任务**：手动创建 10 个 shadcn/ui 基础组件
+- **结果**：完成，10 测试通过
+- **主要变更**：
+  - 手动创建组件（避免 shadcn CLI 配置冲突）
+  - Button, Card, Input, Switch, Label, Tabs, Badge, Dialog, Toast, Avatar
+  - 添加 Radix UI primitives 和 class-variance-authority 依赖
+
+### 遇到的问题
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| shadcn CLI 报错 Invalid configuration | components.json 格式与 CLI 期望不一致 | 改为手动复制组件源码 |
+| React.forwardRef 返回对象而非函数 | 测试期望 typeof === 'function' | 改为检查 displayName 属性 |
+| Toast/Toaster 分散在多个文件 | 组件分布在 toast.tsx, toaster.tsx, toast-hook.tsx | 创建 index.ts 统一导出 |
+
+### 测试结果
+- ✅ components.test.ts: 10 pass / 0 fail
+- **总计**: 10 pass / 0 fail
+
+### 有价值发现
+1. **Radix UI primitives**：无头组件，只提供交互逻辑，所有样式由 Tailwind CSS 定制
+2. **class-variance-authority (cva)**：用于管理组件 variant（default/destructive/outline 等）
+3. **手动复制 vs CLI 安装**：复制方式让我们完全掌控组件代码，便于定制和调试
+
+---
+
+## [2026-02-04] Phase 1 Round 3-5 - 路由系统 + 布局 + P2P 设置页面
+
+### 执行摘要
+- **任务**：@tanstack/react-router 路由、侧边栏布局、P2P 设置页面
+- **结果**：全部完成，49 测试通过
+- **主要变更**：
+  - @tanstack/react-router 路由系统
+  - Layout 组件（Sidebar + 主布局）
+  - P2PSettings 页面（设备/配对/连接 三个 Tab）
+
+### 遇到的问题
+
+| 问题 | 原因 | 解决方案 |
+|------|------|----------|
+| 路由导入路径错误 | routeTree.tsx 在 src/ 而非 src/routes/ | 修复测试导入路径为 @/routeTree |
+| 路由树导出格式 | routeTree 导出多个对象而非单一 named export | 修改测试验证多个导出 |
+
+### 测试结果
+- ✅ routes.test.ts: 10 pass
+- ✅ Layout.test.ts: 5 pass
+- ✅ Settings.test.ts: 7 pass
+- **总计**: 22 pass / 0 fail（新增）
+
+### 有价值发现
+1. **@tanstack/react-router 文件路由**：`createFileRoute("/")` 自动映射文件路径
+2. **路由树结构**：`rootRoute.addChildren([...])` 构建树形结构，支持嵌套
+3. **Tab 组织页面**：使用 Tabs 将复杂页面分为多个逻辑区域
+
+### 完成文件清单
+| 文件 | 类型 | 说明 |
+|------|------|------|
+| `src/routes.ts` | 新建 | 路由根配置 + RouterProvider |
+| `src/routeTree.tsx` | 新建 | 路由树导出 |
+| `src/routes/index.tsx` | 新建 | 首页路由 |
+| `src/routes/settings.tsx` | 新建 | 设置页路由 |
+| `src/components/Layout/Layout.tsx` | 新建 | 侧边栏布局 |
+| `src/components/Settings/P2PSettings.tsx` | 新建 | P2P 设置主页 |
+| `src/components/Settings/DeviceList.tsx` | 新建 | 设备列表组件 |
+| `src/components/Settings/PairingCode.tsx` | 新建 | 配对码组件 |
+| `tests/routes.test.ts` | 新建 | 路由测试 |
+| `tests/Layout.test.ts` | 新建 | 布局测试 |
+| `tests/Settings.test.ts` | 新建 | 设置页面测试 |
+
+---
+
+*格式模板：时间、摘要、问题表、测试结果、发现*
