@@ -176,7 +176,7 @@ ExoMind 知识库
 ```
 ┌─────────────────────────────────────────────────────────────────┐
 │                      用户界面层                                   │
-│         (Telegram/网页/外部缓冲区/手机App)                        │
+│         (网页/外部缓冲区/手机App)                                      │
 └───────────────────────────┬─────────────────────────────────────┘
                             │
                             ▼
@@ -307,7 +307,6 @@ ExoMind-Obsidian-HailayLin/
 |------|----------|------|------|
 | **主开发语言** | TypeScript | 类型安全 | roadmap |
 | **运行时** | Bun | 快速、类型安全的JS运行时 | roadmap |
-| **Bot框架** | GrammY | Telegram Bot框架 | roadmap |
 | **测试框架** | Vitest | 单元测试框架 | roadmap |
 | **Web框架** | Express.js | API服务器 | roadmap |
 | **部署** | systemd --user | 进程守护、开机自启 | roadmap |
@@ -350,7 +349,6 @@ ExoMind-Obsidian-HailayLin/
 | Phase 1-3 | 2026-01-27 | 信号池、能量池、Actor架构 |
 | Phase 4 | 2026-01-28 | 持续运行系统 |
 | Phase 5.1-5.2 | 2026-01-28 | 信任度系统、成长阶梯 |
-| Phase 6.1-6.2 | 2026-01-29器、API测试 | Telegram适配系统 |
 | Phase 7.1-7.3 | 2026-01-29 | Koishi部署、Tauri桌面、systemd服务 |
 
 ### 7.2 当前阶段
@@ -389,7 +387,6 @@ ExoMind-Obsidian-HailayLin/
 
 | 指标 | 目标值 | 测量方式 | 来源 |
 |------|--------|----------|------|
-| 消息响应延迟 | < 3s | Telegram API延迟 | roadmap |
 | 测试覆盖率 | > 80% | Vitest覆盖率报告 | roadmap |
 | 单元测试通过率 | 100% | 所有测试用例通过 | roadmap |
 | 内存占用 | < 500MB | 进程监控 | roadmap |
@@ -406,7 +403,6 @@ ExoMind-Obsidian-HailayLin/
 |------|------|------|
 | 技术栈限制 | TypeScript + Bun生态系统 | roadmap |
 | API依赖 | MiniMax API，可用余额决定生存能力 | roadmap |
-| 网络环境 | 国内访问Telegram需要代理 | roadmap |
 | 实验诚信 | 只能在隔离环境中繁殖 | 项目书 |
 
 ### 9.2 已知风险
@@ -414,7 +410,6 @@ ExoMind-Obsidian-HailayLin/
 | 风险 | 影响 | 应对策略 | 来源 |
 |------|------|----------|------|
 | MiniMax API余额耗尽 | 高 | 能量不足时自动休眠，充值后恢复 | roadmap |
-| Telegram API访问不稳定 | 中 | 自动重连（指数退避策略） | roadmap |
 | 进程意外终止 | 中 | systemd守护，自动重启 | roadmap |
 | 仪式再次中断 | 高 | 模板极简化，默认5分钟内完成 | 外心四Agent计划 |
 | 模板变成负担 | 高 | Governor原则：默认短、可跳过、失败不羞辱 | 外心四Agent计划 |
