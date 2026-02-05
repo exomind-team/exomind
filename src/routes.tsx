@@ -1,6 +1,7 @@
 import { createRootRoute, createRouter, createRoute, Outlet } from "@tanstack/react-router";
 import { Link, useLocation } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
+import { ChatPage } from "@/components/Chat/ChatPage";
 
 const sidebarItems = [
   { title: "聊天", path: "/", icon: "message-circle" },
@@ -61,9 +62,8 @@ const indexRoute = createRoute({
   path: "/",
   component: function Index() {
     return (
-      <div className="p-2">
-        <h3 className="text-lg font-medium">欢迎使用 ExoMind</h3>
-        <p className="text-muted-foreground">选择左侧设备开始聊天</p>
+      <div className="h-full flex flex-col">
+        <ChatPage />
       </div>
     );
   },
@@ -83,8 +83,22 @@ const settingsRoute = createRoute({
   },
 });
 
+// Devices route (/devices)
+const devicesRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/devices",
+  component: function Devices() {
+    return (
+      <div className="p-2">
+        <h3 className="text-lg font-medium">设备</h3>
+        <p className="text-muted-foreground">管理已配对的设备</p>
+      </div>
+    );
+  },
+});
+
 // Create route tree
-const routeTree = rootRoute.addChildren([indexRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, devicesRoute, settingsRoute]);
 
 // Create router
 const router = createRouter({ routeTree });
