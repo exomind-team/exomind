@@ -490,9 +490,9 @@ type DeviceType = 'desktop' | 'mobile' | 'web';
 
 | 文档 | 路径 | 说明 |
 |------|------|------|
-| 产品愿景 | `docs/core/overview.md` | 产品定义 |
-| 技术栈 | `docs/core/stack.md` | 技术选型理由 |
-| 快速上手 | `docs/core/quickstart.md` | 开发入门 |
+| 产品愿景 | `docs/overview.md` | 产品定义 |
+| 技术栈 | `docs/stack.md` | 技术选型理由 |
+| 快速上手 | `docs/quickstart.md` | 开发入门 |
 | 产品需求 | `pm/PRD.md` | 产品定义 |
 | 路线图 | `pm/roadmap.md` | 迭代计划 |
 | Git 规范 | `pm/git-spec.md` | Git 使用规范 |
@@ -545,19 +545,17 @@ exomind/
 │   ├── capabilities/
 │   └── Cargo.toml
 │
-├── docs/                         # 文档
-│   ├── core/                     # 核心文档
-│   │   ├── overview.md           # 产品愿景
-│   │   ├── architecture.md       # 7 层架构总览（本文档）
-│   │   ├── quickstart.md         # 快速上手
-│   │   └── stack.md              # 技术栈
-│   ├── specs/                    # 详细规格
-│   │   ├── architecture/         # 架构决策（ADR）
-│   │   ├── modules/              # 模块规格
-│   │   └── api/                  # API 文档
-│   ├── plans/                    # 计划文档
-│   │   └── archive/               # 已归档计划
-│   └── README.md                 # 文档导航
+├── docs/                          # 文档
+│   ├── overview.md              # 产品愿景
+│   ├── architecture.md         # 7 层架构总览
+│   ├── quickstart.md           # 快速上手
+│   ├── stack.md                # 技术栈
+│   ├── specs/                  # 详细规格
+│   │   ├── architecture/       # 架构决策（ADR）
+│   │   └── modules/            # 模块规格
+│   ├── plans/                  # 计划文档
+│   │   └── archive/           # 已归档计划
+│   └── README.md               # 文档导航
 │
 ├── pm/                           # 项目管理
 │   ├── long-term.md              # 长期记忆
@@ -577,6 +575,6 @@ exomind/
 *文档版本: v2.0*
 *更新: 2026-02-05*
 *合并源文档:*
-- `docs/ARCHITECTURE.md` (v1.0, 2026-02-03)
-- `docs/ARCHITECTURE_7LAYER.md` (v1.0, 2026-01-29)
-- `docs/architecture/7-LAYER.md` (v1.0, 2026-01-29)
+- `// ARCHITECTURE.md` (v1.0, 2026-02-03)
+- `// ARCHITECTURE_7LAYER.md` (v1.0, 2026-01-29)
+- `// architecture/7-LAYER.md` (v1.0, 2026-01-29)

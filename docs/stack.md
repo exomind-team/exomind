@@ -113,8 +113,8 @@ src/
 
 | 文档 | 路径 |
 |------|------|
-| 架构设计 | `docs/core/architecture.md` |
-| 快速上手 | `docs/core/quickstart.md` |
+| 架构设计 | `docs/architecture.md` |
+| 快速上手 | `docs/quickstart.md` |
 | 模块规格 | `docs/specs/modules/` |
 
 ---

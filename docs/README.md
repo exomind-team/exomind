@@ -9,11 +9,10 @@
 ```
 docs/
 ├── README.md                    ← 本文档（导航入口）
-├── core/                        ← 核心文档（必读）
-│   ├── overview.md             # 产品愿景
-│   ├── architecture.md         # 7 层架构总览
-│   ├── quickstart.md           # 快速上手指南
-│   └── stack.md                # 技术栈总览
+├── overview.md                 ← 产品愿景
+├── architecture.md             ← 7 层架构总览
+├── stack.md                    ← 技术栈总览
+├── quickstart.md               ← 快速上手指南
 ├── specs/                       ← 开发规格（按需查阅）
 │   ├── architecture/           # 架构决策（ADR）
 │   └── modules/                # 模块规格
@@ -29,8 +28,8 @@ docs/
 | 文档 | 说明 | 阅读时间 |
 |------|------|----------|
 | [README](../README.md) | 项目说明 | 2 分钟 |
-| [快速上手](core/quickstart.md) | 5 分钟开始开发 | 5 分钟 |
-| [架构总览](core/architecture.md) | 理解系统设计 | 10 分钟 |
+| [快速上手](quickstart.md) | 5 分钟开始开发 | 5 分钟 |
+| [架构总览](architecture.md) | 理解系统设计 | 10 分钟 |
 
 ---
 
@@ -38,10 +37,10 @@ docs/
 
 | 文档 | 说明 | 阅读时间 |
 |------|------|----------|
-| [产品愿景](core/overview.md) | 理解 ExoMind 使命 | 5 分钟 |
-| [技术栈](core/stack.md) | 技术选型理由 | 5 分钟 |
-| [7 层架构](core/architecture.md) | 详细架构设计 | 15 分钟 |
-| [快速上手](core/quickstart.md) | 开发环境搭建 | 5 分钟 |
+| [产品愿景](overview.md) | 理解 ExoMind 使命 | 5 分钟 |
+| [技术栈](stack.md) | 技术选型理由 | 5 分钟 |
+| [7 层架构](architecture.md) | 详细架构设计 | 15 分钟 |
+| [快速上手](quickstart.md) | 开发环境搭建 | 5 分钟 |
 
 ---
 
@@ -105,18 +104,18 @@ docs/
 
 ### 按主题
 
-- **架构设计**: `core/architecture.md`
-- **技术栈**: `core/stack.md`
+- **架构设计**: `architecture.md`
+- **技术栈**: `stack.md`
 - **模块规格**: `specs/modules/`
 - **开发计划**: `plans/`
 
 ### 按阶段
 
-1. **新手入门**: `core/quickstart.md` → `core/architecture.md` → `core/overview.md`
-2. **功能开发**: `core/architecture.md` → `specs/modules/` → 相关计划
+1. **新手入门**: `quickstart.md` → `architecture.md` → `overview.md`
+2. **功能开发**: `architecture.md` → `specs/modules/` → 相关计划
 3. **代码审查**: `pm/git-spec.md` → `specs/architecture/`
 
 ---
 
 > 最后更新: 2026-02-05
-> 导航版本: v2.1
+> 导航版本: v2.2
