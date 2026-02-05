@@ -39,8 +39,7 @@
 
 | 分类 | 文档 | 职责 |
 |------|------|------|
-| 当前 | [【方案】外心MVP最小闭环设计.md](./plans/%E3%80%90%E6%96%B9%E6%A1%88%E3%80%91%E5%A4%96%E5%BF%83MVP%E6%9C%80%E5%B0%8F%E9%97%AD%E7%8E%B0%E8%AE%BE%E8%AE%A1.md) | MVP 最小闭环设计 |
-| 当前 | [外心四Agent快速实施计划.md](./plans/%E5%A4%96%E5%BF%83%E5%9B%9BAgent%E5%BF%AB%E9%80%9F%E5%AE%9E%E6%96%BD%E8%AE%A1%E5%88%92.md) | 四 Agent 实施计划 |
+| 当前 | [product-plan.md](./plans/product-plan.md) | 产品规划与实施计划（整合版） |
 | 当前 | [2026-01-30-ralph-loop-enhanced.md](./plans/2026-01-30-ralph-loop-enhanced.md) | Ralph Loop 增强计划 |
 | 当前 | [2026-02-04-chat-ui-integration.md](./plans/2026-02-04-chat-ui-integration.md) | Chat UI 集成计划 |
 | 当前 | [2026-02-04-multi-device-e2e-testing.md](./plans/2026-02-04-multi-device-e2e-testing.md) | 多设备 E2E 测试计划 |
