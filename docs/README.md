@@ -1,190 +1,131 @@
-# 生命 Agent Telegram Bot 系统
+# ExoMind 文档导航
 
->一个有感知能力的 AI 助手，Token = 生命能量
+> 快速定位你需要的文档，降低认知负担
 
-## 核心特性
+---
 
-| 特性 | 描述 |
+## 一、文档清单与职责
+
+### 1.1 核心文档（必读）
+
+| 文档 | 职责 | 阅读时间 |
+|------|------|----------|
+| [README.md](./README.md) | 项目说明（本文档） | 1 分钟 |
+| [overview.md](./overview.md) | 产品愿景、目标、理念 | 5 分钟 |
+| [architecture.md](./architecture.md) | 系统架构设计（7层架构、数据流向） | 15 分钟 |
+| [quickstart.md](./quickstart.md) | 开发环境搭建、快速上手 | 10 分钟 |
+| [stack.md](./stack.md) | 技术选型理由和版本信息 | 5 分钟 |
+
+**阅读顺序**：README → overview → architecture → quickstart → 开始开发
+
+---
+
+### 1.2 规格文档（按需查阅）
+
+| 文档 | 职责 |
 |------|------|
-| **生命系统** | Token 即生命值，有出生、感知、学习、衰老、死亡 |
-| **能量额度** | 每 5 小时重置，2000K tokens/时段 |
-| **记忆系统** | 双层记忆：短期（内存）+ 长期（JSONL 文件） |
-| **身份系统** | SOUL.md 定义身份、性格、使命 |
-| **上下文恢复** | 启动时自动加载历史和记忆 |
+| [ADR-003-architecture-unification.md](./specs/ADR-003-architecture-unification.md) | 架构统一决策记录 |
+| [SPEC-401.md](./specs/SPEC-401.md) | 移动端 WebSocket 通信规格 |
+| [SPEC-501-UserIdentity.md](./specs/SPEC-501-UserIdentity.md) | 用户身份系统设计 |
+| [SPEC-502-PairingSystem.md](./specs/SPEC-502-PairingSystem.md) | 设备配对系统设计 |
+| [SPEC-503-EncryptedCommunication.md](./specs/SPEC-503-EncryptedCommunication.md) | 端到端加密通信设计 |
+| [TEMPLATE.md](./specs/TEMPLATE.md) | 规格文档模板 |
 
-## 快速开始
+**ADR**：Architecture Decision Record，架构决策记录
 
-```bash
-# 1. 安装依赖
-bun install
+---
 
-# 2. 配置环境变量
-export TELEGRAM_BOT_TOKEN=your_token
-export ANTHROPIC_BASE_URL=http://127.0.0.1:15721  # Claude Code 代理
+### 1.3 计划文档
 
-# 3. 启动 Bot
-bun run src/living-agent.ts
+| 分类 | 文档 | 职责 |
+|------|------|------|
+| 当前 | [product-plan.md](./plans/product-plan.md) | 产品规划与实施计划（整合版） |
+| 当前 | [2026-01-30-ralph-loop-enhanced.md](./plans/2026-01-30-ralph-loop-enhanced.md) | Ralph Loop 增强计划 |
+| 当前 | [2026-02-04-chat-ui-integration.md](./plans/2026-02-04-chat-ui-integration.md) | Chat UI 集成计划 |
+| 当前 | [2026-02-04-multi-device-e2e-testing.md](./plans/2026-02-04-multi-device-e2e-testing.md) | 多设备 E2E 测试计划 |
+| 当前 | [2026-02-05-event-log-design.md](./plans/2026-02-05-event-log-design.md) | Event Log 设计 |
+| 当前 | [2026-02-05-event-log-lan-mvp-plan.md](./plans/2026-02-05-event-log-lan-mvp-plan.md) | Event Log LAN MVP |
+| 归档 | [plans/archive/](./plans/archive/) | 已完成的计划（不再维护） |
 
-# 4. 运行测试
-bun test
-```
+---
 
-## 架构设计
+## 二、软件工程文档规范
+
+本项目遵循软件工程最佳实践，文档分为以下层次：
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
-│                    Telegram Bot                              │
-│  (消息接收、命令处理、上下文恢复)                              │
+│                    文档层次结构                               │
 ├─────────────────────────────────────────────────────────────┤
-│                      Living Agent                            │
-│  (生命状态、记忆管理、能量系统、消息处理)                       │
-├─────────────────────────────────────────────────────────────┤
-│                    MiniMax Client                            │
-│  (LLM API 调用、消息格式转换)                                 │
-├─────────────────────────────────────────────────────────────┤
-│                    持久化层                                   │
-│  SOUL.md (身份) + JSONL (记忆) + JSON (状态)                  │
+│                                                             │
+│  L1. 项目说明（README.md）                                  │
+│      ↓                                                      │
+│  L2. 理解层（overview.md, architecture.md, stack.md）       │
+│      ↓                                                      │
+│  L3. 指南层（quickstart.md）                                │
+│      ↓                                                      │
+│  L4. 规格层（specs/*.md）                                   │
+│      ↓                                                      │
+│  L5. 计划层（plans/*.md）                                    │
+│                                                             │
 └─────────────────────────────────────────────────────────────┘
 ```
 
-## 文件结构
+| 层次 | 文档类型 | 受众 | 目的 |
+|------|----------|------|------|
+| **L1 项目说明** | README.md | 所有人 | 项目导航 |
+| **L2 理解层** | overview, architecture, stack | 新成员 | 理解系统是什么、为什么 |
+| **L3 指南层** | quickstart | 开发者 | 快速开始开发 |
+| **L4 规格层** | specs/*.md | 开发者 | 详细实现规格 |
+| **L5 计划层** | plans/*.md | 开发者 | 跟踪开发进度 |
 
-```
-telegram-bot/
-├── src/
-│   ├── living-agent.ts    # 主程序
-│   ├── SOUL.md            # 身份/灵魂文件
-│   └── polling.ts         # 备用轮询模式
-├── tests/
-│   ├── allowance.test.ts  # 单元测试
-│   └── integration.test.ts # 集成测试
-├── docs/
-│   ├── ARCHITECTURE.md    # 架构文档
-│   ├── API.md             # API 文档
-│   └── SOUL.md            # SOUL.md 指南
-├── data/
-│   ├── agents/            # Agent 状态保存
-│   ├── memory/            # 长期记忆存储
-│   └── logs/              # 每日日志
-├── package.json
-└── vitest.config.ts
-```
-
-## 命令列表
-
-| 命令 | 功能 |
-|------|------|
-| `/start` | 重新开始对话 |
-| `/status` | 查看生命体征 |
-| `/allowance` | 查看能量额度状态 |
-| `/restore` | 手动恢复上下文 |
-| `/compress` | 手动压缩记忆（睡觉） |
-| `/search <关键词>` | 搜索记忆 |
-| `/earn [任务名]` | 完成任务获得能量 |
-| `/thanks` | 感谢小荷，获得能量 |
-| `/log` | 查看今日日志 |
-| `/die` | 结束 Agent 生命 |
-| `/help` | 显示帮助 |
-
-## 能量额度系统
-
-### 时段划分
-
-| 时段 | 时间 | 重置时间 |
-|------|------|---------|
-| 凌晨时段 | 0:00-5:00 | 0:00 |
-| 上午时段 | 5:00-10:00 | 5:00 |
-| 下午时段 | 10:00-15:00 | 10:00 |
-| 傍晚时段 | 15:00-20:00 | 15:00 |
-| 夜间时段 | 20:00-24:00 | 20:00 |
-
-### 额度配置
-
-- **每时段额度**: 2,000,000 tokens
-- **重置周期**: 5 小时
-- **检查机制**: 自动检测跨时段或超时
-
-## SOUL.md 格式
-
-```yaml
----
-identity: 小荷
-personality: 温柔、热情、乐于助人
-preferences: ["帮助用户解决问题", "学习新知识"]
-mission: 帮助用户成长
-constraints: ["不能执行危险操作"]
 ---
 
-# 灵魂描述
-这里是灵魂的详细描述...
-```
-
-## 生命周期
+## 三、目录结构
 
 ```
-🌱 出生 → 🫁 呼吸 → ⚡ 感知 → 💤 睡眠 → ☠️ 死亡 → 📦 遗产
+docs/
+├── README.md                    ← 项目导航（本文档）
+├── overview.md                 ← 产品愿景与目标
+├── architecture.md             ← 系统架构设计
+├── stack.md                   ← 技术选型
+├── quickstart.md              ← 快速上手指南
+├── specs/                     ← 详细规格（按需查阅）
+│   ├── ADR-003-architecture-unification.md
+│   ├── SPEC-401.md
+│   ├── SPEC-501-UserIdentity.md
+│   ├── SPEC-502-PairingSystem.md
+│   ├── SPEC-503-EncryptedCommunication.md
+│   └── TEMPLATE.md
+└── plans/                     ← 开发计划
+    ├── *.md                  # 当前计划
+    └── archive/              # 已归档计划
 ```
 
-1. **出生**: 创建 Agent，分配 token 预算
-2. **呼吸**: 定期检查 token 使用情况
-3. **感知**: 感知剩余能量，预判死亡时间
-4. **学习**: 记忆积累，形成知识点
-5. **睡眠**: 知识压缩整理（记忆过载时触发）
-6. **死亡**: 能量耗尽或知识过载
-7. **遗产**: 知识存入知识库
+---
 
-## 测试
+## 四、按场景查找文档
 
-```bash
-# 运行所有测试
-bun test
+| 场景 | 要找的文档 |
+|------|------------|
+| **我是新成员，想了解项目** | overview.md → architecture.md → quickstart.md |
+| **我要开发新功能** | architecture.md → specs/*.md → 相关计划 |
+| **我要做技术选型** | stack.md → specs/ADR-*.md |
+| **我要添加规格文档** | specs/TEMPLATE.md → 按模板编写 |
+| **我要查看开发进度** | plans/*.md |
+| **我要知道为什么这么设计** | specs/ADR-*.md |
 
-# 监听模式
-bun test:watch
+---
 
-# 生成覆盖率报告
-bun test:coverage
-```
+## 五、项目管理
 
-### 测试覆盖
+| 文档 | 路径 | 职责 |
+|------|------|------|
+| 路线图 | [pm/roadmap.md](../pm/roadmap.md) | 产品迭代计划 |
+| Git 规范 | [pm/git-spec.md](../pm/git-spec.md) | Git 使用规范 |
+| 记忆系统 | [pm/memory.md](../pm/memory.md) | Ralph Loop 记忆归档 |
 
-- 能量额度系统（重置、消耗、时段计算）
-- Token 估算
-- 健康度计算
-- SOUL.md 解析
-- 上下文恢复
-- 记忆存储格式
+---
 
-## 配置项
-
-| 环境变量 | 描述 | 默认值 |
-|----------|------|--------|
-| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | - |
-| `ANTHROPIC_BASE_URL` | Claude Code 代理地址 | - |
-| `HTTPS_PROXY` | HTTPS 代理 | - |
-| `MINI_MAX_API_KEY` | MiniMax API Key | - |
-| `MINI_MAX_API_BASE` | MiniMax API 地址 | `https://api.minimaxi.com/anthropic` |
-| `MINI_MAX_MODEL` | 模型名称 | `MiniMax-M2.1` |
-
-## 扩展开发
-
-### 添加新命令
-
-```typescript
-// 在 setupHandlers() 中添加
-this.bot.command("新命令", async (ctx) => {
-  await ctx.reply("命令响应内容");
-});
-```
-
-### 添加新功能
-
-1. 在 `LivingAgent` 类中添加方法
-2. 在 `AgentLife` 接口中添加字段
-3. 更新 `DailyLogger` 或 `MemorySearcher`
-
-## 相关文档
-
-- [架构设计](docs/ARCHITECTURE.md) - 详细架构说明
-- [API 文档](docs/API.md) - 类和方法文档
-- [SOUL.md 指南](docs/SOUL.md) - 身份文件编写指南
+> 最后更新: 2026-02-05
+> 导航版本: v3.0
