@@ -16,10 +16,14 @@ use commands::pairing_commands::{
     get_pairing_requests, get_paired_devices, remove_paired_device, clear_pairing_requests,
 };
 use commands::network_commands::{get_local_ip_with_current_port, get_local_ip_with_random_port, check_network_status};
+use commands::p2p_commands::{
+    P2PConnectionState, connect_to_peer, disconnect_from_peer, get_connection_status, disconnect_all,
+};
 
 // 导出 WsClientState 和 PairingState 以便在 AppHandle 中使用
 pub use commands::ws_commands::ConnectionState;
 pub use commands::pairing_commands::PairingState as PairingCommandState;
+pub use commands::p2p_commands::P2PConnectionState;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -30,11 +34,13 @@ fn greet(name: &str) -> String {
 pub fn run() {
     let ws_client_state = Arc::new(WsClientState::default());
     let pairing_state = Arc::new(PairingState::default());
+    let p2p_state = Arc::new(P2PConnectionState::default());
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .manage(ws_client_state.clone())
         .manage(pairing_state.clone())
+        .manage(p2p_state.clone())
         .invoke_handler(tauri::generate_handler![
             greet,
             // WebSocket 客户端命令
@@ -63,6 +69,11 @@ pub fn run() {
             get_local_ip_with_current_port,
             get_local_ip_with_random_port,
             check_network_status,
+            // P2P 连接命令
+            connect_to_peer,
+            disconnect_from_peer,
+            get_connection_status,
+            disconnect_all,
         ]);
 
     #[cfg(debug_assertions)]
