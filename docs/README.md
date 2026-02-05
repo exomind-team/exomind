@@ -1,190 +1,113 @@
-# 生命 Agent Telegram Bot 系统
+# ExoMind 文档导航
 
->一个有感知能力的 AI 助手，Token = 生命能量
+> 快速定位你需要的文档，降低认知负担
 
-## 核心特性
-
-| 特性 | 描述 |
-|------|------|
-| **生命系统** | Token 即生命值，有出生、感知、学习、衰老、死亡 |
-| **能量额度** | 每 5 小时重置，2000K tokens/时段 |
-| **记忆系统** | 双层记忆：短期（内存）+ 长期（JSONL 文件） |
-| **身份系统** | SOUL.md 定义身份、性格、使命 |
-| **上下文恢复** | 启动时自动加载历史和记忆 |
-
-## 快速开始
-
-```bash
-# 1. 安装依赖
-bun install
-
-# 2. 配置环境变量
-export TELEGRAM_BOT_TOKEN=your_token
-export ANTHROPIC_BASE_URL=http://127.0.0.1:15721  # Claude Code 代理
-
-# 3. 启动 Bot
-bun run src/living-agent.ts
-
-# 4. 运行测试
-bun test
-```
-
-## 架构设计
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│                    Telegram Bot                              │
-│  (消息接收、命令处理、上下文恢复)                              │
-├─────────────────────────────────────────────────────────────┤
-│                      Living Agent                            │
-│  (生命状态、记忆管理、能量系统、消息处理)                       │
-├─────────────────────────────────────────────────────────────┤
-│                    MiniMax Client                            │
-│  (LLM API 调用、消息格式转换)                                 │
-├─────────────────────────────────────────────────────────────┤
-│                    持久化层                                   │
-│  SOUL.md (身份) + JSONL (记忆) + JSON (状态)                  │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## 文件结构
-
-```
-telegram-bot/
-├── src/
-│   ├── living-agent.ts    # 主程序
-│   ├── SOUL.md            # 身份/灵魂文件
-│   └── polling.ts         # 备用轮询模式
-├── tests/
-│   ├── allowance.test.ts  # 单元测试
-│   └── integration.test.ts # 集成测试
-├── docs/
-│   ├── ARCHITECTURE.md    # 架构文档
-│   ├── API.md             # API 文档
-│   └── SOUL.md            # SOUL.md 指南
-├── data/
-│   ├── agents/            # Agent 状态保存
-│   ├── memory/            # 长期记忆存储
-│   └── logs/              # 每日日志
-├── package.json
-└── vitest.config.ts
-```
-
-## 命令列表
-
-| 命令 | 功能 |
-|------|------|
-| `/start` | 重新开始对话 |
-| `/status` | 查看生命体征 |
-| `/allowance` | 查看能量额度状态 |
-| `/restore` | 手动恢复上下文 |
-| `/compress` | 手动压缩记忆（睡觉） |
-| `/search <关键词>` | 搜索记忆 |
-| `/earn [任务名]` | 完成任务获得能量 |
-| `/thanks` | 感谢小荷，获得能量 |
-| `/log` | 查看今日日志 |
-| `/die` | 结束 Agent 生命 |
-| `/help` | 显示帮助 |
-
-## 能量额度系统
-
-### 时段划分
-
-| 时段 | 时间 | 重置时间 |
-|------|------|---------|
-| 凌晨时段 | 0:00-5:00 | 0:00 |
-| 上午时段 | 5:00-10:00 | 5:00 |
-| 下午时段 | 10:00-15:00 | 10:00 |
-| 傍晚时段 | 15:00-20:00 | 15:00 |
-| 夜间时段 | 20:00-24:00 | 20:00 |
-
-### 额度配置
-
-- **每时段额度**: 2,000,000 tokens
-- **重置周期**: 5 小时
-- **检查机制**: 自动检测跨时段或超时
-
-## SOUL.md 格式
-
-```yaml
----
-identity: 小荷
-personality: 温柔、热情、乐于助人
-preferences: ["帮助用户解决问题", "学习新知识"]
-mission: 帮助用户成长
-constraints: ["不能执行危险操作"]
 ---
 
-# 灵魂描述
-这里是灵魂的详细描述...
-```
+## 快速入口（3 分钟）
 
-## 生命周期
+| 文档 | 说明 | 阅读时间 |
+|------|------|----------|
+| [README](../README.md) | 项目说明 | 2 分钟 |
+| [快速上手](core/quickstart.md) | 5 分钟开始开发 | 5 分钟 |
+| [架构总览](core/architecture.md) | 理解系统设计 | 10 分钟 |
 
-```
-🌱 出生 → 🫁 呼吸 → ⚡ 感知 → 💤 睡眠 → ☠️ 死亡 → 📦 遗产
-```
+---
 
-1. **出生**: 创建 Agent，分配 token 预算
-2. **呼吸**: 定期检查 token 使用情况
-3. **感知**: 感知剩余能量，预判死亡时间
-4. **学习**: 记忆积累，形成知识点
-5. **睡眠**: 知识压缩整理（记忆过载时触发）
-6. **死亡**: 能量耗尽或知识过载
-7. **遗产**: 知识存入知识库
+## 核心文档（30 分钟）
 
-## 测试
+| 文档 | 说明 | 阅读时间 |
+|------|------|----------|
+| [产品愿景](core/overview.md) | 理解 ExoMind 使命 | 5 分钟 |
+| [技术栈](core/stack.md) | 技术选型理由 | 5 分钟 |
+| [7 层架构](core/architecture.md) | 详细架构设计 | 15 分钟 |
+| [快速上手](core/quickstart.md) | 开发环境搭建 | 5 分钟 |
 
-```bash
-# 运行所有测试
-bun test
+---
 
-# 监听模式
-bun test:watch
+## 开发规格（按需查阅）
 
-# 生成覆盖率报告
-bun test:coverage
-```
+### 模块规格
 
-### 测试覆盖
+| 文档 | 说明 |
+|------|------|
+| [SignalPool 规格](specs/modules/SPEC-201-SignalPool.md) | 发布-订阅信号系统 |
+| [Agent Layer 规格](specs/modules/SPEC-202-AgentLayer.md) | Agent 业务逻辑层 |
 
-- 能量额度系统（重置、消耗、时段计算）
-- Token 估算
-- 健康度计算
-- SOUL.md 解析
-- 上下文恢复
-- 记忆存储格式
+### 架构决策（ADR）
 
-## 配置项
+| 文档 | 说明 |
+|------|------|
+| [ADR-001-why-signal-pool](specs/architecture/ADR-001-why-signal-pool.md) | 为什么选择发布-订阅模式 |
+| [ADR-002-why-tauri](specs/architecture/ADR-002-why-tauri.md) | 为什么选择 Tauri |
 
-| 环境变量 | 描述 | 默认值 |
-|----------|------|--------|
-| `TELEGRAM_BOT_TOKEN` | Telegram Bot Token | - |
-| `ANTHROPIC_BASE_URL` | Claude Code 代理地址 | - |
-| `HTTPS_PROXY` | HTTPS 代理 | - |
-| `MINI_MAX_API_KEY` | MiniMax API Key | - |
-| `MINI_MAX_API_BASE` | MiniMax API 地址 | `https://api.minimaxi.com/anthropic` |
-| `MINI_MAX_MODEL` | 模型名称 | `MiniMax-M2.1` |
+### API 文档
 
-## 扩展开发
+| 文档 | 说明 |
+|------|------|
+| [Tauri Commands](specs/api/commands.md) | Tauri 命令参考 |
+| [WebSocket API](specs/api/websocket.md) | WebSocket 接口定义 |
 
-### 添加新命令
+---
 
-```typescript
-// 在 setupHandlers() 中添加
-this.bot.command("新命令", async (ctx) => {
-  await ctx.reply("命令响应内容");
-});
-```
+## 计划与执行
 
-### 添加新功能
+### 当前计划
 
-1. 在 `LivingAgent` 类中添加方法
-2. 在 `AgentLife` 接口中添加字段
-3. 更新 `DailyLogger` 或 `MemorySearcher`
+| 文档 | 说明 |
+|------|------|
+| [【方案】外心MVP最小闭环设计](plans/%E3%80%90%E6%96%B9%E6%A1%88%E3%80%91%E5%A4%96%E5%BF%83MVP%E6%9C%80%E5%B0%8F%E9%97%AD%E7%8E%B0%E8%AE%BE%E8%AE%A1.md) | MVP 最小闭环设计 |
+| [外心四Agent快速实施计划](plans/%E5%A4%96%E5%BF%83%E5%9B%9BAgent%E5%BF%AB%E9%80%9F%E5%AE%9E%E6%96%BD%E8%AE%A1%E5%88%92.md) | 四 Agent 实施计划 |
+| [Event Log LAN MVP Plan](plans/2026-02-05-event-log-lan-mvp-plan.md) | Event Log LAN MVP |
 
-## 相关文档
+### 已归档计划
 
-- [架构设计](docs/ARCHITECTURE.md) - 详细架构说明
-- [API 文档](docs/API.md) - 类和方法文档
-- [SOUL.md 指南](docs/SOUL.md) - 身份文件编写指南
+| 文档 | 说明 |
+|------|------|
+| [Ralph Loop Enhanced](plans/archive/2026-01-30-ralph-loop-enhanced.md) | 已完成的增强计划 |
+| [Chat UI Integration](plans/archive/2026-02-04-chat-ui-integration.md) | 已完成的集成计划 |
+| [Multi-device E2E Testing](plans/archive/2026-02-04-multi-device-e2e-testing.md) | 已完成的测试计划 |
+
+---
+
+## 项目管理
+
+| 文档 | 说明 |
+|------|------|
+| [roadmap.md](../pm/roadmap.md) | 产品路线图 |
+| [git-spec.md](../pm/git-spec.md) | Git 使用规范 |
+| [memory.md](../pm/memory.md) | 记忆系统 |
+
+---
+
+## 文档重构进度
+
+| 轮次 | 状态 | 完成时间 |
+|------|------|----------|
+| Round 1: 目录创建 + 移动文档 | ✅ 完成 | 2026-02-05 16:30 |
+| Round 2: 合并和简化文档 | ✅ 完成 | 2026-02-05 16:45 |
+| Round 3: 清理归档 | ⏳ 待开始 | - |
+
+查看详情: [docs/todo.md](todo.md)
+
+---
+
+## 快速搜索
+
+### 按主题
+
+- **架构设计**: `core/architecture.md`
+- **API 参考**: `specs/api/`
+- **开发计划**: `plans/`
+- **模块规格**: `specs/modules/`
+
+### 按阶段
+
+1. **新手入门**: `core/quickstart.md` → `core/architecture.md` → `core/overview.md`
+2. **功能开发**: `core/architecture.md` → `specs/modules/` → `specs/api/`
+3. **代码审查**: `pm/git-spec.md` → `specs/architecture/`
+
+---
+
+> 最后更新: 2026-02-05
+> 导航版本: v2.0
