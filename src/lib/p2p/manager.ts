@@ -560,8 +560,20 @@ export async function disconnectFromPeer(
   return getP2PManager().disconnect(peerId);
 }
 
-export async function getConnectionStatus(): Promise<ConnectionStatus> {
-  return getP2PManager().getStatus();
+/**
+ * 向后兼容的连接状态类型
+ */
+export type LegacyConnectionStatus = {
+  connected: boolean;
+  peerCount: number;
+};
+
+export async function getConnectionStatus(): Promise<LegacyConnectionStatus> {
+  const status = await getP2PManager().getStatus();
+  return {
+    connected: status.isConnected,
+    peerCount: status.peerCount,
+  };
 }
 
 export async function disconnectAll(): Promise<void> {
