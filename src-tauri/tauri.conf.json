@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "exomind",
+  "productName": "ExoMind",
   "version": "0.1.0",
   "identifier": "com.exomind.app",
   "build": {
@@ -10,11 +10,14 @@
     "frontendDist": "../dist"
   },
   "app": {
+    "withGlobalTauri": true,
     "windows": [
       {
-        "title": "exomind",
-        "width": 800,
-        "height": 600
+        "title": "ExoMind",
+        "width": 1200,
+        "height": 800,
+        "resizable": true,
+        "fullscreen": false
       }
     ],
     "security": {
