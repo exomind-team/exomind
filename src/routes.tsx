@@ -89,7 +89,7 @@ const devicesRoute = createRoute({
   path: "/devices",
   component: function Devices() {
     return (
-      <div className="p-2">
+      <div className="p-2" data-testid="device-panel">
         <h3 className="text-lg font-medium">设备</h3>
         <p className="text-muted-foreground">管理已配对的设备</p>
       </div>
