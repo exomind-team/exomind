@@ -1,6 +1,6 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useChatStore } from '@/lib/stores/chat-store';
-import { useTimeBlockStore, parseTimeBlockCommand, Tag } from '@/lib/stores/timeblock-store';
+import { useTimeBlockStore, parseTimeBlockCommand } from '@/lib/stores/timeblock-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
@@ -53,7 +53,7 @@ export function ChatPage() {
       id: msg.id,
       timestamp: msg.timestamp,
       content: msg.content,
-      tags: new Set<Tag>(msg.tags as unknown as Tag[]),
+      tags: new Set<string>(),
       type: 'message' as const,
       status: msg.status,
     }));
@@ -348,7 +348,6 @@ export function ChatPage() {
             <div className="space-y-2">
               {getTimeBlocksByStartTime().slice(-5).reverse().map((block) => {
                 const startEvent = events.find((e) => e.id === block.startId);
-                const endEvent = events.find((e) => e.id === block.endId);
                 const blockEvents = getEventsInBlock(block);
 
                 return (
