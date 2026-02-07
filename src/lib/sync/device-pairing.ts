@@ -203,9 +203,6 @@ export class PairingManager {
 
     this.clearTimeoutTimer();
 
-    // 保存状态用于测试验证
-    const previousState = this.state;
-
     if (!accept) {
       await this.transitionTo('cancelled', { reason: 'User rejected pairing' });
       this.reset();

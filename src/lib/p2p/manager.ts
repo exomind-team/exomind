@@ -561,11 +561,7 @@ export async function disconnectFromPeer(
 }
 
 export async function getConnectionStatus(): Promise<ConnectionStatus> {
-  const status = await getP2PManager().getStatus();
-  return {
-    connected: status.isConnected,
-    peerCount: status.peerCount,
-  };
+  return getP2PManager().getStatus();
 }
 
 export async function disconnectAll(): Promise<void> {

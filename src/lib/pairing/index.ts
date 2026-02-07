@@ -109,39 +109,39 @@ export interface PairingEventPayload {
   /**
    * 设备发现事件
    */
-  DeviceDiscovered: { device: DiscoveredDevice };
+  deviceDiscovered: { device: DiscoveredDevice };
   /**
    * 配对请求已创建
    */
-  RequestCreated: { code: string; expiresAt: string };
+  requestCreated: { code: string; expiresAt: string };
   /**
    * 收到配对请求
    */
-  RequestReceived: { request: PairingRequest };
+  requestReceived: { request: PairingRequest };
   /**
    * 配对确认
    */
-  Confirmed: { device: PairedDevice };
+  confirmed: { device: PairedDevice };
   /**
    * 配对拒绝
    */
-  Rejected: { reason?: string };
+  rejected: { reason?: string };
   /**
    * 配对超时
    */
-  Timeout: { reason: string };
+  timeout: { reason: string };
   /**
    * 状态变更
    */
-  StateChanged: { previousState: PairingState; currentState: PairingState };
+  stateChanged: { previousState: PairingState; currentState: PairingState };
   /**
    * 错误事件
    */
-  Error: { error: string };
+  error: { error: string };
 }
 
 /**
- * 配对事件类型
+ * 配对事件类型（使用 camelCase 值以匹配 Payload）
  */
 export enum PairingEventType {
   DeviceDiscovered = 'deviceDiscovered',
@@ -175,12 +175,10 @@ export class PairingManager {
 
   // 状态管理
   private state: PairingState = PairingState.Idle;
-  private mode: PairingMode | null = null;
   private config: PairingConfig;
 
   // 配对数据
   private currentCode: string = '';
-  private currentRequest: PairingRequest | null = null;
   private pairedDevices: Map<string, PairedDevice> = new Map();
 
   // 超时处理
@@ -365,7 +363,6 @@ export class PairingManager {
     }
 
     this.currentCode = '';
-    this.currentRequest = null;
 
     if (this.isPairing()) {
       this.setState(PairingState.Idle);
@@ -380,8 +377,6 @@ export class PairingManager {
    * 处理收到的配对请求
    */
   handlePairingRequest(request: PairingRequest): void {
-    this.currentRequest = request;
-
     this.emit(PairingEventType.RequestReceived, { request });
   }
 
@@ -390,7 +385,6 @@ export class PairingManager {
    */
   async confirmPairing(code: string, accept: boolean = true): Promise<PairingResult> {
     if (!accept) {
-      this.currentRequest = null;
       this.emit(PairingEventType.Rejected, {});
       this.setState(PairingState.Idle);
       return { success: false };
@@ -573,7 +567,6 @@ export class PairingManager {
     this.emit(PairingEventType.Timeout, { reason });
 
     this.currentCode = '';
-    this.currentRequest = null;
 
     this.setState(PairingState.Error);
 
@@ -594,7 +587,6 @@ export class PairingManager {
     this.setState(PairingState.Error);
 
     this.currentCode = '';
-    this.currentRequest = null;
 
     // 延迟后恢复空闲状态
     setTimeout(() => {
@@ -632,13 +624,3 @@ export function getPairingManager(config?: Partial<PairingConfig>): PairingManag
 export function destroyPairingManager(): void {
   PairingManager.destroyInstance();
 }
-
-// 导出类型
-export type {
-  PairingConfig,
-  PairingRequest,
-  PairingResult,
-  PairedDevice,
-  DiscoveredDevice,
-  PairingEventPayload,
-};
