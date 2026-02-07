@@ -33,5 +33,6 @@ tokio-tungstenite = "0.21"
 url = "2"
 regex = "1"
 rand = "0.8"
+uuid = { version = "1", features = ["v4", "serde"] }
 tauri-plugin-mcp-bridge= "0.8"
 thiserror = "1"
