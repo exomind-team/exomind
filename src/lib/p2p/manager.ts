@@ -15,6 +15,9 @@ import {
   P2PEventType,
   P2PEventPayload,
   P2PEventListener,
+  RustDevice,
+  RustPairingRequest,
+  RustConnectionStatus,
 } from './types';
 
 // ============================================================================
@@ -351,15 +354,7 @@ export class P2PManager {
    */
   async getStatus(): Promise<ConnectionStatus> {
     try {
-      const result = await invoke<{
-        connected: boolean;
-        peerCount: number;
-        peers: Array<{
-          peer_id: string;
-          ip: string;
-          status: string;
-        }>;
-      }>('get_connection_status');
+      const result = await invoke<RustConnectionStatus>('get_connection_status');
 
       // 同步本地状态
       this.peers.clear();
@@ -372,10 +367,11 @@ export class P2PManager {
       });
 
       return {
-        isConnected: result.connected,
+        isConnected: result.is_connected,
         state: this.currentState,
-        peerCount: result.peerCount,
+        peerCount: result.peer_count,
         peers: this.getConnectedPeers(),
+        lastError: result.last_error,
       };
     } catch (error) {
       return {
@@ -402,16 +398,8 @@ export class P2PManager {
   /**
    * 获取所有已配对设备
    */
-  async getDevices(): Promise<Array<{
-    id: string;
-    name: string;
-    status: 'online' | 'offline' | 'busy';
-    lastSeen?: string;
-    ip?: string;
-    public_key?: string;
-    paired_at?: string;
-  }>> {
-    return invoke('get_paired_devices');
+  async getDevices(): Promise<RustDevice[]> {
+    return invoke<RustDevice[]>('get_paired_devices');
   }
 
   /**
@@ -446,14 +434,8 @@ export class P2PManager {
   /**
    * 获取待处理的配对请求
    */
-  async getPairingRequests(): Promise<Array<{
-    code: string;
-    deviceName: string;
-    deviceIp: string;
-    publicKey: string;
-    createdAt: string;
-  }>> {
-    return invoke('get_pairing_requests');
+  async getPairingRequests(): Promise<RustPairingRequest[]> {
+    return invoke<RustPairingRequest[]>('get_pairing_requests');
   }
 
   // ============================================================================
@@ -536,4 +518,96 @@ export function getP2PManager(config?: Partial<P2PConfig>): P2PManager {
  */
 export function destroyP2PManager(): void {
   P2PManager.destroyInstance();
+}
+
+// ============================================================================
+// 便捷函数导出（供 p2p.ts 重新导出）
+// ============================================================================
+
+export async function getDevices(): Promise<RustDevice[]> {
+  return getP2PManager().getDevices() as Promise<RustDevice[]>;
+}
+
+export async function removeDevice(id: string): Promise<{ success: boolean }> {
+  return getP2PManager().removeDevice(id);
+}
+
+export async function generatePairingCode(
+  deviceName: string,
+  publicKey: string
+): Promise<string> {
+  return getP2PManager().generatePairingCode(deviceName, publicKey);
+}
+
+export async function confirmPairing(
+  code: string,
+  accept: boolean = true
+): Promise<boolean> {
+  return getP2PManager().confirmPairing(code, accept);
+}
+
+export async function getPairingRequests(): Promise<RustPairingRequest[]> {
+  return getP2PManager().getPairingRequests() as Promise<RustPairingRequest[]>;
+}
+
+export async function connectToPeer(peerId: string): Promise<ConnectionResult> {
+  return getP2PManager().connect(peerId);
+}
+
+export async function disconnectFromPeer(
+  peerId: string
+): Promise<ConnectionResult> {
+  return getP2PManager().disconnect(peerId);
+}
+
+export async function getConnectionStatus(): Promise<ConnectionStatus> {
+  const status = await getP2PManager().getStatus();
+  return {
+    connected: status.isConnected,
+    peerCount: status.peerCount,
+  };
+}
+
+export async function disconnectAll(): Promise<void> {
+  return getP2PManager().disconnectAll();
+}
+
+export async function getLocalIp(): Promise<string> {
+  return getP2PManager().getLocalIp();
+}
+
+export function onStateChanged(
+  callback: (payload: P2PEventPayload[P2PEventType.StateChanged]) => void
+): () => void {
+  return getP2PManager().onStateChanged(callback);
+}
+
+export function onPeerConnected(
+  callback: (payload: P2PEventPayload[P2PEventType.PeerConnected]) => void
+): () => void {
+  return getP2PManager().onPeerConnected(callback);
+}
+
+export function onPeerDisconnected(
+  callback: (payload: P2PEventPayload[P2PEventType.PeerDisconnected]) => void
+): () => void {
+  return getP2PManager().onPeerDisconnected(callback);
+}
+
+export function onError(
+  callback: (payload: P2PEventPayload[P2PEventType.Error]) => void
+): () => void {
+  return getP2PManager().onError(callback);
+}
+
+export async function invokeGetDevices(): Promise<RustDevice[]> {
+  return invoke<RustDevice[]>('get_paired_devices');
+}
+
+export async function invokeRemoveDevice(id: string): Promise<{ success: boolean }> {
+  return invoke<{ success: boolean }>('remove_paired_device', { device_id: id });
+}
+
+export async function invokeGetConnectionStatus(): Promise<RustConnectionStatus> {
+  return invoke<RustConnectionStatus>('get_connection_status');
 }

@@ -34,6 +34,7 @@ export function ChatPage() {
 
   const {
     messages,
+    pendingMessages,
     isConnected,
     isConnecting,
     network,
@@ -44,6 +45,7 @@ export function ChatPage() {
   } = useChatStore();
 
   const deviceId = getDeviceId();
+  const pendingCount = pendingMessages.length;
 
   // 按日期分组消息
   const groupedMessages = useMemo(() => groupMessagesByDate(messages), [messages]);
@@ -116,7 +118,7 @@ export function ChatPage() {
       <div className="flex items-center justify-between px-6 py-4 border-b">
         <div>
           <h2 className="text-2xl font-bold">消息</h2>
-          <p className="text-sm text-muted-foreground">
+          <p className="text-sm text-muted-foreground" data-testid="connection-status">
             {connectedDeviceCount > 0 ? (
               <span className="flex items-center gap-2">
                 <Circle size={8} fill="currentColor" className={isConnected ? "text-green-500" : "text-yellow-500"} />
@@ -131,6 +133,11 @@ export function ChatPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
+          {pendingCount > 0 && (
+            <Badge variant="outline" data-testid="pending-count">
+              {pendingCount} 条待发送
+            </Badge>
+          )}
           <Badge variant={network.isOnline ? "default" : "secondary"}>
             {network.isOnline ? "在线" : "离线"}
           </Badge>
@@ -142,7 +149,7 @@ export function ChatPage() {
       </div>
 
       {/* 消息列表 */}
-      <div className="flex-1 overflow-auto p-6" ref={messagesEndRef as React.RefObject<HTMLDivElement>}>
+      <div className="flex-1 overflow-auto p-6" ref={messagesEndRef as React.RefObject<HTMLDivElement>} data-testid="message-list">
         {hasNoMessages ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
@@ -165,6 +172,7 @@ export function ChatPage() {
                     <div
                       key={msg.id}
                       className={`flex gap-3 ${isOwnMessage(msg) ? 'flex-row-reverse' : ''}`}
+                      data-testid={`message-${msg.status}`}
                     >
                       <Avatar className="h-8 w-8">
                         <AvatarFallback className={isOwnMessage(msg) ? "bg-primary text-primary-foreground" : "bg-muted"}>
@@ -208,11 +216,13 @@ export function ChatPage() {
             placeholder={network.isOnline ? "输入消息..." : "离线模式 - 消息稍后发送"}
             className="flex-1"
             disabled={!network.isOnline && hasNoMessages}
+            data-testid="message-input"
           />
           <Button
             onClick={handleSend}
             disabled={!inputValue.trim() || (!network.isOnline && hasNoMessages)}
             size="icon"
+            data-testid="send-button"
           >
             <Send className="h-4 w-4" />
           </Button>

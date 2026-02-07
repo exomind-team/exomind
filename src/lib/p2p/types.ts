@@ -187,6 +187,50 @@ export interface Libp2pConnectionInfo {
 }
 
 // ============================================================================
+// Rust 后端兼容类型（snake_case）
+// 用于与 Rust 后端 API 返回值匹配
+// ============================================================================
+
+/**
+ * Rust 后端返回的设备信息（snake_case 字段名）
+ */
+export interface RustDevice {
+  id: string;
+  name: string;
+  status: 'online' | 'offline' | 'busy';
+  last_seen?: string;
+  ip?: string;
+  public_key?: string;
+  paired_at?: string;
+}
+
+/**
+ * Rust 后端返回的配对请求（snake_case 字段名）
+ */
+export interface RustPairingRequest {
+  code: string;
+  device_name: string;
+  device_ip: string;
+  public_key: string;
+  created_at: string;
+}
+
+/**
+ * Rust 后端返回的连接状态
+ */
+export interface RustConnectionStatus {
+  is_connected: boolean;
+  state: string;
+  peer_count: number;
+  peers: Array<{
+    peer_id: string;
+    ip: string;
+    status: string;
+  }>;
+  last_error?: string;
+}
+
+// ============================================================================
 // 默认配置
 // ============================================================================
 
