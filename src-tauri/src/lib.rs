@@ -17,13 +17,12 @@ use commands::pairing_commands::{
 };
 use commands::network_commands::{get_local_ip_with_current_port, get_local_ip_with_random_port, check_network_status};
 use commands::p2p_commands::{
-    P2PConnectionState, connect_to_peer, disconnect_from_peer, get_connection_status, disconnect_all,
+    P2PManagerState, connect_to_peer, disconnect_from_peer, get_connection_status, disconnect_all,
+    set_p2p_state, get_p2p_state, init_libp2p, get_node_info, publish_message, subscribe_topic,
 };
 
-// 导出 WsClientState 和 PairingState 以便在 AppHandle 中使用
-pub use commands::ws_commands::ConnectionState;
-pub use commands::pairing_commands::PairingState as PairingCommandState;
-pub use commands::p2p_commands::P2PConnectionState;
+// 导出状态管理器以供其他模块使用
+pub use commands::p2p_commands::P2PStateManager;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -34,7 +33,7 @@ fn greet(name: &str) -> String {
 pub fn run() {
     let ws_client_state = Arc::new(WsClientState::default());
     let pairing_state = Arc::new(PairingState::default());
-    let p2p_state = Arc::new(P2PConnectionState::default());
+    let p2p_state = Arc::new(P2PManagerState::default());
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -74,6 +73,13 @@ pub fn run() {
             disconnect_from_peer,
             get_connection_status,
             disconnect_all,
+            set_p2p_state,
+            get_p2p_state,
+            // libp2p 预留命令
+            init_libp2p,
+            get_node_info,
+            publish_message,
+            subscribe_topic,
         ]);
 
     #[cfg(debug_assertions)]
