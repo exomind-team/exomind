@@ -12,8 +12,16 @@ use commands::file_commands::{
     append_file, append_to_markdown, export_messages_to_markdown
 };
 use commands::pairing_commands::{
-    PairingState, generate_pairing_code, confirm_pairing,
-    get_pairing_requests, get_paired_devices, remove_paired_device, clear_pairing_requests,
+    PairingStateManager, PairingState, PairingResult, DeviceType,
+    // 配置命令
+    update_pairing_config, get_pairing_config, get_pairing_state,
+    // 配对命令
+    generate_pairing_code_and_request, confirm_pairing, start_confirming_pairing,
+    cancel_pairing, reset_pairing_state,
+    // 查询命令
+    get_pairing_requests, validate_pairing_code, get_pairing_code_remaining_time,
+    get_paired_devices, get_paired_device, remove_paired_device, clear_pairing_requests,
+    is_device_paired,
 };
 use commands::network_commands::{get_local_ip_with_current_port, get_local_ip_with_random_port, check_network_status};
 use commands::p2p_commands::{
@@ -23,6 +31,7 @@ use commands::p2p_commands::{
 
 // 导出状态管理器以供其他模块使用
 pub use commands::p2p_commands::P2PStateManager;
+pub use commands::pairing_commands::PairingStateManager as PairingState;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -32,7 +41,7 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let ws_client_state = Arc::new(WsClientState::default());
-    let pairing_state = Arc::new(PairingState::default());
+    let pairing_state = Arc::new(PairingStateManager::new());
     let p2p_state = Arc::new(P2PManagerState::default());
 
     let mut builder = tauri::Builder::default()
@@ -57,13 +66,25 @@ pub fn run() {
             append_file,
             append_to_markdown,
             export_messages_to_markdown,
+            // 配对配置命令
+            update_pairing_config,
+            get_pairing_config,
+            get_pairing_state,
             // 配对命令
-            generate_pairing_code,
+            generate_pairing_code_and_request,
             confirm_pairing,
+            start_confirming_pairing,
+            cancel_pairing,
+            reset_pairing_state,
+            // 配对查询命令
             get_pairing_requests,
+            validate_pairing_code,
+            get_pairing_code_remaining_time,
             get_paired_devices,
+            get_paired_device,
             remove_paired_device,
             clear_pairing_requests,
+            is_device_paired,
             // 网络命令
             get_local_ip_with_current_port,
             get_local_ip_with_random_port,
