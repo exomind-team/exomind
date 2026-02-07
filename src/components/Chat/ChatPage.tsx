@@ -1,10 +1,9 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useChatStore } from '@/lib/stores/chat-store';
-import { Card } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
-import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
+import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Send, Circle, Plus } from 'lucide-react';
 
 // 按日期分组消息
