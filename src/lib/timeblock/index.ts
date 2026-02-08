@@ -1,6 +1,7 @@
 /**
  * TimeBlock 模块 - 统一导出
  *
+ * 基于 MVP-ARCHITECTURE.md 文档
  * @module timeblock
  */
 
@@ -11,11 +12,12 @@ export * from './types';
 export { TimeBlockStorage } from './persistence';
 
 // Store
-export { TimeBlockStore, getTimeBlockStore, destroyTimeBlockStore } from './store';
+export { useTimeBlockStore } from './store';
 
-// 事件类型
+// 便捷函数
 export {
-  TimeBlockEventType,
-  type TimeBlockEventPayload,
-  type TimeBlockEventListener,
+  initTimeBlockStore,
+  hasActiveBlock,
+  getActiveBlock,
+  parseTimeBlockCommand,
 } from './store';

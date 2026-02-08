@@ -1,497 +1,413 @@
 /**
- * TimeBlock Store - 状态管理与业务逻辑
+ * TimeBlock Store - zustand 状态管理
  *
+ * 基于 MVP-ARCHITECTURE.md 文档
  * @module timeblock/store
  */
 
-import { v4 as uuidv4 } from 'uuid';
-import {
+import { create } from 'zustand';
+import { persist, createJSONStorage } from 'zustand/middleware';
+import type {
+  UUID,
+  Tag,
+  NoteContent,
+  Event,
   TimeBlock,
-  TimeBlockStatus,
-  TimeBlockType,
-  CreateTimeBlockParams,
-  UpdateTimeBlockParams,
-  TimeBlockQuery,
-  TimeBlockStats,
-  DaySummary,
+  PlannedTimeBlock,
 } from './types';
-import { TimeBlockStorage } from './persistence';
+import { EventImpl, TimeBlockImpl } from './types';
 
 // ============================================================================
-// 事件类型
+// Store 接口
 // ============================================================================
 
-/**
- * TimeBlock 事件类型
- */
-export enum TimeBlockEventType {
-  BlockCreated = 'blockCreated',
-  BlockUpdated = 'blockUpdated',
-  BlockDeleted = 'blockDeleted',
-  StatusChanged = 'statusChanged',
-  Loaded = 'loaded',
-  Error = 'error',
-}
+interface TimeBlockStore {
+  // 数据
+  events: Map<UUID, Event>;
+  timeBlocks: Map<UUID, TimeBlock>;
 
-/**
- * TimeBlock 事件载荷
- */
-export interface TimeBlockEventPayload {
-  [TimeBlockEventType.BlockCreated]: TimeBlock;
-  [TimeBlockEventType.BlockUpdated]: { old: TimeBlock; new: TimeBlock };
-  [TimeBlockEventType.BlockDeleted]: { id: string };
-  [TimeBlockEventType.StatusChanged]: { id: string; oldStatus: TimeBlockStatus; newStatus: TimeBlockStatus };
-  [TimeBlockEventType.Loaded]: TimeBlock[];
-  [TimeBlockEventType.Error]: { error: string };
-}
-
-/**
- * 事件监听器类型
- */
-export type TimeBlockEventListener<K extends TimeBlockEventType = TimeBlockEventType> = (
-  payload: TimeBlockEventPayload[K]
-) => void;
-
-// ============================================================================
-// TimeBlock Store
-// ============================================================================
-
-/**
- * TimeBlock Store
- * 封装时间块的 CRUD 操作和业务逻辑
- */
-export class TimeBlockStore {
-  // 单例实例
-  private static instance: TimeBlockStore | null = null;
-
-  // 存储
-  private storage: TimeBlockStorage;
-
-  // 内存缓存
-  private blocks: Map<string, TimeBlock> = new Map();
-
-  // 事件监听器
-  private listeners: Map<TimeBlockEventType, Set<TimeBlockEventListener>> = new Map();
+  // 当前活跃块
+  activeBlock: PlannedTimeBlock | null;
 
   // 加载状态
-  private loaded: boolean = false;
-  private loading: boolean = false;
-
-  /**
-   * 私有构造函数（单例模式）
-   */
-  private constructor(config?: ConstructorParameters<typeof TimeBlockStorage>[0]) {
-    this.storage = new TimeBlockStorage(config);
-  }
-
-  /**
-   * 获取单例实例
-   */
-  static getInstance(config?: ConstructorParameters<typeof TimeBlockStorage>[0]): TimeBlockStore {
-    if (!TimeBlockStore.instance) {
-      TimeBlockStore.instance = new TimeBlockStore(config);
-    }
-    return TimeBlockStore.instance;
-  }
-
-  /**
-   * 销毁单例实例
-   */
-  static destroyInstance(): void {
-    if (TimeBlockStore.instance) {
-      TimeBlockStore.instance.storage.close();
-      TimeBlockStore.instance = null;
-    }
-  }
-
-  // ============================================================================
-  // 事件系统
-  // ============================================================================
-
-  /**
-   * 订阅事件
-   */
-  on<K extends TimeBlockEventType>(
-    eventType: K,
-    listener: TimeBlockEventListener<K>
-  ): () => void {
-    if (!this.listeners.has(eventType)) {
-      this.listeners.set(eventType, new Set());
-    }
-    this.listeners.get(eventType)!.add(listener as TimeBlockEventListener);
-
-    return () => this.off(eventType, listener);
-  }
-
-  /**
-   * 取消订阅
-   */
-  off<K extends TimeBlockEventType>(
-    eventType: K,
-    listener: TimeBlockEventListener<K>
-  ): void {
-    const listeners = this.listeners.get(eventType);
-    if (listeners) {
-      listeners.delete(listener as TimeBlockEventListener);
-    }
-  }
-
-  /**
-   * 发布事件
-   */
-  private emit<K extends TimeBlockEventType>(
-    eventType: K,
-    payload: TimeBlockEventPayload[K]
-  ): void {
-    const listeners = this.listeners.get(eventType);
-    if (listeners) {
-      listeners.forEach((listener) => {
-        try {
-          listener(payload);
-        } catch (error) {
-          console.error(`TimeBlock event listener error: ${eventType}`, error);
-        }
-      });
-    }
-  }
-
-  // ============================================================================
-  // 加载数据
-  // ============================================================================
-
-  /**
-   * 加载所有时间块
-   */
-  async load(): Promise<void> {
-    if (this.loading || this.loaded) return;
-
-    this.loading = true;
-
-    try {
-      await this.storage.init();
-      const blocks = await this.storage.getAll();
-
-      // 重建内存索引
-      this.blocks.clear();
-      blocks.forEach((block) => {
-        this.blocks.set(block.id, block);
-      });
-
-      this.loaded = true;
-      this.loading = false;
-
-      this.emit(TimeBlockEventType.Loaded, blocks);
-    } catch (error) {
-      this.loading = false;
-      const errorMessage = error instanceof Error ? error.message : String(error);
-      this.emit(TimeBlockEventType.Error, { error: errorMessage });
-      throw error;
-    }
-  }
-
-  /**
-   * 确保数据已加载
-   */
-  private async ensureLoaded(): Promise<void> {
-    if (!this.loaded && !this.loading) {
-      await this.load();
-    }
-  }
-
-  /**
-   * 检查是否已加载
-   */
-  isLoaded(): boolean {
-    return this.loaded;
-  }
-
-  /**
-   * 检查是否正在加载
-   */
-  isLoading(): boolean {
-    return this.loading;
-  }
-
-  // ============================================================================
-  // CRUD 操作
-  // ============================================================================
-
-  /**
-   * 创建时间块
-   */
-  async create(params: CreateTimeBlockParams): Promise<TimeBlock> {
-    await this.ensureLoaded();
-
-    const now = new Date().toISOString();
-    const block: TimeBlock = {
-      id: uuidv4(),
-      title: params.title,
-      description: params.description,
-      startTime: params.startTime,
-      endTime: params.endTime,
-      status: TimeBlockStatus.Pending,
-      type: params.type || TimeBlockType.Work,
-      labelIds: params.labelIds,
-      notes: params.notes,
-      createdAt: now,
-      updatedAt: now,
-    };
-
-    // 保存到存储
-    await this.storage.save(block);
-
-    // 添加到内存缓存
-    this.blocks.set(block.id, block);
-
-    // 发送事件
-    this.emit(TimeBlockEventType.BlockCreated, block);
-
-    return block;
-  }
-
-  /**
-   * 获取单个时间块
-   */
-  async get(id: string): Promise<TimeBlock | null> {
-    await this.ensureLoaded();
-    return this.blocks.get(id) || null;
-  }
-
-  /**
-   * 获取所有时间块
-   */
-  async getAll(): Promise<TimeBlock[]> {
-    await this.ensureLoaded();
-    return Array.from(this.blocks.values());
-  }
-
-  /**
-   * 更新时间块
-   */
-  async update(id: string, params: UpdateTimeBlockParams): Promise<TimeBlock | null> {
-    await this.ensureLoaded();
-
-    const existing = this.blocks.get(id);
-    if (!existing) {
-      return null;
-    }
-
-    const oldBlock = { ...existing };
-    const updated: TimeBlock = {
-      ...existing,
-      ...params,
-      updatedAt: new Date().toISOString(),
-    };
-
-    // 保存到存储
-    await this.storage.save(updated);
-
-    // 更新内存缓存
-    this.blocks.set(id, updated);
-
-    // 发送事件
-    this.emit(TimeBlockEventType.BlockUpdated, { old: oldBlock, new: updated });
-
-    return updated;
-  }
-
-  /**
-   * 更新状态
-   */
-  async updateStatus(
-    id: string,
-    status: TimeBlockStatus
-  ): Promise<TimeBlock | null> {
-    await this.ensureLoaded();
-
-    const existing = this.blocks.get(id);
-    if (!existing) {
-      return null;
-    }
-
-    const oldStatus = existing.status;
-    const updated = await this.update(id, { status });
-
-    if (updated) {
-      this.emit(TimeBlockEventType.StatusChanged, {
-        id,
-        oldStatus,
-        newStatus: status,
-      });
-    }
-
-    return updated;
-  }
-
-  /**
-   * 删除时间块
-   */
-  async delete(id: string): Promise<boolean> {
-    await this.ensureLoaded();
-
-    if (!this.blocks.has(id)) {
-      return false;
-    }
-
-    // 从存储删除
-    await this.storage.delete(id);
-
-    // 从内存删除
-    this.blocks.delete(id);
-
-    // 发送事件
-    this.emit(TimeBlockEventType.BlockDeleted, { id });
-
-    return true;
-  }
-
-  // ============================================================================
-  // 查询操作
-  // ============================================================================
-
-  /**
-   * 条件查询
-   */
-  async where(query: TimeBlockQuery): Promise<TimeBlock[]> {
-    await this.ensureLoaded();
-
-    const all = Array.from(this.blocks.values());
-
-    return all.filter((block) => {
-      // 按状态筛选
-      if (query.status) {
-        const statuses = Array.isArray(query.status) ? query.status : [query.status];
-        if (!statuses.includes(block.status)) return false;
-      }
-
-      // 按类型筛选
-      if (query.type) {
-        const types = Array.isArray(query.type) ? query.type : [query.type];
-        if (!types.includes(block.type)) return false;
-      }
-
-      // 按标签筛选
-      if (query.labelIds && query.labelIds.length > 0) {
-        if (!block.labelIds || !query.labelIds.some((id) => block.labelIds!.includes(id))) {
-          return false;
-        }
-      }
-
-      // 开始时间范围
-      if (query.startTimeFrom && block.startTime < query.startTimeFrom) return false;
-      if (query.startTimeTo && block.startTime > query.startTimeTo) return false;
-
-      // 结束时间范围
-      if (query.endTimeFrom && block.endTime < query.endTimeFrom) return false;
-      if (query.endTimeTo && block.endTime > query.endTimeTo) return false;
-
-      return true;
-    });
-  }
-
-  /**
-   * 获取某一天的时间块
-   */
-  async getByDate(date: string): Promise<TimeBlock[]> {
-    await this.ensureLoaded();
-    return this.storage.getByDate(date);
-  }
-
-  /**
-   * 获取某一天的时间块摘要
-   */
-  async getDaySummary(date: string): Promise<DaySummary> {
-    await this.ensureLoaded();
-    return this.storage.getDaySummary(date);
-  }
-
-  /**
-   * 获取今天的摘要
-   */
-  async getTodaySummary(): Promise<DaySummary> {
-    const today = new Date().toISOString().split('T')[0];
-    return this.getDaySummary(today);
-  }
-
-  /**
-   * 获取待执行的时间块
-   */
-  async getPending(): Promise<TimeBlock[]> {
-    return this.where({ status: TimeBlockStatus.Pending });
-  }
-
-  /**
-   * 获取进行中的时间块
-   */
-  async getInProgress(): Promise<TimeBlock[]> {
-    return this.where({ status: TimeBlockStatus.InProgress });
-  }
-
-  /**
-   * 获取已完成的时间块
-   */
-  async getCompleted(): Promise<TimeBlock[]> {
-    return this.where({ status: TimeBlockStatus.Completed });
-  }
-
-  // ============================================================================
-  // 统计操作
-  // ============================================================================
-
-  /**
-   * 获取时间统计
-   */
-  async getStats(startDate?: string, endDate?: string): Promise<TimeBlockStats> {
-    await this.ensureLoaded();
-    return this.storage.getStats(startDate, endDate);
-  }
-
-  // ============================================================================
-  // 清理操作
-  // ============================================================================
-
-  /**
-   * 清空所有数据
-   */
-  async clear(): Promise<void> {
-    await this.storage.clear();
-    this.blocks.clear();
-    this.loaded = false;
-  }
-
-  /**
-   * 清理过期数据
-   */
-  async cleanup(): Promise<number> {
-    return this.storage.cleanup();
-  }
-
-  /**
-   * 关闭存储
-   */
-  async close(): Promise<void> {
-    await this.storage.close();
-    this.blocks.clear();
-    this.loaded = false;
-  }
+  isLoaded: boolean;
+
+  // Actions - 事件管理
+  addEvent: (content: NoteContent, tags?: Tag[]) => Event;
+  getEventById: (id: UUID) => Event | undefined;
+  getAllEvents: () => Event[];
+  getEventsByTime: () => IterableIterator<Event>;
+
+  // Actions - 时间块管理
+  startBlock: (name: string, tags?: Tag[]) => TimeBlock;
+  endBlock: (note?: string) => TimeBlock | null;
+  getBlockById: (id: UUID) => TimeBlock | undefined;
+  getAllBlocks: () => TimeBlock[];
+  getBlocksByTime: () => IterableIterator<TimeBlock>;
+  eventsInBlock: (block: TimeBlock) => Event[];
+
+  // Actions - 查询
+  getTodayBlocks: () => TimeBlock[];
+
+  // Actions - 持久化
+  save: () => void;
+  load: () => void;
+  reset: () => void;
+
+  // Actions - 内部
+  _setEvents: (events: Map<UUID, Event>) => void;
+  _setBlocks: (blocks: Map<UUID, TimeBlock>) => void;
 }
+
+// ============================================================================
+// Store 实现
+// ============================================================================
+
+export const useTimeBlockStore = create<TimeBlockStore>()(
+  persist(
+    (set, get) => ({
+      // 初始状态
+      events: new Map(),
+      timeBlocks: new Map(),
+      activeBlock: null,
+      isLoaded: false,
+
+      // Actions - 事件管理
+      addEvent: (content: NoteContent, tags?: Tag[]) => {
+        const event = new EventImpl(content, tags);
+        set((state) => {
+          const newEvents = new Map(state.events);
+          newEvents.set(event.id, event);
+          return { events: newEvents };
+        });
+        get().save();
+        return event;
+      },
+
+      getEventById: (id: UUID) => {
+        return get().events.get(id);
+      },
+
+      getAllEvents: () => {
+        return Array.from(get().events.values());
+      },
+
+      getEventsByTime: function* (): IterableIterator<Event> {
+        const events = Array.from(get().events.values());
+        events.sort((a, b) => a.timestamp - b.timestamp);
+        yield* events;
+      },
+
+      // Actions - 时间块管理
+      startBlock: (name: string, tags?: Tag[]) => {
+        const state = get();
+
+        // 如果已有活跃块，先结束它
+        if (state.activeBlock) {
+          get().endBlock();
+        }
+
+        // 创建开始事件
+        const startEvent = new EventImpl(
+          `开始时间块 "${name}"`,
+          [...(tags || []), 'block_start', name]
+        );
+
+        // 创建时间块
+        const block = new TimeBlockImpl(name, startEvent.id, tags);
+
+        // 创建计划块
+        const plannedBlock: PlannedTimeBlock = {
+          startId: startEvent.id,
+          name,
+          tags: new Set(tags || []),
+        };
+
+        // 更新状态
+        set((state) => {
+          const newEvents = new Map(state.events);
+          newEvents.set(startEvent.id, startEvent);
+
+          const newBlocks = new Map(state.timeBlocks);
+          newBlocks.set(block.id, block);
+
+          return {
+            events: newEvents,
+            timeBlocks: newBlocks,
+            activeBlock: plannedBlock,
+          };
+        });
+
+        get().save();
+        return block;
+      },
+
+      endBlock: (note?: string) => {
+        const state = get();
+        if (!state.activeBlock) {
+          return null;
+        }
+
+        const startEvent = state.events.get(state.activeBlock.startId);
+        if (!startEvent) {
+          return null;
+        }
+
+        // 创建结束事件
+        const endEvent = new EventImpl(
+          `结束时间块 "${state.activeBlock.name}"`,
+          ['block_end', state.activeBlock.name]
+        );
+
+        // 更新时间块
+        const block = state.timeBlocks.get(
+          Array.from(state.timeBlocks.values()).find(
+            (b) => b.startId === state.activeBlock!.startId
+          )?.id!
+        );
+
+        if (!block) {
+          return null;
+        }
+
+        // 设置结束事件和记录
+        block.endId = endEvent.id;
+        block.note = note;
+
+        // 更新状态
+        set((state) => {
+          const newEvents = new Map(state.events);
+          newEvents.set(endEvent.id, endEvent);
+
+          const newBlocks = new Map(state.timeBlocks);
+          newBlocks.set(block.id, block);
+
+          return {
+            events: newEvents,
+            timeBlocks: newBlocks,
+            activeBlock: null,
+          };
+        });
+
+        get().save();
+        return block;
+      },
+
+      getBlockById: (id: UUID) => {
+        return get().timeBlocks.get(id);
+      },
+
+      getAllBlocks: () => {
+        return Array.from(get().timeBlocks.values());
+      },
+
+      getBlocksByTime: function* (): IterableIterator<TimeBlock> {
+        const blocks = Array.from(get().timeBlocks.values());
+        blocks.sort((a, b) => {
+          const aStart = get().events.get(a.startId)?.timestamp || 0;
+          const bStart = get().events.get(b.startId)?.timestamp || 0;
+          return aStart - bStart;
+        });
+        yield* blocks;
+      },
+
+      eventsInBlock: (block: TimeBlock) => {
+        const state = get();
+        const startEvent = state.events.get(block.startId);
+        if (!startEvent) return [];
+
+        const startTime = startEvent.timestamp;
+        const endTime = block.endId
+          ? state.events.get(block.endId)?.timestamp || Date.now()
+          : Date.now();
+
+        return Array.from(state.events.values()).filter(
+          (e) => e.timestamp >= startTime && e.timestamp <= endTime
+        );
+      },
+
+      // Actions - 查询
+      getTodayBlocks: () => {
+        const today = new Date();
+        today.setHours(0, 0, 0, 0);
+        const tomorrow = new Date(today);
+        tomorrow.setDate(tomorrow.getDate() + 1);
+
+        return Array.from(get().timeBlocks.values()).filter((block) => {
+          const startEvent = get().events.get(block.startId);
+          if (!startEvent) return false;
+          return startEvent.timestamp >= today.getTime() && startEvent.timestamp < tomorrow.getTime();
+        });
+      },
+
+      // Actions - 持久化
+      save: () => {
+        const state = get();
+
+        // 保存到 localStorage
+        const data = {
+          events: Array.from(state.events.values()).map((e) => {
+            if (e instanceof EventImpl) {
+              return e.toJSON();
+            }
+            return e;
+          }),
+          blocks: Array.from(state.timeBlocks.values()).map((b) => {
+            if (b instanceof TimeBlockImpl) {
+              return b.toJSON();
+            }
+            return b;
+          }),
+          activeBlock: state.activeBlock,
+        };
+
+        localStorage.setItem('timeblock-data', JSON.stringify(data));
+      },
+
+      load: () => {
+        const dataStr = localStorage.getItem('timeblock-data');
+        if (!dataStr) {
+          set({ isLoaded: true });
+          return;
+        }
+
+        try {
+          const data = JSON.parse(dataStr);
+
+          const events = new Map<UUID, Event>();
+          (data.events as unknown[]).forEach((e) => {
+            const event = EventImpl.fromJSON(e as Record<string, unknown>);
+            events.set(event.id, event);
+          });
+
+          const blocks = new Map<UUID, TimeBlock>();
+          (data.blocks as unknown[]).forEach((b) => {
+            const block = TimeBlockImpl.fromJSON(b as Record<string, unknown>);
+            blocks.set(block.id, block);
+          });
+
+          set({
+            events,
+            timeBlocks: blocks,
+            activeBlock: data.activeBlock || null,
+            isLoaded: true,
+          });
+        } catch (error) {
+          console.error('Failed to load timeblock data:', error);
+          set({ isLoaded: true });
+        }
+      },
+
+      reset: () => {
+        set({
+          events: new Map(),
+          timeBlocks: new Map(),
+          activeBlock: null,
+          isLoaded: false,
+        });
+        localStorage.removeItem('timeblock-data');
+      },
+
+      // Actions - 内部
+      _setEvents: (events: Map<UUID, Event>) => {
+        set({ events });
+      },
+
+      _setBlocks: (blocks: Map<UUID, TimeBlock>) => {
+        set({ timeBlocks: blocks });
+      },
+    }),
+    {
+      name: 'timeblock-store',
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({
+        // 只持久化必要数据
+        events: Array.from(state.events.values()).map((e) =>
+          e instanceof EventImpl ? e.toJSON() : e
+        ),
+        blocks: Array.from(state.timeBlocks.values()).map((b) =>
+          b instanceof TimeBlockImpl ? b.toJSON() : b
+        ),
+        activeBlock: state.activeBlock,
+      }),
+      merge: (persisted, current) => {
+        try {
+          const events = new Map<UUID, Event>();
+          ((persisted as { events?: unknown[] })?.events || []).forEach((e) => {
+            const event = EventImpl.fromJSON(e as Record<string, unknown>);
+            events.set(event.id, event);
+          });
+
+          const blocks = new Map<UUID, TimeBlock>();
+          ((persisted as { blocks?: unknown[] })?.blocks || []).forEach((b) => {
+            const block = TimeBlockImpl.fromJSON(b as Record<string, unknown>);
+            blocks.set(block.id, block);
+          });
+
+          return {
+            ...current,
+            events,
+            blocks,
+            activeBlock: (persisted as { activeBlock?: PlannedTimeBlock })?.activeBlock || null,
+            isLoaded: true,
+          };
+        } catch {
+          return current;
+        }
+      },
+    }
+  )
+);
 
 // ============================================================================
 // 便捷函数
 // ============================================================================
 
 /**
- * 获取 TimeBlockStore 单例
+ * 初始化 Store（加载数据）
  */
-export function getTimeBlockStore(
-  config?: ConstructorParameters<typeof TimeBlockStorage>[0]
-): TimeBlockStore {
-  return TimeBlockStore.getInstance(config);
+export function initTimeBlockStore(): void {
+  const store = useTimeBlockStore.getState();
+  if (!store.isLoaded) {
+    store.load();
+  }
 }
 
 /**
- * 销毁 TimeBlockStore
+ * 检查是否有活跃时间块
  */
-export function destroyTimeBlockStore(): void {
-  TimeBlockStore.destroyInstance();
+export function hasActiveBlock(): boolean {
+  return useTimeBlockStore.getState().activeBlock !== null;
+}
+
+/**
+ * 获取活跃时间块
+ */
+export function getActiveBlock(): PlannedTimeBlock | null {
+  return useTimeBlockStore.getState().activeBlock;
+}
+
+/**
+ * 解析时间块命令
+ */
+export function parseTimeBlockCommand(input: string): { type: 'start' | 'end' | 'none'; name?: string } {
+  const trimmed = input.trim();
+
+  // 解析 "开始xxx" 或 "开始 xxx"
+  const startMatch = trimmed.match(/^开始\s*(\S+.*)$/);
+  if (startMatch) {
+    return { type: 'start', name: startMatch[1].trim() };
+  }
+
+  // 解析 "开始" 后跟名称
+  if (trimmed === '开始' || trimmed === 'start') {
+    return { type: 'start', name: '未命名' };
+  }
+
+  // 解析 "结束" 或 "end"
+  if (trimmed === '结束' || trimmed === 'end') {
+    return { type: 'end' };
+  }
+
+  return { type: 'none' };
 }

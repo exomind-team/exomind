@@ -1,8 +1,218 @@
 /**
  * TimeBlock 模块 - 类型定义
  *
+ * 基于 MVP-ARCHITECTURE.md 文档
  * @module timeblock/types
  */
+
+// ============================================================================
+// 基础类型
+// ============================================================================
+
+export type UUID = string;
+export type Timestamp = number;
+export type Tag = string;
+export type NoteContent = string;
+
+export interface JSONObject {
+  [key: string]: unknown;
+}
+
+export type JSONValue = string | number | boolean | null | JSONObject | JSONValue[];
+
+// ============================================================================
+// Event 类型
+// ============================================================================
+
+/**
+ * 事件
+ * 基于 MVP-ARCHITECTURE.md 2.1 Event 定义
+ */
+export interface Event {
+  /** 唯一标识 */
+  id: UUID;
+  /** 发生时间 */
+  timestamp: Timestamp;
+  /** 记录内容 */
+  content: NoteContent;
+  /** 主题标签 */
+  tags: Set<Tag>;
+  /** 扩展元数据 */
+  meta?: JSONObject;
+}
+
+/**
+ * 事件实现
+ */
+export class EventImpl implements Event {
+  readonly id: UUID;
+  readonly timestamp: Timestamp;
+  private _content: NoteContent;
+  private _tags: Set<Tag>;
+  private _meta?: JSONObject;
+
+  constructor(content: NoteContent, tags?: Tag[], meta?: JSONObject) {
+    this.id = crypto.randomUUID();
+    this.timestamp = Date.now();
+    this._content = content;
+    this._tags = new Set(tags || []);
+    this._meta = meta;
+  }
+
+  get content(): NoteContent {
+    return this._content;
+  }
+
+  get tags(): Set<Tag> {
+    return this._tags;
+  }
+
+  get meta(): JSONObject | undefined {
+    return this._meta;
+  }
+
+  /** 序列化 */
+  toJSON(): JSONObject {
+    return {
+      id: this.id,
+      timestamp: this.timestamp,
+      content: this._content,
+      tags: Array.from(this._tags),
+      meta: this._meta,
+    };
+  }
+
+  /** 从 JSON 恢复 */
+  static fromJSON(json: JSONObject): EventImpl {
+    const event = new EventImpl(
+      String(json.content),
+      (json.tags as Tag[]) || []
+    );
+    // 通过 unknown 中转绕过只读检查
+    const data = event as unknown as Record<string, unknown>;
+    data.id = json.id;
+    data.timestamp = json.timestamp;
+    data._meta = json.meta;
+    return event;
+  }
+}
+
+// ============================================================================
+// TimeBlock 类型
+// ============================================================================
+
+/**
+ * 时间块
+ * 基于 MVP-ARCHITECTURE.md 2.2 TimeBlock 定义
+ */
+export interface TimeBlock {
+  /** 唯一标识 */
+  id: UUID;
+  /** 块名称 */
+  name: string;
+  /** 个人记录 */
+  note?: string;
+  /** 开始事件 ID */
+  startId: UUID;
+  /** 结束事件 ID */
+  endId?: UUID;
+  /** 主题标签 */
+  tags: Set<Tag>;
+  /** 扩展元数据 */
+  meta?: JSONObject;
+}
+
+/**
+ * 时间块实现
+ */
+export class TimeBlockImpl implements TimeBlock {
+  readonly id: UUID;
+  name: string;
+  note?: string;
+  readonly startId: UUID;
+  endId?: UUID;
+  private _tags: Set<Tag>;
+  private _meta?: JSONObject;
+
+  constructor(name: string, startId: UUID, tags?: Tag[], note?: string) {
+    this.id = crypto.randomUUID();
+    this.name = name;
+    this.startId = startId;
+    this._tags = new Set(tags || []);
+    this.note = note;
+  }
+
+  get tags(): Set<Tag> {
+    return this._tags;
+  }
+
+  get meta(): JSONObject | undefined {
+    return this._meta;
+  }
+
+  set meta(value: JSONObject | undefined) {
+    this._meta = value;
+  }
+
+  /** 获取开始事件时间戳（供查询使用） */
+  getStartTimestamp(): Timestamp {
+    return 0; // 由外部事件映射提供
+  }
+
+  /** 序列化 */
+  toJSON(): JSONObject {
+    return {
+      id: this.id,
+      name: this.name,
+      note: this.note,
+      startId: this.startId,
+      endId: this.endId,
+      tags: Array.from(this._tags),
+      meta: this._meta,
+    };
+  }
+
+  /** 从 JSON 恢复 */
+  static fromJSON(json: JSONObject): TimeBlockImpl {
+    const block = new TimeBlockImpl(
+      String(json.name),
+      json.startId as UUID,
+      (json.tags as Tag[]) || [],
+      json.note as string | undefined
+    );
+    // 通过 unknown 中转绕过只读检查
+    const data = block as unknown as Record<string, unknown>;
+    data.id = json.id;
+    data.endId = json.endId;
+    data._meta = json.meta;
+    return block;
+  }
+}
+
+// ============================================================================
+// PlannedTimeBlock 类型
+// ============================================================================
+
+/**
+ * 计划中时间块
+ * 基于 MVP-ARCHITECTURE.md 2.3 PlannedTimeBlock 定义
+ *
+ * 用途：跟踪当前活跃但未结束的时间块
+ */
+export interface PlannedTimeBlock {
+  /** 引用开始事件 */
+  startId: UUID;
+  /** 块名称 */
+  name: string;
+  /** 主题标签 */
+  tags: Set<Tag>;
+  /** 扩展元数据 */
+  meta?: JSONObject;
+}
+
+// ============================================================================
+// 时间块状态（用于持久化版本）
+// ============================================================================
 
 /**
  * 时间块状态
@@ -11,7 +221,7 @@ export enum TimeBlockStatus {
   Pending = 'pending',       // 待执行
   InProgress = 'in_progress', // 执行中
   Completed = 'completed',    // 已完成
-  Cancelled = 'cancelled',    // 已取消
+  Cancelled = 'cancelled',   // 已取消
 }
 
 /**
@@ -27,138 +237,18 @@ export enum TimeBlockType {
 }
 
 /**
- * 时间块标签
+ * 持久化时间块（兼容旧版）
  */
-export interface TimeBlockLabel {
+export interface PersistentTimeBlock {
   id: string;
-  name: string;
-  color: string;
-}
-
-/**
- * 时间块
- */
-export interface TimeBlock {
-  /** 唯一标识 */
-  id: string;
-  /** 标题 */
   title: string;
-  /** 描述 */
   description?: string;
-  /** 开始时间 (ISO 8601) */
   startTime: string;
-  /** 结束时间 (ISO 8601) */
   endTime: string;
-  /** 状态 */
   status: TimeBlockStatus;
-  /** 类型 */
   type: TimeBlockType;
-  /** 标签 ID 列表 */
   labelIds?: string[];
-  /** 备注 */
   notes?: string;
-  /** 创建时间 */
   createdAt: string;
-  /** 更新时间 */
   updatedAt?: string;
 }
-
-/**
- * 创建时间块参数
- */
-export interface CreateTimeBlockParams {
-  title: string;
-  description?: string;
-  startTime: string;
-  endTime: string;
-  type?: TimeBlockType;
-  labelIds?: string[];
-  notes?: string;
-}
-
-/**
- * 更新时间块参数
- */
-export interface UpdateTimeBlockParams {
-  title?: string;
-  description?: string;
-  startTime?: string;
-  endTime?: string;
-  status?: TimeBlockStatus;
-  type?: TimeBlockType;
-  labelIds?: string[];
-  notes?: string;
-}
-
-/**
- * 时间块查询条件
- */
-export interface TimeBlockQuery {
-  /** 按状态筛选 */
-  status?: TimeBlockStatus | TimeBlockStatus[];
-  /** 按类型筛选 */
-  type?: TimeBlockType | TimeBlockType[];
-  /** 开始时间范围 */
-  startTimeFrom?: string;
-  startTimeTo?: string;
-  /** 结束时间范围 */
-  endTimeFrom?: string;
-  endTimeTo?: string;
-  /** 按标签筛选 */
-  labelIds?: string[];
-}
-
-/**
- * 时间统计
- */
-export interface TimeBlockStats {
-  /** 总时间块数 */
-  totalCount: number;
-  /** 已完成数 */
-  completedCount: number;
-  /** 总时长（分钟） */
-  totalDuration: number;
-  /** 已完成时长（分钟） */
-  completedDuration: number;
-  /** 按类型统计 */
-  byType: Record<TimeBlockType, { count: number; duration: number }>;
-  /** 按状态统计 */
-  byStatus: Record<TimeBlockStatus, { count: number; duration: number }>;
-}
-
-/**
- * 一天的时间块摘要
- */
-export interface DaySummary {
-  date: string;
-  totalBlocks: number;
-  completedBlocks: number;
-  totalWorkMinutes: number;
-  totalRestMinutes: number;
-  firstBlock?: TimeBlock;
-  lastBlock?: TimeBlock;
-}
-
-/**
- * TimeBlock 存储配置
- */
-export interface TimeBlockStorageConfig {
-  /** 数据目录路径 */
-  dataPath: string;
-  /** 文件名 */
-  filename: string;
-  /** 是否启用压缩 */
-  compress?: boolean;
-  /** 最大保留天数 (0 = 不限制) */
-  maxRetentionDays?: number;
-}
-
-/**
- * 默认存储配置
- */
-export const DEFAULT_TIMEBLOCK_STORAGE_CONFIG: TimeBlockStorageConfig = {
-  dataPath: './data/timeblocks',
-  filename: 'timeblocks.jsonl',
-  compress: false,
-  maxRetentionDays: 0,
-};

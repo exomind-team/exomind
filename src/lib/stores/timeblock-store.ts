@@ -8,7 +8,7 @@
 import { create } from 'zustand';
 import { persist, createJSONStorage } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import { TimeBlock, TimeBlockStatus, TimeBlockType } from '@/lib/timeblock';
+import type { TimeBlock } from '@/lib/timeblock';
 
 // ============================================================================
 // 类型定义（兼容旧 API）
@@ -224,25 +224,15 @@ export function parseTimeBlockCommand(input: string): TimeBlockCommand {
  */
 export function toTimeBlock(
   block: PlannedTimeBlockImplData,
-  events: TimeBlockEvent[]
+  _events: TimeBlockEvent[]
 ): TimeBlock {
-  const startEvent = events.find((e) => e.id === block.startId);
-  const endEvent = events.find((e) => e.id === block.endId);
-
   return {
     id: block.id,
-    title: block.name,
-    description: block._note,
-    startTime: startEvent ? new Date(startEvent.timestamp).toISOString() : new Date().toISOString(),
-    endTime: endEvent
-      ? new Date(endEvent.timestamp).toISOString()
-      : new Date().toISOString(),
-    status: endEvent ? TimeBlockStatus.Completed : TimeBlockStatus.InProgress,
-    type: TimeBlockType.Work,
-    notes: block._note,
-    createdAt: startEvent
-      ? new Date(startEvent.timestamp).toISOString()
-      : new Date().toISOString(),
+    name: block.name,
+    note: block._note,
+    startId: block.startId,
+    endId: block.endId,
+    tags: new Set(block._events.flatMap(e => e._tags)),
   };
 }
 
@@ -252,9 +242,9 @@ export function toTimeBlock(
 export function fromTimeBlock(block: TimeBlock): PlannedTimeBlockImplData {
   return {
     id: block.id,
-    startId: uuidv4(),
-    name: block.title,
-    _note: block.notes,
+    startId: block.startId,
+    name: block.name,
+    _note: block.note,
     _events: [],
   };
 }
