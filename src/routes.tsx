@@ -2,6 +2,8 @@ import { createRootRoute, createRouter, createRoute, Outlet } from "@tanstack/re
 import { Link, useLocation } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { ChatPage } from "@/components/Chat/ChatPage";
+import { SettingsPage } from "@/components/Settings/SettingsPage";
+import { DevicesPage } from "@/components/Settings/DevicesPage";
 
 const sidebarItems = [
   { title: "聊天", path: "/", icon: "message-circle" },
@@ -13,7 +15,7 @@ function Sidebar() {
   const location = useLocation();
 
   return (
-    <aside className="w-64 border-r bg-card h-screen flex flex-col">
+    <aside className="w-64 border-r bg-card h-screen flex flex-col" data-testid="device-panel">
       <div className="p-4 border-b">
         <h1 className="text-xl font-bold">ExoMind</h1>
       </div>
@@ -74,12 +76,7 @@ const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
   component: function Settings() {
-    return (
-      <div className="p-2">
-        <h3 className="text-lg font-medium">设置</h3>
-        <p className="text-muted-foreground">P2P 和设备管理设置</p>
-      </div>
-    );
+    return <SettingsPage connectionStatus="disconnected" />;
   },
 });
 
@@ -88,12 +85,7 @@ const devicesRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/devices",
   component: function Devices() {
-    return (
-      <div className="p-2" data-testid="device-panel">
-        <h3 className="text-lg font-medium">设备</h3>
-        <p className="text-muted-foreground">管理已配对的设备</p>
-      </div>
-    );
+    return <DevicesPage connectionStatus="disconnected" />;
   },
 });
 
