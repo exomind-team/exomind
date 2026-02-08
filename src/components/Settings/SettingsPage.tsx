@@ -15,7 +15,8 @@ import {
   QrCode,
   Users,
   Plus,
-  Trash2
+  Trash2,
+  Save
 } from 'lucide-react';
 import { useChatStore } from '../../lib/stores/chat-store';
 import { exportMessagesToMarkdown } from '../../hooks/useMarkdownExport';
@@ -41,6 +42,8 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
   const [error, setError] = useState<string | null>(null);
   const [exportSuccess, setExportSuccess] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [saveSuccess, setSaveSuccess] = useState(false);
   const [isMobile, setIsMobile] = useState(false);
   const [pairedDevices, setPairedDevices] = useState<PairedDeviceType[]>([]);
 
@@ -247,6 +250,61 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
       setError('导出失败: ' + (err instanceof Error ? err.message : String(err)));
     } finally {
       setIsExporting(false);
+    }
+  };
+
+  // 保存数据到 JSON 文件（参考 MVP 格式）
+  const handleSaveData = async () => {
+    if (messages.length === 0 && pairedDevices.length === 0) {
+      setError('没有数据可保存');
+      return;
+    }
+
+    setIsSaving(true);
+    setError(null);
+    setSaveSuccess(false);
+
+    try {
+      // 构建 MVP 格式的数据
+      const data = {
+        events: messages.map(msg => ({
+          id: msg.id,
+          timestamp: msg.timestamp,
+          content: msg.content,
+          tags: msg.direction === 'outgoing' ? [] : ['received'],
+          meta: {
+            senderId: msg.senderId,
+            receiverId: msg.receiverId,
+            status: msg.status,
+            direction: msg.direction
+          }
+        })),
+        timeBlocks: [], // Web 端暂无时间块功能，保留空数组
+        savedAt: new Date().toISOString(),
+        version: '1.0'
+      };
+
+      // 生成文件名
+      const timestamp = new Date().toISOString().slice(0, 10);
+      const filename = `exomind-data-${timestamp}.json`;
+
+      // 创建 Blob 并下载
+      const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+
+      setSaveSuccess(true);
+      setTimeout(() => setSaveSuccess(false), 3000);
+    } catch (err) {
+      setError('保存失败: ' + (err instanceof Error ? err.message : String(err)));
+    } finally {
+      setIsSaving(false);
     }
   };
 
@@ -541,6 +599,47 @@ export function SettingsPage({ connectionStatus, onConnect, onDisconnect }: Sett
                   导出消息
                   {messages.length > 0 && (
                     <span className="export-stats">({messages.length} 条)</span>
+                  )}
+                </>
+              )}
+            </button>
+          </section>
+
+          {/* 数据备份 */}
+          <section className={`export-section ${isMobile ? 'is-mobile' : ''}`}>
+            <h2 className={`section-title ${isMobile ? 'is-mobile' : ''}`}>
+              <Save size={20} className="section-icon" />
+              数据备份
+            </h2>
+            <p className="section-description">
+              将所有数据保存为 JSON 文件（参考 MVP 格式），可用于迁移或备份
+            </p>
+
+            {saveSuccess && (
+              <div className={`alert alert-success ${isMobile ? 'is-mobile' : ''}`}>
+                <Check size={16} />
+                数据已成功保存到 JSON 文件
+              </div>
+            )}
+
+            <button
+              onClick={handleSaveData}
+              disabled={isSaving || (messages.length === 0 && pairedDevices.length === 0)}
+              className={`btn btn-primary ${isMobile ? 'is-mobile' : ''}`}
+            >
+              {isSaving ? (
+                <>
+                  <RefreshCw size={16} className="animate-spin" />
+                  保存中...
+                </>
+              ) : (
+                <>
+                  <Save size={16} />
+                  保存数据
+                  {(messages.length > 0 || pairedDevices.length > 0) && (
+                    <span className="export-stats">
+                      ({messages.length} 条消息{pairedDevices.length > 0 ? `, ${pairedDevices.length} 个设备` : ''})
+                    </span>
                   )}
                 </>
               )}

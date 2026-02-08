@@ -729,12 +729,3 @@ export function getWSClient(config?: Partial<WSConfig>): WebSocketClient {
 export function destroyWSClient(): void {
   WebSocketClient.destroyInstance();
 }
-
-// 导出类型供外部使用
-export type {
-  WSConfig,
-  WSMessage,
-  WSConnectionResult,
-  WSSendResult,
-  WSMessagePayload,
-};
