@@ -39,6 +39,26 @@ test.describe('Message Flow E2E', () => {
     // 2. 验证消息立即出现
     await expect(page.locator('[data-testid="message-list"]')).toContainText('状态测试消息');
   });
+
+  test('E2E-006: 消息持久化（刷新后保留）', async ({ page }) => {
+    // 测试消息在刷新后仍然保留
+
+    // 1. 发送一条消息
+    const testMessage = `持久化测试 ${Date.now()}`;
+    const input = page.locator('[data-testid="message-input"]');
+    await input.fill(testMessage);
+    await page.locator('[data-testid="send-button"]').click();
+
+    // 2. 验证消息出现在列表
+    await expect(page.locator('[data-testid="message-list"]')).toContainText(testMessage);
+
+    // 3. 刷新页面
+    await page.reload();
+    await page.waitForLoadState('domcontentloaded');
+
+    // 4. 验证消息仍然存在
+    await expect(page.locator('[data-testid="message-list"]')).toContainText(testMessage);
+  });
 });
 
 test.describe('Device Management E2E', () => {

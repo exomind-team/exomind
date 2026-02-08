@@ -5,7 +5,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Send, Circle, Plus, Clock } from 'lucide-react';
+import { Send, Circle, Clock } from 'lucide-react';
 
 export function ChatPage() {
   const [inputValue, setInputValue] = useState('');
@@ -254,10 +254,6 @@ export function ChatPage() {
             <Clock className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
             <span className="hidden sm:inline">时间块</span>
           </Button>
-          <Button variant="outline" size="sm" className="text-xs px-2 sm:px-3">
-            <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
-            <span className="hidden sm:inline">新建</span>
-          </Button>
         </div>
       </div>
 
@@ -376,9 +372,6 @@ export function ChatPage() {
       {/* 输入区域 */}
       <div className="px-3 sm:px-6 py-3 border-t bg-card shrink-0 safe-area-pb">
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon" className="shrink-0">
-            <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
-          </Button>
           <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
