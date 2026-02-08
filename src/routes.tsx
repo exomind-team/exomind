@@ -82,14 +82,14 @@ function Layout() {
   }, []);
 
   return (
-    <div className="flex h-screen bg-background" data-testid="app-container">
+    <div className="flex h-[100dvh] lg:h-screen bg-background" data-testid="app-container">
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
       {/* 移动端菜单按钮 */}
       {isMobile && (
         <button
           onClick={() => setSidebarOpen(true)}
-          className="fixed top-4 left-4 z-30 p-2 bg-background border rounded-md shadow-md"
+          className="fixed top-4 left-4 z-30 p-2 bg-background border rounded-md shadow-md lg:hidden"
         >
           <Menu size={20} />
         </button>

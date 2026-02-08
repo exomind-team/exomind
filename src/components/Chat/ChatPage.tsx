@@ -208,12 +208,12 @@ export function ChatPage() {
   }, [activeBlock, events]);
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex flex-col h-full max-h-[100dvh] lg:max-h-screen">
       {/* 头部 */}
-      <div className="flex items-center justify-between px-6 py-4 border-b">
-        <div>
-          <h2 className="text-2xl font-bold">事件记录</h2>
-          <p className="text-sm text-muted-foreground" data-testid="connection-status">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0">
+        <div className="flex items-center gap-2">
+          <h2 className="text-lg sm:text-2xl font-bold">事件记录</h2>
+          <p className="text-xs sm:text-sm text-muted-foreground" data-testid="connection-status">
             {connectedDeviceCount > 0 ? (
               <span className="flex items-center gap-2">
                 <Circle size={8} fill="currentColor" className={isConnected ? "text-green-500" : "text-yellow-500"} />
@@ -227,10 +227,10 @@ export function ChatPage() {
             )}
           </p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-1 sm:gap-2 flex-wrap">
           {/* 活跃时间块显示 */}
           {activeBlockInfo && (
-            <Badge variant="default" className="flex items-center gap-1">
+            <Badge variant="default" className="flex items-center gap-1 text-xs">
               <Clock className="h-3 w-3" />
               <span className={activeBlockInfo.isLong ? "text-red-300" : ""}>
                 {activeBlockInfo.name} ({activeBlockInfo.duration})
@@ -238,51 +238,52 @@ export function ChatPage() {
             </Badge>
           )}
           {pendingCount > 0 && (
-            <Badge variant="outline" data-testid="pending-count">
+            <Badge variant="outline" data-testid="pending-count" className="text-xs">
               {pendingCount} 条待发送
             </Badge>
           )}
-          <Badge variant={network.isOnline ? "default" : "secondary"}>
+          <Badge variant={network.isOnline ? "default" : "secondary"} className="text-xs">
             {network.isOnline ? "在线" : "离线"}
           </Badge>
           <Button
             variant={showTimeBlocks ? "default" : "outline"}
             size="sm"
             onClick={() => setShowTimeBlocks(!showTimeBlocks)}
+            className="text-xs px-2 sm:px-3"
           >
-            <Clock className="h-4 w-4 mr-2" />
-            时间块
+            <Clock className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+            <span className="hidden sm:inline">时间块</span>
           </Button>
-          <Button variant="outline" size="sm">
-            <Plus className="h-4 w-4 mr-2" />
-            新建
+          <Button variant="outline" size="sm" className="text-xs px-2 sm:px-3">
+            <Plus className="h-3 w-3 sm:h-4 sm:w-4 mr-1" />
+            <span className="hidden sm:inline">新建</span>
           </Button>
         </div>
       </div>
 
       {/* 消息/事件列表 */}
-      <div className="flex-1 overflow-auto p-6" ref={messagesEndRef as React.RefObject<HTMLDivElement>} data-testid="message-list">
+      <div className="flex-1 overflow-auto p-3 sm:p-6" ref={messagesEndRef as React.RefObject<HTMLDivElement>} data-testid="message-list">
         {hasNoEvents ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-16 h-16 rounded-full bg-muted flex items-center justify-center mb-4">
-              <span className="text-3xl">📝</span>
+            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4">
+              <span className="text-2xl sm:text-3xl">📝</span>
             </div>
-            <p className="text-lg font-medium mb-1">暂无事件记录</p>
-            <p className="text-sm text-muted-foreground">
+            <p className="text-base sm:text-lg font-medium mb-1">暂无事件记录</p>
+            <p className="text-xs sm:text-sm text-muted-foreground">
               输入内容开始记录<br />
-              <code className="text-xs bg-muted px-1 rounded">开始xxx</code> 开始时间块，<code className="text-xs bg-muted px-1 rounded">结束</code> 结束时间块
+              <code className="text-xs bg-muted px-1 rounded">开始xxx</code> 开始时间块，<code className="text-xs bg-muted px-1 rounded">结束</code>
             </p>
           </div>
         ) : (
-          <div className="space-y-6">
+          <div className="space-y-4 sm:space-y-6">
             {Array.from(groupedEvents.entries()).map(([date, dateEvents]) => (
               <div key={date}>
-                <div className="flex items-center justify-center mb-4">
-                  <span className="text-xs text-muted-foreground bg-muted px-3 py-1 rounded-full">
+                <div className="flex items-center justify-center mb-3 sm:mb-4">
+                  <span className="text-xs text-muted-foreground bg-muted px-2 sm:px-3 py-1 rounded-full">
                     {date}
                   </span>
                 </div>
-                <div className="space-y-3">
+                <div className="space-y-2 sm:space-y-3">
                   {dateEvents.map((event) => {
                     const isTimeBlockEvent = event.tags.has('block_start') || event.tags.has('block_end');
                     const isStart = event.tags.has('block_start');
@@ -290,10 +291,10 @@ export function ChatPage() {
                     return (
                       <div
                         key={event.id}
-                        className={`flex gap-3 ${isOwnMessage(event as any) ? 'flex-row-reverse' : ''}`}
+                        className={`flex gap-2 sm:gap-3 ${isOwnMessage(event as any) ? 'flex-row-reverse' : ''}`}
                         data-testid={`message-${(event as any).status || 'sent'}`}
                       >
-                        <Avatar className="h-8 w-8">
+                        <Avatar className="h-6 w-6 sm:h-8 sm:w-8 shrink-0">
                           <AvatarFallback className={isTimeBlockEvent
                             ? (isStart ? "bg-blue-500 text-white" : "bg-red-500 text-white")
                             : (isOwnMessage(event as any) ? "bg-primary text-primary-foreground" : "bg-muted")
@@ -301,9 +302,9 @@ export function ChatPage() {
                             {getInitials(event.content.slice(0, 2) || 'EV')}
                           </AvatarFallback>
                         </Avatar>
-                        <div className={`max-w-[70%] ${isOwnMessage(event as any) ? 'text-right' : ''}`}>
+                        <div className={`max-w-[75%] sm:max-w-[70%] ${isOwnMessage(event as any) ? 'text-right' : ''}`}>
                           <div
-                            className={`inline-block px-4 py-2 rounded-2xl ${
+                            className={`inline-block px-3 py-1.5 sm:px-4 sm:py-2 rounded-2xl ${
                               isTimeBlockEvent
                                 ? (isStart
                                     ? "bg-blue-100 text-blue-800 rounded-br-md"
@@ -318,9 +319,9 @@ export function ChatPage() {
                                 {isStart ? '🔷' : '🔴'}
                               </span>
                             )}
-                            <p className="text-sm">{event.content}</p>
+                            <p className="text-xs sm:text-sm break-words">{event.content}</p>
                           </div>
-                          <p className="text-xs text-muted-foreground mt-1">
+                          <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
                             {formatTime(event.timestamp)}
                           </p>
                         </div>
@@ -337,7 +338,7 @@ export function ChatPage() {
 
       {/* 时间块面板 */}
       {showTimeBlocks && (
-        <div className="border-t bg-muted/30 p-4">
+        <div className="border-t bg-muted/30 p-3 sm:p-4 max-h-[40vh] sm:max-h-[50vh] overflow-auto">
           <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
             <Clock className="h-4 w-4" />
             时间块历史
@@ -353,13 +354,13 @@ export function ChatPage() {
                 return (
                   <div key={block.id} className="bg-background rounded-lg p-3 border">
                     <div className="flex items-center justify-between mb-2">
-                      <span className="font-medium">🔷 {block.name}</span>
+                      <span className="font-medium text-sm">🔷 {block.name}</span>
                       <span className="text-xs text-muted-foreground">
                         {startEvent && formatTime(startEvent.timestamp)}
                       </span>
                     </div>
                     {block._note && (
-                      <p className="text-sm text-muted-foreground mb-2">📝 {block._note}</p>
+                      <p className="text-xs sm:text-sm text-muted-foreground mb-2">📝 {block._note}</p>
                     )}
                     <div className="text-xs text-muted-foreground">
                       {blockEvents.length} 条事件
@@ -373,10 +374,10 @@ export function ChatPage() {
       )}
 
       {/* 输入区域 */}
-      <div className="px-6 py-4 border-t bg-card">
+      <div className="px-3 sm:px-6 py-3 border-t bg-card shrink-0 safe-area-pb">
         <div className="flex items-center gap-2">
-          <Button variant="ghost" size="icon">
-            <Plus className="h-5 w-5" />
+          <Button variant="ghost" size="icon" className="shrink-0">
+            <Plus className="h-4 w-4 sm:h-5 sm:w-5" />
           </Button>
           <Input
             value={inputValue}
@@ -386,10 +387,10 @@ export function ChatPage() {
               activeBlock
                 ? `记录中: ${activeBlock.name}...`
                 : network.isOnline
-                  ? "输入消息... (输入 '开始xxx' 开始时间块)"
+                  ? "输入消息... ('开始xxx' 开始时间块)"
                   : "离线模式 - 消息稍后发送"
             }
-            className="flex-1"
+            className="flex-1 min-w-0 text-xs sm:text-sm"
             disabled={!network.isOnline && hasNoEvents}
             data-testid="message-input"
           />
@@ -397,6 +398,7 @@ export function ChatPage() {
             onClick={handleSend}
             disabled={!inputValue.trim() || (!network.isOnline && hasNoEvents)}
             size="icon"
+            className="shrink-0"
             data-testid="send-button"
           >
             <Send className="h-4 w-4" />
