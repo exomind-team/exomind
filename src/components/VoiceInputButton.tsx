@@ -70,12 +70,18 @@ export function VoiceInputButton({
   className,
   style,
 }: VoiceInputButtonProps) {
+  // 权限状态类型
+  type PermissionState = 'checking' | 'granted' | 'denied' | 'prompt' | 'unavailable';
+
   // 主状态（只包含必要的渲染状态）
   const [state, setState] = useState<RecordingState>({
     state: 'idle',
     duration: 0,
     startTime: 0,
   });
+
+  // 麦克风权限状态
+  const [permissionState, setPermissionState] = useState<PermissionState>('checking');
 
   // 上一次状态（用于检测变化）
   const prevStateRef = useRef<VoiceButtonState>('idle');
@@ -128,9 +134,75 @@ export function VoiceInputButton({
     }
   }, [adapterConfig]);
 
+  // 检查麦克风权限状态
+  useEffect(() => {
+    const checkPermission = async () => {
+      // 检查 mediaDevices API 是否可用
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setPermissionState('unavailable');
+        return;
+      }
+
+      // 尝试查询权限状态
+      if (navigator.permissions?.query) {
+        try {
+          const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+          if (permissionStatus.state === 'granted') {
+            setPermissionState('granted');
+          } else if (permissionStatus.state === 'denied') {
+            setPermissionState('denied');
+          } else {
+            setPermissionState('prompt');
+          }
+        } catch {
+          // 无法查询权限，假设需要提示用户
+          setPermissionState('prompt');
+        }
+      } else {
+        // 权限 API 不可用，需要提示用户
+        setPermissionState('prompt');
+      }
+    };
+
+    checkPermission();
+  }, []);
+
   // canvas ref
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
+
+  // 请求麦克风权限
+  const requestPermission = useCallback(async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const error = new Error('您的浏览器不支持语音录制功能');
+      (error as Error & { code: string; userTip: string }).code = 'API_NOT_SUPPORTED';
+      (error as Error & { userTip: string }).userTip = '请使用最新版本的 Chrome、Edge 或 Safari 浏览器';
+      callbacksRef.current.onError?.(`${error.message}\n提示: ${error.userTip}`);
+      setPermissionState('unavailable');
+      return false;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 释放刚获取的 stream
+      stream.getTracks().forEach(track => track.stop());
+      setPermissionState('granted');
+      return true;
+    } catch (error) {
+      const errorName = (error as DOMException).name;
+      if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+        setPermissionState('denied');
+        callbacksRef.current.onError?.('麦克风权限被拒绝\n提示: 请在浏览器设置中允许麦克风访问');
+      } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+        setPermissionState('denied');
+        callbacksRef.current.onError?.('未检测到麦克风设备\n提示: 请确保电脑已连接麦克风');
+      } else {
+        setPermissionState('denied');
+        callbacksRef.current.onError?.(`麦克风访问失败: ${errorName || error}`);
+      }
+      return false;
+    }
+  }, []);
 
   const releaseRecordingResources = useCallback(() => {
     if (streamRef.current) {
@@ -230,11 +302,88 @@ export function VoiceInputButton({
     void finish();
   }, [releaseRecordingResources]);
 
-  // 开始录音
-  const startRecording = useCallback(async () => {
+  // 调试日志函数
+  const logDebug = useCallback((type: string, message: string, data?: unknown) => {
+    const timestamp = new Date().toISOString();
+    const logEntry = `[VoiceInput][${timestamp}][${type}] ${message}`;
+    if (data !== undefined) {
+      console.log(logEntry, data);
+    } else {
+      console.log(logEntry);
+    }
+  }, []);
+
+  // 检测 HTTPS 环境（完整检测）
+  const isSecureContext = useCallback(() => {
+    // 完整检测：使用 browser 内置的 isSecureContext
+    // getUserMedia 要求 HTTPS 或 localhost
+    return window.isSecureContext;
+  }, []);
+
+  // 获取详细的错误信息和用户提示
+  const getErrorInfo = useCallback((error: Error | DOMException): { message: string; userTip: string; code: string } => {
+    const errorName = error.name || 'UnknownError';
+    const errorMessage = error.message || String(error);
+
+    // NotAllowedError - 权限被拒绝
+    if (errorName === 'NotAllowedError' || errorMessage.includes('Permission denied') || errorMessage.includes('permission')) {
+      return {
+        message: '麦克风权限被拒绝',
+        userTip: '请在浏览器设置中允许麦克风访问：点击地址栏左侧的锁图标 -> 权限 -> 麦克风 -> 允许',
+        code: 'PERMISSION_DENIED',
+      };
+    }
+
+    // NotFoundError - 找不到设备
+    if (errorName === 'NotFoundError' || errorMessage.includes('Requested device not found') || errorMessage.includes('No device')) {
+      return {
+        message: '未检测到麦克风设备',
+        userTip: '请确保电脑已连接麦克风，并检查设备是否正常工作',
+        code: 'DEVICE_NOT_FOUND',
+      };
+    }
+
+    // NotReadableError - 设备被占用
+    if (errorName === 'NotReadableError' || errorMessage.includes('device in use') || errorMessage.includes('busy')) {
+      return {
+        message: '麦克风正在被其他程序使用',
+        userTip: '请关闭其他使用麦克风的程序（如视频会议软件、录音软件等），然后重试',
+        code: 'DEVICE_IN_USE',
+      };
+    }
+
+    // NotSupportedError - 不支持的环境
+    if (errorName === 'NotSupportedError' || errorMessage.includes('secure context') || errorMessage.includes('HTTPS')) {
+      return {
+        message: '当前环境不支持语音录制',
+        userTip: '语音功能需要 HTTPS 环境或 localhost。请确保使用安全连接，或在开发环境下使用 localhost',
+        code: 'NOT_SUPPORTED',
+      };
+    }
+
+    // OverconstrainedError - 约束条件不支持
+    if (errorName === 'OverconstrainedError' || errorMessage.includes('constraint')) {
+      return {
+        message: '麦克风不支持所请求的音频配置',
+        userTip: '正在尝试使用默认音频配置...',
+        code: 'CONSTRAINT_FAILED',
+      };
+    }
+
+    // 其他错误
+    return {
+      message: `麦克风访问失败: ${errorMessage}`,
+      userTip: '请检查麦克风连接或浏览器权限设置后重试',
+      code: errorName.toUpperCase().replace(/ERROR$/, '') || 'UNKNOWN',
+    };
+  }, []);
+
+  // 尝试获取麦克风（带重试逻辑）
+  const tryGetUserMedia = useCallback(async (retryCount = 0): Promise<MediaStream | null> => {
+    const maxRetries = 2;
+
     try {
-      operationTokenRef.current += 1;
-      // 获取麦克风
+      logDebug('INFO', `尝试获取麦克风权限 (第 ${retryCount + 1} 次)`);
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
@@ -243,9 +392,83 @@ export function VoiceInputButton({
           channelCount: 1,
         }
       });
-      streamRef.current = stream;
+      logDebug('SUCCESS', '麦克风获取成功', { tracks: stream.getTracks().length });
+      return stream;
+    } catch (error) {
+      const errorInfo = getErrorInfo(error as Error | DOMException);
+      logDebug('ERROR', `麦克风获取失败 (第 ${retryCount + 1} 次)`, { error, errorInfo });
 
-      // 创建 AudioContext 和 Analyser
+      // 如果是约束失败且还有重试次数，尝试不使用约束
+      if (errorInfo.code === 'CONSTRAINT_FAILED' && retryCount < maxRetries) {
+        logDebug('INFO', '约束条件不被支持，尝试使用默认配置');
+        return tryGetUserMedia(retryCount + 1);
+      }
+
+      // 抛出带有详细信息的错误
+      const enhancedError = new Error(errorInfo.message);
+      (enhancedError as Error & { code: string; userTip: string }).code = errorInfo.code;
+      (enhancedError as Error & { userTip: string }).userTip = errorInfo.userTip;
+      throw enhancedError;
+    }
+  }, [logDebug, getErrorInfo]);
+
+  // 开始录音
+  const startRecording = useCallback(async () => {
+    const currentToken = ++operationTokenRef.current;
+
+    try {
+      logDebug('INFO', '开始录音流程', { state: state.state, token: currentToken });
+
+      // 1. 检查权限状态
+      if (permissionState === 'unavailable') {
+        logDebug('ERROR', 'mediaDevices API 不可用');
+        const error = new Error('您的浏览器不支持语音录制功能');
+        (error as Error & { code: string; userTip: string }).code = 'API_NOT_SUPPORTED';
+        (error as Error & { code: string; userTip: string }).userTip = '请使用最新版本的 Chrome、Edge 或 Safari 浏览器';
+        throw error;
+      }
+
+      // 如果权限未授予，先请求权限
+      if (permissionState !== 'granted') {
+        logDebug('INFO', '权限未授予，先请求权限');
+        const granted = await requestPermission();
+        if (!granted) {
+          logDebug('WARN', '权限请求失败');
+          return;
+        }
+        if (currentToken !== operationTokenRef.current) {
+          logDebug('INFO', '操作已被取消，跳过录音');
+          return;
+        }
+      }
+
+      // 2. 检测 mediaDevices API 可用性（双重检查）
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        logDebug('ERROR', 'mediaDevices API 不可用');
+        const error = new Error('您的浏览器不支持语音录制功能');
+        (error as Error & { code: string; userTip: string }).code = 'API_NOT_SUPPORTED';
+        (error as Error & { code: string; userTip: string }).userTip = '请使用最新版本的 Chrome、Edge 或 Safari 浏览器';
+        throw error;
+      }
+      logDebug('INFO', 'mediaDevices API 检查通过');
+
+      // 3. 获取麦克风（带重试逻辑）
+      const stream = await tryGetUserMedia();
+      if (!stream) {
+        logDebug('WARN', '无法获取麦克风权限');
+        return;
+      }
+      if (currentToken !== operationTokenRef.current) {
+        logDebug('INFO', '操作已被取消，跳过录音');
+        return;
+      }
+      streamRef.current = stream;
+      logDebug('INFO', 'MediaStream 已获取', {
+        audioTracks: stream.getAudioTracks().length,
+        label: stream.getAudioTracks()[0]?.label || 'unknown'
+      });
+
+      // 5. 创建 AudioContext 和 Analyser
       const audioContext = new AudioContext();
       audioContextRef.current = audioContext;
       const analyser = audioContext.createAnalyser();
@@ -253,11 +476,16 @@ export function VoiceInputButton({
       analyserRef.current = analyser;
       const source = audioContext.createMediaStreamSource(stream);
       source.connect(analyser);
+      logDebug('INFO', 'AudioContext 和 Analyser 创建成功', { state: audioContext.state });
 
-      // 创建 MediaRecorder
+      // 6. 创建 MediaRecorder
       const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
         ? 'audio/webm;codecs=opus'
-        : 'audio/webm';
+        : MediaRecorder.isTypeSupported('audio/webm')
+          ? 'audio/webm'
+          : 'audio/ogg;codecs=opus';
+      logDebug('INFO', `选择的 MIME 类型: ${mimeType}`);
+
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
       mediaRecorderRef.current = mediaRecorder;
       recordedChunksRef.current = [];
@@ -269,18 +497,37 @@ export function VoiceInputButton({
       };
 
       mediaRecorder.start(100);
+      logDebug('INFO', 'MediaRecorder 已启动');
 
-      // 更新状态
+      // 7. 更新状态
       setState({
         state: 'recording',
         duration: 0,
         startTime: Date.now(),
       });
+      logDebug('SUCCESS', '录音状态已更新为 recording');
 
     } catch (error) {
-      callbacksRef.current.onError?.(`麦克风访问失败: ${error}`);
+      const errorInfo = getErrorInfo(error as Error | DOMException);
+      const userTip = (error as Error & { userTip: string }).userTip || errorInfo.userTip;
+      const code = (error as Error & { code: string }).code || errorInfo.code;
+
+      logDebug('ERROR', `录音失败: ${errorInfo.message}`, { code, userTip });
+
+      // 更新状态为 idle
+      if (currentToken === operationTokenRef.current) {
+        setState(prev => {
+          if (prev.state !== 'idle') {
+            return { state: 'idle', duration: 0, startTime: 0 };
+          }
+          return prev;
+        });
+
+        // 调用错误回调（包含详细信息）
+        callbacksRef.current.onError?.(`${errorInfo.message}\n提示: ${userTip}`);
+      }
     }
-  }, []);
+  }, [requestPermission, permissionState, tryGetUserMedia, getErrorInfo, logDebug, state.state]);
 
   // 处理按钮点击
   const handleClick = useCallback(() => {
@@ -582,7 +829,7 @@ export function VoiceInputButton({
       </button>
 
       {/* 快捷键提示 */}
-      {enableShortcut && state.state === 'idle' && (
+      {enableShortcut && state.state === 'idle' && permissionState === 'granted' && (
         <div style={{
           position: 'absolute',
           bottom: -20,
@@ -593,6 +840,45 @@ export function VoiceInputButton({
           whiteSpace: 'nowrap',
         }}>
           按 [空格] 开始/停止
+        </div>
+      )}
+
+      {/* 权限未授予时显示获取权限按钮 */}
+      {permissionState !== 'granted' && permissionState !== 'checking' && (
+        <button
+          onClick={requestPermission}
+          style={{
+            width: buttonSize,
+            height: buttonSize,
+            borderRadius: '50%',
+            border: 'none',
+            background: 'linear-gradient(135deg, #ffa500 0%, #ff8c00 100%)',
+            boxShadow: '0 4px 12px rgba(255, 140, 0, 0.4)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: buttonSize * 0.3,
+            transition: 'all 0.3s ease',
+          }}
+          title="点击获取麦克风权限"
+        >
+          🔓
+        </button>
+      )}
+
+      {/* 权限提示文字 */}
+      {permissionState !== 'granted' && permissionState !== 'checking' && (
+        <div style={{
+          position: 'absolute',
+          bottom: -20,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          fontSize: 10,
+          color: '#ffa500',
+          whiteSpace: 'nowrap',
+        }}>
+          {permissionState === 'unavailable' ? '不支持' : '需要权限'}
         </div>
       )}
     </div>
