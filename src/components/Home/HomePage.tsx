@@ -8,8 +8,6 @@ import { Link } from '@tanstack/react-router';
 import { ClipboardList, Mic, Settings, ChevronRight, BookOpen } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
-import rehypeSanitize, { defaultSchema } from 'rehype-sanitize';
 import guideContent from '../../docs/user-guide.md?raw';
 
 export function HomePage() {
@@ -69,31 +67,13 @@ export function HomePage() {
           <h2 className="text-lg font-semibold">使用指南</h2>
         </div>
         <div className="p-6 prose prose-sm dark:prose-invert max-w-none
-            prose-table:border prose-table:border-border
-            prose-th:border prose-th:border-border prose-th:bg-muted
-            prose-td:border prose-td:border-border
-            prose-details:border prose-details:border-border prose-details:rounded-md
-            prose-summary:cursor-pointer prose-summary:font-semibold">
-          <ReactMarkdown
-            remarkPlugins={[remarkGfm]}
-            rehypePlugins={[
-              rehypeRaw,
-              [rehypeSanitize, {
-                ...defaultSchema,
-                attributes: {
-                  ...defaultSchema.attributes,
-                  table: [['className', 'border', 'border-collapse', 'w-full']],
-                  thead: [['className', 'bg-muted']],
-                  tbody: [['className', 'divide-y', 'divide-border']],
-                  tr: [['className', 'border-b', 'border-border']],
-                  th: [['className', 'px-4', 'py-2', 'text-left', 'font-semibold', 'border', 'border-border']],
-                  td: [['className', 'px-4', 'py-2', 'border', 'border-border']],
-                  details: [['className', 'border', 'rounded-md', 'mb-4', 'overflow-hidden']],
-                  summary: [['className', 'px-4', 'py-2', 'bg-muted/50', 'cursor-pointer', 'hover:bg-muted']],
-                },
-              }],
-            ]}
-          >
+            prose-headings:font-semibold
+            prose-h1:text-2xl prose-h2:text-xl prose-h3:text-lg
+            prose-table:border prose-table:border-collapse prose-th:border prose-th:bg-muted prose-td:border
+            prose-blockquote:border-l-4 prose-blockquote:border-primary prose-blockquote:bg-muted/30 prose-blockquote:rounded-r
+            prose-code:bg-muted prose-code:rounded prose-code:px-1.5 prose-code:py-0.5
+            prose-pre:bg-muted prose-pre:rounded-lg">
+          <ReactMarkdown remarkPlugins={[remarkGfm]}>
             {guideContent}
           </ReactMarkdown>
         </div>

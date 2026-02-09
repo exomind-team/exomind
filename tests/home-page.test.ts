@@ -41,8 +41,9 @@ describe('User guide markdown', () => {
 
   it('should contain basic sections', async () => {
     const content = await fs.promises.readFile(guidePath, 'utf-8');
-    expect(content).toContain('# ExoMind 使用指南');
+    expect(content).toContain('# 📖 ExoMind 使用指南');
     expect(content).toContain('快速开始');
     expect(content).toContain('功能介绍');
+    expect(content).toContain('常见问题');
   });
 });
