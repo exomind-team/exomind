@@ -15,7 +15,7 @@ export function RecordPage() {
   // TimeBlock Store
   const {
     events,
-    timeBlocks,
+    // timeBlocks, // TODO: 未来用于时间块管理
     activeBlock,
     addEvent,
     startBlock,
@@ -26,11 +26,15 @@ export function RecordPage() {
     save: saveTimeBlocks,
   } = useTimeBlockStore();
 
-  // 解析标签
+  // ============================================================================
+// TODO: 后续添加标签 Badge 显示功能
+// - 在每条记录下方显示解析出的标签
+// - 支持点击筛选相同标签的记录
+// ============================================================================
   const parseTags = (content: string): { text: string; tags: string[] } => {
     const tagRegex = /#(\S+)/g;
     const tags: string[] = [];
-    const text = content.replace(tagRegex, (match, tag) => {
+    const text = content.replace(tagRegex, (_match, tag) => {
       tags.push(tag);
       return '';
     }).trim();
@@ -106,7 +110,11 @@ export function RecordPage() {
     }
   };
 
-  // 格式化时间
+  // ============================================================================
+// TODO: 后续预定义标签集合
+// - 支持预定义标签类型
+// - 标签自动补全
+// ============================================================================
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
     const now = new Date();
