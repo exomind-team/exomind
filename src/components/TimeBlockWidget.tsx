@@ -58,6 +58,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
   // 定时器引用
   const timerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
+  const isRunningRef = useRef(false);  // 使用 ref 跟踪运行状态，避免闭包问题
 
   // Service
   const timeBlockService = getTimeBlockService();
@@ -105,8 +106,11 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
     }
 
     let lastFrameTime = Date.now();
+    isRunningRef.current = true;
 
     const tick = () => {
+      if (!isRunningRef.current) return;
+
       const now = Date.now();
       const delta = now - lastFrameTime;
       lastFrameTime = now;
@@ -119,6 +123,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
         // 倒计时结束
         if (timerMode === 'countdown' && newElapsed <= 0) {
           setTimerState('ended');
+          isRunningRef.current = false;
           setElapsed(0);
           setFeedbackOpen(true);
           if (timerRef.current) {
@@ -133,13 +138,13 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
         return Math.max(0, newElapsed);
       });
 
-      if (timerState === 'running') {
+      if (isRunningRef.current) {
         timerRef.current = requestAnimationFrame(tick);
       }
     };
 
     timerRef.current = requestAnimationFrame(tick);
-  }, [timerMode, timerState]);
+  }, [timerMode]);
 
   // 开始计时
   const handleStart = async () => {
@@ -159,6 +164,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
 
     const block = await timeBlockService.startBlock(taskName.trim(), config);
     setTimerState('running');
+    isRunningRef.current = true;
     startTimeRef.current = block.startTime;
     startTimer();
   };
@@ -166,6 +172,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
   // 暂停计时
   const handlePause = async () => {
     setTimerState('paused');
+    isRunningRef.current = false;
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
@@ -186,6 +193,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
 
   // 结束计时（带反馈）
   const handleEndBlock = async (feedbackText?: string) => {
+    isRunningRef.current = false;
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
