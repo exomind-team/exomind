@@ -82,3 +82,5 @@ pnpm-store/
 !.gitignore
 !.env.example
 nul
+playwright-report/
+.playwright-mcp/

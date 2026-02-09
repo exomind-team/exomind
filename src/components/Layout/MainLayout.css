@@ -305,9 +305,11 @@
     flex-direction: column;
   }
 
-  /* 移动端：主内容区避开状态栏 */
+  /* 移动端：主内容区避开顶部状态栏和底部导航栏 */
   .main-content {
     padding-top: env(safe-area-inset-top, 0px);
+    /* 底部导航栏高度 + safe-area-inset-bottom */
+    padding-bottom: calc(64px + env(safe-area-inset-bottom, 0px));
   }
 }
 
