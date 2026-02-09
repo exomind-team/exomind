@@ -374,20 +374,6 @@ export function MOSSASRTestPage() {
     addLogEntry('✅ 语音识别完成', { text });
   };
 
-  const handleVoiceError = (error: string) => {
-    addLogEntry(`❌ 语音识别失败: ${error}`);
-  };
-
-  const handleVoiceStateChange = (state: 'idle' | 'recording' | 'recognizing' | 'completed') => {
-    if (state === 'recording') {
-      addLogEntry('🎤 开始录音');
-    } else if (state === 'recognizing') {
-      addLogEntry('⏳ 识别中...');
-    } else if (state === 'completed') {
-      addLogEntry('✅ 识别完成');
-    }
-  };
-
   return (
     <div style={{ padding: '24px', maxWidth: '700px', margin: '0 auto' }}>
       <h1 style={{ marginBottom: '20px' }}>🎤 MOSS 语音识别测试</h1>
@@ -627,10 +613,18 @@ export function MOSSASRTestPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           {/* 语音输入按钮 */}
           <VoiceInputButton
+            adapterConfig={{ apiKey: apiKey || undefined }}
             onResult={handleVoiceResult}
-            onError={handleVoiceError}
-            onStateChange={handleVoiceStateChange}
-            defaultMethod="mediaRecorder"
+            onError={(err) => addLogEntry(`❌ ${err}`)}
+            onStateChange={(state) => {
+              if (state === 'recording') {
+                addLogEntry('🎤 开始录音');
+              } else if (state === 'recognizing') {
+                addLogEntry('⏳ 识别中...');
+              } else if (state === 'completed') {
+                addLogEntry('✅ 识别完成');
+              }
+            }}
             showWaveform={true}
             showTimer={true}
             enableShortcut={true}
