@@ -1,33 +1,33 @@
 /**
- * SQLite Database Wrapper - 参数化查询防止 SQL 注入
+ * FileStorage 模块 - SQLite 存储适配器
  */
 
-export interface QueryResult {
-  changes: number;
-  lastInsertRowid?: number;
-}
+import type { Entity, QueryOptions, QueryResult } from './types';
+import type { Storage, StorageConfig } from './storage';
+import { StorageError, ok, fail } from './errors';
 
-export interface Row {
-  [key: string]: unknown;
-}
-
-export class SQLiteDatabase {
+/**
+ * SQLite 存储适配器（预留实现）
+ * 遵循 Storage 接口规范
+ */
+export class SQLiteStorage<T extends Record<string, unknown> = Record<string, unknown>>
+  implements Storage<T>
+{
   private db: unknown;
-  private tables: Record<string, Row[]>;
-  private lastChanges: number = 0;
+  private path: string;
+  private tableName: string;
+  private tables: Map<string, Record<string, unknown>[]>;
 
-  constructor(path: string = ':memory:') {
-    this.tables = {};
-    try {
-      // 尝试使用真正的 better-sqlite3
-      const DatabaseImpl = require('better-sqlite3');
-      this.db = new DatabaseImpl(path);
-    } catch {
-      // 回退到内存数据库模拟
-      this.db = this.createInMemoryDB();
-    }
+  constructor(config: StorageConfig) {
+    this.path = config.path;
+    this.tableName = 'entities';
+    this.tables = new Map();
+    this.db = this.createInMemoryDB();
   }
 
+  /**
+   * 创建内存数据库模拟
+   */
   private createInMemoryDB(): Record<string, unknown> {
     const self = this;
 
@@ -36,46 +36,42 @@ export class SQLiteDatabase {
         sql = sql.trim();
         if (sql.startsWith('CREATE TABLE')) {
           const tableName = this.parseTableName(sql);
-          if (tableName) {
-            self.tables[tableName] = [];
+          if (tableName && !self.tables.has(tableName)) {
+            self.tables.set(tableName, []);
           }
         }
-        self.lastChanges = 0;
-        return { changes: self.lastChanges };
+        return { changes: 0 };
       },
       prepare: (sql: string) => {
         const trimmedSql = sql.trim();
         const isDDL = this.isDDL(trimmedSql);
 
         return {
-          run: (...params: unknown[]) => {
+          run: (..._params: unknown[]) => {
             if (isDDL) {
               return self.run(sql);
             }
-            // 执行 INSERT/UPDATE/DELETE 操作
             const op = trimmedSql.split(' ')[0].toUpperCase();
             if (['INSERT', 'UPDATE', 'DELETE'].includes(op)) {
-              self.lastChanges = 1;
+              return { changes: 1 };
             }
-            return { changes: self.lastChanges };
+            return { changes: 0 };
           },
-          get: (...params: unknown[]) => {
-            // SELECT 查询
+          get: (..._params: unknown[]) => {
             if (trimmedSql.includes('COUNT')) {
               const tableName = this.parseTableNameFromSql(trimmedSql);
               if (tableName) {
-                const count = self.tables[tableName]?.length || 0;
+                const count = self.tables.get(tableName)?.length || 0;
                 return { count };
               }
             }
             return null;
           },
           all: (..._params: unknown[]) => {
-            // SELECT * 查询
             return [];
-          }
+          },
         };
-      }
+      },
     };
   }
 
@@ -113,76 +109,167 @@ export class SQLiteDatabase {
     );
   }
 
-  /**
-   * 执行 SQL 语句（支持参数化查询）
-   */
-  run(sql: string, params?: unknown[]): QueryResult {
-    if (params !== undefined && this.db && typeof (this.db as Record<string, unknown>).prepare === 'function') {
-      const stmt = (this.db as Record<string, unknown>).prepare(sql);
-      if (stmt && typeof (stmt as Record<string, unknown>).run === 'function') {
-        return (stmt as Record<string, ( ...args: unknown[]) => QueryResult>).run(...params);
-      }
-    }
-
-    // 不使用参数，直接执行
-    return this.executeDirect(sql);
-  }
-
-  /**
-   * 查询数据（支持参数化查询）
-   */
-  query<T extends Row = Row>(sql: string, params?: unknown[]): T[] {
-    if (params !== undefined && this.db && typeof (this.db as Record<string, unknown>).prepare === 'function') {
-      const stmt = (this.db as Record<string, unknown>).prepare(sql);
-      if (stmt && typeof (stmt as Record<string, unknown>).all === 'function') {
-        return (stmt as Record<string, ( ...args: unknown[]) => T[]>).all(...params);
-      }
-    }
-
-    return this.queryDirect(sql);
-  }
-
-  /**
-   * 查询单行（支持参数化查询）
-   */
-  get<T extends Row = Row>(sql: string, params?: unknown[]): T | null {
-    if (params !== undefined && this.db && typeof (this.db as Record<string, unknown>).prepare === 'function') {
-      const stmt = (this.db as Record<string, unknown>).prepare(sql);
-      if (stmt && typeof (stmt as Record<string, unknown>).get === 'function') {
-        return (stmt as Record<string, ( ...args: unknown[]) => T | undefined>).get(...params) as T | null;
-      }
-    }
-
-    return this.queryDirect<T>(sql)[0] || null;
-  }
-
-  private executeDirect(sql: string): QueryResult {
+  private run(sql: string): { changes: number } {
     const trimmedSql = sql.trim();
     if (trimmedSql.startsWith('CREATE TABLE')) {
       const tableName = this.parseTableName(trimmedSql);
-      if (tableName && !this.tables[tableName]) {
-        this.tables[tableName] = [];
+      if (tableName && !this.tables.has(tableName)) {
+        this.tables.set(tableName, []);
       }
     }
     return { changes: 0 };
   }
 
-  private queryDirect<T extends Row = Row>(sql: string): T[] {
-    const trimmedSql = sql.trim();
-
-    if (trimmedSql.includes('COUNT')) {
-      const tableName = this.parseTableNameFromSql(trimmedSql);
-      if (tableName) {
-        const count = this.tables[tableName]?.length || 0;
-        return [{ count } as T];
-      }
+  /**
+   * 插入实体
+   */
+  insert(entity: T): T {
+    if (!entity.id) {
+      throw new StorageError({
+        type: 'VALIDATION_ERROR',
+        message: 'Entity must have an id field',
+        field: 'id',
+      });
     }
 
-    return [];
+    const table = this.tables.get(this.tableName) || [];
+
+    if (table.some((e) => e.id === entity.id)) {
+      throw new StorageError({
+        type: 'DUPLICATE_KEY',
+        message: `Entity with id '${entity.id}' already exists`,
+        code: 'DUPLICATE_KEY',
+      });
+    }
+
+    const timestamp = new Date().toISOString();
+    const entityWithTimestamp = {
+      ...entity,
+      createdAt: entity.createdAt ?? timestamp,
+      updatedAt: timestamp,
+    } as T & { createdAt?: string; updatedAt?: string };
+
+    table.push(entityWithTimestamp);
+    this.tables.set(this.tableName, table);
+
+    return entityWithTimestamp;
   }
 
   /**
-   * 关闭数据库连接
+   * 根据 ID 查找实体
+   */
+  find(id: string): T | null {
+    const table = this.tables.get(this.tableName) || [];
+    const entity = table.find((e) => e.id === id);
+    return (entity as T) || null;
+  }
+
+  /**
+   * 更新实体
+   */
+  update(id: string, data: Partial<T>): boolean {
+    const table = this.tables.get(this.tableName) || [];
+    const index = table.findIndex((e) => e.id === id);
+
+    if (index === -1) {
+      return false;
+    }
+
+    const existing = table[index];
+    const updated = {
+      ...existing,
+      ...data,
+      id: existing.id,
+      updatedAt: new Date().toISOString(),
+    } as T;
+
+    table[index] = updated;
+    this.tables.set(this.tableName, table);
+
+    return true;
+  }
+
+  /**
+   * 删除实体
+   */
+  delete(id: string): boolean {
+    const table = this.tables.get(this.tableName) || [];
+    const index = table.findIndex((e) => e.id === id);
+
+    if (index === -1) {
+      return false;
+    }
+
+    table.splice(index, 1);
+    this.tables.set(this.tableName, table);
+
+    return true;
+  }
+
+  /**
+   * 获取所有实体
+   */
+  all(): T[] {
+    const table = this.tables.get(this.tableName) || [];
+    return [...table] as T[];
+  }
+
+  /**
+   * 条件查询
+   */
+  where(filter: Partial<T>): T[] {
+    const table = this.tables.get(this.tableName) || [];
+    return table.filter((entity) => {
+      return Object.entries(filter).every(([key, value]) => {
+        return entity[key] === value;
+      });
+    }) as T[];
+  }
+
+  /**
+   * 带分页和排序的查询
+   */
+  query(options: QueryOptions<T>): QueryResult<T> {
+    let results = this.all();
+
+    // 应用条件过滤
+    if (options.where) {
+      results = results.filter((entity) => {
+        return Object.entries(options.where!).every(([key, value]) => {
+          return entity[key] === value;
+        });
+      });
+    }
+
+    // 应用排序
+    if (options.sort) {
+      const { field, order } = options.sort;
+      results.sort((a, b) => {
+        const aVal = a[field];
+        const bVal = b[field];
+        if (aVal === bVal) return 0;
+        if (aVal === undefined) return 1;
+        if (bVal === undefined) return -1;
+        const comparison = aVal < bVal ? -1 : 1;
+        return order === 'asc' ? comparison : -comparison;
+      });
+    }
+
+    const total = results.length;
+
+    const limit = options.pagination?.limit ?? results.length;
+    const offset = options.pagination?.offset ?? 0;
+    const items = results.slice(offset, offset + limit);
+
+    return {
+      items,
+      total,
+      hasMore: offset + items.length < total,
+    };
+  }
+
+  /**
+   * 关闭存储
    */
   close(): void {
     if (this.db && typeof (this.db as Record<string, unknown>).close === 'function') {
@@ -190,4 +277,47 @@ export class SQLiteDatabase {
     }
     this.db = null;
   }
+
+  /**
+   * 清空所有数据
+   */
+  clear(): void {
+    this.tables.set(this.tableName, []);
+  }
+
+  /**
+   * 获取存储路径
+   */
+  getPath(): string {
+    return this.path;
+  }
+
+  /**
+   * 获取实体数量
+   */
+  size(): number {
+    const table = this.tables.get(this.tableName) || [];
+    return table.length;
+  }
+
+  /**
+   * 检查是否存在
+   */
+  exists(id: string): boolean {
+    const table = this.tables.get(this.tableName) || [];
+    return table.some((e) => e.id === id);
+  }
+}
+
+/**
+ * 创建 SQLite 存储实例的便捷函数
+ */
+export function createSQLiteStorage<T extends Record<string, unknown> = Record<string, unknown>>(
+  path: string,
+  options?: Partial<StorageConfig>
+): SQLiteStorage<T> {
+  return new SQLiteStorage<T>({
+    path,
+    ...options,
+  });
 }

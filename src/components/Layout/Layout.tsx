@@ -1,4 +1,3 @@
-import * as React from "react";
 import { Outlet, Link, useLocation } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 
@@ -12,7 +11,7 @@ export function Sidebar() {
   const location = useLocation();
 
   return (
-    <aside className="w-64 border-r bg-card h-screen flex flex-col">
+    <aside className="w-64 border-r bg-card h-screen flex flex-col" data-testid="device-panel">
       <div className="p-4 border-b">
         <h1 className="text-xl font-bold">ExoMind</h1>
       </div>

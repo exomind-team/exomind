@@ -1,24 +1,86 @@
 //! 文件操作命令
-//! 用于消息持久化存储
+//! 用于消息持久化存储 - 重构版
 
 use tauri::{AppHandle, Runtime, Manager};
 use std::path::PathBuf;
 use std::fs;
+use thiserror::Error;
+
+/// 文件操作错误类型
+#[derive(Error, Debug)]
+pub enum FileError {
+    #[error("文件不存在: {path}")]
+    NotFound { path: String },
+
+    #[error("权限被拒绝: {path}")]
+    PermissionDenied { path: String },
+
+    #[error("IO 错误: {message}")]
+    IoError { message: String, source: std::io::Error },
+
+    #[error("路径无效: {path}")]
+    InvalidPath { path: String },
+
+    #[error("目录创建失败: {message}")]
+    DirectoryCreationFailed { message: String },
+
+    #[error("未知错误: {message}")]
+    Unknown { message: String },
+}
+
+/// 文件操作结果
+pub type FileResult<T> = Result<T, FileError>;
 
 /// 获取应用数据目录
-fn get_data_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
-    let path = app.path().app_data_dir().unwrap_or_else(|_| {
-        let mut path = PathBuf::new();
-        path.push(".exomind");
-        path
-    });
+fn get_data_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, FileError> {
+    let path = app.path().app_data_dir().map_err(|e| FileError::IoError {
+        message: "获取应用数据目录失败".to_string(),
+        source: e,
+    })?;
 
     // 确保目录存在
     if !path.exists() {
-        fs::create_dir_all(&path).unwrap_or_default();
+        fs::create_dir_all(&path).map_err(|e| FileError::DirectoryCreationFailed {
+            message: format!("创建目录失败: {}", e),
+        })?;
     }
 
-    path
+    Ok(path)
+}
+
+/// 处理路径（相对路径转换为绝对路径）
+fn resolve_path<R: Runtime>(
+    app: &AppHandle<R>,
+    path: &str,
+) -> Result<PathBuf, FileError> {
+    let data_dir = get_data_dir(app)?;
+
+    let full_path = if PathBuf::from(path).is_absolute() {
+        PathBuf::from(path)
+    } else {
+        data_dir.join(path)
+    };
+
+    // 验证路径不包含父目录遍历
+    if full_path.to_string_lossy().contains("..") {
+        return Err(FileError::InvalidPath {
+            path: path.to_string(),
+        });
+    }
+
+    Ok(full_path)
+}
+
+/// 确保父目录存在
+fn ensure_parent_dir(path: &PathBuf) -> Result<(), FileError> {
+    if let Some(parent) = path.parent() {
+        if !parent.exists() {
+            fs::create_dir_all(parent).map_err(|e| FileError::DirectoryCreationFailed {
+                message: format!("创建父目录失败: {}", e),
+            })?;
+        }
+    }
+    Ok(())
 }
 
 /// 追加内容到文件（永覆盖）
@@ -28,33 +90,27 @@ pub async fn append_file<R: Runtime>(
     app: AppHandle<R>,
     path: String,
     content: String,
-) -> Result<(), String> {
-    let data_dir = get_data_dir(&app);
+) -> FileResult<()> {
+    let full_path = resolve_path(&app, &path)?;
 
-    // 处理路径：如果path是相对路径，则相对于数据目录
-    let full_path = if PathBuf::from(&path).is_absolute() {
-        PathBuf::from(path)
-    } else {
-        data_dir.join(path)
-    };
-
-    // 确保父目录存在
-    if let Some(parent) = full_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
+    ensure_parent_dir(&full_path)?;
 
     // 追加内容（使用 OpenOptions 以追加模式打开）
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&full_path)
-        .map_err(|e| format!("Failed to open file for append: {}", e))?;
+        .map_err(|e| FileError::IoError {
+            message: format!("打开文件失败: {}", e),
+            source: e,
+        })?;
 
     // 写入内容
     use std::io::Write;
-    writeln!(file, "{}", content)
-        .map_err(|e| format!("Failed to append to file: {}", e))?;
+    writeln!(file, "{}", content).map_err(|e| FileError::IoError {
+        message: format!("追加文件失败: {}", e),
+        source: e,
+    })?;
 
     Ok(())
 }
@@ -66,25 +122,16 @@ pub async fn write_file<R: Runtime>(
     app: AppHandle<R>,
     path: String,
     content: String,
-) -> Result<(), String> {
-    let data_dir = get_data_dir(&app);
+) -> FileResult<()> {
+    let full_path = resolve_path(&app, &path)?;
 
-    // 处理路径：如果path是相对路径，则相对于数据目录
-    let full_path = if PathBuf::from(&path).is_absolute() {
-        PathBuf::from(path)
-    } else {
-        data_dir.join(path)
-    };
-
-    // 确保父目录存在
-    if let Some(parent) = full_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
+    ensure_parent_dir(&full_path)?;
 
     // 写入文件（覆盖）
-    fs::write(&full_path, content)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+    fs::write(&full_path, content).map_err(|e| FileError::IoError {
+        message: format!("写入文件失败: {}", e),
+        source: e,
+    })?;
 
     Ok(())
 }
@@ -94,19 +141,21 @@ pub async fn write_file<R: Runtime>(
 pub async fn read_file<R: Runtime>(
     app: AppHandle<R>,
     path: String,
-) -> Result<String, String> {
-    let data_dir = get_data_dir(&app);
+) -> FileResult<String> {
+    let full_path = resolve_path(&app, &path)?;
 
-    // 处理路径
-    let full_path = if PathBuf::from(&path).is_absolute() {
-        PathBuf::from(path)
-    } else {
-        data_dir.join(path)
-    };
+    // 检查文件是否存在
+    if !full_path.exists() {
+        return Err(FileError::NotFound {
+            path: full_path.to_string_lossy().to_string(),
+        });
+    }
 
     // 读取文件
-    fs::read_to_string(&full_path)
-        .map_err(|e| format!("Failed to read file: {}", e))
+    fs::read_to_string(&full_path).map_err(|e| FileError::IoError {
+        message: format!("读取文件失败: {}", e),
+        source: e,
+    })
 }
 
 /// 读取文件（字节流，用于二进制文件）
@@ -114,17 +163,20 @@ pub async fn read_file<R: Runtime>(
 pub async fn read_file_binary<R: Runtime>(
     app: AppHandle<R>,
     path: String,
-) -> Result<Vec<u8>, String> {
-    let data_dir = get_data_dir(&app);
+) -> FileResult<Vec<u8>> {
+    let full_path = resolve_path(&app, &path)?;
 
-    let full_path = if PathBuf::from(&path).is_absolute() {
-        PathBuf::from(path)
-    } else {
-        data_dir.join(path)
-    };
+    // 检查文件是否存在
+    if !full_path.exists() {
+        return Err(FileError::NotFound {
+            path: full_path.to_string_lossy().to_string(),
+        });
+    }
 
-    fs::read(&full_path)
-        .map_err(|e| format!("Failed to read file: {}", e))
+    fs::read(&full_path).map_err(|e| FileError::IoError {
+        message: format!("读取二进制文件失败: {}", e),
+        source: e,
+    })
 }
 
 /// 删除文件
@@ -132,13 +184,18 @@ pub async fn read_file_binary<R: Runtime>(
 pub async fn delete_file<R: Runtime>(
     _app: AppHandle<R>,
     path: String,
-) -> Result<(), String> {
-    let full_path = PathBuf::from(path);
+) -> FileResult<()> {
+    let full_path = PathBuf::from(&path);
 
-    if full_path.exists() {
-        fs::remove_file(&full_path)
-            .map_err(|e| format!("Failed to delete file: {}", e))?;
+    // 检查文件是否存在
+    if !full_path.exists() {
+        return Ok(());
     }
+
+    fs::remove_file(&full_path).map_err(|e| FileError::IoError {
+        message: format!("删除文件失败: {}", e),
+        source: e,
+    })?;
 
     Ok(())
 }
@@ -148,9 +205,8 @@ pub async fn delete_file<R: Runtime>(
 pub async fn file_exists<R: Runtime>(
     _app: AppHandle<R>,
     path: String,
-) -> Result<bool, String> {
-    let full_path = PathBuf::from(path);
-    Ok(full_path.exists())
+) -> bool {
+    PathBuf::from(path).exists()
 }
 
 /// 列出目录中的文件
@@ -158,25 +214,30 @@ pub async fn file_exists<R: Runtime>(
 pub async fn list_files<R: Runtime>(
     app: AppHandle<R>,
     dir: String,
-) -> Result<Vec<String>, String> {
-    let data_dir = get_data_dir(&app);
-
-    let full_path = if PathBuf::from(&dir).is_absolute() {
-        PathBuf::from(dir)
-    } else {
-        data_dir.join(dir)
-    };
+) -> FileResult<Vec<String>> {
+    let full_path = resolve_path(&app, &dir)?;
 
     if !full_path.exists() {
         return Ok(vec![]);
     }
 
-    let entries = fs::read_dir(&full_path)
-        .map_err(|e| format!("Failed to read directory: {}", e))?;
+    if !full_path.is_dir() {
+        return Err(FileError::InvalidPath {
+            path: full_path.to_string_lossy().to_string(),
+        });
+    }
+
+    let entries = fs::read_dir(&full_path).map_err(|e| FileError::IoError {
+        message: format!("读取目录失败: {}", e),
+        source: e,
+    })?;
 
     let mut files = Vec::new();
     for entry in entries {
-        let entry = entry.map_err(|e| format!("Failed to read entry: {}", e))?;
+        let entry = entry.map_err(|e| FileError::IoError {
+            message: format!("读取目录项失败: {}", e),
+            source: e,
+        })?;
         if entry.path().is_file() {
             files.push(entry.file_name().to_string_lossy().to_string());
         }
@@ -192,33 +253,32 @@ pub async fn append_to_markdown<R: Runtime>(
     app: AppHandle<R>,
     filename: String,
     content: String,
-) -> Result<(), String> {
-    use std::io::Write;
-
-    let data_dir = get_data_dir(&app);
-    let mut full_path = data_dir.join(&filename);
+) -> FileResult<()> {
+    let mut full_path = resolve_path(&app, &filename)?;
 
     // 如果文件名不包含 .md 后缀，自动添加
     if !filename.to_lowercase().ends_with(".md") {
         full_path = full_path.with_extension("md");
     }
 
-    // 确保父目录存在
-    if let Some(parent) = full_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
+    ensure_parent_dir(&full_path)?;
 
     // 追加内容（如果文件存在则追加，否则创建新文件）
     let mut file = fs::OpenOptions::new()
         .create(true)
         .append(true)
         .open(&full_path)
-        .map_err(|e| format!("Failed to open file: {}", e))?;
+        .map_err(|e| FileError::IoError {
+            message: format!("打开文件失败: {}", e),
+            source: e,
+        })?;
 
     // 写入内容
-    writeln!(file, "{}", content)
-        .map_err(|e| format!("Failed to write to file: {}", e))?;
+    use std::io::Write;
+    writeln!(file, "{}", content).map_err(|e| FileError::IoError {
+        message: format!("写入文件失败: {}", e),
+        source: e,
+    })?;
 
     Ok(())
 }
@@ -231,20 +291,15 @@ pub async fn export_messages_to_markdown<R: Runtime>(
     filename: String,
     title: String,
     messages: String, // JSON 序列化的消息数组
-) -> Result<(), String> {
-    let data_dir = get_data_dir(&app);
-    let mut full_path = data_dir.join(&filename);
+) -> FileResult<()> {
+    let mut full_path = resolve_path(&app, &filename)?;
 
     // 如果文件名不包含 .md 后缀，自动添加
     if !filename.to_lowercase().ends_with(".md") {
         full_path = full_path.with_extension("md");
     }
 
-    // 确保父目录存在
-    if let Some(parent) = full_path.parent() {
-        fs::create_dir_all(parent)
-            .map_err(|e| format!("Failed to create directory: {}", e))?;
-    }
+    ensure_parent_dir(&full_path)?;
 
     // 构建 Markdown 内容
     let mut md_content = String::new();
@@ -273,7 +328,9 @@ pub async fn export_messages_to_markdown<R: Runtime>(
         // 提取消息内容块
         let msg_pattern = r#"{"id":"([^"]+)","content":"([^"]+)","timestamp":(\d+),"direction":"([^"]+)","senderId":"([^"]+)","receiverId":"([^"]+)"[^}]*}"#;
 
-        let re = regex::Regex::new(msg_pattern).unwrap();
+        let re = regex::Regex::new(msg_pattern).map_err(|e| FileError::Unknown {
+            message: format!("正则表达式编译失败: {}", e),
+        })?;
 
         for cap in re.captures_iter(&messages) {
             let _id = cap.get(1).unwrap().as_str();
@@ -305,8 +362,10 @@ pub async fn export_messages_to_markdown<R: Runtime>(
     }
 
     // 写入文件
-    fs::write(&full_path, md_content)
-        .map_err(|e| format!("Failed to write file: {}", e))?;
+    fs::write(&full_path, md_content).map_err(|e| FileError::IoError {
+        message: format!("写入文件失败: {}", e),
+        source: e,
+    })?;
 
     Ok(())
 }

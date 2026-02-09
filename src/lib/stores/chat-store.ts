@@ -6,21 +6,8 @@ import { invoke } from '@tauri-apps/api/core';
 // Re-export for external usage
 export type { ChatMessage } from '../sync/message-storage';
 
-// Tauri file system implementation
-const tauriFs = {
-  writeFile: async (path: string, data: string) => {
-    await invoke('write_file', { path, content: data });
-  },
-  readTextFile: async (path: string) => {
-    return await invoke('read_file', { path }) as string;
-  },
-  appendFile: async (path: string, data: string) => {
-    await invoke('append_file', { path, content: data });
-  },
-};
-
-// Message storage singleton
-const messageStorage = getMessageStorage(tauriFs);
+// Message storage singleton (auto-detects Tauri vs Web)
+const messageStorage = getMessageStorage();
 
 interface NetworkState {
   isOnline: boolean;

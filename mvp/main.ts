@@ -133,7 +133,7 @@ class EventImpl implements Event {
 // ============ TimeBlock 实现 ============
 
 class TimeBlockImpl implements TimeBlock {
-    readonly id: UUID
+    id: UUID
     readonly name: string
 
     private _note: NoteContent
@@ -173,6 +173,22 @@ class TimeBlockImpl implements TimeBlock {
             tags: [...this._tags],
             ...(this._meta && { meta: this._meta })
         }
+    }
+
+    static fromJSON(json: JSONObject, start: Event, end: Event): TimeBlockImpl {
+        const tags = new Set<Tag>()
+        if (Array.isArray(json.tags)) {
+            for (const t of json.tags) {
+                if (typeof t === 'string') tags.add(t)
+            }
+        }
+        const name = typeof json.name === 'string' ? json.name : '未命名时间块'
+        const note = typeof json.note === 'string' ? json.note : '' as NoteContent
+        const block = new TimeBlockImpl(start, end, name, note, tags, json.meta as JSONObject | undefined)
+        if (json.id && typeof json.id === 'string') {
+            block.id = json.id as UUID
+        }
+        return block
     }
 }
 
@@ -317,15 +333,7 @@ class ExoMindLogsImpl implements ExoMindLogs {
                 const start = this.getEventById(obj.startId as UUID)
                 const end = this.getEventById(obj.endId as UUID)
                 if (start && end) {
-                    const name = typeof obj.name === 'string' ? obj.name : '未命名时间块'
-                    const note = typeof obj.note === 'string' ? obj.note : '' as NoteContent
-                    const tags = new Set<Tag>()
-                    if (Array.isArray(obj.tags)) {
-                        for (const t of obj.tags) {
-                            if (typeof t === 'string') tags.add(t)
-                        }
-                    }
-                    const block = new TimeBlockImpl(start, end, name, note, tags, obj.meta as JSONObject | undefined)
+                    const block = TimeBlockImpl.fromJSON(obj, start, end)
                     this.timeBlocksMap.set(block.id, block)
                 }
             }

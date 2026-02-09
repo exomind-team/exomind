@@ -12,18 +12,26 @@ use commands::file_commands::{
     append_file, append_to_markdown, export_messages_to_markdown
 };
 use commands::pairing_commands::{
-    PairingState, generate_pairing_code, confirm_pairing,
-    get_pairing_requests, get_paired_devices, remove_paired_device, clear_pairing_requests,
+    PairingStateManager, PairingState, PairingResult, DeviceType,
+    // 配置命令
+    update_pairing_config, get_pairing_config, get_pairing_state,
+    // 配对命令
+    generate_pairing_code_and_request, confirm_pairing, start_confirming_pairing,
+    cancel_pairing, reset_pairing_state,
+    // 查询命令
+    get_pairing_requests, validate_pairing_code, get_pairing_code_remaining_time,
+    get_paired_devices, get_paired_device, remove_paired_device, clear_pairing_requests,
+    is_device_paired,
 };
 use commands::network_commands::{get_local_ip_with_current_port, get_local_ip_with_random_port, check_network_status};
 use commands::p2p_commands::{
-    P2PConnectionState, connect_to_peer, disconnect_from_peer, get_connection_status, disconnect_all,
+    P2PManagerState, connect_to_peer, disconnect_from_peer, get_connection_status, disconnect_all,
+    set_p2p_state, get_p2p_state, init_libp2p, get_node_info, publish_message, subscribe_topic,
 };
 
-// 导出 WsClientState 和 PairingState 以便在 AppHandle 中使用
-pub use commands::ws_commands::ConnectionState;
-pub use commands::pairing_commands::PairingState as PairingCommandState;
-pub use commands::p2p_commands::P2PConnectionState;
+// 导出状态管理器以供其他模块使用
+pub use commands::p2p_commands::P2PStateManager;
+pub use commands::pairing_commands::PairingStateManager as PairingState;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -33,8 +41,8 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let ws_client_state = Arc::new(WsClientState::default());
-    let pairing_state = Arc::new(PairingState::default());
-    let p2p_state = Arc::new(P2PConnectionState::default());
+    let pairing_state = Arc::new(PairingStateManager::new());
+    let p2p_state = Arc::new(P2PManagerState::default());
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
@@ -58,13 +66,25 @@ pub fn run() {
             append_file,
             append_to_markdown,
             export_messages_to_markdown,
+            // 配对配置命令
+            update_pairing_config,
+            get_pairing_config,
+            get_pairing_state,
             // 配对命令
-            generate_pairing_code,
+            generate_pairing_code_and_request,
             confirm_pairing,
+            start_confirming_pairing,
+            cancel_pairing,
+            reset_pairing_state,
+            // 配对查询命令
             get_pairing_requests,
+            validate_pairing_code,
+            get_pairing_code_remaining_time,
             get_paired_devices,
+            get_paired_device,
             remove_paired_device,
             clear_pairing_requests,
+            is_device_paired,
             // 网络命令
             get_local_ip_with_current_port,
             get_local_ip_with_random_port,
@@ -74,6 +94,13 @@ pub fn run() {
             disconnect_from_peer,
             get_connection_status,
             disconnect_all,
+            set_p2p_state,
+            get_p2p_state,
+            // libp2p 预留命令
+            init_libp2p,
+            get_node_info,
+            publish_message,
+            subscribe_topic,
         ]);
 
     #[cfg(debug_assertions)]
