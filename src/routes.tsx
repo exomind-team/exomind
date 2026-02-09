@@ -13,7 +13,7 @@ import { RecordPage } from "@/components/Record/RecordPage";
 
 const sidebarItems = [
   { title: "聊天", path: "/", icon: MessageCircle },
-  { title: "记录", path: "/test/record", icon: ClipboardList },
+  { title: "记录", path: "/timeblock", icon: ClipboardList },
   { title: "MOSS测试", path: "/moss-test", icon: Mic },
   { title: "语音聊天", path: "/voice-chat", icon: MicVocal },
   { title: "ASR测试", path: "/asr-test", icon: Mic },
@@ -146,11 +146,11 @@ const devicesRoute = createRoute({
   },
 });
 
-// Record route (/test/record)
-const recordRoute = createRoute({
+// TimeBlock route (/timeblock)
+const timeblockRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/test/record",
-  component: function Record() {
+  path: "/timeblock",
+  component: function TimeBlock() {
     return (
       <div className="h-full flex flex-col">
         <RecordPage />
@@ -158,6 +158,8 @@ const recordRoute = createRoute({
     );
   },
 });
+
+// TODO: Web端功能 - 原 /test/record 路由已移除，时间块功能移至 /timeblock
 
 // ASR Test route (/asr-test)
 const asrTestRoute = createRoute({
@@ -189,12 +191,12 @@ const mossTestRoute = createRoute({
 // Create route tree
 const routeTree = rootRoute.addChildren([
   indexRoute,
+  timeblockRoute,
   devicesRoute,
   mossTestRoute,
   asrTestRoute,
   voiceChatRoute,
   settingsRoute,
-  recordRoute,
 ]);
 
 // Create router
