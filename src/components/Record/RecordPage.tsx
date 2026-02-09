@@ -1,14 +1,16 @@
-import { useState, useRef, useEffect, useMemo } from 'react';
+import { useState, useRef, useEffect, useMemo, useCallback } from 'react';
 import { useTimeBlockStore, parseTimeBlockCommand, type TimeBlockEvent } from '@/lib/stores/timeblock-store';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Send, Clock, Tag } from 'lucide-react';
+import { Clock, Tag } from 'lucide-react';
+import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 
 export function RecordPage() {
   const [inputValue, setInputValue] = useState('');
+  const inputValueRef = useRef('');
   const [showHistory, setShowHistory] = useState(false);
   const listRef = useRef<HTMLDivElement>(null);
 
@@ -76,8 +78,8 @@ export function RecordPage() {
   }, [events]);
 
   // 处理输入
-  const handleSubmit = async () => {
-    const trimmed = inputValue.trim();
+  const handleSubmit = useCallback(async () => {
+    const trimmed = inputValueRef.current.trim();
     if (!trimmed) return;
 
     // 解析命令
@@ -101,14 +103,17 @@ export function RecordPage() {
     }
 
     setInputValue('');
-  };
+    inputValueRef.current = '';
+  }, [startBlock, endBlock, addEvent, saveTimeBlocks]);
 
-  const handleKeyPress = (e: React.KeyboardEvent) => {
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      handleSubmit();
-    }
-  };
+  // 语音识别结果回调 - 更新输入值
+  const handleVoiceResult = useCallback((text: string) => {
+    const newValue = inputValueRef.current.trim()
+      ? `${inputValueRef.current} ${text}`
+      : text;
+    setInputValue(newValue);
+    inputValueRef.current = newValue;
+  }, []);
 
   // ============================================================================
 // TODO: 后续预定义标签集合
@@ -338,29 +343,16 @@ export function RecordPage() {
 
       {/* 输入区域 */}
       <div className="px-3 sm:px-6 py-3 border-t bg-card shrink-0 safe-area-pb">
-        <div className="flex items-center gap-2" data-testid="record-input-area">
-          <Input
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder={
-              activeBlock
-                ? `记录中: ${activeBlock.name}...`
-                : "输入记录... ('开始xxx' 开始时间块)"
-            }
-            className="flex-1 min-w-0 text-xs sm:text-sm"
-            data-testid="record-input"
-          />
-          <Button
-            onClick={handleSubmit}
-            disabled={!inputValue.trim()}
-            size="icon"
-            className="shrink-0"
-            data-testid="record-send-button"
-          >
-            <Send size={16} />
-          </Button>
-        </div>
+        <VoiceMessageInput
+          onSend={handleSubmit}
+          onVoiceResult={handleVoiceResult}
+          placeholder={
+            activeBlock
+              ? `记录中: ${activeBlock.name}...`
+              : "输入记录... ('开始xxx' 开始时间块)"
+          }
+          buttonSize={40}
+        />
         {inputValue.trim() && (
           <p className="text-xs text-muted-foreground mt-1">
             {parseTags(inputValue).tags.length > 0 && (
