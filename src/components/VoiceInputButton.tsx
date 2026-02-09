@@ -7,15 +7,14 @@
  * │  - 圆形麦克风按钮                        │
  * │  - 录音/识别状态动画                     │
  * │  - 音量波形可视化                        │
- * │  - 快捷键支持                           │
+ * │  - 快捷键支持（仅非输入区域）            │
+ * │  - 依赖注入（可选 IASRPort）             │
  * └─────────────────────────────────────────┘
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
+import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
-
-// 录音方式
-export type RecordingMethod = 'scriptProcessor' | 'mediaRecorder';
 
 // 按钮状态
 export type VoiceButtonState = 'idle' | 'recording' | 'recognizing' | 'completed';
@@ -28,13 +27,17 @@ export interface VoiceInputButtonProps {
   onError?: (error: string) => void;
   /** 状态变化回调 */
   onStateChange?: (state: VoiceButtonState) => void;
-  /** 默认录音方式 */
-  defaultMethod?: RecordingMethod;
+
+  /** ASR 适配器（可选，默认使用 MOSSAdapter） */
+  adapter?: IASRPort;
+  /** 适配器配置（API Key 等） */
+  adapterConfig?: IASRConfig;
+
   /** 是否显示波形 */
   showWaveform?: boolean;
   /** 是否显示计时器 */
   showTimer?: boolean;
-  /** 启用快捷键 */
+  /** 启用快捷键（仅非输入区域生效） */
   enableShortcut?: boolean;
   /** 按钮大小 */
   size?: number;
@@ -48,12 +51,6 @@ export interface VoiceInputButtonProps {
 interface RecordingState {
   state: VoiceButtonState;
   duration: number;
-  method: RecordingMethod;
-  audioContext?: AudioContext;
-  analyser?: AnalyserNode;
-  stream?: MediaStream;
-  mediaRecorder?: MediaRecorder;
-  recordedChunks: Blob[];
   startTime: number;
 }
 
@@ -64,7 +61,8 @@ export function VoiceInputButton({
   onResult,
   onError,
   onStateChange,
-  defaultMethod = 'mediaRecorder',
+  adapter,
+  adapterConfig,
   showWaveform = true,
   showTimer = true,
   enableShortcut = true,
@@ -76,13 +74,21 @@ export function VoiceInputButton({
   const [state, setState] = useState<RecordingState>({
     state: 'idle',
     duration: 0,
-    method: defaultMethod,
-    recordedChunks: [],
     startTime: 0,
   });
 
   // 上一次状态（用于检测变化）
   const prevStateRef = useRef<VoiceButtonState>('idle');
+
+  // 适配器 ref
+  const adapterRef = useRef<IASRPort | null>(null);
+
+  // 资源 refs
+  const streamRef = useRef<MediaStream | null>(null);
+  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
+  const recordedChunksRef = useRef<Blob[]>([]);
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const analyserRef = useRef<AnalyserNode | null>(null);
 
   // 使用 ref 存储回调，避免闭包问题
   const callbacksRef = useRef({
@@ -104,63 +110,95 @@ export function VoiceInputButton({
     }
   }, [state.state]);
 
-  // 使用 ref 存储 analyser，用于动画循环
-  const analyserRef = useRef<AnalyserNode | null>(null);
+  // 初始化适配器
+  useEffect(() => {
+    if (adapter) {
+      adapterRef.current = adapter;
+    } else {
+      // 默认 MOSSAdapter
+      adapterRef.current = new MOSSASRAdapter(adapterConfig);
+    }
+  }, [adapter, adapterConfig]);
+
+  // 配置适配器（API Key 等）
+  useEffect(() => {
+    if (adapterRef.current && adapterConfig) {
+      adapterRef.current.configure(adapterConfig);
+    }
+  }, [adapterConfig]);
+
+  // canvas ref
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // 更新状态
-  const updateState = useCallback((updates: Partial<RecordingState>) => {
-    setState((prev) => ({ ...prev, ...updates }));
-  }, []);
-
-  // WebM 转 WAV（不做重采样，不做增益）
-  const webmToWav = useCallback(async (webmBlob: Blob): Promise<Uint8Array> => {
-    const arrayBuffer = await webmBlob.arrayBuffer();
-    const audioContext = new AudioContext();
-    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-    const rawData = audioBuffer.getChannelData(0);
-    const sampleRate = audioBuffer.sampleRate;
-
-    // PCM 16bit（只裁剪，不放大）
-    const pcmData = new Int16Array(rawData.length);
-    for (let i = 0; i < rawData.length; i++) {
-      const s = Math.max(-1, Math.min(1, rawData[i]));
-      pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+  // 停止录音并释放所有资源
+  const stopRecordingAndRelease = useCallback((reason: 'complete' | 'cancel') => {
+    // 停止动画
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
     }
 
-    const wavData = encodeWAV(new Uint8Array(pcmData.buffer), sampleRate);
-    await audioContext.close();
-    return wavData;
-  }, []);
+    // 停止 MediaRecorder
+    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
+      mediaRecorderRef.current.stop();
+    }
 
-  // 编码 WAV
-  const encodeWAV = useCallback((samples: Uint8Array, sampleRate: number): Uint8Array => {
-    const numChannels = 1;
-    const bytesPerSample = 2;
-    const blockAlign = numChannels * bytesPerSample;
-    const byteRate = sampleRate * blockAlign;
-    const dataSize = samples.length;
-    const buffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(buffer);
+    // 停止音频流
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
 
-    view.setUint32(0, 0x52494646, false);
-    view.setUint32(4, 36 + dataSize, true);
-    view.setUint32(8, 0x57415645, false);
-    view.setUint32(12, 0x666d7420, false);
-    view.setUint32(16, 16, true);
-    view.setUint16(20, 1, true);
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, byteRate, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, bytesPerSample * 8, true);
-    view.setUint32(36, 0x64617461, false);
-    view.setUint32(40, dataSize, true);
+    // 关闭 AudioContext
+    if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
+      audioContextRef.current.close().catch(console.error);
+      audioContextRef.current = null;
+    }
 
-    new Uint8Array(buffer).set(samples, 44);
-    return new Uint8Array(buffer);
+    // 清理 analyser
+    analyserRef.current = null;
+
+    if (reason === 'complete') {
+      // 延迟处理数据，确保 MediaRecorder 数据可用
+      setTimeout(() => {
+        const recordedChunks = recordedChunksRef.current;
+        recordedChunksRef.current = [];
+
+        if (recordedChunks.length > 0) {
+          const webmBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+
+          setState(prev => ({ ...prev, state: 'recognizing', duration: prev.duration }));
+
+          // WebM 转 WAV
+          MOSSASRAdapter.webmToWav(webmBlob)
+            .then((wavData) => {
+              // 调用识别
+              return adapterRef.current?.transcribe({
+                lang: 'zh-CN',
+                preRecordedAudio: wavData,
+              });
+            })
+            .then((result) => {
+              if (result) {
+                setState({ state: 'completed', duration: 0, startTime: 0 });
+                callbacksRef.current.onResult(result.text);
+              }
+            })
+            .catch((error) => {
+              setState({ state: 'idle', duration: 0, startTime: 0 });
+              callbacksRef.current.onError?.(`识别失败: ${error}`);
+            });
+        } else {
+          setState({ state: 'idle', duration: 0, startTime: 0 });
+          callbacksRef.current.onError?.('没有录制到音频数据');
+        }
+      }, 100);
+    } else {
+      // 取消
+      setState({ state: 'idle', duration: 0, startTime: 0 });
+      recordedChunksRef.current = [];
+    }
   }, []);
 
   // 开始录音
@@ -175,9 +213,11 @@ export function VoiceInputButton({
           channelCount: 1,
         }
       });
+      streamRef.current = stream;
 
       // 创建 AudioContext 和 Analyser
       const audioContext = new AudioContext();
+      audioContextRef.current = audioContext;
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 256;
       analyserRef.current = analyser;
@@ -189,142 +229,78 @@ export function VoiceInputButton({
         ? 'audio/webm;codecs=opus'
         : 'audio/webm';
       const mediaRecorder = new MediaRecorder(stream, { mimeType });
-      const recordedChunks: Blob[] = [];
+      mediaRecorderRef.current = mediaRecorder;
+      recordedChunksRef.current = [];
 
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
-          recordedChunks.push(event.data);
+          recordedChunksRef.current.push(event.data);
         }
       };
 
       mediaRecorder.start(100);
 
       // 更新状态
-      updateState({
+      setState({
         state: 'recording',
         duration: 0,
-        method: state.method,
-        audioContext,
-        analyser,
-        stream,
-        mediaRecorder,
-        recordedChunks,
         startTime: Date.now(),
       });
 
     } catch (error) {
       callbacksRef.current.onError?.(`麦克风访问失败: ${error}`);
     }
-  }, [state.method, updateState]);
-
-  // 停止录音并识别
-  const stopRecording = useCallback(async () => {
-    // 停止动画
-    if (animationFrameId !== null) {
-      cancelAnimationFrame(animationFrameId);
-      animationFrameId = null;
-    }
-
-    const {
-      audioContext,
-      stream,
-      mediaRecorder,
-      recordedChunks,
-      startTime,
-    } = state;
-
-    // 停止 MediaRecorder
-    if (mediaRecorder && mediaRecorder.state !== 'inactive') {
-      mediaRecorder.stop();
-    }
-
-    // 计算录音时长
-    const duration = (Date.now() - startTime) / 1000;
-    updateState({ state: 'recognizing', duration });
-
-    // 关闭资源
-    if (stream) {
-      stream.getTracks().forEach(track => track.stop());
-    }
-
-    // 释放 AudioContext
-    if (audioContext && audioContext.state !== 'closed') {
-      await audioContext.close();
-    }
-
-    // 处理录音数据
-    if (recordedChunks.length > 0) {
-      try {
-        const webmBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-        const wavData = await webmToWav(webmBlob);
-
-        // 调用 MOSS 识别
-        const adapter = new MOSSASRAdapter();
-        const result = await adapter.transcribe({
-          lang: 'zh-CN',
-          preRecordedAudio: wavData,
-        });
-
-        updateState({ state: 'completed' });
-        callbacksRef.current.onResult(result.text);
-
-      } catch (error) {
-        updateState({ state: 'idle' });
-        callbacksRef.current.onError?.(`识别失败: ${error}`);
-      }
-    } else {
-      updateState({ state: 'idle' });
-      callbacksRef.current.onError?.('没有录制到音频数据');
-    }
-  }, [state, webmToWav, updateState]);
+  }, []);
 
   // 处理按钮点击
   const handleClick = useCallback(() => {
     if (state.state === 'idle' || state.state === 'completed') {
       startRecording();
     } else if (state.state === 'recording') {
-      stopRecording();
+      const duration = (Date.now() - state.startTime) / 1000;
+      setState(prev => ({ ...prev, duration }));
+      stopRecordingAndRelease('complete');
     }
-  }, [state.state, startRecording, stopRecording]);
+  }, [state.state, state.startTime, startRecording, stopRecordingAndRelease]);
 
-  // 快捷键处理
+  // 快捷键处理（仅非输入区域）
   useEffect(() => {
     if (!enableShortcut) return;
 
     const handleKeyDown = (e: KeyboardEvent) => {
+      // 获取当前焦点元素
+      const target = e.target as HTMLElement;
+
+      // 排除输入区域
+      if (
+        target.tagName === 'INPUT' ||
+        target.tagName === 'TEXTAREA' ||
+        target.isContentEditable ||
+        target.closest('[contenteditable="true"]')
+      ) {
+        return; // 不拦截
+      }
+
       // 空格键开始/停止录音
       if (e.key === ' ' || e.code === 'Space') {
         e.preventDefault();
         handleClick();
       }
-      // Ctrl + Space 切换录音方式
-      else if (e.ctrlKey && (e.key === ' ' || e.code === 'Space')) {
-        e.preventDefault();
-        updateState({
-          method: state.method === 'mediaRecorder' ? 'scriptProcessor' : 'mediaRecorder'
-        });
-      }
       // Escape 取消
       else if (e.key === 'Escape' || e.code === 'Escape') {
         if (state.state === 'recording' || state.state === 'recognizing') {
-          // 停止动画
-          if (animationFrameId !== null) {
-            cancelAnimationFrame(animationFrameId);
-            animationFrameId = null;
-          }
-          updateState({ state: 'idle' });
+          stopRecordingAndRelease('cancel');
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [enableShortcut, handleClick, state.state, state.method, updateState]);
+  }, [enableShortcut, handleClick, state.state, stopRecordingAndRelease]);
 
   // 音量波形动画
   useEffect(() => {
     if (!showWaveform || state.state !== 'recording' || !canvasRef.current) {
-      // 清理动画
       if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
         animationFrameId = null;
@@ -381,7 +357,6 @@ export function VoiceInputButton({
 
     draw();
 
-    // 清理函数
     return () => {
       if (animationFrameId !== null) {
         cancelAnimationFrame(animationFrameId);
@@ -406,11 +381,11 @@ export function VoiceInputButton({
   useEffect(() => {
     if (state.state === 'completed') {
       const timer = setTimeout(() => {
-        updateState({ state: 'idle' });
+        setState(prev => ({ ...prev, state: 'idle' }));
       }, 2000);
       return () => clearTimeout(timer);
     }
-  }, [state.state, updateState]);
+  }, [state.state]);
 
   // 获取按钮颜色
   const getButtonColors = () => {
@@ -455,21 +430,6 @@ export function VoiceInputButton({
 
   return (
     <div style={{ position: 'relative', display: 'inline-block', ...style }} className={className}>
-      {/* 录音方式指示器 */}
-      {showTimer && state.state === 'idle' && (
-        <div style={{
-          position: 'absolute',
-          top: -24,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          fontSize: 11,
-          color: '#868e96',
-          whiteSpace: 'nowrap',
-        }}>
-          {state.method === 'mediaRecorder' ? 'MediaRecorder' : 'ScriptProcessor'}
-        </div>
-      )}
-
       {/* 录音波形画布 */}
       {showWaveform && state.state === 'recording' && (
         <canvas

@@ -6,13 +6,15 @@
 export interface ASRInput {
   lang?: string;        // 语言，默认 'zh-CN'
   stream?: MediaStream; // 麦克风流
+  preRecordedAudio?: Uint8Array; // 预录制音频（WAV格式）
 }
 
 // 语音识别结果
 export interface ASRResult {
   text: string;         // 识别出的文字
   confidence: number;    // 置信度 0-1
-  lang: string;         // 识别语言
+  lang: string;          // 识别语言
+  duration?: number;     // 音频时长（毫秒）
 }
 
 // 部分结果（流式识别时使用）
@@ -22,10 +24,32 @@ export interface ASRPartialResult {
 }
 
 /**
+ * 语音识别配置接口
+ */
+export interface IASRConfig {
+  /** API Key */
+  apiKey?: string;
+  /** API 端点 */
+  apiUrl?: string;
+  /** 超时时间 (毫秒) */
+  timeout?: number;
+}
+
+/**
  * 语音识别 Port
  * 统一接口，适配器实现可替换
  */
 export interface IASRPort {
+  /**
+   * 配置适配器
+   */
+  configure(config: IASRConfig): void;
+
+  /**
+   * 获取支持的语言列表
+   */
+  getSupportedLanguages(): string[];
+
   /**
    * 一次性识别（适合：按住说话松手出结果）
    */

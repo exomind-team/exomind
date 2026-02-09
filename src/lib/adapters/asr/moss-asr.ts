@@ -15,7 +15,7 @@
  * - 返回带时间戳和说话人标识
  */
 
-import type { IASRPort, ASRInput, ASRResult, ASRPartialResult } from '../../environment/interfaces/asr.port';
+import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../../ports/asr-port';
 
 // ========== 配置 ==========
 
@@ -55,18 +55,94 @@ export class MOSSASRAdapter implements IASRPort {
   private config: MOSSASRConfig;
 
   constructor(config?: Partial<MOSSASRConfig>) {
-    const apiKey = import.meta.env?.VITE_MOSS_API_KEY || '';
-    this.config = { ...DEFAULT_CONFIG, ...config, apiKey };
+    // 环境变量作为默认值，外部传入可覆盖
+    const envApiKey = import.meta.env?.VITE_MOSS_API_KEY || '';
+    this.config = {
+      ...DEFAULT_CONFIG,
+      apiKey: envApiKey,
+      ...config,
+    };
     console.log('[ASR-MOSS] 适配器初始化');
     console.log('[ASR-MOSS] API Key:', this.config.apiKey ? `${this.config.apiKey.slice(0, 8)}***` : '未配置');
   }
 
-  isAvailable(): boolean {
-    return !!this.config.apiKey;
+  /**
+   * 配置适配器
+   */
+  configure(config: IASRConfig): void {
+    if (config.apiKey) this.config.apiKey = config.apiKey;
+    if (config.apiUrl) this.config.apiUrl = config.apiUrl;
+    if (config.timeout) this.config.timeout = config.timeout;
   }
 
+  /**
+   * 获取支持的语言列表
+   */
   getSupportedLanguages(): string[] {
     return ['zh-CN', 'en-US', 'yue-HK'];
+  }
+
+  /**
+   * WebM 转 WAV（公共静态方法）
+   * 不做重采样，不做增益
+   */
+  static async webmToWav(webmBlob: Blob): Promise<Uint8Array> {
+    const arrayBuffer = await webmBlob.arrayBuffer();
+    const audioContext = new AudioContext();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    const rawData = audioBuffer.getChannelData(0);
+    const sampleRate = audioBuffer.sampleRate;
+
+    // PCM 16bit（只裁剪，不放大）
+    const pcmData = new Int16Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) {
+      const s = Math.max(-1, Math.min(1, rawData[i]));
+      pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+    }
+
+    const wavData = MOSSASRAdapter.encodeWAV(new Uint8Array(pcmData.buffer), sampleRate);
+    await audioContext.close();
+    return wavData;
+  }
+
+  /**
+   * 编码为 WAV 格式（公共静态方法）
+   * @param samples PCM 16bit 音频数据
+   * @param sampleRate 采样率
+   */
+  static encodeWAV(samples: Uint8Array, sampleRate: number): Uint8Array {
+    const numChannels = 1;
+    const bytesPerSample = 2;
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = samples.length;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    // RIFF header
+    view.setUint32(0, 0x52494646, false); // "RIFF"
+    view.setUint32(4, 36 + dataSize, true);
+    view.setUint32(8, 0x57415645, false); // "WAVE"
+    // fmt chunk
+    view.setUint32(12, 0x666d7420, false); // "fmt "
+    view.setUint32(16, 16, true); // chunk size
+    view.setUint16(20, 1, true); // audio format (PCM)
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bytesPerSample * 8, true);
+    // data chunk
+    view.setUint32(36, 0x64617461, false); // "data"
+    view.setUint32(40, dataSize, true);
+
+    new Uint8Array(buffer).set(samples, 44);
+    return new Uint8Array(buffer);
+  }
+
+  isAvailable(): boolean {
+    return !!this.config.apiKey;
   }
 
   /**
@@ -236,7 +312,7 @@ export class MOSSASRAdapter implements IASRPort {
   /**
    * 从 MediaStream 录制音频并转换为 WAV 格式
    */
-  private async recordAudio(stream: MediaStream): Promise<Uint8Array> {
+  private async recordAudio(stream: MediaStream, _stopRecording?: () => void): Promise<Uint8Array> {
     return new Promise((resolve) => {
       console.log('[ASR-MOSS] 创建 AudioContext...');
       // 使用浏览器默认采样率（通常是 44100 或 48000）
@@ -337,7 +413,7 @@ export class MOSSASRAdapter implements IASRPort {
         }
 
         // 编码为 WAV（使用 16000Hz 采样率）
-        const wavData = this.encodeWAV(new Uint8Array(pcmData.buffer), targetSampleRate);
+        const wavData = MOSSASRAdapter.encodeWAV(new Uint8Array(pcmData.buffer), targetSampleRate);
         console.log(`[ASR-MOSS] WAV 编码完成: ${wavData.length} bytes (${targetSampleRate}Hz, ${(wavData.length / 1024).toFixed(2)}KB)`);
         resolve(wavData);
       };
@@ -350,7 +426,10 @@ export class MOSSASRAdapter implements IASRPort {
         const checkStop = setInterval(() => {
           if (!(window as any).__asrRecordingActive) {
             clearInterval(checkStop);
-            stopRecording();
+            // 调用外部传入的停止回调
+            if (typeof stopRecording === 'function') {
+              stopRecording();
+            }
           }
         }, 100);
       };
@@ -365,45 +444,6 @@ export class MOSSASRAdapter implements IASRPort {
         startListening();
       }
     });
-  }
-
-  /**
-   * 编码为 WAV 格式
-   * @param samples PCM 16bit 音频数据
-   * @param sampleRate 采样率（默认使用浏览器实际采样率）
-   */
-  private encodeWAV(samples: Uint8Array, sampleRate: number = 48000): Uint8Array {
-    const numChannels = 1;
-    const bytesPerSample = 2;
-    const blockAlign = numChannels * bytesPerSample;
-    const byteRate = sampleRate * blockAlign;
-    const dataSize = samples.length;
-    const buffer = new ArrayBuffer(44 + dataSize);
-    const view = new DataView(buffer);
-
-    // RIFF header
-    view.setUint32(0, 0x52494646, false); // "RIFF"
-    view.setUint32(4, 36 + dataSize, true);
-    view.setUint32(8, 0x57415645, false); // "WAVE"
-    // fmt chunk
-    view.setUint32(12, 0x666d7420, false); // "fmt "
-    view.setUint32(16, 16, true); // chunk size
-    view.setUint16(20, 1, true); // audio format (PCM)
-    view.setUint16(22, numChannels, true);
-    view.setUint32(24, sampleRate, true);
-    view.setUint32(28, byteRate, true);
-    view.setUint16(32, blockAlign, true);
-    view.setUint16(34, bytesPerSample * 8, true);
-    // data chunk
-    view.setUint32(36, 0x64617461, false); // "data"
-    view.setUint32(40, dataSize, true);
-
-    new Uint8Array(buffer).set(samples, 44);
-    return new Uint8Array(buffer);
-  }
-
-  stopRecording(): void {
-    console.log('[ASR-MOSS] 停止录制信号');
   }
 
   async *streamTranscribe(_input: ASRInput): AsyncIterable<ASRPartialResult> {

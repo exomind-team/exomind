@@ -3,7 +3,7 @@
  * 浏览器原生语音识别 API 实现
  */
 
-import type { IASRPort, ASRInput, ASRResult, ASRPartialResult } from '../ports/asr-port';
+import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../ports/asr-port';
 
 /**
  * Web Speech API 适配器
@@ -50,6 +50,25 @@ export class WebSpeechASRAdapter implements IASRPort {
    */
   isAvailable(): boolean {
     return this.recognitionClass !== null;
+  }
+
+  /**
+   * 配置适配器（Web Speech API 不需要配置）
+   */
+  configure(_config: IASRConfig): void {
+    // Web Speech API 不需要额外配置
+  }
+
+  /**
+   * 获取支持的语言列表
+   */
+  getSupportedLanguages(): string[] {
+    // Web Speech API 支持的语言取决于浏览器
+    return [
+      'zh-CN', 'zh-TW', 'zh-HK',
+      'en-US', 'en-GB', 'en-AU',
+      'ja-JP', 'ko-KR',
+    ];
   }
 
   /**
