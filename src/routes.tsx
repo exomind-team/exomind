@@ -2,13 +2,19 @@ import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from 
 import { Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Menu, X, MessageCircle, Smartphone, Settings } from "lucide-react";
+import { Menu, X, MessageCircle, Smartphone, Settings, Mic, MicVocal } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
 import { DevicesPage } from "@/components/Settings/DevicesPage";
+import { ASRTestPage } from "@/pages/ASRTestPage";
+import { VoiceChatPage } from "@/pages/VoiceChatPage";
+import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
 
 const sidebarItems = [
   { title: "聊天", path: "/", icon: MessageCircle },
+  { title: "MOSS测试", path: "/moss-test", icon: Mic },
+  { title: "语音聊天", path: "/voice-chat", icon: MicVocal },
+  { title: "ASR测试", path: "/asr-test", icon: Mic },
   { title: "设备", path: "/devices", icon: Smartphone },
   { title: "设置", path: "/settings", icon: Settings },
 ];
@@ -138,8 +144,35 @@ const devicesRoute = createRoute({
   },
 });
 
+// ASR Test route (/asr-test)
+const asrTestRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/asr-test",
+  component: function ASRTest() {
+    return <ASRTestPage />;
+  },
+});
+
+// Voice Chat route (/voice-chat)
+const voiceChatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/voice-chat",
+  component: function VoiceChat() {
+    return <VoiceChatPage />;
+  },
+});
+
+// MOSS ASR Test route (/moss-test)
+const mossTestRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/moss-test",
+  component: function MOSSTest() {
+    return <MOSSASRTestPage />;
+  },
+});
+
 // Create route tree
-const routeTree = rootRoute.addChildren([indexRoute, devicesRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, devicesRoute, mossTestRoute, asrTestRoute, voiceChatRoute, settingsRoute]);
 
 // Create router
 const router = createRouter({ routeTree });
