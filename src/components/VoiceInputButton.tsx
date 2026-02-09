@@ -9,6 +9,7 @@
  * │  - 音量波形可视化                        │
  * │  - 快捷键支持（仅非输入区域）            │
  * │  - 依赖注入（可选 IASRPort）             │
+ * │  - 使用原生 MediaRecorder API            │
  * └─────────────────────────────────────────┘
  */
 
@@ -70,6 +71,9 @@ export function VoiceInputButton({
   className,
   style,
 }: VoiceInputButtonProps) {
+  // 权限状态类型
+  type PermissionState = 'checking' | 'granted' | 'denied' | 'prompt' | 'unavailable';
+
   // 主状态（只包含必要的渲染状态）
   const [state, setState] = useState<RecordingState>({
     state: 'idle',
@@ -77,18 +81,22 @@ export function VoiceInputButton({
     startTime: 0,
   });
 
+  // 麦克风权限状态
+  const [permissionState, setPermissionState] = useState<PermissionState>('checking');
+
   // 上一次状态（用于检测变化）
   const prevStateRef = useRef<VoiceButtonState>('idle');
 
   // 适配器 ref
   const adapterRef = useRef<IASRPort | null>(null);
 
-  // 资源 refs
+  // 资源 refs - 使用原生 MediaRecorder
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const startTimeRef = useRef<number>(0);
   const operationTokenRef = useRef(0);
 
   // 使用 ref 存储回调，避免闭包问题
@@ -113,6 +121,8 @@ export function VoiceInputButton({
 
   // 初始化适配器
   useEffect(() => {
+    console.log('[VoiceInput] 初始化, isSecureContext:', window.isSecureContext);
+    console.log('[VoiceInput] location:', window.location.href, 'protocol:', window.location.protocol);
     if (adapter) {
       adapterRef.current = adapter;
     } else {
@@ -128,10 +138,78 @@ export function VoiceInputButton({
     }
   }, [adapterConfig]);
 
+  // 检查麦克风权限状态
+  useEffect(() => {
+    const checkPermission = async () => {
+      // 检查 mediaDevices API 是否可用
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        setPermissionState('unavailable');
+        return;
+      }
+
+      // 尝试查询权限状态
+      if (navigator.permissions?.query) {
+        try {
+          const permissionStatus = await navigator.permissions.query({ name: 'microphone' as PermissionName });
+          if (permissionStatus.state === 'granted') {
+            setPermissionState('granted');
+          } else if (permissionStatus.state === 'denied') {
+            setPermissionState('denied');
+          } else {
+            setPermissionState('prompt');
+          }
+        } catch {
+          // 无法查询权限，假设需要提示用户
+          setPermissionState('prompt');
+        }
+      } else {
+        // 权限 API 不可用，需要提示用户
+        setPermissionState('prompt');
+      }
+    };
+
+    checkPermission();
+  }, []);
+
   // canvas ref
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
+  // 请求麦克风权限
+  const requestPermission = useCallback(async () => {
+    if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+      const error = new Error('您的浏览器不支持语音录制功能');
+      (error as Error & { code: string; userTip: string }).code = 'API_NOT_SUPPORTED';
+      (error as Error & { userTip: string }).userTip = '请使用最新版本的 Chrome、Edge 或 Safari 浏览器';
+      const extError = error as Error & { userTip: string };
+      callbacksRef.current.onError?.(`${error.message}\n提示: ${extError.userTip}`);
+      setPermissionState('unavailable');
+      return false;
+    }
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // 释放刚获取的 stream
+      stream.getTracks().forEach(track => track.stop());
+      setPermissionState('granted');
+      return true;
+    } catch (error) {
+      const errorName = (error as DOMException).name;
+      if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
+        setPermissionState('denied');
+        callbacksRef.current.onError?.('麦克风权限被拒绝\n提示: 请在浏览器设置中允许麦克风访问');
+      } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
+        setPermissionState('denied');
+        callbacksRef.current.onError?.('未检测到麦克风设备\n提示: 请确保电脑已连接麦克风');
+      } else {
+        setPermissionState('denied');
+        callbacksRef.current.onError?.(`麦克风访问失败: ${errorName || error}`);
+      }
+      return false;
+    }
+  }, []);
+
+  // 释放资源
   const releaseRecordingResources = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
@@ -145,97 +223,102 @@ export function VoiceInputButton({
 
     analyserRef.current = null;
     mediaRecorderRef.current = null;
+    recordedChunksRef.current = [];
   }, []);
 
-  // 停止录音并释放所有资源
-  const stopRecordingAndRelease = useCallback((reason: 'complete' | 'cancel') => {
-    const operationToken = ++operationTokenRef.current;
+  // WebM 转 WAV（与 moss-test 页面相同）
+  const webmToWav = async (webmBlob: Blob): Promise<Uint8Array> => {
+    console.log('[VoiceInput] WebM 转 WAV 中...');
 
-    // Stop button animation
-    if (animationFrameId !== null) {
-      cancelAnimationFrame(animationFrameId);
-      animationFrameId = null;
+    const arrayBuffer = await webmBlob.arrayBuffer();
+    const audioContext = new AudioContext();
+    const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
+
+    // 提取音频数据
+    const rawData = audioBuffer.getChannelData(0);
+    const sampleRate = audioBuffer.sampleRate;
+    console.log(`[VoiceInput] 原始采样率: ${sampleRate}Hz`);
+
+    // 直接转换为 PCM 16bit
+    const pcmData = new Int16Array(rawData.length);
+    for (let i = 0; i < rawData.length; i++) {
+      const s = Math.max(-1, Math.min(1, rawData[i]));
+      pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
 
-    const finish = async () => {
-      releaseRecordingResources();
+    // 编码为 WAV
+    const wavData = encodeWAV(new Uint8Array(pcmData.buffer), sampleRate);
+    await audioContext.close();
 
-      if (reason === 'cancel') {
-        recordedChunksRef.current = [];
-        if (operationToken === operationTokenRef.current) {
-          setState({ state: 'idle', duration: 0, startTime: 0 });
-        }
-        return;
-      }
+    console.log(`[VoiceInput] WAV 转换完成: ${(wavData.length / 1024).toFixed(2)} KB`);
+    return wavData;
+  };
 
-      const recordedChunks = [...recordedChunksRef.current];
-      recordedChunksRef.current = [];
+  // 编码 WAV 格式
+  const encodeWAV = (samples: Uint8Array, sampleRate: number): Uint8Array => {
+    const numChannels = 1;
+    const bytesPerSample = 2;
+    const blockAlign = numChannels * bytesPerSample;
+    const byteRate = sampleRate * blockAlign;
+    const dataSize = samples.length;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
 
-      if (recordedChunks.length === 0) {
-        if (operationToken === operationTokenRef.current) {
-          setState({ state: 'idle', duration: 0, startTime: 0 });
-          callbacksRef.current.onError?.('No recorded audio data');
-        }
-        return;
-      }
+    view.setUint32(0, 0x52494646, false); // "RIFF"
+    view.setUint32(4, 36 + dataSize, true);
+    view.setUint32(8, 0x57415645, false); // "WAVE"
+    view.setUint32(12, 0x666d7420, false); // "fmt "
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bytesPerSample * 8, true);
+    view.setUint32(36, 0x64617461, false); // "data"
+    view.setUint32(40, dataSize, true);
 
-      if (operationToken !== operationTokenRef.current) {
-        return;
-      }
+    new Uint8Array(buffer).set(samples, 44);
+    return new Uint8Array(buffer);
+  };
 
-      setState(prev => ({ ...prev, state: 'recognizing' }));
-
-      try {
-        const webmBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-        const wavData = await MOSSASRAdapter.webmToWav(webmBlob);
-
-        if (operationToken !== operationTokenRef.current) {
-          return;
-        }
-
-        const result = await adapterRef.current?.transcribe({
-          lang: 'zh-CN',
-          preRecordedAudio: wavData,
-        });
-
-        if (operationToken !== operationTokenRef.current) {
-          return;
-        }
-
-        if (result) {
-          setState({ state: 'completed', duration: 0, startTime: 0 });
-          callbacksRef.current.onResult(result.text);
-        }
-      } catch (error) {
-        if (operationToken !== operationTokenRef.current) {
-          return;
-        }
-
-        setState({ state: 'idle', duration: 0, startTime: 0 });
-        callbacksRef.current.onError?.(`Recognition failed: ${error}`);
-      }
-    };
-
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      const handleStop = () => {
-        void finish();
-      };
-
-      recorder.addEventListener('stop', handleStop, { once: true });
-      recorder.stop();
-      return;
-    }
-
-    void finish();
-  }, [releaseRecordingResources]);
-
-  // 开始录音
+  // 开始录音（使用原生 MediaRecorder）
   const startRecording = useCallback(async () => {
+    const currentToken = ++operationTokenRef.current;
+
     try {
-      operationTokenRef.current += 1;
-      // 获取麦克风
-      const stream = await navigator.mediaDevices.getUserMedia({
+      console.log('[VoiceInput] 开始录音流程', { state: state.state, token: currentToken });
+
+      // 1. 检查权限状态
+      if (permissionState === 'unavailable') {
+        console.log('[VoiceInput] mediaDevices API 不可用');
+        throw new Error('您的浏览器不支持语音录制功能');
+      }
+
+      // 如果权限未授予，先请求权限
+      if (permissionState !== 'granted') {
+        console.log('[VoiceInput] 权限未授予，先请求权限');
+        const granted = await requestPermission();
+        if (!granted) {
+          console.log('[VoiceInput] 权限请求失败');
+          return;
+        }
+        if (currentToken !== operationTokenRef.current) {
+          console.log('[VoiceInput] 操作已被取消，跳过录音');
+          return;
+        }
+      }
+
+      // 2. 检测 mediaDevices API 可用性
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        console.log('[VoiceInput] mediaDevices API 不可用');
+        throw new Error('您的浏览器不支持语音录制功能');
+      }
+      console.log('[VoiceInput] mediaDevices API 检查通过');
+
+      // 3. 获取麦克风
+      console.log('[VoiceInput] 获取麦克风...');
+      streamRef.current = await navigator.mediaDevices.getUserMedia({
         audio: {
           echoCancellation: true,
           noiseSuppression: true,
@@ -243,55 +326,150 @@ export function VoiceInputButton({
           channelCount: 1,
         }
       });
-      streamRef.current = stream;
+      startTimeRef.current = Date.now();
+      console.log('[VoiceInput] 麦克风获取成功');
 
-      // 创建 AudioContext 和 Analyser
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-
-      // 创建 MediaRecorder
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : 'audio/webm';
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
+      // 4. 创建 MediaRecorder
+      const mimeType = 'audio/webm;codecs=opus';
+      const mediaRecorder = new MediaRecorder(streamRef.current, {
+        mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : 'audio/webm'
+      });
       mediaRecorderRef.current = mediaRecorder;
       recordedChunksRef.current = [];
 
+      // 5. 设置数据收集回调
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
           recordedChunksRef.current.push(event.data);
+          console.log('[VoiceInput] 收到音频数据:', event.data.size, 'bytes');
         }
       };
 
-      mediaRecorder.start(100);
+      // 6. 开始录音
+      mediaRecorder.start(100); // 每 100ms 收集一次数据
+      console.log('[VoiceInput] MediaRecorder 已启动');
 
-      // 更新状态
-      setState({
-        state: 'recording',
-        duration: 0,
-        startTime: Date.now(),
-      });
+      // 7. 设置波形可视化（使用 analyser）
+      if (showWaveform && streamRef.current) {
+        audioContextRef.current = new AudioContext();
+        const source = audioContextRef.current.createMediaStreamSource(streamRef.current);
+        analyserRef.current = audioContextRef.current.createAnalyser();
+        analyserRef.current.fftSize = 64;
+        source.connect(analyserRef.current);
+      }
+
+      // 8. 更新状态
+      if (currentToken === operationTokenRef.current) {
+        setState({
+          state: 'recording',
+          duration: 0,
+          startTime: Date.now(),
+        });
+      }
 
     } catch (error) {
-      callbacksRef.current.onError?.(`麦克风访问失败: ${error}`);
+      console.error('[VoiceInput] 开始录音失败:', error);
+      releaseRecordingResources();
+
+      if (currentToken === operationTokenRef.current) {
+        setState({ state: 'idle', duration: 0, startTime: 0 });
+        callbacksRef.current.onError?.(`录音失败: ${error}`);
+      }
     }
-  }, []);
+  }, [requestPermission, permissionState, showWaveform, releaseRecordingResources, state.state]);
+
+  // 停止录音并识别
+  const stopRecording = useCallback(async () => {
+    const operationToken = ++operationTokenRef.current;
+    console.log('[VoiceInput] 停止录音...', { token: operationToken });
+
+    // 停止动画
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      // 等待 stop 完成
+      await new Promise<void>((resolve) => {
+        recorder.addEventListener('stop', () => resolve(), { once: true });
+        recorder.stop();
+      });
+      console.log('[VoiceInput] MediaRecorder 已停止');
+    }
+
+    const recDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
+    console.log(`[VoiceInput] 录音时长: ${recDuration}秒`);
+
+    // 检查是否有录音数据
+    if (recordedChunksRef.current.length === 0) {
+      console.error('[VoiceInput] 没有录制到音频数据');
+      releaseRecordingResources();
+      if (operationToken === operationTokenRef.current) {
+        setState({ state: 'idle', duration: 0, startTime: 0 });
+        callbacksRef.current.onError?.('没有录制到音频数据');
+      }
+      return;
+    }
+
+    // 获取录音 blob
+    const webmBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
+    console.log(`[VoiceInput] WebM 文件: ${(webmBlob.size / 1024).toFixed(2)} KB`);
+
+    // 释放麦克风
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach(track => track.stop());
+      streamRef.current = null;
+    }
+
+    // 更新状态为识别中
+    if (operationToken === operationTokenRef.current) {
+      setState(prev => ({ ...prev, state: 'recognizing' }));
+    }
+
+    try {
+      // WebM 转 WAV
+      const wavData = await webmToWav(webmBlob);
+
+      if (operationToken !== operationTokenRef.current) {
+        return;
+      }
+
+      // 调用 ASR 识别
+      console.log('[VoiceInput] 调用 ASR 识别...');
+      const result = await adapterRef.current?.transcribe({
+        lang: 'zh-CN',
+        preRecordedAudio: wavData,
+      });
+
+      if (operationToken !== operationTokenRef.current) {
+        return;
+      }
+
+      if (result) {
+        console.log(`[VoiceInput] 识别完成: "${result.text}"`);
+        setState({ state: 'completed', duration: 0, startTime: 0 });
+        callbacksRef.current.onResult(result.text);
+      }
+    } catch (error) {
+      console.error('[VoiceInput] 识别失败:', error);
+      releaseRecordingResources();
+      if (operationToken === operationTokenRef.current) {
+        setState({ state: 'idle', duration: 0, startTime: 0 });
+        callbacksRef.current.onError?.(`识别失败: ${error}`);
+      }
+    }
+  }, [releaseRecordingResources]);
 
   // 处理按钮点击
   const handleClick = useCallback(() => {
     if (state.state === 'idle' || state.state === 'completed') {
       startRecording();
     } else if (state.state === 'recording') {
-      const duration = (Date.now() - state.startTime) / 1000;
-      setState(prev => ({ ...prev, duration }));
-      stopRecordingAndRelease('complete');
+      stopRecording();
     }
-  }, [state.state, state.startTime, startRecording, stopRecordingAndRelease]);
+  }, [state.state, startRecording, stopRecording]);
 
   // 快捷键处理（仅非输入区域）
   useEffect(() => {
@@ -323,14 +501,15 @@ export function VoiceInputButton({
       // Escape 取消
       else if (e.key === 'Escape' || e.code === 'Escape') {
         if (state.state === 'recording' || state.state === 'recognizing') {
-          stopRecordingAndRelease('cancel');
+          releaseRecordingResources();
+          setState({ state: 'idle', duration: 0, startTime: 0 });
         }
       }
     };
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [enableShortcut, handleClick, state.state, stopRecordingAndRelease]);
+  }, [enableShortcut, handleClick, state.state, releaseRecordingResources]);
 
   // 音量波形动画
   useEffect(() => {
@@ -582,7 +761,7 @@ export function VoiceInputButton({
       </button>
 
       {/* 快捷键提示 */}
-      {enableShortcut && state.state === 'idle' && (
+      {enableShortcut && state.state === 'idle' && permissionState === 'granted' && (
         <div style={{
           position: 'absolute',
           bottom: -20,
@@ -593,6 +772,45 @@ export function VoiceInputButton({
           whiteSpace: 'nowrap',
         }}>
           按 [空格] 开始/停止
+        </div>
+      )}
+
+      {/* 权限未授予时显示获取权限按钮 */}
+      {permissionState !== 'granted' && permissionState !== 'checking' && (
+        <button
+          onClick={requestPermission}
+          style={{
+            width: buttonSize,
+            height: buttonSize,
+            borderRadius: '50%',
+            border: 'none',
+            background: 'linear-gradient(135deg, #ffa500 0%, #ff8c00 100%)',
+            boxShadow: '0 4px 12px rgba(255, 140, 0, 0.4)',
+            cursor: 'pointer',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: buttonSize * 0.3,
+            transition: 'all 0.3s ease',
+          }}
+          title="点击获取麦克风权限"
+        >
+          🔓
+        </button>
+      )}
+
+      {/* 权限提示文字 */}
+      {permissionState !== 'granted' && permissionState !== 'checking' && (
+        <div style={{
+          position: 'absolute',
+          bottom: -20,
+          left: '50%',
+          transform: 'translateX(-50%)',
+          fontSize: 10,
+          color: '#ffa500',
+          whiteSpace: 'nowrap',
+        }}>
+          {permissionState === 'unavailable' ? '不支持' : '需要权限'}
         </div>
       )}
     </div>

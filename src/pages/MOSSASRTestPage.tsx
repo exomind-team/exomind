@@ -15,6 +15,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { MOSSASRAdapter, MOSSASRResult } from '../lib/adapters/asr/moss-asr';
 import { VoiceInputButton } from '../components/VoiceInputButton';
 import type { ASRResult } from '../lib/environment/interfaces/asr.port';
+import { getEventLogService } from '@/lib/services';
 
 // 录音状态
 type RecordingState = 'idle' | 'recording';
@@ -378,13 +379,23 @@ export function MOSSASRTestPage() {
   const handleVoiceResult = (text: string) => {
     setInputText(text);
     addLogEntry('✅ 语音识别完成', { text });
+
+    // 自动添加到事件日志
+    const eventLogService = getEventLogService();
+    eventLogService.addEvent(text).then(() => {
+      addLogEntry('📝 已自动添加到事件日志');
+    }).catch((err) => {
+      addLogEntry(`⚠️ 添加到事件日志失败: ${err}`);
+    });
   };
 
   const voiceButtonAdapterConfig = apiKey ? { apiKey } : undefined;
 
   return (
     <div style={{ padding: '24px', maxWidth: '700px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '20px' }}>🎤 MOSS 语音识别测试</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+        <h1 style={{ margin: 0, fontSize: '24px' }}>MOSS 语音识别测试</h1>
+      </div>
 
       {/* API Key 配置卡片 */}
       <div style={{
