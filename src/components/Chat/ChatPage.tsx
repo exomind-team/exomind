@@ -29,12 +29,13 @@ export function ChatPage() {
     const loadEvents = async () => {
       const loaded = await eventLogService.loadEvents();
       console.log('[ChatPage] 加载事件:', loaded.length, '条');
-      setEvents(loaded);
+      // 反转为升序 [最旧, ..., 最新]，用于渲染
+      setEvents([...loaded].reverse());
     };
 
     loadEvents();
 
-    // 监听新事件
+    // 监听新事件（最新在底部，append 到末尾）
     const unsubscribe = eventLogService.onEvent((newEvent) => {
       console.log('[ChatPage] 收到新事件:', newEvent.id);
       setEvents(prev => {
@@ -44,17 +45,17 @@ export function ChatPage() {
           console.log('[ChatPage] 事件已存在，忽略:', newEvent.id);
           return prev;
         }
-        return [newEvent, ...prev];  // 最新在前（顶部）
+        return [...prev, newEvent];  // 最新在底部（append 到末尾）
       });
     });
 
     return unsubscribe;
   }, []);
 
-  // 滚动到顶部（最新事件在顶部）
+  // 滚动到底部（最新事件在底部）
   useEffect(() => {
     if (events.length > 0) {
-      listEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      listEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
     }
   }, [events]);
 
