@@ -6,12 +6,15 @@
  * │  ─────────────────────────────────     │
  * │  测试 MOSS 语音识别功能                  │
  * │  - 可在页面配置 API Key                 │
- * │  - 开始 → 暂停 → 继续 → 停止            │
+ * │  - 原有的测试功能                       │
+ * │  - 新增：VoiceInputButton 语音输入      │
  * └─────────────────────────────────────────┘
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react';
 import { MOSSASRAdapter, MOSSASRResult } from '../lib/adapters/asr/moss-asr';
+import { VoiceInputButton } from '../components/VoiceInputButton';
+import type { ASRResult } from '../lib/environment/interfaces/asr.port';
 
 // 录音状态
 type RecordingState = 'idle' | 'recording';
@@ -19,15 +22,24 @@ type RecordingState = 'idle' | 'recording';
 // 录音方式
 type RecordingMethod = 'scriptProcessor' | 'mediaRecorder';
 
+// 日志条目
+interface LogEntry {
+  time: string;
+  message: string;
+  duration?: number;
+  text?: string;
+}
+
 export function MOSSASRTestPage() {
   const [apiKey, setApiKey] = useState('');
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
-  const [recordingMethod, setRecordingMethod] = useState<RecordingMethod>('scriptProcessor');
+  const [recordingMethod, setRecordingMethod] = useState<RecordingMethod>('mediaRecorder');
   const [duration, setDuration] = useState(0);
   const [result, setResult] = useState<ASRResult | null>(null);
+  const [inputText, setInputText] = useState('');
   const [audioUrl, setAudioUrl] = useState<string | null>(null);
   const [isAvailable, setIsAvailable] = useState(false);
-  const [logs, setLogs] = useState<string[]>([]);
+  const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<string>('未检测');
 
   const adapterRef = useRef<MOSSASRAdapter | null>(null);
@@ -90,9 +102,22 @@ export function MOSSASRTestPage() {
     };
   }, [recordingState]);
 
-  const addLog = (msg: string) => {
+  // 添加日志
+  const addLogEntry = (msg: string, options?: { duration?: number; text?: string }) => {
     const time = new Date().toLocaleTimeString();
-    setLogs(prev => [`[${time}] ${msg}`, ...prev.slice(0, 19)]);
+    const entry: LogEntry = { time, message: msg };
+    if (options?.duration !== undefined) {
+      entry.duration = options.duration;
+    }
+    if (options?.text !== undefined) {
+      entry.text = options.text;
+    }
+    setLogs(prev => [entry, ...prev.slice(0, 19)]);
+  };
+
+  // 兼容旧代码
+  const addLog = (msg: string) => {
+    addLogEntry(msg);
   };
 
   const handleSaveApiKey = () => {
@@ -339,7 +364,28 @@ export function MOSSASRTestPage() {
     setLogs([]);
     setConnectionStatus('就绪');
     setDuration(0);
+    setInputText('');
     addLog('就绪');
+  };
+
+  // VoiceInputButton 回调函数
+  const handleVoiceResult = (text: string) => {
+    setInputText(text);
+    addLogEntry('✅ 语音识别完成', { text });
+  };
+
+  const handleVoiceError = (error: string) => {
+    addLogEntry(`❌ 语音识别失败: ${error}`);
+  };
+
+  const handleVoiceStateChange = (state: 'idle' | 'recording' | 'recognizing' | 'completed') => {
+    if (state === 'recording') {
+      addLogEntry('🎤 开始录音');
+    } else if (state === 'recognizing') {
+      addLogEntry('⏳ 识别中...');
+    } else if (state === 'completed') {
+      addLogEntry('✅ 识别完成');
+    }
   };
 
   return (
@@ -492,7 +538,6 @@ export function MOSSASRTestPage() {
       <div style={{
         padding: '24px',
         background: recordingState === 'recording' ? '#fee2e2' :
-                    recordingState === 'paused' ? '#fef3c7' :
                     result ? '#dcfce7' : '#f3f4f6',
         borderRadius: '12px',
         marginBottom: '16px',
@@ -567,7 +612,99 @@ export function MOSSASRTestPage() {
         )}
       </div>
 
-      {/* 识别结果 */}
+      {/* VoiceInputButton 语音输入区域 */}
+      <div style={{
+        padding: '20px',
+        background: '#f8fafc',
+        borderRadius: '12px',
+        marginBottom: '16px',
+        border: '1px solid #e2e8f0',
+      }}>
+        <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#374151' }}>
+          🎤 语音输入
+        </h3>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
+          {/* 语音输入按钮 */}
+          <VoiceInputButton
+            onResult={handleVoiceResult}
+            onError={handleVoiceError}
+            onStateChange={handleVoiceStateChange}
+            defaultMethod="mediaRecorder"
+            showWaveform={true}
+            showTimer={true}
+            enableShortcut={true}
+            size={72}
+          />
+
+          {/* 语音输入框 */}
+          <div style={{ flex: 1 }}>
+            <textarea
+              value={inputText}
+              onChange={(e) => setInputText(e.target.value)}
+              placeholder="点击上方麦克风按钮开始语音输入..."
+              style={{
+                width: '100%',
+                minHeight: '80px',
+                padding: '12px',
+                border: '1px solid #d1d5db',
+                borderRadius: '8px',
+                fontSize: '14px',
+                resize: 'vertical',
+                fontFamily: 'inherit',
+              }}
+            />
+            {inputText && (
+              <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
+                <button
+                  onClick={() => navigator.clipboard.writeText(inputText)}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    background: '#f3f4f6',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  复制
+                </button>
+                <button
+                  onClick={() => setInputText('')}
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: '12px',
+                    background: '#f3f4f6',
+                    border: '1px solid #d1d5db',
+                    borderRadius: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  清空
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div style={{
+          marginTop: '12px',
+          padding: '12px',
+          background: '#fef3c7',
+          borderRadius: '8px',
+          fontSize: '12px',
+          color: '#92400e',
+        }}>
+          <strong>快捷键提示：</strong>
+          <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
+            <li>[空格键] 开始/停止录音</li>
+            <li>[Ctrl + 空格] 切换录音方式</li>
+            <li>[Esc] 取消录音</li>
+          </ul>
+        </div>
+      </div>
+
+      {/* 原有的识别结果（仅显示，不使用） */}
       {result && (
         <div style={{
           padding: '20px',
@@ -639,8 +776,27 @@ export function MOSSASRTestPage() {
           </button>
         </div>
         {logs.map((log, i) => (
-          <div key={i} style={{ marginBottom: '4px', lineHeight: '1.5' }}>
-            {log}
+          <div key={i} style={{ marginBottom: '8px', lineHeight: '1.5' }}>
+            <span style={{ color: '#64748b' }}>[{log.time}]</span>{' '}
+            <span>{log.message}</span>
+            {log.duration !== undefined && (
+              <span style={{ color: '#94a3b8', marginLeft: 8 }}>
+                ({log.duration.toFixed(1)}秒)
+              </span>
+            )}
+            {log.text && (
+              <div style={{
+                marginTop: 4,
+                padding: '8px 12px',
+                background: 'rgba(81, 207, 102, 0.2)',
+                borderRadius: '6px',
+                borderLeft: '3px solid #51cf66',
+                fontSize: '13px',
+                color: '#fff',
+              }}>
+                {log.text}
+              </div>
+            )}
           </div>
         ))}
         {logs.length === 0 && (

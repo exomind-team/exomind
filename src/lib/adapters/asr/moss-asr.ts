@@ -44,7 +44,7 @@ export interface MOSSASRInput extends ASRInput {
   preRecordedAudio?: Uint8Array;
 }
 
-const DEFAULT_CONFIG: MOSSASRConfig = {
+const DEFAULT_CONFIG: Partial<MOSSASRConfig> = {
   apiUrl: 'https://studio.mosi.cn/v1/audio/transcriptions',
   timeout: 60000, // 60秒超时（音频处理可能较慢）
 };
@@ -237,7 +237,7 @@ export class MOSSASRAdapter implements IASRPort {
    * 从 MediaStream 录制音频并转换为 WAV 格式
    */
   private async recordAudio(stream: MediaStream): Promise<Uint8Array> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       console.log('[ASR-MOSS] 创建 AudioContext...');
       // 使用浏览器默认采样率（通常是 44100 或 48000）
       const audioContext = new AudioContext();
