@@ -16,13 +16,8 @@ export function ChatPage() {
   const {
     messages,
     pendingMessages,
-    isConnected,
-    isConnecting,
-    network,
     sendMessage,
     loadMessages,
-    getDeviceId,
-    connectedDeviceCount,
   } = useChatStore();
 
   // TimeBlock Store
@@ -39,8 +34,8 @@ export function ChatPage() {
     save: saveTimeBlocks,
   } = useTimeBlockStore();
 
-  const deviceId = getDeviceId();
   const pendingCount = pendingMessages.length;
+  const network = { isOnline: true };
 
   // 合并显示：消息 + 时间块事件
   const allEvents = useMemo(() => {
@@ -155,16 +150,12 @@ export function ChatPage() {
   };
 
   const getConnectionStatusText = () => {
-    if (connectedDeviceCount > 0) {
-      if (isConnecting) return '连接中...';
-      if (isConnected) return `已连接 ${connectedDeviceCount} 个设备`;
-    }
-    if (!network?.isOnline) return '离线模式';
+    if (!network.isOnline) return '离线模式';
     return '准备就绪';
   };
 
   const isOwnMessage = (msg: typeof messages[0]) => {
-    return msg.direction === 'outgoing' || msg.senderId === deviceId;
+    return msg.direction === 'outgoing';
   };
 
   const formatTime = (timestamp: number) => {
@@ -214,17 +205,10 @@ export function ChatPage() {
         <div className="flex items-center gap-2">
           <h2 className="text-lg sm:text-2xl font-bold">事件记录</h2>
           <p className="text-xs sm:text-sm text-muted-foreground" data-testid="connection-status">
-            {connectedDeviceCount > 0 ? (
-              <span className="flex items-center gap-2">
-                <Circle size={8} fill="currentColor" className={isConnected ? "text-green-500" : "text-yellow-500"} />
-                {getConnectionStatusText()}
-              </span>
-            ) : (
-              <span className="flex items-center gap-2">
-                <Circle size={8} fill="currentColor" className="text-gray-400" />
-                {getConnectionStatusText()}
-              </span>
-            )}
+            <span className="flex items-center gap-2">
+              <Circle size={8} fill="currentColor" className="text-gray-400" />
+              {getConnectionStatusText()}
+            </span>
           </p>
         </div>
         <div className="flex items-center gap-1 sm:gap-2 flex-wrap">

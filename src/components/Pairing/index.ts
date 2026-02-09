@@ -1,1 +1,0 @@
-export { PairingModal } from './PairingModal';

@@ -30,6 +30,6 @@
     "noFallthroughCasesInSwitch": true
   },
   "include": ["src"],
-  "exclude": ["src/lib/db/**", "src/lib/ws/auth.ts"],
+  "exclude": ["src/lib/db/**", "src/lib/ws/**", "src/backend/**"],
   "references": [{ "path": "./tsconfig.node.json" }]
 }

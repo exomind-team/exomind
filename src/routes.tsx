@@ -2,10 +2,9 @@ import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from 
 import { Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Menu, X, MessageCircle, Smartphone, Settings, Mic, MicVocal } from "lucide-react";
+import { Menu, X, MessageCircle, Settings, Mic, MicVocal } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
-import { DevicesPage } from "@/components/Settings/DevicesPage";
 import { ASRTestPage } from "@/pages/ASRTestPage";
 import { VoiceChatPage } from "@/pages/VoiceChatPage";
 import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
@@ -15,7 +14,6 @@ const sidebarItems = [
   { title: "MOSS测试", path: "/moss-test", icon: Mic },
   { title: "语音聊天", path: "/voice-chat", icon: MicVocal },
   { title: "ASR测试", path: "/asr-test", icon: Mic },
-  { title: "设备", path: "/devices", icon: Smartphone },
   { title: "设置", path: "/settings", icon: Settings },
 ];
 
@@ -131,16 +129,7 @@ const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/settings",
   component: function Settings() {
-    return <SettingsPage connectionStatus="disconnected" />;
-  },
-});
-
-// Devices route (/devices)
-const devicesRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/devices",
-  component: function Devices() {
-    return <DevicesPage connectionStatus="disconnected" />;
+    return <SettingsPage />;
   },
 });
 
@@ -172,7 +161,7 @@ const mossTestRoute = createRoute({
 });
 
 // Create route tree
-const routeTree = rootRoute.addChildren([indexRoute, devicesRoute, mossTestRoute, asrTestRoute, voiceChatRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, mossTestRoute, asrTestRoute, voiceChatRoute, settingsRoute]);
 
 // Create router
 const router = createRouter({ routeTree });
