@@ -89,6 +89,7 @@ export function VoiceInputButton({
   const recordedChunksRef = useRef<Blob[]>([]);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
+  const operationTokenRef = useRef(0);
 
   // 使用 ref 存储回调，避免闭包问题
   const callbacksRef = useRef({
@@ -131,79 +132,108 @@ export function VoiceInputButton({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const buttonRef = useRef<HTMLButtonElement>(null);
 
-  // 停止录音并释放所有资源
-  const stopRecordingAndRelease = useCallback((reason: 'complete' | 'cancel') => {
-    // 停止动画
-    if (animationFrameId !== null) {
-      cancelAnimationFrame(animationFrameId);
-      animationFrameId = null;
-    }
-
-    // 停止 MediaRecorder
-    if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-      mediaRecorderRef.current.stop();
-    }
-
-    // 停止音频流
+  const releaseRecordingResources = useCallback(() => {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach(track => track.stop());
       streamRef.current = null;
     }
 
-    // 关闭 AudioContext
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
       audioContextRef.current.close().catch(console.error);
       audioContextRef.current = null;
     }
 
-    // 清理 analyser
     analyserRef.current = null;
-
-    if (reason === 'complete') {
-      // 延迟处理数据，确保 MediaRecorder 数据可用
-      setTimeout(() => {
-        const recordedChunks = recordedChunksRef.current;
-        recordedChunksRef.current = [];
-
-        if (recordedChunks.length > 0) {
-          const webmBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-
-          setState(prev => ({ ...prev, state: 'recognizing', duration: prev.duration }));
-
-          // WebM 转 WAV
-          MOSSASRAdapter.webmToWav(webmBlob)
-            .then((wavData) => {
-              // 调用识别
-              return adapterRef.current?.transcribe({
-                lang: 'zh-CN',
-                preRecordedAudio: wavData,
-              });
-            })
-            .then((result) => {
-              if (result) {
-                setState({ state: 'completed', duration: 0, startTime: 0 });
-                callbacksRef.current.onResult(result.text);
-              }
-            })
-            .catch((error) => {
-              setState({ state: 'idle', duration: 0, startTime: 0 });
-              callbacksRef.current.onError?.(`识别失败: ${error}`);
-            });
-        } else {
-          setState({ state: 'idle', duration: 0, startTime: 0 });
-          callbacksRef.current.onError?.('没有录制到音频数据');
-        }
-      }, 100);
-    } else {
-      // 取消
-      setState({ state: 'idle', duration: 0, startTime: 0 });
-      recordedChunksRef.current = [];
-    }
+    mediaRecorderRef.current = null;
   }, []);
+
+  // 停止录音并释放所有资源
+  const stopRecordingAndRelease = useCallback((reason: 'complete' | 'cancel') => {
+    const operationToken = ++operationTokenRef.current;
+
+    // Stop button animation
+    if (animationFrameId !== null) {
+      cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    }
+
+    const finish = async () => {
+      releaseRecordingResources();
+
+      if (reason === 'cancel') {
+        recordedChunksRef.current = [];
+        if (operationToken === operationTokenRef.current) {
+          setState({ state: 'idle', duration: 0, startTime: 0 });
+        }
+        return;
+      }
+
+      const recordedChunks = [...recordedChunksRef.current];
+      recordedChunksRef.current = [];
+
+      if (recordedChunks.length === 0) {
+        if (operationToken === operationTokenRef.current) {
+          setState({ state: 'idle', duration: 0, startTime: 0 });
+          callbacksRef.current.onError?.('No recorded audio data');
+        }
+        return;
+      }
+
+      if (operationToken !== operationTokenRef.current) {
+        return;
+      }
+
+      setState(prev => ({ ...prev, state: 'recognizing' }));
+
+      try {
+        const webmBlob = new Blob(recordedChunks, { type: 'audio/webm' });
+        const wavData = await MOSSASRAdapter.webmToWav(webmBlob);
+
+        if (operationToken !== operationTokenRef.current) {
+          return;
+        }
+
+        const result = await adapterRef.current?.transcribe({
+          lang: 'zh-CN',
+          preRecordedAudio: wavData,
+        });
+
+        if (operationToken !== operationTokenRef.current) {
+          return;
+        }
+
+        if (result) {
+          setState({ state: 'completed', duration: 0, startTime: 0 });
+          callbacksRef.current.onResult(result.text);
+        }
+      } catch (error) {
+        if (operationToken !== operationTokenRef.current) {
+          return;
+        }
+
+        setState({ state: 'idle', duration: 0, startTime: 0 });
+        callbacksRef.current.onError?.(`Recognition failed: ${error}`);
+      }
+    };
+
+    const recorder = mediaRecorderRef.current;
+    if (recorder && recorder.state !== 'inactive') {
+      const handleStop = () => {
+        void finish();
+      };
+
+      recorder.addEventListener('stop', handleStop, { once: true });
+      recorder.stop();
+      return;
+    }
+
+    void finish();
+  }, [releaseRecordingResources]);
 
   // 开始录音
   const startRecording = useCallback(async () => {
     try {
+      operationTokenRef.current += 1;
       // 获取麦克风
       const stream = await navigator.mediaDevices.getUserMedia({
         audio: {
@@ -269,14 +299,18 @@ export function VoiceInputButton({
 
     const handleKeyDown = (e: KeyboardEvent) => {
       // 获取当前焦点元素
-      const target = e.target as HTMLElement;
+      const target = e.target;
+      const targetElement = target instanceof HTMLElement ? target : null;
 
       // 排除输入区域
       if (
-        target.tagName === 'INPUT' ||
-        target.tagName === 'TEXTAREA' ||
-        target.isContentEditable ||
-        target.closest('[contenteditable="true"]')
+        targetElement &&
+        (
+          targetElement.tagName === 'INPUT' ||
+          targetElement.tagName === 'TEXTAREA' ||
+          targetElement.isContentEditable ||
+          targetElement.closest('[contenteditable="true"]')
+        )
       ) {
         return; // 不拦截
       }
