@@ -384,7 +384,9 @@ export function MOSSASRTestPage() {
 
   return (
     <div style={{ padding: '24px', maxWidth: '700px', margin: '0 auto' }}>
-      <h1 style={{ marginBottom: '20px' }}>🎤 MOSS 语音识别测试</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+        <h1 style={{ margin: 0, fontSize: '24px' }}>MOSS 语音识别测试</h1>
+      </div>
 
       {/* API Key 配置卡片 */}
       <div style={{

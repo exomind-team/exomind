@@ -12,10 +12,10 @@
  */
 
 import { useState, KeyboardEvent, useCallback } from 'react';
-import { Send, Mic } from 'lucide-react';
+import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { VoiceInputButton, type VoiceButtonState } from './VoiceInputButton';
+import { VoiceInputButton } from './VoiceInputButton';
 import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
 
 export interface VoiceMessageInputProps {
@@ -57,8 +57,9 @@ export function VoiceMessageInput({
 
   // 发送消息
   const handleSend = useCallback(() => {
-    if (value.trim()) {
-      onSend(value.trim());
+    const trimmed = value.trim();
+    if (trimmed) {
+      onSend(trimmed);
       setValue('');
     }
   }, [value, onSend]);
@@ -80,7 +81,7 @@ export function VoiceMessageInput({
   }, [onVoiceResult]);
 
   // 语音状态变化
-  const handleStateChange = useCallback((state: VoiceButtonState) => {
+  const handleStateChange = useCallback(() => {
     // 可以在这里添加状态提示
   }, []);
 

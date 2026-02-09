@@ -152,7 +152,9 @@ export function ASRTestPage() {
       margin: '0 auto',
       fontFamily: 'system-ui, sans-serif',
     }}>
-      <h1>🎤 语音识别测试</h1>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
+        <h1 style={{ margin: 0, fontSize: '24px' }}>语音识别测试</h1>
+      </div>
 
       {/* 状态显示 */}
       <div style={{
