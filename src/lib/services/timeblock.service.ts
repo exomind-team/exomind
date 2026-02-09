@@ -11,7 +11,9 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import type { Event, TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig, EventData } from '../types/event';
+import { getEventLogService } from './eventlog.service';
+import type { Tag } from '../types/event';
+import type { Event, TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -127,25 +129,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     const endId = crypto.randomUUID();
 
-    // 创建结束事件（带身心反馈）
-    const eventContent = feedback
-      ? `${activeData.name} - ${feedback}`
-      : `${activeData.name} 完成`;
+    // 创建结束事件（通过 EventLogService）
+    await this.addBlockEvent(endId, `${activeData.name} 完成`, 'block_end');
 
-    // 添加 block_end 和 block_feedback 标签
-    await this.addBlockEvent(endId, eventContent, 'block_end');
-
-    // 额外保存 block_feedback 标签的事件
+    // 身心反馈作为独立事件添加到事件日志
     if (feedback) {
-      const feedbackEventData: EventData = {
-        id: crypto.randomUUID(),
-        timestamp: Date.now(),
-        content: feedback,
-        tags: ['block_feedback'],
-      };
-      const events = await this.env.storage.read<EventData[]>('events') || [];
-      events.unshift(feedbackEventData);
-      await this.env.storage.write('events', events);
+      await getEventLogService().addEvent(feedback, new Set<Tag>(['block_feedback']));
     }
 
     // 保存已完成的时间块
@@ -199,31 +188,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return () => this.listeners.delete(callback);
   }
 
-  /** 添加时间块事件 */
+  /** 添加时间块事件（通过 EventLogService） */
   private async addBlockEvent(
-    eventId: string,
+    _eventId: string,
     content: string,
     tag: 'block_start' | 'block_end',
-    _feedback?: string
   ): Promise<Event> {
-    const eventData: EventData = {
-      id: eventId,
-      timestamp: Date.now(),
-      content,
-      tags: [tag],
-    };
+    const tags = new Set<Tag>([tag]);
 
-    // 读取现有事件
-    const events = await this.env.storage.read<EventData[]>('events') || [];
-    events.unshift(eventData);
-    await this.env.storage.write('events', events);
-
-    return {
-      id: eventId,
-      timestamp: eventData.timestamp,
-      content: eventData.content,
-      tags: new Set(eventData.tags),
-    };
+    // 通过 EventLogService 添加事件，确保监听器能收到通知
+    const event = await getEventLogService().addEvent(content, tags);
+    return event;
   }
 
   private notifyChange(block: ActiveBlockData | null): void {
