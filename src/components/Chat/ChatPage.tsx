@@ -2,10 +2,10 @@ import { useState, useRef, useEffect, useMemo } from 'react';
 import { useChatStore } from '@/lib/stores/chat-store';
 import { useTimeBlockStore, parseTimeBlockCommand } from '@/lib/stores/timeblock-store';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Send, Circle, Clock } from 'lucide-react';
+import { Circle, Clock } from 'lucide-react';
+import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 
 export function ChatPage() {
   const [inputValue, setInputValue] = useState('');
@@ -354,34 +354,17 @@ export function ChatPage() {
       )}
 
       {/* 输入区域 */}
-      <div className="px-3 sm:px-6 py-3 border-t bg-card shrink-0 safe-area-pb">
-        <div className="flex items-center gap-2">
-          <Input
-            value={inputValue}
-            onChange={(e) => setInputValue(e.target.value)}
-            onKeyDown={handleKeyPress}
-            placeholder={
-              activeBlock
-                ? `记录中: ${activeBlock.name}...`
-                : network.isOnline
-                  ? "输入消息... ('开始xxx' 开始时间块)"
-                  : "离线模式 - 消息稍后发送"
-            }
-            className="flex-1 min-w-0 text-xs sm:text-sm"
-            disabled={!network.isOnline && hasNoEvents}
-            data-testid="message-input"
-          />
-          <Button
-            onClick={handleSend}
-            disabled={!inputValue.trim() || (!network.isOnline && hasNoEvents)}
-            size="icon"
-            className="shrink-0"
-            data-testid="send-button"
-          >
-            <Send className="h-4 w-4" />
-          </Button>
-        </div>
-      </div>
+      <VoiceMessageInput
+        onSend={handleSend}
+        placeholder={
+          activeBlock
+            ? `记录中: ${activeBlock.name}...`
+            : network.isOnline
+              ? "输入消息... ('开始xxx' 开始时间块)"
+              : "离线模式 - 消息稍后发送"
+        }
+        buttonSize={40}
+      />
     </div>
   );
 }
