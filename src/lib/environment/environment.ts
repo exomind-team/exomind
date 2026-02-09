@@ -29,10 +29,22 @@ export interface Environment {
 export class ExoMindEnvironment implements Environment {
   asr: IASRPort;
 
+  private static instance: ExoMindEnvironment | null = null;
+
   private constructor() {
     // 初始化各个 Port
     this.asr = new VolcanoEngineASRAdapter();
     console.log('[Environment] ExoMindEnvironment 初始化完成');
+  }
+
+  /**
+   * 获取单例实例
+   */
+  static getInstance(): ExoMindEnvironment {
+    if (!ExoMindEnvironment.instance) {
+      ExoMindEnvironment.instance = new ExoMindEnvironment();
+    }
+    return ExoMindEnvironment.instance;
   }
 
   /**
@@ -43,28 +55,4 @@ export class ExoMindEnvironment implements Environment {
       asr: this.asr.isAvailable(),
     };
   }
-}
-
-// ========== Singleton ==========
-
-let environment: ExoMindEnvironment | null = null;
-
-/**
- * 创建 Environment（单例模式）
- */
-export function createEnvironment(): ExoMindEnvironment {
-  if (!environment) {
-    environment = new ExoMindEnvironment();
-  }
-  return environment;
-}
-
-/**
- * 获取 Environment 实例
- */
-export function getEnvironment(): ExoMindEnvironment {
-  if (!environment) {
-    return createEnvironment();
-  }
-  return environment;
 }
