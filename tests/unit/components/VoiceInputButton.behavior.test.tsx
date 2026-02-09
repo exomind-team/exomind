@@ -202,4 +202,3 @@ describe('VoiceInputButton behavior', () => {
     expect(onError).not.toHaveBeenCalled();
   });
 });
-
