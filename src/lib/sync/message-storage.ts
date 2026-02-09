@@ -7,14 +7,17 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { EventLog } from '../eventlog/format';
 
-// Detect environment more reliably
+// Detect environment more reliably - wrap in typeof check to avoid SSR errors
 const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
 
-console.log('[MessageStorage] Environment detection:', {
-  isTauri,
-  hasWindow: typeof window !== 'undefined',
-  hasTauri: window.__TAURI__ !== undefined,
-});
+// Only log in browser/tauri environment, not during SSR/build
+if (typeof window !== 'undefined') {
+  console.log('[MessageStorage] Environment detection:', {
+    isTauri,
+    hasWindow: typeof window !== 'undefined',
+    hasTauri: window.__TAURI__ !== undefined,
+  });
+}
 
 // Web Storage Adapter (localStorage fallback)
 const webStorage = {
@@ -70,7 +73,9 @@ const tauriStorage = {
 
 // Use appropriate storage based on environment
 const fs = isTauri ? tauriStorage : webStorage;
-console.log('[MessageStorage] Using storage:', isTauri ? 'Tauri' : 'Web (localStorage)');
+if (typeof window !== 'undefined') {
+  console.log('[MessageStorage] Using storage:', isTauri ? 'Tauri' : 'Web (localStorage)');
+}
 
 // Message types
 export interface ChatMessage {

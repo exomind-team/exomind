@@ -2,13 +2,15 @@ import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from 
 import { Link } from "@tanstack/react-router";
 import { useState, useEffect } from "react";
 import { cn } from "@/lib/utils";
-import { Menu, X, MessageCircle, Smartphone, Settings } from "lucide-react";
+import { Menu, X, MessageCircle, Smartphone, Settings, ClipboardList } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
 import { DevicesPage } from "@/components/Settings/DevicesPage";
+import { RecordPage } from "@/components/Record/RecordPage";
 
 const sidebarItems = [
   { title: "聊天", path: "/", icon: MessageCircle },
+  { title: "记录", path: "/test/record", icon: ClipboardList },
   { title: "设备", path: "/devices", icon: Smartphone },
   { title: "设置", path: "/settings", icon: Settings },
 ];
@@ -138,8 +140,21 @@ const devicesRoute = createRoute({
   },
 });
 
+// Record route (/test/record)
+const recordRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: "/test/record",
+  component: function Record() {
+    return (
+      <div className="h-full flex flex-col">
+        <RecordPage />
+      </div>
+    );
+  },
+});
+
 // Create route tree
-const routeTree = rootRoute.addChildren([indexRoute, devicesRoute, settingsRoute]);
+const routeTree = rootRoute.addChildren([indexRoute, devicesRoute, settingsRoute, recordRoute]);
 
 // Create router
 const router = createRouter({ routeTree });
