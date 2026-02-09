@@ -297,8 +297,16 @@ export function MOSSASRTestPage() {
       (window as any).__asrRecordingActive = false;
     } else {
       // MediaRecorder 方式
-      if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
-        mediaRecorderRef.current.stop();
+      const recorder = mediaRecorderRef.current;
+      if (recorder && recorder.state !== 'inactive') {
+        await new Promise<void>((resolve) => {
+          const handleRecorderStop = () => {
+            resolve();
+          };
+
+          recorder.addEventListener('stop', handleRecorderStop, { once: true });
+          recorder.stop();
+        });
       }
     }
 
@@ -313,8 +321,7 @@ export function MOSSASRTestPage() {
 
     if (recordingMethod === 'mediaRecorder') {
       // 处理 MediaRecorder 数据
-      setTimeout(async () => {
-        try {
+      try {
           if (recordedChunksRef.current.length === 0) {
             throw new Error('没有录制到音频数据');
           }
@@ -349,7 +356,6 @@ export function MOSSASRTestPage() {
           addLog(`处理错误: ${error}`);
           setConnectionStatus('❌ 处理失败');
         }
-      }, 100);
     }
   };
 
