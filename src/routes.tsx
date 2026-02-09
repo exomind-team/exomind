@@ -2,14 +2,16 @@ import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from 
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { X, Settings, Mic, MicVocal, ClipboardList, Menu } from "lucide-react";
+import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
 import { ASRTestPage } from "@/pages/ASRTestPage";
 import { VoiceChatPage } from "@/pages/VoiceChatPage";
 import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
+import { HomePage } from "@/components/Home/HomePage";
 
 const sidebarItems = [
+  { title: "首页", path: "/", icon: Home },
   { title: "事件日志", path: "/eventlog", icon: ClipboardList },
   { title: "MOSS测试", path: "/moss-test", icon: Mic },
   { title: "语音聊天", path: "/voice-chat", icon: MicVocal },
@@ -106,10 +108,19 @@ const rootRoute = createRootRoute({
   component: Layout,
 });
 
+// Home route (/)
+const homeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
+  component: function Home() {
+    return <HomePage />;
+  },
+});
+
 // Index route (/eventlog)
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/eventlog",
+  path: '/eventlog',
   component: function EventLog() {
     return (
       <div className="h-full flex flex-col">
@@ -120,7 +131,7 @@ const indexRoute = createRoute({
 });
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/settings",
+  path: 'settings',
   component: function Settings() {
     return <SettingsPage />;
   },
@@ -129,7 +140,7 @@ const settingsRoute = createRoute({
 // ASR Test route (/asr-test)
 const asrTestRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/asr-test",
+  path: 'asr-test',
   component: function ASRTest() {
     return <ASRTestPage />;
   },
@@ -138,7 +149,7 @@ const asrTestRoute = createRoute({
 // MOSS ASR Test route (/moss-test)
 const mossTestRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/moss-test",
+  path: 'moss-test',
   component: function MOSSTest() {
     return <MOSSASRTestPage />;
   },
@@ -147,7 +158,7 @@ const mossTestRoute = createRoute({
 // Voice Chat route (/voice-chat)
 const voiceChatRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/voice-chat",
+  path: 'voice-chat',
   component: function VoiceChat() {
     return <VoiceChatPage />;
   },
@@ -155,6 +166,7 @@ const voiceChatRoute = createRoute({
 
 // Create the route tree
 const routeTree = rootRoute.addChildren([
+  homeRoute,
   indexRoute,
   settingsRoute,
   asrTestRoute,
@@ -166,7 +178,7 @@ const routeTree = rootRoute.addChildren([
 const router = createRouter({ routeTree });
 
 // Export router instance
-export { router };
+export { router, rootRoute };
 
 // Re-export Outlet and context for convenience
 export { Outlet };
