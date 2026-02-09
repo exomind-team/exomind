@@ -14,13 +14,9 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { RecordPage } from '@/components/Record/RecordPage';
 import type { TimeBlockEvent, PlannedTimeBlockImplData } from '@/lib/stores/timeblock-store';
 import type { ChatMessage } from '@/lib/stores/chat-store';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
-import { RecordPage } from '@/components/Record/RecordPage';
-import type { TimeBlockEvent, PlannedTimeBlockImplData } from '@/lib/stores/timeblock-store';
-import type { ChatMessage } from '@/lib/stores/chat-store';
 
 // ============================================================================
-// Mock 配置（在 setup 之后执行，所以 Element 等已定义）
+// Mock 配置
 // ============================================================================
 
 // Mock useChatStore
