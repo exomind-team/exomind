@@ -155,12 +155,12 @@ export function RecordPage() {
   };
 
   return (
-    <div className="flex flex-col h-full max-h-[100dvh] lg:max-h-screen">
+    <div className="flex flex-col h-full max-h-[100dvh] lg:max-h-screen" data-testid="record-page">
       {/* 头部 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0" data-testid="record-header">
         <div className="flex items-center gap-2">
-          <h2 className="text-lg sm:text-2xl font-bold">记录</h2>
-          <p className="text-xs sm:text-sm text-muted-foreground">
+          <h2 className="text-lg sm:text-2xl font-bold" data-testid="record-title">记录</h2>
+          <p className="text-xs sm:text-sm text-muted-foreground" data-testid="record-status">
             {activeBlockInfo ? (
               <span className="flex items-center gap-2">
                 <Clock size={12} className="text-blue-500" />
@@ -185,6 +185,7 @@ export function RecordPage() {
             size="sm"
             onClick={() => setShowHistory(!showHistory)}
             className="text-xs"
+            data-testid="history-toggle"
           >
             <Clock size={14} className="mr-1" />
             历史
@@ -196,6 +197,7 @@ export function RecordPage() {
       <div
         className="flex-1 overflow-auto p-3 sm:p-6"
         ref={listRef as React.RefObject<HTMLDivElement>}
+        data-testid="event-list"
       >
         {hasNoEvents ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
@@ -287,7 +289,7 @@ export function RecordPage() {
 
       {/* 历史面板 */}
       {showHistory && (
-        <div className="border-t bg-muted/30 p-3 sm:p-4 max-h-[40vh] sm:max-h-[50vh] overflow-auto">
+        <div className="border-t bg-muted/30 p-3 sm:p-4 max-h-[40vh] sm:max-h-[50vh] overflow-auto" data-testid="history-panel">
           <h3 className="text-sm font-medium mb-2 flex items-center gap-2">
             <Clock size={16} />
             时间块历史
@@ -301,7 +303,7 @@ export function RecordPage() {
                 const blockEvents = getEventsInBlock(block);
 
                 return (
-                  <Card key={block.id} className="bg-background">
+                  <Card key={block.id} className="bg-background" data-testid={`history-block-${block.id}`}>
                     <CardContent className="p-3">
                       <div className="flex items-center justify-between mb-1">
                         <span className="font-medium text-sm flex items-center gap-1">
@@ -328,7 +330,7 @@ export function RecordPage() {
 
       {/* 输入区域 */}
       <div className="px-3 sm:px-6 py-3 border-t bg-card shrink-0 safe-area-pb">
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2" data-testid="record-input-area">
           <Input
             value={inputValue}
             onChange={(e) => setInputValue(e.target.value)}
@@ -339,12 +341,14 @@ export function RecordPage() {
                 : "输入记录... ('开始xxx' 开始时间块)"
             }
             className="flex-1 min-w-0 text-xs sm:text-sm"
+            data-testid="record-input"
           />
           <Button
             onClick={handleSubmit}
             disabled={!inputValue.trim()}
             size="icon"
             className="shrink-0"
+            data-testid="record-send-button"
           >
             <Send size={16} />
           </Button>
