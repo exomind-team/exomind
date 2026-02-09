@@ -15,7 +15,6 @@ import type { IASRPort, ASRInput, ASRResult, ASRPartialResult } from '../ports/a
  * 适配器模式：外部统一接口，内部处理浏览器差异
  */
 export class WebSpeechASRAdapter implements IASRPort {
-  private recognition: SpeechRecognition | null = null;
   private recognitionClass: typeof SpeechRecognition | null = null;
 
   constructor() {
@@ -61,13 +60,14 @@ export class WebSpeechASRAdapter implements IASRPort {
       throw new Error('SpeechRecognition API 不可用');
     }
 
-    const recognition = new this.recognitionClass();
-    recognition.lang = lang;
-    recognition.continuous = false;        // 单次识别
-    recognition.interimResults = false;     // 只返回最终结果
-    recognition.maxAlternatives = 1;       // 只取最高置信度结果
+    const recognitionInstance = new this.recognitionClass();
+    recognitionInstance.lang = lang;
+    recognitionInstance.continuous = false;        // 单次识别
+    recognitionInstance.interimResults = false;     // 只返回最终结果
+    // maxAlternatives 是 webkitSpeechRecognition 的扩展属性
+    (recognitionInstance as any).maxAlternatives = 1;
 
-    return recognition;
+    return recognitionInstance;
   }
 
   /**

@@ -135,7 +135,7 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
    * 从 MediaStream 录制音频并转换为 PCM 格式
    */
   private async recordAudio(stream: MediaStream): Promise<Uint8Array> {
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       const audioContext = new AudioContext({ sampleRate: 16000 });
       const mediaStreamSource = audioContext.createMediaStreamSource(stream);
       const scriptProcessor = audioContext.createScriptProcessor(4096, 1, 1);
