@@ -11,7 +11,7 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import type { Event, TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
+import type { Event, TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig, EventData } from '../types/event';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -46,6 +46,8 @@ export interface TimeBlockService {
 export class TimeBlockServiceImpl implements TimeBlockService {
   private env: ExoMindEnvironment;
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
+  private lastWriteTime = 0;
+  private readonly WRITE_THROTTLE_MS = 1000; // 节流：每秒最多写入一次
 
   constructor(env?: ExoMindEnvironment) {
     this.env = env || ExoMindEnvironment.getInstance();
@@ -126,8 +128,25 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const endId = crypto.randomUUID();
 
     // 创建结束事件（带身心反馈）
-    const eventContent = feedback || `${activeData.name} 完成`;
-    await this.addBlockEvent(endId, eventContent, 'block_end', feedback);
+    const eventContent = feedback
+      ? `${activeData.name} - ${feedback}`
+      : `${activeData.name} 完成`;
+
+    // 添加 block_end 和 block_feedback 标签
+    await this.addBlockEvent(endId, eventContent, 'block_end');
+
+    // 额外保存 block_feedback 标签的事件
+    if (feedback) {
+      const feedbackEventData: EventData = {
+        id: crypto.randomUUID(),
+        timestamp: Date.now(),
+        content: feedback,
+        tags: ['block_feedback'],
+      };
+      const events = await this.env.storage.read<EventData[]>('events') || [];
+      events.unshift(feedbackEventData);
+      await this.env.storage.write('events', events);
+    }
 
     // 保存已完成的时间块
     const timeBlock: TimeBlockData = {
@@ -136,7 +155,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       startId: activeData.startId,
       endId,
       note: feedback,
-      tags: ['block_feedback'],
+      tags: feedback ? ['block_feedback'] : [],
       startTime: activeData.startTime,
       endTime: Date.now(),
     };
@@ -162,6 +181,13 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
     if (!data || data.paused) return;
 
+    const now = Date.now();
+    // 节流：每秒最多写入一次
+    if (now - this.lastWriteTime < this.WRITE_THROTTLE_MS) {
+      return;
+    }
+    this.lastWriteTime = now;
+
     await this.env.storage.write(ACTIVE_BLOCK_KEY, {
       ...data,
       elapsed,
@@ -180,23 +206,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     tag: 'block_start' | 'block_end',
     _feedback?: string
   ): Promise<Event> {
-    const tags: string[] = [tag];
-    if (tag === 'block_end') {
-      tags.push('block_feedback');
-    }
-
-    const eventData = {
+    const eventData: EventData = {
       id: eventId,
       timestamp: Date.now(),
       content,
-      tags,
+      tags: [tag],
     };
 
     // 读取现有事件
-    const eventsKey = 'events';
-    const events = await this.env.storage.read<any[]>(eventsKey) || [];
+    const events = await this.env.storage.read<EventData[]>('events') || [];
     events.unshift(eventData);
-    await this.env.storage.write(eventsKey, events);
+    await this.env.storage.write('events', events);
 
     return {
       id: eventId,

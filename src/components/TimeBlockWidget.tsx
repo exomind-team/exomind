@@ -15,6 +15,15 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { Play, Pause, Square, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from '@/components/ui/dialog';
+import { useToast } from '@/components/ui/toast-hook';
 import { getTimeBlockService, TimerMode, TimerConfig } from '@/lib/services';
 
 interface TimeBlockWidgetProps {
@@ -29,6 +38,9 @@ interface TimeBlockWidgetProps {
 type TimerState = 'idle' | 'running' | 'paused' | 'ended';
 
 export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange }: TimeBlockWidgetProps) {
+  // Toast
+  const { toast } = useToast();
+
   // 内部状态
   const [taskName, setTaskName] = useState('');
   const [timerMode, setTimerMode] = useState<TimerMode>('countdown');
@@ -132,7 +144,11 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
   // 开始计时
   const handleStart = async () => {
     if (!taskName.trim()) {
-      alert('请输入任务标题');
+      toast({
+        title: '请输入任务标题',
+        description: '开始时间块前需要输入任务名称',
+        variant: 'destructive',
+      });
       return;
     }
 
@@ -168,20 +184,19 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
     setFeedbackOpen(true);
   };
 
-  // 确认结束（输入反馈后）
-  const handleConfirmEnd = async () => {
+  // 结束计时（带反馈）
+  const handleEndBlock = async (feedbackText?: string) => {
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
 
-    await timeBlockService.endBlock(feedback || undefined);
+    await timeBlockService.endBlock(feedbackText || undefined);
 
     // 重置状态
     setTimerState('idle');
     setElapsed(0);
     setTaskName('');
     setFeedback('');
-    setFeedbackOpen(false);
   };
 
   // 清理定时器
@@ -360,37 +375,44 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
       )}
 
       {/* 身心反馈对话框 */}
-      {feedbackOpen && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
-          <div className="bg-background rounded-lg p-4 w-80 space-y-4">
-            <h3 className="font-medium">时间块结束</h3>
-            <p className="text-sm text-muted-foreground">
+      <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>时间块结束</DialogTitle>
+            <DialogDescription>
               {taskName || '未命名任务'} 完成了，请输入身心状态反馈：
-            </p>
-            <Input
-              placeholder="身心状态如何？"
-              value={feedback}
-              onChange={(e) => setFeedback(e.target.value)}
-              autoFocus
-            />
-            <div className="flex justify-end gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleConfirmEnd}
-              >
-                跳过
-              </Button>
-              <Button
-                size="sm"
-                onClick={handleConfirmEnd}
-              >
-                确认结束
-              </Button>
-            </div>
-          </div>
-        </div>
-      )}
+            </DialogDescription>
+          </DialogHeader>
+          <Input
+            placeholder="身心状态如何？"
+            value={feedback}
+            onChange={(e) => setFeedback(e.target.value)}
+            autoFocus
+          />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setFeedbackOpen(false);
+                // 跳过反馈，直接结束
+                handleEndBlock();
+              }}
+            >
+              跳过
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setFeedbackOpen(false);
+                handleEndBlock(feedback);
+              }}
+            >
+              确认结束
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
