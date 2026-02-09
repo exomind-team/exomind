@@ -6,7 +6,7 @@ use tokio::sync::Mutex;
 use std::sync::Arc;
 use tungstenite::{Message};
 use tokio_tungstenite::{connect_async, WebSocketStream};
-use futures_util::{SinkExt, StreamExt};
+use futures::{SinkExt, StreamExt};
 use url::Url;
 use tokio_tungstenite::MaybeTlsStream;
 

@@ -5,7 +5,41 @@
 
 ---
 
-## [2026-02-03] Ralph Loop - 重构 CLAUDE.md
+## [2026-02-09] ExoMind Web 端功能集成
+
+### 执行摘要
+- **任务**：时间块功能 Web 端适配 + 语音输入组件化
+- **结果**：全部完成
+- **主要变更**：
+  - 添加 `/timeblock` 路由，移除 `/test/record`
+  - 侧边栏"记录"移至第2位
+  - 创建 `VoiceMessageInput` 通用组件
+  - 替换 ChatPage 和 RecordPage 输入框
+
+### 遇到的问题
+
+| 问题 | 原因 | 解决方案 | 优化建议 |
+|------|------|----------|----------|
+| RecordPage 状态同步 | VoiceMessageInput 内部管理 inputValue | 使用 useRef 跟踪输入值，onVoiceResult 回调同步 | 组件设计时考虑外部状态同步需求 |
+| Playwright 检测 | 组件编译后无 HTML 标记 | 通过 input 元素存在性验证 | 验证组件时检查功能而非 DOM 标记 |
+
+### 有价值发现
+
+1. **两步走战略有效**
+   - 第一步：路由适配（快速验证）
+   - 第二步：组件抽象（复用提升）
+   - 每步独立提交，便于回滚
+
+2. **语音输入组件设计**
+   ```
+   VoiceMessageInput
+   ├── Input（文本输入）
+   ├── SendButton（发送）
+   └── VoiceInputButton（语音）
+   ```
+   - Props 最小化设计
+   - 支持 ASR 适配器注入
+   - onVoiceResult 回调支持标签同步
 
 ### 执行摘要
 - **任务**：整合知识库内容，重构 CLAUDE.md
