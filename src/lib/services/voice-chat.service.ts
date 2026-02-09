@@ -110,6 +110,9 @@ export class VoiceChatService implements IVoiceChatService {
    * 获取当前使用的适配器
    */
   private getCurrentAdapter() {
+    if (this.adapterType === 'moss') {
+      return this.mossAdapter;
+    }
     return this.adapterType === 'http' ? this.httpAdapter : this.wsAdapter;
   }
 
@@ -191,8 +194,8 @@ export class VoiceChatService implements IVoiceChatService {
     (window as any).__asrRecordingActive = false;
 
     // 停止 ASR 适配器
-    const adapter = this.getCurrentAdapter();
-    adapter.stopRecording();
+    const adapter = this.getCurrentAdapter() as { stopRecording?: () => void };
+    adapter.stopRecording?.();
 
     // 关闭麦克风流
     if (this.stream) {
@@ -236,11 +239,13 @@ export function getVoiceChatService(): VoiceChatService {
  */
 export function setASRAdapterType(type: ASRAdapterType): void {
   const service = getVoiceChatService();
+  service.adapterType = type;
+
   if (type === 'http') {
-    service.adapterType = 'http';
-    console.log('[VoiceChatService] 已切换到 HTTP Adapter');
+    console.log('[VoiceChatService] Switched to HTTP Adapter');
+  } else if (type === 'moss') {
+    console.log('[VoiceChatService] Switched to MOSS Adapter');
   } else {
-    service.adapterType = 'websocket';
-    console.log('[VoiceChatService] 已切换到 WebSocket Adapter');
+    console.log('[VoiceChatService] Switched to WebSocket Adapter');
   }
 }

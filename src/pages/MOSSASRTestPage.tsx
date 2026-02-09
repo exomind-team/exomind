@@ -374,6 +374,8 @@ export function MOSSASRTestPage() {
     addLogEntry('✅ 语音识别完成', { text });
   };
 
+  const voiceButtonAdapterConfig = apiKey ? { apiKey } : undefined;
+
   return (
     <div style={{ padding: '24px', maxWidth: '700px', margin: '0 auto' }}>
       <h1 style={{ marginBottom: '20px' }}>🎤 MOSS 语音识别测试</h1>
@@ -613,7 +615,7 @@ export function MOSSASRTestPage() {
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
           {/* 语音输入按钮 */}
           <VoiceInputButton
-            adapterConfig={{ apiKey: apiKey || undefined }}
+            adapterConfig={voiceButtonAdapterConfig}
             onResult={handleVoiceResult}
             onError={(err) => addLogEntry(`❌ ${err}`)}
             onStateChange={(state) => {
@@ -692,7 +694,6 @@ export function MOSSASRTestPage() {
           <strong>快捷键提示：</strong>
           <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
             <li>[空格键] 开始/停止录音</li>
-            <li>[Ctrl + 空格] 切换录音方式</li>
             <li>[Esc] 取消录音</li>
           </ul>
         </div>
