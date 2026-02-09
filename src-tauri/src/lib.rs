@@ -12,7 +12,7 @@ use commands::file_commands::{
     append_file, append_to_markdown, export_messages_to_markdown
 };
 use commands::pairing_commands::{
-    PairingStateManager, PairingState, PairingResult, DeviceType,
+    PairingStateManager, PairingResult, DeviceType,
     // 配置命令
     update_pairing_config, get_pairing_config, get_pairing_state,
     // 配对命令
