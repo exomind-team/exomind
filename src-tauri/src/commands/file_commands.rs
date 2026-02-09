@@ -1,7 +1,7 @@
 //! 文件操作命令
-//! 用于消息持久化存储 - 重构版
+//! 用于消息持久化存储 - 重构版（同步版本）
 
-use tauri::{AppHandle, Runtime, Manager};
+use tauri::{AppHandle, Manager, ipc::InvokeError};
 use std::path::PathBuf;
 use std::fs;
 use thiserror::Error;
@@ -31,11 +31,17 @@ pub enum FileError {
 /// 文件操作结果
 pub type FileResult<T> = Result<T, FileError>;
 
+impl std::convert::From<FileError> for InvokeError {
+    fn from(error: FileError) -> Self {
+        InvokeError::from_error(error)
+    }
+}
+
 /// 获取应用数据目录
-fn get_data_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, FileError> {
+fn get_data_dir(app: &AppHandle) -> Result<PathBuf, FileError> {
     let path = app.path().app_data_dir().map_err(|e| FileError::IoError {
-        message: "获取应用数据目录失败".to_string(),
-        source: e,
+        message: format!("获取应用数据目录失败: {}", e),
+        source: std::io::Error::new(std::io::ErrorKind::Other, e.to_string()),
     })?;
 
     // 确保目录存在
@@ -49,10 +55,7 @@ fn get_data_dir<R: Runtime>(app: &AppHandle<R>) -> Result<PathBuf, FileError> {
 }
 
 /// 处理路径（相对路径转换为绝对路径）
-fn resolve_path<R: Runtime>(
-    app: &AppHandle<R>,
-    path: &str,
-) -> Result<PathBuf, FileError> {
+fn resolve_path(app: &AppHandle, path: &str) -> Result<PathBuf, FileError> {
     let data_dir = get_data_dir(app)?;
 
     let full_path = if PathBuf::from(path).is_absolute() {
@@ -86,11 +89,7 @@ fn ensure_parent_dir(path: &PathBuf) -> Result<(), FileError> {
 /// 追加内容到文件（永覆盖）
 /// 用于消息日志等需要追加的场景
 #[tauri::command]
-pub async fn append_file<R: Runtime>(
-    app: AppHandle<R>,
-    path: String,
-    content: String,
-) -> FileResult<()> {
+pub fn append_file(app: AppHandle, path: String, content: String) -> FileResult<()> {
     let full_path = resolve_path(&app, &path)?;
 
     ensure_parent_dir(&full_path)?;
@@ -118,11 +117,7 @@ pub async fn append_file<R: Runtime>(
 /// 写入文件（覆盖模式）
 /// 用于配置文件等需要覆盖的场景
 #[tauri::command]
-pub async fn write_file<R: Runtime>(
-    app: AppHandle<R>,
-    path: String,
-    content: String,
-) -> FileResult<()> {
+pub fn write_file(app: AppHandle, path: String, content: String) -> FileResult<()> {
     let full_path = resolve_path(&app, &path)?;
 
     ensure_parent_dir(&full_path)?;
@@ -138,10 +133,7 @@ pub async fn write_file<R: Runtime>(
 
 /// 读取文件
 #[tauri::command]
-pub async fn read_file<R: Runtime>(
-    app: AppHandle<R>,
-    path: String,
-) -> FileResult<String> {
+pub fn read_file(app: AppHandle, path: String) -> FileResult<String> {
     let full_path = resolve_path(&app, &path)?;
 
     // 检查文件是否存在
@@ -160,10 +152,7 @@ pub async fn read_file<R: Runtime>(
 
 /// 读取文件（字节流，用于二进制文件）
 #[tauri::command]
-pub async fn read_file_binary<R: Runtime>(
-    app: AppHandle<R>,
-    path: String,
-) -> FileResult<Vec<u8>> {
+pub fn read_file_binary(app: AppHandle, path: String) -> FileResult<Vec<u8>> {
     let full_path = resolve_path(&app, &path)?;
 
     // 检查文件是否存在
@@ -181,10 +170,7 @@ pub async fn read_file_binary<R: Runtime>(
 
 /// 删除文件
 #[tauri::command]
-pub async fn delete_file<R: Runtime>(
-    _app: AppHandle<R>,
-    path: String,
-) -> FileResult<()> {
+pub fn delete_file(_app: AppHandle, path: String) -> FileResult<()> {
     let full_path = PathBuf::from(&path);
 
     // 检查文件是否存在
@@ -202,19 +188,13 @@ pub async fn delete_file<R: Runtime>(
 
 /// 检查文件是否存在
 #[tauri::command]
-pub async fn file_exists<R: Runtime>(
-    _app: AppHandle<R>,
-    path: String,
-) -> bool {
+pub fn file_exists(_app: AppHandle, path: String) -> bool {
     PathBuf::from(path).exists()
 }
 
 /// 列出目录中的文件
 #[tauri::command]
-pub async fn list_files<R: Runtime>(
-    app: AppHandle<R>,
-    dir: String,
-) -> FileResult<Vec<String>> {
+pub fn list_files(app: AppHandle, dir: String) -> FileResult<Vec<String>> {
     let full_path = resolve_path(&app, &dir)?;
 
     if !full_path.exists() {
@@ -249,11 +229,7 @@ pub async fn list_files<R: Runtime>(
 /// 追加内容到 Markdown 文件
 /// 用于导出消息记录到 .md 文件
 #[tauri::command]
-pub async fn append_to_markdown<R: Runtime>(
-    app: AppHandle<R>,
-    filename: String,
-    content: String,
-) -> FileResult<()> {
+pub fn append_to_markdown(app: AppHandle, filename: String, content: String) -> FileResult<()> {
     let mut full_path = resolve_path(&app, &filename)?;
 
     // 如果文件名不包含 .md 后缀，自动添加
@@ -286,8 +262,8 @@ pub async fn append_to_markdown<R: Runtime>(
 /// 导出所有消息到 Markdown 文件
 /// 格式化消息为标准 Markdown 格式
 #[tauri::command]
-pub async fn export_messages_to_markdown<R: Runtime>(
-    app: AppHandle<R>,
+pub fn export_messages_to_markdown(
+    app: AppHandle,
     filename: String,
     title: String,
     messages: String, // JSON 序列化的消息数组
