@@ -9,12 +9,16 @@
  * │  - 音量波形可视化                        │
  * │  - 快捷键支持（仅非输入区域）            │
  * │  - 依赖注入（可选 IASRPort）             │
+ * │  - 使用 Recorder.js 库（支持手机浏览器） │
  * └─────────────────────────────────────────┘
  */
 
 import React, { useState, useRef, useEffect, useCallback } from 'react';
 import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
+import Recorder from 'recorder-core';
+// 引入 mp3 编码支持
+import 'recorder-core/src/engine/mp3';
 
 // 按钮状态
 export type VoiceButtonState = 'idle' | 'recording' | 'recognizing' | 'completed';
@@ -91,8 +95,7 @@ export function VoiceInputButton({
 
   // 资源 refs
   const streamRef = useRef<MediaStream | null>(null);
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const recordedChunksRef = useRef<Blob[]>([]);
+  const recorderRef = useRef<typeof Recorder.prototype | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const operationTokenRef = useRef(0);
@@ -119,6 +122,8 @@ export function VoiceInputButton({
 
   // 初始化适配器
   useEffect(() => {
+    console.log('[VoiceInput] 初始化, isSecureContext:', window.isSecureContext);
+    console.log('[VoiceInput] location:', window.location.href, 'protocol:', window.location.protocol);
     if (adapter) {
       adapterRef.current = adapter;
     } else {
@@ -216,10 +221,10 @@ export function VoiceInputButton({
     }
 
     analyserRef.current = null;
-    mediaRecorderRef.current = null;
+    recorderRef.current = null;
   }, []);
 
-  // 停止录音并释放所有资源
+  // 停止录音并释放所有资源（使用 Recorder 库）
   const stopRecordingAndRelease = useCallback((reason: 'complete' | 'cancel') => {
     const operationToken = ++operationTokenRef.current;
 
@@ -233,20 +238,8 @@ export function VoiceInputButton({
       releaseRecordingResources();
 
       if (reason === 'cancel') {
-        recordedChunksRef.current = [];
         if (operationToken === operationTokenRef.current) {
           setState({ state: 'idle', duration: 0, startTime: 0 });
-        }
-        return;
-      }
-
-      const recordedChunks = [...recordedChunksRef.current];
-      recordedChunksRef.current = [];
-
-      if (recordedChunks.length === 0) {
-        if (operationToken === operationTokenRef.current) {
-          setState({ state: 'idle', duration: 0, startTime: 0 });
-          callbacksRef.current.onError?.('No recorded audio data');
         }
         return;
       }
@@ -257,9 +250,19 @@ export function VoiceInputButton({
 
       setState(prev => ({ ...prev, state: 'recognizing' }));
 
+      // Recorder 库已自动处理音频转换，直接获取 blob
+      const blob = (recorderRef.current as unknown as { blob?: Blob })?.blob;
+      if (!blob) {
+        if (operationToken === operationTokenRef.current) {
+          setState({ state: 'idle', duration: 0, startTime: 0 });
+          callbacksRef.current.onError?.('No recorded audio data');
+        }
+        return;
+      }
+
       try {
-        const webmBlob = new Blob(recordedChunks, { type: 'audio/webm' });
-        const wavData = await MOSSASRAdapter.webmToWav(webmBlob);
+        // MOSS ASR 需要 WAV 格式，调用 webmToWav 转换
+        const wavData = await MOSSASRAdapter.webmToWav(blob);
 
         if (operationToken !== operationTokenRef.current) {
           return;
@@ -279,23 +282,36 @@ export function VoiceInputButton({
           callbacksRef.current.onResult(result.text);
         }
       } catch (error) {
-        if (operationToken !== operationTokenRef.current) {
-          return;
+        if (operationToken === operationTokenRef.current) {
+          setState({ state: 'idle', duration: 0, startTime: 0 });
+          callbacksRef.current.onError?.(`Recognition failed: ${error}`);
         }
-
-        setState({ state: 'idle', duration: 0, startTime: 0 });
-        callbacksRef.current.onError?.(`Recognition failed: ${error}`);
       }
     };
 
-    const recorder = mediaRecorderRef.current;
-    if (recorder && recorder.state !== 'inactive') {
-      const handleStop = () => {
+    // 使用 Recorder 库的 stop 方法
+    if (recorderRef.current) {
+      try {
+        (recorderRef.current as unknown as { stop(success: (blob: Blob, duration: number) => void, fail: (msg: string) => void) }).stop(
+          (blob, duration) => {
+            console.log('[VoiceInput] Recorder 录音完成:', blob.type, duration + 'ms');
+            // 保存 blob 供 finish 使用
+            (recorderRef.current as unknown as { blob?: Blob }).blob = blob;
+            void finish();
+          },
+          (msg) => {
+            console.error('[VoiceInput] Recorder 停止失败:', msg);
+            releaseRecordingResources();
+            if (operationToken === operationTokenRef.current) {
+              setState({ state: 'idle', duration: 0, startTime: 0 });
+              callbacksRef.current.onError?.(`录音失败: ${msg}`);
+            }
+          }
+        );
+      } catch (error) {
+        console.error('[VoiceInput] Recorder stop 异常:', error);
         void finish();
-      };
-
-      recorder.addEventListener('stop', handleStop, { once: true });
-      recorder.stop();
+      }
       return;
     }
 
@@ -396,6 +412,12 @@ export function VoiceInputButton({
       return stream;
     } catch (error) {
       const errorInfo = getErrorInfo(error as Error | DOMException);
+      console.error('[VoiceInput] getUserMedia 失败:', {
+        error,
+        errorInfo,
+        isSecureContext: window.isSecureContext,
+        location: window.location.href
+      });
       logDebug('ERROR', `麦克风获取失败 (第 ${retryCount + 1} 次)`, { error, errorInfo });
 
       // 如果是约束失败且还有重试次数，尝试不使用约束
@@ -412,7 +434,7 @@ export function VoiceInputButton({
     }
   }, [logDebug, getErrorInfo]);
 
-  // 开始录音
+  // 开始录音（使用 Recorder 库）
   const startRecording = useCallback(async () => {
     const currentToken = ++operationTokenRef.current;
 
@@ -452,60 +474,58 @@ export function VoiceInputButton({
       }
       logDebug('INFO', 'mediaDevices API 检查通过');
 
-      // 3. 获取麦克风（带重试逻辑）
-      const stream = await tryGetUserMedia();
-      if (!stream) {
-        logDebug('WARN', '无法获取麦克风权限');
-        return;
-      }
-      if (currentToken !== operationTokenRef.current) {
-        logDebug('INFO', '操作已被取消，跳过录音');
-        return;
-      }
-      streamRef.current = stream;
-      logDebug('INFO', 'MediaStream 已获取', {
-        audioTracks: stream.getAudioTracks().length,
-        label: stream.getAudioTracks()[0]?.label || 'unknown'
-      });
-
-      // 5. 创建 AudioContext 和 Analyser
-      const audioContext = new AudioContext();
-      audioContextRef.current = audioContext;
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      analyserRef.current = analyser;
-      const source = audioContext.createMediaStreamSource(stream);
-      source.connect(analyser);
-      logDebug('INFO', 'AudioContext 和 Analyser 创建成功', { state: audioContext.state });
-
-      // 6. 创建 MediaRecorder
-      const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
-        ? 'audio/webm;codecs=opus'
-        : MediaRecorder.isTypeSupported('audio/webm')
-          ? 'audio/webm'
-          : 'audio/ogg;codecs=opus';
-      logDebug('INFO', `选择的 MIME 类型: ${mimeType}`);
-
-      const mediaRecorder = new MediaRecorder(stream, { mimeType });
-      mediaRecorderRef.current = mediaRecorder;
-      recordedChunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (event) => {
-        if (event.data.size > 0) {
-          recordedChunksRef.current.push(event.data);
+      // 3. 使用 Recorder 库开始录音
+      // Recorder 格式：mp3, wav, webm, amr 等
+      const rec = new Recorder({
+        type: 'webm', // 兼容性最好的格式
+        bitRate: 16,
+        sampleRate: 16000,
+        onProcess: function(buffers, powerLevel, bufferDuration, bufferSampleRate, newBufferIdx, asyncEnd) {
+          // 实时处理回调，可用于波形显示
+          if (powerLevel !== undefined) {
+            // 可以在这里更新波形显示
+          }
         }
-      };
-
-      mediaRecorder.start(100);
-      logDebug('INFO', 'MediaRecorder 已启动');
-
-      // 7. 更新状态
-      setState({
-        state: 'recording',
-        duration: 0,
-        startTime: Date.now(),
       });
-      logDebug('SUCCESS', '录音状态已更新为 recording');
+
+      // 打开麦克风
+      rec.open(
+        function() {
+          // 麦克风授权成功
+          console.log('[VoiceInput] Recorder 麦克风授权成功');
+          logDebug('SUCCESS', 'Recorder 麦克风授权成功');
+
+          // 开始录音
+          rec.start();
+          logDebug('SUCCESS', 'Recorder 开始录音');
+
+          // 更新状态
+          if (currentToken === operationTokenRef.current) {
+            setState({
+              state: 'recording',
+              duration: 0,
+              startTime: Date.now(),
+            });
+            recorderRef.current = rec as unknown as typeof Recorder.prototype;
+          }
+        },
+        function(msg, isUserNotAllow) {
+          // 麦克风授权失败
+          console.error('[VoiceInput] Recorder 麦克风授权失败:', {
+            msg,
+            isUserNotAllow,
+            isSecureContext: window.isSecureContext,
+            location: window.location.href,
+            protocol: window.location.protocol,
+            userAgent: navigator.userAgent
+          });
+          logDebug('ERROR', 'Recorder 麦克风授权失败: ' + msg);
+          if (currentToken === operationTokenRef.current) {
+            setState({ state: 'idle', duration: 0, startTime: 0 });
+            callbacksRef.current.onError?.(`麦克风权限被拒绝\n提示: ${msg}`);
+          }
+        }
+      );
 
     } catch (error) {
       const errorInfo = getErrorInfo(error as Error | DOMException);
@@ -527,7 +547,7 @@ export function VoiceInputButton({
         callbacksRef.current.onError?.(`${errorInfo.message}\n提示: ${userTip}`);
       }
     }
-  }, [requestPermission, permissionState, tryGetUserMedia, getErrorInfo, logDebug, state.state]);
+  }, [requestPermission, permissionState, getErrorInfo, logDebug, state.state]);
 
   // 处理按钮点击
   const handleClick = useCallback(() => {
