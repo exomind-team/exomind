@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react';
 import { useChatStore } from '@/lib/stores/chat-store';
 import { useTimeBlockStore, parseTimeBlockCommand } from '@/lib/stores/timeblock-store';
+import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Circle, Clock } from 'lucide-react';
