@@ -1,4 +1,5 @@
-import { RouterProvider, router } from "@/routes";
+import { RouterProvider } from "@tanstack/react-router";
+import { router } from "@/routes";
 import "./App.css";
 
 function App() {

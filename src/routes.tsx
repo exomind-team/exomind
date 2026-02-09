@@ -1,18 +1,18 @@
 import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
-import { useState, useEffect } from "react";
+import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { Menu, X, MessageCircle, Settings, Mic, MicVocal, ClipboardList } from "lucide-react";
+import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
 import { ASRTestPage } from "@/pages/ASRTestPage";
 import { VoiceChatPage } from "@/pages/VoiceChatPage";
 import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
-import { RecordPage } from "@/components/Record/RecordPage";
+import { HomePage } from "@/components/Home/HomePage";
 
 const sidebarItems = [
-  { title: "聊天", path: "/", icon: MessageCircle },
-  { title: "记录", path: "/timeblock", icon: ClipboardList },
+  { title: "首页", path: "/", icon: Home },
+  { title: "事件日志", path: "/eventlog", icon: ClipboardList },
   { title: "MOSS测试", path: "/moss-test", icon: Mic },
   { title: "语音聊天", path: "/voice-chat", icon: MicVocal },
   { title: "ASR测试", path: "/asr-test", icon: Mic },
@@ -76,34 +76,29 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
 
 function Layout() {
   const [sidebarOpen, setSidebarOpen] = useState(false);
-  const [isMobile, setIsMobile] = useState(false);
-
-  useEffect(() => {
-    const checkMobile = () => {
-      setIsMobile(window.innerWidth < 1024);
-    };
-    checkMobile();
-    window.addEventListener('resize', checkMobile);
-    return () => window.removeEventListener('resize', checkMobile);
-  }, []);
 
   return (
     <div className="flex h-[100dvh] lg:h-screen bg-background" data-testid="app-container">
+      {/* 侧边栏 */}
       <Sidebar isOpen={sidebarOpen} onClose={() => setSidebarOpen(false)} />
 
-      {/* 移动端菜单按钮 */}
-      {isMobile && (
-        <button
-          onClick={() => setSidebarOpen(true)}
-          className="fixed top-4 left-4 z-30 p-2 bg-background border rounded-md shadow-md lg:hidden"
-        >
-          <Menu size={20} />
-        </button>
-      )}
+      {/* 主内容区 */}
+      <div className="flex-1 flex flex-col min-w-0">
+        {/* 顶部栏 - 移动端显示菜单按钮 */}
+        <header className="lg:hidden flex items-center px-4 py-3 border-b bg-card shrink-0">
+          <button
+            onClick={() => setSidebarOpen(true)}
+            className="p-2 hover:bg-accent rounded-md mr-3"
+          >
+            <Menu size={20} />
+          </button>
+          <h2 className="text-lg font-bold">事件日志</h2>
+        </header>
 
-      <main className="flex-1 overflow-auto">
-        <Outlet />
-      </main>
+        <main className="flex-1 overflow-auto">
+          <Outlet />
+        </main>
+      </div>
     </div>
   );
 }
@@ -113,11 +108,20 @@ const rootRoute = createRootRoute({
   component: Layout,
 });
 
-// Index route (/)
+// Home route (/)
+const homeRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: '/',
+  component: function Home() {
+    return <HomePage />;
+  },
+});
+
+// Index route (/eventlog)
 const indexRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/",
-  component: function Index() {
+  path: '/eventlog',
+  component: function EventLog() {
     return (
       <div className="h-full flex flex-col">
         <ChatPage />
@@ -125,76 +129,56 @@ const indexRoute = createRoute({
     );
   },
 });
-
-// Settings route (/settings)
 const settingsRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/settings",
+  path: 'settings',
   component: function Settings() {
     return <SettingsPage />;
-  },
-});
-
-// TimeBlock route (/timeblock)
-const timeblockRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/timeblock",
-  component: function TimeBlock() {
-    return (
-      <div className="h-full flex flex-col">
-        <RecordPage />
-      </div>
-    );
   },
 });
 
 // ASR Test route (/asr-test)
 const asrTestRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/asr-test",
+  path: 'asr-test',
   component: function ASRTest() {
     return <ASRTestPage />;
-  },
-});
-
-// Voice Chat route (/voice-chat)
-const voiceChatRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: "/voice-chat",
-  component: function VoiceChat() {
-    return <VoiceChatPage />;
   },
 });
 
 // MOSS ASR Test route (/moss-test)
 const mossTestRoute = createRoute({
   getParentRoute: () => rootRoute,
-  path: "/moss-test",
+  path: 'moss-test',
   component: function MOSSTest() {
     return <MOSSASRTestPage />;
   },
 });
 
-// Create route tree
+// Voice Chat route (/voice-chat)
+const voiceChatRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'voice-chat',
+  component: function VoiceChat() {
+    return <VoiceChatPage />;
+  },
+});
+
+// Create the route tree
 const routeTree = rootRoute.addChildren([
+  homeRoute,
   indexRoute,
-  timeblockRoute,
-  mossTestRoute,
-  asrTestRoute,
-  voiceChatRoute,
   settingsRoute,
+  asrTestRoute,
+  mossTestRoute,
+  voiceChatRoute,
 ]);
 
-// Create router
+// Create the router
 const router = createRouter({ routeTree });
 
-export { router };
+// Export router instance
+export { router, rootRoute };
 
-// Register the router type
-declare module "@tanstack/react-router" {
-  interface Register {
-    router: typeof router;
-  }
-}
-
-export { RouterProvider } from "@tanstack/react-router";
+// Re-export Outlet and context for convenience
+export { Outlet };

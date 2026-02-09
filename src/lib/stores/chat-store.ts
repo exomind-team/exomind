@@ -55,6 +55,7 @@ export const useChatStore = create<ChatState>((set, get) => ({
    * 发送消息 - 本地模式
    */
   sendMessage: async (content: string) => {
+    console.log('[ChatStore] sendMessage called:', content);
     const { addMessage } = get();
 
     const message: ChatMessage = {
@@ -65,7 +66,9 @@ export const useChatStore = create<ChatState>((set, get) => ({
       status: 'sent',
     };
 
+    console.log('[ChatStore] Adding message:', message);
     addMessage(message);
+    console.log('[ChatStore] Message added, current messages count:', get().messages.length);
   },
 
   loadMessages: async () => {

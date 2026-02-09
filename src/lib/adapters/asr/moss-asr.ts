@@ -192,29 +192,66 @@ export class MOSSASRAdapter implements IASRPort {
     };
 
     console.log('[ASR-MOSS] 发送请求到 MOSS API...');
-
-    // 调用 MOSS API
-    const response = await fetch(this.config.apiUrl!, {
+    console.log('[ASR-MOSS] 请求详情:', {
+      url: this.config.apiUrl,
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.apiKey}`,
+        'Authorization': `Bearer ${this.config.apiKey?.slice(0, 8)}***`,
       },
-      body: JSON.stringify(payload),
-      signal: AbortSignal.timeout(this.config.timeout || 60000),
+      bodySize: JSON.stringify(payload).length,
     });
 
-    console.log(`[ASR-MOSS] 响应状态: ${response.status} ${response.statusText}`);
+    let response: Response;
+    try {
+      // 调用 MOSS API
+      response = await fetch(this.config.apiUrl!, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${this.config.apiKey}`,
+        },
+        body: JSON.stringify(payload),
+        signal: AbortSignal.timeout(this.config.timeout || 60000),
+      });
+
+      console.log(`[ASR-MOSS] 响应状态: ${response.status} ${response.statusText}`);
+    } catch (networkError) {
+      // 网络错误处理（Failed to fetch, CORS, 网络断开等）
+      const errorMessage = networkError instanceof Error ? networkError.message : String(networkError);
+      console.error('[ASR-MOSS] 网络错误:', {
+        error: errorMessage,
+        type: networkError instanceof TypeError ? 'TypeError (可能是 CORS 或网络问题)' : 'UnknownError',
+        url: this.config.apiUrl,
+        isSecureContext: typeof window !== 'undefined' ? window.isSecureContext : 'N/A',
+        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A',
+      });
+
+      // 提供更友好的错误提示
+      if (errorMessage.includes('Failed to fetch') || errorMessage.includes('fetch')) {
+        throw new Error(`网络请求失败，请检查网络连接或 CORS 设置。\n可能原因：\n1. 网络连接不稳定\n2. API 服务器 (${this.config.apiUrl}) 无法访问\n3. 浏览器跨域 (CORS) 限制\n4. 代理服务器拦截了请求\n\n建议：\n- 确保网络连接正常\n- 确认 API 服务器地址正确\n- 检查浏览器控制台是否有 CORS 错误`);
+      }
+
+      throw new Error(`网络请求失败: ${errorMessage}`);
+    }
 
     if (!response.ok) {
       let errorMsg = `HTTP ${response.status}`;
       try {
-        const error = await response.json();
-        console.error('[ASR-MOSS] 错误响应:', error);
-        errorMsg = error.message || errorMsg;
-      } catch {
-        const text = await response.text();
-        console.error('[ASR-MOSS] 错误响应文本:', text);
+        // 克隆响应以支持多次读取
+        const clonedResponse = response.clone();
+        try {
+          const error = await clonedResponse.json();
+          console.error('[ASR-MOSS] 错误响应:', error);
+          errorMsg = error.message || errorMsg;
+        } catch {
+          // JSON 解析失败，尝试获取文本
+          const text = await clonedResponse.text();
+          console.error('[ASR-MOSS] 错误响应文本:', text);
+          errorMsg = text || errorMsg;
+        }
+      } catch (e) {
+        console.error('[ASR-MOSS] 读取错误响应失败:', e);
       }
       throw new Error(`识别失败: ${errorMsg}`);
     }
