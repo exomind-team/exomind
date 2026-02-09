@@ -7,7 +7,14 @@
  * - 标签解析（#tag 语法）
  * - 活跃状态显示
  * - 数据一致性（与 useTimeBlockStore 共享）
- */
+ *
+ * ============================================================================
+// TODO: 后续添加 Playwright E2E 测试
+// - 完整用户流程测试
+// - 多页面数据同步测试
+// - 等 Web 开发环境迁移后再实现
+// ============================================================================
+// */
 
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent, waitFor } from '@testing-library/react';

@@ -140,7 +140,12 @@ const devicesRoute = createRoute({
   },
 });
 
-// Record route (/test/record)
+// ============================================================================
+// TODO: 后续 Web 版迁移
+// - URL 路由兼容性
+// - 侧边栏入口适配
+// - 返回按钮/导航栏
+// ============================================================================
 const recordRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/test/record",
