@@ -4,16 +4,11 @@
   "main": "dist/index.js",
   "module": "dist/index.mjs",
   "types": "dist/index.d.ts",
+  "type": "module",
   "exports": {
-    ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
-    },
-    "./environment": "./dist/environment/index.js",
-    "./services": "./dist/services/index.js",
-    "./interfaces": "./dist/interfaces/index.js",
-    "./adapters": "./dist/adapters/index.js"
+    "import": "./dist/index.mjs",
+    "require": "./dist/index.js",
+    "types": "./dist/index.d.ts"
   },
   "scripts": {
     "build": "tsc",

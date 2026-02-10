@@ -75,6 +75,7 @@
       "name": "@exomind/web-preview",
       "version": "0.0.0",
       "dependencies": {
+        "@exomind/ui": "workspace:*",
         "@tanstack/react-router": "^1.158.0",
         "clsx": "^2.1.1",
         "lucide-react": "^0.563.0",

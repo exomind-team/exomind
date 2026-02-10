@@ -6,3 +6,4 @@ export { ChatPage as EventLogPage } from './EventLogPage';
 export { SyncTestPage } from './SyncTestPage';
 export { UserManagePage } from './UserManagePage';
 export { VoiceChatPage } from './VoiceChatPage';
+export { SettingsPage } from '../components/SettingsPage';

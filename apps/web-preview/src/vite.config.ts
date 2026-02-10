@@ -7,7 +7,9 @@ export default defineConfig({
   plugins: [react(), tailwindcss()],
   resolve: {
     alias: {
+      '@': path.resolve(__dirname, './src'),
       '@exomind/shared': path.resolve(__dirname, '../../packages/shared/src'),
+      '@exomind/ui': path.resolve(__dirname, '../../packages/ui/src'),
     },
   },
 });

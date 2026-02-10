@@ -10,6 +10,10 @@
       "import": "./dist/index.js",
       "require": "./dist/index.js"
     },
+    "./pages": {
+      "types": "./dist/pages/index.d.ts",
+      "import": "./dist/pages/index.js"
+    },
     "./routes": {
       "types": "./dist/routes.d.ts",
       "import": "./dist/routes.js"
@@ -17,7 +21,7 @@
   },
   "scripts": {
     "dev": "vite --port 3001",
-    "build": "tsc && vite build",
+    "build": "vite build && tsc -p tsconfig.json --declaration",
     "lint": "eslint src --ext ts,tsx",
     "preview": "vite preview",
     "clean": "rm -rf dist .turbo"
