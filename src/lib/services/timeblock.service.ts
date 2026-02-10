@@ -11,7 +11,7 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import { getEventStorage } from '../storage/event-storage';
+import { EventStorage } from '../storage/event-storage';
 import type { TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
 
 // 存储键
@@ -49,9 +49,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
   private lastWriteTime = 0;
   private readonly WRITE_THROTTLE_MS = 1000; // 节流：每秒最多写入一次
+  private storage: EventStorage;
 
   constructor(env?: ExoMindEnvironment) {
     this.env = env || ExoMindEnvironment.getInstance();
+    // 使用 PouchDB EventStorage，与 ChatPage 保持一致
+    this.storage = new EventStorage('default');
   }
 
   async loadTimeBlocks(): Promise<TimeBlock[]> {
@@ -136,7 +139,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 身心反馈作为独立事件添加到事件日志
     if (feedback) {
+<<<<<<< HEAD
       await getEventStorage().addEvent({
+=======
+      await this.storage.addEvent({
+>>>>>>> d3af324 (fix: TimeBlockService 使用 PouchDB 存储事件 [timeblock.service.ts])
         id: crypto.randomUUID(),
         content: feedback,
         createdAt: new Date().toISOString(),
@@ -201,7 +208,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     content: string,
     tag: 'block_start' | 'block_end',
   ): Promise<void> {
+<<<<<<< HEAD
     await getEventStorage().addEvent({
+=======
+    await this.storage.addEvent({
+>>>>>>> d3af324 (fix: TimeBlockService 使用 PouchDB 存储事件 [timeblock.service.ts])
       id: eventId,
       content,
       createdAt: new Date().toISOString(),
