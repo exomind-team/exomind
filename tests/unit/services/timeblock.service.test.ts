@@ -1,15 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { addEventMock, getChangeListenersCountMock } = vi.hoisted(() => ({
+const {
+  getEventStorageMock,
+  addEventMock,
+} = vi.hoisted(() => ({
+  getEventStorageMock: vi.fn(),
   addEventMock: vi.fn(),
-  getChangeListenersCountMock: vi.fn(() => 0),
 }));
 
 vi.mock('../../../src/lib/storage/event-storage', () => ({
-  getEventStorage: vi.fn(() => ({
-    addEvent: addEventMock,
-    getChangeListenersCount: getChangeListenersCountMock,
-  })),
+  getEventStorage: getEventStorageMock,
 }));
 
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
@@ -20,13 +20,11 @@ type MemoryEnv = {
     write: (key: string, value: unknown) => Promise<void>;
     delete: (key: string) => Promise<void>;
   };
-  data: Map<string, unknown>;
 };
 
 function createMemoryEnv(): MemoryEnv {
   const data = new Map<string, unknown>();
   return {
-    data,
     storage: {
       async read<T>(key: string) {
         return (data.has(key) ? data.get(key) : null) as T | null;
@@ -41,10 +39,17 @@ function createMemoryEnv(): MemoryEnv {
   };
 }
 
+function createStorage(addEventImpl = addEventMock) {
+  return {
+    addEvent: addEventImpl,
+  };
+}
+
 describe('TimeBlockServiceImpl', () => {
   beforeEach(() => {
     addEventMock.mockReset();
-    getChangeListenersCountMock.mockReturnValue(0);
+    getEventStorageMock.mockReset();
+    getEventStorageMock.mockReturnValue(createStorage());
   });
 
   it('initializes countdown blocks with remaining milliseconds from minutes', async () => {
@@ -65,12 +70,35 @@ describe('TimeBlockServiceImpl', () => {
     const service = new TimeBlockServiceImpl(env as never);
 
     await service.startBlock('write tests', { mode: 'countup' });
-    await service.endBlock('状态不错');
+    await service.endBlock('felt good');
 
     expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
     expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'block_feedback',
-      content: '状态不错',
+      content: 'felt good',
+    }));
+  });
+
+  it('resolves EventStorage at write time so user switches do not write to stale storage', async () => {
+    const env = createMemoryEnv();
+    const startAddEventMock = vi.fn();
+    const switchedUserAddEventMock = vi.fn();
+
+    getEventStorageMock
+      .mockReturnValueOnce(createStorage(startAddEventMock))
+      .mockReturnValueOnce(createStorage(switchedUserAddEventMock))
+      .mockReturnValueOnce(createStorage(switchedUserAddEventMock));
+
+    const service = new TimeBlockServiceImpl(env as never);
+    await service.startBlock('focus', { mode: 'countup' });
+    await service.endBlock('done');
+
+    expect(getEventStorageMock).toHaveBeenCalledTimes(3);
+    expect(startAddEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_start' }));
+    expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
+    expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'block_feedback',
+      content: 'done',
     }));
   });
 });

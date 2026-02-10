@@ -35,7 +35,6 @@ export function ChatPage() {
 
     const loadEvents = async () => {
       const loaded = await storage.getEvents();
-      console.log('[ChatPage] 从 PouchDB 加载事件:', loaded.length, '条');
 
       // 转换为 UI 使用的 Event 格式
       const converted: Event[] = loaded.map((e: StorageEvent) => ({
@@ -45,14 +44,6 @@ export function ChatPage() {
         tags: new Set<string>(e.type ? [e.type] : []),
       }));
 
-      // 调试日志：显示所有事件的类型
-      if (loaded.length > 0) {
-        console.log('[ChatPage] 事件详情:');
-        loaded.forEach((e, i) => {
-          console.log(`  ${i + 1}. type=${e.type}, content=${e.content?.substring(0, 30)}`);
-        });
-      }
-
       // 反转为升序 [最旧, ..., 最新]
       setEvents([...converted].reverse());
     };
@@ -61,7 +52,6 @@ export function ChatPage() {
 
     // 监听变更（本地和远程）
     const unsubscribe = storage.onRemoteChange(() => {
-      console.log('[ChatPage] 收到变更通知，重新加载事件');
       loadEvents();
     });
 
@@ -97,8 +87,6 @@ export function ChatPage() {
   const handleSend = useCallback(async (content: string) => {
     const trimmed = content.trim();
     if (!trimmed) return;
-
-    console.log('[ChatPage] 发送事件到 PouchDB:', trimmed);
 
     // 使用 EventStorage 保存到 PouchDB
     if (storageRef.current) {

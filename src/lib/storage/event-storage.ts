@@ -332,23 +332,14 @@ export class EventStorage {
    */
   onRemoteChange(callback: (change: unknown) => void): () => void {
     this.changeListeners.push(callback);
-    console.log('[EventStorage] 添加监听器，当前数量:', this.changeListeners.length);
 
     // 返回取消监听函数
     return () => {
       const index = this.changeListeners.indexOf(callback);
       if (index > -1) {
         this.changeListeners.splice(index, 1);
-        console.log('[EventStorage] 移除监听器，剩余数量:', this.changeListeners.length);
       }
     };
-  }
-
-  /**
-   * 获取监听器数量（调试用）
-   */
-  getChangeListenersCount(): number {
-    return this.changeListeners.length;
   }
 
   /**
