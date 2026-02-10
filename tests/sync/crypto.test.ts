@@ -15,6 +15,11 @@ import {
   decryptAes256,
   quickEncrypt,
   quickDecrypt,
+  generateSalt,
+  sha256,
+  hashPassword,
+  hashPasswordWithSalt,
+  verifyPassword,
 } from '../../src/adapters/crypto-adapter';
 
 describe('CryptoAdapter', () => {
@@ -313,5 +318,177 @@ describe('跨设备兼容性', () => {
     const decrypted = await quickDecrypt(encrypted, password);
 
     expect(decrypted).toBe(plaintext);
+  });
+});
+
+describe('generateSalt', () => {
+  it('应该生成指定长度的盐', () => {
+    const salt16 = generateSalt(16);
+    const salt32 = generateSalt(32);
+
+    // 16字节的盐 Base64 编码后应该是 24 字符（每 3 字节 = 4 Base64 字符）
+    expect(salt16.length).toBe(24);
+    expect(salt32.length).toBe(44);
+  });
+
+  it('每次调用应该生成不同的盐', () => {
+    const salt1 = generateSalt(16);
+    const salt2 = generateSalt(16);
+    const salt3 = generateSalt(16);
+
+    expect(salt1).not.toBe(salt2);
+    expect(salt2).not.toBe(salt3);
+    expect(salt1).not.toBe(salt3);
+  });
+
+  it('应该生成有效的 Base64 字符串', () => {
+    const salt = generateSalt(16);
+
+    // 验证 Base64 字符集
+    expect(salt).toMatch(/^[A-Za-z0-9+/=]+$/);
+  });
+});
+
+describe('sha256', () => {
+  it('应该返回正确的哈希值', async () => {
+    const hash = await sha256('hello');
+
+    // SHA-256 哈希应该是 64 字符的十六进制字符串
+    expect(hash).toHaveLength(64);
+    expect(hash).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it('相同输入应该产生相同输出', async () => {
+    const hash1 = await sha256('test-input');
+    const hash2 = await sha256('test-input');
+
+    expect(hash1).toBe(hash2);
+  });
+
+  it('不同输入应该产生不同输出', async () => {
+    const hash1 = await sha256('input-a');
+    const hash2 = await sha256('input-b');
+
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it('应该正确处理中文', async () => {
+    const hash = await sha256('你好世界');
+
+    expect(hash).toHaveLength(64);
+    expect(hash).toMatch(/^[0-9a-f]+$/);
+  });
+
+  it('应该正确处理空字符串', async () => {
+    const hash = await sha256('');
+
+    expect(hash).toHaveLength(64);
+    expect(hash).toMatch(/^[0-9a-f]+$/);
+  });
+});
+
+describe('hashPassword', () => {
+  it('应该返回格式化哈希字符串', async () => {
+    const salt = generateSalt(16);
+    const hash = await hashPassword('password', salt);
+
+    // 格式: $pbkdf2$salt$hash
+    expect(hash).toMatch(/^\$pbkdf2\$.+\$.+$/);
+  });
+
+  it('相同密码+盐应该产生相同哈希', async () => {
+    const password = 'my-password';
+    const salt = generateSalt(16);
+
+    const hash1 = await hashPassword(password, salt);
+    const hash2 = await hashPassword(password, salt);
+
+    expect(hash1).toBe(hash2);
+  });
+
+  it('不同盐应该产生不同哈希', async () => {
+    const password = 'same-password';
+    const salt1 = generateSalt(16);
+    const salt2 = generateSalt(16);
+
+    const hash1 = await hashPassword(password, salt1);
+    const hash2 = await hashPassword(password, salt2);
+
+    expect(hash1).not.toBe(hash2);
+  });
+
+  it('不同密码应该产生不同哈希', async () => {
+    const password1 = 'password-a';
+    const password2 = 'password-b';
+    const salt = generateSalt(16);
+
+    const hash1 = await hashPassword(password1, salt);
+    const hash2 = await hashPassword(password2, salt);
+
+    expect(hash1).not.toBe(hash2);
+  });
+});
+
+describe('hashPasswordWithSalt', () => {
+  it('应该自动生成盐并返回哈希', async () => {
+    const hash = await hashPasswordWithSalt('my-password');
+
+    expect(hash).toMatch(/^\$pbkdf2\$.+\$.+$/);
+  });
+
+  it('验证时应该使用正确的盐', async () => {
+    const password = 'test-password';
+    const hash = await hashPasswordWithSalt(password);
+
+    const isValid = await verifyPassword(password, hash);
+    expect(isValid).toBe(true);
+  });
+
+  it('错误密码应该验证失败', async () => {
+    const password = 'correct-password';
+    const hash = await hashPasswordWithSalt(password);
+
+    const isValid = await verifyPassword('wrong-password', hash);
+    expect(isValid).toBe(false);
+  });
+});
+
+describe('verifyPassword', () => {
+  it('正确密码应该验证成功', async () => {
+    const password = 'my-secret-password';
+    const hash = await hashPasswordWithSalt(password);
+
+    const isValid = await verifyPassword(password, hash);
+    expect(isValid).toBe(true);
+  });
+
+  it('错误密码应该验证失败', async () => {
+    const password = 'correct-password';
+    const hash = await hashPasswordWithSalt(password);
+
+    const isValid = await verifyPassword('wrong-password', hash);
+    expect(isValid).toBe(false);
+  });
+
+  it('应该正确解析 $pbkdf2$ 格式', async () => {
+    const password = 'test';
+    const hash = await hashPasswordWithSalt(password);
+
+    // 成功验证说明格式解析正确
+    const isValid = await verifyPassword(password, hash);
+    expect(isValid).toBe(true);
+  });
+
+  it('空密码应该能正确处理', async () => {
+    const password = '';
+    const hash = await hashPasswordWithSalt(password);
+
+    const isValid = await verifyPassword(password, hash);
+    expect(isValid).toBe(true);
+  });
+
+  it('无效格式应该返回 false', async () => {
+    const isValid = await verifyPassword('password', 'invalid-format');
+    expect(isValid).toBe(false);
   });
 });
