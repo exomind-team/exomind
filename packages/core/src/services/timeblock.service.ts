@@ -18,8 +18,12 @@ import type {
   TimeBlockData,
   ActiveBlockData,
   TimerConfig,
+  TimerMode,
   UUID,
 } from '@exomind/shared';
+
+// Re-export timer types
+export type { TimerMode, TimerConfig } from '@exomind/shared';
 
 export interface TimeBlockService {
   loadTimeBlocks(): Promise<TimeBlock[]>;

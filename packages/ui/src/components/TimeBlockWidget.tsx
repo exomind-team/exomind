@@ -1,0 +1,394 @@
+/**
+ * TimeBlockWidget - 时间块控件组件
+ *
+ * ┌─────────────────────────────────────────┐
+ * │  L4 UI                                  │
+ * │  ─────────────────────────────────     │
+ * │  - 时间块开始/暂停/继续/结束             │
+ * │  - 任务标题输入                         │
+ * │  - 计时模式选择                         │
+ * │  - 计时显示                             │
+ * └─────────────────────────────────────────┘
+ *
+ * 迁移自: src/components/TimeBlockWidget.tsx
+ * 迁移时间: 2026-02-10
+ */
+
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { Play, Pause, Square, ChevronDown, ChevronUp } from 'lucide-react';
+import { Button } from './ui/button';
+import { Input } from './ui/input';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+  DialogFooter,
+} from './ui/dialog';
+import { useToast } from './ui/toast-hook';
+import { getTimeBlockService } from '@exomind/core';
+import type { TimerConfig, TimerMode } from '@exomind/shared';
+
+interface TimeBlockWidgetProps {
+  /** 是否展开高级选项 */
+  expanded?: boolean;
+  onExpandedChange?: (expanded: boolean) => void;
+}
+
+/**
+ * 计时器状态
+ */
+type TimerState = 'idle' | 'running' | 'paused' | 'ended';
+
+export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange }: TimeBlockWidgetProps) {
+  // Toast
+  const { toast } = useToast();
+
+  // 内部状态
+  const [taskName, setTaskName] = useState('');
+  const [timerMode, setTimerMode] = useState<TimerMode>('countdown');
+  const [countdownMinutes, setCountdownMinutes] = useState(25);
+  const [elapsed, setElapsed] = useState(0);
+  const [timerState, setTimerState] = useState<TimerState>('idle');
+  const [internalExpanded, setInternalExpanded] = useState(false);
+  const [feedbackOpen, setFeedbackOpen] = useState(false);
+  const [feedback, setFeedback] = useState('');
+
+  // 外部控制展开状态
+  const expanded = controlledExpanded !== undefined ? controlledExpanded : internalExpanded;
+  const setExpanded = onExpandedChange || ((v: boolean) => setInternalExpanded(v));
+
+  // 定时器引用
+  const timerRef = useRef<number | null>(null);
+  const startTimeRef = useRef<number | null>(null);
+  const isRunningRef = useRef(false); // 使用 ref 跟踪运行状态，避免闭包问题
+
+  // Service
+  const timeBlockService = getTimeBlockService();
+
+  // 格式化时间
+  const formatTime = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const hours = Math.floor(totalSeconds / 3600);
+    const minutes = Math.floor((totalSeconds % 3600) / 60);
+    const seconds = totalSeconds % 60;
+
+    if (hours > 0) {
+      return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // 倒计时格式化
+  const formatCountdown = (ms: number) => {
+    const totalSeconds = Math.floor(ms / 1000);
+    const minutes = Math.floor(totalSeconds / 60);
+    const seconds = totalSeconds % 60;
+    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+  };
+
+  // 加载进行中的时间块
+  useEffect(() => {
+    const loadActiveBlock = async () => {
+      const block = await timeBlockService.loadActiveBlock();
+      if (block) {
+        setTaskName(block.name);
+        setTimerMode(block.mode);
+        setElapsed(block.elapsed);
+        setTimerState(block.paused ? 'paused' : 'running');
+        startTimeRef.current = block.startTime;
+      }
+    };
+    loadActiveBlock();
+  }, []);
+
+  // 启动定时器
+  const startTimer = useCallback(() => {
+    if (timerRef.current) {
+      cancelAnimationFrame(timerRef.current);
+    }
+
+    let lastFrameTime = Date.now();
+    isRunningRef.current = true;
+
+    const tick = () => {
+      if (!isRunningRef.current) return;
+
+      const now = Date.now();
+      const delta = now - lastFrameTime;
+      lastFrameTime = now;
+
+      setElapsed((prev) => {
+        const newElapsed = timerMode === 'countdown' ? prev - delta : prev + delta;
+
+        // 倒计时结束
+        if (timerMode === 'countdown' && newElapsed <= 0) {
+          setTimerState('ended');
+          isRunningRef.current = false;
+          setElapsed(0);
+          setFeedbackOpen(true);
+          if (timerRef.current) {
+            cancelAnimationFrame(timerRef.current);
+          }
+          return 0;
+        }
+
+        // 同步到 Service
+        timeBlockService.updateElapsed(Math.max(0, newElapsed));
+
+        return Math.max(0, newElapsed);
+      });
+
+      if (isRunningRef.current) {
+        timerRef.current = requestAnimationFrame(tick);
+      }
+    };
+
+    timerRef.current = requestAnimationFrame(tick);
+  }, [timerMode]);
+
+  // 开始计时
+  const handleStart = async () => {
+    if (!taskName.trim()) {
+      toast({
+        title: '请输入任务标题',
+        description: '开始时间块前需要输入任务名称',
+        variant: 'destructive',
+      });
+      return;
+    }
+
+    const config: TimerConfig = {
+      mode: timerMode,
+      minutes: timerMode === 'countdown' ? countdownMinutes : undefined,
+    };
+
+    const block = await timeBlockService.startBlock(taskName.trim(), config);
+    setTimerState('running');
+    isRunningRef.current = true;
+    startTimeRef.current = block.startTime;
+    startTimer();
+  };
+
+  // 暂停计时
+  const handlePause = async () => {
+    setTimerState('paused');
+    isRunningRef.current = false;
+    if (timerRef.current) {
+      cancelAnimationFrame(timerRef.current);
+    }
+    await timeBlockService.pauseBlock();
+  };
+
+  // 继续计时
+  const handleResume = async () => {
+    setTimerState('running');
+    startTimer();
+    await timeBlockService.resumeBlock();
+  };
+
+  // 结束计时
+  const handleEnd = () => {
+    setFeedbackOpen(true);
+  };
+
+  // 结束计时（带反馈）
+  const handleEndBlock = async (feedbackText?: string) => {
+    isRunningRef.current = false;
+    if (timerRef.current) {
+      cancelAnimationFrame(timerRef.current);
+    }
+
+    await timeBlockService.endBlock(feedbackText || undefined);
+
+    // 重置状态
+    setTimerState('idle');
+    setElapsed(0);
+    setTaskName('');
+    setFeedback('');
+  };
+
+  // 清理定时器
+  useEffect(() => {
+    return () => {
+      if (timerRef.current) {
+        cancelAnimationFrame(timerRef.current);
+      }
+    };
+  }, []);
+
+  // 倒计时结束自动弹窗
+  useEffect(() => {
+    if (timerState === 'ended' && !feedbackOpen) {
+      setFeedbackOpen(true);
+    }
+  }, [timerState, feedbackOpen]);
+
+  // 按钮状态
+  const isIdle = timerState === 'idle';
+  const isRunning = timerState === 'running';
+  const isPaused = timerState === 'paused';
+
+  return (
+    <div className="border-b bg-muted/30">
+      {/* 状态栏 */}
+      <div className="flex items-center justify-between px-4 py-3">
+        {/* 左侧：控制按钮 */}
+        <div className="flex items-center gap-2">
+          {isIdle && (
+            <Button size="sm" onClick={handleStart} className="gap-1 bg-green-600 hover:bg-green-700">
+              <Play size={16} />
+              <span>开始</span>
+            </Button>
+          )}
+
+          {isRunning && (
+            <>
+              <Button size="sm" variant="outline" onClick={handlePause} className="gap-1">
+                <Pause size={16} />
+                <span>暂停</span>
+              </Button>
+              <Button size="sm" variant="destructive" onClick={handleEnd} className="gap-1">
+                <Square size={16} />
+                <span>结束</span>
+              </Button>
+            </>
+          )}
+
+          {isPaused && (
+            <>
+              <Button size="sm" onClick={handleResume} className="gap-1 bg-green-600 hover:bg-green-700">
+                <Play size={16} />
+                <span>继续</span>
+              </Button>
+              <Button size="sm" variant="destructive" onClick={handleEnd} className="gap-1">
+                <Square size={16} />
+                <span>结束</span>
+              </Button>
+            </>
+          )}
+        </div>
+
+        {/* 中间：计时显示 */}
+        <div className="flex items-center gap-2 font-mono text-lg">
+          <span className={timerMode === 'countdown' && elapsed <= 60000 && elapsed > 0 ? 'text-red-500' : ''}>
+            {timerMode === 'countdown' ? formatCountdown(elapsed) : formatTime(elapsed)}
+          </span>
+        </div>
+
+        {/* 右侧：展开按钮 */}
+        <Button variant="ghost" size="sm" onClick={() => setExpanded(!expanded)}>
+          {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+        </Button>
+      </div>
+
+      {/* 展开面板 */}
+      {expanded && (
+        <div className="px-4 pb-4 space-y-3">
+          {/* 任务标题 */}
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">任务标题</label>
+            <Input
+              placeholder="输入任务标题..."
+              value={taskName}
+              onChange={(e) => setTaskName(e.target.value)}
+              disabled={!isIdle}
+              className="h-8"
+            />
+          </div>
+
+          {/* 计时模式 */}
+          <div className="space-y-1">
+            <label className="text-xs text-muted-foreground">计时模式</label>
+            <div className="flex items-center gap-2">
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="radio"
+                  name="timerMode"
+                  checked={timerMode === 'countup'}
+                  onChange={() => setTimerMode('countup')}
+                  disabled={!isIdle}
+                />
+                <span className="text-sm">正计时</span>
+              </label>
+              <label className="flex items-center gap-1 cursor-pointer">
+                <input
+                  type="radio"
+                  name="timerMode"
+                  checked={timerMode === 'countdown'}
+                  onChange={() => setTimerMode('countdown')}
+                  disabled={!isIdle}
+                />
+                <span className="text-sm">倒计时</span>
+              </label>
+            </div>
+          </div>
+
+          {/* 倒计时时长选择 */}
+          {timerMode === 'countdown' && (
+            <div className="space-y-1">
+              <label className="text-xs text-muted-foreground">倒计时时长</label>
+              <div className="flex items-center gap-2">
+                {[15, 25, 45].map((min) => (
+                  <Button
+                    key={min}
+                    size="sm"
+                    variant={countdownMinutes === min ? 'default' : 'outline'}
+                    onClick={() => setCountdownMinutes(min)}
+                    disabled={!isIdle}
+                    className="w-12"
+                  >
+                    {min}m
+                  </Button>
+                ))}
+                <Input
+                  type="number"
+                  placeholder="自定义"
+                  value={countdownMinutes}
+                  onChange={(e) => setCountdownMinutes(Number(e.target.value) || 25)}
+                  disabled={!isIdle}
+                  className="w-20 h-8"
+                  min={1}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* 身心反馈对话框 */}
+      <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>时间块结束</DialogTitle>
+            <DialogDescription>{taskName || '未命名任务'} 完成了，请输入身心状态反馈：</DialogDescription>
+          </DialogHeader>
+          <Input placeholder="身心状态如何？" value={feedback} onChange={(e) => setFeedback(e.target.value)} autoFocus />
+          <DialogFooter>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                setFeedbackOpen(false);
+                // 跳过反馈，直接结束
+                handleEndBlock();
+              }}
+            >
+              跳过
+            </Button>
+            <Button
+              size="sm"
+              onClick={() => {
+                setFeedbackOpen(false);
+                handleEndBlock(feedback);
+              }}
+            >
+              确认结束
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

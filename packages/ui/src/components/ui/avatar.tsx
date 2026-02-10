@@ -17,4 +17,19 @@ const Avatar = React.forwardRef<
 ))
 Avatar.displayName = "Avatar"
 
-export { Avatar }
+const AvatarFallback = React.forwardRef<
+  HTMLDivElement,
+  React.HTMLAttributes<HTMLDivElement>
+>(({ className, ...props }, ref) => (
+  <div
+    ref={ref}
+    className={cn(
+      "flex h-full w-full items-center justify-center rounded-full bg-muted",
+      className
+    )}
+    {...props}
+  />
+))
+AvatarFallback.displayName = "AvatarFallback"
+
+export { Avatar, AvatarFallback }
