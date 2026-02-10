@@ -27,6 +27,8 @@ export interface Event {
 export class EventStorage {
   private db: PouchDB.Database<Event>;
   private initialized: boolean = false;
+  private syncReplication: PouchDB.Replication.Sync<Event> | null = null;
+  private changeListeners: Array<(change: unknown) => void> = [];
 
   /**
    * 创建事件存储实例
@@ -202,12 +204,82 @@ export class EventStorage {
   /**
    * 同步到远程数据库
    *
-   * @param remoteUrl - 远程数据库 URL
+   * @param remoteUrl - 远程数据库 URL（格式: http://host:port/database）
+   * @returns 复制对象
    */
-  async sync(remoteUrl: string): Promise<PouchDB.Replication.Sync<Event>> {
-    return this.db.sync(remoteUrl, {
+  async syncToRemote(remoteUrl: string): Promise<PouchDB.Replication.Sync<Event>> {
+    // 停止之前的同步
+    if (this.syncReplication) {
+      this.syncReplication.cancel();
+    }
+
+    // 启动新的同步
+    this.syncReplication = this.db.sync(remoteUrl, {
       live: true,
       retry: true,
     });
+
+    // 监听变更事件
+    this.syncReplication.on('change', (change: unknown) => {
+      this.notifyChangeListeners(change);
+    });
+
+    this.syncReplication.on('error', (error: unknown) => {
+      console.error('同步错误:', error);
+    });
+
+    return this.syncReplication;
+  }
+
+  /**
+   * 停止同步
+   */
+  async stopSync(): Promise<void> {
+    if (this.syncReplication) {
+      this.syncReplication.cancel();
+      this.syncReplication = null;
+    }
+  }
+
+  /**
+   * 监听远程变更
+   *
+   * @param callback - 回调函数
+   * @returns 取消监听函数
+   */
+  onRemoteChange(callback: (change: unknown) => void): () => void {
+    this.changeListeners.push(callback);
+
+    // 返回取消监听函数
+    return () => {
+      const index = this.changeListeners.indexOf(callback);
+      if (index > -1) {
+        this.changeListeners.splice(index, 1);
+      }
+    };
+  }
+
+  /**
+   * 通知所有变更监听器
+   */
+  private notifyChangeListeners(change: unknown): void {
+    for (const listener of this.changeListeners) {
+      try {
+        listener(change);
+      } catch {
+        console.error('变更监听器执行错误');
+      }
+    }
+  }
+
+  /**
+   * 获取当前同步状态
+   */
+  getSyncStatus(): { active: boolean; paused: boolean; error: unknown } {
+    return {
+      active: this.syncReplication !== null,
+      paused: false,
+      error: null,
+    };
   }
 }
