@@ -7,38 +7,7 @@
 
 // 使用 import * as PouchDB 解决类型问题
 import PouchDB from 'pouchdb';
-import type { Event } from '@/lib/types/event';
-import type {
-  SyncStatus,
-  SyncCredentials,
-  SyncResult,
-  Conflict,
-  ConfigDoc,
-  ISyncPort,
-  DeviceType,
-  DocType,
-} from '@/environment/interfaces/sync.port';
-
-// 设备信息存储键
-const DEVICE_ID_KEY = 'exomind:deviceId';
-
-/**
- * 设备类型映射（兼容旧代码）
- */
-function getDeviceTypeFromString(type: string): DeviceType {
-  switch (type) {
-    case 'phone':
-      return DeviceType.PHONE;
-    case 'tablet':
-      return DeviceType.TABLET;
-    case 'desktop':
-      return DeviceType.DESKTOP;
-    case 'server':
-      return DeviceType.SERVER;
-    default:
-      return DeviceType.DESKTOP;
-  }
-}
+import type { SyncEvent, ConfigDoc, ISyncPort } from '@/environment/interfaces/sync.port';
 
 /**
  * 变更事件接口
@@ -274,13 +243,13 @@ export class PouchSyncAdapter implements ISyncPort {
       const localResult = await this.localDB.query<PouchDocument>('sync/events', {
         include_docs: true,
       });
-      const localEvents: Event[] = localResult.rows.map((r: QueryRow) => r.value as Event);
+      const localEvents: SyncEvent[] = localResult.rows.map((r: QueryRow) => r.value as SyncEvent);
 
       // 获取远程事件
       const remoteResult = await this.remoteDB.query<PouchDocument>('sync/events', {
         include_docs: true,
       });
-      const remoteEvents: Event[] = remoteResult.rows.map((r: QueryRow) => r.value as Event);
+      const remoteEvents: SyncEvent[] = remoteResult.rows.map((r: QueryRow) => r.value as SyncEvent);
 
       let uploaded = 0;
       let downloaded = 0;
@@ -288,7 +257,7 @@ export class PouchSyncAdapter implements ISyncPort {
 
       // 双向同步
       for (const event of localEvents) {
-        const remote = remoteEvents.find((e: Event) => e.id === event.id);
+        const remote = remoteEvents.find((e: SyncEvent) => e.id === event.id);
         if (!remote) {
           // 上传新事件
           await this.remoteDB.put(event as unknown as PouchDocument);
@@ -301,7 +270,7 @@ export class PouchSyncAdapter implements ISyncPort {
       }
 
       for (const event of remoteEvents) {
-        const local = localEvents.find((e: Event) => e.id === event.id);
+        const local = localEvents.find((e: SyncEvent) => e.id === event.id);
         if (!local) {
           // 下载新事件
           await this.localDB.put(event as unknown as PouchDocument);
@@ -411,7 +380,7 @@ export class PouchSyncAdapter implements ISyncPort {
   /**
    * 推送单个事件到本地数据库（自动触发同步）
    */
-  async pushEvent(event: Event): Promise<void> {
+  async pushEvent(event: SyncEvent): Promise<void> {
     if (!this.localDB) return;
 
     await this.localDB.put(event as unknown as PouchDocument);
@@ -433,9 +402,10 @@ export class PouchSyncAdapter implements ISyncPort {
       type: 'config',
       key,
       value,
+      scope: 'global',
+      encrypted: false,
       deviceId,
       updatedAt: new Date().toISOString(),
-      scope: 'global',
     };
 
     await this.localDB.put(config as unknown as PouchDocument);
@@ -530,6 +500,33 @@ export class PouchSyncAdapter implements ISyncPort {
 
     // 更新冲突计数
     await this.getConflicts();
+  }
+
+  /**
+   * 从本地存储导入数据（待实现）
+   */
+  async importFromLocal(_strategy: 'merge' | 'skip' | 'overwrite'): Promise<{
+    success: boolean;
+    importedCount: number;
+    skippedCount: number;
+    conflictCount: number;
+    errors: string[];
+  }> {
+    // TODO: 实现从 localStorage 导入数据
+    return {
+      success: true,
+      importedCount: 0,
+      skippedCount: 0,
+      conflictCount: 0,
+      errors: [],
+    };
+  }
+
+  /**
+   * 导出数据到文件（待实现）
+   */
+  async exportToFile(): Promise<void> {
+    // TODO: 实现导出到 JSONL 文件
   }
 
   /**
