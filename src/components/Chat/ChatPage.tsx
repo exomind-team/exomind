@@ -17,63 +17,79 @@ import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
-import { EventStorage, type Event as StorageEvent } from '@/lib/storage/event-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
+import type { Event as StorageEvent } from '@/lib/storage/event-storage';
 
 export function ChatPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
+  const [isLoading, setIsLoading] = useState(true);
   const listEndRef = useRef<HTMLDivElement>(null);
-  const storageRef = useRef<EventStorage | null>(null);
+  const storageRef = useRef<any>(null);
   const { currentUser, isLoggedIn } = useSyncStore();
 
   // 初始化 EventStorage 和加载事件
   useEffect(() => {
-    const userId = currentUser || 'anonymous';
-    const storage = new EventStorage(userId);
-    storageRef.current = storage;
+    let storage: any = null;
 
-    const loadEvents = async () => {
-      const loaded = await storage.getEvents();
-      console.log('[ChatPage] 从 PouchDB 加载事件:', loaded.length, '条');
+    const initStorage = async () => {
+      setIsLoading(true);
+      const userId = currentUser || 'anonymous';
 
-      // 转换为 UI 使用的 Event 格式
-      const converted: Event[] = loaded.map((e: StorageEvent) => ({
-        id: e.id,
-        timestamp: new Date(e.createdAt).getTime(),
-        content: e.content,
-        tags: new Set<string>(e.type ? [e.type] : []),
-      }));
+      // 动态导入 EventStorage，避免顶层导入导致的浏览器兼容性问题
+      const { getEventStorage } = await import('@/lib/storage/event-storage');
+      storage = await getEventStorage(userId);
+      storageRef.current = storage;
 
-      // 反转为升序 [最旧, ..., 最新]
-      setEvents([...converted].reverse());
+      const loadEvents = async () => {
+        const loaded = await storage.getEvents();
+        console.log('[ChatPage] 从 PouchDB 加载事件:', loaded.length, '条');
+
+        // 转换为 UI 使用的 Event 格式
+        const converted: Event[] = loaded.map((e: StorageEvent) => ({
+          id: e.id,
+          timestamp: new Date(e.createdAt).getTime(),
+          content: e.content,
+          tags: new Set<string>(e.type ? [e.type] : []),
+        }));
+
+        // 反转为升序 [最旧, ..., 最新]
+        setEvents([...converted].reverse());
+        setIsLoading(false);
+      };
+
+      await loadEvents();
+
+      // 监听远程变更
+      const unsubscribe = storage.onRemoteChange((change: unknown) => {
+        console.log('[ChatPage] 收到远程变更:', change);
+        loadEvents();
+      });
+
+      // 如果已登录，连接到远程同步
+      if (isLoggedIn && currentUser) {
+        setSyncStatus('syncing');
+        const remoteUrl = `http://localhost:6984/database/${currentUser}`;
+        storage.syncToRemote(remoteUrl).then(() => {
+          setSyncStatus('connected');
+          console.log('[ChatPage] 远程同步已启动');
+        }).catch((err: unknown) => {
+          console.error('[ChatPage] 同步启动失败:', err);
+          setSyncStatus('disconnected');
+        });
+      }
+
+      return () => {
+        unsubscribe();
+        storage.stopSync();
+        storage.close();
+      };
     };
 
-    loadEvents();
-
-    // 监听远程变更
-    const unsubscribe = storage.onRemoteChange((change) => {
-      console.log('[ChatPage] 收到远程变更:', change);
-      loadEvents();
-    });
-
-    // 如果已登录，连接到远程同步
-    if (isLoggedIn && currentUser) {
-      setSyncStatus('syncing');
-      const remoteUrl = `http://localhost:6984/database/${currentUser}`;
-      storage.syncToRemote(remoteUrl).then(() => {
-        setSyncStatus('connected');
-        console.log('[ChatPage] 远程同步已启动');
-      }).catch((err) => {
-        console.error('[ChatPage] 同步启动失败:', err);
-        setSyncStatus('disconnected');
-      });
-    }
+    const cleanupPromise = initStorage();
 
     return () => {
-      unsubscribe();
-      storage.stopSync();
-      storage.close();
+      cleanupPromise.then((cleanup) => cleanup && cleanup());
     };
   }, [currentUser, isLoggedIn]);
 

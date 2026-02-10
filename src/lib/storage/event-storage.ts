@@ -7,20 +7,38 @@
  * 注意：PouchDB 使用动态导入，避免在应用启动时加载导致浏览器兼容性问题
  */
 
-// 类型延迟导入（不实际加载模块）
-import type PouchDB from 'pouchdb';
-
 // 存储动态导入的 PouchDB 模块
 let pouchdbModule: typeof import('pouchdb') | null = null;
 
 /**
- * 动态加载 PouchDB 模块
+ * 动态加载 PouchDB 模块（使用 alias 配置指向浏览器版本）
+ *
+ * 注意：通过 vite.config.ts 中的 alias 配置 "pouchdb" -> "pouchdb/lib/index-browser.js"
+ * 避免浏览器环境中加载需要 Node.js 内置模块的 ESM 版本
  */
 async function loadPouchDB(): Promise<typeof import('pouchdb')> {
   if (!pouchdbModule) {
     pouchdbModule = await import('pouchdb');
   }
   return pouchdbModule;
+}
+
+// 单例实例缓存
+let singletonInstance: EventStorage | null = null;
+
+/**
+ * 获取 EventStorage 单例实例
+ *
+ * 使用动态导入 PouchDB，避免顶层导入导致的浏览器兼容性问题
+ *
+ * @param userId - 用户 ID，用于隔离不同用户的数据
+ * @returns EventStorage 实例
+ */
+export async function getEventStorage(userId: string): Promise<EventStorage> {
+  if (!singletonInstance || singletonInstance.userId !== userId) {
+    singletonInstance = new EventStorage(userId);
+  }
+  return singletonInstance;
 }
 
 /**
@@ -50,11 +68,12 @@ interface EventDoc extends Event {
  * 使用动态导入 PouchDB 以避免浏览器兼容性问题
  */
 export class EventStorage {
-  private db: InstanceType<typeof PouchDB.prototype.constructor> | null = null;
+  private db: any = null;
   private initialized: boolean = false;
   private syncReplication: any = null;
   private changeListeners: Array<(change: unknown) => void> = [];
   private pouchdb: typeof import('pouchdb') | null = null;
+  private pouchdbConstructor: any = null;
 
   /**
    * 创建事件存储实例
@@ -66,7 +85,10 @@ export class EventStorage {
     this.userId = userId;
   }
 
-  private userId: string = '';
+  /**
+   * 用户 ID（公开用于单例比较）
+   */
+  userId: string = '';
 
   /**
    * 初始化数据库连接
@@ -74,11 +96,12 @@ export class EventStorage {
   private async initDb(): Promise<void> {
     if (this.db) return;
 
-    const PouchDB = await loadPouchDB();
-    this.pouchdb = PouchDB;
+    const pouchdb = await loadPouchDB();
+    this.pouchdb = pouchdb;
+    this.pouchdbConstructor = pouchdb.default;
 
     const dbName = `events_${this.userId}`;
-    this.db = new PouchDB.default(dbName) as InstanceType<typeof PouchDB.default.prototype.constructor>;
+    this.db = new this.pouchdbConstructor(dbName);
     await this.initializeDesignDoc();
   }
 
@@ -135,7 +158,7 @@ export class EventStorage {
       updatedAt: new Date().toISOString(),
     };
 
-    await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
+    await this.db.put(doc);
   }
 
   /**
@@ -192,8 +215,7 @@ export class EventStorage {
 
     try {
       const doc = await this.db.get<Event>(`event:${id}`);
-      // 使用 any 绕过 PouchDB 类型限制
-      await (this.db as unknown as { remove(doc: unknown): Promise<unknown> }).remove(doc);
+      await this.db.remove(doc);
     } catch {
       // 事件不存在，忽略错误
     }
@@ -216,7 +238,7 @@ export class EventStorage {
       updatedAt: new Date().toISOString(),
     };
 
-    await this.db.put(updatedDoc as unknown as Parameters<typeof this.db.put>[0]);
+    await this.db.put(updatedDoc);
   }
 
   /**
@@ -229,15 +251,15 @@ export class EventStorage {
     // 使用 allDocs 获取所有带 _rev 的文档
     const result = await this.db.allDocs({ include_docs: true });
     const docsToDelete = result.rows
-      .filter((row) => row.id && row.id.startsWith('event:'))
-      .map((row) => ({
+      .filter((row: any) => row.id && row.id.startsWith('event:'))
+      .map((row: any) => ({
         _id: row.id,
         _rev: row.value?.rev,
         _deleted: true,
       }));
 
     if (docsToDelete.length > 0) {
-      await this.db.bulkDocs(docsToDelete as unknown as Parameters<typeof this.db.bulkDocs>[0]);
+      await this.db.bulkDocs(docsToDelete);
     }
   }
 

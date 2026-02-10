@@ -1,14 +1,14 @@
 /**
  * PouchDB 同步适配器
  *
- * 使用 PouchDB 内置 replicate() API：
- * - 自动双向同步
- * - 增量复制（性能优化）
- * - 内置冲突检测
+ * 使用 PouchDB dist/pouchdb.js UMD 构建：
+ * - 内置 EventEmitter polyfill（无 'events' 模块依赖）
+ * - 浏览器完全兼容
+ * - 无需额外配置
  */
 
-// 使用默认导入
-import PouchDB from 'pouchdb';
+// 使用 UMD 构建（浏览器兼容版本）
+import PouchDB from 'pouchdb/dist/pouchdb.js';
 import type {
   SyncEvent,
   ConfigDoc,
@@ -19,11 +19,12 @@ import type {
   Conflict,
 } from '@/environment/interfaces/sync.port';
 
-// PouchDB 插件
-import pouchdbAdapterIdb from 'pouchdb-adapter-idb';
-
-// 注册 IDB 适配器（使用 IndexedDB 作为本地存储）
-PouchDB.plugin(pouchdbAdapterIdb);
+// 注意：pouchdb/dist/pouchdb.js UMD 构建已内置以下功能：
+// - IndexedDB 适配器（IDBPouch）
+// - HTTP 适配器（HttpPouch）
+// - 复制功能
+// - mapreduce 视图
+// 因此无需单独导入 pouchdb-adapter-idb
 
 // 设备信息存储键
 const DEVICE_ID_KEY = 'exomind:deviceId';

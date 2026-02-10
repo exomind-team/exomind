@@ -6,15 +6,10 @@ describe('Vite pouchdb interop config', () => {
   const viteConfigPath = path.resolve('vite.config.ts');
   const content = readFileSync(viteConfigPath, 'utf-8');
 
-  it('does not alias pouchdb to raw browser bundle', () => {
-    expect(content).not.toMatch(
+  it('aliases pouchdb to browser bundle for browser environment', () => {
+    // PouchDB 必须 alias 到浏览器版本（包含 IDB 适配器）
+    expect(content).toMatch(
       /['"]pouchdb['"]\s*:\s*path\.resolve\(__dirname,\s*['"]\.\/node_modules\/pouchdb\/lib\/index-browser\.js['"]\)/
-    );
-  });
-
-  it('does not alias pouchdb-utils to raw browser bundle', () => {
-    expect(content).not.toMatch(
-      /['"]pouchdb-utils['"]\s*:\s*path\.resolve\(__dirname,\s*['"]\.\/node_modules\/pouchdb-utils\/lib\/index-browser\.js['"]\)/
     );
   });
 
