@@ -14,3 +14,10 @@ export {
   hashPasswordWithSalt,
   verifyPassword,
 } from './crypto-adapter';
+
+// ASR Adapters (stub implementations - pending full migration)
+export {
+  MossASRAdapter,
+  VolcanoHTTPASRAdapter,
+  VolcanoEngineASRAdapter,
+} from './asr';
