@@ -5,6 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
+    "server": "node server/pouchdb-server.js",
+    "server:dev": "node --watch server/pouchdb-server.js",
+    "test:sync": "vitest run tests/sync/pouch-sync.test.ts",
     "build": "tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
@@ -25,6 +29,8 @@
     "@tauri-apps/plugin-opener": "^2",
     "class-variance-authority": "^0.7.1",
     "lucide-react": "^0.563.0",
+    "pouchdb": "^9.0.0",
+    "pouchdb-adapter-idb": "^9.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "react-markdown": "^10.1.0",
@@ -32,6 +38,7 @@
     "rehype-raw": "^7.0.0",
     "rehype-sanitize": "^6.0.0",
     "remark-gfm": "^4.0.1",
+    "socket.io-client": "^4.8.3",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
@@ -41,6 +48,7 @@
     "@testing-library/jest-dom": "6.9.1",
     "@testing-library/react": "16.3.2",
     "@testing-library/user-event": "^14.6.1",
+    "@types/pouchdb": "^6.4.2",
     "@types/react": "^18.3.1",
     "@types/react-dom": "^18.3.1",
     "@types/uuid": "^10.0.0",
