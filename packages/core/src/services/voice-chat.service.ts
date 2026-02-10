@@ -18,7 +18,7 @@
  * 迁移时间: 2026-02-10
  */
 
-import type { ASRResult } from '../interfaces/asr.port';
+import type { ASRResult } from '../interfaces/asr.port.js';
 import {
   VolcanoHTTPASRAdapter,
   VolcanoEngineASRAdapter,

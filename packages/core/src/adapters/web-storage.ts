@@ -2,7 +2,7 @@
  * WebStorageAdapter - Web 存储适配器
  */
 
-import type { IStoragePort } from '../interfaces/storage.port';
+import type { IStoragePort } from '../interfaces/storage.port.js';
 
 export class WebStorageAdapter implements IStoragePort {
   async read<T>(key: string): Promise<T | null> {

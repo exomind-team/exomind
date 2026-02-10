@@ -10,11 +10,11 @@ export {
   type MOSSASRConfig,
   type MOSSASRResult,
   type MOSSASRInput,
-} from './moss-asr';
+} from './moss-asr.js';
 
 // ========== 火山引擎适配器 Stub（待完整迁移）==========
 
-import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../../interfaces/asr.port';
+import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../../interfaces/asr.port.js';
 
 /**
  * 火山引擎 HTTP ASR 适配器 Stub

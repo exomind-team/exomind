@@ -18,7 +18,7 @@
  * 迁移时间: 2026-02-10
  */
 
-import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../../interfaces/asr.port';
+import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../../interfaces/asr.port.js';
 
 // ========== 配置 ==========
 

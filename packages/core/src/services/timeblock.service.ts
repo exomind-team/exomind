@@ -10,7 +10,7 @@
  * └─────────────────────────────────────────┘
  */
 
-import { ExoMindEnvironment, STORAGE_KEYS } from '../environment/environment';
+import { ExoMindEnvironment, STORAGE_KEYS } from '../environment/environment.js';
 import type {
   Event,
   EventData,

@@ -11,8 +11,8 @@
  * └─────────────────────────────────────────┘
  */
 
-import type { IASRPort } from '../interfaces/asr.port';
-import type { IStoragePort } from '../interfaces/storage.port';
+import type { IASRPort } from '../interfaces/asr.port.js';
+import type { IStoragePort } from '../interfaces/storage.port.js';
 import type { EventData, TimeBlockData, ActiveBlockData, TimerConfig } from '@exomind/shared';
 
 // ============== Environment 接口 ==============

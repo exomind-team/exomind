@@ -16,7 +16,7 @@ import type {
   SyncCredentials,
   SyncResult,
   Conflict,
-} from '../interfaces/sync.port';
+} from '../interfaces/sync.port.js';
 
 // PouchDB 插件
 import pouchdbAdapterIdb from 'pouchdb-adapter-idb';
