@@ -5,6 +5,7 @@
  * 支持添加、获取、删除事件
  */
 
+// 使用默认导入
 import PouchDB from 'pouchdb';
 
 /**

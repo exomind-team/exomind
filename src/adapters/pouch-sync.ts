@@ -7,7 +7,7 @@
  * - 内置冲突检测
  */
 
-// 使用 import * as PouchDB 解决类型问题
+// 使用默认导入
 import PouchDB from 'pouchdb';
 import type {
   SyncEvent,
