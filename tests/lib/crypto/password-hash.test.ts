@@ -101,3 +101,192 @@ describe('集成测试', () => {
     expect(await verifyPassword('wrong', stored)).toBe(false);
   });
 });
+
+describe('deriveKeyFromPassword', () => {
+  it('应该成功派生密钥', async () => {
+    const { deriveKeyFromPassword } = await import('@/adapters/crypto-adapter');
+    const key = await deriveKeyFromPassword('test-password');
+    expect(key).toBeDefined();
+    expect(key.type).toBe('secret');
+    expect(key.algorithm.name).toBe('AES-GCM');
+    expect(key.usages).toContain('encrypt');
+    expect(key.usages).toContain('decrypt');
+  });
+
+  it('相同密码应该生成相同密钥', async () => {
+    const { deriveKeyFromPassword } = await import('@/adapters/crypto-adapter');
+    const key1 = await deriveKeyFromPassword('same-password');
+    const key2 = await deriveKeyFromPassword('same-password');
+
+    // 验证两个密钥等效（可以相互加解密）
+    const encoder = new TextEncoder();
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const data = encoder.encode('test');
+
+    const encrypted1 = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      key1,
+      data
+    );
+
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      key2,
+      encrypted1
+    );
+
+    expect(new TextDecoder().decode(decrypted)).toBe('test');
+  });
+});
+
+describe('hashPasswordWithSalt', () => {
+  it('应该自动生成盐并返回格式化哈希', async () => {
+    const { hashPasswordWithSalt } = await import('@/adapters/crypto-adapter');
+    const hash = await hashPasswordWithSalt('mypassword');
+
+    expect(hash).toMatch(/^\$pbkdf2\$[A-Za-z0-9+/=]+\$[A-Za-z0-9+/=]+$/);
+  });
+
+  it('相同密码应该生成不同哈希（因为盐不同）', async () => {
+    const { hashPasswordWithSalt } = await import('@/adapters/crypto-adapter');
+    const hash1 = await hashPasswordWithSalt('same-password');
+    const hash2 = await hashPasswordWithSalt('same-password');
+
+    expect(hash1).not.toBe(hash2);
+
+    // 但都应该能验证通过
+    expect(await verifyPassword('same-password', hash1)).toBe(true);
+    expect(await verifyPassword('same-password', hash2)).toBe(true);
+  });
+});
+
+describe('加密解密', () => {
+  it('quickEncrypt 应该加密数据', async () => {
+    const { quickEncrypt } = await import('@/adapters/crypto-adapter');
+    const ciphertext = await quickEncrypt('secret data', 'password');
+
+    expect(ciphertext).toBeDefined();
+    expect(ciphertext.length).toBeGreaterThan(0);
+    // Base64 编码应该有 padding
+    expect(ciphertext).toMatch(/^[A-Za-z0-9+/=]+$/);
+  });
+
+  it('quickDecrypt 应该解密数据', async () => {
+    const { quickEncrypt, quickDecrypt } = await import('@/adapters/crypto-adapter');
+    const plaintext = '要保密的内容';
+    const password = 'my-secret-password';
+
+    const ciphertext = await quickEncrypt(plaintext, password);
+    const decrypted = await quickDecrypt(ciphertext, password);
+
+    expect(decrypted).toBe(plaintext);
+  });
+
+  it('错误密码应该解密失败', async () => {
+    const { quickEncrypt, quickDecrypt } = await import('@/adapters/crypto-adapter');
+    const ciphertext = await quickEncrypt('secret', 'correct-password');
+
+    await expect(quickDecrypt(ciphertext, 'wrong-password')).rejects.toThrow();
+  });
+});
+
+describe('encryptAes256 和 decryptAes256', () => {
+  it('应该能加密和解密', async () => {
+    const { encryptAes256, decryptAes256 } = await import('@/adapters/crypto-adapter');
+    const plaintext = '测试加密数据 123!@#';
+    const password = 'test-pwd';
+
+    const ciphertext = await encryptAes256(plaintext, password);
+    const decrypted = await decryptAes256(ciphertext, password);
+
+    expect(decrypted).toBe(plaintext);
+  });
+
+  it('相同明文+密码应该生成不同密文（因为 IV 不同）', async () => {
+    const { encryptAes256 } = await import('@/adapters/crypto-adapter');
+    const plaintext = 'same content';
+    const password = 'same password';
+
+    const cipher1 = await encryptAes256(plaintext, password);
+    const cipher2 = await encryptAes256(plaintext, password);
+
+    expect(cipher1).not.toBe(cipher2);
+  });
+});
+
+describe('CryptoAdapter 类', () => {
+  it('应该能够设置密码和加密', async () => {
+    const { CryptoAdapter } = await import('@/adapters/crypto-adapter');
+    const adapter = new CryptoAdapter();
+
+    await adapter.setPassword('adapter-password');
+    const ciphertext = await adapter.encrypt('adapter secret');
+
+    expect(ciphertext).toBeDefined();
+  });
+
+  it('应该能够解密已加密的数据', async () => {
+    const { CryptoAdapter } = await import('@/adapters/crypto-adapter');
+    const adapter = new CryptoAdapter();
+
+    await adapter.setPassword('adapter-password');
+    const ciphertext = await adapter.encrypt('adapter secret');
+    const decrypted = await adapter.decrypt(ciphertext);
+
+    expect(decrypted).toBe('adapter secret');
+  });
+
+  it('未设置密码时 encrypt 应该抛出错误', async () => {
+    const { CryptoAdapter } = await import('@/adapters/crypto-adapter');
+    const adapter = new CryptoAdapter();
+
+    await expect(adapter.encrypt('test')).rejects.toThrow('Password not set');
+  });
+
+  it('未设置密码时 decrypt 应该抛出错误', async () => {
+    const { CryptoAdapter } = await import('@/adapters/crypto-adapter');
+    const adapter = new CryptoAdapter();
+
+    await expect(adapter.decrypt('test')).rejects.toThrow('Password not set');
+  });
+
+  it('clear 应该清空密钥', async () => {
+    const { CryptoAdapter } = await import('@/adapters/crypto-adapter');
+    const adapter = new CryptoAdapter();
+
+    await adapter.setPassword('test');
+    adapter.clear();
+
+    await expect(adapter.encrypt('test')).rejects.toThrow('Password not set');
+  });
+
+  it('实例方法应该正确工作', async () => {
+    const { CryptoAdapter } = await import('@/adapters/crypto-adapter');
+    const adapter = new CryptoAdapter();
+
+    // 测试 generateSalt
+    const salt = adapter.generateSalt(16);
+    expect(salt.length).toBe(24);
+
+    // 测试 sha256
+    const hash = await adapter.sha256('test');
+    expect(hash.length).toBe(64);
+
+    // 测试 hashPassword
+    const pwdHash = await adapter.hashPassword('pwd', 'salt');
+    expect(pwdHash).toMatch(/^\$pbkdf2\$/);
+
+    // 测试 verifyPassword
+    const isValid = await adapter.verifyPassword('pwd', pwdHash);
+    expect(isValid).toBe(true);
+  });
+
+  it('deriveKeyFromPassword 应该返回密钥', async () => {
+    const { CryptoAdapter } = await import('@/adapters/crypto-adapter');
+    const adapter = new CryptoAdapter();
+
+    const key = await adapter.deriveKeyFromPassword('test');
+    expect(key).toBeDefined();
+    expect(key.type).toBe('secret');
+  });
+});
