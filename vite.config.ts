@@ -15,6 +15,8 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
+      // 解决 spark-md5 没有 default 导出的问题
+      "spark-md5": "spark-md5/spark-md5.js",
     },
   },
 
