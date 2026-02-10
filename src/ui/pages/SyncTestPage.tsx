@@ -12,8 +12,8 @@ import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
 import {
   useSyncStore,
-  type Conflict,
 } from '@/ui/stores/sync-store';
+import type { Conflict } from '@/environment/interfaces/sync.port';
 
 interface LogEntry {
   level: 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
@@ -27,7 +27,6 @@ export function SyncTestPage() {
   const [serverUrl, setServerUrl] = useState('http://localhost:6984');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
-  const [expandedConflict, setExpandedConflict] = useState<string | null>(null);
 
   const {
     status,

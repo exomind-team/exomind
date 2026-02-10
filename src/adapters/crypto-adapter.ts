@@ -289,12 +289,9 @@ export async function quickDecrypt(
  * ```
  */
 export class CryptoAdapter implements ICryptoPort {
-  // 存储密码引用（仅用于 clear() 时清理，JavaScript 无法真正擦除字符串内存）
-  private _passwordRef: string | null = null;
   private currentKey: CryptoKey | null = null;
 
   setPassword(password: string): Promise<void> {
-    this._passwordRef = password;
     return this.deriveKey(password).then((key) => {
       this.currentKey = key;
     });
@@ -362,7 +359,6 @@ export class CryptoAdapter implements ICryptoPort {
   }
 
   clear(): void {
-    this._passwordRef = null;
     this.currentKey = null;
   }
 

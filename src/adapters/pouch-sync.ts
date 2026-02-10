@@ -7,7 +7,15 @@
 
 // 使用 import * as PouchDB 解决类型问题
 import PouchDB from 'pouchdb';
-import type { SyncEvent, ConfigDoc, ISyncPort } from '@/environment/interfaces/sync.port';
+import type {
+  SyncEvent,
+  ConfigDoc,
+  ISyncPort,
+  SyncStatus,
+  SyncCredentials,
+  SyncResult,
+  Conflict,
+} from '@/environment/interfaces/sync.port';
 
 /**
  * 变更事件接口
