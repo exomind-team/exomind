@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EventStorage } from '../../../src/lib/storage/event-storage';
+import { EventStorage } from '../../src/lib/storage/event-storage';
 
 describe('EventStorage', () => {
   let storage: EventStorage;
@@ -112,7 +112,9 @@ describe('EventStorage', () => {
 
     it('删除不存在的事件不应抛出错误', async () => {
       // 不应抛出错误
-      await expect(storage.deleteEvent('non-existent')).resolves.not.toThrow();
+      await expect(async () => {
+        await storage.deleteEvent('non-existent');
+      }).not.toThrow();
     });
 
     it('删除后无法再获取到该事件', async () => {
