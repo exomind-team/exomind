@@ -3,10 +3,25 @@
  *
  * 使用 PouchDB 实现事件数据的本地存储
  * 支持添加、获取、删除事件
+ *
+ * 注意：PouchDB 使用动态导入，避免在应用启动时加载导致浏览器兼容性问题
  */
 
-// 使用默认导入
-import PouchDB from 'pouchdb';
+// 类型延迟导入（不实际加载模块）
+import type PouchDB from 'pouchdb';
+
+// 存储动态导入的 PouchDB 模块
+let pouchdbModule: typeof import('pouchdb') | null = null;
+
+/**
+ * 动态加载 PouchDB 模块
+ */
+async function loadPouchDB(): Promise<typeof import('pouchdb')> {
+  if (!pouchdbModule) {
+    pouchdbModule = await import('pouchdb');
+  }
+  return pouchdbModule;
+}
 
 /**
  * 事件接口
@@ -32,12 +47,14 @@ interface EventDoc extends Event {
  * 事件存储类
  *
  * 使用 PouchDB 实现事件数据的本地存储
+ * 使用动态导入 PouchDB 以避免浏览器兼容性问题
  */
 export class EventStorage {
-  private db: PouchDB.Database<Event>;
+  private db: InstanceType<typeof PouchDB.prototype.constructor> | null = null;
   private initialized: boolean = false;
-  private syncReplication: PouchDB.Replication.Sync<Event> | null = null;
+  private syncReplication: any = null;
   private changeListeners: Array<(change: unknown) => void> = [];
+  private pouchdb: typeof import('pouchdb') | null = null;
 
   /**
    * 创建事件存储实例
@@ -45,16 +62,31 @@ export class EventStorage {
    * @param userId - 用户 ID，用于隔离不同用户的数据
    */
   constructor(userId: string) {
-    const dbName = `events_${userId}`;
-    this.db = new PouchDB<Event>(dbName);
-    this.initializeDesignDoc();
+    // 延迟初始化，不在构造函数中创建数据库
+    this.userId = userId;
+  }
+
+  private userId: string = '';
+
+  /**
+   * 初始化数据库连接
+   */
+  private async initDb(): Promise<void> {
+    if (this.db) return;
+
+    const PouchDB = await loadPouchDB();
+    this.pouchdb = PouchDB;
+
+    const dbName = `events_${this.userId}`;
+    this.db = new PouchDB.default(dbName) as InstanceType<typeof PouchDB.default.prototype.constructor>;
+    await this.initializeDesignDoc();
   }
 
   /**
    * 初始化设计文档（视图）
    */
   private async initializeDesignDoc(): Promise<void> {
-    if (this.initialized) return;
+    if (this.initialized || !this.db) return;
 
     try {
       await (this.db as unknown as { put(doc: unknown): Promise<unknown> }).put({
@@ -93,7 +125,8 @@ export class EventStorage {
    * @param event - 事件数据
    */
   async addEvent(event: Event): Promise<void> {
-    await this.initializeDesignDoc();
+    await this.initDb();
+    if (!this.db) return;
 
     const doc: EventDoc = {
       ...event,
@@ -111,7 +144,8 @@ export class EventStorage {
    * @returns 按时间戳降序排列的事件数组
    */
   async getEvents(): Promise<Event[]> {
-    await this.initializeDesignDoc();
+    await this.initDb();
+    if (!this.db) return [];
 
     const result = await this.db.query<EventDoc>('events/by_created_at', {
       include_docs: true,
@@ -135,7 +169,8 @@ export class EventStorage {
    * @returns 事件数据，不存在返回 undefined
    */
   async getEvent(id: string): Promise<Event | undefined> {
-    await this.initializeDesignDoc();
+    await this.initDb();
+    if (!this.db) return undefined;
 
     try {
       const doc = await this.db.get<Event>(`event:${id}`);
@@ -152,7 +187,8 @@ export class EventStorage {
    * @param id - 事件 ID
    */
   async deleteEvent(id: string): Promise<void> {
-    await this.initializeDesignDoc();
+    await this.initDb();
+    if (!this.db) return;
 
     try {
       const doc = await this.db.get<Event>(`event:${id}`);
@@ -170,7 +206,8 @@ export class EventStorage {
    * @param updates - 要更新的字段
    */
   async updateEvent(id: string, updates: Partial<Event>): Promise<void> {
-    await this.initializeDesignDoc();
+    await this.initDb();
+    if (!this.db) return;
 
     const doc = await this.db.get<Event>(`event:${id}`);
     const updatedDoc: EventDoc = {
@@ -186,7 +223,8 @@ export class EventStorage {
    * 清空所有事件
    */
   async clearAll(): Promise<void> {
-    await this.initializeDesignDoc();
+    await this.initDb();
+    if (!this.db) return;
 
     // 使用 allDocs 获取所有带 _rev 的文档
     const result = await this.db.allDocs({ include_docs: true });
@@ -207,7 +245,8 @@ export class EventStorage {
    * 获取事件数量
    */
   async count(): Promise<number> {
-    await this.initializeDesignDoc();
+    await this.initDb();
+    if (!this.db) return 0;
 
     const result = await this.db.query<Event>('events/by_created_at');
     return result.rows.length;
@@ -217,7 +256,10 @@ export class EventStorage {
    * 关闭数据库连接
    */
   async close(): Promise<void> {
-    await this.db.close();
+    if (this.db) {
+      await this.db.close();
+      this.db = null;
+    }
   }
 
   /**
@@ -226,7 +268,10 @@ export class EventStorage {
    * @param remoteUrl - 远程数据库 URL（格式: http://host:port/database）
    * @returns 复制对象
    */
-  async syncToRemote(remoteUrl: string): Promise<PouchDB.Replication.Sync<Event>> {
+  async syncToRemote(remoteUrl: string): Promise<unknown> {
+    await this.initDb();
+    if (!this.db) throw new Error('数据库未初始化');
+
     // 停止之前的同步
     if (this.syncReplication) {
       this.syncReplication.cancel();
