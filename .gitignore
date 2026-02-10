@@ -84,3 +84,5 @@ pnpm-store/
 nul
 playwright-report/
 .playwright-mcp/
+server/data/*
+server/log.txt
