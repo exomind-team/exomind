@@ -1,0 +1,29 @@
+{
+  "name": "@exomind/core",
+  "version": "0.0.0",
+  "main": "dist/index.js",
+  "module": "dist/index.mjs",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.js",
+      "types": "./dist/index.d.ts"
+    },
+    "./environment": "./dist/environment/index.js",
+    "./services": "./dist/services/index.js",
+    "./interfaces": "./dist/interfaces/index.js",
+    "./adapters": "./dist/adapters/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "dev": "tsc --watch",
+    "lint": "tsc --noEmit",
+    "clean": "rm -rf dist .turbo"
+  },
+  "dependencies": {
+    "@exomind/shared": "*"
+  },
+  "devDependencies": {},
+  "files": ["dist"]
+}
