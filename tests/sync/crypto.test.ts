@@ -98,8 +98,141 @@ describe('加密功能', () => {
   });
 
   describe('加密/解密集成测试', () => {
-    // 这些测试需要真实的 crypto.subtle，在 happy-dom 环境下可能不完整
-    // 只保留不需要 mock 的测试
+    it('应该正确加密和解密', async () => {
+      try {
+        const plaintext = 'Hello, World!';
+        const password = 'test-password-123';
+
+        const result = await encryptAes256(plaintext, password);
+        expect(result).toBeDefined();
+        expect(result.ciphertext).toBeDefined();
+        expect(result.iv).toBeDefined();
+        expect(result.salt).toBeDefined();
+
+        const decrypted = await decryptAes256(result, password);
+        expect(decrypted).toBe(plaintext);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('derivedKeyType')) {
+          console.warn('crypto.subtle 完整功能不可用，跳过加密/解密测试');
+          return;
+        }
+        throw error;
+      }
+    });
+
+    it('quickEncrypt/quickDecrypt 应该工作', async () => {
+      try {
+        const plaintext = 'Test message';
+        const password = 'test-pass';
+
+        const encrypted = await quickEncrypt(plaintext, password);
+        expect(encrypted).toBeDefined();
+        expect(typeof encrypted).toBe('string');
+
+        const decrypted = await quickDecrypt(encrypted, password);
+        expect(decrypted).toBe(plaintext);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('derivedKeyType')) {
+          console.warn('crypto.subtle 完整功能不可用，跳过 quickEncrypt/quickDecrypt 测试');
+          return;
+        }
+        throw error;
+      }
+    });
+
+    it('不同密码应该产生不同密文', async () => {
+      try {
+        const plaintext = 'Same message';
+
+        const encrypted1 = await encryptAes256(plaintext, 'password-1');
+        const encrypted2 = await encryptAes256(plaintext, 'password-2');
+
+        expect(encrypted1.ciphertext).not.toBe(encrypted2.ciphertext);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('derivedKeyType')) {
+          console.warn('crypto.subtle 完整功能不可用，跳过不同密码测试');
+          return;
+        }
+        throw error;
+      }
+    });
+
+    it('相同密码加密相同明文应产生不同密文（随机 IV）', async () => {
+      try {
+        const plaintext = 'Same message';
+        const password = 'same-password';
+
+        const encrypted1 = await encryptAes256(plaintext, password);
+        const encrypted2 = await encryptAes256(plaintext, password);
+
+        // 由于使用随机 IV，密文应该不同
+        expect(encrypted1.ciphertext).not.toEqual(encrypted2.ciphertext);
+        // 但都可以用相同密码解密
+        const decrypted1 = await decryptAes256(encrypted1, password);
+        const decrypted2 = await decryptAes256(encrypted2, password);
+        expect(decrypted1).toBe(plaintext);
+        expect(decrypted2).toBe(plaintext);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('derivedKeyType')) {
+          console.warn('crypto.subtle 完整功能不可用，跳过随机 IV 测试');
+          return;
+        }
+        throw error;
+      }
+    });
+
+    it('应该正确处理长文本', async () => {
+      try {
+        const plaintext = 'A'.repeat(10000); // 10KB 文本
+        const password = 'long-text-password';
+
+        const result = await encryptAes256(plaintext, password);
+        const decrypted = await decryptAes256(result, password);
+
+        expect(decrypted).toBe(plaintext);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('derivedKeyType')) {
+          console.warn('crypto.subtle 完整功能不可用，跳过长文本测试');
+          return;
+        }
+        throw error;
+      }
+    });
+
+    it('应该正确处理特殊字符', async () => {
+      try {
+        const plaintext = 'Hello\n\t\r"quotes"\'single\'`backtick`\n中文🔐';
+        const password = 'special-chars-pass';
+
+        const result = await encryptAes256(plaintext, password);
+        const decrypted = await decryptAes256(result, password);
+
+        expect(decrypted).toBe(plaintext);
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('derivedKeyType')) {
+          console.warn('crypto.subtle 完整功能不可用，跳过特殊字符测试');
+          return;
+        }
+        throw error;
+      }
+    });
+
+    it('错误密码应该抛出错误', async () => {
+      try {
+        const plaintext = 'Secret message';
+        const correctPassword = 'correct-password';
+        const wrongPassword = 'wrong-password';
+
+        const result = await encryptAes256(plaintext, correctPassword);
+        await expect(decryptAes256(result, wrongPassword)).rejects.toThrow();
+      } catch (error) {
+        if (error instanceof Error && error.message.includes('derivedKeyType')) {
+          console.warn('crypto.subtle 完整功能不可用，跳过错误密码测试');
+          return;
+        }
+        throw error;
+      }
+    });
   });
 
   describe('跨设备兼容性', () => {
