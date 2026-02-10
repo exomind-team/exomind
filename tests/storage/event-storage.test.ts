@@ -8,7 +8,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { EventStorage } from '../../src/lib/storage/event-storage';
+import { EventStorage } from '@/lib/storage/event-storage';
 
 describe('EventStorage', () => {
   let storage: EventStorage;
@@ -131,6 +131,36 @@ describe('EventStorage', () => {
       // 确认不存在
       events = await storage.getEvents();
       expect(events.find((e) => e.id === 'to-delete')).toBeUndefined();
+    });
+  });
+
+  describe('clearAll', () => {
+    it('应该清空所有事件', async () => {
+      // 添加多个事件
+      const events = [
+        { id: 'clear-1', content: '事件1', createdAt: new Date().toISOString() },
+        { id: 'clear-2', content: '事件2', createdAt: new Date().toISOString() },
+        { id: 'clear-3', content: '事件3', createdAt: new Date().toISOString() },
+      ];
+      for (const event of events) {
+        await storage.addEvent(event);
+      }
+
+      // 确认有事件
+      expect(await storage.getEvents()).toHaveLength(3);
+
+      // 清空
+      await storage.clearAll();
+
+      // 确认清空
+      expect(await storage.getEvents()).toHaveLength(0);
+    });
+
+    it('在空存储上调用不应抛出错误', async () => {
+      // 不应抛出错误
+      await expect(async () => {
+        await storage.clearAll();
+      }).not.toThrow();
     });
   });
 

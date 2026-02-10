@@ -187,9 +187,18 @@ export class EventStorage {
   async clearAll(): Promise<void> {
     await this.initializeDesignDoc();
 
-    const events = await this.getEvents();
-    for (const event of events) {
-      await this.deleteEvent(event.id);
+    // 使用 allDocs 获取所有带 _rev 的文档
+    const result = await this.db.allDocs({ include_docs: true });
+    const docsToDelete = result.rows
+      .filter((row) => row.id && row.id.startsWith('event:'))
+      .map((row) => ({
+        _id: row.id,
+        _rev: row.value?.rev,
+        _deleted: true,
+      }));
+
+    if (docsToDelete.length > 0) {
+      await this.db.bulkDocs(docsToDelete as unknown as Parameters<typeof this.db.bulkDocs>[0]);
     }
   }
 
