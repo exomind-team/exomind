@@ -28,6 +28,59 @@ interface EventDoc extends Event {
   _rev?: string;
 }
 
+// 单例缓存
+const storageInstances: Map<string, EventStorage> = new Map();
+
+/**
+ * 获取当前用户 ID（与 ChatPage 保持一致）
+ */
+export function getCurrentUserId(): string {
+  // 尝试从 localStorage 读取 sync-store 中的 currentUser
+  try {
+    const syncStoreData = localStorage.getItem('exomind:sync-store');
+    if (syncStoreData) {
+      const parsed = JSON.parse(syncStoreData);
+      // Zustand persist 会将状态包装在 state 对象中
+      if (parsed.state && parsed.state.currentUser) {
+        return parsed.state.currentUser;
+      }
+      // 直接存储的情况
+      if (parsed.currentUser) {
+        return parsed.currentUser;
+      }
+    }
+  } catch {
+    // 忽略解析错误
+  }
+  return 'anonymous';
+}
+
+/**
+ * 获取共享的 EventStorage 实例
+ *
+ * 使用单例模式，确保 ChatPage 和 TimeBlockService 使用同一个实例
+ * 避免数据库连接关闭导致的问题
+ *
+ * @param userId - 用户 ID，如果不提供则使用当前用户 ID
+ */
+export function getEventStorage(userId?: string): EventStorage {
+  const id = userId || getCurrentUserId();
+
+  if (!storageInstances.has(id)) {
+    storageInstances.set(id, new EventStorage(id));
+  }
+
+  return storageInstances.get(id)!;
+}
+
+/**
+ * 清空所有 EventStorage 实例
+ * 主要用于测试
+ */
+export function clearAllStorageInstances(): void {
+  storageInstances.clear();
+}
+
 /**
  * 事件存储类
  *
@@ -103,6 +156,9 @@ export class EventStorage {
     };
 
     await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
+
+    // 触发本地变更通知
+    this.notifyChangeListeners({ type: 'local', doc });
   }
 
   /**
@@ -215,9 +271,17 @@ export class EventStorage {
 
   /**
    * 关闭数据库连接
+   * 注意：关闭后单例会被移除，下次 getEventStorage() 会创建新实例
    */
   async close(): Promise<void> {
     await this.db.close();
+    // 从单例缓存中移除
+    for (const [key, instance] of storageInstances.entries()) {
+      if (instance === this) {
+        storageInstances.delete(key);
+        break;
+      }
+    }
   }
 
   /**
