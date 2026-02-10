@@ -8,31 +8,22 @@ export default defineConfig(async () => ({
 
   envDir: '.',
 
-  // PouchDB 浏览器兼容配置（使用 UMD 构建，无需 polyfill）
+  // PouchDB 浏览器兼容配置
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // pouchdb/dist/pouchdb.js UMD 构建已内置所有必需模块（EventEmitter, IDB 适配器等）
-      // 无需配置 pouchdb 或 events alias
     },
+  },
+
+  // 定义全局变量供 PouchDB UMD 使用
+  define: {
+    'process.env': '{}',
   },
 
   // 优化依赖配置
   optimizeDeps: {
     include: ['spark-md5', 'vuvuzela'],
     exclude: ['pouchdb', 'pouchdb-find', 'pouchdb-browser', 'pouchdb-adapter-idb'],
-  },
-
-  // 处理 PouchDB 的 Node.js 依赖
-  build: {
-    rollupOptions: {
-      external: ['fsevents'],
-      output: {
-        manualChunks: {
-          pouchdb: ['pouchdb'],
-        },
-      },
-    },
   },
 
   clearScreen: false,
