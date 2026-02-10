@@ -2,101 +2,42 @@
  * PouchDB 同步适配器
  *
  * 实现本地 PouchDB 与远程 PouchDB Server 之间的数据同步
+ * 复用 sync.port.ts 中定义的类型，确保架构一致性
  */
 
 // 使用 import * as PouchDB 解决类型问题
 import PouchDB from 'pouchdb';
 import type { Event } from '@/lib/types/event';
+import type {
+  SyncStatus,
+  SyncCredentials,
+  SyncResult,
+  Conflict,
+  ConfigDoc,
+  ISyncPort,
+  DeviceType,
+  DocType,
+} from '@/environment/interfaces/sync.port';
+
+// 设备信息存储键
+const DEVICE_ID_KEY = 'exomind:deviceId';
 
 /**
- * 同步状态
+ * 设备类型映射（兼容旧代码）
  */
-export interface SyncStatus {
-  state: 'disconnected' | 'connecting' | 'connected' | 'syncing' | 'error';
-  lastSync: number | null;
-  pendingChanges: number;
-  conflictCount: number;
-  syncMode: 'realtime' | 'polling';
-  pollInterval: number;
-  error?: string;
-}
-
-/**
- * 认证凭据
- */
-export interface SyncCredentials {
-  username: string;
-  passwordHash: string;
-  deviceName: string;
-  deviceType: 'phone' | 'tablet' | 'desktop' | 'server';
-  platform: string;
-}
-
-/**
- * 同步结果
- */
-export interface SyncResult {
-  success: boolean;
-  uploaded: number;
-  downloaded: number;
-  conflicts: number;
-  errors: string[];
-}
-
-/**
- * 冲突信息
- */
-export interface Conflict {
-  id: string;
-  docId: string;
-  docType: 'event' | 'config';
-  local: {
-    value: unknown;
-    timestamp: number;
-    deviceId: string;
-  };
-  remote: {
-    value: unknown;
-    timestamp: number;
-    deviceId: string;
-  };
-  resolved: boolean;
-}
-
-/**
- * 同步 Port 接口
- */
-export interface ISyncPort {
-  connect(url: string, credentials: SyncCredentials): Promise<void>;
-  disconnect(): Promise<void>;
-  getStatus(): SyncStatus;
-  syncEvents(): Promise<SyncResult>;
-  syncConfig(): Promise<SyncResult>;
-  pushEvent(event: Event): Promise<void>;
-  pushConfig(key: string, value: unknown): Promise<void>;
-  getConflicts(): Promise<Conflict[]>;
-  resolveConflict(
-    docId: string,
-    resolution: 'local' | 'remote' | 'merge'
-  ): Promise<void>;
-  setOnSyncTrigger(callback: (docType: 'event' | 'config') => void): void;
-  triggerSync(docType: 'event' | 'config'): Promise<void>;
-}
-
-/**
- * 配置文档接口
- */
-interface ConfigDoc {
-  _id: string;
-  type: 'config';
-  key: string;
-  value: unknown;
-  scope: 'global' | 'local';
-  encrypted?: boolean;
-  deviceId: string;
-  updatedAt: string;
-  _rev?: string;
-  _deleted?: boolean;
+function getDeviceTypeFromString(type: string): DeviceType {
+  switch (type) {
+    case 'phone':
+      return DeviceType.PHONE;
+    case 'tablet':
+      return DeviceType.TABLET;
+    case 'desktop':
+      return DeviceType.DESKTOP;
+    case 'server':
+      return DeviceType.SERVER;
+    default:
+      return DeviceType.DESKTOP;
+  }
 }
 
 /**
