@@ -1,5 +1,5 @@
 /**
- * MOSS ASR 测试页面
+ * MOSSASRTestPage - MOSS ASR 测试页面
  *
  * ┌─────────────────────────────────────────┐
  * │  L4 UI                                  │
@@ -9,13 +9,16 @@
  * │  - 原有的测试功能                       │
  * │  - 新增：VoiceInputButton 语音输入      │
  * └─────────────────────────────────────────┘
+ *
+ * 迁移自: src/pages/MOSSASRTestPage.tsx
+ * 迁移时间: 2026-02-10
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { MOSSASRAdapter, MOSSASRResult } from '../lib/adapters/asr/moss-asr';
+import { MOSSASRAdapter } from '@exomind/core';
+import type { MOSSASRResult, ASRResult } from '@exomind/core';
+import { getEventLogService } from '@exomind/core';
 import { VoiceInputButton } from '../components/VoiceInputButton';
-import type { ASRResult } from '../lib/environment/interfaces/asr.port';
-import { getEventLogService } from '@/lib/services';
 
 // 录音状态
 type RecordingState = 'idle' | 'recording';
@@ -74,7 +77,7 @@ export function MOSSASRTestPage() {
     const adapter = getAdapter();
     setIsAvailable(adapter.isAvailable());
     setConnectionStatus(adapter.isAvailable() ? '就绪' : '未配置');
-    addLog(adapter.isAvailable() ? '✓ MOSS ASR 已就绪' : '✗ 请配置 API Key');
+    addLog(adapter.isAvailable() ? 'MOSS ASR 已就绪' : '请配置 API Key');
     if (!adapter.isAvailable()) {
       addLog('');
       addLog('【配置步骤】');
@@ -124,13 +127,13 @@ export function MOSSASRTestPage() {
   const handleSaveApiKey = () => {
     if (apiKey) {
       localStorage.setItem('moss_api_key', apiKey);
-      addLog('✓ API Key 已保存到本地');
+      addLog('API Key 已保存到本地');
     }
   };
 
   // WebM 转 WAV（不做重采样，不做增益）
   const webmToWav = async (webmBlob: Blob): Promise<Uint8Array> => {
-    addLog('🔄 WebM 转 WAV 中...');
+    addLog('WebM 转 WAV 中...');
 
     const arrayBuffer = await webmBlob.arrayBuffer();
     const audioContext = new AudioContext();
@@ -139,20 +142,20 @@ export function MOSSASRTestPage() {
     // 提取音频数据
     const rawData = audioBuffer.getChannelData(0);
     const sampleRate = audioBuffer.sampleRate;
-    addLog(`📊 原始采样率: ${sampleRate}Hz`);
+    addLog(`原始采样率: ${sampleRate}Hz`);
 
-    // 直接转换为 PCM 16bit（不做重采样，不做增益）
+    // 直接转换为 PCM 16bit
     const pcmData = new Int16Array(rawData.length);
     for (let i = 0; i < rawData.length; i++) {
-      const s = Math.max(-1, Math.min(1, rawData[i]));  // 只裁剪，不放大
+      const s = Math.max(-1, Math.min(1, rawData[i]));
       pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
     }
 
-    // 编码为 WAV（使用原始采样率）
+    // 编码为 WAV
     const wavData = encodeWAV(new Uint8Array(pcmData.buffer), sampleRate);
     await audioContext.close();
 
-    addLog(`✓ WAV 转换完成: ${(wavData.length / 1024).toFixed(2)} KB`);
+    addLog(`WAV 转换完成: ${(wavData.length / 1024).toFixed(2)} KB`);
     return wavData;
   };
 
@@ -190,13 +193,13 @@ export function MOSSASRTestPage() {
 
     if (!adapter.isAvailable()) {
       addLog('错误: 请先配置有效的 API Key');
-      setConnectionStatus('❌ 未配置');
+      setConnectionStatus('未配置');
       return;
     }
 
     try {
-      addLog(`🔴 开始录音 (${recordingMethod === 'scriptProcessor' ? 'ScriptProcessor' : 'MediaRecorder'})...`);
-      setConnectionStatus('🔴 录音中...');
+      addLog(`开始录音 (${recordingMethod === 'scriptProcessor' ? 'ScriptProcessor' : 'MediaRecorder'})...`);
+      setConnectionStatus('录音中...');
       setRecordingState('recording');
       setDuration(0);
       setResult(null);
@@ -213,7 +216,6 @@ export function MOSSASRTestPage() {
       startTimeRef.current = Date.now();
 
       if (recordingMethod === 'scriptProcessor') {
-        // ScriptProcessor 方式：直接调用 transcribe
         (window as any).__asrRecordingActive = true;
 
         const transcribePromise = adapter.transcribe({
@@ -236,13 +238,13 @@ export function MOSSASRTestPage() {
               const blob = new Blob([res.audioData], { type: 'audio/wav' });
               const url = URL.createObjectURL(blob);
               setAudioUrl(url);
-              addLog(`📦 音频文件: ${(res.audioData.length / 1024).toFixed(2)} KB`);
+              addLog(`音频文件: ${(res.audioData.length / 1024).toFixed(2)} KB`);
             }
 
-            setConnectionStatus('✓ 识别完成');
-            addLog(`✓ 识别完成: ${res.text}`);
+            setConnectionStatus('识别完成');
+            addLog(`识别完成: ${res.text}`);
             if (res.confidence) {
-              addLog(`  置信度: ${(res.confidence * 100).toFixed(1)}%`);
+              addLog(`置信度: ${(res.confidence * 100).toFixed(1)}%`);
             }
           })
           .catch((error) => {
@@ -254,13 +256,11 @@ export function MOSSASRTestPage() {
               }
             }
             addLog(`识别错误: ${error}`);
-            setConnectionStatus('❌ 识别失败');
+            setConnectionStatus('识别失败');
           });
       } else {
-        // MediaRecorder 方式：先录制，停止时再转换
-        addLog('⏳ 请开始说话...');
+        addLog('请开始说话...');
 
-        // 创建 MediaRecorder
         const mediaRecorder = new MediaRecorder(streamRef.current, {
           mimeType: 'audio/webm;codecs=opus'
         });
@@ -274,30 +274,29 @@ export function MOSSASRTestPage() {
         };
 
         mediaRecorder.onstop = async () => {
-          addLog('🔄 正在处理录音...');
+          addLog('正在处理录音...');
         };
 
-        mediaRecorder.start(100);  // 每 100ms 收集一次数据
-        addLog('✓ MediaRecorder 已启动');
+        mediaRecorder.start(100);
+        addLog('MediaRecorder 已启动');
       }
 
     } catch (error) {
       addLog(`错误: ${error}`);
-      setConnectionStatus('❌ 麦克风获取失败');
+      setConnectionStatus('麦克风获取失败');
       setRecordingState('idle');
     }
   };
 
   // 停止并识别
   const handleStop = async () => {
-    addLog('⏹ 停止录音...');
-    setConnectionStatus('⏳ 处理中...');
+    addLog('停止录音...');
+    setConnectionStatus('处理中...');
     setRecordingState('idle');
 
     if (recordingMethod === 'scriptProcessor') {
       (window as any).__asrRecordingActive = false;
     } else {
-      // MediaRecorder 方式
       const recorder = mediaRecorderRef.current;
       if (recorder && recorder.state !== 'inactive') {
         await new Promise<void>((resolve) => {
@@ -312,7 +311,7 @@ export function MOSSASRTestPage() {
     }
 
     const recDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-    addLog(`📊 录音时长: ${recDuration}秒`);
+    addLog(`录音时长: ${recDuration}秒`);
 
     // 关闭麦克风
     if (streamRef.current) {
@@ -321,20 +320,19 @@ export function MOSSASRTestPage() {
     }
 
     if (recordingMethod === 'mediaRecorder') {
-      // 处理 MediaRecorder 数据
       try {
           if (recordedChunksRef.current.length === 0) {
             throw new Error('没有录制到音频数据');
           }
 
           const webmBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-          addLog(`📦 WebM 文件: ${(webmBlob.size / 1024).toFixed(2)} KB`);
+          addLog(`WebM 文件: ${(webmBlob.size / 1024).toFixed(2)} KB`);
 
-          // WebM 转 WAV（不做重采样，不做增益）
+          // WebM 转 WAV
           const wavData = await webmToWav(webmBlob);
 
           // 发送到 MOSS 识别
-          setConnectionStatus('⏳ 识别中...');
+          setConnectionStatus('识别中...');
           const adapter = getAdapter();
 
           const res = await adapter.transcribe({
@@ -348,21 +346,20 @@ export function MOSSASRTestPage() {
           setAudioUrl(url);
 
           setResult(res);
-          setConnectionStatus('✓ 识别完成');
-          addLog(`✓ 识别完成: ${res.text}`);
+          setConnectionStatus('识别完成');
+          addLog(`识别完成: ${res.text}`);
           if (res.confidence) {
-            addLog(`  置信度: ${(res.confidence * 100).toFixed(1)}%`);
+            addLog(`置信度: ${(res.confidence * 100).toFixed(1)}%`);
           }
         } catch (error) {
           addLog(`处理错误: ${error}`);
-          setConnectionStatus('❌ 处理失败');
+          setConnectionStatus('处理失败');
         }
     }
   };
 
   // 重置
   const handleReset = () => {
-    // 释放之前的音频 URL
     if (audioUrl) {
       URL.revokeObjectURL(audioUrl);
       setAudioUrl(null);
@@ -378,14 +375,14 @@ export function MOSSASRTestPage() {
   // VoiceInputButton 回调函数
   const handleVoiceResult = (text: string) => {
     setInputText(text);
-    addLogEntry('✅ 语音识别完成', { text });
+    addLogEntry('语音识别完成', { text });
 
     // 自动添加到事件日志
     const eventLogService = getEventLogService();
     eventLogService.addEvent(text).then(() => {
-      addLogEntry('📝 已自动添加到事件日志');
+      addLogEntry('已自动添加到事件日志');
     }).catch((err) => {
-      addLogEntry(`⚠️ 添加到事件日志失败: ${err}`);
+      addLogEntry(`添加到事件日志失败: ${err}`);
     });
   };
 
@@ -444,7 +441,7 @@ export function MOSSASRTestPage() {
         </div>
 
         <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
-          {apiKey ? '✓ 已配置' : '✗ 未配置'}
+          {apiKey ? '已配置' : '未配置'}
           {apiKey && ` (${apiKey.slice(0, 4)}...${apiKey.slice(-4)})`}
         </div>
       </div>
@@ -549,8 +546,8 @@ export function MOSSASRTestPage() {
         textAlign: 'center',
       }}>
         <div style={{ fontSize: '18px', marginBottom: '8px', fontWeight: '500' }}>
-          {recordingState === 'recording' ? '🔴 录音中...' :
-           result ? '✓ 识别完成' : '🎤 点击开始录音'}
+          {recordingState === 'recording' ? '录音中...' :
+           result ? '识别完成' : '点击开始录音'}
         </div>
         {recordingState === 'recording' && (
           <div style={{ fontSize: '40px', fontWeight: 'bold', fontFamily: 'monospace', color: '#dc2626' }}>
@@ -576,7 +573,7 @@ export function MOSSASRTestPage() {
               cursor: isAvailable ? 'pointer' : 'not-allowed',
             }}
           >
-            🎤 开始录音
+            开始录音
           </button>
         )}
 
@@ -594,7 +591,7 @@ export function MOSSASRTestPage() {
               cursor: 'pointer',
             }}
           >
-            ⏹ 停止并识别
+            停止并识别
           </button>
         )}
 
@@ -612,7 +609,7 @@ export function MOSSASRTestPage() {
               cursor: 'pointer',
             }}
           >
-            🔄 重新录音
+            重新录音
           </button>
         )}
       </div>
@@ -626,22 +623,21 @@ export function MOSSASRTestPage() {
         border: '1px solid #e2e8f0',
       }}>
         <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#374151' }}>
-          🎤 语音输入
+          语音输入
         </h3>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-          {/* 语音输入按钮 */}
           <VoiceInputButton
             adapterConfig={voiceButtonAdapterConfig}
             onResult={handleVoiceResult}
-            onError={(err) => addLogEntry(`❌ ${err}`)}
+            onError={(err) => addLogEntry(`${err}`)}
             onStateChange={(state) => {
               if (state === 'recording') {
-                addLogEntry('🎤 开始录音');
+                addLogEntry('开始录音');
               } else if (state === 'recognizing') {
-                addLogEntry('⏳ 识别中...');
+                addLogEntry('识别中...');
               } else if (state === 'completed') {
-                addLogEntry('✅ 识别完成');
+                addLogEntry('识别完成');
               }
             }}
             showWaveform={true}
@@ -650,7 +646,6 @@ export function MOSSASRTestPage() {
             size={72}
           />
 
-          {/* 语音输入框 */}
           <div style={{ flex: 1 }}>
             <textarea
               value={inputText}
@@ -716,7 +711,7 @@ export function MOSSASRTestPage() {
         </div>
       </div>
 
-      {/* 原有的识别结果（仅显示，不使用） */}
+      {/* 识别结果 */}
       {result && (
         <div style={{
           padding: '20px',
@@ -753,7 +748,7 @@ export function MOSSASRTestPage() {
                 fontSize: '12px',
               }}
             >
-              ⬇️ 下载录音文件
+              下载录音文件
             </a>
           )}
         </div>
@@ -770,7 +765,7 @@ export function MOSSASRTestPage() {
         color: '#22d3ee',
       }}>
         <div style={{ marginBottom: '12px', color: '#94a3b8', fontSize: '11px' }}>
-          📋 运行日志
+          运行日志
           <button
             onClick={() => setLogs([])}
             style={{

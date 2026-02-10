@@ -1,10 +1,13 @@
 /**
- * 语音识别测试页面
+ * ASRTestPage - 语音识别测试页面
+ *
  * 使用浏览器原生 Web Speech API 进行测试
+ * 迁移自: src/pages/ASRTestPage.tsx
+ * 迁移时间: 2026-02-10
  */
 
 import { useEffect, useRef, useState } from 'react';
-import type { ASRResult } from '../lib/ports/asr-port';
+import type { ASRResult } from '@exomind/core';
 
 // 获取 SpeechRecognition 构造函数
 const getSpeechRecognition = () => {
@@ -33,7 +36,7 @@ export function ASRTestPage() {
   const startRecording = () => {
     const SpeechRecognition = getSpeechRecognition();
     if (!SpeechRecognition) {
-      addLog('✗ 浏览器不支持语音识别');
+      addLog('浏览器不支持语音识别');
       setStatus('error');
       setApiAvailable(false);
       return;
@@ -54,7 +57,7 @@ export function ASRTestPage() {
       let finalConfidence = 0;
 
       for (let i = 0; i < results.length; i++) {
-        const r = results[i];  // 用 r 避免与 state.result 冲突
+        const r = results[i];
         if (r.isFinal) {
           finalText += r[0].transcript;
           finalConfidence = Math.max(finalConfidence, r[0].confidence);
@@ -89,12 +92,11 @@ export function ASRTestPage() {
     recognition.onend = () => {
       addLog('录音结束');
       recognitionRef.current = null;
-      // 只有还在 recording 状态时才重置为 ready
       setStatus(prev => prev === 'recording' ? 'ready' : prev);
     };
 
     setStatus('recording');
-    addLog('🔴 开始录音...');
+    addLog('开始录音...');
     recognition.start();
   };
 
@@ -103,12 +105,12 @@ export function ASRTestPage() {
     if (recognitionRef.current) {
       try {
         recognitionRef.current.stop();
-        addLog('⏹ 用户停止录音');
+        addLog('停止录音');
       } catch (e) {
         addLog(`停止失败: ${e}`);
       }
     } else {
-      addLog('⚠️ 没有正在运行的识别器');
+      addLog('没有正在运行的识别器');
     }
     setStatus('ready');
   };
@@ -135,11 +137,11 @@ export function ASRTestPage() {
   useEffect(() => {
     const SpeechRecognition = getSpeechRecognition();
     if (SpeechRecognition) {
-      addLog('✓ Web Speech API 可用');
+      addLog('Web Speech API 可用');
       setStatus('ready');
       setApiAvailable(true);
     } else {
-      addLog('✗ 浏览器不支持语音识别');
+      addLog('浏览器不支持语音识别');
       setStatus('error');
       setApiAvailable(false);
     }
@@ -168,10 +170,10 @@ export function ASRTestPage() {
         textAlign: 'center',
       }}>
         {status === 'idle' && '点击"开始录音"'}
-        {status === 'ready' && '✓ 准备就绪'}
-        {status === 'recording' && '🔴 录音中...请说话'}
-        {status === 'success' && '✓ 识别完成'}
-        {status === 'error' && '✗ 出错了'}
+        {status === 'ready' && '准备就绪'}
+        {status === 'recording' && '录音中...请说话'}
+        {status === 'success' && '识别完成'}
+        {status === 'error' && '出错了'}
       </div>
 
       {/* 控制按钮 */}
@@ -206,7 +208,7 @@ export function ASRTestPage() {
               cursor: 'pointer',
             }}
           >
-            🔄 重新开始
+            重新开始
           </button>
         ) : (
           <button
@@ -222,7 +224,7 @@ export function ASRTestPage() {
               cursor: 'pointer',
             }}
           >
-            {status === 'recording' ? '⏹ 点击停止' : '🎤 点击开始录音'}
+            {status === 'recording' ? '停止录音' : '点击开始录音'}
           </button>
         )}
       </div>
@@ -284,7 +286,7 @@ export function ASRTestPage() {
       }}>
         <strong>Web Speech API 状态：</strong>
         <br />
-        {apiAvailable ? '✓ 浏览器支持语音识别' : '✗ 浏览器不支持语音识别（请使用 Chrome/Edge/Safari）'}
+        {apiAvailable ? '浏览器支持语音识别' : '浏览器不支持语音识别（请使用 Chrome/Edge/Safari）'}
       </div>
     </div>
   );
