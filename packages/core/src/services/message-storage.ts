@@ -5,11 +5,13 @@
  */
 
 // Environment type declaration for Tauri
+interface TauriWindow {
+  core?: Record<string, unknown>;
+}
+
 declare global {
   interface Window {
-    __TAURI__?: {
-      core?: Record<string, unknown>;
-    };
+    __TAURI__?: TauriWindow;
   }
 }
 
