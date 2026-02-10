@@ -2,52 +2,32 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 
-// @ts-expect-error process is a nodejs global
-const host = process.env.TAURI_DEV_HOST;
-
 // https://vitejs.dev/config/
 export default defineConfig(async () => ({
   plugins: [react()],
 
-  // 读取 .env 文件
   envDir: '.',
 
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // 解决 CJS 模块的 default 导出问题
-      "spark-md5": "spark-md5/spark-md5.js",
-      "vuvuzela": "vuvuzela/index.js",
+      // 强制使用 pouchdb 浏览器 CJS 构建，避免 ESM 导入 CJS 问题
+      "pouchdb": path.resolve(__dirname, './node_modules/pouchdb/lib/index-browser.js'),
+      "pouchdb-utils": path.resolve(__dirname, './node_modules/pouchdb-utils/lib/index-browser.js'),
     },
   },
 
-  // 保持 pouchdb 排除，强制预构建 spark-md5 以提供 CJS default interop
-  optimizeDeps: {
-    exclude: ['pouchdb'],
-    include: ['spark-md5'],
-  },
-
-  // SSR 配置
-  ssr: {
-    noExternal: ['pouchdb', 'vuvuzela'],
-  },
-
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent vite from obscuring rust errors
   clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
   server: {
     port: 1420,
     strictPort: true,
-    host: '0.0.0.0',  // 监听所有网络接口
+    host: '0.0.0.0',
     hmr: {
       protocol: "ws",
       host: "0.0.0.0",
       port: 1421,
     },
     watch: {
-      // 3. tell vite to ignore watching `src-tauri`
       ignored: ["**/src-tauri/**"],
     },
   },
