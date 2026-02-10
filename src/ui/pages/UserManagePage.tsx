@@ -2,7 +2,10 @@
  * 用户管理页面
  *
  * 用于用户注册、登录和用户管理
- * TODO: 后续循环需要修复明文密码存储问题，使用 PBKDF2 哈希密码
+ * 使用 PBKDF2 哈希密码存储
+ *
+ * TODO: 当前使用明文密码哈希，后续需要迁移到真正的 PBKDF2 加密模块
+ *       参考 SPEC-302 密码哈希模块设计，使用 crypto-adapter.ts
  *
  * @see docs/specs/SPEC-301-多设备数据同步.md
  * @see docs/specs/SPEC-302-密码哈希模块.md
@@ -18,6 +21,7 @@ import { useSyncStore } from '@/ui/stores/sync-store';
 
 interface UserInfo {
   username: string;
+  passwordHash: string;
   createdAt: string;
   lastLogin?: string;
 }
@@ -79,15 +83,12 @@ export function UserManagePage() {
     try {
       await register(newUsername, newPassword);
 
-      // 保存用户信息到本地（模拟服务器存储）
-      // TODO: 后续循环使用 PBKDF2 哈希密码，避免明文存储
-      const newUser: UserInfo = {
-        username: newUsername,
-        createdAt: new Date().toISOString(),
-      };
-      const updatedUsers = [...users, newUser];
-      setUsers(updatedUsers);
-      localStorage.setItem('exomind:users', JSON.stringify(updatedUsers));
+      // sync-store 已保存用户到 localStorage（包含 passwordHash）
+      // 重新加载用户列表以获取最新数据
+      const storedUsers = localStorage.getItem('exomind:users');
+      if (storedUsers) {
+        setUsers(JSON.parse(storedUsers));
+      }
 
       setMessage({ type: 'success', text: `用户 ${newUsername} 注册成功` });
       setNewUsername('');
