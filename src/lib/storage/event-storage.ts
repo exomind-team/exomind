@@ -4,32 +4,17 @@
  * 使用 PouchDB 实现事件数据的本地存储
  * 支持添加、获取、删除事件
  *
- * 注意：PouchDB 使用动态导入，避免在应用启动时加载导致浏览器兼容性问题
+ * 注意：PouchDB 通过 vite.config.ts 注入的全局 UMD 构建访问
  */
 
-// 存储动态导入的 PouchDB 模块
-let pouchdbModule: typeof import('pouchdb') | null = null;
-
-/**
- * 动态加载 PouchDB 模块（使用 alias 配置指向浏览器版本）
- *
- * 注意：通过 vite.config.ts 中的 alias 配置 "pouchdb" -> "pouchdb/lib/index-browser.js"
- * 避免浏览器环境中加载需要 Node.js 内置模块的 ESM 版本
- */
-async function loadPouchDB(): Promise<typeof import('pouchdb')> {
-  if (!pouchdbModule) {
-    pouchdbModule = await import('pouchdb');
-  }
-  return pouchdbModule;
-}
+// PouchDB 全局变量（由 vite.config.ts 中的 pouchdbInject 插件注入）
+declare const PouchDB: any;
 
 // 单例实例缓存
 let singletonInstance: EventStorage | null = null;
 
 /**
  * 获取 EventStorage 单例实例
- *
- * 使用动态导入 PouchDB，避免顶层导入导致的浏览器兼容性问题
  *
  * @param userId - 用户 ID，用于隔离不同用户的数据
  * @returns EventStorage 实例
@@ -65,14 +50,13 @@ interface EventDoc extends Event {
  * 事件存储类
  *
  * 使用 PouchDB 实现事件数据的本地存储
- * 使用动态导入 PouchDB 以避免浏览器兼容性问题
+ * 使用动态导入 PouchDB UMD 构建以避免浏览器兼容性问题
  */
 export class EventStorage {
   private db: any = null;
   private initialized: boolean = false;
   private syncReplication: any = null;
   private changeListeners: Array<(change: unknown) => void> = [];
-  private pouchdb: typeof import('pouchdb') | null = null;
   private pouchdbConstructor: any = null;
 
   /**
@@ -96,9 +80,8 @@ export class EventStorage {
   private async initDb(): Promise<void> {
     if (this.db) return;
 
-    const pouchdb = await loadPouchDB();
-    this.pouchdb = pouchdb;
-    this.pouchdbConstructor = pouchdb.default;
+    // 使用全局的 PouchDB（由 vite.config.ts 注入的 UMD 构建）
+    this.pouchdbConstructor = PouchDB;
 
     const dbName = `events_${this.userId}`;
     this.db = new this.pouchdbConstructor(dbName);

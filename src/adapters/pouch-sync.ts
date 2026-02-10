@@ -2,13 +2,11 @@
  * PouchDB 同步适配器
  *
  * 使用 PouchDB dist/pouchdb.js UMD 构建：
- * - 内置 EventEmitter polyfill（无 'events' 模块依赖）
- * - 浏览器完全兼容
- * - 无需额外配置
+ * - 通过 vite.config.ts 的 pouchdbInject 插件注入到 HTML
+ * - 作为全局变量 window.PouchDB 使用
+ * - 内置 EventEmitter polyfill，浏览器完全兼容
  */
 
-// 使用 UMD 构建（浏览器兼容版本）
-import PouchDB from 'pouchdb/dist/pouchdb.js';
 import type {
   SyncEvent,
   ConfigDoc,
@@ -19,12 +17,8 @@ import type {
   Conflict,
 } from '@/environment/interfaces/sync.port';
 
-// 注意：pouchdb/dist/pouchdb.js UMD 构建已内置以下功能：
-// - IndexedDB 适配器（IDBPouch）
-// - HTTP 适配器（HttpPouch）
-// - 复制功能
-// - mapreduce 视图
-// 因此无需单独导入 pouchdb-adapter-idb
+// UMD 构建通过 HTML script 标签注入，使用全局变量
+declare const PouchDB: any;
 
 // 设备信息存储键
 const DEVICE_ID_KEY = 'exomind:deviceId';
