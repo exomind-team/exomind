@@ -10,49 +10,13 @@
 // PouchDB 全局变量（由 vite.config.ts 中的 pouchdbInject 插件注入）
 declare const PouchDB: any;
 
-// 单例实例缓存
-let singletonInstance: EventStorage | null = null;
-
-/**
- * 获取 EventStorage 单例实例
- *
- * @param userId - 用户 ID，用于隔离不同用户的数据
- * @returns EventStorage 实例
- */
-export async function getEventStorage(userId: string): Promise<EventStorage> {
-  if (!singletonInstance || singletonInstance.userId !== userId) {
-    singletonInstance = new EventStorage(userId);
-  }
-  return singletonInstance;
-}
-
-/**
- * 事件接口
- */
-export interface Event {
-  id: string;
-  content: string;
-  createdAt: string;
-  updatedAt?: string;
-  type?: string;
-  metadata?: Record<string, unknown>;
-}
-
-/**
- * 内部事件文档接口（包含 PouchDB 字段）
- */
-interface EventDoc extends Event {
-  _id: string;
-  _rev?: string;
-}
-
 // 单例缓存
 const storageInstances: Map<string, EventStorage> = new Map();
 
 /**
  * 获取当前用户 ID（与 ChatPage 保持一致）
  */
-export function getCurrentUserId(): string {
+function getCurrentUserId(): string {
   // 尝试从 localStorage 读取 sync-store 中的 currentUser
   try {
     const syncStoreData = localStorage.getItem('exomind:sync-store');
@@ -81,7 +45,7 @@ export function getCurrentUserId(): string {
  *
  * @param userId - 用户 ID，如果不提供则使用当前用户 ID
  */
-export function getEventStorage(userId?: string): EventStorage {
+export async function getEventStorage(userId?: string): Promise<EventStorage> {
   const id = userId || getCurrentUserId();
 
   if (!storageInstances.has(id)) {
@@ -89,6 +53,26 @@ export function getEventStorage(userId?: string): EventStorage {
   }
 
   return storageInstances.get(id)!;
+}
+
+/**
+ * 事件接口
+ */
+export interface Event {
+  id: string;
+  content: string;
+  createdAt: string;
+  updatedAt?: string;
+  type?: string;
+  metadata?: Record<string, unknown>;
+}
+
+/**
+ * 内部事件文档接口（包含 PouchDB 字段）
+ */
+interface EventDoc extends Event {
+  _id: string;
+  _rev?: string;
 }
 
 /**
@@ -209,17 +193,19 @@ export class EventStorage {
     await this.initDb();
     if (!this.db) return [];
 
-    const result = await this.db.query<EventDoc>('events/by_created_at', {
+    // 类型化 PouchDB query 方法
+    const queryFn = this.db.query as (view: string, opts?: object) => Promise<{ rows: Array<{ doc?: EventDoc }> }>;
+    const result = await queryFn('events/by_created_at', {
       include_docs: true,
       descending: true,
     });
 
     return result.rows
-      .filter((row) => row.doc)
+      .filter((row): row is { doc: EventDoc } => !!row.doc)
       .map((row) => {
         const doc = row.doc!;
-        // 移除内部字段
-        const { _id, _rev, _conflicts, ...event } = doc;
+        // 移除内部字段（使用类型断言避免 _conflicts 不存在的问题）
+        const { _id, _rev, ...event } = doc as EventDoc & { _conflicts?: unknown };
         return event as Event;
       });
   }
@@ -235,8 +221,10 @@ export class EventStorage {
     if (!this.db) return undefined;
 
     try {
-      const doc = await this.db.get<Event>(`event:${id}`);
-      const { _id, _rev, _conflicts, ...event } = doc;
+      // 类型化 PouchDB get 方法
+      const getFn = this.db.get as (docId: string) => Promise<EventDoc & { _conflicts?: unknown }>;
+      const doc = await getFn(`event:${id}`);
+      const { _id, _rev, ...event } = doc;
       return event as Event;
     } catch {
       return undefined;
@@ -253,8 +241,11 @@ export class EventStorage {
     if (!this.db) return;
 
     try {
-      const doc = await this.db.get<Event>(`event:${id}`);
-      await this.db.remove(doc);
+      // 类型化 PouchDB get 和 remove 方法
+      const getFn = this.db.get as (docId: string) => Promise<EventDoc>;
+      const removeFn = this.db.remove as (doc: EventDoc) => Promise<void>;
+      const doc = await getFn(`event:${id}`);
+      await removeFn(doc);
     } catch {
       // 事件不存在，忽略错误
     }
@@ -270,7 +261,9 @@ export class EventStorage {
     await this.initDb();
     if (!this.db) return;
 
-    const doc = await this.db.get<Event>(`event:${id}`);
+    // 类型化 PouchDB get 方法
+    const getFn = this.db.get as (docId: string) => Promise<EventDoc>;
+    const doc = await getFn(`event:${id}`);
     const updatedDoc: EventDoc = {
       ...doc,
       ...updates,
@@ -309,7 +302,9 @@ export class EventStorage {
     await this.initDb();
     if (!this.db) return 0;
 
-    const result = await this.db.query<Event>('events/by_created_at');
+    // 类型化 PouchDB query 方法
+    const queryFn = this.db.query as (view: string, opts?: object) => Promise<{ rows: Array<unknown> }>;
+    const result = await queryFn('events/by_created_at');
     return result.rows.length;
   }
 
@@ -317,7 +312,6 @@ export class EventStorage {
    * 关闭数据库连接
    * 注意：关闭后单例会被移除，下次 getEventStorage() 会创建新实例
    */
-  async close(): Promise<void> {
   async close(): Promise<void> {
     if (!this.db) return;
 
