@@ -15,19 +15,21 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // 解决 spark-md5 没有 default 导出的问题
-      "spark-md5": path.resolve(__dirname, "./node_modules/spark-md5/spark-md5.js"),
+      // 解决 CJS 模块的 default 导出问题
+      "spark-md5": "spark-md5/spark-md5.js",
+      "vuvuzela": "vuvuzela/index.js",
     },
   },
 
-  // 排除 PouchDB 和 spark-md5 的依赖优化，避免浏览器兼容性问题
+  // 保持 pouchdb 排除，强制预构建 spark-md5 以提供 CJS default interop
   optimizeDeps: {
-    exclude: ['pouchdb', 'spark-md5'],
+    exclude: ['pouchdb'],
+    include: ['spark-md5'],
   },
 
   // SSR 配置
   ssr: {
-    noExternal: ['pouchdb', 'spark-md5'],
+    noExternal: ['pouchdb', 'vuvuzela'],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
