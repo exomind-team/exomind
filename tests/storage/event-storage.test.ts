@@ -1,7 +1,8 @@
 /**
  * EventStorage 单元测试
  *
- * 测试事件本地存储功能�? * - 添加事件
+ * 测试事件本地存储功能：
+ * - 添加事件
  * - 获取事件列表
  * - 删除事件
  */
@@ -58,11 +59,11 @@ describe('EventStorage', () => {
       expect(storedEvents).toHaveLength(3);
     });
 
-    it('应该保留事件时间�?, async () => {
+    it('应该保留事件时间戳', async () => {
       const timestamp = new Date().toISOString();
       const event = {
         id: 'event-ts',
-        content: '带时间戳的事�?,
+        content: '带时间戳的事件',
         createdAt: timestamp,
       };
 
@@ -79,14 +80,14 @@ describe('EventStorage', () => {
       expect(events).toEqual([]);
     });
 
-    it('应该按创建时间排序返回事�?, async () => {
-      // 添加延迟确保时间戳不�?      const event1 = { id: 'event-1', content: '第一个事�?, createdAt: '2024-01-01T10:00:00.000Z' };
+    it('应该按创建时间排序返回事件', async () => {
+      const event1 = { id: 'event-1', content: '第一个事件', createdAt: '2024-01-01T10:00:00.000Z' };
       await storage.addEvent(event1);
 
-      const event2 = { id: 'event-2', content: '第二个事�?, createdAt: '2024-01-01T11:00:00.000Z' };
+      const event2 = { id: 'event-2', content: '第二个事件', createdAt: '2024-01-01T11:00:00.000Z' };
       await storage.addEvent(event2);
 
-      const event3 = { id: 'event-3', content: '第三个事�?, createdAt: '2024-01-01T09:00:00.000Z' };
+      const event3 = { id: 'event-3', content: '第三个事件', createdAt: '2024-01-01T09:00:00.000Z' };
       await storage.addEvent(event3);
 
       const events = await storage.getEvents();
@@ -111,13 +112,7 @@ describe('EventStorage', () => {
 
     it('删除不存在的事件不应抛出错误', async () => {
       // 不应抛出错误
-      let errorThrown = false;
-      try {
-        await storage.deleteEvent('non-existent');
-      } catch {
-        errorThrown = true;
-      }
-      expect(errorThrown).toBe(false);
+      await expect(storage.deleteEvent('non-existent')).resolves.not.toThrow();
     });
 
     it('删除后无法再获取到该事件', async () => {
@@ -131,13 +126,14 @@ describe('EventStorage', () => {
       // 删除
       await storage.deleteEvent('to-delete');
 
-      // 确认不存�?      events = await storage.getEvents();
+      // 确认不存在
+      events = await storage.getEvents();
       expect(events.find((e) => e.id === 'to-delete')).toBeUndefined();
     });
   });
 
-  describe('事件数据完整�?, () => {
-    it('应该正确存储包含特殊字符的内�?, async () => {
+  describe('事件数据完整性', () => {
+    it('应该正确存储包含特殊字符的内容', async () => {
       const specialContent = '事件内容: Hello World! @#$%^&*()';
       const event = {
         id: 'special-chars',
