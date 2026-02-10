@@ -1,234 +1,183 @@
-// server/pouchdb-server.js
-// ExoMind PouchDB Sync Server
-// 端口: 6984
+/**
+ * PouchDB Sync Server
+ *
+ * 使用官方 pouchdb-server，提供：
+ * - 内置用户认证
+ * - CouchDB 兼容 API
+ * - 实时变更推送
+ *
+ * 端口: 6984
+ */
 
-import PouchDB from 'pouchdb';
 import express from 'express';
 import cors from 'cors';
-import { Server } from 'socket.io';
-import http from 'http';
+import { createServer } from 'http';
+import { spawn } from 'child_process';
 import fs from 'fs';
 import path from 'path';
-import { createHash } from 'crypto';
+import { fileURLToPath } from 'url';
 import config from './config.js';
 
+// ESM 模块中获取 __dirname
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
 // 确保目录存在
-const DB_DIR = path.resolve(config.dataDir);
-const LOGS_DIR = path.resolve(config.logsDir);
+const DB_DIR = path.resolve(__dirname, config.dataDir);
+const LOGS_DIR = path.resolve(__dirname, config.logsDir);
 
-if (!fs.existsSync(DB_DIR)) {
-  fs.mkdirSync(DB_DIR, { recursive: true });
-}
-
-if (!fs.existsSync(LOGS_DIR)) {
-  fs.mkdirSync(LOGS_DIR, { recursive: true });
+for (const dir of [DB_DIR, LOGS_DIR]) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+  }
 }
 
 // 创建日志流
-const logStream = fs.createWriteStream(path.join(LOGS_DIR, 'stdout.log'), { flags: 'a' });
+const logStream = fs.createWriteStream(path.join(LOGS_DIR, 'server.log'), { flags: 'a' });
 
 function log(message) {
   const timestamp = new Date().toISOString();
   const logMessage = `[${timestamp}] ${message}\n`;
   logStream.write(logMessage);
-  console.log(message);
+  console.log(logMessage.trim());
 }
 
-// 创建 Express 应用
+// pouchdb-server 进程
+let pouchdbServerProcess = null;
+
+// 创建 Express 应用（用于自定义路由）
 const app = express();
-app.use(cors());
+const httpServer = createServer(app);
+
+// CORS 配置
+app.use(cors({
+  origin: config.pouchdbServer?.cors?.origin || '*',
+  credentials: config.pouchdbServer?.cors?.credentials || true,
+}));
 app.use(express.json());
 
-// HTTP 服务器
-const server = http.createServer(app);
-
-// WebSocket 服务器
-const io = new Server(server, {
-  cors: {
-    origin: config.corsOrigin,
-    methods: ['GET', 'POST'],
-  },
-});
-
-// 用户存储（内存中，服务重启后丢失）
-// 后续可扩展为持久化到 JSON 文件
-const users = new Map(); // username -> { passwordHash, salt }
-
-// 数据库缓存
-const dbCache = new Map(); // username -> PouchDB instance
-
-// 生成随机盐
-function generateSalt(length = 16) {
-  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-  let result = '';
-  for (let i = 0; i < length; i++) {
-    result += chars.charAt(Math.floor(Math.random() * chars.length));
-  }
-  return result;
-}
-
-// 使用 PBKDF2 派生密钥
-function pbkdf2(password, salt) {
-  const derived = createHash('sha256').update(password + salt).digest('hex');
-  return derived;
-}
-
-// 获取或创建用户数据库
-function getUserDb(username) {
-  if (dbCache.has(username)) {
-    return dbCache.get(username);
-  }
-
-  const dbPath = path.join(DB_DIR, `user-${username}.db`);
-  const db = new PouchDB(dbPath);
-  dbCache.set(username, db);
-  return db;
-}
-
-// 初始化用户
-function initUser(username, passwordHash, salt) {
-  users.set(username, { passwordHash, salt });
-  getUserDb(username); // 创建数据库
-  log(`用户 ${username} 已初始化`);
-}
-
-// 根路径 - 健康检查
+// 健康检查端点
 app.get('/', (req, res) => {
-  res.json({ status: 'ok', message: 'PouchDB Server running' });
+  res.json({
+    status: 'ok',
+    message: 'PouchDB Sync Server running',
+    version: '1.0.0',
+    pouchdbServer: pouchdbServerProcess ? 'running' : 'stopped',
+    endpoints: {
+      health: '/',
+      pouchdb: '/:dbname',
+      users: '/_users',
+      stats: '/stats',
+    },
+  });
 });
 
-// 用户注册
-app.post('/register', async (req, res) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ error: '用户名和密码必填' });
-  }
-
-  if (users.has(username)) {
-    return res.status(409).json({ error: '用户已存在' });
-  }
-
-  // 使用 PBKDF2 加盐哈希
-  const salt = generateSalt(16);
-  const passwordHash = pbkdf2(password, salt);
-  initUser(username, passwordHash, salt);
-
-  log(`用户 ${username} 注册成功`);
-  res.json({ success: true, message: '用户注册成功' });
-});
-
-// 用户登录
-app.post('/login', async (req, res) => {
-  const { username, password } = req.body;
-
-  if (!username || !password) {
-    return res.status(400).json({ error: '用户名和密码必填' });
-  }
-
-  const user = users.get(username);
-  if (!user) {
-    return res.status(401).json({ error: '用户不存在' });
-  }
-
-  // 验证密码
-  const passwordHash = pbkdf2(password, user.salt);
-  if (passwordHash !== user.passwordHash) {
-    log(`用户 ${username} 登录失败：密码错误`);
-    return res.status(403).json({ error: '密码错误' });
-  }
-
-  log(`用户 ${username} 登录成功`);
-  res.json({ success: true, token: user.passwordHash, username });
-});
-
-// 获取用户数据库信息
-app.get('/db/:username', async (req, res) => {
-  const { username } = req.params;
-
-  const user = users.get(username);
-  if (!user) {
-    return res.status(404).json({ error: '用户不存在' });
-  }
-
-  const db = getUserDb(username);
+// 统计信息端点
+app.get('/stats', async (req, res) => {
   try {
-    const info = await db.info();
-    res.json({
-      success: true,
-      database: `user-${username}.db`,
-      docCount: info.doc_count,
-      updateSeq: info.update_seq,
-    });
+    const stats = {
+      uptime: process.uptime(),
+      memory: process.memoryUsage(),
+      pouchdbServer: pouchdbServerProcess ? 'running' : 'stopped',
+      databases: [],
+    };
+
+    // 获取数据库列表
+    if (fs.existsSync(DB_DIR)) {
+      const files = fs.readdirSync(DB_DIR);
+      stats.databases = files
+        .filter(f => f.endsWith('.couch') || f.endsWith('.db'))
+        .map(f => f.replace(/\.(couch|db)$/, ''));
+    }
+
+    res.json(stats);
   } catch (error) {
     res.status(500).json({ error: error.message });
   }
 });
 
-// 获取用户所有文档
-app.get('/db/:username/_all_docs', async (req, res) => {
-  const { username } = req.params;
+/**
+ * 启动 pouchdb-server 子进程
+ * 注意：pouchdb-server 会占用 config.port，所以我们需要监听不同的端口
+ * 或者直接使用 pouchdb-server 作为主服务器
+ */
+function startPouchDBServer() {
+  log('启动官方 pouchdb-server...');
 
-  const user = users.get(username);
-  if (!user) {
-    return res.status(404).json({ error: '用户不存在' });
+  // pouchdb-server 入口
+  const pouchdbBin = path.join(__dirname, 'node_modules', 'pouchdb-server', 'lib', 'index.js');
+
+  // 检查是否存在
+  if (!fs.existsSync(pouchdbBin)) {
+    log(`错误: pouchdb-server 未找到，请先运行: bun install`);
+    return false;
   }
 
-  const db = getUserDb(username);
-  try {
-    const result = await db.allDocs({ include_docs: true });
-    res.json(result);
-  } catch (error) {
-    res.status(500).json({ error: error.message });
-  }
-});
+  // pouchdb-server 命令行参数
+  const args = [
+    '-p', String(config.port),
+    '-d', DB_DIR,
+  ];
 
-// WebSocket 连接处理
-io.on('connection', (socket) => {
-  log(`WebSocket 客户端连接: ${socket.id}`);
+  log(`执行: node ${pouchdbBin} ${args.join(' ')}`);
 
-  socket.on('subscribe', ({ username, deviceId }) => {
-    socket.join(`user:${username}`);
-    log(`客户端 ${deviceId} 订阅用户 ${username}`);
+  pouchdbServerProcess = spawn('node', [pouchdbBin, ...args], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env },
   });
 
-  socket.on('unsubscribe', ({ username }) => {
-    socket.leave(`user:${username}`);
-    log(`客户端取消订阅用户 ${username}`);
+  pouchdbServerProcess.stdout.on('data', (data) => {
+    const message = data.toString().trim();
+    if (message) {
+      log(`[pouchdb-server] ${message}`);
+    }
   });
 
-  socket.on('disconnect', () => {
-    log(`WebSocket 客户端断开: ${socket.id}`);
+  pouchdbServerProcess.stderr.on('data', (data) => {
+    const message = data.toString().trim();
+    if (message) {
+      log(`[pouchdb-server ERROR] ${message}`);
+    }
   });
-});
 
-// 广播变化给订阅者
-function broadcastChange(username, change) {
-  io.to(`user:${username}`).emit('change', change);
+  pouchdbServerProcess.on('close', (code) => {
+    log(`pouchdb-server 进程退出，代码: ${code}`);
+    pouchdbServerProcess = null;
+  });
+
+  pouchdbServerProcess.on('error', (err) => {
+    log(`pouchdb-server 启动失败: ${err.message}`);
+    pouchdbServerProcess = null;
+  });
+
+  return true;
 }
 
-// 启动服务器
-const PORT = process.env.PORT || config.port;
-const HOST = process.env.HOST || config.host;
+// 启动 pouchdb-server 作为主服务器
+const PORT = config.port;
+const HOST = config.host;
 
-server.listen(PORT, HOST, () => {
-  log(`PouchDB Server 运行在 http://${HOST}:${PORT}`);
+log('========================================');
+log('PouchDB Sync Server 启动中...');
+log('========================================');
+
+if (startPouchDBServer()) {
+  log(`pouchdb-server 已在后台启动，端口: ${PORT}`);
   log(`数据目录: ${DB_DIR}`);
   log(`日志目录: ${LOGS_DIR}`);
-});
+  log('========================================');
+}
 
 // 优雅关闭
 process.on('SIGINT', () => {
   log('收到关闭信号，正在关闭服务器...');
-  server.close(() => {
-    log('服务器已关闭');
-    // 关闭所有数据库连接
-    for (const [username, db] of dbCache) {
-      db.close();
-      log(`数据库 ${username} 已关闭`);
-    }
-    process.exit(0);
-  });
+
+  if (pouchdbServerProcess) {
+    pouchdbServerProcess.kill('SIGTERM');
+  }
+
+  process.exit(0);
 });
 
-export { app, server, io };
+// 导出用于测试
+export { app };
