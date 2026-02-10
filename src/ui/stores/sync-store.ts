@@ -4,6 +4,8 @@
  * 使用 Zustand 管理同步相关的状态
  * 集成 PouchSyncAdapter 实现真正的同步逻辑
  * 集成 CryptoAdapter 实现密码哈希（SPEC-302）
+ *
+ * 注意：PouchSyncAdapter 使用动态导入，避免在应用启动时加载 PouchDB
  */
 
 import { create } from 'zustand';
@@ -15,18 +17,36 @@ import {
   type SyncResult,
   type Conflict,
 } from '@/environment/interfaces/sync.port';
-import { PouchSyncAdapter } from '@/adapters/pouch-sync';
 import {
   CryptoAdapter,
   hashPasswordWithSalt,
 } from '@/adapters/crypto-adapter';
 
-// 创建 PouchSyncAdapter 实例（单例）
+// 类型延迟导入（不实际加载模块）
+import type { PouchSyncAdapter } from '@/adapters/pouch-sync';
+
+// 存储动态导入的适配器实例
 let syncAdapter: PouchSyncAdapter | null = null;
+
+// 动态导入 PouchSyncAdapter（浏览器兼容）
+async function loadSyncAdapter(): Promise<typeof import('@/adapters/pouch-sync')> {
+  const module = await import('@/adapters/pouch-sync');
+  return module;
+}
 
 function getSyncAdapter(): PouchSyncAdapter {
   if (!syncAdapter) {
-    syncAdapter = new PouchSyncAdapter();
+    // 运行时创建实例（模块加载后）
+    throw new Error('同步适配器未初始化，请先调用 initSyncAdapter()');
+  }
+  return syncAdapter;
+}
+
+// 初始化同步适配器（在用户登录后调用）
+export async function initSyncAdapter(): Promise<PouchSyncAdapter> {
+  if (!syncAdapter) {
+    const module = await loadSyncAdapter();
+    syncAdapter = new module.PouchSyncAdapter();
   }
   return syncAdapter;
 }
@@ -220,7 +240,8 @@ export const useSyncStore = create<SyncState>()(
         });
 
         try {
-          const adapter = getSyncAdapter();
+          // 初始化适配器（动态加载 PouchDB）
+          const adapter = await initSyncAdapter();
           await adapter.connect(url, credentials);
 
           set({
@@ -249,10 +270,11 @@ export const useSyncStore = create<SyncState>()(
       // 断开连接
       async disconnect() {
         try {
-          const adapter = getSyncAdapter();
+          // 尝试初始化并断开
+          const adapter = await initSyncAdapter();
           await adapter.disconnect();
         } catch {
-          // 忽略断开连接时的错误
+          // 忽略断开连接时的错误（可能还未初始化）
         }
 
         set({
@@ -277,7 +299,7 @@ export const useSyncStore = create<SyncState>()(
         });
 
         try {
-          const adapter = getSyncAdapter();
+          const adapter = await initSyncAdapter();
           const result = await adapter.syncEvents();
 
           // 更新冲突计数
@@ -318,7 +340,7 @@ export const useSyncStore = create<SyncState>()(
         });
 
         try {
-          const adapter = getSyncAdapter();
+          const adapter = await initSyncAdapter();
           const result = await adapter.syncConfig();
 
           // 更新冲突计数
@@ -351,7 +373,7 @@ export const useSyncStore = create<SyncState>()(
       // 获取冲突列表
       async getConflicts() {
         try {
-          const adapter = getSyncAdapter();
+          const adapter = await initSyncAdapter();
           const conflicts = await adapter.getConflicts();
 
           set({
@@ -371,7 +393,7 @@ export const useSyncStore = create<SyncState>()(
       // 解决冲突
       async resolveConflict(docId: string, resolution: 'local' | 'remote' | 'merge') {
         try {
-          const adapter = getSyncAdapter();
+          const adapter = await initSyncAdapter();
           await adapter.resolveConflict(docId, resolution);
 
           // 更新冲突列表
