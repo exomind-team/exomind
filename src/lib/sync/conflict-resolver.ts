@@ -6,7 +6,7 @@
  * - 时间戳相同时使用设备 ID 作为裁决
  */
 
-import type { Conflict } from '@/environment/interfaces/sync.types';
+import type { Conflict } from '@/adapters/pouch-sync';
 
 interface DocWithRev {
   value: unknown;
