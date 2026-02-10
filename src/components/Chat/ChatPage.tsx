@@ -7,6 +7,7 @@
  * │  - TimeBlock 控件栏                     │
  * │  - 事件列表（时间排序，最新在顶部）       │
  * │  - 输入区域                            │
+ * │  - 同步状态显示                         │
  * └─────────────────────────────────────────┘
  */
 
@@ -15,42 +16,66 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
-import { getEventLogService } from '@/lib/services';
 import type { Event } from '@/lib/types/event';
+import { EventStorage, type Event as StorageEvent } from '@/lib/storage/event-storage';
+import { useSyncStore } from '@/ui/stores/sync-store';
 
 export function ChatPage() {
   const [events, setEvents] = useState<Event[]>([]);
+  const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
   const listEndRef = useRef<HTMLDivElement>(null);
+  const storageRef = useRef<EventStorage | null>(null);
+  const { currentUser, isLoggedIn } = useSyncStore();
 
-  // 加载事件并监听变化
+  // 初始化 EventStorage 和加载事件
   useEffect(() => {
-    const eventLogService = getEventLogService();
+    const userId = currentUser || 'anonymous';
+    const storage = new EventStorage(userId);
+    storageRef.current = storage;
 
     const loadEvents = async () => {
-      const loaded = await eventLogService.loadEvents();
-      console.log('[ChatPage] 加载事件:', loaded.length, '条');
-      // 反转为升序 [最旧, ..., 最新]，用于渲染
-      setEvents([...loaded].reverse());
+      const loaded = await storage.getEvents();
+      console.log('[ChatPage] 从 PouchDB 加载事件:', loaded.length, '条');
+
+      // 转换为 UI 使用的 Event 格式
+      const converted: Event[] = loaded.map((e: StorageEvent) => ({
+        id: e.id,
+        timestamp: new Date(e.createdAt).getTime(),
+        content: e.content,
+        tags: new Set<string>(e.type ? [e.type] : []),
+      }));
+
+      // 反转为升序 [最旧, ..., 最新]
+      setEvents([...converted].reverse());
     };
 
     loadEvents();
 
-    // 监听新事件（最新在底部，append 到末尾）
-    const unsubscribe = eventLogService.onEvent((newEvent) => {
-      console.log('[ChatPage] 收到新事件:', newEvent.id);
-      setEvents(prev => {
-        // 检查是否已存在
-        const exists = prev.some(e => e.id === newEvent.id);
-        if (exists) {
-          console.log('[ChatPage] 事件已存在，忽略:', newEvent.id);
-          return prev;
-        }
-        return [...prev, newEvent];  // 最新在底部（append 到末尾）
-      });
+    // 监听远程变更
+    const unsubscribe = storage.onRemoteChange((change) => {
+      console.log('[ChatPage] 收到远程变更:', change);
+      loadEvents();
     });
 
-    return unsubscribe;
-  }, []);
+    // 如果已登录，连接到远程同步
+    if (isLoggedIn && currentUser) {
+      setSyncStatus('syncing');
+      const remoteUrl = `http://localhost:6984/database/${currentUser}`;
+      storage.syncToRemote(remoteUrl).then(() => {
+        setSyncStatus('connected');
+        console.log('[ChatPage] 远程同步已启动');
+      }).catch((err) => {
+        console.error('[ChatPage] 同步启动失败:', err);
+        setSyncStatus('disconnected');
+      });
+    }
+
+    return () => {
+      unsubscribe();
+      storage.stopSync();
+      storage.close();
+    };
+  }, [currentUser, isLoggedIn]);
 
   // 滚动到底部（最新事件在底部）
   useEffect(() => {
@@ -64,9 +89,26 @@ export function ChatPage() {
     const trimmed = content.trim();
     if (!trimmed) return;
 
-    console.log('[ChatPage] 发送事件:', trimmed);
-    const eventLogService = getEventLogService();
-    await eventLogService.addEvent(trimmed);
+    console.log('[ChatPage] 发送事件到 PouchDB:', trimmed);
+
+    // 使用 EventStorage 保存到 PouchDB
+    if (storageRef.current) {
+      await storageRef.current.addEvent({
+        id: crypto.randomUUID(),
+        content: trimmed,
+        createdAt: new Date().toISOString(),
+      });
+
+      // 刷新事件列表
+      const loaded = await storageRef.current.getEvents();
+      const converted: Event[] = loaded.map((e: StorageEvent) => ({
+        id: e.id,
+        timestamp: new Date(e.createdAt).getTime(),
+        content: e.content,
+        tags: new Set<string>(e.type ? [e.type] : []),
+      }));
+      setEvents([...converted].reverse());
+    }
   }, []);
 
   // 格式化时间
@@ -131,6 +173,13 @@ export function ChatPage() {
       <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0">
         <div className="flex items-center gap-2">
           <h2 className="text-lg sm:text-2xl font-bold">事件日志</h2>
+          {/* 同步状态 */}
+          <Badge
+            variant={syncStatus === 'connected' ? 'default' : syncStatus === 'syncing' ? 'outline' : 'secondary'}
+            className="text-xs"
+          >
+            {syncStatus === 'connected' ? '已同步' : syncStatus === 'syncing' ? '同步中...' : '未同步'}
+          </Badge>
         </div>
         <Badge variant="secondary" className="text-xs">
           {events.length} 条事件
