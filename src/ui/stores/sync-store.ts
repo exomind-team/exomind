@@ -18,8 +18,8 @@ import {
   type Conflict,
 } from '@/environment/interfaces/sync.port';
 import {
-  CryptoAdapter,
   hashPasswordWithSalt,
+  verifyPassword,
 } from '@/adapters/crypto-adapter';
 
 // 类型延迟导入（不实际加载模块）
@@ -147,8 +147,7 @@ export const useSyncStore = create<SyncState>()(
         }
 
         // 使用 SPEC-302 的密码验证
-        const crypto = new CryptoAdapter();
-        const isValid = await crypto.verifyPassword(password, user.passwordHash);
+        const isValid = await verifyPassword(password, user.passwordHash);
         if (!isValid) {
           throw new Error('密码错误');
         }

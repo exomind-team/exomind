@@ -8,12 +8,15 @@ export default defineConfig(async () => ({
 
   envDir: '.',
 
+  optimizeDeps: {
+    include: ['spark-md5', 'vuvuzela'],
+    exclude: ['pouchdb', 'pouchdb-find', 'pouchdb-browser'],
+  },
+
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      // 强制使用 pouchdb 浏览器 CJS 构建，避免 ESM 导入 CJS 问题
-      "pouchdb": path.resolve(__dirname, './node_modules/pouchdb/lib/index-browser.js'),
-      "pouchdb-utils": path.resolve(__dirname, './node_modules/pouchdb-utils/lib/index-browser.js'),
+      "events": "events",
     },
   },
 

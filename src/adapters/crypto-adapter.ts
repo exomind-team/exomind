@@ -1,16 +1,16 @@
 /**
  * 加密适配器 - AES-256-GCM 加密实现
  *
- * 只负责：
+ * 负责：
  * - 消息内容的端到端加密
  * - 本地数据的存储加密
- *
- * 不再负责：
- * - 用户密码哈希（由服务器处理）
+ * - 用户密码哈希（本地注册场景）
  */
 
 // 固定公开盐（用于多设备密钥派生，保持一致性）
 const ENCRYPTION_SALT = 'exomind-v1-salt';
+// 密码哈希盐（用于本地用户注册）
+const PASSWORD_HASH_SALT = 'exomind-password-v1';
 
 const PBKDF2_ITERATIONS = 100000;  // NIST 推荐至少 100,000 次
 const IV_LENGTH = 12;  // NIST 推荐 12 字节 = 96 位
@@ -145,4 +145,110 @@ export async function quickEncrypt(plaintext: string, password: string): Promise
  */
 export async function quickDecrypt(ciphertext: string, password: string): Promise<string> {
   return decryptAes256(ciphertext, password);
+}
+
+/**
+ * 使用 PBKDF2 对密码进行哈希处理
+ *
+ * @param password 明文密码
+ * @returns 格式化的哈希字符串: $pbkdf2$salt$hash
+ */
+export async function hashPasswordWithSalt(password: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const salt = crypto.getRandomValues(new Uint8Array(16));
+
+  // 派生密钥
+  const passwordKey = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password + PASSWORD_HASH_SALT),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations: PBKDF2_ITERATIONS,
+      hash: 'SHA-256',
+    },
+    passwordKey,
+    256
+  );
+
+  const hashArray = Array.from(new Uint8Array(derivedBits));
+  const saltArray = Array.from(salt);
+
+  // 格式化: $pbkdf2$<saltBase64>$<hashBase64>
+  const saltBase64 = btoa(String.fromCharCode(...saltArray));
+  const hashBase64 = btoa(String.fromCharCode(...hashArray));
+
+  return `$pbkdf2$${saltBase64}$${hashBase64}`;
+}
+
+/**
+ * 验证密码是否匹配哈希
+ *
+ * @param password 明文密码
+ * @param storedHash 存储的哈希字符串
+ * @returns 是否匹配
+ */
+export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
+  try {
+    const encoder = new TextEncoder();
+
+    // 解析存储的哈希
+    const parts = storedHash.split('$');
+    if (parts.length !== 3 || parts[0] !== 'pbkdf2') {
+      return false;
+    }
+
+    const saltBase64 = parts[1];
+    const storedHashBase64 = parts[2];
+
+    // 解码 salt 和 hash
+    const salt = new Uint8Array(
+      atob(saltBase64).split('').map((c) => c.charCodeAt(0))
+    );
+    const storedHashArray = new Uint8Array(
+      atob(storedHashBase64).split('').map((c) => c.charCodeAt(0))
+    );
+
+    // 使用相同参数计算新哈希
+    const passwordKey = await crypto.subtle.importKey(
+      'raw',
+      encoder.encode(password + PASSWORD_HASH_SALT),
+      { name: 'PBKDF2' },
+      false,
+      ['deriveBits']
+    );
+
+    const derivedBits = await crypto.subtle.deriveBits(
+      {
+        name: 'PBKDF2',
+        salt,
+        iterations: PBKDF2_ITERATIONS,
+        hash: 'SHA-256',
+      },
+      passwordKey,
+      256
+    );
+
+    const newHashArray = new Uint8Array(derivedBits);
+
+    // 使用恒定时间比较防止时序攻击
+    if (newHashArray.length !== storedHashArray.length) {
+      return false;
+    }
+
+    let result = 0;
+    for (let i = 0; i < newHashArray.length; i++) {
+      result |= newHashArray[i] ^ storedHashArray[i];
+    }
+
+    return result === 0;
+  } catch {
+    return false;
+  }
 }
