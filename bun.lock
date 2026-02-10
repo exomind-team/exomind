@@ -38,14 +38,17 @@
       "name": "@exomind/web-preview",
       "version": "0.0.0",
       "dependencies": {
-        "@exomind/core": "*",
-        "@exomind/shared": "*",
-        "@exomind/ui": "*",
+        "@tanstack/react-router": "^1.158.0",
+        "clsx": "^2.1.1",
+        "lucide-react": "^0.563.0",
         "react": "^18.3.1",
         "react-dom": "^18.3.1",
+        "tailwind-merge": "^3.4.0",
       },
       "devDependencies": {
+        "@tailwindcss/vite": "^4.1.18",
         "@vitejs/plugin-react": "^4.3.4",
+        "tailwindcss": "^4.1.18",
         "typescript": "~5.6.2",
         "vite": "^6.0.3",
       },
@@ -352,6 +355,8 @@
     "@tailwindcss/postcss": ["@tailwindcss/postcss@4.1.18", "https://registry.npmmirror.com/@tailwindcss/postcss/-/postcss-4.1.18.tgz", { "dependencies": { "@alloc/quick-lru": "^5.2.0", "@tailwindcss/node": "4.1.18", "@tailwindcss/oxide": "4.1.18", "postcss": "^8.4.41", "tailwindcss": "4.1.18" } }, "sha512-Ce0GFnzAOuPyfV5SxjXGn0CubwGcuDB0zcdaPuCSzAa/2vII24JTkH+I6jcbXLb1ctjZMZZI6OjDaLPJQL1S0g=="],
 
     "@tailwindcss/typography": ["@tailwindcss/typography@0.5.19", "https://registry.npmmirror.com/@tailwindcss/typography/-/typography-0.5.19.tgz", { "dependencies": { "postcss-selector-parser": "6.0.10" }, "peerDependencies": { "tailwindcss": ">=3.0.0 || insiders || >=4.0.0-alpha.20 || >=4.0.0-beta.1" } }, "sha512-w31dd8HOx3k9vPtcQh5QHP9GwKcgbMp87j58qi6xgiBnFFtKEAgCWnDw4qUT8aHwkCp8bKvb/KGKWWHedP0AAg=="],
+
+    "@tailwindcss/vite": ["@tailwindcss/vite@4.1.18", "https://registry.npmmirror.com/@tailwindcss/vite/-/vite-4.1.18.tgz", { "dependencies": { "@tailwindcss/node": "4.1.18", "@tailwindcss/oxide": "4.1.18", "tailwindcss": "4.1.18" }, "peerDependencies": { "vite": "^5.2.0 || ^6 || ^7" } }, "sha512-jVA+/UpKL1vRLg6Hkao5jldawNmRo7mQYrZtNHMIVpLfLhDml5nMRUo/8MwoX2vNXvnaXNNMedrMfMugAVX1nA=="],
 
     "@tanstack/history": ["@tanstack/history@1.154.14", "https://registry.npmmirror.com/@tanstack/history/-/history-1.154.14.tgz", {}, "sha512-xyIfof8eHBuub1CkBnbKNKQXeRZC4dClhmzePHVOEel4G7lk/dW+TQ16da7CFdeNLv6u6Owf5VoBQxoo6DFTSA=="],
 

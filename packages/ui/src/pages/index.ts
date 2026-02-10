@@ -1,4 +1,4 @@
 /**
- * Pages - 导出
+ * Pages - 页面组件导出
  */
-export {};
+export { HomePage } from './HomePage';

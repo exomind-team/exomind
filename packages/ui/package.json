@@ -2,19 +2,18 @@
   "name": "@exomind/ui",
   "version": "0.0.0",
   "main": "dist/index.js",
-  "module": "dist/index.mjs",
+  "module": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
-      "import": "./dist/index.mjs",
-      "require": "./dist/index.js",
-      "types": "./dist/index.d.ts"
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js",
+      "require": "./dist/index.js"
     },
-    "./components": "./dist/components/index.js",
-    "./pages": "./dist/pages/index.js",
-    "./hooks": "./dist/hooks/index.js",
-    "./stores": "./dist/stores/index.js",
-    "./styles": "./dist/styles/index.js"
+    "./routes": {
+      "types": "./dist/routes.d.ts",
+      "import": "./dist/routes.js"
+    }
   },
   "scripts": {
     "dev": "vite --port 3001",
@@ -24,8 +23,8 @@
     "clean": "rm -rf dist .turbo"
   },
   "dependencies": {
-    "@exomind/core": "*",
-    "@exomind/shared": "*",
+    "@exomind/core": "workspace:*",
+    "@exomind/shared": "workspace:*",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "@tanstack/react-router": "^1.158.0",
