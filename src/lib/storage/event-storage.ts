@@ -20,9 +20,17 @@ export interface Event {
 }
 
 /**
+ * 内部事件文档接口（包含 PouchDB 字段）
+ */
+interface EventDoc extends Event {
+  _id: string;
+  _rev?: string;
+}
+
+/**
  * 事件存储类
  *
- * 使用 PouchDB 实现本地数据库存储
+ * 使用 PouchDB 实现事件数据的本地存储
  */
 export class EventStorage {
   private db: PouchDB.Database<Event>;
@@ -48,19 +56,19 @@ export class EventStorage {
     if (this.initialized) return;
 
     try {
-      await this.db.put({
+      await (this.db as unknown as { put(doc: unknown): Promise<unknown> }).put({
         _id: '_design/events',
         views: {
           by_created_at: {
             map: `function(doc) {
-              if (doc._id.startsWith('event:')) {
+              if (doc._id && doc._id.startsWith('event:')) {
                 emit(doc.createdAt, doc);
               }
             }`,
           },
           by_id: {
             map: `function(doc) {
-              if (doc._id.startsWith('event:')) {
+              if (doc._id && doc._id.startsWith('event:')) {
                 emit(doc._id, doc);
               }
             }`,
@@ -86,14 +94,14 @@ export class EventStorage {
   async addEvent(event: Event): Promise<void> {
     await this.initializeDesignDoc();
 
-    const doc: Event = {
+    const doc: EventDoc = {
       ...event,
       _id: `event:${event.id}`,
       createdAt: event.createdAt || new Date().toISOString(),
       updatedAt: new Date().toISOString(),
     };
 
-    await this.db.put(doc);
+    await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
   }
 
   /**
@@ -147,7 +155,8 @@ export class EventStorage {
 
     try {
       const doc = await this.db.get<Event>(`event:${id}`);
-      await this.db.remove(doc);
+      // 使用 any 绕过 PouchDB 类型限制
+      await (this.db as unknown as { remove(doc: unknown): Promise<unknown> }).remove(doc);
     } catch {
       // 事件不存在，忽略错误
     }
@@ -163,13 +172,13 @@ export class EventStorage {
     await this.initializeDesignDoc();
 
     const doc = await this.db.get<Event>(`event:${id}`);
-    const updatedDoc: Event = {
+    const updatedDoc: EventDoc = {
       ...doc,
       ...updates,
       updatedAt: new Date().toISOString(),
     };
 
-    await this.db.put(updatedDoc);
+    await this.db.put(updatedDoc as unknown as Parameters<typeof this.db.put>[0]);
   }
 
   /**
