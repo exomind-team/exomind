@@ -30,37 +30,6 @@ ExoMind（外心）是一个**个人/集体的生命成长助手**，甚至在�
 | **抑制是高阶能力**  | 成熟判断多数是否定行动，Governor 作为系统刹车                           |
 | **适应性发育**      | 同一基因组→不同环境→不同形态，L0-L5 信任度阶梯逐级开放权限            |
 
-### 四 Agent 架构
-
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    小荷 Supervisor                               │
-│         消息路由 → 智能分流 → 场景模式匹配                        │
-└───────────────────────────┬─────────────────────────────────────┘
-                            │
-        ┌───────────────────┼───────────────────┐
-        │                   │                   │
-        ▼                   ▼                   ▼
-┌─────────────┐    ┌─────────────┐    ┌─────────────┐
-│ Governor    │    │ 任务系统    │    │ Growth Coach│
-│ 调控中枢    │    │ 智能匹配    │    │ 成长教练    │
-│ ·开机调度   │    │ ·状态×需求  │    │ ·证据三角   │
-│ ·输出治理   │    │ ·项目×兴趣  │    │ ·模式识别   │
-│ ·关机校准   │    │ ·推荐+备选  │    │ ·最小改写   │
-└─────────────┘    └─────────────┘    └─────────────┘
-        │                   │                   │
-        └───────────────────┼───────────────────┘
-                            │
-                            ▼
-                  ┌─────────────────┐
-                  │ Review Agent    │
-                  │ 极简复盘        │
-                  │ ·4行复盘        │
-                  │ ·有效/卡住     │
-                  │ ·改进/避免     │
-                  └─────────────────┘
-```
-
 ### 技术实现
 
 项目采用 Tauri 2.0 + React + Rust 技术栈，前端负责 UI 展示，后端负责 Agent 调度和系统集成。支持 Windows/macOS/Linux/Android 全平台。
@@ -88,29 +57,133 @@ ExoMind（外心）是一个**个人/集体的生命成长助手**，甚至在�
 
 ## 核心架构
 
-### 7 层架构模型
+### 分层架构模型（v4.0）
+
+自底向上构建，每层都有运行时实体。
 
 ```
-┌─────────────────────────────────────────────────────────────────────┐
-│                     ExoMind 7 层架构                                  │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  L7-UI 前端展示层 (React + TypeScript)                               │
-│      ↓ IPC (Tauri invoke)                                           │
-│  L6 核心业务逻辑层 (Claude Runner, Agent Layer)                       │
-│      ↓                                                              │
-│  L5  SignalPool (发布-订阅信号系统)                                   │
-│      ↓                                                              │
-│  L4  终端执行器 (跨平台命令执行)                                       │
-│      ↓                                                              │
-│  L3  平台适配层 (Windows/macOS/Linux/Android)                         │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
+L4  UI ──────── React + zustand，只调 Service
+    │
+    │  ← Service interface（L3 向上暴露，谁提供谁定义）
+    │
+L3  Service / Actor / Agent ── 业务逻辑层
+    │
+    │  ← ActorContext interface（L3 定义自己需要的环境访问权限）
+    │
+L2  Environment ── 共享物理世界
+    │               · 持有 Port 实例（能力）
+    │               · 资源池（周期刷新型 + 总额有限型）
+    │               · 消息缓冲（短期记录，自动淘汰）
+    │               · 独占资源管理（acquire / release）
+    │
+    │  ← Port interface（L2 定义，谁消费谁定义）
+    │
+L1  Adapter ──── 具体实现，按运行时替换
+                 Web: IndexedDB, fetch, Web Speech, WebContainer
+                 Tauri: SQLite, Rust HTTP, Native Shell
+```
+
+#### 接口归属规则
+
+| 接缝 | 接口放在 | 原则 | 本质 |
+|------|----------|------|------|
+| L1 ↔ L2 | Port interface 放 L2 | 谁消费谁定义 | 类型契约 |
+| L2 ↔ L3 | ActorContext 放 L3 | 谁消费谁定义 | 权限边界 |
+| L3 ↔ L4 | Service interface 放 L3 | 谁提供谁定义 | API 暴露 |
+
+**核心逻辑**：接口永远归更稳定的一方所有。
+
+#### Port 定义
+
+| Port | 职责 | 读写 |
+|------|------|------|
+| ILLMPort | 大语言模型推理 | 双向 |
+| IASRPort | 语音识别 | 读 |
+| ITTSPort | 语音合成 | 写 |
+| IStoragePort | 持久化存储 | 双向 |
+| ITerminalPort | 终端执行 | 双向 |
+| ISandboxPort | 沙箱脚本执行 | 双向 |
+| IPlatformPort | 平台能力 | 双向 |
+| IEventBusPort | 事件总线 | 双向 |
+| ICryptoPort | 加密解密 | 双向 |
+
+#### Environment 职责
+
+1. **持有 Port 实例**（所有 Adapter 在 bootstrap 时注入）
+2. **管理资源池**：
+   - 周期刷新型（如 API 限额每 5h 刷新）
+   - 总额有限型（如预付费余额）
+3. **维护消息缓冲**（短期记忆，保留最近 5 分钟或 500 条）
+
+#### Actor / Agent 模型（Phase 4）
+
+| | Actor | Agent |
+|---|---|---|
+| 智能 | 无，机械执行 | 有，LLM 驱动 |
+| 能量单位 | CPU/内存/存储 | Token |
+| 通信 | 有界邮箱，异步消息 | 同 Actor |
+| 示例 | 通知监听、定时器 | Governor、Task System、Growth Coach |
+
+**去中心化**：没有中央路由器。每个 Agent 自己订阅信号源，自己判断是否处理。
+
+#### 渐进式实施路线
+
+| Phase | 目标 | 引入特性 |
+|-------|------|----------|
+| Phase 1 | 语音输入 → LLM → 事件日志 | Port 层、直接调用链 |
+| Phase 2 | 解耦 Service 依赖 | EventBus 发布订阅 |
+| Phase 3 | 资源管控 + 可观测性 | 资源池、消息缓冲 |
+| Phase 4 | 多 Agent 并发协作 | Actor Model、Supervisor |
+| Phase 5 | 高级生命特性 | Agent 生命周期，沙箱脚本 |
+
+#### 设计模式总览
+
+| 模式 | 应用 | 阶段 |
+|------|------|------|
+| Ports & Adapters | Port 定义能力接口 | Phase 1 |
+| Facade | Service 包装底层机制 | Phase 1 |
+| Observer | EventBus 发布订阅 | Phase 2 |
+| Decorator | EncryptedStorage 叠加加密 | Phase 2 |
+| Strategy | 邮箱策略、重启策略 | Phase 3-4 |
+| Actor Model | 有界邮箱、异步通信 | Phase 4 |
+| Supervisor Tree | 崩溃隔离、自动恢复 | Phase 4 |
+
+### 文件组织
+
+```
+src/
+├── adapters/           # L1：具体实现（llm, asr, tts, storage, terminal, crypto, platform）
+├── environment/        # L2：共享物理世界
+│   ├── interfaces/     #   Port interface 定义
+│   ├── environment.ts  #   Environment 实现
+│   ├── resource-pool.ts
+│   ├── message-buffer.ts
+│   └── bootstrap.ts    #   运行时检测 → 组装 Adapter
+├── services/           # L3
+│   ├── interfaces/     #   Service interface
+│   └── impl/           #   Service 实现
+├── actor/              # L3（Phase 4 引入）
+│   ├── interfaces/     #   ActorContext 等
+│   ├── mailbox.ts
+│   ├── supervisor.ts
+│   ├── actors/         #   具体 Actor
+│   └── agents/         #   具体 Agent（LLM 驱动）
+└── ui/                 # L4
+    ├── components/
+    ├── pages/
+    ├── stores/
+    └── providers/
 ```
 
 ### 核心模块状态
 
-全部未完成
+| 模块 | 状态 | Phase |
+|------|------|-------|
+| Port 层 | 未完成 | Phase 1 |
+| Environment | 部分完成 | Phase 1-3 |
+| Service 层 | 部分完成 | Phase 1 |
+| EventBus | 部分完成 | Phase 2 |
+| Actor/Agent | 未完成 | Phase 4 |
 
 ---
 
@@ -255,75 +328,14 @@ pm/memory/
 
 ---
 
-### 架构设计 vs 模块规格：功能区分
+### 架构设计 vs 模块规格
 
 | 维度 | 架构设计 (docs/architecture/) | 模块规格 (docs/specs/) |
 |------|------------------------------|----------------------|
-| **范围** | 系统**整体** | 单个**模块** |
+| **范围** | 系统整体 | 单个模块 |
 | **视角** | 宏观、全局 | 微观、局部 |
-| **内容** | 7层架构、模块关系、数据流向、接口边界 | 设计理由、功能定义、输入输出、验收标准 |
-| **时机** | 每个大版本一次 | 每个功能模块一次 |
-| **变更频率** | 低（架构稳定后少变） | 高（随需求迭代） |
-
-**文件组织方案**：
-
-```
-docs/
-├── architecture/                    # 【架构设计：系统蓝图】
-│   ├── README.md                    # 架构总览
-│   ├── 7-LAYER.md                   # 7层架构详解
-│   ├── DATA-FLOW.md                 # 数据流向设计
-│   ├── INTERFACE.md                 # 模块接口定义
-│   └── DECISIONS/                   # 架构决策记录 (ADR)
-│       ├── ADR-001-why-signal-pool.md
-│       ├── ADR-002-why-tauri.md
-│       └── ...
-│
-└── specs/                           # 【模块规格：施工图纸】
-    ├── README.md                    # 规格总览
-    ├── SPEC-201-SignalPool.md       # 模块详细规格
-    ├── SPEC-202-AgentLayer.md
-    └── TEMPLATE.md                  # 规格模板
-```
-
-**示例对比**：
-
-```
-架构设计（整体蓝图）：
-┌─────────────────────────────────────┐
-│  docs/architecture/7-LAYER.md       │
-│                                     │
-│  L7-UI 层 ←→ L6-业务逻辑层          │
-│      ↓              ↓               │
-│  L5-SignalPool ←→ L4-终端执行器     │
-│              ↓                      │
-│         L3-平台适配层               │
-│                                     │
-│  说明：各层职责、层间接口、数据流向 │
-└─────────────────────────────────────┘
-
-架构决策（为什么）：
-┌─────────────────────────────────────┐
-│  docs/architecture/DECISIONS/       │
-│  ADR-001-why-signal-pool.md         │
-│                                     │
-│  - 决策：使用发布-订阅模式          │
-│  - 原因：解耦生产者与消费者         │
-│  - 替代方案：直接调用（ rejected ） │
-│  - 影响：需要引入消息队列           │
-└─────────────────────────────────────┘
-
-模块规格（施工图纸）：
-┌─────────────────────────────────────┐
-│  docs/specs/SPEC-201-SignalPool.md  │
-│                                     │
-│  - 设计理由：为什么这样实现          │
-│  - 功能：信号注册、订阅、发布        │
-│  - 输入：信号类型、payload           │
-│  - 输出：订阅者回调                  │
-│  - 验收标准：XXX                     │
-└─────────────────────────────────────┘
-```
+| **内容** | 分层架构、Port/Service 定义 | 设计理由、功能定义、输入输出、验收标准 |
+| **变更频率** | 低 | 高 |
 
 **简单记忆**：
 - 架构设计 = **系统蓝图**（整体怎么搭、为什么这样搭）
@@ -402,241 +414,78 @@ docs/
 
 ---
 
-### 修改即提交原则 ⭐
-
-**每次修改文件后立即提交 Git commit**
-
-| 原则               | 说明                                |
-| ------------------ | ----------------------------------- |
-| **触发时机** | 任何文件修改后立即提交              |
-| **提交粒度** | 按文件/功能，小步提交               |
-| **提交信息** | `[类型]: [简短描述] [修改文件]`   |
-| **分支**     | 在 feature 分支上提交，不影响主分支 |
-
-**小提交粒度（每个设计决策 → 一个 commit）**：
-
-```bash
-# 架构设计完成
-git add docs/architecture/
-git commit -m "docs: 添加 SignalPool 架构设计 [architecture/7-LAYER.md]"
-
-# SPEC 设计完成
-git add docs/specs/
-git commit -m "docs: 添加 SignalPool 模块规格 [specs/SPEC-201.md]"
-
-# 单个函数实现
-git add src/core/signal-pool.ts
-git commit -m "feat: 实现信号注册功能 [signal-pool.ts]"
-
-# 单个组件实现
-git add src/components/SignalPanel.tsx
-git commit -m "feat: 实现信号面板 UI [SignalPanel.tsx]"
-
-# 测试用例
-git add tests/signal-pool.test.ts
-git commit -m "test: 添加信号池单元测试 [signal-pool.test.ts]"
-```
-
----
-
-### 双轨制 Git 工作流 ⭐
+### Git 工作流 ⭐
 
 **核心原则：小提交持续保存进度，PR 引入人类审查**
 
+#### 分支策略
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│                    双轨制 Git 工作流                          │
-├─────────────────────────────────────────────────────────────┤
-│                                                             │
-│  小提交（持续）    +    PR 提交（里程碑）                      │
-│                                                             │
-│  ┌─────────┐         ┌─────────┐                           │
-│  │ 本地     │  ────→  │ 远程    │                           │
-│  │ 小步提交 │  每步   │ 分支    │                           │
-│  └─────────┘         └────┬────┘                           │
-│       │                    │                                │
-│       │  每完成一步        │  功能完成/每日结束               │
-│       │  git commit        │  git push origin feature/xxx    │
-│       │                    │                                │
-│       └────────────────────┘                                │
-│                            │                                │
-│                            ▼                                │
-│                    ┌───────────────┐                        │
-│                    │  Draft PR      │ ← 人类可见进度         │
-│                    │  （WIP 标记）  │ ← 自转开发             │
-│                    └───────┬───────┘                        │
-│                            │                                │
-│               功能完成 → 正式 PR → 请求审查                  │
-│                            │                                │
-│                            ▼                                │
-│                    ┌───────────────┐                        │
-│                    │  人类审查      │ ← 只有人类能批准       │
-│                    │  - 逐行评论    │                        │
-│                    │  - 要求修改    │                        │
-│                    │  - 批准合并    │ ← LGTM                │
-│                    └───────┬───────┘                        │
-│                            │                                │
-│                            ▼                                │
-│                    ┌───────────────┐                        │
-│                    │  人工合并      │ ← 只有人类能点 merge   │
-│                    │  **必须到 dev** │                        │
-│                    └───────────────┘                        │
-│                                                             │
-└─────────────────────────────────────────────────────────────┘
+main (生产环境) ─────────────●────────────────●──
+                               └── hotfix/v1.x.y
+                               │
+dev (开发主干) ─────●──●──●──●──●──●──●──●──●──●──
+                    \              /
+                     ●──────────●  (feature/xxx)
+
+| 分支 | 角色 | 生命周期 |
+|------|------|----------|
+| `main` | 生产环境 | 永久 |
+| `dev` | 开发主干 | 永久 |
+| `feature/*` | 功能开发 | 临时 |
+| `release/*` | 预发布 | 临时 |
+| `hotfix/*` | 紧急修复 | 临时 |
 ```
 
-**Draft PR vs 正式 PR**：
+#### 小提交原则
+
+每次修改文件后立即提交 Git commit。
+
+| 原则 | 说明 |
+|------|------|
+| **触发时机** | 任何文件修改后立即提交 |
+| **提交粒度** | 按文件/功能，小步提交 |
+| **提交信息** | `[类型]: [简短描述] [修改文件]` |
+
+#### Git 提交类型
+
+| 类型 | 说明 |
+|------|------|
+| `feat` | 新功能 |
+| `fix` | Bug 修复 |
+| `refactor` | 重构 (不改变外在行为) |
+| `perf` | 性能优化 |
+| `docs` | 文档更新 |
+| `chore` | 其他维护 (构建、依赖等) |
+| `test` | 测试相关 |
+| `style` | 代码格式 (不影响语义) |
+| `build` | 构建系统相关 |
+| `ci` | CI 配置相关 |
+| `revert` | 回滚提交 |
+
+> **注意**: 类型使用小写，描述首字母小写
+
+#### Draft PR vs 正式 PR
 
 | 类型 | 创建时机 | 状态 | AI 权限 | 人类角色 |
 |------|---------|------|---------|----------|
 | **Draft PR** | 创建分支时 | WIP（进行中） | **自转**（继续开发） | 旁观进度 |
 | **正式 PR** | 功能完成后 | Ready for review | **等待**（修改请求） | **审查+批准** |
 
-**人类不响应的处理**：
+#### CI/CD Tag 规范
 
-| 阶段 | 策略 | 说明 |
-|------|------|------|
-| **Draft PR** | AI 自转继续开发 | 不阻塞，人类有空再看 |
-| **正式 PR** | 等待 + 提醒 | 尊重人类时间，不自动合并 |
-| **超时** | N 小时后提醒 | 不强制，人类掌握最终决策权 |
-
-**示例流程**：
+| Tag 模式 | 触发 | 产出 |
+|----------|------|------|
+| `build/**` | 构建 jobs | Artifact |
+| `release/**` | 构建 + Release jobs | GitHub Release |
 
 ```bash
-# Step 2: 创建功能分支 + Draft PR
-git checkout -b feature/signal-pool
-git push origin feature/signal-pool
-# 在 GitHub 创建 Draft PR（标记 WIP）
+# 构建验证
+git tag build/v0.1.0 && git push origin build/v0.1.0
 
-# Step 3: 架构设计 → 小提交 → 更新 Draft PR
-git add docs/architecture/
-git commit -m "docs: 7层架构设计 [architecture/7-LAYER.md]"
-git push origin feature/signal-pool
-
-# Step 4: SPEC 设计 → 小提交 → 更新 Draft PR
-git add docs/specs/
-git commit -m "docs: SignalPool 规格 [specs/SPEC-201.md]"
-git push origin feature/signal-pool
-
-# Step 5: 编码 → 多个小提交 → 定期 push
-git add src/core/signal-pool.ts
-git commit -m "feat: 实现信号注册 [signal-pool.ts]"
-git add src/core/signal-pool.ts
-git commit -m "feat: 实现信号订阅 [signal-pool.ts]"
-git push origin feature/signal-pool
-
-# Step 6-7: 测试 → 小提交 → 更新 Draft PR
-git add tests/
-git commit -m "test: 信号池单元测试 100% 覆盖"
-git push origin feature/signal-pool
-
-# Step 9: 功能完成 → Draft PR 改为正式 PR
-# - 移除 WIP 标记
-# - 填写 PR 描述
-# - 请求人类审查
-
-# Step 10: 人类审查 → 如有问题回到 Step 5 修改
-
-# Step 11: 人类批准 → 人工合并
-# 只有人类能点击 merge 按钮
+# 正式发布
+git tag release/v0.1.0 && git push origin release/v0.1.0
 ```
-
-**为什么？**
-
-1. Git 成为 Agent 的完整历史
-2. 每次变更可追溯、可回滚
-3. 便于 code review 和审计
-4. 小的提交更容易理解和调试
-
----
-
-### CI/CD Tag 规范 ⭐
-
-**核心原则：打特定标识的 tag 才触发自动构建**
-
-```
-┌─────────────────────────────────────────────────────────────────────┐
-│                    Tag 触发规范                                      │
-├─────────────────────────────────────────────────────────────────────┤
-│                                                                     │
-│  构建专用：  git tag build/v0.1.0    ──→ 只构建，产出 Artifact     │
-│             git push origin build/v0.1.0                            │
-│                                                                     │
-│  发布专用：  git tag release/v0.1.0   ──→ 构建 + GitHub Release     │
-│             git push origin release/v0.1.0                          │
-│                                                                     │
-│  版本号格式：遵循 semver (主.次.修订)                                │
-│  示例：                                                             │
-│    - build/v0.1.0     → v0.1.0 的开发构建                           │
-│    - build/v0.1.1+abc1234 → 包含 6位 commit hash                    │
-│    - release/v0.1.0   → 正式发布 v0.1.0                             │
-│                                                                     │
-└─────────────────────────────────────────────────────────────────────┘
-```
-
-**GitHub Actions 触发条件**：
-
-| Tag 模式 | 触发 | 产出 | 说明 |
-|----------|------|------|------|
-| `build/**` | 构建 jobs | Artifact | 快速验证构建是否成功 |
-| `release/**` | 构建 + Release jobs | GitHub Release | 完整发布流程 |
-
-**使用流程**：
-
-```bash
-# 场景 1：验证构建
-# 1. 确保代码可以正常构建
-git tag build/v0.1.0
-git push origin build/v0.1.0
-# → GitHub Actions 自动构建，产出 Artifact
-
-# 场景 2：正式发布
-# 1. 测试通过后打发布 tag
-git tag release/v0.1.0
-git push origin release/v0.1.0
-# → GitHub Actions 构建 + 创建 GitHub Release
-```
-
-**删除错误 tag**：
-
-```bash
-# 删除本地 tag
-git tag -d build/v0.1.0
-
-# 删除远程 tag
-git push origin :refs/tags/build/v0.1.0
-# 或
-git push origin --delete build/v0.1.0
-```
-
-**为什么？**
-
-1. **可控性**：只有明确标记的 tag 才触发构建，避免意外触发
-2. **可追溯**：每次构建对应唯一 tag，可以回溯到具体代码
-3. **分离关注**：`build/*` 快速验证，`release/*` 正式发布
-4. **符合习惯**：很多开源项目（如 Docker、Go 项目）使用类似模式
-
----
-
----
-
-### Git 提交类型
-
-> **注意**: 类型使用小写，描述首字母小写
-
-| 类型         | 说明                    |
-| ------------ | ----------------------- |
-| `feat`     | 新功能                  |
-| `fix`      | Bug 修复                |
-| `refactor` | 重构 (不改变外在行为)   |
-| `perf`     | 性能优化                |
-| `docs`     | 文档更新                |
-| `chore`    | 其他维护 (构建、依赖等) |
-| `test`     | 测试相关                |
-| `style`    | 代码格式 (不影响语义)   |
-| `build`    | 构建系统相关            |
-| `ci`       | CI 配置相关             |
-| `revert`   | 回滚提交                |
 
 ---
 
@@ -699,37 +548,6 @@ bun run src/living-agent.ts
 
 ---
 
-## 分支管理
-
-参考 `pm/git-spec.md` 获取完整的分支策略和工作流规范：
-
-```
-main (生产环境) ─────────────●────────────────●──
-                               └── hotfix/v1.x.y
-                               │
-dev (开发主干) ─────●──●──●──●──●──●──●──●──●──●──
-                    \              /
-                     ●──────────●  (feature/xxx)
-
-| 分支 | 角色 | 生命周期 |
-|------|------|----------|
-| `main` | 生产环境 | 永久 |
-| `dev` | 开发主干 | 永久 |
-| `feature/*` | 功能开发 | 临时 |
-| `release/*` | 预发布 | 临时 |
-| `hotfix/*` | 紧急修复 | 临时 |
-```
-
-**完整文档包含**：
-
-- 分支结构与保护规则
-- 开发、重构、发布、热修复流程
-- Worktree 使用规范（隔离工作区、多分支并行）
-- AI 生成内容管理（agent-output/）
-- Git 提交类型速查
-
----
-
 ## systemd 服务管理
 
 ```bash
@@ -761,57 +579,20 @@ sudo loginctl enable-linger $(whoami)
 ## 目录结构
 
 ```
-exomind/
-├── src/                      # 前端源代码 (React + TypeScript)
-│   ├── App.tsx               # 主应用组件
-│   ├── main.tsx              # React 入口
-│   ├── components/           # 组件目录
-│   │   ├── ui/              # shadcn/ui 基础组件
-│   │   ├── Terminal/        # 终端页面
-│   │   ├── Chat/            # 对话页面
-│   │   └── Settings/        # 设置页面
-│   ├── hooks/                # 自定义 Hooks
-│   ├── stores/               # zustand stores
-│   └── lib/                  # 工具函数
-│
-├── src-tauri/                # Tauri 后端 (Rust)
-│   ├── src/
-│   │   ├── lib.rs            # Rust 核心库
-│   │   ├── main.rs           # 程序入口
-│   │   └── core/            # 核心模块
-│   ├── Cargo.toml            # Rust 依赖配置
-│   └── tauri.conf.json       # Tauri 配置
-│
-├── docs/                     # 文档目录
-│   ├── architecture/         # 【架构设计：系统蓝图】
-│   │   ├── README.md         # 架构总览
-│   │   ├── 7-LAYER.md        # 7层架构详解
-│   │   ├── DATA-FLOW.md      # 数据流向设计
-│   │   ├── INTERFACE.md      # 模块接口定义
-│   │   └── DECISIONS/        # 架构决策记录 (ADR)
-│   │       ├── ADR-001-why-signal-pool.md
-│   │       └── ...
-│   ├── FRONTEND_STACK.md    # 前端技术栈规划
-│   └── specs/                # 【模块规格：施工图纸】
-│       ├── README.md         # 规格总览
-│       ├── SPEC-201-SignalPool.md
-│       ├── SPEC-202-AgentLayer.md
-│       └── TEMPLATE.md       # 规格模板
-│
-├── pm/                       # 项目管理
-│   ├── git-spec.md           # Git 使用规范（分支管理 + Worktree）
-│   ├── REQUIREMENTS.md       # 需求规格文档
-│   ├── PRD.md                # 产品需求文档
-│   ├── roadmap.md            # 产品路线图
-│   └── memory/               # 执行记忆（每轮追加）
-│       ├── logs.md           # 执行日志（问题、优化、发现）
-│       ├── 知识点-Git工作流.md  # 经验库（主题分类）
-│       └── 知识点-文档分层.md
-│
-├── modules/                  # 可独立部署模块
-│   └── ExoMind-NLS-Guardian/ # Android 通知权限守护模块
-│
-└── build-*.ps1               # 自动化构建脚本
+src/
+├── adapters/           # L1：具体实现（llm, asr, tts, storage, terminal, crypto, platform）
+├── environment/         # L2：共享物理世界
+├── services/            # L3：业务逻辑层
+├── actor/              # L3：Actor/Agent 模型
+└── ui/                 # L4：前端展示层
+
+docs/
+├── architecture/        # 架构设计
+└── specs/               # 模块规格
+
+pm/
+├── git-spec.md          # Git 规范
+└── memory/              # 记忆系统
 ```
 
 ---
@@ -883,23 +664,73 @@ exomind/
 
 ---
 
-## 相关文档
+## 团队协作规范
 
-| 文档           | 路径                                  |
-| -------------- | ------------------------------------- |
-| 架构设计       | `docs/architecture/`                |
-| 7层架构详解    | `docs/architecture/7-LAYER.md`      |
-| 架构决策记录   | `docs/architecture/DECISIONS/`      |
-| 模块规格       | `docs/specs/`                       |
-| git 使用规范   | `pm/git-spec.md`                    |
-| 产品需求文档   | `pm/prd.md`                         |
-| 产品路线图     | `pm/roadmap.md`                     |
-| 执行日志       | `pm/memory/logs.md`                 |
-| Git工作流知识点 | `pm/memory/知识点-Git工作流.md`       |
-| 文档分层知识点 | `pm/memory/知识点-文档分层.md`        |
-| ExoMind 知识库 | `docs/02_ExoMind-KNOWLEDGE-BASE.md` |
+### 4 角色分工
+
+| 角色 | 职责 | 任务类型 |
+|------|------|---------|
+| **Architect** | 架构设计、v4 合规审核 | 架构设计、接口定义 |
+| **Developer** | 编码实现、单元测试 | 功能开发、重构 |
+| **Developer-2** | 编码实现、单元测试 | 功能开发、重构 |
+| **Tester** | 编写/运行测试、质量保证 | 单元测试、集成测试 |
+| **Reviewer** | 代码审核、安全检查 | 架构合规、安全审核 |
+
+### 任务循环流程
+
+```
+架构设计 → 编码实现 → 单元测试 → 代码审核
+    ↓           ↓           ↓           ↓
+   通过?      通过?       通过?       通过?
+    ↓           ↓           ↓           ↓
+  否→返回    否→返回     否→返回    是→完成
+```
+
+### 循环执行规则
+
+| 循环 | 可用目标 | 包含任务 |
+|------|---------|---------|
+| Cycle 1 | 页面可访问 | 路由、页面、测试、审核 |
+| Cycle 2 | 密码安全 | 密码哈希模块 |
+| Cycle 3 | 架构就绪 | sync 模块架构 |
+| Cycle 4 | 架构合规 | sync-store 重构 |
+| Cycle 5 | 完整功能 | PouchSyncAdapter |
+
+### Git 提交规则
+
+**每位成员完成任务后必须**：
+1. Git commit 提交代码
+2. Git push 推送到远程
+
+**Commit 格式**：
+```
+[类型]: [简短描述] [修改文件]
+
+类型：feat/fix/docs/test/refactor
+示例：feat: 实现密码哈希模块 [password-hash.ts]
+```
+
+### Lead 职责
+
+- 分配任务、协调流程
+- 每个循环完成后更新 PR 描述
+- 回写知识到 CLAUDE.md 和 pm/memory/logs.md
 
 ---
 
-*文档版本: v3.0*
+## 相关文档
+
+| 文档 | 路径 |
+|------|------|
+| 架构设计 | `docs/architecture/` |
+| 模块规格 | `docs/specs/` |
+| Git 规范 | `pm/git-spec.md` |
+| 产品需求 | `pm/prd.md` |
+| 产品路线图 | `pm/roadmap.md` |
+| 执行日志 | `pm/memory/logs.md` |
+| Git工作流知识点 | `pm/memory/知识点-Git工作流.md` |
+
+---
+
+*文档版本: v4.0*
 *更新: 2026-02-03*
