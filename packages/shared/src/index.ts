@@ -13,3 +13,4 @@ export * from './utils';
 // Types
 export * from './types/message';
 export * from './types/event';
+export * from './types/device';

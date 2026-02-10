@@ -16,3 +16,6 @@ export * from './services';
 
 // Interfaces
 export * from './interfaces';
+
+// Adapters
+export * from './adapters';

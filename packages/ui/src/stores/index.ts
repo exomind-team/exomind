@@ -1,4 +1,4 @@
 /**
  * Stores - 导出
  */
-export {};
+export { useSyncStore } from './sync-store';

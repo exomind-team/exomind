@@ -22,3 +22,6 @@ export * from './pages';
 
 // Router
 export * from './routes';
+
+// Stores
+export * from './stores';
