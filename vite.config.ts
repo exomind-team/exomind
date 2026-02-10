@@ -18,6 +18,16 @@ export default defineConfig(async () => ({
     },
   },
 
+  // 排除 PouchDB 的依赖优化，避免浏览器兼容性问题
+  optimizeDeps: {
+    exclude: ['pouchdb'],
+  },
+
+  // SSR 配置
+  ssr: {
+    noExternal: ['pouchdb'],
+  },
+
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
   //
   // 1. prevent vite from obscuring rust errors

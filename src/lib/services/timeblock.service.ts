@@ -11,6 +11,8 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
+import { getEventLogService } from './eventlog.service';
+import type { Tag } from '../types/event';
 import type { Event, TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
 
 // 存储键
@@ -46,6 +48,8 @@ export interface TimeBlockService {
 export class TimeBlockServiceImpl implements TimeBlockService {
   private env: ExoMindEnvironment;
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
+  private lastWriteTime = 0;
+  private readonly WRITE_THROTTLE_MS = 1000; // 节流：每秒最多写入一次
 
   constructor(env?: ExoMindEnvironment) {
     this.env = env || ExoMindEnvironment.getInstance();
@@ -125,9 +129,13 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     const endId = crypto.randomUUID();
 
-    // 创建结束事件（带身心反馈）
-    const eventContent = feedback || `${activeData.name} 完成`;
-    await this.addBlockEvent(endId, eventContent, 'block_end', feedback);
+    // 创建结束事件（通过 EventLogService）
+    await this.addBlockEvent(endId, `${activeData.name} 完成`, 'block_end');
+
+    // 身心反馈作为独立事件添加到事件日志
+    if (feedback) {
+      await getEventLogService().addEvent(feedback, new Set<Tag>(['block_feedback']));
+    }
 
     // 保存已完成的时间块
     const timeBlock: TimeBlockData = {
@@ -136,7 +144,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       startId: activeData.startId,
       endId,
       note: feedback,
-      tags: ['block_feedback'],
+      tags: feedback ? ['block_feedback'] : [],
       startTime: activeData.startTime,
       endTime: Date.now(),
     };
@@ -162,6 +170,13 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
     if (!data || data.paused) return;
 
+    const now = Date.now();
+    // 节流：每秒最多写入一次
+    if (now - this.lastWriteTime < this.WRITE_THROTTLE_MS) {
+      return;
+    }
+    this.lastWriteTime = now;
+
     await this.env.storage.write(ACTIVE_BLOCK_KEY, {
       ...data,
       elapsed,
@@ -173,37 +188,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return () => this.listeners.delete(callback);
   }
 
-  /** 添加时间块事件 */
+  /** 添加时间块事件（通过 EventLogService） */
   private async addBlockEvent(
-    eventId: string,
+    _eventId: string,
     content: string,
     tag: 'block_start' | 'block_end',
-    _feedback?: string
   ): Promise<Event> {
-    const tags: string[] = [tag];
-    if (tag === 'block_end') {
-      tags.push('block_feedback');
-    }
+    const tags = new Set<Tag>([tag]);
 
-    const eventData = {
-      id: eventId,
-      timestamp: Date.now(),
-      content,
-      tags,
-    };
-
-    // 读取现有事件
-    const eventsKey = 'events';
-    const events = await this.env.storage.read<any[]>(eventsKey) || [];
-    events.unshift(eventData);
-    await this.env.storage.write(eventsKey, events);
-
-    return {
-      id: eventId,
-      timestamp: eventData.timestamp,
-      content: eventData.content,
-      tags: new Set(eventData.tags),
-    };
+    // 通过 EventLogService 添加事件，确保监听器能收到通知
+    const event = await getEventLogService().addEvent(content, tags);
+    return event;
   }
 
   private notifyChange(block: ActiveBlockData | null): void {
