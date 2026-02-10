@@ -1,9 +1,18 @@
 import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import path from 'path';
+import { nodePolyfills } from 'vite-plugin-node-polyfills';
 
 export default defineConfig({
-  plugins: [react()],
+  plugins: [
+    react(),
+    nodePolyfills({
+      include: ['events'],
+      globals: {
+        global: true,
+      },
+    }),
+  ],
   resolve: {
     alias: {
       '@exomind/core': path.resolve(__dirname, '../../packages/core/src'),
@@ -13,20 +22,5 @@ export default defineConfig({
   },
   build: {
     target: 'esnext',
-  },
-  // Let Vite handle CommonJS modules through esbuild
-  esbuild: {
-    // This helps with CommonJS to ESM conversion
-    supported: {
-      'top-level-await': true,
-    },
-  },
-  // Optimize deps to handle CommonJS
-  optimizeDeps: {
-    include: ['@exomind/core', '@exomind/ui', '@exomind/shared'],
-    esbuildOptions: {
-      // Enable ESM output for dependencies
-      mainFields: ['module', 'main'],
-    },
   },
 });
