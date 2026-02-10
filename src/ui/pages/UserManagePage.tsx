@@ -2,6 +2,10 @@
  * 用户管理页面
  *
  * 用于用户注册、登录和用户管理
+ * TODO: 后续循环需要修复明文密码存储问题，使用 PBKDF2 哈希密码
+ *
+ * @see docs/specs/SPEC-301-多设备数据同步.md
+ * @see docs/specs/SPEC-302-密码哈希模块.md
  */
 
 import { useState, useEffect } from 'react';
@@ -22,8 +26,12 @@ export function UserManagePage() {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [loginUsername, setLoginUsername] = useState('');
+  const [loginPassword, setLoginPassword] = useState('');
   const [message, setMessage] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
   const [isLoading, setIsLoading] = useState(false);
+  const [showLoginForm, setShowLoginForm] = useState(false);
 
   const {
     isLoggedIn,
@@ -62,11 +70,17 @@ export function UserManagePage() {
       return;
     }
 
+    if (newPassword !== confirmPassword) {
+      setMessage({ type: 'error', text: '两次输入的密码不一致' });
+      return;
+    }
+
     setIsLoading(true);
     try {
       await register(newUsername, newPassword);
 
       // 保存用户信息到本地（模拟服务器存储）
+      // TODO: 后续循环使用 PBKDF2 哈希密码，避免明文存储
       const newUser: UserInfo = {
         username: newUsername,
         createdAt: new Date().toISOString(),
@@ -78,6 +92,7 @@ export function UserManagePage() {
       setMessage({ type: 'success', text: `用户 ${newUsername} 注册成功` });
       setNewUsername('');
       setNewPassword('');
+      setConfirmPassword('');
     } catch (error) {
       setMessage({ type: 'error', text: `注册失败: ${(error as Error).message}` });
     } finally {
@@ -85,12 +100,20 @@ export function UserManagePage() {
     }
   };
 
-  // 处理登录
-  const handleLogin = async (username: string, password: string) => {
+  // 快速登录
+  const handleQuickLogin = async (username: string, password: string) => {
+    if (!password) {
+      setMessage({ type: 'error', text: '请输入密码' });
+      return;
+    }
+
     setIsLoading(true);
     try {
       await login(username, password);
       setMessage({ type: 'success', text: `用户 ${username} 登录成功` });
+      setLoginUsername('');
+      setLoginPassword('');
+      setShowLoginForm(false);
     } catch (error) {
       setMessage({ type: 'error', text: `登录失败: ${(error as Error).message}` });
     } finally {
@@ -171,6 +194,18 @@ export function UserManagePage() {
             />
           </div>
 
+          <div className="grid gap-2">
+            <Label htmlFor="confirmPassword">确认密码</Label>
+            <Input
+              id="confirmPassword"
+              type="password"
+              placeholder="请再次输入密码"
+              value={confirmPassword}
+              onChange={(e) => setConfirmPassword(e.target.value)}
+              disabled={isLoading}
+            />
+          </div>
+
           <Button onClick={handleRegister} disabled={isLoading}>
             {isLoading ? '注册中...' : '注册'}
           </Button>
@@ -199,19 +234,53 @@ export function UserManagePage() {
                       {user.lastLogin && ` | 最后登录: ${new Date(user.lastLogin).toLocaleString()}`}
                     </div>
                   </div>
+                  {showLoginForm && loginUsername === user.username && (
+                    <div className="flex items-center gap-2 ml-4" style={{ width: '140px' }}>
+                      <Input
+                        type="password"
+                        placeholder="输入密码"
+                        value={loginPassword}
+                        onChange={(e) => setLoginPassword(e.target.value)}
+                        disabled={isLoading}
+                      />
+                    </div>
+                  )}
                   {!isLoggedIn && (
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      onClick={() => {
-                        const password = prompt(`请输入 ${user.username} 的密码:`);
-                        if (password) {
-                          handleLogin(user.username, password);
-                        }
-                      }}
-                    >
-                      登录
-                    </Button>
+                    <div className="flex gap-2">
+                      {!showLoginForm ? (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => {
+                            setLoginUsername(user.username);
+                            setShowLoginForm(true);
+                          }}
+                        >
+                          登录
+                        </Button>
+                      ) : loginUsername === user.username ? (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => {
+                              setShowLoginForm(false);
+                              setLoginUsername('');
+                              setLoginPassword('');
+                            }}
+                          >
+                            取消
+                          </Button>
+                          <Button
+                            size="sm"
+                            onClick={() => handleQuickLogin(user.username, loginPassword)}
+                            disabled={isLoading || !loginPassword}
+                          >
+                            确定
+                          </Button>
+                        </>
+                      ) : null}
+                    </div>
                   )}
                 </div>
               ))}
