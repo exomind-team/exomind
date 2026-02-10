@@ -42,15 +42,13 @@
 
 ---
 
-## 未迁移服务模块 (src/lib/services/)
+## 已迁移服务模块
 
-| 服务 | 路径 | 说明 | 复杂度 | 优先级 |
-|------|------|------|--------|--------|
-| 语音聊天服务 | `src/lib/services/voice-chat.service.ts` | 语音对话核心逻辑 | 高 | P0 |
-| 事件日志服务 | `src/lib/services/eventlog.service.ts` | 事件读写 | 中 | P1 |
-| 时间块服务 | `src/lib/services/timeblock.service.ts` | 时间块管理 | 中 | P1 |
-
----
+| 服务 | 迁移位置 | 状态 | 说明 |
+|------|----------|------|------|
+| 语音聊天服务 | `packages/core/src/services/voice-chat.service.ts` | ✅ 完成 | 语音对话核心逻辑 |
+| 事件日志服务 | - | ❌ 未迁移 | 事件读写 |
+| 时间块服务 | `packages/core/src/services/timeblock.service.ts` | ✅ 完成 | 时间块管理 |
 
 ## 未迁移存储层 (src/lib/db/)
 
@@ -62,15 +60,15 @@
 
 ---
 
-## 未迁移适配器 (src/lib/adapters/)
+## 已迁移适配器
 
-| 适配器 | 路径 | 说明 | 复杂度 | 优先级 |
-|--------|------|------|--------|--------|
-| 火山引擎ASR | `src/lib/adapters/asr/volcano-engine-asr.ts` | 语音识别 | 高 | P1 |
-| Web Speech ASR | `src/lib/adapters/asr/web-speech-asr.ts` | 浏览器原生ASR | 中 | P2 |
-| Moss ASR | `src/lib/adapters/asr/moss-asr.ts` | Moss语音识别 | 高 | P1 |
-| Crypto适配器 | `src/adapters/crypto-adapter.ts` | 密码哈希 | 中 | P1 |
-| Pouch同步 | `src/adapters/pouch-sync.ts` | PouchDB同步 | 高 | P0 |
+| 适配器 | 迁移位置 | 状态 | 说明 |
+|--------|----------|------|------|
+| Moss ASR | `packages/core/src/adapters/asr/moss-asr.ts` | ✅ 完成 | Moss语音识别 |
+| 火山引擎ASR | `packages/core/src/adapters/asr/index.ts` | ⚠️ Stub | 语音识别 (待完整迁移) |
+| Web Speech ASR | - | ❌ 未迁移 | 浏览器原生ASR |
+| Crypto适配器 | `packages/core/src/adapters/crypto-adapter.ts` | ✅ 完成 | 密码哈希 |
+| Pouch同步 | `packages/core/src/adapters/pouch-sync.ts` | ✅ 完成 | PouchDB同步 |
 
 ---
 
@@ -96,19 +94,19 @@
 
 ## 建议迁移顺序
 
-### P0 (最高优先级)
-1. **pouch-sync.ts** - 核心同步功能，其他功能依赖
-2. **message-storage.ts** - 消息存储，语音聊天依赖
-3. **voice-chat.service.ts** - 语音聊天核心
-4. **sync-store.ts** - 同步状态
-5. **SyncTestPage** - 同步测试页面
+### P0 (最高优先级) - ✅ 大部分完成
+1. ~~pouch-sync.ts~~ - ✅ 核心同步功能
+2. ~~message-storage.ts~~ - ✅ 消息存储
+3. ~~voice-chat.service.ts~~ - ✅ 语音聊天核心
+4. ~~sync-store.ts~~ - ✅ 同步状态
+5. **SyncTestPage** - 同步测试页面 (待迁移)
 
-### P1 (高优先级)
-1. **chat-store.ts** - 聊天状态
-2. **ChatPage** - 聊天页面
-3. **火山引擎/Moss ASR** - 语音识别适配器
-4. **UserManagePage** - 用户管理
-5. **eventlog.service.ts** - 事件日志
+### P1 (高优先级) - 进行中
+1. ~~chat-store.ts~~ - ✅ 聊天状态
+2. **ChatPage** - 聊天页面 (待迁移)
+3. **火山引擎/Moss ASR** - ⚠️ 部分完成 (Moss完成，Volcano待迁移)
+4. **UserManagePage** - 用户管理 (待迁移)
+5. **eventlog.service.ts** - 事件日志 (待迁移)
 
 ### P2 (中优先级)
 1. **SettingsPage** - 设置页面
@@ -143,10 +141,21 @@ voice-chat.service.ts (P0)
 
 ## 总结
 
-Monorepo 迁移当前仅完成了基础框架搭建：
-- ✅ packages/shared (工具函数、类型定义)
-- ✅ packages/core (基础接口、环境)
-- ✅ packages/ui (基础UI组件、首页)
-- ❌ 大部分核心业务逻辑未迁移
+Monorepo 迁移进度：**P0 大部分完成，P1 进行中**
 
-建议按依赖顺序逐步迁移，优先完成同步模块和语音聊天功能。
+| 层级 | 包 | 状态 |
+|------|-----|------|
+| ✅ L1 Adapter | Moss ASR | 完成 |
+| ✅ L1 Adapter | Crypto | 完成 |
+| ✅ L1 Adapter | PouchSync | 完成 |
+| ✅ L3 Service | voice-chat.service | 完成 |
+| ✅ L3 Service | message-storage | 完成 |
+| ✅ L3 Service | timeblock.service | 完成 |
+| ✅ L4 Store | sync-store | 完成 |
+| ✅ L4 Store | chat-store | 完成 |
+| ⏳ L4 Store | timeblock-store | 待迁移 |
+| ⏳ L4 UI | SyncTestPage | 待迁移 |
+| ⏳ L4 UI | ChatPage | 待迁移 |
+| ⏳ L4 UI | UserManagePage | 待迁移 |
+
+**下一步**: 继续迁移 P1 优先级模块（ChatPage, UserManagePage, eventlog.service）
