@@ -151,6 +151,132 @@ export async function decryptAes256(
 }
 
 /**
+ * 生成随机盐
+ *
+ * @param length - 盐长度（字节数，默认 16）
+ * @returns Base64 编码的盐字符串
+ */
+export function generateSalt(length: number = 16): string {
+  const randomBytes = new Uint8Array(length);
+  crypto.getRandomValues(randomBytes);
+
+  // Base64 编码
+  const base64Chars =
+    'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  let result = '';
+
+  // 每 3 字节转换为 4 个 Base64 字符
+  for (let i = 0; i < randomBytes.length; i += 3) {
+    const byte1 = randomBytes[i];
+    const byte2 = randomBytes[i + 1] ?? 0;
+    const byte3 = randomBytes[i + 2] ?? 0;
+
+    const char1 = base64Chars[byte1 >> 2];
+    const char2 = base64Chars[((byte1 & 0x03) << 4) | (byte2 >> 4)];
+    const char3 = base64Chars[((byte2 & 0x0f) << 2) | (byte3 >> 6)];
+    const char4 = base64Chars[byte3 & 0x3f];
+
+    // 填充 '=' 如果字节不足
+    result += char1;
+    result += char2;
+    result += i + 1 < randomBytes.length ? char3 : '=';
+    result += i + 2 < randomBytes.length ? char4 : '=';
+  }
+
+  return result;
+}
+
+/**
+ * SHA-256 哈希
+ *
+ * @param message - 消息字符串
+ * @returns 十六进制哈希字符串
+ */
+export async function sha256(message: string): Promise<string> {
+  const encoder = new TextEncoder();
+  const msgBuffer = encoder.encode(message);
+
+  // 使用 Web Crypto API 计算 SHA-256
+  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashArray = Array.from(new Uint8Array(hashBuffer));
+
+  // 转换为十六进制字符串
+  return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+/**
+ * 带盐哈希密码
+ *
+ * @param password - 原始密码
+ * @param salt - 盐值
+ * @returns 格式化的哈希字符串 "salt:hash"
+ */
+export async function hashPassword(
+  password: string,
+  salt: string
+): Promise<string> {
+  const hash = await sha256(salt + password);
+  return `${salt}:${hash}`;
+}
+
+/**
+ * 验证密码
+ *
+ * @param password - 原始密码
+ * @param stored - 存储的格式化哈希字符串
+ * @returns 是否匹配
+ */
+export async function verifyPassword(
+  password: string,
+  stored: string
+): Promise<boolean> {
+  const [salt] = stored.split(':');
+  const computedHash = await sha256(salt + password);
+  return `${salt}:${computedHash}` === stored;
+}
+
+/**
+ * 便捷函数：生成带盐哈希的密码
+ *
+ * @param password - 原始密码
+ * @returns 格式化的哈希字符串（自动生成盐）
+ */
+export async function hashPasswordWithSalt(
+  password: string
+): Promise<string> {
+  const salt = generateSalt(16);
+  return hashPassword(password, salt);
+}
+
+/**
+ * 便捷函数：快速加密（自动派生密钥）
+ *
+ * @param plaintext 明文
+ * @param password 密码
+ * @returns Base64 编码的密文
+ */
+export async function quickEncrypt(
+  plaintext: string,
+  password: string
+): Promise<string> {
+  return encryptAes256(plaintext, password);
+}
+
+/**
+ * 便捷函数：快速解密（自动派生密钥）
+ *
+ * @param ciphertext Base64 编码的密文
+ * @param password 密码
+ * @returns 明文
+ */
+export async function quickDecrypt(
+  ciphertext: string,
+  password: string
+): Promise<string> {
+  return decryptAes256(ciphertext, password);
+}
+
+/**
  * 加密适配器类实现
  *
  * 使用示例：
@@ -164,14 +290,14 @@ export async function decryptAes256(
  */
 export class CryptoAdapter implements ICryptoPort {
   // 存储密码引用（仅用于 clear() 时清理，JavaScript 无法真正擦除字符串内存）
-  // 使用 void 消除未使用警告
   private _passwordRef: string | null = null;
   private currentKey: CryptoKey | null = null;
 
-  async setPassword(password: string): Promise<void> {
+  setPassword(password: string): Promise<void> {
     this._passwordRef = password;
-    this.currentKey = await deriveKeyFromPassword(password);
-    void this._passwordRef; // 消除未使用警告
+    return this.deriveKey(password).then((key) => {
+      this.currentKey = key;
+    });
   }
 
   async encrypt(plaintext: string): Promise<string> {
@@ -227,6 +353,10 @@ export class CryptoAdapter implements ICryptoPort {
     return decoder.decode(decrypted);
   }
 
+  deriveKey(password: string): Promise<CryptoKey> {
+    return deriveKeyFromPassword(password);
+  }
+
   deriveKeyFromPassword(password: string): Promise<CryptoKey> {
     return deriveKeyFromPassword(password);
   }
@@ -235,32 +365,22 @@ export class CryptoAdapter implements ICryptoPort {
     this._passwordRef = null;
     this.currentKey = null;
   }
-}
 
-/**
- * 便捷函数：快速加密（自动派生密钥）
- *
- * @param plaintext 明文
- * @param password 密码
- * @returns Base64 编码的密文
- */
-export async function quickEncrypt(
-  plaintext: string,
-  password: string
-): Promise<string> {
-  return encryptAes256(plaintext, password);
-}
+  // === 密码哈希方法 ===
 
-/**
- * 便捷函数：快速解密（自动派生密钥）
- *
- * @param ciphertext Base64 编码的密文
- * @param password 密码
- * @returns 明文
- */
-export async function quickDecrypt(
-  ciphertext: string,
-  password: string
-): Promise<string> {
-  return decryptAes256(ciphertext, password);
+  generateSalt(length?: number): string {
+    return generateSalt(length);
+  }
+
+  sha256(message: string): Promise<string> {
+    return sha256(message);
+  }
+
+  hashPassword(password: string, salt: string): Promise<string> {
+    return hashPassword(password, salt);
+  }
+
+  verifyPassword(password: string, stored: string): Promise<boolean> {
+    return verifyPassword(password, stored);
+  }
 }

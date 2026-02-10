@@ -3,6 +3,7 @@
  *
  * 使用 Zustand 管理同步相关的状态
  * 集成 PouchSyncAdapter 实现真正的同步逻辑
+ * 集成 CryptoAdapter 实现密码哈希（SPEC-302）
  */
 
 import { create } from 'zustand';
@@ -15,6 +16,11 @@ import {
   type Conflict,
 } from '@/environment/interfaces/sync.port';
 import { PouchSyncAdapter } from '@/adapters/pouch-sync';
+import {
+  CryptoAdapter,
+  hashPasswordWithSalt,
+  verifyPassword,
+} from '@/adapters/crypto-adapter';
 
 // 创建 PouchSyncAdapter 实例（单例）
 let syncAdapter: PouchSyncAdapter | null = null;
@@ -131,18 +137,24 @@ export const useSyncStore = create<SyncState>()(
         }
 
         // 验证用户凭据
-        const users = JSON.parse(localStorage.getItem('exomind:users') || '[]');
-        const user = users.find((u: { username: string; passwordHash: string }) => {
-          // 简单验证：检查用户名和密码哈希
-          return u.username === username;
-        });
+        const users = JSON.parse(
+          localStorage.getItem('exomind:users') || '[]'
+        );
+        const user = users.find(
+          (u: { username: string; passwordHash: string }) =>
+            u.username === username
+        );
 
         if (!user) {
           throw new Error('用户不存在');
         }
 
-        // 验证密码（简化版本：实际应该使用 PBKDF2 哈希）
-        // 这里使用简单比较作为占位符
+        // 使用 SPEC-302 的密码验证
+        const crypto = new CryptoAdapter();
+        const isValid = await crypto.verifyPassword(password, user.passwordHash);
+        if (!isValid) {
+          throw new Error('密码错误');
+        }
         const deviceInfo = getDeviceInfo();
         const credentials: SyncCredentials = {
           username,
@@ -175,8 +187,8 @@ export const useSyncStore = create<SyncState>()(
           throw new Error('用户名已存在');
         }
 
-        // 生成密码哈希（简化版本：实际应该使用 PBKDF2）
-        const passwordHash = password; // TODO: 使用 crypto.subtle.pbkdf2
+        // 使用 SPEC-302 的密码哈希
+        const passwordHash = await hashPasswordWithSalt(password);
 
         // 保存新用户
         const newUser = {
