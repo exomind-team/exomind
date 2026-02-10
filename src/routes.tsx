@@ -2,13 +2,15 @@ import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from 
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home } from "lucide-react";
+import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home, Users, RefreshCw } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
 import { ASRTestPage } from "@/pages/ASRTestPage";
 import { VoiceChatPage } from "@/pages/VoiceChatPage";
 import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
 import { HomePage } from "@/components/Home/HomePage";
+import { UserManagePage } from "@/ui/pages/UserManagePage";
+import { SyncTestPage } from "@/ui/pages/SyncTestPage";
 
 const sidebarItems = [
   { title: "首页", path: "/", icon: Home },
@@ -16,6 +18,8 @@ const sidebarItems = [
   { title: "MOSS测试", path: "/moss-test", icon: Mic },
   { title: "语音聊天", path: "/voice-chat", icon: MicVocal },
   { title: "ASR测试", path: "/asr-test", icon: Mic },
+  { title: "用户管理", path: "/user-manage", icon: Users },
+  { title: "同步测试", path: "/sync-test", icon: RefreshCw },
   { title: "设置", path: "/settings", icon: Settings },
 ];
 
@@ -164,6 +168,24 @@ const voiceChatRoute = createRoute({
   },
 });
 
+// User Manage route (/user-manage)
+const userManageRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'user-manage',
+  component: function UserManage() {
+    return <UserManagePage />;
+  },
+});
+
+// Sync Test route (/sync-test)
+const syncTestRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'sync-test',
+  component: function SyncTest() {
+    return <SyncTestPage />;
+  },
+});
+
 // Create the route tree
 const routeTree = rootRoute.addChildren([
   homeRoute,
@@ -172,6 +194,8 @@ const routeTree = rootRoute.addChildren([
   asrTestRoute,
   mossTestRoute,
   voiceChatRoute,
+  userManageRoute,
+  syncTestRoute,
 ]);
 
 // Create the router
