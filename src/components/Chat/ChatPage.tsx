@@ -17,8 +17,8 @@ import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
-import { useSyncStore } from '@/ui/stores/sync-store';
 import type { Event as StorageEvent } from '@/lib/storage/event-storage';
+import { useSyncStore } from '@/ui/stores/sync-store';
 
 export function ChatPage() {
   const [events, setEvents] = useState<Event[]>([]);
@@ -82,7 +82,8 @@ export function ChatPage() {
       return () => {
         unsubscribe();
         storage.stopSync();
-        storage.close();
+        // 注意：不调用 storage.close()，因为 EventStorage 是共享的单例
+        // 其他组件（如 TimeBlockService）可能还在使用它
       };
     };
 
