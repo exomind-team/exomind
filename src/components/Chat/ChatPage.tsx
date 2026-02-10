@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
-import { EventStorage, type Event as StorageEvent } from '@/lib/storage/event-storage';
+import { getEventStorage, type Event as StorageEvent, type EventStorage } from '@/lib/storage/event-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 
 export function ChatPage() {
@@ -29,8 +29,8 @@ export function ChatPage() {
 
   // 初始化 EventStorage 和加载事件
   useEffect(() => {
-    const userId = currentUser || 'anonymous';
-    const storage = new EventStorage(userId);
+    // 使用共享的 EventStorage 单例，与 TimeBlockService 保持一致
+    const storage = getEventStorage(currentUser || undefined);
     storageRef.current = storage;
 
     const loadEvents = async () => {
@@ -45,15 +45,23 @@ export function ChatPage() {
         tags: new Set<string>(e.type ? [e.type] : []),
       }));
 
+      // 调试日志：显示所有事件的类型
+      if (loaded.length > 0) {
+        console.log('[ChatPage] 事件详情:');
+        loaded.forEach((e, i) => {
+          console.log(`  ${i + 1}. type=${e.type}, content=${e.content?.substring(0, 30)}`);
+        });
+      }
+
       // 反转为升序 [最旧, ..., 最新]
       setEvents([...converted].reverse());
     };
 
     loadEvents();
 
-    // 监听远程变更
-    const unsubscribe = storage.onRemoteChange((change) => {
-      console.log('[ChatPage] 收到远程变更:', change);
+    // 监听变更（本地和远程）
+    const unsubscribe = storage.onRemoteChange(() => {
+      console.log('[ChatPage] 收到变更通知，重新加载事件');
       loadEvents();
     });
 
@@ -73,7 +81,8 @@ export function ChatPage() {
     return () => {
       unsubscribe();
       storage.stopSync();
-      storage.close();
+      // 注意：不调用 storage.close()，因为 EventStorage 是共享的单例
+      // 其他组件（如 TimeBlockService）可能还在使用它
     };
   }, [currentUser, isLoggedIn]);
 

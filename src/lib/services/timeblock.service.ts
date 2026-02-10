@@ -11,7 +11,7 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import { EventStorage } from '../storage/event-storage';
+import { getEventStorage } from '../storage/event-storage';
 import type { TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
 
 // 存储键
@@ -49,12 +49,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
   private lastWriteTime = 0;
   private readonly WRITE_THROTTLE_MS = 1000; // 节流：每秒最多写入一次
-  private storage: EventStorage;
+  private storage: ReturnType<typeof getEventStorage>;
 
   constructor(env?: ExoMindEnvironment) {
     this.env = env || ExoMindEnvironment.getInstance();
-    // 使用 PouchDB EventStorage，与 ChatPage 保持一致
-    this.storage = new EventStorage('default');
+    // 使用共享的 EventStorage 单例，与 ChatPage 保持一致
+    this.storage = getEventStorage();
   }
 
   async loadTimeBlocks(): Promise<TimeBlock[]> {
@@ -74,6 +74,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async startBlock(name: string, config: TimerConfig): Promise<ActiveBlockData> {
     const startId = crypto.randomUUID();
+    const initialElapsed = config.mode === 'countdown'
+      ? (config.minutes ?? 25) * 60 * 1000
+      : 0;
 
     // 创建开始事件
     await this.addBlockEvent(startId, name, 'block_start');
@@ -83,9 +86,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       startId,
       name,
       startTime: Date.now(),
-      elapsed: 0,
+      elapsed: initialElapsed,
       mode: config.mode,
-      targetMinutes: config.mode === 'countdown' ? config.minutes : undefined,
+      targetMinutes: config.mode === 'countdown' ? (config.minutes ?? 25) : undefined,
       paused: false,
     };
 
@@ -136,12 +139,14 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 身心反馈作为独立事件添加到事件日志
     if (feedback) {
+      console.log('[TimeBlockService] 保存 feedback 事件:', feedback);
       await this.storage.addEvent({
         id: crypto.randomUUID(),
         content: feedback,
         createdAt: new Date().toISOString(),
         type: 'block_feedback',
       });
+      console.log('[TimeBlockService] feedback 事件已保存，storage.changeListeners 数量:', this.storage.getChangeListenersCount?.());
     }
 
     // 保存已完成的时间块
