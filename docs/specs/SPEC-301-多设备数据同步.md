@@ -65,46 +65,45 @@
 
 ```
 src/
-├── lib/
-│   ├── ports/
-│   │   ├── sync.port.ts          # ISyncPort 接口定义
-│   │   ├── import-export.port.ts # 导入导出接口
-│   │   └── user.port.ts          # 用户管理接口
-│   │
-│   ├── adapters/
-│   │   ├── pouch-sync.ts         # PouchDB 同步适配器
-│   │   ├── crypto-adapter.ts     # Web Crypto API 加密适配器
-│   │   └── user-adapter.ts       # 用户认证适配器
-│   │
-│   ├── sync/
-│   │   ├── conflict-resolver.ts   # 冲突检测与解决
-│   │   ├── device-manager.ts     # 设备管理（仅本地）
-│   │   ├── import-export.ts      # 导入导出服务
-│   │   └── sync-status.ts        # 同步状态管理
-│   │
-│   ├── services/
-│   │   ├── user.service.ts       # 用户管理服务
-│   │   └── sync.service.ts       # 同步服务
-│   │
-│   └── stores/
-│       ├── sync-store.ts         # Zustand 同步状态 Store
-│       └── user-store.ts         # Zustand 用户状态 Store
+├── adapters/                    # L1
+│   ├── crypto-adapter.ts        # 加密实现
+│   ├── pouch-sync.ts            # PouchDB 同步适配器
+│   └── user-adapter.ts          # 用户认证适配器
 │
-├── pages/
-│   ├── SyncTestPage.tsx          # 同步测试页面 (/sync-test)
-│   └── UserManagePage.tsx        # 用户管理页面 (/user-manage)
+├── environment/                 # L2
+│   ├── interfaces/              # Port 接口定义
+│   │   ├── storage.port.ts     # 已有
+│   │   ├── crypto.port.ts      # 加密 Port
+│   │   └── sync.port.ts        # 同步 Port
+│   ├── environment.ts           # Environment 实现
+│   └── bootstrap.ts             # 运行时检测 → 组装 Adapter
 │
-└── routes.tsx                    # 添加 /sync-test 和 /user-manage 路由
+├── services/                    # L3
+│   ├── interfaces/             # Service 接口
+│   │   ├── sync.service.ts    # 同步服务接口
+│   │   └── user.service.ts    # 用户服务接口
+│   └── impl/                   # Service 实现
+│       ├── sync.service.impl.ts
+│       └── user.service.impl.ts
+│
+└── ui/                          # L4
+    ├── pages/
+    │   ├── SyncTestPage.tsx    # 同步测试页面 (/sync-test)
+    │   └── UserManagePage.tsx  # 用户管理页面 (/user-manage)
+    └── stores/
+        └── sync-store.ts       # Zustand 同步状态 Store
 
 server/
-└── pouchdb-server.js             # PouchDB Server 入口 (端口: 6984)
+├── package.json                 # 依赖配置
+├── config.js                    # 服务端配置
+└── pouchdb-server.js            # PouchDB Server 入口 (端口: 6984)
 
 tests/
 └── sync/
-    ├── sync.port.test.ts         # 同步接口测试
-    ├── conflict.test.ts          # 冲突处理测试
-    ├── import-export.test.ts     # 导入导出测试
-    └── user.test.ts             # 用户管理测试
+    ├── sync.port.test.ts        # 同步接口测试
+    ├── conflict.test.ts         # 冲突处理测试
+    ├── import-export.test.ts    # 导入导出测试
+    └── user.test.ts            # 用户管理测试
 ```
 
 ---
@@ -184,6 +183,17 @@ export interface ISyncPort {
    * 导出到文件
    */
   exportToFile(): Promise<void>;
+
+  // === 同步触发机制 ===
+  /**
+   * 设置同步触发回调（当本地数据变更时自动触发同步）
+   */
+  setOnSyncTrigger(callback: (docType: 'event' | 'config') => void): void;
+
+  /**
+   * 触发同步（供内部调用）
+   */
+  triggerSync(docType: 'event' | 'config'): Promise<void>;
 }
 
 /**
@@ -560,80 +570,86 @@ export async function verifyPassword(
 }
 ```
 
-### 5.3 AES-256 加密（Web Crypto API）
+### 5.3 AES-256 加密（方案 A：密钥随密码生成，支持多设备同步）
 
 ```typescript
-// src/lib/adapters/crypto-adapter.ts
+// src/environment/interfaces/crypto.port.ts
 
 /**
- * 加密密钥存储键
+ * 加密 Port 接口
  */
-const ENCRYPTION_KEY_ID = 'exomind:encryptionKey';
+export interface ICryptoPort {
+  /**
+   * 使用密码生成加密密钥（方案A：多设备用相同密码生成相同密钥）
+   */
+  deriveKeyFromPassword(password: string): Promise<CryptoKey>;
 
-/**
- * 生成加密密钥（使用 Web Crypto API）
- */
-export async function generateEncryptionKey(): Promise<CryptoKey> {
-  return await crypto.subtle.generateKey(
-    { name: 'AES-GCM', length: 256 },
-    true,
-    ['encrypt', 'decrypt']
-  );
+  /**
+   * AES-256-GCM 加密
+   */
+  encrypt(plaintext: string): Promise<string>;
+
+  /**
+   * AES-256-GCM 解密
+   */
+  decrypt(ciphertext: string): Promise<string>;
 }
 
-/**
- * 导出密钥为可存储格式（用于 localStorage）
- */
-export async function exportKey(key: CryptoKey): Promise<string> {
-  const exported = await crypto.subtle.exportKey('raw', key);
-  return btoa(String.fromCharCode(...new Uint8Array(exported)));
-}
+// src/adapters/crypto-adapter.ts
 
 /**
- * 导入密钥（从 localStorage）
+ * 加密适配器实现
+ *
+ * 方案A：密钥从用户密码派生
+ * - 设备A: 密码 + 固定盐 → 密钥A
+ * - 设备B: 相同密码 + 相同盐 → 相同密钥
+ * - 加密数据可跨设备解密
  */
-export async function importKey(keyData: string): Promise<CryptoKey> {
-  const keyBytes = Uint8Array.from(atob(keyData), c => c.charCodeAt(0));
-  return await crypto.subtle.importKey(
+const ENCRYPTION_SALT = 'exomind-v1-salt';  // 固定公开盐
+
+/**
+ * 使用 PBKDF2 从密码派生 AES-256 密钥
+ * 支持多设备用相同密码生成相同密钥
+ */
+export async function deriveKeyFromPassword(password: string): Promise<CryptoKey> {
+  const encoder = new TextEncoder();
+  const passwordKey = await crypto.subtle.importKey(
     'raw',
-    keyBytes,
+    encoder.encode(password + ENCRYPTION_SALT),
+    'PBKDF2',
+    false,
+    ['deriveKey']
+  );
+
+  return await crypto.subtle.deriveKey(
+    {
+      name: 'PBKDF2',
+      salt: encoder.encode(ENCRYPTION_SALT),
+      iterations: 100000,
+      hash: 'SHA-256',
+    },
+    passwordKey,
     { name: 'AES-GCM', length: 256 },
-    true,
+    false,
     ['encrypt', 'decrypt']
   );
-}
-
-/**
- * 获取或创建加密密钥
- */
-export async function getOrCreateEncryptionKey(): Promise<CryptoKey> {
-  if (typeof window === 'undefined') {
-    throw new Error('Encryption only works in browser');
-  }
-
-  const stored = localStorage.getItem(ENCRYPTION_KEY_ID);
-  if (stored) {
-    return await importKey(stored);
-  }
-
-  const key = await generateEncryptionKey();
-  const exported = await exportKey(key);
-  localStorage.setItem(ENCRYPTION_KEY_ID, exported);
-  return key;
 }
 
 /**
  * AES-256-GCM 加密
  */
-export async function encryptAes256(plaintext: string): Promise<string> {
+export async function encryptAes256(
+  plaintext: string,
+  password: string
+): Promise<string> {
   const encoder = new TextEncoder();
   const data = encoder.encode(plaintext);
 
+  // 从密码派生密钥
+  const key = await deriveKeyFromPassword(password);
+
   // 生成随机 IV (12字节)
   const iv = crypto.getRandomValues(new Uint8Array(12));
-
-  // 获取加密密钥
-  const key = await getOrCreateEncryptionKey();
 
   // 加密
   const encrypted = await crypto.subtle.encrypt(
@@ -654,9 +670,15 @@ export async function encryptAes256(plaintext: string): Promise<string> {
 /**
  * AES-256-GCM 解密
  */
-export async function decryptAes256(ciphertext: string): Promise<string> {
+export async function decryptAes256(
+  ciphertext: string,
+  password: string
+): Promise<string> {
   const encoder = new TextEncoder();
   const decoder = new TextDecoder();
+
+  // 从密码派生密钥
+  const key = await deriveKeyFromPassword(password);
 
   // Base64 解码
   const combined = new Uint8Array(
@@ -667,9 +689,6 @@ export async function decryptAes256(ciphertext: string): Promise<string> {
   const iv = combined.slice(0, 12);
   const encrypted = combined.slice(12);
 
-  // 获取解密密钥
-  const key = await getOrCreateEncryptionKey();
-
   // 解密
   const decrypted = await crypto.subtle.decrypt(
     { name: 'AES-GCM', iv },
@@ -678,6 +697,59 @@ export async function decryptAes256(ciphertext: string): Promise<string> {
   );
 
   return decoder.decode(decrypted);
+}
+
+/**
+ * 加密适配器类
+ */
+export class CryptoAdapter implements ICryptoPort {
+  private currentPassword: string | null = null;
+  private currentKey: CryptoKey | null = null;
+
+  async setPassword(password: string): Promise<void> {
+    this.currentPassword = password;
+    this.currentKey = await deriveKeyFromPassword(password);
+  }
+
+  async encrypt(plaintext: string): Promise<string> {
+    if (!this.currentKey) {
+      throw new Error('Password not set. Call setPassword() first.');
+    }
+    const encoder = new TextEncoder();
+    const data = encoder.encode(plaintext);
+    const iv = crypto.getRandomValues(new Uint8Array(12));
+    const encrypted = await crypto.subtle.encrypt(
+      { name: 'AES-GCM', iv },
+      this.currentKey,
+      data
+    );
+    const combined = new Uint8Array(iv.length + encrypted.byteLength);
+    combined.set(iv);
+    combined.set(new Uint8Array(encrypted), iv.length);
+    return btoa(String.fromCharCode(...combined));
+  }
+
+  async decrypt(ciphertext: string): Promise<string> {
+    if (!this.currentKey) {
+      throw new Error('Password not set. Call setPassword() first.');
+    }
+    const decoder = new TextDecoder();
+    const combined = new Uint8Array(
+      atob(ciphertext).split('').map(c => c.charCodeAt(0))
+    );
+    const iv = combined.slice(0, 12);
+    const encrypted = combined.slice(12);
+    const decrypted = await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv },
+      this.currentKey,
+      encrypted
+    );
+    return decoder.decode(decrypted);
+  }
+
+  deriveKeyFromPassword(password: string): Promise<CryptoKey> {
+    return deriveKeyFromPassword(password);
+  }
 }
 ```
 
@@ -847,7 +919,373 @@ export function detectPlatform(): string {
 }
 ```
 
-### 5.7 冲突解决
+### 5.7 PouchDB 核心适配器
+
+```typescript
+// src/adapters/pouch-sync.ts
+
+import PouchDB from 'pouchdb';
+import type { Event } from '@/lib/types/event';
+import type {
+  SyncStatus,
+  SyncCredentials,
+  SyncResult,
+  Conflict,
+} from '@/environment/interfaces/sync.types';
+import { getDeviceId } from '@/lib/sync/device-manager';
+
+/**
+ * PouchDB 同步适配器核心实现
+ */
+export class PouchSyncAdapter {
+  private localDB: PouchDB.Database | null = null;
+  private remoteDB: PouchDB.Database | null = null;
+  private credentials: SyncCredentials | null = null;
+  private status: SyncStatus = this.getInitialStatus();
+  private syncTrigger: ((docType: 'event' | 'config') => void) | null = null;
+  private syncChanges: PouchDB.Replication.Sync<{}> | null = null;
+
+  private getInitialStatus(): SyncStatus {
+    return {
+      state: 'disconnected',
+      lastSync: null,
+      pendingChanges: 0,
+      conflictCount: 0,
+      syncMode: 'realtime',
+      pollInterval: 5,
+    };
+  }
+
+  /**
+   * 连接到同步服务器
+   */
+  async connect(url: string, credentials: SyncCredentials): Promise<void> {
+    this.credentials = credentials;
+    this.status.state = 'connecting';
+
+    // 创建本地 PouchDB
+    this.localDB = new PouchDB(`local_${credentials.username}`);
+
+    // 创建远程 PouchDB 连接
+    const remoteUrl = `${url}/database/${credentials.username}`;
+    this.remoteDB = new PouchDB(remoteUrl, {
+      auth: {
+        username: credentials.username,
+        password: credentials.passwordHash,
+      },
+    });
+
+    // 设置视图
+    await this.ensureViews();
+
+    // 启动实时同步
+    this.startRealtimeSync();
+
+    this.status.state = 'connected';
+  }
+
+  /**
+   * 确保视图已创建
+   */
+  private async ensureViews(): Promise<void> {
+    if (!this.localDB) return;
+
+    // 创建设计文档
+    await this.localDB.put({
+      _id: '_design/sync',
+      views: {
+        events: {
+          map: `function(doc) {
+            if (doc.type === 'event') {
+              emit(doc._id, doc);
+            }
+          }`,
+        },
+        configs: {
+          map: `function(doc) {
+            if (doc.type === 'config') {
+              emit(doc._id, doc);
+            }
+          }`,
+        },
+      },
+    }).catch(() => {
+      // 视图已存在，忽略
+    });
+  }
+
+  /**
+   * 启动实时同步（WebSocket 优先）
+   */
+  private startRealtimeSync(): void {
+    if (!this.localDB || !this.remoteDB) return;
+
+    // PouchDB 自动处理实时同步（通过 changes()）
+    const deviceId = getDeviceId();
+
+    // 监听本地变更并同步到远程
+    this.localDB.changes({
+      since: 'now',
+      live: true,
+      include_docs: true,
+    }).on('change', async (change) => {
+      if (change.id.startsWith('_') || change.deleted) return;
+
+      // 获取文档
+      const doc = await this.localDB!.get(change.id);
+
+      // 同步到远程
+      await this.remoteDB!.put(doc);
+
+      this.status.pendingChanges = Math.max(0, this.status.pendingChanges - 1);
+    });
+
+    // 监听远程变更并同步到本地
+    this.remoteDB!.changes({
+      since: 'now',
+      live: true,
+      include_docs: true,
+    }).on('change', async (change) => {
+      if (change.id.startsWith('_') || change.deleted) return;
+
+      // 同步到本地
+      const doc = await this.remoteDB!.get(change.id);
+      await this.localDB!.put(doc);
+    });
+
+    this.status.syncMode = 'realtime';
+  }
+
+  /**
+   * 同步事件数据
+   */
+  async syncEvents(): Promise<SyncResult> {
+    if (!this.localDB || !this.remoteDB) {
+      return { success: false, uploaded: 0, downloaded: 0, conflicts: 0, errors: ['未连接'] };
+    }
+
+    this.status.state = 'syncing';
+    const deviceId = getDeviceId();
+
+    try {
+      // 获取本地事件
+      const localResult = await this.localDB.query('sync/events', { include_docs: true });
+      const localEvents = localResult.rows.map((r) => r.value as Event);
+
+      // 获取远程事件
+      const remoteResult = await this.remoteDB.query('sync/events', { include_docs: true });
+      const remoteEvents = remoteResult.rows.map((r) => r.value as Event);
+
+      let uploaded = 0;
+      let downloaded = 0;
+      let conflicts = 0;
+
+      // 双向同步
+      for (const event of localEvents) {
+        const remote = remoteEvents.find((e) => e.id === event.id);
+        if (!remote) {
+          // 上传新事件
+          await this.remoteDB.put(event);
+          uploaded++;
+        } else if (event.timestamp > remote.timestamp) {
+          // 本地更新，更新远程
+          await this.remoteDB.put(event);
+          uploaded++;
+        }
+      }
+
+      for (const event of remoteEvents) {
+        const local = localEvents.find((e) => e.id === event.id);
+        if (!local) {
+          // 下载新事件
+          await this.localDB.put(event);
+          downloaded++;
+        } else if (event.timestamp > local.timestamp) {
+          // 远程更新，更新本地
+          await this.localDB.put(event);
+          downloaded++;
+        }
+      }
+
+      this.status.lastSync = Date.now();
+      this.status.state = 'connected';
+
+      return { success: true, uploaded, downloaded, conflicts, errors: [] };
+    } catch (error) {
+      this.status.state = 'error';
+      this.status.error = error.message;
+      return { success: false, uploaded: 0, downloaded: 0, conflicts: 0, errors: [error.message] };
+    }
+  }
+
+  /**
+   * 同步配置数据
+   */
+  async syncConfig(): Promise<SyncResult> {
+    if (!this.localDB || !this.remoteDB) {
+      return { success: false, uploaded: 0, downloaded: 0, conflicts: 0, errors: ['未连接'] };
+    }
+
+    this.status.state = 'syncing';
+    const deviceId = getDeviceId();
+
+    try {
+      // 获取本地配置（只同步 global 作用域）
+      const localResult = await this.localDB.query('sync/configs', { include_docs: true });
+      const localConfigs = localResult.rows.map((r) => r.value);
+
+      // 获取远程配置
+      const remoteResult = await this.remoteDB.query('sync/configs', { include_docs: true });
+      const remoteConfigs = remoteResult.rows.map((r) => r.value);
+
+      let uploaded = 0;
+      let downloaded = 0;
+      let conflicts = 0;
+
+      for (const config of localConfigs) {
+        if (config.scope === 'local') continue; // 跳过本地配置
+
+        const remote = remoteConfigs.find((c) => c.key === config.key);
+        if (!remote) {
+          await this.remoteDB.put(config);
+          uploaded++;
+        } else if (config.updatedAt > remote.updatedAt) {
+          await this.remoteDB.put(config);
+          uploaded++;
+        }
+      }
+
+      for (const config of remoteConfigs) {
+        if (config.scope === 'local') continue;
+
+        const local = localConfigs.find((c) => c.key === config.key);
+        if (!local) {
+          await this.localDB.put(config);
+          downloaded++;
+        } else if (config.updatedAt > local.updatedAt) {
+          await this.localDB.put(config);
+          downloaded++;
+        }
+      }
+
+      this.status.lastSync = Date.now();
+      this.status.state = 'connected';
+
+      return { success: true, uploaded, downloaded, conflicts, errors: [] };
+    } catch (error) {
+      this.status.state = 'error';
+      this.status.error = error.message;
+      return { success: false, uploaded: 0, downloaded: 0, conflicts: 0, errors: [error.message] };
+    }
+  }
+
+  /**
+   * 推送单个事件（供内部调用，自动触发同步）
+   */
+  async pushEvent(event: Event): Promise<void> {
+    if (!this.localDB) return;
+
+    await this.localDB.put(event);
+
+    // 触发同步
+    await this.syncEvents();
+  }
+
+  /**
+   * 推送配置（供内部调用，自动触发同步）
+   */
+  async pushConfig(key: string, value: unknown): Promise<void> {
+    if (!this.localDB) return;
+
+    const deviceId = getDeviceId();
+    const config = {
+      _id: `config:${key}`,
+      type: 'config',
+      key,
+      value,
+      deviceId,
+      updatedAt: new Date().toISOString(),
+      scope: 'global',
+    };
+
+    await this.localDB.put(config);
+
+    // 触发同步
+    await this.syncConfig();
+  }
+
+  /**
+   * 设置同步触发回调
+   */
+  setOnSyncTrigger(callback: (docType: 'event' | 'config') => void): void {
+    this.syncTrigger = callback;
+  }
+
+  /**
+   * 触发同步
+   */
+  async triggerSync(docType: 'event' | 'config'): Promise<void> {
+    if (docType === 'event') {
+      await this.syncEvents();
+    } else {
+      await this.syncConfig();
+    }
+  }
+
+  /**
+   * 获取冲突列表
+   */
+  async getConflicts(): Promise<Conflict[]> {
+    // PouchDB 自动处理冲突检测
+    // 实际实现需要查询 _conflicts
+    return [];
+  }
+
+  /**
+   * 解决冲突
+   */
+  async resolveConflict(docId: string, resolution: 'local' | 'remote'): Promise<void> {
+    if (!this.localDB || !this.remoteDB) return;
+
+    if (resolution === 'local') {
+      // 保留本地，删除远程冲突
+      const local = await this.localDB.get(docId);
+      await this.remoteDB.put(local);
+    } else {
+      // 保留远程，删除本地冲突
+      const remote = await this.remoteDB.get(docId);
+      await this.localDB.put(remote);
+    }
+  }
+
+  /**
+   * 断开连接
+   */
+  async disconnect(): Promise<void> {
+    if (this.syncChanges) {
+      this.syncChanges.cancel();
+      this.syncChanges = null;
+    }
+
+    if (this.localDB) {
+      await this.localDB.close();
+      this.localDB = null;
+    }
+
+    this.remoteDB = null;
+    this.status = this.getInitialStatus();
+  }
+
+  /**
+   * 获取同步状态
+   */
+  getStatus(): SyncStatus {
+    return { ...this.status };
+  }
+}
+```
+
+### 5.8 冲突解决
 
 ```typescript
 // src/lib/sync/conflict-resolver.ts
@@ -1582,18 +2020,34 @@ const io = new Server(server, {
 });
 
 // 用户认证
-const users = new Map();  // username -> { passwordHash, db }
+const users = new Map();  // username -> { passwordHash, salt }
 
-// SHA-256 哈希函数（后端）
-import { createHash } from 'crypto';
+// 生成随机盐
+function generateSalt(length: number = 16): string {
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+  let result = '';
+  for (let i = 0; i < length; i++) {
+    result += chars.charAt(Math.floor(Math.random() * chars.length));
+  }
+  return result;
+}
 
+// SHA-256 哈希函数
 function sha256(message: string): string {
   return createHash('sha256').update(message).digest('hex');
 }
 
+// 使用 PBKDF2 派生密钥（与前端方案A一致）
+function pbkdf2(password: string, salt: string): string {
+  // Node.js 内置 pbkdf2
+  const { pbkdf2Sync } = require('crypto');
+  const derived = pbkdf2Sync(password, salt, 100000, 64, 'sha256');
+  return derived.toString('hex');
+}
+
 // 初始化用户
-function initUser(username: string, passwordHash: string) {
-  users.set(username, { passwordHash });
+function initUser(username: string, passwordHash: string, salt: string) {
+  users.set(username, { passwordHash, salt });
   const dbPath = path.join(DB_DIR, `user-${username}.db`);
   return new PouchDB(dbPath);
 }
@@ -1608,7 +2062,7 @@ app.use('/db/:username/*', async (req, res, next) => {
     return res.status(401).json({ error: '用户不存在' });
   }
 
-  // 验证密码（Bearer token 格式: "Bearer <passwordHash>"）
+  // 验证密码（Bearer token 格式）
   const token = authHeader?.replace('Bearer ', '');
   if (token !== user.passwordHash) {
     return res.status(403).json({ error: '密码错误' });
@@ -1629,8 +2083,10 @@ app.post('/register', async (req, res) => {
     return res.status(409).json({ error: '用户已存在' });
   }
 
-  const passwordHash = sha256(password);  // 简单哈希，实际可加盐
-  initUser(username, passwordHash);
+  // 使用 PBKDF2 加盐哈希
+  const salt = generateSalt(16);
+  const passwordHash = pbkdf2(password, salt);
+  initUser(username, passwordHash, salt);
 
   res.json({ success: true, message: '用户注册成功' });
 });
@@ -1644,12 +2100,13 @@ app.post('/login', async (req, res) => {
     return res.status(401).json({ error: '用户不存在' });
   }
 
-  const passwordHash = sha256(password);
+  // 使用相同盐验证
+  const passwordHash = pbkdf2(password, user.salt);
   if (passwordHash !== user.passwordHash) {
     return res.status(403).json({ error: '密码错误' });
   }
 
-  // 返回 token（用于后续请求）
+  // 返回 token
   res.json({ success: true, token: user.passwordHash });
 });
 
@@ -1819,15 +2276,178 @@ describe('PouchSyncAdapter', () => {
 
 ## 10. 依赖清单
 
+### 10.1 前端依赖
+
 | 包名 | 版本 | 用途 |
 |------|------|------|
 | `pouchdb` | ^8.0.0 | 客户端数据库 |
 | `socket.io-client` | ^4.7.0 | WebSocket 客户端 |
-| `crypto-js` | ^4.2.0 | AES 加密（备选） |
+
+### 10.2 服务端依赖
+
+| 包名 | 版本 | 用途 |
+|------|------|------|
+| `pouchdb` | ^8.0.0 | 服务端数据库 |
+| `express` | ^4.18.0 | HTTP 服务 |
+| `socket.io` | ^4.7.0 | WebSocket 服务 |
+| `cors` | ^2.8.0 | 跨域中间件 |
 
 ---
 
-## 11. 风险与缓解
+## 11. 服务端部署指南
+
+### 11.1 程序存放位置
+
+```
+📁 exomind/
+├── 📁 server/                    # 服务端代码
+│   ├── package.json             # 依赖配置
+│   ├── config.js                # 配置文件
+│   └── pouchdb-server.js        # 入口文件
+│
+└── 📁 data/                     # 数据库存储（自动创建）
+    ├── user-alice.db/          # 用户 alice 的数据库
+    └── user-bob.db/            # 用户 bob 的数据库
+```
+
+### 11.2 安装依赖
+
+**使用 Bun**（推荐，与主项目一致）
+
+```bash
+cd server
+bun init -y
+bun add pouchdb express socket.io cors
+```
+
+**使用 npm**
+
+```bash
+cd server
+npm init -y
+npm install pouchdb express socket.io cors
+```
+
+### 11.3 配置文件
+
+```javascript
+// server/config.js
+
+export default {
+  // 服务端口
+  port: 6984,
+
+  // 数据库存储目录
+  dataDir: './data',
+
+  // CORS 来源（开发环境可放宽）
+  corsOrigin: '*',
+
+  // 轮询间隔（毫秒），实时模式不使用
+  pollingInterval: 300000,
+};
+```
+
+### 11.4 启动命令
+
+**开发模式**
+
+```bash
+cd server
+bun run dev        # 热重载（需要安装 bun-node 或 tsx）
+
+# 或直接运行
+node pouchdb-server.js
+bun run pouchdb-server.js
+```
+
+**生产模式（PM2）**
+
+```bash
+cd server
+bun build --target bun ./pouchdb-server.js
+
+# 使用 PM2 管理
+pm2 start pouchdb-server.js --name exomind-sync
+pm2 startup          # 设置开机自启
+pm2 save             # 保存进程列表
+```
+
+**Windows 服务**
+
+使用 NSSM 创建服务：
+
+```powershell
+nssm install ExoMind-Sync "C:\Program Files\nodejs\node.exe" "D:\exomind\server\pouchdb-server.js"
+nssm set ExoMind-Sync AppDirectory "D:\exomind\server"
+nssm set ExoMind-Sync DisplayName "ExoMind Sync Server"
+nssm set ExoMind-Sync Start SERVICE_AUTO_START
+nssm set ExoMind-Sync AppStdout "D:\exomind\logs\stdout.log"
+nssm set ExoMind-Sync AppStderr "D:\exomind\logs\stderr.log"
+```
+
+### 11.5 验证服务
+
+```bash
+# 测试连接
+curl http://localhost:6984/
+
+# 返回示例：
+# { "status": "ok", "message": "PouchDB Server running" }
+
+# 测试注册
+curl -X POST http://localhost:6984/register \
+  -H "Content-Type: application/json" \
+  -d '{"username":"alice","password":"test123"}'
+
+# 返回示例：
+# { "success": true, "message": "用户注册成功" }
+```
+
+### 11.6 网络配置
+
+| 配置项 | 值 | 说明 |
+|--------|-----|------|
+| 端口 | **6984** | TCP（默认） |
+| 协议 | HTTP + WebSocket | `http://` 和 `ws://` |
+| 认证 | Bearer Token | 请求头传递 |
+| CORS | `*` | 开发环境可放宽 |
+| 防火墙 | 开放 6984 | 允许局域网访问 |
+
+### 11.7 常见问题
+
+**Q: 端口被占用**
+```bash
+# Windows
+netstat -ano | findstr :6984
+
+# 结束占用进程
+taskkill /PID <PID> /F
+
+# 或换端口
+PORT=8080 bun run pouchdb-server.js
+```
+
+**Q: 局域网无法访问**
+1. 检查防火墙设置
+2. 确认服务监听 `0.0.0.0` 而非 `127.0.0.1`
+3. 确认 CORS 配置允许局域网 IP
+
+**Q: 用户数据丢失**
+- 当前用户数据存储在内存，服务重启后丢失
+- 后续扩展：持久化用户数据到 JSON 文件
+
+### 11.8 日志位置
+
+```bash
+📁 logs/
+├── stdout.log   # 标准输出
+└── stderr.log  # 错误输出
+```
+
+---
+
+## 12. 风险与缓解
 
 | 风险 | 影响 | 缓解措施 |
 |------|------|----------|
