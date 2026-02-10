@@ -10,7 +10,10 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
-import { useSyncStore } from '@/ui/stores/sync-store';
+import {
+  useSyncStore,
+  type Conflict,
+} from '@/ui/stores/sync-store';
 
 interface LogEntry {
   level: 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
@@ -24,17 +27,21 @@ export function SyncTestPage() {
   const [serverUrl, setServerUrl] = useState('http://localhost:6984');
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
+  const [expandedConflict, setExpandedConflict] = useState<string | null>(null);
 
   const {
     status,
     isLoggedIn,
     currentUser,
+    conflicts,
     login,
     logout,
     connect,
     disconnect,
     syncEvents,
     syncConfig,
+    getConflicts,
+    resolveConflict,
   } = useSyncStore();
 
   // 自动滚动日志
@@ -43,6 +50,13 @@ export function SyncTestPage() {
       logsRef.current.scrollTop = logsRef.current.scrollHeight;
     }
   }, [logs]);
+
+  // 初始加载冲突列表
+  useEffect(() => {
+    if (status.state === 'connected') {
+      getConflicts();
+    }
+  }, [status.state, getConflicts]);
 
   // 添加日志
   const addLog = (level: LogEntry['level'], message: string) => {
@@ -73,6 +87,11 @@ export function SyncTestPage() {
       addLog('INFO', `正在连接到 ${serverUrl}...`);
       await connect(serverUrl);
       addLog('SUCCESS', '连接成功');
+      // 连接成功后获取冲突列表
+      const conflictList = await getConflicts();
+      if (conflictList.length > 0) {
+        addLog('WARN', `检测到 ${conflictList.length} 个冲突`);
+      }
     } catch (error) {
       addLog('ERROR', `连接失败: ${(error as Error).message}`);
     }
@@ -87,21 +106,58 @@ export function SyncTestPage() {
   // 处理同步事件
   const handleSyncEvents = async () => {
     addLog('INFO', '正在同步事件...');
-    await syncEvents();
-    addLog('SUCCESS', '事件同步完成');
+    try {
+      const result = await syncEvents();
+      if (result.success) {
+        addLog('SUCCESS', `事件同步完成: 上传 ${result.uploaded}, 下载 ${result.downloaded}`);
+      } else {
+        addLog('ERROR', `事件同步失败: ${result.errors.join(', ')}`);
+      }
+    } catch (error) {
+      addLog('ERROR', `事件同步失败: ${(error as Error).message}`);
+    }
   };
 
   // 处理同步配置
   const handleSyncConfig = async () => {
     addLog('INFO', '正在同步配置...');
-    await syncConfig();
-    addLog('SUCCESS', '配置同步完成');
+    try {
+      const result = await syncConfig();
+      if (result.success) {
+        addLog('SUCCESS', `配置同步完成: 上传 ${result.uploaded}, 下载 ${result.downloaded}`);
+      } else {
+        addLog('ERROR', `配置同步失败: ${result.errors.join(', ')}`);
+      }
+    } catch (error) {
+      addLog('ERROR', `配置同步失败: ${(error as Error).message}`);
+    }
   };
 
   // 处理登出
   const handleLogout = () => {
     logout();
     addLog('INFO', '已退出登录');
+  };
+
+  // 处理解决冲突
+  const handleResolveConflict = async (
+    conflict: Conflict,
+    resolution: 'local' | 'remote' | 'merge'
+  ) => {
+    try {
+      addLog('INFO', `正在解决冲突 ${conflict.docId}...`);
+      await resolveConflict(conflict.docId, resolution);
+      addLog('SUCCESS', `冲突 ${conflict.docId} 已解决`);
+      // 刷新冲突列表
+      await getConflicts();
+    } catch (error) {
+      addLog('ERROR', `解决冲突失败: ${(error as Error).message}`);
+    }
+  };
+
+  // 格式化时间显示
+  const formatTimestamp = (timestamp: number): string => {
+    return new Date(timestamp).toLocaleString();
   };
 
   return (
@@ -216,6 +272,129 @@ export function SyncTestPage() {
 
             <div className="text-sm">
               冲突数量: {status.conflictCount}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 冲突列表 */}
+      {status.state === 'connected' && conflicts.length > 0 && (
+        <Card>
+          <CardHeader>
+            <CardTitle>冲突列表 ({conflicts.length})</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {conflicts.map((conflict) => (
+              <div
+                key={conflict.id}
+                className="border rounded-lg p-4 space-y-3"
+              >
+                <div className="flex items-center justify-between">
+                  <div className="font-mono text-sm">{conflict.docId}</div>
+                  <Badge variant={conflict.resolved ? 'default' : 'destructive'}>
+                    {conflict.resolved ? '已解决' : '未解决'}
+                  </Badge>
+                </div>
+
+                <div className="grid grid-cols-2 gap-4 text-sm">
+                  <div className="bg-blue-50 dark:bg-blue-950 p-3 rounded">
+                    <div className="font-medium mb-1">本地版本</div>
+                    <div className="text-muted-foreground">
+                      {conflict.local.timestamp > 0
+                        ? formatTimestamp(conflict.local.timestamp)
+                        : '未知时间'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      设备: {conflict.local.deviceId.slice(0, 8)}...
+                    </div>
+                    <pre className="mt-2 text-xs overflow-auto max-h-24">
+                      {JSON.stringify(conflict.local.value, null, 2)}
+                    </pre>
+                  </div>
+
+                  <div className="bg-green-50 dark:bg-green-950 p-3 rounded">
+                    <div className="font-medium mb-1">远端版本</div>
+                    <div className="text-muted-foreground">
+                      {conflict.remote.timestamp > 0
+                        ? formatTimestamp(conflict.remote.timestamp)
+                        : '未知时间'}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      设备: {conflict.remote.deviceId.slice(0, 8)}...
+                    </div>
+                    <pre className="mt-2 text-xs overflow-auto max-h-24">
+                      {JSON.stringify(conflict.remote.value, null, 2)}
+                    </pre>
+                  </div>
+                </div>
+
+                <div className="flex gap-2">
+                  <Button
+                    size="sm"
+                    onClick={() => handleResolveConflict(conflict, 'local')}
+                  >
+                    保留本地
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => handleResolveConflict(conflict, 'remote')}
+                  >
+                    保留远端
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="secondary"
+                    onClick={() => handleResolveConflict(conflict, 'merge')}
+                  >
+                    手动合并
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* 导入导出 */}
+      {status.state === 'connected' && (
+        <Card>
+          <CardHeader>
+            <CardTitle>导入导出</CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="flex gap-4 items-center">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  addLog('INFO', '正在从本地导入...');
+                  // TODO: 实现导入功能
+                  addLog('SUCCESS', '导入功能待实现');
+                }}
+              >
+                从本地导入
+              </Button>
+              <select
+                className="border rounded px-2 py-1 text-sm"
+                defaultValue="merge"
+              >
+                <option value="merge">合并</option>
+                <option value="skip">跳过</option>
+                <option value="overwrite">覆盖</option>
+              </select>
+            </div>
+
+            <div className="flex gap-4">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  addLog('INFO', '正在导出到文件...');
+                  // TODO: 实现导出功能
+                  addLog('SUCCESS', '导出功能待实现');
+                }}
+              >
+                导出到文件
+              </Button>
             </div>
           </CardContent>
         </Card>
