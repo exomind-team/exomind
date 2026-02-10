@@ -3,7 +3,7 @@
 
 export default {
   // 服务端口
-  port: 6985,
+  port: 6986,
 
   // 数据库存储目录
   dataDir: './data',

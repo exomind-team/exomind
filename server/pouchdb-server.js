@@ -42,13 +42,10 @@ function log(message) {
   console.log(logMessage.trim());
 }
 
-// pouchdb-server 路由前缀
-const POUCHDB_PREFIX = '';
-
 // pouchdb-server 进程
 let pouchdbServerProcess = null;
 
-// 创建 Express 应用
+// 创建 Express 应用（用于自定义路由）
 const app = express();
 const httpServer = createServer(app);
 
@@ -101,6 +98,8 @@ app.get('/stats', async (req, res) => {
 
 /**
  * 启动 pouchdb-server 子进程
+ * 注意：pouchdb-server 会占用 config.port，所以我们需要监听不同的端口
+ * 或者直接使用 pouchdb-server 作为主服务器
  */
 function startPouchDBServer() {
   log('启动官方 pouchdb-server...');
@@ -118,13 +117,12 @@ function startPouchDBServer() {
   const args = [
     '-p', String(config.port),
     '-d', DB_DIR,
-    '--prefix', POUCHDB_PREFIX,
   ];
 
-  log(`执行: ${pouchdbBin} ${args.join(' ')}`);
+  log(`执行: node ${pouchdbBin} ${args.join(' ')}`);
 
-  pouchdbServerProcess = spawn(pouchdbBin, args, {
-    stdio: ['ignore', 'pipe', 'pipe'],
+  pouchdbServerProcess = spawn('node', [pouchdbBin, ...args], {
+    stdio: ['pipe', 'pipe', 'pipe'],
     env: { ...process.env },
   });
 
@@ -155,27 +153,20 @@ function startPouchDBServer() {
   return true;
 }
 
-// 启动服务器
+// 启动 pouchdb-server 作为主服务器
 const PORT = config.port;
 const HOST = config.host;
 
-httpServer.listen(PORT, HOST, () => {
-  log(`========================================`);
-  log(`PouchDB Sync Server 启动成功`);
-  log(`========================================`);
-  log(`HTTP 服务器: http://${HOST}:${PORT}`);
-  log(`PouchDB 端点: http://${HOST}:${PORT}/:dbname`);
+log('========================================');
+log('PouchDB Sync Server 启动中...');
+log('========================================');
+
+if (startPouchDBServer()) {
+  log(`pouchdb-server 已在后台启动，端口: ${PORT}`);
   log(`数据目录: ${DB_DIR}`);
   log(`日志目录: ${LOGS_DIR}`);
-  log(`========================================`);
-
-  // 延迟启动 pouchdb-server
-  setTimeout(() => {
-    if (!startPouchDBServer()) {
-      log('警告: pouchdb-server 启动失败，服务器将以只读模式运行');
-    }
-  }, 500);
-});
+  log('========================================');
+}
 
 // 优雅关闭
 process.on('SIGINT', () => {
@@ -185,11 +176,8 @@ process.on('SIGINT', () => {
     pouchdbServerProcess.kill('SIGTERM');
   }
 
-  httpServer.close(() => {
-    log('HTTP 服务器已关闭');
-    process.exit(0);
-  });
+  process.exit(0);
 });
 
 // 导出用于测试
-export { app, httpServer };
+export { app };
