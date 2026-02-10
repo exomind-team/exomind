@@ -17,7 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
-import { EventStorage, type Event as StorageEvent } from '@/lib/storage/event-storage';
+import { getEventStorage, type Event as StorageEvent, type EventStorage } from '@/lib/storage/event-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 
 export function ChatPage() {
@@ -29,13 +29,12 @@ export function ChatPage() {
 
   // 初始化 EventStorage 和加载事件
   useEffect(() => {
-    const userId = currentUser || 'anonymous';
-    const storage = new EventStorage(userId);
+    // 使用共享的 EventStorage 单例，与 TimeBlockService 保持一致
+    const storage = getEventStorage(currentUser || undefined);
     storageRef.current = storage;
 
     const loadEvents = async () => {
       const loaded = await storage.getEvents();
-      console.log('[ChatPage] 从 PouchDB 加载事件:', loaded.length, '条');
 
       // 转换为 UI 使用的 Event 格式
       const converted: Event[] = loaded.map((e: StorageEvent) => ({
@@ -51,9 +50,8 @@ export function ChatPage() {
 
     loadEvents();
 
-    // 监听远程变更
-    const unsubscribe = storage.onRemoteChange((change) => {
-      console.log('[ChatPage] 收到远程变更:', change);
+    // 监听变更（本地和远程）
+    const unsubscribe = storage.onRemoteChange(() => {
       loadEvents();
     });
 
@@ -73,7 +71,8 @@ export function ChatPage() {
     return () => {
       unsubscribe();
       storage.stopSync();
-      storage.close();
+      // 注意：不调用 storage.close()，因为 EventStorage 是共享的单例
+      // 其他组件（如 TimeBlockService）可能还在使用它
     };
   }, [currentUser, isLoggedIn]);
 
@@ -88,8 +87,6 @@ export function ChatPage() {
   const handleSend = useCallback(async (content: string) => {
     const trimmed = content.trim();
     if (!trimmed) return;
-
-    console.log('[ChatPage] 发送事件到 PouchDB:', trimmed);
 
     // 使用 EventStorage 保存到 PouchDB
     if (storageRef.current) {

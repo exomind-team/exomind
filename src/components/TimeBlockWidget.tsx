@@ -163,6 +163,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
     };
 
     const block = await timeBlockService.startBlock(taskName.trim(), config);
+    setElapsed(block.elapsed);
     setTimerState('running');
     isRunningRef.current = true;
     startTimeRef.current = block.startTime;

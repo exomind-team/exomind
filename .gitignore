@@ -86,3 +86,5 @@ playwright-report/
 .playwright-mcp/
 server/data/*
 server/log.txt
+test-results/.last-run.json
+test-results/*
