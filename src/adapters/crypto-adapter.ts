@@ -205,22 +205,52 @@ export async function sha256(message: string): Promise<string> {
 }
 
 /**
- * 带盐哈希密码
+ * PBKDF2-HMAC-SHA256 哈希长度（32字节 = 256位）
+ */
+const HASH_LENGTH = 32;
+
+/**
+ * 带盐哈希密码（使用 PBKDF2-HMAC-SHA256）
  *
  * @param password - 原始密码
- * @param salt - 盐值
- * @returns 格式化的哈希字符串 "salt:hash"
+ * @param salt - 盐值（Base64 编码）
+ * @returns 格式化的哈希字符串 "$pbkdf2$salt$hash"
  */
 export async function hashPassword(
   password: string,
   salt: string
 ): Promise<string> {
-  const hash = await sha256(salt + password);
-  return `${salt}:${hash}`;
+  const encoder = new TextEncoder();
+  const saltBytes = Uint8Array.from(atob(salt), (c) => c.charCodeAt(0));
+
+  // 使用 PBKDF2 派生密钥
+  const passwordKey = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: saltBytes,
+      iterations: PBKDF2_ITERATIONS,
+      hash: 'SHA-256',
+    },
+    passwordKey,
+    HASH_LENGTH * 8
+  );
+
+  const hashBytes = new Uint8Array(derivedBits);
+  const hash = btoa(String.fromCharCode(...hashBytes));
+
+  return `$pbkdf2$${salt}$${hash}`;
 }
 
 /**
- * 验证密码
+ * 验证密码（使用 PBKDF2-HMAC-SHA256）
  *
  * @param password - 原始密码
  * @param stored - 存储的格式化哈希字符串
@@ -230,13 +260,45 @@ export async function verifyPassword(
   password: string,
   stored: string
 ): Promise<boolean> {
-  const [salt] = stored.split(':');
-  const computedHash = await sha256(salt + password);
-  return `${salt}:${computedHash}` === stored;
+  // 解析存储的哈希字符串格式: $pbkdf2$salt$hash
+  const parts = stored.split('$');
+  if (parts.length !== 4 || parts[0] !== '' || parts[1] !== 'pbkdf2') {
+    return false;
+  }
+
+  const salt = parts[2];
+  const storedHash = parts[3];
+
+  // 重新计算哈希
+  const encoder = new TextEncoder();
+  const saltBytes = Uint8Array.from(atob(salt), (c) => c.charCodeAt(0));
+
+  const passwordKey = await crypto.subtle.importKey(
+    'raw',
+    encoder.encode(password),
+    'PBKDF2',
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await crypto.subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt: saltBytes,
+      iterations: PBKDF2_ITERATIONS,
+      hash: 'SHA-256',
+    },
+    passwordKey,
+    HASH_LENGTH * 8
+  );
+
+  const computedHash = btoa(String.fromCharCode(...new Uint8Array(derivedBits)));
+
+  return computedHash === storedHash;
 }
 
 /**
- * 便捷函数：生成带盐哈希的密码
+ * 便捷函数：生成带盐哈希的密码（自动生成盐）
  *
  * @param password - 原始密码
  * @returns 格式化的哈希字符串（自动生成盐）

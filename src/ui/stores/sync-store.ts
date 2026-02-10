@@ -34,14 +34,6 @@ async function loadSyncAdapter(): Promise<typeof import('@/adapters/pouch-sync')
   return module;
 }
 
-function getSyncAdapter(): PouchSyncAdapter {
-  if (!syncAdapter) {
-    // 运行时创建实例（模块加载后）
-    throw new Error('同步适配器未初始化，请先调用 initSyncAdapter()');
-  }
-  return syncAdapter;
-}
-
 // 初始化同步适配器（在用户登录后调用）
 export async function initSyncAdapter(): Promise<PouchSyncAdapter> {
   if (!syncAdapter) {
