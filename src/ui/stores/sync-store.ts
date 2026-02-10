@@ -19,7 +19,6 @@ import { PouchSyncAdapter } from '@/adapters/pouch-sync';
 import {
   CryptoAdapter,
   hashPasswordWithSalt,
-  verifyPassword,
 } from '@/adapters/crypto-adapter';
 
 // 创建 PouchSyncAdapter 实例（单例）
@@ -30,20 +29,6 @@ function getSyncAdapter(): PouchSyncAdapter {
     syncAdapter = new PouchSyncAdapter();
   }
   return syncAdapter;
-}
-
-// 获取设备 ID
-function getDeviceId(): string {
-  if (typeof window === 'undefined') {
-    return 'server-' + Date.now();
-  }
-
-  const stored = localStorage.getItem('exomind:deviceId');
-  if (stored) return stored;
-
-  const newId = 'device-' + crypto.randomUUID();
-  localStorage.setItem('exomind:deviceId', newId);
-  return newId;
 }
 
 // 获取设备信息
