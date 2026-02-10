@@ -1,6 +1,6 @@
 /**
  * Interfaces - 统一导出
  */
-export * from './asr.port';
-export * from './storage.port';
-export * from './sync.port';
+export * from './asr.port.js';
+export * from './storage.port.js';
+export * from './sync.port.js';

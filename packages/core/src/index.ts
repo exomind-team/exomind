@@ -9,13 +9,13 @@
  */
 
 // Environment
-export * from './environment';
+export * from './environment/index.js';
 
 // Services
-export * from './services';
+export * from './services/index.js';
 
 // Interfaces
-export * from './interfaces';
+export * from './interfaces/index.js';
 
 // Adapters
-export * from './adapters';
+export * from './adapters/index.js';

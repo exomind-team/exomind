@@ -15,7 +15,7 @@
  */
 
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { MOSSASRAdapter } from '@exomind/core';
+import { MossASRAdapter } from '@exomind/core';
 import type { MOSSASRResult, ASRResult } from '@exomind/core';
 import { getEventLogService } from '@exomind/core';
 import { VoiceInputButton } from '../components/VoiceInputButton';
@@ -46,7 +46,7 @@ export function MOSSASRTestPage() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [connectionStatus, setConnectionStatus] = useState<string>('未检测');
 
-  const adapterRef = useRef<MOSSASRAdapter | null>(null);
+  const adapterRef = useRef<MossASRAdapter | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -56,9 +56,9 @@ export function MOSSASRTestPage() {
   // 初始化适配器
   const getAdapter = useCallback(() => {
     if (!adapterRef.current) {
-      adapterRef.current = new MOSSASRAdapter({ apiKey: apiKey || import.meta.env?.VITE_MOSS_API_KEY || '' });
+      adapterRef.current = new MossASRAdapter({ apiKey: apiKey || import.meta.env?.VITE_MOSS_API_KEY || '' });
     } else {
-      adapterRef.current = new MOSSASRAdapter({ apiKey: apiKey || import.meta.env?.VITE_MOSS_API_KEY || '' });
+      adapterRef.current = new MossASRAdapter({ apiKey: apiKey || import.meta.env?.VITE_MOSS_API_KEY || '' });
     }
     return adapterRef.current;
   }, [apiKey]);

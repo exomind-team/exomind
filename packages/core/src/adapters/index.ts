@@ -1,8 +1,8 @@
 /**
  * Adapters - 导出
  */
-export { WebStorageAdapter } from './web-storage';
-export { PouchSyncAdapter, createPouchSyncAdapter } from './pouch-sync';
+export { WebStorageAdapter } from './web-storage.js';
+export { PouchSyncAdapter, createPouchSyncAdapter } from './pouch-sync.js';
 export {
   deriveKeyFromPassword,
   generateSalt,
@@ -13,11 +13,11 @@ export {
   quickDecrypt,
   hashPasswordWithSalt,
   verifyPassword,
-} from './crypto-adapter';
+} from './crypto-adapter.js';
 
 // ASR Adapters (stub implementations - pending full migration)
 export {
   MossASRAdapter,
   VolcanoHTTPASRAdapter,
   VolcanoEngineASRAdapter,
-} from './asr';
+} from './asr/index.js';

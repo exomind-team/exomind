@@ -19,14 +19,18 @@
  */
 
 import type { ASRResult } from '../interfaces/asr.port.js';
+import type { MOSSASRResult } from '../adapters/asr/moss-asr.js';
 import {
   VolcanoHTTPASRAdapter,
   VolcanoEngineASRAdapter,
   MossASRAdapter,
-} from '../adapters/asr';
+} from '../adapters/asr/index.js';
 
 // Adapter 类型
 export type ASRAdapterType = 'http' | 'websocket' | 'moss';
+
+// 导出 MOSSASRResult 供 UI 使用
+export type { MOSSASRResult };
 
 /**
  * VoiceChatService 接口
