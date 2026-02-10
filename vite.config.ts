@@ -18,14 +18,14 @@ export default defineConfig(async () => ({
     },
   },
 
-  // 排除 PouchDB 的依赖优化，避免浏览器兼容性问题
+  // 排除 PouchDB 和 spark-md5 的依赖优化，避免浏览器兼容性问题
   optimizeDeps: {
-    exclude: ['pouchdb'],
+    exclude: ['pouchdb', 'spark-md5'],
   },
 
   // SSR 配置
   ssr: {
-    noExternal: ['pouchdb'],
+    noExternal: ['pouchdb', 'spark-md5'],
   },
 
   // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
