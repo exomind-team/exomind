@@ -11,10 +11,10 @@
  * └─────────────────────────────────────────┘
  */
 
-import { useState, KeyboardEvent, useCallback } from 'react';
+import { useState, KeyboardEvent, useCallback, useRef, useEffect } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { VoiceInputButton } from './VoiceInputButton';
 import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
 
@@ -39,6 +39,10 @@ export interface VoiceMessageInputProps {
   inputClassName?: string;
   /** 按钮大小 */
   buttonSize?: number;
+  /** 输入框最小行数 */
+  minRows?: number;
+  /** 输入框最大行数（超过后内部滚动） */
+  maxRows?: number;
 }
 
 export function VoiceMessageInput({
@@ -52,8 +56,35 @@ export function VoiceMessageInput({
   enableShortcut = true,
   inputClassName,
   buttonSize = 40,
+  minRows = 2,
+  maxRows = 6,
 }: VoiceMessageInputProps) {
   const [value, setValue] = useState('');
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+
+  const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
+    const el = target ?? textareaRef.current;
+    if (!el) return;
+
+    const computed = window.getComputedStyle(el);
+    const lineHeight = Number.parseFloat(computed.lineHeight) || 20;
+    const paddingTop = Number.parseFloat(computed.paddingTop) || 0;
+    const paddingBottom = Number.parseFloat(computed.paddingBottom) || 0;
+    const borderTop = Number.parseFloat(computed.borderTopWidth) || 0;
+    const borderBottom = Number.parseFloat(computed.borderBottomWidth) || 0;
+    const vertical = paddingTop + paddingBottom + borderTop + borderBottom;
+    const minHeight = Math.ceil(lineHeight * minRows + vertical);
+    const maxHeight = Math.ceil(lineHeight * maxRows + vertical);
+
+    el.style.height = 'auto';
+    const nextHeight = Math.max(minHeight, Math.min(el.scrollHeight, maxHeight));
+    el.style.height = `${nextHeight}px`;
+    el.style.overflowY = el.scrollHeight > maxHeight ? 'auto' : 'hidden';
+  }, [maxRows, minRows]);
+
+  useEffect(() => {
+    resizeTextarea();
+  }, [value, resizeTextarea]);
 
   // 发送消息
   const handleSend = useCallback(() => {
@@ -65,7 +96,7 @@ export function VoiceMessageInput({
   }, [value, onSend]);
 
   // 键盘事件
-  const handleKeyDown = (e: KeyboardEvent<HTMLInputElement>) => {
+  const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -86,7 +117,7 @@ export function VoiceMessageInput({
   }, []);
 
   return (
-    <div className="flex items-center gap-2 px-3 py-2 border-t bg-card shrink-0 safe-area-pb">
+    <div className="flex items-end gap-2 px-3 py-2 border-t bg-card shrink-0 safe-area-pb">
       {/* 语音输入按钮 */}
       <VoiceInputButton
         onResult={handleVoiceResult}
@@ -103,14 +134,23 @@ export function VoiceMessageInput({
       />
 
       {/* 文本输入框 */}
-      <Input
+      <Textarea
+        ref={textareaRef}
         value={value}
-        onChange={(e) => setValue(e.target.value)}
+        onChange={(e) => {
+          setValue(e.target.value);
+          resizeTextarea(e.target);
+        }}
         onKeyDown={handleKeyDown}
         placeholder={placeholder}
         className={inputClassName}
+        rows={minRows}
+        data-testid="event-input-textarea"
+        data-gramm="false"
+        spellCheck={false}
         style={{
           flex: 1,
+          minHeight: '56px',
         }}
       />
 
@@ -120,6 +160,8 @@ export function VoiceMessageInput({
         disabled={!value.trim()}
         size="icon"
         className="shrink-0"
+        type="button"
+        data-testid="event-send-button"
       >
         <Send size={18} />
       </Button>

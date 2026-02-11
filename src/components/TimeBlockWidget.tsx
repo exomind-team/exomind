@@ -250,7 +250,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
   const isPaused = timerState === 'paused';
 
   return (
-    <div className="border-b bg-muted/30">
+    <div className="border-b bg-muted/30" data-testid="timeblock-widget">
       {/* 状态栏 */}
       <div className="flex items-center justify-between px-4 py-3">
         {/* 左侧：控制按钮 */}
