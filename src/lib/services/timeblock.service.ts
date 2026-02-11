@@ -66,11 +66,19 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async loadActiveBlock(): Promise<ActiveBlockData | null> {
     const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
-    return data || null;
+    if (!data) return null;
+
+    const normalized = this.normalizeActiveBlock(data);
+    if (this.shouldPersistNormalized(data, normalized)) {
+      await this.env.storage.write(ACTIVE_BLOCK_KEY, normalized);
+    }
+
+    return normalized;
   }
 
   async startBlock(name: string, config: TimerConfig): Promise<ActiveBlockData> {
     const startId = crypto.randomUUID();
+    const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
       ? (config.minutes ?? 25) * 60 * 1000
       : 0;
@@ -82,10 +90,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const activeBlock: ActiveBlockData = {
       startId,
       name,
-      startTime: Date.now(),
+      startTime: now,
       elapsed: initialElapsed,
       mode: config.mode,
       targetMinutes: config.mode === 'countdown' ? (config.minutes ?? 25) : undefined,
+      updatedAt: now,
       paused: false,
     };
 
@@ -101,33 +110,39 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
     if (!data) return;
 
-    await this.env.storage.write(ACTIVE_BLOCK_KEY, {
-      ...data,
+    const now = Date.now();
+    const normalized = this.normalizeActiveBlock(data, now);
+    const pausedBlock: ActiveBlockData = {
+      ...normalized,
       paused: true,
-      pausedAt: Date.now(),
-    });
+      pausedAt: now,
+      updatedAt: now,
+    };
 
-    const block = await this.loadActiveBlock();
-    if (block) this.notifyChange(block);
+    await this.env.storage.write(ACTIVE_BLOCK_KEY, pausedBlock);
+    this.notifyChange(pausedBlock);
   }
 
   async resumeBlock(): Promise<void> {
     const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
     if (!data || !data.paused) return;
 
-    await this.env.storage.write(ACTIVE_BLOCK_KEY, {
+    const now = Date.now();
+    const resumedBlock: ActiveBlockData = {
       ...data,
       paused: false,
       pausedAt: undefined,
-    });
+      updatedAt: now,
+    };
 
-    const block = await this.loadActiveBlock();
-    if (block) this.notifyChange(block);
+    await this.env.storage.write(ACTIVE_BLOCK_KEY, resumedBlock);
+    this.notifyChange(resumedBlock);
   }
 
   async endBlock(feedback?: string): Promise<TimeBlock | null> {
-    const activeData = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
-    if (!activeData) return null;
+    const rawActiveData = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    if (!rawActiveData) return null;
+    const activeData = this.normalizeActiveBlock(rawActiveData);
 
     const endId = crypto.randomUUID();
 
@@ -188,6 +203,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     await this.env.storage.write(ACTIVE_BLOCK_KEY, {
       ...data,
       elapsed,
+      updatedAt: now,
     });
   }
 
@@ -214,6 +230,32 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private notifyChange(block: ActiveBlockData | null): void {
     this.listeners.forEach(cb => cb(block));
+  }
+
+  private normalizeActiveBlock(data: ActiveBlockData, now: number = Date.now()): ActiveBlockData {
+    // 兼容旧数据：无 updatedAt 时先以当前时间建立基准，避免一次性错误跳变
+    const baseTime = data.updatedAt ?? now;
+    if (data.paused) {
+      return {
+        ...data,
+        updatedAt: baseTime,
+      };
+    }
+
+    const delta = Math.max(0, now - baseTime);
+    const nextElapsed = data.mode === 'countdown'
+      ? Math.max(0, data.elapsed - delta)
+      : data.elapsed + delta;
+
+    return {
+      ...data,
+      elapsed: nextElapsed,
+      updatedAt: now,
+    };
+  }
+
+  private shouldPersistNormalized(prev: ActiveBlockData, next: ActiveBlockData): boolean {
+    return prev.elapsed !== next.elapsed || prev.updatedAt !== next.updatedAt;
   }
 }
 

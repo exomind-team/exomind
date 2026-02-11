@@ -66,6 +66,8 @@ export interface ActiveBlockData {
   targetMinutes?: number;
   elapsed: number;
   startTime: Timestamp;
+  /** 最近一次计时基准更新时间（毫秒时间戳） */
+  updatedAt?: Timestamp;
   paused: boolean;
   pausedAt?: Timestamp;
 }
