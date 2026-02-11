@@ -88,3 +88,4 @@ server/data/*
 server/log.txt
 test-results/.last-run.json
 test-results/*
+tests/e2e/report/

@@ -16,7 +16,8 @@ export default defineConfig(async () => ({
   resolve: {
     alias: {
       "@": path.resolve(__dirname, "./src"),
-      "events": "events",
+      // Force the npm polyfill package instead of Node builtin externalization.
+      "events": "events/",
     },
   },
 

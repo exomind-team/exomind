@@ -1,0 +1,67 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import type { EventData } from '@/lib/types/event';
+import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
+
+type StorageShape = {
+  read: <T>(key: string) => Promise<T | null>;
+  write: <T>(key: string, data: T) => Promise<void>;
+  delete: (key: string) => Promise<void>;
+  readAll: <T>() => Promise<Map<string, T>>;
+  clear: () => Promise<void>;
+  query: <T>(_opts: unknown) => Promise<{ items: T[]; total: number; hasMore: boolean }>;
+};
+
+function createMockStorage(initialEvents: EventData[] = []): StorageShape {
+  let current = initialEvents;
+  return {
+    read: vi.fn(async <T,>(key: string) => {
+      if (key !== 'events') return null;
+      return current as T;
+    }),
+    write: vi.fn(async <T,>(key: string, data: T) => {
+      if (key === 'events') {
+        current = data as EventData[];
+      }
+    }),
+    delete: vi.fn(async () => {}),
+    readAll: vi.fn(async <T,>() => new Map<string, T>()),
+    clear: vi.fn(async () => {}),
+    query: vi.fn(async <T,>() => ({ items: [] as T[], total: 0, hasMore: false })),
+  };
+}
+
+describe('EventLogService import/export', () => {
+  let storage: StorageShape;
+
+  beforeEach(() => {
+    storage = createMockStorage([
+      { id: 'e1', timestamp: 1000, content: 'old', tags: ['note'] },
+      { id: 'e2', timestamp: 2000, content: 'old-2', tags: ['note'] },
+    ]);
+  });
+
+  it('exports eventlog as json backup', async () => {
+    const service = new EventLogServiceImpl({ storage } as any);
+    const json = await service.exportEventsAsJson();
+    const parsed = JSON.parse(json) as { version: number; events: EventData[] };
+    expect(parsed.version).toBe(1);
+    expect(parsed.events).toHaveLength(2);
+  });
+
+  it('imports backup with merge strategy', async () => {
+    const service = new EventLogServiceImpl({ storage } as any);
+    const backup = JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      events: [
+        { id: 'e2', timestamp: 3000, content: 'new-2', tags: ['note'] },
+        { id: 'e3', timestamp: 4000, content: 'new-3', tags: ['note'] },
+      ],
+    });
+
+    const result = await service.importEventsFromJson(backup, 'merge');
+    expect(result.imported).toBe(1);
+    expect(result.skipped).toBe(1);
+    expect(result.total).toBe(3);
+  });
+});
