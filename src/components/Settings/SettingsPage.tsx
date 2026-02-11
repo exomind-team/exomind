@@ -1,17 +1,135 @@
-/**
- * Settings Page - 设置页面
- *
- * 遵循架构 v4.0，此处为占位实现
- * 后续将按新架构重建
- */
+import { useRef, useState } from 'react';
+import type { ChangeEvent } from 'react';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { getEventLogService } from '@/lib/services';
+
+type ImportStrategy = 'merge' | 'overwrite';
+
+function buildBackupFileName(): string {
+  const date = new Date().toISOString().slice(0, 10);
+  return `exomind-eventlog-${date}.json`;
+}
 
 export function SettingsPage() {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [importStrategy, setImportStrategy] = useState<ImportStrategy>('merge');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  const clearNotice = () => {
+    setStatusMessage('');
+    setErrorMessage('');
+  };
+
+  const handleExport = async () => {
+    clearNotice();
+    setLoading(true);
+
+    try {
+      const service = getEventLogService();
+      const json = await service.exportEventsAsJson();
+      const payload = JSON.parse(json) as { events?: unknown[] };
+      const count = Array.isArray(payload.events) ? payload.events.length : 0;
+
+      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      anchor.href = url;
+      anchor.download = buildBackupFileName();
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      URL.revokeObjectURL(url);
+
+      setStatusMessage(`导出成功，共 ${count} 条事件。`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`导出失败：${message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImportClick = () => {
+    fileInputRef.current?.click();
+  };
+
+  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
+    clearNotice();
+
+    const file = event.target.files?.[0];
+    if (!file) {
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const content = await file.text();
+      const service = getEventLogService();
+      const result = await service.importEventsFromJson(content, importStrategy);
+      setStatusMessage(
+        `导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`导入失败：${message}`);
+    } finally {
+      event.target.value = '';
+      setLoading(false);
+    }
+  };
+
   return (
-    <div className="settings-page p-6">
-      <h1 className="text-2xl font-bold mb-4">设置</h1>
+    <div className="settings-page p-6 space-y-4">
+      <h1 className="text-2xl font-bold">设置</h1>
       <p className="text-muted-foreground">
-        设置功能待按新架构重建。
+        事件日志导入导出（MVP）
       </p>
+
+      <div className="space-y-2 max-w-sm">
+        <Label htmlFor="import-strategy">导入策略</Label>
+        <select
+          id="import-strategy"
+          className="w-full rounded-md border px-3 py-2 text-sm"
+          value={importStrategy}
+          onChange={(e) => setImportStrategy(e.target.value as ImportStrategy)}
+          disabled={loading}
+        >
+          <option value="merge">merge（按 ID 去重合并）</option>
+          <option value="overwrite">overwrite（覆盖）</option>
+        </select>
+      </div>
+
+      <div className="flex flex-wrap gap-3">
+        <Button onClick={handleExport} disabled={loading}>
+          导出 JSON
+        </Button>
+        <Button variant="outline" onClick={handleImportClick} disabled={loading}>
+          导入 JSON
+        </Button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".json,application/json"
+          className="hidden"
+          onChange={handleImportFile}
+        />
+      </div>
+
+      {statusMessage && (
+        <p role="status" className="text-sm text-green-600">
+          {statusMessage}
+        </p>
+      )}
+
+      {errorMessage && (
+        <p role="alert" className="text-sm text-red-600">
+          {errorMessage}
+        </p>
+      )}
     </div>
   );
 }
