@@ -30,13 +30,14 @@ export function resolveDevPorts(env: EnvMap): { web: number; hmr: number } {
   return { web, hmr };
 }
 
-export function resolveSyncServerUrl(env: EnvMap): string {
+export function resolveSyncServerUrl(env: EnvMap, runtimeHostname: string = 'localhost'): string {
   if (env.VITE_SYNC_SERVER_URL) {
     return normalizeBaseUrl(env.VITE_SYNC_SERVER_URL);
   }
 
   const port = parsePort(env.EXOMIND_POUCHDB_PORT, DEFAULT_PORTS.pouchdb);
-  return `http://localhost:${port}`;
+  const hostname = runtimeHostname.trim() || 'localhost';
+  return `http://${hostname}:${port}`;
 }
 
 export function resolveAsrServerUrl(env: EnvMap): string {

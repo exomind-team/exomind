@@ -51,6 +51,17 @@ describe('port env resolver', () => {
   });
 
   it('resolveSyncServerUrl should fallback to EXOMIND_POUCHDB_PORT', () => {
+    const serverUrl = resolveSyncServerUrl(
+      {
+        EXOMIND_POUCHDB_PORT: '1930',
+      },
+      '192.168.1.88'
+    );
+
+    expect(serverUrl).toBe('http://192.168.1.88:1930');
+  });
+
+  it('resolveSyncServerUrl should default to localhost when runtime hostname absent', () => {
     const serverUrl = resolveSyncServerUrl({
       EXOMIND_POUCHDB_PORT: '1930',
     });

@@ -144,6 +144,14 @@ describe('SyncStore', () => {
       await expect(register('', 'password123')).rejects.toThrow('用户名和密码不能为空');
     });
 
+    it('应该拒绝包含空格的用户名', async () => {
+      const { register } = useSyncStore.getState();
+
+      await expect(register('bad user', 'password123')).rejects.toThrow('用户名不能包含空格');
+      await expect(register(' baduser', 'password123')).rejects.toThrow('用户名不能包含空格');
+      await expect(register('baduser ', 'password123')).rejects.toThrow('用户名不能包含空格');
+    });
+
     it('应该拒绝空密码', async () => {
       const { register } = useSyncStore.getState();
 
@@ -256,6 +264,14 @@ describe('SyncStore', () => {
       const { login } = useSyncStore.getState();
 
       await expect(login('', 'password123')).rejects.toThrow('用户名和密码不能为空');
+    });
+
+    it('应该拒绝包含空格的用户名', async () => {
+      const { login } = useSyncStore.getState();
+
+      await expect(login('bad user', 'password123')).rejects.toThrow('用户名不能包含空格');
+      await expect(login(' baduser', 'password123')).rejects.toThrow('用户名不能包含空格');
+      await expect(login('baduser ', 'password123')).rejects.toThrow('用户名不能包含空格');
     });
   });
 

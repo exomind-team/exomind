@@ -27,6 +27,7 @@ import type { PouchSyncAdapter } from '@/adapters/pouch-sync';
 
 // 存储动态导入的适配器实例
 let syncAdapter: PouchSyncAdapter | null = null;
+const USERNAME_WHITESPACE_PATTERN = /\s/;
 
 // 动态导入 PouchSyncAdapter（浏览器兼容）
 async function loadSyncAdapter(): Promise<typeof import('@/adapters/pouch-sync')> {
@@ -99,6 +100,15 @@ interface SyncState {
   resolveConflict: (docId: string, resolution: 'local' | 'remote' | 'merge') => Promise<void>;
 }
 
+function validateAuthInput(username: string, password: string): void {
+  if (!username || !password) {
+    throw new Error('用户名和密码不能为空');
+  }
+  if (USERNAME_WHITESPACE_PATTERN.test(username)) {
+    throw new Error('用户名不能包含空格');
+  }
+}
+
 export const useSyncStore = create<SyncState>()(
   persist(
     (set, get) => ({
@@ -129,9 +139,7 @@ export const useSyncStore = create<SyncState>()(
 
       // 登录
       async login(username: string, password: string) {
-        if (!username || !password) {
-          throw new Error('用户名和密码不能为空');
-        }
+        validateAuthInput(username, password);
 
         // 验证用户凭据
         const users = JSON.parse(
@@ -169,9 +177,7 @@ export const useSyncStore = create<SyncState>()(
 
       // 注册
       async register(username: string, password: string) {
-        if (!username || !password) {
-          throw new Error('用户名和密码不能为空');
-        }
+        validateAuthInput(username, password);
 
         if (password.length < 6) {
           throw new Error('密码长度至少6位');
