@@ -32,7 +32,7 @@ test.describe('事件日志页面 (EventLog)', () => {
 
   test('应该渲染 ChatPage 组件', async ({ page }) => {
     // 验证页面标题文本
-    await expect(page.getByText('事件日志')).toBeVisible();
+    await expect(page.locator('main h2').filter({ hasText: '事件日志' }).first()).toBeVisible();
 
     // 验证同步状态徽章存在
     await expect(page.locator('text=未同步')).toBeVisible();
@@ -48,10 +48,10 @@ test.describe('事件日志页面 (EventLog)', () => {
 
   test('应该显示消息输入框', async ({ page }) => {
     // 验证输入框占位符
-    await expect(page.locator('input[placeholder*="输入内容记录事件"]')).toBeVisible();
+    await expect(page.locator('[data-testid="event-input-textarea"][placeholder*="输入内容记录事件"]')).toBeVisible();
 
     // 验证发送按钮存在
-    await expect(page.locator('button[type="submit"]')).toBeVisible();
+    await expect(page.locator('[data-testid="event-send-button"]')).toBeVisible();
   });
 
   test('侧边栏应该高亮当前激活的导航项', async ({ page }) => {
@@ -73,7 +73,7 @@ test.describe('事件日志页面 (EventLog)', () => {
     await expect(mainContent).toBeVisible();
 
     // 验证头部区域存在（包含标题和状态）
-    await expect(page.getByText('事件日志')).toBeVisible();
+    await expect(page.locator('main h2').filter({ hasText: '事件日志' }).first()).toBeVisible();
 
     // 验证 TimeBlock 控件栏存在
     await expect(page.locator('[data-testid="timeblock-widget"], .timeblock-widget')).toBeVisible();
@@ -88,7 +88,7 @@ test.describe('事件日志页面 (EventLog)', () => {
     await expect(page).toHaveURL('/');
 
     // 返回事件日志页面
-    await page.locator('a:has-text("事件日志")').click();
+    await page.locator('[data-testid="device-panel"] a:has-text("事件日志")').click();
     await page.waitForLoadState('networkidle');
 
     // 验证返回事件日志页面
@@ -144,12 +144,12 @@ test.describe('事件日志页面 - 输入交互', () => {
   });
 
   test('输入框应该可聚焦', async ({ page }) => {
-    const input = page.locator('input[placeholder*="输入内容记录事件"]');
+    const input = page.locator('[data-testid="event-input-textarea"]');
     await expect(input).toBeEnabled();
   });
 
   test('输入内容后应该能触发发送逻辑', async ({ page }) => {
-    const input = page.locator('input[placeholder*="输入内容记录事件"]');
+    const input = page.locator('[data-testid="event-input-textarea"]');
 
     // 输入测试内容
     await input.fill('测试事件内容');
