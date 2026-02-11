@@ -103,6 +103,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
   const startTimer = useCallback(() => {
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
+      timerRef.current = null;
     }
 
     let lastFrameTime = Date.now();
@@ -146,6 +147,28 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
     timerRef.current = requestAnimationFrame(tick);
   }, [timerMode]);
 
+  // 统一由 timerState 驱动计时器生命周期，确保恢复运行态也能自动继续计时
+  useEffect(() => {
+    if (timerState !== 'running') {
+      isRunningRef.current = false;
+      if (timerRef.current) {
+        cancelAnimationFrame(timerRef.current);
+        timerRef.current = null;
+      }
+      return;
+    }
+
+    startTimer();
+
+    return () => {
+      isRunningRef.current = false;
+      if (timerRef.current) {
+        cancelAnimationFrame(timerRef.current);
+        timerRef.current = null;
+      }
+    };
+  }, [timerState, startTimer]);
+
   // 开始计时
   const handleStart = async () => {
     if (!taskName.trim()) {
@@ -165,9 +188,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
     const block = await timeBlockService.startBlock(taskName.trim(), config);
     setElapsed(block.elapsed);
     setTimerState('running');
-    isRunningRef.current = true;
     startTimeRef.current = block.startTime;
-    startTimer();
   };
 
   // 暂停计时
@@ -183,7 +204,6 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
   // 继续计时
   const handleResume = async () => {
     setTimerState('running');
-    startTimer();
     await timeBlockService.resumeBlock();
   };
 
