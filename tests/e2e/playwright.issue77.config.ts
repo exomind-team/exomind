@@ -4,7 +4,7 @@ const PORT = 1436;
 const BASE_URL = `http://localhost:${PORT}`;
 
 export default defineConfig({
-  testDir: './tests/e2e',
+  testDir: '.',
   fullyParallel: false,
   retries: 0,
   workers: 1,
@@ -24,10 +24,9 @@ export default defineConfig({
   ],
   webServer: {
     command: `bun run build && bunx vite preview --port ${PORT} --strictPort --host 0.0.0.0`,
-    cwd: '.',
+    cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: true,
     timeout: 180000,
   },
 });
-
