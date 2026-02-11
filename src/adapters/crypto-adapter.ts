@@ -7,6 +7,9 @@
  * - 用户密码哈希（本地注册场景）
  */
 
+import { pbkdf2 as pbkdf2Js } from '@noble/hashes/pbkdf2.js';
+import { sha256 as sha256Js } from '@noble/hashes/sha2.js';
+
 // 固定公开盐（用于多设备密钥派生，保持一致性）
 const ENCRYPTION_SALT = 'exomind-v1-salt';
 // 密码哈希盐（用于本地用户注册）
@@ -16,14 +19,96 @@ const PBKDF2_ITERATIONS = 100000;  // NIST 推荐至少 100,000 次
 const IV_LENGTH = 12;  // NIST 推荐 12 字节 = 96 位
 const KEY_LENGTH = 32;  // 256 位
 
+function getSubtleCrypto(): SubtleCrypto | null {
+  const subtle = globalThis.crypto?.subtle;
+  if (!subtle || typeof subtle.importKey !== 'function') {
+    return null;
+  }
+  return subtle;
+}
+
+function toBase64(bytes: Uint8Array): string {
+  return btoa(String.fromCharCode(...bytes));
+}
+
+function fromBase64(base64: string): Uint8Array {
+  return new Uint8Array(
+    atob(base64).split('').map((c) => c.charCodeAt(0))
+  );
+}
+
+function timingSafeEqualBytes(a: Uint8Array, b: Uint8Array): boolean {
+  if (a.length !== b.length) {
+    return false;
+  }
+
+  let result = 0;
+  for (let i = 0; i < a.length; i++) {
+    result |= a[i] ^ b[i];
+  }
+  return result === 0;
+}
+
+async function derivePasswordHashWithSubtle(password: string, salt: Uint8Array): Promise<Uint8Array> {
+  const subtle = getSubtleCrypto();
+  if (!subtle || typeof subtle.deriveBits !== 'function') {
+    throw new Error('WebCrypto PBKDF2 不可用');
+  }
+
+  const encoder = new TextEncoder();
+  const passwordKey = await subtle.importKey(
+    'raw',
+    encoder.encode(password + PASSWORD_HASH_SALT),
+    { name: 'PBKDF2' },
+    false,
+    ['deriveBits']
+  );
+
+  const derivedBits = await subtle.deriveBits(
+    {
+      name: 'PBKDF2',
+      salt,
+      iterations: PBKDF2_ITERATIONS,
+      hash: 'SHA-256',
+    },
+    passwordKey,
+    256
+  );
+
+  return new Uint8Array(derivedBits);
+}
+
+function derivePasswordHashWithJsPbkdf2(password: string, salt: Uint8Array): Uint8Array {
+  const encoder = new TextEncoder();
+  return pbkdf2Js(
+    sha256Js,
+    encoder.encode(password + PASSWORD_HASH_SALT),
+    salt,
+    { c: PBKDF2_ITERATIONS, dkLen: 32 }
+  );
+}
+
+async function derivePasswordHash(password: string, salt: Uint8Array): Promise<Uint8Array> {
+  const subtle = getSubtleCrypto();
+  if (subtle && typeof subtle.deriveBits === 'function') {
+    return derivePasswordHashWithSubtle(password, salt);
+  }
+  // 无 WebCrypto 时使用纯 JS PBKDF2，保证仍是 KDF 方案而非弱散列兜底。
+  return derivePasswordHashWithJsPbkdf2(password, salt);
+}
+
 /**
  * 从密码派生 AES-256 密钥
  */
 export async function deriveKeyFromPassword(password: string): Promise<CryptoKey> {
   const encoder = new TextEncoder();
+  const subtle = getSubtleCrypto();
+  if (!subtle) {
+    throw new Error('WebCrypto subtle API 不可用');
+  }
 
   // 将密码 + 固定盐导入为 PBKDF2 密钥
-  const passwordKey = await crypto.subtle.importKey(
+  const passwordKey = await subtle.importKey(
     'raw',
     encoder.encode(password + ENCRYPTION_SALT),
     { name: 'PBKDF2' },
@@ -32,7 +117,7 @@ export async function deriveKeyFromPassword(password: string): Promise<CryptoKey
   );
 
   // 派生 AES-256-GCM 密钥
-  return await crypto.subtle.deriveKey(
+  return await subtle.deriveKey(
     {
       name: 'PBKDF2',
       salt: encoder.encode(ENCRYPTION_SALT),
@@ -73,7 +158,12 @@ export async function encryptAes256(plaintext: string, password: string): Promis
   const iv = crypto.getRandomValues(new Uint8Array(IV_LENGTH));
 
   // 加密
-  const encrypted = await crypto.subtle.encrypt(
+  const subtle = getSubtleCrypto();
+  if (!subtle) {
+    throw new Error('WebCrypto subtle API 不可用');
+  }
+
+  const encrypted = await subtle.encrypt(
     { name: 'AES-GCM', iv },
     key,
     data
@@ -111,7 +201,12 @@ export async function decryptAes256(ciphertext: string, password: string): Promi
   const encrypted = combined.slice(IV_LENGTH);
 
   // 解密
-  const decrypted = await crypto.subtle.decrypt(
+  const subtle = getSubtleCrypto();
+  if (!subtle) {
+    throw new Error('WebCrypto subtle API 不可用');
+  }
+
+  const decrypted = await subtle.decrypt(
     { name: 'AES-GCM', iv },
     key,
     encrypted
@@ -126,8 +221,12 @@ export async function decryptAes256(ciphertext: string, password: string): Promi
 export async function sha256(message: string): Promise<string> {
   const encoder = new TextEncoder();
   const msgBuffer = encoder.encode(message);
+  const subtle = getSubtleCrypto();
+  if (!subtle) {
+    throw new Error('WebCrypto subtle API 不可用');
+  }
 
-  const hashBuffer = await crypto.subtle.digest('SHA-256', msgBuffer);
+  const hashBuffer = await subtle.digest('SHA-256', msgBuffer);
   const hashArray = Array.from(new Uint8Array(hashBuffer));
 
   return hashArray.map((b) => b.toString(16).padStart(2, '0')).join('');
@@ -154,35 +253,12 @@ export async function quickDecrypt(ciphertext: string, password: string): Promis
  * @returns 格式化的哈希字符串: $pbkdf2$salt$hash
  */
 export async function hashPasswordWithSalt(password: string): Promise<string> {
-  const encoder = new TextEncoder();
   const salt = crypto.getRandomValues(new Uint8Array(16));
-
-  // 派生密钥
-  const passwordKey = await crypto.subtle.importKey(
-    'raw',
-    encoder.encode(password + PASSWORD_HASH_SALT),
-    { name: 'PBKDF2' },
-    false,
-    ['deriveBits']
-  );
-
-  const derivedBits = await crypto.subtle.deriveBits(
-    {
-      name: 'PBKDF2',
-      salt,
-      iterations: PBKDF2_ITERATIONS,
-      hash: 'SHA-256',
-    },
-    passwordKey,
-    256
-  );
-
-  const hashArray = Array.from(new Uint8Array(derivedBits));
-  const saltArray = Array.from(salt);
+  const derivedHash = await derivePasswordHash(password, salt);
 
   // 格式化: $pbkdf2$<saltBase64>$<hashBase64>
-  const saltBase64 = btoa(String.fromCharCode(...saltArray));
-  const hashBase64 = btoa(String.fromCharCode(...hashArray));
+  const saltBase64 = toBase64(salt);
+  const hashBase64 = toBase64(derivedHash);
 
   return `$pbkdf2$${saltBase64}$${hashBase64}`;
 }
@@ -196,58 +272,31 @@ export async function hashPasswordWithSalt(password: string): Promise<string> {
  */
 export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
   try {
-    const encoder = new TextEncoder();
-
     // 解析存储的哈希
-    const parts = storedHash.split('$');
-    if (parts.length !== 3 || parts[0] !== 'pbkdf2') {
+    const normalized = storedHash.startsWith('$') ? storedHash.slice(1) : storedHash;
+    const parts = normalized.split('$');
+    if (parts.length !== 3) {
       return false;
     }
 
-    const saltBase64 = parts[1];
-    const storedHashBase64 = parts[2];
+    const [scheme, saltBase64, storedDigest] = parts;
+
+    if (scheme === 'fallback') {
+      // 明确拒绝历史弱哈希格式
+      return false;
+    }
+
+    if (scheme !== 'pbkdf2') {
+      return false;
+    }
 
     // 解码 salt 和 hash
-    const salt = new Uint8Array(
-      atob(saltBase64).split('').map((c) => c.charCodeAt(0))
-    );
-    const storedHashArray = new Uint8Array(
-      atob(storedHashBase64).split('').map((c) => c.charCodeAt(0))
-    );
+    const salt = fromBase64(saltBase64);
+    const storedHashArray = fromBase64(storedDigest);
 
-    // 使用相同参数计算新哈希
-    const passwordKey = await crypto.subtle.importKey(
-      'raw',
-      encoder.encode(password + PASSWORD_HASH_SALT),
-      { name: 'PBKDF2' },
-      false,
-      ['deriveBits']
-    );
-
-    const derivedBits = await crypto.subtle.deriveBits(
-      {
-        name: 'PBKDF2',
-        salt,
-        iterations: PBKDF2_ITERATIONS,
-        hash: 'SHA-256',
-      },
-      passwordKey,
-      256
-    );
-
-    const newHashArray = new Uint8Array(derivedBits);
-
-    // 使用恒定时间比较防止时序攻击
-    if (newHashArray.length !== storedHashArray.length) {
-      return false;
-    }
-
-    let result = 0;
-    for (let i = 0; i < newHashArray.length; i++) {
-      result |= newHashArray[i] ^ storedHashArray[i];
-    }
-
-    return result === 0;
+    // 使用相同参数计算新哈希（WebCrypto 或纯 JS PBKDF2）
+    const newHashArray = await derivePasswordHash(password, salt);
+    return timingSafeEqualBytes(newHashArray, storedHashArray);
   } catch {
     return false;
   }

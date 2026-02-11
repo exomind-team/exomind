@@ -34,3 +34,17 @@
 2. E2E 脚本应保留在 `tests/e2e/`，测试报告目录应忽略。
 3. 提交信息应直接描述变更目的，避免空泛描述。
 
+## 端口与 Worktree 约定
+
+1. 多个 worktree 并行开发时，必须为每个 worktree 分配独立端口（Web/HMR/PouchDB/ASR）。
+2. `VITE_SYNC_SERVER_URL` 未设置时，前端会使用“当前浏览器 hostname + `EXOMIND_POUCHDB_PORT`”拼接同步地址。
+3. 同步服务默认仅监听 `127.0.0.1`（本地安全模式）；局域网联调时再显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0` 与 `VITE_SYNC_SERVER_URL=http://<LAN-IP>:<PORT>`。
+
+## Agent 工作流程（执行清单）
+
+1. 先在 issue 评论中给出方案与验收链路，再开始编码。
+2. 新功能必须先补失败测试（单测/E2E），再写实现，再跑通过。
+3. 新建 worktree 开发后，先执行依赖安装；`server/` 子项目使用 `bun install --omit optional`。
+4. 端到端测试优先使用 `tests/e2e/playwright.issue*.config.ts` 的独立端口配置，避免污染主开发端口。
+5. 完成后给出测试证据（命令 + 通过结果）并同步到 PR/Issue 评论。
+

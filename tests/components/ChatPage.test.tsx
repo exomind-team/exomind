@@ -22,15 +22,18 @@ const mockStopSync = vi.fn();
 const mockOnRemoteChange = vi.fn(() => vi.fn());
 const mockSyncToRemote = vi.fn();
 
+class MockEventStorage {
+  addEvent = mockAddEvent;
+  getEvents = mockGetEvents;
+  close = mockClose;
+  stopSync = mockStopSync;
+  onRemoteChange = mockOnRemoteChange;
+  syncToRemote = mockSyncToRemote;
+}
+
 vi.mock('@/lib/storage/event-storage', () => ({
-  EventStorage: vi.fn().mockImplementation(() => ({
-    addEvent: mockAddEvent,
-    getEvents: mockGetEvents,
-    close: mockClose,
-    stopSync: mockStopSync,
-    onRemoteChange: mockOnRemoteChange,
-    syncToRemote: mockSyncToRemote,
-  })),
+  EventStorage: MockEventStorage,
+  getEventStorage: vi.fn(() => new MockEventStorage()),
 }));
 
 // Mock sync-store
@@ -128,10 +131,10 @@ describe('ChatPage EventStorage 集成', () => {
       mockSyncToRemote.mockResolvedValue({});
 
       const storage = new EventStorage('testuser');
-      await storage.syncToRemote('http://localhost:6984/database/testuser');
+      await storage.syncToRemote('http://localhost:6984/testuser');
 
       expect(mockSyncToRemote).toHaveBeenCalledWith(
-        'http://localhost:6984/database/testuser'
+        'http://localhost:6984/testuser'
       );
     });
 
