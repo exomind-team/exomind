@@ -22,15 +22,17 @@ function parseTimerToSeconds(timerText: string): number {
 }
 
 function createActiveBlock(mode: TimerMode, paused: boolean) {
+  const now = Date.now();
   return {
     startId: 'issue82-block',
     name: 'Issue 82 regression',
-    startTime: Date.now() - 5000,
+    startTime: now - 5000,
     elapsed: mode === 'countup' ? 1000 : 5 * 60 * 1000,
+    updatedAt: now,
     mode,
     targetMinutes: mode === 'countdown' ? 5 : undefined,
     paused,
-    pausedAt: paused ? Date.now() - 1000 : undefined,
+    pausedAt: paused ? now - 1000 : undefined,
   };
 }
 
@@ -79,16 +81,21 @@ test.describe('Issue #82: TimeBlock timer restore behavior', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByRole('button', { name: '暂停' })).toBeVisible();
-    await expectTimerIncreasing(page);
+    const beforeLeave = await readTimerSeconds(page);
 
     await page.getByRole('link', { name: '设置' }).click();
     await expect(page).toHaveURL(/\/settings/);
+    await page.waitForTimeout(3200);
     await page.getByRole('link', { name: '事件日志' }).click();
     await expect(page).toHaveURL(/\/eventlog/);
-    await expectTimerIncreasing(page);
+    const afterReturn = await readTimerSeconds(page);
+    expect(afterReturn - beforeLeave).toBeGreaterThanOrEqual(2);
 
+    const beforeRefresh = await readTimerSeconds(page);
     await page.reload({ waitUntil: 'networkidle' });
     await expect(page.getByRole('button', { name: '暂停' })).toBeVisible();
+    const afterRefresh = await readTimerSeconds(page);
+    expect(afterRefresh).toBeGreaterThanOrEqual(beforeRefresh);
     await expectTimerIncreasing(page);
   });
 
@@ -98,13 +105,15 @@ test.describe('Issue #82: TimeBlock timer restore behavior', () => {
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByRole('button', { name: '继续' })).toBeVisible();
-    await expectTimerStable(page);
+    const beforeLeave = await readTimerSeconds(page);
 
     await page.getByRole('link', { name: '设置' }).click();
     await expect(page).toHaveURL(/\/settings/);
+    await page.waitForTimeout(3200);
     await page.getByRole('link', { name: '事件日志' }).click();
     await expect(page).toHaveURL(/\/eventlog/);
-    await expectTimerStable(page);
+    const afterReturn = await readTimerSeconds(page);
+    expect(afterReturn).toBe(beforeLeave);
 
     await page.reload({ waitUntil: 'networkidle' });
     await expect(page.getByRole('button', { name: '继续' })).toBeVisible();
