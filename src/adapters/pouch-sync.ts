@@ -18,6 +18,7 @@ import type {
   SyncResult,
   Conflict,
 } from '@/environment/interfaces/sync.port';
+import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 
 // PouchDB 插件
 import pouchdbAdapterIdb from 'pouchdb-adapter-idb';
@@ -91,7 +92,7 @@ export class PouchSyncAdapter implements ISyncPort {
     this.localDB = new PouchDB(dbName, { adapter: 'idb' });
 
     // 创建远程数据库连接
-    const remoteUrl = `${url}/database/${username}`;
+    const remoteUrl = buildRemoteDbUrl(url, username);
     this.remoteDB = new PouchDB(remoteUrl, {
       auth: {
         username,

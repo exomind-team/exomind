@@ -117,6 +117,7 @@ function startPouchDBServer() {
   const args = [
     '-p', String(config.port),
     '-d', DB_DIR,
+    '-o', String(config.host),
   ];
 
   log(`执行: node ${pouchdbBin} ${args.join(' ')}`);
@@ -162,7 +163,7 @@ log('PouchDB Sync Server 启动中...');
 log('========================================');
 
 if (startPouchDBServer()) {
-  log(`pouchdb-server 已在后台启动，端口: ${PORT}`);
+  log(`pouchdb-server 已在后台启动，地址: ${HOST}:${PORT}`);
   log(`数据目录: ${DB_DIR}`);
   log(`日志目录: ${LOGS_DIR}`);
   log('========================================');

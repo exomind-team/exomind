@@ -16,6 +16,7 @@
     "test:e2e": "playwright test",
     "test:e2e:issue77": "playwright test tests/e2e/settings-import-export.test.ts --config tests/e2e/playwright.issue77.config.ts",
     "test:e2e:issue82": "playwright test tests/e2e/timeblock-resume.issue82.test.ts --config tests/e2e/playwright.issue82.config.ts",
+    "test:e2e:issue27": "playwright test tests/e2e/eventlog-multi-device-sync.issue27.test.ts --config tests/e2e/playwright.issue27.config.ts",
     "test:e2e:report": "playwright test --reporter=html"
   },
   "dependencies": {
