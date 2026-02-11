@@ -24,7 +24,7 @@ describe('password hash compatibility', () => {
     await expect(verifyPassword('wrong-password', hash)).resolves.toBe(false);
   });
 
-  it('should support fallback hashing when crypto.subtle is unavailable', async () => {
+  it('should still use pbkdf2 hashing when crypto.subtle is unavailable', async () => {
     Object.defineProperty(globalThis, 'crypto', {
       configurable: true,
       value: {
@@ -41,9 +41,13 @@ describe('password hash compatibility', () => {
     const password = 'mobile-fallback-password';
     const hash = await hashPasswordWithSalt(password);
 
-    expect(hash.startsWith('$fallback$')).toBe(true);
+    expect(hash.startsWith('$pbkdf2$')).toBe(true);
     await expect(verifyPassword(password, hash)).resolves.toBe(true);
     await expect(verifyPassword('bad-password', hash)).resolves.toBe(false);
   });
-});
 
+  it('should reject legacy fallback hash scheme', async () => {
+    const legacyHash = '$fallback$c2FsdA==$deadbeefcafebabe';
+    await expect(verifyPassword('any-password', legacyHash)).resolves.toBe(false);
+  });
+});
