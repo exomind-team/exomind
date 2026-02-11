@@ -12,6 +12,7 @@ export default defineConfig(({ mode }) => {
     plugins: [react()],
 
     envDir: ".",
+    envPrefix: ["VITE_", "EXOMIND_"],
 
     optimizeDeps: {
       include: ["spark-md5", "vuvuzela"],
