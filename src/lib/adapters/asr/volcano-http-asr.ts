@@ -15,6 +15,7 @@
  */
 
 import type { IASRPort, ASRInput, ASRResult, ASRPartialResult } from '../../environment/interfaces/asr.port';
+import { resolveAsrServerUrl } from '@/config/port-env';
 
 // ========== 配置 ==========
 
@@ -26,7 +27,7 @@ export interface VolcanoHTTPASRConfig {
 }
 
 const DEFAULT_CONFIG: VolcanoHTTPASRConfig = {
-  serverUrl: (import.meta.env?.VITE_ASR_SERVER_URL as string) || 'http://localhost:1949',
+  serverUrl: resolveAsrServerUrl(import.meta.env as Record<string, string | undefined>),
   timeout: 30000, // 30秒超时
 };
 
