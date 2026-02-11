@@ -310,3 +310,37 @@ cat build-logs\*.log
 - [Tauri 官方文档](https://tauri.app/)
 - [Tauri Android 指南](https://tauri.app/v2/guides/mobile/android/)
 - [Android Studio 下载](https://developer.android.com/studio)
+
+## GitHub 评论脚本（Python）
+
+用于新增、追加、覆盖 Issue/PR 评论，避免 PowerShell 反引号与 Markdown 转义问题。
+
+```powershell
+# 新增评论
+npm run gh:comment -- --type issue --number 93 --file docs/report.md
+
+# 追加到指定评论（注意 # 前缀需要加引号）
+npm run gh:comment -- --type issue --number 93 --comment "#issuecomment-3883010944" --mode append --file docs/add.md
+
+# 覆盖指定评论
+npm run gh:comment -- --type issue --number 93 --comment "#issuecomment-3883010944" --mode replace --file docs/final.md
+
+# 用完整链接自动解析 repo/type/number/comment
+npm run gh:comment -- --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append
+
+# 只看解析结果，不写入 GitHub
+npm run gh:comment -- --ref "https://github.com/exomind-team/exomind/pull/89" --body "test" --dry-run
+
+# PowerShell 直接调用
+.\Scripts\dev\github-comment.ps1 --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append
+```
+
+参数说明：
+
+- `--type issue|pr`：目标类型。
+- `--number`：Issue/PR 编号。
+- `--comment`：评论定位，支持 `#issuecomment-xxxx`、URL、纯数字 id。
+- `--mode create|append|replace`：操作模式。默认：无 comment 为 `create`，有 comment 为 `append`。
+- `--file` / `--body`：Markdown 输入来源（二选一）。
+- `--ref`：完整 GitHub 链接（可含 `#issuecomment-...`）。
+- `--repo`：仓库 `owner/name`（省略时自动探测）。
