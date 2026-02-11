@@ -40,9 +40,20 @@ interface ASRResponse {
   audio_info?: { duration: number };
 }
 
+function parsePort(value: string | undefined, fallback: number): number {
+  const port = Number.parseInt(value ?? '', 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return fallback;
+  }
+  return port;
+}
+
 // 配置 - 从环境变量读取（支持 VITE_ 和 VOLCANO_ 前缀）
 const CONFIG = {
-  PORT: parseInt(process.env.VOLCANO_PORT || process.env.VITE_VOLCANO_PORT || '1949'),
+  PORT: parsePort(
+    process.env.EXOMIND_ASR_PORT || process.env.VOLCANO_PORT || process.env.VITE_VOLCANO_PORT,
+    1949
+  ),
   APP_KEY: process.env.VOLCANO_APP_KEY || process.env.VITE_VOLCANO_APP_KEY || '',
   ACCESS_KEY: process.env.VOLCANO_ACCESS_KEY || process.env.VITE_VOLCANO_ACCESS_KEY || '',
   RESOURCE_ID: process.env.VOLCANO_RESOURCE_ID || process.env.VITE_VOLCANO_RESOURCE_ID || 'volc.bigasr.sauc.duration',
