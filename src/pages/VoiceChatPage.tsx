@@ -13,9 +13,11 @@
 import { useEffect, useState } from 'react';
 import { getVoiceChatService, setASRAdapterType, ASRAdapterType } from '../lib/services/voice-chat.service';
 import type { ASRResult } from '../lib/environment/interfaces/asr.port';
+import { resolveAsrServerUrl } from '@/config/port-env';
 
 export function VoiceChatPage() {
   const service = getVoiceChatService();
+  const defaultAsrServerUrl = resolveAsrServerUrl(import.meta.env as Record<string, string | undefined>);
 
   const [isRecording, setIsRecording] = useState(false);
   const [duration, setDuration] = useState(0);
@@ -42,10 +44,10 @@ export function VoiceChatPage() {
         addLog('【配置环境变量】');
         addLog('  VITE_VOLCANO_APP_KEY=xxx');
         addLog('  VITE_VOLCANO_ACCESS_KEY=xxx');
-        addLog('  VITE_ASR_SERVER_URL=http://localhost:1949');
+        addLog(`  VITE_ASR_SERVER_URL=${defaultAsrServerUrl}`);
       }
     }, 500);
-  }, []);
+  }, [defaultAsrServerUrl]);
 
   // 轮询服务状态
   useEffect(() => {

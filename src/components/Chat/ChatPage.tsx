@@ -19,6 +19,7 @@ import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type Event as StorageEvent, type EventStorage } from '@/lib/storage/event-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
+import { resolveSyncServerUrl } from '@/config/port-env';
 
 export function ChatPage() {
   const [events, setEvents] = useState<Event[]>([]);
@@ -58,7 +59,8 @@ export function ChatPage() {
     // 如果已登录，连接到远程同步
     if (isLoggedIn && currentUser) {
       setSyncStatus('syncing');
-      const remoteUrl = `http://localhost:6984/database/${currentUser}`;
+      const syncServerUrl = resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>);
+      const remoteUrl = `${syncServerUrl}/database/${currentUser}`;
       storage.syncToRemote(remoteUrl).then(() => {
         setSyncStatus('connected');
         console.log('[ChatPage] 远程同步已启动');
