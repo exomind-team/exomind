@@ -11,6 +11,12 @@
 
 import { ExoMindEnvironment } from '../environment/environment';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
+import {
+  createBackupPayload,
+  parseBackupPayload,
+  mergeEventsById,
+  type ImportStrategy,
+} from '../eventlog/backup';
 
 // 存储键
 const EVENTS_KEY = 'events';
@@ -18,12 +24,24 @@ const EVENTS_KEY = 'events';
 // 标签常量
 const NOTE_TAG: Tag = 'note';
 
+export interface ImportEventsResult {
+  imported: number;
+  skipped: number;
+  total: number;
+}
+
 export interface EventLogService {
   /** 加载所有事件 */
   loadEvents(): Promise<Event[]>;
 
   /** 添加普通事件 */
   addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event>;
+
+  /** 导出事件为 JSON */
+  exportEventsAsJson(): Promise<string>;
+
+  /** 从 JSON 导入事件 */
+  importEventsFromJson(json: string, strategy: ImportStrategy): Promise<ImportEventsResult>;
 
   /** 监听新事件 */
   onEvent(callback: (event: Event) => void): () => void;
@@ -41,11 +59,10 @@ export class EventLogServiceImpl implements EventLogService {
     const data = await this.env.storage.read<EventData[]>(EVENTS_KEY);
     if (!data) return [];
 
-    return data.map(d => this.deserializeEvent(d)).sort((a, b) => b.timestamp - a.timestamp);
+    return data.map((d) => this.deserializeEvent(d)).sort((a, b) => b.timestamp - a.timestamp);
   }
 
   async addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event> {
-    console.log('[EventLogService] addEvent 被调用, content:', content);
     const eventData: EventData = {
       id: crypto.randomUUID(),
       timestamp: Date.now(),
@@ -53,28 +70,52 @@ export class EventLogServiceImpl implements EventLogService {
       tags: tags ? Array.from(tags) : [NOTE_TAG],
     };
 
-    console.log('[EventLogService] 准备保存事件:', eventData);
-
     // 持久化：加载现有事件，添加新事件，保存
     const events = await this.loadEvents();
-    console.log('[EventLogService] 现有事件数量:', events.length);
-    events.unshift(this.deserializeEvent(eventData));  // 最新在前
-    console.log('[EventLogService] 保存前事件数量:', events.length);
+    events.unshift(this.deserializeEvent(eventData));
 
-    await this.env.storage.write(EVENTS_KEY, events.map(e => this.serializeEvent(e)));
-    console.log('[EventLogService] 数据已写入 storage');
+    await this.env.storage.write(EVENTS_KEY, events.map((e) => this.serializeEvent(e)));
 
     const event = this.deserializeEvent(eventData);
 
     // 通知监听者
-    console.log('[EventLogService] 通知监听者, listener 数量:', this.listeners.size);
-    this.listeners.forEach(cb => {
-      console.log('[EventLogService] 调用监听器...');
-      cb(event);
-    });
+    this.listeners.forEach((cb) => cb(event));
 
-    console.log('[EventLogService] 事件已保存:', { id: event.id, content: event.content });
     return event;
+  }
+
+  async exportEventsAsJson(): Promise<string> {
+    const events = (await this.env.storage.read<EventData[]>(EVENTS_KEY)) || [];
+    const payload = createBackupPayload(events);
+    return JSON.stringify(payload, null, 2);
+  }
+
+  async importEventsFromJson(json: string, strategy: ImportStrategy): Promise<ImportEventsResult> {
+    const payload = parseBackupPayload(json);
+    const incoming = mergeEventsById([], payload.events);
+    const existing = (await this.env.storage.read<EventData[]>(EVENTS_KEY)) || [];
+
+    let next: EventData[];
+    let imported = 0;
+    let skipped = 0;
+
+    if (strategy === 'overwrite') {
+      next = incoming;
+      imported = incoming.length;
+    } else {
+      const existingIds = new Set(existing.map((event) => event.id));
+      imported = incoming.filter((event) => !existingIds.has(event.id)).length;
+      skipped = incoming.length - imported;
+      next = mergeEventsById(existing, incoming);
+    }
+
+    await this.env.storage.write(EVENTS_KEY, next);
+
+    return {
+      imported,
+      skipped,
+      total: next.length,
+    };
   }
 
   onEvent(callback: (event: Event) => void): () => void {
