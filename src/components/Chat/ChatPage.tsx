@@ -17,8 +17,9 @@ import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
-import { getEventStorage, type Event as StorageEvent, type EventStorage } from '@/lib/storage/event-storage';
+import { getEventStorage, type EventStorage } from '@/lib/storage/event-storage';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
+import { getEventLogService } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { resolveSyncServerUrl } from '@/config/port-env';
 
@@ -27,28 +28,19 @@ export function ChatPage() {
   const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
   const listEndRef = useRef<HTMLDivElement>(null);
   const storageRef = useRef<EventStorage | null>(null);
+  const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn } = useSyncStore();
 
-  // 初始化 EventStorage 和加载事件
+  const loadEvents = useCallback(async () => {
+    const loaded = await eventLogService.current.loadEvents();
+    setEvents([...loaded].reverse());
+  }, []);
+
+  // 初始化同步能力和加载事件
   useEffect(() => {
     // 使用共享的 EventStorage 单例，与 TimeBlockService 保持一致
     const storage = getEventStorage(currentUser || undefined);
     storageRef.current = storage;
-
-    const loadEvents = async () => {
-      const loaded = await storage.getEvents();
-
-      // 转换为 UI 使用的 Event 格式
-      const converted: Event[] = loaded.map((e: StorageEvent) => ({
-        id: e.id,
-        timestamp: new Date(e.createdAt).getTime(),
-        content: e.content,
-        tags: new Set<string>(e.type ? [e.type] : []),
-      }));
-
-      // 反转为升序 [最旧, ..., 最新]
-      setEvents([...converted].reverse());
-    };
 
     loadEvents();
 
@@ -78,7 +70,7 @@ export function ChatPage() {
       // 注意：不调用 storage.close()，因为 EventStorage 是共享的单例
       // 其他组件（如 TimeBlockService）可能还在使用它
     };
-  }, [currentUser, isLoggedIn]);
+  }, [currentUser, isLoggedIn, loadEvents]);
 
   // 滚动到底部（最新事件在底部）
   useEffect(() => {
@@ -92,25 +84,9 @@ export function ChatPage() {
     const trimmed = content.trim();
     if (!trimmed) return;
 
-    // 使用 EventStorage 保存到 PouchDB
-    if (storageRef.current) {
-      await storageRef.current.addEvent({
-        id: crypto.randomUUID(),
-        content: trimmed,
-        createdAt: new Date().toISOString(),
-      });
-
-      // 刷新事件列表
-      const loaded = await storageRef.current.getEvents();
-      const converted: Event[] = loaded.map((e: StorageEvent) => ({
-        id: e.id,
-        timestamp: new Date(e.createdAt).getTime(),
-        content: e.content,
-        tags: new Set<string>(e.type ? [e.type] : []),
-      }));
-      setEvents([...converted].reverse());
-    }
-  }, []);
+    await eventLogService.current.addEvent(trimmed);
+    await loadEvents();
+  }, [loadEvents]);
 
   // 格式化时间
   const formatTime = (timestamp: number) => {

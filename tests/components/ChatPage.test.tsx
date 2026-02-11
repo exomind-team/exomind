@@ -8,6 +8,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { readFileSync } from 'node:fs';
 
 // Mock document (happy-dom 需要)
 global.document = {
@@ -21,6 +22,7 @@ const mockClose = vi.fn();
 const mockStopSync = vi.fn();
 const mockOnRemoteChange = vi.fn(() => vi.fn());
 const mockSyncToRemote = vi.fn();
+const mockClearAll = vi.fn();
 
 class MockEventStorage {
   addEvent = mockAddEvent;
@@ -29,6 +31,7 @@ class MockEventStorage {
   stopSync = mockStopSync;
   onRemoteChange = mockOnRemoteChange;
   syncToRemote = mockSyncToRemote;
+  clearAll = mockClearAll;
 }
 
 vi.mock('@/lib/storage/event-storage', () => ({
@@ -53,6 +56,7 @@ describe('ChatPage EventStorage 集成', () => {
     mockAddEvent.mockResolvedValue(undefined);
     mockSyncToRemote.mockResolvedValue({});
     mockOnRemoteChange.mockReturnValue(vi.fn());
+    mockClearAll.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -187,6 +191,17 @@ describe('ChatPage EventStorage 集成', () => {
 
       expect(mockStopSync).toHaveBeenCalled();
     });
+  });
+});
+
+describe('ChatPage 架构边界', () => {
+  it('应通过 EventLogService 管理事件读写（不直连 EventStorage 的 get/add）', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).toContain('getEventLogService');
+    expect(source).not.toContain('storageRef.current.addEvent(');
+    expect(source).not.toContain('storageRef.current.getEvents(');
+    expect(source).not.toContain('storage.getEvents(');
   });
 });
 
