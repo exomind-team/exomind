@@ -10,22 +10,6 @@
 // PouchDB 全局变量（由 vite.config.ts 中的 pouchdbInject 插件注入）
 declare const PouchDB: any;
 
-// 单例实例缓存
-let singletonInstance: EventStorage | null = null;
-
-/**
- * 获取 EventStorage 单例实例
- *
- * @param userId - 用户 ID，用于隔离不同用户的数据
- * @returns EventStorage 实例
- */
-export async function getEventStorage(userId: string): Promise<EventStorage> {
-  if (!singletonInstance || singletonInstance.userId !== userId) {
-    singletonInstance = new EventStorage(userId);
-  }
-  return singletonInstance;
-}
-
 /**
  * 事件接口
  */
@@ -209,14 +193,14 @@ export class EventStorage {
     await this.initDb();
     if (!this.db) return [];
 
-    const result = await this.db.query<EventDoc>('events/by_created_at', {
+    const result = await this.db.query('events/by_created_at', {
       include_docs: true,
       descending: true,
-    });
+    }) as EventDoc as any;
 
     return result.rows
-      .filter((row) => row.doc)
-      .map((row) => {
+      .filter((row: any) => row.doc)
+      .map((row: any) => {
         const doc = row.doc!;
         // 移除内部字段
         const { _id, _rev, _conflicts, ...event } = doc;
@@ -235,7 +219,7 @@ export class EventStorage {
     if (!this.db) return undefined;
 
     try {
-      const doc = await this.db.get<Event>(`event:${id}`);
+      const doc = await this.db.get(`event:${id}`) as Event as any;
       const { _id, _rev, _conflicts, ...event } = doc;
       return event as Event;
     } catch {
@@ -253,7 +237,7 @@ export class EventStorage {
     if (!this.db) return;
 
     try {
-      const doc = await this.db.get<Event>(`event:${id}`);
+      const doc = await this.db.get(`event:${id}`) as Event as any;
       await this.db.remove(doc);
     } catch {
       // 事件不存在，忽略错误
@@ -270,7 +254,7 @@ export class EventStorage {
     await this.initDb();
     if (!this.db) return;
 
-    const doc = await this.db.get<Event>(`event:${id}`);
+    const doc = await this.db.get(`event:${id}`) as Event as any;
     const updatedDoc: EventDoc = {
       ...doc,
       ...updates,
@@ -309,7 +293,7 @@ export class EventStorage {
     await this.initDb();
     if (!this.db) return 0;
 
-    const result = await this.db.query<Event>('events/by_created_at');
+    const result = await this.db.query('events/by_created_at') as Event as any;
     return result.rows.length;
   }
 
@@ -317,7 +301,6 @@ export class EventStorage {
    * 关闭数据库连接
    * 注意：关闭后单例会被移除，下次 getEventStorage() 会创建新实例
    */
-  async close(): Promise<void> {
   async close(): Promise<void> {
     if (!this.db) return;
 

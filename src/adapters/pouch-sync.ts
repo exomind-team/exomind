@@ -116,34 +116,37 @@ export class PouchSyncAdapter implements ISyncPort {
     this.stopReplication();
 
     // 本地 → 远程（持续复制）
-    this.replicationPush = PouchDB.replicate(this.localDB, this.remoteDB, {
+    const replicationPush = PouchDB.replicate(this.localDB, this.remoteDB, {
       live: true,
       retry: true,
-    });
+    })!;
+    this.replicationPush = replicationPush
 
     // 远程 → 本地（持续复制）
-    this.replicationPull = PouchDB.replicate(this.remoteDB, this.localDB, {
+    const replicationPull = PouchDB.replicate(this.remoteDB, this.localDB, {
       live: true,
       retry: true,
     });
+    this.replicationPull = replicationPull;
+
 
     // 监听复制变更事件
-    this.replicationPush.on('change', (info) => {
+    replicationPush.on('change', (info: { docs_written?: number }) => {
       this.onPushChange(info);
     });
 
-    this.replicationPull.on('change', (info) => {
+    replicationPull.on('change', (info: { docs_written?: number }) => {
       this.onPullChange(info);
     });
 
     // 监听复制错误
-    this.replicationPush.on('error', (err: { message?: string }) => {
+    replicationPush.on('error', (err: { message?: string }) => {
       console.error('[Sync] 推送错误:', err);
       this.status.state = 'error';
       this.status.error = err.message || '未知错误';
     });
 
-    this.replicationPull.on('error', (err: { message?: string }) => {
+    replicationPull.on('error', (err: { message?: string }) => {
       console.error('[Sync] 拉取错误:', err);
       this.status.state = 'error';
       this.status.error = err.message || '未知错误';

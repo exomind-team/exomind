@@ -139,11 +139,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 身心反馈作为独立事件添加到事件日志
     if (feedback) {
-<<<<<<< HEAD
-      await getEventStorage().addEvent({
-=======
       await this.storage.addEvent({
->>>>>>> d3af324 (fix: TimeBlockService 使用 PouchDB 存储事件 [timeblock.service.ts])
         id: crypto.randomUUID(),
         content: feedback,
         createdAt: new Date().toISOString(),
@@ -208,11 +204,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     content: string,
     tag: 'block_start' | 'block_end',
   ): Promise<void> {
-<<<<<<< HEAD
-    await getEventStorage().addEvent({
-=======
     await this.storage.addEvent({
->>>>>>> d3af324 (fix: TimeBlockService 使用 PouchDB 存储事件 [timeblock.service.ts])
       id: eventId,
       content,
       createdAt: new Date().toISOString(),
