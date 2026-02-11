@@ -136,8 +136,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 身心反馈作为独立事件添加到事件日志
     if (feedback) {
-      const storage = await getEventStorage();
-      await storage.addEvent({
+      await getEventStorage().addEvent({
         id: crypto.randomUUID(),
         content: feedback,
         createdAt: new Date().toISOString(),
@@ -202,8 +201,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     content: string,
     tag: 'block_start' | 'block_end',
   ): Promise<void> {
-    const storage = await getEventStorage();
-    await storage.addEvent({
+    await getEventStorage().addEvent({
       id: eventId,
       content,
       createdAt: new Date().toISOString(),

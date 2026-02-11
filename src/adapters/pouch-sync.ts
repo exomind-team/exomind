@@ -128,23 +128,22 @@ export class PouchSyncAdapter implements ISyncPort {
     });
 
     // 监听复制变更事件
-    // // 📌【2026-02-11 01:23:00】可能为空，但此处Agent假定不为空
-    this.replicationPush!.on('change', (info) => {
+    this.replicationPush.on('change', (info) => {
       this.onPushChange(info);
     });
 
-    this.replicationPull!.on('change', (info) => {
+    this.replicationPull.on('change', (info) => {
       this.onPullChange(info);
     });
 
     // 监听复制错误
-    this.replicationPush!.on('error', (err: { message?: string }) => {
+    this.replicationPush.on('error', (err: { message?: string }) => {
       console.error('[Sync] 推送错误:', err);
       this.status.state = 'error';
       this.status.error = err.message || '未知错误';
     });
 
-    this.replicationPull!.on('error', (err: { message?: string }) => {
+    this.replicationPull.on('error', (err: { message?: string }) => {
       console.error('[Sync] 拉取错误:', err);
       this.status.state = 'error';
       this.status.error = err.message || '未知错误';

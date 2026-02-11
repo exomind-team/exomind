@@ -23,7 +23,7 @@ import { useSyncStore } from '@/ui/stores/sync-store';
 export function ChatPage() {
   const [events, setEvents] = useState<Event[]>([]);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
-  const [_isLoading, setIsLoading] = useState(true);
+  const [isLoading, setIsLoading] = useState(true);
   const listEndRef = useRef<HTMLDivElement>(null);
   const storageRef = useRef<any>(null);
   const { currentUser, isLoggedIn } = useSyncStore();
