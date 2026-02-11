@@ -42,3 +42,29 @@
 4. PR 评论必须包含五项：复现步骤、根因分析、修复方案、验证方法、风险与回归点。
 5. 完成前至少做一次针对性验证（相关单测/E2E 或 `bun run build`），再提交和推送。
 
+## 多工作区端口配置方法
+
+1. 统一使用环境变量配置端口，不在代码中硬编码：
+   - `EXOMIND_WEB_PORT`（Vite）
+   - `EXOMIND_HMR_PORT`（HMR）
+   - `EXOMIND_POUCHDB_PORT`（PouchDB）
+   - `EXOMIND_ASR_PORT`（ASR）
+2. 前端服务地址优先级：
+   - `VITE_SYNC_SERVER_URL` > `EXOMIND_POUCHDB_PORT` 组装地址
+   - `VITE_ASR_SERVER_URL` > `EXOMIND_ASR_PORT` 组装地址
+3. 每个 worktree 必须使用独立端口组，避免冲突。示例（PowerShell）：
+   - Worktree A：
+     - `$env:EXOMIND_WEB_PORT='1420'`
+     - `$env:EXOMIND_HMR_PORT='1421'`
+     - `$env:EXOMIND_POUCHDB_PORT='6984'`
+     - `$env:EXOMIND_ASR_PORT='1949'`
+   - Worktree B：
+     - `$env:EXOMIND_WEB_PORT='1520'`
+     - `$env:EXOMIND_HMR_PORT='1521'`
+     - `$env:EXOMIND_POUCHDB_PORT='7084'`
+     - `$env:EXOMIND_ASR_PORT='2049'`
+4. 启动前检查：
+   - 端口已按 worktree 设置
+   - `bun run dev` 或 `bun run dev:sync` 日志端口与环境变量一致
+   - 浏览器访问地址与 `EXOMIND_WEB_PORT` 一致
+
