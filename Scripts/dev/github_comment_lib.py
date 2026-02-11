@@ -1,4 +1,4 @@
-﻿import re
+import re
 from pathlib import Path
 from typing import Dict, Optional
 
@@ -14,12 +14,12 @@ _GITHUB_REF_PATTERN = re.compile(
 )
 
 _HTTPS_REMOTE_PATTERN = re.compile(
-    r"^https?://github\.com/([^/]+/[^/.]+)(?:\.git)?$",
+    r"^https?://github\.com/([^/]+)/([^/]+?)(?:\.git)?$",
     re.IGNORECASE,
 )
 
 _SSH_REMOTE_PATTERN = re.compile(
-    r"^git@github\.com:([^/]+/[^/.]+)(?:\.git)?$",
+    r"^git@github\.com:([^/]+)/([^/]+?)(?:\.git)?$",
     re.IGNORECASE,
 )
 
@@ -93,10 +93,10 @@ def parse_repo_from_remote_url(remote_url: str) -> str:
     value = remote_url.strip()
     https_match = _HTTPS_REMOTE_PATTERN.match(value)
     if https_match:
-        return https_match.group(1)
+        return f"{https_match.group(1)}/{https_match.group(2)}"
 
     ssh_match = _SSH_REMOTE_PATTERN.match(value)
     if ssh_match:
-        return ssh_match.group(1)
+        return f"{ssh_match.group(1)}/{ssh_match.group(2)}"
 
     raise ValueError(f"Unable to parse GitHub repo from remote URL: {remote_url}")
