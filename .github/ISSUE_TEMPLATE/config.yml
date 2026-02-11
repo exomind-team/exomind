@@ -1,0 +1,8 @@
+blank_issues_enabled: true
+contact_links:
+  - name: 📖 文档
+    url: https://github.com/exomind-team/exomind/wiki
+    about: 查看使用文档和常见问题
+  - name: 💬 讨论
+    url: https://github.com/exomind-team/exomind/discussions
+    about: 提问和讨论
