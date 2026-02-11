@@ -11,6 +11,7 @@
 
 import { ExoMindEnvironment } from '../environment/environment';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
+import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
 import {
   createBackupPayload,
   parseBackupPayload,
@@ -48,17 +49,15 @@ export interface EventLogService {
 }
 
 export class EventLogServiceImpl implements EventLogService {
-  private env: ExoMindEnvironment;
+  private env: ExoMindEnvironment | null;
   private listeners: Set<(event: Event) => void> = new Set();
 
   constructor(env?: ExoMindEnvironment) {
-    this.env = env || ExoMindEnvironment.getInstance();
+    this.env = env || null;
   }
 
   async loadEvents(): Promise<Event[]> {
-    const data = await this.env.storage.read<EventData[]>(EVENTS_KEY);
-    if (!data) return [];
-
+    const data = await this.readEventData();
     return data.map((d) => this.deserializeEvent(d)).sort((a, b) => b.timestamp - a.timestamp);
   }
 
@@ -70,11 +69,16 @@ export class EventLogServiceImpl implements EventLogService {
       tags: tags ? Array.from(tags) : [NOTE_TAG],
     };
 
-    // 持久化：加载现有事件，添加新事件，保存
-    const events = await this.loadEvents();
-    events.unshift(this.deserializeEvent(eventData));
-
-    await this.env.storage.write(EVENTS_KEY, events.map((e) => this.serializeEvent(e)));
+    if (this.env) {
+      // 测试注入模式：仍走环境存储
+      const existing = await this.readEventData();
+      existing.unshift(eventData);
+      await this.writeEventData(existing);
+    } else {
+      // 运行时默认：与 ChatPage 使用同一个 PouchDB EventStorage
+      const storage = getEventStorage();
+      await storage.addEvent(this.toStorageEvent(eventData));
+    }
 
     const event = this.deserializeEvent(eventData);
 
@@ -85,7 +89,7 @@ export class EventLogServiceImpl implements EventLogService {
   }
 
   async exportEventsAsJson(): Promise<string> {
-    const events = (await this.env.storage.read<EventData[]>(EVENTS_KEY)) || [];
+    const events = await this.readEventData();
     const payload = createBackupPayload(events);
     return JSON.stringify(payload, null, 2);
   }
@@ -93,7 +97,7 @@ export class EventLogServiceImpl implements EventLogService {
   async importEventsFromJson(json: string, strategy: ImportStrategy): Promise<ImportEventsResult> {
     const payload = parseBackupPayload(json);
     const incoming = mergeEventsById([], payload.events);
-    const existing = (await this.env.storage.read<EventData[]>(EVENTS_KEY)) || [];
+    const existing = await this.readEventData();
 
     let next: EventData[];
     let imported = 0;
@@ -109,7 +113,7 @@ export class EventLogServiceImpl implements EventLogService {
       next = mergeEventsById(existing, incoming);
     }
 
-    await this.env.storage.write(EVENTS_KEY, next);
+    await this.writeEventData(next);
 
     return {
       imported,
@@ -123,16 +127,6 @@ export class EventLogServiceImpl implements EventLogService {
     return () => this.listeners.delete(callback);
   }
 
-  /** 序列化事件（用于存储） */
-  private serializeEvent(event: Event): EventData {
-    return {
-      id: event.id,
-      timestamp: event.timestamp,
-      content: event.content,
-      tags: Array.from(event.tags),
-    };
-  }
-
   /** 反序列化事件（从存储读取） */
   private deserializeEvent(data: EventData): Event {
     return {
@@ -141,6 +135,70 @@ export class EventLogServiceImpl implements EventLogService {
       content: data.content,
       tags: new Set(data.tags),
     };
+  }
+
+  private async readEventData(): Promise<EventData[]> {
+    if (this.env) {
+      return (await this.env.storage.read<EventData[]>(EVENTS_KEY)) || [];
+    }
+
+    const storage = getEventStorage();
+    const events = await storage.getEvents();
+    return events.map((event) => this.fromStorageEvent(event));
+  }
+
+  private async writeEventData(events: EventData[]): Promise<void> {
+    if (this.env) {
+      await this.env.storage.write(EVENTS_KEY, events);
+      return;
+    }
+
+    const storage = getEventStorage();
+    await storage.clearAll();
+
+    const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
+    for (const event of sorted) {
+      await storage.addEvent(this.toStorageEvent(event));
+    }
+  }
+
+  private toStorageEvent(event: EventData): StorageEvent {
+    return {
+      id: event.id,
+      content: event.content,
+      createdAt: new Date(event.timestamp).toISOString(),
+      type: event.tags[0] || NOTE_TAG,
+      metadata: {
+        tags: event.tags,
+      },
+    };
+  }
+
+  private fromStorageEvent(event: StorageEvent): EventData {
+    const parsedTimestamp = Date.parse(event.createdAt);
+    const tags = this.normalizeTags(event.metadata?.tags, event.type);
+
+    return {
+      id: event.id,
+      timestamp: Number.isNaN(parsedTimestamp) ? Date.now() : parsedTimestamp,
+      content: event.content,
+      tags,
+    };
+  }
+
+  private normalizeTags(rawTags: unknown, fallbackType?: string): Tag[] {
+    if (Array.isArray(rawTags)) {
+      const tags = rawTags.filter((tag): tag is string => typeof tag === 'string' && tag.length > 0);
+      if (tags.length > 0) {
+        return tags;
+      }
+    }
+
+    if (typeof fallbackType === 'string' && fallbackType.length > 0) {
+      return [fallbackType];
+    }
+
+    return [NOTE_TAG];
   }
 }
 
