@@ -38,7 +38,7 @@
 
 1. 多个 worktree 并行开发时，必须为每个 worktree 分配独立端口（Web/HMR/PouchDB/ASR）。
 2. `VITE_SYNC_SERVER_URL` 未设置时，前端会使用“当前浏览器 hostname + `EXOMIND_POUCHDB_PORT`”拼接同步地址。
-3. 局域网联调时，优先设置 `EXOMIND_POUCHDB_HOST=0.0.0.0` 并显式设置 `VITE_SYNC_SERVER_URL=http://<LAN-IP>:<PORT>`。
+3. 同步服务默认仅监听 `127.0.0.1`（本地安全模式）；局域网联调时再显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0` 与 `VITE_SYNC_SERVER_URL=http://<LAN-IP>:<PORT>`。
 
 ## Agent 工作流程（执行清单）
 

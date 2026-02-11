@@ -12,7 +12,7 @@ Issue: `#79`
 | `EXOMIND_WEB_PORT` | `1420` | Vite 开发服务端口 |
 | `EXOMIND_HMR_PORT` | `1421` | Vite HMR WebSocket 端口 |
 | `EXOMIND_POUCHDB_PORT` | `6984` | PouchDB 同步服务端口 |
-| `EXOMIND_POUCHDB_HOST` | `0.0.0.0` | PouchDB 同步服务监听地址（局域网联调建议保留默认） |
+| `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | PouchDB 同步服务监听地址（默认仅本机访问；局域网联调时设为 `0.0.0.0`） |
 | `EXOMIND_ASR_PORT` | `1949` | ASR 后端服务端口 |
 | `VITE_SYNC_SERVER_URL` | `http://localhost:6984` | 前端同步服务地址（优先级高于 `EXOMIND_POUCHDB_PORT`） |
 | `VITE_ASR_SERVER_URL` | `http://localhost:1949` | 前端 ASR 服务地址（优先级高于 `EXOMIND_ASR_PORT`） |
@@ -22,6 +22,12 @@ Issue: `#79`
 1. 前端同步地址：`VITE_SYNC_SERVER_URL` > `EXOMIND_POUCHDB_PORT + 当前浏览器 hostname` 组装地址 > 默认地址  
 2. 前端 ASR 地址：`VITE_ASR_SERVER_URL` > `EXOMIND_ASR_PORT` 组装地址 > 默认地址  
 3. Vite 端口：`EXOMIND_WEB_PORT` 和 `EXOMIND_HMR_PORT`（若未设置 HMR 端口，则自动使用 `WEB_PORT + 1`）
+
+## 本地模式与 LAN 测试模式
+
+1. 本地模式（默认，安全）：不设置 `EXOMIND_POUCHDB_HOST`，服务仅监听 `127.0.0.1`。  
+2. LAN 测试模式（显式开启）：设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，允许手机/其他设备访问。  
+3. 生产部署请使用受控网络与鉴权，不建议直接暴露开发同步服务。
 
 ## 推荐：每个 worktree 一组端口
 

@@ -25,8 +25,8 @@ export default {
   // 轮询间隔（毫秒），实时模式不使用
   pollingInterval: 300000,
 
-  // 服务器主机（0.0.0.0 允许局域网访问）
-  host: process.env.EXOMIND_POUCHDB_HOST || '0.0.0.0',
+  // 默认仅本机访问；局域网联调时显式设置 EXOMIND_POUCHDB_HOST=0.0.0.0
+  host: process.env.EXOMIND_POUCHDB_HOST || '127.0.0.1',
 
   // pouchdb-server 配置
   pouchdbServer: {
