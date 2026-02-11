@@ -1,9 +1,17 @@
 // server/config.js
 // PouchDB Server 配置文件
 
+function parsePort(value, fallback) {
+  const port = Number.parseInt(value ?? '', 10);
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    return fallback;
+  }
+  return port;
+}
+
 export default {
   // 服务端口
-  port: 6986,
+  port: parsePort(process.env.EXOMIND_POUCHDB_PORT, 6984),
 
   // 数据库存储目录
   dataDir: './data',

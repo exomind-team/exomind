@@ -14,6 +14,7 @@ import {
   useSyncStore,
 } from '@/ui/stores/sync-store';
 import type { Conflict } from '@/environment/interfaces/sync.port';
+import { resolveSyncServerUrl } from '@/config/port-env';
 
 interface LogEntry {
   level: 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
@@ -22,9 +23,10 @@ interface LogEntry {
 }
 
 export function SyncTestPage() {
+  const defaultSyncServerUrl = resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>);
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsRef = useRef<HTMLDivElement>(null);
-  const [serverUrl, setServerUrl] = useState('http://localhost:6984');
+  const [serverUrl, setServerUrl] = useState(defaultSyncServerUrl);
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -173,7 +175,7 @@ export function SyncTestPage() {
             <Label htmlFor="serverUrl">服务器地址</Label>
             <Input
               id="serverUrl"
-              placeholder="http://localhost:6984"
+              placeholder={defaultSyncServerUrl}
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
             />
