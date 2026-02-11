@@ -1,4 +1,4 @@
-﻿import pathlib
+import pathlib
 import sys
 import unittest
 
@@ -78,6 +78,16 @@ class GithubCommentLibTests(unittest.TestCase):
         self.assertEqual(
             parse_repo_from_remote_url("git@github.com:exomind-team/exomind.git"),
             "exomind-team/exomind",
+        )
+
+    def test_parse_repo_from_remote_supports_dotted_repo_name(self) -> None:
+        self.assertEqual(
+            parse_repo_from_remote_url("https://github.com/org/my.repo.git"),
+            "org/my.repo",
+        )
+        self.assertEqual(
+            parse_repo_from_remote_url("git@github.com:org/my.repo.git"),
+            "org/my.repo",
         )
 
 
