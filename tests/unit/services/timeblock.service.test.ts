@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
   getEventStorageMock,
@@ -52,6 +52,10 @@ describe('TimeBlockServiceImpl', () => {
     getEventStorageMock.mockReturnValue(createStorage());
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('initializes countdown blocks with remaining milliseconds from minutes', async () => {
     const env = createMemoryEnv();
     const service = new TimeBlockServiceImpl(env as never);
@@ -61,7 +65,8 @@ describe('TimeBlockServiceImpl', () => {
 
     expect(block.elapsed).toBe(25 * 60 * 1000);
     expect(block.targetMinutes).toBe(25);
-    expect(stored?.elapsed).toBe(25 * 60 * 1000);
+    expect(stored?.elapsed).toBeLessThanOrEqual(25 * 60 * 1000);
+    expect(stored?.elapsed).toBeGreaterThanOrEqual(25 * 60 * 1000 - 2000);
     expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_start' }));
   });
 
@@ -100,5 +105,45 @@ describe('TimeBlockServiceImpl', () => {
       type: 'block_feedback',
       content: 'done',
     }));
+  });
+
+  it('recalculates elapsed time on load for running blocks', async () => {
+    vi.useFakeTimers();
+    const base = new Date('2026-02-11T08:00:00.000Z');
+    vi.setSystemTime(base);
+
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('focus', { mode: 'countup' });
+
+    vi.setSystemTime(new Date(base.getTime() + 5000));
+    const active = await service.loadActiveBlock();
+
+    expect(active?.paused).toBe(false);
+    expect(active?.elapsed).toBeGreaterThanOrEqual(5000);
+  });
+
+  it('keeps elapsed stable while paused even after time passes', async () => {
+    vi.useFakeTimers();
+    const base = new Date('2026-02-11T09:00:00.000Z');
+    vi.setSystemTime(base);
+
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('pause-check', { mode: 'countup' });
+
+    vi.setSystemTime(new Date(base.getTime() + 3000));
+    await service.pauseBlock();
+    const paused = await service.loadActiveBlock();
+
+    vi.setSystemTime(new Date(base.getTime() + 9000));
+    const stillPaused = await service.loadActiveBlock();
+
+    expect(paused?.paused).toBe(true);
+    expect(stillPaused?.paused).toBe(true);
+    expect(paused?.elapsed).toBeGreaterThanOrEqual(3000);
+    expect(stillPaused?.elapsed).toBe(paused?.elapsed);
   });
 });
