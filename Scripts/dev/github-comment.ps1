@@ -5,5 +5,5 @@ param(
 
 $ErrorActionPreference = 'Stop'
 
-$scriptPath = Join-Path $PSScriptRoot 'github_comment.py'
-python $scriptPath @Rest
+$scriptPath = Join-Path $PSScriptRoot 'github-comment.ts'
+bun $scriptPath @Rest
