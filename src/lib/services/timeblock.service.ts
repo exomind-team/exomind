@@ -11,8 +11,7 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import { getEventLogService } from './eventlog.service';
-import type { Tag } from '../types/event';
+import { getEventStorage } from '../storage/event-storage';
 import type { TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
 
 // 存储键
@@ -132,13 +131,18 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     const endId = crypto.randomUUID();
 
-    // 创建结束事件（通过 EventLogService，与 ChatPage 保持一致）
+    // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
     await this.addBlockEvent(endId, `${activeData.name} 完成`, 'block_end');
 
-    // 身心反馈作为独立事件添加到事件日志
+    // 身心反馈作为独立事件添加到事件日志（通过 EventStorage）
     if (feedback) {
-      const feedbackTags = new Set<Tag>(['block_feedback']);
-      await getEventLogService().addEvent(feedback, feedbackTags);
+      const storage = getEventStorage();
+      await storage.addEvent({
+        id: crypto.randomUUID(),
+        content: feedback,
+        createdAt: new Date().toISOString(),
+        type: 'block_feedback',
+      });
     }
 
     // 保存已完成的时间块
@@ -192,14 +196,20 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return () => this.listeners.delete(callback);
   }
 
-  /** 添加时间块事件（通过 EventLogService，与 ChatPage 保持一致） */
+  /** 添加时间块事件（通过 EventStorage，与 ChatPage 保持一致） */
   private async addBlockEvent(
     _eventId: string,
     content: string,
     tag: 'block_start' | 'block_end',
   ): Promise<void> {
-    const tags = new Set<Tag>([tag]);
-    await getEventLogService().addEvent(content, tags);
+    // 使用 EventStorage 保存事件，与 ChatPage 保持一致
+    const storage = getEventStorage();
+    await storage.addEvent({
+      id: crypto.randomUUID(),
+      content,
+      createdAt: new Date().toISOString(),
+      type: tag,
+    });
   }
 
   private notifyChange(block: ActiveBlockData | null): void {
