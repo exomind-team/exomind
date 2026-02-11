@@ -311,9 +311,9 @@ cat build-logs\*.log
 - [Tauri Android 指南](https://tauri.app/v2/guides/mobile/android/)
 - [Android Studio 下载](https://developer.android.com/studio)
 
-## GitHub 评论脚本（Python）
+## GitHub 评论脚本（Bun + TypeScript）
 
-用于新增、追加、覆盖 Issue/PR 评论，避免 PowerShell 反引号与 Markdown 转义问题。
+用于新增、追加、覆盖 Issue/PR 评论，使用 Bun 直接运行 TypeScript，减少 PowerShell 对 Markdown 参数的转义干扰。
 
 ```powershell
 # 新增评论
@@ -344,3 +344,4 @@ npm run gh:comment -- --ref "https://github.com/exomind-team/exomind/pull/89" --
 - `--file` / `--body`：Markdown 输入来源（二选一）。
 - `--ref`：完整 GitHub 链接（可含 `#issuecomment-...`）。
 - `--repo`：仓库 `owner/name`（省略时自动探测）。
+

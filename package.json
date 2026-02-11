@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "vite",
     "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
-    "gh:comment": "python Scripts/dev/github_comment.py",
+    "gh:comment": "bun Scripts/dev/github-comment.ts",
     "server": "node server/pouchdb-server.js",
     "server:dev": "node --watch server/pouchdb-server.js",
     "test:sync": "vitest run tests/sync/pouch-sync.test.ts",
@@ -73,5 +73,6 @@
     "vitest": "^4.0.18"
   }
 }
+
 
 
