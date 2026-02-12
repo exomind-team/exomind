@@ -287,7 +287,7 @@ export class EventStorage {
   /**
    * 同步到远程数据库
    *
-   * @param remoteUrl - 远程数据库 URL（格式: http://host:port/database）
+   * @param remoteUrl - 远程数据库 URL（格式: http://host:port/<db-name>）
    * @returns 复制对象
    */
   async syncToRemote(remoteUrl: string): Promise<PouchDB.Replication.Sync<Event>> {

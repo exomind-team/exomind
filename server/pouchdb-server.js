@@ -17,6 +17,7 @@ import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import config from './config.js';
+import { detectLockedLevelDbFiles } from './startup-guard.js';
 
 // ESM 模块中获取 __dirname
 const __filename = fileURLToPath(import.meta.url);
@@ -104,13 +105,20 @@ app.get('/stats', async (req, res) => {
 function startPouchDBServer() {
   log('启动官方 pouchdb-server...');
 
+  const lockedFiles = detectLockedLevelDbFiles(DB_DIR);
+  if (lockedFiles.length > 0) {
+    log(`检测到数据目录被其他进程占用，跳过重复启动。锁文件: ${lockedFiles[0]}`);
+    log('提示: 这通常表示已有同步服务在运行。若需重启，请先停止旧进程。');
+    return { status: 'already-running' };
+  }
+
   // pouchdb-server 入口
   const pouchdbBin = path.join(__dirname, 'node_modules', 'pouchdb-server', 'lib', 'index.js');
 
   // 检查是否存在
   if (!fs.existsSync(pouchdbBin)) {
     log(`错误: pouchdb-server 未找到，请先运行: bun install`);
-    return false;
+    return { status: 'missing-binary' };
   }
 
   // pouchdb-server 命令行参数
@@ -151,7 +159,7 @@ function startPouchDBServer() {
     pouchdbServerProcess = null;
   });
 
-  return true;
+  return { status: 'started' };
 }
 
 // 启动 pouchdb-server 作为主服务器
@@ -162,11 +170,19 @@ log('========================================');
 log('PouchDB Sync Server 启动中...');
 log('========================================');
 
-if (startPouchDBServer()) {
+const startResult = startPouchDBServer();
+
+if (startResult.status === 'started') {
   log(`pouchdb-server 已在后台启动，地址: ${HOST}:${PORT}`);
   log(`数据目录: ${DB_DIR}`);
   log(`日志目录: ${LOGS_DIR}`);
   log('========================================');
+} else if (startResult.status === 'already-running') {
+  log('未启动新实例，当前命令已安全退出。');
+  process.exit(0);
+} else {
+  log('启动失败，当前命令退出。');
+  process.exit(1);
 }
 
 // 优雅关闭

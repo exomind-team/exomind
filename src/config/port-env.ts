@@ -6,6 +6,7 @@ export const DEFAULT_PORTS = {
 } as const;
 
 export const SYNC_SERVER_URL_STORAGE_KEY = 'exomind:syncServerUrl';
+export const SYNC_SERVER_URL_CHANGED_EVENT = 'exomind:sync-server-url-changed';
 
 type EnvMap = Record<string, string | undefined>;
 type ResolveSyncServerUrlOptions = {
@@ -82,10 +83,16 @@ export function setSyncServerUrlOverride(url: string | null): void {
     const normalized = normalizeOptionalBaseUrl(url);
     if (!normalized) {
       window.localStorage.removeItem(SYNC_SERVER_URL_STORAGE_KEY);
+      window.dispatchEvent(new CustomEvent(SYNC_SERVER_URL_CHANGED_EVENT, {
+        detail: { value: null },
+      }));
       return;
     }
 
     window.localStorage.setItem(SYNC_SERVER_URL_STORAGE_KEY, normalized);
+    window.dispatchEvent(new CustomEvent(SYNC_SERVER_URL_CHANGED_EVENT, {
+      detail: { value: normalized },
+    }));
   } catch {
     // ignore localStorage write errors
   }
