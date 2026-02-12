@@ -17,32 +17,137 @@ import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
-import { getEventStorage, type EventStorage } from '@/lib/storage/event-storage';
+import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
+import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import {
   resolveSyncServerUrl,
   SYNC_SERVER_URL_CHANGED_EVENT,
 } from '@/config/port-env';
+import {
+  mergeLatestEventsAscending,
+  normalizeStorageEventsAscending,
+  prependOlderEventsAscending,
+} from './chat-event-pagination';
+
+const PAGE_SIZE = 50;
+const TOP_LOAD_THRESHOLD = 40;
+const NEAR_BOTTOM_THRESHOLD = 120;
 
 export function ChatPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const [events, setEvents] = useState<Event[]>([]);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
   const [syncServerUrl, setSyncServerUrl] = useState(() => resolveSyncServerUrl(envMap));
+  const [loadingOlder, setLoadingOlder] = useState(false);
+  const [isInitialLoading, setIsInitialLoading] = useState(true);
+  const [hasMore, setHasMore] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
+  const listContainerRef = useRef<HTMLDivElement>(null);
   const storageRef = useRef<EventStorage | null>(null);
+  const nextCursorRef = useRef<EventPageCursor | null>(null);
+  const loadingOlderRef = useRef(false);
+  const shouldStickToBottomRef = useRef(true);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn } = useSyncStore();
 
-  const loadEvents = useCallback(async () => {
-    const loaded = await eventLogService.current.loadEvents();
-    setEvents([...loaded].reverse());
+  const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
+    listEndRef.current?.scrollIntoView({ behavior, block: 'end' });
   }, []);
+
+  const isNearBottom = useCallback(() => {
+    const container = listContainerRef.current;
+    if (!container) {
+      return true;
+    }
+
+    const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+    return distanceToBottom <= NEAR_BOTTOM_THRESHOLD;
+  }, []);
+
+  const loadInitialEvents = useCallback(async (storage: EventStorage) => {
+    setIsInitialLoading(true);
+    const page = await storage.getEventsPage({ limit: PAGE_SIZE });
+    setEvents(normalizeStorageEventsAscending(page.events));
+    setHasMore(page.hasMore);
+    nextCursorRef.current = page.nextCursor;
+    shouldStickToBottomRef.current = true;
+
+    requestAnimationFrame(() => {
+      scrollToBottom('auto');
+    });
+    setIsInitialLoading(false);
+  }, [scrollToBottom]);
+
+  const refreshLatestEvents = useCallback(async (storage: EventStorage) => {
+    const page = await storage.getEventsPage({ limit: PAGE_SIZE });
+    const latestAsc = normalizeStorageEventsAscending(page.events);
+
+    setEvents((prev) => mergeLatestEventsAscending(prev, latestAsc));
+    setHasMore((prev) => prev || page.hasMore);
+
+    if (!nextCursorRef.current) {
+      nextCursorRef.current = page.nextCursor;
+    }
+
+    requestAnimationFrame(() => {
+      if (shouldStickToBottomRef.current) {
+        scrollToBottom('smooth');
+      }
+    });
+  }, [scrollToBottom]);
+
+  const loadOlderEvents = useCallback(async () => {
+    const storage = storageRef.current;
+    const cursor = nextCursorRef.current;
+
+    if (!storage || !cursor || !hasMore || loadingOlderRef.current) {
+      return;
+    }
+
+    const container = listContainerRef.current;
+    const previousScrollHeight = container?.scrollHeight ?? 0;
+
+    loadingOlderRef.current = true;
+    setLoadingOlder(true);
+
+    try {
+      const page = await storage.getEventsPage({
+        limit: PAGE_SIZE,
+        cursor,
+      });
+
+      const olderAsc = normalizeStorageEventsAscending(page.events);
+      setEvents((prev) => prependOlderEventsAscending(prev, olderAsc));
+      setHasMore(page.hasMore);
+      nextCursorRef.current = page.nextCursor;
+
+      requestAnimationFrame(() => {
+        const currentContainer = listContainerRef.current;
+        if (!currentContainer) return;
+
+        const nextScrollHeight = currentContainer.scrollHeight;
+        currentContainer.scrollTop = Math.max(0, nextScrollHeight - previousScrollHeight);
+      });
+    } finally {
+      loadingOlderRef.current = false;
+      setLoadingOlder(false);
+    }
+  }, [hasMore]);
+
+  const handleListScroll = useCallback(() => {
+    const container = listContainerRef.current;
+    if (!container) return;
+
+    if (container.scrollTop <= TOP_LOAD_THRESHOLD) {
+      void loadOlderEvents();
+    }
+  }, [loadOlderEvents]);
 
   useEffect(() => {
     const refreshSyncServerUrl = () => {
-      setSyncServerUrl(resolveSyncServerUrl(envMap));
+      setSyncServerUrl(resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>));
     };
 
     refreshSyncServerUrl();
@@ -50,25 +155,22 @@ export function ChatPage() {
     return () => {
       window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
     };
-  }, [envMap]);
+  }, []);
 
-  // 初始化同步能力和加载事件
+  // 初始化 EventStorage 和加载事件
   useEffect(() => {
-    // 使用共享的 EventStorage 单例，与 TimeBlockService 保持一致
     const storage = getEventStorage(currentUser || undefined);
     storageRef.current = storage;
+    void loadInitialEvents(storage);
 
-    loadEvents();
-
-    // 监听变更（本地和远程）
     const unsubscribe = storage.onRemoteChange(() => {
-      loadEvents();
+      shouldStickToBottomRef.current = isNearBottom();
+      void refreshLatestEvents(storage);
     });
 
-    // 如果已登录，连接到远程同步
     if (isLoggedIn && currentUser) {
       setSyncStatus('syncing');
-      const remoteUrl = `${syncServerUrl}/${encodeURIComponent(currentUser)}`;
+      const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
       storage.syncToRemote(remoteUrl).then(() => {
         setSyncStatus('connected');
         console.log('[ChatPage] 远程同步已启动');
@@ -81,26 +183,20 @@ export function ChatPage() {
     return () => {
       unsubscribe();
       storage.stopSync();
-      // 注意：不调用 storage.close()，因为 EventStorage 是共享的单例
-      // 其他组件（如 TimeBlockService）可能还在使用它
     };
-  }, [currentUser, isLoggedIn, loadEvents, syncServerUrl]);
-
-  // 滚动到底部（最新事件在底部）
-  useEffect(() => {
-    if (events.length > 0) {
-      listEndRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' });
-    }
-  }, [events]);
+  }, [currentUser, isLoggedIn, isNearBottom, loadInitialEvents, refreshLatestEvents, syncServerUrl]);
 
   // 处理发送消息
   const handleSend = useCallback(async (content: string) => {
     const trimmed = content.trim();
     if (!trimmed) return;
 
-    await eventLogService.current.addEvent(trimmed);
-    await loadEvents();
-  }, [loadEvents]);
+    if (storageRef.current) {
+      shouldStickToBottomRef.current = true;
+      await eventLogService.current.addEvent(trimmed);
+      await refreshLatestEvents(storageRef.current);
+    }
+  }, [refreshLatestEvents]);
 
   // 格式化时间
   const formatTime = (timestamp: number) => {
@@ -173,7 +269,7 @@ export function ChatPage() {
           </Badge>
         </div>
         <Badge variant="secondary" className="text-xs">
-          {events.length} 条事件
+          {events.length}{hasMore ? '+' : ''} 条事件
         </Badge>
       </div>
 
@@ -181,8 +277,17 @@ export function ChatPage() {
       <TimeBlockWidget />
 
       {/* 事件列表 */}
-      <div className="flex-1 overflow-auto p-3 sm:p-6" data-testid="event-list">
-        {events.length === 0 ? (
+      <div
+        ref={listContainerRef}
+        className="flex-1 overflow-auto p-3 sm:p-6"
+        data-testid="event-list"
+        onScroll={handleListScroll}
+      >
+        {isInitialLoading ? (
+          <div className="flex flex-col items-center justify-center h-full text-center">
+            <p className="text-sm text-muted-foreground">加载中...</p>
+          </div>
+        ) : events.length === 0 ? (
           <div className="flex flex-col items-center justify-center h-full text-center">
             <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4">
               <span className="text-2xl sm:text-3xl">📝</span>
@@ -194,6 +299,13 @@ export function ChatPage() {
           </div>
         ) : (
           <div className="space-y-4 sm:space-y-6">
+            {loadingOlder && (
+              <div className="flex justify-center">
+                <span className="text-xs text-muted-foreground" data-testid="event-list-loading-more">
+                  加载更多...
+                </span>
+              </div>
+            )}
             {Array.from(groupedEvents.entries()).map(([date, dateEvents]) => (
               <div key={date}>
                 <div className="flex items-center justify-center mb-3 sm:mb-4">
