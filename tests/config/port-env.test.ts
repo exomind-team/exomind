@@ -69,6 +69,32 @@ describe('port env resolver', () => {
     expect(serverUrl).toBe('http://localhost:1930');
   });
 
+  it('resolveSyncServerUrl should use local override url', () => {
+    const serverUrl = resolveSyncServerUrl(
+      {
+        EXOMIND_POUCHDB_PORT: '1930',
+      },
+      {
+        syncServerOverride: 'http://192.168.1.10:6984/',
+      }
+    );
+
+    expect(serverUrl).toBe('http://192.168.1.10:6984');
+  });
+
+  it('resolveSyncServerUrl should fallback to runtime hostname when provided', () => {
+    const serverUrl = resolveSyncServerUrl(
+      {
+        EXOMIND_POUCHDB_PORT: '1930',
+      },
+      {
+        hostname: '192.168.1.20',
+      }
+    );
+
+    expect(serverUrl).toBe('http://192.168.1.20:1930');
+  });
+
   it('resolveAsrServerUrl should prefer VITE_ASR_SERVER_URL', () => {
     const serverUrl = resolveAsrServerUrl({
       VITE_ASR_SERVER_URL: 'http://localhost:19049',
@@ -84,5 +110,18 @@ describe('port env resolver', () => {
     });
 
     expect(serverUrl).toBe('http://localhost:1931');
+  });
+
+  it('resolveAsrServerUrl should fallback to runtime hostname when provided', () => {
+    const serverUrl = resolveAsrServerUrl(
+      {
+        EXOMIND_ASR_PORT: '1931',
+      },
+      {
+        hostname: '192.168.1.20',
+      }
+    );
+
+    expect(serverUrl).toBe('http://192.168.1.20:1931');
   });
 });

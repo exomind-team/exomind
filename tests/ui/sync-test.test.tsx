@@ -72,6 +72,11 @@ describe('SyncTestPage 功能完整性', () => {
     expect(content).toContain('连接设置');
   });
 
+  it('应该包含服务器地址持久化控制', () => {
+    expect(content).toContain('保存为默认地址');
+    expect(content).toContain('恢复自动地址');
+  });
+
   it('应该包含同步控制 UI', () => {
     expect(content).toContain('同步控制');
   });
@@ -115,6 +120,14 @@ describe('SyncTestPage 事件处理器', () => {
 
   it('应该定义 handleSyncConfig 函数', () => {
     expect(content).toContain('handleSyncConfig');
+  });
+
+  it('应该定义 handleSaveServerUrl 函数', () => {
+    expect(content).toContain('handleSaveServerUrl');
+  });
+
+  it('应该定义 handleResetServerUrl 函数', () => {
+    expect(content).toContain('handleResetServerUrl');
   });
 });
 
