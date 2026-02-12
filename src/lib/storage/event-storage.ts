@@ -20,6 +20,22 @@ export interface Event {
   metadata?: Record<string, unknown>;
 }
 
+export interface EventPageCursor {
+  createdAt: string;
+  id: string;
+}
+
+export interface EventPageOptions {
+  limit?: number;
+  cursor?: EventPageCursor | null;
+}
+
+export interface EventPageResult {
+  events: Event[];
+  nextCursor: EventPageCursor | null;
+  hasMore: boolean;
+}
+
 /**
  * 内部事件文档接口（包含 PouchDB 字段）
  */
@@ -27,6 +43,18 @@ interface EventDoc extends Event {
   _id: string;
   _rev?: string;
 }
+
+const BY_CREATED_AT_MAP = `function(doc) {
+  if (doc._id && doc._id.startsWith('event:')) {
+    emit([doc.createdAt, doc._id], null);
+  }
+}`;
+
+const BY_ID_MAP = `function(doc) {
+  if (doc._id && doc._id.startsWith('event:')) {
+    emit(doc._id, doc);
+  }
+}`;
 
 // 单例缓存
 const storageInstances: Map<string, EventStorage> = new Map();
@@ -109,31 +137,47 @@ export class EventStorage {
   private async initializeDesignDoc(): Promise<void> {
     if (this.initialized) return;
 
-    try {
-      await (this.db as unknown as { put(doc: unknown): Promise<unknown> }).put({
-        _id: '_design/events',
-        views: {
-          by_created_at: {
-            map: `function(doc) {
-              if (doc._id && doc._id.startsWith('event:')) {
-                emit(doc.createdAt, doc);
-              }
-            }`,
-          },
-          by_id: {
-            map: `function(doc) {
-              if (doc._id && doc._id.startsWith('event:')) {
-                emit(doc._id, doc);
-              }
-            }`,
-          },
+    const designDoc = {
+      _id: '_design/events',
+      views: {
+        by_created_at: {
+          map: BY_CREATED_AT_MAP,
         },
-      });
+        by_id: {
+          map: BY_ID_MAP,
+        },
+      },
+    };
+
+    try {
+      await (this.db as unknown as { put(doc: unknown): Promise<unknown> }).put(designDoc);
       this.initialized = true;
     } catch (error: unknown) {
-      // 409 表示文档已存在，这是正常情况
       if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 409) {
-        this.initialized = true;
+        try {
+          const existingDoc = await this.db.get<{
+            _rev: string;
+            views?: {
+              by_created_at?: { map?: string };
+              by_id?: { map?: string };
+            };
+          }>('_design/events');
+
+          const hasLatestMap =
+            existingDoc.views?.by_created_at?.map === BY_CREATED_AT_MAP &&
+            existingDoc.views?.by_id?.map === BY_ID_MAP;
+
+          if (!hasLatestMap) {
+            await (this.db as unknown as { put(doc: unknown): Promise<unknown> }).put({
+              ...designDoc,
+              _rev: existingDoc._rev,
+            });
+          }
+
+          this.initialized = true;
+        } catch (updateError) {
+          console.warn('更新设计文档失败:', updateError);
+        }
       } else {
         console.warn('创建设计文档失败:', error);
       }
@@ -174,14 +218,50 @@ export class EventStorage {
       descending: true,
     });
 
-    return result.rows
-      .filter((row) => row.doc)
-      .map((row) => {
-        const doc = row.doc!;
-        // 移除内部字段
-        const { _id, _rev, _conflicts, ...event } = doc;
-        return event as Event;
-      });
+    return result.rows.filter((row) => row.doc).map((row) => this.toEvent(row.doc!));
+  }
+
+  /**
+   * 分页获取事件（按时间倒序，最新在前）
+   */
+  async getEventsPage(options: EventPageOptions = {}): Promise<EventPageResult> {
+    await this.initializeDesignDoc();
+
+    const limit = Math.max(1, options.limit ?? 50);
+    const queryOptions: Record<string, unknown> = {
+      include_docs: true,
+      descending: true,
+      limit: limit + 1,
+    };
+
+    if (options.cursor) {
+      queryOptions.startkey = [options.cursor.createdAt, `event:${options.cursor.id}`];
+      queryOptions.skip = 1;
+    }
+
+    const result = await this.db.query<EventDoc>(
+      'events/by_created_at',
+      queryOptions as Parameters<typeof this.db.query<EventDoc>>[1]
+    );
+
+    const docs = result.rows.filter((row) => row.doc).map((row) => row.doc!);
+    const hasMore = docs.length > limit;
+    const pageDocs = hasMore ? docs.slice(0, limit) : docs;
+    const events = pageDocs.map((doc) => this.toEvent(doc));
+
+    const lastEvent = events[events.length - 1];
+    const nextCursor = hasMore && lastEvent
+      ? {
+          createdAt: lastEvent.createdAt,
+          id: lastEvent.id,
+        }
+      : null;
+
+    return {
+      events,
+      nextCursor,
+      hasMore,
+    };
   }
 
   /**
@@ -364,5 +444,13 @@ export class EventStorage {
       paused: false,
       error: null,
     };
+  }
+
+  private toEvent(doc: EventDoc): Event {
+    const event = { ...doc } as Record<string, unknown>;
+    delete event._id;
+    delete event._rev;
+    delete event._conflicts;
+    return event as unknown as Event;
   }
 }
