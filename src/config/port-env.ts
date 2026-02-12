@@ -16,6 +16,15 @@ type ResolveSyncServerUrlOptions = {
 type ResolveAsrServerUrlOptions = {
   hostname?: string;
 };
+type ResolveBffCorsPolicyOptions = {
+  hostname?: string;
+  isProduction?: boolean;
+};
+export type BffCorsPolicy = {
+  allowAllOrigins: boolean;
+  allowOrigins: string[];
+  allowCredentials: boolean;
+};
 
 export function parsePort(value: string | undefined, fallback: number): number {
   if (!value) return fallback;
@@ -124,6 +133,58 @@ export function resolveDevPorts(env: EnvMap): { web: number; hmr: number } {
   const hmr = parsePort(env.EXOMIND_HMR_PORT, fallbackHmr);
 
   return { web, hmr };
+}
+
+function parseOriginList(value: string | undefined): string[] {
+  if (!value) return [];
+  return value
+    .split(',')
+    .map(origin => normalizeOptionalBaseUrl(origin))
+    .filter((origin): origin is string => Boolean(origin));
+}
+
+function resolveWebAppOrigin(env: EnvMap, hostname?: string): string {
+  const host = formatHostForUrl(resolveRuntimeHostname(hostname));
+  const port = parsePort(env.EXOMIND_WEB_PORT, DEFAULT_PORTS.web);
+  return `http://${host}:${port}`;
+}
+
+export function resolveBffCorsPolicy(
+  env: EnvMap,
+  options: ResolveBffCorsPolicyOptions = {}
+): BffCorsPolicy {
+  const configuredOrigins = parseOriginList(env.EXOMIND_BFF_ALLOWED_ORIGINS);
+
+  if (env.EXOMIND_BFF_ALLOWED_ORIGINS?.trim() === '*') {
+    return {
+      allowAllOrigins: true,
+      allowOrigins: [],
+      allowCredentials: false,
+    };
+  }
+
+  if (configuredOrigins.length > 0) {
+    return {
+      allowAllOrigins: false,
+      allowOrigins: [...new Set(configuredOrigins)],
+      allowCredentials: false,
+    };
+  }
+
+  const isProduction = options.isProduction ?? env.NODE_ENV === 'production';
+  if (!isProduction) {
+    return {
+      allowAllOrigins: true,
+      allowOrigins: [],
+      allowCredentials: false,
+    };
+  }
+
+  return {
+    allowAllOrigins: false,
+    allowOrigins: [resolveWebAppOrigin(env, options.hostname)],
+    allowCredentials: false,
+  };
 }
 
 export function resolveSyncServerUrl(
