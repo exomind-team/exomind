@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import {
   DEFAULT_PORTS,
   parsePort,
+  resolveBffCorsPolicy,
   resolveAsrServerUrl,
   resolveDevPorts,
   resolveSyncServerUrl,
@@ -123,5 +124,44 @@ describe('port env resolver', () => {
     );
 
     expect(serverUrl).toBe('http://192.168.1.20:1931');
+  });
+
+  it('resolveBffCorsPolicy should allow all origins in development by default', () => {
+    const policy = resolveBffCorsPolicy({
+      NODE_ENV: 'development',
+      EXOMIND_WEB_PORT: '1420',
+    });
+
+    expect(policy.allowAllOrigins).toBe(true);
+    expect(policy.allowOrigins).toEqual([]);
+    expect(policy.allowCredentials).toBe(false);
+  });
+
+  it('resolveBffCorsPolicy should restrict to web origin in production by default', () => {
+    const policy = resolveBffCorsPolicy(
+      {
+        NODE_ENV: 'production',
+        EXOMIND_WEB_PORT: '1420',
+      },
+      { hostname: '192.168.1.50' }
+    );
+
+    expect(policy.allowAllOrigins).toBe(false);
+    expect(policy.allowOrigins).toEqual(['http://192.168.1.50:1420']);
+    expect(policy.allowCredentials).toBe(false);
+  });
+
+  it('resolveBffCorsPolicy should parse explicit origins from env', () => {
+    const policy = resolveBffCorsPolicy({
+      NODE_ENV: 'production',
+      EXOMIND_BFF_ALLOWED_ORIGINS: 'http://localhost:1420, http://192.168.1.50:1620/',
+    });
+
+    expect(policy.allowAllOrigins).toBe(false);
+    expect(policy.allowOrigins).toEqual([
+      'http://localhost:1420',
+      'http://192.168.1.50:1620',
+    ]);
+    expect(policy.allowCredentials).toBe(false);
   });
 });

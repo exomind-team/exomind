@@ -14,6 +14,8 @@
  * 注意：此文件独立运行，不参与前端构建
  */
 
+import { resolveBffCorsPolicy, type BffCorsPolicy } from '../config/port-env';
+
 // 加载 .env 文件
 const envFile = Bun.file('.env');
 if (await envFile.exists()) {
@@ -59,6 +61,41 @@ const CONFIG = {
   RESOURCE_ID: process.env.VOLCANO_RESOURCE_ID || process.env.VITE_VOLCANO_RESOURCE_ID || 'volc.bigasr.sauc.duration',
 };
 
+const CORS_POLICY: BffCorsPolicy = resolveBffCorsPolicy(
+  process.env as Record<string, string | undefined>
+);
+
+function resolveAllowOrigin(requestOrigin: string | null): string | null {
+  if (CORS_POLICY.allowAllOrigins) {
+    return '*';
+  }
+
+  if (!requestOrigin) {
+    return null;
+  }
+
+  return CORS_POLICY.allowOrigins.includes(requestOrigin) ? requestOrigin : null;
+}
+
+function buildCorsHeaders(requestOrigin: string | null): Record<string, string> {
+  const allowOrigin = resolveAllowOrigin(requestOrigin);
+  const headers: Record<string, string> = {
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
+    'Access-Control-Allow-Headers': 'Content-Type, Authorization',
+    'Vary': 'Origin',
+  };
+
+  if (allowOrigin) {
+    headers['Access-Control-Allow-Origin'] = allowOrigin;
+  }
+
+  if (CORS_POLICY.allowCredentials) {
+    headers['Access-Control-Allow-Credentials'] = 'true';
+  }
+
+  return headers;
+}
+
 // 打印启动信息
 console.log('='.repeat(50));
 console.log('  火山引擎 ASR 后端服务');
@@ -66,6 +103,7 @@ console.log('='.repeat(50));
 console.log(`  端口: ${CONFIG.PORT}`);
 console.log(`  APP Key: ${CONFIG.APP_KEY.slice(0, 8)}***`);
 console.log(`  Resource: ${CONFIG.RESOURCE_ID}`);
+console.log(`  CORS: ${CORS_POLICY.allowAllOrigins ? '*' : CORS_POLICY.allowOrigins.join(', ') || '(deny by default)'}`);
 console.log('='.repeat(50));
 
 if (!CONFIG.APP_KEY || !CONFIG.ACCESS_KEY) {
@@ -372,17 +410,17 @@ const server = Bun.serve({
 
   async fetch(req: Request): Promise<Response> {
     const url = new URL(req.url);
+    const requestOrigin = req.headers.get('origin');
 
     // CORS 头
-    const corsHeaders = {
-      'Access-Control-Allow-Origin': '*',
-      'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
-      'Access-Control-Allow-Headers': 'Content-Type',
-    };
+    const corsHeaders = buildCorsHeaders(requestOrigin);
 
     // 处理 OPTIONS 预检请求
     if (req.method === 'OPTIONS') {
-      return new Response(null, { headers: corsHeaders });
+      if (!corsHeaders['Access-Control-Allow-Origin'] && requestOrigin) {
+        return new Response('CORS origin denied', { status: 403, headers: corsHeaders });
+      }
+      return new Response(null, { status: 204, headers: corsHeaders });
     }
 
     // 根路径 - 健康检查
