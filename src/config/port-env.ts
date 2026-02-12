@@ -52,6 +52,26 @@ function resolveRuntimeHostname(hostname?: string): string {
   return resolveDefaultHost();
 }
 
+function normalizeSyncOptions(
+  options: ResolveSyncServerUrlOptions | string | undefined
+): ResolveSyncServerUrlOptions {
+  if (typeof options === 'string') {
+    return { hostname: options };
+  }
+
+  return options ?? {};
+}
+
+function normalizeAsrOptions(
+  options: ResolveAsrServerUrlOptions | string | undefined
+): ResolveAsrServerUrlOptions {
+  if (typeof options === 'string') {
+    return { hostname: options };
+  }
+
+  return options ?? {};
+}
+
 function formatHostForUrl(host: string): string {
   if (host.includes(':') && !host.startsWith('[')) {
     return `[${host}]`;
@@ -108,34 +128,38 @@ export function resolveDevPorts(env: EnvMap): { web: number; hmr: number } {
 
 export function resolveSyncServerUrl(
   env: EnvMap,
-  options: ResolveSyncServerUrlOptions = {}
+  options: ResolveSyncServerUrlOptions | string = {}
 ): string {
+  const normalizedOptions = normalizeSyncOptions(options);
+
   if (env.VITE_SYNC_SERVER_URL) {
     return normalizeBaseUrl(env.VITE_SYNC_SERVER_URL);
   }
 
   const overrideUrl =
-    normalizeOptionalBaseUrl(options.syncServerOverride) ??
+    normalizeOptionalBaseUrl(normalizedOptions.syncServerOverride) ??
     getSyncServerUrlOverride();
   if (overrideUrl) {
     return overrideUrl;
   }
 
   const port = parsePort(env.EXOMIND_POUCHDB_PORT, DEFAULT_PORTS.pouchdb);
-  const host = formatHostForUrl(resolveRuntimeHostname(options.hostname));
+  const host = formatHostForUrl(resolveRuntimeHostname(normalizedOptions.hostname));
   return `http://${host}:${port}`;
 }
 
 export function resolveAsrServerUrl(
   env: EnvMap,
-  options: ResolveAsrServerUrlOptions = {}
+  options: ResolveAsrServerUrlOptions | string = {}
 ): string {
+  const normalizedOptions = normalizeAsrOptions(options);
+
   if (env.VITE_ASR_SERVER_URL) {
     return normalizeBaseUrl(env.VITE_ASR_SERVER_URL);
   }
 
   const port = parsePort(env.EXOMIND_ASR_PORT, DEFAULT_PORTS.asr);
-  const host = formatHostForUrl(resolveRuntimeHostname(options.hostname));
+  const host = formatHostForUrl(resolveRuntimeHostname(normalizedOptions.hostname));
   return `http://${host}:${port}`;
 }
 
