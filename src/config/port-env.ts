@@ -22,6 +22,22 @@ function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
+function resolveDefaultHost(): string {
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    return window.location.hostname;
+  }
+
+  return 'localhost';
+}
+
+function formatHostForUrl(host: string): string {
+  if (host.includes(':') && !host.startsWith('[')) {
+    return `[${host}]`;
+  }
+
+  return host;
+}
+
 export function resolveDevPorts(env: EnvMap): { web: number; hmr: number } {
   const web = parsePort(env.EXOMIND_WEB_PORT, DEFAULT_PORTS.web);
   const fallbackHmr = web < 65535 ? web + 1 : DEFAULT_PORTS.hmr;
@@ -30,14 +46,14 @@ export function resolveDevPorts(env: EnvMap): { web: number; hmr: number } {
   return { web, hmr };
 }
 
-export function resolveSyncServerUrl(env: EnvMap, runtimeHostname: string = 'localhost'): string {
+export function resolveSyncServerUrl(env: EnvMap): string {
   if (env.VITE_SYNC_SERVER_URL) {
     return normalizeBaseUrl(env.VITE_SYNC_SERVER_URL);
   }
 
   const port = parsePort(env.EXOMIND_POUCHDB_PORT, DEFAULT_PORTS.pouchdb);
-  const hostname = runtimeHostname.trim() || 'localhost';
-  return `http://${hostname}:${port}`;
+  const host = formatHostForUrl(resolveDefaultHost());
+  return `http://${host}:${port}`;
 }
 
 export function resolveAsrServerUrl(env: EnvMap): string {
@@ -46,6 +62,7 @@ export function resolveAsrServerUrl(env: EnvMap): string {
   }
 
   const port = parsePort(env.EXOMIND_ASR_PORT, DEFAULT_PORTS.asr);
-  return `http://localhost:${port}`;
+  const host = formatHostForUrl(resolveDefaultHost());
+  return `http://${host}:${port}`;
 }
 
