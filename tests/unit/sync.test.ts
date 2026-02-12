@@ -194,12 +194,15 @@ describe('MessageStorage - 消息存储和读取', () => {
       });
 
       const syncMessage = storage.createSyncMessage(chatMessage);
+      const payload = syncMessage.payload as Record<string, unknown>;
 
       expect(syncMessage.type).toBe('CHANGE');
-      expect(syncMessage.payload).toEqual({
+      expect(payload).toMatchObject({
         entity: 'message',
         data: chatMessage,
       });
+      expect(payload.event_id).toBeTypeOf('string');
+      expect(payload.client_nonce).toBeTypeOf('string');
       expect(syncMessage.deviceId).toBe(storage.getDeviceId());
     });
 
@@ -541,6 +544,29 @@ describe('IndexedDB/Storage Operations - 存储操作模拟', () => {
       expect(storedCall).toBeDefined();
       const storedData = JSON.parse(storedCall![1]);
       expect(storedData.content).toBe('Hello');
+    });
+
+    it('should deduplicate duplicate saveMessage writes by message id', async () => {
+      const module = await import('../../src/lib/sync/message-storage');
+      const storage = new module.MessageStorage('.exomind-test-idempotent');
+
+      const message = storage.createOutgoingMessage('Hello', 'receiver-001');
+      message.id = 'msg-dedup-1';
+      message.senderId = 'device-sender-fixed';
+
+      const firstSave = await storage.saveMessage(message);
+      const secondSave = await storage.saveMessage({
+        ...message,
+        status: 'sent',
+      });
+
+      expect(firstSave.saved).toBe(true);
+      expect(secondSave.saved).toBe(false);
+
+      const storageKey = 'exomind:.exomind-test-idempotent/messages.jsonl';
+      const persisted = mockLocalStorageData[storageKey];
+      expect(typeof persisted).toBe('string');
+      expect(persisted.trim().split('\n').length).toBe(1);
     });
   });
 });

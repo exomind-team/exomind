@@ -1,9 +1,10 @@
 //! WebSocket 客户端命令
 //! 用于连接远程 WebSocket 服务器（手机端连接电脑端）
 
-use tauri::{AppHandle, Runtime, State};
+use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::sync::Mutex;
 use std::sync::Arc;
+use std::collections::HashSet;
 use tungstenite::{Message};
 use tokio_tungstenite::{connect_async, WebSocketStream};
 use futures::{SinkExt, StreamExt};
@@ -22,6 +23,7 @@ pub enum ConnectionState {
 pub struct WsClientState {
     pub state: Mutex<ConnectionState>,
     pub stream: Mutex<Option<WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>>>,
+    pub seen_ack_keys: Mutex<HashSet<String>>,
 }
 
 impl Default for WsClientState {
@@ -29,6 +31,7 @@ impl Default for WsClientState {
         Self {
             state: Mutex::new(ConnectionState::Disconnected),
             stream: Mutex::new(None),
+            seen_ack_keys: Mutex::new(HashSet::new()),
         }
     }
 }
@@ -139,7 +142,7 @@ pub async fn ws_get_state<R: Runtime>(
 }
 
 /// 接收消息的异步任务
-async fn receive_messages<R: Runtime>(_app: AppHandle<R>, client_state: Arc<WsClientState>) {
+async fn receive_messages<R: Runtime>(app: AppHandle<R>, client_state: Arc<WsClientState>) {
     // 获取流的拥有权
     let stream_opt = {
         let mut stream_guard = client_state.stream.lock().await;
@@ -156,8 +159,38 @@ async fn receive_messages<R: Runtime>(_app: AppHandle<R>, client_state: Arc<WsCl
         match msg_result {
             Ok(Message::Text(text)) => {
                 println!("Received message: {}", text);
-                // TODO: 通过 Tauri 事件将消息发送到前端
-                // app.emit("ws-message", &text).ok();
+                app.emit("ws-message", &text).ok();
+
+                if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
+                    let payload = json.get("payload");
+                    let message_id = payload
+                        .and_then(|p| p.get("messageId"))
+                        .and_then(|v| v.as_str())
+                        .or_else(|| json.get("messageId").and_then(|v| v.as_str()));
+
+                    if let Some(message_id) = message_id {
+                        let event_id = payload
+                            .and_then(|p| p.get("event_id"))
+                            .and_then(|v| v.as_str());
+                        let client_nonce = payload
+                            .and_then(|p| p.get("client_nonce"))
+                            .and_then(|v| v.as_str());
+
+                        let dedup_key = client_nonce
+                            .map(|nonce| format!("nonce:{}", nonce))
+                            .unwrap_or_else(|| format!("message:{}", message_id));
+
+                        let mut seen_ack_keys = client_state.seen_ack_keys.lock().await;
+                        if seen_ack_keys.insert(dedup_key) {
+                            let ack_payload = serde_json::json!({
+                                "messageId": message_id,
+                                "event_id": event_id,
+                                "client_nonce": client_nonce,
+                            });
+                            app.emit("ws-ack", ack_payload).ok();
+                        }
+                    }
+                }
             }
             Ok(Message::Binary(data)) => {
                 println!("Received binary data: {} bytes", data.len());
