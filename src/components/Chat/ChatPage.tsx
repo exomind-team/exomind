@@ -18,7 +18,6 @@ import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventStorage } from '@/lib/storage/event-storage';
-import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { resolveSyncServerUrl } from '@/config/port-env';
@@ -52,9 +51,8 @@ export function ChatPage() {
     // 如果已登录，连接到远程同步
     if (isLoggedIn && currentUser) {
       setSyncStatus('syncing');
-      const runtimeHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-      const syncServerUrl = resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>, runtimeHost);
-      const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
+      const syncServerUrl = resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>);
+      const remoteUrl = `${syncServerUrl}/${encodeURIComponent(currentUser)}`;
       storage.syncToRemote(remoteUrl).then(() => {
         setSyncStatus('connected');
         console.log('[ChatPage] 远程同步已启动');
