@@ -20,11 +20,16 @@ import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
-import { resolveSyncServerUrl } from '@/config/port-env';
+import {
+  resolveSyncServerUrl,
+  SYNC_SERVER_URL_CHANGED_EVENT,
+} from '@/config/port-env';
 
 export function ChatPage() {
+  const envMap = import.meta.env as Record<string, string | undefined>;
   const [events, setEvents] = useState<Event[]>([]);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
+  const [syncServerUrl, setSyncServerUrl] = useState(() => resolveSyncServerUrl(envMap));
   const listEndRef = useRef<HTMLDivElement>(null);
   const storageRef = useRef<EventStorage | null>(null);
   const eventLogService = useRef(getEventLogService());
@@ -34,6 +39,18 @@ export function ChatPage() {
     const loaded = await eventLogService.current.loadEvents();
     setEvents([...loaded].reverse());
   }, []);
+
+  useEffect(() => {
+    const refreshSyncServerUrl = () => {
+      setSyncServerUrl(resolveSyncServerUrl(envMap));
+    };
+
+    refreshSyncServerUrl();
+    window.addEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
+    return () => {
+      window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
+    };
+  }, [envMap]);
 
   // 初始化同步能力和加载事件
   useEffect(() => {
@@ -51,7 +68,6 @@ export function ChatPage() {
     // 如果已登录，连接到远程同步
     if (isLoggedIn && currentUser) {
       setSyncStatus('syncing');
-      const syncServerUrl = resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>);
       const remoteUrl = `${syncServerUrl}/${encodeURIComponent(currentUser)}`;
       storage.syncToRemote(remoteUrl).then(() => {
         setSyncStatus('connected');
@@ -69,6 +85,7 @@ export function ChatPage() {
       // 其他组件（如 TimeBlockService）可能还在使用它
     };
   }, [currentUser, isLoggedIn, loadEvents]);
+  }, [currentUser, isLoggedIn, loadEvents, syncServerUrl]);
 
   // 滚动到底部（最新事件在底部）
   useEffect(() => {
