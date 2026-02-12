@@ -1,6 +1,9 @@
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
+import { TauriEventLogStorageAdapter } from '../adapters/tauri-eventlog-storage';
+import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { WebStorageAdapter } from '../adapters/web-storage';
 import type { IASRPort } from './interfaces/asr.port';
+import type { IEventLogPort } from './interfaces/eventlog.port';
 import type { IStoragePort } from './interfaces/storage.port';
 
 export type RuntimeKind = 'web' | 'tauri';
@@ -9,6 +12,7 @@ export interface RuntimeBootstrapResult {
   runtime: RuntimeKind;
   asr: IASRPort;
   storage: IStoragePort;
+  eventlog: IEventLogPort;
 }
 
 export interface RuntimeBootstrapOptions {
@@ -49,6 +53,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
       runtime,
       asr,
       storage: new TauriStorageAdapter(),
+      eventlog: new TauriEventLogStorageAdapter(),
     };
   }
 
@@ -56,6 +61,6 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
     runtime,
     asr,
     storage: new WebStorageAdapter(),
+    eventlog: new WebEventLogStorageAdapter(),
   };
 }
-
