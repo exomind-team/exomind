@@ -3,3 +3,4 @@
 
 pub mod ws_commands;
 pub mod file_commands;
+pub mod device_commands;

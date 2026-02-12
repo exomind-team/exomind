@@ -9,6 +9,7 @@ use commands::file_commands::{
     write_file, read_file, read_file_binary, delete_file, file_exists, list_files,
     append_file, append_to_markdown, export_messages_to_markdown
 };
+use commands::device_commands::get_device_id;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -39,6 +40,7 @@ pub fn run() {
             append_file,
             append_to_markdown,
             export_messages_to_markdown,
+            get_device_id,
         ]);
 
     #[cfg(debug_assertions)]

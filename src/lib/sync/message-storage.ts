@@ -101,9 +101,31 @@ export interface SyncMessage {
 export class MessageStorage {
   private deviceId: string = '';
   private messageHandlers: ((msg: ChatMessage) => void)[] = [];
+  private deviceIdInitPromise: Promise<void>;
 
   constructor(private storagePath: string = '.exomind') {
-    this.initDeviceId();
+    this.deviceId = this.resolveInitialDeviceId();
+    this.deviceIdInitPromise = this.initDeviceId();
+  }
+
+  private resolveInitialDeviceId(): string {
+    const fallback = `device-${Date.now()}`;
+
+    if (typeof localStorage === 'undefined') {
+      return fallback;
+    }
+
+    const stored = localStorage.getItem('exomind:deviceId');
+    if (stored) {
+      return stored;
+    }
+
+    if (!isTauri) {
+      localStorage.setItem('exomind:deviceId', fallback);
+      return fallback;
+    }
+
+    return fallback;
   }
 
   private async initDeviceId(): Promise<void> {
@@ -111,10 +133,13 @@ export class MessageStorage {
     if (isTauri) {
       try {
         this.deviceId = await invoke('get_device_id') as string;
+        localStorage.setItem('exomind:deviceId', this.deviceId);
         console.log('[MessageStorage] Tauri device ID:', this.deviceId);
       } catch {
-        this.deviceId = `device-${Date.now()}`;
-        console.log('[MessageStorage] Generated fallback device ID:', this.deviceId);
+        const stored = localStorage.getItem('exomind:deviceId');
+        this.deviceId = stored || this.deviceId || `device-${Date.now()}`;
+        localStorage.setItem('exomind:deviceId', this.deviceId);
+        console.log('[MessageStorage] Fallback device ID:', this.deviceId);
       }
     } else {
       // Web: try to get from localStorage
@@ -123,6 +148,10 @@ export class MessageStorage {
       localStorage.setItem('exomind:deviceId', this.deviceId);
       console.log('[MessageStorage] Web device ID:', this.deviceId, 'from storage:', !!stored);
     }
+  }
+
+  async waitForDeviceIdReady(): Promise<void> {
+    await this.deviceIdInitPromise;
   }
 
   async saveMessage(message: ChatMessage): Promise<void> {
