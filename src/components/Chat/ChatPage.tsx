@@ -84,7 +84,6 @@ export function ChatPage() {
       // 注意：不调用 storage.close()，因为 EventStorage 是共享的单例
       // 其他组件（如 TimeBlockService）可能还在使用它
     };
-  }, [currentUser, isLoggedIn, loadEvents]);
   }, [currentUser, isLoggedIn, loadEvents, syncServerUrl]);
 
   // 滚动到底部（最新事件在底部）
