@@ -194,4 +194,54 @@ describe('EventStorage', () => {
       expect(parsed.target).toBe('button');
     });
   });
+
+  describe('getEventsPage', () => {
+    it('应该按分页返回最近事件并提供下一页游标', async () => {
+      const base = new Date('2024-01-01T10:00:00.000Z').getTime();
+
+      for (let i = 0; i < 5; i++) {
+        await storage.addEvent({
+          id: `page-${i + 1}`,
+          content: `事件 ${i + 1}`,
+          createdAt: new Date(base + i * 1000).toISOString(),
+        });
+      }
+
+      const firstPage = await storage.getEventsPage({ limit: 2 });
+
+      expect(firstPage.events.map((event) => event.id)).toEqual(['page-5', 'page-4']);
+      expect(firstPage.hasMore).toBe(true);
+      expect(firstPage.nextCursor).toEqual({
+        createdAt: new Date(base + 3 * 1000).toISOString(),
+        id: 'page-4',
+      });
+    });
+
+    it('应该根据游标继续加载更早事件且不重复', async () => {
+      const base = new Date('2024-01-01T10:00:00.000Z').getTime();
+
+      for (let i = 0; i < 5; i++) {
+        await storage.addEvent({
+          id: `cursor-${i + 1}`,
+          content: `事件 ${i + 1}`,
+          createdAt: new Date(base + i * 1000).toISOString(),
+        });
+      }
+
+      const firstPage = await storage.getEventsPage({ limit: 2 });
+      const secondPage = await storage.getEventsPage({
+        limit: 2,
+        cursor: firstPage.nextCursor!,
+      });
+      const thirdPage = await storage.getEventsPage({
+        limit: 2,
+        cursor: secondPage.nextCursor!,
+      });
+
+      expect(secondPage.events.map((event) => event.id)).toEqual(['cursor-3', 'cursor-2']);
+      expect(thirdPage.events.map((event) => event.id)).toEqual(['cursor-1']);
+      expect(thirdPage.hasMore).toBe(false);
+      expect(thirdPage.nextCursor).toBeNull();
+    });
+  });
 });
