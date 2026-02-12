@@ -69,6 +69,58 @@ bun run tauri dev
 bun run tauri android dev
 ```
 
+## 本地联调部署（Issue #25 分支）
+
+用于同时启动：
+- PouchDB 同步后端（`bun run server`）
+- Web 前端开发服务（`bun run dev`）
+
+> 约束：端口必须通过环境变量传入。脚本不会停止或覆盖已有端口进程（例如已占用的 1620）。
+
+### 一键启动（推荐）
+
+```powershell
+cd D:\project\exomind-issue-25-epic
+
+# 示例端口（按你的环境改）
+$env:EXOMIND_WEB_PORT='1760'
+$env:EXOMIND_HMR_PORT='1761'
+$env:EXOMIND_POUCHDB_PORT='7384'
+$env:EXOMIND_POUCHDB_HOST='0.0.0.0'
+$env:EXOMIND_SYNC_HOST='192.168.1.50'   # 电脑局域网 IP
+
+powershell -ExecutionPolicy Bypass -File .\Scripts\dev\run-test-stack.ps1
+```
+
+### 仅预检（不启动）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Scripts\dev\run-test-stack.ps1 -DryRun
+```
+
+### 手动分开启动（备用）
+
+```powershell
+cd D:\project\exomind-issue-25-epic
+$env:EXOMIND_POUCHDB_PORT='7384'
+$env:EXOMIND_POUCHDB_HOST='127.0.0.1'
+bun run server
+```
+
+```powershell
+cd D:\project\exomind-issue-25-epic
+$env:EXOMIND_WEB_PORT='1760'
+$env:EXOMIND_HMR_PORT='1761'
+$env:VITE_SYNC_SERVER_URL='http://127.0.0.1:7384'
+bun run dev -- --host 0.0.0.0
+```
+
+### 启动后检查
+
+1. 后端日志出现 `pouchdb-server 已在后台启动`
+2. 前端可访问 `http://localhost:<EXOMIND_WEB_PORT>`
+3. 同步接口可访问 `http://<SYNC_HOST>:<EXOMIND_POUCHDB_PORT>/`
+
 ### GitHub 评论自动化（Bun + TypeScript）
 
 用于新增、追加、覆盖 Issue/PR 评论，避免手工编辑时的转义问题。
