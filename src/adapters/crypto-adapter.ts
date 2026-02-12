@@ -272,10 +272,15 @@ export async function hashPasswordWithSalt(password: string): Promise<string> {
  */
 export async function verifyPassword(password: string, storedHash: string): Promise<boolean> {
   try {
-    // 解析存储的哈希
-    const normalized = storedHash.startsWith('$') ? storedHash.slice(1) : storedHash;
-    const parts = normalized.split('$');
-    if (parts.length !== 3) {
+    // 支持两种格式：
+    // 1) $pbkdf2$<salt>$<hash>（当前格式）
+    // 2) pbkdf2$<salt>$<hash>（兼容历史/手动数据）
+    const normalizedHash = storedHash.startsWith('$')
+      ? storedHash.slice(1)
+      : storedHash;
+    const parts = normalizedHash.split('$');
+
+    if (parts.length !== 3 || parts[0] !== 'pbkdf2') {
       return false;
     }
 
