@@ -1,82 +1,117 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { EventLog } from '../../src/lib/eventlog/format';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type { ChatMessage, SyncMessage } from '../../src/lib/sync/message-storage';
+import { MessageStorage } from '../../src/lib/sync/message-storage';
 
-// Mock dependencies
-const mockWriteFile = vi.fn().mockResolvedValue(undefined);
-const mockReadFile = vi.fn().mockReturnValue('');
+const storageData: Record<string, string> = {};
 
-describe('MessageStorage', () => {
+const mockLocalStorage = {
+  getItem: vi.fn((key: string) => storageData[key] ?? null),
+  setItem: vi.fn((key: string, value: string) => {
+    storageData[key] = value;
+  }),
+  removeItem: vi.fn((key: string) => {
+    delete storageData[key];
+  }),
+  clear: vi.fn(() => {
+    Object.keys(storageData).forEach((key) => delete storageData[key]);
+  }),
+  key: vi.fn(),
+  length: 0,
+};
+
+Object.defineProperty(globalThis, 'localStorage', {
+  value: mockLocalStorage,
+  writable: true,
+  configurable: true,
+});
+
+if (typeof globalThis.window === 'undefined') {
+  Object.defineProperty(globalThis, 'window', {
+    value: {
+      __TAURI__: undefined,
+      location: { hostname: 'localhost' },
+      localStorage: mockLocalStorage,
+    },
+    writable: true,
+    configurable: true,
+  });
+}
+
+function createMessage(overrides: Partial<ChatMessage> = {}): ChatMessage {
+  return {
+    id: 'msg-1',
+    type: 'chat',
+    content: 'hello',
+    timestamp: Date.now(),
+    senderId: 'device-a',
+    receiverId: 'device-b',
+    status: 'sending',
+    ...overrides,
+  };
+}
+
+describe('message storage sync reliability', () => {
   beforeEach(() => {
+    mockLocalStorage.clear();
     vi.clearAllMocks();
-    mockReadFile.mockReturnValue('');
   });
 
-  it('should generate unique message IDs', () => {
-    const generateId = () => `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
-    const id1 = generateId();
-    const id2 = generateId();
-    expect(id1).not.toBe(id2);
+  it('createSyncMessage should include idempotent fields and enter pending queue', () => {
+    const storage = new MessageStorage('.exomind-sync-test');
+    const message = createMessage({ id: 'msg-idempotent-1' });
+
+    const syncMessage = storage.createSyncMessage(message);
+    const payload = syncMessage.payload as Record<string, unknown>;
+
+    expect(syncMessage.type).toBe('CHANGE');
+    expect(payload.event_id).toBeTypeOf('string');
+    expect(payload.client_nonce).toBeTypeOf('string');
+    expect(payload.data).toMatchObject({ id: 'msg-idempotent-1' });
+    expect(storage.getUnackedSyncMessages()).toHaveLength(1);
   });
 
-  it('should create message with correct structure', () => {
-    const message = {
-      id: `msg-${Date.now()}`,
-      type: 'chat',
-      content: 'Hello',
+  it('should mark ACK state and clear pending queue after ack message', () => {
+    const storage = new MessageStorage('.exomind-sync-test');
+    const message = createMessage({ id: 'msg-ack-1' });
+    storage.createSyncMessage(message);
+
+    const ackMessage: SyncMessage = {
+      type: 'ACK',
+      payload: { messageId: 'msg-ack-1' },
       timestamp: Date.now(),
-      senderId: 'device-1',
-      receiverId: 'device-2',
-      status: 'sending' as const,
+      deviceId: 'device-b',
     };
 
-    expect(message).toHaveProperty('id');
-    expect(message).toHaveProperty('content');
-    expect(message).toHaveProperty('timestamp');
-    expect(message).toHaveProperty('senderId');
-    expect(message).toHaveProperty('receiverId');
-    expect(message).toHaveProperty('status');
-    expect(message.type).toBe('chat');
-    expect(message.status).toBe('sending');
+    storage.handleIncomingMessage(ackMessage);
+
+    expect(storage.isMessageAcked('msg-ack-1')).toBe(true);
+    expect(storage.getUnackedSyncMessages()).toHaveLength(0);
   });
 
-  it('should format event log entry correctly', () => {
-    const event: EventLog = {
-      id: 'evt-1',
-      type: 'message_sent',
-      timestamp: Date.now(),
-      data: { messageId: 'msg-1', content: 'Hello' },
-    };
+  it('should drop duplicate CHANGE packets with same event_id/client_nonce', () => {
+    const storage = new MessageStorage('.exomind-sync-test');
+    const handler = vi.fn();
+    storage.onMessage(handler);
 
-    const line = JSON.stringify(event);
-    const parsed = JSON.parse(line);
-
-    expect(parsed.id).toBe('evt-1');
-    expect(parsed.type).toBe('message_sent');
-    expect(parsed.data.messageId).toBe('msg-1');
-  });
-
-  it('should serialize message to sync format', () => {
-    const message = {
-      id: 'msg-1',
-      type: 'chat',
-      content: 'Hello',
-      timestamp: Date.now(),
-      senderId: 'device-1',
-      receiverId: 'device-2',
-    };
-
-    const syncPayload = {
+    const duplicateChange: SyncMessage = {
       type: 'CHANGE',
       payload: {
         entity: 'message',
-        data: message,
+        event_id: 'evt-dup-1',
+        client_nonce: 'nonce-dup-1',
+        data: createMessage({
+          id: 'msg-dup-1',
+          senderId: 'device-remote',
+          receiverId: storage.getDeviceId(),
+        }),
       },
-      timestamp: message.timestamp,
-      deviceId: message.senderId,
+      timestamp: Date.now(),
+      deviceId: 'device-remote',
     };
 
-    expect(syncPayload.type).toBe('CHANGE');
-    expect(syncPayload.payload.entity).toBe('message');
-    expect(syncPayload.payload.data).toEqual(message);
+    storage.handleIncomingMessage(duplicateChange);
+    storage.handleIncomingMessage(duplicateChange);
+
+    expect(handler).toHaveBeenCalledTimes(1);
   });
 });

@@ -97,11 +97,36 @@ export interface SyncMessage {
   deviceId: string;
 }
 
+export interface SyncChangePayload {
+  entity: 'message';
+  data: ChatMessage;
+  event_id: string;
+  client_nonce: string;
+}
+
+export interface SyncAckPayload {
+  messageId: string;
+  event_id?: string;
+  client_nonce?: string;
+}
+
+export interface SaveMessageResult {
+  saved: boolean;
+  deduplicated: boolean;
+  messageId: string;
+  eventId: string;
+  clientNonce: string;
+}
+
 // Message Storage class
 export class MessageStorage {
   private deviceId: string = '';
   private messageHandlers: ((msg: ChatMessage) => void)[] = [];
   private deviceIdInitPromise: Promise<void>;
+  private persistedMessageKeys: Set<string> = new Set();
+  private handledIncomingKeys: Set<string> = new Set();
+  private pendingSyncMessages: Map<string, SyncMessage> = new Map();
+  private ackedMessageIds: Set<string> = new Set();
 
   constructor(private storagePath: string = '.exomind') {
     this.deviceId = this.resolveInitialDeviceId();
@@ -154,9 +179,52 @@ export class MessageStorage {
     await this.deviceIdInitPromise;
   }
 
-  async saveMessage(message: ChatMessage): Promise<void> {
+  private resolveEventId(message: ChatMessage): string {
+    return `evt-${message.senderId}-${message.id}`;
+  }
+
+  private resolveClientNonce(message: ChatMessage): string {
+    return `nonce-${message.senderId}-${message.id}`;
+  }
+
+  private resolveMessageKey(message: ChatMessage): string {
+    return `${message.senderId}:${message.id}`;
+  }
+
+  private async isMessagePersisted(storagePath: string, message: ChatMessage): Promise<boolean> {
+    const messageKey = this.resolveMessageKey(message);
+    if (this.persistedMessageKeys.has(messageKey)) {
+      return true;
+    }
+
+    const content = await fs.readTextFile(storagePath);
+    if (!content) {
+      return false;
+    }
+
+    const lines = content.split('\n').filter(line => line.trim());
+    for (const line of lines) {
+      try {
+        const event = JSON.parse(line) as EventLog;
+        const storedMessageId = event.metadata?.messageId as string | undefined;
+        if (storedMessageId === message.id && event.device_id === message.senderId) {
+          this.persistedMessageKeys.add(messageKey);
+          return true;
+        }
+      } catch {
+        continue;
+      }
+    }
+
+    return false;
+  }
+
+  async saveMessage(message: ChatMessage): Promise<SaveMessageResult> {
+    const eventId = this.resolveEventId(message);
+    const clientNonce = this.resolveClientNonce(message);
+    const messageKey = this.resolveMessageKey(message);
     const event: EventLog = {
-      id: `evt-${message.id}`,
+      id: eventId,
       type: 'message_send',
       content: message.content,
       device_id: message.senderId,
@@ -165,6 +233,8 @@ export class MessageStorage {
         messageId: message.id,
         receiverId: message.receiverId,
         status: message.status,
+        event_id: eventId,
+        client_nonce: clientNonce,
       },
     };
 
@@ -174,9 +244,28 @@ export class MessageStorage {
     console.log('[MessageStorage] Saving message:', message.id, 'to:', storagePath);
 
     try {
+      if (await this.isMessagePersisted(storagePath, message)) {
+        console.log('[MessageStorage] Duplicate message skipped:', message.id);
+        return {
+          saved: false,
+          deduplicated: true,
+          messageId: message.id,
+          eventId,
+          clientNonce,
+        };
+      }
+
       // 使用 append_file 追加写入，永不覆盖
       await fs.appendFile(storagePath, line);
+      this.persistedMessageKeys.add(messageKey);
       console.log('[MessageStorage] Message saved successfully:', message.id);
+      return {
+        saved: true,
+        deduplicated: false,
+        messageId: message.id,
+        eventId,
+        clientNonce,
+      };
     } catch (error) {
       console.error('[MessageStorage] Failed to save message:', message.id, error);
       throw error; // Re-throw so caller knows it failed
@@ -252,15 +341,51 @@ export class MessageStorage {
   }
 
   createSyncMessage(message: ChatMessage): SyncMessage {
-    return {
+    const eventId = this.resolveEventId(message);
+    const clientNonce = this.resolveClientNonce(message);
+    const syncMessage: SyncMessage = {
       type: 'CHANGE',
       payload: {
         entity: 'message',
         data: message,
+        event_id: eventId,
+        client_nonce: clientNonce,
       },
       timestamp: message.timestamp,
       deviceId: this.deviceId,
     };
+
+    this.ackedMessageIds.delete(message.id);
+    this.pendingSyncMessages.set(message.id, syncMessage);
+    return syncMessage;
+  }
+
+  createAckMessage(messageId: string, eventId?: string, clientNonce?: string): SyncMessage {
+    const payload: SyncAckPayload = {
+      messageId,
+      event_id: eventId,
+      client_nonce: clientNonce,
+    };
+
+    return {
+      type: 'ACK',
+      payload,
+      timestamp: Date.now(),
+      deviceId: this.deviceId,
+    };
+  }
+
+  markMessageAcked(messageId: string): void {
+    this.ackedMessageIds.add(messageId);
+    this.pendingSyncMessages.delete(messageId);
+  }
+
+  isMessageAcked(messageId: string): boolean {
+    return this.ackedMessageIds.has(messageId);
+  }
+
+  getUnackedSyncMessages(): SyncMessage[] {
+    return Array.from(this.pendingSyncMessages.values());
   }
 
   parseSyncMessage(raw: unknown): SyncMessage {
@@ -271,11 +396,49 @@ export class MessageStorage {
     this.messageHandlers.push(handler);
   }
 
+  private getIncomingDedupKey(syncMsg: SyncMessage): string | null {
+    if (syncMsg.type !== 'CHANGE' || !syncMsg.payload) {
+      return null;
+    }
+
+    const payload = syncMsg.payload as Partial<SyncChangePayload>;
+    if (typeof payload.event_id === 'string' && payload.event_id) {
+      return `event:${payload.event_id}`;
+    }
+
+    if (typeof payload.client_nonce === 'string' && payload.client_nonce) {
+      return `nonce:${payload.client_nonce}`;
+    }
+
+    const message = payload.data as ChatMessage | undefined;
+    if (message?.id && message?.senderId) {
+      return `message:${message.senderId}:${message.id}`;
+    }
+
+    return null;
+  }
+
   handleIncomingMessage(syncMsg: SyncMessage): void {
+    if (syncMsg.type === 'ACK' && syncMsg.payload) {
+      const payload = syncMsg.payload as Partial<SyncAckPayload>;
+      if (typeof payload.messageId === 'string' && payload.messageId) {
+        this.markMessageAcked(payload.messageId);
+      }
+      return;
+    }
+
     if (syncMsg.type !== 'CHANGE' || !syncMsg.payload) return;
 
     const payload = syncMsg.payload as { entity: string; data: unknown };
     if (payload.entity !== 'message') return;
+
+    const dedupKey = this.getIncomingDedupKey(syncMsg);
+    if (dedupKey) {
+      if (this.handledIncomingKeys.has(dedupKey)) {
+        return;
+      }
+      this.handledIncomingKeys.add(dedupKey);
+    }
 
     const message = payload.data as ChatMessage;
     if (message.senderId !== this.deviceId) {
