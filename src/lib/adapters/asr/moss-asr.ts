@@ -49,19 +49,58 @@ const DEFAULT_CONFIG: Partial<MOSSASRConfig> = {
   timeout: 60000, // 60秒超时（音频处理可能较慢）
 };
 
+const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
+
+function normalizeApiKey(value?: string): string {
+  if (!value) return '';
+
+  let normalized = value.trim();
+  normalized = normalized.replace(/^['"]|['"]$/g, '');
+  normalized = normalized.replace(/^Bearer\s+/i, '');
+  return normalized.trim();
+}
+
+function readStoredApiKey(): string {
+  const storage = (() => {
+    if (typeof window !== 'undefined' && typeof window.localStorage !== 'undefined') {
+      return window.localStorage;
+    }
+
+    const globalStorage = (globalThis as { localStorage?: Storage }).localStorage;
+    if (typeof globalStorage !== 'undefined') {
+      return globalStorage;
+    }
+
+    return null;
+  })();
+
+  if (!storage) {
+    return '';
+  }
+
+  try {
+    return normalizeApiKey(storage.getItem(MOSS_API_KEY_STORAGE_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+
 // ========== 适配器实现 ==========
 
 export class MOSSASRAdapter implements IASRPort {
   private config: MOSSASRConfig;
 
   constructor(config?: Partial<MOSSASRConfig>) {
-    // 环境变量作为默认值，外部传入可覆盖
-    const envApiKey = import.meta.env?.VITE_MOSS_API_KEY || '';
+    const envApiKey = normalizeApiKey(import.meta.env?.VITE_MOSS_API_KEY || '');
+    const localApiKey = readStoredApiKey();
+    const incomingApiKey = normalizeApiKey(config?.apiKey);
+
     this.config = {
       ...DEFAULT_CONFIG,
-      apiKey: envApiKey,
+      apiKey: incomingApiKey || localApiKey || envApiKey,
       ...config,
     };
+    this.config.apiKey = normalizeApiKey(this.config.apiKey);
     console.log('[ASR-MOSS] 适配器初始化');
     console.log('[ASR-MOSS] API Key:', this.config.apiKey ? `${this.config.apiKey.slice(0, 8)}***` : '未配置');
   }
@@ -70,9 +109,30 @@ export class MOSSASRAdapter implements IASRPort {
    * 配置适配器
    */
   configure(config: IASRConfig): void {
-    if (config.apiKey) this.config.apiKey = config.apiKey;
+    if (config.apiKey) this.config.apiKey = normalizeApiKey(config.apiKey);
     if (config.apiUrl) this.config.apiUrl = config.apiUrl;
     if (config.timeout) this.config.timeout = config.timeout;
+  }
+
+  private resolveApiKey(): string {
+    const explicit = normalizeApiKey(this.config.apiKey);
+    if (explicit) {
+      return explicit;
+    }
+
+    const local = readStoredApiKey();
+    if (local) {
+      this.config.apiKey = local;
+      return local;
+    }
+
+    const fromEnv = normalizeApiKey(import.meta.env?.VITE_MOSS_API_KEY || '');
+    if (fromEnv) {
+      this.config.apiKey = fromEnv;
+      return fromEnv;
+    }
+
+    return '';
   }
 
   /**
@@ -142,7 +202,7 @@ export class MOSSASRAdapter implements IASRPort {
   }
 
   isAvailable(): boolean {
-    return !!this.config.apiKey;
+    return !!this.resolveApiKey();
   }
 
   /**
@@ -157,6 +217,11 @@ export class MOSSASRAdapter implements IASRPort {
   async transcribe(input: MOSSASRInput): Promise<MOSSASRResult> {
     console.log('[ASR-MOSS] 开始识别');
     const startTime = Date.now();
+    const apiKey = this.resolveApiKey();
+
+    if (!apiKey) {
+      throw new Error('MOSS API Key 未配置，请先在 MOSS 测试页保存 Key');
+    }
 
     let audioData: Uint8Array;
 
@@ -197,7 +262,7 @@ export class MOSSASRAdapter implements IASRPort {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.config.apiKey?.slice(0, 8)}***`,
+        'Authorization': `Bearer ${apiKey.slice(0, 8)}***`,
       },
       bodySize: JSON.stringify(payload).length,
     });
@@ -209,7 +274,7 @@ export class MOSSASRAdapter implements IASRPort {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          'Authorization': `Bearer ${this.config.apiKey}`,
+          'Authorization': `Bearer ${apiKey}`,
         },
         body: JSON.stringify(payload),
         signal: AbortSignal.timeout(this.config.timeout || 60000),
