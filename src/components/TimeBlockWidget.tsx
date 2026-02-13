@@ -461,6 +461,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
               onKeyDown={(e) => {
                 if (e.key === 'Escape') {
                   (e.currentTarget as HTMLTextAreaElement).blur();
+                  setExpanded(false); // 自动折叠
                   return;
                 }
                 if (e.key === 'Enter' && !e.shiftKey) {
