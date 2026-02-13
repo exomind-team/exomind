@@ -36,4 +36,5 @@ regex = "1"
 rand = "0.8"
 uuid = { version = "1", features = ["v4", "serde"] }
 tauri-plugin-mcp-bridge= "0.8"
+tauri-plugin-dialog = "2"
 thiserror = "1"

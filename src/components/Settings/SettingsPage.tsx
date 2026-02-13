@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getEventLogService } from '@/lib/services';
+import { isTauri } from '@tauri-apps/api/core';
 import {
   getSyncServerUrlOverride,
   resolveSyncServerUrl,
@@ -94,18 +95,39 @@ export function SettingsPage() {
       const json = await service.exportEventsAsJson();
       const payload = JSON.parse(json) as { events?: unknown[] };
       const count = Array.isArray(payload.events) ? payload.events.length : 0;
+      const defaultFileName = buildBackupFileName();
 
-      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = buildBackupFileName();
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
+      // 检测是否在 Tauri 环境中运行
+      const isRunningInTauri = await isTauri();
 
-      setStatusMessage(`导出成功，共 ${count} 条事件。`);
+      if (isRunningInTauri) {
+        // Tauri 环境：使用原生保存对话框
+        const { invoke } = await import('@tauri-apps/api/core');
+        const savedPath = await invoke<string | null>('save_json_file', {
+          content: json,
+          defaultName: defaultFileName,
+        });
+
+        if (savedPath) {
+          setStatusMessage(`导出成功，共 ${count} 条事件。保存路径：${savedPath}`);
+        } else {
+          // 用户取消保存
+          setStatusMessage('已取消保存。');
+        }
+      } else {
+        // Web 环境：使用 Blob 下载（兼容模式）
+        const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const anchor = document.createElement('a');
+        anchor.href = url;
+        anchor.download = defaultFileName;
+        document.body.appendChild(anchor);
+        anchor.click();
+        anchor.remove();
+        URL.revokeObjectURL(url);
+
+        setStatusMessage(`导出成功，共 ${count} 条事件。`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`导出失败：${message}`);
