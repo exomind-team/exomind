@@ -121,34 +121,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return activeBlock;
   }
 
-  async markEnding(): Promise<void> {
-    const raw = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
-    if (!raw) return;
-
-    const now = Date.now();
-    const normalized = this.normalizeActiveBlock(raw, now);
-
-    const actionEndedAt = normalized.actionEndedAt ?? now;
-    const feedbackStartedAt = normalized.feedbackStartedAt ?? actionEndedAt;
-    const pauseAccumulatedMs = normalized.pauseAccumulatedMs ?? 0;
-
-    await this.env.storage.write(ACTIVE_BLOCK_KEY, {
-      ...normalized,
-      actionEndedAt,
-      feedbackStartedAt,
-      pauseAccumulatedMs,
-      updatedAt: now,
-    });
-
-    this.notifyChange({
-      ...normalized,
-      actionEndedAt,
-      feedbackStartedAt,
-      pauseAccumulatedMs,
-      updatedAt: now,
-    });
-  }
-
   async pauseBlock(): Promise<void> {
     const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
     if (!data || data.paused) return;
@@ -192,6 +164,37 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.notifyChange(resumedBlock);
   }
 
+  async markEnding(): Promise<void> {
+    const raw = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    if (!raw) return;
+
+    const now = Date.now();
+    const normalized = this.normalizeActiveBlock(raw, now);
+
+    const actionEndedAt = normalized.actionEndedAt ?? now;
+    const feedbackStartedAt = normalized.feedbackStartedAt ?? actionEndedAt;
+    const pauseAccumulatedMs = normalized.pauseAccumulatedMs ?? 0;
+
+    // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
+    await this.addBlockEvent(`${normalized.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
+
+    await this.env.storage.write(ACTIVE_BLOCK_KEY, {
+      ...normalized,
+      actionEndedAt,
+      feedbackStartedAt,
+      pauseAccumulatedMs,
+      updatedAt: now,
+    });
+
+    this.notifyChange({
+      ...normalized,
+      actionEndedAt,
+      feedbackStartedAt,
+      pauseAccumulatedMs,
+      updatedAt: now,
+    });
+  }
+
   async endBlock(feedback?: string): Promise<TimeBlock | null> {
     const rawActiveData = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
     if (!rawActiveData) return null;
@@ -214,9 +217,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const workDurationMs = Math.max(0, actionDurationMs - pausedDurationMs);
 
     const endId = crypto.randomUUID();
-
-    // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
-    await this.addBlockEvent(`${activeData.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
 
     const timeBlockName = activeData.name;
     const feedbackText = feedback?.trim() ? feedback.trim() : '（未填写）';
@@ -409,7 +409,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       ``,
       `${input.feedbackText}`,
     );
-      return result.trimEnd()
+    return result.trimEnd()
   }
 }
 

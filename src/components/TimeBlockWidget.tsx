@@ -197,14 +197,15 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
             void timeBlockService.updateElapsed(0);
             return 0;
           }
-
-          // 硬结束：停止计时并进入反馈流程
-          setTimerState('ended');
-          isRunningRef.current = false;
-          if (timerRef.current) {
-            cancelAnimationFrame(timerRef.current);
+          else {
+            // 硬结束：停止计时并进入反馈流程
+            setTimerState('ended');
+            isRunningRef.current = false;
+            if (timerRef.current) {
+              cancelAnimationFrame(timerRef.current);
+            }
+            return 0;
           }
-          return 0;
         }
 
         // 同步到 Service
@@ -224,6 +225,12 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   // 统一由 timerState 驱动计时器生命周期，确保恢复运行态也能自动继续计时
   useEffect(() => {
     if (timerState !== 'running') {
+
+      // 📌【2026-02-14 01:11:53】人改：硬结束时调用 markEnding，标记时间块的结束状态
+      if (timerState === 'ended') {
+        void timeBlockService.markEnding();
+      }
+
       isRunningRef.current = false;
       if (timerRef.current) {
         cancelAnimationFrame(timerRef.current);
@@ -267,7 +274,9 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   };
 
   // 结束计时（显示反馈对话框）
-  const handleEndDialog = () => {
+  const handleEndDialog = async () => {
+    // 📌【2026-02-14 00:53:03】【人写】需要标记反馈
+    if (!continueAfterCountdownEnd) await timeBlockService.markEnding();
     setFeedbackOpen(true);
   };
 
@@ -277,6 +286,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
+
+    if (continueAfterCountdownEnd) await timeBlockService.markEnding();
 
     await timeBlockService.endBlock(feedbackText || undefined);
 
@@ -423,7 +434,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           <span
             className={
               timerMode === 'countdown'
-              && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0))
+                && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0))
                 ? 'text-red-500'
                 : ''
             }
