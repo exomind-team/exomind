@@ -1,10 +1,11 @@
-import { cleanup, render, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 
 const {
   loadActiveBlockMock,
   startBlockMock,
+  markEndingMock,
   pauseBlockMock,
   resumeBlockMock,
   endBlockMock,
@@ -12,6 +13,7 @@ const {
 } = vi.hoisted(() => ({
   loadActiveBlockMock: vi.fn(),
   startBlockMock: vi.fn(),
+  markEndingMock: vi.fn(),
   pauseBlockMock: vi.fn(),
   resumeBlockMock: vi.fn(),
   endBlockMock: vi.fn(),
@@ -22,6 +24,7 @@ vi.mock('@/lib/services', () => ({
   getTimeBlockService: () => ({
     loadActiveBlock: loadActiveBlockMock,
     startBlock: startBlockMock,
+    markEnding: markEndingMock,
     pauseBlock: pauseBlockMock,
     resumeBlock: resumeBlockMock,
     endBlock: endBlockMock,
@@ -44,6 +47,7 @@ describe('TimeBlockWidget resume behavior', () => {
 
     loadActiveBlockMock.mockReset();
     startBlockMock.mockReset();
+    markEndingMock.mockReset();
     pauseBlockMock.mockReset();
     resumeBlockMock.mockReset();
     endBlockMock.mockReset();
@@ -94,5 +98,29 @@ describe('TimeBlockWidget resume behavior', () => {
 
     const rafMock = vi.mocked(requestAnimationFrame);
     expect(rafMock).not.toHaveBeenCalled();
+  });
+
+  it('marks ending before opening feedback dialog when clicking end', async () => {
+    markEndingMock.mockResolvedValue(undefined);
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-running',
+      name: 'Focus work',
+      startTime: now - 5000,
+      elapsed: 1000,
+      mode: 'countup',
+      paused: false,
+    });
+
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByText('结束'));
+
+    await waitFor(() => {
+      expect(markEndingMock).toHaveBeenCalledTimes(1);
+    });
   });
 });
