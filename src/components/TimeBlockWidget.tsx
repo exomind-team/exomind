@@ -72,7 +72,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   // 倒计时结束动作（纯前端配置，不持久化）
   const [countdownEndSoundEnabled, setCountdownEndSoundEnabled] = useState(true);
   const [countdownEndSoundPresetId, setCountdownEndSoundPresetId] = useState(DEFAULT_TIMER_END_SOUND_PRESET_ID);
-  const [continueAfterCountdownEnd, setContinueAfterCountdownEnd] = useState(false);
+  const [continueAfterCountdownEnd, setContinueAfterCountdownEnd] = useState(true); // * 📌【2026-02-14 01:49:27】【人写】默认为开，软提醒，需要用户自己结束
   const [countdownOvertimeMs, setCountdownOvertimeMs] = useState(0);
 
   // 外部控制展开状态
@@ -182,28 +182,29 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           if (!countdownEndedRef.current) {
             countdownEndedRef.current = true;
 
+            // * 📌【2026-02-14 01:34:25】【人写】只有在「软计时结束」后才触发
             // 仅在本次运行从 >0 跨到 <=0 时触发提示音，避免刷新/恢复时重复播放
             if (prev > 0) {
               void playCountdownEndSound();
             }
-            setFeedbackOpen(true);
           }
 
-          // 软结束：继续计时直到用户确认结束
+          // 软结束：继续计时直到用户以其他方式确认结束
           if (continueAfterCountdownEnd) {
             countdownOverrunRef.current = true;
             setCountdownOvertimeMs(overshoot);
             // 持久化层仍保持倒计时归零（不扩展存储结构）
             void timeBlockService.updateElapsed(0);
             return 0;
-          }
-          else {
+          } else {
             // 硬结束：停止计时并进入反馈流程
             setTimerState('ended');
             isRunningRef.current = false;
             if (timerRef.current) {
               cancelAnimationFrame(timerRef.current);
             }
+            // 立即弹出对话框
+            setFeedbackOpen(true);
             return 0;
           }
         }
@@ -273,21 +274,19 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     await timeBlockService.resumeBlock();
   };
 
-  // 结束计时（显示反馈对话框）
+  // 点击按钮结束计时（显示反馈对话框）
   const handleEndDialog = async () => {
     // 📌【2026-02-14 00:53:03】【人写】需要标记反馈
-    if (!continueAfterCountdownEnd) await timeBlockService.markEnding();
+    setTimerState('ended'); // * 📌【2026-02-14 01:43:50】【人写】其中就包含了「时间块结束」的动作，会添加「时间块结束」事件
     setFeedbackOpen(true);
   };
 
-  // 带反馈结束时间块
+  // 对话框后，带反馈结束时间块
   const handleEndBlock = async (feedbackText?: string) => {
     isRunningRef.current = false;
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
-
-    if (continueAfterCountdownEnd) await timeBlockService.markEnding();
 
     await timeBlockService.endBlock(feedbackText || undefined);
 
@@ -353,13 +352,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       }
     };
   }, []);
-
-  // 倒计时结束自动弹窗
-  useEffect(() => {
-    if (timerState === 'ended' && !feedbackOpen) {
-      setFeedbackOpen(true);
-    }
-  }, [timerState, feedbackOpen]);
 
   // 按钮状态
   const isIdle = timerState === 'idle';
@@ -555,7 +547,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                 />
               </div>
 
-              <div className="space-y-1">
+              {countdownEndSoundEnabled && (<div className="space-y-1">
                 <Label htmlFor="countdown-end-sound-preset" className="text-sm">提示音预设</Label>
                 <select
                   id="countdown-end-sound-preset"
@@ -570,14 +562,14 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                     </option>
                   ))}
                 </select>
-              </div>
+              </div>)}
 
               <div className="flex items-center justify-between">
-                <Label htmlFor="continue-after-countdown-end" className="text-sm">软结束（结束后继续计时）</Label>
+                <Label htmlFor="continue-after-countdown-end" className="text-sm">硬结束：倒计时结束后强制结束计时</Label>
                 <Switch
                   id="continue-after-countdown-end"
-                  checked={continueAfterCountdownEnd}
-                  onCheckedChange={setContinueAfterCountdownEnd}
+                  checked={!continueAfterCountdownEnd}
+                  onCheckedChange={(bool: boolean) => setContinueAfterCountdownEnd(!bool)}
                   disabled={!isIdle}
                 />
               </div>
