@@ -12,6 +12,7 @@ describe('Tauri EventLog invoke contract', () => {
   beforeEach(() => {
     vi.resetModules();
     mockInvoke.mockReset();
+    localStorage.clear();
 
     if (typeof window !== 'undefined') {
       (window as { __TAURI__?: unknown }).__TAURI__ = { __VERSION__: '2.0.0' };
@@ -57,6 +58,28 @@ describe('Tauri EventLog invoke contract', () => {
     expect(mockInvoke).toHaveBeenCalledWith('eventlog_get', { userId: 'user-a', id: sample.id });
     expect(listed).toHaveLength(1);
     expect(one?.id).toBe(sample.id);
+  });
+
+  it('uses current user from sync store when adapter userId is omitted', async () => {
+    const sample: EventData = {
+      id: 'evt-2',
+      timestamp: 1700000001000,
+      content: 'hello user-bound eventlog',
+      tags: ['note'],
+    };
+
+    localStorage.setItem('exomind:sync-store', JSON.stringify({
+      state: { currentUser: 'user-from-store' },
+    }));
+
+    mockInvoke.mockResolvedValue([sample]);
+
+    const { TauriEventLogStorageAdapter } = await import('@/lib/adapters/tauri-eventlog-storage');
+    const adapter = new TauriEventLogStorageAdapter();
+
+    await adapter.listEvents();
+
+    expect(mockInvoke).toHaveBeenCalledWith('eventlog_list', { userId: 'user-from-store' });
   });
 
   it('registers eventlog commands in tauri backend', () => {

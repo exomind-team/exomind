@@ -55,8 +55,8 @@ describe('SyncTestPage 路由注册', () => {
     expect(routesContent).not.toContain('同步测试');
   });
 
-  it('不应该注册 /sync-test 路由', () => {
-    expect(routesContent).not.toContain("path: 'sync-test'");
+  it('应该注册 /sync-test 路由（兼容旧入口）', () => {
+    expect(routesContent).toContain("path: 'sync-test'");
   });
 });
 

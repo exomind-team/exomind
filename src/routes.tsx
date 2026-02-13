@@ -10,6 +10,7 @@ import { VoiceChatPage } from "@/pages/VoiceChatPage";
 import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
 import { HomePage } from "@/components/Home/HomePage";
 import { UserManagePage } from "@/ui/pages/UserManagePage";
+import { SyncTestPage } from "@/ui/pages/SyncTestPage";
 
 const sidebarItems = [
   { title: "首页", path: "/", icon: Home },
@@ -175,6 +176,16 @@ const userManageRoute = createRoute({
   },
 });
 
+// Sync Test route (/sync-test)
+// 保留兼容入口；不在侧边栏展示
+const syncTestRoute = createRoute({
+  getParentRoute: () => rootRoute,
+  path: 'sync-test',
+  component: function SyncTest() {
+    return <SyncTestPage />;
+  },
+});
+
 // Create the route tree
 const routeTree = rootRoute.addChildren([
   homeRoute,
@@ -184,6 +195,7 @@ const routeTree = rootRoute.addChildren([
   mossTestRoute,
   voiceChatRoute,
   userManageRoute,
+  syncTestRoute,
 ]);
 
 // Create the router
