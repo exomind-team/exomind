@@ -66,6 +66,12 @@ export interface ActiveBlockData {
   targetMinutes?: number;
   elapsed: number;
   startTime: Timestamp;
+  /** 点击“结束”的时刻（行动结束） */
+  actionEndedAt?: Timestamp;
+  /** 反馈弹窗打开的时刻（通常与 actionEndedAt 一致） */
+  feedbackStartedAt?: Timestamp;
+  /** 累计暂停时长（毫秒） */
+  pauseAccumulatedMs?: number;
   /** 最近一次计时基准更新时间（毫秒时间戳） */
   updatedAt?: Timestamp;
   paused: boolean;

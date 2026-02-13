@@ -333,7 +333,7 @@ export function ChatPage() {
                               {getEventPrefix(event)}
                             </span>
                           )}
-                          <p className="text-xs sm:text-sm break-words">{event.content}</p>
+                          <p className="text-xs sm:text-sm break-words whitespace-pre-wrap">{event.content}</p>
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
                           {formatTime(event.timestamp)}

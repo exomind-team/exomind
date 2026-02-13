@@ -126,6 +126,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
           setTimerState('ended');
           isRunningRef.current = false;
           setElapsed(0);
+          void timeBlockService.markEnding();
           setFeedbackOpen(true);
           if (timerRef.current) {
             cancelAnimationFrame(timerRef.current);
@@ -208,7 +209,13 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
   };
 
   // 结束计时
-  const handleEnd = () => {
+  const handleEnd = async () => {
+    isRunningRef.current = false;
+    if (timerRef.current) {
+      cancelAnimationFrame(timerRef.current);
+    }
+    setTimerState('ended');
+    await timeBlockService.markEnding();
     setFeedbackOpen(true);
   };
 
@@ -405,7 +412,10 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
 
       {/* 身心反馈对话框 */}
       <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
-        <DialogContent>
+        <DialogContent
+          onEscapeKeyDown={(e) => e.preventDefault()}
+          onInteractOutside={(e) => e.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>时间块结束</DialogTitle>
             <DialogDescription>
