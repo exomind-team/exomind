@@ -65,6 +65,7 @@ export interface ActiveBlockData {
   mode: 'countup' | 'countdown';
   targetMinutes?: number;
   elapsed: number;
+  /** 点击“开始”的时刻（行动结束） */
   startTime: Timestamp;
   /** 点击“结束”的时刻（行动结束） */
   actionEndedAt?: Timestamp;

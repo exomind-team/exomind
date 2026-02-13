@@ -180,6 +180,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (!rawActiveData) return null;
     const activeData = this.normalizeActiveBlock(rawActiveData);
 
+    const actionStartAt = activeData.startTime;
     const submittedAt = Date.now();
     const actionEndedAt = activeData.actionEndedAt ?? submittedAt;
     const feedbackStartedAt = activeData.feedbackStartedAt ?? actionEndedAt;
@@ -200,13 +201,16 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
     await this.addBlockEvent(`${activeData.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
 
+    const timeBlockName = activeData.name;
     const feedbackText = feedback?.trim() ? feedback.trim() : '（未填写）';
     const report = this.buildFeedbackReport({
+      timeBlockName,
       feedbackText,
       feedbackDurationMs,
       pausedDurationMs,
       workDurationMs,
       totalDurationMs,
+      actionStartAt,
       actionEndedAt,
       submittedAt,
     });
@@ -329,7 +333,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private formatDuration(ms: number): string {
-    const totalSeconds = Math.floor(Math.max(0, ms) / 1000);
+    const totalSeconds = Math.round(Math.max(0, ms) / 1000);
     const hours = Math.floor(totalSeconds / 3600);
     const minutes = Math.floor((totalSeconds % 3600) / 60);
     const seconds = totalSeconds % 60;
@@ -337,8 +341,13 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     }
-
-    return `${minutes}:${seconds.toString().padStart(2, '0')}`;
+    
+    if (minutes > 0) {
+      return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+    }
+    
+    // 📌【2026-02-13 21:57:18】人写：原先是想用「12s」这样的格式的，但会导致格式不一致
+    return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }
 
   private formatClock(ts: number): string {
@@ -350,23 +359,40 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private buildFeedbackReport(input: {
+    timeBlockName: string;
     feedbackText: string;
     feedbackDurationMs: number;
     pausedDurationMs: number;
     workDurationMs: number;
     totalDurationMs: number;
+    actionStartAt: number;
     actionEndedAt: number;
     submittedAt: number;
   }): string {
-    return [
-      `反馈：${input.feedbackText}`,
-      `- 反馈用时：${this.formatDuration(input.feedbackDurationMs)}`,
-      `- 暂停时长：${this.formatDuration(input.pausedDurationMs)}`,
-      `- 实际工作：${this.formatDuration(input.workDurationMs)}`,
-      `- 总时长：${this.formatDuration(input.totalDurationMs)}`,
-      `- 行动结束：${this.formatClock(input.actionEndedAt)}`,
-      `- 提交反馈：${this.formatClock(input.submittedAt)}`,
-    ].join('\n');
+    let result = ''
+    let print = (...lines: string[]) => { for (const line of lines) { result += line + '\n' } }
+    print(
+      `## ${input.timeBlockName}`,
+      ``,
+      `### 时刻信息`,
+      ``,
+      `- 时间开始于：\`${this.formatClock(input.actionStartAt)}\``,
+      `- 时间结束于：\`${this.formatClock(input.actionEndedAt)}\``,
+      `- 反馈提交于：\`${this.formatClock(input.submittedAt)}\``,
+      ``,
+      `### 统计信息`,
+      ``,
+      `- 总共时长：**\`${this.formatDuration(input.totalDurationMs)}\`**`);
+    if (input.workDurationMs > 0) print(`- 实际工作：**\`${this.formatDuration(input.workDurationMs)}\`**`)
+    if (input.pausedDurationMs > 0) print(`- 暂停时长：**\`${this.formatDuration(input.pausedDurationMs)}\`**`)
+    if (input.feedbackDurationMs > 0) print(`- 反馈用时：**\`${this.formatDuration(input.feedbackDurationMs)}\`**`)
+    print(
+      ``,
+      `---`,
+      ``,
+      `${input.feedbackText}`,
+    );
+      return result.trimEnd()
   }
 }
 
