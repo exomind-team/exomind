@@ -3,106 +3,15 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 import remarkMath from 'remark-math';
 import rehypeKatex from 'rehype-katex';
+import rehypeRaw from 'rehype-raw';
 import 'katex/dist/katex.min.css';
 
 /**
- * 自定义 remark 插件: 支持 ==highlight== 语法 (Obsidian 荧光笔风格)
- *
- * 将 ==text== 转换为 <mark> 标签
- * 修复: 避免 DOM 嵌套问题和无限递归
+ * 预处理器: 将 ==highlight== 转换为 <mark>highlight</mark>
+ * 用于支持 Obsidian 荧光笔风格的高亮语法
  */
-function remarkHighlight() {
-  return (tree: any) => {
-    const visited = new Set();
-
-    const visitor = (node: any) => {
-      if (visited.has(node)) return;
-      visited.add(node);
-
-      // 只处理 text 节点
-      if (node.type === 'text' && node.value && node.value.includes('==')) {
-        const children = [];
-        let remaining = node.value;
-        let pos = 0;
-
-        while (pos < remaining.length) {
-          const start = remaining.indexOf('==', pos);
-          if (start === -1) {
-            // 没有更多的高亮标记，添加剩余文本
-            if (pos < remaining.length) {
-              children.push({ type: 'text', value: remaining.slice(pos) });
-            }
-            break;
-          }
-
-          // 添加高亮之前的文本
-          if (start > pos) {
-            children.push({ type: 'text', value: remaining.slice(pos, start) });
-          }
-
-          const end = remaining.indexOf('==', start + 2);
-          if (end === -1) {
-            // 没有闭合的 ==，将剩余作为文本
-            children.push({ type: 'text', value: remaining.slice(start) });
-            break;
-          }
-
-          // 添加高亮文本 - 使用 text 类型而不是 html，避免安全问题
-          const highlightText = remaining.slice(start + 2, end);
-          children.push({
-            type: 'text',
-            value: `\u0001${highlightText}\u0002`,
-            marked: true // 标记为需要转换
-          });
-
-          pos = end + 2;
-        }
-
-        // 替换原始节点
-        if (children.length > 0) {
-          Object.assign(node, {
-            type: 'text',
-            children: children,
-            value: ''
-          });
-        }
-      }
-
-      // 递归访问子节点
-      if (node.children && Array.isArray(node.children)) {
-        node.children.forEach(visitor);
-      }
-    };
-
-    visitor(tree);
-
-    // 第二遍: 将标记的节点转换为 mark 元素
-    const transformMarked = (node: any) => {
-      if (node.children && Array.isArray(node.children)) {
-        const newChildren: any[] = [];
-        for (const child of node.children) {
-          if (child.marked) {
-            // 创建 <mark> 元素
-            newChildren.push({
-              type: 'element',
-              tagName: 'mark',
-              properties: {},
-              children: [{ type: 'text', value: child.value }]
-            });
-          } else if (child.children) {
-            // 递归处理
-            transformMarked(child);
-            newChildren.push(child);
-          } else {
-            newChildren.push(child);
-          }
-        }
-        node.children = newChildren;
-      }
-    };
-
-    transformMarked(tree);
-  };
+function preprocessHighlight(content: string): string {
+  return content.replace(/==([^=]+)==/g, '<mark>$1</mark>');
 }
 
 /**
@@ -112,7 +21,7 @@ function remarkHighlight() {
  * - GitHub Flavored Markdown (GFM): 表格、任务列表、删除线等
  * - 软换行: 单行换行也能分段 (remark-breaks)
  * - LaTeX数学公式: $inline$ 和 $$block$$ (remark-math + rehype-katex)
- * - Obsidian高亮: ==highlight== (自定义 remarkHighlight 插件)
+ * - Obsidian高亮: ==highlight== (预处理器 + rehype-raw)
  * - 分界线: --- 和 ===
  *
  * 样式适配:
@@ -122,6 +31,9 @@ function remarkHighlight() {
  * - 小字号
  */
 export function EventMarkdown({ content }: { content: string }) {
+  // 预处理高亮语法
+  const processedContent = preprocessHighlight(content);
+
   return (
     <div className="
       text-xs sm:text-sm break-words leading-relaxed
@@ -170,12 +82,16 @@ export function EventMarkdown({ content }: { content: string }) {
         remarkPlugins={[
           remarkGfm,
           remarkBreaks,
-          remarkMath,
-          remarkHighlight
+          remarkMath
         ]}
-        rehypePlugins={[rehypeKatex]}
+        rehypePlugins={[
+          rehypeKatex,
+          // 使用 rehype-raw 允许 <mark> 标签通过
+          // 配合 preprocessHighlight 将 ==text== 转换为 <mark>text</mark>
+          [rehypeRaw, { allowDangerousHtml: true }]
+        ]}
       >
-        {content}
+        {processedContent}
       </ReactMarkdown>
     </div>
   );
