@@ -1,18 +1,28 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { TimerMode, TimerConfig, TimeBlock, ActiveBlockData } from '../../../../src/lib/types/event';
 import type { TimeBlockService } from '../../../../src/lib/services/timeblock.service';
+import { z } from 'zod';
+import { parseToolArgs } from '../utils/zod-tool-parse';
 
-function asString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
+const startBlockArgsSchema = z
+  .object({
+    name: z.string().min(1, 'name is required'),
+    mode: z.enum(['countup', 'countdown']),
+    minutes: z.number().int().positive().optional(),
+  })
+  .strict();
 
-function asNumber(value: unknown): number | null {
-  return typeof value === 'number' && Number.isFinite(value) ? value : null;
-}
+const endBlockArgsSchema = z
+  .object({
+    feedback: z.string().optional(),
+  })
+  .strict();
 
-function isTimerMode(value: unknown): value is TimerMode {
-  return value === 'countup' || value === 'countdown';
-}
+const getBlocksArgsSchema = z
+  .object({
+    date: z.string().optional(),
+  })
+  .strict();
 
 function formatActiveBlock(block: ActiveBlockData): Record<string, unknown> {
   return {
@@ -103,19 +113,12 @@ export function createTimeBlockTools(
     {
       tool: startTool,
       async handler(args) {
-        const name = asString(args.name);
-        const mode = args.mode;
-        if (!name || !name.trim()) throw new Error('name is required');
-        if (!isTimerMode(mode)) throw new Error('mode must be countup or countdown');
+        const input = parseToolArgs(startBlockArgsSchema, args);
+        const name = input.name.trim();
+        if (!name) throw new Error('name is required');
 
-        const minutesRaw = asNumber(args.minutes);
-        const config: TimerConfig =
-          mode === 'countdown'
-            ? {
-                mode,
-                minutes: minutesRaw !== null ? Math.max(1, Math.floor(minutesRaw)) : undefined,
-              }
-            : { mode };
+        const mode: TimerMode = input.mode;
+        const config: TimerConfig = mode === 'countdown' ? { mode, minutes: input.minutes } : { mode };
 
         const block = await timeBlockService.startBlock(name, config);
         return { block: formatActiveBlock(block) };
@@ -124,7 +127,8 @@ export function createTimeBlockTools(
     {
       tool: endTool,
       async handler(args) {
-        const feedback = asString(args.feedback) ?? undefined;
+        const input = parseToolArgs(endBlockArgsSchema, args);
+        const feedback = input.feedback?.trim() || undefined;
         const ended = await timeBlockService.endBlock(feedback);
         return { block: ended ? formatTimeBlock(ended) : null };
       },
@@ -132,7 +136,8 @@ export function createTimeBlockTools(
     {
       tool: getBlocksTool,
       async handler(args) {
-        const date = asString(args.date);
+        const input = parseToolArgs(getBlocksArgsSchema, args);
+        const date = input.date?.trim() || undefined;
         const blocks = await timeBlockService.loadTimeBlocks();
         const filtered = date ? filterByDate(blocks, date) : blocks;
         return { count: filtered.length, blocks: filtered.map(formatTimeBlock) };
