@@ -4,7 +4,7 @@
  * Provides tools for managing ExoMind TimeBlocks
  */
 
-import PouchDB from 'pouchdb';
+import PouchDB from 'pouchdb-node';
 
 // Types
 interface StartBlockInput {
@@ -53,14 +53,14 @@ let blocksDb: PouchDB.Database | null = null;
 
 function getActiveDb(): PouchDB.Database {
   if (!activeDb) {
-    activeDb = new PouchDB('exomind-active-block', { adapter: 'node' });
+    activeDb = new PouchDB('exomind-active-block');
   }
   return activeDb;
 }
 
 function getBlocksDb(): PouchDB.Database {
   if (!blocksDb) {
-    blocksDb = new PouchDB('exomind-time-blocks', { adapter: 'node' });
+    blocksDb = new PouchDB('exomind-time-blocks');
   }
   return blocksDb;
 }

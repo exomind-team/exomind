@@ -4,7 +4,7 @@
  * Provides tools for adding and retrieving events from ExoMind EventLog
  */
 
-import PouchDB from 'pouchdb';
+import PouchDB from 'pouchdb-node';
 
 // Types
 interface AddEventInput {
@@ -32,7 +32,7 @@ let db: PouchDB.Database | null = null;
 
 function getDb(): PouchDB.Database {
   if (!db) {
-    db = new PouchDB('exomind-events', { adapter: 'node' });
+    db = new PouchDB('exomind-events');
   }
   return db;
 }
