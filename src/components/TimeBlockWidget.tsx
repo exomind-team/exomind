@@ -41,14 +41,20 @@ interface TimeBlockWidgetProps {
   onExpandedChange?: (expanded: boolean) => void;
 }
 
-export interface TimeBlockWidgetHandle {
-  expandAndFocusTaskName: () => void;
-}
-
 /**
  * 计时器状态
  */
-type TimerState = 'idle' | 'running' | 'paused' | 'ended';
+export type TimerState = 'idle' | 'running' | 'paused' | 'ended';
+
+export interface TimeBlockWidgetHandle {
+  expandAndFocusTaskName: () => void;
+  /** 当前计时器状态 */
+  getTimerState: () => TimerState;
+  /** 暂停/继续时间块 */
+  pauseOrResume: () => Promise<void>;
+  /** 直接结束时间块 */
+  end: () => Promise<void>;
+}
 
 export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidgetProps>(function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange }, ref) {
   const { toast } = useToast();
@@ -244,9 +250,59 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     });
   }, [setExpanded]);
 
+  // 暂停计时
+  const handlePause = async () => {
+    setTimerState('paused');
+    isRunningRef.current = false;
+    if (timerRef.current) {
+      cancelAnimationFrame(timerRef.current);
+    }
+    await timeBlockService.pauseBlock();
+  };
+
+  // 继续计时
+  const handleResume = async () => {
+    setTimerState('running');
+    await timeBlockService.resumeBlock();
+  };
+
+  // 结束计时（显示反馈对话框）
+  const handleEndDialog = () => {
+    setFeedbackOpen(true);
+  };
+
+  // 暂停/继续切换
+  const pauseOrResume = async () => {
+    if (timerState === 'running') {
+      await handlePause();
+    } else if (timerState === 'paused') {
+      await handleResume();
+    }
+  };
+
+  // 直接结束时间块（不弹反馈框）
+  const end = async () => {
+    isRunningRef.current = false;
+    if (timerRef.current) {
+      cancelAnimationFrame(timerRef.current);
+    }
+    await timeBlockService.endBlock(undefined);
+    // 重置状态
+    setTimerState('idle');
+    setElapsed(0);
+    setTaskName('');
+    setFeedback('');
+    countdownEndedRef.current = false;
+    countdownOverrunRef.current = false;
+    setCountdownOvertimeMs(0);
+  };
+
   useImperativeHandle(ref, () => ({
     expandAndFocusTaskName,
-  }), [expandAndFocusTaskName]);
+    getTimerState: () => timerState,
+    pauseOrResume,
+    end,
+  }), [expandAndFocusTaskName, timerState, pauseOrResume, end]);
 
   // 开始计时
   const handleStart = async () => {
@@ -274,46 +330,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     setElapsed(block.elapsed);
     setTimerState('running');
     startTimeRef.current = block.startTime;
-  };
-
-  // 暂停计时
-  const handlePause = async () => {
-    setTimerState('paused');
-    isRunningRef.current = false;
-    if (timerRef.current) {
-      cancelAnimationFrame(timerRef.current);
-    }
-    await timeBlockService.pauseBlock();
-  };
-
-  // 继续计时
-  const handleResume = async () => {
-    setTimerState('running');
-    await timeBlockService.resumeBlock();
-  };
-
-  // 结束计时
-  const handleEnd = () => {
-    setFeedbackOpen(true);
-  };
-
-  // 结束计时（带反馈）
-  const handleEndBlock = async (feedbackText?: string) => {
-    isRunningRef.current = false;
-    if (timerRef.current) {
-      cancelAnimationFrame(timerRef.current);
-    }
-
-    await timeBlockService.endBlock(feedbackText || undefined);
-
-    // 重置状态
-    setTimerState('idle');
-    setElapsed(0);
-    setTaskName('');
-    setFeedback('');
-    countdownEndedRef.current = false;
-    countdownOverrunRef.current = false;
-    setCountdownOvertimeMs(0);
   };
 
   // 清理定时器
@@ -368,7 +384,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
               <Button
                 size="sm"
                 variant="destructive"
-                onClick={handleEnd}
+                onClick={handleEndDialog}
                 className="gap-1"
               >
                 <Square size={16} />
@@ -390,7 +406,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
               <Button
                 size="sm"
                 variant="destructive"
-                onClick={handleEnd}
+                onClick={handleEndDialog}
                 className="gap-1"
               >
                 <Square size={16} />

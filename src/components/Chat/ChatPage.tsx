@@ -200,7 +200,7 @@ export function ChatPage() {
     }
   }, [refreshLatestEvents]);
 
-  // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter 快速聚焦
+  // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦
   useEffect(() => {
     const isEditableTarget = (target: EventTarget | null) => {
       const el = target instanceof HTMLElement ? target : null;
@@ -214,12 +214,33 @@ export function ChatPage() {
       if (e.key !== 'Enter') return;
       if (isEditableTarget(e.target)) return;
 
-      e.preventDefault();
-      if (e.shiftKey) {
-        timeBlockWidgetRef.current?.expandAndFocusTaskName();
-      } else {
-        voiceMessageInputRef.current?.focusText();
+      // Ctrl+Enter: 结束时间块（正在计时或暂停中）
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const timerState = timeBlockWidgetRef.current?.getTimerState();
+        if (timerState === 'running' || timerState === 'paused') {
+          timeBlockWidgetRef.current?.end();
+        }
+        return;
       }
+
+      // Shift+Enter: 暂停/继续时间块，或展开时间块输入框
+      if (e.shiftKey) {
+        e.preventDefault();
+        const timerState = timeBlockWidgetRef.current?.getTimerState();
+        if (timerState === 'running' || timerState === 'paused') {
+          // 正在计时或暂停中 → 暂停/继续
+          timeBlockWidgetRef.current?.pauseOrResume();
+        } else {
+          // 空闲/无时间块 → 展开时间块输入框
+          timeBlockWidgetRef.current?.expandAndFocusTaskName();
+        }
+        return;
+      }
+
+      // Enter: 聚焦输入框
+      e.preventDefault();
+      voiceMessageInputRef.current?.focusText();
     };
 
     window.addEventListener('keydown', handleKeyDown);
