@@ -18,7 +18,6 @@ import type {
   SyncResult,
   Conflict,
 } from '@/environment/interfaces/sync.port';
-import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 
 // PouchDB 插件
 import pouchdbAdapterIdb from 'pouchdb-adapter-idb';
@@ -28,6 +27,37 @@ PouchDB.plugin(pouchdbAdapterIdb);
 
 // 设备信息存储键
 const DEVICE_ID_KEY = 'exomind:deviceId';
+type SyncAuthMode = 'enabled' | 'disabled';
+
+function normalizeSyncServerBaseUrl(url: string): string {
+  const trimmed = url.replace(/\/+$/, '');
+  if (trimmed.endsWith('/database')) {
+    return trimmed.slice(0, -'/database'.length);
+  }
+  return trimmed;
+}
+
+function normalizeSyncAuthMode(rawValue: string | undefined): SyncAuthMode {
+  const value = rawValue?.trim().toLowerCase();
+  if (value === 'enabled' || value === 'on' || value === 'true' || value === 'required') {
+    return 'enabled';
+  }
+
+  return 'disabled';
+}
+
+function resolveSyncAuthMode(): SyncAuthMode {
+  const processEnv = (globalThis as { process?: { env?: Record<string, string | undefined> } })
+    .process?.env;
+
+  const rawMode =
+    import.meta.env?.EXOMIND_SYNC_AUTH_MODE ||
+    import.meta.env?.VITE_SYNC_AUTH_MODE ||
+    processEnv?.EXOMIND_SYNC_AUTH_MODE ||
+    processEnv?.VITE_SYNC_AUTH_MODE;
+
+  return normalizeSyncAuthMode(rawMode);
+}
 
 /**
  * 获取设备 ID
@@ -85,20 +115,27 @@ export class PouchSyncAdapter implements ISyncPort {
     this.credentials = credentials;
     this.status.state = 'connecting';
 
-    const { username, passwordHash } = credentials;
+    const { username } = credentials;
+    const authMode = resolveSyncAuthMode();
+    const normalizedUrl = normalizeSyncServerBaseUrl(url);
+    const remoteDbName = encodeURIComponent(username);
 
     // 创建本地数据库（使用 IndexedDB）
     const dbName = `local_${username}`;
     this.localDB = new PouchDB(dbName, { adapter: 'idb' });
 
     // 创建远程数据库连接
-    const remoteUrl = buildRemoteDbUrl(url, username);
-    this.remoteDB = new PouchDB(remoteUrl, {
-      auth: {
-        username,
-        password: passwordHash, // PouchDB auth 使用 password 字段
-      },
-    });
+    // 注意：当前 server/pouchdb-server.js 启动的是官方 pouchdb-server，
+    // 数据库路径为 `/<dbname>`，不是 `/database/<dbname>`。
+    // 可通过 EXOMIND_SYNC_AUTH_MODE / VITE_SYNC_AUTH_MODE=enabled 开启 basic auth。
+    const remoteUrl = `${normalizedUrl}/${remoteDbName}`;
+    const remoteConfig = authMode === 'enabled'
+      ? { auth: { username, password: credentials.passwordHash } }
+      : undefined;
+    this.remoteDB = remoteConfig
+      ? new PouchDB(remoteUrl, remoteConfig)
+      : new PouchDB(remoteUrl);
+    console.log(`[Sync] 远程数据库连接: ${remoteUrl} (auth: ${authMode})`);
 
     // 启动实时双向同步
     this.startRealtimeSync();

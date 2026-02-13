@@ -51,6 +51,7 @@ local.properties
 .env
 .env.local
 .env.*.local
+/config.json
 
 # === OS ===
 .DS_Store

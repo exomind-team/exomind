@@ -18,16 +18,34 @@ import type { SyncEvent, ConfigDoc, Conflict } from '@/environment/interfaces/sy
  */
 class MockPouchDB {
   private static plugins: Array<unknown> = [];
+  private static instances: MockPouchDB[] = [];
   private docs: Map<string, Record<string, unknown>> = new Map();
   private changesCallbacks: Array<(change: { id: string; deleted?: boolean; doc?: unknown }) => void> = [];
   private queryResults: Map<string, Array<{ id: string; key: string; value: unknown; doc?: unknown }>> = new Map();
   private closed = false;
 
-  constructor(private name: string) {}
+  constructor(
+    private name: string,
+    private options: Record<string, unknown> = {}
+  ) {
+    MockPouchDB.instances.push(this);
+  }
 
   static plugin(_plugin: unknown): typeof MockPouchDB {
     MockPouchDB.plugins.push(_plugin);
     return MockPouchDB;
+  }
+
+  static resetInstances(): void {
+    MockPouchDB.instances = [];
+  }
+
+  static getInstanceByName(name: string): MockPouchDB | undefined {
+    return MockPouchDB.instances.find((instance) => instance.name === name);
+  }
+
+  getOptions(): Record<string, unknown> {
+    return this.options;
   }
 
   static replicate(
@@ -209,6 +227,9 @@ describe('PouchSyncAdapter', () => {
   beforeEach(() => {
     mockLocalStorage.clear();
     vi.clearAllMocks();
+    MockPouchDB.resetInstances();
+    delete process.env.EXOMIND_SYNC_AUTH_MODE;
+    delete process.env.VITE_SYNC_AUTH_MODE;
   });
 
   describe('getDeviceId', () => {
@@ -264,6 +285,38 @@ describe('PouchSyncAdapter', () => {
 
       expect(localDB).not.toBeNull();
       expect(remoteDB).not.toBeNull();
+    });
+
+    it('should not attach remote auth by default', async () => {
+      const adapter = createPouchSyncAdapter();
+
+      await adapter.connect('http://localhost:6984', {
+        username: 'test-user',
+        passwordHash: 'test-pass-hash',
+      });
+
+      const remote = MockPouchDB.getInstanceByName('http://localhost:6984/test-user');
+      expect(remote).toBeDefined();
+      expect(remote?.getOptions()).not.toHaveProperty('auth');
+    });
+
+    it('should attach remote auth when EXOMIND_SYNC_AUTH_MODE is enabled', async () => {
+      process.env.EXOMIND_SYNC_AUTH_MODE = 'enabled';
+      const adapter = createPouchSyncAdapter();
+
+      await adapter.connect('http://localhost:6984', {
+        username: 'test-user',
+        passwordHash: 'test-pass-hash',
+      });
+
+      const remote = MockPouchDB.getInstanceByName('http://localhost:6984/test-user');
+      expect(remote).toBeDefined();
+      expect(remote?.getOptions()).toMatchObject({
+        auth: {
+          username: 'test-user',
+          password: 'test-pass-hash',
+        },
+      });
     });
   });
 

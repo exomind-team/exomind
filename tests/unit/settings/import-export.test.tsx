@@ -10,4 +10,12 @@ describe('SettingsPage import/export', () => {
     expect(screen.getByRole('button', { name: '导入 JSON' })).toBeInTheDocument();
     expect(screen.getByLabelText('导入策略')).toBeInTheDocument();
   });
+
+  it('renders sync server controls', () => {
+    render(<SettingsPage />);
+
+    expect(screen.getByLabelText('同步服务器地址')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '保存同步地址' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '恢复自动地址' })).toBeInTheDocument();
+  });
 });

@@ -26,7 +26,7 @@ export default {
   pollingInterval: 300000,
 
   // 默认仅本机访问；局域网联调时显式设置 EXOMIND_POUCHDB_HOST=0.0.0.0
-  host: process.env.EXOMIND_POUCHDB_HOST || '127.0.0.1',
+  host: process.env.EXOMIND_POUCHDB_HOST?.trim() || '127.0.0.1',
 
   // pouchdb-server 配置
   pouchdbServer: {
