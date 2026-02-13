@@ -93,3 +93,4 @@ test-results/*
 tests/e2e/report/
 packages/mcp/.data/
 packages/mcp/events_*/
+events_*/
