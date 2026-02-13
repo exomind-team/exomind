@@ -1,16 +1,22 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
 import type { EventLogService } from '../../../../src/lib/services/eventlog.service';
 import type { Tag } from '../../../../src/lib/types/event';
+import { z } from 'zod';
+import { parseToolArgs } from '../utils/zod-tool-parse';
 
-function asString(value: unknown): string | null {
-  return typeof value === 'string' ? value : null;
-}
+const addEventArgsSchema = z
+  .object({
+    content: z.string().min(1, 'content is required'),
+    tags: z.array(z.string()).optional(),
+  })
+  .strict();
 
-function asStringArray(value: unknown): string[] | null {
-  if (!Array.isArray(value)) return null;
-  if (value.every((item) => typeof item === 'string')) return value;
-  return null;
-}
+const getEventsArgsSchema = z
+  .object({
+    limit: z.number().int().positive().optional(),
+    tag: z.string().optional(),
+  })
+  .strict();
 
 export function createEventTools(
   eventLogService: EventLogService,
@@ -46,13 +52,11 @@ export function createEventTools(
     {
       tool: addEventTool,
       async handler(args) {
-        const content = asString(args.content);
-        if (!content || !content.trim()) {
-          throw new Error('content is required');
-        }
+        const input = parseToolArgs(addEventArgsSchema, args);
+        const content = input.content.trim();
+        if (!content) throw new Error('content is required');
 
-        const tagsRaw = asStringArray(args.tags);
-        const tags = tagsRaw ? new Set<Tag>(tagsRaw) : undefined;
+        const tags = input.tags ? new Set<Tag>(input.tags) : undefined;
         const event = await eventLogService.addEvent(content, tags);
 
         return {
@@ -66,9 +70,9 @@ export function createEventTools(
     {
       tool: getEventsTool,
       async handler(args) {
-        const limitRaw = typeof args.limit === 'number' ? args.limit : undefined;
-        const limit = limitRaw && Number.isFinite(limitRaw) ? Math.max(1, Math.floor(limitRaw)) : 20;
-        const tag = asString(args.tag);
+        const input = parseToolArgs(getEventsArgsSchema, args);
+        const limit = input.limit ? Math.max(1, input.limit) : 20;
+        const tag = input.tag?.trim() || undefined;
 
         const events = await eventLogService.loadEvents();
         const filtered = tag ? events.filter((event) => event.tags.has(tag)) : events;
