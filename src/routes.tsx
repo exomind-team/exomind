@@ -1,8 +1,8 @@
 import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from "@tanstack/react-router";
 import { Link } from "@tanstack/react-router";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home, Users } from "lucide-react";
+import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home, Users, Sun, Moon, SunMoon } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
 import { ASRTestPage } from "@/pages/ASRTestPage";
@@ -11,6 +11,12 @@ import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
 import { HomePage } from "@/components/Home/HomePage";
 import { UserManagePage } from "@/ui/pages/UserManagePage";
 import { SyncTestPage } from "@/ui/pages/SyncTestPage";
+import {
+  getThemePreference,
+  setThemePreference,
+  subscribeThemePreferenceChanges,
+  type ThemePreference,
+} from "@/config/theme";
 
 const sidebarItems = [
   { title: "首页", path: "/", icon: Home },
@@ -24,6 +30,39 @@ const sidebarItems = [
 
 function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) {
   const location = useLocation();
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => getThemePreference());
+
+  useEffect(() => {
+    return subscribeThemePreferenceChanges((preference) => {
+      setThemePreferenceState(preference);
+    });
+  }, []);
+
+  const handleToggleTheme = () => {
+    const nextPreference: ThemePreference =
+      themePreference === 'light' ? 'dark' : themePreference === 'dark' ? 'system' : 'light';
+    setThemePreference(nextPreference);
+    setThemePreferenceState(nextPreference);
+  };
+
+  const renderThemeIcon = () => {
+    const iconClassName = "w-5 h-5";
+    if (themePreference === 'light') {
+      return <Sun className={iconClassName} aria-hidden="true" />;
+    }
+    if (themePreference === 'dark') {
+      return <Moon className={iconClassName} aria-hidden="true" />;
+    }
+
+    return (
+      <span className="relative inline-flex" aria-hidden="true">
+        <SunMoon className={iconClassName} />
+        <span className="absolute -bottom-0.5 -right-0.5 rounded bg-background px-0.5 text-[9px] leading-none text-muted-foreground border">
+          A
+        </span>
+      </span>
+    );
+  };
 
   return (
     <>
@@ -41,14 +80,26 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
         )}
         data-testid="device-panel"
       >
-        <div className="p-4 border-b flex items-center justify-between">
+        <div className="p-4 border-b flex items-center justify-between gap-2">
           <h1 className="text-xl font-bold">ExoMind</h1>
-          <button
-            onClick={onClose}
-            className="lg:hidden p-2 hover:bg-accent rounded-md"
-          >
-            <X size={20} />
-          </button>
+          <div className="flex items-center gap-1">
+            <button
+              type="button"
+              onClick={handleToggleTheme}
+              className="p-2 hover:bg-accent rounded-md"
+              aria-label="切换主题（浅色/深色/跟随系统）"
+              title="切换主题：浅 → 深 → 系统"
+            >
+              {renderThemeIcon()}
+            </button>
+            <button
+              onClick={onClose}
+              className="lg:hidden p-2 hover:bg-accent rounded-md"
+              aria-label="关闭侧边栏"
+            >
+              <X size={20} />
+            </button>
+          </div>
         </div>
         <nav className="flex-1 p-4 space-y-1">
           {sidebarItems.map((item) => {
