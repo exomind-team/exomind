@@ -52,8 +52,6 @@ export interface TimeBlockWidgetHandle {
   getTimerState: () => TimerState;
   /** 暂停/继续时间块 */
   pauseOrResume: () => Promise<void>;
-  /** 直接结束时间块（不弹对话框） */
-  end: () => Promise<void>;
   /** 弹出反馈对话框 */
   endDialog: () => void;
 }
@@ -273,22 +271,15 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     setFeedbackOpen(true);
   };
 
-  // 暂停/继续切换
-  const pauseOrResume = async () => {
-    if (timerState === 'running') {
-      await handlePause();
-    } else if (timerState === 'paused') {
-      await handleResume();
-    }
-  };
-
-  // 直接结束时间块（不弹反馈框）
-  const end = async () => {
+  // 带反馈结束时间块
+  const handleEndBlock = async (feedbackText?: string) => {
     isRunningRef.current = false;
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
-    await timeBlockService.endBlock(undefined);
+
+    await timeBlockService.endBlock(feedbackText || undefined);
+
     // 重置状态
     setTimerState('idle');
     setElapsed(0);
@@ -299,13 +290,21 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     setCountdownOvertimeMs(0);
   };
 
+  // 暂停/继续切换
+  const pauseOrResume = async () => {
+    if (timerState === 'running') {
+      await handlePause();
+    } else if (timerState === 'paused') {
+      await handleResume();
+    }
+  };
+
   useImperativeHandle(ref, () => ({
     expandAndFocusTaskName,
     getTimerState: () => timerState,
     pauseOrResume,
-    end,
     endDialog: handleEndDialog,
-  }), [expandAndFocusTaskName, timerState, pauseOrResume, end, handleEndDialog]);
+  }), [expandAndFocusTaskName, timerState, pauseOrResume, handleEndDialog]);
 
   // 开始计时
   const handleStart = async () => {
@@ -602,17 +601,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
             data-testid="timeblock-feedback-textarea"
           />
           <DialogFooter>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => {
-                setFeedbackOpen(false);
-                // 跳过反馈，直接结束
-                handleEndBlock();
-              }}
-            >
-              跳过
-            </Button>
             <Button
               size="sm"
               onClick={() => {

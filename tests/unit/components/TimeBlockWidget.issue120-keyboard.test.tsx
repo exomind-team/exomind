@@ -108,7 +108,7 @@ describe('TimeBlockWidget keyboard shortcuts (Issue #120)', () => {
     expect(resumeBlockMock).toHaveBeenCalled();
   });
 
-  it('end should end time block directly without feedback dialog', async () => {
+  it('endDialog should open feedback dialog', async () => {
     const ref = React.createRef<TimeBlockWidgetHandle>();
     render(<TimeBlockWidget ref={ref} expanded={true} />);
 
@@ -121,9 +121,10 @@ describe('TimeBlockWidget keyboard shortcuts (Issue #120)', () => {
       expect(startBlockMock).toHaveBeenCalled();
     });
 
-    // Test end
-    await ref.current?.end();
-    expect(endBlockMock).toHaveBeenCalledWith(undefined);
+    // Test endDialogtoHaveBeenCalled - should not call endBlock, just open dialog
+    ref.current?.endDialog();
+    // endBlock should NOT have been called yet
+    expect(endBlockMock).not.toHaveBeenCalled();
   });
 
   it('getTimerState should return current timer state', async () => {
