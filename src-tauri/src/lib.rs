@@ -7,7 +7,7 @@ use commands::ws_commands::{
 };
 use commands::file_commands::{
     write_file, read_file, read_file_binary, delete_file, file_exists, list_files,
-    append_file, append_to_markdown, export_messages_to_markdown
+    append_file, append_to_markdown, export_messages_to_markdown, save_json_file
 };
 use commands::device_commands::get_device_id;
 use commands::eventlog_commands::{
@@ -26,6 +26,7 @@ pub fn run() {
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .manage(ws_client_state.clone())
         .invoke_handler(tauri::generate_handler![
             greet,
@@ -44,6 +45,7 @@ pub fn run() {
             append_file,
             append_to_markdown,
             export_messages_to_markdown,
+            save_json_file,
             get_device_id,
             eventlog_list,
             eventlog_append,

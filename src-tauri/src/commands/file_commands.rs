@@ -2,6 +2,7 @@
 //! 用于消息持久化存储 - 重构版（同步版本）
 
 use tauri::{AppHandle, Manager, ipc::InvokeError};
+use tauri_plugin_dialog::DialogExt;
 use std::path::PathBuf;
 use std::fs;
 use thiserror::Error;
@@ -344,4 +345,36 @@ pub fn export_messages_to_markdown(
     })?;
 
     Ok(())
+}
+
+/// 保存 JSON 文件到用户选择的路径
+/// 弹出系统保存对话框，让用户选择保存位置
+#[tauri::command]
+pub fn save_json_file(app: AppHandle, content: String, default_name: String) -> FileResult<Option<String>> {
+    let file_path = app.dialog()
+        .file()
+        .set_file_name(&default_name)
+        .add_filter("JSON 文件", &["json"])
+        .blocking_save_file();
+
+    match file_path {
+        Some(path) => {
+            let path_ref = path.as_path();
+            if let Some(path_str) = path_ref {
+                let path_string = path_str.to_string_lossy().to_string();
+                let path_buf = PathBuf::from(&path_string);
+                fs::write(&path_buf, content).map_err(|e| FileError::IoError {
+                    message: format!("保存文件失败: {}", e),
+                    source: e,
+                })?;
+                Ok(Some(path_string))
+            } else {
+                Ok(None)
+            }
+        }
+        None => {
+            // 用户取消了对话框
+            Ok(None)
+        }
+    }
 }
