@@ -178,4 +178,20 @@ describe('TimeBlockServiceImpl', () => {
     const pauseCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_pause');
     expect(pauseCalls).toHaveLength(1);
   });
+
+  it('does not start a new block when an active block exists', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    const first = await service.startBlock('first', { mode: 'countup' });
+    await service.pauseBlock();
+
+    const second = await service.startBlock('second', { mode: 'countup' });
+
+    expect(second.startId).toBe(first.startId);
+    expect(second.name).toBe(first.name);
+
+    const startCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_start');
+    expect(startCalls).toHaveLength(1);
+  });
 });

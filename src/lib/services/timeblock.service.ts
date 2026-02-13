@@ -77,6 +77,16 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async startBlock(name: string, config: TimerConfig): Promise<ActiveBlockData> {
+    // 不允许在已有活跃块（运行中/已暂停）时开启新块
+    const existing = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    if (existing) {
+      const normalized = this.normalizeActiveBlock(existing);
+      if (this.shouldPersistNormalized(existing, normalized)) {
+        await this.env.storage.write(ACTIVE_BLOCK_KEY, normalized);
+      }
+      return normalized;
+    }
+
     const startId = crypto.randomUUID();
     const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
