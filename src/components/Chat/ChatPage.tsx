@@ -225,8 +225,12 @@ export function ChatPage() {
 
   // 获取事件背景色
   const getEventBgColor = (event: Event) => {
-    if (event.tags.has('block_start')) return 'bg-blue-100 text-blue-800 rounded-br-md';
-    if (event.tags.has('block_end')) return 'bg-red-100 text-red-800 rounded-br-md';
+    if (event.tags.has('block_start')) {
+      return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 rounded-br-md';
+    }
+    if (event.tags.has('block_end')) {
+      return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-100 rounded-br-md';
+    }
     return 'bg-muted rounded-bl-md';
   };
 
