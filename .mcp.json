@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "exomind": {
+      "command": "bun",
+      "args": ["run", "server.ts"],
+      "cwd": "packages/mcp"
+    }
+  }
+}
+
