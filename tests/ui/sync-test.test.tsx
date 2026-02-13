@@ -51,8 +51,12 @@ describe('SyncTestPage 路由注册', () => {
   const routesPath = path.resolve('src/routes.tsx');
   const routesContent = fs.readFileSync(routesPath, 'utf-8');
 
-  it('不应该在侧边栏显示同步测试入口', () => {
-    expect(routesContent).not.toContain('同步测试');
+  it('应该在侧边栏显示同步测试入口', () => {
+    expect(routesContent).toContain('同步测试');
+  });
+
+  it('同步测试应该使用 RefreshCw 图标', () => {
+    expect(routesContent).toContain('RefreshCw');
   });
 
   it('应该注册 /sync-test 路由（兼容旧入口）', () => {
