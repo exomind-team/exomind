@@ -26,7 +26,7 @@ export interface TimeBlockService {
   loadActiveBlock(): Promise<ActiveBlockData | null>;
 
   /** 开始时间块 */
-  startBlock(name: string, config: TimerConfig): Promise<ActiveBlockData>;
+  startBlock(name: string, config: TimerConfig, description?: string): Promise<ActiveBlockData>;
 
   /** 标记“行动结束/开始填写反馈”（点击结束时刻） */
   markEnding(): Promise<void>;
@@ -79,7 +79,16 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return normalized;
   }
 
-  async startBlock(name: string, config: TimerConfig): Promise<ActiveBlockData> {
+  async startBlock(name: string, config: TimerConfig, description?: string): Promise<ActiveBlockData> {
+    // 不允许在已有活跃块（运行中/已暂停）时开启新块
+    const existing = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    if (existing) {
+      const normalized = this.normalizeActiveBlock(existing);
+      if (this.shouldPersistNormalized(existing, normalized)) {
+        await this.env.storage.write(ACTIVE_BLOCK_KEY, normalized);
+      }
+      return normalized;
+    }
     const startId = crypto.randomUUID();
     const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
@@ -87,7 +96,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       : 0;
 
     // 创建开始事件
-    await this.addBlockEvent(name, 'block_start', new Date(now).toISOString());
+    const normalizedDescription = description?.trim();
+    const eventContent = normalizedDescription ? `${name}\n${normalizedDescription}` : name;
+    await this.addBlockEvent(eventContent, 'block_start', new Date(now).toISOString());
 
     // 保存进行中的时间块
     const activeBlock: ActiveBlockData = {
@@ -140,7 +151,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async pauseBlock(): Promise<void> {
     const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
-    if (!data) return;
+    if (!data || data.paused) return;
 
     const now = Date.now();
     const normalized = this.normalizeActiveBlock(data, now);
@@ -153,6 +164,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
 
     await this.env.storage.write(ACTIVE_BLOCK_KEY, pausedBlock);
+
+    // 记录暂停事件
+    await this.addBlockEvent(`${normalized.name} 暂停`, 'block_pause', new Date(now).toISOString());
     this.notifyChange(pausedBlock);
   }
 
@@ -172,6 +186,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
 
     await this.env.storage.write(ACTIVE_BLOCK_KEY, resumedBlock);
+
+    // 记录继续事件
+    await this.addBlockEvent(`${data.name} 继续`, 'block_resume', new Date(now).toISOString());
     this.notifyChange(resumedBlock);
   }
 
@@ -289,7 +306,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   /** 添加时间块事件（通过 EventStorage，与 ChatPage 保持一致） */
   private async addBlockEvent(
     content: string,
-    tag: 'block_start' | 'block_end',
+    tag: 'block_start' | 'block_end' | 'block_pause' | 'block_resume',
     createdAt: string,
   ): Promise<void> {
     const storage = getEventStorage();
@@ -341,11 +358,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (hours > 0) {
       return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     }
-    
+
     if (minutes > 0) {
       return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
     }
-    
+
     // 📌【2026-02-13 21:57:18】人写：原先是想用「12s」这样的格式的，但会导致格式不一致
     return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
   }

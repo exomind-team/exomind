@@ -13,7 +13,7 @@
  * └─────────────────────────────────────────┘
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 
@@ -48,6 +48,10 @@ export interface VoiceInputButtonProps {
   style?: React.CSSProperties;
 }
 
+export interface VoiceInputButtonHandle {
+  start: () => void;
+}
+
 // 录音状态管理
 interface RecordingState {
   state: VoiceButtonState;
@@ -58,7 +62,7 @@ interface RecordingState {
 // 使用 ref 来存储动画帧 ID，避免触发重渲染
 let animationFrameId: number | null = null;
 
-export function VoiceInputButton({
+export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceInputButtonProps>(function VoiceInputButton({
   onResult,
   onError,
   onStateChange,
@@ -70,7 +74,7 @@ export function VoiceInputButton({
   size = 64,
   className,
   style,
-}: VoiceInputButtonProps) {
+}, ref) {
   // 权限状态类型
   type PermissionState = 'checking' | 'granted' | 'denied' | 'prompt' | 'unavailable';
 
@@ -471,6 +475,14 @@ export function VoiceInputButton({
     }
   }, [state.state, startRecording, stopRecording]);
 
+  useImperativeHandle(ref, () => ({
+    start: () => {
+      if (state.state === 'idle' || state.state === 'completed') {
+        startRecording();
+      }
+    },
+  }), [startRecording, state.state]);
+
   // 快捷键处理（仅非输入区域）
   useEffect(() => {
     if (!enableShortcut) return;
@@ -511,6 +523,12 @@ export function VoiceInputButton({
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [enableShortcut, handleClick, state.state, releaseRecordingResources]);
 
+  const formatCssVarColor = (triplet: string, alpha: number): string | null => {
+    const parts = triplet.trim().split(/\s+/);
+    if (parts.length < 3) return null;
+    return `hsla(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`;
+  };
+
   // 音量波形动画
   useEffect(() => {
     if (!showWaveform || state.state !== 'recording' || !canvasRef.current) {
@@ -532,6 +550,10 @@ export function VoiceInputButton({
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
     const baseRadius = (size / 2) - 8;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const destructiveTriplet = rootStyle.getPropertyValue('--destructive');
+    const destructive0 = formatCssVarColor(destructiveTriplet, 0.9) ?? '#ff6b6b';
+    const destructive1 = formatCssVarColor(destructiveTriplet, 0.6) ?? '#ee5a5a';
 
     const draw = () => {
       animationFrameId = requestAnimationFrame(draw);
@@ -555,8 +577,8 @@ export function VoiceInputButton({
         const y2 = centerY + Math.sin(angle) * (baseRadius + barHeight);
 
         const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-        gradient.addColorStop(0, '#ff6b6b');
-        gradient.addColorStop(1, '#ee5a5a');
+        gradient.addColorStop(0, destructive0);
+        gradient.addColorStop(1, destructive1);
 
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -605,26 +627,30 @@ export function VoiceInputButton({
     switch (state.state) {
       case 'recording':
         return {
-          background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%)',
-          shadow: '0 0 20px rgba(255, 107, 107, 0.6)',
+          background:
+            'linear-gradient(135deg, hsl(var(--destructive)) 0%, hsl(var(--destructive) / 0.85) 100%)',
+          shadow: '0 0 20px hsl(var(--destructive) / 0.6)',
           icon: '🎤',
         };
       case 'recognizing':
         return {
-          background: 'linear-gradient(135deg, #4dabf7 0%, #339af0 100%)',
-          shadow: '0 0 20px rgba(77, 171, 247, 0.6)',
+          background:
+            'linear-gradient(135deg, hsl(var(--brand)) 0%, hsl(var(--brand) / 0.85) 100%)',
+          shadow: '0 0 20px hsl(var(--brand) / 0.6)',
           icon: '⏳',
         };
       case 'completed':
         return {
-          background: 'linear-gradient(135deg, #51cf66 0%, #40c057 100%)',
-          shadow: '0 0 20px rgba(81, 207, 102, 0.6)',
+          background:
+            'linear-gradient(135deg, hsl(var(--success)) 0%, hsl(var(--success) / 0.85) 100%)',
+          shadow: '0 0 20px hsl(var(--success) / 0.6)',
           icon: '✓',
         };
       default:
         return {
-          background: 'linear-gradient(135deg, #868e96 0%, #6c757d 100%)',
-          shadow: '0 4px 12px rgba(108, 117, 125, 0.3)',
+          background:
+            'linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--secondary)) 100%)',
+          shadow: '0 4px 12px hsl(var(--ring) / 0.2)',
           icon: '🎤',
         };
     }
@@ -667,8 +693,12 @@ export function VoiceInputButton({
           transform: 'translateX(-50%)',
           fontSize: 12,
           fontWeight: 500,
-          color: state.state === 'recording' ? '#ff6b6b' :
-                 state.state === 'recognizing' ? '#4dabf7' : '#51cf66',
+          color:
+            state.state === 'recording'
+              ? 'hsl(var(--destructive))'
+              : state.state === 'recognizing'
+                ? 'hsl(var(--brand))'
+                : 'hsl(var(--success))',
           whiteSpace: 'nowrap',
         }}>
           {state.state === 'recording' ? formatTime(state.duration) :
@@ -740,7 +770,7 @@ export function VoiceInputButton({
             width: 8,
             height: 8,
             borderRadius: '50%',
-            background: '#fff',
+            background: 'hsl(var(--foreground))',
             animation: 'blink 1s ease-in-out infinite',
           }}>
             <style>{`
@@ -768,7 +798,7 @@ export function VoiceInputButton({
           left: '50%',
           transform: 'translateX(-50%)',
           fontSize: 10,
-          color: '#adb5bd',
+          color: 'hsl(var(--muted-foreground))',
           whiteSpace: 'nowrap',
         }}>
           按 [空格] 开始/停止
@@ -784,8 +814,9 @@ export function VoiceInputButton({
             height: buttonSize,
             borderRadius: '50%',
             border: 'none',
-            background: 'linear-gradient(135deg, #ffa500 0%, #ff8c00 100%)',
-            boxShadow: '0 4px 12px rgba(255, 140, 0, 0.4)',
+            background:
+              'linear-gradient(135deg, hsl(var(--warning)) 0%, hsl(var(--warning) / 0.85) 100%)',
+            boxShadow: '0 4px 12px hsl(var(--warning) / 0.4)',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -807,7 +838,7 @@ export function VoiceInputButton({
           left: '50%',
           transform: 'translateX(-50%)',
           fontSize: 10,
-          color: '#ffa500',
+          color: 'hsl(var(--warning))',
           whiteSpace: 'nowrap',
         }}>
           {permissionState === 'unavailable' ? '不支持' : '需要权限'}
@@ -815,4 +846,4 @@ export function VoiceInputButton({
       )}
     </div>
   );
-}
+});

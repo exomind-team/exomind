@@ -5,6 +5,9 @@
 
 import { useEffect, useRef, useState } from 'react';
 import type { ASRResult } from '../lib/ports/asr-port';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { cn } from '@/lib/utils';
 
 // 获取 SpeechRecognition 构造函数
 const getSpeechRecognition = () => {
@@ -146,146 +149,99 @@ export function ASRTestPage() {
   }, []);
 
   return (
-    <div style={{
-      padding: '24px',
-      maxWidth: '600px',
-      margin: '0 auto',
-      fontFamily: 'system-ui, sans-serif',
-    }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-        <h1 style={{ margin: 0, fontSize: '24px' }}>语音识别测试</h1>
-      </div>
+    <div className="p-6 max-w-2xl mx-auto space-y-4">
+      <h1 className="text-2xl font-bold">语音识别测试</h1>
 
-      {/* 状态显示 */}
-      <div style={{
-        padding: '12px',
-        background: status === 'success' ? '#dcfce7' :
-                    status === 'error' ? '#fee2e2' :
-                    status === 'recording' ? '#fee2e2' :
-                    '#f3f4f6',
-        borderRadius: '8px',
-        marginBottom: '16px',
-        textAlign: 'center',
-      }}>
-        {status === 'idle' && '点击"开始录音"'}
+      <div
+        className={cn(
+          "rounded-lg border p-3 text-center text-sm",
+          status === 'success'
+            ? "border-success/30 bg-success/10"
+            : status === 'error'
+              ? "border-destructive/30 bg-destructive/10"
+              : status === 'recording'
+                ? "border-brand/30 bg-brand/10"
+                : "bg-muted"
+        )}
+      >
+        {status === 'idle' && '点击“开始录音”'}
         {status === 'ready' && '✓ 准备就绪'}
         {status === 'recording' && '🔴 录音中...请说话'}
         {status === 'success' && '✓ 识别完成'}
         {status === 'error' && '✗ 出错了'}
       </div>
 
-      {/* 控制按钮 */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+      <div className="flex gap-3">
         {!apiAvailable ? (
-          <button
-            disabled
-            style={{
-              flex: 1,
-              padding: '16px',
-              fontSize: '18px',
-              background: '#9ca3af',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'not-allowed',
-            }}
-          >
+          <Button type="button" disabled className="flex-1 h-auto py-4 text-lg">
             浏览器不支持语音识别
-          </button>
+          </Button>
         ) : status === 'success' || status === 'error' ? (
-          <button
-            onClick={reset}
-            style={{
-              flex: 1,
-              padding: '16px',
-              fontSize: '18px',
-              background: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-            }}
-          >
+          <Button type="button" variant="brand" onClick={reset} className="flex-1 h-auto py-4 text-lg">
             🔄 重新开始
-          </button>
-        ) : (
-          <button
+          </Button>
+        ) : status === 'recording' ? (
+          <Button
+            type="button"
+            variant="destructive"
             onClick={toggleRecording}
-            style={{
-              flex: 1,
-              padding: '16px',
-              fontSize: '18px',
-              background: status === 'recording' ? '#ef4444' : '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-            }}
+            className="flex-1 h-auto py-4 text-lg"
           >
-            {status === 'recording' ? '⏹ 点击停止' : '🎤 点击开始录音'}
-          </button>
+            ⏹ 点击停止
+          </Button>
+        ) : (
+          <Button
+            type="button"
+            variant="brand"
+            onClick={toggleRecording}
+            className="flex-1 h-auto py-4 text-lg"
+          >
+            🎤 点击开始录音
+          </Button>
         )}
       </div>
 
-      {/* 识别结果 */}
       {result && (
-        <div style={{
-          padding: '16px',
-          background: '#f0fdf4',
-          borderRadius: '8px',
-          marginTop: '16px',
-        }}>
-          <h3 style={{ margin: '0 0 8px 0' }}>识别结果：</h3>
-          <p style={{ margin: 0, fontSize: '18px' }}>{result.text}</p>
-          <p style={{ margin: '8px 0 0 0', fontSize: '12px', color: '#666' }}>
-            置信度: {(result.confidence * 100).toFixed(1)}% | 语言: {result.lang}
-          </p>
-        </div>
+        <Card className="shadow-sm border-success/30 bg-success/10">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-success">识别结果</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2">
+            <p className="text-lg">{result.text}</p>
+            <p className="text-xs text-muted-foreground">
+              置信度: {(result.confidence * 100).toFixed(1)}% | 语言: {result.lang}
+            </p>
+          </CardContent>
+        </Card>
       )}
 
-      {/* 错误信息 */}
       {error && (
-        <div style={{
-          padding: '12px',
-          background: '#fef2f2',
-          borderRadius: '8px',
-          marginTop: '16px',
-          color: '#dc2626',
-        }}>
-          错误: {error}
-        </div>
+        <Card className="shadow-sm border-destructive/30 bg-destructive/10">
+          <CardContent className="p-4 text-sm text-destructive">
+            错误: {error}
+          </CardContent>
+        </Card>
       )}
 
-      {/* 日志 */}
-      <div style={{
-        padding: '12px',
-        background: '#1f2937',
-        borderRadius: '8px',
-        marginTop: '16px',
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        color: '#10b981',
-      }}>
-        <div style={{ marginBottom: '8px', color: '#9ca3af' }}>运行日志：</div>
-        {logs.map((log, i) => (
-          <div key={i} style={{ marginBottom: '4px' }}>{log}</div>
-        ))}
-        {logs.length === 0 && <span style={{ color: '#4b5563' }}>暂无日志</span>}
-      </div>
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">运行日志</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 font-mono text-xs text-brand space-y-1">
+          {logs.map((log, i) => (
+            <div key={i}>{log}</div>
+          ))}
+          {logs.length === 0 && <span className="text-muted-foreground">暂无日志</span>}
+        </CardContent>
+      </Card>
 
-      {/* API 状态 */}
-      <div style={{
-        marginTop: '24px',
-        padding: '12px',
-        background: '#f0f9ff',
-        borderRadius: '8px',
-        fontSize: '12px',
-        color: '#0369a1',
-      }}>
-        <strong>Web Speech API 状态：</strong>
-        <br />
-        {apiAvailable ? '✓ 浏览器支持语音识别' : '✗ 浏览器不支持语音识别（请使用 Chrome/Edge/Safari）'}
-      </div>
+      <Card className="shadow-sm border-brand/20 bg-brand/10">
+        <CardContent className="p-4 text-xs text-brand">
+          <span className="font-semibold">Web Speech API 状态：</span>
+          <br />
+          {apiAvailable ? '✓ 浏览器支持语音识别' : '✗ 浏览器不支持语音识别（请使用 Chrome/Edge/Safari）'}
+        </CardContent>
+      </Card>
     </div>
   );
 }
