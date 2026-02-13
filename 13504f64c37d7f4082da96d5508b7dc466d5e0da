@@ -1,0 +1,24 @@
+.editorconfig
+  217325634556d3cc 1-45
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.1.3",
+  "base_commit_sha": "13504f64c37d7f4082da96d5508b7dc466d5e0da",
+  "prompts": {
+    "217325634556d3cc": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "5ac707e0-16b4-466e-9f15-784986fcc652",
+        "model": "MiniMax-M2.5"
+      },
+      "human_author": "ARCJ137442 <61109168+ARCJ137442@users.noreply.github.com>",
+      "messages": [],
+      "total_additions": 0,
+      "total_deletions": 0,
+      "accepted_lines": 45,
+      "overriden_lines": 0,
+      "messages_url": "https://usegitai.com/cas/a32ff533aabf4b7aecf8b90b0bc8e6f2e39ae9ae18dcaf1c4e4e06457e60e1fd"
+    }
+  }
+}
