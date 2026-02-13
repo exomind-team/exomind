@@ -436,11 +436,21 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
               {taskName || '未命名任务'} 完成了，请输入身心状态反馈：
             </DialogDescription>
           </DialogHeader>
-          <Input
+          <Textarea
             placeholder="身心状态如何？"
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              if (e.shiftKey || e.ctrlKey) return;
+              e.preventDefault();
+              setFeedbackOpen(false);
+              handleEndBlock(feedback);
+            }}
             autoFocus
+            className="min-h-[88px] resize-none"
+            rows={4}
+            data-testid="timeblock-feedback-textarea"
           />
           <DialogFooter>
             <Button
