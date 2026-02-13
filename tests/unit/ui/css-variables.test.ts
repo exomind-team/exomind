@@ -22,6 +22,9 @@ describe('CSS variables', () => {
     expect(content).toContain('--background');
     expect(content).toContain('--foreground');
     expect(content).toContain('--primary');
+    expect(content).toContain('--brand');
+    expect(content).toContain('--success');
+    expect(content).toContain('--warning');
     expect(content).toContain('--radius');
   });
 
@@ -30,6 +33,9 @@ describe('CSS variables', () => {
     expect(content).toContain('.dark');
     expect(content).toContain('--background:');
     expect(content).toContain('--foreground:');
+    expect(content).toContain('--brand:');
+    expect(content).toContain('--success:');
+    expect(content).toContain('--warning:');
   });
 
   it('should apply border-base and body styles', () => {
