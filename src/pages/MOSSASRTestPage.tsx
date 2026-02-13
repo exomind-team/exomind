@@ -16,6 +16,12 @@ import { MOSSASRAdapter, MOSSASRResult } from '../lib/adapters/asr/moss-asr';
 import { VoiceInputButton } from '../components/VoiceInputButton';
 import type { ASRResult } from '../lib/environment/interfaces/asr.port';
 import { getEventLogService } from '@/lib/services';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Textarea } from '@/components/ui/textarea';
+import { cn } from '@/lib/utils';
 
 // 录音状态
 type RecordingState = 'idle' | 'recording';
@@ -392,429 +398,288 @@ export function MOSSASRTestPage() {
   const voiceButtonAdapterConfig = apiKey ? { apiKey } : undefined;
 
   return (
-    <div style={{ padding: '24px', maxWidth: '700px', margin: '0 auto' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '20px' }}>
-        <h1 style={{ margin: 0, fontSize: '24px' }}>MOSS 语音识别测试</h1>
-      </div>
+    <div className="p-6 max-w-3xl mx-auto space-y-4">
+      <h1 className="text-2xl font-bold">MOSS 语音识别测试</h1>
 
-      {/* API Key 配置卡片 */}
-      <div style={{
-        padding: '16px',
-        background: '#f8fafc',
-        borderRadius: '12px',
-        marginBottom: '16px',
-        border: '1px solid #e2e8f0',
-      }}>
-        <div style={{ marginBottom: '12px' }}>
-          <strong style={{ fontSize: '14px' }}>MOSS API Key 配置</strong>
-          <p style={{ fontSize: '12px', color: '#666', marginTop: '4px' }}>
-            申请地址: <a href="https://studio.mosi.cn/" target="_blank" style={{ color: '#3b82f6' }}>https://studio.mosi.cn/</a>
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">MOSS API Key 配置</CardTitle>
+          <p className="text-xs text-muted-foreground">
+            申请地址:{' '}
+            <a
+              href="https://studio.mosi.cn/"
+              target="_blank"
+              rel="noreferrer"
+              className="text-brand underline underline-offset-4"
+            >
+              https://studio.mosi.cn/
+            </a>
           </p>
-        </div>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-2">
+          <div className="space-y-1">
+            <Label htmlFor="moss-api-key">API Key</Label>
+            <div className="flex gap-2">
+              <Input
+                id="moss-api-key"
+                type="password"
+                value={apiKey}
+                onChange={(e) => setApiKey(e.target.value)}
+                placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
+                className="font-mono"
+              />
+              <Button type="button" variant="brand" onClick={handleSaveApiKey}>
+                保存
+              </Button>
+            </div>
+          </div>
 
-        <div style={{ display: 'flex', gap: '8px' }}>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-            style={{
-              flex: 1,
-              padding: '10px 12px',
-              border: '1px solid #d1d5db',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontFamily: 'monospace',
-            }}
-          />
-          <button
-            onClick={handleSaveApiKey}
-            style={{
-              padding: '10px 16px',
-              background: '#3b82f6',
-              color: 'white',
-              border: 'none',
-              borderRadius: '8px',
-              cursor: 'pointer',
-              fontSize: '14px',
-            }}
-          >
-            保存
-          </button>
-        </div>
+          <div className="text-xs text-muted-foreground">
+            {apiKey ? '✓ 已配置' : '✗ 未配置'}
+            {apiKey && ` (${apiKey.slice(0, 4)}...${apiKey.slice(-4)})`}
+          </div>
+        </CardContent>
+      </Card>
 
-        <div style={{ marginTop: '8px', fontSize: '11px', color: '#666' }}>
-          {apiKey ? '✓ 已配置' : '✗ 未配置'}
-          {apiKey && ` (${apiKey.slice(0, 4)}...${apiKey.slice(-4)})`}
-        </div>
-      </div>
+      <Card
+        className={cn(
+          "shadow-sm",
+          isAvailable ? "border-success/30 bg-success/10" : "border-destructive/30 bg-destructive/10"
+        )}
+      >
+        <CardHeader className="pb-3">
+          <div className="flex items-center justify-between gap-3">
+            <CardTitle className="text-sm">MOSS Transcribe-Diarize</CardTitle>
+            <span
+              className={cn(
+                "rounded-md px-2 py-0.5 text-xs font-semibold",
+                isAvailable
+                  ? "bg-success text-success-foreground"
+                  : "bg-destructive text-destructive-foreground"
+              )}
+            >
+              {isAvailable ? '就绪' : '未配置'}
+            </span>
+          </div>
+          <p className="mt-2 text-xs text-muted-foreground">
+            {isAvailable ? '直接调用 MOSS HTTP API，无需后端服务' : '请在上方配置 API Key'}
+          </p>
+        </CardHeader>
+      </Card>
 
-      {/* 状态卡片 */}
-      <div style={{
-        padding: '16px',
-        background: isAvailable ? '#dcfce7' : '#fee2e2',
-        borderRadius: '12px',
-        marginBottom: '16px',
-        fontSize: '13px',
-      }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <strong>MOSS Transcribe-Diarize</strong>
-          <span style={{
-            padding: '2px 8px',
-            borderRadius: '4px',
-            background: isAvailable ? '#22c55e' : '#ef4444',
-            color: 'white',
-            fontSize: '11px',
-          }}>
-            {isAvailable ? '就绪' : '未配置'}
-          </span>
-        </div>
-        <div style={{ marginTop: '8px', color: '#666' }}>
-          {isAvailable ? '直接调用 MOSS HTTP API，无需后端服务' : '请在上方配置 API Key'}
-        </div>
-      </div>
-
-      {/* 录音方式切换 */}
       {recordingState === 'idle' && (
-        <div style={{
-          padding: '12px',
-          background: '#f8fafc',
-          borderRadius: '8px',
-          marginBottom: '16px',
-          border: '1px solid #e2e8f0',
-        }}>
-          <div style={{ marginBottom: '8px', fontSize: '12px', fontWeight: '500' }}>
-            录音方式
-          </div>
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={() => setRecordingMethod('scriptProcessor')}
-              disabled={!isAvailable}
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                fontSize: '12px',
-                background: recordingMethod === 'scriptProcessor' ? '#3b82f6' : '#e5e7eb',
-                color: recordingMethod === 'scriptProcessor' ? 'white' : '#374151',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: isAvailable ? 'pointer' : 'not-allowed',
-              }}
-            >
-              ScriptProcessor
-              <br />
-              <small style={{ opacity: 0.8 }}>WAV，~100KB/3秒</small>
-            </button>
-            <button
-              onClick={() => setRecordingMethod('mediaRecorder')}
-              disabled={!isAvailable}
-              style={{
-                flex: 1,
-                padding: '8px 12px',
-                fontSize: '12px',
-                background: recordingMethod === 'mediaRecorder' ? '#3b82f6' : '#e5e7eb',
-                color: recordingMethod === 'mediaRecorder' ? 'white' : '#374151',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: isAvailable ? 'pointer' : 'not-allowed',
-              }}
-            >
-              MediaRecorder
-              <br />
-              <small style={{ opacity: 0.8 }}>WebM，~40KB/3秒</small>
-            </button>
-          </div>
-        </div>
+        <Card className="shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm">录音方式</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0">
+            <div className="flex gap-2">
+              <Button
+                type="button"
+                onClick={() => setRecordingMethod('scriptProcessor')}
+                disabled={!isAvailable}
+                variant={recordingMethod === 'scriptProcessor' ? 'brand' : 'outline'}
+                className="flex-1 h-auto py-2 px-3 flex-col items-start gap-0"
+              >
+                <span className="text-sm">ScriptProcessor</span>
+                <span className="text-xs opacity-80">WAV，~100KB/3秒</span>
+              </Button>
+              <Button
+                type="button"
+                onClick={() => setRecordingMethod('mediaRecorder')}
+                disabled={!isAvailable}
+                variant={recordingMethod === 'mediaRecorder' ? 'brand' : 'outline'}
+                className="flex-1 h-auto py-2 px-3 flex-col items-start gap-0"
+              >
+                <span className="text-sm">MediaRecorder</span>
+                <span className="text-xs opacity-80">WebM，~40KB/3秒</span>
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
       )}
 
-      {/* 连接状态 */}
-      <div style={{
-        padding: '12px',
-        background: '#f8fafc',
-        borderRadius: '8px',
-        marginBottom: '16px',
-        fontSize: '12px',
-        border: '1px solid #e2e8f0',
-      }}>
-        <strong>状态：</strong> {connectionStatus}
-      </div>
+      <Card className="shadow-sm">
+        <CardContent className="p-4 text-sm">
+          <span className="font-semibold">状态：</span> {connectionStatus}
+        </CardContent>
+      </Card>
 
-      {/* 录音状态 */}
-      <div style={{
-        padding: '24px',
-        background: recordingState === 'recording' ? '#fee2e2' :
-                    result ? '#dcfce7' : '#f3f4f6',
-        borderRadius: '12px',
-        marginBottom: '16px',
-        textAlign: 'center',
-      }}>
-        <div style={{ fontSize: '18px', marginBottom: '8px', fontWeight: '500' }}>
-          {recordingState === 'recording' ? '🔴 录音中...' :
-           result ? '✓ 识别完成' : '🎤 点击开始录音'}
+      <div
+        className={cn(
+          "rounded-xl border p-6 text-center",
+          recordingState === 'recording'
+            ? "border-destructive/30 bg-destructive/10"
+            : result
+              ? "border-success/30 bg-success/10"
+              : "bg-muted"
+        )}
+      >
+        <div className="text-lg font-medium mb-2">
+          {recordingState === 'recording' ? '🔴 录音中...' : result ? '✓ 识别完成' : '🎤 点击开始录音'}
         </div>
         {recordingState === 'recording' && (
-          <div style={{ fontSize: '40px', fontWeight: 'bold', fontFamily: 'monospace', color: '#dc2626' }}>
+          <div className="font-mono text-4xl font-bold text-destructive">
             {duration.toFixed(1)}s
           </div>
         )}
       </div>
 
-      {/* 控制按钮 */}
-      <div style={{ display: 'flex', gap: '12px', marginBottom: '16px' }}>
+      <div className="flex gap-3">
         {recordingState === 'idle' && !result && (
-          <button
+          <Button
+            type="button"
             onClick={handleStart}
             disabled={!isAvailable}
-            style={{
-              flex: 1,
-              padding: '24px',
-              fontSize: '18px',
-              background: isAvailable ? '#3b82f6' : '#9ca3af',
-              color: 'white',
-              border: 'none',
-              borderRadius: '12px',
-              cursor: isAvailable ? 'pointer' : 'not-allowed',
-            }}
+            variant="brand"
+            className="flex-1 h-auto py-6 text-lg"
           >
             🎤 开始录音
-          </button>
+          </Button>
         )}
 
         {recordingState === 'recording' && (
-          <button
+          <Button
+            type="button"
             onClick={handleStop}
-            style={{
-              flex: 1,
-              padding: '24px',
-              fontSize: '18px',
-              background: '#ef4444',
-              color: 'white',
-              border: 'none',
-              borderRadius: '12px',
-              cursor: 'pointer',
-            }}
+            variant="destructive"
+            className="flex-1 h-auto py-6 text-lg"
           >
             ⏹ 停止并识别
-          </button>
+          </Button>
         )}
 
         {result && (
-          <button
+          <Button
+            type="button"
             onClick={handleReset}
-            style={{
-              flex: 1,
-              padding: '24px',
-              fontSize: '18px',
-              background: '#10b981',
-              color: 'white',
-              border: 'none',
-              borderRadius: '12px',
-              cursor: 'pointer',
-            }}
+            variant="brand"
+            className="flex-1 h-auto py-6 text-lg"
           >
             🔄 重新录音
-          </button>
+          </Button>
         )}
       </div>
 
-      {/* VoiceInputButton 语音输入区域 */}
-      <div style={{
-        padding: '20px',
-        background: '#f8fafc',
-        borderRadius: '12px',
-        marginBottom: '16px',
-        border: '1px solid #e2e8f0',
-      }}>
-        <h3 style={{ margin: '0 0 16px 0', fontSize: '14px', color: '#374151' }}>
-          🎤 语音输入
-        </h3>
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-sm">🎤 语音输入</CardTitle>
+        </CardHeader>
+        <CardContent className="pt-0 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-start gap-6">
+            <div className="shrink-0 self-center sm:self-start">
+              <VoiceInputButton
+                adapterConfig={voiceButtonAdapterConfig}
+                onResult={handleVoiceResult}
+                onError={(err) => addLogEntry(`❌ ${err}`)}
+                onStateChange={(state) => {
+                  if (state === 'recording') {
+                    addLogEntry('🎤 开始录音');
+                  } else if (state === 'recognizing') {
+                    addLogEntry('⏳ 识别中...');
+                  } else if (state === 'completed') {
+                    addLogEntry('✅ 识别完成');
+                  }
+                }}
+                showWaveform={true}
+                showTimer={true}
+                enableShortcut={true}
+                size={72}
+              />
+            </div>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '24px' }}>
-          {/* 语音输入按钮 */}
-          <VoiceInputButton
-            adapterConfig={voiceButtonAdapterConfig}
-            onResult={handleVoiceResult}
-            onError={(err) => addLogEntry(`❌ ${err}`)}
-            onStateChange={(state) => {
-              if (state === 'recording') {
-                addLogEntry('🎤 开始录音');
-              } else if (state === 'recognizing') {
-                addLogEntry('⏳ 识别中...');
-              } else if (state === 'completed') {
-                addLogEntry('✅ 识别完成');
-              }
-            }}
-            showWaveform={true}
-            showTimer={true}
-            enableShortcut={true}
-            size={72}
-          />
-
-          {/* 语音输入框 */}
-          <div style={{ flex: 1 }}>
-            <textarea
-              value={inputText}
-              onChange={(e) => setInputText(e.target.value)}
-              placeholder="点击上方麦克风按钮开始语音输入..."
-              style={{
-                width: '100%',
-                minHeight: '80px',
-                padding: '12px',
-                border: '1px solid #d1d5db',
-                borderRadius: '8px',
-                fontSize: '14px',
-                resize: 'vertical',
-                fontFamily: 'inherit',
-              }}
-            />
-            {inputText && (
-              <div style={{ marginTop: '8px', display: 'flex', gap: '8px' }}>
-                <button
-                  onClick={() => navigator.clipboard.writeText(inputText)}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    background: '#f3f4f6',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  复制
-                </button>
-                <button
-                  onClick={() => setInputText('')}
-                  style={{
-                    padding: '6px 12px',
-                    fontSize: '12px',
-                    background: '#f3f4f6',
-                    border: '1px solid #d1d5db',
-                    borderRadius: '6px',
-                    cursor: 'pointer',
-                  }}
-                >
-                  清空
-                </button>
-              </div>
-            )}
+            <div className="flex-1 space-y-2">
+              <Textarea
+                value={inputText}
+                onChange={(e) => setInputText(e.target.value)}
+                placeholder="点击上方麦克风按钮开始语音输入..."
+                className="min-h-20 resize-y"
+              />
+              {inputText && (
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => navigator.clipboard.writeText(inputText)}
+                  >
+                    复制
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setInputText('')}
+                  >
+                    清空
+                  </Button>
+                </div>
+              )}
+            </div>
           </div>
-        </div>
 
-        <div style={{
-          marginTop: '12px',
-          padding: '12px',
-          background: '#fef3c7',
-          borderRadius: '8px',
-          fontSize: '12px',
-          color: '#92400e',
-        }}>
-          <strong>快捷键提示：</strong>
-          <ul style={{ margin: '8px 0 0 0', paddingLeft: '20px' }}>
-            <li>[空格键] 开始/停止录音</li>
-            <li>[Esc] 取消录音</li>
-          </ul>
-        </div>
-      </div>
+          <div className="rounded-lg border border-warning/30 bg-warning/10 p-3 text-xs text-warning">
+            <strong className="text-warning">快捷键提示：</strong>
+            <ul className="mt-2 list-disc pl-5">
+              <li>[空格键] 开始/停止录音</li>
+              <li>[Esc] 取消录音</li>
+            </ul>
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* 原有的识别结果（仅显示，不使用） */}
       {result && (
-        <div style={{
-          padding: '20px',
-          background: '#f0fdf4',
-          borderRadius: '12px',
-          marginTop: '16px',
-          border: '1px solid #86efac',
-        }}>
-          <h3 style={{ margin: '0 0 12px 0', fontSize: '14px', color: '#166534' }}>
-            识别结果
-          </h3>
-          <p style={{ margin: 0, fontSize: '20px', fontWeight: '500' }}>
-            {result.text || '（无识别结果）'}
-          </p>
-          <div style={{ marginTop: '12px', fontSize: '12px', color: '#666' }}>
-            {result.confidence && `置信度: ${(result.confidence * 100).toFixed(1)}%`}
-            {result.duration && ` | 时长: ${(result.duration / 1000).toFixed(2)}秒`}
-            {result.lang && ` | 语言: ${result.lang}`}
-          </div>
-          {audioUrl && (
-            <a
-              href={audioUrl}
-              download={`moss-recording-${Date.now()}.wav`}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: '6px',
-                marginTop: '12px',
-                padding: '8px 12px',
-                background: '#3b82f6',
-                color: 'white',
-                borderRadius: '6px',
-                textDecoration: 'none',
-                fontSize: '12px',
-              }}
-            >
-              ⬇️ 下载录音文件
-            </a>
-          )}
-        </div>
+        <Card className="shadow-sm border-success/30 bg-success/10">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-sm text-success">识别结果</CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 space-y-2">
+            <p className="text-lg font-medium">{result.text || '（无识别结果）'}</p>
+            <div className="text-xs text-muted-foreground">
+              {result.confidence && `置信度: ${(result.confidence * 100).toFixed(1)}%`}
+              {result.duration && ` | 时长: ${(result.duration / 1000).toFixed(2)}秒`}
+              {result.lang && ` | 语言: ${result.lang}`}
+            </div>
+            {audioUrl && (
+              <Button type="button" asChild variant="brand" size="sm" className="w-fit">
+                <a href={audioUrl} download={`moss-recording-${Date.now()}.wav`}>
+                  ⬇️ 下载录音文件
+                </a>
+              </Button>
+            )}
+          </CardContent>
+        </Card>
       )}
 
-      {/* 日志面板 */}
-      <div style={{
-        padding: '16px',
-        background: '#1e293b',
-        borderRadius: '12px',
-        marginTop: '20px',
-        fontFamily: 'monospace',
-        fontSize: '12px',
-        color: '#22d3ee',
-      }}>
-        <div style={{ marginBottom: '12px', color: '#94a3b8', fontSize: '11px' }}>
-          📋 运行日志
-          <button
-            onClick={() => setLogs([])}
-            style={{
-              marginLeft: '8px',
-              padding: '2px 6px',
-              fontSize: '10px',
-              background: '#334155',
-              color: '#94a3b8',
-              border: 'none',
-              borderRadius: '4px',
-              cursor: 'pointer',
-            }}
-          >
+      <Card className="shadow-sm">
+        <CardHeader className="pb-3 flex-row items-center justify-between space-y-0">
+          <CardTitle className="text-sm">📋 运行日志</CardTitle>
+          <Button type="button" variant="outline" size="sm" onClick={() => setLogs([])}>
             清空
-          </button>
-        </div>
-        {logs.map((log, i) => (
-          <div key={i} style={{ marginBottom: '8px', lineHeight: '1.5' }}>
-            <span style={{ color: '#64748b' }}>[{log.time}]</span>{' '}
-            <span>{log.message}</span>
-            {log.duration !== undefined && (
-              <span style={{ color: '#94a3b8', marginLeft: 8 }}>
-                ({log.duration.toFixed(1)}秒)
-              </span>
-            )}
-            {log.text && (
-              <div style={{
-                marginTop: 4,
-                padding: '8px 12px',
-                background: 'rgba(81, 207, 102, 0.2)',
-                borderRadius: '6px',
-                borderLeft: '3px solid #51cf66',
-                fontSize: '13px',
-                color: '#fff',
-              }}>
-                {log.text}
-              </div>
-            )}
-          </div>
-        ))}
-        {logs.length === 0 && (
-          <div style={{ color: '#475569' }}>暂无日志</div>
-        )}
-      </div>
+          </Button>
+        </CardHeader>
+        <CardContent className="pt-0 font-mono text-xs space-y-2">
+          {logs.map((log, i) => (
+            <div key={i} className="leading-relaxed">
+              <span className="text-muted-foreground">[{log.time}]</span>{' '}
+              <span className="text-foreground">{log.message}</span>
+              {log.duration !== undefined && (
+                <span className="text-muted-foreground ml-2">
+                  ({log.duration.toFixed(1)}秒)
+                </span>
+              )}
+              {log.text && (
+                <div className="mt-1 rounded-md border-l-4 border-success bg-success/10 px-3 py-2 text-sm text-foreground">
+                  {log.text}
+                </div>
+              )}
+            </div>
+          ))}
+          {logs.length === 0 && (
+            <div className="text-muted-foreground">暂无日志</div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
