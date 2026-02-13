@@ -19,13 +19,33 @@ function resolveUserId(): string | undefined {
   return raw ? raw : undefined;
 }
 
+type EventLogMode = 'auto' | 'local' | 'remote';
+
+function resolveEventLogMode(): EventLogMode {
+  const raw = process.env.EXOMIND_MCP_EVENTLOG_MODE?.trim().toLowerCase();
+  if (raw === 'local' || raw === 'remote' || raw === 'auto') {
+    return raw;
+  }
+  return 'auto';
+}
+
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, '');
 }
 
-function resolveRemoteDbUrl(userId: string): string | null {
-  const baseUrl = process.env.EXOMIND_MCP_SYNC_SERVER_URL?.trim();
-  if (!baseUrl) return null;
+function resolveSyncServerBaseUrl(): string {
+  const explicit = process.env.EXOMIND_MCP_SYNC_SERVER_URL?.trim();
+  if (explicit) {
+    return normalizeBaseUrl(explicit);
+  }
+
+  const portRaw = process.env.EXOMIND_POUCHDB_PORT?.trim();
+  const port = portRaw ? Number.parseInt(portRaw, 10) : 6984;
+  const normalizedPort = Number.isInteger(port) && port > 0 && port <= 65535 ? port : 6984;
+  return `http://localhost:${normalizedPort}`;
+}
+
+function buildRemoteDbUrl(baseUrl: string, userId: string): string {
   return `${normalizeBaseUrl(baseUrl)}/${encodeURIComponent(userId)}`;
 }
 
@@ -39,8 +59,22 @@ export function createMcpEnvironment(): {
   const runtime: RuntimeKind = 'web';
 
   const userId = resolveUserId();
-  const remoteDbUrl = userId ? resolveRemoteDbUrl(userId) : null;
-  const eventlog = remoteDbUrl ? new RemoteEventLogPort(remoteDbUrl) : new WebEventLogStorageAdapter(userId);
+  const mode = resolveEventLogMode();
+
+  const syncBaseUrl = resolveSyncServerBaseUrl();
+  const remoteDbUrl = userId ? buildRemoteDbUrl(syncBaseUrl, userId) : null;
+
+  const shouldUseRemote =
+    mode === 'remote' || (mode === 'auto' && Boolean(userId));
+
+  if (mode === 'remote' && !userId) {
+    throw new Error('EXOMIND_MCP_USER_ID is required when EXOMIND_MCP_EVENTLOG_MODE=remote');
+  }
+
+  const eventlog =
+    shouldUseRemote && remoteDbUrl
+      ? new RemoteEventLogPort(remoteDbUrl)
+      : new WebEventLogStorageAdapter(userId);
 
   const env = {
     asr: new UnavailableAsrPort(),
