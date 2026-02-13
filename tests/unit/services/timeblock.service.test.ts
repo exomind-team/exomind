@@ -146,4 +146,36 @@ describe('TimeBlockServiceImpl', () => {
     expect(paused?.elapsed).toBeGreaterThanOrEqual(3000);
     expect(stillPaused?.elapsed).toBe(paused?.elapsed);
   });
+
+  it('writes block_pause and block_resume events when pausing and resuming', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('pause-resume', { mode: 'countup' });
+    await service.pauseBlock();
+    await service.resumeBlock();
+
+    const types = addEventMock.mock.calls.map(([event]) => (event as { type?: string }).type);
+    expect(types).toEqual(expect.arrayContaining(['block_start', 'block_pause', 'block_resume']));
+    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'block_pause',
+      content: expect.stringContaining('pause-resume'),
+    }));
+    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({
+      type: 'block_resume',
+      content: expect.stringContaining('pause-resume'),
+    }));
+  });
+
+  it('does not write duplicate pause events when pausing an already paused block', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('idempotent-pause', { mode: 'countup' });
+    await service.pauseBlock();
+    await service.pauseBlock();
+
+    const pauseCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_pause');
+    expect(pauseCalls).toHaveLength(1);
+  });
 });

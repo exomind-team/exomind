@@ -218,6 +218,8 @@ export function ChatPage() {
   // 获取事件图标
   const getEventIcon = (event: Event) => {
     if (event.tags.has('block_start')) return '🔷';
+    if (event.tags.has('block_pause')) return '⏸️';
+    if (event.tags.has('block_resume')) return '▶️';
     if (event.tags.has('block_end')) return '🔴';
     if (event.tags.has('block_feedback')) return '📝';
     return '📝';
@@ -226,6 +228,8 @@ export function ChatPage() {
   // 获取事件背景色
   const getEventBgColor = (event: Event) => {
     if (event.tags.has('block_start')) return 'bg-blue-100 text-blue-800 rounded-br-md';
+    if (event.tags.has('block_pause')) return 'bg-yellow-100 text-yellow-900 rounded-br-md';
+    if (event.tags.has('block_resume')) return 'bg-green-100 text-green-900 rounded-br-md';
     if (event.tags.has('block_end')) return 'bg-red-100 text-red-800 rounded-br-md';
     return 'bg-muted rounded-bl-md';
   };
@@ -233,6 +237,8 @@ export function ChatPage() {
   // 获取事件前缀
   const getEventPrefix = (event: Event) => {
     if (event.tags.has('block_start')) return '🔷';
+    if (event.tags.has('block_pause')) return '⏸️';
+    if (event.tags.has('block_resume')) return '▶️';
     if (event.tags.has('block_end')) return '🔴';
     if (event.tags.has('block_feedback')) return '📝';
     return null;
