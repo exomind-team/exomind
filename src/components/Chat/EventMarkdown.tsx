@@ -9,11 +9,18 @@ import 'katex/dist/katex.min.css';
  * 自定义 remark 插件: 支持 ==highlight== 语法 (Obsidian 荧光笔风格)
  *
  * 将 ==text== 转换为 <mark> 标签
+ * 修复: 避免 DOM 嵌套问题和无限递归
  */
 function remarkHighlight() {
   return (tree: any) => {
+    const visited = new Set();
+
     const visitor = (node: any) => {
-      if (node.type === 'text' && node.value.includes('==')) {
+      if (visited.has(node)) return;
+      visited.add(node);
+
+      // 只处理 text 节点
+      if (node.type === 'text' && node.value && node.value.includes('==')) {
         const children = [];
         let remaining = node.value;
         let pos = 0;
@@ -40,11 +47,12 @@ function remarkHighlight() {
             break;
           }
 
-          // 添加高亮文本
+          // 添加高亮文本 - 使用 text 类型而不是 html，避免安全问题
           const highlightText = remaining.slice(start + 2, end);
           children.push({
-            type: 'html',
-            value: `<mark>${highlightText}</mark>`
+            type: 'text',
+            value: `\u0001${highlightText}\u0002`,
+            marked: true // 标记为需要转换
           });
 
           pos = end + 2;
@@ -53,19 +61,47 @@ function remarkHighlight() {
         // 替换原始节点
         if (children.length > 0) {
           Object.assign(node, {
-            type: 'paragraph',
-            children: children
+            type: 'text',
+            children: children,
+            value: ''
           });
         }
       }
 
       // 递归访问子节点
-      if (node.children) {
+      if (node.children && Array.isArray(node.children)) {
         node.children.forEach(visitor);
       }
     };
 
     visitor(tree);
+
+    // 第二遍: 将标记的节点转换为 mark 元素
+    const transformMarked = (node: any) => {
+      if (node.children && Array.isArray(node.children)) {
+        const newChildren: any[] = [];
+        for (const child of node.children) {
+          if (child.marked) {
+            // 创建 <mark> 元素
+            newChildren.push({
+              type: 'element',
+              tagName: 'mark',
+              properties: {},
+              children: [{ type: 'text', value: child.value }]
+            });
+          } else if (child.children) {
+            // 递归处理
+            transformMarked(child);
+            newChildren.push(child);
+          } else {
+            newChildren.push(child);
+          }
+        }
+        node.children = newChildren;
+      }
+    };
+
+    transformMarked(tree);
   };
 }
 
