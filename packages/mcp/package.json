@@ -1,0 +1,25 @@
+{
+  "name": "@exomind/mcp",
+  "version": "0.1.0",
+  "type": "module",
+  "description": "ExoMind MCP Server - Model Context Protocol for ExoMind",
+  "main": "src/index.ts",
+  "scripts": {
+    "server": "bun run src/index.ts",
+    "start": "bun run src/index.ts",
+    "dev": "bun --watch run src/index.ts"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.26.0",
+    "pouchdb": "^9.0.0",
+    "pouchdb-node": "^9.0.0"
+  },
+  "devDependencies": {
+    "@types/pouchdb": "^6.4.2",
+    "typescript": "~5.6.2"
+  },
+  "imports": {
+    "@exomind/core": "../../src/lib",
+    "@exomind/core/*": "../../src/lib/*"
+  }
+}

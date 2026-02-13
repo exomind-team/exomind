@@ -1,0 +1,23 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "lib": ["ES2022"],
+    "strict": true,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "baseUrl": ".",
+    "paths": {
+      "@exomind/core": ["../../src/lib"],
+      "@exomind/core/*": ["../../src/lib/*"]
+    }
+  },
+  "include": ["src/**/*", "../../src/lib/**/*"],
+  "exclude": ["node_modules", "dist"]
+}
