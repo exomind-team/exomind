@@ -523,6 +523,12 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     return () => window.removeEventListener('keydown', handleKeyDown);
   }, [enableShortcut, handleClick, state.state, releaseRecordingResources]);
 
+  const formatCssVarColor = (triplet: string, alpha: number): string | null => {
+    const parts = triplet.trim().split(/\s+/);
+    if (parts.length < 3) return null;
+    return `hsla(${parts[0]}, ${parts[1]}, ${parts[2]}, ${alpha})`;
+  };
+
   // 音量波形动画
   useEffect(() => {
     if (!showWaveform || state.state !== 'recording' || !canvasRef.current) {
@@ -544,6 +550,10 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     const centerX = canvas.width / 2;
     const centerY = canvas.height / 2;
     const baseRadius = (size / 2) - 8;
+    const rootStyle = getComputedStyle(document.documentElement);
+    const destructiveTriplet = rootStyle.getPropertyValue('--destructive');
+    const destructive0 = formatCssVarColor(destructiveTriplet, 0.9) ?? '#ff6b6b';
+    const destructive1 = formatCssVarColor(destructiveTriplet, 0.6) ?? '#ee5a5a';
 
     const draw = () => {
       animationFrameId = requestAnimationFrame(draw);
@@ -567,8 +577,8 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         const y2 = centerY + Math.sin(angle) * (baseRadius + barHeight);
 
         const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-        gradient.addColorStop(0, '#ff6b6b');
-        gradient.addColorStop(1, '#ee5a5a');
+        gradient.addColorStop(0, destructive0);
+        gradient.addColorStop(1, destructive1);
 
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -617,26 +627,30 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     switch (state.state) {
       case 'recording':
         return {
-          background: 'linear-gradient(135deg, #ff6b6b 0%, #ee5a5a 100%)',
-          shadow: '0 0 20px rgba(255, 107, 107, 0.6)',
+          background:
+            'linear-gradient(135deg, hsl(var(--destructive)) 0%, hsl(var(--destructive) / 0.85) 100%)',
+          shadow: '0 0 20px hsl(var(--destructive) / 0.6)',
           icon: '🎤',
         };
       case 'recognizing':
         return {
-          background: 'linear-gradient(135deg, #4dabf7 0%, #339af0 100%)',
-          shadow: '0 0 20px rgba(77, 171, 247, 0.6)',
+          background:
+            'linear-gradient(135deg, hsl(var(--brand)) 0%, hsl(var(--brand) / 0.85) 100%)',
+          shadow: '0 0 20px hsl(var(--brand) / 0.6)',
           icon: '⏳',
         };
       case 'completed':
         return {
-          background: 'linear-gradient(135deg, #51cf66 0%, #40c057 100%)',
-          shadow: '0 0 20px rgba(81, 207, 102, 0.6)',
+          background:
+            'linear-gradient(135deg, hsl(var(--success)) 0%, hsl(var(--success) / 0.85) 100%)',
+          shadow: '0 0 20px hsl(var(--success) / 0.6)',
           icon: '✓',
         };
       default:
         return {
-          background: 'linear-gradient(135deg, #868e96 0%, #6c757d 100%)',
-          shadow: '0 4px 12px rgba(108, 117, 125, 0.3)',
+          background:
+            'linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--secondary)) 100%)',
+          shadow: '0 4px 12px hsl(var(--ring) / 0.2)',
           icon: '🎤',
         };
     }
@@ -679,8 +693,12 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           transform: 'translateX(-50%)',
           fontSize: 12,
           fontWeight: 500,
-          color: state.state === 'recording' ? '#ff6b6b' :
-                 state.state === 'recognizing' ? '#4dabf7' : '#51cf66',
+          color:
+            state.state === 'recording'
+              ? 'hsl(var(--destructive))'
+              : state.state === 'recognizing'
+                ? 'hsl(var(--brand))'
+                : 'hsl(var(--success))',
           whiteSpace: 'nowrap',
         }}>
           {state.state === 'recording' ? formatTime(state.duration) :
@@ -752,7 +770,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
             width: 8,
             height: 8,
             borderRadius: '50%',
-            background: '#fff',
+            background: 'hsl(var(--foreground))',
             animation: 'blink 1s ease-in-out infinite',
           }}>
             <style>{`
@@ -780,7 +798,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           left: '50%',
           transform: 'translateX(-50%)',
           fontSize: 10,
-          color: '#adb5bd',
+          color: 'hsl(var(--muted-foreground))',
           whiteSpace: 'nowrap',
         }}>
           按 [空格] 开始/停止
@@ -796,8 +814,9 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
             height: buttonSize,
             borderRadius: '50%',
             border: 'none',
-            background: 'linear-gradient(135deg, #ffa500 0%, #ff8c00 100%)',
-            boxShadow: '0 4px 12px rgba(255, 140, 0, 0.4)',
+            background:
+              'linear-gradient(135deg, hsl(var(--warning)) 0%, hsl(var(--warning) / 0.85) 100%)',
+            boxShadow: '0 4px 12px hsl(var(--warning) / 0.4)',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
@@ -819,7 +838,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           left: '50%',
           transform: 'translateX(-50%)',
           fontSize: 10,
-          color: '#ffa500',
+          color: 'hsl(var(--warning))',
           whiteSpace: 'nowrap',
         }}>
           {permissionState === 'unavailable' ? '不支持' : '需要权限'}

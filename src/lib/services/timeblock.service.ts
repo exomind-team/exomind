@@ -77,6 +77,15 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async startBlock(name: string, config: TimerConfig, description?: string): Promise<ActiveBlockData> {
+    // 不允许在已有活跃块（运行中/已暂停）时开启新块
+    const existing = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    if (existing) {
+      const normalized = this.normalizeActiveBlock(existing);
+      if (this.shouldPersistNormalized(existing, normalized)) {
+        await this.env.storage.write(ACTIVE_BLOCK_KEY, normalized);
+      }
+      return normalized;
+    }
     const startId = crypto.randomUUID();
     const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
@@ -86,7 +95,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     // 创建开始事件
     const normalizedDescription = description?.trim();
     const eventContent = normalizedDescription ? `${name}\n${normalizedDescription}` : name;
-    await this.addBlockEvent(startId, eventContent, 'block_start');
+    await this.addBlockEvent(eventContent, 'block_start');
 
     // 保存进行中的时间块
     const activeBlock: ActiveBlockData = {
@@ -110,7 +119,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async pauseBlock(): Promise<void> {
     const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
-    if (!data) return;
+    if (!data || data.paused) return;
 
     const now = Date.now();
     const normalized = this.normalizeActiveBlock(data, now);
@@ -122,6 +131,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
 
     await this.env.storage.write(ACTIVE_BLOCK_KEY, pausedBlock);
+
+    // 记录暂停事件
+    await this.addBlockEvent(`${normalized.name} 暂停`, 'block_pause');
     this.notifyChange(pausedBlock);
   }
 
@@ -138,6 +150,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
 
     await this.env.storage.write(ACTIVE_BLOCK_KEY, resumedBlock);
+
+    // 记录继续事件
+    await this.addBlockEvent(`${data.name} 继续`, 'block_resume');
     this.notifyChange(resumedBlock);
   }
 
@@ -149,7 +164,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const endId = crypto.randomUUID();
 
     // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
-    await this.addBlockEvent(endId, `${activeData.name} 完成`, 'block_end');
+    await this.addBlockEvent(`${activeData.name} 完成`, 'block_end');
 
     // 身心反馈作为独立事件添加到事件日志（通过 EventStorage）
     if (feedback) {
@@ -216,9 +231,8 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   /** 添加时间块事件（通过 EventStorage，与 ChatPage 保持一致） */
   private async addBlockEvent(
-    _eventId: string,
     content: string,
-    tag: 'block_start' | 'block_end',
+    tag: 'block_start' | 'block_end' | 'block_pause' | 'block_resume',
   ): Promise<void> {
     // 使用 EventStorage 保存事件，与 ChatPage 保持一致
     const storage = getEventStorage();
