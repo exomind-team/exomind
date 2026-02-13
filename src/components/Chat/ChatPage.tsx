@@ -16,6 +16,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
+import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
@@ -347,7 +348,7 @@ export function ChatPage() {
                               {getEventPrefix(event)}
                             </span>
                           )}
-                          <p className="text-xs sm:text-sm break-words">{event.content}</p>
+                          <EventMarkdown content={event.content} />
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
                           {formatTime(event.timestamp)}
