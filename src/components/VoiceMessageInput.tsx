@@ -103,11 +103,17 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
 
   // 键盘事件
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      textareaRef.current?.blur();
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
       if (value.trim()) {
         handleSend();
       } else {
+        textareaRef.current?.blur();
         voiceButtonRef.current?.start();
       }
     }

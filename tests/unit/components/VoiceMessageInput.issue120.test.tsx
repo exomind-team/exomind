@@ -31,10 +31,12 @@ describe('VoiceMessageInput Issue-120 behaviors', () => {
     render(<VoiceMessageInput onSend={onSend} placeholder="输入内容记录事件..." />);
 
     const textarea = screen.getByTestId('event-input-textarea');
+    (textarea as HTMLTextAreaElement).focus();
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
 
     expect(onSend).not.toHaveBeenCalled();
     expect(startVoiceSpy).toHaveBeenCalledTimes(1);
+    expect(textarea).not.toHaveFocus();
   });
 
   it('pressing Enter with content should send instead of starting voice', () => {
@@ -48,5 +50,17 @@ describe('VoiceMessageInput Issue-120 behaviors', () => {
     expect(onSend).toHaveBeenCalledWith('测试事件');
     expect(startVoiceSpy).not.toHaveBeenCalled();
   });
-});
 
+  it('pressing Escape should blur the textarea', () => {
+    const onSend = vi.fn();
+    render(<VoiceMessageInput onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('event-input-textarea');
+    (textarea as HTMLTextAreaElement).focus();
+    expect(textarea).toHaveFocus();
+
+    fireEvent.keyDown(textarea, { key: 'Escape', code: 'Escape' });
+
+    expect(textarea).not.toHaveFocus();
+  });
+});

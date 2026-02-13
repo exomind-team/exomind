@@ -60,5 +60,18 @@ describe('TimeBlockWidget Issue-120 behaviors', () => {
       expect(textarea).toHaveFocus();
     });
   });
-});
 
+  it('pressing Escape in task textarea should blur', async () => {
+    render(<TimeBlockWidget expanded={true} />);
+
+    const textarea = await screen.findByTestId('timeblock-task-textarea');
+    (textarea as HTMLTextAreaElement).focus();
+    expect(textarea).toHaveFocus();
+
+    fireEvent.keyDown(textarea, { key: 'Escape', code: 'Escape' });
+
+    await waitFor(() => {
+      expect(textarea).not.toHaveFocus();
+    });
+  });
+});

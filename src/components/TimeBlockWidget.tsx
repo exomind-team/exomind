@@ -356,6 +356,10 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
               value={taskName}
               onChange={(e) => setTaskName(e.target.value)}
               onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  (e.currentTarget as HTMLTextAreaElement).blur();
+                  return;
+                }
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
                   void handleStart();
