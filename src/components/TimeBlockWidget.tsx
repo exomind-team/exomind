@@ -11,10 +11,11 @@
  * └─────────────────────────────────────────┘
  */
 
-import { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
 import { Play, Pause, Square, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
+import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import {
@@ -40,13 +41,16 @@ interface TimeBlockWidgetProps {
   onExpandedChange?: (expanded: boolean) => void;
 }
 
+export interface TimeBlockWidgetHandle {
+  expandAndFocusTaskName: () => void;
+}
+
 /**
  * 计时器状态
  */
 type TimerState = 'idle' | 'running' | 'paused' | 'ended';
 
-export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange }: TimeBlockWidgetProps) {
-  // Toast
+export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidgetProps>(function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange }, ref) {
   const { toast } = useToast();
 
   // 内部状态
@@ -73,6 +77,7 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
   const timerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
   const isRunningRef = useRef(false);  // 使用 ref 跟踪运行状态，避免闭包问题
+  const taskNameRef = useRef<HTMLTextAreaElement | null>(null);
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
 
@@ -232,14 +237,26 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
     };
   }, [timerState, startTimer]);
 
+  const expandAndFocusTaskName = useCallback(() => {
+    setExpanded(true);
+    requestAnimationFrame(() => {
+      taskNameRef.current?.focus();
+    });
+  }, [setExpanded]);
+
+  useImperativeHandle(ref, () => ({
+    expandAndFocusTaskName,
+  }), [expandAndFocusTaskName]);
+
   // 开始计时
   const handleStart = async () => {
-    if (!taskName.trim()) {
-      toast({
-        title: '请输入任务标题',
-        description: '开始时间块前需要输入任务名称',
-        variant: 'destructive',
-      });
+    const raw = taskName;
+    const lines = raw.split(/\r?\n/);
+    const name = (lines[0] ?? '').trim();
+    const description = lines.slice(1).join('\n').trim();
+
+    if (!name) {
+      expandAndFocusTaskName();
       return;
     }
 
@@ -252,7 +269,8 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
     countdownOverrunRef.current = false;
     setCountdownOvertimeMs(0);
 
-    const block = await timeBlockService.startBlock(taskName.trim(), config);
+    const block = await timeBlockService.startBlock(name, config, description || undefined);
+    setTaskName(name);
     setElapsed(block.elapsed);
     setTimerState('running');
     startTimeRef.current = block.startTime;
@@ -414,12 +432,25 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
           {/* 任务标题 */}
           <div className="space-y-1">
             <label className="text-xs text-muted-foreground">任务标题</label>
-            <Input
+            <Textarea
+              ref={taskNameRef}
               placeholder="输入任务标题..."
               value={taskName}
               onChange={(e) => setTaskName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Escape') {
+                  (e.currentTarget as HTMLTextAreaElement).blur();
+                  return;
+                }
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault();
+                  void handleStart();
+                }
+              }}
               disabled={!isIdle}
-              className="h-8"
+              className="min-h-[32px] resize-none"
+              rows={2}
+              data-testid="timeblock-task-textarea"
             />
           </div>
 
@@ -535,11 +566,21 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
               {taskName || '未命名任务'} 完成了，请输入身心状态反馈：
             </DialogDescription>
           </DialogHeader>
-          <Input
+          <Textarea
             placeholder="身心状态如何？"
             value={feedback}
             onChange={(e) => setFeedback(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key !== 'Enter') return;
+              if (e.shiftKey || e.ctrlKey) return;
+              e.preventDefault();
+              setFeedbackOpen(false);
+              handleEndBlock(feedback);
+            }}
             autoFocus
+            className="min-h-[88px] resize-none"
+            rows={4}
+            data-testid="timeblock-feedback-textarea"
           />
           <DialogFooter>
             <Button
@@ -567,4 +608,4 @@ export function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange
       </Dialog>
     </div>
   );
-}
+});
