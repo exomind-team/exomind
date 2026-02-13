@@ -212,14 +212,25 @@ export function ChatPage() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if (e.defaultPrevented || e.isComposing) return;
       if (e.key !== 'Enter') return;
+
+      // 如果焦点在按钮/链接上，让默认 Enter 行为触发
+      const activeEl = document.activeElement;
+      if (activeEl && (
+        activeEl.tagName === 'BUTTON' ||
+        activeEl.getAttribute('role') === 'button' ||
+        activeEl instanceof HTMLAnchorElement
+      )) {
+        return;
+      }
+
       if (isEditableTarget(e.target)) return;
 
-      // Ctrl+Enter: 结束时间块（正在计时或暂停中）
+      // Ctrl+Enter: 弹出反馈对话框（正在计时或暂停中）
       if (e.ctrlKey) {
         e.preventDefault();
         const timerState = timeBlockWidgetRef.current?.getTimerState();
         if (timerState === 'running' || timerState === 'paused') {
-          timeBlockWidgetRef.current?.end();
+          timeBlockWidgetRef.current?.endDialog();
         }
         return;
       }

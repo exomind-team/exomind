@@ -52,8 +52,10 @@ export interface TimeBlockWidgetHandle {
   getTimerState: () => TimerState;
   /** 暂停/继续时间块 */
   pauseOrResume: () => Promise<void>;
-  /** 直接结束时间块 */
+  /** 直接结束时间块（不弹对话框） */
   end: () => Promise<void>;
+  /** 弹出反馈对话框 */
+  endDialog: () => void;
 }
 
 export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidgetProps>(function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange }, ref) {
@@ -302,7 +304,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     getTimerState: () => timerState,
     pauseOrResume,
     end,
-  }), [expandAndFocusTaskName, timerState, pauseOrResume, end]);
+    endDialog: handleEndDialog,
+  }), [expandAndFocusTaskName, timerState, pauseOrResume, end, handleEndDialog]);
 
   // 开始计时
   const handleStart = async () => {
