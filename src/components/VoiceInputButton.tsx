@@ -13,7 +13,7 @@
  * └─────────────────────────────────────────┘
  */
 
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 
@@ -48,6 +48,10 @@ export interface VoiceInputButtonProps {
   style?: React.CSSProperties;
 }
 
+export interface VoiceInputButtonHandle {
+  start: () => void;
+}
+
 // 录音状态管理
 interface RecordingState {
   state: VoiceButtonState;
@@ -58,7 +62,7 @@ interface RecordingState {
 // 使用 ref 来存储动画帧 ID，避免触发重渲染
 let animationFrameId: number | null = null;
 
-export function VoiceInputButton({
+export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceInputButtonProps>(function VoiceInputButton({
   onResult,
   onError,
   onStateChange,
@@ -70,7 +74,7 @@ export function VoiceInputButton({
   size = 64,
   className,
   style,
-}: VoiceInputButtonProps) {
+}, ref) {
   // 权限状态类型
   type PermissionState = 'checking' | 'granted' | 'denied' | 'prompt' | 'unavailable';
 
@@ -471,6 +475,14 @@ export function VoiceInputButton({
     }
   }, [state.state, startRecording, stopRecording]);
 
+  useImperativeHandle(ref, () => ({
+    start: () => {
+      if (state.state === 'idle' || state.state === 'completed') {
+        startRecording();
+      }
+    },
+  }), [startRecording, state.state]);
+
   // 快捷键处理（仅非输入区域）
   useEffect(() => {
     if (!enableShortcut) return;
@@ -834,4 +846,4 @@ export function VoiceInputButton({
       )}
     </div>
   );
-}
+});
