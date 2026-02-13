@@ -26,7 +26,7 @@ export interface TimeBlockService {
   loadActiveBlock(): Promise<ActiveBlockData | null>;
 
   /** 开始时间块 */
-  startBlock(name: string, config: TimerConfig): Promise<ActiveBlockData>;
+  startBlock(name: string, config: TimerConfig, description?: string): Promise<ActiveBlockData>;
 
   /** 暂停时间块 */
   pauseBlock(): Promise<void>;
@@ -76,7 +76,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return normalized;
   }
 
-  async startBlock(name: string, config: TimerConfig): Promise<ActiveBlockData> {
+  async startBlock(name: string, config: TimerConfig, description?: string): Promise<ActiveBlockData> {
     // 不允许在已有活跃块（运行中/已暂停）时开启新块
     const existing = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
     if (existing) {
@@ -86,7 +86,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       }
       return normalized;
     }
-
     const startId = crypto.randomUUID();
     const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
@@ -94,7 +93,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       : 0;
 
     // 创建开始事件
-    await this.addBlockEvent(name, 'block_start');
+    const normalizedDescription = description?.trim();
+    const eventContent = normalizedDescription ? `${name}\n${normalizedDescription}` : name;
+    await this.addBlockEvent(eventContent, 'block_start');
 
     // 保存进行中的时间块
     const activeBlock: ActiveBlockData = {

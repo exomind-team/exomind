@@ -14,8 +14,8 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { VoiceMessageInput } from '@/components/VoiceMessageInput';
-import { TimeBlockWidget } from '@/components/TimeBlockWidget';
+import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
+import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
@@ -52,6 +52,8 @@ export function ChatPage() {
   const shouldStickToBottomRef = useRef(true);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn } = useSyncStore();
+  const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
+  const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     listEndRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -199,6 +201,32 @@ export function ChatPage() {
     }
   }, [refreshLatestEvents]);
 
+  // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter 快速聚焦
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target instanceof HTMLElement ? target : null;
+      if (!el) return false;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
+      return Boolean(el.closest('input, textarea, [contenteditable="true"]'));
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return;
+      if (e.key !== 'Enter') return;
+      if (isEditableTarget(e.target)) return;
+
+      e.preventDefault();
+      if (e.shiftKey) {
+        timeBlockWidgetRef.current?.expandAndFocusTaskName();
+      } else {
+        voiceMessageInputRef.current?.focusText();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // 格式化时间
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -289,7 +317,7 @@ export function ChatPage() {
       </div>
 
       {/* TimeBlock 控件栏 */}
-      <TimeBlockWidget />
+      <TimeBlockWidget ref={timeBlockWidgetRef} />
 
       {/* 事件列表 */}
       <div
@@ -366,6 +394,7 @@ export function ChatPage() {
 
       {/* 输入区域 */}
       <VoiceMessageInput
+        ref={voiceMessageInputRef}
         onSend={handleSend}
         placeholder="输入内容记录事件..."
         buttonSize={40}

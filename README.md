@@ -127,16 +127,16 @@ bun run dev -- --host 0.0.0.0
 
 ```powershell
 # 新增评论
-npm run gh:comment -- --type issue --number 93 --file docs/report.md
+bun run gh:comment -- --type issue --number 93 --file docs/report.md
 
 # 追加到指定评论
-npm run gh:comment -- --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append
+bun run gh:comment -- --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append
 
 # 覆盖指定评论
-npm run gh:comment -- --comment "#issuecomment-3883010944" --repo exomind-team/exomind --type issue --number 93 --file docs/final.md --mode replace
+bun run gh:comment -- --comment "#issuecomment-3883010944" --repo exomind-team/exomind --type issue --number 93 --file docs/final.md --mode replace
 
 # 预览解析结果，不写入
-npm run gh:comment -- --ref "https://github.com/exomind-team/exomind/pull/89" --body "preview" --dry-run
+bun run gh:comment -- --ref "https://github.com/exomind-team/exomind/pull/89" --body "preview" --dry-run
 ```
 
 更多参数和 PowerShell 用法见：`Scripts/README.md`。

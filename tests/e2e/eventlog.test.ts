@@ -158,3 +158,48 @@ test.describe('事件日志页面 - 输入交互', () => {
     await expect(input).toHaveValue('测试事件内容');
   });
 });
+
+test.describe('事件日志页面 - 快捷键交互 (issue-120)', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/eventlog');
+    await page.waitForLoadState('networkidle');
+  });
+
+  test('未聚焦输入框时按 Enter 应聚焦事件输入框', async ({ page }) => {
+    const eventInput = page.locator('[data-testid="event-input-textarea"]');
+    await expect(eventInput).not.toBeFocused();
+
+    await page.keyboard.press('Enter');
+
+    await expect(eventInput).toBeFocused();
+  });
+
+  test('未聚焦输入框时按 Shift+Enter 应展开并聚焦时间块名称输入框', async ({ page }) => {
+    await page.keyboard.press('Shift+Enter');
+
+    const taskTextarea = page.locator('[data-testid="timeblock-task-textarea"]');
+    await expect(taskTextarea).toBeVisible();
+    await expect(taskTextarea).toBeFocused();
+  });
+
+  test('时间块名称有内容时按 Enter 应快速开始时间块，并写入描述', async ({ page }) => {
+    await page.keyboard.press('Shift+Enter');
+
+    const taskTextarea = page.locator('[data-testid="timeblock-task-textarea"]');
+    await taskTextarea.fill('写代码\\n修复 issue-120');
+
+    await page.keyboard.press('Enter');
+
+    await expect(page.getByRole('button', { name: '暂停' })).toBeVisible();
+    await expect(page.locator('[data-testid="event-list"]')).toContainText('写代码');
+    await expect(page.locator('[data-testid="event-list"]')).toContainText('修复 issue-120');
+  });
+
+  test('时间块名称为空时点击开始应自动聚焦时间块名称输入框', async ({ page }) => {
+    await page.getByRole('button', { name: '开始' }).click();
+
+    const taskTextarea = page.locator('[data-testid="timeblock-task-textarea"]');
+    await expect(taskTextarea).toBeVisible();
+    await expect(taskTextarea).toBeFocused();
+  });
+});
