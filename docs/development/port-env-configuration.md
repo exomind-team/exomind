@@ -14,6 +14,7 @@ Issue: `#79`
 | `EXOMIND_POUCHDB_PORT` | `6984` | PouchDB 同步服务端口 |
 | `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | PouchDB 同步服务监听地址（默认仅本机访问；局域网联调时设为 `0.0.0.0`） |
 | `EXOMIND_ASR_PORT` | `1949` | ASR 后端服务端口 |
+| `EXOMIND_BFF_ALLOWED_ORIGINS` | 见下方规则 | ASR BFF 的 CORS 白名单（逗号分隔；`*` 表示全放行） |
 | `VITE_SYNC_SERVER_URL` | `http://localhost:6984` | 前端同步服务地址（优先级高于 `EXOMIND_POUCHDB_PORT`） |
 | `VITE_ASR_SERVER_URL` | `http://localhost:1949` | 前端 ASR 服务地址（优先级高于 `EXOMIND_ASR_PORT`） |
 
@@ -22,6 +23,10 @@ Issue: `#79`
 1. 前端同步地址：`VITE_SYNC_SERVER_URL` > `EXOMIND_POUCHDB_PORT + 当前浏览器 hostname` 组装地址 > 默认地址  
 2. 前端 ASR 地址：`VITE_ASR_SERVER_URL` > `EXOMIND_ASR_PORT` 组装地址 > 默认地址  
 3. Vite 端口：`EXOMIND_WEB_PORT` 和 `EXOMIND_HMR_PORT`（若未设置 HMR 端口，则自动使用 `WEB_PORT + 1`）
+4. ASR BFF CORS：
+   - 若设置 `EXOMIND_BFF_ALLOWED_ORIGINS='*'`：全部放行（仅建议开发临时使用）
+   - 若设置具体白名单（逗号分隔）：仅放行白名单
+   - 未设置时：`development` 默认放行；`production` 默认仅放行 `http://<hostname>:<EXOMIND_WEB_PORT>`
 
 ## 本地模式与 LAN 测试模式
 
@@ -64,7 +69,8 @@ bun run dev
 1. 启动日志中 Web/PouchDB/ASR 端口与环境变量一致。  
 2. 浏览器访问地址与 `EXOMIND_WEB_PORT` 一致。  
 3. 同步页面默认服务器地址与端口配置一致。  
-4. 修改环境变量后，重启进程即可生效。
+4. ASR BFF 启动日志会打印当前 CORS 策略（`*` 或白名单）。
+5. 修改环境变量后，重启进程即可生效。
 
 ## Issue #27（多设备 EventLog 同步）最小联调步骤
 

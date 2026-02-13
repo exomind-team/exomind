@@ -9,6 +9,11 @@ use commands::file_commands::{
     write_file, read_file, read_file_binary, delete_file, file_exists, list_files,
     append_file, append_to_markdown, export_messages_to_markdown
 };
+use commands::device_commands::get_device_id;
+use commands::eventlog_commands::{
+    eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
+    eventlog_rebuild_markdown,
+};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -39,6 +44,13 @@ pub fn run() {
             append_file,
             append_to_markdown,
             export_messages_to_markdown,
+            get_device_id,
+            eventlog_list,
+            eventlog_append,
+            eventlog_get,
+            eventlog_clear,
+            eventlog_mirror_status,
+            eventlog_rebuild_markdown,
         ]);
 
     #[cfg(debug_assertions)]

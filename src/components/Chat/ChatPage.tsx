@@ -18,9 +18,13 @@ import { VoiceMessageInput } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
+import { getEventLogService } from '@/lib/services/eventlog.service';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { useSyncStore } from '@/ui/stores/sync-store';
-import { resolveSyncServerUrl } from '@/config/port-env';
+import {
+  resolveSyncServerUrl,
+  SYNC_SERVER_URL_CHANGED_EVENT,
+} from '@/config/port-env';
 import {
   mergeLatestEventsAscending,
   normalizeStorageEventsAscending,
@@ -32,8 +36,10 @@ const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 
 export function ChatPage() {
+  const envMap = import.meta.env as Record<string, string | undefined>;
   const [events, setEvents] = useState<Event[]>([]);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
+  const [syncServerUrl, setSyncServerUrl] = useState(() => resolveSyncServerUrl(envMap));
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
@@ -43,6 +49,7 @@ export function ChatPage() {
   const nextCursorRef = useRef<EventPageCursor | null>(null);
   const loadingOlderRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
+  const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn } = useSyncStore();
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -138,6 +145,18 @@ export function ChatPage() {
     }
   }, [loadOlderEvents]);
 
+  useEffect(() => {
+    const refreshSyncServerUrl = () => {
+      setSyncServerUrl(resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>));
+    };
+
+    refreshSyncServerUrl();
+    window.addEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
+    return () => {
+      window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
+    };
+  }, []);
+
   // 初始化 EventStorage 和加载事件
   useEffect(() => {
     const storage = getEventStorage(currentUser || undefined);
@@ -151,8 +170,6 @@ export function ChatPage() {
 
     if (isLoggedIn && currentUser) {
       setSyncStatus('syncing');
-      const runtimeHost = typeof window !== 'undefined' ? window.location.hostname : 'localhost';
-      const syncServerUrl = resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>, runtimeHost);
       const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
       storage.syncToRemote(remoteUrl).then(() => {
         setSyncStatus('connected');
@@ -167,21 +184,16 @@ export function ChatPage() {
       unsubscribe();
       storage.stopSync();
     };
-  }, [currentUser, isLoggedIn, isNearBottom, loadInitialEvents, refreshLatestEvents]);
+  }, [currentUser, isLoggedIn, isNearBottom, loadInitialEvents, refreshLatestEvents, syncServerUrl]);
 
   // 处理发送消息
   const handleSend = useCallback(async (content: string) => {
     const trimmed = content.trim();
     if (!trimmed) return;
 
-    // 使用 EventStorage 保存到 PouchDB
     if (storageRef.current) {
       shouldStickToBottomRef.current = true;
-      await storageRef.current.addEvent({
-        id: crypto.randomUUID(),
-        content: trimmed,
-        createdAt: new Date().toISOString(),
-      });
+      await eventLogService.current.addEvent(trimmed);
       await refreshLatestEvents(storageRef.current);
     }
   }, [refreshLatestEvents]);

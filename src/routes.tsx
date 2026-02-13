@@ -2,7 +2,7 @@ import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from 
 import { Link } from "@tanstack/react-router";
 import { useState } from "react";
 import { cn } from "@/lib/utils";
-import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home, Users, RefreshCw } from "lucide-react";
+import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home, Users } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
 import { ASRTestPage } from "@/pages/ASRTestPage";
@@ -19,7 +19,6 @@ const sidebarItems = [
   { title: "语音聊天", path: "/voice-chat", icon: MicVocal },
   { title: "ASR测试", path: "/asr-test", icon: Mic },
   { title: "用户管理", path: "/user-manage", icon: Users },
-  { title: "同步测试", path: "/sync-test", icon: RefreshCw },
   { title: "设置", path: "/settings", icon: Settings },
 ];
 
@@ -178,6 +177,7 @@ const userManageRoute = createRoute({
 });
 
 // Sync Test route (/sync-test)
+// 保留兼容入口；不在侧边栏展示
 const syncTestRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: 'sync-test',

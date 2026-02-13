@@ -298,7 +298,7 @@ export function UserManagePage() {
         <CardContent className="space-y-2 text-sm text-muted-foreground">
           <p>1. 先注册一个新用户（用户名和密码）</p>
           <p>2. 使用注册的用户名和密码登录</p>
-          <p>3. 登录后可以访问同步测试页面进行数据同步</p>
+          <p>3. 在设置页配置同步服务器地址（局域网可用）</p>
           <p>4. 同一用户名可以在多个设备上登录，数据会自动同步</p>
         </CardContent>
       </Card>

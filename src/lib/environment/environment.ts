@@ -12,9 +12,9 @@
  */
 
 import type { IASRPort } from './interfaces/asr.port';
+import type { IEventLogPort } from './interfaces/eventlog.port';
 import type { IStoragePort } from './interfaces/storage.port';
-import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
-import { WebStorageAdapter } from '../adapters/web-storage';
+import { createRuntimeBootstrap, type RuntimeKind } from './bootstrap';
 
 /**
  * Environment 接口
@@ -25,6 +25,10 @@ export interface Environment {
   asr: IASRPort;
   /** 存储能力 */
   storage: IStoragePort;
+  /** 事件日志能力 */
+  eventlog: IEventLogPort;
+  /** 运行时类型 */
+  runtime: RuntimeKind;
 }
 
 /**
@@ -33,14 +37,18 @@ export interface Environment {
 export class ExoMindEnvironment implements Environment {
   asr: IASRPort;
   storage: IStoragePort;
+  eventlog: IEventLogPort;
+  runtime: RuntimeKind;
 
   private static instance: ExoMindEnvironment | null = null;
 
-  private constructor() {
-    // 初始化各个 Port
-    this.asr = new VolcanoEngineASRAdapter();
-    this.storage = new WebStorageAdapter();
-    console.log('[Environment] ExoMindEnvironment 初始化完成');
+  private constructor(runtime?: RuntimeKind) {
+    const bootstrap = createRuntimeBootstrap({ runtime });
+    this.runtime = bootstrap.runtime;
+    this.asr = bootstrap.asr;
+    this.storage = bootstrap.storage;
+    this.eventlog = bootstrap.eventlog;
+    console.log(`[Environment] ExoMindEnvironment 初始化完成: ${this.runtime}`);
   }
 
   /**
@@ -54,12 +62,20 @@ export class ExoMindEnvironment implements Environment {
   }
 
   /**
+   * 测试辅助：清理单例
+   */
+  static resetForTests(): void {
+    ExoMindEnvironment.instance = null;
+  }
+
+  /**
    * 检查能力是否可用
    */
   capabilities(): Record<string, boolean> {
     return {
       asr: this.asr.isAvailable(),
-      storage: true, // WebStorageAdapter 始终可用
+      storage: true,
+      eventlog: true,
     };
   }
 }

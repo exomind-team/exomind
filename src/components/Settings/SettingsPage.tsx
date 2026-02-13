@@ -1,8 +1,14 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { getEventLogService } from '@/lib/services';
+import {
+  getSyncServerUrlOverride,
+  resolveSyncServerUrl,
+  setSyncServerUrlOverride,
+} from '@/config/port-env';
 
 type ImportStrategy = 'merge' | 'overwrite';
 
@@ -12,6 +18,12 @@ function buildBackupFileName(): string {
 }
 
 export function SettingsPage() {
+  const envMap = import.meta.env as Record<string, string | undefined>;
+  const autoSyncServerUrl = resolveSyncServerUrl(envMap, {
+    syncServerOverride: null,
+  });
+  const [syncServerUrl, setSyncServerUrl] = useState(() => getSyncServerUrlOverride() || autoSyncServerUrl);
+  const [savedSyncServerUrl, setSavedSyncServerUrl] = useState<string | null>(() => getSyncServerUrlOverride());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy, setImportStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
@@ -21,6 +33,50 @@ export function SettingsPage() {
   const clearNotice = () => {
     setStatusMessage('');
     setErrorMessage('');
+  };
+
+  const normalizeSyncServerUrl = (value: string): string => {
+    const normalized = value.trim().replace(/\/+$/, '');
+    if (!normalized) {
+      throw new Error('同步服务器地址不能为空');
+    }
+
+    let url: URL;
+    try {
+      url = new URL(normalized);
+    } catch {
+      throw new Error('同步服务器地址格式无效');
+    }
+
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') {
+      throw new Error('同步服务器地址必须以 http:// 或 https:// 开头');
+    }
+
+    return normalized;
+  };
+
+  const handleSaveSyncServerUrl = () => {
+    clearNotice();
+
+    try {
+      const normalized = normalizeSyncServerUrl(syncServerUrl);
+      setSyncServerUrlOverride(normalized);
+      const saved = getSyncServerUrlOverride() || normalized;
+      setSavedSyncServerUrl(saved);
+      setSyncServerUrl(saved);
+      setStatusMessage(`同步服务器地址已保存：${saved}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`保存失败：${message}`);
+    }
+  };
+
+  const handleResetSyncServerUrl = () => {
+    clearNotice();
+    setSyncServerUrlOverride(null);
+    setSavedSyncServerUrl(null);
+    setSyncServerUrl(autoSyncServerUrl);
+    setStatusMessage(`已恢复自动地址：${autoSyncServerUrl}`);
   };
 
   const handleExport = async () => {
@@ -86,8 +142,40 @@ export function SettingsPage() {
     <div className="settings-page p-6 space-y-4">
       <h1 className="text-2xl font-bold">设置</h1>
       <p className="text-muted-foreground">
-        事件日志导入导出（MVP）
+        配置局域网同步地址与事件日志导入导出
       </p>
+
+      <div className="space-y-2 max-w-xl">
+        <Label htmlFor="sync-server-url">同步服务器地址</Label>
+        <Input
+          id="sync-server-url"
+          value={syncServerUrl}
+          onChange={(event) => setSyncServerUrl(event.target.value)}
+          placeholder={autoSyncServerUrl}
+          disabled={loading}
+        />
+        <div className="flex flex-wrap gap-2">
+          <Button
+            variant="outline"
+            onClick={handleSaveSyncServerUrl}
+            disabled={loading}
+          >
+            保存同步地址
+          </Button>
+          <Button
+            variant="outline"
+            onClick={handleResetSyncServerUrl}
+            disabled={loading}
+          >
+            恢复自动地址
+          </Button>
+        </div>
+        <p className="text-xs text-muted-foreground">
+          {savedSyncServerUrl
+            ? `当前已保存：${savedSyncServerUrl}`
+            : `未保存自定义地址，自动使用：${autoSyncServerUrl}`}
+        </p>
+      </div>
 
       <div className="space-y-2 max-w-sm">
         <Label htmlFor="import-strategy">导入策略</Label>

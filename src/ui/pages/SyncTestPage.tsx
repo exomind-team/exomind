@@ -14,7 +14,11 @@ import {
   useSyncStore,
 } from '@/ui/stores/sync-store';
 import type { Conflict } from '@/environment/interfaces/sync.port';
-import { resolveSyncServerUrl } from '@/config/port-env';
+import {
+  getSyncServerUrlOverride,
+  resolveSyncServerUrl,
+  setSyncServerUrlOverride,
+} from '@/config/port-env';
 
 interface LogEntry {
   level: 'INFO' | 'SUCCESS' | 'WARN' | 'ERROR';
@@ -23,10 +27,15 @@ interface LogEntry {
 }
 
 export function SyncTestPage() {
-  const defaultSyncServerUrl = resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>);
+  const envMap = import.meta.env as Record<string, string | undefined>;
+  const defaultSyncServerUrl = resolveSyncServerUrl(envMap);
+  const autoSyncServerUrl = resolveSyncServerUrl(envMap, {
+    syncServerOverride: null,
+  });
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const logsRef = useRef<HTMLDivElement>(null);
   const [serverUrl, setServerUrl] = useState(defaultSyncServerUrl);
+  const [savedServerUrl, setSavedServerUrl] = useState<string | null>(() => getSyncServerUrlOverride());
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
 
@@ -84,9 +93,15 @@ export function SyncTestPage() {
 
   // 处理连接
   const handleConnect = async () => {
+    const targetServerUrl = serverUrl.trim().replace(/\/+$/, '');
+    if (!targetServerUrl) {
+      addLog('WARN', '服务器地址不能为空');
+      return;
+    }
+
     try {
-      addLog('INFO', `正在连接到 ${serverUrl}...`);
-      await connect(serverUrl);
+      addLog('INFO', `正在连接到 ${targetServerUrl}...`);
+      await connect(targetServerUrl);
       addLog('SUCCESS', '连接成功');
       // 连接成功后获取冲突列表
       const conflictList = await getConflicts();
@@ -140,6 +155,29 @@ export function SyncTestPage() {
     addLog('INFO', '已退出登录');
   };
 
+  // 保存同步服务器地址
+  const handleSaveServerUrl = () => {
+    const normalizedUrl = serverUrl.trim().replace(/\/+$/, '');
+    if (!normalizedUrl) {
+      addLog('WARN', '服务器地址不能为空');
+      return;
+    }
+
+    setSyncServerUrlOverride(normalizedUrl);
+    const latestSavedUrl = getSyncServerUrlOverride();
+    setSavedServerUrl(latestSavedUrl);
+    setServerUrl(latestSavedUrl || normalizedUrl);
+    addLog('SUCCESS', `已保存默认服务器地址: ${latestSavedUrl || normalizedUrl}`);
+  };
+
+  // 恢复自动地址
+  const handleResetServerUrl = () => {
+    setSyncServerUrlOverride(null);
+    setSavedServerUrl(null);
+    setServerUrl(autoSyncServerUrl);
+    addLog('INFO', `已恢复自动服务器地址: ${autoSyncServerUrl}`);
+  };
+
   // 处理解决冲突
   const handleResolveConflict = async (
     conflict: Conflict,
@@ -179,6 +217,19 @@ export function SyncTestPage() {
               value={serverUrl}
               onChange={(e) => setServerUrl(e.target.value)}
             />
+            <div className="flex items-center gap-2">
+              <Button variant="outline" size="sm" onClick={handleSaveServerUrl}>
+                保存为默认地址
+              </Button>
+              <Button variant="outline" size="sm" onClick={handleResetServerUrl}>
+                恢复自动地址
+              </Button>
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {savedServerUrl
+                ? `已保存默认地址: ${savedServerUrl}`
+                : `当前自动地址: ${autoSyncServerUrl}（基于访问设备主机）`}
+            </div>
           </div>
 
           <div className="grid gap-2">

@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const mocks = vi.hoisted(() => ({
+const mocks = {
   getEvents: vi.fn(),
   addEvent: vi.fn(),
   clearAll: vi.fn(),
-}));
+};
 
 vi.mock('@/lib/storage/event-storage', () => ({
   getEventStorage: vi.fn(() => ({

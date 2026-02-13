@@ -51,16 +51,12 @@ describe('SyncTestPage 路由注册', () => {
   const routesPath = path.resolve('src/routes.tsx');
   const routesContent = fs.readFileSync(routesPath, 'utf-8');
 
-  it('应该导入 SyncTestPage', () => {
-    expect(routesContent).toContain('SyncTestPage');
+  it('不应该在侧边栏显示同步测试入口', () => {
+    expect(routesContent).not.toContain('同步测试');
   });
 
-  it('应该定义 /sync-test 路由', () => {
+  it('应该注册 /sync-test 路由（兼容旧入口）', () => {
     expect(routesContent).toContain("path: 'sync-test'");
-  });
-
-  it('路由应该使用 SyncTestPage 组件', () => {
-    expect(routesContent).toContain('<SyncTestPage />');
   });
 });
 
@@ -70,6 +66,11 @@ describe('SyncTestPage 功能完整性', () => {
 
   it('应该包含连接设置 UI', () => {
     expect(content).toContain('连接设置');
+  });
+
+  it('应该包含服务器地址持久化控制', () => {
+    expect(content).toContain('保存为默认地址');
+    expect(content).toContain('恢复自动地址');
   });
 
   it('应该包含同步控制 UI', () => {
@@ -115,6 +116,14 @@ describe('SyncTestPage 事件处理器', () => {
 
   it('应该定义 handleSyncConfig 函数', () => {
     expect(content).toContain('handleSyncConfig');
+  });
+
+  it('应该定义 handleSaveServerUrl 函数', () => {
+    expect(content).toContain('handleSaveServerUrl');
+  });
+
+  it('应该定义 handleResetServerUrl 函数', () => {
+    expect(content).toContain('handleResetServerUrl');
   });
 });
 

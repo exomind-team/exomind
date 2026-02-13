@@ -10,17 +10,15 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
+import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
-import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
+import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import {
   createBackupPayload,
   parseBackupPayload,
   mergeEventsById,
   type ImportStrategy,
 } from '../eventlog/backup';
-
-// 存储键
-const EVENTS_KEY = 'events';
 
 // 标签常量
 const NOTE_TAG: Tag = 'note';
@@ -48,12 +46,16 @@ export interface EventLogService {
   onEvent(callback: (event: Event) => void): () => void;
 }
 
+export interface EventLogServiceOptions {
+  port?: IEventLogPort;
+}
+
 export class EventLogServiceImpl implements EventLogService {
-  private env: ExoMindEnvironment | null;
+  private readonly port: IEventLogPort;
   private listeners: Set<(event: Event) => void> = new Set();
 
-  constructor(env?: ExoMindEnvironment) {
-    this.env = env || null;
+  constructor(options: EventLogServiceOptions = {}) {
+    this.port = options.port ?? new WebEventLogStorageAdapter();
   }
 
   async loadEvents(): Promise<Event[]> {
@@ -69,16 +71,7 @@ export class EventLogServiceImpl implements EventLogService {
       tags: tags ? Array.from(tags) : [NOTE_TAG],
     };
 
-    if (this.env) {
-      // 测试注入模式：仍走环境存储
-      const existing = await this.readEventData();
-      existing.unshift(eventData);
-      await this.writeEventData(existing);
-    } else {
-      // 运行时默认：与 ChatPage 使用同一个 PouchDB EventStorage
-      const storage = getEventStorage();
-      await storage.addEvent(this.toStorageEvent(eventData));
-    }
+    await this.port.appendEvent(eventData);
 
     const event = this.deserializeEvent(eventData);
 
@@ -138,67 +131,16 @@ export class EventLogServiceImpl implements EventLogService {
   }
 
   private async readEventData(): Promise<EventData[]> {
-    if (this.env) {
-      return (await this.env.storage.read<EventData[]>(EVENTS_KEY)) || [];
-    }
-
-    const storage = getEventStorage();
-    const events = await storage.getEvents();
-    return events.map((event) => this.fromStorageEvent(event));
+    return this.port.listEvents();
   }
 
   private async writeEventData(events: EventData[]): Promise<void> {
-    if (this.env) {
-      await this.env.storage.write(EVENTS_KEY, events);
-      return;
-    }
-
-    const storage = getEventStorage();
-    await storage.clearAll();
+    await this.port.clearEvents();
 
     const sorted = [...events].sort((a, b) => a.timestamp - b.timestamp);
     for (const event of sorted) {
-      await storage.addEvent(this.toStorageEvent(event));
+      await this.port.appendEvent(event);
     }
-  }
-
-  private toStorageEvent(event: EventData): StorageEvent {
-    return {
-      id: event.id,
-      content: event.content,
-      createdAt: new Date(event.timestamp).toISOString(),
-      type: event.tags[0] || NOTE_TAG,
-      metadata: {
-        tags: event.tags,
-      },
-    };
-  }
-
-  private fromStorageEvent(event: StorageEvent): EventData {
-    const parsedTimestamp = Date.parse(event.createdAt);
-    const tags = this.normalizeTags(event.metadata?.tags, event.type);
-
-    return {
-      id: event.id,
-      timestamp: Number.isNaN(parsedTimestamp) ? Date.now() : parsedTimestamp,
-      content: event.content,
-      tags,
-    };
-  }
-
-  private normalizeTags(rawTags: unknown, fallbackType?: string): Tag[] {
-    if (Array.isArray(rawTags)) {
-      const tags = rawTags.filter((tag): tag is string => typeof tag === 'string' && tag.length > 0);
-      if (tags.length > 0) {
-        return tags;
-      }
-    }
-
-    if (typeof fallbackType === 'string' && fallbackType.length > 0) {
-      return [fallbackType];
-    }
-
-    return [NOTE_TAG];
   }
 }
 
@@ -207,7 +149,8 @@ let eventLogServiceInstance: EventLogService | null = null;
 
 export function getEventLogService(): EventLogService {
   if (!eventLogServiceInstance) {
-    eventLogServiceInstance = new EventLogServiceImpl();
+    const environment = ExoMindEnvironment.getInstance();
+    eventLogServiceInstance = new EventLogServiceImpl({ port: environment.eventlog });
   }
   return eventLogServiceInstance;
 }
