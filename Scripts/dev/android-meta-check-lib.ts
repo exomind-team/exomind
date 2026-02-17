@@ -19,10 +19,11 @@ export interface AndroidMetaCheckReport {
   artifacts: ArtifactSizeSummary[];
 }
 
-const SOFT_APK_SIZE_MB = 80;
-const HARD_APK_SIZE_MB = 120;
-const SOFT_AAB_SIZE_MB = 100;
-const HARD_AAB_SIZE_MB = 180;
+// 目标：安装包应稳定控制在 <100MB，常态建议接近 20MB。
+const SOFT_APK_SIZE_MB = 40;
+const HARD_APK_SIZE_MB = 100;
+const SOFT_AAB_SIZE_MB = 60;
+const HARD_AAB_SIZE_MB = 100;
 
 export function parseAndroidStringValues(xml: string): Record<string, string> {
   const values: Record<string, string> = {};
