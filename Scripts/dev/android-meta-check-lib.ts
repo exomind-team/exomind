@@ -68,7 +68,9 @@ export function collectArtifactSizeSummary(
       const sizeBytes = sizeFn(filePath);
       const sizeMB = Number((sizeBytes / (1024 * 1024)).toFixed(2));
       const kind: ArtifactKind = filePath.endsWith('.apk') ? 'apk' : 'aab';
-      const debug = kind === 'apk' && /(^|[\\/])debug([\\/]|$)|-debug\.apk$/i.test(filePath);
+      // Extract filename from path for debug detection (avoid false positives from directory names)
+      const fileName = filePath.split(/[\\/]/).pop() ?? '';
+      const debug = kind === 'apk' && (fileName.includes('-debug') || fileName.endsWith('-debug.apk'));
       return {
         kind,
         path: filePath,
