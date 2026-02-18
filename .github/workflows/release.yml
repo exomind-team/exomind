@@ -222,17 +222,21 @@ jobs:
           }
 
           $content = Get-Content -Path $buildTask.FullName -Raw -Encoding utf8
-          $needle = 'val args = listOf("run", "--", "tauri", "android", "android-studio-script");'
-          $replacement = 'val args = listOf("--prefix", "..", "run", "--", "tauri", "android", "android-studio-script");'
+          $targetToken = '"run", "--", "tauri", "android", "android-studio-script"'
+          $patchedToken = '"--prefix", "..", "run", "--", "tauri", "android", "android-studio-script"'
 
-          if ($content.Contains($replacement)) {
+          if ($content.Contains($patchedToken)) {
             Write-Host "BuildTask already patched: $($buildTask.FullName)"
-          } elseif ($content.Contains($needle)) {
-            $patched = $content.Replace($needle, $replacement)
+          } elseif ($content.Contains($targetToken)) {
+            $patched = $content -replace '"run",\s*"--",\s*"tauri",\s*"android",\s*"android-studio-script"', $patchedToken
             Set-Content -Path $buildTask.FullName -Value $patched -Encoding utf8
             Write-Host "BuildTask patched successfully: $($buildTask.FullName)"
           } else {
-            throw "Expected BuildTask args pattern not found in $($buildTask.FullName)"
+            $hint = Select-String -Path $buildTask.FullName -Pattern "android-studio-script" -SimpleMatch | Select-Object -First 1
+            if ($hint) {
+              Write-Host "Found android-studio-script line: $($hint.Line.Trim())"
+            }
+            throw "Expected BuildTask args token not found in $($buildTask.FullName)"
           }
 
       - name: Verify RECORD_AUDIO permission persisted（校验权限已持久化）
