@@ -5,6 +5,17 @@ on:
     tags:
       - 'build/**'      # 构建触发：只构建，不发布
       - 'release/**'     # 发布触发：构建 + GitHub Release
+  workflow_dispatch:
+    inputs:
+      build_scope:
+        description: Build scope（构建范围）
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - android
+          - windows
 
 permissions:
   contents: write
@@ -15,6 +26,7 @@ env:
 jobs:
   build-windows:
     needs: build-android
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'windows') && (github.event.inputs.build_scope == 'windows' || needs.build-android.result == 'success') }}
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
@@ -44,6 +56,38 @@ jobs:
           }
           Write-Host "Using Bun from: $($bunCmd.Source)"
           bun --version
+
+      - name: Rust diagnostics (Rust 诊断输出)
+        shell: powershell
+        run: |
+          Write-Host "=== Rust diagnostics / Rust 诊断输出 ==="
+          Write-Host "event_name=${{ github.event_name }}"
+          Write-Host "ref=${{ github.ref }}"
+          Write-Host "build_scope=${{ github.event.inputs.build_scope || 'n/a' }}"
+          Write-Host "runner=$env:RUNNER_NAME os=$env:RUNNER_OS arch=$env:RUNNER_ARCH"
+          Write-Host "whoami=$(whoami)"
+          Write-Host "USERPROFILE=$env:USERPROFILE"
+          Write-Host "HOME=$env:HOME"
+          Write-Host "CARGO_HOME=$env:CARGO_HOME"
+          Write-Host "RUSTUP_HOME=$env:RUSTUP_HOME"
+
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          Write-Host "cargoBin=$cargoBin exists=$(Test-Path $cargoBin)"
+
+          foreach ($name in @("rustup.exe", "rustc.exe", "cargo.exe", "rustup", "rustc", "cargo")) {
+            $candidate = Join-Path $cargoBin $name
+            Write-Host "candidate=$candidate exists=$(Test-Path $candidate)"
+          }
+
+          Write-Host "Get-Command (before prepend PATH):"
+          foreach ($cmd in @("rustup", "rustc", "cargo")) {
+            $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
+            if ($resolved) {
+              Write-Host " - $cmd => $($resolved.Source)"
+            } else {
+              Write-Host " - $cmd => NOT_FOUND"
+            }
+          }
 
       - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
         shell: powershell
@@ -100,6 +144,7 @@ jobs:
           path: src-tauri/target/release/bundle/msi/
 
   build-android:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'android' }}
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
