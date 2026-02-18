@@ -35,7 +35,8 @@ jobs:
 
       - name: Get short commit hash
         id: hash
-        run: echo "HASH=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+        shell: pwsh
+        run: '"HASH=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_OUTPUT'
 
       - name: Install dependencies
         run: bun install
@@ -58,7 +59,7 @@ jobs:
           path: src-tauri/target/release/bundle/msi/
 
   build-android:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
 
@@ -72,23 +73,36 @@ jobs:
         with:
           bun-version: latest
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - name: Configure local Android toolchain (配置本地 Android 工具链)
+        shell: pwsh
+        run: |
+          if (-not $env:JAVA_HOME) {
+            $javaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
+            if (-not (Test-Path $javaHome)) {
+              throw "JAVA_HOME is not set and default path not found: $javaHome"
+            }
+            "JAVA_HOME=$javaHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
 
-      - name: Setup JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+          if (-not $env:ANDROID_SDK_ROOT) {
+            $androidSdkRoot = "D:\data\AndroidSDK"
+            if (-not (Test-Path $androidSdkRoot)) {
+              throw "ANDROID_SDK_ROOT is not set and default path not found: $androidSdkRoot"
+            }
+            "ANDROID_SDK_ROOT=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "ANDROID_HOME=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif (-not $env:ANDROID_HOME) {
+            "ANDROID_HOME=$env:ANDROID_SDK_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Ensure Rust Android targets (确保 Rust Android 目标)
+        shell: pwsh
+        run: rustup target add aarch64-linux-android i686-linux-android
 
       - name: Get short commit hash
         id: hash
-        run: echo "HASH=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+        shell: pwsh
+        run: '"HASH=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_OUTPUT'
 
       - name: Install dependencies
         run: bun install
@@ -98,15 +112,12 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Android AAB (release channel / 商店包)
-        run: bun tauri android build --ci --aab
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Build Android APK (release split-per-abi / 侧载包)
+      - name: Build Android APK only (仅构建 APK，aarch64 + i686)
         run: bun tauri android build --ci --apk --split-per-abi -t aarch64 i686
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)
+          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false
 
       - name: Validate Android app name/icon/artifact size (门禁校验)
         run: bun run check:android:meta
@@ -114,98 +125,87 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Prepare Android signing keystore (准备签名密钥库)
-        shell: bash
+        shell: pwsh
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
         run: |
-          set -euo pipefail
-          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
-            echo "Missing secret: ANDROID_KEYSTORE_BASE64"
-            exit 1
-          fi
-          KEYSTORE_PATH="$RUNNER_TEMP/android-release.jks"
-          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
-          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
+          if (-not $env:ANDROID_KEYSTORE_BASE64) {
+            throw "Missing secret: ANDROID_KEYSTORE_BASE64"
+          }
+          $keystorePath = Join-Path $env:RUNNER_TEMP "android-release.jks"
+          try {
+            $bytes = [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
+          } catch {
+            throw "ANDROID_KEYSTORE_BASE64 is not valid Base64."
+          }
+          [IO.File]::WriteAllBytes($keystorePath, $bytes)
+          "ANDROID_KEYSTORE_PATH=$keystorePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
-      - name: Sign Android release artifacts (签名 APK/AAB)
-        shell: bash
+      - name: Sign Android APK artifacts (签名 APK 产物)
+        shell: pwsh
         env:
           ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
           ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          set -euo pipefail
-          for required in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
-            if [ -z "${!required:-}" ]; then
-              echo "Missing secret: ${required}"
-              exit 1
-            fi
-          done
+          foreach ($required in @("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")) {
+            if (-not (Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue)) {
+              throw "Missing secret: $required"
+            }
+          }
 
-          BUILD_TOOLS_DIR="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
-          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
-          ZIPALIGN="$BUILD_TOOLS_DIR/zipalign"
+          $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { $null }
+          if (-not $sdkRoot) {
+            throw "ANDROID_SDK_ROOT or ANDROID_HOME must be set."
+          }
 
-          if [ ! -x "$APKSIGNER" ] || [ ! -x "$ZIPALIGN" ]; then
-            echo "apksigner/zipalign not found under $BUILD_TOOLS_DIR"
-            exit 1
-          fi
+          $buildToolsRoot = Join-Path $sdkRoot "build-tools"
+          $buildToolsDir = Get-ChildItem -Path $buildToolsRoot -Directory | Sort-Object { [Version]$_.Name } | Select-Object -Last 1
+          if (-not $buildToolsDir) {
+            throw "No Android build-tools directory found under $buildToolsRoot"
+          }
 
-          SIGNED_APK_DIR="src-tauri/gen/android/app/build/outputs/apk-signed"
-          SIGNED_AAB_DIR="src-tauri/gen/android/app/build/outputs/bundle-signed"
-          mkdir -p "$SIGNED_APK_DIR" "$SIGNED_AAB_DIR"
+          $zipalign = Join-Path $buildToolsDir.FullName "zipalign.exe"
+          $apksigner = Join-Path $buildToolsDir.FullName "apksigner.bat"
+          if ((-not (Test-Path $zipalign)) -or (-not (Test-Path $apksigner))) {
+            throw "zipalign.exe or apksigner.bat not found under $($buildToolsDir.FullName)"
+          }
 
-          mapfile -t APK_FILES < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name "*release*.apk" ! -name "*-signed.apk")
-          if [ "${#APK_FILES[@]}" -eq 0 ]; then
-            echo "No release APK files found."
-            exit 1
-          fi
+          $signedApkDir = "src-tauri/gen/android/app/build/outputs/apk-signed"
+          New-Item -Path $signedApkDir -ItemType Directory -Force | Out-Null
 
-          for apk in "${APK_FILES[@]}"; do
-            base_name="$(basename "$apk" .apk)"
-            aligned_apk="$RUNNER_TEMP/${base_name}-aligned.apk"
-            signed_apk="$SIGNED_APK_DIR/${base_name}-signed.apk"
+          $apkFiles = Get-ChildItem -Path "src-tauri/gen/android/app/build/outputs/apk" -Recurse -Filter "*release*.apk" | Where-Object { $_.Name -notlike "*-signed.apk" }
+          if (-not $apkFiles -or $apkFiles.Count -eq 0) {
+            throw "No release APK files found."
+          }
 
-            "$ZIPALIGN" -p -f 4 "$apk" "$aligned_apk"
-            "$APKSIGNER" sign \
-              --ks "$ANDROID_KEYSTORE_PATH" \
-              --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
-              --ks-key-alias "$ANDROID_KEY_ALIAS" \
-              --key-pass "pass:$ANDROID_KEY_PASSWORD" \
-              --out "$signed_apk" \
-              "$aligned_apk"
+          foreach ($apk in $apkFiles) {
+            $baseName = [IO.Path]::GetFileNameWithoutExtension($apk.Name)
+            $alignedApk = Join-Path $env:RUNNER_TEMP "$baseName-aligned.apk"
+            $signedApk = Join-Path $signedApkDir "$baseName-signed.apk"
 
-            "$APKSIGNER" verify --verbose "$signed_apk"
-            echo "Signed APK: $signed_apk"
-          done
+            & $zipalign -p -f 4 $apk.FullName $alignedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "zipalign failed: $($apk.FullName)"
+            }
 
-          mapfile -t AAB_FILES < <(find src-tauri/gen/android/app/build/outputs/bundle -type f -name "*.aab")
-          if [ "${#AAB_FILES[@]}" -eq 0 ]; then
-            echo "No AAB files found."
-            exit 1
-          fi
+            & $apksigner sign `
+              --ks $env:ANDROID_KEYSTORE_PATH `
+              --ks-pass ("pass:{0}" -f $env:ANDROID_KEYSTORE_PASSWORD) `
+              --ks-key-alias $env:ANDROID_KEY_ALIAS `
+              --key-pass ("pass:{0}" -f $env:ANDROID_KEY_PASSWORD) `
+              --out $signedApk `
+              $alignedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "apksigner sign failed: $($apk.FullName)"
+            }
 
-          for aab in "${AAB_FILES[@]}"; do
-            base_name="$(basename "$aab" .aab)"
-            signed_aab="$SIGNED_AAB_DIR/${base_name}-signed.aab"
-
-            jarsigner \
-              -keystore "$ANDROID_KEYSTORE_PATH" \
-              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
-              -keypass "$ANDROID_KEY_PASSWORD" \
-              -signedjar "$signed_aab" \
-              "$aab" \
-              "$ANDROID_KEY_ALIAS"
-
-            jarsigner -verify -verbose "$signed_aab" > /dev/null
-            echo "Signed AAB: $signed_aab"
-          done
-
-      - name: Upload Android signed AAB Artifact (上传已签名 AAB)
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-aab-signed-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/gen/android/app/build/outputs/bundle-signed/
+            & $apksigner verify --verbose $signedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "apksigner verify failed: $signedApk"
+            }
+            Write-Host "Signed APK: $signedApk"
+          }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
         uses: actions/upload-artifact@v4
@@ -254,3 +254,4 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
