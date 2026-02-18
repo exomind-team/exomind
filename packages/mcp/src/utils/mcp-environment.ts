@@ -1,0 +1,90 @@
+import type { ASRInput, ASRResult, IASRPort } from '../../../../src/lib/environment/interfaces/asr.port';
+import type { RuntimeKind } from '../../../../src/lib/environment/bootstrap';
+import { WebEventLogStorageAdapter } from '../../../../src/lib/adapters/web-eventlog-storage';
+import { NodeFileStorageAdapter } from './node-file-storage';
+import { RemoteEventLogPort } from '../ports/remote-eventlog-port';
+
+class UnavailableAsrPort implements IASRPort {
+  isAvailable(): boolean {
+    return false;
+  }
+
+  async transcribe(_input: ASRInput): Promise<ASRResult> {
+    throw new Error('ASR is not available in MCP runtime');
+  }
+}
+
+function resolveUserId(): string | undefined {
+  const raw = process.env.EXOMIND_MCP_USER_ID?.trim();
+  return raw ? raw : undefined;
+}
+
+type EventLogMode = 'auto' | 'local' | 'remote';
+
+function resolveEventLogMode(): EventLogMode {
+  const raw = process.env.EXOMIND_MCP_EVENTLOG_MODE?.trim().toLowerCase();
+  if (raw === 'local' || raw === 'remote' || raw === 'auto') {
+    return raw;
+  }
+  return 'auto';
+}
+
+function normalizeBaseUrl(url: string): string {
+  return url.replace(/\/+$/, '');
+}
+
+function resolveSyncServerBaseUrl(): string {
+  const explicit = process.env.EXOMIND_MCP_SYNC_SERVER_URL?.trim();
+  if (explicit) {
+    return normalizeBaseUrl(explicit);
+  }
+
+  const portRaw = process.env.EXOMIND_POUCHDB_PORT?.trim();
+  const port = portRaw ? Number.parseInt(portRaw, 10) : 6984;
+  const normalizedPort = Number.isInteger(port) && port > 0 && port <= 65535 ? port : 6984;
+  return `http://localhost:${normalizedPort}`;
+}
+
+function buildRemoteDbUrl(baseUrl: string, userId: string): string {
+  return `${normalizeBaseUrl(baseUrl)}/${encodeURIComponent(userId)}`;
+}
+
+export function createMcpEnvironment(): {
+  asr: IASRPort;
+  storage: NodeFileStorageAdapter;
+  eventlog: WebEventLogStorageAdapter | RemoteEventLogPort;
+  runtime: RuntimeKind;
+  capabilities(): Record<string, boolean>;
+} {
+  const runtime: RuntimeKind = 'web';
+
+  const userId = resolveUserId();
+  const mode = resolveEventLogMode();
+
+  const syncBaseUrl = resolveSyncServerBaseUrl();
+  const remoteDbUrl = userId ? buildRemoteDbUrl(syncBaseUrl, userId) : null;
+
+  const shouldUseRemote =
+    mode === 'remote' || (mode === 'auto' && Boolean(userId));
+
+  if (mode === 'remote' && !userId) {
+    throw new Error('EXOMIND_MCP_USER_ID is required when EXOMIND_MCP_EVENTLOG_MODE=remote');
+  }
+
+  const eventlog =
+    shouldUseRemote && remoteDbUrl
+      ? new RemoteEventLogPort(remoteDbUrl)
+      : new WebEventLogStorageAdapter(userId);
+
+  const env = {
+    asr: new UnavailableAsrPort(),
+    storage: new NodeFileStorageAdapter(),
+    eventlog,
+    runtime,
+    capabilities() {
+      return { asr: false, storage: true, eventlog: true };
+    },
+  };
+
+  return env;
+}

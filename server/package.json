@@ -5,8 +5,8 @@
   "main": "pouchdb-server.js",
   "type": "module",
   "scripts": {
-    "start": "node pouchdb-server.js",
-    "dev": "node pouchdb-server.js",
+    "start": "bun pouchdb-server.js",
+    "dev": "bun pouchdb-server.js",
     "test": "echo \"No tests specified\" && exit 0"
   },
   "dependencies": {
