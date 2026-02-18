@@ -14,7 +14,7 @@ env:
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
 
@@ -23,10 +23,24 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
+      - name: Ensure local Bun is available (确保本机 Bun 可用)
+        shell: pwsh
+        run: |
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          if (-not $bunCmd) {
+            Write-Host "Bun not found in PATH, installing via npm (通过 npm 安装 Bun)..."
+            npm install -g bun
+            $npmPrefix = (npm config get prefix).Trim()
+            if ($npmPrefix) {
+              $env:Path = "$npmPrefix;$env:Path"
+              "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            }
+            $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          }
+          if (-not $bunCmd) {
+            throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
+          }
+          bun --version
 
       - name: Setup Rust
         uses: dtolnay/rust-toolchain@stable
