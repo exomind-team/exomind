@@ -13,6 +13,7 @@ import { ExoMindEnvironment } from '../environment/environment';
 import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
+import { createUuidV4 } from '../utils/uuid';
 import {
   createBackupPayload,
   parseBackupPayload,
@@ -65,7 +66,7 @@ export class EventLogServiceImpl implements EventLogService {
 
   async addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event> {
     const eventData: EventData = {
-      id: crypto.randomUUID(),
+      id: createUuidV4(),
       timestamp: Date.now(),
       content,
       tags: tags ? Array.from(tags) : [NOTE_TAG],
