@@ -6,12 +6,15 @@ on:
       - 'build/**'      # 构建触发：只构建，不发布
       - 'release/**'     # 发布触发：构建 + GitHub Release
 
+permissions:
+  contents: write
+
 env:
   RUST_TOOLCHAIN: stable
 
 jobs:
   build-windows:
-    runs-on: windows-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
 
@@ -20,19 +23,60 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
+      - name: Ensure local Bun is available (确保本机 Bun 可用)
+        shell: powershell
+        run: |
+          Write-Host "Install Bun via npm to enforce native Windows binary (通过 npm 强制使用 Windows 原生 Bun)..."
+          npm install -g bun
+          $npmPrefix = (npm config get prefix).Trim()
+          if (-not $npmPrefix) {
+            throw "npm prefix is empty; cannot locate global bun install path."
+          }
+          $env:Path = "$npmPrefix;$env:Path"
+          "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          if (-not $bunCmd) {
+            throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
+          }
+          if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+            throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+          }
+          Write-Host "Using Bun from: $($bunCmd.Source)"
+          bun --version
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+        shell: powershell
+        run: |
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          if (Test-Path $cargoBin) {
+            $env:Path = "$cargoBin;$env:Path"
+            "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $rustupCmd = Get-Command rustup -ErrorAction SilentlyContinue
+          $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
+          $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+          if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
+            throw "Rust toolchain not found on self-hosted Windows runner. Please pre-install rustup/cargo/rustc."
+          }
+
+          if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            throw "Detected Rust command from WSL path. Please use native Windows Rust toolchain."
+          }
+
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to select stable Rust toolchain. Please install stable locally first (例如: rustup toolchain install stable)."
+          }
+
+          rustup show active-toolchain
+          rustc -vV
+          cargo -V
 
       - name: Get short commit hash
         id: hash
-        run: echo "HASH=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+        shell: powershell
+        run: '"HASH=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_OUTPUT'
 
       - name: Install dependencies
         run: bun install
@@ -49,7 +93,7 @@ jobs:
           path: src-tauri/target/release/bundle/msi/
 
   build-android:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
 
@@ -58,28 +102,86 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
+      - name: Ensure local Bun is available (确保本机 Bun 可用)
+        shell: powershell
+        run: |
+          Write-Host "Install Bun via npm to enforce native Windows binary (通过 npm 强制使用 Windows 原生 Bun)..."
+          npm install -g bun
+          $npmPrefix = (npm config get prefix).Trim()
+          if (-not $npmPrefix) {
+            throw "npm prefix is empty; cannot locate global bun install path."
+          }
+          $env:Path = "$npmPrefix;$env:Path"
+          "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          if (-not $bunCmd) {
+            throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
+          }
+          if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+            throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+          }
+          Write-Host "Using Bun from: $($bunCmd.Source)"
+          bun --version
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          targets: aarch64-linux-android,armv7-linux-androideabi,i686-linux-android,x86_64-linux-android
+      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+        shell: powershell
+        run: |
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          if (Test-Path $cargoBin) {
+            $env:Path = "$cargoBin;$env:Path"
+            "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
 
-      - name: Setup JDK 17
-        uses: actions/setup-java@v4
-        with:
-          java-version: '17'
-          distribution: 'temurin'
+          $rustupCmd = Get-Command rustup -ErrorAction SilentlyContinue
+          $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
+          $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+          if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
+            throw "Rust toolchain not found on self-hosted Windows runner. Please pre-install rustup/cargo/rustc."
+          }
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+          if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            throw "Detected Rust command from WSL path. Please use native Windows Rust toolchain."
+          }
+
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to select stable Rust toolchain. Please install stable locally first (例如: rustup toolchain install stable)."
+          }
+
+          rustup show active-toolchain
+          rustc -vV
+          cargo -V
+
+      - name: Configure local Android toolchain (配置本地 Android 工具链)
+        shell: powershell
+        run: |
+          if (-not $env:JAVA_HOME) {
+            $javaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
+            if (-not (Test-Path $javaHome)) {
+              throw "JAVA_HOME is not set and default path not found: $javaHome"
+            }
+            "JAVA_HOME=$javaHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+          if (-not $env:ANDROID_SDK_ROOT) {
+            $androidSdkRoot = "D:\data\AndroidSDK"
+            if (-not (Test-Path $androidSdkRoot)) {
+              throw "ANDROID_SDK_ROOT is not set and default path not found: $androidSdkRoot"
+            }
+            "ANDROID_SDK_ROOT=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "ANDROID_HOME=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          } elseif (-not $env:ANDROID_HOME) {
+            "ANDROID_HOME=$env:ANDROID_SDK_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Ensure Rust Android targets (确保 Rust Android 目标)
+        shell: powershell
+        run: rustup target add aarch64-linux-android i686-linux-android
 
       - name: Get short commit hash
         id: hash
-        run: echo "HASH=$(git rev-parse --short=7 HEAD)" >> $GITHUB_OUTPUT
+        shell: powershell
+        run: '"HASH=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_OUTPUT'
 
       - name: Install dependencies
         run: bun install
@@ -90,27 +192,29 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Verify RECORD_AUDIO permission persisted（校验权限已持久化）
+        shell: powershell
         run: |
-          MANIFEST_PATH="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
-          if [ ! -f "$MANIFEST_PATH" ]; then
-            echo "Manifest not found: $MANIFEST_PATH"
-            exit 1
-          fi
-          if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH"; then
-            echo "Missing android.permission.RECORD_AUDIO in AndroidManifest.xml"
-            exit 1
-          fi
-          echo "RECORD_AUDIO permission verified."
+          $manifestPath = "src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          if (-not (Test-Path $manifestPath)) {
+            throw "Manifest not found: $manifestPath"
+          }
+          $manifestContent = Get-Content -Path $manifestPath -Raw -Encoding utf8
+          if ($manifestContent -notmatch "android.permission.RECORD_AUDIO") {
+            throw "Missing android.permission.RECORD_AUDIO in AndroidManifest.xml"
+          }
+          Write-Host "RECORD_AUDIO permission verified."
 
       - name: Build Android AAB (release channel)
-        run: bun Scripts/dev/tauri.ts android build
+        run: bun Scripts/dev/tauri.ts android build --ci
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Android APK (sideload channel, split by ABI)
-        run: bun Scripts/dev/tauri.ts android build --debug --apk --split-per-abi
+        run: bun Scripts/dev/tauri.ts android build --ci --debug --apk --split-per-abi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)
+          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false
 
       - name: Validate Android app name/icon/artifact size
         run: bun run check:android:meta
