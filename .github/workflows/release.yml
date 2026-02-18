@@ -44,10 +44,34 @@ jobs:
           Write-Host "Using Bun from: $($bunCmd.Source)"
           bun --version
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-        with:
-          toolchain: stable
+      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+        shell: powershell
+        run: |
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          if (Test-Path $cargoBin) {
+            $env:Path = "$cargoBin;$env:Path"
+            "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $rustupCmd = Get-Command rustup -ErrorAction SilentlyContinue
+          $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
+          $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+          if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
+            throw "Rust toolchain not found on self-hosted Windows runner. Please pre-install rustup/cargo/rustc."
+          }
+
+          if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            throw "Detected Rust command from WSL path. Please use native Windows Rust toolchain."
+          }
+
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to select stable Rust toolchain. Please install stable locally first (例如: rustup toolchain install stable)."
+          }
+
+          rustup show active-toolchain
+          rustc -vV
+          cargo -V
 
       - name: Get short commit hash
         id: hash
@@ -104,6 +128,35 @@ jobs:
           }
           Write-Host "Using Bun from: $($bunCmd.Source)"
           bun --version
+
+      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+        shell: powershell
+        run: |
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          if (Test-Path $cargoBin) {
+            $env:Path = "$cargoBin;$env:Path"
+            "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $rustupCmd = Get-Command rustup -ErrorAction SilentlyContinue
+          $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
+          $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+          if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
+            throw "Rust toolchain not found on self-hosted Windows runner. Please pre-install rustup/cargo/rustc."
+          }
+
+          if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            throw "Detected Rust command from WSL path. Please use native Windows Rust toolchain."
+          }
+
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to select stable Rust toolchain. Please install stable locally first (例如: rustup toolchain install stable)."
+          }
+
+          rustup show active-toolchain
+          rustc -vV
+          cargo -V
 
       - name: Configure local Android toolchain (配置本地 Android 工具链)
         shell: powershell
