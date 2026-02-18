@@ -1,10 +1,11 @@
 //! 文件操作命令
 //! 用于消息持久化存储 - 重构版（同步版本）
 
-use tauri::{AppHandle, Manager, ipc::InvokeError};
-use tauri_plugin_dialog::DialogExt;
-use std::path::PathBuf;
+use serde::Deserialize;
 use std::fs;
+use std::path::PathBuf;
+use tauri::{ipc::InvokeError, AppHandle, Manager};
+use tauri_plugin_dialog::DialogExt;
 use thiserror::Error;
 
 /// 文件操作错误类型
@@ -17,7 +18,10 @@ pub enum FileError {
     PermissionDenied { path: String },
 
     #[error("IO 错误: {message}")]
-    IoError { message: String, source: std::io::Error },
+    IoError {
+        message: String,
+        source: std::io::Error,
+    },
 
     #[error("路径无效: {path}")]
     InvalidPath { path: String },
@@ -260,6 +264,100 @@ pub fn append_to_markdown(app: AppHandle, filename: String, content: String) -> 
     Ok(())
 }
 
+#[derive(Debug, Deserialize)]
+struct MarkdownMessage {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    content: String,
+    #[serde(default)]
+    timestamp: i64,
+    #[serde(default)]
+    direction: String,
+    #[serde(rename = "senderId", default)]
+    sender_id: String,
+    #[serde(rename = "receiverId", default)]
+    receiver_id: String,
+}
+
+fn parse_markdown_messages(messages_json: &str) -> FileResult<Vec<MarkdownMessage>> {
+    let trimmed = messages_json.trim();
+    if trimmed.is_empty() {
+        return Ok(Vec::new());
+    }
+
+    serde_json::from_str::<Vec<MarkdownMessage>>(trimmed).map_err(|e| FileError::Unknown {
+        message: format!("消息 JSON 解析失败: {}", e),
+    })
+}
+
+fn format_markdown_time(timestamp_ms: i64, fallback: chrono::DateTime<chrono::Utc>) -> String {
+    let tz_utc8 = chrono::FixedOffset::east_opt(8 * 3600)
+        .expect("fixed offset +08:00 should always be valid");
+
+    chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp_ms)
+        .map(|dt| dt.with_timezone(&tz_utc8))
+        .unwrap_or_else(|| fallback.with_timezone(&tz_utc8))
+        .format("%Y-%m-%d %H:%M:%S")
+        .to_string()
+}
+
+fn quote_markdown_content(content: &str) -> String {
+    let normalized = content.replace("\r\n", "\n");
+    if normalized.is_empty() {
+        return "  > ".to_string();
+    }
+
+    normalized
+        .split('\n')
+        .map(|line| format!("  > {}", line))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn build_markdown_document(
+    title: &str,
+    messages_json: &str,
+    exported_at: chrono::DateTime<chrono::Utc>,
+) -> FileResult<String> {
+    let messages = parse_markdown_messages(messages_json)?;
+    let mut md_content = String::new();
+
+    md_content.push_str("---\n");
+    md_content.push_str("exported_at: ");
+    md_content.push_str(&exported_at.to_rfc3339());
+    md_content.push_str("\nmessage_count: ");
+    md_content.push_str(&messages.len().to_string());
+    md_content.push_str("\n---\n\n");
+
+    md_content.push_str("# ");
+    md_content.push_str(title);
+    md_content.push_str("\n\n");
+
+    if !messages.is_empty() {
+        md_content.push_str("## 消息记录\n\n");
+
+        for message in messages {
+            let when = format_markdown_time(message.timestamp, exported_at);
+            let is_outgoing = message.direction == "outgoing";
+
+            md_content.push_str("### ");
+            md_content.push_str(if is_outgoing { "发送" } else { "接收" });
+            md_content.push_str("\n\n");
+
+            md_content.push_str(&format!("- **时间**: {}\n", when));
+            md_content.push_str(&format!("- **发送者**: {}\n", message.sender_id));
+            md_content.push_str(&format!("- **接收者**: {}\n", message.receiver_id));
+            md_content.push_str(&format!("- **消息ID**: {}\n", message.id));
+            md_content.push_str("- **内容**:\n");
+            md_content.push_str(&quote_markdown_content(&message.content));
+            md_content.push_str("\n\n---\n\n");
+        }
+    }
+
+    Ok(md_content)
+}
+
 /// 导出所有消息到 Markdown 文件
 /// 格式化消息为标准 Markdown 格式
 #[tauri::command]
@@ -278,65 +376,7 @@ pub fn export_messages_to_markdown(
 
     ensure_parent_dir(&full_path)?;
 
-    // 构建 Markdown 内容
-    let mut md_content = String::new();
-
-    // 添加 YAML front matter
-    md_content.push_str("---\n");
-    md_content.push_str("exported_at: ");
-    md_content.push_str(&chrono::Utc::now().to_rfc3339());
-    md_content.push_str("\nmessage_count: ");
-    // 计算消息数量（粗略估算）
-    let count = messages.matches("\"id\"").count() / 3;
-    md_content.push_str(&count.to_string());
-    md_content.push_str("\n---\n\n");
-
-    // 添加标题
-    md_content.push_str("# ");
-    md_content.push_str(&title);
-    md_content.push_str("\n\n");
-
-    // 解析消息并添加到 Markdown
-    // 消息格式: [{id, content, timestamp, direction, senderId, receiverId}]
-    if !messages.is_empty() {
-        md_content.push_str("## 消息记录\n\n");
-
-        // 简单的消息解析（假设是 JSON 数组格式）
-        // 提取消息内容块
-        let msg_pattern = r#"{"id":"([^"]+)","content":"([^"]+)","timestamp":(\d+),"direction":"([^"]+)","senderId":"([^"]+)","receiverId":"([^"]+)"[^}]*}"#;
-
-        let re = regex::Regex::new(msg_pattern).map_err(|e| FileError::Unknown {
-            message: format!("正则表达式编译失败: {}", e),
-        })?;
-
-        for cap in re.captures_iter(&messages) {
-            let _id = cap.get(1).unwrap().as_str();
-            let content = cap.get(2).unwrap().as_str();
-            let timestamp: i64 = cap.get(3).unwrap().as_str().parse().unwrap_or(0);
-            let direction = cap.get(4).unwrap().as_str();
-            let sender = cap.get(5).unwrap().as_str();
-            let receiver = cap.get(6).unwrap().as_str();
-
-            let dt = chrono::DateTime::<chrono::Utc>::from_timestamp_millis(timestamp)
-                .map(|dt| dt.with_timezone(&chrono::FixedOffset::east_opt(8 * 3600).unwrap()))
-                .unwrap_or_else(|| chrono::Utc::now().into());
-
-            // 判断发送者方向
-            let is_outgoing = direction == "outgoing";
-
-            md_content.push_str("### ");
-            md_content.push_str(if is_outgoing { "发送" } else { "接收" });
-            md_content.push_str("\n\n");
-
-            md_content.push_str(&format!("- **时间**: {}\n", dt.format("%Y-%m-%d %H:%M:%S")));
-            md_content.push_str(&format!("- **发送者**: {}\n", sender));
-            md_content.push_str(&format!("- **接收者**: {}\n", receiver));
-            md_content.push_str("- **内容**:\n");
-            md_content.push_str(&format!("  > {}\n", content.replace('\n', "\n  > ")));
-
-            md_content.push_str("\n---\n\n");
-        }
-    }
+    let md_content = build_markdown_document(&title, &messages, chrono::Utc::now())?;
 
     // 写入文件
     fs::write(&full_path, md_content).map_err(|e| FileError::IoError {
@@ -347,34 +387,87 @@ pub fn export_messages_to_markdown(
     Ok(())
 }
 
-/// 保存 JSON 文件到用户选择的路径
-/// 弹出系统保存对话框，让用户选择保存位置
+/// 保存 JSON 内容到系统文件选择路径
 #[tauri::command]
-pub fn save_json_file(app: AppHandle, content: String, default_name: String) -> FileResult<Option<String>> {
-    let file_path = app.dialog()
+pub fn save_json_file(
+    app: AppHandle,
+    content: String,
+    default_name: String,
+) -> FileResult<Option<String>> {
+    let file_path = app
+        .dialog()
         .file()
         .set_file_name(&default_name)
-        .add_filter("JSON 文件", &["json"])
+        .add_filter("JSON", &["json"])
         .blocking_save_file();
 
-    match file_path {
-        Some(path) => {
-            let path_ref = path.as_path();
-            if let Some(path_str) = path_ref {
-                let path_string = path_str.to_string_lossy().to_string();
-                let path_buf = PathBuf::from(&path_string);
-                fs::write(&path_buf, content).map_err(|e| FileError::IoError {
-                    message: format!("保存文件失败: {}", e),
-                    source: e,
-                })?;
-                Ok(Some(path_string))
-            } else {
-                Ok(None)
-            }
-        }
-        None => {
-            // 用户取消了对话框
-            Ok(None)
-        }
+    let Some(file_path) = file_path else {
+        return Ok(None);
+    };
+
+    let Some(path) = file_path.as_path() else {
+        return Err(FileError::InvalidPath {
+            path: "系统返回了无效的保存路径".to_string(),
+        });
+    };
+
+    fs::write(path, content).map_err(|e| FileError::IoError {
+        message: format!("写入导出文件失败: {}", e),
+        source: e,
+    })?;
+
+    Ok(Some(path.to_string_lossy().to_string()))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::TimeZone;
+
+    #[test]
+    fn builds_markdown_from_structured_json_and_counts_exactly() {
+        let exported_at = chrono::Utc
+            .timestamp_millis_opt(1_700_000_000_000)
+            .single()
+            .unwrap();
+        let messages = r#"[
+            {"timestamp":1700000000000,"id":"m1","receiverId":"bob","content":"hello","direction":"outgoing","senderId":"alice"},
+            {"id":"m2","content":"line1\nline2 \"quoted\" 😀","timestamp":1700000001000,"direction":"incoming","senderId":"bob","receiverId":"alice"}
+        ]"#;
+
+        let markdown = build_markdown_document("导出测试", messages, exported_at)
+            .expect("should render markdown");
+
+        assert!(markdown.contains("message_count: 2"));
+        assert!(markdown.contains("### 发送"));
+        assert!(markdown.contains("### 接收"));
+        assert!(markdown.contains("line1"));
+        assert!(markdown.contains("line2 \"quoted\" 😀"));
+    }
+
+    #[test]
+    fn builds_markdown_for_empty_message_list() {
+        let exported_at = chrono::Utc
+            .timestamp_millis_opt(1_700_000_000_000)
+            .single()
+            .unwrap();
+        let markdown = build_markdown_document("空导出", "[]", exported_at)
+            .expect("should render empty markdown");
+
+        assert!(markdown.contains("message_count: 0"));
+        assert!(!markdown.contains("## 消息记录"));
+    }
+
+    #[test]
+    fn rejects_invalid_messages_json() {
+        let exported_at = chrono::Utc
+            .timestamp_millis_opt(1_700_000_000_000)
+            .single()
+            .unwrap();
+        let err =
+            build_markdown_document("坏数据", "{not-json}", exported_at).expect_err("should fail");
+        let text = format!("{}", err);
+
+        assert!(text.contains("JSON"));
     }
 }
