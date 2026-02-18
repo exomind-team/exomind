@@ -208,6 +208,33 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Patch Android BuildTask npm working root（修正 BuildTask 的 npm 根目录）
+        shell: powershell
+        run: |
+          $buildSrcRoot = "src-tauri/gen/android/buildSrc/src/main/java"
+          if (-not (Test-Path $buildSrcRoot)) {
+            throw "BuildTask source root not found: $buildSrcRoot"
+          }
+
+          $buildTask = Get-ChildItem -Path $buildSrcRoot -Recurse -Filter "BuildTask.kt" | Select-Object -First 1
+          if (-not $buildTask) {
+            throw "BuildTask.kt not found under $buildSrcRoot"
+          }
+
+          $content = Get-Content -Path $buildTask.FullName -Raw -Encoding utf8
+          $needle = 'val args = listOf("run", "--", "tauri", "android", "android-studio-script");'
+          $replacement = 'val args = listOf("--prefix", "..", "run", "--", "tauri", "android", "android-studio-script");'
+
+          if ($content.Contains($replacement)) {
+            Write-Host "BuildTask already patched: $($buildTask.FullName)"
+          } elseif ($content.Contains($needle)) {
+            $patched = $content.Replace($needle, $replacement)
+            Set-Content -Path $buildTask.FullName -Value $patched -Encoding utf8
+            Write-Host "BuildTask patched successfully: $($buildTask.FullName)"
+          } else {
+            throw "Expected BuildTask args pattern not found in $($buildTask.FullName)"
+          }
+
       - name: Verify RECORD_AUDIO permission persisted（校验权限已持久化）
         shell: powershell
         run: |
