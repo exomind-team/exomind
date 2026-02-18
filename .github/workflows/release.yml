@@ -68,10 +68,13 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Install Bun
-        uses: oven-sh/setup-bun@v1
-        with:
-          bun-version: latest
+      - name: Ensure local Bun is available (确保本机 Bun 可用)
+        shell: pwsh
+        run: |
+          if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
+            throw "Bun is required on self-hosted Windows runner. Please install Bun and add it to PATH."
+          }
+          bun --version
 
       - name: Configure local Android toolchain (配置本地 Android 工具链)
         shell: pwsh
