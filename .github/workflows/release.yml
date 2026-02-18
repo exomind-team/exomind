@@ -92,6 +92,18 @@ jobs:
       - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
         shell: powershell
         run: |
+          $preferredCargoHome = "D:\actions-runner\rust\cargo"
+          $preferredRustupHome = "D:\actions-runner\rust\rustup"
+          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
+          if (Test-Path $preferredCargoBin) {
+            $env:CARGO_HOME = $preferredCargoHome
+            $env:RUSTUP_HOME = $preferredRustupHome
+            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $env:Path = "$preferredCargoBin;$env:Path"
+            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
           $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
           if (Test-Path $cargoBin) {
             $env:Path = "$cargoBin;$env:Path"
@@ -178,6 +190,18 @@ jobs:
       - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
         shell: powershell
         run: |
+          $preferredCargoHome = "D:\actions-runner\rust\cargo"
+          $preferredRustupHome = "D:\actions-runner\rust\rustup"
+          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
+          if (Test-Path $preferredCargoBin) {
+            $env:CARGO_HOME = $preferredCargoHome
+            $env:RUSTUP_HOME = $preferredRustupHome
+            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $env:Path = "$preferredCargoBin;$env:Path"
+            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
           $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
           if (Test-Path $cargoBin) {
             $env:Path = "$cargoBin;$env:Path"
