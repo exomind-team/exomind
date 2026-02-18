@@ -6,6 +6,9 @@ on:
       - 'build/**'      # 构建触发：只构建，不发布
       - 'release/**'     # 发布触发：构建 + GitHub Release
 
+permissions:
+  contents: write
+
 env:
   RUST_TOOLCHAIN: stable
 
@@ -37,12 +40,18 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build Windows
-        run: bun tauri build --bundles msi
+      - name: Build Windows installers (构建 Windows 安装包)
+        run: bun tauri build --bundles nsis,msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Artifact
+      - name: Upload Windows EXE Artifact (上传 EXE)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/nsis/
+
+      - name: Upload Windows MSI Artifact (上传 MSI)
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
@@ -89,32 +98,120 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Android AAB (release channel)
-        run: bun tauri android build
+      - name: Build Android AAB (release channel / 商店包)
+        run: bun tauri android build --ci --aab
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Android APK (sideload channel, split by ABI)
-        run: bun tauri android build --debug --apk --split-per-abi
+      - name: Build Android APK (release split-per-abi / 侧载包)
+        run: bun tauri android build --ci --apk --split-per-abi -t aarch64 i686
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Validate Android app name/icon/artifact size
+      - name: Validate Android app name/icon/artifact size (门禁校验)
         run: bun run check:android:meta
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Android AAB Artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-aab-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/gen/android/app/build/outputs/bundle/
+      - name: Prepare Android signing keystore (准备签名密钥库)
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          set -euo pipefail
+          if [ -z "${ANDROID_KEYSTORE_BASE64:-}" ]; then
+            echo "Missing secret: ANDROID_KEYSTORE_BASE64"
+            exit 1
+          fi
+          KEYSTORE_PATH="$RUNNER_TEMP/android-release.jks"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 --decode > "$KEYSTORE_PATH"
+          echo "ANDROID_KEYSTORE_PATH=$KEYSTORE_PATH" >> "$GITHUB_ENV"
 
-      - name: Upload Android APK Artifact
+      - name: Sign Android release artifacts (签名 APK/AAB)
+        shell: bash
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          for required in ANDROID_KEYSTORE_PASSWORD ANDROID_KEY_ALIAS ANDROID_KEY_PASSWORD; do
+            if [ -z "${!required:-}" ]; then
+              echo "Missing secret: ${required}"
+              exit 1
+            fi
+          done
+
+          BUILD_TOOLS_DIR="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -n 1)"
+          APKSIGNER="$BUILD_TOOLS_DIR/apksigner"
+          ZIPALIGN="$BUILD_TOOLS_DIR/zipalign"
+
+          if [ ! -x "$APKSIGNER" ] || [ ! -x "$ZIPALIGN" ]; then
+            echo "apksigner/zipalign not found under $BUILD_TOOLS_DIR"
+            exit 1
+          fi
+
+          SIGNED_APK_DIR="src-tauri/gen/android/app/build/outputs/apk-signed"
+          SIGNED_AAB_DIR="src-tauri/gen/android/app/build/outputs/bundle-signed"
+          mkdir -p "$SIGNED_APK_DIR" "$SIGNED_AAB_DIR"
+
+          mapfile -t APK_FILES < <(find src-tauri/gen/android/app/build/outputs/apk -type f -name "*release*.apk" ! -name "*-signed.apk")
+          if [ "${#APK_FILES[@]}" -eq 0 ]; then
+            echo "No release APK files found."
+            exit 1
+          fi
+
+          for apk in "${APK_FILES[@]}"; do
+            base_name="$(basename "$apk" .apk)"
+            aligned_apk="$RUNNER_TEMP/${base_name}-aligned.apk"
+            signed_apk="$SIGNED_APK_DIR/${base_name}-signed.apk"
+
+            "$ZIPALIGN" -p -f 4 "$apk" "$aligned_apk"
+            "$APKSIGNER" sign \
+              --ks "$ANDROID_KEYSTORE_PATH" \
+              --ks-pass "pass:$ANDROID_KEYSTORE_PASSWORD" \
+              --ks-key-alias "$ANDROID_KEY_ALIAS" \
+              --key-pass "pass:$ANDROID_KEY_PASSWORD" \
+              --out "$signed_apk" \
+              "$aligned_apk"
+
+            "$APKSIGNER" verify --verbose "$signed_apk"
+            echo "Signed APK: $signed_apk"
+          done
+
+          mapfile -t AAB_FILES < <(find src-tauri/gen/android/app/build/outputs/bundle -type f -name "*.aab")
+          if [ "${#AAB_FILES[@]}" -eq 0 ]; then
+            echo "No AAB files found."
+            exit 1
+          fi
+
+          for aab in "${AAB_FILES[@]}"; do
+            base_name="$(basename "$aab" .aab)"
+            signed_aab="$SIGNED_AAB_DIR/${base_name}-signed.aab"
+
+            jarsigner \
+              -keystore "$ANDROID_KEYSTORE_PATH" \
+              -storepass "$ANDROID_KEYSTORE_PASSWORD" \
+              -keypass "$ANDROID_KEY_PASSWORD" \
+              -signedjar "$signed_aab" \
+              "$aab" \
+              "$ANDROID_KEY_ALIAS"
+
+            jarsigner -verify -verbose "$signed_aab" > /dev/null
+            echo "Signed AAB: $signed_aab"
+          done
+
+      - name: Upload Android signed AAB Artifact (上传已签名 AAB)
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/gen/android/app/build/outputs/apk/
+          name: android-aab-signed-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/gen/android/app/build/outputs/bundle-signed/
+
+      - name: Upload Android signed APK Artifact (上传已签名 APK)
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-signed-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/gen/android/app/build/outputs/apk-signed/
 
   create-release:
     needs: [build-windows, build-android]
@@ -131,15 +228,29 @@ jobs:
       - name: List Files
         run: ls -la release-files/
 
+      - name: Resolve release metadata (解析发布元信息)
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#release/}"
+          if [[ "$version" =~ (preview|alpha|beta|rc) ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=Preview $version" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "title=Release $version" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: release-files/**
           # 从 tag 名称提取版本号 (去掉 release/ 前缀)
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          name: ${{ steps.meta.outputs.title }}
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
