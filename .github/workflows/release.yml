@@ -82,7 +82,7 @@ jobs:
         run: bun install
 
       - name: Build Windows installers (构建 Windows 安装包)
-        run: bun tauri build --bundles nsis,msi
+        run: bun tauri build --bundles 'nsis,msi'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
