@@ -75,7 +75,7 @@ function Sidebar({ isOpen, onClose }: { isOpen: boolean; onClose: () => void }) 
       )}
       <aside
         className={cn(
-          "fixed lg:static inset-y-0 left-0 z-50 w-64 bg-card border-r flex flex-col transition-transform duration-300 lg:translate-x-0",
+          "fixed lg:static inset-y-0 left-0 z-50 w-64 bg-card border-r flex flex-col safe-area-pt transition-transform duration-300 lg:translate-x-0",
           isOpen ? "translate-x-0" : "-translate-x-full"
         )}
         data-testid="device-panel"
@@ -139,7 +139,7 @@ function Layout() {
       {/* 主内容区 */}
       <div className="flex-1 flex flex-col min-w-0">
         {/* 顶部栏 - 移动端显示菜单按钮 */}
-        <header className="lg:hidden flex items-center px-4 py-3 border-b bg-card shrink-0">
+        <header className="lg:hidden sticky top-0 z-30 safe-area-pt flex items-center px-4 py-3 border-b bg-card shrink-0">
           <button
             onClick={() => setSidebarOpen(true)}
             className="p-2 hover:bg-accent rounded-md mr-3"
