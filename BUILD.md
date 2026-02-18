@@ -195,10 +195,34 @@ git push origin release/v0.2.0-preview
 
 | Secret 名称 | 说明 |
 |------------|------|
-| `ANDROID_KEYSTORE_BASE64` | JKS 文件的 Base64 内容（`base64 -w 0 your-key.jks`） |
+| `ANDROID_KEYSTORE_BASE64` | JKS 文件完整二进制内容的 Base64（单行文本） |
 | `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
 | `ANDROID_KEY_ALIAS` | 密钥别名（alias） |
 | `ANDROID_KEY_PASSWORD` | key 密码 |
+
+推荐使用仓库脚本生成并校验（Windows PowerShell）：
+
+```powershell
+.\Scripts\dev\android-signing-secrets.ps1 `
+  -KeystorePath "D:\sign\exomind-release.jks" `
+  -StorePassword "your-store-password" `
+  -KeyAlias "your-alias" `
+  -KeyPassword "your-key-password"
+```
+
+如需脚本直接写入 GitHub Secrets（需已登录 `gh auth login`）：
+
+```powershell
+.\Scripts\dev\android-signing-secrets.ps1 `
+  -KeystorePath "D:\sign\exomind-release.jks" `
+  -StorePassword "your-store-password" `
+  -KeyAlias "your-alias" `
+  -KeyPassword "your-key-password" `
+  -SetGhSecrets `
+  -Repo "exomind-team/exomind"
+```
+
+> 注意：workflow 已在 Android 构建早期增加签名 secrets 预检，缺任何一个都会立即失败并提示具体 secret 名称。
 
 #### 构建产物
 
@@ -206,7 +230,6 @@ git push origin release/v0.2.0-preview
 |------|-----|------|---------------|
 | Windows | build-windows | MSI 安装包 | `windows-msi-<hash>` |
 | Windows | build-windows | EXE 安装包（NSIS） | `windows-exe-<hash>` |
-| Android | build-android | 已签名 AAB（build/release） | `android-aab-signed-<hash>` |
 | Android | build-android | 已签名 APK（build/release, split ABI） | `android-apk-signed-<hash>` |
 
 > Android APK 默认输出 `aarch64 (arm64-v8a)` 与 `x86 (i686)` 两个 ABI，可直接侧载安装。
