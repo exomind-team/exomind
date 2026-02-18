@@ -3,7 +3,20 @@ import { join } from 'node:path';
 import { resolveTauriExecutable } from '../../../Scripts/dev/tauri-cli-lib';
 
 describe('resolveTauriExecutable', () => {
-  it('prefers local node_modules tauri.cmd on Windows（Windows 优先使用本地 tauri.cmd）', () => {
+  it('prefers local node_modules tauri.exe on Windows（Windows 优先使用本地 tauri.exe）', () => {
+    const projectRoot = 'D:/project/exomind';
+    const expected = join(projectRoot, 'node_modules', '.bin', 'tauri.exe');
+
+    const actual = resolveTauriExecutable({
+      projectRoot,
+      platform: 'win32',
+      exists: (candidate) => candidate === expected,
+    });
+
+    expect(actual).toBe(expected);
+  });
+
+  it('uses local tauri.cmd when tauri.exe is absent（无 tauri.exe 时使用本地 tauri.cmd）', () => {
     const projectRoot = 'D:/project/exomind';
     const expected = join(projectRoot, 'node_modules', '.bin', 'tauri.cmd');
 
@@ -25,6 +38,6 @@ describe('resolveTauriExecutable', () => {
       exists: () => false,
     });
 
-    expect(actual).toBe('tauri.cmd');
+    expect(actual).toBe('tauri');
   });
 });

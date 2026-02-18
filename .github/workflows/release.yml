@@ -82,7 +82,7 @@ jobs:
         run: bun install
 
       - name: Build Windows
-        run: bun tauri build --bundles msi
+        run: bun Scripts/dev/tauri.ts build --bundles msi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
