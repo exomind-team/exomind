@@ -48,4 +48,21 @@ describe('ensureRecordAudioPermissionInManifest', () => {
     expect(result.manifestXml).toContain(RECORD_AUDIO_PERMISSION);
     expect(result.manifestXml).toContain('<application android:label="@string/app_name" />');
   });
+
+  it('injects after multiline manifest opening tag（多行 manifest 起始标签后注入）', () => {
+    const input = `<?xml version="1.0" encoding="utf-8"?>
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.exomind.app">
+    <application android:label="@string/app_name" />
+</manifest>
+`;
+
+    const result = ensureRecordAudioPermissionInManifest(input);
+
+    expect(result.changed).toBe(true);
+    expect(result.manifestXml).toContain('<manifest\n    xmlns:android="http://schemas.android.com/apk/res/android"\n    package="com.exomind.app">');
+    expect(result.manifestXml).toContain(`    <uses-permission android:name="${RECORD_AUDIO_PERMISSION}" />`);
+    expect(result.manifestXml).toContain('<application android:label="@string/app_name" />');
+  });
 });

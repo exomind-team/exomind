@@ -30,8 +30,14 @@ export function ensureRecordAudioPermissionInManifest(manifestXml: string): Mani
 
   const manifestStartLine = lines.findIndex((line) => line.includes('<manifest'));
   if (manifestStartLine >= 0) {
-    lines.splice(manifestStartLine + 1, 0, permissionLine);
-    return { manifestXml: lines.join(newline), changed: true };
+    // Find opening <manifest> closing line（查找 manifest 起始标签的闭合行）
+    const manifestOpenTagEndLine = lines.findIndex(
+      (line, index) => index >= manifestStartLine && line.includes('>')
+    );
+    if (manifestOpenTagEndLine >= 0) {
+      lines.splice(manifestOpenTagEndLine + 1, 0, permissionLine);
+      return { manifestXml: lines.join(newline), changed: true };
+    }
   }
 
   return { manifestXml, changed: false };
