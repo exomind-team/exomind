@@ -15,14 +15,14 @@ describe('environment bootstrap', () => {
     expect(result.eventlog.constructor.name).toBe('WebEventLogStorageAdapter');
   });
 
-  it('createRuntimeBootstrap should build tauri storage adapter for tauri runtime', () => {
+  it('createRuntimeBootstrap should use pouchdb eventlog adapter for tauri runtime', () => {
     const webResult = createRuntimeBootstrap({ runtime: 'web' });
     const tauriResult = createRuntimeBootstrap({ runtime: 'tauri' });
 
     expect(tauriResult.runtime).toBe('tauri');
     expect(tauriResult.storage.constructor.name).toBe('TauriStorageAdapter');
     expect(tauriResult.storage.constructor.name).not.toBe(webResult.storage.constructor.name);
-    expect(tauriResult.eventlog.constructor.name).toBe('TauriEventLogStorageAdapter');
-    expect(tauriResult.eventlog.constructor.name).not.toBe(webResult.eventlog.constructor.name);
+    expect(tauriResult.eventlog.constructor.name).toBe('WebEventLogStorageAdapter');
+    expect(tauriResult.eventlog.constructor.name).toBe(webResult.eventlog.constructor.name);
   });
 });
