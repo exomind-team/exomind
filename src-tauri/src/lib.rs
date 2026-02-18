@@ -2,18 +2,16 @@
 
 mod commands;
 
-use commands::ws_commands::{
-    WsClientState, ws_connect, ws_disconnect, ws_send, ws_get_state,
-};
-use commands::file_commands::{
-    write_file, read_file, read_file_binary, delete_file, file_exists, list_files,
-    append_file, append_to_markdown, export_messages_to_markdown, save_json_file
-};
 use commands::device_commands::get_device_id;
 use commands::eventlog_commands::{
     eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
     eventlog_rebuild_markdown,
 };
+use commands::file_commands::{
+    append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
+    list_files, read_file, read_file_binary, save_json_file, write_file,
+};
+use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
