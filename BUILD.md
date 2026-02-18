@@ -190,7 +190,8 @@ git push origin release/v0.2.0-preview
 
 #### Android 签名 Secrets（GitHub Actions）
 
-在仓库 `Settings -> Secrets and variables -> Actions` 配置以下 secrets：
+在仓库 `Settings -> Secrets and variables -> Actions` 配置以下 secrets。
+说明：`build/**` 与 `release/**` 两类 tag 流程都会执行 Android 签名步骤，因此都要求这些 secrets 已配置。
 
 | Secret 名称 | 说明 |
 |------------|------|
@@ -205,8 +206,8 @@ git push origin release/v0.2.0-preview
 |------|-----|------|---------------|
 | Windows | build-windows | MSI 安装包 | `windows-msi-<hash>` |
 | Windows | build-windows | EXE 安装包（NSIS） | `windows-exe-<hash>` |
-| Android | build-android | 已签名 AAB（release） | `android-aab-signed-<hash>` |
-| Android | build-android | 已签名 APK（release, split ABI） | `android-apk-signed-<hash>` |
+| Android | build-android | 已签名 AAB（build/release） | `android-aab-signed-<hash>` |
+| Android | build-android | 已签名 APK（build/release, split ABI） | `android-apk-signed-<hash>` |
 
 > Android APK 默认输出 `aarch64 (arm64-v8a)` 与 `x86 (i686)` 两个 ABI，可直接侧载安装。
 
