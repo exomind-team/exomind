@@ -1,7 +1,7 @@
 {
   "name": "exomind",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.2.0",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -13,7 +13,7 @@
     "test:sync": "vitest run tests/sync/pouch-sync.test.ts",
     "build": "bun install --frozen-lockfile && tsc && vite build",
     "preview": "vite preview",
-    "tauri": "bun Scripts/dev/tauri.ts",
+    "tauri": "tauri",
     "test": "vitest",
     "test:e2e": "playwright test",
     "test:e2e:issue77": "playwright test tests/e2e/settings-import-export.test.ts --config tests/e2e/playwright.issue77.config.ts",

@@ -81,12 +81,18 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build Windows
-        run: bun Scripts/dev/tauri.ts build --bundles msi
+      - name: Build Windows installers (构建 Windows 安装包)
+        run: bun tauri build --bundles 'nsis,msi'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Artifact
+      - name: Upload Windows EXE Artifact (上传 EXE)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/nsis/
+
+      - name: Upload Windows MSI Artifact (上传 MSI)
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
@@ -101,23 +107,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
-
-      - name: Provide node.bat shim for Android Gradle tasks（为 Android Gradle 提供 node.bat 兼容层）
-        shell: powershell
-        run: |
-          $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
-          if (-not $nodeCmd) {
-            throw "node command not found after setup-node."
-          }
-          $nodeExe = $nodeCmd.Source
-          $shimRoot = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP "node-shim" } else { Join-Path $env:TEMP "node-shim" }
-          New-Item -ItemType Directory -Force -Path $shimRoot | Out-Null
-          $shimPath = Join-Path $shimRoot "node.bat"
-          $shimContent = "@echo off`r`n`"$nodeExe`" %*"
-          Set-Content -Path $shimPath -Value $shimContent -Encoding ascii
-          $env:Path = "$shimRoot;$env:Path"
-          "$shimRoot" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-          Write-Host "Created node.bat shim: $shimPath -> $nodeExe"
 
       - name: Ensure local Bun is available (确保本机 Bun 可用)
         shell: powershell
@@ -191,6 +180,20 @@ jobs:
             "ANDROID_HOME=$env:ANDROID_SDK_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
 
+      - name: Validate Android signing secrets early (提前校验 Android 签名密钥)
+        shell: powershell
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          foreach ($required in @("ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")) {
+            if (-not (Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue)) {
+              throw "Missing secret: $required"
+            }
+          }
+
       - name: Ensure Rust Android targets (确保 Rust Android 目标)
         shell: powershell
         run: rustup target add aarch64-linux-android i686-linux-android
@@ -203,43 +206,12 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Init Android (via wrapper / 通过包装脚本初始化)
-        run: bun Scripts/dev/tauri.ts android init
+      - name: Init Android
+        run: bun tauri android init
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Patch Android BuildTask npm working root（修正 BuildTask 的 npm 根目录）
-        shell: powershell
-        run: |
-          $buildSrcRoot = "src-tauri/gen/android/buildSrc/src/main/java"
-          if (-not (Test-Path $buildSrcRoot)) {
-            throw "BuildTask source root not found: $buildSrcRoot"
-          }
-
-          $buildTask = Get-ChildItem -Path $buildSrcRoot -Recurse -Filter "BuildTask.kt" | Select-Object -First 1
-          if (-not $buildTask) {
-            throw "BuildTask.kt not found under $buildSrcRoot"
-          }
-
-          $content = Get-Content -Path $buildTask.FullName -Raw -Encoding utf8
-          $targetToken = '"run", "--", "tauri", "android", "android-studio-script"'
-          $patchedToken = '"--prefix", "..", "run", "--", "tauri", "android", "android-studio-script"'
-
-          if ($content.Contains($patchedToken)) {
-            Write-Host "BuildTask already patched: $($buildTask.FullName)"
-          } elseif ($content.Contains($targetToken)) {
-            $patched = $content -replace '"run",\s*"--",\s*"tauri",\s*"android",\s*"android-studio-script"', $patchedToken
-            Set-Content -Path $buildTask.FullName -Value $patched -Encoding utf8
-            Write-Host "BuildTask patched successfully: $($buildTask.FullName)"
-          } else {
-            $hint = Select-String -Path $buildTask.FullName -Pattern "android-studio-script" -SimpleMatch | Select-Object -First 1
-            if ($hint) {
-              Write-Host "Found android-studio-script line: $($hint.Line.Trim())"
-            }
-            throw "Expected BuildTask args token not found in $($buildTask.FullName)"
-          }
-
-      - name: Verify RECORD_AUDIO permission persisted（校验权限已持久化）
+      - name: Verify RECORD_AUDIO permission persisted（校验录音权限已持久化）
         shell: powershell
         run: |
           $manifestPath = "src-tauri/gen/android/app/src/main/AndroidManifest.xml"
@@ -252,23 +224,106 @@ jobs:
           }
           Write-Host "RECORD_AUDIO permission verified."
 
-      - name: Build Android APK (sideload channel, split by ABI)
-        run: bun Scripts/dev/tauri.ts android build --ci --apk --split-per-abi -t aarch64 i686
+      - name: Build Android APK only (仅构建 APK，aarch64 + i686)
+        run: bun tauri android build --ci --apk --split-per-abi -t aarch64 i686
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)
           GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false
 
-      - name: Validate Android app name/icon/artifact size
+      - name: Validate Android app name/icon/artifact size (门禁校验)
         run: bun run check:android:meta
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Android APK Artifact
+      - name: Prepare Android signing keystore (准备签名密钥库)
+        shell: powershell
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if (-not $env:ANDROID_KEYSTORE_BASE64) {
+            throw "Missing secret: ANDROID_KEYSTORE_BASE64"
+          }
+          $keystorePath = Join-Path $env:RUNNER_TEMP "android-release.jks"
+          try {
+            $bytes = [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
+          } catch {
+            throw "ANDROID_KEYSTORE_BASE64 is not valid Base64."
+          }
+          [IO.File]::WriteAllBytes($keystorePath, $bytes)
+          "ANDROID_KEYSTORE_PATH=$keystorePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Sign Android APK artifacts (签名 APK 产物)
+        shell: powershell
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          foreach ($required in @("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")) {
+            if (-not (Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue)) {
+              throw "Missing secret: $required"
+            }
+          }
+
+          $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { $null }
+          if (-not $sdkRoot) {
+            throw "ANDROID_SDK_ROOT or ANDROID_HOME must be set."
+          }
+
+          $buildToolsRoot = Join-Path $sdkRoot "build-tools"
+          $buildToolsDir = Get-ChildItem -Path $buildToolsRoot -Directory | Sort-Object { [Version]$_.Name } | Select-Object -Last 1
+          if (-not $buildToolsDir) {
+            throw "No Android build-tools directory found under $buildToolsRoot"
+          }
+
+          $zipalign = Join-Path $buildToolsDir.FullName "zipalign.exe"
+          $apksigner = Join-Path $buildToolsDir.FullName "apksigner.bat"
+          if ((-not (Test-Path $zipalign)) -or (-not (Test-Path $apksigner))) {
+            throw "zipalign.exe or apksigner.bat not found under $($buildToolsDir.FullName)"
+          }
+
+          $signedApkDir = "src-tauri/gen/android/app/build/outputs/apk-signed"
+          New-Item -Path $signedApkDir -ItemType Directory -Force | Out-Null
+
+          $apkFiles = Get-ChildItem -Path "src-tauri/gen/android/app/build/outputs/apk" -Recurse -Filter "*release*.apk" | Where-Object { $_.Name -notlike "*-signed.apk" }
+          if (-not $apkFiles -or $apkFiles.Count -eq 0) {
+            throw "No release APK files found."
+          }
+
+          foreach ($apk in $apkFiles) {
+            $baseName = [IO.Path]::GetFileNameWithoutExtension($apk.Name)
+            $alignedApk = Join-Path $env:RUNNER_TEMP "$baseName-aligned.apk"
+            $signedApk = Join-Path $signedApkDir "$baseName-signed.apk"
+
+            & $zipalign -p -f 4 $apk.FullName $alignedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "zipalign failed: $($apk.FullName)"
+            }
+
+            & $apksigner sign `
+              --ks $env:ANDROID_KEYSTORE_PATH `
+              --ks-pass ("pass:{0}" -f $env:ANDROID_KEYSTORE_PASSWORD) `
+              --ks-key-alias $env:ANDROID_KEY_ALIAS `
+              --key-pass ("pass:{0}" -f $env:ANDROID_KEY_PASSWORD) `
+              --out $signedApk `
+              $alignedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "apksigner sign failed: $($apk.FullName)"
+            }
+
+            & $apksigner verify --verbose $signedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "apksigner verify failed: $signedApk"
+            }
+            Write-Host "Signed APK: $signedApk"
+          }
+
+      - name: Upload Android signed APK Artifact (上传已签名 APK)
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/gen/android/app/build/outputs/apk/
+          name: android-apk-signed-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/gen/android/app/build/outputs/apk-signed/
 
   create-release:
     needs: [build-windows, build-android]
@@ -285,15 +340,29 @@ jobs:
       - name: List Files
         run: ls -la release-files/
 
+      - name: Resolve release metadata (解析发布元信息)
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#release/}"
+          if [[ "$version" =~ (preview|alpha|beta|rc) ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=Preview $version" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "title=Release $version" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: release-files/**
           # 从 tag 名称提取版本号 (去掉 release/ 前缀)
           tag_name: ${{ github.ref_name }}
-          name: Release ${{ github.ref_name }}
+          name: ${{ steps.meta.outputs.title }}
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
