@@ -14,6 +14,7 @@ env:
 
 jobs:
   build-windows:
+    needs: build-android
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
@@ -207,7 +208,7 @@ jobs:
         run: bun install
 
       - name: Init Android
-        run: bun tauri android init
+        run: bun Scripts/dev/tauri.ts android init
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
