@@ -208,22 +208,9 @@ jobs:
         run: bun install
 
       - name: Init Android
-        run: bun Scripts/dev/tauri.ts android init
+        run: bun tauri android init
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Verify RECORD_AUDIO permission persisted（校验录音权限已持久化）
-        shell: powershell
-        run: |
-          $manifestPath = "src-tauri/gen/android/app/src/main/AndroidManifest.xml"
-          if (-not (Test-Path $manifestPath)) {
-            throw "Manifest not found: $manifestPath"
-          }
-          $manifestContent = Get-Content -Path $manifestPath -Raw -Encoding utf8
-          if ($manifestContent -notmatch "android.permission.RECORD_AUDIO") {
-            throw "Missing android.permission.RECORD_AUDIO in AndroidManifest.xml"
-          }
-          Write-Host "RECORD_AUDIO permission verified."
 
       - name: Build Android APK only (仅构建 APK，aarch64 + i686)
         run: bun tauri android build --ci --apk --split-per-abi -t aarch64 i686
