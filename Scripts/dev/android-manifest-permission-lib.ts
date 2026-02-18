@@ -22,9 +22,25 @@ export function ensureRecordAudioPermissionInManifest(manifestXml: string): Mani
   const lines = manifestXml.split(/\r?\n/);
   const permissionLine = `    <uses-permission android:name="${RECORD_AUDIO_PERMISSION}" />`;
 
-  const internetPermissionLine = lines.findIndex((line) => line.includes('android.permission.INTERNET'));
-  if (internetPermissionLine >= 0) {
-    lines.splice(internetPermissionLine + 1, 0, permissionLine);
+  // Find the complete INTERNET permission block:
+  // 1. First find the line with INTERNET
+  // 2. Then find the closing tag (/> or </uses-permission>) in the same line or subsequent lines
+  let internetPermissionEndLine = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].includes('android.permission.INTERNET')) {
+      // Found the line with INTERNET, now find where the permission closes
+      for (let j = i; j < lines.length; j++) {
+        if (lines[j].includes('/>') || lines[j].includes('</uses-permission>')) {
+          internetPermissionEndLine = j;
+          break;
+        }
+      }
+      break;
+    }
+  }
+
+  if (internetPermissionEndLine >= 0) {
+    lines.splice(internetPermissionEndLine + 1, 0, permissionLine);
     return { manifestXml: lines.join(newline), changed: true };
   }
 
