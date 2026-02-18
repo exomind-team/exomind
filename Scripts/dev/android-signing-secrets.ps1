@@ -72,15 +72,27 @@ $resolvedKeystore = (Resolve-Path -LiteralPath $KeystorePath).Path
 $keytool = Resolve-KeytoolPath
 
 Write-Host "[1/4] Validate keystore/alias with keytool (校验 keystore/alias)..."
-& $keytool -list `
-    -keystore $resolvedKeystore `
-    -storepass $StorePassword `
-    -alias $KeyAlias `
-    -keypass $KeyPassword `
-    *> $null
-if ($LASTEXITCODE -ne 0) {
-    throw "Keytool validation failed. Check keystore path / alias / passwords."
+$tmpOut = Join-Path $env:TEMP ("keytool-out-" + [guid]::NewGuid().ToString("N") + ".log")
+$tmpErr = Join-Path $env:TEMP ("keytool-err-" + [guid]::NewGuid().ToString("N") + ".log")
+$keytoolArgs = @(
+    "-list",
+    "-keystore", $resolvedKeystore,
+    "-storepass", $StorePassword,
+    "-alias", $KeyAlias,
+    "-keypass", $KeyPassword
+)
+$proc = Start-Process -FilePath $keytool `
+    -ArgumentList $keytoolArgs `
+    -Wait `
+    -PassThru `
+    -NoNewWindow `
+    -RedirectStandardOutput $tmpOut `
+    -RedirectStandardError $tmpErr
+if ($proc.ExitCode -ne 0) {
+    $errText = if (Test-Path $tmpErr) { Get-Content -Path $tmpErr -Raw } else { "" }
+    throw "Keytool validation failed. Check keystore path / alias / passwords. $errText"
 }
+Remove-Item -Path $tmpOut, $tmpErr -Force -ErrorAction SilentlyContinue
 Write-Host "OK: keystore and alias are valid."
 
 Write-Host "[2/4] Generate Base64 for ANDROID_KEYSTORE_BASE64 (生成 Base64)..."
