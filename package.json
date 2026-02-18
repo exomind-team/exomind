@@ -7,6 +7,7 @@
     "dev": "vite",
     "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
     "gh:comment": "bun Scripts/dev/github-comment.ts",
+    "check:android:meta": "bun Scripts/dev/android-meta-check.ts",
     "server": "bun server/pouchdb-server.js",
     "server:dev": "bun --watch server/pouchdb-server.js",
     "test:sync": "vitest run tests/sync/pouch-sync.test.ts",
