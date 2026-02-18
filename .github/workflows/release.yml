@@ -26,20 +26,22 @@ jobs:
       - name: Ensure local Bun is available (确保本机 Bun 可用)
         shell: powershell
         run: |
-          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
-          if (-not $bunCmd) {
-            Write-Host "Bun not found in PATH, installing via npm (通过 npm 安装 Bun)..."
-            npm install -g bun
-            $npmPrefix = (npm config get prefix).Trim()
-            if ($npmPrefix) {
-              $env:Path = "$npmPrefix;$env:Path"
-              "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-            }
-            $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          Write-Host "Install Bun via npm to enforce native Windows binary (通过 npm 强制使用 Windows 原生 Bun)..."
+          npm install -g bun
+          $npmPrefix = (npm config get prefix).Trim()
+          if (-not $npmPrefix) {
+            throw "npm prefix is empty; cannot locate global bun install path."
           }
+          $env:Path = "$npmPrefix;$env:Path"
+          "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
           if (-not $bunCmd) {
             throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
           }
+          if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+            throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+          }
+          Write-Host "Using Bun from: $($bunCmd.Source)"
           bun --version
 
       - name: Setup Rust
@@ -85,20 +87,22 @@ jobs:
       - name: Ensure local Bun is available (确保本机 Bun 可用)
         shell: powershell
         run: |
-          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
-          if (-not $bunCmd) {
-            Write-Host "Bun not found in PATH, installing via npm (通过 npm 安装 Bun)..."
-            npm install -g bun
-            $npmPrefix = (npm config get prefix).Trim()
-            if ($npmPrefix) {
-              $env:Path = "$npmPrefix;$env:Path"
-              "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
-            }
-            $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          Write-Host "Install Bun via npm to enforce native Windows binary (通过 npm 强制使用 Windows 原生 Bun)..."
+          npm install -g bun
+          $npmPrefix = (npm config get prefix).Trim()
+          if (-not $npmPrefix) {
+            throw "npm prefix is empty; cannot locate global bun install path."
           }
+          $env:Path = "$npmPrefix;$env:Path"
+          "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
           if (-not $bunCmd) {
             throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
           }
+          if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+            throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+          }
+          Write-Host "Using Bun from: $($bunCmd.Source)"
           bun --version
 
       - name: Configure local Android toolchain (配置本地 Android 工具链)
@@ -121,6 +125,20 @@ jobs:
             "ANDROID_HOME=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           } elseif (-not $env:ANDROID_HOME) {
             "ANDROID_HOME=$env:ANDROID_SDK_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Validate Android signing secrets early (提前校验 Android 签名密钥)
+        shell: powershell
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          foreach ($required in @("ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")) {
+            if (-not (Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue)) {
+              throw "Missing secret: $required"
+            }
           }
 
       - name: Ensure Rust Android targets (确保 Rust Android 目标)
