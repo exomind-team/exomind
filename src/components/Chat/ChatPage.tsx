@@ -14,8 +14,9 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
-import { VoiceMessageInput } from '@/components/VoiceMessageInput';
-import { TimeBlockWidget } from '@/components/TimeBlockWidget';
+import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
+import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
+import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
@@ -51,6 +52,8 @@ export function ChatPage() {
   const shouldStickToBottomRef = useRef(true);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn } = useSyncStore();
+  const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
+  const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     listEndRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -198,6 +201,64 @@ export function ChatPage() {
     }
   }, [refreshLatestEvents]);
 
+  // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦
+  useEffect(() => {
+    const isEditableTarget = (target: EventTarget | null) => {
+      const el = target instanceof HTMLElement ? target : null;
+      if (!el) return false;
+      if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.isContentEditable) return true;
+      return Boolean(el.closest('input, textarea, [contenteditable="true"]'));
+    };
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing) return;
+      if (e.key !== 'Enter') return;
+
+      // 如果焦点在按钮/链接上，让默认 Enter 行为触发
+      const activeEl = document.activeElement;
+      if (activeEl && (
+        activeEl.tagName === 'BUTTON' ||
+        activeEl.getAttribute('role') === 'button' ||
+        activeEl instanceof HTMLAnchorElement
+      )) {
+        return;
+      }
+
+      if (isEditableTarget(e.target)) return;
+
+      // Ctrl+Enter: 弹出反馈对话框（正在计时或暂停中）
+      if (e.ctrlKey) {
+        e.preventDefault();
+        const timerState = timeBlockWidgetRef.current?.getTimerState();
+        if (timerState === 'running' || timerState === 'paused') {
+          timeBlockWidgetRef.current?.endDialog();
+        }
+        return;
+      }
+
+      // Shift+Enter: 暂停/继续时间块，或展开时间块输入框
+      if (e.shiftKey) {
+        e.preventDefault();
+        const timerState = timeBlockWidgetRef.current?.getTimerState();
+        if (timerState === 'running' || timerState === 'paused') {
+          // 正在计时或暂停中 → 暂停/继续
+          timeBlockWidgetRef.current?.pauseOrResume();
+        } else {
+          // 空闲/无时间块 → 展开时间块输入框
+          timeBlockWidgetRef.current?.expandAndFocusTaskName();
+        }
+        return;
+      }
+
+      // Enter: 聚焦输入框
+      e.preventDefault();
+      voiceMessageInputRef.current?.focusText();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
+
   // 格式化时间
   const formatTime = (timestamp: number) => {
     const date = new Date(timestamp);
@@ -218,6 +279,8 @@ export function ChatPage() {
   // 获取事件图标
   const getEventIcon = (event: Event) => {
     if (event.tags.has('block_start')) return '🔷';
+    if (event.tags.has('block_pause')) return '⏸️';
+    if (event.tags.has('block_resume')) return '▶️';
     if (event.tags.has('block_end')) return '🔴';
     if (event.tags.has('block_feedback')) return '📝';
     return '📝';
@@ -225,14 +288,26 @@ export function ChatPage() {
 
   // 获取事件背景色
   const getEventBgColor = (event: Event) => {
-    if (event.tags.has('block_start')) return 'bg-blue-100 text-blue-800 rounded-br-md';
-    if (event.tags.has('block_end')) return 'bg-red-100 text-red-800 rounded-br-md';
+    if (event.tags.has('block_start')) {
+      return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 rounded-br-md';
+    }
+    if (event.tags.has('block_pause')) {
+      return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-100 rounded-br-md';
+    }
+    if (event.tags.has('block_resume')) {
+      return 'bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100 rounded-br-md';
+    }
+    if (event.tags.has('block_end')) {
+      return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-100 rounded-br-md';
+    }
     return 'bg-muted rounded-bl-md';
   };
 
   // 获取事件前缀
   const getEventPrefix = (event: Event) => {
     if (event.tags.has('block_start')) return '🔷';
+    if (event.tags.has('block_pause')) return '⏸️';
+    if (event.tags.has('block_resume')) return '▶️';
     if (event.tags.has('block_end')) return '🔴';
     if (event.tags.has('block_feedback')) return '📝';
     return null;
@@ -274,7 +349,7 @@ export function ChatPage() {
       </div>
 
       {/* TimeBlock 控件栏 */}
-      <TimeBlockWidget />
+      <TimeBlockWidget ref={timeBlockWidgetRef} />
 
       {/* 事件列表 */}
       <div
@@ -333,7 +408,7 @@ export function ChatPage() {
                               {getEventPrefix(event)}
                             </span>
                           )}
-                          <p className="text-xs sm:text-sm break-words">{event.content}</p>
+                          <EventMarkdown content={event.content} />
                         </div>
                         <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
                           {formatTime(event.timestamp)}
@@ -351,6 +426,7 @@ export function ChatPage() {
 
       {/* 输入区域 */}
       <VoiceMessageInput
+        ref={voiceMessageInputRef}
         onSend={handleSend}
         placeholder="输入内容记录事件..."
         buttonSize={40}

@@ -9,6 +9,11 @@ import {
   resolveSyncServerUrl,
   setSyncServerUrlOverride,
 } from '@/config/port-env';
+import {
+  getThemePreference,
+  setThemePreference,
+  type ThemePreference,
+} from '@/config/theme';
 
 type ImportStrategy = 'merge' | 'overwrite';
 
@@ -24,6 +29,7 @@ export function SettingsPage() {
   });
   const [syncServerUrl, setSyncServerUrl] = useState(() => getSyncServerUrlOverride() || autoSyncServerUrl);
   const [savedSyncServerUrl, setSavedSyncServerUrl] = useState<string | null>(() => getSyncServerUrlOverride());
+  const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => getThemePreference());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy, setImportStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
@@ -145,6 +151,28 @@ export function SettingsPage() {
         配置局域网同步地址与事件日志导入导出
       </p>
 
+      <div className="space-y-2 max-w-sm">
+        <Label htmlFor="theme-preference">主题</Label>
+        <select
+          id="theme-preference"
+          className="w-full rounded-md border bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          value={themePreference}
+          disabled={loading}
+          onChange={(event) => {
+            const nextPreference = event.target.value as ThemePreference;
+            setThemePreference(nextPreference);
+            setThemePreferenceState(nextPreference);
+          }}
+        >
+          <option value="system">system（跟随系统）</option>
+          <option value="light">light（浅色）</option>
+          <option value="dark">dark（暗色）</option>
+        </select>
+        <p className="text-xs text-muted-foreground">
+          暗色模式对 Chrome 手机版等无法使用扩展的环境更友好。
+        </p>
+      </div>
+
       <div className="space-y-2 max-w-xl">
         <Label htmlFor="sync-server-url">同步服务器地址</Label>
         <Input
@@ -181,7 +209,7 @@ export function SettingsPage() {
         <Label htmlFor="import-strategy">导入策略</Label>
         <select
           id="import-strategy"
-          className="w-full rounded-md border px-3 py-2 text-sm"
+          className="w-full rounded-md border bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
           value={importStrategy}
           onChange={(e) => setImportStrategy(e.target.value as ImportStrategy)}
           disabled={loading}

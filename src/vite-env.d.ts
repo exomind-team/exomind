@@ -1,5 +1,9 @@
 /// <reference types="vite/client" />
 
+// 缺少类型的模块声明
+declare module 'remark-obsidian';
+declare module 'rehype-katex';
+
 interface Window {
   __TAURI__: {
     [key: string]: unknown;
