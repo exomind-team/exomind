@@ -102,6 +102,23 @@ jobs:
         with:
           node-version: '20'
 
+      - name: Provide node.bat shim for Android Gradle tasks（为 Android Gradle 提供 node.bat 兼容层）
+        shell: powershell
+        run: |
+          $nodeCmd = Get-Command node -ErrorAction SilentlyContinue
+          if (-not $nodeCmd) {
+            throw "node command not found after setup-node."
+          }
+          $nodeExe = $nodeCmd.Source
+          $shimRoot = if ($env:RUNNER_TEMP) { Join-Path $env:RUNNER_TEMP "node-shim" } else { Join-Path $env:TEMP "node-shim" }
+          New-Item -ItemType Directory -Force -Path $shimRoot | Out-Null
+          $shimPath = Join-Path $shimRoot "node.bat"
+          $shimContent = "@echo off`r`n`"$nodeExe`" %*"
+          Set-Content -Path $shimPath -Value $shimContent -Encoding ascii
+          $env:Path = "$shimRoot;$env:Path"
+          "$shimRoot" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          Write-Host "Created node.bat shim: $shimPath -> $nodeExe"
+
       - name: Ensure local Bun is available (确保本机 Bun 可用)
         shell: powershell
         run: |
