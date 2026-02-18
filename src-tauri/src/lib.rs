@@ -23,6 +23,7 @@ pub fn run() {
     let ws_client_state = std::sync::Arc::new(WsClientState::default());
 
     let mut builder = tauri::Builder::default()
+        .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .manage(ws_client_state.clone())
