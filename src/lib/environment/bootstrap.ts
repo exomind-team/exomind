@@ -1,5 +1,4 @@
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
-import { TauriEventLogStorageAdapter } from '../adapters/tauri-eventlog-storage';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { WebStorageAdapter } from '../adapters/web-storage';
 import type { IASRPort } from './interfaces/asr.port';
@@ -53,7 +52,8 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
       runtime,
       asr,
       storage: new TauriStorageAdapter(),
-      eventlog: new TauriEventLogStorageAdapter(),
+      // 临时统一到 PouchDB，避免 Tauri 原生 EventLog 与 UI 读取源分裂（#144）
+      eventlog: new WebEventLogStorageAdapter(),
     };
   }
 
