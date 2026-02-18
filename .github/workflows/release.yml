@@ -205,12 +205,14 @@ jobs:
           Write-Host "RECORD_AUDIO permission verified."
 
       - name: Build Android AAB (release channel)
-        run: bun Scripts/dev/tauri.ts android build --ci
+        run: bun Scripts/dev/tauri.ts android build --ci -t aarch64 i686
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)
+          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false
 
       - name: Build Android APK (sideload channel, split by ABI)
-        run: bun Scripts/dev/tauri.ts android build --ci --debug --apk --split-per-abi
+        run: bun Scripts/dev/tauri.ts android build --ci --debug --apk --split-per-abi -t aarch64 i686
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)

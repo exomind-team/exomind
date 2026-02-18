@@ -42,7 +42,7 @@ describe('android-meta-check-lib', () => {
     });
 
     expect(summary).toHaveLength(2);
-    expect(summary[0]).toMatchObject({ kind: 'apk' });
-    expect(summary[1]).toMatchObject({ kind: 'aab' });
+    expect(summary[0]).toMatchObject({ kind: 'apk', debug: true });
+    expect(summary[1]).toMatchObject({ kind: 'aab', debug: false });
   });
 });

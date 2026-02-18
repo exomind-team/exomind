@@ -3,6 +3,7 @@
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
 import { ensureRecordAudioPermissionInManifestFile } from './android-manifest-permission-lib';
+import { resolveTauriExecutable } from './tauri-cli-lib';
 
 type AndroidLifecycleCommand = 'init' | 'build' | 'dev';
 
@@ -48,7 +49,7 @@ function main(): never {
     ensureAndroidRecordAudioPermission(process.cwd());
   }
 
-  const tauriExecutable = process.platform === 'win32' ? 'tauri.cmd' : 'tauri';
+  const tauriExecutable = resolveTauriExecutable({ projectRoot: process.cwd() });
   const run = spawnSync(tauriExecutable, tauriArgs, { stdio: 'inherit' });
 
   if (run.error) {
