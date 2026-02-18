@@ -10,7 +10,7 @@
     "server": "node server/pouchdb-server.js",
     "server:dev": "node --watch server/pouchdb-server.js",
     "test:sync": "vitest run tests/sync/pouch-sync.test.ts",
-    "build": "tsc && vite build",
+    "build": "bun install --frozen-lockfile && tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
     "test": "vitest",
