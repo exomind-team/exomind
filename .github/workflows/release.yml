@@ -84,18 +84,31 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Init Android
-        run: bun tauri android init
+      - name: Init Android (via wrapper / 通过包装脚本初始化)
+        run: bun Scripts/dev/tauri.ts android init
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Verify RECORD_AUDIO permission persisted（校验权限已持久化）
+        run: |
+          MANIFEST_PATH="src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          if [ ! -f "$MANIFEST_PATH" ]; then
+            echo "Manifest not found: $MANIFEST_PATH"
+            exit 1
+          fi
+          if ! grep -q "android.permission.RECORD_AUDIO" "$MANIFEST_PATH"; then
+            echo "Missing android.permission.RECORD_AUDIO in AndroidManifest.xml"
+            exit 1
+          fi
+          echo "RECORD_AUDIO permission verified."
+
       - name: Build Android AAB (release channel)
-        run: bun tauri android build
+        run: bun Scripts/dev/tauri.ts android build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build Android APK (sideload channel, split by ABI)
-        run: bun tauri android build --debug --apk --split-per-abi
+        run: bun Scripts/dev/tauri.ts android build --debug --apk --split-per-abi
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
