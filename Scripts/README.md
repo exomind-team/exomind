@@ -317,19 +317,19 @@ cat build-logs\*.log
 
 ```powershell
 # 新增评论
-npm run gh:comment -- --type issue --number 93 --file docs/report.md
+bun run gh:comment -- --type issue --number 93 --file docs/report.md
 
 # 追加到指定评论（注意 # 前缀需要加引号）
-npm run gh:comment -- --type issue --number 93 --comment "#issuecomment-3883010944" --mode append --file docs/add.md
+bun run gh:comment -- --type issue --number 93 --comment "#issuecomment-3883010944" --mode append --file docs/add.md
 
 # 覆盖指定评论
-npm run gh:comment -- --type issue --number 93 --comment "#issuecomment-3883010944" --mode replace --file docs/final.md
+bun run gh:comment -- --type issue --number 93 --comment "#issuecomment-3883010944" --mode replace --file docs/final.md
 
 # 用完整链接自动解析 repo/type/number/comment
-npm run gh:comment -- --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append
+bun run gh:comment -- --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append
 
 # 只看解析结果，不写入 GitHub
-npm run gh:comment -- --ref "https://github.com/exomind-team/exomind/pull/89" --body "test" --dry-run
+bun run gh:comment -- --ref "https://github.com/exomind-team/exomind/pull/89" --body "test" --dry-run
 
 # PowerShell 直接调用
 .\Scripts\dev\github-comment.ps1 --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append

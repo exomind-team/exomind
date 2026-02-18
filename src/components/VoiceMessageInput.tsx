@@ -11,11 +11,11 @@
  * └─────────────────────────────────────────┘
  */
 
-import { useState, KeyboardEvent, useCallback, useRef, useEffect } from 'react';
+import { useState, KeyboardEvent, useCallback, useRef, useEffect, useImperativeHandle, forwardRef } from 'react';
 import { Send } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
-import { VoiceInputButton } from './VoiceInputButton';
+import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
 
 export interface VoiceMessageInputProps {
@@ -45,7 +45,12 @@ export interface VoiceMessageInputProps {
   maxRows?: number;
 }
 
-export function VoiceMessageInput({
+export interface VoiceMessageInputHandle {
+  focusText: () => void;
+  startVoiceRecording: () => void;
+}
+
+export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessageInputProps>(function VoiceMessageInput({
   onSend,
   onVoiceResult,
   placeholder = '输入消息...',
@@ -58,9 +63,10 @@ export function VoiceMessageInput({
   buttonSize = 40,
   minRows = 2,
   maxRows = 6,
-}: VoiceMessageInputProps) {
+}: VoiceMessageInputProps, ref) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -97,9 +103,19 @@ export function VoiceMessageInput({
 
   // 键盘事件
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === 'Escape') {
+      textareaRef.current?.blur();
+      return;
+    }
+
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault();
-      handleSend();
+      if (value.trim()) {
+        handleSend();
+      } else {
+        textareaRef.current?.blur();
+        voiceButtonRef.current?.start();
+      }
     }
   };
 
@@ -116,10 +132,20 @@ export function VoiceMessageInput({
     // 可以在这里添加状态提示
   }, []);
 
+  useImperativeHandle(ref, () => ({
+    focusText: () => {
+      textareaRef.current?.focus();
+    },
+    startVoiceRecording: () => {
+      voiceButtonRef.current?.start();
+    },
+  }), []);
+
   return (
     <div className="flex items-end gap-2 px-3 py-2 border-t bg-card shrink-0 safe-area-pb">
       {/* 语音输入按钮 */}
       <VoiceInputButton
+        ref={voiceButtonRef}
         onResult={handleVoiceResult}
         onStateChange={handleStateChange}
         adapter={adapter}
@@ -167,4 +193,4 @@ export function VoiceMessageInput({
       </Button>
     </div>
   );
-}
+});
