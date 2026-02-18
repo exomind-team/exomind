@@ -89,16 +89,32 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Build Android
-        run: bun tauri android build --debug
+      - name: Build Android AAB (release channel)
+        run: bun tauri android build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Upload Artifact
+      - name: Build Android APK (sideload channel, split by ABI)
+        run: bun tauri android build --debug --apk --split-per-abi
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Validate Android app name/icon/artifact size
+        run: bun run check:android:meta
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Upload Android AAB Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-aab-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/gen/android/app/build/outputs/bundle/
+
+      - name: Upload Android APK Artifact
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/gen/android/app/build/outputs/apk/debug/
+          path: src-tauri/gen/android/app/build/outputs/apk/
 
   create-release:
     needs: [build-windows, build-android]
