@@ -1,5 +1,6 @@
 import { useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -94,12 +95,29 @@ export function SettingsPage() {
       const json = await service.exportEventsAsJson();
       const payload = JSON.parse(json) as { events?: unknown[] };
       const count = Array.isArray(payload.events) ? payload.events.length : 0;
+      const defaultName = buildBackupFileName();
+
+      const isRunningInTauri = await isTauri();
+      if (isRunningInTauri) {
+        const savedPath = await invoke<string | null>('save_json_file', {
+          content: json,
+          defaultName,
+        });
+
+        if (!savedPath) {
+          setStatusMessage('已取消保存。');
+          return;
+        }
+
+        setStatusMessage(`导出成功，共 ${count} 条事件。保存路径：${savedPath}`);
+        return;
+      }
 
       const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
       const url = URL.createObjectURL(blob);
       const anchor = document.createElement('a');
       anchor.href = url;
-      anchor.download = buildBackupFileName();
+      anchor.download = defaultName;
       document.body.appendChild(anchor);
       anchor.click();
       anchor.remove();

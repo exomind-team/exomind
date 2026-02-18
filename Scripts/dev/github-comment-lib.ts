@@ -9,6 +9,8 @@ const COMMENT_ID_PATTERNS = [
 const GITHUB_REF_PATTERN = /^https?:\/\/github\.com\/([^/]+\/[^/]+)\/(issues|pull)\/(\d+)(?:#issuecomment-(\d+))?\/?$/i;
 const HTTPS_REMOTE_PATTERN = /^https?:\/\/github\.com\/([^/]+)\/([^/]+?)(?:\.git)?$/i;
 const SSH_REMOTE_PATTERN = /^git@github\.com:([^/]+)\/([^/]+?)(?:\.git)?$/i;
+const UTF8_BOM = '\uFEFF';
+const SUSPICIOUS_QUESTION_SEQUENCE = /\?{8,}/;
 
 export type RefType = 'issue' | 'pr';
 
@@ -76,6 +78,22 @@ export function buildAppendedBody(existingBody: string, incomingBody: string): s
   return `${current}\n\n${next}`;
 }
 
+function normalizeBodyText(content: string): string {
+  const withoutBom = content.startsWith(UTF8_BOM) ? content.slice(1) : content;
+
+  if (withoutBom.includes('\u0000')) {
+    throw new Error('Comment body appears to contain NULL bytes. 可能是错误编码（encoding）文件。');
+  }
+  if (withoutBom.includes('\uFFFD')) {
+    throw new Error('Comment body contains replacement characters (�), possible garbled text. 可能已乱码。');
+  }
+  if (SUSPICIOUS_QUESTION_SEQUENCE.test(withoutBom)) {
+    throw new Error('Comment body contains suspicious long "?" sequence, possible garbled text. 检测到疑似乱码。');
+  }
+
+  return withoutBom;
+}
+
 export function readBodyInput(filePath: string | undefined, bodyText: string | undefined): string {
   if (filePath && bodyText) {
     throw new Error('Use either --file or --body, not both.');
@@ -85,10 +103,11 @@ export function readBodyInput(filePath: string | undefined, bodyText: string | u
   }
 
   if (filePath) {
-    return readFileSync(filePath, 'utf8');
+    const raw = readFileSync(filePath);
+    return normalizeBodyText(raw.toString('utf8'));
   }
 
-  return bodyText as string;
+  return normalizeBodyText(bodyText as string);
 }
 
 export function parseRepoFromRemoteUrl(remoteUrl: string): string {
