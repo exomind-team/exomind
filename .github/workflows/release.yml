@@ -71,8 +71,19 @@ jobs:
       - name: Ensure local Bun is available (确保本机 Bun 可用)
         shell: pwsh
         run: |
-          if (-not (Get-Command bun -ErrorAction SilentlyContinue)) {
-            throw "Bun is required on self-hosted Windows runner. Please install Bun and add it to PATH."
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          if (-not $bunCmd) {
+            Write-Host "Bun not found in PATH, installing via npm (通过 npm 安装 Bun)..."
+            npm install -g bun
+            $npmPrefix = (npm config get prefix).Trim()
+            if ($npmPrefix) {
+              $env:Path = "$npmPrefix;$env:Path"
+              "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            }
+            $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          }
+          if (-not $bunCmd) {
+            throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
           }
           bun --version
 
