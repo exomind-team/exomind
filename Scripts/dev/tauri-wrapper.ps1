@@ -95,6 +95,36 @@ function Ensure-AndroidManifestPermissions {
   $writer.Dispose()
 }
 
+function Ensure-AndroidReleaseCleartextTraffic {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$BuildGradlePath
+  )
+
+  if (-not (Test-Path -LiteralPath $BuildGradlePath)) {
+    return
+  }
+
+  $content = Get-Content -LiteralPath $BuildGradlePath -Raw -Encoding UTF8
+  $targetLine = 'manifestPlaceholders["usesCleartextTraffic"] = "true"'
+
+  if ($content -match 'getByName\("release"\)\s*\{[\s\S]*manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"') {
+    return
+  }
+
+  $updated = [regex]::Replace(
+    $content,
+    'getByName\("release"\)\s*\{',
+    "getByName(`"release`") {`r`n            # LAN debug first（局域网调试优先）: allow HTTP sync in release for now`r`n            $targetLine",
+    1
+  )
+
+  if ($updated -ne $content) {
+    Set-Content -LiteralPath $BuildGradlePath -Value $updated -Encoding UTF8NoBOM
+    Write-Host "[tauri-wrapper] Enabled release cleartext traffic in Android build.gradle.kts"
+  }
+}
+
 function Ensure-AndroidLauncherIcons {
   param(
     [Parameter(Mandatory = $true)]
@@ -164,9 +194,12 @@ $projectRoot = Join-Path $PSScriptRoot "..\..\"
 $projectRoot = [System.IO.Path]::GetFullPath($projectRoot)
 $manifestPath = Join-Path $PSScriptRoot "..\..\src-tauri\gen\android\app\src\main\AndroidManifest.xml"
 $manifestPath = [System.IO.Path]::GetFullPath($manifestPath)
+$buildGradlePath = Join-Path $PSScriptRoot "..\..\src-tauri\gen\android\app\build.gradle.kts"
+$buildGradlePath = [System.IO.Path]::GetFullPath($buildGradlePath)
 
-# Patch before command for existing Android project (已有工程先补权限)
+# Patch before command for existing Android project (已有工程先补权限与 cleartext 配置)
 Ensure-AndroidManifestPermissions -ManifestPath $manifestPath
+Ensure-AndroidReleaseCleartextTraffic -BuildGradlePath $buildGradlePath
 
 # Ensure cargo is resolvable even when rustup shim is partial.
 #（兼容仅安装 rustup、但 PATH 缺少 cargo 代理的环境）
@@ -186,9 +219,10 @@ if ($TauriArgs -and $TauriArgs.Count -gt 0) {
 }
 $exitCode = $LASTEXITCODE
 
-# Patch again for `tauri android init`-like flows (初始化后再次补权限)
+# Patch again for `tauri android init`-like flows (初始化后再次补权限与 cleartext 配置)
 if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android") {
   Ensure-AndroidManifestPermissions -ManifestPath $manifestPath
+  Ensure-AndroidReleaseCleartextTraffic -BuildGradlePath $buildGradlePath
   if ($androidCommandsNeedIconSync -contains $TauriArgs[1]) {
     Ensure-AndroidLauncherIcons -ProjectRoot $projectRoot
   }
