@@ -142,55 +142,57 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
   }), []);
 
   return (
-    <div className="flex items-end gap-2 px-3 py-2 border-t bg-card shrink-0 safe-area-pb">
-      {/* 语音输入按钮 */}
-      <VoiceInputButton
-        ref={voiceButtonRef}
-        onResult={handleVoiceResult}
-        onStateChange={handleStateChange}
-        adapter={adapter}
-        adapterConfig={adapterConfig}
-        showWaveform={showWaveform}
-        showTimer={showTimer}
-        enableShortcut={enableShortcut}
-        size={buttonSize}
-        style={{
-          flexShrink: 0,
-        }}
-      />
+    <div className="safe-area-pb bg-card shrink-0">
+      <div className="flex items-end gap-2 px-3 py-2 border-t">
+        {/* 语音输入按钮 */}
+        <VoiceInputButton
+          ref={voiceButtonRef}
+          onResult={handleVoiceResult}
+          onStateChange={handleStateChange}
+          adapter={adapter}
+          adapterConfig={adapterConfig}
+          showWaveform={showWaveform}
+          showTimer={showTimer}
+          enableShortcut={enableShortcut}
+          size={buttonSize}
+          style={{
+            flexShrink: 0,
+          }}
+        />
 
-      {/* 文本输入框 */}
-      <Textarea
-        ref={textareaRef}
-        value={value}
-        onChange={(e) => {
-          setValue(e.target.value);
-          resizeTextarea(e.target);
-        }}
-        onKeyDown={handleKeyDown}
-        placeholder={placeholder}
-        className={inputClassName}
-        rows={minRows}
-        data-testid="event-input-textarea"
-        data-gramm="false"
-        spellCheck={false}
-        style={{
-          flex: 1,
-          minHeight: '56px',
-        }}
-      />
+        {/* 文本输入框 */}
+        <Textarea
+          ref={textareaRef}
+          value={value}
+          onChange={(e) => {
+            setValue(e.target.value);
+            resizeTextarea(e.target);
+          }}
+          onKeyDown={handleKeyDown}
+          placeholder={placeholder}
+          className={inputClassName}
+          rows={minRows}
+          data-testid="event-input-textarea"
+          data-gramm="false"
+          spellCheck={false}
+          style={{
+            flex: 1,
+            minHeight: '56px',
+          }}
+        />
 
-      {/* 发送按钮 */}
-      <Button
-        onClick={handleSend}
-        disabled={!value.trim()}
-        size="icon"
-        className="shrink-0"
-        type="button"
-        data-testid="event-send-button"
-      >
-        <Send size={18} />
-      </Button>
+        {/* 发送按钮 */}
+        <Button
+          onClick={handleSend}
+          disabled={!value.trim()}
+          size="icon"
+          className="shrink-0"
+          type="button"
+          data-testid="event-send-button"
+        >
+          <Send size={18} />
+        </Button>
+      </div>
     </div>
   );
 });

@@ -67,31 +67,35 @@ export function resolveMode(requestedMode: string | undefined, commentId: string
   return commentId ? 'append' : 'create';
 }
 
+export function normalizeBodyText(
+  content: string,
+  source: 'input' | 'existing' = 'input',
+): string {
+  const withoutBom = content.startsWith(UTF8_BOM) ? content.slice(1) : content;
+  const sourceLabel = source === 'existing' ? 'Existing comment body' : 'Input body';
+
+  if (withoutBom.includes('\u0000')) {
+    throw new Error(`${sourceLabel} appears to contain NULL bytes. 可能是错误编码（encoding）文件。`);
+  }
+  if (withoutBom.includes('\uFFFD')) {
+    throw new Error(`${sourceLabel} contains replacement characters (�), possible garbled text. 可能已乱码。`);
+  }
+  if (SUSPICIOUS_QUESTION_SEQUENCE.test(withoutBom)) {
+    throw new Error(`${sourceLabel} contains suspicious long "?" sequence, possible garbled text. 检测到疑似乱码。`);
+  }
+
+  return withoutBom;
+}
+
 export function buildAppendedBody(existingBody: string, incomingBody: string): string {
-  const current = existingBody ?? '';
-  const next = incomingBody ?? '';
+  const current = normalizeBodyText(existingBody ?? '', 'existing');
+  const next = normalizeBodyText(incomingBody ?? '', 'input');
 
   if (!current.trim()) {
     return next;
   }
 
   return `${current}\n\n${next}`;
-}
-
-function normalizeBodyText(content: string): string {
-  const withoutBom = content.startsWith(UTF8_BOM) ? content.slice(1) : content;
-
-  if (withoutBom.includes('\u0000')) {
-    throw new Error('Comment body appears to contain NULL bytes. 可能是错误编码（encoding）文件。');
-  }
-  if (withoutBom.includes('\uFFFD')) {
-    throw new Error('Comment body contains replacement characters (�), possible garbled text. 可能已乱码。');
-  }
-  if (SUSPICIOUS_QUESTION_SEQUENCE.test(withoutBom)) {
-    throw new Error('Comment body contains suspicious long "?" sequence, possible garbled text. 检测到疑似乱码。');
-  }
-
-  return withoutBom;
 }
 
 export function readBodyInput(filePath: string | undefined, bodyText: string | undefined): string {
@@ -104,10 +108,10 @@ export function readBodyInput(filePath: string | undefined, bodyText: string | u
 
   if (filePath) {
     const raw = readFileSync(filePath);
-    return normalizeBodyText(raw.toString('utf8'));
+    return normalizeBodyText(raw.toString('utf8'), 'input');
   }
 
-  return normalizeBodyText(bodyText as string);
+  return normalizeBodyText(bodyText as string, 'input');
 }
 
 export function parseRepoFromRemoteUrl(remoteUrl: string): string {

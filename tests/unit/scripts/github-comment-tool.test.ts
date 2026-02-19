@@ -73,6 +73,11 @@ describe('github-comment-lib', () => {
     it('returns incoming body when existing body is empty', () => {
       expect(buildAppendedBody('', 'new text')).toBe('new text');
     });
+
+    it('throws when existing body is suspiciously garbled', () => {
+      expect(() => buildAppendedBody('Android ????????????', 'new text'))
+        .toThrow(/garbled|encoding|乱码/i);
+    });
   });
 
   describe('parseRepoFromRemoteUrl', () => {
