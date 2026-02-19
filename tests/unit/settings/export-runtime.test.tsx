@@ -99,4 +99,36 @@ describe('SettingsPage export runtime routing', () => {
     expect(mocks.invoke).not.toHaveBeenCalled();
     expect(screen.getByRole('status').textContent).toContain('导出成功，共 1 条事件。');
   });
+
+  it('uses tauri native pick command for import in tauri runtime', async () => {
+    mocks.isTauri.mockResolvedValue(true);
+    mocks.invoke.mockImplementation((command: string) => {
+      if (command === 'pick_json_file') {
+        return Promise.resolve({
+          path: 'content://downloads/document/eventlog.json',
+          content: JSON.stringify({
+            version: 1,
+            events: [
+              { id: 'evt-2', timestamp: 1700000000001, content: 'hello', tags: ['note'] },
+            ],
+          }),
+        });
+      }
+      return Promise.resolve(null);
+    });
+    mocks.importEventsFromJson.mockResolvedValue({ imported: 1, skipped: 0, total: 2 });
+
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByRole('button', { name: '导入 JSON' }));
+
+    await waitFor(() => {
+      expect(mocks.invoke).toHaveBeenCalledWith('pick_json_file');
+    });
+
+    expect(mocks.importEventsFromJson).toHaveBeenCalledWith(
+      expect.stringContaining('"version":1'),
+      'merge',
+    );
+    expect(screen.getByRole('status').textContent).toContain('导入成功：新增 1 条');
+  });
 });

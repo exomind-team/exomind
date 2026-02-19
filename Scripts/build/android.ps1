@@ -128,6 +128,10 @@ Write-Host "  This may take 3-5 minutes..." -ForegroundColor Gray
 $buildType = if ($Release) { "release" } else { "debug" }
 Write-Host "  Build type: $buildType" -ForegroundColor Gray
 
+# Ensure generated Android res uses the latest app icon (确保使用最新 App 图标)
+Write-Host "  Syncing Android launcher icons..." -ForegroundColor DarkGray
+Sync-AndroidLauncherIcons -ProjectRoot $Global:EMConfig.ProjectRoot
+
 if ($Release) {
     bun run tauri android build --apk | Out-Null
 } else {
