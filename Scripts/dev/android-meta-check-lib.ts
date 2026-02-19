@@ -9,6 +9,7 @@ export interface ArtifactSizeSummary {
   sizeBytes: number;
   sizeMB: number;
   universal: boolean;
+  debug: boolean;
 }
 
 export interface AndroidMetaCheckReport {
@@ -22,6 +23,8 @@ export interface AndroidMetaCheckReport {
 // 目标：安装包应稳定控制在 <100MB，常态建议接近 20MB。
 const SOFT_APK_SIZE_MB = 40;
 const HARD_APK_SIZE_MB = 100;
+const SOFT_DEBUG_APK_SIZE_MB = 180;
+const HARD_DEBUG_APK_SIZE_MB = 250;
 const SOFT_AAB_SIZE_MB = 60;
 const HARD_AAB_SIZE_MB = 100;
 
@@ -65,12 +68,16 @@ export function collectArtifactSizeSummary(
       const sizeBytes = sizeFn(filePath);
       const sizeMB = Number((sizeBytes / (1024 * 1024)).toFixed(2));
       const kind: ArtifactKind = filePath.endsWith('.apk') ? 'apk' : 'aab';
+      // Extract filename from path for debug detection (avoid false positives from directory names)
+      const fileName = filePath.split(/[\\/]/).pop() ?? '';
+      const debug = kind === 'apk' && (fileName.includes('-debug') || fileName.endsWith('-debug.apk'));
       return {
         kind,
         path: filePath,
         sizeBytes,
         sizeMB,
         universal: /universal/i.test(filePath),
+        debug,
       };
     });
 }
@@ -194,7 +201,14 @@ export function runAndroidMetaCheck(repoRoot = process.cwd()): AndroidMetaCheckR
   } else {
     for (const artifact of artifacts) {
       infos.push(`${artifact.kind.toUpperCase()} ${artifact.sizeMB}MB - ${relative(repoRoot, artifact.path)}`);
-      if (artifact.kind === 'apk' && artifact.sizeMB > HARD_APK_SIZE_MB) {
+      if (artifact.kind === 'apk' && artifact.debug) {
+        // Debug APK includes symbols and diagnostics（Debug 包含符号与诊断信息，体积会明显更大）
+        if (artifact.sizeMB > HARD_DEBUG_APK_SIZE_MB) {
+          errors.push(`Debug APK 体积过大（>${HARD_DEBUG_APK_SIZE_MB}MB）：${relative(repoRoot, artifact.path)}`);
+        } else if (artifact.sizeMB > SOFT_DEBUG_APK_SIZE_MB) {
+          warnings.push(`Debug APK 体积偏大（>${SOFT_DEBUG_APK_SIZE_MB}MB）：${relative(repoRoot, artifact.path)}`);
+        }
+      } else if (artifact.kind === 'apk' && artifact.sizeMB > HARD_APK_SIZE_MB) {
         errors.push(`APK 体积过大（>${HARD_APK_SIZE_MB}MB）：${relative(repoRoot, artifact.path)}`);
       } else if (artifact.kind === 'apk' && artifact.sizeMB > SOFT_APK_SIZE_MB) {
         warnings.push(`APK 体积偏大（>${SOFT_APK_SIZE_MB}MB）：${relative(repoRoot, artifact.path)}`);

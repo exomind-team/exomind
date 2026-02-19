@@ -42,7 +42,34 @@ describe('android-meta-check-lib', () => {
     });
 
     expect(summary).toHaveLength(2);
-    expect(summary[0]).toMatchObject({ kind: 'apk' });
-    expect(summary[1]).toMatchObject({ kind: 'aab' });
+    expect(summary[0]).toMatchObject({ kind: 'apk', debug: true });
+    expect(summary[1]).toMatchObject({ kind: 'aab', debug: false });
+  });
+
+  it('does not误判 release APK in debug directory as debug', () => {
+    // Path contains "debug" as a directory name, but the APK is a RELEASE build
+    const summary = collectArtifactSizeSummary([
+      'D:/home/debug/outputs/apk/release/app-release.apk',
+    ], () => 50 * 1024 * 1024);
+
+    expect(summary).toHaveLength(1);
+    // Should NOT be detected as debug because the filename is "app-release.apk"
+    expect(summary[0].debug).toBe(false);
+  });
+
+  it('correctly detects debug APK by filename pattern', () => {
+    const summary = collectArtifactSizeSummary([
+      'D:/repo/outputs/apk/debug/app-debug.apk',
+      'D:/repo/outputs/apk/release/app-release.apk',
+      'D:/repo/outputs/apk/universal/app-universal.apk',
+    ], () => 50 * 1024 * 1024);
+
+    expect(summary).toHaveLength(3);
+    // app-debug.apk should be detected as debug
+    expect(summary[0].debug).toBe(true);
+    // app-release.apk should NOT be detected as debug
+    expect(summary[1].debug).toBe(false);
+    // app-universal.apk should NOT be detected as debug (no -debug suffix)
+    expect(summary[2].debug).toBe(false);
   });
 });

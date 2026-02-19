@@ -199,9 +199,13 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       return true;
     } catch (error) {
       const errorName = (error as DOMException).name;
+      // Android runtime guidance（Android 端引导文案）
+      const permissionGuide = /Android/i.test(navigator.userAgent)
+        ? '请在系统设置 > 应用 > ExoMind > 权限中允许麦克风访问'
+        : '请在浏览器设置中允许麦克风访问';
       if (errorName === 'NotAllowedError' || errorName === 'PermissionDeniedError') {
         setPermissionState('denied');
-        callbacksRef.current.onError?.('麦克风权限被拒绝\n提示: 请在浏览器设置中允许麦克风访问');
+        callbacksRef.current.onError?.(`麦克风权限被拒绝\n提示: ${permissionGuide}`);
       } else if (errorName === 'NotFoundError' || errorName === 'DevicesNotFoundError') {
         setPermissionState('denied');
         callbacksRef.current.onError?.('未检测到麦克风设备\n提示: 请确保电脑已连接麦克风');

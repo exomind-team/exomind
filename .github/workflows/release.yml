@@ -5,6 +5,17 @@ on:
     tags:
       - 'build/**'      # 构建触发：只构建，不发布
       - 'release/**'     # 发布触发：构建 + GitHub Release
+  workflow_dispatch:
+    inputs:
+      build_scope:
+        description: Build scope（构建范围）
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - android
+          - windows
 
 permissions:
   contents: write
@@ -14,6 +25,8 @@ env:
 
 jobs:
   build-windows:
+    needs: build-android
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'windows') && (github.event.inputs.build_scope == 'windows' || needs.build-android.result == 'success') }}
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
@@ -44,9 +57,53 @@ jobs:
           Write-Host "Using Bun from: $($bunCmd.Source)"
           bun --version
 
+      - name: Rust diagnostics (Rust 诊断输出)
+        shell: powershell
+        run: |
+          Write-Host "=== Rust diagnostics / Rust 诊断输出 ==="
+          Write-Host "event_name=${{ github.event_name }}"
+          Write-Host "ref=${{ github.ref }}"
+          Write-Host "build_scope=${{ github.event.inputs.build_scope || 'n/a' }}"
+          Write-Host "runner=$env:RUNNER_NAME os=$env:RUNNER_OS arch=$env:RUNNER_ARCH"
+          Write-Host "whoami=$(whoami)"
+          Write-Host "USERPROFILE=$env:USERPROFILE"
+          Write-Host "HOME=$env:HOME"
+          Write-Host "CARGO_HOME=$env:CARGO_HOME"
+          Write-Host "RUSTUP_HOME=$env:RUSTUP_HOME"
+
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          Write-Host "cargoBin=$cargoBin exists=$(Test-Path $cargoBin)"
+
+          foreach ($name in @("rustup.exe", "rustc.exe", "cargo.exe", "rustup", "rustc", "cargo")) {
+            $candidate = Join-Path $cargoBin $name
+            Write-Host "candidate=$candidate exists=$(Test-Path $candidate)"
+          }
+
+          Write-Host "Get-Command (before prepend PATH):"
+          foreach ($cmd in @("rustup", "rustc", "cargo")) {
+            $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
+            if ($resolved) {
+              Write-Host " - $cmd => $($resolved.Source)"
+            } else {
+              Write-Host " - $cmd => NOT_FOUND"
+            }
+          }
+
       - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
         shell: powershell
         run: |
+          $preferredCargoHome = "D:\actions-runner\rust\cargo"
+          $preferredRustupHome = "D:\actions-runner\rust\rustup"
+          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
+          if (Test-Path $preferredCargoBin) {
+            $env:CARGO_HOME = $preferredCargoHome
+            $env:RUSTUP_HOME = $preferredRustupHome
+            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $env:Path = "$preferredCargoBin;$env:Path"
+            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
           $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
           if (Test-Path $cargoBin) {
             $env:Path = "$cargoBin;$env:Path"
@@ -76,15 +133,30 @@ jobs:
       - name: Get short commit hash
         id: hash
         shell: powershell
-        run: '"HASH=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_OUTPUT'
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install dependencies
         run: bun install
 
-      - name: Build Windows installers (构建 Windows 安装包)
-        run: bun tauri build --bundles 'nsis,msi'
+      - name: Build Windows NSIS installer (构建 Windows EXE/NSIS 安装包)
+        run: bun tauri build --bundles 'nsis'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Windows MSI installer (可选 MSI，失败不阻断)
+        id: build_msi
+        continue-on-error: true
+        run: bun tauri build --bundles 'msi'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Warn MSI optional failure (提示 MSI 可选失败)
+        if: ${{ steps.build_msi.outcome != 'success' }}
+        shell: powershell
+        run: |
+          Write-Warning "MSI bundling failed but job continues. Common cause: VBSCRIPT optional feature disabled on self-hosted Windows."
 
       - name: Upload Windows EXE Artifact (上传 EXE)
         uses: actions/upload-artifact@v4
@@ -97,8 +169,10 @@ jobs:
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
           path: src-tauri/target/release/bundle/msi/
+          if-no-files-found: ignore
 
   build-android:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'android' }}
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
@@ -132,6 +206,18 @@ jobs:
       - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
         shell: powershell
         run: |
+          $preferredCargoHome = "D:\actions-runner\rust\cargo"
+          $preferredRustupHome = "D:\actions-runner\rust\rustup"
+          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
+          if (Test-Path $preferredCargoBin) {
+            $env:CARGO_HOME = $preferredCargoHome
+            $env:RUSTUP_HOME = $preferredRustupHome
+            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $env:Path = "$preferredCargoBin;$env:Path"
+            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
           $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
           if (Test-Path $cargoBin) {
             $env:Path = "$cargoBin;$env:Path"
@@ -161,23 +247,31 @@ jobs:
       - name: Configure local Android toolchain (配置本地 Android 工具链)
         shell: powershell
         run: |
-          if (-not $env:JAVA_HOME) {
-            $javaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
-            if (-not (Test-Path $javaHome)) {
-              throw "JAVA_HOME is not set and default path not found: $javaHome"
+          $defaultJavaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
+          $javaHome = $env:JAVA_HOME
+          if (-not $javaHome -or -not (Test-Path $javaHome)) {
+            if (-not (Test-Path $defaultJavaHome)) {
+              throw "JAVA_HOME is invalid and default path not found: $defaultJavaHome"
             }
-            "JAVA_HOME=$javaHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $javaHome = $defaultJavaHome
+          }
+          "JAVA_HOME=$javaHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $javaBin = Join-Path $javaHome "bin"
+          if (Test-Path $javaBin) {
+            "$javaBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           }
 
-          if (-not $env:ANDROID_SDK_ROOT) {
-            $androidSdkRoot = "D:\data\AndroidSDK"
-            if (-not (Test-Path $androidSdkRoot)) {
-              throw "ANDROID_SDK_ROOT is not set and default path not found: $androidSdkRoot"
+          $defaultAndroidSdkRoot = "D:\data\AndroidSDK"
+          $androidSdkRoot = $env:ANDROID_SDK_ROOT
+          if (-not $androidSdkRoot -or -not (Test-Path $androidSdkRoot)) {
+            if (-not (Test-Path $defaultAndroidSdkRoot)) {
+              throw "ANDROID_SDK_ROOT is invalid and default path not found: $defaultAndroidSdkRoot"
             }
-            "ANDROID_SDK_ROOT=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $androidSdkRoot = $defaultAndroidSdkRoot
+          }
+          "ANDROID_SDK_ROOT=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if (-not $env:ANDROID_HOME -or -not (Test-Path $env:ANDROID_HOME)) {
             "ANDROID_HOME=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          } elseif (-not $env:ANDROID_HOME) {
-            "ANDROID_HOME=$env:ANDROID_SDK_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
 
       - name: Validate Android signing secrets early (提前校验 Android 签名密钥)
@@ -201,7 +295,9 @@ jobs:
       - name: Get short commit hash
         id: hash
         shell: powershell
-        run: '"HASH=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_OUTPUT'
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install dependencies
         run: bun install
@@ -211,12 +307,33 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
+      - name: Patch Android Manifest RECORD_AUDIO permission（注入录音权限）
+        shell: powershell
+        run: |
+          bun Scripts/dev/android-manifest-permission.ts
+
+      - name: Verify RECORD_AUDIO permission persisted（校验录音权限已持久化）
+        shell: powershell
+        run: |
+          $manifestPath = "src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          if (-not (Test-Path $manifestPath)) {
+            throw "Manifest not found: $manifestPath"
+          }
+          if (-not (Select-String -Path $manifestPath -Pattern "android.permission.RECORD_AUDIO" -SimpleMatch -Quiet)) {
+            throw "Missing android.permission.RECORD_AUDIO in AndroidManifest.xml"
+          }
+          Write-Host "RECORD_AUDIO permission verified."
+
       - name: Build Android APK only (仅构建 APK，aarch64 + i686)
         run: bun tauri android build --ci --apk --split-per-abi -t aarch64 i686
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HTTP_PROXY: http://127.0.0.1:7890
+          HTTPS_PROXY: http://127.0.0.1:7890
+          ALL_PROXY: http://127.0.0.1:7890
+          NO_PROXY: localhost,127.0.0.1
           # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)
-          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false
+          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890
 
       - name: Validate Android app name/icon/artifact size (门禁校验)
         run: bun run check:android:meta
