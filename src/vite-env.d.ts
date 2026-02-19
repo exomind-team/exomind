@@ -4,6 +4,11 @@
 declare module 'remark-obsidian';
 declare module 'rehype-katex';
 
+interface ImportMetaEnv {
+  readonly VITE_APP_VERSION?: string; // App Version（应用版本）
+  readonly VITE_BUILD_HASH?: string; // Build Hash（构建哈希）
+}
+
 interface Window {
   __TAURI__: {
     [key: string]: unknown;

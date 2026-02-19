@@ -10,6 +10,7 @@ import {
   resolveSyncServerUrl,
   setSyncServerUrlOverride,
 } from '@/config/port-env';
+import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import {
   getThemePreference,
   setThemePreference,
@@ -25,6 +26,7 @@ function buildBackupFileName(): string {
 
 export function SettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
+  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.2.1');
   const autoSyncServerUrl = resolveSyncServerUrl(envMap, {
     syncServerOverride: null,
   });
@@ -168,6 +170,14 @@ export function SettingsPage() {
       <p className="text-muted-foreground">
         配置局域网同步地址与事件日志导入导出
       </p>
+      <div className="space-y-1 max-w-sm text-sm">
+        <p>
+          <span className="font-medium">App Version（应用版本）:</span> {versionBuildInfo.appVersion}
+        </p>
+        <p>
+          <span className="font-medium">Build Hash（构建哈希）:</span> {versionBuildInfo.buildHash}
+        </p>
+      </div>
 
       <div className="space-y-2 max-w-sm">
         <Label htmlFor="theme-preference">主题</Label>
