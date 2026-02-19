@@ -1,8 +1,8 @@
 # ExoMind 构建指南
 
 > ExoMind 项目构建和 CI/CD 流程说明
-> 版本: v1.0
-> 更新日期: 2026-02-04
+> 版本: v1.1
+> 更新日期: 2026-02-18
 
 ---
 
@@ -144,7 +144,7 @@ $env:ANDROID_SDK_ROOT = "D:\Android\Sdk"
 | Tag 模式 | 触发 | 产出 |
 |----------|------|------|
 | `build/**` | 推送到 build tag | 构建产物 (Artifact) |
-| `release/**` | 推送 release tag | 构建产物 + GitHub Release |
+| `release/**` | 推送 release tag | 构建产物 + GitHub Release（支持 preview 预发布） |
 
 #### Tag 命名规范
 
@@ -154,11 +154,15 @@ build/v{主}.{次}.{修订}-{commit_hash}
 
 # 发布 Tag（构建 + Release）
 release/v{主}.{次}.{修订}
+
+# 预览发布 Tag（构建 + Pre-Release）
+release/v{主}.{次}.{修订}-preview
 ```
 
 示例：
-- `build/v0.1.0-alpha-eef7afc` - v0.1.0 开发构建（commit: eef7afc）
-- `release/v0.1.0` - v0.1.0 正式发布
+- `build/v0.2.0-alpha-eef7afc` - v0.2.0 开发构建（commit: eef7afc）
+- `release/v0.2.0` - v0.2.0 正式发布
+- `release/v0.2.0-preview` - v0.2.0 预览发布（GitHub Pre-release）
 
 #### 触发构建
 
@@ -169,23 +173,66 @@ git commit -m "feat: 新功能"
 git push origin feature/xxx
 
 # 2. 创建并推送 build tag
-git tag build/v0.1.0-alpha-$(git rev-parse --short=7 HEAD)
-git push origin build/v0.1.0-alpha-xxxxxxx
+git tag build/v0.2.0-alpha-$(git rev-parse --short=7 HEAD)
+git push origin build/v0.2.0-alpha-xxxxxxx
 
 # 3. 等待构建完成，下载 Artifacts
 # 查看构建状态: https://github.com/exomind-team/exomind/actions
 
 # 4. 如需正式发布，创建 release tag
-git tag release/v0.1.0
-git push origin release/v0.1.0
+git tag release/v0.2.0
+git push origin release/v0.2.0
+
+# 5. 如需预览发布，创建 preview tag
+git tag release/v0.2.0-preview
+git push origin release/v0.2.0-preview
 ```
+
+#### Android 签名 Secrets（GitHub Actions）
+
+在仓库 `Settings -> Secrets and variables -> Actions` 配置以下 secrets。
+说明：`build/**` 与 `release/**` 两类 tag 流程都会执行 Android 签名步骤，因此都要求这些 secrets 已配置。
+
+| Secret 名称 | 说明 |
+|------------|------|
+| `ANDROID_KEYSTORE_BASE64` | JKS 文件完整二进制内容的 Base64（单行文本） |
+| `ANDROID_KEYSTORE_PASSWORD` | keystore 密码 |
+| `ANDROID_KEY_ALIAS` | 密钥别名（alias） |
+| `ANDROID_KEY_PASSWORD` | key 密码 |
+
+推荐使用仓库脚本生成并校验（Windows PowerShell）：
+
+```powershell
+.\Scripts\dev\android-signing-secrets.ps1 `
+  -KeystorePath "D:\sign\exomind-release.jks" `
+  -StorePassword "your-store-password" `
+  -KeyAlias "your-alias" `
+  -KeyPassword "your-key-password"
+```
+
+如需脚本直接写入 GitHub Secrets（需已登录 `gh auth login`）：
+
+```powershell
+.\Scripts\dev\android-signing-secrets.ps1 `
+  -KeystorePath "D:\sign\exomind-release.jks" `
+  -StorePassword "your-store-password" `
+  -KeyAlias "your-alias" `
+  -KeyPassword "your-key-password" `
+  -SetGhSecrets `
+  -Repo "exomind-team/exomind"
+```
+
+> 注意：workflow 已在 Android 构建早期增加签名 secrets 预检，缺任何一个都会立即失败并提示具体 secret 名称。
 
 #### 构建产物
 
 | 平台 | Job | 产物 | Artifact 名称 |
 |------|-----|------|---------------|
 | Windows | build-windows | MSI 安装包 | `windows-msi-<hash>` |
-| Android | build-android | Debug APK | `android-apk-<hash>` |
+| Windows | build-windows | EXE 安装包（NSIS） | `windows-exe-<hash>` |
+| Android | build-android | 已签名 APK（build/release, split ABI） | `android-apk-signed-<hash>` |
+
+> Android APK 默认输出 `aarch64 (arm64-v8a)` 与 `x86 (i686)` 两个 ABI，可直接侧载安装。
 
 #### 下载构建产物
 

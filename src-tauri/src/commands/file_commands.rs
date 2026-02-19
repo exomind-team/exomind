@@ -5,7 +5,8 @@ use serde::Deserialize;
 use std::fs;
 use std::path::PathBuf;
 use tauri::{ipc::InvokeError, AppHandle, Manager};
-use tauri_plugin_dialog::DialogExt;
+use tauri_plugin_dialog::{DialogExt, FilePath};
+use tauri_plugin_fs::{FsExt, OpenOptions};
 use thiserror::Error;
 
 /// 文件操作错误类型
@@ -358,6 +359,36 @@ fn build_markdown_document(
     Ok(md_content)
 }
 
+fn persist_export_content_for_selected_file<PW, UW>(
+    selected: FilePath,
+    content: &[u8],
+    path_writer: PW,
+    uri_writer: UW,
+) -> FileResult<String>
+where
+    PW: FnOnce(&std::path::Path, &[u8]) -> std::io::Result<()>,
+    UW: FnOnce(&FilePath, &[u8]) -> std::io::Result<()>,
+{
+    match selected {
+        FilePath::Path(path) => {
+            path_writer(&path, content).map_err(|e| FileError::IoError {
+                message: format!("写入导出文件失败: {}", e),
+                source: e,
+            })?;
+
+            Ok(path.to_string_lossy().to_string())
+        }
+        uri_like => {
+            let display = uri_like.to_string();
+            uri_writer(&uri_like, content).map_err(|e| FileError::IoError {
+                message: format!("写入导出文件失败: {}", e),
+                source: e,
+            })?;
+            Ok(display)
+        }
+    }
+}
+
 /// 导出所有消息到 Markdown 文件
 /// 格式化消息为标准 Markdown 格式
 #[tauri::command]
@@ -405,24 +436,29 @@ pub fn save_json_file(
         return Ok(None);
     };
 
-    let Some(path) = file_path.as_path() else {
-        return Err(FileError::InvalidPath {
-            path: "系统返回了无效的保存路径".to_string(),
-        });
-    };
+    let saved = persist_export_content_for_selected_file(
+        file_path,
+        content.as_bytes(),
+        |path, bytes| fs::write(path, bytes),
+        |uri_like, bytes| {
+            let mut options = OpenOptions::new();
+            options.write(true).create(true).truncate(true);
 
-    fs::write(path, content).map_err(|e| FileError::IoError {
-        message: format!("写入导出文件失败: {}", e),
-        source: e,
-    })?;
+            let mut file = app.fs().open(uri_like.clone(), options)?;
+            use std::io::Write;
+            file.write_all(bytes)?;
+            Ok(())
+        },
+    )?;
 
-    Ok(Some(path.to_string_lossy().to_string()))
+    Ok(Some(saved))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use chrono::TimeZone;
+    use std::path::PathBuf;
 
     #[test]
     fn builds_markdown_from_structured_json_and_counts_exactly() {
@@ -469,5 +505,59 @@ mod tests {
         let text = format!("{}", err);
 
         assert!(text.contains("JSON"));
+    }
+
+    #[test]
+    fn persists_export_content_to_regular_path() {
+        let selected = tauri_plugin_dialog::FilePath::Path(PathBuf::from("C:\\temp\\export.json"));
+        let mut wrote_path = false;
+
+        let saved = persist_export_content_for_selected_file(
+            selected,
+            b"{\"ok\":true}",
+            |path, content| {
+                wrote_path = true;
+                assert_eq!(path, PathBuf::from("C:\\temp\\export.json").as_path());
+                assert_eq!(content, b"{\"ok\":true}");
+                Ok(())
+            },
+            |_selected, _content| {
+                panic!("url writer should not be called for regular path");
+            },
+        )
+        .expect("path variant should be persisted");
+
+        assert!(wrote_path);
+        assert_eq!(saved, "C:\\temp\\export.json");
+    }
+
+    #[test]
+    fn persists_export_content_to_android_content_uri() {
+        let selected = tauri_plugin_dialog::FilePath::Url(
+            url::Url::parse("content://com.android.providers.downloads/doc/42")
+                .expect("valid content uri"),
+        );
+        let mut wrote_url = false;
+
+        let saved = persist_export_content_for_selected_file(
+            selected,
+            b"{\"ok\":true}",
+            |_path, _content| {
+                panic!("path writer should not be called for URI");
+            },
+            |uri, content| {
+                wrote_url = true;
+                assert_eq!(
+                    uri.to_string(),
+                    "content://com.android.providers.downloads/doc/42"
+                );
+                assert_eq!(content, b"{\"ok\":true}");
+                Ok(())
+            },
+        )
+        .expect("url variant should be persisted");
+
+        assert!(wrote_url);
+        assert_eq!(saved, "content://com.android.providers.downloads/doc/42");
     }
 }
