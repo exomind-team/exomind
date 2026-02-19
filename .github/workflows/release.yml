@@ -137,6 +137,35 @@ jobs:
           $short = $env:GITHUB_SHA.Substring(0, 7)
           "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Resolve app version (解析应用版本)
+        id: app_version
+        shell: powershell
+        run: |
+          $refName = "${{ github.ref_name }}"
+          $appVersion = ""
+
+          if ($refName.StartsWith("release/")) {
+            $appVersion = $refName.Substring("release/".Length)
+          } elseif ($refName.StartsWith("build/")) {
+            $appVersion = $refName.Substring("build/".Length)
+          }
+
+          if (-not $appVersion) {
+            $packageVersion = (Get-Content -Path "package.json" -Raw | ConvertFrom-Json).version
+            $appVersion = [string]$packageVersion
+          }
+
+          if ($appVersion.StartsWith("v")) {
+            $appVersion = $appVersion.Substring(1)
+          }
+
+          if (-not $appVersion) {
+            throw "Cannot resolve app version from tag or package.json."
+          }
+
+          "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Resolved app version: $appVersion"
+
       - name: Install dependencies
         run: bun install
 
@@ -144,6 +173,8 @@ jobs:
         run: bun tauri build --bundles 'nsis'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
       - name: Build Windows MSI installer (可选 MSI，失败不阻断)
         id: build_msi
@@ -151,6 +182,8 @@ jobs:
         run: bun tauri build --bundles 'msi'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
       - name: Warn MSI optional failure (提示 MSI 可选失败)
         if: ${{ steps.build_msi.outcome != 'success' }}
@@ -299,6 +332,35 @@ jobs:
           $short = $env:GITHUB_SHA.Substring(0, 7)
           "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
+      - name: Resolve app version (解析应用版本)
+        id: app_version
+        shell: powershell
+        run: |
+          $refName = "${{ github.ref_name }}"
+          $appVersion = ""
+
+          if ($refName.StartsWith("release/")) {
+            $appVersion = $refName.Substring("release/".Length)
+          } elseif ($refName.StartsWith("build/")) {
+            $appVersion = $refName.Substring("build/".Length)
+          }
+
+          if (-not $appVersion) {
+            $packageVersion = (Get-Content -Path "package.json" -Raw | ConvertFrom-Json).version
+            $appVersion = [string]$packageVersion
+          }
+
+          if ($appVersion.StartsWith("v")) {
+            $appVersion = $appVersion.Substring(1)
+          }
+
+          if (-not $appVersion) {
+            throw "Cannot resolve app version from tag or package.json."
+          }
+
+          "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Resolved app version: $appVersion"
+
       - name: Install dependencies
         run: bun install
 
@@ -328,6 +390,8 @@ jobs:
         run: bun tauri android build --ci --apk --split-per-abi -t aarch64 i686
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
           HTTP_PROXY: http://127.0.0.1:7890
           HTTPS_PROXY: http://127.0.0.1:7890
           ALL_PROXY: http://127.0.0.1:7890
@@ -450,18 +514,90 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#release/}"
-          if [[ "$version" =~ (preview|alpha|beta|rc) ]]; then
+          short_hash="${GITHUB_SHA::7}"
+          lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
+          channel=""
+          if [[ "$lower_version" == *"-alpha."* ]]; then
+            channel="Alpha"
+          elif [[ "$lower_version" == *"-beta."* ]]; then
+            channel="Beta"
+          elif [[ "$lower_version" == *"-rc."* ]]; then
+            channel="RC"
+          elif [[ "$lower_version" == *"-preview."* ]]; then
+            channel="Preview"
+          fi
+
+          if [[ -n "$channel" ]]; then
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "title=Preview $version" >> "$GITHUB_OUTPUT"
+            echo "title=$channel $version" >> "$GITHUB_OUTPUT"
           else
             echo "prerelease=false" >> "$GITHUB_OUTPUT"
             echo "title=Release $version" >> "$GITHUB_OUTPUT"
           fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
+
+      - name: Normalize release artifact names (统一发布产物命名)
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+
+          version="${{ steps.meta.outputs.version }}"
+          short_hash="${{ steps.meta.outputs.short_hash }}"
+          source_dir="release-files"
+          output_dir="release-assets"
+          mkdir -p "$output_dir"
+
+          exe_files=("$source_dir"/**/*.exe)
+          if (( ${#exe_files[@]} == 0 )); then
+            echo "::error::Missing Windows EXE artifact."
+            exit 1
+          fi
+          cp "${exe_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
+
+          msi_files=("$source_dir"/**/*.msi)
+          if (( ${#msi_files[@]} > 0 )); then
+            cp "${msi_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-installer.msi"
+          fi
+
+          apk_files=("$source_dir"/**/*signed.apk)
+          if (( ${#apk_files[@]} == 0 )); then
+            apk_files=("$source_dir"/**/*.apk)
+          fi
+
+          arm64_apk=""
+          x86_apk=""
+          for apk in "${apk_files[@]}"; do
+            file_name="$(basename "$apk" | tr '[:upper:]' '[:lower:]')"
+            if [[ -z "$arm64_apk" && ( "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"arm64-v8a"* ) ]]; then
+              arm64_apk="$apk"
+              continue
+            fi
+            if [[ -z "$x86_apk" && ( "$file_name" == *"i686"* || "$file_name" == *"x86"* ) && "$file_name" != *"x86_64"* ]]; then
+              x86_apk="$apk"
+            fi
+          done
+
+          if [[ -z "$arm64_apk" ]]; then
+            echo "::error::Missing Android arm64 APK artifact."
+            exit 1
+          fi
+          if [[ -z "$x86_apk" ]]; then
+            echo "::error::Missing Android x86 APK artifact."
+            exit 1
+          fi
+
+          cp "$arm64_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-arm64.apk"
+          cp "$x86_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-x86.apk"
+
+      - name: List Normalized Files
+        run: ls -la release-assets/
 
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          files: release-files/**
+          files: release-assets/**
           # 从 tag 名称提取版本号 (去掉 release/ 前缀)
           tag_name: ${{ github.ref_name }}
           name: ${{ steps.meta.outputs.title }}
