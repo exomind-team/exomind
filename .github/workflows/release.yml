@@ -247,23 +247,31 @@ jobs:
       - name: Configure local Android toolchain (配置本地 Android 工具链)
         shell: powershell
         run: |
-          if (-not $env:JAVA_HOME) {
-            $javaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
-            if (-not (Test-Path $javaHome)) {
-              throw "JAVA_HOME is not set and default path not found: $javaHome"
+          $defaultJavaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
+          $javaHome = $env:JAVA_HOME
+          if (-not $javaHome -or -not (Test-Path $javaHome)) {
+            if (-not (Test-Path $defaultJavaHome)) {
+              throw "JAVA_HOME is invalid and default path not found: $defaultJavaHome"
             }
-            "JAVA_HOME=$javaHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $javaHome = $defaultJavaHome
+          }
+          "JAVA_HOME=$javaHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $javaBin = Join-Path $javaHome "bin"
+          if (Test-Path $javaBin) {
+            "$javaBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
           }
 
-          if (-not $env:ANDROID_SDK_ROOT) {
-            $androidSdkRoot = "D:\data\AndroidSDK"
-            if (-not (Test-Path $androidSdkRoot)) {
-              throw "ANDROID_SDK_ROOT is not set and default path not found: $androidSdkRoot"
+          $defaultAndroidSdkRoot = "D:\data\AndroidSDK"
+          $androidSdkRoot = $env:ANDROID_SDK_ROOT
+          if (-not $androidSdkRoot -or -not (Test-Path $androidSdkRoot)) {
+            if (-not (Test-Path $defaultAndroidSdkRoot)) {
+              throw "ANDROID_SDK_ROOT is invalid and default path not found: $defaultAndroidSdkRoot"
             }
-            "ANDROID_SDK_ROOT=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $androidSdkRoot = $defaultAndroidSdkRoot
+          }
+          "ANDROID_SDK_ROOT=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if (-not $env:ANDROID_HOME -or -not (Test-Path $env:ANDROID_HOME)) {
             "ANDROID_HOME=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
-          } elseif (-not $env:ANDROID_HOME) {
-            "ANDROID_HOME=$env:ANDROID_SDK_ROOT" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
           }
 
       - name: Validate Android signing secrets early (提前校验 Android 签名密钥)
