@@ -140,10 +140,23 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build Windows installers (构建 Windows 安装包)
-        run: bun tauri build --bundles 'nsis,msi'
+      - name: Build Windows NSIS installer (构建 Windows EXE/NSIS 安装包)
+        run: bun tauri build --bundles 'nsis'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Build Windows MSI installer (可选 MSI，失败不阻断)
+        id: build_msi
+        continue-on-error: true
+        run: bun tauri build --bundles 'msi'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Warn MSI optional failure (提示 MSI 可选失败)
+        if: ${{ steps.build_msi.outcome != 'success' }}
+        shell: powershell
+        run: |
+          Write-Warning "MSI bundling failed but job continues. Common cause: VBSCRIPT optional feature disabled on self-hosted Windows."
 
       - name: Upload Windows EXE Artifact (上传 EXE)
         uses: actions/upload-artifact@v4
@@ -156,6 +169,7 @@ jobs:
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
           path: src-tauri/target/release/bundle/msi/
+          if-no-files-found: ignore
 
   build-android:
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'android' }}
