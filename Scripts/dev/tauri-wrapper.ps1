@@ -134,7 +134,7 @@ function Ensure-AndroidReleaseCleartextTraffic {
   $updated = [regex]::Replace(
     $content,
     'getByName\("release"\)\s*\{',
-    "getByName(`"release`") {`r`n            # LAN debug first（局域网调试优先）: allow HTTP sync in release for now`r`n            $targetLine",
+    "getByName(`"release`") {`r`n            // LAN debug first（局域网调试优先）: allow HTTP sync in release for now`r`n            $targetLine",
     1
   )
 
