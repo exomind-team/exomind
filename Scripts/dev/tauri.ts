@@ -50,7 +50,12 @@ function main(): never {
   }
 
   const tauriExecutable = resolveTauriExecutable({ projectRoot: process.cwd() });
-  const run = spawnSync(tauriExecutable, tauriArgs, { stdio: 'inherit' });
+  const needsShellOnWindows =
+    process.platform === 'win32' && tauriExecutable.toLowerCase().endsWith('.cmd');
+  const run = spawnSync(tauriExecutable, tauriArgs, {
+    stdio: 'inherit',
+    shell: needsShellOnWindows,
+  });
 
   if (run.error) {
     throw run.error;
