@@ -19,41 +19,35 @@ export function ensureRecordAudioPermissionInManifest(manifestXml: string): Mani
   }
 
   const newline = manifestXml.includes('\r\n') ? '\r\n' : '\n';
-  const lines = manifestXml.split(/\r?\n/);
   const permissionLine = `    <uses-permission android:name="${RECORD_AUDIO_PERMISSION}" />`;
 
-  // Find the complete INTERNET permission block:
-  // 1. First find the line with INTERNET
-  // 2. Then find the closing tag (/> or </uses-permission>) in the same line or subsequent lines
-  let internetPermissionEndLine = -1;
-  for (let i = 0; i < lines.length; i++) {
-    if (lines[i].includes('android.permission.INTERNET')) {
-      // Found the line with INTERNET, now find where the permission closes
-      for (let j = i; j < lines.length; j++) {
-        if (lines[j].includes('/>') || lines[j].includes('</uses-permission>')) {
-          internetPermissionEndLine = j;
-          break;
-        }
-      }
-      break;
-    }
+  // Match the complete INTERNET permission element (single-line or multi-line).
+  const internetPermissionPattern =
+    /<uses-permission\b[\s\S]*?android:name\s*=\s*["']android\.permission\.INTERNET["'][\s\S]*?(?:\/>|<\/uses-permission>)/;
+  const internetMatch = manifestXml.match(internetPermissionPattern);
+  if (internetMatch?.index !== undefined) {
+    const insertionPoint = internetMatch.index + internetMatch[0].length;
+    const afterInternet = manifestXml.slice(insertionPoint);
+    const hasLeadingNewline = afterInternet.startsWith('\n') || afterInternet.startsWith('\r\n');
+    const injected = `${newline}${permissionLine}${hasLeadingNewline ? '' : newline}`;
+    return {
+      manifestXml: `${manifestXml.slice(0, insertionPoint)}${injected}${afterInternet}`,
+      changed: true,
+    };
   }
 
-  if (internetPermissionEndLine >= 0) {
-    lines.splice(internetPermissionEndLine + 1, 0, permissionLine);
-    return { manifestXml: lines.join(newline), changed: true };
-  }
-
-  const manifestStartLine = lines.findIndex((line) => line.includes('<manifest'));
-  if (manifestStartLine >= 0) {
-    // Find opening <manifest> closing line（查找 manifest 起始标签的闭合行）
-    const manifestOpenTagEndLine = lines.findIndex(
-      (line, index) => index >= manifestStartLine && line.includes('>')
-    );
-    if (manifestOpenTagEndLine >= 0) {
-      lines.splice(manifestOpenTagEndLine + 1, 0, permissionLine);
-      return { manifestXml: lines.join(newline), changed: true };
-    }
+  // Fallback: insert right after <manifest ...> opening tag.
+  const manifestOpenTagPattern = /<manifest\b[\s\S]*?>/;
+  const manifestOpenTagMatch = manifestXml.match(manifestOpenTagPattern);
+  if (manifestOpenTagMatch?.index !== undefined) {
+    const insertionPoint = manifestOpenTagMatch.index + manifestOpenTagMatch[0].length;
+    const afterManifestOpenTag = manifestXml.slice(insertionPoint);
+    const hasLeadingNewline = afterManifestOpenTag.startsWith('\n') || afterManifestOpenTag.startsWith('\r\n');
+    const injected = `${hasLeadingNewline ? '' : newline}${permissionLine}${newline}`;
+    return {
+      manifestXml: `${manifestXml.slice(0, insertionPoint)}${injected}${afterManifestOpenTag}`,
+      changed: true,
+    };
   }
 
   return { manifestXml, changed: false };
