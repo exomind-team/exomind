@@ -16,6 +16,11 @@
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
+import {
+  createCompatibleMediaRecorder,
+  DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
+  getUserMediaWithConstraintFallback,
+} from '../lib/media/microphone-capture';
 
 // 按钮状态
 export type VoiceButtonState = 'idle' | 'recording' | 'recognizing' | 'completed';
@@ -98,6 +103,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   const streamRef = useRef<MediaStream | null>(null);
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
+  const recordedMimeTypeRef = useRef<string | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const startTimeRef = useRef<number>(0);
@@ -232,6 +238,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     analyserRef.current = null;
     mediaRecorderRef.current = null;
     recordedChunksRef.current = [];
+    recordedMimeTypeRef.current = null;
   }, []);
 
   // WebM 转 WAV（与 moss-test 页面相同）
@@ -326,28 +333,25 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
       // 3. 获取麦克风
       console.log('[VoiceInput] 获取麦克风...');
-      streamRef.current = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          channelCount: 1,
-        }
-      });
+      streamRef.current = await getUserMediaWithConstraintFallback(
+        (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+        { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS }
+      );
       startTimeRef.current = Date.now();
       console.log('[VoiceInput] 麦克风获取成功');
 
       // 4. 创建 MediaRecorder
-      const mimeType = 'audio/webm;codecs=opus';
-      const mediaRecorder = new MediaRecorder(streamRef.current, {
-        mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : 'audio/webm'
-      });
+      const { recorder: mediaRecorder, mimeType } = createCompatibleMediaRecorder(streamRef.current);
       mediaRecorderRef.current = mediaRecorder;
       recordedChunksRef.current = [];
+      recordedMimeTypeRef.current = mimeType;
 
       // 5. 设置数据收集回调
       mediaRecorder.ondataavailable = (event) => {
         if (event.data.size > 0) {
+          if (!recordedMimeTypeRef.current && event.data.type) {
+            recordedMimeTypeRef.current = event.data.type;
+          }
           recordedChunksRef.current.push(event.data);
           console.log('[VoiceInput] 收到音频数据:', event.data.size, 'bytes');
         }
@@ -422,8 +426,9 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     }
 
     // 获取录音 blob
-    const webmBlob = new Blob(recordedChunksRef.current, { type: 'audio/webm' });
-    console.log(`[VoiceInput] WebM 文件: ${(webmBlob.size / 1024).toFixed(2)} KB`);
+    const recordedMimeType = recordedMimeTypeRef.current || 'audio/webm';
+    const webmBlob = new Blob(recordedChunksRef.current, { type: recordedMimeType });
+    console.log(`[VoiceInput] 音频文件(${recordedMimeType}): ${(webmBlob.size / 1024).toFixed(2)} KB`);
 
     // 释放麦克风
     if (streamRef.current) {
