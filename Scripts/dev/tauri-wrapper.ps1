@@ -4,6 +4,25 @@ $TauriArgs = @($args)
 
 $ErrorActionPreference = "Stop"
 
+function Write-TextUtf8NoBom {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$Path,
+    [Parameter(Mandatory = $true)]
+    [string]$Content
+  )
+
+  # PowerShell 5.1 does not support UTF8NoBOM in Set-Content.
+  #（PowerShell 5.1 不支持 Set-Content 的 UTF8NoBOM）
+  if ($PSVersionTable.PSVersion.Major -ge 6) {
+    Set-Content -LiteralPath $Path -Value $Content -Encoding UTF8NoBOM
+    return
+  }
+
+  $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+  [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+}
+
 function Ensure-CargoFromRustup {
   # Guard: if cargo already available, keep existing behavior.
   #（若 PATH 已有 cargo，保持原行为）
@@ -120,7 +139,7 @@ function Ensure-AndroidReleaseCleartextTraffic {
   )
 
   if ($updated -ne $content) {
-    Set-Content -LiteralPath $BuildGradlePath -Value $updated -Encoding UTF8NoBOM
+    Write-TextUtf8NoBom -Path $BuildGradlePath -Content $updated
     Write-Host "[tauri-wrapper] Enabled release cleartext traffic in Android build.gradle.kts"
   }
 }
