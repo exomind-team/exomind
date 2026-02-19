@@ -1,7 +1,7 @@
 //! 文件操作命令
 //! 用于消息持久化存储 - 重构版（同步版本）
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::PathBuf;
 use tauri::{ipc::InvokeError, AppHandle, Manager};
@@ -389,6 +389,48 @@ where
     }
 }
 
+#[derive(Debug, Serialize)]
+pub struct PickedJsonFile {
+    // path（文件路径/URI）for user feedback（用于前端提示导入来源）
+    path: String,
+    // content（文件文本内容）in UTF-8（UTF-8 文本）
+    content: String,
+}
+
+fn read_import_content_from_selected_file<PR, UR>(
+    selected: FilePath,
+    path_reader: PR,
+    uri_reader: UR,
+) -> FileResult<PickedJsonFile>
+where
+    PR: FnOnce(&std::path::Path) -> std::io::Result<Vec<u8>>,
+    UR: FnOnce(&FilePath) -> std::io::Result<Vec<u8>>,
+{
+    let (display, bytes) = match selected {
+        FilePath::Path(path) => {
+            let bytes = path_reader(&path).map_err(|e| FileError::IoError {
+                message: format!("读取导入文件失败: {}", e),
+                source: e,
+            })?;
+            (path.to_string_lossy().to_string(), bytes)
+        }
+        uri_like => {
+            let display = uri_like.to_string();
+            let bytes = uri_reader(&uri_like).map_err(|e| FileError::IoError {
+                message: format!("读取导入文件失败: {}", e),
+                source: e,
+            })?;
+            (display, bytes)
+        }
+    };
+
+    let content = String::from_utf8(bytes).map_err(|e| FileError::Unknown {
+        message: format!("导入文件不是 UTF-8 文本: {}", e),
+    })?;
+
+    Ok(PickedJsonFile { path: display, content })
+}
+
 /// 导出所有消息到 Markdown 文件
 /// 格式化消息为标准 Markdown 格式
 #[tauri::command]
@@ -452,6 +494,37 @@ pub fn save_json_file(
     )?;
 
     Ok(Some(saved))
+}
+
+/// 从系统文件选择器选择 JSON 文件并读取内容
+#[tauri::command]
+pub fn pick_json_file(app: AppHandle) -> FileResult<Option<PickedJsonFile>> {
+    let selected = app
+        .dialog()
+        .file()
+        .add_filter("JSON", &["json"])
+        .blocking_pick_file();
+
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+
+    let picked = read_import_content_from_selected_file(
+        selected,
+        |path| fs::read(path),
+        |uri_like| {
+            let mut options = OpenOptions::new();
+            options.read(true);
+
+            let mut file = app.fs().open(uri_like.clone(), options)?;
+            let mut bytes = Vec::new();
+            use std::io::Read;
+            file.read_to_end(&mut bytes)?;
+            Ok(bytes)
+        },
+    )?;
+
+    Ok(Some(picked))
 }
 
 #[cfg(test)]
@@ -559,5 +632,57 @@ mod tests {
 
         assert!(wrote_url);
         assert_eq!(saved, "content://com.android.providers.downloads/doc/42");
+    }
+
+    #[test]
+    fn reads_import_content_from_regular_path() {
+        let selected = tauri_plugin_dialog::FilePath::Path(PathBuf::from("C:\\temp\\import.json"));
+        let mut read_path = false;
+
+        let picked = read_import_content_from_selected_file(
+            selected,
+            |path| {
+                read_path = true;
+                assert_eq!(path, PathBuf::from("C:\\temp\\import.json").as_path());
+                Ok(br#"{"version":1,"events":[]}"#.to_vec())
+            },
+            |_selected| {
+                panic!("uri reader should not be called for regular path");
+            },
+        )
+        .expect("path variant should be readable");
+
+        assert!(read_path);
+        assert_eq!(picked.path, "C:\\temp\\import.json");
+        assert!(picked.content.contains("\"version\":1"));
+    }
+
+    #[test]
+    fn reads_import_content_from_android_content_uri() {
+        let selected = tauri_plugin_dialog::FilePath::Url(
+            url::Url::parse("content://com.android.providers.downloads/doc/42")
+                .expect("valid content uri"),
+        );
+        let mut read_uri = false;
+
+        let picked = read_import_content_from_selected_file(
+            selected,
+            |_path| {
+                panic!("path reader should not be called for URI");
+            },
+            |uri| {
+                read_uri = true;
+                assert_eq!(
+                    uri.to_string(),
+                    "content://com.android.providers.downloads/doc/42"
+                );
+                Ok(br#"{"version":1,"events":[]}"#.to_vec())
+            },
+        )
+        .expect("url variant should be readable");
+
+        assert!(read_uri);
+        assert_eq!(picked.path, "content://com.android.providers.downloads/doc/42");
+        assert!(picked.content.contains("\"version\":1"));
     }
 }
