@@ -4,6 +4,48 @@ $TauriArgs = @($args)
 
 $ErrorActionPreference = "Stop"
 
+function Ensure-CargoFromRustup {
+  # Guard: if cargo already available, keep existing behavior.
+  #（若 PATH 已有 cargo，保持原行为）
+  if (Get-Command cargo -ErrorAction SilentlyContinue) {
+    return
+  }
+
+  $rustupCommand = Get-Command rustup -ErrorAction SilentlyContinue
+  if (-not $rustupCommand) {
+    return
+  }
+
+  $cargoPath = ""
+  try {
+    $cargoPath = (& $rustupCommand.Source which cargo 2>$null | Select-Object -First 1)
+  } catch {
+    return
+  }
+
+  if ([string]::IsNullOrWhiteSpace($cargoPath)) {
+    return
+  }
+
+  $cargoPath = $cargoPath.Trim()
+  if (-not (Test-Path -LiteralPath $cargoPath)) {
+    return
+  }
+
+  $cargoBinDir = Split-Path -Parent $cargoPath
+  if ([string]::IsNullOrWhiteSpace($cargoBinDir)) {
+    return
+  }
+
+  $pathEntries = @($env:PATH -split ';')
+  if ($pathEntries -contains $cargoBinDir) {
+    return
+  }
+
+  $env:PATH = "$cargoBinDir;$env:PATH"
+  Write-Host "[tauri-wrapper] Added cargo path from rustup: $cargoBinDir"
+}
+
 function Ensure-AndroidManifestPermissions {
   param(
     [Parameter(Mandatory = $true)]
@@ -58,6 +100,10 @@ $manifestPath = [System.IO.Path]::GetFullPath($manifestPath)
 
 # Patch before command for existing Android project (已有工程先补权限)
 Ensure-AndroidManifestPermissions -ManifestPath $manifestPath
+
+# Ensure cargo is resolvable even when rustup shim is partial.
+#（兼容仅安装 rustup、但 PATH 缺少 cargo 代理的环境）
+Ensure-CargoFromRustup
 
 # Run tauri CLI (执行 tauri 命令)
 if ($TauriArgs -and $TauriArgs.Count -gt 0) {
