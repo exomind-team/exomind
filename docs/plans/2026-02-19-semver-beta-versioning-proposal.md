@@ -74,15 +74,15 @@
 
 引入统一命名模板：
 
-- Windows EXE: `ExoMind-v<version>-<pre>-<hash>-x64-setup.exe`
-- Windows MSI（若启用）: `ExoMind-v<version>-<pre>-<hash>-x64-installer.msi`
+- Windows EXE: `ExoMind-v<version>-<pre>-<hash>-windows-x64-setup.exe`
+- Windows MSI（若启用）: `ExoMind-v<version>-<pre>-<hash>-windows-x64-installer.msi`
 - Android APK（arm64）: `ExoMind-v<version>-<pre>-<hash>-android-arm64.apk`
 - Android APK（x86）: `ExoMind-v<version>-<pre>-<hash>-android-x86.apk`
 
 示例：
 
-- `ExoMind-v0.2.1-beta.1-dbce231-x64-setup.exe`
-- `ExoMind-v0.2.1-beta.1-dbce231-x64-installer.msi`
+- `ExoMind-v0.2.1-beta.1-dbce231-windows-x64-setup.exe`
+- `ExoMind-v0.2.1-beta.1-dbce231-windows-x64-installer.msi`
 - `ExoMind-v0.2.1-beta.1-dbce231-android-arm64.apk`
 - `ExoMind-v0.2.1-beta.1-dbce231-android-x86.apk`
 
@@ -90,6 +90,7 @@
 
 - 该模板中的 `<pre>` 指 pre-release identifier（预发布标识），例如 `beta.1`。
 - 该模板中的 `<hash>` 指 git short hash（提交短哈希），例如 `dbce231`。
+- `windows` 前缀显式标注 OS（操作系统）维度，和 `android` 保持并列结构，可读性更高。
 
 ### 4.5 应用内版本展示（In-App Version Display / 应用内展示）
 
@@ -115,8 +116,9 @@
 
 1. `release/v0.2.1-beta.1`（发布标签）
 2. `Beta v0.2.1-beta.1`（发布标题）
-3. `ExoMind-v0.2.1-beta.1-dbce231-android-arm64.apk`（发布产物）
-4. `App Version: 0.2.1-beta.1` + `Build Hash: dbce231`（应用内展示）
+3. `ExoMind-v0.2.1-beta.1-dbce231-windows-x64-setup.exe`（发布产物，Windows）
+4. `ExoMind-v0.2.1-beta.1-dbce231-android-arm64.apk`（发布产物，Android）
+5. `App Version: 0.2.1-beta.1` + `Build Hash: dbce231`（应用内展示）
 
 ## 5. 实施边界（Scope / 范围）
 
