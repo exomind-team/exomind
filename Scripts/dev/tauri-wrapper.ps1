@@ -1,8 +1,6 @@
 # Ensure Android manifest microphone permissions (确保 Android 清单包含麦克风权限)
-param(
-  [Parameter(ValueFromRemainingArguments = $true)]
-  [string[]]$TauriArgs
-)
+# Use built-in $args for CI compatibility (使用内置 $args 以兼容 CI)
+$TauriArgs = @($args)
 
 $ErrorActionPreference = "Stop"
 
