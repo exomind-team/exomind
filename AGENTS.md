@@ -48,3 +48,12 @@
 4. 端到端测试优先使用 `tests/e2e/playwright.issue*.config.ts` 的独立端口配置，避免污染主开发端口。
 5. 完成后给出测试证据（命令 + 通过结果）并同步到 PR/Issue 评论。
 
+## 图标刷新命令
+
+- 全量刷新（推荐）：`bun run icon:all`
+  - 用途：以 `app_qwen_icon.png` 为母版图（source icon，源图）同步并生成 Tauri + Web 全部图标。
+- 分步命令（按需）：
+  - `bun run icon:sync-source`：同步源图到 `src-tauri/app-icon.png`
+  - `bun run icon:tauri`：生成 `src-tauri/icons/` 的桌面/移动图标资源
+  - `bun run icon:web`：生成 `public/icons/` 的 Web 图标（16/32/180/192/512）
+
