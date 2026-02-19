@@ -133,7 +133,9 @@ jobs:
       - name: Get short commit hash
         id: hash
         shell: powershell
-        run: '"HASH=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_OUTPUT'
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install dependencies
         run: bun install
@@ -271,7 +273,9 @@ jobs:
       - name: Get short commit hash
         id: hash
         shell: powershell
-        run: '"HASH=$(git rev-parse --short=7 HEAD)" >> $env:GITHUB_OUTPUT'
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
       - name: Install dependencies
         run: bun install
