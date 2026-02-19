@@ -18,6 +18,11 @@ import {
 } from '@/config/theme';
 
 type ImportStrategy = 'merge' | 'overwrite';
+// PickedJsonFile（已选 JSON 文件）: tauri native picker return payload（原生文件选择返回体）
+type PickedJsonFile = {
+  path: string;
+  content: string;
+};
 
 function buildBackupFileName(): string {
   const date = new Date().toISOString().slice(0, 10);
@@ -134,8 +139,35 @@ export function SettingsPage() {
     }
   };
 
-  const handleImportClick = () => {
-    fileInputRef.current?.click();
+  const handleImportClick = async () => {
+    clearNotice();
+
+    const isRunningInTauri = await isTauri();
+    if (!isRunningInTauri) {
+      fileInputRef.current?.click();
+      return;
+    }
+
+    setLoading(true);
+
+    try {
+      const picked = await invoke<PickedJsonFile | null>('pick_json_file');
+      if (!picked) {
+        setStatusMessage('已取消导入。');
+        return;
+      }
+
+      const service = getEventLogService();
+      const result = await service.importEventsFromJson(picked.content, importStrategy);
+      setStatusMessage(
+        `导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。来源：${picked.path}`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`导入失败：${message}`);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
