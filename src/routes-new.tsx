@@ -17,7 +17,7 @@ function NewLayout() {
   return (
     <div className="min-h-[100dvh] bg-[#ECE6E1] md:p-6">
       <div className="relative mx-auto h-[100dvh] w-full max-w-[393px] overflow-hidden bg-[#FAF7F5] md:h-[852px] md:rounded-[40px] md:border md:border-[#E6DFD8] md:shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]">
-        <main className="absolute inset-0 overflow-y-auto pb-[calc(env(safe-area-inset-bottom,0px)+98px)]">
+        <main className="absolute inset-x-0 top-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto">
           <Outlet />
         </main>
 
