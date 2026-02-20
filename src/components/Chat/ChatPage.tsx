@@ -36,7 +36,12 @@ const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 
-export function ChatPage() {
+interface ChatPageProps {
+  variant?: 'default' | 'new-mobile'; // new-mobile（新移动端外观）用于 v0.3.0 UI 重构
+  hideHeader?: boolean;
+}
+
+export function ChatPage({ variant = 'default', hideHeader = false }: ChatPageProps = {}) {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const [events, setEvents] = useState<Event[]>([]);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
@@ -329,24 +334,36 @@ export function ChatPage() {
     return groups;
   }, new Map<string, Event[]>());
 
+  const rootClassName =
+    variant === 'new-mobile'
+      ? 'flex h-full max-h-[100dvh] flex-col rounded-[24px] border border-[#F0ECE8] bg-[#FAF7F5] shadow-[0_12px_30px_-18px_rgba(0,0,0,0.25)]'
+      : 'flex flex-col h-full max-h-[100dvh] lg:max-h-screen';
+
+  const listClassName =
+    variant === 'new-mobile'
+      ? 'flex-1 overflow-auto p-4'
+      : 'flex-1 overflow-auto p-3 sm:p-6';
+
   return (
-    <div className="flex flex-col h-full max-h-[100dvh] lg:max-h-screen">
+    <div className={rootClassName}>
       {/* 头部 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg sm:text-2xl font-bold">事件日志</h2>
-          {/* 同步状态 */}
-          <Badge
-            variant={syncStatus === 'connected' ? 'default' : syncStatus === 'syncing' ? 'outline' : 'secondary'}
-            className="text-xs"
-          >
-            {syncStatus === 'connected' ? '已同步' : syncStatus === 'syncing' ? '同步中...' : '未同步'}
+      {!hideHeader && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg sm:text-2xl font-bold">事件日志</h2>
+            {/* 同步状态 */}
+            <Badge
+              variant={syncStatus === 'connected' ? 'default' : syncStatus === 'syncing' ? 'outline' : 'secondary'}
+              className="text-xs"
+            >
+              {syncStatus === 'connected' ? '已同步' : syncStatus === 'syncing' ? '同步中...' : '未同步'}
+            </Badge>
+          </div>
+          <Badge variant="secondary" className="text-xs">
+            {events.length}{hasMore ? '+' : ''} 条事件
           </Badge>
         </div>
-        <Badge variant="secondary" className="text-xs">
-          {events.length}{hasMore ? '+' : ''} 条事件
-        </Badge>
-      </div>
+      )}
 
       {/* TimeBlock 控件栏 */}
       <TimeBlockWidget ref={timeBlockWidgetRef} />
@@ -354,7 +371,7 @@ export function ChatPage() {
       {/* 事件列表 */}
       <div
         ref={listContainerRef}
-        className="flex-1 overflow-auto p-3 sm:p-6"
+        className={listClassName}
         data-testid="event-list"
         onScroll={handleListScroll}
       >
