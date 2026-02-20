@@ -6,14 +6,14 @@ describe('new focus layout issue-175 structure', () => {
   const focusPagePath = path.resolve('src/ui/new/pages/NewFocusPage.tsx');
   const source = readFileSync(focusPagePath, 'utf-8');
 
-  it('contains layered task card nodes for pencil-like glow and glass', () => {
-    expect(source).toContain('data-testid="new-now-task-card-glow"');
-    expect(source).toContain('data-testid="new-now-task-card"');
+  it('removes legacy top hero card and keeps only chat container（移除旧顶部卡片）', () => {
+    expect(source).not.toContain('data-testid="new-now-task-card-glow"');
+    expect(source).not.toContain('data-testid="new-now-task-card"');
+    expect(source).not.toContain('设计系统重构');
   });
 
-  it('uses full-width chat section instead of inner horizontal padding wrapper', () => {
+  it('uses full-width chat section with new-mobile variant（保留新移动端聊天主体）', () => {
     expect(source).toContain('data-testid="new-now-chat-section"');
-    expect(source).not.toContain('section className="min-h-0 flex-1 px-4');
+    expect(source).toContain('<ChatPage variant="new-mobile" hideHeader />');
   });
 });
-
