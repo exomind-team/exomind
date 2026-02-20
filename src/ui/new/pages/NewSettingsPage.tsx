@@ -38,7 +38,7 @@ function buildBackupFileName(): string {
 
 export function NewSettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
-  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.0');
+  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.0-beta1');
   const autoSyncServerUrl = resolveSyncServerUrl(envMap, {
     syncServerOverride: null,
   });
