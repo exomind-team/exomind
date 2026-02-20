@@ -22,7 +22,7 @@ import {
   setDeveloperModeEnabled,
 } from '@/config/developer-mode';
 import { setUIMode } from '@/config/ui-mode';
-import { Braces, Download, Import, MoonStar, TimerReset, Wifi } from 'lucide-react';
+import { Braces, Download, Import, MoonStar, TimerReset, Users, Wifi } from 'lucide-react';
 
 type ImportStrategy = 'merge' | 'overwrite';
 type PickedJsonFile = {
@@ -342,6 +342,27 @@ export function NewSettingsPage() {
                 onChange={handleImportFile}
               />
             </div>
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <p className="text-xs font-medium text-stone-500">账号与用户</p>
+          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-stone-800">
+                <Users className="h-4 w-4 text-stone-400" />
+                <span>多用户管理</span>
+              </div>
+              <Button
+                type="button"
+                variant="outline"
+                className="h-8 rounded-xl text-xs"
+                onClick={() => { window.location.pathname = '/user-manage'; }}
+              >
+                打开用户管理
+              </Button>
+            </div>
+            <p className="text-[11px] text-stone-500">支持注册、登录和多设备同账号同步。</p>
           </div>
         </section>
 
