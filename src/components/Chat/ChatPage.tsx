@@ -318,6 +318,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     return null;
   };
 
+  const isSystemEvent = (event: Event) => (
+    event.tags.has('block_start')
+    || event.tags.has('block_pause')
+    || event.tags.has('block_resume')
+    || event.tags.has('block_end')
+    || event.tags.has('block_feedback')
+  );
+
   // 按日期分组
   const groupedEvents = events.reduce((groups, event) => {
     const date = new Date(event.timestamp).toLocaleDateString('zh-CN', {
@@ -336,12 +344,12 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   const rootClassName =
     variant === 'new-mobile'
-      ? 'flex h-full max-h-[100dvh] flex-col rounded-[24px] border border-[#F0ECE8] bg-[#FAF7F5] shadow-[0_12px_30px_-18px_rgba(0,0,0,0.25)]'
+      ? 'flex h-full min-h-0 flex-col rounded-[24px] border border-[#F0ECE8] bg-[#FAF7F5] shadow-[0_12px_30px_-18px_rgba(0,0,0,0.25)]'
       : 'flex flex-col h-full max-h-[100dvh] lg:max-h-screen';
 
   const listClassName =
     variant === 'new-mobile'
-      ? 'flex-1 overflow-auto p-4'
+      ? 'flex-1 overflow-auto'
       : 'flex-1 overflow-auto p-3 sm:p-6';
 
   return (
@@ -366,7 +374,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       )}
 
       {/* TimeBlock 控件栏 */}
-      <TimeBlockWidget ref={timeBlockWidgetRef} />
+      <TimeBlockWidget ref={timeBlockWidgetRef} variant={variant === 'new-mobile' ? 'new-mobile' : 'default'} />
 
       {/* 事件列表 */}
       <div
@@ -380,14 +388,55 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
             <p className="text-sm text-muted-foreground">加载中...</p>
           </div>
         ) : events.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4">
+          <div className="flex h-full flex-col items-center justify-center text-center">
+            <div className={variant === 'new-mobile' ? 'mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#EEF2F7]' : 'w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4'}>
               <span className="text-2xl sm:text-3xl">📝</span>
             </div>
-            <p className="text-base sm:text-lg font-medium mb-1">暂无事件记录</p>
-            <p className="text-xs sm:text-sm text-muted-foreground">
+            <p className="mb-1 text-base font-semibold text-stone-800 sm:text-lg">暂无事件记录</p>
+            <p className="text-xs text-muted-foreground sm:text-sm">
               开始计时或输入内容记录事件
             </p>
+          </div>
+        ) : variant === 'new-mobile' ? (
+          <div className="space-y-3 px-4 pb-2 pt-3">
+            {loadingOlder && (
+              <div className="flex justify-center">
+                <span className="text-xs text-muted-foreground" data-testid="event-list-loading-more">
+                  加载更多...
+                </span>
+              </div>
+            )}
+            {events.map((event) => {
+              const systemEvent = isSystemEvent(event);
+              if (systemEvent) {
+                return (
+                  <div key={event.id} className="flex gap-2">
+                    <Avatar className="h-7 w-7 shrink-0">
+                      <AvatarFallback className="rounded-full bg-[#E8EEF8] text-[11px]">
+                        {getEventIcon(event)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 max-w-[80%]">
+                      <div className="rounded-2xl border border-[#ECE7E2] bg-white px-3 py-2 text-sm text-stone-800 shadow-[0_6px_18px_-14px_rgba(0,0,0,0.45)]">
+                        <EventMarkdown content={event.content} />
+                      </div>
+                      <p className="mt-1 text-[11px] text-stone-400">{formatTime(event.timestamp)}</p>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div key={event.id} className="flex justify-end">
+                  <div className="max-w-[82%]">
+                    <div className="rounded-2xl bg-[#FDECEA] px-3 py-2 text-sm text-stone-800">
+                      <EventMarkdown content={event.content} />
+                    </div>
+                    <p className="mt-1 text-right text-[11px] text-stone-400">{formatTime(event.timestamp)}</p>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="space-y-4 sm:space-y-6">
@@ -407,10 +456,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                 </div>
                 <div className="space-y-2 sm:space-y-3">
                   {dateEvents.map((event) => (
-                    <div
-                      key={event.id}
-                      className="flex gap-2 sm:gap-3"
-                    >
+                    <div key={event.id} className="flex gap-2 sm:gap-3">
                       <Avatar className="h-6 w-6 sm:h-8 sm:w-8 shrink-0">
                         <AvatarFallback className={getEventBgColor(event)}>
                           {getEventIcon(event)}
@@ -447,6 +493,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         onSend={handleSend}
         placeholder="输入内容记录事件..."
         buttonSize={40}
+        variant={variant === 'new-mobile' ? 'new-mobile' : 'default'}
       />
     </div>
   );
