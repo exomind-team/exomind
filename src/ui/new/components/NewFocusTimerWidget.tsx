@@ -13,8 +13,8 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 
-type FocusUiState = 'idle' | 'config' | 'running'; // UI 状态机（State Machine / 状态机）
-type RunningSubState = 'running' | 'paused'; // 运行子状态（Sub-state / 子状态）
+type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
+type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
 export type NewFocusTimerState = 'idle' | 'running' | 'paused';
 
 export interface NewFocusTimerWidgetHandle {
@@ -30,22 +30,27 @@ function formatClock(ms: number): string {
   const hours = Math.floor(totalSeconds / 3600);
   const minutes = Math.floor((totalSeconds % 3600) / 60);
   const seconds = totalSeconds % 60;
-
   return `${hours}:${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+}
+
+function glassCardShadowClass(): string {
+  return 'shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_24px_-6px_rgba(0,0,0,0.08),0_20px_40px_-8px_rgba(0,0,0,0.05)]';
 }
 
 export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(function NewFocusTimerWidget(_, ref) {
   const timeBlockServiceRef = useRef(getTimeBlockService());
-  const taskInputRef = useRef<HTMLInputElement | null>(null);
   const frameRef = useRef<number | null>(null);
+  const taskInputRef = useRef<HTMLInputElement | null>(null);
 
   const [uiState, setUiState] = useState<FocusUiState>('idle');
   const [runningSubState, setRunningSubState] = useState<RunningSubState>('running');
+
   const [taskNameDraft, setTaskNameDraft] = useState('');
   const [taskName, setTaskName] = useState('');
   const [timerMode, setTimerMode] = useState<TimerMode>('countdown');
   const [countdownMinutes, setCountdownMinutes] = useState(25);
   const [elapsedMs, setElapsedMs] = useState(25 * 60 * 1000);
+
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
 
@@ -63,9 +68,10 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   }, []);
 
   const enterConfigState = useCallback(() => {
+    if (isRunningUi) return;
     setUiState('config');
     focusTaskInput();
-  }, [focusTaskInput]);
+  }, [focusTaskInput, isRunningUi]);
 
   useEffect(() => {
     let cancelled = false;
@@ -132,6 +138,11 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     };
   }, []);
 
+  useEffect(() => {
+    if (uiState !== 'idle') return;
+    syncIdleElapsedFromMode(timerMode, countdownMinutes);
+  }, [countdownMinutes, syncIdleElapsedFromMode, timerMode, uiState]);
+
   const handleStart = useCallback(async () => {
     const name = taskNameDraft.trim();
     if (!name) {
@@ -186,7 +197,9 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     ref,
     () => ({
       expandAndFocusTaskName: () => {
-        enterConfigState();
+        if (uiState === 'running') return;
+        setUiState('config');
+        focusTaskInput();
       },
       getTimerState: () => {
         if (uiState !== 'running') return 'idle';
@@ -199,160 +212,187 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
         handleOpenEndDialog();
       },
     }),
-    [enterConfigState, handleOpenEndDialog, handlePauseOrResume, runningSubState, uiState],
-  );
-
-  useEffect(() => {
-    if (uiState !== 'idle') return;
-    syncIdleElapsedFromMode(timerMode, countdownMinutes);
-  }, [countdownMinutes, syncIdleElapsedFromMode, timerMode, uiState]);
-
-  const renderIdle = () => (
-    <div data-testid="new-focus-state-idle" className="px-4 py-3">
-      <button
-        type="button"
-        data-testid="new-focus-idle-card"
-        onClick={enterConfigState}
-        className="flex w-full items-center justify-between rounded-3xl border border-[#FFFFFF80] bg-[#FFFFFFA0] px-5 py-4 text-left shadow-[0_10px_30px_-22px_rgba(0,0,0,0.5)]"
-      >
-        <div className="mr-3 flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[#FEF0ED] text-[#C75B3A]">
-            <Target size={18} />
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-[16px] font-semibold text-[#1C1917]">点击设置专注任务</p>
-            <p className="truncate text-[12px] text-[#78716C]">配置时间块、开始倒计时</p>
-          </div>
-        </div>
-        <ChevronRight size={18} className="shrink-0 text-[#C75B3A]" />
-      </button>
-    </div>
-  );
-
-  const renderConfig = () => (
-    <div data-testid="new-focus-state-config" className="px-4 py-3">
-      <div className="space-y-3 rounded-3xl border border-[#FFFFFF80] bg-[#FFFFFFA0] px-4 py-4 shadow-[0_12px_32px_-24px_rgba(0,0,0,0.45)]">
-        <div className="flex items-center gap-3">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FEF0ED] text-[#C75B3A]">
-            <Target size={18} />
-          </div>
-          <Input
-            ref={taskInputRef}
-            data-testid="new-focus-task-input"
-            value={taskNameDraft}
-            onChange={(event) => setTaskNameDraft(event.target.value)}
-            placeholder="输入任务名称..."
-            className="h-9 border-[#E7E5E4] bg-white/80 text-sm"
-          />
-        </div>
-
-        <div className="flex items-center justify-between gap-3">
-          <span className="text-xs font-medium text-[#57534E]">计时模式</span>
-          <div className="flex items-center gap-1 rounded-lg bg-[#FFFFFF70] p-1">
-            <button
-              type="button"
-              data-testid="new-focus-mode-countup"
-              onClick={() => setTimerMode('countup')}
-              className={`rounded-md px-3 py-1 text-xs ${timerMode === 'countup' ? 'bg-white text-[#1C1917]' : 'text-[#78716C]'}`}
-            >
-              正计时
-            </button>
-            <button
-              type="button"
-              data-testid="new-focus-mode-countdown"
-              onClick={() => setTimerMode('countdown')}
-              className={`rounded-md px-3 py-1 text-xs ${timerMode === 'countdown' ? 'bg-white text-[#1C1917]' : 'text-[#78716C]'}`}
-            >
-              倒计时
-            </button>
-          </div>
-        </div>
-
-        {timerMode === 'countdown' && (
-          <div className="flex items-center justify-between gap-3">
-            <span className="text-xs font-medium text-[#57534E]">倒计时时长</span>
-            <div className="flex items-center gap-1">
-              {[15, 25, 45].map((minutes) => (
-                <button
-                  key={minutes}
-                  type="button"
-                  data-testid={`new-focus-duration-${minutes}`}
-                  onClick={() => setCountdownMinutes(minutes)}
-                  className={`rounded-md px-2.5 py-1 text-xs ${countdownMinutes === minutes ? 'bg-white text-[#1C1917]' : 'text-[#78716C]'}`}
-                >
-                  {minutes}m
-                </button>
-              ))}
-            </div>
-          </div>
-        )}
-
-        <Button
-          type="button"
-          data-testid="new-focus-start-button"
-          onClick={() => {
-            void handleStart();
-          }}
-          className="h-10 w-full rounded-xl bg-[#C75B3A] text-sm hover:bg-[#B24D2F]"
-        >
-          <Play size={16} className="mr-1" />
-          开始
-        </Button>
-      </div>
-    </div>
-  );
-
-  const renderRunning = () => (
-    <div data-testid="new-focus-state-running" className="px-4 py-2">
-      <div className="space-y-2 rounded-3xl border border-[#FFFFFF80] bg-[#FFFFFFA0] px-5 py-4 shadow-[0_12px_32px_-24px_rgba(0,0,0,0.45)]">
-        <button type="button" onClick={enterConfigState} className="flex w-full items-center gap-3 text-left">
-          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#FEF0ED] text-[#C75B3A]">
-            <Target size={18} />
-          </div>
-          <div className="min-w-0 flex-1">
-            <p className="truncate text-[18px] font-semibold text-[#1C1917]">{taskName || '未命名任务'}</p>
-          </div>
-          <ChevronDown size={16} className="text-[#C75B3A]" />
-        </button>
-
-        <div className="flex justify-center py-2">
-          <span className="font-mono text-[52px] font-light tracking-[0.05em] text-[#1C1917]" data-testid="new-focus-running-clock">
-            {formatClock(elapsedMs)}
-          </span>
-        </div>
-
-        <div className="flex items-center justify-center gap-3">
-          <Button
-            type="button"
-            data-testid="new-focus-pause-resume-button"
-            onClick={() => {
-              void handlePauseOrResume();
-            }}
-            className={isPaused ? 'h-10 rounded-[24px] bg-[#16A34A] px-6 hover:bg-[#15803D]' : 'h-10 rounded-[24px] bg-[#EDECE9] px-6 text-[#1C1917] hover:bg-[#E5E3DF]'}
-          >
-            {isPaused ? <Play size={16} className="mr-1" /> : <Pause size={16} className="mr-1" />}
-            {isPaused ? '继续' : '暂停'}
-          </Button>
-
-          <Button
-            type="button"
-            data-testid="new-focus-end-button"
-            onClick={handleOpenEndDialog}
-            className="h-10 rounded-[24px] bg-[#FDECEB] px-6 text-[#C75B3A] hover:bg-[#F8DED9]"
-          >
-            <Square size={16} className="mr-1" />
-            结束
-          </Button>
-        </div>
-      </div>
-    </div>
+    [focusTaskInput, handleOpenEndDialog, handlePauseOrResume, runningSubState, uiState],
   );
 
   return (
-    <div className="border-y border-[#E8E3DE] bg-white/80" data-testid="new-focus-timer-widget">
-      {uiState === 'idle' && renderIdle()}
-      {uiState === 'config' && renderConfig()}
-      {uiState === 'running' && renderRunning()}
+    <div className="bg-[#FAF7F5]" data-testid="new-focus-timer-widget">
+      {uiState === 'idle' && (
+        <section className="safe-area-pt-plus">
+          <div className="relative mx-auto h-[104px] w-full max-w-[390px]" data-testid="new-focus-state-idle">
+            <div
+              className="absolute left-1/2 top-[18px] h-[74px] w-[353px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
+              aria-hidden
+            />
+
+            <button
+              type="button"
+              data-testid="new-focus-idle-card"
+              onClick={enterConfigState}
+              className={`absolute left-4 top-4 flex h-[68px] w-[357px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()}`}
+            >
+              <div className="mr-3 flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A]">
+                  <Target size={20} />
+                </div>
+                <div className="min-w-0">
+                  <p className="truncate text-[16px] font-semibold leading-[1.4] text-[#1C1917]">点击设置专注任务</p>
+                  <p className="truncate text-[12px] leading-[1.4] text-[#78716C]">配置时间块、开始倒计时</p>
+                </div>
+              </div>
+              <ChevronRight size={20} className="shrink-0 text-[#C75B3A]" />
+            </button>
+          </div>
+        </section>
+      )}
+
+      {uiState === 'config' && (
+        <section className="safe-area-pt-plus">
+          <div className="relative mx-auto h-[253px] w-full max-w-[390px]" data-testid="new-focus-state-config">
+            <div
+              className="absolute left-4 top-[14px] h-[227px] w-[361px] rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
+              aria-hidden
+            />
+
+            <div
+              className={`absolute left-4 top-4 flex w-[361px] flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
+            >
+              <div className="flex items-center gap-[10px]">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A]">
+                  <Target size={20} />
+                </div>
+                <Input
+                  ref={taskInputRef}
+                  data-testid="new-focus-task-input"
+                  value={taskNameDraft}
+                  onChange={(event) => setTaskNameDraft(event.target.value)}
+                  placeholder="输入任务名称..."
+                  className="h-9 border-[#E7E5E4]/80 bg-white/60 text-sm"
+                />
+              </div>
+
+              <div className="h-px w-full bg-[#D4785F30]" />
+
+              <div className="flex items-center justify-between">
+                <span className="text-[12px] font-medium text-[#57534E]">计时模式</span>
+                <div className="flex items-center gap-1">
+                  <button
+                    type="button"
+                    data-testid="new-focus-mode-countup"
+                    onClick={() => setTimerMode('countup')}
+                    className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${timerMode === 'countup' ? 'bg-white/90 text-[#1C1917]' : 'bg-transparent text-[#A8A29E]'}`}
+                  >
+                    正计时
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="new-focus-mode-countdown"
+                    onClick={() => setTimerMode('countdown')}
+                    className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${timerMode === 'countdown' ? 'bg-white/90 text-[#1C1917]' : 'bg-transparent text-[#A8A29E]'}`}
+                  >
+                    倒计时
+                  </button>
+                </div>
+              </div>
+
+              {timerMode === 'countdown' && (
+                <div className="flex items-center justify-between">
+                  <span className="text-[12px] font-medium text-[#57534E]">倒计时时长</span>
+                  <div className="flex items-center gap-[6px]">
+                    {[15, 25, 45].map((minutes) => (
+                      <button
+                        key={minutes}
+                        type="button"
+                        data-testid={`new-focus-duration-${minutes}`}
+                        onClick={() => setCountdownMinutes(minutes)}
+                        className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${
+                          countdownMinutes === minutes ? 'border border-[#FFFFFF60] bg-white/90 font-semibold text-[#1C1917]' : 'bg-transparent text-[#78716C]'
+                        }`}
+                      >
+                        {minutes}m
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              <Button
+                type="button"
+                data-testid="new-focus-start-button"
+                onClick={() => {
+                  void handleStart();
+                }}
+                className="h-10 w-full rounded-[12px] bg-[#C75B3A] text-[14px] font-medium hover:bg-[#B24D2F]"
+              >
+                <Play size={16} className="mr-2" />
+                开始
+              </Button>
+            </div>
+          </div>
+        </section>
+      )}
+
+      {uiState === 'running' && (
+        <section className="safe-area-pt-plus" data-testid="new-focus-state-running">
+          <div className="relative mx-auto h-[104px] w-full max-w-[390px]">
+            <div
+              className="absolute left-1/2 top-[18px] h-[74px] w-[357px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
+              aria-hidden
+            />
+
+            <div
+              className={`absolute left-4 top-4 flex h-[68px] w-[357px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-5 py-[18px] backdrop-blur-[24px] ${glassCardShadowClass()}`}
+            >
+              <div className="mr-3 flex min-w-0 items-center gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A]">
+                  <Target size={20} />
+                </div>
+                <p className="truncate text-[20px] font-semibold leading-[1.4] text-[#1C1917]">{taskName || '未命名任务'}</p>
+              </div>
+              <ChevronDown size={16} className="shrink-0 text-[#C75B3A]" />
+            </div>
+          </div>
+
+          <div className="px-6 pb-3 pt-2">
+            <div className="flex items-center justify-center">
+              <span
+                className="font-mono text-[56px] font-[200] leading-[1.1] tracking-[2px] text-[#1C1917]"
+                data-testid="new-focus-running-clock"
+              >
+                {formatClock(elapsedMs)}
+              </span>
+            </div>
+          </div>
+
+          <div className="flex items-center justify-center gap-3 px-6 pb-2 pt-2">
+            <Button
+              type="button"
+              data-testid="new-focus-pause-resume-button"
+              onClick={() => {
+                void handlePauseOrResume();
+              }}
+              className={
+                isPaused
+                  ? 'h-10 rounded-[24px] bg-[#16A34A] px-6 text-[14px] font-medium text-white hover:bg-[#15803D]'
+                  : 'h-10 rounded-[24px] bg-[#EDECE9] px-6 text-[14px] font-medium text-[#1C1917] hover:bg-[#E5E3DF]'
+              }
+            >
+              {isPaused ? <Play size={16} className="mr-2" /> : <Pause size={16} className="mr-2" />}
+              {isPaused ? '继续' : '暂停'}
+            </Button>
+
+            <Button
+              type="button"
+              data-testid="new-focus-end-button"
+              onClick={handleOpenEndDialog}
+              className="h-10 rounded-[24px] bg-[#FDECEB] px-6 text-[14px] font-medium text-[#C75B3A] hover:bg-[#F8DED9]"
+            >
+              <Square size={16} className="mr-2" />
+              结束
+            </Button>
+          </div>
+        </section>
+      )}
 
       <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
         <DialogContent>

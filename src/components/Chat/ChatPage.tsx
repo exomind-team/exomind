@@ -396,7 +396,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   const listClassName =
     variant === 'new-mobile'
-      ? 'flex-1 overflow-auto border-y border-[#E8E3DE]'
+      ? 'flex-1 overflow-auto'
       : 'flex-1 overflow-auto p-3 sm:p-6';
 
   return (
