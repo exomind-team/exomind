@@ -3,6 +3,7 @@ import { Target, Settings } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NewFocusPage } from '@/ui/new/pages/NewFocusPage';
 import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { UserManagePage } from '@/ui/pages/UserManagePage';
 import { ASRTestPage } from '@/pages/ASRTestPage';
 import { MOSSASRTestPage } from '@/pages/MOSSASRTestPage';
 
@@ -75,6 +76,14 @@ const newSettingsRoute = createRoute({
   },
 });
 
+const newUserManageRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/user-manage',
+  component: function NewUserManage() {
+    return <UserManagePage />;
+  },
+});
+
 const newAsrTestRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/asr-test',
@@ -95,6 +104,7 @@ const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newEventlogRoute,
   newSettingsRoute,
+  newUserManageRoute,
   newAsrTestRoute,
   newMossTestRoute,
 ]);
