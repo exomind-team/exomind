@@ -3538,7 +3538,7 @@
                   "type": "ref",
                   "ref": "C3KOZ",
                   "x": 24,
-                  "y": 24.019943701668048,
+                  "y": 24.01994370166805,
                   "width": "fill_container",
                   "descendants": {
                     "NEMHS": {
@@ -5606,7 +5606,7 @@
       "name": "Settings Screen",
       "clip": true,
       "width": 393,
-      "height": 852,
+      "height": 1326,
       "fill": "#FAF7F5",
       "cornerRadius": 40,
       "layout": "vertical",
@@ -7009,6 +7009,81 @@
                           "fontFamily": "Inter",
                           "fontSize": 12,
                           "fontWeight": "normal"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "8eylm",
+                      "name": "uiModeDividerWrap",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "id": "AeKnI",
+                          "name": "uiModeDivider",
+                          "fill": "#F0ECE8",
+                          "width": "fill_container",
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "N9agq",
+                      "name": "BackToOldUiRow",
+                      "width": "fill_container",
+                      "gap": 12,
+                      "padding": [
+                        14,
+                        16
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "ZqOO8",
+                          "name": "BackToOldUiLeft",
+                          "gap": 12,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "sY22l",
+                              "name": "backOldUiIcon",
+                              "width": 18,
+                              "height": 18,
+                              "iconFontName": "undo-2",
+                              "iconFontFamily": "lucide",
+                              "fill": "#78716C"
+                            },
+                            {
+                              "type": "text",
+                              "id": "SWCHI",
+                              "name": "backOldUiLabel",
+                              "fill": "#1C1917",
+                              "content": "返回旧 UI",
+                              "lineHeight": 1.4,
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "icon_font",
+                          "id": "JpnQA",
+                          "name": "backOldUiArrow",
+                          "width": 18,
+                          "height": 18,
+                          "iconFontName": "chevron-right",
+                          "iconFontFamily": "lucide",
+                          "fill": "#D6D3D1"
                         }
                       ]
                     }
