@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Image, PenLine, Send } from 'lucide-react';
+import { Clipboard, Image, SendHorizontal } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
@@ -68,8 +68,8 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   }), []);
 
   return (
-    <div className="safe-area-pb shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5]" data-testid="new-now-input-row">
-      <div className="px-4 pb-2 pt-2">
+    <div className="shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5]" data-testid="new-now-input-row">
+      <div className="px-4 py-2">
         <div className="flex items-end gap-2">
           <button
             type="button"
@@ -97,11 +97,11 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
             <button
               type="button"
               onClick={() => textareaRef.current?.focus()}
-              className="absolute right-3 top-1/2 -translate-y-1/2 text-stone-400"
-              aria-label="聚焦输入"
+              className="absolute right-[7px] top-1/2 flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] text-stone-400"
+              aria-label="剪贴板"
               data-testid="new-now-input-inline-button"
             >
-              <PenLine size={14} />
+              <Clipboard size={16} />
             </button>
           </div>
 
@@ -113,11 +113,10 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
             className="h-9 w-9 shrink-0 rounded-full bg-[#C75B3A] text-white hover:bg-[#B24D2F] data-[disabled]:bg-[#D1D5DB] data-[disabled]:text-white"
             data-testid="new-now-send-button"
           >
-            <Send size={16} />
+            <SendHorizontal size={16} />
           </Button>
         </div>
       </div>
     </div>
   );
 });
-
