@@ -17,6 +17,7 @@ import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
+import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
@@ -488,13 +489,21 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       </div>
 
       {/* 输入区域 */}
-      <VoiceMessageInput
-        ref={voiceMessageInputRef}
-        onSend={handleSend}
-        placeholder="输入内容记录事件..."
-        buttonSize={40}
-        variant={variant === 'new-mobile' ? 'new-mobile' : 'default'}
-      />
+      {variant === 'new-mobile' ? (
+        <NewNowInputRow
+          ref={voiceMessageInputRef}
+          onSend={handleSend}
+          placeholder="记录当下的事实..."
+        />
+      ) : (
+        <VoiceMessageInput
+          ref={voiceMessageInputRef}
+          onSend={handleSend}
+          placeholder="输入内容记录事件..."
+          buttonSize={40}
+          variant="default"
+        />
+      )}
     </div>
   );
 }
