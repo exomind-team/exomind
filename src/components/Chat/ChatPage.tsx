@@ -345,12 +345,12 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   const rootClassName =
     variant === 'new-mobile'
-      ? 'flex h-full min-h-0 flex-col rounded-[24px] border border-[#F0ECE8] bg-[#FAF7F5] shadow-[0_12px_30px_-18px_rgba(0,0,0,0.25)]'
+      ? 'flex h-full min-h-0 flex-col bg-[#FAF7F5]'
       : 'flex flex-col h-full max-h-[100dvh] lg:max-h-screen';
 
   const listClassName =
     variant === 'new-mobile'
-      ? 'flex-1 overflow-auto'
+      ? 'flex-1 overflow-auto border-y border-[#E8E3DE]'
       : 'flex-1 overflow-auto p-3 sm:p-6';
 
   return (
@@ -389,7 +389,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
             <p className="text-sm text-muted-foreground">加载中...</p>
           </div>
         ) : events.length === 0 ? (
-          <div className="flex h-full flex-col items-center justify-center text-center">
+          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <div className={variant === 'new-mobile' ? 'mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#EEF2F7]' : 'w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4'}>
               <span className="text-2xl sm:text-3xl">📝</span>
             </div>

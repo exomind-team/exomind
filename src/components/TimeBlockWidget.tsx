@@ -366,15 +366,15 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   const timerValueClassName =
     variant === 'new-mobile'
-      ? 'text-[42px] leading-none font-light tracking-[0.06em] text-stone-900'
+      ? 'text-[56px] leading-[0.95] font-light tracking-[0.05em] text-stone-900'
       : 'text-lg';
-  const rootClassName = variant === 'new-mobile' ? 'border-b border-[#E8E3DE] bg-white/80' : 'border-b bg-muted/30';
+  const rootClassName = variant === 'new-mobile' ? 'border-y border-[#E8E3DE] bg-white/80' : 'border-b bg-muted/30';
 
   return (
     <div className={rootClassName} data-testid="timeblock-widget">
       {/* 状态栏 */}
       {variant === 'new-mobile' ? (
-        <div className="px-3 py-2">
+        <div className="px-4 py-1">
           <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2" data-testid="timeblock-main-row">
             <div className="flex items-center gap-2">
               {isIdle && (
@@ -440,7 +440,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
               )}
             </div>
           </div>
-          <div className="mt-1 flex justify-end">
+          <div className="-mt-1 flex justify-end">
             <Button
               variant="ghost"
               size="sm"
