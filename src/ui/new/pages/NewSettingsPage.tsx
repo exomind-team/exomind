@@ -24,7 +24,6 @@ import {
 import { setUIMode } from '@/config/ui-mode';
 
 type ImportStrategy = 'merge' | 'overwrite';
-// PickedJsonFile（已选 JSON 文件）: tauri native picker return payload（原生文件选择返回体）
 type PickedJsonFile = {
   path: string;
   content: string;
@@ -35,7 +34,7 @@ function buildBackupFileName(): string {
   return `exomind-eventlog-${date}.json`;
 }
 
-export function SettingsPage() {
+export function NewSettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.0');
   const autoSyncServerUrl = resolveSyncServerUrl(envMap, {
@@ -181,9 +180,7 @@ export function SettingsPage() {
     clearNotice();
 
     const file = event.target.files?.[0];
-    if (!file) {
-      return;
-    }
+    if (!file) return;
 
     setLoading(true);
 
@@ -203,158 +200,136 @@ export function SettingsPage() {
     }
   };
 
-  const handleSwitchToNewUi = () => {
-    // setUIMode（界面模式切换）: old -> new
-    setUIMode('new');
+  const handleBackToOldUi = () => {
+    setUIMode('old');
   };
 
   return (
-    <div className="settings-page p-6 space-y-4">
-      <h1 className="text-2xl font-bold">设置</h1>
-      <p className="text-muted-foreground">
-        配置局域网同步地址与事件日志导入导出
-      </p>
-      <div className="space-y-1 max-w-sm text-sm">
-        <p>
-          <span className="font-medium">App Version（应用版本）:</span> {versionBuildInfo.appVersion}
-        </p>
-        <p>
-          <span className="font-medium">Build Hash（构建哈希）:</span> {versionBuildInfo.buildHash}
-        </p>
-      </div>
+    <div className="mx-auto w-full max-w-3xl p-4 md:p-6">
+      <div className="rounded-[28px] bg-[#FAF7F5] border border-[#EDE7E3] p-4 md:p-6 space-y-4">
+        <header className="space-y-1">
+          <h1 className="text-xl md:text-2xl font-bold text-stone-900">设置</h1>
+          <p className="text-xs md:text-sm text-stone-500">新 UI（New UI）配置页</p>
+        </header>
 
-      <div className="space-y-2 max-w-sm">
-        <Label>界面模式（UI Mode）</Label>
-        <Button type="button" variant="outline" onClick={handleSwitchToNewUi} disabled={loading}>
-          切换到新 UI
-        </Button>
-        <p className="text-xs text-muted-foreground">
-          过渡期支持双 UI：可在新 UI 设置页中返回旧 UI。
-        </p>
-      </div>
-
-      <div className="space-y-2 max-w-sm">
-        <Label htmlFor="theme-preference">主题</Label>
-        <select
-          id="theme-preference"
-          className="w-full rounded-md border bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          value={themePreference}
-          disabled={loading}
-          onChange={(event) => {
-            const nextPreference = event.target.value as ThemePreference;
-            setThemePreference(nextPreference);
-            setThemePreferenceState(nextPreference);
-          }}
-        >
-          <option value="system">system（跟随系统）</option>
-          <option value="light">light（浅色）</option>
-          <option value="dark">dark（暗色）</option>
-        </select>
-        <p className="text-xs text-muted-foreground">
-          暗色模式对 Chrome 手机版等无法使用扩展的环境更友好。
-        </p>
-      </div>
-
-      <div className="space-y-2 max-w-xl">
-        <Label htmlFor="sync-server-url">同步服务器地址</Label>
-        <Input
-          id="sync-server-url"
-          value={syncServerUrl}
-          onChange={(event) => setSyncServerUrl(event.target.value)}
-          placeholder={autoSyncServerUrl}
-          disabled={loading}
-        />
-        <div className="flex flex-wrap gap-2">
-          <Button
-            variant="outline"
-            onClick={handleSaveSyncServerUrl}
-            disabled={loading}
-          >
-            保存同步地址
-          </Button>
-          <Button
-            variant="outline"
-            onClick={handleResetSyncServerUrl}
-            disabled={loading}
-          >
-            恢复自动地址
-          </Button>
-        </div>
-        <p className="text-xs text-muted-foreground">
-          {savedSyncServerUrl
-            ? `当前已保存：${savedSyncServerUrl}`
-            : `未保存自定义地址，自动使用：${autoSyncServerUrl}`}
-        </p>
-      </div>
-
-      <div className="space-y-2 max-w-sm">
-        <Label htmlFor="import-strategy">导入策略</Label>
-        <select
-          id="import-strategy"
-          className="w-full rounded-md border bg-background px-3 py-2 text-sm shadow-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-          value={importStrategy}
-          onChange={(e) => setImportStrategy(e.target.value as ImportStrategy)}
-          disabled={loading}
-        >
-          <option value="merge">merge（按 ID 去重合并）</option>
-          <option value="overwrite">overwrite（覆盖）</option>
-        </select>
-      </div>
-
-      <div className="flex flex-wrap gap-3">
-        <Button onClick={handleExport} disabled={loading}>
-          导出 JSON
-        </Button>
-        <Button variant="outline" onClick={handleImportClick} disabled={loading}>
-          导入 JSON
-        </Button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".json,application/json"
-          className="hidden"
-          onChange={handleImportFile}
-        />
-      </div>
-
-      <div className="space-y-2 max-w-xl rounded-md border p-3">
-        <div className="flex items-center justify-between gap-3">
-          <div>
-            <p className="text-sm font-medium">开发者模式</p>
-            <p className="text-xs text-muted-foreground">开启后显示 MOSS / ASR 测试入口</p>
+        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between gap-3">
+            <div>
+              <h2 className="text-sm font-semibold text-stone-900">界面模式（UI Mode）</h2>
+              <p className="text-xs text-stone-500">过渡期支持新旧 UI 双向切换</p>
+            </div>
+            <Button type="button" variant="outline" onClick={handleBackToOldUi}>
+              返回旧 UI
+            </Button>
           </div>
-          <Switch
-            checked={developerMode}
-            onCheckedChange={(checked) => {
-              setDeveloperMode(checked);
-              setDeveloperModeEnabled(checked);
+        </section>
+
+        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
+          <Label htmlFor="theme-preference-new">主题</Label>
+          <select
+            id="theme-preference-new"
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            value={themePreference}
+            disabled={loading}
+            onChange={(event) => {
+              const nextPreference = event.target.value as ThemePreference;
+              setThemePreference(nextPreference);
+              setThemePreferenceState(nextPreference);
             }}
-            aria-label="开发者模式"
+          >
+            <option value="system">system（跟随系统）</option>
+            <option value="light">light（浅色）</option>
+            <option value="dark">dark（暗色）</option>
+          </select>
+        </section>
+
+        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
+          <Label htmlFor="sync-server-url-new">同步服务器地址</Label>
+          <Input
+            id="sync-server-url-new"
+            value={syncServerUrl}
+            onChange={(event) => setSyncServerUrl(event.target.value)}
+            placeholder={autoSyncServerUrl}
+            disabled={loading}
           />
-        </div>
-        {developerMode && (
           <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/moss-test'; }}>
-              打开 MOSS测试
+            <Button type="button" variant="outline" onClick={handleSaveSyncServerUrl} disabled={loading}>
+              保存同步地址
             </Button>
-            <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/asr-test'; }}>
-              打开 ASR测试
+            <Button type="button" variant="outline" onClick={handleResetSyncServerUrl} disabled={loading}>
+              恢复自动地址
             </Button>
           </div>
-        )}
+          <p className="text-xs text-stone-500">
+            {savedSyncServerUrl ? `当前已保存：${savedSyncServerUrl}` : `未保存自定义地址，自动使用：${autoSyncServerUrl}`}
+          </p>
+        </section>
+
+        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
+          <Label htmlFor="import-strategy-new">导入策略</Label>
+          <select
+            id="import-strategy-new"
+            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
+            value={importStrategy}
+            onChange={(event) => setImportStrategy(event.target.value as ImportStrategy)}
+            disabled={loading}
+          >
+            <option value="merge">merge（按 ID 去重合并）</option>
+            <option value="overwrite">overwrite（覆盖）</option>
+          </select>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" onClick={handleExport} disabled={loading}>导出 JSON</Button>
+            <Button type="button" variant="outline" onClick={handleImportClick} disabled={loading}>导入 JSON</Button>
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
+          <div className="flex items-center justify-between">
+            <div>
+              <h3 className="text-sm font-semibold text-stone-900">开发者模式</h3>
+              <p className="text-xs text-stone-500">开启后显示 MOSS/ASR 测试入口</p>
+            </div>
+            <Switch
+              checked={developerMode}
+              onCheckedChange={(checked) => {
+                setDeveloperMode(checked);
+                setDeveloperModeEnabled(checked);
+              }}
+              aria-label="开发者模式"
+            />
+          </div>
+          {developerMode && (
+            <div className="flex flex-wrap gap-2">
+              <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/moss-test'; }}>
+                打开 MOSS测试
+              </Button>
+              <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/asr-test'; }}>
+                打开 ASR测试
+              </Button>
+            </div>
+          )}
+        </section>
+
+        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4">
+          <p className="text-sm text-stone-700">
+            <span className="font-medium">App Version（应用版本）:</span> {versionBuildInfo.appVersion}
+          </p>
+          <p className="text-xs text-stone-500">
+            <span className="font-medium">Build Hash（构建哈希）:</span> {versionBuildInfo.buildHash}
+          </p>
+        </section>
+
+        {statusMessage && <p role="status" className="text-sm text-green-700">{statusMessage}</p>}
+        {errorMessage && <p role="alert" className="text-sm text-red-700">{errorMessage}</p>}
       </div>
-
-      {statusMessage && (
-        <p role="status" className="text-sm text-green-600">
-          {statusMessage}
-        </p>
-      )}
-
-      {errorMessage && (
-        <p role="alert" className="text-sm text-red-600">
-          {errorMessage}
-        </p>
-      )}
     </div>
   );
 }
+
