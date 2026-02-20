@@ -159,6 +159,76 @@ function Test-ADB {
     return $adbPath
 }
 
+function Sync-AndroidLauncherIcons {
+    param(
+        [string]$ProjectRoot = $Global:EMConfig.ProjectRoot
+    )
+
+    # Android generated project resource path (Android 生成工程资源目录)
+    $androidResPath = Join-Path $ProjectRoot "src-tauri\gen\android\app\src\main\res"
+    if (-not (Test-Path $androidResPath)) {
+        Write-Warning "Android project not initialized, skip icon sync"
+        return
+    }
+
+    # Prefer app-icon.png, fallback to icons/icon.png (优先 app-icon.png，兜底 icons/icon.png)
+    $sourceIcon = Join-Path $ProjectRoot "src-tauri\app-icon.png"
+    if (-not (Test-Path $sourceIcon)) {
+        $fallbackIcon = Join-Path $ProjectRoot "src-tauri\icons\icon.png"
+        if (Test-Path $fallbackIcon) {
+            $sourceIcon = $fallbackIcon
+        }
+        else {
+            Write-Warning "No source icon found, skip Android icon sync"
+            return
+        }
+    }
+
+    $tempDir = Join-Path $env:TEMP ("exomind-tauri-icon-sync-{0}" -f [Guid]::NewGuid().ToString("N"))
+
+    try {
+        New-Item -ItemType Directory -Path $tempDir -Force | Out-Null
+
+        # Generate platform launcher icons (生成平台图标)
+        & tauri icon $sourceIcon -o $tempDir | Out-Null
+        if ($LASTEXITCODE -ne 0) {
+            throw "tauri icon exited with code $LASTEXITCODE"
+        }
+
+        $generatedAndroid = Join-Path $tempDir "android"
+        if (-not (Test-Path $generatedAndroid)) {
+            throw "Generated android icon directory not found: $generatedAndroid"
+        }
+
+        $copiedCount = 0
+        Get-ChildItem -Path $generatedAndroid -Directory -Filter "mipmap-*" | ForEach-Object {
+            $targetDir = Join-Path $androidResPath $_.Name
+            New-Item -ItemType Directory -Path $targetDir -Force | Out-Null
+
+            Get-ChildItem -Path $_.FullName -File -Filter "ic_launcher*.png" | ForEach-Object {
+                Copy-Item -Path $_.FullName -Destination (Join-Path $targetDir $_.Name) -Force
+                $copiedCount++
+            }
+        }
+
+        if ($copiedCount -gt 0) {
+            Write-Success "Android launcher icons synced ($copiedCount files)"
+        }
+        else {
+            Write-Warning "Android icon sync completed with no launcher files copied"
+        }
+    }
+    catch {
+        Write-Warning "Failed to sync Android launcher icons: $_"
+        throw
+    }
+    finally {
+        if (Test-Path $tempDir) {
+            Remove-Item -Recurse -Force $tempDir -ErrorAction SilentlyContinue
+        }
+    }
+}
+
 function Get-AndroidDevices {
     $adbPath = Test-ADB
     $devices = & $adbPath devices | Select-String "device$" | Where-Object { $_ -notmatch "List of devices attached" }
