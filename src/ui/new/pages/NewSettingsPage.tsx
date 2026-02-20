@@ -214,12 +214,12 @@ export function NewSettingsPage() {
   })();
 
   return (
-    <div className="safe-area-pt-plus flex h-full min-h-0 flex-col px-4 pb-4">
+    <div className="safe-area-pt-plus min-h-full px-4">
       <header className="py-2 text-center">
         <h1 className="text-base font-semibold text-stone-900">设置</h1>
       </header>
 
-      <div className="flex-1 space-y-4 overflow-y-auto pb-24">
+      <div className="space-y-4 pb-[calc(env(safe-area-inset-bottom,0px)+108px)]">
         <section className="rounded-2xl border border-[#FFFFFF50] bg-gradient-to-br from-[#E8866F] via-[#D4664A] to-[#C75B3A] p-4 text-white shadow-[0_16px_30px_-18px_rgba(199,91,58,0.7)]">
           <div className="flex items-center justify-between">
             <div>

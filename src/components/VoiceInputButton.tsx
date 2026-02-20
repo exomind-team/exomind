@@ -43,6 +43,8 @@ export interface VoiceInputButtonProps {
   showWaveform?: boolean;
   /** 是否显示计时器 */
   showTimer?: boolean;
+  /** 权限未授予时是否显示解锁按钮（permission unlock button） */
+  showPermissionUnlockButton?: boolean;
   /** 启用快捷键（仅非输入区域生效） */
   enableShortcut?: boolean;
   /** 按钮大小 */
@@ -75,6 +77,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   adapterConfig,
   showWaveform = true,
   showTimer = true,
+  showPermissionUnlockButton = true,
   enableShortcut = true,
   size = 64,
   className,
@@ -815,7 +818,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       )}
 
       {/* 权限未授予时显示获取权限按钮 */}
-      {permissionState !== 'granted' && permissionState !== 'checking' && (
+      {showPermissionUnlockButton && permissionState !== 'granted' && permissionState !== 'checking' && (
         <button
           onClick={requestPermission}
           style={{

@@ -16,12 +16,12 @@ function NewLayout() {
 
   return (
     <div className="min-h-[100dvh] bg-[#ECE6E1] md:p-6">
-      <div className="relative mx-auto min-h-[100dvh] w-full max-w-[393px] overflow-hidden bg-[#FAF7F5] md:min-h-[852px] md:rounded-[40px] md:border md:border-[#E6DFD8] md:shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]">
-        <main className="h-full overflow-y-auto pb-[calc(env(safe-area-inset-bottom,0px)+88px)]">
+      <div className="relative mx-auto h-[100dvh] w-full max-w-[393px] overflow-hidden bg-[#FAF7F5] md:h-[852px] md:rounded-[40px] md:border md:border-[#E6DFD8] md:shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]">
+        <main className="absolute inset-0 overflow-y-auto pb-[calc(env(safe-area-inset-bottom,0px)+98px)]">
           <Outlet />
         </main>
 
-        <nav className="absolute bottom-0 left-0 right-0 z-40 border-t border-[#E4DED7] bg-[#FAF7F5]/95 backdrop-blur">
+        <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] bg-[#FAF7F5]/95 backdrop-blur">
           <div className="flex items-center justify-around px-6 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
             {navItems.map((item) => {
               const Icon = item.icon;
