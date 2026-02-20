@@ -4,6 +4,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { Switch } from '@/components/ui/switch';
 import { getEventLogService } from '@/lib/services';
 import {
   getSyncServerUrlOverride,
@@ -16,6 +17,11 @@ import {
   setThemePreference,
   type ThemePreference,
 } from '@/config/theme';
+import {
+  getDeveloperModeEnabled,
+  setDeveloperModeEnabled,
+} from '@/config/developer-mode';
+import { setUIMode } from '@/config/ui-mode';
 
 type ImportStrategy = 'merge' | 'overwrite';
 // PickedJsonFile（已选 JSON 文件）: tauri native picker return payload（原生文件选择返回体）
@@ -31,13 +37,14 @@ function buildBackupFileName(): string {
 
 export function SettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
-  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.2.1');
+  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.0-beta1');
   const autoSyncServerUrl = resolveSyncServerUrl(envMap, {
     syncServerOverride: null,
   });
   const [syncServerUrl, setSyncServerUrl] = useState(() => getSyncServerUrlOverride() || autoSyncServerUrl);
   const [savedSyncServerUrl, setSavedSyncServerUrl] = useState<string | null>(() => getSyncServerUrlOverride());
   const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => getThemePreference());
+  const [developerMode, setDeveloperMode] = useState<boolean>(() => getDeveloperModeEnabled());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy, setImportStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
@@ -196,6 +203,11 @@ export function SettingsPage() {
     }
   };
 
+  const handleSwitchToNewUi = () => {
+    // setUIMode（界面模式切换）: old -> new
+    setUIMode('new');
+  };
+
   return (
     <div className="settings-page p-6 space-y-4">
       <h1 className="text-2xl font-bold">设置</h1>
@@ -208,6 +220,16 @@ export function SettingsPage() {
         </p>
         <p>
           <span className="font-medium">Build Hash（构建哈希）:</span> {versionBuildInfo.buildHash}
+        </p>
+      </div>
+
+      <div className="space-y-2 max-w-sm">
+        <Label>界面模式（UI Mode）</Label>
+        <Button type="button" variant="outline" onClick={handleSwitchToNewUi} disabled={loading}>
+          切换到新 UI
+        </Button>
+        <p className="text-xs text-muted-foreground">
+          过渡期支持双 UI：可在新 UI 设置页中返回旧 UI。
         </p>
       </div>
 
@@ -293,6 +315,33 @@ export function SettingsPage() {
           className="hidden"
           onChange={handleImportFile}
         />
+      </div>
+
+      <div className="space-y-2 max-w-xl rounded-md border p-3">
+        <div className="flex items-center justify-between gap-3">
+          <div>
+            <p className="text-sm font-medium">开发者模式</p>
+            <p className="text-xs text-muted-foreground">开启后显示 MOSS / ASR 测试入口</p>
+          </div>
+          <Switch
+            checked={developerMode}
+            onCheckedChange={(checked) => {
+              setDeveloperMode(checked);
+              setDeveloperModeEnabled(checked);
+            }}
+            aria-label="开发者模式"
+          />
+        </div>
+        {developerMode && (
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/moss-test'; }}>
+              打开 MOSS测试
+            </Button>
+            <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/asr-test'; }}>
+              打开 ASR测试
+            </Button>
+          </div>
+        )}
       </div>
 
       {statusMessage && (

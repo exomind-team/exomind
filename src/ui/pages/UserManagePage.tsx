@@ -26,7 +26,11 @@ interface UserInfo {
   lastLogin?: string;
 }
 
-export function UserManagePage() {
+interface UserManagePageProps {
+  embedded?: boolean;
+}
+
+export function UserManagePage({ embedded = false }: UserManagePageProps) {
   const [users, setUsers] = useState<UserInfo[]>([]);
   const [newUsername, setNewUsername] = useState('');
   const [newPassword, setNewPassword] = useState('');
@@ -129,8 +133,8 @@ export function UserManagePage() {
   };
 
   return (
-    <div className="container mx-auto p-6 space-y-6">
-      <h1 className="text-2xl font-bold">用户管理</h1>
+    <div className={embedded ? 'space-y-4' : 'container mx-auto p-6 space-y-6'}>
+      {!embedded && <h1 className="text-2xl font-bold">用户管理</h1>}
 
       {/* 消息提示 */}
       {message && (

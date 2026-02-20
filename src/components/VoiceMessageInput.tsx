@@ -43,6 +43,8 @@ export interface VoiceMessageInputProps {
   minRows?: number;
   /** 输入框最大行数（超过后内部滚动） */
   maxRows?: number;
+  /** UI 变体（UI Variant） */
+  variant?: 'default' | 'new-mobile';
 }
 
 export interface VoiceMessageInputHandle {
@@ -63,6 +65,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
   buttonSize = 40,
   minRows = 2,
   maxRows = 6,
+  variant = 'default',
 }: VoiceMessageInputProps, ref) {
   const [value, setValue] = useState('');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
@@ -141,9 +144,19 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     },
   }), []);
 
+  const isNewMobile = variant === 'new-mobile';
+  const wrapperClassName = isNewMobile ? 'safe-area-pb bg-transparent shrink-0' : 'safe-area-pb bg-card shrink-0';
+  const rowClassName = isNewMobile
+    ? 'mx-3 mb-2 mt-2 flex items-end gap-2 rounded-2xl border border-[#ECE7E2] bg-white px-2 py-2 shadow-[0_10px_24px_-18px_rgba(0,0,0,0.45)]'
+    : 'flex items-end gap-2 px-3 py-2 border-t';
+  const textareaClassName = isNewMobile ? `${inputClassName ?? ''} rounded-2xl border-[#E7E5E4] bg-white` : inputClassName;
+  const sendButtonClassName = isNewMobile
+    ? 'shrink-0 rounded-xl bg-[#9CA3AF] hover:bg-[#7B8493] data-[disabled]:bg-[#D1D5DB]'
+    : 'shrink-0';
+
   return (
-    <div className="safe-area-pb bg-card shrink-0">
-      <div className="flex items-end gap-2 px-3 py-2 border-t">
+    <div className={wrapperClassName}>
+      <div className={rowClassName}>
         {/* 语音输入按钮 */}
         <VoiceInputButton
           ref={voiceButtonRef}
@@ -153,6 +166,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
           adapterConfig={adapterConfig}
           showWaveform={showWaveform}
           showTimer={showTimer}
+          showPermissionUnlockButton={!isNewMobile}
           enableShortcut={enableShortcut}
           size={buttonSize}
           style={{
@@ -170,7 +184,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
           }}
           onKeyDown={handleKeyDown}
           placeholder={placeholder}
-          className={inputClassName}
+          className={textareaClassName}
           rows={minRows}
           data-testid="event-input-textarea"
           data-gramm="false"
@@ -186,7 +200,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
           onClick={handleSend}
           disabled={!value.trim()}
           size="icon"
-          className="shrink-0"
+          className={sendButtonClassName}
           type="button"
           data-testid="event-send-button"
         >
