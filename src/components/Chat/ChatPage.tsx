@@ -11,7 +11,7 @@
  * └─────────────────────────────────────────┘
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
@@ -42,6 +42,26 @@ interface ChatPageProps {
   hideHeader?: boolean;
 }
 
+function resolvePlatformLabel(platform?: string): string {
+  if (!platform) {
+    return 'Web';
+  }
+
+  const normalized = platform.toLowerCase();
+  if (normalized.includes('win')) return 'Win';
+  if (normalized.includes('mac')) return 'macOS';
+  if (normalized.includes('linux')) return 'Linux';
+  if (normalized.includes('android')) return 'Android';
+  if (normalized.includes('ios') || normalized.includes('iphone') || normalized.includes('ipad')) return 'iOS';
+  return platform;
+}
+
+function resolveAvatarInitial(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '我';
+  return trimmed.charAt(0).toUpperCase();
+}
+
 export function ChatPage({ variant = 'default', hideHeader = false }: ChatPageProps = {}) {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const [events, setEvents] = useState<Event[]>([]);
@@ -57,9 +77,20 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const loadingOlderRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
   const eventLogService = useRef(getEventLogService());
-  const { currentUser, isLoggedIn } = useSyncStore();
+  const { currentUser, isLoggedIn, credentials } = useSyncStore();
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
   const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
+  const userDisplayName = currentUser || 'Hailay';
+  const userMeta = useMemo(() => {
+    const deviceName = credentials?.deviceName?.trim() || '本机设备';
+    const platformLabel = resolvePlatformLabel(credentials?.platform);
+    return {
+      deviceName,
+      platformLabel,
+      avatarInitial: resolveAvatarInitial(userDisplayName),
+    };
+  }, [credentials?.deviceName, credentials?.platform, userDisplayName]);
+  const assistantDeviceLabel = `· ExoMind · ${userMeta.platformLabel}`;
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     listEndRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -319,6 +350,15 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     return null;
   };
 
+  const formatMessageTime = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  };
+
   const isSystemEvent = (event: Event) => (
     event.tags.has('block_start')
     || event.tags.has('block_pause')
@@ -399,7 +439,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
             </p>
           </div>
         ) : variant === 'new-mobile' ? (
-          <div className="space-y-3 px-4 pb-2 pt-3">
+          <div className="space-y-4 px-5 pb-1 pt-3">
             {loadingOlder && (
               <div className="flex justify-center">
                 <span className="text-xs text-muted-foreground" data-testid="event-list-loading-more">
@@ -411,30 +451,58 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
               const systemEvent = isSystemEvent(event);
               if (systemEvent) {
                 return (
-                  <div key={event.id} className="flex gap-2">
-                    <Avatar className="h-7 w-7 shrink-0">
-                      <AvatarFallback className="rounded-full bg-[#E8EEF8] text-[11px]">
+                  <div
+                    key={event.id}
+                    className="flex items-start gap-2"
+                    data-testid="new-mobile-system-message-row"
+                  >
+                    <Avatar className="mt-0.5 h-8 w-8 shrink-0">
+                      <AvatarFallback className="rounded-full bg-[#E8EEF8] text-[11px] text-[#40618A]">
                         {getEventIcon(event)}
                       </AvatarFallback>
                     </Avatar>
-                    <div className="min-w-0 max-w-[80%]">
-                      <div className="rounded-2xl border border-[#ECE7E2] bg-white px-3 py-2 text-sm text-stone-800 shadow-[0_6px_18px_-14px_rgba(0,0,0,0.45)]">
+                    <div className="min-w-0 max-w-[85%] flex-1">
+                      <div
+                        className="mb-1 flex items-center gap-1 text-[11px] leading-[1.4]"
+                        data-testid="new-mobile-message-meta"
+                      >
+                        <span className="text-xs font-semibold text-[#1C1917]">AI 助理</span>
+                        <span className="text-[#B8AFA9]">{assistantDeviceLabel}</span>
+                        <span className="text-[#B8AFA9]">{formatMessageTime(event.timestamp)}</span>
+                      </div>
+                      <div className="rounded-2xl border border-[#F0ECE8] bg-white px-[14px] py-3 text-[13px] leading-[1.6] text-[#44403C]">
                         <EventMarkdown content={event.content} />
                       </div>
-                      <p className="mt-1 text-[11px] text-stone-400">{formatTime(event.timestamp)}</p>
                     </div>
                   </div>
                 );
               }
 
               return (
-                <div key={event.id} className="flex justify-end">
-                  <div className="max-w-[82%]">
-                    <div className="rounded-2xl bg-[#FDECEA] px-3 py-2 text-sm text-stone-800">
+                <div
+                  key={event.id}
+                  className="flex justify-end gap-2"
+                  data-testid="new-mobile-user-message-row"
+                >
+                  <div className="flex max-w-[84%] flex-col items-end">
+                    <div
+                      className="mb-1 flex items-center justify-end gap-1 text-[11px] leading-[1.4]"
+                      data-testid="new-mobile-message-meta"
+                    >
+                      <span className="text-[#B8AFA9]">{userMeta.deviceName}</span>
+                      <span className="text-[#B8AFA9]">· App ·</span>
+                      <span className="text-[#A8A29E]">{formatMessageTime(event.timestamp)}</span>
+                      <span className="text-xs font-semibold text-[#1C1917]">{userDisplayName}</span>
+                    </div>
+                    <div className="rounded-2xl bg-[#FDECEA] px-[14px] py-[10px] text-[13px] leading-[1.6] text-[#3D1410]">
                       <EventMarkdown content={event.content} />
                     </div>
-                    <p className="mt-1 text-right text-[11px] text-stone-400">{formatTime(event.timestamp)}</p>
                   </div>
+                  <Avatar className="h-8 w-8 shrink-0">
+                    <AvatarFallback className="rounded-full bg-[#F1E3DB] text-[11px] font-semibold text-[#6B2F24]">
+                      {userMeta.avatarInitial}
+                    </AvatarFallback>
+                  </Avatar>
                 </div>
               );
             })}

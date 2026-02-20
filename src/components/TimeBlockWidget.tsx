@@ -364,10 +364,12 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const isRunning = timerState === 'running';
   const isPaused = timerState === 'paused';
 
-  const timerValueClassName =
-    variant === 'new-mobile'
-      ? 'text-[56px] leading-[0.95] font-light tracking-[0.05em] text-stone-900'
-      : 'text-lg';
+  const timerDisplayValue = timerMode === 'countdown'
+    ? (countdownOverrunRef.current ? `+${formatTime(countdownOvertimeMs)}` : formatCountdown(elapsed))
+    : formatTime(elapsed);
+  const isCountdownWarning =
+    timerMode === 'countdown'
+    && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0));
   const rootClassName = variant === 'new-mobile' ? 'border-y border-[#E8E3DE] bg-white/80' : 'border-b bg-muted/30';
 
   return (
@@ -375,9 +377,9 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       {/* 状态栏 */}
       {variant === 'new-mobile' ? (
         <div className="px-4 py-1">
-          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2" data-testid="timeblock-main-row">
-            <div className="flex items-center gap-2">
-              {isIdle && (
+          {isIdle ? (
+            <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2" data-testid="timeblock-main-row">
+              <div className="flex items-center">
                 <Button
                   size="sm"
                   onClick={handleStart}
@@ -386,61 +388,67 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   <Play size={15} />
                   <span>开始</span>
                 </Button>
-              )}
-              {isRunning && (
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={handlePause}
-                  className="h-9 gap-1 rounded-lg border-[#E7E5E4] bg-[#EDECE9] px-4 text-sm text-stone-800"
-                >
-                  <Pause size={15} />
-                  <span>暂停</span>
-                </Button>
-              )}
-              {isPaused && (
-                <Button
-                  size="sm"
-                  onClick={handleResume}
-                  className="h-9 gap-1 rounded-lg bg-[#16A34A] px-4 text-sm hover:bg-[#15803D]"
-                >
-                  <Play size={15} />
-                  <span>继续</span>
-                </Button>
-              )}
-            </div>
+              </div>
 
-            <div className="text-center font-mono">
-              <span
-                className={
-                  `${timerValueClassName} ${
-                    timerMode === 'countdown' && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0))
-                      ? 'text-red-500'
-                      : ''
-                  }`
-                }
-              >
-                {timerMode === 'countdown'
-                  ? (countdownOverrunRef.current ? `+${formatTime(countdownOvertimeMs)}` : formatCountdown(elapsed))
-                  : formatTime(elapsed)}
-              </span>
-            </div>
+              <div className="text-center font-mono">
+                <span
+                  className={`text-[32px] font-light leading-[1.05] tracking-[0.04em] ${
+                    isCountdownWarning ? 'text-red-500' : 'text-stone-900'
+                  }`}
+                >
+                  {timerDisplayValue}
+                </span>
+              </div>
 
-            <div className="flex items-center justify-end gap-1">
-              {!isIdle && (
+              <div className="h-9 w-9" aria-hidden />
+            </div>
+          ) : (
+            <>
+              <div className="flex items-center justify-center px-6 pb-1 pt-2" data-testid="timeblock-main-row">
+                <span
+                  className={`font-mono text-[56px] font-light leading-[0.95] tracking-[0.05em] ${
+                    isCountdownWarning ? 'text-red-500' : 'text-stone-900'
+                  }`}
+                >
+                  {timerDisplayValue}
+                </span>
+              </div>
+              <div className="flex items-center justify-center gap-3 px-6 pb-1" data-testid="timeblock-action-row">
+                {isRunning && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handlePause}
+                    className="h-10 gap-2 rounded-[24px] border-0 bg-[#EDECE9] px-6 text-sm font-medium text-[#1C1917]"
+                  >
+                    <Pause size={16} />
+                    <span>暂停</span>
+                  </Button>
+                )}
+                {isPaused && (
+                  <Button
+                    size="sm"
+                    onClick={handleResume}
+                    className="h-10 gap-2 rounded-[24px] bg-[#16A34A] px-6 text-sm font-medium text-white hover:bg-[#15803D]"
+                  >
+                    <Play size={16} />
+                    <span>继续</span>
+                  </Button>
+                )}
                 <Button
                   size="sm"
                   variant="outline"
                   onClick={handleEndDialog}
-                  className="h-9 gap-1 rounded-lg border-[#F5D4CC] bg-[#FDECEB] px-3 text-sm text-[#C75B3A]"
+                  className="h-10 gap-2 rounded-[24px] border-0 bg-[#FDECEB] px-6 text-sm font-medium text-[#C75B3A]"
                 >
-                  <Square size={14} />
+                  <Square size={16} />
                   <span>结束</span>
                 </Button>
-              )}
-            </div>
-          </div>
-          <div className="-mt-1 flex justify-end">
+              </div>
+            </>
+          )}
+
+          <div className="-mt-0.5 flex justify-end">
             <Button
               variant="ghost"
               size="sm"
