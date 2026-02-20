@@ -68,7 +68,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   }), []);
 
   return (
-    <div className="shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5]" data-testid="new-now-input-row">
+    <div className="mb-2 shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5]" data-testid="new-now-input-row">
       <div className="px-4 py-2">
         <div className="flex items-end gap-2">
           <button
