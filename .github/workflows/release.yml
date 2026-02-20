@@ -369,22 +369,35 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Patch Android Manifest RECORD_AUDIO permission（注入录音权限）
+      - name: Patch Android audio permissions and release cleartext（注入音频权限与 release cleartext）
         shell: powershell
         run: |
           bun Scripts/dev/android-manifest-permission.ts
 
-      - name: Verify RECORD_AUDIO permission persisted（校验录音权限已持久化）
+      - name: Verify Android permission and cleartext patch persisted（校验权限与 cleartext 配置）
         shell: powershell
         run: |
           $manifestPath = "src-tauri/gen/android/app/src/main/AndroidManifest.xml"
           if (-not (Test-Path $manifestPath)) {
             throw "Manifest not found: $manifestPath"
           }
-          if (-not (Select-String -Path $manifestPath -Pattern "android.permission.RECORD_AUDIO" -SimpleMatch -Quiet)) {
-            throw "Missing android.permission.RECORD_AUDIO in AndroidManifest.xml"
+          foreach ($permission in @("android.permission.RECORD_AUDIO", "android.permission.MODIFY_AUDIO_SETTINGS")) {
+            if (-not (Select-String -Path $manifestPath -Pattern $permission -SimpleMatch -Quiet)) {
+              throw "Missing $permission in AndroidManifest.xml"
+            }
           }
-          Write-Host "RECORD_AUDIO permission verified."
+
+          $buildGradlePath = "src-tauri/gen/android/app/build.gradle.kts"
+          if (-not (Test-Path $buildGradlePath)) {
+            throw "Build gradle not found: $buildGradlePath"
+          }
+          $buildGradleContent = Get-Content -Path $buildGradlePath -Raw -Encoding UTF8
+          $releaseCleartextPattern = 'getByName\("release"\)\s*\{[\s\S]*manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"'
+          if (-not ($buildGradleContent -match $releaseCleartextPattern)) {
+            throw "Missing usesCleartextTraffic=true in release block."
+          }
+
+          Write-Host "Android permissions and cleartext release placeholder verified."
 
       - name: Build Android APK only (仅构建 APK，aarch64 + i686)
         run: bun tauri android build --ci --apk --split-per-abi -t aarch64 i686

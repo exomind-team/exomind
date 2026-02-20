@@ -2,11 +2,10 @@ import { createRootRoute, createRouter, createRoute, Outlet, useLocation } from 
 import { Link } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { cn } from "@/lib/utils";
-import { X, Settings, Mic, MicVocal, ClipboardList, Menu, Home, Users, Sun, Moon, SunMoon } from "lucide-react";
+import { X, Settings, ClipboardList, Menu, Home, Users, Sun, Moon, SunMoon } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
 import { ASRTestPage } from "@/pages/ASRTestPage";
-import { VoiceChatPage } from "@/pages/VoiceChatPage";
 import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
 import { HomePage } from "@/components/Home/HomePage";
 import { UserManagePage } from "@/ui/pages/UserManagePage";
@@ -21,9 +20,6 @@ import {
 const sidebarItems = [
   { title: "首页", path: "/", icon: Home },
   { title: "事件日志", path: "/eventlog", icon: ClipboardList },
-  { title: "MOSS测试", path: "/moss-test", icon: Mic },
-  { title: "语音聊天", path: "/voice-chat", icon: MicVocal },
-  { title: "ASR测试", path: "/asr-test", icon: Mic },
   { title: "用户管理", path: "/user-manage", icon: Users },
   { title: "设置", path: "/settings", icon: Settings },
 ];
@@ -209,15 +205,6 @@ const mossTestRoute = createRoute({
   },
 });
 
-// Voice Chat route (/voice-chat)
-const voiceChatRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: 'voice-chat',
-  component: function VoiceChat() {
-    return <VoiceChatPage />;
-  },
-});
-
 // User Manage route (/user-manage)
 const userManageRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -244,7 +231,6 @@ const routeTree = rootRoute.addChildren([
   settingsRoute,
   asrTestRoute,
   mossTestRoute,
-  voiceChatRoute,
   userManageRoute,
   syncTestRoute,
 ]);

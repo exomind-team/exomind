@@ -11,12 +11,14 @@
  * └─────────────────────────────────────────┘
  */
 
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
+import { NewFocusTimerWidget, type NewFocusTimerWidgetHandle } from '@/ui/new/components/NewFocusTimerWidget';
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
+import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
@@ -36,7 +38,32 @@ const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 
-export function ChatPage() {
+interface ChatPageProps {
+  variant?: 'default' | 'new-mobile'; // new-mobile（新移动端外观）用于 v0.3.0 UI 重构
+  hideHeader?: boolean;
+}
+
+function resolvePlatformLabel(platform?: string): string {
+  if (!platform) {
+    return 'Web';
+  }
+
+  const normalized = platform.toLowerCase();
+  if (normalized.includes('win')) return 'Win';
+  if (normalized.includes('mac')) return 'macOS';
+  if (normalized.includes('linux')) return 'Linux';
+  if (normalized.includes('android')) return 'Android';
+  if (normalized.includes('ios') || normalized.includes('iphone') || normalized.includes('ipad')) return 'iOS';
+  return platform;
+}
+
+function resolveAvatarInitial(name: string): string {
+  const trimmed = name.trim();
+  if (!trimmed) return '我';
+  return trimmed.charAt(0).toUpperCase();
+}
+
+export function ChatPage({ variant = 'default', hideHeader = false }: ChatPageProps = {}) {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const [events, setEvents] = useState<Event[]>([]);
   const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
@@ -51,9 +78,21 @@ export function ChatPage() {
   const loadingOlderRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
   const eventLogService = useRef(getEventLogService());
-  const { currentUser, isLoggedIn } = useSyncStore();
+  const { currentUser, isLoggedIn, credentials } = useSyncStore();
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
   const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
+  const newFocusTimerWidgetRef = useRef<NewFocusTimerWidgetHandle | null>(null);
+  const userDisplayName = currentUser || 'Hailay';
+  const userMeta = useMemo(() => {
+    const deviceName = credentials?.deviceName?.trim() || '本机设备';
+    const platformLabel = resolvePlatformLabel(credentials?.platform);
+    return {
+      deviceName,
+      platformLabel,
+      avatarInitial: resolveAvatarInitial(userDisplayName),
+    };
+  }, [credentials?.deviceName, credentials?.platform, userDisplayName]);
+  const assistantDeviceLabel = `· ExoMind · ${userMeta.platformLabel}`;
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     listEndRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -226,12 +265,16 @@ export function ChatPage() {
 
       if (isEditableTarget(e.target)) return;
 
+      const timerWidget = variant === 'new-mobile'
+        ? newFocusTimerWidgetRef.current
+        : timeBlockWidgetRef.current;
+
       // Ctrl+Enter: 弹出反馈对话框（正在计时或暂停中）
       if (e.ctrlKey) {
         e.preventDefault();
-        const timerState = timeBlockWidgetRef.current?.getTimerState();
+        const timerState = timerWidget?.getTimerState();
         if (timerState === 'running' || timerState === 'paused') {
-          timeBlockWidgetRef.current?.endDialog();
+          timerWidget?.endDialog();
         }
         return;
       }
@@ -239,13 +282,13 @@ export function ChatPage() {
       // Shift+Enter: 暂停/继续时间块，或展开时间块输入框
       if (e.shiftKey) {
         e.preventDefault();
-        const timerState = timeBlockWidgetRef.current?.getTimerState();
+        const timerState = timerWidget?.getTimerState();
         if (timerState === 'running' || timerState === 'paused') {
           // 正在计时或暂停中 → 暂停/继续
-          timeBlockWidgetRef.current?.pauseOrResume();
+          timerWidget?.pauseOrResume();
         } else {
           // 空闲/无时间块 → 展开时间块输入框
-          timeBlockWidgetRef.current?.expandAndFocusTaskName();
+          timerWidget?.expandAndFocusTaskName();
         }
         return;
       }
@@ -257,7 +300,7 @@ export function ChatPage() {
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [variant]);
 
   // 格式化时间
   const formatTime = (timestamp: number) => {
@@ -313,6 +356,23 @@ export function ChatPage() {
     return null;
   };
 
+  const formatMessageTime = (timestamp: number) => {
+    const date = new Date(timestamp);
+    return date.toLocaleTimeString('zh-CN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: false,
+    });
+  };
+
+  const isSystemEvent = (event: Event) => (
+    event.tags.has('block_start')
+    || event.tags.has('block_pause')
+    || event.tags.has('block_resume')
+    || event.tags.has('block_end')
+    || event.tags.has('block_feedback')
+  );
+
   // 按日期分组
   const groupedEvents = events.reduce((groups, event) => {
     const date = new Date(event.timestamp).toLocaleDateString('zh-CN', {
@@ -329,32 +389,48 @@ export function ChatPage() {
     return groups;
   }, new Map<string, Event[]>());
 
+  const rootClassName =
+    variant === 'new-mobile'
+      ? 'flex h-full min-h-0 flex-col bg-[#FAF7F5]'
+      : 'flex flex-col h-full max-h-[100dvh] lg:max-h-screen';
+
+  const listClassName =
+    variant === 'new-mobile'
+      ? 'flex-1 overflow-auto'
+      : 'flex-1 overflow-auto p-3 sm:p-6';
+
   return (
-    <div className="flex flex-col h-full max-h-[100dvh] lg:max-h-screen">
+    <div className={rootClassName}>
       {/* 头部 */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0">
-        <div className="flex items-center gap-2">
-          <h2 className="text-lg sm:text-2xl font-bold">事件日志</h2>
-          {/* 同步状态 */}
-          <Badge
-            variant={syncStatus === 'connected' ? 'default' : syncStatus === 'syncing' ? 'outline' : 'secondary'}
-            className="text-xs"
-          >
-            {syncStatus === 'connected' ? '已同步' : syncStatus === 'syncing' ? '同步中...' : '未同步'}
+      {!hideHeader && (
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-lg sm:text-2xl font-bold">事件日志</h2>
+            {/* 同步状态 */}
+            <Badge
+              variant={syncStatus === 'connected' ? 'default' : syncStatus === 'syncing' ? 'outline' : 'secondary'}
+              className="text-xs"
+            >
+              {syncStatus === 'connected' ? '已同步' : syncStatus === 'syncing' ? '同步中...' : '未同步'}
+            </Badge>
+          </div>
+          <Badge variant="secondary" className="text-xs">
+            {events.length}{hasMore ? '+' : ''} 条事件
           </Badge>
         </div>
-        <Badge variant="secondary" className="text-xs">
-          {events.length}{hasMore ? '+' : ''} 条事件
-        </Badge>
-      </div>
+      )}
 
       {/* TimeBlock 控件栏 */}
-      <TimeBlockWidget ref={timeBlockWidgetRef} />
+      {variant === 'new-mobile' ? (
+        <NewFocusTimerWidget ref={newFocusTimerWidgetRef} />
+      ) : (
+        <TimeBlockWidget ref={timeBlockWidgetRef} variant="default" />
+      )}
 
       {/* 事件列表 */}
       <div
         ref={listContainerRef}
-        className="flex-1 overflow-auto p-3 sm:p-6"
+        className={listClassName}
         data-testid="event-list"
         onScroll={handleListScroll}
       >
@@ -363,14 +439,83 @@ export function ChatPage() {
             <p className="text-sm text-muted-foreground">加载中...</p>
           </div>
         ) : events.length === 0 ? (
-          <div className="flex flex-col items-center justify-center h-full text-center">
-            <div className="w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4">
+          <div className="flex h-full flex-col items-center justify-center px-6 text-center">
+            <div className={variant === 'new-mobile' ? 'mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#EEF2F7]' : 'w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4'}>
               <span className="text-2xl sm:text-3xl">📝</span>
             </div>
-            <p className="text-base sm:text-lg font-medium mb-1">暂无事件记录</p>
-            <p className="text-xs sm:text-sm text-muted-foreground">
+            <p className="mb-1 text-base font-semibold text-stone-800 sm:text-lg">暂无事件记录</p>
+            <p className="text-xs text-muted-foreground sm:text-sm">
               开始计时或输入内容记录事件
             </p>
+          </div>
+        ) : variant === 'new-mobile' ? (
+          <div className="space-y-4 px-5 pb-1 pt-3">
+            {loadingOlder && (
+              <div className="flex justify-center">
+                <span className="text-xs text-muted-foreground" data-testid="event-list-loading-more">
+                  加载更多...
+                </span>
+              </div>
+            )}
+            {events.map((event) => {
+              const systemEvent = isSystemEvent(event);
+              if (systemEvent) {
+                return (
+                  <div
+                    key={event.id}
+                    className="flex items-start gap-2"
+                    data-testid="new-mobile-system-message-row"
+                  >
+                    <Avatar className="mt-0.5 h-8 w-8 shrink-0">
+                      <AvatarFallback className="rounded-full bg-[#E8EEF8] text-[11px] text-[#40618A]">
+                        {getEventIcon(event)}
+                      </AvatarFallback>
+                    </Avatar>
+                    <div className="min-w-0 max-w-[85%] flex-1">
+                      <div
+                        className="mb-1 flex items-center gap-1 text-[11px] leading-[1.4]"
+                        data-testid="new-mobile-message-meta"
+                      >
+                        <span className="text-xs font-semibold text-[#1C1917]">AI 助理</span>
+                        <span className="text-[#B8AFA9]">{assistantDeviceLabel}</span>
+                        <span className="text-[#B8AFA9]">{formatMessageTime(event.timestamp)}</span>
+                      </div>
+                      <div className="rounded-2xl border border-[#F0ECE8] bg-white px-[14px] py-3 text-[13px] leading-[1.6] text-[#44403C]">
+                        <EventMarkdown content={event.content} />
+                      </div>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <div
+                  key={event.id}
+                  className="flex justify-end gap-2"
+                  data-testid="new-mobile-user-message-row"
+                >
+                  <div className="flex max-w-[84%] flex-col items-end">
+                    <div
+                      className="mb-1 flex items-center justify-end gap-1 text-[11px] leading-[1.4]"
+                      data-testid="new-mobile-message-meta"
+                    >
+                      <span className="text-[#B8AFA9]">{userMeta.deviceName}</span>
+                      <span className="text-[#B8AFA9]">· App ·</span>
+                      <span className="text-[#A8A29E]">{formatMessageTime(event.timestamp)}</span>
+                      <span className="text-xs font-semibold text-[#1C1917]">{userDisplayName}</span>
+                    </div>
+                    <div className="rounded-2xl bg-[#FDECEA] px-[14px] py-[10px] text-[13px] leading-[1.6] text-[#3D1410]">
+                      <EventMarkdown content={event.content} />
+                    </div>
+                  </div>
+                  <Avatar className="h-8 w-8 shrink-0">
+                    <AvatarFallback className="rounded-full bg-[#F1E3DB] text-[11px] font-semibold text-[#6B2F24]">
+                      {userMeta.avatarInitial}
+                    </AvatarFallback>
+                  </Avatar>
+                </div>
+              );
+            })}
           </div>
         ) : (
           <div className="space-y-4 sm:space-y-6">
@@ -390,10 +535,7 @@ export function ChatPage() {
                 </div>
                 <div className="space-y-2 sm:space-y-3">
                   {dateEvents.map((event) => (
-                    <div
-                      key={event.id}
-                      className="flex gap-2 sm:gap-3"
-                    >
+                    <div key={event.id} className="flex gap-2 sm:gap-3">
                       <Avatar className="h-6 w-6 sm:h-8 sm:w-8 shrink-0">
                         <AvatarFallback className={getEventBgColor(event)}>
                           {getEventIcon(event)}
@@ -425,12 +567,21 @@ export function ChatPage() {
       </div>
 
       {/* 输入区域 */}
-      <VoiceMessageInput
-        ref={voiceMessageInputRef}
-        onSend={handleSend}
-        placeholder="输入内容记录事件..."
-        buttonSize={40}
-      />
+      {variant === 'new-mobile' ? (
+        <NewNowInputRow
+          ref={voiceMessageInputRef}
+          onSend={handleSend}
+          placeholder="记录当下的事实..."
+        />
+      ) : (
+        <VoiceMessageInput
+          ref={voiceMessageInputRef}
+          onSend={handleSend}
+          placeholder="输入内容记录事件..."
+          buttonSize={40}
+          variant="default"
+        />
+      )}
     </div>
   );
 }

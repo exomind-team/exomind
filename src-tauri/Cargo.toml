@@ -1,6 +1,6 @@
 [package]
 name = "exomind"
-version = "0.2.1"
+version = "0.3.0"
 description = "ExoMind - A Tauri App"
 authors = ["you"]
 edition = "2021"
@@ -44,3 +44,4 @@ lto = true
 opt-level = "s"
 panic = "abort"
 strip = true
+

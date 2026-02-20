@@ -39,6 +39,8 @@ interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
   expanded?: boolean;
   onExpandedChange?: (expanded: boolean) => void;
+  /** UI 变体（UI Variant） */
+  variant?: 'default' | 'new-mobile';
 }
 
 /**
@@ -56,7 +58,11 @@ export interface TimeBlockWidgetHandle {
   endDialog: () => void;
 }
 
-export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidgetProps>(function TimeBlockWidget({ expanded: controlledExpanded, onExpandedChange }, ref) {
+export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidgetProps>(function TimeBlockWidget({
+  expanded: controlledExpanded,
+  onExpandedChange,
+  variant = 'default',
+}, ref) {
   const { toast } = useToast();
 
   // 内部状态
@@ -358,94 +364,189 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const isRunning = timerState === 'running';
   const isPaused = timerState === 'paused';
 
-  return (
-    <div className="border-b bg-muted/30" data-testid="timeblock-widget">
-      {/* 状态栏 */}
-      <div className="flex items-center justify-between px-4 py-3">
-        {/* 左侧：控制按钮 */}
-        <div className="flex items-center gap-2">
-          {isIdle && (
-            <Button
-              size="sm"
-              onClick={handleStart}
-              className="gap-1 bg-green-600 hover:bg-green-700"
-            >
-              <Play size={16} />
-              <span>开始</span>
-            </Button>
-          )}
+  const timerDisplayValue = timerMode === 'countdown'
+    ? (countdownOverrunRef.current ? `+${formatTime(countdownOvertimeMs)}` : formatCountdown(elapsed))
+    : formatTime(elapsed);
+  const isCountdownWarning =
+    timerMode === 'countdown'
+    && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0));
+  const rootClassName = variant === 'new-mobile' ? 'border-y border-[#E8E3DE] bg-white/80' : 'border-b bg-muted/30';
 
-          {isRunning && (
+  return (
+    <div className={rootClassName} data-testid="timeblock-widget">
+      {/* 状态栏 */}
+      {variant === 'new-mobile' ? (
+        <div className="px-4 py-1">
+          {isIdle ? (
+            <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2" data-testid="timeblock-main-row">
+              <div className="flex items-center">
+                <Button
+                  size="sm"
+                  onClick={handleStart}
+                  className="h-9 gap-1 rounded-lg bg-[#16A34A] px-4 text-sm hover:bg-[#15803D]"
+                >
+                  <Play size={15} />
+                  <span>开始</span>
+                </Button>
+              </div>
+
+              <div className="text-center font-mono">
+                <span
+                  className={`text-[32px] font-light leading-[1.05] tracking-[0.04em] ${
+                    isCountdownWarning ? 'text-red-500' : 'text-stone-900'
+                  }`}
+                >
+                  {timerDisplayValue}
+                </span>
+              </div>
+
+              <div className="h-9 w-9" aria-hidden />
+            </div>
+          ) : (
             <>
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handlePause}
-                className="gap-1"
-              >
-                <Pause size={16} />
-                <span>暂停</span>
-              </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={handleEndDialog}
-                className="gap-1"
-              >
-                <Square size={16} />
-                <span>结束</span>
-              </Button>
+              <div className="flex items-center justify-center px-6 pb-1 pt-2" data-testid="timeblock-main-row">
+                <span
+                  className={`font-mono text-[56px] font-light leading-[0.95] tracking-[0.05em] ${
+                    isCountdownWarning ? 'text-red-500' : 'text-stone-900'
+                  }`}
+                >
+                  {timerDisplayValue}
+                </span>
+              </div>
+              <div className="flex items-center justify-center gap-3 px-6 pb-1" data-testid="timeblock-action-row">
+                {isRunning && (
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={handlePause}
+                    className="h-10 gap-2 rounded-[24px] border-0 bg-[#EDECE9] px-6 text-sm font-medium text-[#1C1917]"
+                  >
+                    <Pause size={16} />
+                    <span>暂停</span>
+                  </Button>
+                )}
+                {isPaused && (
+                  <Button
+                    size="sm"
+                    onClick={handleResume}
+                    className="h-10 gap-2 rounded-[24px] bg-[#16A34A] px-6 text-sm font-medium text-white hover:bg-[#15803D]"
+                  >
+                    <Play size={16} />
+                    <span>继续</span>
+                  </Button>
+                )}
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleEndDialog}
+                  className="h-10 gap-2 rounded-[24px] border-0 bg-[#FDECEB] px-6 text-sm font-medium text-[#C75B3A]"
+                >
+                  <Square size={16} />
+                  <span>结束</span>
+                </Button>
+              </div>
             </>
           )}
 
-          {isPaused && (
-            <>
+          <div className="-mt-0.5 flex justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setExpanded(!expanded)}
+              className="h-8 rounded-full px-2 text-stone-500"
+              data-testid="timeblock-collapse-toggle"
+            >
+              {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            </Button>
+          </div>
+        </div>
+      ) : (
+        <div className="flex items-center justify-between px-4 py-3">
+          {/* 左侧：控制按钮 */}
+          <div className="flex items-center gap-2">
+            {isIdle && (
               <Button
                 size="sm"
-                onClick={handleResume}
+                onClick={handleStart}
                 className="gap-1 bg-green-600 hover:bg-green-700"
               >
                 <Play size={16} />
-                <span>继续</span>
+                <span>开始</span>
               </Button>
-              <Button
-                size="sm"
-                variant="destructive"
-                onClick={handleEndDialog}
-                className="gap-1"
-              >
-                <Square size={16} />
-                <span>结束</span>
-              </Button>
-            </>
-          )}
-        </div>
+            )}
 
-        {/* 中间：计时显示 */}
-        <div className="flex items-center gap-2 font-mono text-lg">
-          <span
-            className={
-              timerMode === 'countdown'
-                && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0))
-                ? 'text-red-500'
-                : ''
-            }
+            {isRunning && (
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handlePause}
+                  className="gap-1"
+                >
+                  <Pause size={16} />
+                  <span>暂停</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleEndDialog}
+                  className="gap-1"
+                >
+                  <Square size={16} />
+                  <span>结束</span>
+                </Button>
+              </>
+            )}
+
+            {isPaused && (
+              <>
+                <Button
+                  size="sm"
+                  onClick={handleResume}
+                  className="gap-1 bg-green-600 hover:bg-green-700"
+                >
+                  <Play size={16} />
+                  <span>继续</span>
+                </Button>
+                <Button
+                  size="sm"
+                  variant="destructive"
+                  onClick={handleEndDialog}
+                  className="gap-1"
+                >
+                  <Square size={16} />
+                  <span>结束</span>
+                </Button>
+              </>
+            )}
+          </div>
+
+          {/* 中间：计时显示 */}
+          <div className="flex items-center gap-2 font-mono text-lg">
+            <span
+              className={
+                timerMode === 'countdown'
+                  && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0))
+                  ? 'text-red-500'
+                  : ''
+              }
+            >
+              {timerMode === 'countdown'
+                ? (countdownOverrunRef.current ? `+${formatTime(countdownOvertimeMs)}` : formatCountdown(elapsed))
+                : formatTime(elapsed)}
+            </span>
+          </div>
+
+          {/* 右侧：展开按钮 */}
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => setExpanded(!expanded)}
           >
-            {timerMode === 'countdown'
-              ? (countdownOverrunRef.current ? `+${formatTime(countdownOvertimeMs)}` : formatCountdown(elapsed))
-              : formatTime(elapsed)}
-          </span>
+            {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+          </Button>
         </div>
-
-        {/* 右侧：展开按钮 */}
-        <Button
-          variant="ghost"
-          size="sm"
-          onClick={() => setExpanded(!expanded)}
-        >
-          {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-        </Button>
-      </div>
+      )}
 
       {/* 展开面板 */}
       {expanded && (
