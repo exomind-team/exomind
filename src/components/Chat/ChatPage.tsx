@@ -16,6 +16,7 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
+import { NewFocusTimerWidget, type NewFocusTimerWidgetHandle } from '@/ui/new/components/NewFocusTimerWidget';
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 import type { Event } from '@/lib/types/event';
@@ -80,6 +81,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const { currentUser, isLoggedIn, credentials } = useSyncStore();
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
   const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
+  const newFocusTimerWidgetRef = useRef<NewFocusTimerWidgetHandle | null>(null);
   const userDisplayName = currentUser || 'Hailay';
   const userMeta = useMemo(() => {
     const deviceName = credentials?.deviceName?.trim() || '本机设备';
@@ -263,12 +265,16 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
       if (isEditableTarget(e.target)) return;
 
+      const timerWidget = variant === 'new-mobile'
+        ? newFocusTimerWidgetRef.current
+        : timeBlockWidgetRef.current;
+
       // Ctrl+Enter: 弹出反馈对话框（正在计时或暂停中）
       if (e.ctrlKey) {
         e.preventDefault();
-        const timerState = timeBlockWidgetRef.current?.getTimerState();
+        const timerState = timerWidget?.getTimerState();
         if (timerState === 'running' || timerState === 'paused') {
-          timeBlockWidgetRef.current?.endDialog();
+          timerWidget?.endDialog();
         }
         return;
       }
@@ -276,13 +282,13 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       // Shift+Enter: 暂停/继续时间块，或展开时间块输入框
       if (e.shiftKey) {
         e.preventDefault();
-        const timerState = timeBlockWidgetRef.current?.getTimerState();
+        const timerState = timerWidget?.getTimerState();
         if (timerState === 'running' || timerState === 'paused') {
           // 正在计时或暂停中 → 暂停/继续
-          timeBlockWidgetRef.current?.pauseOrResume();
+          timerWidget?.pauseOrResume();
         } else {
           // 空闲/无时间块 → 展开时间块输入框
-          timeBlockWidgetRef.current?.expandAndFocusTaskName();
+          timerWidget?.expandAndFocusTaskName();
         }
         return;
       }
@@ -294,7 +300,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, []);
+  }, [variant]);
 
   // 格式化时间
   const formatTime = (timestamp: number) => {
@@ -415,7 +421,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       )}
 
       {/* TimeBlock 控件栏 */}
-      <TimeBlockWidget ref={timeBlockWidgetRef} variant={variant === 'new-mobile' ? 'new-mobile' : 'default'} />
+      {variant === 'new-mobile' ? (
+        <NewFocusTimerWidget ref={newFocusTimerWidgetRef} />
+      ) : (
+        <TimeBlockWidget ref={timeBlockWidgetRef} variant="default" />
+      )}
 
       {/* 事件列表 */}
       <div
