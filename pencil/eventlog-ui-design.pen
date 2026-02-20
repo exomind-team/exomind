@@ -5606,7 +5606,7 @@
       "name": "Settings Screen",
       "clip": true,
       "width": 393,
-      "height": 1326,
+      "height": 852,
       "fill": "#FAF7F5",
       "cornerRadius": 40,
       "layout": "vertical",

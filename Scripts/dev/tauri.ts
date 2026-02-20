@@ -2,7 +2,7 @@
 
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { ensureRecordAudioPermissionInManifestFile } from './android-manifest-permission-lib';
+import { ensureRequiredAudioPermissionsInManifestFile } from './android-manifest-permission-lib';
 import { resolveTauriExecutable } from './tauri-cli-lib';
 
 type AndroidLifecycleCommand = 'init' | 'build' | 'dev';
@@ -18,12 +18,12 @@ function getAndroidLifecycleCommand(args: string[]): AndroidLifecycleCommand | n
   return candidate && ANDROID_LIFECYCLE_COMMANDS.includes(candidate) ? candidate : null;
 }
 
-function ensureAndroidRecordAudioPermission(projectRoot: string): void {
+function ensureAndroidAudioPermissions(projectRoot: string): void {
   const manifestPath = join(projectRoot, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
-  const result = ensureRecordAudioPermissionInManifestFile(manifestPath);
+  const result = ensureRequiredAudioPermissionsInManifestFile(manifestPath);
 
   if (result.status === 'updated') {
-    console.log('[android-permission] injected android.permission.RECORD_AUDIO');
+    console.log('[android-permission] injected required audio permissions');
     return;
   }
 
@@ -46,7 +46,7 @@ function main(): never {
 
   // For build/dev: patch first, then execute tauri.
   if (androidCommand && androidCommand !== 'init') {
-    ensureAndroidRecordAudioPermission(process.cwd());
+    ensureAndroidAudioPermissions(process.cwd());
   }
 
   const tauriExecutable = resolveTauriExecutable({ projectRoot: process.cwd() });
@@ -63,7 +63,7 @@ function main(): never {
 
   // For init: project is generated after command, so patch here.
   if (androidCommand === 'init' && run.status === 0) {
-    ensureAndroidRecordAudioPermission(process.cwd());
+    ensureAndroidAudioPermissions(process.cwd());
   }
 
   process.exit(run.status ?? 1);

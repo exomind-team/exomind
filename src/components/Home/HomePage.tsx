@@ -5,7 +5,7 @@
  */
 
 import { Link } from '@tanstack/react-router';
-import { ClipboardList, Mic, Settings, ChevronRight, BookOpen } from 'lucide-react';
+import { ClipboardList, Settings, ChevronRight, BookOpen, Users } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import guideContent from '../../docs/user-guide.md?raw';
@@ -36,13 +36,13 @@ export function HomePage() {
         </Link>
 
         <Link
-          to="/voice-chat"
+          to="/user-manage"
           className="flex items-center gap-4 p-4 rounded-lg border hover:bg-accent transition-colors"
         >
-          <Mic className="w-8 h-8 text-primary" />
+          <Users className="w-8 h-8 text-primary" />
           <div className="flex-1">
-            <h3 className="font-semibold">语音聊天</h3>
-            <p className="text-sm text-muted-foreground">语音输入助手</p>
+            <h3 className="font-semibold">用户管理</h3>
+            <p className="text-sm text-muted-foreground">设备与账号联调入口</p>
           </div>
           <ChevronRight className="w-5 h-5 text-muted-foreground" />
         </Link>

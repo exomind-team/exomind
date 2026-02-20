@@ -22,6 +22,7 @@ import {
   setDeveloperModeEnabled,
 } from '@/config/developer-mode';
 import { setUIMode } from '@/config/ui-mode';
+import { Braces, Download, Import, MoonStar, TimerReset, Wifi } from 'lucide-react';
 
 type ImportStrategy = 'merge' | 'overwrite';
 type PickedJsonFile = {
@@ -204,132 +205,196 @@ export function NewSettingsPage() {
     setUIMode('old');
   };
 
+  const syncHost = (() => {
+    try {
+      return new URL(savedSyncServerUrl || autoSyncServerUrl).hostname;
+    } catch {
+      return '127.0.0.1';
+    }
+  })();
+
   return (
-    <div className="mx-auto w-full max-w-3xl p-4 md:p-6">
-      <div className="rounded-[28px] bg-[#FAF7F5] border border-[#EDE7E3] p-4 md:p-6 space-y-4">
-        <header className="space-y-1">
-          <h1 className="text-xl md:text-2xl font-bold text-stone-900">设置</h1>
-          <p className="text-xs md:text-sm text-stone-500">新 UI（New UI）配置页</p>
-        </header>
+    <div className="safe-area-pt-plus flex h-full min-h-0 flex-col px-4 pb-4">
+      <header className="py-2 text-center">
+        <h1 className="text-base font-semibold text-stone-900">设置</h1>
+      </header>
 
-        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
-          <div className="flex items-center justify-between gap-3">
-            <div>
-              <h2 className="text-sm font-semibold text-stone-900">界面模式（UI Mode）</h2>
-              <p className="text-xs text-stone-500">过渡期支持新旧 UI 双向切换</p>
-            </div>
-            <Button type="button" variant="outline" onClick={handleBackToOldUi}>
-              返回旧 UI
-            </Button>
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
-          <Label htmlFor="theme-preference-new">主题</Label>
-          <select
-            id="theme-preference-new"
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            value={themePreference}
-            disabled={loading}
-            onChange={(event) => {
-              const nextPreference = event.target.value as ThemePreference;
-              setThemePreference(nextPreference);
-              setThemePreferenceState(nextPreference);
-            }}
-          >
-            <option value="system">system（跟随系统）</option>
-            <option value="light">light（浅色）</option>
-            <option value="dark">dark（暗色）</option>
-          </select>
-        </section>
-
-        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
-          <Label htmlFor="sync-server-url-new">同步服务器地址</Label>
-          <Input
-            id="sync-server-url-new"
-            value={syncServerUrl}
-            onChange={(event) => setSyncServerUrl(event.target.value)}
-            placeholder={autoSyncServerUrl}
-            disabled={loading}
-          />
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" variant="outline" onClick={handleSaveSyncServerUrl} disabled={loading}>
-              保存同步地址
-            </Button>
-            <Button type="button" variant="outline" onClick={handleResetSyncServerUrl} disabled={loading}>
-              恢复自动地址
-            </Button>
-          </div>
-          <p className="text-xs text-stone-500">
-            {savedSyncServerUrl ? `当前已保存：${savedSyncServerUrl}` : `未保存自定义地址，自动使用：${autoSyncServerUrl}`}
-          </p>
-        </section>
-
-        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
-          <Label htmlFor="import-strategy-new">导入策略</Label>
-          <select
-            id="import-strategy-new"
-            className="w-full rounded-md border bg-background px-3 py-2 text-sm"
-            value={importStrategy}
-            onChange={(event) => setImportStrategy(event.target.value as ImportStrategy)}
-            disabled={loading}
-          >
-            <option value="merge">merge（按 ID 去重合并）</option>
-            <option value="overwrite">overwrite（覆盖）</option>
-          </select>
-          <div className="flex flex-wrap gap-2">
-            <Button type="button" onClick={handleExport} disabled={loading}>导出 JSON</Button>
-            <Button type="button" variant="outline" onClick={handleImportClick} disabled={loading}>导入 JSON</Button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,application/json"
-              className="hidden"
-              onChange={handleImportFile}
-            />
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4 space-y-3">
+      <div className="flex-1 space-y-4 overflow-y-auto pb-24">
+        <section className="rounded-2xl border border-[#FFFFFF50] bg-gradient-to-br from-[#E8866F] via-[#D4664A] to-[#C75B3A] p-4 text-white shadow-[0_16px_30px_-18px_rgba(199,91,58,0.7)]">
           <div className="flex items-center justify-between">
             <div>
-              <h3 className="text-sm font-semibold text-stone-900">开发者模式</h3>
-              <p className="text-xs text-stone-500">开启后显示 MOSS/ASR 测试入口</p>
+              <p className="text-sm font-semibold">Hailay</p>
+              <p className="mt-1 text-[11px] text-white/80">持续小步迭代</p>
             </div>
-            <Switch
-              checked={developerMode}
-              onCheckedChange={(checked) => {
-                setDeveloperMode(checked);
-                setDeveloperModeEnabled(checked);
-              }}
-              aria-label="开发者模式"
-            />
+            <div className="flex gap-2">
+              <Button type="button" variant="secondary" className="h-8 rounded-xl bg-white/20 text-xs text-white hover:bg-white/30">
+                个人资料
+              </Button>
+              <Button type="button" variant="secondary" className="h-8 rounded-xl bg-white/20 text-xs text-white hover:bg-white/30">
+                退出
+              </Button>
+            </div>
           </div>
-          {developerMode && (
+        </section>
+
+        <section className="space-y-2">
+          <p className="text-xs font-medium text-stone-500">外观</p>
+          <div className="rounded-2xl border border-[#F0ECE8] bg-white">
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-2 text-sm text-stone-800">
+                <MoonStar className="h-4 w-4 text-stone-400" />
+                <span>主题</span>
+              </div>
+              <select
+                id="theme-preference-new"
+                className="rounded-lg border border-[#E7E5E4] bg-[#FAF7F5] px-2 py-1 text-xs text-stone-700"
+                value={themePreference}
+                disabled={loading}
+                onChange={(event) => {
+                  const nextPreference = event.target.value as ThemePreference;
+                  setThemePreference(nextPreference);
+                  setThemePreferenceState(nextPreference);
+                }}
+              >
+                <option value="system">跟随系统</option>
+                <option value="light">浅色</option>
+                <option value="dark">深色</option>
+              </select>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <p className="text-xs font-medium text-stone-500">计时器</p>
+          <div className="rounded-2xl border border-[#F0ECE8] bg-white">
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-2 text-sm text-stone-800">
+                <TimerReset className="h-4 w-4 text-stone-400" />
+                <span>结束样式</span>
+              </div>
+              <span className="text-xs text-stone-500">保留现有逻辑</span>
+            </div>
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <p className="text-xs font-medium text-stone-500">网络与同步</p>
+          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
+            <Label htmlFor="sync-server-url-new" className="text-xs text-stone-500">
+              同步服务器地址
+            </Label>
+            <Input
+              id="sync-server-url-new"
+              value={syncServerUrl}
+              onChange={(event) => setSyncServerUrl(event.target.value)}
+              placeholder={autoSyncServerUrl}
+              disabled={loading}
+            />
             <div className="flex flex-wrap gap-2">
-              <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/moss-test'; }}>
-                打开 MOSS测试
+              <Button type="button" className="h-8 rounded-xl bg-[#C75B3A] text-xs hover:bg-[#B24D2F]" onClick={handleSaveSyncServerUrl} disabled={loading}>
+                保存地址
               </Button>
-              <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/asr-test'; }}>
-                打开 ASR测试
+              <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={handleResetSyncServerUrl} disabled={loading}>
+                设为默认
               </Button>
             </div>
-          )}
+            <div className="flex items-center justify-between rounded-xl bg-[#FAF7F5] px-3 py-2 text-xs text-stone-500">
+              <div className="flex items-center gap-2">
+                <Wifi className="h-3.5 w-3.5" />
+                <span>本机IP</span>
+              </div>
+              <span>{syncHost}</span>
+            </div>
+            <p className="text-[11px] text-stone-500">
+              {savedSyncServerUrl ? `当前已保存：${savedSyncServerUrl}` : `未保存自定义地址，自动使用：${autoSyncServerUrl}`}
+            </p>
+          </div>
         </section>
 
-        <section className="rounded-2xl border border-[#F0ECE8] bg-white p-4">
-          <p className="text-sm text-stone-700">
-            <span className="font-medium">App Version（应用版本）:</span> {versionBuildInfo.appVersion}
-          </p>
-          <p className="text-xs text-stone-500">
-            <span className="font-medium">Build Hash（构建哈希）:</span> {versionBuildInfo.buildHash}
-          </p>
+        <section className="space-y-2">
+          <p className="text-xs font-medium text-stone-500">导入导出</p>
+          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-stone-800">导入策略</span>
+              <select
+                id="import-strategy-new"
+                className="rounded-lg border border-[#E7E5E4] bg-[#FAF7F5] px-2 py-1 text-xs text-stone-700"
+                value={importStrategy}
+                onChange={(event) => setImportStrategy(event.target.value as ImportStrategy)}
+                disabled={loading}
+              >
+                <option value="merge">合并（merge）</option>
+                <option value="overwrite">覆盖（overwrite）</option>
+              </select>
+            </div>
+            <div className="grid grid-cols-2 gap-2">
+              <Button type="button" variant="outline" className="h-9 justify-start rounded-xl text-xs" onClick={handleExport} disabled={loading}>
+                <Download className="mr-2 h-4 w-4" /> 导出 JSON
+              </Button>
+              <Button type="button" variant="outline" className="h-9 justify-start rounded-xl text-xs" onClick={handleImportClick} disabled={loading}>
+                <Import className="mr-2 h-4 w-4" /> 导入 JSON
+              </Button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,application/json"
+                className="hidden"
+                onChange={handleImportFile}
+              />
+            </div>
+          </div>
         </section>
 
-        {statusMessage && <p role="status" className="text-sm text-green-700">{statusMessage}</p>}
-        {errorMessage && <p role="alert" className="text-sm text-red-700">{errorMessage}</p>}
+        <section className="space-y-2">
+          <p className="text-xs font-medium text-stone-500">开发者</p>
+          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-sm text-stone-800">
+                <Braces className="h-4 w-4 text-stone-400" />
+                <span>开发者模式</span>
+              </div>
+              <Switch
+                checked={developerMode}
+                onCheckedChange={(checked) => {
+                  setDeveloperMode(checked);
+                  setDeveloperModeEnabled(checked);
+                }}
+                aria-label="开发者模式"
+              />
+            </div>
+            <p className="text-[11px] text-stone-500">开启后显示 MOSS / ASR 测试入口</p>
+            {developerMode && (
+              <div className="flex flex-wrap gap-2">
+                <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/moss-test'; }}>
+                  打开 MOSS测试
+                </Button>
+                <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/asr-test'; }}>
+                  打开 ASR测试
+                </Button>
+              </div>
+            )}
+            <div className="border-t border-[#F2F1F0] pt-3">
+              <div className="flex items-center justify-between">
+                <div>
+                  <p className="text-sm text-stone-800">界面模式（UI Mode）</p>
+                  <p className="text-[11px] text-stone-500">过渡期支持新旧 UI 双向切换</p>
+                </div>
+                <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={handleBackToOldUi}>
+                  返回旧 UI
+                </Button>
+              </div>
+            </div>
+          </div>
+        </section>
+
+        <section className="py-1 text-center">
+          <p className="text-[11px] text-stone-400">ExoMind v{versionBuildInfo.appVersion}</p>
+          <p className="text-[10px] text-stone-400">Build: {versionBuildInfo.buildHash}</p>
+        </section>
+
+        {statusMessage && <p role="status" className="text-center text-xs text-green-700">{statusMessage}</p>}
+        {errorMessage && <p role="alert" className="text-center text-xs text-red-700">{errorMessage}</p>}
       </div>
     </div>
   );
 }
-
