@@ -375,7 +375,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       {/* 状态栏 */}
       {variant === 'new-mobile' ? (
         <div className="px-3 py-2">
-          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2">
+          <div className="grid grid-cols-[auto_1fr_auto] items-center gap-2" data-testid="timeblock-main-row">
             <div className="flex items-center gap-2">
               {isIdle && (
                 <Button
@@ -438,15 +438,18 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   <span>结束</span>
                 </Button>
               )}
-              <Button
-                variant="ghost"
-                size="sm"
-                onClick={() => setExpanded(!expanded)}
-                className="h-8 rounded-full px-2 text-stone-500"
-              >
-                {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
-              </Button>
             </div>
+          </div>
+          <div className="mt-1 flex justify-end">
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setExpanded(!expanded)}
+              className="h-8 rounded-full px-2 text-stone-500"
+              data-testid="timeblock-collapse-toggle"
+            >
+              {expanded ? <ChevronUp size={18} /> : <ChevronDown size={18} />}
+            </Button>
           </div>
         </div>
       ) : (
