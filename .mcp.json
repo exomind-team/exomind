@@ -1,9 +1,21 @@
 {
   "mcpServers": {
     "exomind": {
-      "command": "bun",
-      "args": ["run", "server.ts"],
-      "cwd": "packages/mcp"
+      "command": "cmd",
+      "env": {
+        "EXOMIND_MCP_USER_ID": "v2",
+        "EXOMIND_MCP_USER_PASSWD": "123456",
+        "EXOMIND_MCP_SYNC_SERVER_URL": "http://localhost:6984"
+      },
+      "args": [
+        "/c",
+        "cd",
+        "D:\\project\\exomind\\packages\\mcp",
+        "&&",
+        "bun",
+        "run",
+        "server.ts"
+      ]
     }
   }
 }

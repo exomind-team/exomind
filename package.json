@@ -38,6 +38,7 @@
     "@tanstack/react-router": "^1.158.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "agentation-mcp": "^1.2.0",
     "class-variance-authority": "^0.7.1",
     "events": "^3.3.0",
     "katex": "^0.16.28",
@@ -85,4 +86,3 @@
     "vitest": "^4.0.18"
   }
 }
-
