@@ -4548,7 +4548,7 @@
           "id": "Hxhxg",
           "name": "Task Card Wrapper",
           "width": "fill_container",
-          "height": 104,
+          "height": 200,
           "layout": "none",
           "children": [
             {
@@ -4556,7 +4556,7 @@
               "cornerRadius": 22,
               "id": "2sLiS",
               "x": 20,
-              "y": 18,
+              "y": 20,
               "name": "BG Glow",
               "fill": {
                 "type": "gradient",
@@ -4581,8 +4581,8 @@
                   }
                 ]
               },
-              "width": 357,
-              "height": 74,
+              "width": 353,
+              "height": 163,
               "effect": {
                 "type": "blur",
                 "radius": 8
@@ -4595,7 +4595,7 @@
               "y": 16,
               "name": "Task Card",
               "width": 357,
-              "height": 68,
+              "height": 169,
               "fill": [
                 "#FFFFFFA0",
                 {
@@ -4663,8 +4663,9 @@
                 }
               ],
               "layout": "vertical",
+              "gap": 12,
               "padding": [
-                18,
+                16,
                 20
               ],
               "justifyContent": "center",
@@ -4727,135 +4728,99 @@
                           "fontWeight": "600"
                         }
                       ]
-                    },
-                    {
-                      "type": "icon_font",
-                      "id": "ECbdG",
-                      "name": "timerArrow",
-                      "width": 16,
-                      "height": 16,
-                      "iconFontName": "chevron-down",
-                      "iconFontFamily": "lucide",
-                      "fill": "#C75B3A"
                     }
                   ]
-                }
-              ]
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "ySLyT",
-          "name": "Timer Section",
-          "width": "fill_container",
-          "layout": "vertical",
-          "gap": 4,
-          "padding": [
-            8,
-            24,
-            12,
-            24
-          ],
-          "alignItems": "center",
-          "children": [
-            {
-              "type": "text",
-              "id": "2oRy9",
-              "name": "timerText",
-              "fill": "#1C1917",
-              "content": "01:24:35",
-              "lineHeight": 1.1,
-              "fontFamily": "Inter",
-              "fontSize": 56,
-              "fontWeight": "200",
-              "letterSpacing": 2
-            }
-          ]
-        },
-        {
-          "type": "frame",
-          "id": "w1nDv",
-          "name": "Button Row",
-          "width": "fill_container",
-          "gap": 12,
-          "padding": [
-            8,
-            24
-          ],
-          "justifyContent": "center",
-          "children": [
-            {
-              "type": "frame",
-              "id": "rebku",
-              "name": "Pause Button",
-              "fill": "#EDECE9",
-              "cornerRadius": 24,
-              "gap": 8,
-              "padding": [
-                10,
-                24
-              ],
-              "justifyContent": "center",
-              "alignItems": "center",
-              "children": [
-                {
-                  "type": "icon_font",
-                  "id": "9YyJT",
-                  "name": "pauseIcon",
-                  "width": 16,
-                  "height": 16,
-                  "iconFontName": "pause",
-                  "iconFontFamily": "lucide",
-                  "fill": "#1C1917"
                 },
                 {
-                  "type": "text",
-                  "id": "VGLyZ",
-                  "name": "pauseText",
-                  "fill": "#1C1917",
-                  "content": "暂停",
-                  "lineHeight": 1.4,
-                  "fontFamily": "Inter",
-                  "fontSize": 14,
-                  "fontWeight": "500"
-                }
-              ]
-            },
-            {
-              "type": "frame",
-              "id": "lVEIg",
-              "name": "End Button",
-              "fill": "#FDECEB",
-              "cornerRadius": 24,
-              "gap": 8,
-              "padding": [
-                10,
-                24
-              ],
-              "justifyContent": "center",
-              "alignItems": "center",
-              "children": [
-                {
-                  "type": "icon_font",
-                  "id": "9aVFw",
-                  "name": "endIcon",
-                  "width": 16,
-                  "height": 16,
-                  "iconFontName": "square",
-                  "iconFontFamily": "lucide",
-                  "fill": "#C75B3A"
+                  "type": "rectangle",
+                  "id": "NzQO5",
+                  "name": "divider",
+                  "fill": "#D4785F30",
+                  "width": "fill_container",
+                  "height": 1
                 },
                 {
-                  "type": "text",
-                  "id": "H1wUL",
-                  "name": "endText",
-                  "fill": "#C75B3A",
-                  "content": "结束",
-                  "lineHeight": 1.4,
-                  "fontFamily": "Inter",
-                  "fontSize": 14,
-                  "fontWeight": "500"
+                  "type": "frame",
+                  "id": "nUDL7",
+                  "name": "timerRow",
+                  "width": "fill_container",
+                  "padding": [
+                    8,
+                    4
+                  ],
+                  "justifyContent": "space_between",
+                  "alignItems": "center",
+                  "children": [
+                    {
+                      "type": "frame",
+                      "id": "6zxgu",
+                      "name": "pauseBtn",
+                      "width": 44,
+                      "height": 44,
+                      "fill": "#EDECE9",
+                      "cornerRadius": 12,
+                      "layout": "vertical",
+                      "gap": 4,
+                      "padding": [
+                        10,
+                        12
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon_font",
+                          "id": "ESV96",
+                          "name": "pauseIco",
+                          "width": 18,
+                          "height": 18,
+                          "iconFontName": "pause",
+                          "iconFontFamily": "lucide",
+                          "fill": "#1C1917"
+                        }
+                      ]
+                    },
+                    {
+                      "type": "text",
+                      "id": "CO7QZ",
+                      "name": "timerText",
+                      "fill": "#1C1917",
+                      "content": "01:24:35",
+                      "lineHeight": 1.1,
+                      "fontFamily": "Inter",
+                      "fontSize": 40,
+                      "letterSpacing": 2
+                    },
+                    {
+                      "type": "frame",
+                      "id": "qZCT9",
+                      "name": "endBtn",
+                      "width": 44,
+                      "height": 44,
+                      "fill": "#FDECEB",
+                      "cornerRadius": 12,
+                      "layout": "vertical",
+                      "gap": 4,
+                      "padding": [
+                        10,
+                        12
+                      ],
+                      "justifyContent": "center",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "icon_font",
+                          "id": "qafQN",
+                          "name": "endIco",
+                          "width": 18,
+                          "height": 18,
+                          "iconFontName": "square",
+                          "iconFontFamily": "lucide",
+                          "fill": "#C75B3A"
+                        }
+                      ]
+                    }
+                  ]
                 }
               ]
             }
@@ -5451,7 +5416,7 @@
       "name": "Settings Screen",
       "clip": true,
       "width": 393,
-      "height": 852,
+      "height": 1312,
       "fill": "#FAF7F5",
       "cornerRadius": 40,
       "layout": "vertical",
@@ -7097,8 +7062,8 @@
               "type": "rectangle",
               "cornerRadius": 22,
               "id": "VG45C",
-              "x": 16,
-              "y": 14,
+              "x": 20,
+              "y": 20,
               "name": "BG Glow",
               "fill": {
                 "type": "gradient",
@@ -7123,8 +7088,8 @@
                   }
                 ]
               },
-              "width": 361,
-              "height": 227,
+              "width": 353,
+              "height": 211,
               "effect": {
                 "type": "blur",
                 "radius": 8
@@ -7404,16 +7369,6 @@
                           ],
                           "alignItems": "center",
                           "children": [
-                            {
-                              "type": "icon_font",
-                              "id": "UQnJc",
-                              "name": "customIcon",
-                              "width": 12,
-                              "height": 12,
-                              "iconFontName": "chevron-down",
-                              "iconFontFamily": "lucide",
-                              "fill": "#C75B3A"
-                            },
                             {
                               "type": "text",
                               "id": "zL4dx",
@@ -7970,7 +7925,7 @@
               "cornerRadius": 22,
               "id": "nD8yq",
               "x": 20,
-              "y": 18,
+              "y": 20,
               "name": "BG Glow",
               "fill": {
                 "type": "gradient",
@@ -7995,8 +7950,8 @@
                   }
                 ]
               },
-              "width": 353,
-              "height": 74,
+              "width": 349,
+              "height": 58,
               "effect": {
                 "type": "blur",
                 "radius": 8
