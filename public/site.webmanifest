@@ -1,0 +1,21 @@
+{
+  "name": "ExoMind",
+  "short_name": "ExoMind",
+  "description": "ExoMind - local-first, event-driven personal AI assistant.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#ffffff",
+  "theme_color": "#f97316",
+  "icons": [
+    {
+      "src": "/icons/192x192.png",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "/icons/512x512.png",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}

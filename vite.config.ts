@@ -1,32 +1,45 @@
-import { defineConfig } from "vite";
+import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
-
-// @ts-expect-error process is a nodejs global
-const host = process.env.TAURI_DEV_HOST;
+import path from "path";
+import { resolveDevPorts } from "./src/config/port-env";
 
 // https://vitejs.dev/config/
-export default defineConfig(async () => ({
-  plugins: [react()],
+export default defineConfig(({ mode }) => {
+  const env = loadEnv(mode, process.cwd(), "");
+  const devPorts = resolveDevPorts(env);
 
-  // Vite options tailored for Tauri development and only applied in `tauri dev` or `tauri build`
-  //
-  // 1. prevent vite from obscuring rust errors
-  clearScreen: false,
-  // 2. tauri expects a fixed port, fail if that port is not available
-  server: {
-    port: 1420,
-    strictPort: true,
-    host: host || false,
-    hmr: host
-      ? {
-          protocol: "ws",
-          host,
-          port: 1421,
-        }
-      : undefined,
-    watch: {
-      // 3. tell vite to ignore watching `src-tauri`
-      ignored: ["**/src-tauri/**"],
+  return {
+    plugins: [react()],
+
+    envDir: ".",
+    envPrefix: ["VITE_", "EXOMIND_"],
+
+    optimizeDeps: {
+      include: ["spark-md5", "vuvuzela"],
+      exclude: ["pouchdb", "pouchdb-find", "pouchdb-browser"],
     },
-  },
-}));
+
+    resolve: {
+      alias: {
+        "@": path.resolve(__dirname, "./src"),
+        // Force the npm polyfill package instead of Node builtin externalization.
+        events: "events/",
+      },
+    },
+
+    clearScreen: false,
+    server: {
+      port: devPorts.web,
+      strictPort: true,
+      host: "0.0.0.0",
+      hmr: {
+        protocol: "ws",
+        host: "0.0.0.0",
+        port: devPorts.hmr,
+      },
+      watch: {
+        ignored: ["**/src-tauri/**"],
+      },
+    },
+  };
+});

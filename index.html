@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/png" sizes="32x32" href="/icons/32x32.png" />
+    <link rel="icon" type="image/png" sizes="16x16" href="/icons/16x16.png" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/180x180.png" />
+    <link rel="manifest" href="/site.webmanifest" />
+    <meta name="theme-color" content="#f97316" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <title>ExoMind</title>
+    <script>
+      (function () {
+        try {
+          var preference = localStorage.getItem("exomind:themePreference") || "system";
+          var prefersDark =
+            preference === "dark" ||
+            (preference === "system" &&
+              window.matchMedia &&
+              window.matchMedia("(prefers-color-scheme: dark)").matches);
+          var root = document.documentElement;
+          if (prefersDark) root.classList.add("dark");
+          else root.classList.remove("dark");
+          root.style.colorScheme = prefersDark ? "dark" : "light";
+        } catch (e) {}
+      })();
+    </script>
+  </head>
+
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>

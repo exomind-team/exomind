@@ -1,219 +1,251 @@
-# Exomind
+# ExoMind
 
-基于 Tauri v2 的跨平台桌面应用，使用 React + TypeScript 构建前端，Rust 构建原生后端。
+> 本地优先（Local-first / 本地优先）的个人 AI 助手，聚焦事件日志（Event Log / 事件日志）、时间块（TimeBlock / 时间块）与多端同步（Multi-device Sync / 多端同步）。
 
-## 项目标识
+## 项目概览
 
-| 属性 | 值 |
-|------|-----|
-| **应用名称** | Exomind |
-| **包名** | `com.exomind.app` |
-| **Rust Crate** | `exomind` |
-| **版本** | 0.1.0 |
+ExoMind 是一个基于 Tauri v2 的跨平台应用（Windows/macOS/Linux/Android），前端使用 React + TypeScript，数据层使用 PouchDB（IndexedDB）并支持局域网同步。
 
-## 技术栈
+当前主线版本：
 
-| 层级 | 技术 | 版本 |
-|------|------|------|
-| 前端框架 | React | 18.3.1 |
-| 前端语言 | TypeScript | 5.6.2 |
-| 构建工具 | Vite | 6.0.3 |
-| 桌面框架 | Tauri | v2 |
-| 后端语言 | Rust | Edition 2021 |
-| 包管理器 | Bun | - |
+- App Version（应用版本）: `0.2.1`
+- Package Name（包名）: `com.exomind.app`
+- Rust Crate（Rust 包名）: `exomind`
 
-## 快速开始
+## 当前功能（v0.2.1）
 
-### 环境要求
+| 模块                     | 状态     | 说明                                                |
+| ------------------------ | -------- | --------------------------------------------------- |
+| Event Log（事件日志）    | 稳定可用 | Markdown 记录、按时间分组、分页加载、JSON 导入导出  |
+| TimeBlock（时间块）      | 稳定可用 | 开始/暂停/继续/结束，结束时支持反馈记录             |
+| Sync（同步）             | 稳定可用 | 基于 PouchDB 的本地优先同步，支持按用户隔离数据库   |
+| Settings（设置）         | 稳定可用 | 主题切换、同步地址覆盖、导入策略、版本/构建哈希展示 |
+| Voice / ASR（语音/识别） | 实验中   | 提供语音聊天、ASR 测试与 MOSS 测试页面              |
+| User Manage（用户管理）  | 实验中   | 本地注册/登录流程，用于同步能力联调                 |
 
-- [Bun](https://bun.sh/) - JavaScript 包管理器
-- [Rust](https://www.rust-lang.org/tools/install) - 后端编译
-- [Visual Studio Build Tools](https://visualstudio.microsoft.com/downloads/) - Windows 编译依赖
+## 技术栈（Tech Stack / 技术栈）
 
-### 安装依赖
+| 分类                        | 技术                             |
+| --------------------------- | -------------------------------- |
+| Runtime（运行时）           | Bun                              |
+| Frontend（前端）            | React 18 + TypeScript + Vite     |
+| Desktop/Mobile（桌面/移动） | Tauri v2                         |
+| UI（界面）                  | Tailwind CSS + Radix UI + Lucide |
+| State（状态）               | Zustand                          |
+| Storage（存储）             | PouchDB（IndexedDB）             |
+| Router（路由）              | TanStack Router                  |
+| Test（测试）                | Vitest + Playwright              |
+
+## 快速开始（Quick Start / 快速上手）
+
+### 1) 环境要求（Prerequisites / 先决条件）
+
+- Bun（必需）
+- Rust stable toolchain（必需）
+- Node.js 20+（推荐，与 CI 一致）
+- Windows 构建时需要 Visual Studio Build Tools（C++ 构建工具）
+- Android 开发需要：
+  - Android SDK（建议 API 34+）
+  - JDK 17
+
+### 2) 安装依赖（Install / 安装）
+
+```powershell
+# 根项目依赖
+bun install
+
+# 同步服务依赖（server 子项目）
+bun install --cwd server --omit optional
+```
+
+### 3) 本地开发（Development / 开发）
+
+```powershell
+# Web 前端（默认端口 1420）
+bun run dev
+
+# PouchDB 同步服务（默认 127.0.0.1:6984）
+bun run server
+```
+
+```powershell
+# Tauri 桌面开发
+bun run tauri dev
+
+# Tauri Android 开发
+bun run tauri android dev
+```
+
+### 4) 推荐联调方式（Web + Sync / 前后端联调）
+
+```powershell
+# 建议在多 worktree 下显式设置端口，避免互相冲突
+$env:EXOMIND_WEB_PORT='1760'
+$env:EXOMIND_HMR_PORT='1761'
+$env:EXOMIND_POUCHDB_PORT='7384'
+$env:EXOMIND_POUCHDB_HOST='127.0.0.1'
+
+# 启动同步服务
+bun run server
+
+# 新终端启动前端
+bun run dev
+```
+
+可选一键脚本：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\Scripts\dev\run-test-stack.ps1
+```
+
+## 常用命令（Scripts / 常用脚本）
+
+### package.json 脚本
+
+| 命令                          | 作用                              |
+| ----------------------------- | --------------------------------- |
+| `bun run dev`               | 启动 Vite 开发服务                |
+| `bun run dev:sync`          | 通过 `dev.ps1` 启动同步开发流程 |
+| `bun run server`            | 启动 PouchDB 同步服务             |
+| `bun run tauri dev`         | 桌面端开发                        |
+| `bun run tauri android dev` | Android 开发                      |
+| `bun run build`             | TypeScript + Vite 构建            |
+| `bun run test`              | Vitest 单测                       |
+| `bun run test:e2e`          | Playwright E2E                    |
+| `bun run gh:comment -- ...` | GitHub Issue/PR 评论自动化        |
+
+### PowerShell 自动化脚本
+
+查看 `Scripts/README.md`，主要分组：
+
+- `Scripts/dev/*.ps1`：开发启动与辅助工具
+- `Scripts/build/*.ps1`：桌面/Android 构建
+- `Scripts/test/*.ps1`：测试执行
+
+## 环境变量（Environment Variables / 环境变量）
+
+建议从 `.env.example` 复制并调整：
+
+```powershell
+Copy-Item .env.example .env
+```
+
+核心变量：
+
+| 变量                     | 默认值        | 说明                        |
+| ------------------------ | ------------- | --------------------------- |
+| `EXOMIND_WEB_PORT`     | `1420`      | Web 开发端口                |
+| `EXOMIND_HMR_PORT`     | `1421`      | HMR 端口                    |
+| `EXOMIND_POUCHDB_PORT` | `6984`      | 同步服务端口                |
+| `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | 同步服务监听地址            |
+| `EXOMIND_ASR_PORT`     | `1949`      | ASR 服务端口                |
+| `VITE_SYNC_SERVER_URL` | 空            | 前端强制覆盖同步地址        |
+| `VITE_ASR_SERVER_URL`  | 空            | 前端强制覆盖 ASR 地址       |
+| `VITE_APP_VERSION`     | 自动解析      | 应用显示版本（CI 可注入）   |
+| `VITE_BUILD_HASH`      | `local`     | 应用显示构建哈希（CI 注入） |
+
+说明：
+
+- 未设置 `VITE_SYNC_SERVER_URL` 时，前端会按 `当前 hostname + EXOMIND_POUCHDB_PORT` 自动拼接同步地址。
+- 局域网联调时，显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，并在客户端填写可达 IP。
+
+## 测试与验收（Testing / 测试）
+
+```powershell
+# 单元测试
+bun run test
+
+# 指定同步测试
+bun run test:sync
+
+# 端到端测试
+bun run test:e2e
+
+# Issue 专用 E2E 配置示例
+bun run test:e2e:issue27
+bun run test:e2e:issue77
+bun run test:e2e:issue82
+bun run test:e2e:issue120
+```
+
+## 构建与发布（Build & Release / 构建发布）
+
+### 本地构建
+
+```powershell
+# Web 构建
+bun run build
+
+# Tauri 桌面构建（示例：NSIS）
+bun run tauri build --bundles nsis
+
+# Android 构建
+bun run tauri android init
+bun run tauri android build --debug
+```
+
+### CI/CD（GitHub Actions）
+
+工作流文件：`.github/workflows/release.yml`
+
+Tag 触发规则：
+
+- `build/**`：只构建，产出 Artifact（构建产物）
+- `release/**`：构建并创建 GitHub Release（发布）
+
+示例：
 
 ```bash
-bun install
+# 构建（不发布）
+git tag build/v0.2.1-beta.1
+git push origin build/v0.2.1-beta.1
+
+# 发布（预发布或正式发布由版本号判断）
+git tag release/v0.2.1-beta.1
+git push origin release/v0.2.1-beta.1
 ```
 
-### 开发模式
+发布产物命名（归一化后）：
 
-```powershell
-# 桌面端开发
-.\dev.ps1 desktop
+- `ExoMind-v0.2.1-beta.1-<hash>-windows-x64-setup.exe`
+- `ExoMind-v0.2.1-beta.1-<hash>-windows-x64-installer.msi`（可选）
+- `ExoMind-v0.2.1-beta.1-<hash>-android-arm64.apk`
+- `ExoMind-v0.2.1-beta.1-<hash>-android-x86.apk`
 
-# 或 Android 开发（需要 Android Studio）
-.\dev.ps1 android
-```
+## 项目结构（Repository Layout / 目录结构）
 
-## 自动化构建脚本
-
-项目包含完整的自动化构建脚本：
-
-| 脚本 | 功能 |
-|------|------|
-| `build-android-auto.ps1` | ⭐ Android 全自动构建+安装 |
-| `build-desktop-v2.ps1` | 桌面端构建 + 计时统计 |
-| `build-all-v2.ps1` | 一键构建所有平台 |
-| `dev.ps1` | 启动开发服务器 |
-
-### 快速构建
-
-```powershell
-# 构建桌面端并生成安装包
-.\build-desktop-v2.ps1
-
-# 构建 Android 并自动安装到设备
-.\build-android-auto.ps1
-
-# 一键构建所有平台
-.\build-all-v2.ps1
-```
-
-## 项目结构
-
-```
+```text
 exomind/
-├── src/                      # 前端源代码
-│   ├── App.tsx              # 主应用组件
-│   ├── main.tsx             # React 入口
-│   ├── App.css              # 样式文件
-│   └── assets/              # 静态资源
-├── src-tauri/               # Tauri 后端代码
-│   ├── src/
-│   │   ├── lib.rs          # Rust 核心代码（包名：exomind_lib）
-│   │   └── main.rs         # 程序入口
-│   ├── capabilities/       # 权限配置
-│   ├── gen/android/       # Android 项目（包名：com.exomind.app）
-│   ├── Cargo.toml         # Rust 配置（crate：exomind）
-│   └── tauri.conf.json    # Tauri 配置（productName：exomind）
-├── build-*.ps1            # 自动化构建脚本
-├── dev.ps1               # 开发启动脚本
-└── README.md             # 本文件
+├─ src/                 # React 前端与业务逻辑
+├─ src-tauri/           # Tauri Rust 侧与打包配置
+├─ server/              # PouchDB 同步服务
+├─ Scripts/             # PowerShell/Bun 自动化脚本
+├─ tests/               # Vitest + Playwright 测试
+├─ docs/                # 文档中心（架构/规格/计划）
+├─ pm/                  # 项目管理文档
+└─ README.md            # 当前文件
 ```
 
-## 前端-后端通信
+## 文档索引（Docs / 文档）
 
-**前端调用 Rust：**
-```typescript
-import { invoke } from "@tauri-apps/api/core";
+- 项目文档导航：`docs/README.md`
+- 快速上手：`docs/quickstart.md`
+- 架构说明：`docs/architecture.md`
+- 技术栈说明：`docs/stack.md`
+- 构建指南：`BUILD.md`
+- 脚本说明：`Scripts/README.md`
+- 开发规范：`CLAUDE.md`
 
-const response = await invoke("greet", { name: "World" });
-console.log(response); // "Hello, World! You've been greeted from Rust!"
-```
+## 常见问题（FAQ / 常见问题）
 
-**Rust 定义命令：**
-```rust
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-```
-
-## 配置详情
-
-### package.json
-```json
-{
-  "name": "exomind"
-}
-```
-
-### src-tauri/tauri.conf.json
-```json
-{
-  "productName": "exomind",
-  "identifier": "com.exomind.app",
-  "app": {
-    "windows": [{ "title": "exomind" }]
-  }
-}
-```
-
-### src-tauri/Cargo.toml
-```toml
-[package]
-name = "exomind"
-
-[lib]
-name = "exomind_lib"
-```
-
-### Android 配置
-- **Namespace**: `com.exomind.app`
-- **ApplicationId**: `com.exomind.app`
-
-## 构建输出
-
-### 桌面端
-- **可执行文件**: `src-tauri\target\release\exomind.exe`
-- **MSI 安装包**: `src-tauri\target\release\bundle\msi\exomind_0.1.0_x64_en-US.msi`
-- **NSIS 安装包**: `src-tauri\target\release\bundle\nsis\exomind_0.1.0_x64-setup.exe`
-
-### Android
-- **Debug APK**: `src-tauri\gen\android\app\build\outputs\apk\debug\app-debug.apk`
-- **Release APK**: `src-tauri\gen\android\app\build\outputs\apk\release\app-release-unsigned.apk`
-
-## 脚本配置
-
-如需修改 Java/Android SDK 路径，编辑 `build-android-auto.ps1`：
-
-```powershell
-$Config = @{
-    Java17 = "D:\data\AndroidStudioSDK\java17"
-    AndroidSdk = "D:\data\AndroidStudioSDK"
-}
-```
-
-## 重命名检查清单
-
-本项目已从 `tauri-app` 重命名为 `exomind`：
-
-- [x] `package.json` - name: "exomind"
-- [x] `src-tauri/tauri.conf.json` - productName: "exomind"
-- [x] `src-tauri/tauri.conf.json` - identifier: "com.exomind.app"
-- [x] `src-tauri/tauri.conf.json` - windows.title: "exomind"
-- [x] `src-tauri/Cargo.toml` - name: "exomind"
-- [x] `src-tauri/Cargo.toml` - lib.name: "exomind_lib"
-- [x] `src-tauri/src/main.rs` - 引用 exomind_lib
-- [x] `index.html` - title: "Exomind"
-- [x] `src/App.tsx` - 标题: "Welcome to Exomind"
-- [x] Android build.gradle.kts - namespace: "com.exomind.app"
-- [x] Android build.gradle.kts - applicationId: "com.exomind.app"
-- [x] Android MainActivity.kt - package com.exomind.app
-- [x] Android 目录结构 - com/tauri_app/app → com/exomind/app
-- [x] 桌面端构建测试通过
-
-## 常见问题
-
-### 1. 找不到 Java
-编辑 `build-android-auto.ps1`，修改 `Java17` 路径为你的 Java 17 安装路径。
-
-### 2. 找不到 ADB
-编辑 `build-android-auto.ps1`，修改 `AndroidSdk` 路径为你的 Android SDK 路径。
-
-### 3. Android 构建失败
-- 确保 Android Studio 已安装
-- 确保 NDK 已通过 SDK Manager 安装
-- 运行 `bun run tauri android init` 初始化
-
-### 4. 多设备安装失败
-```powershell
-# 指定设备
-.\build-android-auto.ps1 -Device emulator-5554
-```
-
-## 参考文档
-
-- [ARCHITECTURE.md](docs/ARCHITECTURE.md) - 完整架构设计文档
-- [ARCHITECTURE_7LAYER.md](docs/ARCHITECTURE_7LAYER.md) - 7层架构详解
-- [ExoMind-Notification-Permission-Guard.md](docs/ExoMind-Notification-Permission-Guard.md) - Android 通知权限守护模块
-
-### 模块
-
-| 模块 | 说明 |
-|------|------|
-| [modules/ExoMind-NLS-Guardian/](modules/ExoMind-NLS-Guardian/) | Android 通知权限守护模块 |
+1. 同步服务启动报 `pouchdb-server 未找到`
+   安装 `server` 依赖：`bun install --cwd server --omit optional`。
+2. Web 端无法同步
+   检查 `EXOMIND_POUCHDB_PORT`、`EXOMIND_POUCHDB_HOST` 与设置页同步地址是否一致。
+3. Android 构建失败
+   先确认 `JAVA_HOME`、`ANDROID_SDK_ROOT` 与 `bun run tauri android init` 已完成。
+4. 多 worktree 端口冲突
+   为每个 worktree 设独立 `EXOMIND_WEB_PORT/EXOMIND_HMR_PORT/EXOMIND_POUCHDB_PORT/EXOMIND_ASR_PORT`。
 
 ## License
 

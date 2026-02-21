@@ -1,0 +1,621 @@
+name: Build & Release
+
+on:
+  push:
+    tags:
+      - 'build/**'      # 构建触发：只构建，不发布
+      - 'release/**'     # 发布触发：构建 + GitHub Release
+  workflow_dispatch:
+    inputs:
+      build_scope:
+        description: Build scope（构建范围）
+        required: true
+        default: all
+        type: choice
+        options:
+          - all
+          - android
+          - windows
+
+permissions:
+  contents: write
+
+env:
+  RUST_TOOLCHAIN: stable
+
+jobs:
+  build-windows:
+    needs: build-android
+    if: ${{ always() && (github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'windows') && (github.event.inputs.build_scope == 'windows' || needs.build-android.result == 'success') }}
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Ensure local Bun is available (确保本机 Bun 可用)
+        shell: powershell
+        run: |
+          Write-Host "Install Bun via npm to enforce native Windows binary (通过 npm 强制使用 Windows 原生 Bun)..."
+          npm install -g bun
+          $npmPrefix = (npm config get prefix).Trim()
+          if (-not $npmPrefix) {
+            throw "npm prefix is empty; cannot locate global bun install path."
+          }
+          $env:Path = "$npmPrefix;$env:Path"
+          "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          if (-not $bunCmd) {
+            throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
+          }
+          if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+            throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+          }
+          Write-Host "Using Bun from: $($bunCmd.Source)"
+          bun --version
+
+      - name: Rust diagnostics (Rust 诊断输出)
+        shell: powershell
+        run: |
+          Write-Host "=== Rust diagnostics / Rust 诊断输出 ==="
+          Write-Host "event_name=${{ github.event_name }}"
+          Write-Host "ref=${{ github.ref }}"
+          Write-Host "build_scope=${{ github.event.inputs.build_scope || 'n/a' }}"
+          Write-Host "runner=$env:RUNNER_NAME os=$env:RUNNER_OS arch=$env:RUNNER_ARCH"
+          Write-Host "whoami=$(whoami)"
+          Write-Host "USERPROFILE=$env:USERPROFILE"
+          Write-Host "HOME=$env:HOME"
+          Write-Host "CARGO_HOME=$env:CARGO_HOME"
+          Write-Host "RUSTUP_HOME=$env:RUSTUP_HOME"
+
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          Write-Host "cargoBin=$cargoBin exists=$(Test-Path $cargoBin)"
+
+          foreach ($name in @("rustup.exe", "rustc.exe", "cargo.exe", "rustup", "rustc", "cargo")) {
+            $candidate = Join-Path $cargoBin $name
+            Write-Host "candidate=$candidate exists=$(Test-Path $candidate)"
+          }
+
+          Write-Host "Get-Command (before prepend PATH):"
+          foreach ($cmd in @("rustup", "rustc", "cargo")) {
+            $resolved = Get-Command $cmd -ErrorAction SilentlyContinue
+            if ($resolved) {
+              Write-Host " - $cmd => $($resolved.Source)"
+            } else {
+              Write-Host " - $cmd => NOT_FOUND"
+            }
+          }
+
+      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+        shell: powershell
+        run: |
+          $preferredCargoHome = "D:\actions-runner\rust\cargo"
+          $preferredRustupHome = "D:\actions-runner\rust\rustup"
+          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
+          if (Test-Path $preferredCargoBin) {
+            $env:CARGO_HOME = $preferredCargoHome
+            $env:RUSTUP_HOME = $preferredRustupHome
+            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $env:Path = "$preferredCargoBin;$env:Path"
+            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          if (Test-Path $cargoBin) {
+            $env:Path = "$cargoBin;$env:Path"
+            "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $rustupCmd = Get-Command rustup -ErrorAction SilentlyContinue
+          $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
+          $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+          if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
+            throw "Rust toolchain not found on self-hosted Windows runner. Please pre-install rustup/cargo/rustc."
+          }
+
+          if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            throw "Detected Rust command from WSL path. Please use native Windows Rust toolchain."
+          }
+
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to select stable Rust toolchain. Please install stable locally first (例如: rustup toolchain install stable)."
+          }
+
+          rustup show active-toolchain
+          rustc -vV
+          cargo -V
+
+      - name: Get short commit hash
+        id: hash
+        shell: powershell
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Resolve app version (解析应用版本)
+        id: app_version
+        shell: powershell
+        run: |
+          $refName = "${{ github.ref_name }}"
+          $appVersion = ""
+
+          if ($refName.StartsWith("release/")) {
+            $appVersion = $refName.Substring("release/".Length)
+          } elseif ($refName.StartsWith("build/")) {
+            $appVersion = $refName.Substring("build/".Length)
+          }
+
+          if (-not $appVersion) {
+            $packageVersion = (Get-Content -Path "package.json" -Raw | ConvertFrom-Json).version
+            $appVersion = [string]$packageVersion
+          }
+
+          if ($appVersion.StartsWith("v")) {
+            $appVersion = $appVersion.Substring(1)
+          }
+
+          if (-not $appVersion) {
+            throw "Cannot resolve app version from tag or package.json."
+          }
+
+          "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Resolved app version: $appVersion"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build Windows NSIS installer (构建 Windows EXE/NSIS 安装包)
+        run: bun tauri build --bundles 'nsis'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Build Windows MSI installer (可选 MSI，失败不阻断)
+        id: build_msi
+        continue-on-error: true
+        run: bun tauri build --bundles 'msi'
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Warn MSI optional failure (提示 MSI 可选失败)
+        if: ${{ steps.build_msi.outcome != 'success' }}
+        shell: powershell
+        run: |
+          Write-Warning "MSI bundling failed but job continues. Common cause: VBSCRIPT optional feature disabled on self-hosted Windows."
+
+      - name: Upload Windows EXE Artifact (上传 EXE)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/nsis/
+
+      - name: Upload Windows MSI Artifact (上传 MSI)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-msi-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/msi/
+          if-no-files-found: ignore
+
+  build-android:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'android' }}
+    runs-on: [self-hosted, Windows, X64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Ensure local Bun is available (确保本机 Bun 可用)
+        shell: powershell
+        run: |
+          Write-Host "Install Bun via npm to enforce native Windows binary (通过 npm 强制使用 Windows 原生 Bun)..."
+          npm install -g bun
+          $npmPrefix = (npm config get prefix).Trim()
+          if (-not $npmPrefix) {
+            throw "npm prefix is empty; cannot locate global bun install path."
+          }
+          $env:Path = "$npmPrefix;$env:Path"
+          "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+          if (-not $bunCmd) {
+            throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
+          }
+          if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+            throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+          }
+          Write-Host "Using Bun from: $($bunCmd.Source)"
+          bun --version
+
+      - name: Use local Rust toolchain (使用本机 Rust 工具链，禁止 WSL)
+        shell: powershell
+        run: |
+          $preferredCargoHome = "D:\actions-runner\rust\cargo"
+          $preferredRustupHome = "D:\actions-runner\rust\rustup"
+          $preferredCargoBin = Join-Path $preferredCargoHome "bin"
+          if (Test-Path $preferredCargoBin) {
+            $env:CARGO_HOME = $preferredCargoHome
+            $env:RUSTUP_HOME = $preferredRustupHome
+            "CARGO_HOME=$preferredCargoHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            "RUSTUP_HOME=$preferredRustupHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+            $env:Path = "$preferredCargoBin;$env:Path"
+            "$preferredCargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $cargoBin = Join-Path $env:USERPROFILE ".cargo\bin"
+          if (Test-Path $cargoBin) {
+            $env:Path = "$cargoBin;$env:Path"
+            "$cargoBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $rustupCmd = Get-Command rustup -ErrorAction SilentlyContinue
+          $rustcCmd = Get-Command rustc -ErrorAction SilentlyContinue
+          $cargoCmd = Get-Command cargo -ErrorAction SilentlyContinue
+          if ((-not $rustupCmd) -or (-not $rustcCmd) -or (-not $cargoCmd)) {
+            throw "Rust toolchain not found on self-hosted Windows runner. Please pre-install rustup/cargo/rustc."
+          }
+
+          if (($rustupCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($rustcCmd.Source -match '(?i)wsl|\\ubuntu\\') -or ($cargoCmd.Source -match '(?i)wsl|\\ubuntu\\')) {
+            throw "Detected Rust command from WSL path. Please use native Windows Rust toolchain."
+          }
+
+          rustup default stable
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to select stable Rust toolchain. Please install stable locally first (例如: rustup toolchain install stable)."
+          }
+
+          rustup show active-toolchain
+          rustc -vV
+          cargo -V
+
+      - name: Configure local Android toolchain (配置本地 Android 工具链)
+        shell: powershell
+        run: |
+          $defaultJavaHome = "C:\Program Files\Eclipse Adoptium\jdk-17.0.13.11-hotspot"
+          $javaHome = $env:JAVA_HOME
+          if (-not $javaHome -or -not (Test-Path $javaHome)) {
+            if (-not (Test-Path $defaultJavaHome)) {
+              throw "JAVA_HOME is invalid and default path not found: $defaultJavaHome"
+            }
+            $javaHome = $defaultJavaHome
+          }
+          "JAVA_HOME=$javaHome" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          $javaBin = Join-Path $javaHome "bin"
+          if (Test-Path $javaBin) {
+            "$javaBin" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          }
+
+          $defaultAndroidSdkRoot = "D:\data\AndroidSDK"
+          $androidSdkRoot = $env:ANDROID_SDK_ROOT
+          if (-not $androidSdkRoot -or -not (Test-Path $androidSdkRoot)) {
+            if (-not (Test-Path $defaultAndroidSdkRoot)) {
+              throw "ANDROID_SDK_ROOT is invalid and default path not found: $defaultAndroidSdkRoot"
+            }
+            $androidSdkRoot = $defaultAndroidSdkRoot
+          }
+          "ANDROID_SDK_ROOT=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          if (-not $env:ANDROID_HOME -or -not (Test-Path $env:ANDROID_HOME)) {
+            "ANDROID_HOME=$androidSdkRoot" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          }
+
+      - name: Validate Android signing secrets early (提前校验 Android 签名密钥)
+        shell: powershell
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          foreach ($required in @("ANDROID_KEYSTORE_BASE64", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")) {
+            if (-not (Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue)) {
+              throw "Missing secret: $required"
+            }
+          }
+
+      - name: Ensure Rust Android targets (确保 Rust Android 目标)
+        shell: powershell
+        run: rustup target add aarch64-linux-android i686-linux-android
+
+      - name: Get short commit hash
+        id: hash
+        shell: powershell
+        run: |
+          $short = $env:GITHUB_SHA.Substring(0, 7)
+          "HASH=$short" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Resolve app version (解析应用版本)
+        id: app_version
+        shell: powershell
+        run: |
+          $refName = "${{ github.ref_name }}"
+          $appVersion = ""
+
+          if ($refName.StartsWith("release/")) {
+            $appVersion = $refName.Substring("release/".Length)
+          } elseif ($refName.StartsWith("build/")) {
+            $appVersion = $refName.Substring("build/".Length)
+          }
+
+          if (-not $appVersion) {
+            $packageVersion = (Get-Content -Path "package.json" -Raw | ConvertFrom-Json).version
+            $appVersion = [string]$packageVersion
+          }
+
+          if ($appVersion.StartsWith("v")) {
+            $appVersion = $appVersion.Substring(1)
+          }
+
+          if (-not $appVersion) {
+            throw "Cannot resolve app version from tag or package.json."
+          }
+
+          "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "Resolved app version: $appVersion"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Init Android
+        run: bun tauri android init
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Patch Android audio permissions and release cleartext（注入音频权限与 release cleartext）
+        shell: powershell
+        run: |
+          bun Scripts/dev/android-manifest-permission.ts
+
+      - name: Verify Android permission and cleartext patch persisted（校验权限与 cleartext 配置）
+        shell: powershell
+        run: |
+          $manifestPath = "src-tauri/gen/android/app/src/main/AndroidManifest.xml"
+          if (-not (Test-Path $manifestPath)) {
+            throw "Manifest not found: $manifestPath"
+          }
+          foreach ($permission in @("android.permission.RECORD_AUDIO", "android.permission.MODIFY_AUDIO_SETTINGS")) {
+            if (-not (Select-String -Path $manifestPath -Pattern $permission -SimpleMatch -Quiet)) {
+              throw "Missing $permission in AndroidManifest.xml"
+            }
+          }
+
+          $buildGradlePath = "src-tauri/gen/android/app/build.gradle.kts"
+          if (-not (Test-Path $buildGradlePath)) {
+            throw "Build gradle not found: $buildGradlePath"
+          }
+          $buildGradleContent = Get-Content -Path $buildGradlePath -Raw -Encoding UTF8
+          $releaseCleartextPattern = 'getByName\("release"\)\s*\{[\s\S]*manifestPlaceholders\["usesCleartextTraffic"\]\s*=\s*"true"'
+          if (-not ($buildGradleContent -match $releaseCleartextPattern)) {
+            throw "Missing usesCleartextTraffic=true in release block."
+          }
+
+          Write-Host "Android permissions and cleartext release placeholder verified."
+
+      - name: Build Android APK only (仅构建 APK，aarch64 + i686)
+        run: bun tauri android build --ci --apk --split-per-abi -t aarch64 i686
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+          HTTP_PROXY: http://127.0.0.1:7890
+          HTTPS_PROXY: http://127.0.0.1:7890
+          ALL_PROXY: http://127.0.0.1:7890
+          NO_PROXY: localhost,127.0.0.1
+          # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)
+          GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890
+
+      - name: Validate Android app name/icon/artifact size (门禁校验)
+        run: bun run check:android:meta
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Prepare Android signing keystore (准备签名密钥库)
+        shell: powershell
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if (-not $env:ANDROID_KEYSTORE_BASE64) {
+            throw "Missing secret: ANDROID_KEYSTORE_BASE64"
+          }
+          $keystorePath = Join-Path $env:RUNNER_TEMP "android-release.jks"
+          try {
+            $bytes = [Convert]::FromBase64String($env:ANDROID_KEYSTORE_BASE64)
+          } catch {
+            throw "ANDROID_KEYSTORE_BASE64 is not valid Base64."
+          }
+          [IO.File]::WriteAllBytes($keystorePath, $bytes)
+          "ANDROID_KEYSTORE_PATH=$keystorePath" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+
+      - name: Sign Android APK artifacts (签名 APK 产物)
+        shell: powershell
+        env:
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          foreach ($required in @("ANDROID_KEYSTORE_PATH", "ANDROID_KEYSTORE_PASSWORD", "ANDROID_KEY_ALIAS", "ANDROID_KEY_PASSWORD")) {
+            if (-not (Get-Item -Path "Env:$required" -ErrorAction SilentlyContinue)) {
+              throw "Missing secret: $required"
+            }
+          }
+
+          $sdkRoot = if ($env:ANDROID_SDK_ROOT) { $env:ANDROID_SDK_ROOT } elseif ($env:ANDROID_HOME) { $env:ANDROID_HOME } else { $null }
+          if (-not $sdkRoot) {
+            throw "ANDROID_SDK_ROOT or ANDROID_HOME must be set."
+          }
+
+          $buildToolsRoot = Join-Path $sdkRoot "build-tools"
+          $buildToolsDir = Get-ChildItem -Path $buildToolsRoot -Directory | Sort-Object { [Version]$_.Name } | Select-Object -Last 1
+          if (-not $buildToolsDir) {
+            throw "No Android build-tools directory found under $buildToolsRoot"
+          }
+
+          $zipalign = Join-Path $buildToolsDir.FullName "zipalign.exe"
+          $apksigner = Join-Path $buildToolsDir.FullName "apksigner.bat"
+          if ((-not (Test-Path $zipalign)) -or (-not (Test-Path $apksigner))) {
+            throw "zipalign.exe or apksigner.bat not found under $($buildToolsDir.FullName)"
+          }
+
+          $signedApkDir = "src-tauri/gen/android/app/build/outputs/apk-signed"
+          New-Item -Path $signedApkDir -ItemType Directory -Force | Out-Null
+
+          $apkFiles = Get-ChildItem -Path "src-tauri/gen/android/app/build/outputs/apk" -Recurse -Filter "*release*.apk" | Where-Object { $_.Name -notlike "*-signed.apk" }
+          if (-not $apkFiles -or $apkFiles.Count -eq 0) {
+            throw "No release APK files found."
+          }
+
+          foreach ($apk in $apkFiles) {
+            $baseName = [IO.Path]::GetFileNameWithoutExtension($apk.Name)
+            $alignedApk = Join-Path $env:RUNNER_TEMP "$baseName-aligned.apk"
+            $signedApk = Join-Path $signedApkDir "$baseName-signed.apk"
+
+            & $zipalign -p -f 4 $apk.FullName $alignedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "zipalign failed: $($apk.FullName)"
+            }
+
+            & $apksigner sign `
+              --ks $env:ANDROID_KEYSTORE_PATH `
+              --ks-pass ("pass:{0}" -f $env:ANDROID_KEYSTORE_PASSWORD) `
+              --ks-key-alias $env:ANDROID_KEY_ALIAS `
+              --key-pass ("pass:{0}" -f $env:ANDROID_KEY_PASSWORD) `
+              --out $signedApk `
+              $alignedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "apksigner sign failed: $($apk.FullName)"
+            }
+
+            & $apksigner verify --verbose $signedApk
+            if ($LASTEXITCODE -ne 0) {
+              throw "apksigner verify failed: $signedApk"
+            }
+            Write-Host "Signed APK: $signedApk"
+          }
+
+      - name: Upload Android signed APK Artifact (上传已签名 APK)
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-signed-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/gen/android/app/build/outputs/apk-signed/
+
+  create-release:
+    needs: [build-windows, build-android]
+    runs-on: ubuntu-latest
+    # 只对 release/* tag 执行发布步骤
+    if: startsWith(github.ref, 'refs/tags/release/')
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-files
+          merge-multiple: true
+
+      - name: List Files
+        run: ls -la release-files/
+
+      - name: Resolve release metadata (解析发布元信息)
+        id: meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#release/}"
+          short_hash="${GITHUB_SHA::7}"
+          lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
+          channel=""
+          if [[ "$lower_version" == *"-alpha."* ]]; then
+            channel="Alpha"
+          elif [[ "$lower_version" == *"-beta."* ]]; then
+            channel="Beta"
+          elif [[ "$lower_version" == *"-rc."* ]]; then
+            channel="RC"
+          elif [[ "$lower_version" == *"-preview."* ]]; then
+            channel="Preview"
+          fi
+
+          if [[ -n "$channel" ]]; then
+            echo "prerelease=true" >> "$GITHUB_OUTPUT"
+            echo "title=$channel $version" >> "$GITHUB_OUTPUT"
+          else
+            echo "prerelease=false" >> "$GITHUB_OUTPUT"
+            echo "title=Release $version" >> "$GITHUB_OUTPUT"
+          fi
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
+
+      - name: Normalize release artifact names (统一发布产物命名)
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+
+          version="${{ steps.meta.outputs.version }}"
+          short_hash="${{ steps.meta.outputs.short_hash }}"
+          source_dir="release-files"
+          output_dir="release-assets"
+          mkdir -p "$output_dir"
+
+          exe_files=("$source_dir"/**/*.exe)
+          if (( ${#exe_files[@]} == 0 )); then
+            echo "::error::Missing Windows EXE artifact."
+            exit 1
+          fi
+          cp "${exe_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
+
+          msi_files=("$source_dir"/**/*.msi)
+          if (( ${#msi_files[@]} > 0 )); then
+            cp "${msi_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-installer.msi"
+          fi
+
+          apk_files=("$source_dir"/**/*signed.apk)
+          if (( ${#apk_files[@]} == 0 )); then
+            apk_files=("$source_dir"/**/*.apk)
+          fi
+
+          arm64_apk=""
+          x86_apk=""
+          for apk in "${apk_files[@]}"; do
+            file_name="$(basename "$apk" | tr '[:upper:]' '[:lower:]')"
+            if [[ -z "$arm64_apk" && ( "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"arm64-v8a"* ) ]]; then
+              arm64_apk="$apk"
+              continue
+            fi
+            if [[ -z "$x86_apk" && ( "$file_name" == *"i686"* || "$file_name" == *"x86"* ) && "$file_name" != *"x86_64"* ]]; then
+              x86_apk="$apk"
+            fi
+          done
+
+          if [[ -z "$arm64_apk" ]]; then
+            echo "::error::Missing Android arm64 APK artifact."
+            exit 1
+          fi
+          if [[ -z "$x86_apk" ]]; then
+            echo "::error::Missing Android x86 APK artifact."
+            exit 1
+          fi
+
+          cp "$arm64_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-arm64.apk"
+          cp "$x86_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-x86.apk"
+
+      - name: List Normalized Files
+        run: ls -la release-assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: release-assets/**
+          # 从 tag 名称提取版本号 (去掉 release/ 前缀)
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.meta.outputs.title }}
+          draft: false
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

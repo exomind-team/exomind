@@ -51,6 +51,7 @@ local.properties
 .env
 .env.local
 .env.*.local
+/config.json
 
 # === OS ===
 .DS_Store
@@ -66,6 +67,9 @@ coverage/
 *.html
 htmlcov/
 
+# === Vite Entry (required) ===
+!index.html
+
 # === Temporary ===
 *.tmp
 *.temp
@@ -78,3 +82,18 @@ pnpm-store/
 # Use placeholder values in example files
 !.gitignore
 !.env.example
+nul
+playwright-report/
+.playwright-mcp/
+server/data/*
+server/log.txt
+log.txt
+test-results/.last-run.json
+test-results/*
+tests/e2e/report/
+packages/mcp/.data/
+packages/mcp/events_*/
+events_*/
+
+# 配置文件不同步
+pencil/.claude/settings.local.json

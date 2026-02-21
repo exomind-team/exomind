@@ -1,0 +1,334 @@
+import { useState, useEffect } from 'react';
+import { ChevronLeft } from 'lucide-react';
+import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Button } from '@/components/ui/button';
+import { useSyncStore } from '@/ui/stores/sync-store';
+
+interface UserInfo {
+  username: string;
+  passwordHash: string;
+  createdAt: string;
+  lastLogin?: string;
+}
+
+interface SwitchAccountSheetProps {
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  initialMode: 'switch' | 'login' | 'register';
+}
+
+export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAccountSheetProps) {
+  const { login, register, currentUser } = useSyncStore();
+
+  const [mode, setMode] = useState<'switch' | 'login' | 'register'>(initialMode);
+  const [previousMode, setPreviousMode] = useState<'switch' | 'login'>(initialMode === 'register' ? 'login' : initialMode as 'switch' | 'login');
+  const [users, setUsers] = useState<UserInfo[]>([]);
+  const [selectedUser, setSelectedUser] = useState<string | null>(null);
+  const [password, setPassword] = useState('');
+  const [username, setUsername] = useState('');
+  const [regPassword, setRegPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  // When sheet opens, reset state and reload users
+  useEffect(() => {
+    if (open) {
+      setMode(initialMode);
+      setPreviousMode(initialMode === 'register' ? 'login' : initialMode as 'switch' | 'login');
+      setSelectedUser(null);
+      setPassword('');
+      setUsername('');
+      setRegPassword('');
+      setConfirmPassword('');
+      setError('');
+      setLoading(false);
+      loadUsers();
+    }
+  }, [open, initialMode]);
+
+  function loadUsers() {
+    try {
+      const stored = localStorage.getItem('exomind:users');
+      setUsers(stored ? JSON.parse(stored) : []);
+    } catch {
+      setUsers([]);
+    }
+  }
+
+  async function handleSwitchLogin() {
+    if (!selectedUser || !password) return;
+    setLoading(true);
+    setError('');
+    try {
+      await login(selectedUser, password);
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '登录失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLogin() {
+    if (!username || !password) return;
+    setLoading(true);
+    setError('');
+    try {
+      await login(username, password);
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '登录失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleRegister() {
+    if (!username || !regPassword || !confirmPassword) return;
+    if (regPassword !== confirmPassword) {
+      setError('两次密码不一致');
+      return;
+    }
+    if (regPassword.length < 6) {
+      setError('密码长度至少6位');
+      return;
+    }
+    setLoading(true);
+    setError('');
+    try {
+      await register(username, regPassword);
+      await login(username, regPassword);
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '注册失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function goToRegister() {
+    setPreviousMode(mode as 'switch' | 'login');
+    setMode('register');
+    setError('');
+    setUsername('');
+    setRegPassword('');
+    setConfirmPassword('');
+  }
+
+  function goToLogin() {
+    setMode('login');
+    setError('');
+    setUsername('');
+    setPassword('');
+  }
+
+  function goBack() {
+    setMode(previousMode);
+    setError('');
+  }
+
+  return (
+    <Drawer open={open} onOpenChange={onOpenChange}>
+      <DrawerContent>
+        <div className="px-5 pb-6 pt-2">
+          {/* Switch mode */}
+          {mode === 'switch' && (
+            <div className="space-y-3">
+              <DrawerTitle className="text-base font-semibold text-stone-800">
+                切换账户
+              </DrawerTitle>
+
+              <div className="space-y-2">
+                {users.map((user) => {
+                  const isCurrent = user.username === currentUser;
+                  const isSelected = user.username === selectedUser;
+                  return (
+                    <button
+                      key={user.username}
+                      className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
+                        isCurrent
+                          ? 'border-[#C75B3A]/30 bg-[#C75B3A]/5'
+                          : isSelected
+                            ? 'border-[#C75B3A]/50 bg-[#FAF7F5]'
+                            : 'border-[#F0ECE8] hover:bg-[#FAF7F5]'
+                      }`}
+                      onClick={() => {
+                        if (!isCurrent) {
+                          setSelectedUser(user.username);
+                          setPassword('');
+                          setError('');
+                        }
+                      }}
+                    >
+                      <div>
+                        <div className="text-sm font-medium text-stone-800">
+                          {user.username}
+                        </div>
+                        <div className="text-xs text-stone-400">
+                          注册于 {new Date(user.createdAt).toLocaleDateString()}
+                        </div>
+                      </div>
+                      {isCurrent && (
+                        <span className="rounded-full bg-[#C75B3A]/10 px-2 py-0.5 text-xs font-medium text-[#C75B3A]">
+                          当前
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+
+              {/* Password input for selected user */}
+              {selectedUser && selectedUser !== currentUser && (
+                <div className="space-y-3">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-stone-500">密码</Label>
+                    <Input
+                      type="password"
+                      placeholder="请输入密码"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSwitchLogin()}
+                    />
+                  </div>
+                  <Button
+                    className="w-full rounded-xl bg-[#C75B3A] hover:bg-[#B24D2F] text-white"
+                    onClick={handleSwitchLogin}
+                    disabled={loading || !password}
+                  >
+                    {loading ? '登录中...' : '登录'}
+                  </Button>
+                </div>
+              )}
+
+              {error && <p className="text-xs text-red-600">{error}</p>}
+
+              <Button
+                variant="outline"
+                className="w-full rounded-xl"
+                onClick={goToRegister}
+              >
+                注册新账户
+              </Button>
+            </div>
+          )}
+
+          {/* Login mode */}
+          {mode === 'login' && (
+            <div className="space-y-3">
+              <DrawerTitle className="text-base font-semibold text-stone-800">
+                登录
+              </DrawerTitle>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-stone-500">用户名</Label>
+                <Input
+                  type="text"
+                  placeholder="请输入用户名"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-stone-500">密码</Label>
+                <Input
+                  type="password"
+                  placeholder="请输入密码"
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleLogin()}
+                />
+              </div>
+
+              {error && <p className="text-xs text-red-600">{error}</p>}
+
+              <Button
+                className="w-full rounded-xl bg-[#C75B3A] hover:bg-[#B24D2F] text-white"
+                onClick={handleLogin}
+                disabled={loading || !username || !password}
+              >
+                {loading ? '登录中...' : '登录'}
+              </Button>
+
+              <button
+                className="w-full text-center text-xs text-stone-400 hover:text-stone-600"
+                onClick={goToRegister}
+              >
+                没有账户？去注册
+              </button>
+            </div>
+          )}
+
+          {/* Register mode */}
+          {mode === 'register' && (
+            <div className="space-y-3">
+              <div className="flex items-center gap-2">
+                <button
+                  className="rounded-lg p-1 hover:bg-stone-100"
+                  onClick={goBack}
+                >
+                  <ChevronLeft className="h-5 w-5 text-stone-600" />
+                </button>
+                <DrawerTitle className="text-base font-semibold text-stone-800">
+                  注册新账户
+                </DrawerTitle>
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-stone-500">用户名</Label>
+                <Input
+                  type="text"
+                  placeholder="请输入用户名"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-stone-500">密码（至少6位）</Label>
+                <Input
+                  type="password"
+                  placeholder="请输入密码"
+                  value={regPassword}
+                  onChange={(e) => setRegPassword(e.target.value)}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <Label className="text-xs text-stone-500">确认密码</Label>
+                <Input
+                  type="password"
+                  placeholder="请再次输入密码"
+                  value={confirmPassword}
+                  onChange={(e) => setConfirmPassword(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleRegister()}
+                />
+              </div>
+
+              {error && <p className="text-xs text-red-600">{error}</p>}
+
+              <Button
+                className="w-full rounded-xl bg-[#C75B3A] hover:bg-[#B24D2F] text-white"
+                onClick={handleRegister}
+                disabled={loading || !username || !regPassword || !confirmPassword}
+              >
+                {loading ? '注册中...' : '注册'}
+              </Button>
+
+              <button
+                className="w-full text-center text-xs text-stone-400 hover:text-stone-600"
+                onClick={goToLogin}
+              >
+                已有账户？去登录
+              </button>
+            </div>
+          )}
+        </div>
+      </DrawerContent>
+    </Drawer>
+  );
+}

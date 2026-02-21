@@ -310,3 +310,38 @@ cat build-logs\*.log
 - [Tauri 官方文档](https://tauri.app/)
 - [Tauri Android 指南](https://tauri.app/v2/guides/mobile/android/)
 - [Android Studio 下载](https://developer.android.com/studio)
+
+## GitHub 评论脚本（Bun + TypeScript）
+
+用于新增、追加、覆盖 Issue/PR 评论，使用 Bun 直接运行 TypeScript，减少 PowerShell 对 Markdown 参数的转义干扰。
+
+```powershell
+# 新增评论
+bun run gh:comment -- --type issue --number 93 --file docs/report.md
+
+# 追加到指定评论（注意 # 前缀需要加引号）
+bun run gh:comment -- --type issue --number 93 --comment "#issuecomment-3883010944" --mode append --file docs/add.md
+
+# 覆盖指定评论
+bun run gh:comment -- --type issue --number 93 --comment "#issuecomment-3883010944" --mode replace --file docs/final.md
+
+# 用完整链接自动解析 repo/type/number/comment
+bun run gh:comment -- --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append
+
+# 只看解析结果，不写入 GitHub
+bun run gh:comment -- --ref "https://github.com/exomind-team/exomind/pull/89" --body "test" --dry-run
+
+# PowerShell 直接调用
+.\Scripts\dev\github-comment.ps1 --ref "https://github.com/exomind-team/exomind/issues/93#issuecomment-3883010944" --file docs/add.md --mode append
+```
+
+参数说明：
+
+- `--type issue|pr`：目标类型。
+- `--number`：Issue/PR 编号。
+- `--comment`：评论定位，支持 `#issuecomment-xxxx`、URL、纯数字 id。
+- `--mode create|append|replace`：操作模式。默认：无 comment 为 `create`，有 comment 为 `append`。
+- `--file` / `--body`：Markdown 输入来源（二选一）。
+- `--ref`：完整 GitHub 链接（可含 `#issuecomment-...`）。
+- `--repo`：仓库 `owner/name`（省略时自动探测）。
+
