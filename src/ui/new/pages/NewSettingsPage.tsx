@@ -415,16 +415,41 @@ export function NewSettingsPage() {
                 <Import className="h-[18px] w-[18px] text-stone-500" />
                 <span className="text-[15px] font-medium text-stone-900">导入策略</span>
               </div>
-              <select
+              <div
                 id="import-strategy-new"
-                className="h-8 rounded-[10px] border border-[#E7E5E4] bg-[#FAF7F5] px-2 text-xs text-stone-700"
-                value={importStrategy}
-                onChange={(event) => setImportStrategy(event.target.value as ImportStrategy)}
-                disabled={loading}
+                role="group"
+                aria-label="导入策略"
+                className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]"
               >
-                <option value="merge">合并（merge）</option>
-                <option value="overwrite">覆盖（overwrite）</option>
-              </select>
+                <button
+                  type="button"
+                  data-testid="new-settings-import-strategy-merge"
+                  aria-pressed={importStrategy === 'merge'}
+                  onClick={() => setImportStrategy('merge')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    importStrategy === 'merge'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  合并（merge）
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-settings-import-strategy-overwrite"
+                  aria-pressed={importStrategy === 'overwrite'}
+                  onClick={() => setImportStrategy('overwrite')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    importStrategy === 'overwrite'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  覆盖（overwrite）
+                </button>
+              </div>
             </div>
             <div className="mx-4 h-px bg-[#F0ECE8]" />
 

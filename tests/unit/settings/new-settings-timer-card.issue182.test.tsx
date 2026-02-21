@@ -95,7 +95,27 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
 
     expect(screen.getByTestId('new-settings-import-export-card')).toBeInTheDocument();
     expect(screen.getByTestId('new-settings-import-strategy-row')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-import-strategy-merge')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-import-strategy-overwrite')).toBeInTheDocument();
     expect(screen.getByTestId('new-settings-export-row')).toBeInTheDocument();
     expect(screen.getByTestId('new-settings-import-row')).toBeInTheDocument();
+  });
+
+  it('toggles import strategy segmented controls（切换导入策略分段按钮）', () => {
+    render(<NewSettingsPage />);
+
+    const mergeButton = screen.getByTestId('new-settings-import-strategy-merge');
+    const overwriteButton = screen.getByTestId('new-settings-import-strategy-overwrite');
+
+    expect(mergeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(overwriteButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(overwriteButton);
+    expect(overwriteButton).toHaveAttribute('aria-pressed', 'true');
+    expect(mergeButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(mergeButton);
+    expect(mergeButton).toHaveAttribute('aria-pressed', 'true');
+    expect(overwriteButton).toHaveAttribute('aria-pressed', 'false');
   });
 });
