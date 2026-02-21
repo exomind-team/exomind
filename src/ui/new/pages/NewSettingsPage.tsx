@@ -217,11 +217,11 @@ export function NewSettingsPage() {
   return (
     <div className="safe-area-pt-plus min-h-full px-4">
       <header className="py-2 text-center">
-        <h1 className="text-base font-semibold text-stone-900">设置</h1>
+        <h1 className="text-base font-semibold text-primary">设置</h1>
       </header>
 
       <div className="space-y-4 pb-[calc(env(safe-area-inset-bottom,0px)+108px)]">
-        <section className="rounded-2xl border border-[#FFFFFF50] bg-gradient-to-br from-[#E8866F] via-[#D4664A] to-[#C75B3A] p-4 text-white shadow-[0_16px_30px_-18px_rgba(199,91,58,0.7)]">
+        <section className="rounded-2xl border border-white/50 bg-[linear-gradient(to_bottom_right,var(--brand-gradient))] p-4 text-white shadow-[0_16px_30px_-18px_rgba(199,91,58,0.7)]">
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-semibold">Hailay</p>
@@ -239,16 +239,16 @@ export function NewSettingsPage() {
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">外观</p>
-          <div className="rounded-2xl border border-[#F0ECE8] bg-white">
+          <p className="text-xs font-medium text-secondary">外观</p>
+          <div className="rounded-2xl border border-card bg-card">
             <div className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-2 text-sm text-stone-800">
-                <MoonStar className="h-4 w-4 text-stone-400" />
+              <div className="flex items-center gap-2 text-sm text-strong">
+                <MoonStar className="h-4 w-4 text-muted" />
                 <span>主题</span>
               </div>
               <select
                 id="theme-preference-new"
-                className="rounded-lg border border-[#E7E5E4] bg-[#FAF7F5] px-2 py-1 text-xs text-stone-700"
+                className="rounded-lg border border-subtle bg-surface px-2 py-1 text-xs text-strong"
                 value={themePreference}
                 disabled={loading}
                 onChange={(event) => {
@@ -266,22 +266,22 @@ export function NewSettingsPage() {
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">计时器</p>
-          <div className="rounded-2xl border border-[#F0ECE8] bg-white">
+          <p className="text-xs font-medium text-secondary">计时器</p>
+          <div className="rounded-2xl border border-card bg-card">
             <div className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-2 text-sm text-stone-800">
-                <TimerReset className="h-4 w-4 text-stone-400" />
+              <div className="flex items-center gap-2 text-sm text-strong">
+                <TimerReset className="h-4 w-4 text-muted" />
                 <span>结束样式</span>
               </div>
-              <span className="text-xs text-stone-500">保留现有逻辑</span>
+              <span className="text-xs text-secondary">保留现有逻辑</span>
             </div>
           </div>
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">网络与同步</p>
-          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
-            <Label htmlFor="sync-server-url-new" className="text-xs text-stone-500">
+          <p className="text-xs font-medium text-secondary">网络与同步</p>
+          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
+            <Label htmlFor="sync-server-url-new" className="text-xs text-secondary">
               同步服务器地址
             </Label>
             <Input
@@ -292,34 +292,34 @@ export function NewSettingsPage() {
               disabled={loading}
             />
             <div className="flex flex-wrap gap-2">
-              <Button type="button" className="h-8 rounded-xl bg-[#C75B3A] text-xs hover:bg-[#B24D2F]" onClick={handleSaveSyncServerUrl} disabled={loading}>
+              <Button type="button" className="h-8 rounded-xl bg-brand-accent text-xs hover:bg-brand-accent/90" onClick={handleSaveSyncServerUrl} disabled={loading}>
                 保存地址
               </Button>
               <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={handleResetSyncServerUrl} disabled={loading}>
                 设为默认
               </Button>
             </div>
-            <div className="flex items-center justify-between rounded-xl bg-[#FAF7F5] px-3 py-2 text-xs text-stone-500">
+            <div className="flex items-center justify-between rounded-xl bg-surface px-3 py-2 text-xs text-secondary">
               <div className="flex items-center gap-2">
                 <Wifi className="h-3.5 w-3.5" />
                 <span>本机IP</span>
               </div>
               <span>{syncHost}</span>
             </div>
-            <p className="text-[11px] text-stone-500">
+            <p className="text-[11px] text-secondary">
               {savedSyncServerUrl ? `当前已保存：${savedSyncServerUrl}` : `未保存自定义地址，自动使用：${autoSyncServerUrl}`}
             </p>
           </div>
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">导入导出</p>
-          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
+          <p className="text-xs font-medium text-secondary">导入导出</p>
+          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
             <div className="flex items-center justify-between">
-              <span className="text-sm text-stone-800">导入策略</span>
+              <span className="text-sm text-strong">导入策略</span>
               <select
                 id="import-strategy-new"
-                className="rounded-lg border border-[#E7E5E4] bg-[#FAF7F5] px-2 py-1 text-xs text-stone-700"
+                className="rounded-lg border border-subtle bg-surface px-2 py-1 text-xs text-strong"
                 value={importStrategy}
                 onChange={(event) => setImportStrategy(event.target.value as ImportStrategy)}
                 disabled={loading}
@@ -347,23 +347,23 @@ export function NewSettingsPage() {
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">账号与用户</p>
-          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
-            <div className="flex items-center gap-2 text-sm text-stone-800">
-              <Users className="h-4 w-4 text-stone-400" />
+          <p className="text-xs font-medium text-secondary">账号与用户</p>
+          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
+            <div className="flex items-center gap-2 text-sm text-strong">
+              <Users className="h-4 w-4 text-muted" />
               <span>多用户管理</span>
             </div>
-            <p className="text-[11px] text-stone-500">支持注册、登录和多设备同账号同步。</p>
+            <p className="text-[11px] text-secondary">支持注册、登录和多设备同账号同步。</p>
             <UserManagePage embedded />
           </div>
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">开发者</p>
-          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
+          <p className="text-xs font-medium text-secondary">开发者</p>
+          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-stone-800">
-                <Braces className="h-4 w-4 text-stone-400" />
+              <div className="flex items-center gap-2 text-sm text-strong">
+                <Braces className="h-4 w-4 text-muted" />
                 <span>开发者模式</span>
               </div>
               <Switch
@@ -375,7 +375,7 @@ export function NewSettingsPage() {
                 aria-label="开发者模式"
               />
             </div>
-            <p className="text-[11px] text-stone-500">开启后显示 MOSS / ASR 测试入口</p>
+            <p className="text-[11px] text-secondary">开启后显示 MOSS / ASR 测试入口</p>
             {developerMode && (
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/moss-test'; }}>
@@ -386,11 +386,11 @@ export function NewSettingsPage() {
                 </Button>
               </div>
             )}
-            <div className="border-t border-[#F2F1F0] pt-3">
+            <div className="border-t border-subtle pt-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-stone-800">界面模式（UI Mode）</p>
-                  <p className="text-[11px] text-stone-500">过渡期支持新旧 UI 双向切换</p>
+                  <p className="text-sm text-strong">界面模式（UI Mode）</p>
+                  <p className="text-[11px] text-secondary">过渡期支持新旧 UI 双向切换</p>
                 </div>
                 <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={handleBackToOldUi}>
                   返回旧 UI
@@ -401,8 +401,8 @@ export function NewSettingsPage() {
         </section>
 
         <section className="py-1 text-center">
-          <p className="text-[11px] text-stone-400">ExoMind v{versionBuildInfo.appVersion}</p>
-          <p className="text-[10px] text-stone-400">Build: {versionBuildInfo.buildHash}</p>
+          <p className="text-[11px] text-muted">ExoMind v{versionBuildInfo.appVersion}</p>
+          <p className="text-[10px] text-muted">Build: {versionBuildInfo.buildHash}</p>
         </section>
 
         {statusMessage && <p role="status" className="text-center text-xs text-green-700">{statusMessage}</p>}
