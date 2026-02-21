@@ -402,13 +402,22 @@ export function NewSettingsPage() {
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-secondary">导入导出</p>
-          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-strong">导入策略</span>
+          <p className="text-xs font-medium text-stone-500">导入导出</p>
+          <div
+            data-testid="new-settings-import-export-card"
+            className="rounded-2xl border border-[#F0ECE8] bg-white"
+          >
+            <div
+              data-testid="new-settings-import-strategy-row"
+              className="flex items-center justify-between p-4"
+            >
+              <div className="flex items-center gap-[10px]">
+                <Import className="h-[18px] w-[18px] text-stone-500" />
+                <span className="text-[15px] font-medium text-stone-900">导入策略</span>
+              </div>
               <select
                 id="import-strategy-new"
-                className="rounded-lg border border-subtle bg-surface px-2 py-1 text-xs text-strong"
+                className="h-8 rounded-[10px] border border-[#E7E5E4] bg-[#FAF7F5] px-2 text-xs text-stone-700"
                 value={importStrategy}
                 onChange={(event) => setImportStrategy(event.target.value as ImportStrategy)}
                 disabled={loading}
@@ -417,21 +426,51 @@ export function NewSettingsPage() {
                 <option value="overwrite">覆盖（overwrite）</option>
               </select>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="outline" className="h-9 justify-start rounded-xl text-xs" onClick={handleExport} disabled={loading}>
-                <Download className="mr-2 h-4 w-4" /> 导出 JSON
-              </Button>
-              <Button type="button" variant="outline" className="h-9 justify-start rounded-xl text-xs" onClick={handleImportClick} disabled={loading}>
-                <Import className="mr-2 h-4 w-4" /> 导入 JSON
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json"
-                className="hidden"
-                onChange={handleImportFile}
-              />
-            </div>
+            <div className="mx-4 h-px bg-[#F0ECE8]" />
+
+            <button
+              type="button"
+              data-testid="new-settings-export-row"
+              onClick={handleExport}
+              disabled={loading}
+              className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <div className="flex items-center gap-[10px]">
+                <Download className="h-[18px] w-[18px] text-stone-500" />
+                <div>
+                  <p className="text-[15px] font-medium text-stone-900">导出 JSON</p>
+                  <p className="text-xs text-stone-400">导出当前事件日志备份</p>
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-stone-400" />
+            </button>
+
+            <div className="mx-4 h-px bg-[#F0ECE8]" />
+
+            <button
+              type="button"
+              data-testid="new-settings-import-row"
+              onClick={handleImportClick}
+              disabled={loading}
+              className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <div className="flex items-center gap-[10px]">
+                <Import className="h-[18px] w-[18px] text-stone-500" />
+                <div>
+                  <p className="text-[15px] font-medium text-stone-900">导入 JSON</p>
+                  <p className="text-xs text-stone-400">从备份文件恢复事件日志</p>
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-stone-400" />
+            </button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
           </div>
         </section>
 

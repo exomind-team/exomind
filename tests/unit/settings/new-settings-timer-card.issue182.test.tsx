@@ -89,4 +89,13 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
 
     expect(screen.getByText('Ring 10')).toBeInTheDocument();
   });
+
+  it('renders import-export section in new row style（导入导出区使用新行式风格）', () => {
+    render(<NewSettingsPage />);
+
+    expect(screen.getByTestId('new-settings-import-export-card')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-import-strategy-row')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-export-row')).toBeInTheDocument();
+    expect(screen.getByTestId('new-settings-import-row')).toBeInTheDocument();
+  });
 });
