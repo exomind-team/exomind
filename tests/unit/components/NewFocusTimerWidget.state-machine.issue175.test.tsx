@@ -210,6 +210,10 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     const chevronNode = runningSection.querySelector("[data-lucide='chevron-down']");
     expect(glowNode).toBeNull();
     expect(frostedBackdrop).not.toBeNull();
+    expect(frostedBackdrop?.className).toContain('from-[#D8C4B5]');
+    expect(frostedBackdrop?.className).toContain('to-[#C8AF9E]');
+    expect(frostedBackdrop?.className).toContain('w-[361px]');
+    expect(frostedBackdrop?.className).toContain('shadow-[');
     expect(chevronNode).toBeNull();
   });
 });

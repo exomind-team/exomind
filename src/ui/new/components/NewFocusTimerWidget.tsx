@@ -532,7 +532,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
             {isCountupMode && (
               <div
                 data-testid="new-focus-running-frosted-backdrop"
-                className="absolute inset-x-4 top-[14px] h-[74px] rounded-[22px] bg-[linear-gradient(180deg,rgba(255,255,255,0.55)_0%,rgba(250,247,245,0.35)_100%)] blur-[10px]"
+                className="absolute left-1/2 top-[12px] h-[86px] w-[361px] -translate-x-1/2 rounded-[24px] bg-gradient-to-br from-[#D8C4B5] via-[#D0BAAB] to-[#C8AF9E] opacity-80 blur-[14px] shadow-[0_12px_28px_rgba(128,104,86,0.24)]"
                 aria-hidden
               />
             )}
