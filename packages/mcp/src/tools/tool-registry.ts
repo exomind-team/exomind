@@ -1,4 +1,5 @@
 import type { Tool } from '@modelcontextprotocol/sdk/types.js';
+import { createAuthTools } from './tools-auth';
 import { createEventTools } from './tools-event';
 import { createTimeBlockTools } from './tools-timeblock';
 import type { McpToolDependencies } from '../utils/mcp-dependencies';
@@ -25,6 +26,7 @@ export function createToolRegistryWithDependencies(dependencies: McpToolDependen
   const registry = new Map<string, RegisteredTool>();
 
   for (const entry of [
+    ...createAuthTools(),
     ...createEventTools(dependencies.eventLogService),
     ...createTimeBlockTools(dependencies.timeBlockService),
   ]) {
