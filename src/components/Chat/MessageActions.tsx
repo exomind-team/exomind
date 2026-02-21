@@ -19,11 +19,16 @@ export function MessageActions({ content, align }: MessageActionsProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const handleCopy = useCallback(async () => {
+    console.log('[MessageActions] handleCopy triggered, content length:', content.length);
+    console.log('[MessageActions] navigator.clipboard available:', !!navigator.clipboard);
+    console.log('[MessageActions] navigator.clipboard.writeText available:', !!navigator.clipboard?.writeText);
     try {
       await navigator.clipboard.writeText(content);
+      console.log('[MessageActions] clipboard.writeText succeeded');
       setCopied(true);
       timerRef.current = setTimeout(() => setCopied(false), 1500);
-    } catch {
+    } catch (err) {
+      console.error('[MessageActions] clipboard.writeText failed:', err);
       toast({ title: '复制失败，请重试', variant: 'destructive' });
     }
   }, [content]);
