@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 const mocks = vi.hoisted(() => ({
   isTauri: vi.fn(),
   invoke: vi.fn(),
+  setThemePreference: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
@@ -26,7 +27,7 @@ vi.mock('@/config/port-env', () => ({
 
 vi.mock('@/config/theme', () => ({
   getThemePreference: () => 'system',
-  setThemePreference: vi.fn(),
+  setThemePreference: mocks.setThemePreference,
 }));
 
 vi.mock('@/config/developer-mode', () => ({
@@ -55,6 +56,26 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
     expect(screen.getByText('倒计时结束后的行为')).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '硬结束' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '软结束' })).toBeInTheDocument();
+  });
+
+  it('toggles theme segmented controls and persists preference（切换主题分段按钮并持久化）', () => {
+    render(<NewSettingsPage />);
+
+    const systemButton = screen.getByTestId('new-settings-theme-system');
+    const lightButton = screen.getByTestId('new-settings-theme-light');
+    const darkButton = screen.getByTestId('new-settings-theme-dark');
+
+    expect(systemButton).toHaveAttribute('aria-pressed', 'true');
+    expect(lightButton).toHaveAttribute('aria-pressed', 'false');
+    expect(darkButton).toHaveAttribute('aria-pressed', 'false');
+
+    fireEvent.click(lightButton);
+    expect(lightButton).toHaveAttribute('aria-pressed', 'true');
+    expect(mocks.setThemePreference).toHaveBeenCalledWith('light');
+
+    fireEvent.click(darkButton);
+    expect(darkButton).toHaveAttribute('aria-pressed', 'true');
+    expect(mocks.setThemePreference).toHaveBeenCalledWith('dark');
   });
 
   it('toggles end mode and persists selection（切换结束模式并持久化）', () => {

@@ -231,6 +231,11 @@ export function NewSettingsPage() {
     setTimerPreferencesState(updateTimerPreferences({ countdownEndMode: mode }));
   };
 
+  const handleThemePreferenceChange = (nextPreference: ThemePreference) => {
+    setThemePreference(nextPreference);
+    setThemePreferenceState(nextPreference);
+  };
+
   const handleSoundPresetChange = (presetId: TimerEndSoundPresetId | 'off') => {
     if (presetId === 'off') {
       setTimerPreferencesState(updateTimerPreferences({ countdownEndSoundEnabled: false }));
@@ -288,21 +293,55 @@ export function NewSettingsPage() {
                 <MoonStar className="h-4 w-4 text-muted" />
                 <span>主题</span>
               </div>
-              <select
+              <div
                 id="theme-preference-new"
-                className="rounded-lg border border-subtle bg-surface px-2 py-1 text-xs text-strong"
-                value={themePreference}
-                disabled={loading}
-                onChange={(event) => {
-                  const nextPreference = event.target.value as ThemePreference;
-                  setThemePreference(nextPreference);
-                  setThemePreferenceState(nextPreference);
-                }}
+                role="group"
+                aria-label="主题"
+                className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]"
               >
-                <option value="system">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-              </select>
+                <button
+                  type="button"
+                  data-testid="new-settings-theme-system"
+                  aria-pressed={themePreference === 'system'}
+                  onClick={() => handleThemePreferenceChange('system')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    themePreference === 'system'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  跟随系统
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-settings-theme-light"
+                  aria-pressed={themePreference === 'light'}
+                  onClick={() => handleThemePreferenceChange('light')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    themePreference === 'light'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  浅色
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-settings-theme-dark"
+                  aria-pressed={themePreference === 'dark'}
+                  onClick={() => handleThemePreferenceChange('dark')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    themePreference === 'dark'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  深色
+                </button>
+              </div>
             </div>
           </div>
         </section>
