@@ -148,8 +148,8 @@ describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支�
     await waitFor(() =>
       expect(screen.getByTestId('new-focus-running-clock').textContent).toContain('+'),
     );
+    expect(screen.getByTestId('new-focus-running-clock').className).toContain('text-[#C75B3A]');
     expect(markEndingMock).not.toHaveBeenCalled();
     expect(playMock).toHaveBeenCalledTimes(1);
   });
 });
-

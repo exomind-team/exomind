@@ -85,6 +85,11 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   const isPaused = isRunningUi && runningSubState === 'paused';
   const isCustomDurationSelected = !isPresetCountdownMinutes(countdownMinutes);
   const customDurationTriggerText = isCustomDurationSelected ? `${countdownMinutes}m` : '自定义';
+  const isCountdownOvertime =
+    timerMode === 'countdown' && countdownOverrunRef.current;
+  const isCountdownWarning =
+    timerMode === 'countdown'
+    && (isCountdownOvertime || (elapsedMs <= 60000 && elapsedMs > 0));
 
   const syncIdleElapsedFromMode = useCallback((mode: TimerMode, minutes: number) => {
     setElapsedMs(mode === 'countdown' ? minutes * 60 * 1000 : 0);
@@ -544,10 +549,12 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
           <div className="px-6 pb-3 pt-2">
             <div className="flex items-center justify-center">
               <span
-                className="font-mono text-[56px] font-[200] leading-[1.1] tracking-[2px] text-[#1C1917]"
+                className={`font-mono text-[56px] font-[200] leading-[1.1] tracking-[2px] ${
+                  isCountdownWarning ? 'text-[#C75B3A]' : 'text-[#1C1917]'
+                }`}
                 data-testid="new-focus-running-clock"
               >
-                {timerMode === 'countdown' && countdownOverrunRef.current
+                {isCountdownOvertime
                   ? `+${formatClock(countdownOvertimeMs)}`
                   : formatClock(elapsedMs)}
               </span>
