@@ -14,7 +14,10 @@ let dependencies: McpToolDependencies | null = null;
 export function createMcpToolDependencies(): McpToolDependencies {
   if (dependencies) return dependencies;
 
+  console.error('[DEBUG] Creating MCP environment...');
   const env = createMcpEnvironment();
+  console.error('[DEBUG] EventLog type:', env.eventlog.constructor.name);
+
   dependencies = {
     eventLogService: new EventLogServiceImpl({ port: env.eventlog }),
     timeBlockService: new TimeBlockServiceImpl(env),
@@ -30,8 +33,9 @@ export async function initMcpWithAuth(): Promise<{ valid: boolean; userId: strin
   const result = await validateUserCredentials();
   authResult = result;
 
-  if (!result.valid && result.reason === 'USER_PASSWD required') {
-    throw new Error('USER_PASSWD is required when USER_ID is set');
+  // 认证失败时抛出错误（MCP 只支持远程模式）
+  if (!result.valid) {
+    throw new Error(`Authentication failed: ${result.reason}`);
   }
 
   return result;

@@ -74,7 +74,10 @@ export function createEventTools(
         const limit = input.limit ? Math.max(1, input.limit) : 20;
         const tag = input.tag?.trim() || undefined;
 
+        console.error('[DEBUG] Loading events...');
         const events = await eventLogService.loadEvents();
+        console.error('[DEBUG] Events loaded:', events.length);
+
         const filtered = tag ? events.filter((event) => event.tags.has(tag)) : events;
         const sliced = filtered.slice(0, limit);
 
