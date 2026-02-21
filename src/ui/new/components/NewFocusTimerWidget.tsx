@@ -67,6 +67,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   const isRunningUi = uiState === 'running';
   const isPaused = isRunningUi && runningSubState === 'paused';
   const isCustomDurationSelected = !isPresetCountdownMinutes(countdownMinutes);
+  const customDurationTriggerText = isCustomDurationSelected ? `${countdownMinutes}m` : '自定义';
 
   const syncIdleElapsedFromMode = useCallback((mode: TimerMode, minutes: number) => {
     setElapsedMs(mode === 'countdown' ? minutes * 60 * 1000 : 0);
@@ -357,14 +358,17 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                       type="button"
                       data-testid="new-focus-duration-custom-trigger"
                       onClick={handleOpenCustomDurationEditor}
-                      className={`flex items-center gap-1 rounded-[8px] px-[8px] py-[6px] text-[12px] ${
+                      className={`flex items-center rounded-[8px] text-[12px] ${
                         isCustomDurationEditing || isCustomDurationSelected
                           ? 'bg-white/90 font-semibold text-[#C75B3A]'
                           : 'bg-transparent text-[#C75B3A]'
+                      } ${
+                        isCustomDurationEditing ? 'h-8 w-8 justify-center p-0' : 'gap-1 px-[8px] py-[6px]'
                       }`}
+                      aria-label="自定义倒计时（Custom countdown）"
                     >
                       <ChevronDown size={12} className={isCustomDurationEditing ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                      自定义
+                      {!isCustomDurationEditing && customDurationTriggerText}
                     </button>
 
                     {isCustomDurationEditing && (

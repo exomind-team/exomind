@@ -144,6 +144,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     const customInput = screen.getByTestId('new-focus-duration-custom-input');
     fireEvent.change(customInput, { target: { value: '37' } });
     fireEvent.blur(customInput);
+    expect(screen.getByTestId('new-focus-duration-custom-trigger')).toHaveTextContent('37m');
 
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
     await waitFor(() => {
@@ -153,5 +154,16 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
         undefined,
       );
     });
+  });
+
+  it('shows icon-only custom trigger while editing（自定义编辑态仅显示箭头）', () => {
+    render(<NewFocusTimerWidget />);
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+
+    const trigger = screen.getByTestId('new-focus-duration-custom-trigger');
+    fireEvent.click(trigger);
+
+    expect(trigger.textContent?.trim()).toBe('');
+    expect(screen.getByTestId('new-focus-duration-custom-input')).toBeInTheDocument();
   });
 });
