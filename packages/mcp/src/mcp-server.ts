@@ -5,8 +5,22 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { createToolRegistry } from './tools/tool-registry';
+import { initMcpWithAuth } from './utils/mcp-dependencies';
 
 export async function startExoMindMcpServer(): Promise<void> {
+  // 启动时验证用户凭据
+  try {
+    const auth = await initMcpWithAuth();
+    if (auth.valid) {
+      console.error(`[MCP] Authenticated as: ${auth.userId}`);
+    } else {
+      console.error(`[MCP] Running in local mode: ${auth.reason}`);
+    }
+  } catch (error) {
+    console.error('[MCP] Authentication failed:', error);
+    process.exit(1);
+  }
+
   const toolRegistry = await createToolRegistry();
 
   const server = new Server(
