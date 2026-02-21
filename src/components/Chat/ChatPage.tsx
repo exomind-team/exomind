@@ -555,6 +555,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                           )}
                           <EventMarkdown content={event.content} />
                         </div>
+                        <MessageActions content={event.content} align="start" />
                         <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
                           {formatTime(event.timestamp)}
                         </p>
