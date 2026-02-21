@@ -68,6 +68,18 @@ export default {
         // 语义化颜色 - 品牌色
         'brand-accent': "hsl(var(--brand-accent))",
         'brand-gradient': "var(--brand-gradient)",
+        // 语义化功能性颜色 - 标签色
+        'tag-info': "hsl(var(--tag-info))",
+        'tag-warning': "hsl(var(--tag-warning))",
+        'tag-success': "hsl(var(--tag-success))",
+        'tag-error': "hsl(var(--tag-error))",
+        // 语义化功能性颜色 - 用户消息气泡色
+        'bubble-user-bg': "hsl(var(--bubble-user-bg))",
+        'bubble-user-text': "hsl(var(--bubble-user-text))",
+        'bubble-user-avatar-bg': "hsl(var(--bubble-user-avatar-bg))",
+        'bubble-user-avatar-text': "hsl(var(--bubble-user-avatar-text))",
+        // 语义化功能性颜色 - 遮罩
+        'overlay': "hsl(var(--overlay) / <alpha-value>)",
       },
       borderRadius: {
         lg: "var(--radius)",

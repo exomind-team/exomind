@@ -332,18 +332,18 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   // 获取事件背景色
   const getEventBgColor = (event: Event) => {
     if (event.tags.has('block_start')) {
-      return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 rounded-br-md';
+      return 'bg-tag-info text-tag-info rounded-br-md';
     }
     if (event.tags.has('block_pause')) {
-      return 'bg-yellow-100 text-yellow-900 dark:bg-yellow-950 dark:text-yellow-100 rounded-br-md';
+      return 'bg-tag-warning text-tag-warning rounded-br-md';
     }
     if (event.tags.has('block_resume')) {
-      return 'bg-green-100 text-green-900 dark:bg-green-950 dark:text-green-100 rounded-br-md';
+      return 'bg-tag-success text-tag-success rounded-br-md';
     }
     if (event.tags.has('block_end')) {
-      return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-100 rounded-br-md';
+      return 'bg-tag-error text-tag-error rounded-br-md';
     }
-    return 'bg-muted rounded-bl-md';
+    return 'bg-muted text-muted-foreground rounded-bl-md';
   };
 
   // 获取事件前缀
@@ -467,7 +467,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                     data-testid="new-mobile-system-message-row"
                   >
                     <Avatar className="mt-0.5 h-8 w-8 shrink-0">
-                      <AvatarFallback className="rounded-full bg-blue-100 text-[11px] text-blue-800 dark:bg-blue-950 dark:text-blue-100">
+                      <AvatarFallback className="rounded-full bg-tag-info text-[11px] text-tag-info">
                         {getEventIcon(event)}
                       </AvatarFallback>
                     </Avatar>
@@ -504,12 +504,12 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                       <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       <span className="text-xs font-semibold text-strong">{userDisplayName}</span>
                     </div>
-                    <div className="rounded-2xl bg-red-50 px-[14px] py-[10px] text-[13px] leading-[1.6] text-red-900 dark:bg-red-950 dark:text-red-100">
+                    <div className="rounded-2xl bg-bubble-user-bg px-[14px] py-[10px] text-[13px] leading-[1.6] text-bubble-user-text">
                       <EventMarkdown content={event.content} />
                     </div>
                   </div>
                   <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarFallback className="rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100">
+                    <AvatarFallback className="rounded-full bg-bubble-user-avatar-bg text-[11px] font-semibold text-bubble-user-avatar-text">
                       {userMeta.avatarInitial}
                     </AvatarFallback>
                   </Avatar>

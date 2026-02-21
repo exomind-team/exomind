@@ -43,6 +43,17 @@
     --border-subtle: 30 10% 91%;
     --brand-accent: 14 76% 66%;
     --brand-gradient: 14 76% 66%, 14 68% 53%, 14 64% 48%;
+
+    /* 语义化功能性颜色 - 浅色模式 */
+    --tag-info: 217 91% 60%;
+    --tag-warning: 45 93% 47%;
+    --tag-success: 142 71% 45%;
+    --tag-error: 0 72% 51%;
+    --bubble-user-bg: 0 86% 97%;
+    --bubble-user-text: 0 72% 31%;
+    --bubble-user-avatar-bg: 24 95% 53%;
+    --bubble-user-avatar-text: 24 95% 26%;
+    --overlay: 0 0% 0%;
   }
 
   .dark {
@@ -84,6 +95,16 @@
     --border-subtle: 270 25% 20%;
     --brand-accent: 271 81% 76%;
     --brand-gradient: 271 81% 76%, 271 75% 65%, 271 70% 55%;
+
+    /* 语义化功能性颜色 - 深色模式 */
+    --tag-info: 217 91% 80%;
+    --tag-warning: 45 93% 56%;
+    --tag-success: 142 71% 65%;
+    --tag-error: 0 62% 50%;
+    --bubble-user-bg: 0 62% 18%;
+    --bubble-user-text: 0 0% 90%;
+    --bubble-user-avatar-bg: 24 95% 35%;
+    --bubble-user-avatar-text: 24 95% 90%;
   }
 }
 
