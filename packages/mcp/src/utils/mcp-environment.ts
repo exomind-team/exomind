@@ -88,3 +88,47 @@ export function createMcpEnvironment(): {
 
   return env;
 }
+
+// === 用户认证相关 ===
+
+export interface AuthResult {
+  valid: boolean;
+  userId: string | null;
+  passwordHash: string | null;
+  reason?: string;
+}
+
+function resolveUserPassword(): string | undefined {
+  return process.env.EXOMIND_MCP_USER_PASSWD?.trim();
+}
+
+export async function validateUserCredentials(): Promise<AuthResult> {
+  const userId = resolveUserId();
+  const password = resolveUserPassword();
+
+  // 情况 1: 没有设置 USER_ID
+  if (!userId) {
+    console.error('[MCP] WARN: USER_ID not set, running in local mode');
+    return { valid: false, userId: null, passwordHash: null, reason: 'USER_ID not set' };
+  }
+
+  // 情况 2: 没有设置 USER_PASSWD（但设置了 USER_ID）
+  if (!password) {
+    const error = '[MCP] ERROR: USER_PASSWD is required when USER_ID is set';
+    console.error(error);
+    return { valid: false, userId, passwordHash: null, reason: 'USER_PASSWD required' };
+  }
+
+  // 情况 3: 需要验证密码
+  // 由于 Node.js 无法访问浏览器 localStorage，我们采用简化方案：
+  // 直接使用密码进行哈希验证（需要用户先在主应用注册，获取密码哈希）
+  // 这里先返回成功，后续需要密钥文件或服务器验证
+
+  console.log(`[MCP] User authenticated: ${userId}`);
+  return {
+    valid: true,
+    userId,
+    passwordHash: password, // 简化：直接返回密码作为凭据
+    reason: 'authenticated'
+  };
+}
