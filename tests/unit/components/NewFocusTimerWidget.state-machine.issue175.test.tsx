@@ -112,6 +112,23 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     });
   });
 
+  it('uses adaptive config layout for countup switch（正计时切换时配置布局自适应）', () => {
+    render(<NewFocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+
+    const configContainer = screen.getByTestId('new-focus-state-config');
+    const glowNode = configContainer.querySelector("div[aria-hidden='true']");
+    expect(configContainer.className).not.toContain('h-[253px]');
+    expect(glowNode?.className).not.toContain('h-[227px]');
+
+    fireEvent.click(screen.getByTestId('new-focus-mode-countup'));
+
+    expect(screen.queryByText('倒计时时长')).toBeNull();
+    expect(configContainer.className).toContain('pb-3');
+    expect(glowNode?.className).toContain('bottom-[10px]');
+  });
+
   it('adds a11y attrs and forbids collapse from running（可访问性与运行态禁收起）', async () => {
     render(<NewFocusTimerWidget />);
 

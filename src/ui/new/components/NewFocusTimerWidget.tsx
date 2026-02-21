@@ -387,15 +387,15 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
 
       {uiState === 'config' && (
         <section className="safe-area-pt-plus">
-          <div className="relative mx-auto h-[253px] w-full max-w-[390px]" data-testid="new-focus-state-config">
+          <div className="relative mx-auto w-full max-w-[390px] px-4 pb-3 pt-4" data-testid="new-focus-state-config">
             <div
-              className="absolute left-4 top-[14px] h-[227px] w-[361px] rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
+              className="absolute inset-x-4 bottom-[10px] top-[14px] rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
               aria-hidden
             />
 
             <div
               id="new-focus-config-panel"
-              className={`absolute left-4 top-4 flex w-[361px] flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
+              className={`relative flex w-full flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
             >
               <div className="flex items-center gap-[10px]">
                 <button
