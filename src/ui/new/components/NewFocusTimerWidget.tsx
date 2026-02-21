@@ -37,10 +37,18 @@ function glassCardShadowClass(): string {
   return 'shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_24px_-6px_rgba(0,0,0,0.08),0_20px_40px_-8px_rgba(0,0,0,0.05)]';
 }
 
+const PRESET_COUNTDOWN_MINUTES = [15, 25, 45] as const;
+const MAX_CUSTOM_COUNTDOWN_MINUTES = 720;
+
+function isPresetCountdownMinutes(minutes: number): boolean {
+  return PRESET_COUNTDOWN_MINUTES.includes(minutes as (typeof PRESET_COUNTDOWN_MINUTES)[number]);
+}
+
 export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(function NewFocusTimerWidget(_, ref) {
   const timeBlockServiceRef = useRef(getTimeBlockService());
   const frameRef = useRef<number | null>(null);
   const taskInputRef = useRef<HTMLInputElement | null>(null);
+  const customDurationInputRef = useRef<HTMLInputElement | null>(null);
 
   const [uiState, setUiState] = useState<FocusUiState>('idle');
   const [runningSubState, setRunningSubState] = useState<RunningSubState>('running');
@@ -49,6 +57,8 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   const [taskName, setTaskName] = useState('');
   const [timerMode, setTimerMode] = useState<TimerMode>('countdown');
   const [countdownMinutes, setCountdownMinutes] = useState(25);
+  const [customDurationDraft, setCustomDurationDraft] = useState('25');
+  const [isCustomDurationEditing, setIsCustomDurationEditing] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(25 * 60 * 1000);
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
@@ -56,6 +66,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
 
   const isRunningUi = uiState === 'running';
   const isPaused = isRunningUi && runningSubState === 'paused';
+  const isCustomDurationSelected = !isPresetCountdownMinutes(countdownMinutes);
 
   const syncIdleElapsedFromMode = useCallback((mode: TimerMode, minutes: number) => {
     setElapsedMs(mode === 'countdown' ? minutes * 60 * 1000 : 0);
@@ -72,6 +83,11 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     setUiState('config');
     focusTaskInput();
   }, [focusTaskInput, isRunningUi]);
+
+  // Keep draft minutes synced for custom input（自定义输入框与草稿分钟同步）
+  useEffect(() => {
+    setCustomDurationDraft(String(countdownMinutes));
+  }, [countdownMinutes]);
 
   useEffect(() => {
     let cancelled = false;
@@ -163,6 +179,32 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     setUiState('running');
   }, [countdownMinutes, focusTaskInput, taskNameDraft, timerMode]);
 
+  const handleCollapseToIdle = useCallback(() => {
+    if (uiState !== 'config') return;
+    setIsCustomDurationEditing(false);
+    setUiState('idle');
+  }, [uiState]);
+
+  const handleOpenCustomDurationEditor = useCallback(() => {
+    setIsCustomDurationEditing(true);
+    requestAnimationFrame(() => {
+      customDurationInputRef.current?.focus();
+      customDurationInputRef.current?.select();
+    });
+  }, []);
+
+  const applyCustomDuration = useCallback((rawValue: string) => {
+    const parsedValue = Number.parseInt(rawValue.trim(), 10);
+    if (Number.isFinite(parsedValue)) {
+      const safeMinutes = Math.max(1, Math.min(MAX_CUSTOM_COUNTDOWN_MINUTES, parsedValue));
+      setCountdownMinutes(safeMinutes);
+      setCustomDurationDraft(String(safeMinutes));
+    } else {
+      setCustomDurationDraft(String(countdownMinutes));
+    }
+    setIsCustomDurationEditing(false);
+  }, [countdownMinutes]);
+
   const handlePauseOrResume = useCallback(async () => {
     if (!isRunningUi) return;
 
@@ -229,6 +271,9 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
               type="button"
               data-testid="new-focus-idle-card"
               onClick={enterConfigState}
+              aria-expanded="false"
+              aria-controls="new-focus-config-panel"
+              aria-label="展开专注配置（Expand focus configuration）"
               className={`absolute left-4 top-4 flex h-[68px] w-[357px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()}`}
             >
               <div className="mr-3 flex min-w-0 items-center gap-3">
@@ -255,12 +300,21 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
             />
 
             <div
+              id="new-focus-config-panel"
               className={`absolute left-4 top-4 flex w-[361px] flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
             >
               <div className="flex items-center gap-[10px]">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A]">
+                <button
+                  type="button"
+                  data-testid="new-focus-config-collapse-button"
+                  aria-expanded="true"
+                  aria-controls="new-focus-config-panel"
+                  aria-label="收起专注配置（Collapse focus configuration）"
+                  onClick={handleCollapseToIdle}
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A] transition-transform active:scale-95"
+                >
                   <Target size={20} />
-                </div>
+                </button>
                 <Input
                   ref={taskInputRef}
                   data-testid="new-focus-task-input"
@@ -299,12 +353,55 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                 <div className="flex items-center justify-between">
                   <span className="text-[12px] font-medium text-[#57534E]">倒计时时长</span>
                   <div className="flex items-center gap-[6px]">
-                    {[15, 25, 45].map((minutes) => (
+                    <button
+                      type="button"
+                      data-testid="new-focus-duration-custom-trigger"
+                      onClick={handleOpenCustomDurationEditor}
+                      className={`flex items-center gap-1 rounded-[8px] px-[8px] py-[6px] text-[12px] ${
+                        isCustomDurationEditing || isCustomDurationSelected
+                          ? 'bg-white/90 font-semibold text-[#C75B3A]'
+                          : 'bg-transparent text-[#C75B3A]'
+                      }`}
+                    >
+                      <ChevronDown size={12} className={isCustomDurationEditing ? 'rotate-180 transition-transform' : 'transition-transform'} />
+                      自定义
+                    </button>
+
+                    {isCustomDurationEditing && (
+                      <Input
+                        ref={customDurationInputRef}
+                        data-testid="new-focus-duration-custom-input"
+                        value={customDurationDraft}
+                        onChange={(event) => {
+                          setCustomDurationDraft(event.target.value.replace(/[^\d]/g, ''));
+                        }}
+                        onBlur={() => applyCustomDuration(customDurationDraft)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter') {
+                            event.preventDefault();
+                            applyCustomDuration(customDurationDraft);
+                          }
+                          if (event.key === 'Escape') {
+                            event.preventDefault();
+                            setCustomDurationDraft(String(countdownMinutes));
+                            setIsCustomDurationEditing(false);
+                          }
+                        }}
+                        aria-label="自定义倒计时分钟（Custom countdown minutes）"
+                        placeholder="分钟"
+                        className="h-8 w-[72px] border-[#FFFFFF60] bg-white/90 px-2 text-[12px] font-medium text-[#1C1917]"
+                      />
+                    )}
+
+                    {PRESET_COUNTDOWN_MINUTES.map((minutes) => (
                       <button
                         key={minutes}
                         type="button"
                         data-testid={`new-focus-duration-${minutes}`}
-                        onClick={() => setCountdownMinutes(minutes)}
+                        onClick={() => {
+                          setIsCustomDurationEditing(false);
+                          setCountdownMinutes(minutes);
+                        }}
                         className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${
                           countdownMinutes === minutes ? 'border border-[#FFFFFF60] bg-white/90 font-semibold text-[#1C1917]' : 'bg-transparent text-[#78716C]'
                         }`}
@@ -377,8 +474,8 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                   : 'h-10 rounded-[24px] bg-[#EDECE9] px-6 text-[14px] font-medium text-[#1C1917] hover:bg-[#E5E3DF]'
               }
             >
-              {isPaused ? <Play size={16} className="mr-2" /> : <Pause size={16} className="mr-2" />}
-              {isPaused ? '继续' : '暂停'}
+                {isPaused ? <Play size={16} className="mr-2" /> : <Pause size={16} className="mr-2" />}
+                {isPaused ? '继续' : '暂停'}
             </Button>
 
             <Button
