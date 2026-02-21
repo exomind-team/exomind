@@ -20,6 +20,7 @@ describe('MCP tool registry', () => {
     expect(tools).toEqual([
       'exomind_add_event',
       'exomind_end_block',
+      'exomind_get_auth_status',
       'exomind_get_blocks',
       'exomind_get_events',
       'exomind_start_block',
