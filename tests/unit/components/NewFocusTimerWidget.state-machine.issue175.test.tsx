@@ -166,4 +166,27 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     expect(trigger.textContent?.trim()).toBe('');
     expect(screen.getByTestId('new-focus-duration-custom-input')).toBeInTheDocument();
   });
+
+  it('does not render red glow in running countup mode（正计时运行态不渲染红色阴影）', async () => {
+    render(<NewFocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.click(screen.getByTestId('new-focus-mode-countup'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '正计时任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(startBlockMock).toHaveBeenCalledWith(
+        '正计时任务',
+        expect.objectContaining({ mode: 'countup', minutes: undefined }),
+        undefined,
+      );
+    });
+
+    const runningSection = screen.getByTestId('new-focus-state-running');
+    const glowNode = runningSection.querySelector("div[aria-hidden='true'][class*='blur-[8px]']");
+    expect(glowNode).toBeNull();
+  });
 });

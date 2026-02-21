@@ -85,6 +85,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   const isPaused = isRunningUi && runningSubState === 'paused';
   const isCustomDurationSelected = !isPresetCountdownMinutes(countdownMinutes);
   const customDurationTriggerText = isCustomDurationSelected ? `${countdownMinutes}m` : '自定义';
+  const isCountupMode = timerMode === 'countup'; // countup（正计时）模式
   const isCountdownOvertime =
     timerMode === 'countdown' && countdownOverrunRef.current;
   const isCountdownWarning =
@@ -527,14 +528,19 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
 
       {uiState === 'running' && (
         <section className="safe-area-pt-plus" data-testid="new-focus-state-running">
-          <div className="relative mx-auto h-[104px] w-full max-w-[390px]">
+          <div className={isCountupMode ? 'relative mx-auto w-full max-w-[390px] px-4 pt-4' : 'relative mx-auto h-[104px] w-full max-w-[390px]'}>
+            {!isCountupMode && (
+              <div
+                className="absolute left-1/2 top-[18px] h-[74px] w-[357px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
+                aria-hidden
+              />
+            )}
             <div
-              className="absolute left-1/2 top-[18px] h-[74px] w-[357px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
-              aria-hidden
-            />
-
-            <div
-              className={`absolute left-4 top-4 flex h-[68px] w-[357px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-5 py-[18px] backdrop-blur-[24px] ${glassCardShadowClass()}`}
+              className={`${
+                isCountupMode
+                  ? 'flex min-h-[68px] w-full items-center justify-between rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-5 py-[18px] backdrop-blur-[24px]'
+                  : 'absolute left-4 top-4 flex h-[68px] w-[357px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-5 py-[18px] backdrop-blur-[24px]'
+              } ${glassCardShadowClass()}`}
             >
               <div className="mr-3 flex min-w-0 items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A]">
