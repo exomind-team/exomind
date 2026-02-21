@@ -18,6 +18,7 @@ import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/Vo
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
 import { NewFocusTimerWidget, type NewFocusTimerWidgetHandle } from '@/ui/new/components/NewFocusTimerWidget';
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
+import { MessageActions } from '@/components/Chat/MessageActions';
 import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
@@ -391,7 +392,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   const rootClassName =
     variant === 'new-mobile'
-      ? 'flex h-full min-h-0 flex-col bg-[#FAF7F5]'
+      ? 'flex h-full min-h-0 flex-col bg-surface'
       : 'flex flex-col h-full max-h-[100dvh] lg:max-h-screen';
 
   const listClassName =
@@ -440,10 +441,10 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
           </div>
         ) : events.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center">
-            <div className={variant === 'new-mobile' ? 'mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-[#EEF2F7]' : 'w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4'}>
+            <div className={variant === 'new-mobile' ? 'mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-surface' : 'w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4'}>
               <span className="text-2xl sm:text-3xl">📝</span>
             </div>
-            <p className="mb-1 text-base font-semibold text-stone-800 sm:text-lg">暂无事件记录</p>
+            <p className="mb-1 text-base font-semibold text-strong sm:text-lg">暂无事件记录</p>
             <p className="text-xs text-muted-foreground sm:text-sm">
               开始计时或输入内容记录事件
             </p>
@@ -467,7 +468,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                     data-testid="new-mobile-system-message-row"
                   >
                     <Avatar className="mt-0.5 h-8 w-8 shrink-0">
-                      <AvatarFallback className="rounded-full bg-[#E8EEF8] text-[11px] text-[#40618A]">
+                      <AvatarFallback className="rounded-full bg-blue-100 text-[11px] text-blue-800 dark:bg-blue-950 dark:text-blue-100">
                         {getEventIcon(event)}
                       </AvatarFallback>
                     </Avatar>
@@ -476,13 +477,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                         className="mb-1 flex items-center gap-1 text-[11px] leading-[1.4]"
                         data-testid="new-mobile-message-meta"
                       >
-                        <span className="text-xs font-semibold text-[#1C1917]">AI 助理</span>
-                        <span className="text-[#B8AFA9]">{assistantDeviceLabel}</span>
-                        <span className="text-[#B8AFA9]">{formatMessageTime(event.timestamp)}</span>
+                        <span className="text-xs font-semibold text-strong">AI 助理</span>
+                        <span className="text-muted">{assistantDeviceLabel}</span>
+                        <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       </div>
-                      <div className="rounded-2xl border border-[#F0ECE8] bg-white px-[14px] py-3 text-[13px] leading-[1.6] text-[#44403C]">
+                      <div className="rounded-2xl border border-card bg-card px-[14px] py-3 text-[13px] leading-[1.6] text-strong">
                         <EventMarkdown content={event.content} />
                       </div>
+                      <MessageActions content={event.content} align="start" />
                     </div>
                   </div>
                 );
@@ -499,17 +501,18 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                       className="mb-1 flex items-center justify-end gap-1 text-[11px] leading-[1.4]"
                       data-testid="new-mobile-message-meta"
                     >
-                      <span className="text-[#B8AFA9]">{userMeta.deviceName}</span>
-                      <span className="text-[#B8AFA9]">· App ·</span>
-                      <span className="text-[#A8A29E]">{formatMessageTime(event.timestamp)}</span>
-                      <span className="text-xs font-semibold text-[#1C1917]">{userDisplayName}</span>
+                      <span className="text-muted">{userMeta.deviceName}</span>
+                      <span className="text-muted">· App ·</span>
+                      <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
+                      <span className="text-xs font-semibold text-strong">{userDisplayName}</span>
                     </div>
-                    <div className="rounded-2xl bg-[#FDECEA] px-[14px] py-[10px] text-[13px] leading-[1.6] text-[#3D1410]">
+                    <div className="rounded-2xl bg-red-50 px-[14px] py-[10px] text-[13px] leading-[1.6] text-red-900 dark:bg-red-950 dark:text-red-100">
                       <EventMarkdown content={event.content} />
                     </div>
+                    <MessageActions content={event.content} align="end" />
                   </div>
                   <Avatar className="h-8 w-8 shrink-0">
-                    <AvatarFallback className="rounded-full bg-[#F1E3DB] text-[11px] font-semibold text-[#6B2F24]">
+                    <AvatarFallback className="rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100">
                       {userMeta.avatarInitial}
                     </AvatarFallback>
                   </Avatar>
@@ -552,6 +555,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                           )}
                           <EventMarkdown content={event.content} />
                         </div>
+                        <MessageActions content={event.content} align="start" />
                         <p className="text-xs text-muted-foreground mt-0.5 sm:mt-1">
                           {formatTime(event.timestamp)}
                         </p>

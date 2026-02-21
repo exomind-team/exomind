@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -21,9 +22,20 @@ import {
   getDeveloperModeEnabled,
   setDeveloperModeEnabled,
 } from '@/config/developer-mode';
+import {
+  getTimerPreferences,
+  subscribeTimerPreferencesChanges,
+  updateTimerPreferences,
+  type CountdownEndMode,
+} from '@/config/timer-preferences';
 import { setUIMode } from '@/config/ui-mode';
+import {
+  TIMER_END_SOUND_PRESETS,
+  getTimerEndSoundPresetById,
+  type TimerEndSoundPresetId,
+} from '@/lib/media/timer-end-sounds';
 import { UserCard } from '@/ui/new/components/UserCard';
-import { Braces, Download, Import, MoonStar, TimerReset, Wifi } from 'lucide-react';
+import { Bell, Braces, Check, ChevronRight, Download, Import, MoonStar, Timer, Wifi } from 'lucide-react';
 
 type ImportStrategy = 'merge' | 'overwrite';
 type PickedJsonFile = {
@@ -46,6 +58,8 @@ export function NewSettingsPage() {
   const [savedSyncServerUrl, setSavedSyncServerUrl] = useState<string | null>(() => getSyncServerUrlOverride());
   const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => getThemePreference());
   const [developerMode, setDeveloperMode] = useState<boolean>(() => getDeveloperModeEnabled());
+  const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
+  const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy, setImportStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
@@ -206,6 +220,39 @@ export function NewSettingsPage() {
     setUIMode('old');
   };
 
+  useEffect(() => {
+    const unsubscribe = subscribeTimerPreferencesChanges((nextPreferences) => {
+      setTimerPreferencesState(nextPreferences);
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleCountdownEndModeChange = (mode: CountdownEndMode) => {
+    setTimerPreferencesState(updateTimerPreferences({ countdownEndMode: mode }));
+  };
+
+  const handleThemePreferenceChange = (nextPreference: ThemePreference) => {
+    setThemePreference(nextPreference);
+    setThemePreferenceState(nextPreference);
+  };
+
+  const handleSoundPresetChange = (presetId: TimerEndSoundPresetId | 'off') => {
+    if (presetId === 'off') {
+      setTimerPreferencesState(updateTimerPreferences({ countdownEndSoundEnabled: false }));
+      setSoundPickerOpen(false);
+      return;
+    }
+    setTimerPreferencesState(updateTimerPreferences({
+      countdownEndSoundEnabled: true,
+      countdownEndSoundPresetId: presetId,
+    }));
+    setSoundPickerOpen(false);
+  };
+
+  const currentSoundLabel = timerPreferences.countdownEndSoundEnabled
+    ? getTimerEndSoundPresetById(timerPreferences.countdownEndSoundPresetId).label
+    : '已关闭';
+
   const syncHost = (() => {
     try {
       return new URL(savedSyncServerUrl || autoSyncServerUrl).hostname;
@@ -217,56 +264,137 @@ export function NewSettingsPage() {
   return (
     <div className="safe-area-pt-plus min-h-full px-4">
       <header className="py-2 text-center">
-        <h1 className="text-base font-semibold text-stone-900">设置</h1>
+        <h1 className="text-base font-semibold text-primary">设置</h1>
       </header>
 
       <div className="space-y-4 pb-[calc(env(safe-area-inset-bottom,0px)+108px)]">
         <UserCard />
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">外观</p>
-          <div className="rounded-2xl border border-[#F0ECE8] bg-white">
+          <p className="text-xs font-medium text-secondary">外观</p>
+          <div className="rounded-2xl border border-card bg-card">
             <div className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-2 text-sm text-stone-800">
-                <MoonStar className="h-4 w-4 text-stone-400" />
+              <div className="flex items-center gap-2 text-sm text-strong">
+                <MoonStar className="h-4 w-4 text-muted" />
                 <span>主题</span>
               </div>
-              <select
+              <div
                 id="theme-preference-new"
-                className="rounded-lg border border-[#E7E5E4] bg-[#FAF7F5] px-2 py-1 text-xs text-stone-700"
-                value={themePreference}
-                disabled={loading}
-                onChange={(event) => {
-                  const nextPreference = event.target.value as ThemePreference;
-                  setThemePreference(nextPreference);
-                  setThemePreferenceState(nextPreference);
-                }}
+                role="group"
+                aria-label="主题"
+                className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]"
               >
-                <option value="system">跟随系统</option>
-                <option value="light">浅色</option>
-                <option value="dark">深色</option>
-              </select>
-            </div>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">计时器</p>
-          <div className="rounded-2xl border border-[#F0ECE8] bg-white">
-            <div className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-2 text-sm text-stone-800">
-                <TimerReset className="h-4 w-4 text-stone-400" />
-                <span>结束样式</span>
+                <button
+                  type="button"
+                  data-testid="new-settings-theme-system"
+                  aria-pressed={themePreference === 'system'}
+                  onClick={() => handleThemePreferenceChange('system')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    themePreference === 'system'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  跟随系统
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-settings-theme-light"
+                  aria-pressed={themePreference === 'light'}
+                  onClick={() => handleThemePreferenceChange('light')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    themePreference === 'light'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  浅色
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-settings-theme-dark"
+                  aria-pressed={themePreference === 'dark'}
+                  onClick={() => handleThemePreferenceChange('dark')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    themePreference === 'dark'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  深色
+                </button>
               </div>
-              <span className="text-xs text-stone-500">保留现有逻辑</span>
             </div>
           </div>
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">网络与同步</p>
-          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
-            <Label htmlFor="sync-server-url-new" className="text-xs text-stone-500">
+          <p className="text-xs font-medium text-secondary">计时器</p>
+          <div className="rounded-2xl border border-card bg-card">
+            <div className="flex items-center justify-between p-4">
+              <div className="flex items-center gap-[10px]">
+                <Timer className="h-[18px] w-[18px] text-stone-500" />
+                <div>
+                  <p className="text-[15px] font-medium text-stone-900">结束模式</p>
+                  <p className="text-xs text-stone-400">倒计时结束后的行为</p>
+                </div>
+              </div>
+              <div className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]">
+                <button
+                  type="button"
+                  data-testid="new-settings-end-mode-hard"
+                  aria-pressed={timerPreferences.countdownEndMode === 'hard'}
+                  onClick={() => handleCountdownEndModeChange('hard')}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs ${
+                    timerPreferences.countdownEndMode === 'hard'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  硬结束
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-settings-end-mode-soft"
+                  aria-pressed={timerPreferences.countdownEndMode === 'soft'}
+                  onClick={() => handleCountdownEndModeChange('soft')}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs ${
+                    timerPreferences.countdownEndMode === 'soft'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  软结束
+                </button>
+              </div>
+            </div>
+            <div className="mx-4 h-px bg-[#F0ECE8]" />
+            <button
+              type="button"
+              data-testid="new-settings-sound-row"
+              aria-label="提示音"
+              className="flex w-full items-center justify-between p-4 text-left"
+              onClick={() => setSoundPickerOpen(true)}
+            >
+              <div className="flex items-center gap-[10px]">
+                <Bell className="h-[18px] w-[18px] text-stone-500" />
+                <span className="text-[15px] font-medium text-stone-900">提示音</span>
+              </div>
+              <div className="flex items-center gap-1 text-sm text-stone-500">
+                <span>{currentSoundLabel}</span>
+                <ChevronRight className="h-4 w-4 text-stone-400" />
+              </div>
+            </button>
+          </div>
+        </section>
+
+        <section className="space-y-2">
+          <p className="text-xs font-medium text-secondary">网络与同步</p>
+          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
+            <Label htmlFor="sync-server-url-new" className="text-xs text-secondary">
               同步服务器地址
             </Label>
             <Input
@@ -277,21 +405,21 @@ export function NewSettingsPage() {
               disabled={loading}
             />
             <div className="flex flex-wrap gap-2">
-              <Button type="button" className="h-8 rounded-xl bg-[#C75B3A] text-xs hover:bg-[#B24D2F]" onClick={handleSaveSyncServerUrl} disabled={loading}>
+              <Button type="button" className="h-8 rounded-xl bg-brand-accent text-xs hover:bg-brand-accent/90" onClick={handleSaveSyncServerUrl} disabled={loading}>
                 保存地址
               </Button>
               <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={handleResetSyncServerUrl} disabled={loading}>
                 设为默认
               </Button>
             </div>
-            <div className="flex items-center justify-between rounded-xl bg-[#FAF7F5] px-3 py-2 text-xs text-stone-500">
+            <div className="flex items-center justify-between rounded-xl bg-surface px-3 py-2 text-xs text-secondary">
               <div className="flex items-center gap-2">
                 <Wifi className="h-3.5 w-3.5" />
                 <span>本机IP</span>
               </div>
               <span>{syncHost}</span>
             </div>
-            <p className="text-[11px] text-stone-500">
+            <p className="text-[11px] text-secondary">
               {savedSyncServerUrl ? `当前已保存：${savedSyncServerUrl}` : `未保存自定义地址，自动使用：${autoSyncServerUrl}`}
             </p>
           </div>
@@ -299,44 +427,108 @@ export function NewSettingsPage() {
 
         <section className="space-y-2">
           <p className="text-xs font-medium text-stone-500">导入导出</p>
-          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-stone-800">导入策略</span>
-              <select
+          <div
+            data-testid="new-settings-import-export-card"
+            className="rounded-2xl border border-[#F0ECE8] bg-white"
+          >
+            <div
+              data-testid="new-settings-import-strategy-row"
+              className="flex items-center justify-between p-4"
+            >
+              <div className="flex items-center gap-[10px]">
+                <Import className="h-[18px] w-[18px] text-stone-500" />
+                <span className="text-[15px] font-medium text-stone-900">导入策略</span>
+              </div>
+              <div
                 id="import-strategy-new"
-                className="rounded-lg border border-[#E7E5E4] bg-[#FAF7F5] px-2 py-1 text-xs text-stone-700"
-                value={importStrategy}
-                onChange={(event) => setImportStrategy(event.target.value as ImportStrategy)}
-                disabled={loading}
+                role="group"
+                aria-label="导入策略"
+                className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]"
               >
-                <option value="merge">合并（merge）</option>
-                <option value="overwrite">覆盖（overwrite）</option>
-              </select>
+                <button
+                  type="button"
+                  data-testid="new-settings-import-strategy-merge"
+                  aria-pressed={importStrategy === 'merge'}
+                  onClick={() => setImportStrategy('merge')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    importStrategy === 'merge'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  合并
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-settings-import-strategy-overwrite"
+                  aria-pressed={importStrategy === 'overwrite'}
+                  onClick={() => setImportStrategy('overwrite')}
+                  disabled={loading}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                    importStrategy === 'overwrite'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  覆盖
+                </button>
+              </div>
             </div>
-            <div className="grid grid-cols-2 gap-2">
-              <Button type="button" variant="outline" className="h-9 justify-start rounded-xl text-xs" onClick={handleExport} disabled={loading}>
-                <Download className="mr-2 h-4 w-4" /> 导出 JSON
-              </Button>
-              <Button type="button" variant="outline" className="h-9 justify-start rounded-xl text-xs" onClick={handleImportClick} disabled={loading}>
-                <Import className="mr-2 h-4 w-4" /> 导入 JSON
-              </Button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept=".json,application/json"
-                className="hidden"
-                onChange={handleImportFile}
-              />
-            </div>
+            <div className="mx-4 h-px bg-[#F0ECE8]" />
+
+            <button
+              type="button"
+              data-testid="new-settings-export-row"
+              onClick={handleExport}
+              disabled={loading}
+              className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <div className="flex items-center gap-[10px]">
+                <Download className="h-[18px] w-[18px] text-stone-500" />
+                <div>
+                  <p className="text-[15px] font-medium text-stone-900">导出 JSON</p>
+                  <p className="text-xs text-stone-400">导出当前事件日志备份</p>
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-stone-400" />
+            </button>
+
+            <div className="mx-4 h-px bg-[#F0ECE8]" />
+
+            <button
+              type="button"
+              data-testid="new-settings-import-row"
+              onClick={handleImportClick}
+              disabled={loading}
+              className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              <div className="flex items-center gap-[10px]">
+                <Import className="h-[18px] w-[18px] text-stone-500" />
+                <div>
+                  <p className="text-[15px] font-medium text-stone-900">导入 JSON</p>
+                  <p className="text-xs text-stone-400">从备份文件恢复事件日志</p>
+                </div>
+              </div>
+              <ChevronRight className="h-4 w-4 text-stone-400" />
+            </button>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".json,application/json"
+              className="hidden"
+              onChange={handleImportFile}
+            />
           </div>
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">开发者</p>
-          <div className="space-y-3 rounded-2xl border border-[#F0ECE8] bg-white p-4">
+          <p className="text-xs font-medium text-secondary">开发者</p>
+          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
             <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-stone-800">
-                <Braces className="h-4 w-4 text-stone-400" />
+              <div className="flex items-center gap-2 text-sm text-strong">
+                <Braces className="h-4 w-4 text-muted" />
                 <span>开发者模式</span>
               </div>
               <Switch
@@ -348,7 +540,7 @@ export function NewSettingsPage() {
                 aria-label="开发者模式"
               />
             </div>
-            <p className="text-[11px] text-stone-500">开启后显示 MOSS / ASR 测试入口</p>
+            <p className="text-[11px] text-secondary">开启后显示 MOSS / ASR 测试入口</p>
             {developerMode && (
               <div className="flex flex-wrap gap-2">
                 <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/moss-test'; }}>
@@ -362,11 +554,11 @@ export function NewSettingsPage() {
                 </Button>
               </div>
             )}
-            <div className="border-t border-[#F2F1F0] pt-3">
+            <div className="border-t border-subtle pt-3">
               <div className="flex items-center justify-between">
                 <div>
-                  <p className="text-sm text-stone-800">界面模式（UI Mode）</p>
-                  <p className="text-[11px] text-stone-500">过渡期支持新旧 UI 双向切换</p>
+                  <p className="text-sm text-strong">界面模式（UI Mode）</p>
+                  <p className="text-[11px] text-secondary">过渡期支持新旧 UI 双向切换</p>
                 </div>
                 <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={handleBackToOldUi}>
                   返回旧 UI
@@ -377,13 +569,48 @@ export function NewSettingsPage() {
         </section>
 
         <section className="py-1 text-center">
-          <p className="text-[11px] text-stone-400">ExoMind v{versionBuildInfo.appVersion}</p>
-          <p className="text-[10px] text-stone-400">Build: {versionBuildInfo.buildHash}</p>
+          <p className="text-[11px] text-muted">ExoMind v{versionBuildInfo.appVersion}</p>
+          <p className="text-[10px] text-muted">Build: {versionBuildInfo.buildHash}</p>
         </section>
 
         {statusMessage && <p role="status" className="text-center text-xs text-green-700">{statusMessage}</p>}
         {errorMessage && <p role="alert" className="text-center text-xs text-red-700">{errorMessage}</p>}
       </div>
+
+      <Dialog open={soundPickerOpen} onOpenChange={setSoundPickerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>选择提示音</DialogTitle>
+            <DialogDescription>选择倒计时结束时播放的提示音</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => handleSoundPresetChange('off')}
+              className="flex w-full items-center justify-between rounded-lg border border-[#F0ECE8] px-3 py-2 text-left text-sm hover:bg-[#FAF7F5]"
+            >
+              <span>关闭提示音</span>
+              {!timerPreferences.countdownEndSoundEnabled && <Check className="h-4 w-4 text-[#C75B3A]" />}
+            </button>
+
+            {TIMER_END_SOUND_PRESETS.map((preset) => {
+              const selected = timerPreferences.countdownEndSoundEnabled
+                && timerPreferences.countdownEndSoundPresetId === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => handleSoundPresetChange(preset.id)}
+                  className="flex w-full items-center justify-between rounded-lg border border-[#F0ECE8] px-3 py-2 text-left text-sm hover:bg-[#FAF7F5]"
+                >
+                  <span>{preset.label}</span>
+                  {selected && <Check className="h-4 w-4 text-[#C75B3A]" />}
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
