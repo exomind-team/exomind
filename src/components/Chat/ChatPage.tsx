@@ -18,6 +18,7 @@ import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/Vo
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
 import { NewFocusTimerWidget, type NewFocusTimerWidgetHandle } from '@/ui/new/components/NewFocusTimerWidget';
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
+import { MessageActions } from '@/components/Chat/MessageActions';
 import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
@@ -483,6 +484,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                       <div className="rounded-2xl border border-card bg-card px-[14px] py-3 text-[13px] leading-[1.6] text-strong">
                         <EventMarkdown content={event.content} />
                       </div>
+                      <MessageActions content={event.content} align="start" />
                     </div>
                   </div>
                 );
@@ -507,6 +509,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                     <div className="rounded-2xl bg-red-50 px-[14px] py-[10px] text-[13px] leading-[1.6] text-red-900 dark:bg-red-950 dark:text-red-100">
                       <EventMarkdown content={event.content} />
                     </div>
+                    <MessageActions content={event.content} align="end" />
                   </div>
                   <Avatar className="h-8 w-8 shrink-0">
                     <AvatarFallback className="rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100">
