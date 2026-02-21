@@ -529,6 +529,13 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
       {uiState === 'running' && (
         <section className="safe-area-pt-plus" data-testid="new-focus-state-running">
           <div className={isCountupMode ? 'relative mx-auto w-full max-w-[390px] px-4 pt-4' : 'relative mx-auto h-[104px] w-full max-w-[390px]'}>
+            {isCountupMode && (
+              <div
+                data-testid="new-focus-running-frosted-backdrop"
+                className="absolute inset-x-4 top-[14px] h-[74px] rounded-[22px] bg-[linear-gradient(180deg,rgba(255,255,255,0.55)_0%,rgba(250,247,245,0.35)_100%)] blur-[10px]"
+                aria-hidden
+              />
+            )}
             {!isCountupMode && (
               <div
                 className="absolute left-1/2 top-[18px] h-[74px] w-[357px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
@@ -548,7 +555,6 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                 </div>
                 <p className="truncate text-[20px] font-semibold leading-[1.4] text-[#1C1917]">{taskName || '未命名任务'}</p>
               </div>
-              <ChevronDown size={16} className="shrink-0 text-[#C75B3A]" />
             </div>
           </div>
 

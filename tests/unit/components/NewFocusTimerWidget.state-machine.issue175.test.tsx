@@ -184,7 +184,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     expect(screen.getByTestId('new-focus-duration-custom-input')).toBeInTheDocument();
   });
 
-  it('does not render red glow in running countup mode（正计时运行态不渲染红色阴影）', async () => {
+  it('keeps frosted backdrop and removes right chevron in running countup mode（正计时运行态保留磨砂并移除右箭头）', async () => {
     render(<NewFocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
@@ -204,6 +204,12 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
 
     const runningSection = screen.getByTestId('new-focus-state-running');
     const glowNode = runningSection.querySelector("div[aria-hidden='true'][class*='blur-[8px]']");
+    const frostedBackdrop = runningSection.querySelector(
+      "[data-testid='new-focus-running-frosted-backdrop']",
+    );
+    const chevronNode = runningSection.querySelector("[data-lucide='chevron-down']");
     expect(glowNode).toBeNull();
+    expect(frostedBackdrop).not.toBeNull();
+    expect(chevronNode).toBeNull();
   });
 });
