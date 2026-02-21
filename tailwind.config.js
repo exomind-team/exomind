@@ -54,6 +54,20 @@ export default {
           DEFAULT: "hsl(var(--warning) / <alpha-value>)",
           foreground: "hsl(var(--warning-foreground) / <alpha-value>)",
         },
+        // 语义化颜色 - 文字（按视觉重要性）
+        primary: "hsl(var(--text-primary))",
+        strong: "hsl(var(--text-strong))",
+        secondary: "hsl(var(--text-secondary))",
+        muted: "hsl(var(--text-muted))",
+        // 语义化颜色 - 背景
+        card: "hsl(var(--bg-card))",
+        surface: "hsl(var(--bg-surface))",
+        // 语义化颜色 - 边框
+        'border-card': "hsl(var(--border-card))",
+        'border-subtle': "hsl(var(--border-subtle))",
+        // 语义化颜色 - 品牌色
+        'brand-accent': "hsl(var(--brand-accent))",
+        'brand-gradient': "var(--brand-gradient)",
       },
       borderRadius: {
         lg: "var(--radius)",

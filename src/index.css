@@ -31,6 +31,18 @@
     --success-foreground: 210 40% 98%;
     --warning: 38 92% 50%;
     --warning-foreground: 222.2 84% 4.9%;
+
+    /* 语义化颜色变量 - 浅色模式 */
+    --text-primary: 222.2 84% 4.9%;
+    --text-strong: 215.4 15% 25%;
+    --text-secondary: 215.4 16.3% 46.9%;
+    --text-muted: 215.4 16.3% 56.9%;
+    --bg-card: 0 0% 100%;
+    --bg-surface: 40 20% 98%;
+    --border-card: 30 20% 94%;
+    --border-subtle: 30 10% 91%;
+    --brand-accent: 14 76% 66%;
+    --brand-gradient: 14 76% 66%, 14 68% 53%, 14 64% 48%;
   }
 
   .dark {
@@ -60,6 +72,18 @@
     --success-foreground: 222.2 84% 4.9%;
     --warning: 38 92% 55%;
     --warning-foreground: 222.2 84% 4.9%;
+
+    /* 语义化颜色变量 - 深色模式 */
+    --text-primary: 270 31% 94%;
+    --text-strong: 270 30% 88%;
+    --text-secondary: 270 25% 68%;
+    --text-muted: 270 20% 55%;
+    --bg-card: 270 30% 18%;
+    --bg-surface: 270 25% 14%;
+    --border-card: 270 30% 25%;
+    --border-subtle: 270 25% 20%;
+    --brand-accent: 271 81% 76%;
+    --brand-gradient: 271 81% 76%, 271 75% 65%, 271 70% 55%;
   }
 }
 
