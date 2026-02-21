@@ -34,8 +34,8 @@ import {
   getTimerEndSoundPresetById,
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
-import { UserManagePage } from '@/ui/pages/UserManagePage';
-import { Bell, Braces, Check, ChevronRight, Download, Import, MoonStar, Timer, Users, Wifi } from 'lucide-react';
+import { UserCard } from '@/ui/new/components/UserCard';
+import { Bell, Braces, Check, ChevronRight, Download, Import, MoonStar, Timer, Wifi } from 'lucide-react';
 
 type ImportStrategy = 'merge' | 'overwrite';
 type PickedJsonFile = {
@@ -268,22 +268,7 @@ export function NewSettingsPage() {
       </header>
 
       <div className="space-y-4 pb-[calc(env(safe-area-inset-bottom,0px)+108px)]">
-        <section className="rounded-2xl border border-white/50 bg-[linear-gradient(to_bottom_right,var(--brand-gradient))] p-4 text-white shadow-[0_16px_30px_-18px_rgba(199,91,58,0.7)]">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-sm font-semibold">Hailay</p>
-              <p className="mt-1 text-[11px] text-white/80">持续小步迭代</p>
-            </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="secondary" className="h-8 rounded-xl bg-white/20 text-xs text-white hover:bg-white/30">
-                个人资料
-              </Button>
-              <Button type="button" variant="secondary" className="h-8 rounded-xl bg-white/20 text-xs text-white hover:bg-white/30">
-                退出
-              </Button>
-            </div>
-          </div>
-        </section>
+        <UserCard />
 
         <section className="space-y-2">
           <p className="text-xs font-medium text-secondary">外观</p>
@@ -539,18 +524,6 @@ export function NewSettingsPage() {
         </section>
 
         <section className="space-y-2">
-          <p className="text-xs font-medium text-secondary">账号与用户</p>
-          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
-            <div className="flex items-center gap-2 text-sm text-strong">
-              <Users className="h-4 w-4 text-muted" />
-              <span>多用户管理</span>
-            </div>
-            <p className="text-[11px] text-secondary">支持注册、登录和多设备同账号同步。</p>
-            <UserManagePage embedded />
-          </div>
-        </section>
-
-        <section className="space-y-2">
           <p className="text-xs font-medium text-secondary">开发者</p>
           <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
             <div className="flex items-center justify-between">
@@ -575,6 +548,9 @@ export function NewSettingsPage() {
                 </Button>
                 <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/asr-test'; }}>
                   打开 ASR测试
+                </Button>
+                <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/user-manage'; }}>
+                  多用户管理（旧版）
                 </Button>
               </div>
             )}
