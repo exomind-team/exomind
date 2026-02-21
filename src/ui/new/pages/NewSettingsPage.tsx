@@ -1,7 +1,8 @@
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
@@ -21,9 +22,20 @@ import {
   getDeveloperModeEnabled,
   setDeveloperModeEnabled,
 } from '@/config/developer-mode';
+import {
+  getTimerPreferences,
+  subscribeTimerPreferencesChanges,
+  updateTimerPreferences,
+  type CountdownEndMode,
+} from '@/config/timer-preferences';
 import { setUIMode } from '@/config/ui-mode';
+import {
+  TIMER_END_SOUND_PRESETS,
+  getTimerEndSoundPresetById,
+  type TimerEndSoundPresetId,
+} from '@/lib/media/timer-end-sounds';
 import { UserManagePage } from '@/ui/pages/UserManagePage';
-import { Braces, Download, Import, MoonStar, TimerReset, Users, Wifi } from 'lucide-react';
+import { Bell, Braces, Check, ChevronRight, Download, Import, MoonStar, Timer, Users, Wifi } from 'lucide-react';
 
 type ImportStrategy = 'merge' | 'overwrite';
 type PickedJsonFile = {
@@ -46,6 +58,8 @@ export function NewSettingsPage() {
   const [savedSyncServerUrl, setSavedSyncServerUrl] = useState<string | null>(() => getSyncServerUrlOverride());
   const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => getThemePreference());
   const [developerMode, setDeveloperMode] = useState<boolean>(() => getDeveloperModeEnabled());
+  const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
+  const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy, setImportStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
@@ -206,6 +220,34 @@ export function NewSettingsPage() {
     setUIMode('old');
   };
 
+  useEffect(() => {
+    const unsubscribe = subscribeTimerPreferencesChanges((nextPreferences) => {
+      setTimerPreferencesState(nextPreferences);
+    });
+    return unsubscribe;
+  }, []);
+
+  const handleCountdownEndModeChange = (mode: CountdownEndMode) => {
+    setTimerPreferencesState(updateTimerPreferences({ countdownEndMode: mode }));
+  };
+
+  const handleSoundPresetChange = (presetId: TimerEndSoundPresetId | 'off') => {
+    if (presetId === 'off') {
+      setTimerPreferencesState(updateTimerPreferences({ countdownEndSoundEnabled: false }));
+      setSoundPickerOpen(false);
+      return;
+    }
+    setTimerPreferencesState(updateTimerPreferences({
+      countdownEndSoundEnabled: true,
+      countdownEndSoundPresetId: presetId,
+    }));
+    setSoundPickerOpen(false);
+  };
+
+  const currentSoundLabel = timerPreferences.countdownEndSoundEnabled
+    ? getTimerEndSoundPresetById(timerPreferences.countdownEndSoundPresetId).label
+    : '已关闭';
+
   const syncHost = (() => {
     try {
       return new URL(savedSyncServerUrl || autoSyncServerUrl).hostname;
@@ -269,12 +311,59 @@ export function NewSettingsPage() {
           <p className="text-xs font-medium text-secondary">计时器</p>
           <div className="rounded-2xl border border-card bg-card">
             <div className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-2 text-sm text-strong">
-                <TimerReset className="h-4 w-4 text-muted" />
-                <span>结束样式</span>
+              <div className="flex items-center gap-[10px]">
+                <Timer className="h-[18px] w-[18px] text-stone-500" />
+                <div>
+                  <p className="text-[15px] font-medium text-stone-900">结束模式</p>
+                  <p className="text-xs text-stone-400">倒计时结束后的行为</p>
+                </div>
               </div>
-              <span className="text-xs text-secondary">保留现有逻辑</span>
+              <div className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]">
+                <button
+                  type="button"
+                  data-testid="new-settings-end-mode-hard"
+                  aria-pressed={timerPreferences.countdownEndMode === 'hard'}
+                  onClick={() => handleCountdownEndModeChange('hard')}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs ${
+                    timerPreferences.countdownEndMode === 'hard'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  硬结束
+                </button>
+                <button
+                  type="button"
+                  data-testid="new-settings-end-mode-soft"
+                  aria-pressed={timerPreferences.countdownEndMode === 'soft'}
+                  onClick={() => handleCountdownEndModeChange('soft')}
+                  className={`rounded-[8px] px-3 py-1.5 text-xs ${
+                    timerPreferences.countdownEndMode === 'soft'
+                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-stone-400'
+                  }`}
+                >
+                  软结束
+                </button>
+              </div>
             </div>
+            <div className="mx-4 h-px bg-[#F0ECE8]" />
+            <button
+              type="button"
+              data-testid="new-settings-sound-row"
+              aria-label="提示音"
+              className="flex w-full items-center justify-between p-4 text-left"
+              onClick={() => setSoundPickerOpen(true)}
+            >
+              <div className="flex items-center gap-[10px]">
+                <Bell className="h-[18px] w-[18px] text-stone-500" />
+                <span className="text-[15px] font-medium text-stone-900">提示音</span>
+              </div>
+              <div className="flex items-center gap-1 text-sm text-stone-500">
+                <span>{currentSoundLabel}</span>
+                <ChevronRight className="h-4 w-4 text-stone-400" />
+              </div>
+            </button>
           </div>
         </section>
 
@@ -408,6 +497,41 @@ export function NewSettingsPage() {
         {statusMessage && <p role="status" className="text-center text-xs text-green-700">{statusMessage}</p>}
         {errorMessage && <p role="alert" className="text-center text-xs text-red-700">{errorMessage}</p>}
       </div>
+
+      <Dialog open={soundPickerOpen} onOpenChange={setSoundPickerOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>选择提示音</DialogTitle>
+            <DialogDescription>选择倒计时结束时播放的提示音</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => handleSoundPresetChange('off')}
+              className="flex w-full items-center justify-between rounded-lg border border-[#F0ECE8] px-3 py-2 text-left text-sm hover:bg-[#FAF7F5]"
+            >
+              <span>关闭提示音</span>
+              {!timerPreferences.countdownEndSoundEnabled && <Check className="h-4 w-4 text-[#C75B3A]" />}
+            </button>
+
+            {TIMER_END_SOUND_PRESETS.map((preset) => {
+              const selected = timerPreferences.countdownEndSoundEnabled
+                && timerPreferences.countdownEndSoundPresetId === preset.id;
+              return (
+                <button
+                  key={preset.id}
+                  type="button"
+                  onClick={() => handleSoundPresetChange(preset.id)}
+                  className="flex w-full items-center justify-between rounded-lg border border-[#F0ECE8] px-3 py-2 text-left text-sm hover:bg-[#FAF7F5]"
+                >
+                  <span>{preset.label}</span>
+                  {selected && <Check className="h-4 w-4 text-[#C75B3A]" />}
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

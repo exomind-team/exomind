@@ -8,9 +8,21 @@ import {
 } from 'react';
 import { ChevronDown, ChevronRight, Pause, Play, Square, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import {
+  getTimerPreferences,
+  subscribeTimerPreferencesChanges,
+} from '@/config/timer-preferences';
+import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
 import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
@@ -49,6 +61,9 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   const frameRef = useRef<number | null>(null);
   const taskInputRef = useRef<HTMLInputElement | null>(null);
   const customDurationInputRef = useRef<HTMLInputElement | null>(null);
+  const countdownEndedRef = useRef(false);
+  const countdownOverrunRef = useRef(false);
+  const hardEndTriggeredRef = useRef(false);
 
   const [uiState, setUiState] = useState<FocusUiState>('idle');
   const [runningSubState, setRunningSubState] = useState<RunningSubState>('running');
@@ -60,6 +75,8 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   const [customDurationDraft, setCustomDurationDraft] = useState('25');
   const [isCustomDurationEditing, setIsCustomDurationEditing] = useState(false);
   const [elapsedMs, setElapsedMs] = useState(25 * 60 * 1000);
+  const [countdownOvertimeMs, setCountdownOvertimeMs] = useState(0);
+  const [timerPreferences, setTimerPreferences] = useState(() => getTimerPreferences());
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -89,6 +106,27 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   useEffect(() => {
     setCustomDurationDraft(String(countdownMinutes));
   }, [countdownMinutes]);
+
+  useEffect(() => {
+    const unsubscribe = subscribeTimerPreferencesChanges((preferences) => {
+      setTimerPreferences(preferences);
+    });
+    return unsubscribe;
+  }, []);
+
+  const playCountdownEndSound = useCallback(async () => {
+    if (!timerPreferences.countdownEndSoundEnabled) return;
+    const preset = getTimerEndSoundPresetById(timerPreferences.countdownEndSoundPresetId);
+    try {
+      const audio = new Audio(preset.url);
+      audio.loop = false;
+      audio.preload = 'auto';
+      audio.currentTime = 0;
+      await audio.play();
+    } catch {
+      // Ignore sound playback failures（忽略浏览器自动播放限制等失败）
+    }
+  }, [timerPreferences.countdownEndSoundEnabled, timerPreferences.countdownEndSoundPresetId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -129,13 +167,49 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
       const delta = now - last;
       last = now;
 
+      // Soft end（软结束）时进入超时累计：显示 +xx:xx:xx
+      if (timerMode === 'countdown' && countdownOverrunRef.current) {
+        setCountdownOvertimeMs((prev) => prev + delta);
+        frameRef.current = requestAnimationFrame(tick);
+        return;
+      }
+
       setElapsedMs((previous) => {
-        const next = timerMode === 'countdown' ? Math.max(0, previous - delta) : previous + delta;
-        void timeBlockServiceRef.current.updateElapsed(next);
-        return next;
+        const next = timerMode === 'countdown' ? previous - delta : previous + delta;
+
+        if (timerMode === 'countdown' && next <= 0) {
+          const overshoot = Math.max(0, -next);
+          if (!countdownEndedRef.current) {
+            countdownEndedRef.current = true;
+            if (previous > 0) {
+              void playCountdownEndSound();
+            }
+          }
+
+          if (timerPreferences.countdownEndMode === 'soft') {
+            countdownOverrunRef.current = true;
+            setCountdownOvertimeMs(overshoot);
+            void timeBlockServiceRef.current.updateElapsed(0);
+            return 0;
+          }
+
+          if (!hardEndTriggeredRef.current) {
+            hardEndTriggeredRef.current = true;
+            void timeBlockServiceRef.current.markEnding();
+            setRunningSubState('paused');
+            setFeedbackOpen(true);
+          }
+          return 0;
+        }
+
+        const safeNext = timerMode === 'countdown' ? Math.max(0, next) : next;
+        void timeBlockServiceRef.current.updateElapsed(safeNext);
+        return safeNext;
       });
 
-      frameRef.current = requestAnimationFrame(tick);
+      if (!hardEndTriggeredRef.current) {
+        frameRef.current = requestAnimationFrame(tick);
+      }
     };
 
     frameRef.current = requestAnimationFrame(tick);
@@ -145,7 +219,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
         frameRef.current = null;
       }
     };
-  }, [isPaused, isRunningUi, timerMode]);
+  }, [isPaused, isRunningUi, playCountdownEndSound, timerMode, timerPreferences.countdownEndMode]);
 
   useEffect(() => {
     return () => {
@@ -157,6 +231,10 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
 
   useEffect(() => {
     if (uiState !== 'idle') return;
+    countdownEndedRef.current = false;
+    countdownOverrunRef.current = false;
+    hardEndTriggeredRef.current = false;
+    setCountdownOvertimeMs(0);
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
   }, [countdownMinutes, syncIdleElapsedFromMode, timerMode, uiState]);
 
@@ -171,6 +249,11 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
       mode: timerMode,
       minutes: timerMode === 'countdown' ? countdownMinutes : undefined,
     };
+
+    countdownEndedRef.current = false;
+    countdownOverrunRef.current = false;
+    hardEndTriggeredRef.current = false;
+    setCountdownOvertimeMs(0);
 
     const block = await timeBlockServiceRef.current.startBlock(name, config, undefined);
     setTaskName(name);
@@ -233,6 +316,10 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     setRunningSubState('running');
     setTaskName('');
     setTaskNameDraft('');
+    countdownEndedRef.current = false;
+    countdownOverrunRef.current = false;
+    hardEndTriggeredRef.current = false;
+    setCountdownOvertimeMs(0);
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
   }, [countdownMinutes, feedback, syncIdleElapsedFromMode, timerMode]);
 
@@ -460,7 +547,9 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                 className="font-mono text-[56px] font-[200] leading-[1.1] tracking-[2px] text-[#1C1917]"
                 data-testid="new-focus-running-clock"
               >
-                {formatClock(elapsedMs)}
+                {timerMode === 'countdown' && countdownOverrunRef.current
+                  ? `+${formatClock(countdownOvertimeMs)}`
+                  : formatClock(elapsedMs)}
               </span>
             </div>
           </div>
@@ -499,6 +588,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
         <DialogContent>
           <DialogHeader>
             <DialogTitle>结束专注并记录反馈</DialogTitle>
+            <DialogDescription>记录本次专注反馈后将结束当前时间块</DialogDescription>
           </DialogHeader>
           <Textarea
             data-testid="new-focus-feedback-textarea"
