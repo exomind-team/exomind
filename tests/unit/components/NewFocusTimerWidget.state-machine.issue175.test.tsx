@@ -208,4 +208,23 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     expect(glowNode).not.toBeNull();
     expect(chevronNode).toBeNull();
   });
+
+  it('keeps timer and controls inside one running task card（运行态计时与控制整合在同一卡片）', async () => {
+    render(<NewFocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '运行态整合结构' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    const runningCard = screen.getByTestId('new-focus-running-task-card');
+    expect(runningCard).toContainElement(screen.getByTestId('new-focus-running-clock'));
+    expect(runningCard).toContainElement(screen.getByTestId('new-focus-pause-resume-button'));
+    expect(runningCard).toContainElement(screen.getByTestId('new-focus-end-button'));
+  });
 });
