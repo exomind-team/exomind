@@ -433,7 +433,7 @@ export function NewSettingsPage() {
                       : 'text-stone-400'
                   }`}
                 >
-                  合并（merge）
+                  合并
                 </button>
                 <button
                   type="button"
@@ -447,7 +447,7 @@ export function NewSettingsPage() {
                       : 'text-stone-400'
                   }`}
                 >
-                  覆盖（overwrite）
+                  覆盖
                 </button>
               </div>
             </div>
