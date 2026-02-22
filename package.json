@@ -40,6 +40,8 @@
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
     "agentation-mcp": "^1.2.0",
+    "baseline-browser-mapping": "^2.10.0",
+    "caniuse-lite": "^1.0.30001772",
     "class-variance-authority": "^0.7.1",
     "events": "^3.3.0",
     "katex": "^0.16.28",
