@@ -19,6 +19,10 @@ import {
   setDeveloperModeEnabled,
 } from '@/config/developer-mode';
 import {
+  getAgentPageEnabled,
+  setAgentPageEnabled,
+} from '@/config/agent-page-enabled';
+import {
   getTimerPreferences,
   subscribeTimerPreferencesChanges,
   updateTimerPreferences,
@@ -129,6 +133,9 @@ export function NewSettingsPage() {
   const [savedSyncServerUrl, setSavedSyncServerUrl] = useState<string | null>(() => getSyncServerUrlOverride());
   const [themePreference, setThemePreferenceState] = useState<ThemePreference>(() => getThemePreference());
   const [developerMode, setDeveloperMode] = useState<boolean>(() => getDeveloperModeEnabled());
+  const [agentPageEnabled, setAgentPageEnabledState] = useState<boolean>(
+    () => getAgentPageEnabled()
+  );
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -238,6 +245,11 @@ export function NewSettingsPage() {
   const handleDeveloperModeToggle = (checked: boolean) => {
     setDeveloperModeEnabled(checked);
     setDeveloperMode(checked);
+  };
+
+  const handleAgentPageEnabledToggle = (checked: boolean) => {
+    setAgentPageEnabled(checked);
+    setAgentPageEnabledState(checked);
   };
 
   const navigate = useNavigate();
@@ -464,6 +476,16 @@ export function NewSettingsPage() {
                 <div className="pb-[14px] pl-[46px] pr-4">
                   <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
                 </div>
+                <SettingRow
+                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="启用 Agent 页面"
+                  right={
+                    <Switch
+                      checked={agentPageEnabled}
+                      onCheckedChange={handleAgentPageEnabledToggle}
+                    />
+                  }
+                />
                 <Divider />
                 <SettingRow
                   icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
