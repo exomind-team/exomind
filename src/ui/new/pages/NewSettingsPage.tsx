@@ -599,7 +599,7 @@ export function NewSettingsPage() {
               onClick={() => handleSoundPresetChange('off')}
               className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
             >
-              <span className="text-[#1C1917]">关闭提示音</span>
+              <span className="text-[#1C1917] dark:text-[#FAFAF9]">关闭提示音</span>
               {!timerPreferences.countdownEndSoundEnabled && <Check className="h-4 w-4 text-[#C75B3A]" />}
             </button>
 
@@ -613,7 +613,7 @@ export function NewSettingsPage() {
                   onClick={() => handleSoundPresetChange(preset.id)}
                   className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
                 >
-                  <span className="text-[#1C1917]">{preset.label}</span>
+                  <span className="text-[#1C1917] dark:text-[#FAFAF9]">{preset.label}</span>
                   {selected && <Check className="h-4 w-4 text-[#C75B3A]" />}
                 </button>
               );
