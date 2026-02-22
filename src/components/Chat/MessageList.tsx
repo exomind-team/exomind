@@ -59,8 +59,8 @@ export function MessageList({
               marginLeft: isSent ? 'auto' : '8px',
               padding: '12px 16px',
               borderRadius: isSent ? '16px 16px 4px 16px' : '16px 16px 16px 4px',
-              backgroundColor: isSent ? '#C75B3A' : 'hsl(var(--bg-card, 229 84% 5%))',
-              color: isSent ? '#fff' : 'hsl(var(--text-primary, 0 0% 100%))',
+              backgroundColor: isSent ? 'hsl(var(--brand-accent))' : 'hsl(var(--bg-card))',
+              color: isSent ? '#FAFAF9' : 'hsl(var(--text-primary))',
             }}
           >
             <div
