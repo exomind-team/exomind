@@ -1,5 +1,14 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
+
+vi.mock('@/config/theme', () => ({
+  getThemePreference: () => 'system',
+  setThemePreference: vi.fn(),
+  resolveThemePreference: (pref: string) => pref === 'system' ? 'light' : pref,
+  subscribeThemePreferenceChanges: () => () => {},
+  subscribeSystemThemeChanges: () => () => {},
+}));
+
 import { SettingsPage } from '@/components/Settings/SettingsPage';
 import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
 
