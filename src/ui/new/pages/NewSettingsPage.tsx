@@ -1,10 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
-import { invoke, isTauri } from '@tauri-apps/api/core';
-import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { getEventLogService } from '@/lib/services';
 import {
@@ -35,7 +31,29 @@ import {
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
 import { UserCard } from '@/ui/new/components/UserCard';
-import { Bell, Braces, Check, ChevronRight, Download, Import, MoonStar, Timer, Wifi } from 'lucide-react';
+import { useNavigate } from '@tanstack/react-router';
+import {
+  Bell,
+  Bot,
+  Check,
+  ChevronRight,
+  Code,
+  Download,
+  Heart,
+  House,
+  Mic,
+  Monitor,
+  Moon,
+  MoonStar,
+  Package,
+  Speech,
+  Sun,
+  Timer,
+  Undo2,
+  Upload,
+  Users,
+  Wifi,
+} from 'lucide-react';
 
 type ImportStrategy = 'merge' | 'overwrite';
 type PickedJsonFile = {
@@ -46,6 +64,59 @@ type PickedJsonFile = {
 function buildBackupFileName(): string {
   const date = new Date().toISOString().slice(0, 10);
   return `exomind-eventlog-${date}.json`;
+}
+
+/* ── Shared row / divider components ── */
+
+function SettingRow({
+  icon,
+  label,
+  right,
+  onClick,
+  className = '',
+}: {
+  icon: React.ReactNode;
+  label: string;
+  right?: React.ReactNode;
+  onClick?: () => void;
+  className?: string;
+}) {
+  const Wrapper = onClick ? 'button' : 'div';
+  return (
+    <Wrapper
+      type={onClick ? 'button' : undefined}
+      onClick={onClick}
+      className={`flex w-full items-center justify-between px-4 py-[14px] ${onClick ? 'active:bg-stone-50' : ''} ${className}`}
+    >
+      <div className="flex items-center gap-3">
+        {icon}
+        <span className="text-sm text-[#1C1917]">{label}</span>
+      </div>
+      {right}
+    </Wrapper>
+  );
+}
+
+function Divider() {
+  return (
+    <div className="px-4">
+      <div className="h-px bg-[#F0ECE8]" />
+    </div>
+  );
+}
+
+function SectionCard({ children }: { children: React.ReactNode }) {
+  return (
+    <div className="overflow-hidden rounded-2xl border border-[#F0ECE8] bg-white">
+      {children}
+    </div>
+  );
+}
+
+function SectionTitle({ children }: { children: React.ReactNode }) {
+  return (
+    <p className="text-[13px] font-medium leading-[1.4] text-[#78716C]">{children}</p>
+  );
 }
 
 export function NewSettingsPage() {
@@ -60,8 +131,10 @@ export function NewSettingsPage() {
   const [developerMode, setDeveloperMode] = useState<boolean>(() => getDeveloperModeEnabled());
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
+  const [syncDialogOpen, setSyncDialogOpen] = useState(false);
+  const [countdownModeDialogOpen, setCountdownModeDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
-  const [importStrategy, setImportStrategy] = useState<ImportStrategy>('merge');
+  const [importStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
@@ -101,58 +174,22 @@ export function NewSettingsPage() {
       setSavedSyncServerUrl(saved);
       setSyncServerUrl(saved);
       setStatusMessage(`同步服务器地址已保存：${saved}`);
+      setSyncDialogOpen(false);
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`保存失败：${message}`);
     }
   };
 
-  const handleResetSyncServerUrl = () => {
-    clearNotice();
-    setSyncServerUrlOverride(null);
-    setSavedSyncServerUrl(null);
-    setSyncServerUrl(autoSyncServerUrl);
-    setStatusMessage(`已恢复自动地址：${autoSyncServerUrl}`);
-  };
-
-  const handleExport = async () => {
+  const handleExportBackup = async () => {
     clearNotice();
     setLoading(true);
-
     try {
       const service = getEventLogService();
       const json = await service.exportEventsAsJson();
-      const payload = JSON.parse(json) as { events?: unknown[] };
-      const count = Array.isArray(payload.events) ? payload.events.length : 0;
-      const defaultName = buildBackupFileName();
 
-      const isRunningInTauri = await isTauri();
-      if (isRunningInTauri) {
-        const savedPath = await invoke<string | null>('save_json_file', {
-          content: json,
-          defaultName,
-        });
-
-        if (!savedPath) {
-          setStatusMessage('已取消保存。');
-          return;
-        }
-
-        setStatusMessage(`导出成功，共 ${count} 条事件。保存路径：${savedPath}`);
-        return;
-      }
-
-      const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
-      const url = URL.createObjectURL(blob);
-      const anchor = document.createElement('a');
-      anchor.href = url;
-      anchor.download = defaultName;
-      document.body.appendChild(anchor);
-      anchor.click();
-      anchor.remove();
-      URL.revokeObjectURL(url);
-
-      setStatusMessage(`导出成功，共 ${count} 条事件。`);
+      downloadJsonFallback(json, buildBackupFileName());
+      setStatusMessage('已导出事件备份');
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`导出失败：${message}`);
@@ -161,29 +198,35 @@ export function NewSettingsPage() {
     }
   };
 
-  const handleImportClick = async () => {
+  const downloadJsonFallback = (json: string, filename: string) => {
+    const blob = new Blob([json], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleImportBackup = async () => {
     clearNotice();
+    fileInputRef.current?.click();
+  };
 
-    const isRunningInTauri = await isTauri();
-    if (!isRunningInTauri) {
-      fileInputRef.current?.click();
-      return;
-    }
+  const handleFileInputChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const content = await file.text();
+    await processImport({ path: file.name, content });
+    e.target.value = '';
+  };
 
+  const processImport = async (picked: PickedJsonFile) => {
     setLoading(true);
-
     try {
-      const picked = await invoke<PickedJsonFile | null>('pick_json_file');
-      if (!picked) {
-        setStatusMessage('已取消导入。');
-        return;
-      }
-
       const service = getEventLogService();
       const result = await service.importEventsFromJson(picked.content, importStrategy);
-      setStatusMessage(
-        `导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。来源：${picked.path}`
-      );
+      setStatusMessage(`已导入 ${result.imported} 条事件，跳过 ${result.skipped} 条`);
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`导入失败：${message}`);
@@ -192,31 +235,14 @@ export function NewSettingsPage() {
     }
   };
 
-  const handleImportFile = async (event: ChangeEvent<HTMLInputElement>) => {
-    clearNotice();
-
-    const file = event.target.files?.[0];
-    if (!file) return;
-
-    setLoading(true);
-
-    try {
-      const content = await file.text();
-      const service = getEventLogService();
-      const result = await service.importEventsFromJson(content, importStrategy);
-      setStatusMessage(
-        `导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。`
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : '未知错误';
-      setErrorMessage(`导入失败：${message}`);
-    } finally {
-      event.target.value = '';
-      setLoading(false);
-    }
+  const handleDeveloperModeToggle = (checked: boolean) => {
+    setDeveloperModeEnabled(checked);
+    setDeveloperMode(checked);
   };
 
-  const handleBackToOldUi = () => {
+  const navigate = useNavigate();
+
+  const handleSwitchToOldUI = () => {
     setUIMode('old');
   };
 
@@ -229,6 +255,7 @@ export function NewSettingsPage() {
 
   const handleCountdownEndModeChange = (mode: CountdownEndMode) => {
     setTimerPreferencesState(updateTimerPreferences({ countdownEndMode: mode }));
+    setCountdownModeDialogOpen(false);
   };
 
   const handleThemePreferenceChange = (nextPreference: ThemePreference) => {
@@ -253,6 +280,8 @@ export function NewSettingsPage() {
     ? getTimerEndSoundPresetById(timerPreferences.countdownEndSoundPresetId).label
     : '已关闭';
 
+  const countdownEndModeLabel = timerPreferences.countdownEndMode === 'hard' ? '硬停止' : '柔和提醒';
+
   const syncHost = (() => {
     try {
       return new URL(savedSyncServerUrl || autoSyncServerUrl).hostname;
@@ -262,21 +291,35 @@ export function NewSettingsPage() {
   })();
 
   return (
-    <div className="safe-area-pt-plus min-h-full px-4">
-      <header className="py-2 text-center">
-        <h1 className="text-base font-semibold text-primary">设置</h1>
+    <div className="min-h-full bg-[#FAF7F5]">
+      {/* Hidden file input for import */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".json"
+        className="hidden"
+        onChange={handleFileInputChange}
+      />
+
+      {/* Header */}
+      <header className="flex items-center justify-center px-6 py-3">
+        <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917]">设置</h1>
       </header>
 
-      <div className="space-y-4 pb-[calc(env(safe-area-inset-bottom,0px)+108px)]">
+      {/* Settings Content */}
+      <div className="space-y-5 px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2">
+
+        {/* ── User Card ── */}
         <UserCard />
 
+        {/* ── Theme Section (外观) ── */}
         <section className="space-y-2">
-          <p className="text-xs font-medium text-secondary">外观</p>
-          <div className="rounded-2xl border border-card bg-card">
-            <div className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-2 text-sm text-strong">
-                <MoonStar className="h-4 w-4 text-muted" />
-                <span>主题</span>
+          <SectionTitle>外观</SectionTitle>
+          <SectionCard>
+            <div className="flex items-center justify-between px-4 py-[14px]">
+              <div className="flex items-center gap-3">
+                <MoonStar className="h-[18px] w-[18px] text-[#78716C]" />
+                <span className="text-sm text-[#1C1917]">主题</span>
               </div>
               <div
                 id="theme-preference-new"
@@ -290,13 +333,14 @@ export function NewSettingsPage() {
                   aria-pressed={themePreference === 'system'}
                   onClick={() => handleThemePreferenceChange('system')}
                   disabled={loading}
-                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                  className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
                     themePreference === 'system'
-                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
-                      : 'text-stone-400'
+                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-[#A8A29E]'
                   }`}
                 >
-                  跟随系统
+                  <Monitor className="h-3.5 w-3.5" />
+                  自动
                 </button>
                 <button
                   type="button"
@@ -304,12 +348,13 @@ export function NewSettingsPage() {
                   aria-pressed={themePreference === 'light'}
                   onClick={() => handleThemePreferenceChange('light')}
                   disabled={loading}
-                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                  className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
                     themePreference === 'light'
-                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
-                      : 'text-stone-400'
+                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-[#A8A29E]'
                   }`}
                 >
+                  <Sun className="h-3.5 w-3.5" />
                   浅色
                 </button>
                 <button
@@ -318,278 +363,243 @@ export function NewSettingsPage() {
                   aria-pressed={themePreference === 'dark'}
                   onClick={() => handleThemePreferenceChange('dark')}
                   disabled={loading}
-                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                  className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
                     themePreference === 'dark'
-                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
-                      : 'text-stone-400'
+                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      : 'text-[#A8A29E]'
                   }`}
                 >
+                  <Moon className="h-3.5 w-3.5" />
                   深色
                 </button>
               </div>
             </div>
-          </div>
+          </SectionCard>
         </section>
 
+        {/* ── Timer Section (计时器) ── */}
         <section className="space-y-2">
-          <p className="text-xs font-medium text-secondary">计时器</p>
-          <div className="rounded-2xl border border-card bg-card">
-            <div className="flex items-center justify-between p-4">
-              <div className="flex items-center gap-[10px]">
-                <Timer className="h-[18px] w-[18px] text-stone-500" />
-                <div>
-                  <p className="text-[15px] font-medium text-stone-900">结束模式</p>
-                  <p className="text-xs text-stone-400">倒计时结束后的行为</p>
+          <SectionTitle>计时器</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Timer className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="倒计时结束"
+              onClick={() => setCountdownModeDialogOpen(true)}
+              right={
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-[#A8A29E]">{countdownEndModeLabel}</span>
+                  <ChevronRight className="h-4 w-4 text-[#D6D3D1]" />
                 </div>
-              </div>
-              <div className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]">
-                <button
-                  type="button"
-                  data-testid="new-settings-end-mode-hard"
-                  aria-pressed={timerPreferences.countdownEndMode === 'hard'}
-                  onClick={() => handleCountdownEndModeChange('hard')}
-                  className={`rounded-[8px] px-3 py-1.5 text-xs ${
-                    timerPreferences.countdownEndMode === 'hard'
-                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
-                      : 'text-stone-400'
-                  }`}
-                >
-                  硬结束
-                </button>
-                <button
-                  type="button"
-                  data-testid="new-settings-end-mode-soft"
-                  aria-pressed={timerPreferences.countdownEndMode === 'soft'}
-                  onClick={() => handleCountdownEndModeChange('soft')}
-                  className={`rounded-[8px] px-3 py-1.5 text-xs ${
-                    timerPreferences.countdownEndMode === 'soft'
-                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
-                      : 'text-stone-400'
-                  }`}
-                >
-                  软结束
-                </button>
-              </div>
-            </div>
-            <div className="mx-4 h-px bg-[#F0ECE8]" />
-            <button
-              type="button"
-              data-testid="new-settings-sound-row"
-              aria-label="提示音"
-              className="flex w-full items-center justify-between p-4 text-left"
+              }
+            />
+            <Divider />
+            <SettingRow
+              icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="提示音"
               onClick={() => setSoundPickerOpen(true)}
-            >
-              <div className="flex items-center gap-[10px]">
-                <Bell className="h-[18px] w-[18px] text-stone-500" />
-                <span className="text-[15px] font-medium text-stone-900">提示音</span>
-              </div>
-              <div className="flex items-center gap-1 text-sm text-stone-500">
-                <span>{currentSoundLabel}</span>
-                <ChevronRight className="h-4 w-4 text-stone-400" />
-              </div>
-            </button>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <p className="text-xs font-medium text-secondary">网络与同步</p>
-          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
-            <Label htmlFor="sync-server-url-new" className="text-xs text-secondary">
-              同步服务器地址
-            </Label>
-            <Input
-              id="sync-server-url-new"
-              value={syncServerUrl}
-              onChange={(event) => setSyncServerUrl(event.target.value)}
-              placeholder={autoSyncServerUrl}
-              disabled={loading}
-            />
-            <div className="flex flex-wrap gap-2">
-              <Button type="button" className="h-8 rounded-xl bg-brand-accent text-xs hover:bg-brand-accent/90" onClick={handleSaveSyncServerUrl} disabled={loading}>
-                保存地址
-              </Button>
-              <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={handleResetSyncServerUrl} disabled={loading}>
-                设为默认
-              </Button>
-            </div>
-            <div className="flex items-center justify-between rounded-xl bg-surface px-3 py-2 text-xs text-secondary">
-              <div className="flex items-center gap-2">
-                <Wifi className="h-3.5 w-3.5" />
-                <span>本机IP</span>
-              </div>
-              <span>{syncHost}</span>
-            </div>
-            <p className="text-[11px] text-secondary">
-              {savedSyncServerUrl ? `当前已保存：${savedSyncServerUrl}` : `未保存自定义地址，自动使用：${autoSyncServerUrl}`}
-            </p>
-          </div>
-        </section>
-
-        <section className="space-y-2">
-          <p className="text-xs font-medium text-stone-500">导入导出</p>
-          <div
-            data-testid="new-settings-import-export-card"
-            className="rounded-2xl border border-[#F0ECE8] bg-white"
-          >
-            <div
-              data-testid="new-settings-import-strategy-row"
-              className="flex items-center justify-between p-4"
-            >
-              <div className="flex items-center gap-[10px]">
-                <Import className="h-[18px] w-[18px] text-stone-500" />
-                <span className="text-[15px] font-medium text-stone-900">导入策略</span>
-              </div>
-              <div
-                id="import-strategy-new"
-                role="group"
-                aria-label="导入策略"
-                className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]"
-              >
-                <button
-                  type="button"
-                  data-testid="new-settings-import-strategy-merge"
-                  aria-pressed={importStrategy === 'merge'}
-                  onClick={() => setImportStrategy('merge')}
-                  disabled={loading}
-                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
-                    importStrategy === 'merge'
-                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
-                      : 'text-stone-400'
-                  }`}
-                >
-                  合并
-                </button>
-                <button
-                  type="button"
-                  data-testid="new-settings-import-strategy-overwrite"
-                  aria-pressed={importStrategy === 'overwrite'}
-                  onClick={() => setImportStrategy('overwrite')}
-                  disabled={loading}
-                  className={`rounded-[8px] px-3 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
-                    importStrategy === 'overwrite'
-                      ? 'bg-white font-medium text-stone-900 shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
-                      : 'text-stone-400'
-                  }`}
-                >
-                  覆盖
-                </button>
-              </div>
-            </div>
-            <div className="mx-4 h-px bg-[#F0ECE8]" />
-
-            <button
-              type="button"
-              data-testid="new-settings-export-row"
-              onClick={handleExport}
-              disabled={loading}
-              className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <div className="flex items-center gap-[10px]">
-                <Download className="h-[18px] w-[18px] text-stone-500" />
-                <div>
-                  <p className="text-[15px] font-medium text-stone-900">导出 JSON</p>
-                  <p className="text-xs text-stone-400">导出当前事件日志备份</p>
+              right={
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-[#A8A29E]">{currentSoundLabel}</span>
+                  <ChevronRight className="h-4 w-4 text-[#D6D3D1]" />
                 </div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-stone-400" />
-            </button>
-
-            <div className="mx-4 h-px bg-[#F0ECE8]" />
-
-            <button
-              type="button"
-              data-testid="new-settings-import-row"
-              onClick={handleImportClick}
-              disabled={loading}
-              className="flex w-full items-center justify-between p-4 text-left transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-50"
-            >
-              <div className="flex items-center gap-[10px]">
-                <Import className="h-[18px] w-[18px] text-stone-500" />
-                <div>
-                  <p className="text-[15px] font-medium text-stone-900">导入 JSON</p>
-                  <p className="text-xs text-stone-400">从备份文件恢复事件日志</p>
-                </div>
-              </div>
-              <ChevronRight className="h-4 w-4 text-stone-400" />
-            </button>
-
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept=".json,application/json"
-              className="hidden"
-              onChange={handleImportFile}
+              }
             />
-          </div>
+          </SectionCard>
         </section>
 
+        {/* ── Sync Section (同步) ── */}
         <section className="space-y-2">
-          <p className="text-xs font-medium text-secondary">开发者</p>
-          <div className="space-y-3 rounded-2xl border border-card bg-card p-4">
-            <div className="flex items-center justify-between">
-              <div className="flex items-center gap-2 text-sm text-strong">
-                <Braces className="h-4 w-4 text-muted" />
-                <span>开发者模式</span>
-              </div>
-              <Switch
-                checked={developerMode}
-                onCheckedChange={(checked) => {
-                  setDeveloperMode(checked);
-                  setDeveloperModeEnabled(checked);
-                }}
-                aria-label="开发者模式"
-              />
-            </div>
-            <p className="text-[11px] text-secondary">开启后显示 MOSS / ASR 测试入口</p>
+          <SectionTitle>同步</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="同步服务器"
+              onClick={() => setSyncDialogOpen(true)}
+              right={
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-[#A8A29E]">{syncHost}</span>
+                  <ChevronRight className="h-4 w-4 text-[#D6D3D1]" />
+                </div>
+              }
+            />
+          </SectionCard>
+        </section>
+
+        {/* ── Import/Export Section (数据) ── */}
+        <section className="space-y-2">
+          <SectionTitle>数据</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="导出备份"
+              onClick={handleExportBackup}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="导入数据"
+              onClick={handleImportBackup}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+            />
+          </SectionCard>
+        </section>
+
+        {/* ── Developer Section (开发者) ── */}
+        <section className="space-y-2">
+          <SectionTitle>开发者</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="开发者模式"
+              right={
+                <Switch
+                  checked={developerMode}
+                  onCheckedChange={handleDeveloperModeToggle}
+                />
+              }
+            />
             {developerMode && (
-              <div className="flex flex-wrap gap-2">
-                <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/moss-test'; }}>
-                  打开 MOSS测试
-                </Button>
-                <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/asr-test'; }}>
-                  打开 ASR测试
-                </Button>
-                <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={() => { window.location.pathname = '/user-manage'; }}>
-                  多用户管理（旧版）
-                </Button>
-              </div>
-            )}
-            <div className="border-t border-subtle pt-3">
-              <div className="flex items-center justify-between">
-                <div>
-                  <p className="text-sm text-strong">界面模式（UI Mode）</p>
-                  <p className="text-[11px] text-secondary">过渡期支持新旧 UI 双向切换</p>
+              <>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
                 </div>
-                <Button type="button" variant="outline" className="h-8 rounded-xl text-xs" onClick={handleBackToOldUi}>
-                  返回旧 UI
-                </Button>
+                <Divider />
+                <SettingRow
+                  icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="返回旧 UI"
+                  onClick={handleSwitchToOldUI}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="语音测试页面"
+                  onClick={() => navigate({ to: '/asr-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="MOSS 调试"
+                  onClick={() => navigate({ to: '/moss-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Speech className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="ASR 语音识别"
+                  onClick={() => navigate({ to: '/asr-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Users className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="多用户管理"
+                  onClick={() => navigate({ to: '/user-manage' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<House className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="旧首页"
+                  onClick={() => { setUIMode('old'); window.location.pathname = '/'; }}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+              </>
+            )}
+          </SectionCard>
+        </section>
+
+        {/* ── Version Info (关于) ── */}
+        <section className="space-y-2">
+          <SectionTitle>关于</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Package className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="版本"
+              right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.appVersion}</span>}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Package className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="构建"
+              right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.buildHash}</span>}
+            />
+            <Divider />
+            <div className="px-4 pb-[14px] pt-[14px]">
+              <div className="flex items-center gap-3">
+                <Heart className="h-[18px] w-[18px] text-[#78716C]" />
+                <span className="text-sm text-[#1C1917]">开发者</span>
               </div>
+              <p className="mt-1 pl-[30px] text-xs leading-[1.4] text-[#A8A29E]">
+                ExoMind — 个人生命成长助手，探索生命与认知的本质。
+              </p>
             </div>
+          </SectionCard>
+        </section>
+
+        {/* Status / Error messages */}
+        {statusMessage && (
+          <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+            {statusMessage}
           </div>
-        </section>
-
-        <section className="py-1 text-center">
-          <p className="text-[11px] text-muted">ExoMind v{versionBuildInfo.appVersion}</p>
-          <p className="text-[10px] text-muted">Build: {versionBuildInfo.buildHash}</p>
-        </section>
-
-        {statusMessage && <p role="status" className="text-center text-xs text-green-700">{statusMessage}</p>}
-        {errorMessage && <p role="alert" className="text-center text-xs text-red-700">{errorMessage}</p>}
+        )}
+        {errorMessage && (
+          <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+            {errorMessage}
+          </div>
+        )}
       </div>
 
+      {/* ── Countdown End Mode Dialog ── */}
+      <Dialog open={countdownModeDialogOpen} onOpenChange={setCountdownModeDialogOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>倒计时结束模式</DialogTitle>
+            <DialogDescription>选择倒计时结束后的行为</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            <button
+              type="button"
+              onClick={() => handleCountdownEndModeChange('hard')}
+              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5]"
+            >
+              <div>
+                <div className="font-medium text-[#1C1917]">硬停止</div>
+                <div className="mt-0.5 text-xs text-[#A8A29E]">倒计时结束后立即停止</div>
+              </div>
+              {timerPreferences.countdownEndMode === 'hard' && <Check className="h-4 w-4 text-[#C75B3A]" />}
+            </button>
+            <button
+              type="button"
+              onClick={() => handleCountdownEndModeChange('soft')}
+              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5]"
+            >
+              <div>
+                <div className="font-medium text-[#1C1917]">柔和提醒</div>
+                <div className="mt-0.5 text-xs text-[#A8A29E]">倒计时结束后继续计时并提醒</div>
+              </div>
+              {timerPreferences.countdownEndMode === 'soft' && <Check className="h-4 w-4 text-[#C75B3A]" />}
+            </button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Sound Picker Dialog ── */}
       <Dialog open={soundPickerOpen} onOpenChange={setSoundPickerOpen}>
-        <DialogContent>
+        <DialogContent className="rounded-2xl">
           <DialogHeader>
             <DialogTitle>选择提示音</DialogTitle>
-            <DialogDescription>选择倒计时结束时播放的提示音</DialogDescription>
+            <DialogDescription>倒计时结束时播放的提示音</DialogDescription>
           </DialogHeader>
           <div className="space-y-2">
             <button
               type="button"
               onClick={() => handleSoundPresetChange('off')}
-              className="flex w-full items-center justify-between rounded-lg border border-[#F0ECE8] px-3 py-2 text-left text-sm hover:bg-[#FAF7F5]"
+              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5]"
             >
-              <span>关闭提示音</span>
+              <span className="text-[#1C1917]">关闭提示音</span>
               {!timerPreferences.countdownEndSoundEnabled && <Check className="h-4 w-4 text-[#C75B3A]" />}
             </button>
 
@@ -601,13 +611,51 @@ export function NewSettingsPage() {
                   key={preset.id}
                   type="button"
                   onClick={() => handleSoundPresetChange(preset.id)}
-                  className="flex w-full items-center justify-between rounded-lg border border-[#F0ECE8] px-3 py-2 text-left text-sm hover:bg-[#FAF7F5]"
+                  className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5]"
                 >
-                  <span>{preset.label}</span>
+                  <span className="text-[#1C1917]">{preset.label}</span>
                   {selected && <Check className="h-4 w-4 text-[#C75B3A]" />}
                 </button>
               );
             })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Sync Server Dialog ── */}
+      <Dialog open={syncDialogOpen} onOpenChange={setSyncDialogOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>同步服务器</DialogTitle>
+            <DialogDescription>设置事件日志同步的服务器地址</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <input
+              type="url"
+              value={syncServerUrl}
+              onChange={(e) => setSyncServerUrl(e.target.value)}
+              placeholder="https://example.com"
+              className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
+            />
+            {errorMessage && (
+              <p className="text-xs text-red-500">{errorMessage}</p>
+            )}
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setSyncDialogOpen(false)}
+                className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveSyncServerUrl}
+                className="flex-1 rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F]"
+              >
+                保存
+              </button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
