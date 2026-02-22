@@ -61,7 +61,7 @@ bun install --cwd server --omit optional
 ### 3) 本地开发（Development / 开发）
 
 ```powershell
-# Web 前端（默认端口 1420）
+# Web 前端（默认尝试 1420，被占用时自动选择空闲端口）
 bun run dev
 
 # PouchDB 同步服务（默认 127.0.0.1:6984）
@@ -69,7 +69,7 @@ bun run server
 ```
 
 ```powershell
-# Tauri 桌面开发
+# Tauri 桌面开发（自动探测空闲端口，无需手动配置）
 bun run tauri dev
 
 # Tauri Android 开发
@@ -134,8 +134,8 @@ Copy-Item .env.example .env
 
 | 变量                     | 默认值        | 说明                        |
 | ------------------------ | ------------- | --------------------------- |
-| `EXOMIND_WEB_PORT`     | `1420`      | Web 开发端口                |
-| `EXOMIND_HMR_PORT`     | `1421`      | HMR 端口                    |
+| `EXOMIND_WEB_PORT`     | 自动探测 | Web 开发端口（默认尝试 1420，被占用自动切换） |
+| `EXOMIND_HMR_PORT`     | WEB+1   | HMR 端口                    |
 | `EXOMIND_POUCHDB_PORT` | `6984`      | 同步服务端口                |
 | `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | 同步服务监听地址            |
 | `EXOMIND_ASR_PORT`     | `1949`      | ASR 服务端口                |
@@ -246,7 +246,7 @@ exomind/
 3. Android 构建失败
    先确认 `JAVA_HOME`、`ANDROID_SDK_ROOT` 与 `bun run tauri android init` 已完成。
 4. 多 worktree 端口冲突
-   为每个 worktree 设独立 `EXOMIND_WEB_PORT/EXOMIND_HMR_PORT/EXOMIND_POUCHDB_PORT/EXOMIND_ASR_PORT`。
+   dev 端口已支持自动探测空闲端口，通常无需手动配置。如需固定端口，可设置 `EXOMIND_WEB_PORT/EXOMIND_HMR_PORT/EXOMIND_POUCHDB_PORT/EXOMIND_ASR_PORT`。
 
 ## License
 
