@@ -595,7 +595,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
             value={feedback}
             onChange={(event) => setFeedback(event.target.value)}
             placeholder="记录本次专注的反馈..."
-            className="min-h-[96px] resize-none"
+            className="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
           />
           <DialogFooter>
             <Button
@@ -604,6 +604,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
               onClick={() => {
                 void handleConfirmEnd();
               }}
+              className="dark:rounded-[10px] dark:bg-[#C75B3A] dark:text-white dark:hover:bg-[#B24D2F]"
             >
               确认结束
             </Button>
