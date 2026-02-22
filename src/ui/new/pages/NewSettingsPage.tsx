@@ -31,22 +31,27 @@ import {
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
 import { UserCard } from '@/ui/new/components/UserCard';
+import { useNavigate } from '@tanstack/react-router';
 import {
   Bell,
-  Braces,
+  Bot,
   Check,
   ChevronRight,
   Code,
   Download,
   Heart,
-
+  House,
+  Mic,
   Monitor,
   Moon,
   MoonStar,
   Package,
+  Speech,
   Sun,
   Timer,
+  Undo2,
   Upload,
+  Users,
   Wifi,
 } from 'lucide-react';
 
@@ -234,6 +239,8 @@ export function NewSettingsPage() {
     setDeveloperModeEnabled(checked);
     setDeveloperMode(checked);
   };
+
+  const navigate = useNavigate();
 
   const handleSwitchToOldUI = () => {
     setUIMode('old');
@@ -443,7 +450,7 @@ export function NewSettingsPage() {
           <SectionTitle>开发者</SectionTitle>
           <SectionCard>
             <SettingRow
-              icon={<Braces className="h-[18px] w-[18px] text-[#78716C]" />}
+              icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
               label="开发者模式"
               right={
                 <Switch
@@ -454,11 +461,49 @@ export function NewSettingsPage() {
             />
             {developerMode && (
               <>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
+                </div>
                 <Divider />
                 <SettingRow
-                  icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="切换旧版 UI"
+                  icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="返回旧 UI"
                   onClick={handleSwitchToOldUI}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="语音测试页面"
+                  onClick={() => navigate({ to: '/asr-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="MOSS 调试"
+                  onClick={() => navigate({ to: '/moss-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Speech className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="ASR 语音识别"
+                  onClick={() => navigate({ to: '/asr-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Users className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="多用户管理"
+                  onClick={() => navigate({ to: '/user-manage' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<House className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="旧首页"
+                  onClick={() => { setUIMode('old'); window.location.pathname = '/'; }}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
                 />
               </>
