@@ -96,4 +96,4 @@ packages/mcp/events_*/
 events_*/
 
 # 配置文件不同步
-pencil/.claude/settings.local.json
+pencil/.claude/settings.local.jsonagent.test.local.state.json
