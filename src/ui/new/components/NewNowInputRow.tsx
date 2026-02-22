@@ -93,12 +93,12 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   }), []);
 
   return (
-    <div className="mb-2 shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5]" data-testid="new-now-input-row">
+    <div className="mb-2 shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]" data-testid="new-now-input-row">
       <div className="px-4 py-2">
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] text-stone-500"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E]"
             aria-label="附件"
             data-testid="new-now-attachment-button"
           >
@@ -116,13 +116,13 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               rows={1}
-              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 pr-10 text-sm text-stone-700 placeholder:text-stone-400"
+              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 pr-10 text-sm text-stone-700 placeholder:text-stone-400 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
               data-testid="new-now-input-textarea"
             />
             <button
               type="button"
               onClick={handlePasteFromClipboard}
-              className="absolute right-[7px] top-1/2 flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] text-stone-400"
+              className="absolute right-[7px] top-1/2 flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] text-stone-400 dark:text-[#78716C]"
               aria-label="剪贴板"
               data-testid="new-now-input-inline-button"
             >
