@@ -96,4 +96,14 @@ packages/mcp/events_*/
 events_*/
 
 # 配置文件不同步
-pencil/.claude/settings.local.jsonagent.test.local.state.json
+pencil/.claude/settings.local.json
+
+# Agent 本地状态
+agent.test.local.state.json
+
+# 临时截图和备份
+dark-mode-*.png
+*-backup.md
+
+# 测试输出
+vitest-output.txt
