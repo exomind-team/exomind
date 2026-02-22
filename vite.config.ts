@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => {
     clearScreen: false,
     server: {
       port: devPorts.web,
-      strictPort: true,
+      strictPort: false,
       host: "0.0.0.0",
       hmr: {
         protocol: "ws",
