@@ -68,6 +68,9 @@ export default {
         // 语义化颜色 - 品牌色
         'brand-accent': "hsl(var(--brand-accent))",
         'brand-gradient': "var(--brand-gradient)",
+        // 用户消息气泡
+        'user-bubble': "#C75B3A",
+        'user-bubble-text': "#FAFAF9",
       },
       borderRadius: {
         lg: "var(--radius)",
