@@ -30,7 +30,7 @@ export default defineConfig(({ mode }) => {
     clearScreen: false,
     server: {
       port: devPorts.web,
-      strictPort: false,
+      strictPort: Boolean(process.env.EXOMIND_WEB_PORT),
       host: "0.0.0.0",
       hmr: {
         protocol: "ws",
