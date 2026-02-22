@@ -86,11 +86,11 @@ function SettingRow({
     <Wrapper
       type={onClick ? 'button' : undefined}
       onClick={onClick}
-      className={`flex w-full items-center justify-between px-4 py-[14px] ${onClick ? 'active:bg-stone-50' : ''} ${className}`}
+      className={`flex w-full items-center justify-between px-4 py-[14px] ${onClick ? 'active:bg-stone-50 dark:active:bg-stone-800' : ''} ${className}`}
     >
       <div className="flex items-center gap-3">
         {icon}
-        <span className="text-sm text-[#1C1917]">{label}</span>
+        <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{label}</span>
       </div>
       {right}
     </Wrapper>
@@ -100,14 +100,14 @@ function SettingRow({
 function Divider() {
   return (
     <div className="px-4">
-      <div className="h-px bg-[#F0ECE8]" />
+      <div className="h-px bg-[#F0ECE8] dark:bg-[#292524]" />
     </div>
   );
 }
 
 function SectionCard({ children }: { children: React.ReactNode }) {
   return (
-    <div className="overflow-hidden rounded-2xl border border-[#F0ECE8] bg-white">
+    <div className="overflow-hidden rounded-2xl border border-[#F0ECE8] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
       {children}
     </div>
   );
@@ -291,7 +291,7 @@ export function NewSettingsPage() {
   })();
 
   return (
-    <div className="min-h-full bg-[#FAF7F5]">
+    <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
       {/* Hidden file input for import */}
       <input
         ref={fileInputRef}
@@ -303,7 +303,7 @@ export function NewSettingsPage() {
 
       {/* Header */}
       <header className="flex items-center justify-center px-6 py-3">
-        <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917]">设置</h1>
+        <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">设置</h1>
       </header>
 
       {/* Settings Content */}
@@ -319,13 +319,13 @@ export function NewSettingsPage() {
             <div className="flex items-center justify-between px-4 py-[14px]">
               <div className="flex items-center gap-3">
                 <MoonStar className="h-[18px] w-[18px] text-[#78716C]" />
-                <span className="text-sm text-[#1C1917]">主题</span>
+                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">主题</span>
               </div>
               <div
                 id="theme-preference-new"
                 role="group"
                 aria-label="主题"
-                className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px]"
+                className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
               >
                 <button
                   type="button"
@@ -335,7 +335,7 @@ export function NewSettingsPage() {
                   disabled={loading}
                   className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
                     themePreference === 'system'
-                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
                       : 'text-[#A8A29E]'
                   }`}
                 >
@@ -350,7 +350,7 @@ export function NewSettingsPage() {
                   disabled={loading}
                   className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
                     themePreference === 'light'
-                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
                       : 'text-[#A8A29E]'
                   }`}
                 >
@@ -365,7 +365,7 @@ export function NewSettingsPage() {
                   disabled={loading}
                   className={`flex items-center gap-1 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
                     themePreference === 'dark'
-                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
+                      ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
                       : 'text-[#A8A29E]'
                   }`}
                 >
@@ -388,7 +388,7 @@ export function NewSettingsPage() {
               right={
                 <div className="flex items-center gap-1">
                   <span className="text-sm text-[#A8A29E]">{countdownEndModeLabel}</span>
-                  <ChevronRight className="h-4 w-4 text-[#D6D3D1]" />
+                  <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
                 </div>
               }
             />
@@ -400,7 +400,7 @@ export function NewSettingsPage() {
               right={
                 <div className="flex items-center gap-1">
                   <span className="text-sm text-[#A8A29E]">{currentSoundLabel}</span>
-                  <ChevronRight className="h-4 w-4 text-[#D6D3D1]" />
+                  <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
                 </div>
               }
             />
@@ -418,7 +418,7 @@ export function NewSettingsPage() {
               right={
                 <div className="flex items-center gap-1">
                   <span className="text-sm text-[#A8A29E]">{syncHost}</span>
-                  <ChevronRight className="h-4 w-4 text-[#D6D3D1]" />
+                  <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
                 </div>
               }
             />
@@ -433,14 +433,14 @@ export function NewSettingsPage() {
               icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
               label="导出备份"
               onClick={handleExportBackup}
-              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
             />
             <Divider />
             <SettingRow
               icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
               label="导入数据"
               onClick={handleImportBackup}
-              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
             />
           </SectionCard>
         </section>
@@ -469,42 +469,42 @@ export function NewSettingsPage() {
                   icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="返回旧 UI"
                   onClick={handleSwitchToOldUI}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
                 <Divider />
                 <SettingRow
                   icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="语音测试页面"
                   onClick={() => navigate({ to: '/asr-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
                 <Divider />
                 <SettingRow
                   icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="MOSS 调试"
                   onClick={() => navigate({ to: '/moss-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
                 <Divider />
                 <SettingRow
                   icon={<Speech className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="ASR 语音识别"
                   onClick={() => navigate({ to: '/asr-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
                 <Divider />
                 <SettingRow
                   icon={<Users className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="多用户管理"
                   onClick={() => navigate({ to: '/user-manage' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
                 <Divider />
                 <SettingRow
                   icon={<House className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="旧首页"
                   onClick={() => { setUIMode('old'); window.location.pathname = '/'; }}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1]" />}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
               </>
             )}
@@ -530,7 +530,7 @@ export function NewSettingsPage() {
             <div className="px-4 pb-[14px] pt-[14px]">
               <div className="flex items-center gap-3">
                 <Heart className="h-[18px] w-[18px] text-[#78716C]" />
-                <span className="text-sm text-[#1C1917]">开发者</span>
+                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">开发者</span>
               </div>
               <p className="mt-1 pl-[30px] text-xs leading-[1.4] text-[#A8A29E]">
                 ExoMind — 个人生命成长助手，探索生命与认知的本质。
@@ -563,10 +563,10 @@ export function NewSettingsPage() {
             <button
               type="button"
               onClick={() => handleCountdownEndModeChange('hard')}
-              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5]"
+              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
             >
               <div>
-                <div className="font-medium text-[#1C1917]">硬停止</div>
+                <div className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">硬停止</div>
                 <div className="mt-0.5 text-xs text-[#A8A29E]">倒计时结束后立即停止</div>
               </div>
               {timerPreferences.countdownEndMode === 'hard' && <Check className="h-4 w-4 text-[#C75B3A]" />}
@@ -574,10 +574,10 @@ export function NewSettingsPage() {
             <button
               type="button"
               onClick={() => handleCountdownEndModeChange('soft')}
-              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5]"
+              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
             >
               <div>
-                <div className="font-medium text-[#1C1917]">柔和提醒</div>
+                <div className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">柔和提醒</div>
                 <div className="mt-0.5 text-xs text-[#A8A29E]">倒计时结束后继续计时并提醒</div>
               </div>
               {timerPreferences.countdownEndMode === 'soft' && <Check className="h-4 w-4 text-[#C75B3A]" />}
@@ -597,7 +597,7 @@ export function NewSettingsPage() {
             <button
               type="button"
               onClick={() => handleSoundPresetChange('off')}
-              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5]"
+              className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
             >
               <span className="text-[#1C1917]">关闭提示音</span>
               {!timerPreferences.countdownEndSoundEnabled && <Check className="h-4 w-4 text-[#C75B3A]" />}
@@ -611,7 +611,7 @@ export function NewSettingsPage() {
                   key={preset.id}
                   type="button"
                   onClick={() => handleSoundPresetChange(preset.id)}
-                  className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5]"
+                  className="flex w-full items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
                 >
                   <span className="text-[#1C1917]">{preset.label}</span>
                   {selected && <Check className="h-4 w-4 text-[#C75B3A]" />}
@@ -635,7 +635,7 @@ export function NewSettingsPage() {
               value={syncServerUrl}
               onChange={(e) => setSyncServerUrl(e.target.value)}
               placeholder="https://example.com"
-              className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A]"
+              className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
             />
             {errorMessage && (
               <p className="text-xs text-red-500">{errorMessage}</p>
@@ -644,7 +644,7 @@ export function NewSettingsPage() {
               <button
                 type="button"
                 onClick={() => setSyncDialogOpen(false)}
-                className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5]"
+                className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
               >
                 取消
               </button>
