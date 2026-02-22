@@ -819,5 +819,23 @@ pm/
 
 ---
 
+## 工具使用经验
+
+### GitHub PR 描述更新
+
+使用 `--body-file` 而不是 `--body` 来避免 shell 转义导致的反斜杠问题：
+
+```bash
+# 1. 先用 Write 工具写入文件
+# 2. 用 --body-file 上传
+gh pr edit <number> --body-file pr-body.md
+# 3. 清理临时文件
+rm pr-body.md
+```
+
+直接在 `--body "..."` 里写 markdown 会导致 backtick、反斜杠等字符被 shell 转义，渲染出错。
+
+---
+
 *文档版本: v4.0*
 *更新: 2026-02-03*
