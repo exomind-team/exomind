@@ -573,7 +573,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                   data-testid="new-focus-end-button"
                   aria-label="结束（End）"
                   onClick={handleOpenEndDialog}
-                  className="h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#2A1510] p-0 text-[#C75B3A] dark:text-[#E8734E] hover:bg-[#F8DED9] dark:hover:bg-[#3D1F15]"
+                  className="h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#C75B3A] p-0 text-[#C75B3A] dark:text-[#FAFAF9] hover:bg-[#F8DED9] dark:hover:bg-[#B24D2F]"
                 >
                   <Square size={18} />
                 </Button>
