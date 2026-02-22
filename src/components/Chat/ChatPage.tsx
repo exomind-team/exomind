@@ -506,7 +506,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                       <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       <span className="text-xs font-semibold text-strong">{userDisplayName}</span>
                     </div>
-                    <div className="rounded-2xl bg-[#C75B3A] px-[14px] py-[10px] text-[13px] leading-[1.6] text-[#FAFAF9]">
+                    <div className="rounded-2xl bg-[#C75B3A] px-[14px] py-[10px] text-[13px] leading-[1.6] text-[#FAFAF9] [&_.prose]:text-inherit [&_.prose_*]:text-inherit">
                       <EventMarkdown content={event.content} />
                     </div>
                     <MessageActions content={event.content} align="end" />
