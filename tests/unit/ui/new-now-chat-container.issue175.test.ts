@@ -7,7 +7,7 @@ describe('new now chat container issue-175 structure', () => {
   const source = readFileSync(chatPagePath, 'utf-8');
 
   it('uses flat full-width container for new-mobile variant instead of rounded card shell', () => {
-    expect(source).toContain('flex h-full min-h-0 flex-col bg-[#FAF7F5]');
+    expect(source).toContain('flex h-full min-h-0 flex-col bg-surface');
     expect(source).not.toContain('rounded-[24px] border border-[#F0ECE8] bg-[#FAF7F5]');
   });
 });

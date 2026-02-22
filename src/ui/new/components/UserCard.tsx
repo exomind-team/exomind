@@ -19,17 +19,15 @@ export function UserCard() {
 
   return (
     <>
+      {/*
+        UserCard 使用 CSS 自定义属性实现暗色模式，而非 JS 条件判断。
+        复杂渐变和阴影无法用 Tailwind dark: 前缀表达，因此通过 CSS 变量在 index.css 中定义。
+      */}
       <div
-        className="relative overflow-hidden"
+        className="user-card relative overflow-hidden rounded-[20px] p-5 border border-white/[0.19] dark:border-white/[0.15] backdrop-blur-[20px]"
         style={{
-          borderRadius: 20,
-          padding: 20,
-          border: '1px solid rgba(255,255,255,0.19)',
-          background:
-            'radial-gradient(circle at 15% 0%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, #E8866F 0%, #D4664A 50%, #C75B3A 100%)',
-          boxShadow:
-            '0 8px 24px -4px rgba(199,91,58,0.19), 0 20px 40px -8px rgba(199,91,58,0.13), 0 3px 8px rgba(255,255,255,0.31)',
-          backdropFilter: 'blur(20px)',
+          background: 'var(--user-card-bg)',
+          boxShadow: 'var(--user-card-shadow)',
         }}
       >
         {/* Profile Top */}
