@@ -73,17 +73,17 @@
     --warning: 38 92% 55%;
     --warning-foreground: 222.2 84% 4.9%;
 
-    /* 语义化颜色变量 - 深色模式 */
-    --text-primary: 270 31% 94%;
-    --text-strong: 270 30% 88%;
-    --text-secondary: 270 25% 68%;
-    --text-muted: 270 20% 55%;
-    --bg-card: 270 30% 18%;
-    --bg-surface: 270 25% 14%;
-    --border-card: 270 30% 25%;
-    --border-subtle: 270 25% 20%;
-    --brand-accent: 271 81% 76%;
-    --brand-gradient: 271 81% 76%, 271 75% 65%, 271 70% 55%;
+    /* 语义化颜色变量 - 深色模式 (Stone warm tone) */
+    --text-primary: 60 9% 98%;       /* #FAFAF9 Stone-50 */
+    --text-strong: 20 6% 90%;        /* #E7E5E4 Stone-200 */
+    --text-secondary: 24 5% 64%;     /* #A8A29E Stone-400 */
+    --text-muted: 25 5% 45%;         /* #78716C Stone-500 */
+    --bg-card: 24 10% 10%;           /* #1C1917 Stone-900 */
+    --bg-surface: 20 14% 4%;         /* #0C0A09 Stone-950 */
+    --border-card: 12 6% 15%;        /* #292524 Stone-800 */
+    --border-subtle: 20 5% 12%;      /* #211F1E Stone-850 approx */
+    --brand-accent: 14 56% 50%;      /* #C75B3A */
+    --brand-gradient: 14 56% 50%, 14 60% 42%, 14 65% 35%;
   }
 }
 
