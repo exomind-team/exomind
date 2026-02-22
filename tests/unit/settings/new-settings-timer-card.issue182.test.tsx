@@ -28,6 +28,9 @@ vi.mock('@/config/port-env', () => ({
 vi.mock('@/config/theme', () => ({
   getThemePreference: () => 'system',
   setThemePreference: mocks.setThemePreference,
+  resolveThemePreference: (pref: string) => pref === 'system' ? 'light' : pref,
+  subscribeThemePreferenceChanges: () => () => {},
+  subscribeSystemThemeChanges: () => () => {},
 }));
 
 vi.mock('@/config/developer-mode', () => ({

@@ -15,26 +15,14 @@ export function MessageInput({ onSend }: MessageInputProps) {
   };
 
   return (
-    <div style={{
-      display: 'flex',
-      padding: '16px',
-      borderTop: '1px solid #e5e5ea',
-      backgroundColor: '#fff',
-    }}>
+    <div className="flex p-4 border-t border-border-card bg-background">
       <input
         type="text"
         placeholder="输入消息..."
         value={value}
         onChange={(e) => setValue(e.target.value)}
         onKeyDown={handleKeyDown}
-        style={{
-          flex: 1,
-          padding: '12px 16px',
-          borderRadius: '20px',
-          border: '1px solid #e5e5ea',
-          outline: 'none',
-          fontSize: '14px',
-        }}
+        className="flex-1 px-4 py-3 rounded-[20px] border border-border-card bg-card text-primary text-sm outline-none"
       />
     </div>
   );
