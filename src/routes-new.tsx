@@ -1,17 +1,27 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation } from '@tanstack/react-router';
-import { Target, Settings } from 'lucide-react';
+import { useState, useEffect } from 'react';
+import { Target, Settings, Bot } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { NewFocusPage } from '@/ui/new/pages/NewFocusPage';
 import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
 import { UserManagePage } from '@/ui/pages/UserManagePage';
 import { ASRTestPage } from '@/pages/ASRTestPage';
 import { MOSSASRTestPage } from '@/pages/MOSSASRTestPage';
+import { AgentsPage } from '@/ui/new/pages/AgentsPage';
+import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 
 function NewLayout() {
   const location = useLocation();
 
+  const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
+
+  useEffect(() => {
+    return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
+  }, []);
+
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
+    ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
 
@@ -100,6 +110,14 @@ const newMossTestRoute = createRoute({
   },
 });
 
+const newAgentsRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents',
+  component: function NewAgents() {
+    return <AgentsPage />;
+  },
+});
+
 const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newEventlogRoute,
@@ -107,6 +125,7 @@ const newRouteTree = newRootRoute.addChildren([
   newUserManageRoute,
   newAsrTestRoute,
   newMossTestRoute,
+  newAgentsRoute,
 ]);
 
 const newUiRouter = createRouter({ routeTree: newRouteTree });
