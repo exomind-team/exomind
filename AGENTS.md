@@ -57,3 +57,22 @@
   - `bun run icon:tauri`：生成 `src-tauri/icons/` 的桌面/移动图标资源
   - `bun run icon:web`：生成 `public/icons/` 的 Web 图标（16/32/180/192/512）
 
+## 发布流程
+
+| Tag 格式 | 产出 | Release 类型 |
+|---------|------|-------------|
+| `build/v0.3.2-build.20260222T1430` | GitHub Release | Pre-release（可直接下载） |
+| `release/v0.3.3` | GitHub Release | 正式版 |
+| `release/v0.3.3-beta.1` | GitHub Release | Pre-release |
+
+```bash
+# 日常构建测试（自动时间戳，Releases 页面直接下载）
+bun run build:tag
+
+# 正式发版（先 bump 版本号到 package.json / tauri.conf.json / Cargo.toml，再打 tag）
+git tag release/v0.3.3 && git push origin release/v0.3.3
+```
+
+版本号规范：
+- 有功能/修复 → bump patch（0.3.x）
+- 纯资源变更（图标等）→ 不单独 bump，随下一个功能版本一起发

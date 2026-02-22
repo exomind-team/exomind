@@ -94,3 +94,6 @@ tests/e2e/report/
 packages/mcp/.data/
 packages/mcp/events_*/
 events_*/
+
+# 配置文件不同步
+pencil/.claude/settings.local.json

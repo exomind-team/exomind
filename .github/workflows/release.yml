@@ -509,8 +509,8 @@ jobs:
   create-release:
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
-    # 只对 release/* tag 执行发布步骤
-    if: startsWith(github.ref, 'refs/tags/release/')
+    # 对 release/* 和 build/* tag 执行发布步骤
+    if: startsWith(github.ref, 'refs/tags/release/') || startsWith(github.ref, 'refs/tags/build/')
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -526,26 +526,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#release/}"
           short_hash="${GITHUB_SHA::7}"
-          lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
-          channel=""
-          if [[ "$lower_version" == *"-alpha."* ]]; then
-            channel="Alpha"
-          elif [[ "$lower_version" == *"-beta."* ]]; then
-            channel="Beta"
-          elif [[ "$lower_version" == *"-rc."* ]]; then
-            channel="RC"
-          elif [[ "$lower_version" == *"-preview."* ]]; then
-            channel="Preview"
-          fi
 
-          if [[ -n "$channel" ]]; then
+          if [[ "$GITHUB_REF_NAME" == build/* ]]; then
+            # build/v0.3.3-build.20260222T1430 → version=v0.3.3-build.20260222T1430
+            version="${GITHUB_REF_NAME#build/}"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "title=$channel $version" >> "$GITHUB_OUTPUT"
+            echo "title=Pre-release $version" >> "$GITHUB_OUTPUT"
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "title=Release $version" >> "$GITHUB_OUTPUT"
+            # release/v0.3.3 → version=v0.3.3
+            version="${GITHUB_REF_NAME#release/}"
+            lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
+            channel=""
+            if [[ "$lower_version" == *"-alpha."* ]]; then
+              channel="Alpha"
+            elif [[ "$lower_version" == *"-beta."* ]]; then
+              channel="Beta"
+            elif [[ "$lower_version" == *"-rc."* ]]; then
+              channel="RC"
+            elif [[ "$lower_version" == *"-preview."* ]]; then
+              channel="Preview"
+            fi
+
+            if [[ -n "$channel" ]]; then
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              echo "title=$channel $version" >> "$GITHUB_OUTPUT"
+            else
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "title=Release $version" >> "$GITHUB_OUTPUT"
+            fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"

@@ -1,7 +1,7 @@
 {
   "name": "exomind",
   "private": true,
-  "version": "0.3.0-beta1",
+  "version": "0.3.2",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -10,6 +10,7 @@
     "icon:web": "bunx tauri icon src-tauri/app-icon.png --png 16 --png 32 --png 180 --png 192 --png 512 -o public/icons",
     "icon:all": "bun run icon:sync-source && bun run icon:tauri && bun run icon:web",
     "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
+    "build:tag": "bun Scripts/dev/build-tag.ts",
     "gh:comment": "bun Scripts/dev/github-comment.ts",
     "check:android:meta": "bun Scripts/dev/android-meta-check.ts",
     "server": "bun server/pouchdb-server.js",
@@ -56,6 +57,7 @@
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
     "socket.io-client": "^4.8.3",
+    "vaul": "^1.1.2",
     "zustand": "^5.0.11"
   },
   "devDependencies": {
