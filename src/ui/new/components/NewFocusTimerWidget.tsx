@@ -351,12 +351,12 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   );
 
   return (
-    <div className="bg-[#FAF7F5]" data-testid="new-focus-timer-widget">
+    <div className="bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-focus-timer-widget">
       {uiState === 'idle' && (
         <section className="safe-area-pt-plus">
           <div className="relative mx-auto h-[104px] w-full max-w-[390px]" data-testid="new-focus-state-idle">
             <div
-              className="absolute left-1/2 top-[18px] h-[74px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
+              className="absolute left-1/2 top-[18px] h-[74px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14] blur-[8px]"
               aria-hidden
             />
 
@@ -367,14 +367,14 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
               aria-expanded="false"
               aria-controls="new-focus-config-panel"
               aria-label="展开专注配置（Expand focus configuration）"
-              className={`absolute left-4 right-4 top-4 flex h-[68px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()}`}
+              className={`absolute left-4 right-4 top-4 flex h-[68px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] dark:border-[#FFFFFF15] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:bg-[#1C1917] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()}`}
             >
               <div className="mr-3 flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A]">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
                   <Target size={20} />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-[16px] font-semibold leading-[1.4] text-[#1C1917]">点击设置专注任务</p>
+                  <p className="truncate text-[16px] font-semibold leading-[1.4] text-[#1C1917] dark:text-[#FAFAF9]">点击设置专注任务</p>
                   <p className="truncate text-[12px] leading-[1.4] text-[#78716C]">配置时间块、开始倒计时</p>
                 </div>
               </div>
@@ -388,13 +388,13 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
         <section className="safe-area-pt-plus">
           <div className="relative mx-auto w-full max-w-[390px] px-4 pb-3 pt-4" data-testid="new-focus-state-config">
             <div
-              className="absolute inset-x-4 bottom-[10px] top-[14px] rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
+              className="absolute inset-x-4 bottom-[10px] top-[14px] rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14] blur-[8px]"
               aria-hidden
             />
 
             <div
               id="new-focus-config-panel"
-              className={`relative flex w-full flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
+              className={`relative flex w-full flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] dark:border-[#FFFFFF15] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:bg-[#1C1917] px-[18px] py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
             >
               <div className="flex items-center gap-[10px]">
                 <button
@@ -404,7 +404,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                   aria-controls="new-focus-config-panel"
                   aria-label="收起专注配置（Collapse focus configuration）"
                   onClick={handleCollapseToIdle}
-                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A] transition-transform active:scale-95"
+                  className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E] transition-transform active:scale-95"
                 >
                   <Target size={20} />
                 </button>
@@ -414,20 +414,20 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                   value={taskNameDraft}
                   onChange={(event) => setTaskNameDraft(event.target.value)}
                   placeholder="输入任务名称..."
-                  className="h-9 border-[#E7E5E4]/80 bg-white/60 text-sm"
+                  className="h-9 border-[#E7E5E4]/80 dark:border-[#FFFFFF20] bg-white/60 dark:bg-[#FFFFFF10] text-sm dark:text-[#FAFAF9]"
                 />
               </div>
 
-              <div className="h-px w-full bg-[#D4785F30]" />
+              <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />
 
               <div className="flex items-center justify-between">
-                <span className="text-[12px] font-medium text-[#57534E]">计时模式</span>
+                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">计时模式</span>
                 <div className="flex items-center gap-1">
                   <button
                     type="button"
                     data-testid="new-focus-mode-countup"
                     onClick={() => setTimerMode('countup')}
-                    className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${timerMode === 'countup' ? 'bg-white/90 text-[#1C1917]' : 'bg-transparent text-[#A8A29E]'}`}
+                    className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${timerMode === 'countup' ? 'bg-white/90 dark:bg-[#FFFFFF20] text-[#1C1917] dark:text-[#FAFAF9]' : 'bg-transparent text-[#A8A29E]'}`}
                   >
                     正计时
                   </button>
@@ -435,7 +435,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                     type="button"
                     data-testid="new-focus-mode-countdown"
                     onClick={() => setTimerMode('countdown')}
-                    className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${timerMode === 'countdown' ? 'bg-white/90 text-[#1C1917]' : 'bg-transparent text-[#A8A29E]'}`}
+                    className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${timerMode === 'countdown' ? 'bg-white/90 dark:bg-[#FFFFFF20] text-[#1C1917] dark:text-[#FAFAF9]' : 'bg-transparent text-[#A8A29E]'}`}
                   >
                     倒计时
                   </button>
@@ -444,7 +444,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
 
               {timerMode === 'countdown' && (
                 <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium text-[#57534E]">倒计时时长</span>
+                  <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">倒计时时长</span>
                   <div className="flex items-center gap-[6px]">
                     <button
                       type="button"
@@ -452,7 +452,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                       onClick={handleOpenCustomDurationEditor}
                       className={`flex items-center rounded-[8px] text-[12px] ${
                         isCustomDurationEditing || isCustomDurationSelected
-                          ? 'bg-white/90 font-semibold text-[#C75B3A]'
+                          ? 'bg-white/90 dark:bg-[#FFFFFF20] font-semibold text-[#C75B3A]'
                           : 'bg-transparent text-[#C75B3A]'
                       } ${
                         isCustomDurationEditing ? 'h-8 w-8 justify-center p-0' : 'gap-1 px-[8px] py-[6px]'
@@ -485,7 +485,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                         }}
                         aria-label="自定义倒计时分钟（Custom countdown minutes）"
                         placeholder="分钟"
-                        className="h-8 w-[72px] border-[#FFFFFF60] bg-white/90 px-2 text-[12px] font-medium text-[#1C1917]"
+                        className="h-8 w-[72px] border-[#FFFFFF60] bg-white/90 dark:bg-[#FFFFFF20] px-2 text-[12px] font-medium text-[#1C1917] dark:text-[#FAFAF9]"
                       />
                     )}
 
