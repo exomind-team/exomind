@@ -1,12 +1,33 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Users, LogOut, LogIn, UserPlus } from 'lucide-react';
 import { useSyncStore } from '@/ui/stores/sync-store';
+import {
+  getThemePreference,
+  resolveThemePreference,
+  subscribeThemePreferenceChanges,
+  subscribeSystemThemeChanges,
+} from '@/config/theme';
 import { SwitchAccountSheet } from './SwitchAccountSheet';
 
 export function UserCard() {
   const { isLoggedIn, currentUser, logout } = useSyncStore();
   const [sheetOpen, setSheetOpen] = useState(false);
   const [sheetMode, setSheetMode] = useState<'switch' | 'login' | 'register'>('login');
+
+  const [isDark, setIsDark] = useState(() => {
+    const pref = getThemePreference();
+    return resolveThemePreference(pref) === 'dark';
+  });
+
+  useEffect(() => {
+    function update() {
+      const pref = getThemePreference();
+      setIsDark(resolveThemePreference(pref) === 'dark');
+    }
+    const unsub1 = subscribeThemePreferenceChanges(update);
+    const unsub2 = subscribeSystemThemeChanges(update);
+    return () => { unsub1(); unsub2(); };
+  }, []);
 
   function openSheet(mode: 'switch' | 'login' | 'register') {
     setSheetMode(mode);
@@ -24,11 +45,15 @@ export function UserCard() {
         style={{
           borderRadius: 20,
           padding: 20,
-          border: '1px solid rgba(255,255,255,0.19)',
-          background:
-            'radial-gradient(circle at 15% 0%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, #E8866F 0%, #D4664A 50%, #C75B3A 100%)',
-          boxShadow:
-            '0 8px 24px -4px rgba(199,91,58,0.19), 0 20px 40px -8px rgba(199,91,58,0.13), 0 3px 8px rgba(255,255,255,0.31)',
+          border: isDark
+            ? '1px solid rgba(255,255,255,0.15)'
+            : '1px solid rgba(255,255,255,0.19)',
+          background: isDark
+            ? 'radial-gradient(circle at 15% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 50%), linear-gradient(145deg, #8B3A25 0%, #6B2E1E 50%, #4A1F14 100%)'
+            : 'radial-gradient(circle at 15% 0%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, #E8866F 0%, #D4664A 50%, #C75B3A 100%)',
+          boxShadow: isDark
+            ? '0 8px 24px -4px rgba(199,91,58,0.12), 0 20px 40px -8px rgba(199,91,58,0.08)'
+            : '0 8px 24px -4px rgba(199,91,58,0.19), 0 20px 40px -8px rgba(199,91,58,0.13), 0 3px 8px rgba(255,255,255,0.31)',
           backdropFilter: 'blur(20px)',
         }}
       >
