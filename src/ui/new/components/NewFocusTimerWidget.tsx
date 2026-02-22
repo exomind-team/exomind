@@ -351,7 +351,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   );
 
   return (
-    <div className="bg-[#FAF7F5]" data-testid="new-focus-timer-widget">
+    <div className="bg-surface" data-testid="new-focus-timer-widget">
       {uiState === 'idle' && (
         <section className="safe-area-pt-plus">
           <div className="relative mx-auto h-[104px] w-full max-w-[390px]" data-testid="new-focus-state-idle">

@@ -68,7 +68,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   }), []);
 
   return (
-    <div className="mb-2 shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5]" data-testid="new-now-input-row">
+    <div className="mb-2 shrink-0 border-t border-subtle bg-surface" data-testid="new-now-input-row">
       <div className="px-4 py-2">
         <div className="flex items-center gap-2">
           <button
@@ -91,7 +91,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               rows={1}
-              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 pr-10 text-sm text-stone-700 placeholder:text-stone-400"
+              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-card px-4 py-2 pr-10 text-sm text-strong placeholder:text-muted"
               data-testid="new-now-input-textarea"
             />
             <button
