@@ -18,8 +18,8 @@ export function MessageInput({ onSend }: MessageInputProps) {
     <div style={{
       display: 'flex',
       padding: '16px',
-      borderTop: '1px solid #e5e5ea',
-      backgroundColor: '#fff',
+      borderTop: '1px solid hsl(var(--border-card, 0 0% 15%))',
+      backgroundColor: 'hsl(var(--background, 0 0% 4%))',
     }}>
       <input
         type="text"
@@ -31,9 +31,11 @@ export function MessageInput({ onSend }: MessageInputProps) {
           flex: 1,
           padding: '12px 16px',
           borderRadius: '20px',
-          border: '1px solid #e5e5ea',
+          border: '1px solid hsl(var(--border-card, 0 0% 15%))',
           outline: 'none',
           fontSize: '14px',
+          backgroundColor: 'hsl(var(--bg-card, 0 0% 10%))',
+          color: 'hsl(var(--text-primary, 0 0% 100%))',
         }}
       />
     </div>
