@@ -46,18 +46,15 @@ function AgentCard({ agent }: { agent: AgentCardData }) {
     <div className="relative h-[140px] w-full overflow-hidden rounded-[20px]">
       {/* 光晕背景 */}
       <div
-        className="absolute left-4 top-[18px] h-[120px] w-[321px] rounded-[20px] blur-[8px]"
-        style={{ background: 'linear-gradient(145deg, #EDADA0 0%, #E08E7A 50%, #D4785F 100%)' }}
+        className="absolute left-4 top-[18px] h-[120px] w-[321px] rounded-[20px] blur-[8px] bg-[linear-gradient(145deg,#EDADA0_0%,#E08E7A_50%,#D4785F_100%)]"
       />
       {/* 毛玻璃卡片内容 */}
       <div
-        className="absolute inset-[8px] flex items-start gap-[14px] rounded-[20px] border border-white/50 p-[16px_18px] backdrop-blur-[24px]"
-        style={{ background: 'rgba(255,255,255,0.63)' }}
+        className="absolute inset-[8px] flex items-start gap-[14px] rounded-[20px] border border-white/50 p-[16px_18px] backdrop-blur-[24px] bg-white/[0.63]"
       >
         {/* Avatar */}
         <div
-          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[22px]"
-          style={{ background: 'linear-gradient(145deg, #E8866F 0%, #C75B3A 100%)' }}
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-[22px] bg-[linear-gradient(145deg,#E8866F_0%,#C75B3A_100%)]"
         >
           <Icon size={22} className="text-white" />
         </div>
@@ -95,6 +92,7 @@ export function AgentsPage() {
         <span className="text-[18px] font-semibold leading-[1.5] text-[#1C1917]">Agents</span>
         <button
           type="button"
+          aria-label="添加 Agent"
           className="flex h-9 w-9 items-center justify-center rounded-[18px] bg-[#F5F0ED]"
         >
           <Plus size={18} className="text-[#1C1917]" />
