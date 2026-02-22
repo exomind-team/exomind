@@ -43,6 +43,10 @@
     --border-subtle: 30 10% 91%;
     --brand-accent: 14 76% 66%;
     --brand-gradient: 14 76% 66%, 14 68% 53%, 14 64% 48%;
+
+    /* UserCard 渐变背景和阴影 */
+    --user-card-bg: radial-gradient(circle at 15% 0%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, #E8866F 0%, #D4664A 50%, #C75B3A 100%);
+    --user-card-shadow: 0 8px 24px -4px rgba(199,91,58,0.19), 0 20px 40px -8px rgba(199,91,58,0.13), 0 3px 8px rgba(255,255,255,0.31);
   }
 
   .dark {
@@ -84,6 +88,10 @@
     --border-subtle: 20 5% 12%;      /* #211F1E Stone-850 approx */
     --brand-accent: 14 56% 50%;      /* #C75B3A */
     --brand-gradient: 14 56% 50%, 14 60% 42%, 14 65% 35%;
+
+    /* UserCard 渐变背景和阴影 - 暗色 */
+    --user-card-bg: radial-gradient(circle at 15% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 50%), linear-gradient(145deg, #8B3A25 0%, #6B2E1E 50%, #4A1F14 100%);
+    --user-card-shadow: 0 8px 24px -4px rgba(199,91,58,0.12), 0 20px 40px -8px rgba(199,91,58,0.08);
   }
 }
 

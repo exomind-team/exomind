@@ -20,11 +20,7 @@
   margin: 0;
   font-size: 1.25rem;
   font-weight: 600;
-  color: #1e293b;
-}
-
-.dark .device-panel-header h2 {
-  color: #FAFAF9;
+  color: hsl(var(--text-primary));
 }
 
 .device-section {
@@ -35,13 +31,9 @@
 .device-section h3 {
   font-size: 0.75rem;
   font-weight: 500;
-  color: #94a3b8;
+  color: hsl(var(--text-muted));
   margin: 0 0 0.25rem 0;
   padding: 0 1rem;
-}
-
-.dark .device-section h3 {
-  color: #78716C;
 }
 
 .device-list {
@@ -62,19 +54,11 @@
 }
 
 .device-item:hover {
-  background-color: #f1f5f9;
-}
-
-.dark .device-item:hover {
-  background-color: #292524;
+  background-color: hsl(var(--border-card));
 }
 
 .device-item.selected {
-  background-color: #e0f2fe;
-}
-
-.dark .device-item.selected {
-  background-color: #1C1917;
+  background-color: hsl(var(--bg-card));
 }
 
 .device-icon {
@@ -85,12 +69,8 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  background-color: #f1f5f9;
+  background-color: hsl(var(--border-card));
   border-radius: 50%;
-}
-
-.dark .device-icon {
-  background-color: #292524;
 }
 
 .device-info {
@@ -104,23 +84,15 @@
 .device-name {
   font-size: 0.9375rem;
   font-weight: 500;
-  color: #1e293b;
+  color: hsl(var(--text-primary));
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.dark .device-name {
-  color: #FAFAF9;
-}
-
 .device-ip {
   font-size: 0.75rem;
-  color: #94a3b8;
-}
-
-.dark .device-ip {
-  color: #A8A29E;
+  color: hsl(var(--text-muted));
 }
 
 .selected-indicator {
@@ -131,13 +103,9 @@
 
 .empty-message {
   font-size: 0.875rem;
-  color: #94a3b8;
+  color: hsl(var(--text-muted));
   margin: 0;
   padding: 1rem;
-}
-
-.dark .empty-message {
-  color: #78716C;
 }
 
 /* ========== 移动端布局 (< 768px) ========== */
