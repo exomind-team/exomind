@@ -47,6 +47,31 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
     setValue('');
   }, [onSend, value]);
 
+  const handlePasteFromClipboard = useCallback(async () => {
+    try {
+      const text = await navigator.clipboard.readText();
+      if (!text) return;
+      setValue((prev) => {
+        const textarea = textareaRef.current;
+        if (textarea) {
+          const start = textarea.selectionStart;
+          const end = textarea.selectionEnd;
+          const next = prev.slice(0, start) + text + prev.slice(end);
+          // 延迟设置光标位置到粘贴文本之后
+          requestAnimationFrame(() => {
+            textarea.selectionStart = textarea.selectionEnd = start + text.length;
+            textarea.focus();
+          });
+          return next;
+        }
+        return prev + text;
+      });
+    } catch (err) {
+      // 权限被拒绝或不支持
+      console.warn('[clipboard] readText failed:', err);
+    }
+  }, []);
+
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
       textareaRef.current?.blur();
@@ -96,7 +121,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
             />
             <button
               type="button"
-              onClick={() => textareaRef.current?.focus()}
+              onClick={handlePasteFromClipboard}
               className="absolute right-[7px] top-1/2 flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] text-stone-400"
               aria-label="剪贴板"
               data-testid="new-now-input-inline-button"

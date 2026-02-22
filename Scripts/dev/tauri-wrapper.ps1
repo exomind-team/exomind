@@ -209,6 +209,33 @@ function Ensure-AndroidLauncherIcons {
   }
 }
 
+# Resolve a free dev port for Vite when not explicitly configured.
+# (未显式配置端口时，自动寻找空闲端口)
+function Resolve-FreeDevPort {
+  if ($env:EXOMIND_WEB_PORT) {
+    return
+  }
+
+  $scriptPath = Join-Path $PSScriptRoot "find-free-port.ts"
+  if (-not (Test-Path -LiteralPath $scriptPath)) {
+    return
+  }
+
+  try {
+    $port = (& bun $scriptPath 1420 2>$null).Trim()
+    if ($port -and $port -match '^\d+$') {
+      $env:EXOMIND_WEB_PORT = $port
+      $hmr = [int]$port + 1
+      if ($hmr -le 65535) {
+        $env:EXOMIND_HMR_PORT = "$hmr"
+      }
+      Write-Host "[tauri-wrapper] Dev port resolved: $port (HMR: $hmr)"
+    }
+  } catch {
+    Write-Warning "[tauri-wrapper] Failed to resolve free port: $_"
+  }
+}
+
 $projectRoot = Join-Path $PSScriptRoot "..\..\"
 $projectRoot = [System.IO.Path]::GetFullPath($projectRoot)
 $manifestPath = Join-Path $PSScriptRoot "..\..\src-tauri\gen\android\app\src\main\AndroidManifest.xml"
@@ -224,6 +251,12 @@ Ensure-AndroidReleaseCleartextTraffic -BuildGradlePath $buildGradlePath
 #（兼容仅安装 rustup、但 PATH 缺少 cargo 代理的环境）
 Ensure-CargoFromRustup
 
+# Resolve free dev port for `tauri dev` (为 tauri dev 自动寻找空闲端口)
+$isTauriDev = $TauriArgs -and $TauriArgs.Count -ge 1 -and $TauriArgs[0] -eq "dev"
+if ($isTauriDev) {
+  Resolve-FreeDevPort
+}
+
 # Sync launcher icons before android build/dev/run/init (构建前同步 Android 图标)
 $androidCommandsNeedIconSync = @("build", "dev", "run", "init")
 if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android" -and ($androidCommandsNeedIconSync -contains $TauriArgs[1])) {
@@ -232,7 +265,14 @@ if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android" -and
 
 # Run tauri CLI (执行 tauri 命令)
 if ($TauriArgs -and $TauriArgs.Count -gt 0) {
-  & tauri @TauriArgs
+  # Inject --config to override devUrl when port differs from default
+  # (端口非默认值时，通过 --config 覆盖 devUrl)
+  if ($isTauriDev -and $env:EXOMIND_WEB_PORT -and $env:EXOMIND_WEB_PORT -ne "1420") {
+    $devUrlOverride = '{"build":{"devUrl":"http://localhost:' + $env:EXOMIND_WEB_PORT + '"}}'
+    & tauri @TauriArgs --config $devUrlOverride
+  } else {
+    & tauri @TauriArgs
+  }
 } else {
   & tauri
 }
