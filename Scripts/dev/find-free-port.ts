@@ -3,6 +3,11 @@
  * Usage: bun Scripts/dev/find-free-port.ts [preferredPort]
  *
  * If preferredPort is available, prints it. Otherwise finds a random free port.
+ *
+ * NOTE: There is a small TOCTOU window between this script releasing the port
+ * and Vite binding to it. In the Tauri scenario, if another process claims the
+ * port in that window, the injected devUrl will be stale. This is extremely
+ * unlikely in local dev and mitigated by strictPort when EXOMIND_WEB_PORT is set.
  */
 import { createServer } from "net";
 

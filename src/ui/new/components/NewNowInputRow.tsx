@@ -66,8 +66,9 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
         }
         return prev + text;
       });
-    } catch {
-      // 权限被拒绝或不支持，静默忽略
+    } catch (err) {
+      // 权限被拒绝或不支持
+      console.warn('[clipboard] readText failed:', err);
     }
   }, []);
 
