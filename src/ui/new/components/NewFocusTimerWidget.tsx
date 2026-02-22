@@ -367,7 +367,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
               aria-expanded="false"
               aria-controls="new-focus-config-panel"
               aria-label="展开专注配置（Expand focus configuration）"
-              className={`absolute left-4 right-4 top-4 flex h-[68px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] dark:border-[#FFFFFF15] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:bg-[#1C1917] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()}`}
+              className={`absolute left-4 right-4 top-4 flex h-[68px] items-center justify-between rounded-[24px] border border-[#FFFFFF80] dark:border-[#FFFFFF15] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)] px-5 py-[18px] text-left backdrop-blur-[24px] ${glassCardShadowClass()}`}
             >
               <div className="mr-3 flex min-w-0 items-center gap-3">
                 <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
@@ -378,7 +378,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                   <p className="truncate text-[12px] leading-[1.4] text-[#78716C]">配置时间块、开始倒计时</p>
                 </div>
               </div>
-              <ChevronRight size={20} className="shrink-0 text-[#C75B3A]" />
+              <ChevronRight size={20} className="shrink-0 text-[#C75B3A] dark:text-[#E8734E]" />
             </button>
           </div>
         </section>
