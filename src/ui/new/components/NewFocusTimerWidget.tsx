@@ -499,7 +499,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                           setCountdownMinutes(minutes);
                         }}
                         className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${
-                          countdownMinutes === minutes ? 'border border-[#FFFFFF60] bg-white/90 font-semibold text-[#1C1917]' : 'bg-transparent text-[#78716C]'
+                          countdownMinutes === minutes ? 'border border-[#FFFFFF60] bg-white/90 dark:bg-[#FFFFFF20] font-semibold text-[#1C1917] dark:text-[#FAFAF9]' : 'bg-transparent text-[#78716C]'
                         }`}
                       >
                         {minutes}m
@@ -515,7 +515,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                 onClick={() => {
                   void handleStart();
                 }}
-                className="h-10 w-full rounded-[12px] bg-[#C75B3A] text-[14px] font-medium hover:bg-[#B24D2F]"
+                className="h-10 w-full rounded-[12px] bg-[#C75B3A] text-[14px] font-medium hover:bg-[#B24D2F] dark:bg-[#C75B3A] dark:hover:bg-[#B24D2F]"
               >
                 <Play size={16} className="mr-2" />
                 开始
@@ -529,20 +529,20 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
         <section className="safe-area-pt-plus" data-testid="new-focus-state-running">
           <div className="relative mx-auto h-[200px] w-full max-w-[390px]">
             <div
-              className="absolute left-1/2 top-[20px] h-[163px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] blur-[8px]"
+              className="absolute left-1/2 top-[20px] h-[163px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14] blur-[8px]"
               aria-hidden
             />
             <div
               data-testid="new-focus-running-task-card"
-              className={`absolute left-4 right-4 top-4 flex h-[169px] flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
+              className={`absolute left-4 right-4 top-4 flex h-[169px] flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] dark:border-[#FFFFFF15] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:bg-[#1C1917] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
             >
               <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] text-[#C75B3A]">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
                   <Target size={20} />
                 </div>
-                <p className="truncate text-[20px] font-semibold leading-[1.4] text-[#1C1917]">{taskName || '未命名任务'}</p>
+                <p className="truncate text-[20px] font-semibold leading-[1.4] text-[#1C1917] dark:text-[#FAFAF9]">{taskName || '未命名任务'}</p>
               </div>
-              <div className="h-px w-full bg-[#D4785F30]" />
+              <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />
               <div className="flex items-center justify-between px-1 pt-1">
                 <Button
                   type="button"
@@ -554,14 +554,14 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                   className={
                     isPaused
                       ? 'h-11 w-11 rounded-[12px] bg-[#16A34A] p-0 text-white hover:bg-[#15803D]'
-                      : 'h-11 w-11 rounded-[12px] bg-[#EDECE9] p-0 text-[#1C1917] hover:bg-[#E5E3DF]'
+                      : 'h-11 w-11 rounded-[12px] bg-[#EDECE9] dark:bg-[#292524] p-0 text-[#1C1917] dark:text-[#FAFAF9] hover:bg-[#E5E3DF] dark:hover:bg-[#3D3835]'
                   }
                 >
                   {isPaused ? <Play size={18} /> : <Pause size={18} />}
                 </Button>
                 <span
                   className={`font-mono text-[40px] font-normal leading-[1.1] tracking-[2px] ${
-                    isCountdownWarning ? 'text-[#C75B3A]' : 'text-[#1C1917]'
+                    isCountdownWarning ? 'text-[#C75B3A]' : 'text-[#1C1917] dark:text-[#FAFAF9]'
                   }`}
                   data-testid="new-focus-running-clock"
                 >
@@ -574,7 +574,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                   data-testid="new-focus-end-button"
                   aria-label="结束（End）"
                   onClick={handleOpenEndDialog}
-                  className="h-11 w-11 rounded-[12px] bg-[#FDECEB] p-0 text-[#C75B3A] hover:bg-[#F8DED9]"
+                  className="h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#2A1510] p-0 text-[#C75B3A] dark:text-[#E8734E] hover:bg-[#F8DED9] dark:hover:bg-[#3D1F15]"
                 >
                   <Square size={18} />
                 </Button>
