@@ -1,4 +1,4 @@
-import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation } from '@tanstack/react-router';
+import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useParams } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useState } from 'react';
 import { Target, Settings, Bot, SquareCheckBig } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -42,6 +42,26 @@ const MOSSASRTestPage = lazy(async () => {
 const AgentsPage = lazy(async () => {
   const module = await import('@/ui/new/pages/AgentsPage');
   return { default: module.AgentsPage };
+});
+
+const AgentDetailPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/agents/AgentDetailPage');
+  return { default: module.AgentDetailPage };
+});
+
+const ActorDetailPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/agents/ActorDetailPage');
+  return { default: module.ActorDetailPage };
+});
+
+const AgentConversationPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/agents/AgentConversationPage');
+  return { default: module.AgentConversationPage };
+});
+
+const AgentMarketPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/agents/AgentMarketPage');
+  return { default: module.AgentMarketPage };
 });
 
 function PageFallback() {
@@ -219,6 +239,57 @@ const newAgentsRoute = createRoute({
   },
 });
 
+const newAgentDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/agent/$agentId',
+  component: function NewAgentDetail() {
+    const { agentId } = useParams({ strict: false }) as { agentId?: string };
+    return (
+      <LazyPage>
+        <AgentDetailPage agentId={agentId} />
+      </LazyPage>
+    );
+  },
+});
+
+const newActorDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/actor/$actorId',
+  component: function NewActorDetail() {
+    const { actorId } = useParams({ strict: false }) as { actorId?: string };
+    return (
+      <LazyPage>
+        <ActorDetailPage actorId={actorId} />
+      </LazyPage>
+    );
+  },
+});
+
+const newAgentConversationRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/chat/$agentId',
+  component: function NewAgentConversation() {
+    const { agentId } = useParams({ strict: false }) as { agentId?: string };
+    return (
+      <LazyPage>
+        <AgentConversationPage agentId={agentId} />
+      </LazyPage>
+    );
+  },
+});
+
+const newAgentMarketRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/market',
+  component: function NewAgentMarket() {
+    return (
+      <LazyPage>
+        <AgentMarketPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newEventlogRoute,
@@ -229,6 +300,10 @@ const newRouteTree = newRootRoute.addChildren([
   newAsrTestRoute,
   newMossTestRoute,
   newAgentsRoute,
+  newAgentDetailRoute,
+  newActorDetailRoute,
+  newAgentConversationRoute,
+  newAgentMarketRoute,
 ]);
 
 const newUiRouter = createRouter({ routeTree: newRouteTree });

@@ -1,9 +1,12 @@
 import { getUseMockDataEnabled } from '@/config/mock-data';
+import { AgentWebAdapter } from '@/lib/adapters/agent-web-adapter';
+import { AgentMockAdapter } from '@/lib/adapters/mock/agent-mock-adapter';
 import { TaskMockAdapter } from '@/lib/adapters/mock/task-mock-adapter';
 import { TaskWebAdapter } from '@/lib/adapters/task-web-adapter';
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { WebStorageAdapter } from '../adapters/web-storage';
+import type { IAgentPort } from './interfaces/agent.port';
 import type { IASRPort } from './interfaces/asr.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
 import type { IStoragePort } from './interfaces/storage.port';
@@ -17,6 +20,7 @@ export interface RuntimeBootstrapResult {
   storage: IStoragePort;
   eventlog: IEventLogPort;
   task: ITaskPort;
+  agent: IAgentPort;
 }
 
 export interface RuntimeBootstrapOptions {
@@ -54,6 +58,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
   const asr = new VolcanoEngineASRAdapter();
   const useMockData = options.useMockData ?? getUseMockDataEnabled();
   const task: ITaskPort = useMockData ? new TaskMockAdapter() : new TaskWebAdapter();
+  const agent: IAgentPort = useMockData ? new AgentMockAdapter() : new AgentWebAdapter();
 
   if (runtime === 'tauri') {
     return {
@@ -63,6 +68,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
       // 临时统一到 PouchDB，避免 Tauri 原生 EventLog 与 UI 读取源分裂（#144）
       eventlog: new WebEventLogStorageAdapter(),
       task,
+      agent,
     };
   }
 
@@ -72,5 +78,6 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
     storage: new WebStorageAdapter(),
     eventlog: new WebEventLogStorageAdapter(),
     task,
+    agent,
   };
 }
