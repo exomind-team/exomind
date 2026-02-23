@@ -1,11 +1,14 @@
 import { getUseMockDataEnabled } from '@/config/mock-data';
 import { MeWebAdapter } from '@/lib/adapters/me-web-adapter';
 import { MeMockAdapter } from '@/lib/adapters/mock/me-mock-adapter';
+import { AgentWebAdapter } from '@/lib/adapters/agent-web-adapter';
+import { AgentMockAdapter } from '@/lib/adapters/mock/agent-mock-adapter';
 import { TaskMockAdapter } from '@/lib/adapters/mock/task-mock-adapter';
 import { TaskWebAdapter } from '@/lib/adapters/task-web-adapter';
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { WebStorageAdapter } from '../adapters/web-storage';
+import type { IAgentPort } from './interfaces/agent.port';
 import type { IASRPort } from './interfaces/asr.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
 import type { IMePort } from './interfaces/me.port';
@@ -21,6 +24,7 @@ export interface RuntimeBootstrapResult {
   eventlog: IEventLogPort;
   task: ITaskPort;
   me: IMePort;
+  agent: IAgentPort;
 }
 
 export interface RuntimeBootstrapOptions {
@@ -59,6 +63,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
   const useMockData = options.useMockData ?? getUseMockDataEnabled();
   const task: ITaskPort = useMockData ? new TaskMockAdapter() : new TaskWebAdapter();
   const me: IMePort = useMockData ? new MeMockAdapter() : new MeWebAdapter();
+  const agent: IAgentPort = useMockData ? new AgentMockAdapter() : new AgentWebAdapter();
 
   if (runtime === 'tauri') {
     return {
@@ -69,6 +74,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
       eventlog: new WebEventLogStorageAdapter(),
       task,
       me,
+      agent,
     };
   }
 
@@ -79,5 +85,6 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
     eventlog: new WebEventLogStorageAdapter(),
     task,
     me,
+    agent,
   };
 }

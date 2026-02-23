@@ -15,6 +15,7 @@ describe('environment bootstrap', () => {
     expect(result.eventlog.constructor.name).toBe('WebEventLogStorageAdapter');
     expect(result.task.constructor.name).toBe('TaskWebAdapter');
     expect(result.me.constructor.name).toBe('MeWebAdapter');
+    expect(result.agent.constructor.name).toBe('AgentWebAdapter');
   });
 
   it('createRuntimeBootstrap should use pouchdb eventlog adapter for tauri runtime', () => {
@@ -28,11 +29,13 @@ describe('environment bootstrap', () => {
     expect(tauriResult.eventlog.constructor.name).toBe(webResult.eventlog.constructor.name);
     expect(tauriResult.task.constructor.name).toBe('TaskWebAdapter');
     expect(tauriResult.me.constructor.name).toBe('MeWebAdapter');
+    expect(tauriResult.agent.constructor.name).toBe('AgentWebAdapter');
   });
 
   it('createRuntimeBootstrap should use mock task adapter when mock flag is enabled', () => {
     const result = createRuntimeBootstrap({ runtime: 'web', useMockData: true });
     expect(result.task.constructor.name).toBe('TaskMockAdapter');
     expect(result.me.constructor.name).toBe('MeMockAdapter');
+    expect(result.agent.constructor.name).toBe('AgentMockAdapter');
   });
 });
