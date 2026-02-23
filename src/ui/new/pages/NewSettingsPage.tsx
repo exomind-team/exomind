@@ -538,7 +538,7 @@ export function NewSettingsPage() {
             <SettingRow
               icon={<RefreshCw className="h-[18px] w-[18px] text-[#78716C]" />}
               label="更新"
-              onClick={() => {}}
+              onClick={() => navigate({ to: '/update' })}
               right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
             />
             <Divider />
