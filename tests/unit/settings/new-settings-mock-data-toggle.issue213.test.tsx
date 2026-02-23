@@ -58,6 +58,10 @@ vi.mock('@/config/mock-data', () => ({
   subscribeUseMockDataChanges: () => () => {},
 }));
 
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => vi.fn(),
+}));
+
 import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
 
 describe('settings mock-data toggle issue-213（设置页测试数据开关）', () => {
@@ -77,4 +81,3 @@ describe('settings mock-data toggle issue-213（设置页测试数据开关）',
     expect(mocks.setUseMockDataEnabled).toHaveBeenCalledWith(true);
   });
 });
-
