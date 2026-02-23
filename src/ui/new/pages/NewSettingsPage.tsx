@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { Switch } from '@/components/ui/switch';
 import { getEventLogService } from '@/lib/services';
 import {
@@ -717,24 +718,26 @@ export function NewSettingsPage() {
         </DialogContent>
       </Dialog>
 
-      {/* ── Feature Toggles Dialog ── */}
-      <Dialog open={featureTogglesDialogOpen} onOpenChange={setFeatureTogglesDialogOpen}>
-        <DialogContent className="rounded-2xl">
-          <DialogHeader>
-            <DialogTitle>功能开关</DialogTitle>
-            <DialogDescription>启用或关闭实验性功能</DialogDescription>
-          </DialogHeader>
-          <div className="space-y-2">
-            <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
-              <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
-              <Switch
-                checked={agentPageEnabled}
-                onCheckedChange={handleAgentPageEnabledToggle}
-              />
+      {/* ── Feature Toggles Drawer ── */}
+      <Drawer open={featureTogglesDialogOpen} onOpenChange={setFeatureTogglesDialogOpen}>
+        <DrawerContent className="dark:bg-[#1C1917]">
+          <div className="px-5 pb-8 pt-2">
+            <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+              功能开关
+            </DrawerTitle>
+            <p className="mt-1 text-center text-xs text-[#A8A29E]">启用或关闭实验性功能</p>
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
+                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
+                <Switch
+                  checked={agentPageEnabled}
+                  onCheckedChange={handleAgentPageEnabledToggle}
+                />
+              </div>
             </div>
           </div>
-        </DialogContent>
-      </Dialog>
+        </DrawerContent>
+      </Drawer>
 
       {/* ── Sync Server Dialog ── */}
       <Dialog open={syncDialogOpen} onOpenChange={setSyncDialogOpen}>
