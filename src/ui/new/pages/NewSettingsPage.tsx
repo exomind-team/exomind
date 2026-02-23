@@ -502,17 +502,6 @@ export function NewSettingsPage() {
                   <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
                 </div>
                 <SettingRow
-                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="启用 Agent 页面"
-                  right={
-                    <Switch
-                      checked={agentPageEnabled}
-                      onCheckedChange={handleAgentPageEnabledToggle}
-                    />
-                  }
-                />
-                <Divider />
-                <SettingRow
                   icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="使用测试数据"
                   right={
@@ -533,43 +522,8 @@ export function NewSettingsPage() {
                 <Divider />
                 <SettingRow
                   icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="返回旧 UI"
+                  label="旧版页面"
                   onClick={handleSwitchToOldUI}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="语音测试页面"
-                  onClick={() => navigate({ to: '/asr-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="MOSS 调试"
-                  onClick={() => navigate({ to: '/moss-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Speech className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="ASR 语音识别"
-                  onClick={() => navigate({ to: '/asr-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Users className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="多用户管理"
-                  onClick={() => navigate({ to: '/user-manage' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<House className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="旧首页"
-                  onClick={() => { setUIMode('old'); window.location.pathname = '/'; }}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
               </>
@@ -584,28 +538,28 @@ export function NewSettingsPage() {
             <SettingRow
               icon={<RefreshCw className="h-[18px] w-[18px] text-[#78716C]" />}
               label="更新"
-              onClick={() => navigate({ to: '/update' })}
+              onClick={() => {}}
               right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
             />
             <Divider />
             <SettingRow
               icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
               label="遥测"
-              onClick={() => navigate({ to: '/telemetry' })}
+              onClick={() => {}}
               right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
             />
             <Divider />
             <SettingRow
               icon={<Bug className="h-[18px] w-[18px] text-[#78716C]" />}
               label="报告问题"
-              onClick={() => navigate({ to: '/report' })}
+              onClick={() => {}}
               right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
             />
             <Divider />
             <SettingRow
               icon={<ScrollText className="h-[18px] w-[18px] text-[#78716C]" />}
               label="调试日志"
-              onClick={() => navigate({ to: '/debug-log' })}
+              onClick={() => {}}
               right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
             />
           </SectionCard>
