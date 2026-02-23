@@ -100,5 +100,19 @@ describe('issue-213 task ui pages（任务页面还原）', () => {
       expect(screen.getByText('眼睛健康')).toBeInTheDocument();
     });
   });
+
+  it('applies dark-mode classes for long-term goals section（长期区域暗色模式样式）', async () => {
+    render(<NewTasksPage />);
+    fireEvent.click(screen.getByRole('button', { name: '长期' }));
+
+    await waitFor(() => {
+      const group = screen.getByTestId('tasks-goals-group-goal-group-business');
+      const card = screen.getByTestId('tasks-goal-card-goal-biz-exomind-release');
+
+      expect(group.className).toContain('dark:text-[#FAFAF9]');
+      expect(card.className).toContain('dark:border-[#3A3432]');
+      expect(card.className).toContain('dark:bg-[#1C1917]');
+    });
+  });
 });
 
