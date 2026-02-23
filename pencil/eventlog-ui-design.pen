@@ -6212,6 +6212,85 @@
                     },
                     {
                       "type": "frame",
+                      "id": "4JKni",
+                      "name": "Mock Data Row",
+                      "width": "fill_container",
+                      "padding": [
+                        14,
+                        16
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "1w7DN",
+                          "name": "devLeft",
+                          "gap": 12,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "K7114",
+                              "name": "devIcon",
+                              "width": 18,
+                              "height": 18,
+                              "iconFontName": "database",
+                              "iconFontFamily": "lucide",
+                              "fill": "#78716C"
+                            },
+                            {
+                              "type": "text",
+                              "id": "Mp3Mx",
+                              "name": "devLabel",
+                              "fill": "#1C1917",
+                              "content": "使用测试数据",
+                              "lineHeight": 1.4,
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "s4biE",
+                          "name": "devRight",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "fhJLo",
+                              "type": "ref",
+                              "ref": "c8fiq",
+                              "name": "mockSwitch"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "p5JQc",
+                      "name": "divWrap",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "id": "TcG4q",
+                          "name": "divider",
+                          "fill": "#E7E5E4",
+                          "width": "fill_container",
+                          "height": 1
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
                       "id": "OgWHL",
                       "name": "divWrap",
                       "width": "fill_container",
@@ -14700,6 +14779,85 @@
                               }
                             }
                           ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "PcDls",
+                      "name": "Mock Data Row",
+                      "width": "fill_container",
+                      "padding": [
+                        14,
+                        16
+                      ],
+                      "justifyContent": "space_between",
+                      "alignItems": "center",
+                      "children": [
+                        {
+                          "type": "frame",
+                          "id": "5zqeb",
+                          "name": "devLeft",
+                          "gap": 12,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "type": "icon_font",
+                              "id": "etyip",
+                              "name": "devIcon",
+                              "width": 18,
+                              "height": 18,
+                              "iconFontName": "database",
+                              "iconFontFamily": "lucide",
+                              "fill": "#78716C"
+                            },
+                            {
+                              "type": "text",
+                              "id": "E5dHR",
+                              "name": "devLabel",
+                              "fill": "#FAFAF9",
+                              "content": "使用测试数据",
+                              "lineHeight": 1.4,
+                              "fontFamily": "Inter",
+                              "fontSize": 14,
+                              "fontWeight": "normal"
+                            }
+                          ]
+                        },
+                        {
+                          "type": "frame",
+                          "id": "Fj43r",
+                          "name": "devRight",
+                          "gap": 8,
+                          "alignItems": "center",
+                          "children": [
+                            {
+                              "id": "NsuPB",
+                              "type": "ref",
+                              "ref": "c8fiq",
+                              "name": "mockSwitch"
+                            }
+                          ]
+                        }
+                      ]
+                    },
+                    {
+                      "type": "frame",
+                      "id": "Qs0v4",
+                      "name": "divWrap",
+                      "width": "fill_container",
+                      "padding": [
+                        0,
+                        16
+                      ],
+                      "children": [
+                        {
+                          "type": "rectangle",
+                          "id": "7gmtM",
+                          "name": "divider",
+                          "fill": "#292524",
+                          "width": "fill_container",
+                          "height": 1
                         }
                       ]
                     },
