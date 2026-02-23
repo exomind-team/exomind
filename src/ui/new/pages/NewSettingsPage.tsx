@@ -482,6 +482,101 @@ export function NewSettingsPage() {
           </SectionCard>
         </section>
 
+        {/* ── Developer Section (开发者) ── */}
+        <section className="space-y-2">
+          <SectionTitle>开发者</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="开发者模式"
+              right={
+                <Switch
+                  checked={developerMode}
+                  onCheckedChange={handleDeveloperModeToggle}
+                />
+              }
+            />
+            {developerMode && (
+              <>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
+                </div>
+                <SettingRow
+                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="启用 Agent 页面"
+                  right={
+                    <Switch
+                      checked={agentPageEnabled}
+                      onCheckedChange={handleAgentPageEnabledToggle}
+                    />
+                  }
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="使用测试数据"
+                  right={
+                    <Switch
+                      data-testid="new-settings-use-mock-data-switch"
+                      checked={useMockData}
+                      onCheckedChange={handleUseMockDataToggle}
+                    />
+                  }
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="功能开关"
+                  onClick={() => setFeatureTogglesDialogOpen(true)}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="返回旧 UI"
+                  onClick={handleSwitchToOldUI}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="语音测试页面"
+                  onClick={() => navigate({ to: '/asr-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="MOSS 调试"
+                  onClick={() => navigate({ to: '/moss-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Speech className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="ASR 语音识别"
+                  onClick={() => navigate({ to: '/asr-test' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Users className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="多用户管理"
+                  onClick={() => navigate({ to: '/user-manage' })}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<House className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="旧首页"
+                  onClick={() => { setUIMode('old'); window.location.pathname = '/'; }}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+              </>
+            )}
+          </SectionCard>
+        </section>
+
         {/* ── More Section (更多) ── */}
         <section className="space-y-2">
           <SectionTitle>更多</SectionTitle>
@@ -582,101 +677,6 @@ export function NewSettingsPage() {
                 ExoMind — 个人生命成长助手，探索生命与认知的本质。
               </p>
             </div>
-          </SectionCard>
-        </section>
-
-        {/* ── Developer Section (开发者) ── */}
-        <section className="space-y-2">
-          <SectionTitle>开发者</SectionTitle>
-          <SectionCard>
-            <SettingRow
-              icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="开发者模式"
-              right={
-                <Switch
-                  checked={developerMode}
-                  onCheckedChange={handleDeveloperModeToggle}
-                />
-              }
-            />
-            {developerMode && (
-              <>
-                <div className="pb-[14px] pl-[46px] pr-4">
-                  <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
-                </div>
-                <SettingRow
-                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="启用 Agent 页面"
-                  right={
-                    <Switch
-                      checked={agentPageEnabled}
-                      onCheckedChange={handleAgentPageEnabledToggle}
-                    />
-                  }
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="使用测试数据"
-                  right={
-                    <Switch
-                      data-testid="new-settings-use-mock-data-switch"
-                      checked={useMockData}
-                      onCheckedChange={handleUseMockDataToggle}
-                    />
-                  }
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="功能开关"
-                  onClick={() => setFeatureTogglesDialogOpen(true)}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="返回旧 UI"
-                  onClick={handleSwitchToOldUI}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="语音测试页面"
-                  onClick={() => navigate({ to: '/asr-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="MOSS 调试"
-                  onClick={() => navigate({ to: '/moss-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Speech className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="ASR 语音识别"
-                  onClick={() => navigate({ to: '/asr-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Users className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="多用户管理"
-                  onClick={() => navigate({ to: '/user-manage' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<House className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="旧首页"
-                  onClick={() => { setUIMode('old'); window.location.pathname = '/'; }}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-              </>
-            )}
           </SectionCard>
         </section>
 
