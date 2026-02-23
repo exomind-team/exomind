@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Users, LogOut, LogIn, UserPlus } from 'lucide-react';
+import { Sparkles, Users, LogOut, LogIn, UserPlus } from 'lucide-react';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { SwitchAccountSheet } from './SwitchAccountSheet';
 
@@ -58,13 +58,18 @@ export function UserCard() {
           {isLoggedIn ? (
             <>
               <button
+                className="flex items-center gap-1.5 rounded-[10px] bg-white/[0.22] px-3 py-2"
+              >
+                <Sparkles className="h-[15px] w-[15px] text-[#FFE4B5]" />
+                <span className="text-[13px] font-medium text-[#FFE4B5]">激活</span>
+              </button>
+              <button
                 className="flex items-center gap-1.5 rounded-[10px] bg-white/20 px-3 py-2"
                 onClick={() => openSheet('switch')}
               >
                 <Users className="h-[15px] w-[15px] text-white/75" />
                 <span className="text-[13px] font-medium text-white/80">切换账户</span>
               </button>
-              <div className="flex-1" />
               <button
                 className="flex items-center gap-1.5 rounded-[10px] bg-white/20 px-3 py-2"
                 onClick={handleLogout}
