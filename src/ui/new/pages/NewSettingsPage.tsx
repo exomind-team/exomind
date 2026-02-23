@@ -44,10 +44,14 @@ import { useNavigate } from '@tanstack/react-router';
 import {
   Bell,
   Bot,
+  Bug,
   Check,
   ChevronRight,
   Code,
   Download,
+  ExternalLink,
+  FileText,
+  Globe,
   Heart,
   House,
   Mic,
@@ -55,6 +59,9 @@ import {
   Moon,
   MoonStar,
   Package,
+  RefreshCw,
+  ScrollText,
+  Shield,
   Speech,
   Sun,
   Timer,
@@ -559,6 +566,81 @@ export function NewSettingsPage() {
                 />
               </>
             )}
+          </SectionCard>
+        </section>
+
+        {/* ── More Section (更多) ── */}
+        <section className="space-y-2">
+          <SectionTitle>更多</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<RefreshCw className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="更新"
+              onClick={() => navigate({ to: '/update' })}
+              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="遥测"
+              onClick={() => navigate({ to: '/telemetry' })}
+              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Bug className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="报告问题"
+              onClick={() => navigate({ to: '/report' })}
+              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<ScrollText className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="调试日志"
+              onClick={() => navigate({ to: '/debug-log' })}
+              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+            />
+          </SectionCard>
+        </section>
+
+        {/* ── Legal Section (法律与支持) ── */}
+        <section className="space-y-2">
+          <SectionTitle>法律与支持</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="隐私政策"
+              onClick={() => {}}
+              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<FileText className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="用户协议"
+              onClick={() => {}}
+              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Globe className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="官网"
+              onClick={() => {}}
+              right={<ExternalLink className="h-4 w-4 text-[#A8A29E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Heart className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="赞助开发者"
+              onClick={() => {}}
+              right={<ExternalLink className="h-4 w-4 text-[#A8A29E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="开源软件使用声明"
+              onClick={() => {}}
+              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+            />
           </SectionCard>
         </section>
 
