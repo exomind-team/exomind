@@ -12,6 +12,7 @@
  */
 
 import type { IASRPort } from './interfaces/asr.port';
+import type { IAgentPort } from './interfaces/agent.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
 import type { IStoragePort } from './interfaces/storage.port';
 import type { ITaskPort } from './interfaces/task.port';
@@ -30,6 +31,8 @@ export interface Environment {
   eventlog: IEventLogPort;
   /** 任务能力 */
   task: ITaskPort;
+  /** Agent Hub 能力 */
+  agent: IAgentPort;
   /** 运行时类型 */
   runtime: RuntimeKind;
 }
@@ -42,6 +45,7 @@ export class ExoMindEnvironment implements Environment {
   storage: IStoragePort;
   eventlog: IEventLogPort;
   task: ITaskPort;
+  agent: IAgentPort;
   runtime: RuntimeKind;
 
   private static instance: ExoMindEnvironment | null = null;
@@ -53,6 +57,7 @@ export class ExoMindEnvironment implements Environment {
     this.storage = bootstrap.storage;
     this.eventlog = bootstrap.eventlog;
     this.task = bootstrap.task;
+    this.agent = bootstrap.agent;
     console.log(`[Environment] ExoMindEnvironment 初始化完成: ${this.runtime}`);
   }
 
@@ -82,6 +87,7 @@ export class ExoMindEnvironment implements Environment {
       storage: true,
       eventlog: true,
       task: true,
+      agent: true,
     };
   }
 }
