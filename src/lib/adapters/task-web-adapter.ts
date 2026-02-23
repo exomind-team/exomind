@@ -1,8 +1,14 @@
 import type { ITaskPort } from '@/lib/environment/interfaces/task.port';
 import { WebStorageAdapter } from '@/lib/adapters/web-storage';
-import type { CreateTaskInput, TaskItem, TaskTimerMode } from '@/lib/types/task';
+import type {
+  CreateTaskInput,
+  TaskGoalGroup,
+  TaskItem,
+  TaskTimerMode,
+} from '@/lib/types/task';
 
 const TASK_STORAGE_KEY = 'task_items';
+const TASK_GOAL_STORAGE_KEY = 'task_goal_groups';
 
 function nowIso(): string {
   return new Date().toISOString();
@@ -10,6 +16,10 @@ function nowIso(): string {
 
 function cloneTask(task: TaskItem): TaskItem {
   return JSON.parse(JSON.stringify(task)) as TaskItem;
+}
+
+function cloneGoalGroup(group: TaskGoalGroup): TaskGoalGroup {
+  return JSON.parse(JSON.stringify(group)) as TaskGoalGroup;
 }
 
 export class TaskWebAdapter implements ITaskPort {
@@ -27,6 +37,12 @@ export class TaskWebAdapter implements ITaskPort {
   async listTasks(): Promise<TaskItem[]> {
     const tasks = await this.readTasks();
     return tasks.map(cloneTask);
+  }
+
+  async getLongTermGoals(): Promise<TaskGoalGroup[]> {
+    const groups = await this.storage.read<TaskGoalGroup[]>(TASK_GOAL_STORAGE_KEY);
+    if (!Array.isArray(groups)) return [];
+    return groups.map(cloneGoalGroup);
   }
 
   async getTaskById(taskId: string): Promise<TaskItem | null> {
