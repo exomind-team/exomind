@@ -30,6 +30,23 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
     });
   });
 
+  it('uses task-like pill tab style（顶部标签与任务页胶囊风格统一）', async () => {
+    render(<NewMePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('当前状态')).toBeInTheDocument();
+    });
+
+    const statusTab = screen.getByRole('button', { name: '状态' });
+    const learnTab = screen.getByRole('button', { name: '学习' });
+
+    expect(statusTab.className).toContain('rounded-2xl');
+    expect(statusTab.className).toContain('bg-[#C75B3A]');
+    expect(statusTab.className).toContain('text-white');
+    expect(learnTab.className).toContain('rounded-2xl');
+    expect(learnTab.className).toContain('bg-[#F5F0ED]');
+  });
+
   it('switches to learn and implicit tabs（可切换到学习与内隐）', async () => {
     render(<NewMePage />);
 
