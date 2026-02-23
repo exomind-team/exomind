@@ -162,7 +162,7 @@ function ViewToggle({
   onChange: (value: AgentHubViewMode) => void;
 }) {
   return (
-    <div className="flex items-center rounded-[10px] bg-[#F5F0ED] p-1">
+    <div className="flex items-center rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
       {VIEW_ITEMS.map((item) => {
         const Icon = item.icon;
         const active = value === item.id;
@@ -175,8 +175,8 @@ function ViewToggle({
             aria-pressed={active}
             className={`flex h-7 w-8 items-center justify-center rounded-[8px] transition ${
               active
-                ? 'bg-white text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)]'
-                : 'text-[#78716C]'
+                ? 'bg-white text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                : 'text-[#78716C] dark:text-[#A8A29E]'
             }`}
             title={item.label}
           >
@@ -226,7 +226,7 @@ function TopologyNode({
       >
         <div
           className={`flex h-10 w-10 items-center justify-center rounded-full border ${
-            selected ? 'ring-2 ring-offset-1' : ''
+            selected ? 'ring-2 ring-offset-1 ring-offset-[#FAF7F5] dark:ring-offset-[#1C1917]' : ''
           }`}
           style={{
             borderColor: `${baseColor}50`,
@@ -236,7 +236,7 @@ function TopologyNode({
         >
           <Icon size={15} />
         </div>
-        <span className="mt-1 text-[10px] font-medium text-[#57534E]">{node.name}</span>
+        <span className="mt-1 text-[10px] font-medium text-[#57534E] dark:text-[#D6D3D1]">{node.name}</span>
       </button>
     );
   }
@@ -253,8 +253,8 @@ function TopologyNode({
         }}
         className={`absolute flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition ${
           selected
-            ? 'border-[#C75B3A] bg-white shadow-[0_8px_20px_-14px_rgba(199,91,58,0.9)]'
-            : 'border-[#E7E5E4] bg-white'
+            ? 'border-[#C75B3A] bg-white shadow-[0_8px_20px_-14px_rgba(199,91,58,0.9)] dark:border-[#E8734E] dark:bg-[#2A2522]'
+            : 'border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]'
         }`}
         style={{
           left: layout.x,
@@ -271,8 +271,8 @@ function TopologyNode({
           <Icon size={13} />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-[12px] font-semibold text-[#44403C]">{node.name}</p>
-          <p className="truncate text-[10px] text-[#A8A29E]">{node.subtitle ?? node.status}</p>
+          <p className="truncate text-[12px] font-semibold text-[#44403C] dark:text-[#F5F5F4]">{node.name}</p>
+          <p className="truncate text-[10px] text-[#A8A29E] dark:text-[#78716C]">{node.subtitle ?? node.status}</p>
         </div>
       </button>
     );
@@ -287,10 +287,10 @@ function TopologyNode({
         event.stopPropagation();
         onSelect(node.id);
       }}
-      className={`absolute rounded-2xl border bg-white px-3 py-3 text-left transition ${
+      className={`absolute rounded-2xl border bg-white px-3 py-3 text-left transition dark:bg-[#1C1917] ${
         selected
-          ? 'border-[#C75B3A] shadow-[0_12px_24px_-16px_rgba(199,91,58,0.9)]'
-          : 'border-[#E7E5E4]'
+          ? 'border-[#C75B3A] shadow-[0_12px_24px_-16px_rgba(199,91,58,0.9)] dark:border-[#E8734E]'
+          : 'border-[#E7E5E4] dark:border-[#292524]'
       }`}
       style={{
         left: layout.x,
@@ -308,11 +308,11 @@ function TopologyNode({
           <Icon size={15} />
         </div>
         <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold text-[#1C1917]">{node.name}</p>
-          <p className="truncate text-[10px] text-[#A8A29E]">{node.subtitle ?? node.status}</p>
+          <p className="truncate text-[13px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{node.name}</p>
+          <p className="truncate text-[10px] text-[#A8A29E] dark:text-[#78716C]">{node.subtitle ?? node.status}</p>
         </div>
       </div>
-      <div className="mt-2 flex items-center gap-1 text-[10px] text-[#78716C]">
+      <div className="mt-2 flex items-center gap-1 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
         <span
           className="inline-block h-1.5 w-1.5 rounded-full"
           style={{ backgroundColor: node.status === 'running' ? '#22C55E' : '#A8A29E' }}
@@ -362,11 +362,11 @@ function TopologyView({
     <section data-testid="agent-topology-view" className="space-y-3" onClick={onClearSelection}>
       <div
         data-testid="agent-topology-canvas"
-        className="relative h-[568px] overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5]"
+        className="relative h-[568px] overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
       >
-        <div className="absolute left-3 top-2 rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E]">输出节点</div>
-        <div className="absolute left-3 top-[205px] rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E]">Agent / Actor</div>
-        <div className="absolute left-3 top-[462px] rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E]">信号输入</div>
+        <div className="absolute left-3 top-2 rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">输出节点</div>
+        <div className="absolute left-3 top-[205px] rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">Agent / Actor</div>
+        <div className="absolute left-3 top-[462px] rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">信号输入</div>
 
         <svg className="absolute inset-0 h-full w-full" viewBox="0 0 356 568" fill="none" aria-hidden="true">
           {topology.edges.map((edge) => {
@@ -410,7 +410,7 @@ function TopologyView({
       {selectedNode && (
         <div
           data-testid="agent-topology-node-detail-card"
-          className="rounded-2xl border border-[#E7E5E4] bg-[#1C1917] px-4 py-3 text-white"
+          className="rounded-2xl border border-[#E7E5E4] bg-[#1C1917] px-4 py-3 text-white dark:border-[#44403C] dark:bg-[#0C0A09]"
           onClick={(event) => event.stopPropagation()}
         >
           <p className="text-sm font-semibold">{selectedNode.name}</p>
@@ -440,7 +440,7 @@ function ListView({
               type="button"
               data-testid={`agent-list-filter-${filterItem.id}`}
               className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] ${
-                active ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C]'
+                active ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'
               }`}
             >
               {filterItem.label}
@@ -452,10 +452,10 @@ function ListView({
       {sections.map((section) => (
         <article key={section.id} className="space-y-2">
           <div className="flex items-center justify-between">
-            <h3 className="text-[13px] font-semibold text-[#78716C]">{section.title}</h3>
-            <span className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C]">{section.count} 个节点</span>
+            <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">{section.title}</h3>
+            <span className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">{section.count} 个节点</span>
           </div>
-          <div className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white">
+          <div className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
             {section.items.map((item, index) => {
               const Icon = getListItemIcon(item);
               return (
@@ -474,21 +474,21 @@ function ListView({
                     className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
                   >
                     <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F5F0ED] text-[#78716C]">
+                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
                         <Icon size={16} />
                       </div>
                       <div>
-                        <p className="text-sm font-medium text-[#1C1917]">{item.name}</p>
-                        <p className="text-xs text-[#A8A29E]">{item.description}</p>
+                        <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</p>
+                        <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{item.description}</p>
                       </div>
                     </div>
                     <ChevronRight
                       data-testid={`agent-list-item-${item.id}-chevron`}
                       size={14}
-                      className="shrink-0 text-[#D6D3D1]"
+                      className="shrink-0 text-[#D6D3D1] dark:text-[#57534E]"
                     />
                   </button>
-                  {index !== section.items.length - 1 && <div className="h-px bg-[#F5F0ED]" />}
+                  {index !== section.items.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
                 </div>
               );
             })}
@@ -507,20 +507,20 @@ function DeviceView({ groups }: { groups: AgentDeviceGroup[] }) {
       {hostCard && (
         <article
           data-testid="agent-device-overview-card"
-          className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3"
+          className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
         >
           <div className="flex items-start justify-between">
             <div>
-              <p className="text-sm font-semibold text-[#1C1917]">{hostCard.name}</p>
-              <p className="mt-0.5 text-xs text-[#A8A29E]">{hostCard.summary}</p>
+              <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{hostCard.name}</p>
+              <p className="mt-0.5 text-xs text-[#A8A29E] dark:text-[#78716C]">{hostCard.summary}</p>
             </div>
             <span className="rounded bg-[#C75B3A15] px-2 py-0.5 text-[11px] text-[#C75B3A]">本机</span>
           </div>
           <div className="mt-2 grid grid-cols-3 gap-2">
             {hostCard.metrics.slice(0, 3).map((metric) => (
-              <div key={metric.label} className="rounded-lg bg-[#FAF7F5] px-2 py-1.5 text-center">
-                <p className="text-[10px] text-[#A8A29E]">{metric.label}</p>
-                <p className="text-[12px] font-semibold text-[#1C1917]">{metric.value}</p>
+              <div key={metric.label} className="rounded-lg bg-[#FAF7F5] px-2 py-1.5 text-center dark:bg-[#292524]">
+                <p className="text-[10px] text-[#A8A29E] dark:text-[#78716C]">{metric.label}</p>
+                <p className="text-[12px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
               </div>
             ))}
           </div>
@@ -541,25 +541,25 @@ function DeviceView({ groups }: { groups: AgentDeviceGroup[] }) {
       {groups.map((group) => (
         <article key={group.id} className="space-y-2">
           <div className="flex items-center gap-2">
-            <h3 className="text-[13px] font-semibold text-[#78716C]">{group.title}</h3>
-            <span className="text-[11px] text-[#A8A29E]">{group.summary}</span>
+            <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">{group.title}</h3>
+            <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">{group.summary}</span>
           </div>
           <div className="space-y-2">
             {group.cards.map((card) => {
               const DeviceIcon = getDeviceTypeIcon(group.id);
               return (
-                <div key={card.id} className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3">
+                <div key={card.id} className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]">
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-start gap-2">
-                      <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-lg bg-[#F5F0ED] text-[#78716C]">
+                      <div className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-lg bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
                         <DeviceIcon size={14} />
                       </div>
                       <div>
-                        <p className="text-sm font-semibold text-[#1C1917]">{card.name}</p>
-                        <p className="text-xs text-[#A8A29E]">{card.summary}</p>
+                        <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{card.name}</p>
+                        <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{card.summary}</p>
                       </div>
                     </div>
-                    <ChevronRight size={14} className="text-[#D6D3D1]" />
+                    <ChevronRight size={14} className="text-[#D6D3D1] dark:text-[#57534E]" />
                   </div>
                   <div className="mt-2 flex flex-wrap gap-1">
                     {card.tags.map((tag) => (
@@ -602,18 +602,18 @@ function AddNodeSheet({
       />
       <section
         data-testid="agent-add-node-sheet"
-        className="absolute inset-x-0 bottom-0 z-10 rounded-t-[24px] bg-white pb-7 shadow-[0_-8px_28px_rgba(0,0,0,0.12)]"
+        className="absolute inset-x-0 bottom-0 z-10 rounded-t-[24px] bg-white pb-7 shadow-[0_-8px_28px_rgba(0,0,0,0.12)] dark:bg-[#1C1917] dark:shadow-[0_-8px_28px_rgba(0,0,0,0.45)]"
       >
         <div className="flex justify-center pt-2">
-          <div className="h-1 w-10 rounded bg-[#D6D3D1]" />
+          <div className="h-1 w-10 rounded bg-[#D6D3D1] dark:bg-[#57534E]" />
         </div>
         <div className="flex items-center justify-between px-5 py-3">
-          <h2 className="text-[18px] font-bold text-[#1C1917]">添加节点</h2>
+          <h2 className="text-[18px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">添加节点</h2>
           <button
             type="button"
             data-testid="agent-add-node-close"
             onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#A8A29E]"
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]"
           >
             <X size={16} />
           </button>
@@ -632,7 +632,7 @@ function AddNodeSheet({
                     onNavigate('/agents/market');
                   }
                 }}
-                className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left"
+                className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left dark:bg-[#292524]"
               >
                 <div className="flex items-center gap-3">
                   <div
@@ -642,11 +642,11 @@ function AddNodeSheet({
                     <Icon size={16} />
                   </div>
                   <div>
-                    <p className="text-sm font-semibold text-[#1C1917]">{option.title}</p>
-                    <p className="mt-1 text-xs text-[#78716C]">{option.description}</p>
+                    <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{option.title}</p>
+                    <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{option.description}</p>
                   </div>
                 </div>
-                <ChevronRight size={14} className="text-[#D6D3D1]" />
+                <ChevronRight size={14} className="text-[#D6D3D1] dark:text-[#57534E]" />
               </button>
             );
           })}
@@ -710,13 +710,13 @@ export function AgentsPage() {
   }, [deviceGroups, listSections, selectedNodeId, topology, viewMode]);
 
   return (
-    <div data-testid="agent-hub-page" className="relative min-h-full bg-[#FAF7F5]">
+    <div data-testid="agent-hub-page" className="relative min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
       <header className="flex items-center justify-between px-5 py-3">
-        <h1 className="text-[30px] font-bold leading-[1.2] text-[#1C1917]">Agent 网络</h1>
+        <h1 className="text-[30px] font-bold leading-[1.2] text-[#1C1917] dark:text-[#FAFAF9]">Agent 网络</h1>
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C]"
+            className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
             aria-label="拓扑设置（Topology Settings）"
           >
             <Settings size={18} />

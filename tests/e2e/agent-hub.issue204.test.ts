@@ -51,3 +51,37 @@ test.describe('Issue #204 Agent Hub（Agent Hub 全视图）', () => {
     await expect(page.getByText('Code Review Agent')).toBeVisible();
   });
 });
+
+test.describe('Issue #204 Agent Hub runtime toggle（运行时切换测试数据）', () => {
+  test('switches to mock topology without full reload and keeps dark surface（不刷新切换到 mock 并保持暗色背景）', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('exomind:uiMode', 'new');
+      localStorage.setItem('exomind:agentPageEnabled', 'true');
+      localStorage.setItem('exomind:developerMode', 'true');
+      localStorage.setItem('exomind:themePreference', 'dark');
+      localStorage.setItem('exomind:useMockData', 'false');
+      for (const key of Object.keys(localStorage)) {
+        if (key.startsWith('agent_hub_')) {
+          localStorage.removeItem(key);
+        }
+      }
+    });
+
+    await page.goto('/agents');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
+    await expect(page.getByTestId('agent-topology-node-agent-daily')).toHaveCount(0);
+
+    await page.getByRole('link', { name: '设置' }).click();
+    await expect(page.getByTestId('new-settings-use-mock-data-switch')).toBeVisible();
+    await page.getByTestId('new-settings-use-mock-data-switch').click();
+
+    await page.getByRole('link', { name: 'Agent' }).click();
+    await expect(page.getByTestId('agent-topology-node-agent-daily')).toBeVisible();
+
+    const pageBackground = await page.getByTestId('agent-hub-page').evaluate((node) => {
+      return window.getComputedStyle(node).backgroundColor;
+    });
+    expect(pageBackground).toBe('rgb(12, 10, 9)');
+  });
+});

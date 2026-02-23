@@ -40,6 +40,7 @@ describe('agent chat and market issue-204（对话与市场）', () => {
 
     expect(screen.getByTestId('agent-conversation-header')).toBeInTheDocument();
     expect(screen.getByTestId('agent-chat-input-bar')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-conversation-page').className).toContain('dark:bg-[#0C0A09]');
     expect(screen.getByText('你好！我是日报 Agent。有什么需要我整理的吗？')).toBeInTheDocument();
     fireEvent.change(screen.getByPlaceholderText('输入消息...'), { target: { value: '今天情况如何' } });
     fireEvent.click(screen.getByTestId('agent-chat-send-button'));
@@ -57,6 +58,7 @@ describe('agent chat and market issue-204（对话与市场）', () => {
     });
 
     expect(screen.getByTestId('agent-market-search')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-market-page').className).toContain('dark:bg-[#0C0A09]');
     expect(screen.getAllByText('by exomind team').length).toBeGreaterThan(0);
     expect(screen.getByText('热门推荐')).toBeInTheDocument();
     expect(screen.getByText('Code Review Agent')).toBeInTheDocument();

@@ -35,6 +35,7 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('输出目标')).toBeInTheDocument();
     expect(screen.getByTestId('agent-detail-chat-button')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-page').className).toContain('dark:bg-[#0C0A09]');
   });
 
   it('renders actor detail sections（Actor 详情区块）', async () => {
@@ -48,5 +49,6 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByTestId('actor-detail-header')).toBeInTheDocument();
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('最近执行')).toBeInTheDocument();
+    expect(screen.getByTestId('actor-detail-page').className).toContain('dark:bg-[#0C0A09]');
   });
 });
