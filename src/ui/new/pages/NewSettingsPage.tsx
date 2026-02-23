@@ -216,6 +216,8 @@ export function NewSettingsPage() {
   const handleUseMockDataToggle = (checked: boolean) => {
     setUseMockDataEnabled(checked);
     setUseMockData(checked);
+    // Reload page（刷新页面）to re-bootstrap runtime adapters（重建运行时适配器注入）.
+    window.location.reload();
   };
 
   const navigate = useNavigate();
