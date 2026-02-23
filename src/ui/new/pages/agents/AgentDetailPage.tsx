@@ -11,15 +11,34 @@ function getTargetIcon(target: AgentHubListItem) {
 
 export function AgentDetailPage({ agentId }: { agentId?: string }) {
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
+  const [loading, setLoading] = useState(true);
   const targetId = agentId ?? '';
 
   useEffect(() => {
     let disposed = false;
     const load = async () => {
-      if (!targetId) return;
-      const response = await getAgentHubService().getAgentDetail(targetId);
-      if (!disposed) {
-        setDetail(response);
+      if (!targetId) {
+        if (!disposed) {
+          setDetail(null);
+          setLoading(false);
+        }
+        return;
+      }
+
+      setLoading(true);
+      try {
+        const response = await getAgentHubService().getAgentDetail(targetId);
+        if (!disposed) {
+          setDetail(response);
+        }
+      } catch {
+        if (!disposed) {
+          setDetail(null);
+        }
+      } finally {
+        if (!disposed) {
+          setLoading(false);
+        }
       }
     };
     void load();
@@ -28,10 +47,31 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
     };
   }, [targetId]);
 
-  if (!detail) {
+  if (loading) {
     return (
       <div data-testid="agent-detail-page" className="min-h-full px-5 py-4 text-sm text-[#A8A29E] dark:text-[#78716C]">
         Agent 详情加载中...
+      </div>
+    );
+  }
+
+  if (!detail) {
+    return (
+      <div data-testid="agent-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09]">
+        <section
+          data-testid="agent-detail-empty-state"
+          className="mt-6 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-6 text-center dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">未找到 Agent 详情</p>
+          <p className="mt-1 text-xs text-[#A8A29E] dark:text-[#78716C]">该节点可能已删除或尚未配置详情数据。</p>
+          <button
+            type="button"
+            onClick={() => window.history.back()}
+            className="mt-4 rounded-lg bg-[#F5F0ED] px-3 py-2 text-xs font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+          >
+            返回上一页
+          </button>
+        </section>
       </div>
     );
   }

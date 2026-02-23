@@ -75,4 +75,17 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     expect(screen.getByTestId('agent-hub-page').className).toContain('dark:bg-[#0C0A09]');
     expect(screen.getByTestId('agent-topology-canvas').className).toContain('dark:bg-[#1C1917]');
   });
+
+  it('uses task-page sized title（标题字号与任务页一致）', async () => {
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Agent 网络' })).toBeInTheDocument();
+    });
+
+    const heading = screen.getByRole('heading', { name: 'Agent 网络' });
+    expect(heading.className).toContain('text-lg');
+    expect(heading.className).toContain('font-semibold');
+    expect(heading.className).not.toContain('text-[30px]');
+  });
 });

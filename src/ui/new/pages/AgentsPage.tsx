@@ -712,7 +712,7 @@ export function AgentsPage() {
   return (
     <div data-testid="agent-hub-page" className="relative min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
       <header className="flex items-center justify-between px-5 py-3">
-        <h1 className="text-[30px] font-bold leading-[1.2] text-[#1C1917] dark:text-[#FAFAF9]">Agent 网络</h1>
+        <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent 网络</h1>
         <div className="flex items-center gap-2">
           <button
             type="button"
