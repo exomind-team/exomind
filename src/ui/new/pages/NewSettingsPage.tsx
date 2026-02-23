@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { Switch } from '@/components/ui/switch';
 import { getEventLogService } from '@/lib/services';
 import {
@@ -40,6 +41,10 @@ import {
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
 import { UserCard } from '@/ui/new/components/UserCard';
+import { MoreSection } from '@/ui/new/components/MoreSection';
+import { LegalSection } from '@/ui/new/components/LegalSection';
+import { AboutSection } from '@/ui/new/components/AboutSection';
+import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/new/components/settings-shared';
 import { useNavigate } from '@tanstack/react-router';
 import {
   Bell,
@@ -48,19 +53,13 @@ import {
   ChevronRight,
   Code,
   Download,
-  Heart,
-  House,
-  Mic,
   Monitor,
   Moon,
   MoonStar,
-  Package,
-  Speech,
   Sun,
   Timer,
   Undo2,
   Upload,
-  Users,
   Wifi,
 } from 'lucide-react';
 
@@ -73,59 +72,6 @@ type PickedJsonFile = {
 function buildBackupFileName(): string {
   const date = new Date().toISOString().slice(0, 10);
   return `exomind-eventlog-${date}.json`;
-}
-
-/* ── Shared row / divider components ── */
-
-function SettingRow({
-  icon,
-  label,
-  right,
-  onClick,
-  className = '',
-}: {
-  icon: React.ReactNode;
-  label: string;
-  right?: React.ReactNode;
-  onClick?: () => void;
-  className?: string;
-}) {
-  const Wrapper = onClick ? 'button' : 'div';
-  return (
-    <Wrapper
-      type={onClick ? 'button' : undefined}
-      onClick={onClick}
-      className={`flex w-full items-center justify-between px-4 py-[14px] ${onClick ? 'active:bg-stone-50 dark:active:bg-stone-800' : ''} ${className}`}
-    >
-      <div className="flex items-center gap-3">
-        {icon}
-        <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{label}</span>
-      </div>
-      {right}
-    </Wrapper>
-  );
-}
-
-function Divider() {
-  return (
-    <div className="px-4">
-      <div className="h-px bg-[#F0ECE8] dark:bg-[#292524]" />
-    </div>
-  );
-}
-
-function SectionCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-[#F0ECE8] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-      {children}
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[13px] font-medium leading-[1.4] text-[#78716C]">{children}</p>
-  );
 }
 
 export function NewSettingsPage() {
@@ -146,11 +92,20 @@ export function NewSettingsPage() {
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [countdownModeDialogOpen, setCountdownModeDialogOpen] = useState(false);
+  const [featureTogglesDialogOpen, setFeatureTogglesDialogOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [comingSoonVisible, setComingSoonVisible] = useState(false);
+  const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showComingSoon = () => {
+    if (comingSoonTimer.current) clearTimeout(comingSoonTimer.current);
+    setComingSoonVisible(true);
+    comingSoonTimer.current = setTimeout(() => setComingSoonVisible(false), 1500);
+  };
 
   const clearNotice = () => {
     setStatusMessage('');
@@ -476,6 +431,18 @@ export function NewSettingsPage() {
           </SectionCard>
         </section>
 
+        <MoreSection
+          onNavigateUpdate={() => navigate({ to: '/update' })}
+          onComingSoon={showComingSoon}
+        />
+
+        <LegalSection onComingSoon={showComingSoon} />
+
+        <AboutSection
+          appVersion={versionBuildInfo.appVersion}
+          buildHash={versionBuildInfo.buildHash}
+        />
+
         {/* ── Developer Section (开发者) ── */}
         <section className="space-y-2">
           <SectionTitle>开发者</SectionTitle>
@@ -496,17 +463,6 @@ export function NewSettingsPage() {
                   <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
                 </div>
                 <SettingRow
-                  icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="启用 Agent 页面"
-                  right={
-                    <Switch
-                      checked={agentPageEnabled}
-                      onCheckedChange={handleAgentPageEnabledToggle}
-                    />
-                  }
-                />
-                <Divider />
-                <SettingRow
                   icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="使用测试数据"
                   right={
@@ -519,76 +475,20 @@ export function NewSettingsPage() {
                 />
                 <Divider />
                 <SettingRow
-                  icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="返回旧 UI"
-                  onClick={handleSwitchToOldUI}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="语音测试页面"
-                  onClick={() => navigate({ to: '/asr-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
                   icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="MOSS 调试"
-                  onClick={() => navigate({ to: '/moss-test' })}
+                  label="功能开关"
+                  onClick={() => setFeatureTogglesDialogOpen(true)}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
                 <Divider />
                 <SettingRow
-                  icon={<Speech className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="ASR 语音识别"
-                  onClick={() => navigate({ to: '/asr-test' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Users className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="多用户管理"
-                  onClick={() => navigate({ to: '/user-manage' })}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<House className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="旧首页"
-                  onClick={() => { setUIMode('old'); window.location.pathname = '/'; }}
+                  icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="旧版页面"
+                  onClick={handleSwitchToOldUI}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
               </>
             )}
-          </SectionCard>
-        </section>
-
-        {/* ── Version Info (关于) ── */}
-        <section className="space-y-2">
-          <SectionTitle>关于</SectionTitle>
-          <SectionCard>
-            <SettingRow
-              icon={<Package className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="版本"
-              right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.appVersion}</span>}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Package className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="构建"
-              right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.buildHash}</span>}
-            />
-            <Divider />
-            <div className="px-4 pb-[14px] pt-[14px]">
-              <div className="flex items-center gap-3">
-                <Heart className="h-[18px] w-[18px] text-[#78716C]" />
-                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">开发者</span>
-              </div>
-              <p className="mt-1 pl-[30px] text-xs leading-[1.4] text-[#A8A29E]">
-                ExoMind — 个人生命成长助手，探索生命与认知的本质。
-              </p>
-            </div>
           </SectionCard>
         </section>
 
@@ -604,6 +504,15 @@ export function NewSettingsPage() {
           </div>
         )}
       </div>
+
+      {/* Coming Soon Toast */}
+      {comingSoonVisible && (
+        <div className="fixed inset-x-0 bottom-28 z-50 flex justify-center">
+          <div className="rounded-full bg-[#1C1917] px-4 py-2 text-sm text-white shadow-lg dark:bg-[#FAFAF9] dark:text-[#1C1917]">
+            即将推出
+          </div>
+        </div>
+      )}
 
       {/* ── Countdown End Mode Dialog ── */}
       <Dialog open={countdownModeDialogOpen} onOpenChange={setCountdownModeDialogOpen}>
@@ -674,6 +583,27 @@ export function NewSettingsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Feature Toggles Drawer ── */}
+      <Drawer open={featureTogglesDialogOpen} onOpenChange={setFeatureTogglesDialogOpen}>
+        <DrawerContent className="dark:bg-[#1C1917]">
+          <div className="px-5 pb-8 pt-2">
+            <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+              功能开关
+            </DrawerTitle>
+            <p className="mt-1 text-center text-xs text-[#A8A29E]">启用或关闭实验性功能</p>
+            <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
+                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
+                <Switch
+                  checked={agentPageEnabled}
+                  onCheckedChange={handleAgentPageEnabledToggle}
+                />
+              </div>
+            </div>
+          </div>
+        </DrawerContent>
+      </Drawer>
 
       {/* ── Sync Server Dialog ── */}
       <Dialog open={syncDialogOpen} onOpenChange={setSyncDialogOpen}>
