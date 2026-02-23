@@ -28,6 +28,11 @@ import {
   updateTimerPreferences,
   type CountdownEndMode,
 } from '@/config/timer-preferences';
+import {
+  getUseMockDataEnabled,
+  setUseMockDataEnabled,
+  subscribeUseMockDataChanges,
+} from '@/config/mock-data';
 import { setUIMode } from '@/config/ui-mode';
 import {
   TIMER_END_SOUND_PRESETS,
@@ -136,6 +141,7 @@ export function NewSettingsPage() {
   const [agentPageEnabled, setAgentPageEnabledState] = useState<boolean>(
     () => getAgentPageEnabled()
   );
+  const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -252,6 +258,11 @@ export function NewSettingsPage() {
     setAgentPageEnabledState(checked);
   };
 
+  const handleUseMockDataToggle = (checked: boolean) => {
+    setUseMockDataEnabled(checked);
+    setUseMockData(checked);
+  };
+
   const navigate = useNavigate();
 
   const handleSwitchToOldUI = () => {
@@ -263,6 +274,12 @@ export function NewSettingsPage() {
       setTimerPreferencesState(nextPreferences);
     });
     return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    return subscribeUseMockDataChanges((enabled) => {
+      setUseMockData(enabled);
+    });
   }, []);
 
   const handleCountdownEndModeChange = (mode: CountdownEndMode) => {
@@ -483,6 +500,18 @@ export function NewSettingsPage() {
                     <Switch
                       checked={agentPageEnabled}
                       onCheckedChange={handleAgentPageEnabledToggle}
+                    />
+                  }
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="使用测试数据"
+                  right={
+                    <Switch
+                      data-testid="new-settings-use-mock-data-switch"
+                      checked={useMockData}
+                      onCheckedChange={handleUseMockDataToggle}
                     />
                   }
                 />
