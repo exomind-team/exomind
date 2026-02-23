@@ -1,25 +1,24 @@
-# GH#215 自评审结论（Me 三视图）
+# GH#215 代码评审结论（Me 三视图 + 底部导航 5 菜单修复）
 
-## 评审范围
-- 领域层：`me` types/port/adapters/service  
-- UI 层：`NewMePage` 三视图切换与卡片结构  
-- 路由层：`/me` 新路由与底部导航接线  
-- 自动化：Vitest + Playwright + Build
+## Findings（按严重度排序）
 
-## 结果
-- 功能正确性：通过  
-  - 默认显示 `状态` 视图  
-  - 可切换 `学习` / `内隐`  
-  - 底部导航可进入 `Me`
-- 注入策略：通过  
-  - `useMockData=true` 时为 `MeMockAdapter`  
-  - `useMockData=false` 时为 `MeWebAdapter`
-- 自动化测试：通过  
-  - 单测 13 项通过  
-  - E2E 2 项通过  
-  - `bun run build` 通过
+### Important
+1. `MeWebAdapter` 在非 Mock 模式下仍会回退到 Mock Fixture，导致“关闭测试数据”后仍展示伪造数据。  
+   - 代码位置：`src/lib/adapters/me-web-adapter.ts:19`、`src/lib/adapters/me-web-adapter.ts:26`  
+   - 影响：`useMockData=false` 语义被弱化，用户可能误以为看到的是“真实数据”。  
+   - 建议：将回退策略改为“空态数据（empty state，空状态）/显式无数据提示”，不要回退到 `MOCK_ME_DASHBOARD_FIXTURE`。
 
-## 风险与后续
-- 当前 `MeWebAdapter` 使用本地存储占位读取，后续若接真实数据源，需要新增迁移与容错测试。  
-- 构建仍存在历史 chunk 警告，不属于本次改动引入；后续可在独立任务优化分包策略。  
+## 验证证据（fresh run）
+- `bunx vitest run tests/unit/environment/bootstrap.test.ts tests/unit/me/me-types-contract.issue215.test.ts tests/unit/services/me.service.issue215.test.ts tests/unit/ui/new-me-pages.issue215.test.tsx tests/unit/ui/new-me-routing.issue215.test.ts tests/unit/ui/new-bottom-nav-fit.issue215.test.ts tests/unit/ui/new-task-routing.issue213.test.ts tests/unit/ui/new-layout-bottom-nav-spacing.issue175.test.ts`  
+  - 结果：`8 files / 19 tests passed`
+- `bun run test:e2e:issue215`  
+  - 结果：`2 passed`
+- `bun run build`  
+  - 结果：构建通过（仅历史遗留 chunk warning，无新增构建错误）
 
+## 合并建议（Merge to dev）
+- **当前结论：不建议直接合并到 `dev`（Needs changes）**  
+  - 理由：存在 1 条 `Important` 语义问题（非 Mock 模式仍展示 Mock 数据），会影响环境开关可信度。  
+- 若团队接受“阶段性占位（placeholder，占位实现）”风险，也可带风险合并，但建议在 PR 描述中明确：
+  - `useMockData=false` 目前仍可能显示样例数据；
+  - 后续需补一条修复任务并在下一次迭代关闭该风险。
