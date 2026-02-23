@@ -14,6 +14,7 @@
 import type { IASRPort } from './interfaces/asr.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
 import type { IStoragePort } from './interfaces/storage.port';
+import type { ITaskPort } from './interfaces/task.port';
 import { createRuntimeBootstrap, type RuntimeKind } from './bootstrap';
 
 /**
@@ -27,6 +28,8 @@ export interface Environment {
   storage: IStoragePort;
   /** 事件日志能力 */
   eventlog: IEventLogPort;
+  /** 任务能力 */
+  task: ITaskPort;
   /** 运行时类型 */
   runtime: RuntimeKind;
 }
@@ -38,6 +41,7 @@ export class ExoMindEnvironment implements Environment {
   asr: IASRPort;
   storage: IStoragePort;
   eventlog: IEventLogPort;
+  task: ITaskPort;
   runtime: RuntimeKind;
 
   private static instance: ExoMindEnvironment | null = null;
@@ -48,6 +52,7 @@ export class ExoMindEnvironment implements Environment {
     this.asr = bootstrap.asr;
     this.storage = bootstrap.storage;
     this.eventlog = bootstrap.eventlog;
+    this.task = bootstrap.task;
     console.log(`[Environment] ExoMindEnvironment 初始化完成: ${this.runtime}`);
   }
 
@@ -76,6 +81,7 @@ export class ExoMindEnvironment implements Environment {
       asr: this.asr.isAvailable(),
       storage: true,
       eventlog: true,
+      task: true,
     };
   }
 }

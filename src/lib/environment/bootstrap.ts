@@ -1,9 +1,13 @@
+import { getUseMockDataEnabled } from '@/config/mock-data';
+import { TaskMockAdapter } from '@/lib/adapters/mock/task-mock-adapter';
+import { TaskWebAdapter } from '@/lib/adapters/task-web-adapter';
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { WebStorageAdapter } from '../adapters/web-storage';
 import type { IASRPort } from './interfaces/asr.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
 import type { IStoragePort } from './interfaces/storage.port';
+import type { ITaskPort } from './interfaces/task.port';
 
 export type RuntimeKind = 'web' | 'tauri';
 
@@ -12,11 +16,13 @@ export interface RuntimeBootstrapResult {
   asr: IASRPort;
   storage: IStoragePort;
   eventlog: IEventLogPort;
+  task: ITaskPort;
 }
 
 export interface RuntimeBootstrapOptions {
   runtime?: RuntimeKind;
   globalObject?: unknown;
+  useMockData?: boolean;
 }
 
 /**
@@ -46,6 +52,8 @@ export function detectRuntime(globalObject: unknown = globalThis): RuntimeKind {
 export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): RuntimeBootstrapResult {
   const runtime = options.runtime ?? detectRuntime(options.globalObject);
   const asr = new VolcanoEngineASRAdapter();
+  const useMockData = options.useMockData ?? getUseMockDataEnabled();
+  const task: ITaskPort = useMockData ? new TaskMockAdapter() : new TaskWebAdapter();
 
   if (runtime === 'tauri') {
     return {
@@ -54,6 +62,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
       storage: new TauriStorageAdapter(),
       // 临时统一到 PouchDB，避免 Tauri 原生 EventLog 与 UI 读取源分裂（#144）
       eventlog: new WebEventLogStorageAdapter(),
+      task,
     };
   }
 
@@ -62,5 +71,6 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
     asr,
     storage: new WebStorageAdapter(),
     eventlog: new WebEventLogStorageAdapter(),
+    task,
   };
 }
