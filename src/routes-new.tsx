@@ -44,6 +44,11 @@ const AgentsPage = lazy(async () => {
   return { default: module.AgentsPage };
 });
 
+const UpdatePage = lazy(async () => {
+  const module = await import('@/ui/new/pages/UpdatePage');
+  return { default: module.UpdatePage };
+});
+
 const AgentDetailPage = lazy(async () => {
   const module = await import('@/ui/new/pages/agents/AgentDetailPage');
   return { default: module.AgentDetailPage };
@@ -239,6 +244,18 @@ const newAgentsRoute = createRoute({
   },
 });
 
+const newUpdateRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/update',
+  component: function NewUpdate() {
+    return (
+      <LazyPage>
+        <UpdatePage />
+      </LazyPage>
+    );
+  },
+});
+
 const newAgentDetailRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents/agent/$agentId',
@@ -300,6 +317,7 @@ const newRouteTree = newRootRoute.addChildren([
   newAsrTestRoute,
   newMossTestRoute,
   newAgentsRoute,
+  newUpdateRoute,
   newAgentDetailRoute,
   newActorDetailRoute,
   newAgentConversationRoute,
