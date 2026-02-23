@@ -12,6 +12,8 @@ import { getMeService } from '@/lib/services';
 import type {
   MeBehaviorPattern,
   MeDashboardData,
+  MeHabitLoop,
+  MeLearningItem,
   MePatternHistoryItem,
   MeStatusMetric,
   MeViewType,
@@ -24,23 +26,35 @@ function tabClass(active: boolean): string {
 }
 
 function metricToneClass(metric: MeStatusMetric): string {
-  if (metric.tone === 'green') return 'bg-[#F0FDF4]';
-  if (metric.tone === 'blue') return 'bg-[#EFF6FF]';
-  if (metric.tone === 'amber') return 'bg-[#FFFBEB]';
-  if (metric.tone === 'rose') return 'bg-[#FEF2F2]';
-  return 'bg-[#FEF7F5]';
+  if (metric.tone === 'green') return 'bg-[#F0FDF4] dark:bg-[#1E2B22]';
+  if (metric.tone === 'blue') return 'bg-[#EFF6FF] dark:bg-[#1D2837]';
+  if (metric.tone === 'amber') return 'bg-[#FFFBEB] dark:bg-[#302818]';
+  if (metric.tone === 'rose') return 'bg-[#FEF2F2] dark:bg-[#352122]';
+  return 'bg-[#FEF7F5] dark:bg-[#2E2420]';
 }
 
 function behaviorStateClass(pattern: MeBehaviorPattern): string {
-  if (pattern.state === 'good') return 'bg-[#F0FDF4] text-[#16A34A]';
-  if (pattern.state === 'risk') return 'bg-[#FEF2F2] text-[#DC2626]';
-  return 'bg-[#FFF7ED] text-[#C75B3A]';
+  if (pattern.state === 'good') return 'bg-[#F0FDF4] text-[#16A34A] dark:bg-[#1F2F25] dark:text-[#86EFAC]';
+  if (pattern.state === 'risk') return 'bg-[#FEF2F2] text-[#DC2626] dark:bg-[#3A2323] dark:text-[#FCA5A5]';
+  return 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#3A2A22] dark:text-[#FDBA74]';
 }
 
 function historyDeltaClass(item: MePatternHistoryItem): string {
   if (item.deltaTone === 'down') return 'text-[#16A34A]';
   if (item.deltaTone === 'up') return 'text-[#DC2626]';
   return 'text-[#A8A29E]';
+}
+
+function learnItemToneClass(item: MeLearningItem): string {
+  if (item.tone === 'blue') return 'bg-[#EFF6FF] dark:bg-[#1D2837]';
+  if (item.tone === 'purple') return 'bg-[#F5F3FF] dark:bg-[#2B233A]';
+  return 'bg-[#FEF7F5] dark:bg-[#2E2420]';
+}
+
+function habitLoopToneClass(loop: MeHabitLoop): string {
+  if (loop.state === 'good') return 'bg-[#F0FDF4] dark:bg-[#1E2B22]';
+  if (loop.state === 'risk') return 'bg-[#FEF2F2] dark:bg-[#3A2323]';
+  return 'bg-[#EFF6FF] dark:bg-[#1D2837]';
 }
 
 export function NewMePage() {
@@ -117,18 +131,18 @@ export function NewMePage() {
               <div className="grid grid-cols-3 gap-2">
                 {data.status.metrics.map((metric) => (
                   <article key={metric.id} className={`rounded-xl p-3 ${metricToneClass(metric)}`}>
-                    <p className="text-[11px] text-[#78716C]">{metric.title}</p>
-                    <p className="text-[15px] font-semibold text-[#1C1917]">{metric.value}</p>
-                    <p className="text-[11px] text-[#A8A29E]">{metric.hint}</p>
+                    <p className="text-[11px] text-[#78716C] dark:text-[#CFC5BE]">{metric.title}</p>
+                    <p className="text-[15px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
+                    <p className="text-[11px] text-[#A8A29E] dark:text-[#B8B1AC]">{metric.hint}</p>
                   </article>
                 ))}
               </div>
               <div className="grid grid-cols-3 gap-2">
                 {data.status.financeMetrics.map((metric) => (
                   <article key={metric.id} className={`rounded-xl p-3 ${metricToneClass(metric)}`}>
-                    <p className="text-[11px] text-[#78716C]">{metric.title}</p>
-                    <p className="text-[14px] font-semibold text-[#1C1917]">{metric.value}</p>
-                    <p className="text-[11px] text-[#A8A29E]">{metric.hint}</p>
+                    <p className="text-[11px] text-[#78716C] dark:text-[#CFC5BE]">{metric.title}</p>
+                    <p className="text-[14px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
+                    <p className="text-[11px] text-[#A8A29E] dark:text-[#B8B1AC]">{metric.hint}</p>
                   </article>
                 ))}
               </div>
@@ -145,8 +159,8 @@ export function NewMePage() {
               </div>
               <div className="grid grid-cols-2 gap-2">
                 {data.status.behaviorPatterns.map((pattern) => (
-                  <article key={pattern.id} className="rounded-xl border border-[#F0ECE8] p-2">
-                    <p className="text-[12px] font-medium text-[#44403C]">{pattern.title}</p>
+                  <article key={pattern.id} className="rounded-xl border border-[#F0ECE8] bg-white p-2 dark:border-[#3A3432] dark:bg-[#24201E]">
+                    <p className="text-[12px] font-medium text-[#44403C] dark:text-[#E7E5E4]">{pattern.title}</p>
                     <p className={`mt-1 inline-flex rounded-md px-2 py-0.5 text-[11px] font-semibold ${behaviorStateClass(pattern)}`}>
                       {pattern.streakText}
                     </p>
@@ -164,12 +178,12 @@ export function NewMePage() {
                 模式历史
               </div>
               {data.status.historyItems.map((item) => (
-                <article key={item.id} className="rounded-xl bg-[#FAF7F5] p-3">
+                <article key={item.id} className="rounded-xl bg-[#FAF7F5] p-3 dark:bg-[#2A2523]">
                   <div className="flex items-center">
-                    <p className="text-[12px] font-medium text-[#44403C]">{item.title}</p>
+                    <p className="text-[12px] font-medium text-[#44403C] dark:text-[#E7E5E4]">{item.title}</p>
                     <span className={`ml-auto text-[11px] font-semibold ${historyDeltaClass(item)}`}>{item.deltaText}</span>
                   </div>
-                  <p className="mt-1 text-[11px] text-[#A8A29E]">{item.detail}</p>
+                  <p className="mt-1 text-[11px] text-[#A8A29E] dark:text-[#B8B1AC]">{item.detail}</p>
                 </article>
               ))}
             </section>
@@ -189,15 +203,13 @@ export function NewMePage() {
               {data.learn.urgentItems.map((item) => (
                 <article
                   key={item.id}
-                  className={`rounded-xl border border-[#F0ECE8] p-3 ${
-                    item.tone === 'blue' ? 'bg-[#EFF6FF]' : item.tone === 'purple' ? 'bg-[#F5F3FF]' : 'bg-[#FEF7F5]'
-                  }`}
+                  className={`rounded-xl border border-[#F0ECE8] p-3 dark:border-[#3A3432] ${learnItemToneClass(item)}`}
                 >
                   <div className="flex items-center">
-                    <p className="text-[13px] font-medium text-[#292524]">{item.title}</p>
+                    <p className="text-[13px] font-medium text-[#292524] dark:text-[#F5F5F4]">{item.title}</p>
                     <span className="ml-auto text-[11px] font-semibold text-[#C75B3A]">{item.priorityText}</span>
                   </div>
-                  <p className="mt-1 text-[11px] text-[#A8A29E]">→ {item.source}</p>
+                  <p className="mt-1 text-[11px] text-[#A8A29E] dark:text-[#B8B1AC]">→ {item.source}</p>
                 </article>
               ))}
             </section>
@@ -211,15 +223,15 @@ export function NewMePage() {
                 知识看板
               </div>
               {data.learn.lanes.map((lane) => (
-                <article key={lane.id} className="rounded-xl border border-[#F0ECE8] p-3">
+                <article key={lane.id} className="rounded-xl border border-[#F0ECE8] bg-white p-3 dark:border-[#3A3432] dark:bg-[#24201E]">
                   <div className="flex items-center">
-                    <p className="text-[13px] font-semibold text-[#44403C]">{lane.title}</p>
-                    <span className="ml-auto text-[11px] text-[#A8A29E]">{lane.countText}</span>
+                    <p className="text-[13px] font-semibold text-[#44403C] dark:text-[#E7E5E4]">{lane.title}</p>
+                    <span className="ml-auto text-[11px] text-[#A8A29E] dark:text-[#B8B1AC]">{lane.countText}</span>
                   </div>
-                  <p className="mt-1 text-[11px] text-[#A8A29E]">{lane.progressText}</p>
+                  <p className="mt-1 text-[11px] text-[#A8A29E] dark:text-[#B8B1AC]">{lane.progressText}</p>
                   <div className="mt-2 flex flex-wrap gap-1.5">
                     {lane.tags.map((tag) => (
-                      <span key={tag} className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[10px] text-[#78716C]">
+                      <span key={tag} className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[10px] text-[#78716C] dark:bg-[#3A3432] dark:text-[#D6D3D1]">
                         {tag}
                       </span>
                     ))}
@@ -240,7 +252,7 @@ export function NewMePage() {
                 <Network size={15} className="mr-2 text-[#C75B3A]" />
                 信念网络
               </div>
-              <div className="relative h-[160px] rounded-xl bg-[#FAF7F5]">
+              <div className="relative h-[160px] rounded-xl bg-[#FAF7F5] dark:bg-[#2A2523]">
                 {data.implicit.beliefNodes.map((node) => (
                   <span
                     key={node.id}
@@ -270,18 +282,18 @@ export function NewMePage() {
               {data.implicit.habitLoops.map((loop) => (
                 <article
                   key={loop.id}
-                  className={`rounded-xl p-3 ${loop.state === 'good' ? 'bg-[#F0FDF4]' : loop.state === 'risk' ? 'bg-[#FEF2F2]' : 'bg-[#EFF6FF]'}`}
+                  className={`rounded-xl p-3 ${habitLoopToneClass(loop)}`}
                 >
                   <div className="flex items-center">
-                    <p className="text-[12px] font-semibold text-[#44403C]">{loop.name}</p>
-                    <span className="ml-auto text-[11px] text-[#78716C]">{loop.frequencyText}</span>
+                    <p className="text-[12px] font-semibold text-[#44403C] dark:text-[#F5F5F4]">{loop.name}</p>
+                    <span className="ml-auto text-[11px] text-[#78716C] dark:text-[#D6D3D1]">{loop.frequencyText}</span>
                   </div>
-                  <p className="mt-1 flex items-center text-[11px] text-[#78716C]">
+                  <p className="mt-1 flex items-center text-[11px] text-[#78716C] dark:text-[#D6D3D1]">
                     <CircleDot size={12} className="mr-1.5" />
                     线索：{loop.cue}
                   </p>
-                  <p className="mt-1 text-[11px] text-[#78716C]">行为：{loop.routine}</p>
-                  <p className="mt-1 text-[11px] text-[#78716C]">奖励：{loop.reward}</p>
+                  <p className="mt-1 text-[11px] text-[#78716C] dark:text-[#D6D3D1]">行为：{loop.routine}</p>
+                  <p className="mt-1 text-[11px] text-[#78716C] dark:text-[#D6D3D1]">奖励：{loop.reward}</p>
                 </article>
               ))}
             </section>
@@ -291,4 +303,3 @@ export function NewMePage() {
     </div>
   );
 }
-
