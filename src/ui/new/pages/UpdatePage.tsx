@@ -21,6 +21,7 @@ export function UpdatePage() {
       <header className="flex items-center gap-3 px-5 py-3">
         <button
           type="button"
+          aria-label="返回设置"
           onClick={() => navigate({ to: '/settings' })}
           className="flex h-8 w-8 items-center justify-center rounded-lg text-[#78716C] active:bg-black/5 dark:active:bg-white/5"
         >

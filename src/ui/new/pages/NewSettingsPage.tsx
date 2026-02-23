@@ -41,34 +41,25 @@ import {
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
 import { UserCard } from '@/ui/new/components/UserCard';
+import { MoreSection } from '@/ui/new/components/MoreSection';
+import { LegalSection } from '@/ui/new/components/LegalSection';
+import { AboutSection } from '@/ui/new/components/AboutSection';
+import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/new/components/settings-shared';
 import { useNavigate } from '@tanstack/react-router';
 import {
   Bell,
   Bot,
-  Bug,
   Check,
   ChevronRight,
   Code,
   Download,
-  ExternalLink,
-  FileText,
-  Globe,
-  Heart,
-  House,
-  Mic,
   Monitor,
   Moon,
   MoonStar,
-  Package,
-  RefreshCw,
-  ScrollText,
-  Shield,
-  Speech,
   Sun,
   Timer,
   Undo2,
   Upload,
-  Users,
   Wifi,
 } from 'lucide-react';
 
@@ -81,59 +72,6 @@ type PickedJsonFile = {
 function buildBackupFileName(): string {
   const date = new Date().toISOString().slice(0, 10);
   return `exomind-eventlog-${date}.json`;
-}
-
-/* ── Shared row / divider components ── */
-
-function SettingRow({
-  icon,
-  label,
-  right,
-  onClick,
-  className = '',
-}: {
-  icon: React.ReactNode;
-  label: string;
-  right?: React.ReactNode;
-  onClick?: () => void;
-  className?: string;
-}) {
-  const Wrapper = onClick ? 'button' : 'div';
-  return (
-    <Wrapper
-      type={onClick ? 'button' : undefined}
-      onClick={onClick}
-      className={`flex w-full items-center justify-between px-4 py-[14px] ${onClick ? 'active:bg-stone-50 dark:active:bg-stone-800' : ''} ${className}`}
-    >
-      <div className="flex items-center gap-3">
-        {icon}
-        <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{label}</span>
-      </div>
-      {right}
-    </Wrapper>
-  );
-}
-
-function Divider() {
-  return (
-    <div className="px-4">
-      <div className="h-px bg-[#F0ECE8] dark:bg-[#292524]" />
-    </div>
-  );
-}
-
-function SectionCard({ children }: { children: React.ReactNode }) {
-  return (
-    <div className="overflow-hidden rounded-2xl border border-[#F0ECE8] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-      {children}
-    </div>
-  );
-}
-
-function SectionTitle({ children }: { children: React.ReactNode }) {
-  return (
-    <p className="text-[13px] font-medium leading-[1.4] text-[#78716C]">{children}</p>
-  );
 }
 
 export function NewSettingsPage() {
@@ -160,6 +98,14 @@ export function NewSettingsPage() {
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [comingSoonVisible, setComingSoonVisible] = useState(false);
+  const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  const showComingSoon = () => {
+    if (comingSoonTimer.current) clearTimeout(comingSoonTimer.current);
+    setComingSoonVisible(true);
+    comingSoonTimer.current = setTimeout(() => setComingSoonVisible(false), 1500);
+  };
 
   const clearNotice = () => {
     setStatusMessage('');
@@ -483,6 +429,18 @@ export function NewSettingsPage() {
           </SectionCard>
         </section>
 
+        <MoreSection
+          onNavigateUpdate={() => navigate({ to: '/update' })}
+          onComingSoon={showComingSoon}
+        />
+
+        <LegalSection onComingSoon={showComingSoon} />
+
+        <AboutSection
+          appVersion={versionBuildInfo.appVersion}
+          buildHash={versionBuildInfo.buildHash}
+        />
+
         {/* ── Developer Section (开发者) ── */}
         <section className="space-y-2">
           <SectionTitle>开发者</SectionTitle>
@@ -532,109 +490,6 @@ export function NewSettingsPage() {
           </SectionCard>
         </section>
 
-        {/* ── More Section (更多) ── */}
-        <section className="space-y-2">
-          <SectionTitle>更多</SectionTitle>
-          <SectionCard>
-            <SettingRow
-              icon={<RefreshCw className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="更新"
-              onClick={() => navigate({ to: '/update' })}
-              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="遥测"
-              onClick={() => {}}
-              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Bug className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="报告问题"
-              onClick={() => {}}
-              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<ScrollText className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="调试日志"
-              onClick={() => {}}
-              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-            />
-          </SectionCard>
-        </section>
-
-        {/* ── Legal Section (法律与支持) ── */}
-        <section className="space-y-2">
-          <SectionTitle>法律与支持</SectionTitle>
-          <SectionCard>
-            <SettingRow
-              icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="隐私政策"
-              onClick={() => {}}
-              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<FileText className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="用户协议"
-              onClick={() => {}}
-              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Globe className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="官网"
-              onClick={() => {}}
-              right={<ExternalLink className="h-4 w-4 text-[#A8A29E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Heart className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="赞助开发者"
-              onClick={() => {}}
-              right={<ExternalLink className="h-4 w-4 text-[#A8A29E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="开源软件使用声明"
-              onClick={() => {}}
-              right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-            />
-          </SectionCard>
-        </section>
-
-        {/* ── Version Info (关于) ── */}
-        <section className="space-y-2">
-          <SectionTitle>关于</SectionTitle>
-          <SectionCard>
-            <SettingRow
-              icon={<Package className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="版本"
-              right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.appVersion}</span>}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Package className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="构建"
-              right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.buildHash}</span>}
-            />
-            <Divider />
-            <div className="px-4 pb-[14px] pt-[14px]">
-              <div className="flex items-center gap-3">
-                <Heart className="h-[18px] w-[18px] text-[#78716C]" />
-                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">开发者</span>
-              </div>
-              <p className="mt-1 pl-[30px] text-xs leading-[1.4] text-[#A8A29E]">
-                ExoMind — 个人生命成长助手，探索生命与认知的本质。
-              </p>
-            </div>
-          </SectionCard>
-        </section>
-
         {/* Status / Error messages */}
         {statusMessage && (
           <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
@@ -647,6 +502,15 @@ export function NewSettingsPage() {
           </div>
         )}
       </div>
+
+      {/* Coming Soon Toast */}
+      {comingSoonVisible && (
+        <div className="fixed inset-x-0 bottom-28 z-50 flex justify-center">
+          <div className="rounded-full bg-[#1C1917] px-4 py-2 text-sm text-white shadow-lg dark:bg-[#FAFAF9] dark:text-[#1C1917]">
+            即将推出
+          </div>
+        </div>
+      )}
 
       {/* ── Countdown End Mode Dialog ── */}
       <Dialog open={countdownModeDialogOpen} onOpenChange={setCountdownModeDialogOpen}>
