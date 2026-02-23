@@ -30,6 +30,11 @@ test.describe('Issue #213 Task UI（任务界面）', () => {
     await quickInput.press('Enter');
     await page.getByRole('button', { name: '一周' }).click();
     await expect(page.getByText(createdTitle)).toBeVisible();
+
+    await page.getByRole('button', { name: '长期' }).click();
+    await expect(page.getByTestId('tasks-goals-content')).toBeVisible();
+    await expect(page.getByText('商业项目')).toBeVisible();
+    await expect(page.getByText('Exomind v0.3 发布')).toBeVisible();
   });
 
   test('任务详情卡片交互（模式切换/暂停/输入）', async ({ page }) => {
