@@ -1,3 +1,4 @@
+import { AlarmClock, ArrowLeft, Clock3, MoreHorizontal, TriangleAlert } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentDetailData } from '@/lib/types/agent-hub';
@@ -30,9 +31,36 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
   }
 
   return (
-    <div data-testid="actor-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-4">
+    <div data-testid="actor-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3">
+      <header data-testid="actor-detail-header" className="mb-3 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => window.history.back()}
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C]"
+          aria-label="返回（Back）"
+        >
+          <ArrowLeft size={16} />
+        </button>
+        <h1 className="text-[17px] font-bold text-[#1C1917]">{detail.title}</h1>
+        <button
+          type="button"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C]"
+          aria-label="更多（More）"
+        >
+          <MoreHorizontal size={16} />
+        </button>
+      </header>
+
       <section className="rounded-[18px] border border-[#E7E5E4] bg-white p-4">
-        <p className="text-[18px] font-bold text-[#1C1917]">{detail.title}</p>
+        <div className="flex items-center gap-3">
+          <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#78716C20] text-[#78716C]">
+            <AlarmClock size={18} />
+          </div>
+          <div>
+            <p className="text-[16px] font-bold text-[#1C1917]">{detail.title}</p>
+            <p className="text-xs text-[#22C55E]">● 运行中</p>
+          </div>
+        </div>
         <p className="mt-2 text-sm text-[#78716C]">{detail.description}</p>
       </section>
 
@@ -56,18 +84,29 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
       <section className="mt-4">
         <h3 className="text-[13px] font-semibold text-[#78716C]">最近执行</h3>
         <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white">
-          {detail.recentLogs.map((item, index) => (
-            <div key={item.id}>
-              <div className="flex items-center justify-between px-4 py-3">
-                <div>
-                  <p className="text-sm font-medium text-[#1C1917]">{item.title}</p>
-                  <p className="text-xs text-[#A8A29E]">{item.time}</p>
+          {detail.recentLogs.map((item, index) => {
+            const warning = item.status === 'warning';
+            return (
+              <div key={item.id}>
+                <div className="flex items-center justify-between px-4 py-3">
+                  <div className="flex items-start gap-2">
+                    <div className={`mt-0.5 rounded-full p-1 ${warning ? 'bg-[#F973161A] text-[#F97316]' : 'bg-[#22C55E15] text-[#22C55E]'}`}>
+                      <TriangleAlert size={12} />
+                    </div>
+                    <div>
+                      <p className="text-sm font-medium text-[#1C1917]">{item.title}</p>
+                      <p className="text-xs text-[#A8A29E]">{item.time}</p>
+                    </div>
+                  </div>
+                  <div className="flex items-center gap-1 text-xs text-[#78716C]">
+                    <Clock3 size={11} />
+                    {item.duration ?? '--'}
+                  </div>
                 </div>
-                <span className="text-xs text-[#78716C]">{item.duration ?? '--'}</span>
+                {index !== detail.recentLogs.length - 1 && <div className="h-px bg-[#F5F0ED]" />}
               </div>
-              {index !== detail.recentLogs.length - 1 && <div className="h-px bg-[#F5F0ED]" />}
-            </div>
-          ))}
+            );
+          })}
         </div>
       </section>
     </div>

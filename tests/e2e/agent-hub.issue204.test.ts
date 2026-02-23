@@ -32,7 +32,7 @@ test.describe('Issue #204 Agent Hub（Agent Hub 全视图）', () => {
     await page.getByTestId('agent-list-item-agent-daily').click();
     await expect(page).toHaveURL(/\/agents\/agent\/agent-daily$/);
     await expect(page.getByTestId('agent-detail-page')).toBeVisible();
-    await expect(page.getByText('日报 Agent')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '日报 Agent' })).toBeVisible();
   });
 
   test('chat streaming + market browse（对话流式与市场浏览）', async ({ page }) => {
@@ -51,4 +51,3 @@ test.describe('Issue #204 Agent Hub（Agent Hub 全视图）', () => {
     await expect(page.getByText('Code Review Agent')).toBeVisible();
   });
 });
-

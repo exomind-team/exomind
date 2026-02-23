@@ -35,10 +35,15 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     });
 
     expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-topology-canvas')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-topology-edge-e-rss-daily')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('agent-view-toggle-list'));
     expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-list-filter-all')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-list-item-agent-daily-chevron')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('agent-view-toggle-device'));
     expect(screen.getByTestId('agent-device-view')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-device-overview-card')).toBeInTheDocument();
   });
 
   it('supports selecting topology node and opening add node sheet（支持节点选中与添加节点弹窗）', async () => {
@@ -50,6 +55,7 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
 
     fireEvent.click(screen.getByTestId('agent-topology-node-agent-daily'));
     expect(screen.getByTestId('agent-topology-node-detail-card')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-topology-node-agent-summary')).toHaveAttribute('data-muted', 'true');
 
     fireEvent.click(screen.getByTestId('agent-add-node-button'));
     expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
@@ -59,4 +65,3 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     expect(screen.queryByTestId('agent-add-node-sheet')).not.toBeInTheDocument();
   });
 });
-

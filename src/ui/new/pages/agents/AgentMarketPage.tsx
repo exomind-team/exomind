@@ -1,6 +1,13 @@
+import { ArrowDownToLine, ArrowLeft, Search, Sparkles, Store, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentMarketCategory, AgentMarketItem } from '@/lib/types/agent-hub';
+
+function getMarketCardIcon(item: AgentMarketItem) {
+  if (item.id.includes('calendar')) return Store;
+  if (item.id.includes('knowledge')) return Users;
+  return Sparkles;
+}
 
 export function AgentMarketPage() {
   const [categories, setCategories] = useState<AgentMarketCategory[]>([]);
@@ -33,12 +40,27 @@ export function AgentMarketPage() {
 
   return (
     <div data-testid="agent-market-page" className="min-h-full bg-[#FAF7F5]">
-      <header className="px-5 py-3">
-        <h1 className="text-[17px] font-bold text-[#1C1917]">市场</h1>
+      <header className="grid grid-cols-[auto,1fr,auto] items-center px-5 py-3">
+        <button
+          type="button"
+          onClick={() => window.history.back()}
+          className="flex items-center gap-1 text-[12px] text-[#C75B3A]"
+        >
+          <ArrowLeft size={14} />
+          返回
+        </button>
+        <h1 className="text-center text-[17px] font-bold text-[#1C1917]">市场</h1>
+        <span />
       </header>
 
       <div className="px-5">
-        <div className="rounded-xl bg-[#F5F0ED] px-4 py-2 text-sm text-[#A8A29E]">搜索 Agent、数据源、知识包...</div>
+        <label
+          data-testid="agent-market-search"
+          className="flex items-center gap-2 rounded-xl bg-[#F5F0ED] px-3 py-2 text-sm text-[#A8A29E]"
+        >
+          <Search size={14} />
+          搜索 Agent、数据源、知识包...
+        </label>
       </div>
 
       <div className="mt-3 flex gap-2 overflow-x-auto px-5 pb-1">
@@ -68,25 +90,41 @@ export function AgentMarketPage() {
         </div>
 
         <div className="mt-2 space-y-3 pb-[calc(env(safe-area-inset-bottom,0px)+108px)]">
-          {items.map((item) => (
-            <article key={item.id} className="rounded-2xl border border-[#F5F0ED] bg-white p-4">
-              <p className="text-sm font-semibold text-[#1C1917]">{item.name}</p>
-              <p className="mt-1 text-xs text-[#78716C]">{item.summary}</p>
-              <div className="mt-2 flex items-center justify-between">
-                <div className="flex flex-wrap gap-1">
-                  {item.tags.map((tag) => (
-                    <span key={`${item.id}-${tag}`} className="rounded bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C]">
-                      {tag}
-                    </span>
-                  ))}
+          {items.map((item) => {
+            const Icon = getMarketCardIcon(item);
+            return (
+              <article key={item.id} className="rounded-2xl border border-[#F5F0ED] bg-white p-4">
+                <div className="flex items-start gap-3">
+                  <div
+                    className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl"
+                    style={{ backgroundColor: `${item.tintColor}20`, color: item.tintColor }}
+                  >
+                    <Icon size={16} />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-[#1C1917]">{item.name}</p>
+                    <p className="text-[11px] text-[#A8A29E]">by exomind team</p>
+                  </div>
                 </div>
-                <span className="text-[11px] text-[#A8A29E]">{item.installsText}</span>
-              </div>
-            </article>
-          ))}
+                <p className="mt-2 text-xs text-[#78716C]">{item.summary}</p>
+                <div className="mt-2 flex items-center justify-between">
+                  <div className="flex flex-wrap gap-1">
+                    {item.tags.slice(0, 2).map((tag) => (
+                      <span key={`${item.id}-${tag}`} className="rounded bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C]">
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                  <div className="flex items-center gap-1 text-[11px] text-[#A8A29E]">
+                    <ArrowDownToLine size={11} />
+                    {item.installsText}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
         </div>
       </div>
     </div>
   );
 }
-

@@ -29,7 +29,9 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
       expect(screen.getByTestId('agent-detail-page')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('日报 Agent')).toBeInTheDocument();
+    expect(screen.getAllByText('日报 Agent').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('agent-detail-header')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-detail-back-button')).toBeInTheDocument();
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('输出目标')).toBeInTheDocument();
     expect(screen.getByTestId('agent-detail-chat-button')).toBeInTheDocument();
@@ -42,9 +44,9 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
       expect(screen.getByTestId('actor-detail-page')).toBeInTheDocument();
     });
 
-    expect(screen.getByText('定时唤醒')).toBeInTheDocument();
+    expect(screen.getAllByText('定时唤醒').length).toBeGreaterThan(0);
+    expect(screen.getByTestId('actor-detail-header')).toBeInTheDocument();
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('最近执行')).toBeInTheDocument();
   });
 });
-
