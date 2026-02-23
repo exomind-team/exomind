@@ -26,6 +26,8 @@
     "test:e2e:issue27": "playwright test tests/e2e/eventlog-multi-device-sync.issue27.test.ts --config tests/e2e/playwright.issue27.config.ts",
     "test:e2e:issue120": "playwright test tests/e2e/eventlog.test.ts --config tests/e2e/playwright.issue120.config.ts -g \"issue-120\"",
     "test:e2e:issue213": "playwright test tests/e2e/task-ui.issue213.test.ts --config tests/e2e/playwright.issue213.config.ts",
+    "test:e2e:issue215": "playwright test tests/e2e/me-ui.issue215.test.ts --config tests/e2e/playwright.issue215.config.ts",
+    "test:e2e:issue204": "playwright test tests/e2e/agent-hub.issue204.test.ts --config tests/e2e/playwright.issue204.config.ts",
     "test:e2e:report": "playwright test --reporter=html"
   },
   "dependencies": {

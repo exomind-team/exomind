@@ -1,6 +1,14 @@
 import type { ITaskPort } from '@/lib/environment/interfaces/task.port';
-import type { CreateTaskInput, TaskItem, TaskTimerMode } from '@/lib/types/task';
-import { MOCK_TASKS_FIXTURE } from './fixtures/tasks';
+import type {
+  CreateTaskInput,
+  TaskGoalGroup,
+  TaskItem,
+  TaskTimerMode,
+} from '@/lib/types/task';
+import {
+  MOCK_TASK_GOAL_GROUPS_FIXTURE,
+  MOCK_TASKS_FIXTURE,
+} from './fixtures/tasks';
 
 function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
@@ -12,9 +20,14 @@ function nowIso(): string {
 
 export class TaskMockAdapter implements ITaskPort {
   private tasks: TaskItem[] = deepClone(MOCK_TASKS_FIXTURE);
+  private goals: TaskGoalGroup[] = deepClone(MOCK_TASK_GOAL_GROUPS_FIXTURE);
 
   async listTasks(): Promise<TaskItem[]> {
     return deepClone(this.tasks);
+  }
+
+  async getLongTermGoals(): Promise<TaskGoalGroup[]> {
+    return deepClone(this.goals);
   }
 
   async getTaskById(taskId: string): Promise<TaskItem | null> {
