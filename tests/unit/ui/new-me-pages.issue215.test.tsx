@@ -51,4 +51,27 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
       expect(screen.getByText('信念网络')).toBeInTheDocument();
     });
   });
+
+  it('applies dark-readable classes for key child cards（关键子卡片具备暗色可读样式）', async () => {
+    render(<NewMePage />);
+
+    await waitFor(() => {
+      expect(screen.getByText('读 3 页商业书')).toBeInTheDocument();
+    });
+
+    const behaviorTitle = screen.getByText('读 3 页商业书');
+    const behaviorCard = behaviorTitle.closest('article');
+    expect(behaviorCard?.className).toContain('dark:bg');
+    expect(behaviorTitle.className).toContain('dark:text');
+
+    fireEvent.click(screen.getByRole('button', { name: '学习' }));
+    await waitFor(() => {
+      expect(screen.getByText('编译器')).toBeInTheDocument();
+    });
+
+    const laneTitle = screen.getByText('编译器');
+    const laneCard = laneTitle.closest('article');
+    expect(laneCard?.className).toContain('dark:bg');
+    expect(laneTitle.className).toContain('dark:text');
+  });
 });
