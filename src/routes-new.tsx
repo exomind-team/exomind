@@ -44,6 +44,11 @@ const AgentsPage = lazy(async () => {
   return { default: module.AgentsPage };
 });
 
+const UpdatePage = lazy(async () => {
+  const module = await import('@/ui/new/pages/UpdatePage');
+  return { default: module.UpdatePage };
+});
+
 function PageFallback() {
   return (
     <div className="px-6 py-6 text-sm text-[#A8A29E] dark:text-[#78716C]">
@@ -219,6 +224,18 @@ const newAgentsRoute = createRoute({
   },
 });
 
+const newUpdateRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/update',
+  component: function NewUpdate() {
+    return (
+      <LazyPage>
+        <UpdatePage />
+      </LazyPage>
+    );
+  },
+});
+
 const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newEventlogRoute,
@@ -229,6 +246,7 @@ const newRouteTree = newRootRoute.addChildren([
   newAsrTestRoute,
   newMossTestRoute,
   newAgentsRoute,
+  newUpdateRoute,
 ]);
 
 const newUiRouter = createRouter({ routeTree: newRouteTree });
