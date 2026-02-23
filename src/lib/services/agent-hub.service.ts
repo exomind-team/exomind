@@ -32,52 +32,59 @@ export interface AgentHubService {
 }
 
 export class AgentHubServiceImpl implements AgentHubService {
-  private readonly env: AgentEnvironmentLike;
+  private readonly injectedEnv: AgentEnvironmentLike | null;
 
   constructor(env?: AgentEnvironmentLike) {
-    this.env = env ?? ExoMindEnvironment.getInstance();
+    this.injectedEnv = env ?? null;
+  }
+
+  private getAgentPort(): IAgentPort {
+    if (this.injectedEnv) {
+      return this.injectedEnv.agent;
+    }
+    return ExoMindEnvironment.getInstance().agent;
   }
 
   async getTopology(): Promise<AgentHubTopologyData> {
-    return this.env.agent.getTopology();
+    return this.getAgentPort().getTopology();
   }
 
   async getListView(): Promise<AgentHubListSection[]> {
-    return this.env.agent.getListView();
+    return this.getAgentPort().getListView();
   }
 
   async getDeviceView(): Promise<AgentDeviceGroup[]> {
-    return this.env.agent.getDeviceView();
+    return this.getAgentPort().getDeviceView();
   }
 
   async listAddNodeOptions(): Promise<AgentAddNodeOption[]> {
-    return this.env.agent.listAddNodeOptions();
+    return this.getAgentPort().listAddNodeOptions();
   }
 
   async getAgentDetail(agentId: string): Promise<AgentDetailData | null> {
-    return this.env.agent.getAgentDetail(agentId);
+    return this.getAgentPort().getAgentDetail(agentId);
   }
 
   async getActorDetail(actorId: string): Promise<AgentDetailData | null> {
-    return this.env.agent.getActorDetail(actorId);
+    return this.getAgentPort().getActorDetail(actorId);
   }
 
   async listMarketCategories(): Promise<AgentMarketCategory[]> {
-    return this.env.agent.listMarketCategories();
+    return this.getAgentPort().listMarketCategories();
   }
 
   async getMarketItems(params?: { categoryId?: string; query?: string }): Promise<AgentMarketItem[]> {
-    return this.env.agent.getMarketItems(params);
+    return this.getAgentPort().getMarketItems(params);
   }
 
   async getConversation(agentId: string): Promise<AgentConversationMessage[]> {
-    return this.env.agent.getConversation(agentId);
+    return this.getAgentPort().getConversation(agentId);
   }
 
   streamConversation(
     input: { agentId: string; prompt: string }
   ): AsyncGenerator<AgentConversationChunk, void, void> {
-    return this.env.agent.streamConversation(input);
+    return this.getAgentPort().streamConversation(input);
   }
 }
 
@@ -89,4 +96,3 @@ export function getAgentHubService(): AgentHubService {
   }
   return agentHubServiceInstance;
 }
-
