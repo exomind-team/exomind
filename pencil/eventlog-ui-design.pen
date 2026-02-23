@@ -49456,6 +49456,7 @@
           ],
           "justifyContent": "center",
           "alignItems": "center",
+          "gap": 6,
           "children": [
             {
               "type": "frame",
@@ -49475,6 +49476,8 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#C75B3A",
               "children": [
                 {
                   "type": "text",
@@ -49506,6 +49509,13 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#F5F0ED",
+              "stroke": {
+                "align": "inside",
+                "thickness": 0,
+                "fill": "#00000000"
+              },
               "children": [
                 {
                   "type": "text",
@@ -49537,6 +49547,13 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#F5F0ED",
+              "stroke": {
+                "align": "inside",
+                "thickness": 0,
+                "fill": "#00000000"
+              },
               "children": [
                 {
                   "type": "text",
@@ -50939,6 +50956,7 @@
           ],
           "justifyContent": "center",
           "alignItems": "center",
+          "gap": 6,
           "children": [
             {
               "type": "frame",
@@ -50958,6 +50976,13 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#F5F0ED",
+              "stroke": {
+                "align": "inside",
+                "thickness": 0,
+                "fill": "#00000000"
+              },
               "children": [
                 {
                   "type": "text",
@@ -50989,6 +51014,8 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#C75B3A",
               "children": [
                 {
                   "type": "text",
@@ -51020,6 +51047,13 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#F5F0ED",
+              "stroke": {
+                "align": "inside",
+                "thickness": 0,
+                "fill": "#00000000"
+              },
               "children": [
                 {
                   "type": "text",
@@ -51911,6 +51945,7 @@
           ],
           "justifyContent": "center",
           "alignItems": "center",
+          "gap": 6,
           "children": [
             {
               "type": "frame",
@@ -51930,6 +51965,13 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#F5F0ED",
+              "stroke": {
+                "align": "inside",
+                "thickness": 0,
+                "fill": "#00000000"
+              },
               "children": [
                 {
                   "type": "text",
@@ -51961,6 +52003,13 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#F5F0ED",
+              "stroke": {
+                "align": "inside",
+                "thickness": 0,
+                "fill": "#00000000"
+              },
               "children": [
                 {
                   "type": "text",
@@ -51992,6 +52041,8 @@
               ],
               "justifyContent": "center",
               "alignItems": "center",
+              "cornerRadius": 16,
+              "fill": "#C75B3A",
               "children": [
                 {
                   "type": "text",

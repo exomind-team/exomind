@@ -1,6 +1,6 @@
-import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation } from '@tanstack/react-router';
+import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useParams } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig } from 'lucide-react';
+import { Target, Settings, Bot, SquareCheckBig, UserRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 
@@ -24,6 +24,11 @@ const NewTaskDetailPage = lazy(async () => {
   return { default: module.NewTaskDetailPage };
 });
 
+const NewMePage = lazy(async () => {
+  const module = await import('@/ui/new/pages/NewMePage');
+  return { default: module.NewMePage };
+});
+
 const UserManagePage = lazy(async () => {
   const module = await import('@/ui/pages/UserManagePage');
   return { default: module.UserManagePage };
@@ -42,6 +47,31 @@ const MOSSASRTestPage = lazy(async () => {
 const AgentsPage = lazy(async () => {
   const module = await import('@/ui/new/pages/AgentsPage');
   return { default: module.AgentsPage };
+});
+
+const UpdatePage = lazy(async () => {
+  const module = await import('@/ui/new/pages/UpdatePage');
+  return { default: module.UpdatePage };
+});
+
+const AgentDetailPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/agents/AgentDetailPage');
+  return { default: module.AgentDetailPage };
+});
+
+const ActorDetailPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/agents/ActorDetailPage');
+  return { default: module.ActorDetailPage };
+});
+
+const AgentConversationPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/agents/AgentConversationPage');
+  return { default: module.AgentConversationPage };
+});
+
+const AgentMarketPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/agents/AgentMarketPage');
+  return { default: module.AgentMarketPage };
 });
 
 function PageFallback() {
@@ -68,6 +98,7 @@ function NewLayout() {
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
+    { title: 'Me', path: '/me', icon: UserRound },
     ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
@@ -80,18 +111,19 @@ function NewLayout() {
         </main>
 
         <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur">
-          <div className="flex items-center justify-around px-6 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
+          <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
             {navItems.map((item) => {
               const Icon = item.icon;
               const active = location.pathname === item.path
                 || (item.path === '/eventlog' && location.pathname === '/')
-                || (item.path === '/tasks' && location.pathname.startsWith('/tasks'));
+                || (item.path === '/tasks' && location.pathname.startsWith('/tasks'))
+                || (item.path === '/me' && location.pathname.startsWith('/me'));
               return (
                 <Link
                   key={item.path}
                   to={item.path}
                   className={cn(
-                    'flex min-w-20 flex-col items-center gap-1 rounded-xl px-3 py-1 text-[11px] transition-colors',
+                    'flex flex-1 min-w-0 flex-col items-center gap-1 rounded-xl py-1 text-[11px] transition-colors',
                     active ? 'text-[#C75B3A] dark:text-[#E8734E] font-semibold' : 'text-stone-400 dark:text-[#57534E]'
                   )}
                 >
@@ -159,6 +191,18 @@ const newTaskDetailRoute = createRoute({
   },
 });
 
+const newMeRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/me',
+  component: function NewMe() {
+    return (
+      <LazyPage>
+        <NewMePage />
+      </LazyPage>
+    );
+  },
+});
+
 const newSettingsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/settings',
@@ -219,16 +263,85 @@ const newAgentsRoute = createRoute({
   },
 });
 
+const newUpdateRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/update',
+  component: function NewUpdate() {
+    return (
+      <LazyPage>
+        <UpdatePage />
+      </LazyPage>
+    );
+  },
+});
+
+const newAgentDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/agent/$agentId',
+  component: function NewAgentDetail() {
+    const { agentId } = useParams({ strict: false }) as { agentId?: string };
+    return (
+      <LazyPage>
+        <AgentDetailPage agentId={agentId} />
+      </LazyPage>
+    );
+  },
+});
+
+const newActorDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/actor/$actorId',
+  component: function NewActorDetail() {
+    const { actorId } = useParams({ strict: false }) as { actorId?: string };
+    return (
+      <LazyPage>
+        <ActorDetailPage actorId={actorId} />
+      </LazyPage>
+    );
+  },
+});
+
+const newAgentConversationRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/chat/$agentId',
+  component: function NewAgentConversation() {
+    const { agentId } = useParams({ strict: false }) as { agentId?: string };
+    return (
+      <LazyPage>
+        <AgentConversationPage agentId={agentId} />
+      </LazyPage>
+    );
+  },
+});
+
+const newAgentMarketRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/market',
+  component: function NewAgentMarket() {
+    return (
+      <LazyPage>
+        <AgentMarketPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newEventlogRoute,
   newTasksRoute,
   newTaskDetailRoute,
+  newMeRoute,
   newSettingsRoute,
   newUserManageRoute,
   newAsrTestRoute,
   newMossTestRoute,
   newAgentsRoute,
+  newUpdateRoute,
+  newAgentDetailRoute,
+  newActorDetailRoute,
+  newAgentConversationRoute,
+  newAgentMarketRoute,
 ]);
 
 const newUiRouter = createRouter({ routeTree: newRouteTree });
