@@ -141,7 +141,13 @@ function TopologyView({
   );
 }
 
-function ListView({ sections }: { sections: AgentHubListSection[] }) {
+function ListView({
+  sections,
+  onItemNavigate,
+}: {
+  sections: AgentHubListSection[];
+  onItemNavigate: (path: string) => void;
+}) {
   return (
     <section data-testid="agent-list-view" className="space-y-4">
       {sections.map((section) => (
@@ -153,13 +159,25 @@ function ListView({ sections }: { sections: AgentHubListSection[] }) {
           <div className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white">
             {section.items.map((item, index) => (
               <div key={item.id}>
-                <div className="flex items-center justify-between px-4 py-3">
+                <button
+                  type="button"
+                  data-testid={`agent-list-item-${item.id}`}
+                  onClick={() => {
+                    if (item.type === 'agent') {
+                      onItemNavigate(`/agents/agent/${item.id}`);
+                    }
+                    if (item.type === 'actor') {
+                      onItemNavigate(`/agents/actor/${item.id}`);
+                    }
+                  }}
+                  className="flex w-full items-center justify-between px-4 py-3 text-left"
+                >
                   <div>
                     <p className="text-sm font-medium text-[#1C1917]">{item.name}</p>
                     <p className="text-xs text-[#A8A29E]">{item.description}</p>
                   </div>
                   <span className="text-[11px] text-[#78716C]">{item.status}</span>
-                </div>
+                </button>
                 {index !== section.items.length - 1 && <div className="h-px bg-[#F5F0ED]" />}
               </div>
             ))}
@@ -212,9 +230,11 @@ function DeviceView({ groups }: { groups: AgentDeviceGroup[] }) {
 function AddNodeSheet({
   options,
   onClose,
+  onNavigate,
 }: {
   options: AgentAddNodeOption[];
   onClose: () => void;
+  onNavigate: (path: string) => void;
 }) {
   return (
     <>
@@ -248,6 +268,13 @@ function AddNodeSheet({
             <button
               key={option.id}
               type="button"
+              data-testid={`agent-add-node-option-${option.id}`}
+              onClick={() => {
+                if (option.id === 'market') {
+                  onClose();
+                  onNavigate('/agents/market');
+                }
+              }}
               className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left"
             >
               <div>
@@ -295,9 +322,13 @@ export function AgentsPage() {
     };
   }, []);
 
+  const navigateByPath = (path: string) => {
+    window.location.href = path;
+  };
+
   const content = useMemo(() => {
     if (viewMode === 'list') {
-      return <ListView sections={listSections} />;
+      return <ListView sections={listSections} onItemNavigate={navigateByPath} />;
     }
     if (viewMode === 'device') {
       return <DeviceView groups={deviceGroups} />;
@@ -341,8 +372,13 @@ export function AgentsPage() {
         {content}
       </div>
 
-      {sheetOpen && <AddNodeSheet options={addNodeOptions} onClose={() => setSheetOpen(false)} />}
+      {sheetOpen && (
+        <AddNodeSheet
+          options={addNodeOptions}
+          onClose={() => setSheetOpen(false)}
+          onNavigate={navigateByPath}
+        />
+      )}
     </div>
   );
 }
-
