@@ -15,10 +15,10 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
   const [messages, setMessages] = useState<AgentConversationMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
+  const targetId = agentId ?? '';
 
   useEffect(() => {
     let disposed = false;
-    const targetId = agentId ?? '';
     const load = async () => {
       if (!targetId) return;
       const history = await getAgentHubService().getConversation(targetId);
@@ -30,11 +30,10 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
     return () => {
       disposed = true;
     };
-  }, [agentId]);
+  }, [targetId]);
 
   const handleSend = async () => {
     const prompt = inputValue.trim();
-    const targetId = agentId ?? '';
     if (!prompt || !targetId || sending) return;
 
     setSending(true);

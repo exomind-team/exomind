@@ -4,10 +4,10 @@ import type { AgentDetailData } from '@/lib/types/agent-hub';
 
 export function ActorDetailPage({ actorId }: { actorId?: string }) {
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
+  const targetId = actorId ?? '';
 
   useEffect(() => {
     let disposed = false;
-    const targetId = actorId ?? '';
     const load = async () => {
       if (!targetId) return;
       const response = await getAgentHubService().getActorDetail(targetId);
@@ -19,7 +19,7 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
     return () => {
       disposed = true;
     };
-  }, [actorId]);
+  }, [targetId]);
 
   if (!detail) {
     return (
@@ -73,4 +73,3 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
     </div>
   );
 }
-
