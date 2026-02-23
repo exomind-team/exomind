@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig } from 'lucide-react';
+import { Target, Settings, Bot, SquareCheckBig, UserRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 
@@ -22,6 +22,11 @@ const NewTasksPage = lazy(async () => {
 const NewTaskDetailPage = lazy(async () => {
   const module = await import('@/ui/new/pages/NewTaskDetailPage');
   return { default: module.NewTaskDetailPage };
+});
+
+const NewMePage = lazy(async () => {
+  const module = await import('@/ui/new/pages/NewMePage');
+  return { default: module.NewMePage };
 });
 
 const UserManagePage = lazy(async () => {
@@ -68,6 +73,7 @@ function NewLayout() {
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
+    { title: 'Me', path: '/me', icon: UserRound },
     ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
@@ -85,7 +91,8 @@ function NewLayout() {
               const Icon = item.icon;
               const active = location.pathname === item.path
                 || (item.path === '/eventlog' && location.pathname === '/')
-                || (item.path === '/tasks' && location.pathname.startsWith('/tasks'));
+                || (item.path === '/tasks' && location.pathname.startsWith('/tasks'))
+                || (item.path === '/me' && location.pathname.startsWith('/me'));
               return (
                 <Link
                   key={item.path}
@@ -159,6 +166,18 @@ const newTaskDetailRoute = createRoute({
   },
 });
 
+const newMeRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/me',
+  component: function NewMe() {
+    return (
+      <LazyPage>
+        <NewMePage />
+      </LazyPage>
+    );
+  },
+});
+
 const newSettingsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/settings',
@@ -224,6 +243,7 @@ const newRouteTree = newRootRoute.addChildren([
   newEventlogRoute,
   newTasksRoute,
   newTaskDetailRoute,
+  newMeRoute,
   newSettingsRoute,
   newUserManageRoute,
   newAsrTestRoute,
