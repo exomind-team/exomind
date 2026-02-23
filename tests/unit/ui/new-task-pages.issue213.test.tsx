@@ -1,15 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { MOCK_TASK_GOAL_GROUPS_FIXTURE } from '@/lib/adapters/mock/fixtures/tasks';
 import { NewTaskTimerCard } from '@/ui/new/components/NewTaskTimerCard';
 import { NewTasksPage } from '@/ui/new/pages/NewTasksPage';
 import type { TaskItem } from '@/lib/types/task';
 
 const listTasksMock = vi.fn();
+const longTermGoalsMock = vi.fn();
 const createTaskMock = vi.fn();
 
 vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     listTasks: listTasksMock,
+    getLongTermGoals: longTermGoalsMock,
     createTask: createTaskMock,
     getTask: vi.fn(),
     setTimerMode: vi.fn(),
@@ -38,8 +41,10 @@ const sampleTask: TaskItem = {
 describe('issue-213 task ui pages（任务页面还原）', () => {
   beforeEach(() => {
     listTasksMock.mockReset();
+    longTermGoalsMock.mockReset();
     createTaskMock.mockReset();
     listTasksMock.mockResolvedValue([sampleTask]);
+    longTermGoalsMock.mockResolvedValue(MOCK_TASK_GOAL_GROUPS_FIXTURE);
     createTaskMock.mockResolvedValue(sampleTask);
   });
 
@@ -78,6 +83,21 @@ describe('issue-213 task ui pages（任务页面还原）', () => {
 
     await waitFor(() => {
       expect(screen.getByText('完成 Task List 视图设计')).toBeInTheDocument();
+    });
+  });
+
+  it('renders long-term goals from pencil fixture（长期页渲染设计稿数据）', async () => {
+    render(<NewTasksPage />);
+    fireEvent.click(screen.getByRole('button', { name: '长期' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('tasks-goals-content')).toBeInTheDocument();
+      expect(screen.getByText('商业项目')).toBeInTheDocument();
+      expect(screen.getByText('Exomind v0.3 发布')).toBeInTheDocument();
+      expect(screen.getByText('科学研究')).toBeInTheDocument();
+      expect(screen.getByText('人工认知生命理论')).toBeInTheDocument();
+      expect(screen.getByText('知识学习')).toBeInTheDocument();
+      expect(screen.getByText('眼睛健康')).toBeInTheDocument();
     });
   });
 });
