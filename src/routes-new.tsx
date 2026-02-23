@@ -1,14 +1,60 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation } from '@tanstack/react-router';
-import { useState, useEffect } from 'react';
-import { Target, Settings, Bot } from 'lucide-react';
+import { Suspense, lazy, useEffect, useState } from 'react';
+import { Target, Settings, Bot, SquareCheckBig } from 'lucide-react';
 import { cn } from '@/lib/utils';
-import { NewFocusPage } from '@/ui/new/pages/NewFocusPage';
-import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
-import { UserManagePage } from '@/ui/pages/UserManagePage';
-import { ASRTestPage } from '@/pages/ASRTestPage';
-import { MOSSASRTestPage } from '@/pages/MOSSASRTestPage';
-import { AgentsPage } from '@/ui/new/pages/AgentsPage';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
+
+const NewFocusPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/NewFocusPage');
+  return { default: module.NewFocusPage };
+});
+
+const NewSettingsPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/NewSettingsPage');
+  return { default: module.NewSettingsPage };
+});
+
+const NewTasksPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/NewTasksPage');
+  return { default: module.NewTasksPage };
+});
+
+const NewTaskDetailPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/NewTaskDetailPage');
+  return { default: module.NewTaskDetailPage };
+});
+
+const UserManagePage = lazy(async () => {
+  const module = await import('@/ui/pages/UserManagePage');
+  return { default: module.UserManagePage };
+});
+
+const ASRTestPage = lazy(async () => {
+  const module = await import('@/pages/ASRTestPage');
+  return { default: module.ASRTestPage };
+});
+
+const MOSSASRTestPage = lazy(async () => {
+  const module = await import('@/pages/MOSSASRTestPage');
+  return { default: module.MOSSASRTestPage };
+});
+
+const AgentsPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/AgentsPage');
+  return { default: module.AgentsPage };
+});
+
+function PageFallback() {
+  return (
+    <div className="px-6 py-6 text-sm text-[#A8A29E] dark:text-[#78716C]">
+      页面加载中...
+    </div>
+  );
+}
+
+function LazyPage({ children }: { children: React.ReactNode }) {
+  return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
+}
 
 function NewLayout() {
   const location = useLocation();
@@ -21,6 +67,7 @@ function NewLayout() {
 
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
+    { title: '任务', path: '/tasks', icon: SquareCheckBig },
     ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
@@ -36,7 +83,9 @@ function NewLayout() {
           <div className="flex items-center justify-around px-6 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const active = location.pathname === item.path || (item.path === '/eventlog' && location.pathname === '/');
+              const active = location.pathname === item.path
+                || (item.path === '/eventlog' && location.pathname === '/')
+                || (item.path === '/tasks' && location.pathname.startsWith('/tasks'));
               return (
                 <Link
                   key={item.path}
@@ -66,7 +115,11 @@ const newHomeRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/',
   component: function NewHome() {
-    return <NewFocusPage />;
+    return (
+      <LazyPage>
+        <NewFocusPage />
+      </LazyPage>
+    );
   },
 });
 
@@ -74,7 +127,35 @@ const newEventlogRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/eventlog',
   component: function NewEventlog() {
-    return <NewFocusPage />;
+    return (
+      <LazyPage>
+        <NewFocusPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newTasksRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks',
+  component: function NewTasks() {
+    return (
+      <LazyPage>
+        <NewTasksPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newTaskDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/$taskId',
+  component: function NewTaskDetail() {
+    return (
+      <LazyPage>
+        <NewTaskDetailPage />
+      </LazyPage>
+    );
   },
 });
 
@@ -82,7 +163,11 @@ const newSettingsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/settings',
   component: function NewSettings() {
-    return <NewSettingsPage />;
+    return (
+      <LazyPage>
+        <NewSettingsPage />
+      </LazyPage>
+    );
   },
 });
 
@@ -90,7 +175,11 @@ const newUserManageRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/user-manage',
   component: function NewUserManage() {
-    return <UserManagePage />;
+    return (
+      <LazyPage>
+        <UserManagePage />
+      </LazyPage>
+    );
   },
 });
 
@@ -98,7 +187,11 @@ const newAsrTestRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/asr-test',
   component: function NewAsrTest() {
-    return <ASRTestPage />;
+    return (
+      <LazyPage>
+        <ASRTestPage />
+      </LazyPage>
+    );
   },
 });
 
@@ -106,7 +199,11 @@ const newMossTestRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/moss-test',
   component: function NewMossTest() {
-    return <MOSSASRTestPage />;
+    return (
+      <LazyPage>
+        <MOSSASRTestPage />
+      </LazyPage>
+    );
   },
 });
 
@@ -114,13 +211,19 @@ const newAgentsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents',
   component: function NewAgents() {
-    return <AgentsPage />;
+    return (
+      <LazyPage>
+        <AgentsPage />
+      </LazyPage>
+    );
   },
 });
 
 const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newEventlogRoute,
+  newTasksRoute,
+  newTaskDetailRoute,
   newSettingsRoute,
   newUserManageRoute,
   newAsrTestRoute,
