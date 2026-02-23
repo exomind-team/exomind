@@ -111,4 +111,9 @@ describe('NewSettingsPage - Developer Section (developerMode=true)', () => {
     render(<NewSettingsPage />);
     expect(screen.getByText('使用测试数据')).toBeInTheDocument();
   });
+
+  it('renders old pages row', () => {
+    render(<NewSettingsPage />);
+    expect(screen.getByText('旧版页面')).toBeInTheDocument();
+  });
 });
