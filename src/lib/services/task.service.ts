@@ -1,11 +1,6 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment';
 import type { ITaskPort } from '@/lib/environment/interfaces/task.port';
-import type {
-  CreateTaskInput,
-  TaskGoalGroup,
-  TaskItem,
-  TaskTimerMode,
-} from '@/lib/types/task';
+import type { CreateTaskInput, TaskItem, TaskTimerMode } from '@/lib/types/task';
 
 type TaskEnvironmentLike = {
   task: ITaskPort;
@@ -13,7 +8,6 @@ type TaskEnvironmentLike = {
 
 export interface TaskService {
   listTasks(): Promise<TaskItem[]>;
-  getLongTermGoals(): Promise<TaskGoalGroup[]>;
   getTask(taskId: string): Promise<TaskItem | null>;
   createTask(input: CreateTaskInput): Promise<TaskItem>;
   setTimerMode(taskId: string, mode: TaskTimerMode): Promise<TaskItem | null>;
@@ -31,10 +25,6 @@ export class TaskServiceImpl implements TaskService {
 
   async listTasks(): Promise<TaskItem[]> {
     return this.env.task.listTasks();
-  }
-
-  async getLongTermGoals(): Promise<TaskGoalGroup[]> {
-    return this.env.task.getLongTermGoals();
   }
 
   async getTask(taskId: string): Promise<TaskItem | null> {

@@ -14,7 +14,6 @@
 import type { IASRPort } from './interfaces/asr.port';
 import type { IAgentPort } from './interfaces/agent.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
-import type { IMePort } from './interfaces/me.port';
 import type { IStoragePort } from './interfaces/storage.port';
 import type { ITaskPort } from './interfaces/task.port';
 import { createRuntimeBootstrap, type RuntimeKind } from './bootstrap';
@@ -33,8 +32,6 @@ export interface Environment {
   eventlog: IEventLogPort;
   /** 任务能力 */
   task: ITaskPort;
-  /** Me 页面能力 */
-  me: IMePort;
   /** Agent Hub 能力 */
   agent: IAgentPort;
   /** 运行时类型 */
@@ -49,7 +46,6 @@ export class ExoMindEnvironment implements Environment {
   storage: IStoragePort;
   eventlog: IEventLogPort;
   task: ITaskPort;
-  me: IMePort;
   agent: IAgentPort;
   runtime: RuntimeKind;
   private useMockDataEnabled: boolean;
@@ -64,7 +60,6 @@ export class ExoMindEnvironment implements Environment {
     this.storage = bootstrap.storage;
     this.eventlog = bootstrap.eventlog;
     this.task = bootstrap.task;
-    this.me = bootstrap.me;
     this.agent = bootstrap.agent;
     this.useMockDataEnabled = useMockDataEnabled;
     console.log(`[Environment] ExoMindEnvironment 初始化完成: ${this.runtime}`);
@@ -82,7 +77,6 @@ export class ExoMindEnvironment implements Environment {
       useMockData: nextUseMockDataEnabled,
     });
     this.task = bootstrap.task;
-    this.me = bootstrap.me;
     this.agent = bootstrap.agent;
     this.useMockDataEnabled = nextUseMockDataEnabled;
   }
@@ -114,7 +108,6 @@ export class ExoMindEnvironment implements Environment {
       storage: true,
       eventlog: true,
       task: true,
-      me: true,
       agent: true,
     };
   }

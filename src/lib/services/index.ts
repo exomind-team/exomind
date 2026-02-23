@@ -11,8 +11,6 @@ export type { TimeBlockService } from './timeblock.service';
 export { TaskServiceImpl, getTaskService } from './task.service';
 export type { TaskService } from './task.service';
 
-export { MeServiceImpl, getMeService } from './me.service';
-export type { MeService } from './me.service';
 export { AgentHubServiceImpl, getAgentHubService } from './agent-hub.service';
 export type { AgentHubService } from './agent-hub.service';
 

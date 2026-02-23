@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskServiceImpl } from '@/lib/services/task.service';
 import type { ITaskPort } from '@/lib/environment/interfaces/task.port';
-import type { TaskGoalGroup, TaskItem } from '@/lib/types/task';
+import type { TaskItem } from '@/lib/types/task';
 
 function createTask(id: string): TaskItem {
   return {
@@ -21,32 +21,6 @@ function createTask(id: string): TaskItem {
   };
 }
 
-function createGoalGroup(id: string): TaskGoalGroup {
-  return {
-    id,
-    icon: '📚',
-    title: `Group ${id}`,
-    badgeText: '1',
-    badgeTone: 'indigo',
-    goals: [
-      {
-        id: `${id}-goal`,
-        title: `Goal ${id}`,
-        focus: 'focus',
-        acceptance: 'acceptance',
-        stage: '阶段: mock',
-        stageTone: 'indigo',
-        status: {
-          icon: '🔥',
-          text: '进行中',
-          tone: 'success',
-        },
-        accentTone: 'indigo',
-      },
-    ],
-  };
-}
-
 describe('task service（任务服务）', () => {
   let taskPort: ITaskPort;
   let service: TaskServiceImpl;
@@ -54,7 +28,6 @@ describe('task service（任务服务）', () => {
   beforeEach(() => {
     taskPort = {
       listTasks: vi.fn(async () => [createTask('1'), createTask('2')]),
-      getLongTermGoals: vi.fn(async () => [createGoalGroup('g1')]),
       getTaskById: vi.fn(async (taskId: string) => createTask(taskId)),
       createTask: vi.fn(async (input) => createTask(input.title)),
       setTaskTimerMode: vi.fn(async (taskId: string) => ({
@@ -88,13 +61,6 @@ describe('task service（任务服务）', () => {
     const tasks = await service.listTasks();
     expect(tasks).toHaveLength(2);
     expect(taskPort.listTasks).toHaveBeenCalledTimes(1);
-  });
-
-  it('loads long-term goals（加载长期目标）', async () => {
-    const groups = await service.getLongTermGoals();
-    expect(groups).toHaveLength(1);
-    expect(groups[0]?.title).toBe('Group g1');
-    expect(taskPort.getLongTermGoals).toHaveBeenCalledTimes(1);
   });
 
   it('switches timer mode（切换计时模式）', async () => {

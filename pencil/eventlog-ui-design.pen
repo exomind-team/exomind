@@ -49373,7 +49373,6 @@
           ],
           "justifyContent": "center",
           "alignItems": "center",
-          "gap": 6,
           "children": [
             {
               "type": "frame",
@@ -49381,27 +49380,27 @@
               "name": "Tab Status",
               "stroke": {
                 "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
+                "thickness": {
+                  "bottom": 2
+                },
+                "fill": "#C75B3A"
               },
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#C75B3A",
               "children": [
                 {
                   "type": "text",
                   "id": "di6ph",
                   "name": "tab1Label",
-                  "fill": "#FFFFFF",
+                  "fill": "#C75B3A",
                   "content": "状态",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
+                  "fontSize": 14,
                   "fontWeight": "600"
                 }
               ]
@@ -49412,28 +49411,21 @@
               "name": "Tab Learn",
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#F5F0ED",
-              "stroke": {
-                "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
-              },
               "children": [
                 {
                   "type": "text",
                   "id": "MtzMS",
                   "name": "tab2Label",
-                  "fill": "#78716C",
+                  "fill": "#A8A29E",
                   "content": "学习",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "500"
+                  "fontSize": 14,
+                  "fontWeight": "normal"
                 }
               ]
             },
@@ -49443,28 +49435,21 @@
               "name": "Tab Implicit",
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#F5F0ED",
-              "stroke": {
-                "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
-              },
               "children": [
                 {
                   "type": "text",
                   "id": "INqXR",
                   "name": "tab3Label",
-                  "fill": "#78716C",
+                  "fill": "#A8A29E",
                   "content": "内隐",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "500"
+                  "fontSize": 14,
+                  "fontWeight": "normal"
                 }
               ]
             }
@@ -50856,7 +50841,6 @@
           ],
           "justifyContent": "center",
           "alignItems": "center",
-          "gap": 6,
           "children": [
             {
               "type": "frame",
@@ -50864,28 +50848,21 @@
               "name": "vt2a",
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#F5F0ED",
-              "stroke": {
-                "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
-              },
               "children": [
                 {
                   "type": "text",
                   "id": "D0PLt",
                   "name": "vt2aL",
-                  "fill": "#78716C",
+                  "fill": "#A8A29E",
                   "content": "状态",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "500"
+                  "fontSize": 14,
+                  "fontWeight": "normal"
                 }
               ]
             },
@@ -50895,27 +50872,27 @@
               "name": "vt2b",
               "stroke": {
                 "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
+                "thickness": {
+                  "bottom": 2
+                },
+                "fill": "#C75B3A"
               },
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#C75B3A",
               "children": [
                 {
                   "type": "text",
                   "id": "pSrYS",
                   "name": "vt2bL",
-                  "fill": "#FFFFFF",
+                  "fill": "#C75B3A",
                   "content": "学习",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
+                  "fontSize": 14,
                   "fontWeight": "600"
                 }
               ]
@@ -50926,28 +50903,21 @@
               "name": "vt2c",
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#F5F0ED",
-              "stroke": {
-                "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
-              },
               "children": [
                 {
                   "type": "text",
                   "id": "2B9rf",
                   "name": "vt2cL",
-                  "fill": "#78716C",
+                  "fill": "#A8A29E",
                   "content": "内隐",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "500"
+                  "fontSize": 14,
+                  "fontWeight": "normal"
                 }
               ]
             }
@@ -51828,7 +51798,6 @@
           ],
           "justifyContent": "center",
           "alignItems": "center",
-          "gap": 6,
           "children": [
             {
               "type": "frame",
@@ -51836,28 +51805,21 @@
               "name": "vt3a",
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#F5F0ED",
-              "stroke": {
-                "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
-              },
               "children": [
                 {
                   "type": "text",
                   "id": "R6Ajd",
                   "name": "vt3aL",
-                  "fill": "#78716C",
+                  "fill": "#A8A29E",
                   "content": "状态",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "500"
+                  "fontSize": 14,
+                  "fontWeight": "normal"
                 }
               ]
             },
@@ -51867,28 +51829,21 @@
               "name": "vt3b",
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#F5F0ED",
-              "stroke": {
-                "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
-              },
               "children": [
                 {
                   "type": "text",
                   "id": "mc2AR",
                   "name": "vt3bL",
-                  "fill": "#78716C",
+                  "fill": "#A8A29E",
                   "content": "学习",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
-                  "fontWeight": "500"
+                  "fontSize": 14,
+                  "fontWeight": "normal"
                 }
               ]
             },
@@ -51898,27 +51853,27 @@
               "name": "vt3c",
               "stroke": {
                 "align": "inside",
-                "thickness": 0,
-                "fill": "#00000000"
+                "thickness": {
+                  "bottom": 2
+                },
+                "fill": "#C75B3A"
               },
               "layout": "vertical",
               "padding": [
-                6,
-                14
+                8,
+                16
               ],
               "justifyContent": "center",
               "alignItems": "center",
-              "cornerRadius": 16,
-              "fill": "#C75B3A",
               "children": [
                 {
                   "type": "text",
                   "id": "6OaGM",
                   "name": "vt3cL",
-                  "fill": "#FFFFFF",
+                  "fill": "#C75B3A",
                   "content": "内隐",
                   "fontFamily": "Inter",
-                  "fontSize": 13,
+                  "fontSize": 14,
                   "fontWeight": "600"
                 }
               ]

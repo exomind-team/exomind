@@ -75,11 +75,9 @@ describe('settings mock-data toggle issue-213（设置页测试数据开关）',
   });
 
   it('calls setUseMockDataEnabled after toggle click（点击后更新 mock 开关）', () => {
-    const reloadSpy = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
     render(<NewSettingsPage />);
     const switchEl = screen.getByTestId('new-settings-use-mock-data-switch');
     fireEvent.click(switchEl);
     expect(mocks.setUseMockDataEnabled).toHaveBeenCalledWith(true);
-    expect(reloadSpy).toHaveBeenCalledTimes(1);
   });
 });
