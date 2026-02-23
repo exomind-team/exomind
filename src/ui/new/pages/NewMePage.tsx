@@ -21,8 +21,8 @@ import type {
 
 function tabClass(active: boolean): string {
   return active
-    ? 'border-b-2 border-[#C75B3A] text-[#C75B3A] font-semibold'
-    : 'border-b-2 border-transparent text-[#A8A29E]';
+    ? 'bg-[#C75B3A] font-semibold text-white'
+    : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]';
 }
 
 function metricToneClass(metric: MeStatusMetric): string {
@@ -89,31 +89,33 @@ export function NewMePage() {
         <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Me</h1>
       </header>
 
-      <div className="flex items-center justify-center border-b border-[#E7E5E4] px-5">
-        <button
-          type="button"
-          className={`px-4 py-2 text-[14px] ${tabClass(activeTab === 'status')}`}
-          onClick={() => setActiveTab('status')}
-          aria-pressed={activeTab === 'status'}
-        >
-          状态
-        </button>
-        <button
-          type="button"
-          className={`px-4 py-2 text-[14px] ${tabClass(activeTab === 'learn')}`}
-          onClick={() => setActiveTab('learn')}
-          aria-pressed={activeTab === 'learn'}
-        >
-          学习
-        </button>
-        <button
-          type="button"
-          className={`px-4 py-2 text-[14px] ${tabClass(activeTab === 'implicit')}`}
-          onClick={() => setActiveTab('implicit')}
-          aria-pressed={activeTab === 'implicit'}
-        >
-          内隐
-        </button>
+      <div className="px-5 pb-1">
+        <div className="flex justify-center gap-1">
+          <button
+            type="button"
+            className={`shrink-0 rounded-2xl px-4 py-1.5 text-[13px] ${tabClass(activeTab === 'status')}`}
+            onClick={() => setActiveTab('status')}
+            aria-pressed={activeTab === 'status'}
+          >
+            状态
+          </button>
+          <button
+            type="button"
+            className={`shrink-0 rounded-2xl px-4 py-1.5 text-[13px] ${tabClass(activeTab === 'learn')}`}
+            onClick={() => setActiveTab('learn')}
+            aria-pressed={activeTab === 'learn'}
+          >
+            学习
+          </button>
+          <button
+            type="button"
+            className={`shrink-0 rounded-2xl px-4 py-1.5 text-[13px] ${tabClass(activeTab === 'implicit')}`}
+            onClick={() => setActiveTab('implicit')}
+            aria-pressed={activeTab === 'implicit'}
+          >
+            内隐
+          </button>
+        </div>
       </div>
 
       <div className="space-y-4 px-5 pb-[calc(env(safe-area-inset-bottom,0px)+92px)] pt-4">
