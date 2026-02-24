@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Clipboard, Image, SendHorizontal } from 'lucide-react';
+import { Clipboard, Image, SendHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
@@ -179,7 +179,14 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
             >
               {pasteFeedback === 'success'
                 ? <span className="text-[10px] font-medium leading-none">已粘贴</span>
-                : <Clipboard size={16} />}
+                : pasteFeedback === 'error'
+                  ? (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-medium leading-none">
+                      <X size={10} className="h-2.5 w-2.5" />
+                      未粘贴
+                    </span>
+                  )
+                  : <Clipboard size={16} />}
             </button>
           </div>
 

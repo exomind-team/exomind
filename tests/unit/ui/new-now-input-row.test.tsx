@@ -83,11 +83,13 @@ describe('NewNowInputRow', () => {
         description: '请改用 localhost 或 https 访问；http://局域网IP 通常会被浏览器限制读取剪贴板。',
         variant: 'destructive',
     });
+    expect(screen.getByText('未粘贴')).toBeInTheDocument();
     expect(screen.getByTestId('new-now-input-inline-button').className).toContain('text-red-500');
 
     act(() => {
       vi.advanceTimersByTime(1500);
     });
+    expect(screen.queryByText('未粘贴')).not.toBeInTheDocument();
     expect(screen.getByTestId('new-now-input-inline-button').className).not.toContain('text-red-500');
   });
 });

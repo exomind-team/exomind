@@ -6,7 +6,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
-import { Copy, Check, Quote } from 'lucide-react';
+import { Copy, Check, Quote, X } from 'lucide-react';
 import { toast } from '@/components/ui/toast-hook';
 import { getClipboardService } from '@/lib/services';
 
@@ -63,8 +63,12 @@ export function MessageActions({ content, align }: MessageActionsProps) {
           copyFailed ? 'text-red-500 dark:text-red-400' : 'text-[#C8C0BA]'
         }`}
       >
-        {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
-        {copied ? '已复制' : '复制'}
+        {copyFailed
+          ? <X className="h-3.5 w-3.5" />
+          : copied
+            ? <Check className="h-3.5 w-3.5" />
+            : <Copy className="h-3.5 w-3.5" />}
+        {copyFailed ? '未复制' : copied ? '已复制' : '复制'}
       </button>
       <button
         data-testid="msg-quote-btn"

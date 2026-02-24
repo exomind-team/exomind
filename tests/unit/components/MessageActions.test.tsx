@@ -113,14 +113,15 @@ describe('MessageActions', () => {
 
     // Should NOT show success feedback
     expect(screen.queryByText('已复制')).not.toBeInTheDocument();
-    // Should still show original text
-    expect(screen.getByText('复制')).toBeInTheDocument();
+    // Should show failure text
+    expect(screen.getByText('未复制')).toBeInTheDocument();
     // Should show temporary error style
     expect(screen.getByTestId('msg-copy-btn').className).toContain('text-red-500');
 
     act(() => {
       vi.advanceTimersByTime(1500);
     });
+    expect(screen.getByText('复制')).toBeInTheDocument();
     expect(screen.getByTestId('msg-copy-btn').className).not.toContain('text-red-500');
   });
 
