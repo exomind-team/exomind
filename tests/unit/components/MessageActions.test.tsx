@@ -9,15 +9,22 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
 import { MessageActions } from '@/components/Chat/MessageActions';
 
-describe('MessageActions', () => {
-  const mockWriteText = vi.fn().mockResolvedValue(undefined);
+const { mockClipboardWriteText } = vi.hoisted(() => ({
+  mockClipboardWriteText: vi.fn(),
+}));
 
+vi.mock('@/lib/services', () => ({
+  getClipboardService: () => ({
+    writeText: mockClipboardWriteText,
+    readText: vi.fn(),
+    isAvailable: () => true,
+  }),
+}));
+
+describe('MessageActions', () => {
   beforeEach(() => {
     vi.useFakeTimers();
-    mockWriteText.mockResolvedValue(undefined);
-    vi.stubGlobal('navigator', {
-      clipboard: { writeText: mockWriteText },
-    });
+    mockClipboardWriteText.mockResolvedValue({ ok: true });
   });
 
   afterEach(() => {
@@ -64,7 +71,7 @@ describe('MessageActions', () => {
     await act(async () => {
       fireEvent.click(screen.getByTestId('msg-copy-btn'));
     });
-    expect(mockWriteText).toHaveBeenCalledWith('test message');
+    expect(mockClipboardWriteText).toHaveBeenCalledWith('test message');
   });
 
   it('shows success feedback after copy', async () => {
@@ -91,7 +98,13 @@ describe('MessageActions', () => {
   // --- 复制失败 ---
 
   it('shows toast on clipboard failure', async () => {
-    mockWriteText.mockRejectedValue(new Error('denied'));
+    mockClipboardWriteText.mockResolvedValue({
+      ok: false,
+      reason: 'unknown',
+      title: '复制失败，请重试',
+      description: '你可以手动选中文本后复制。',
+      error: new Error('denied'),
+    });
 
     render(<MessageActions content="test message" align="start" />);
     await act(async () => {

@@ -3,15 +3,16 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 
-const { mockInvoke, mockIsTauri, mockToast } = vi.hoisted(() => ({
-  mockInvoke: vi.fn(),
-  mockIsTauri: vi.fn(),
+const { mockReadClipboardText, mockToast } = vi.hoisted(() => ({
+  mockReadClipboardText: vi.fn(),
   mockToast: vi.fn(),
 }));
 
-vi.mock('@tauri-apps/api/core', () => ({
-  invoke: mockInvoke,
-  isTauri: mockIsTauri,
+vi.mock('@/lib/services', () => ({
+  getClipboardService: () => ({
+    readText: mockReadClipboardText,
+    isAvailable: () => true,
+  }),
 }));
 
 vi.mock('@/components/ui/toast-hook', () => ({
@@ -20,8 +21,7 @@ vi.mock('@/components/ui/toast-hook', () => ({
 
 describe('NewNowInputRow', () => {
   beforeEach(() => {
-    mockInvoke.mockReset();
-    mockIsTauri.mockReset();
+    mockReadClipboardText.mockReset();
     mockToast.mockReset();
   });
 
@@ -44,49 +44,26 @@ describe('NewNowInputRow', () => {
     expect((textarea as HTMLTextAreaElement).value).toBe('');
   });
 
-  it('uses tauri clipboard command when running in tauri runtime', async () => {
-    mockIsTauri.mockResolvedValue(true);
-    const mockReadText = vi.fn().mockResolvedValue('浏览器文本');
-    vi.stubGlobal('navigator', {
-      clipboard: { readText: mockReadText },
-    });
-    mockInvoke.mockResolvedValue('Tauri 文本');
+  it('inserts clipboard text via clipboard service', async () => {
+    mockReadClipboardText.mockResolvedValue({ ok: true, text: '服务层剪贴板文本' });
 
     render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
     fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
 
     await waitFor(() => {
-      expect(mockInvoke).toHaveBeenCalledWith('plugin:clipboard-manager|read_text');
+      expect(mockReadClipboardText).toHaveBeenCalledTimes(1);
     });
-    expect(mockReadText).not.toHaveBeenCalled();
-    expect((screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement).value).toBe('Tauri 文本');
+    expect((screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement).value).toBe('服务层剪贴板文本');
     expect(mockToast).not.toHaveBeenCalled();
   });
 
-  it('falls back to navigator clipboard on web runtime', async () => {
-    mockIsTauri.mockResolvedValue(false);
-    const mockReadText = vi.fn().mockResolvedValue('Web 文本');
-    vi.stubGlobal('navigator', {
-      clipboard: { readText: mockReadText },
-    });
-
-    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
-    fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
-
-    await waitFor(() => {
-      expect(mockReadText).toHaveBeenCalledTimes(1);
-    });
-    expect(mockInvoke).not.toHaveBeenCalled();
-    expect((screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement).value).toBe('Web 文本');
-    expect(mockToast).not.toHaveBeenCalled();
-  });
-
-  it('shows toast when tauri and web clipboard reads both fail', async () => {
-    mockIsTauri.mockResolvedValue(true);
-    mockInvoke.mockRejectedValue(new Error('tauri denied'));
-    const mockReadText = vi.fn().mockRejectedValue(new Error('web denied'));
-    vi.stubGlobal('navigator', {
-      clipboard: { readText: mockReadText },
+  it('shows secure-context guidance from clipboard service', async () => {
+    mockReadClipboardText.mockResolvedValue({
+      ok: false,
+      reason: 'insecure-context',
+      title: '当前页面不支持读取剪贴板',
+      description: '请改用 localhost 或 https 访问；http://局域网IP 通常会被浏览器限制读取剪贴板。',
+      error: new Error('secure context'),
     });
 
     render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
@@ -94,7 +71,8 @@ describe('NewNowInputRow', () => {
 
     await waitFor(() => {
       expect(mockToast).toHaveBeenCalledWith({
-        title: '读取剪贴板失败，请重试',
+        title: '当前页面不支持读取剪贴板',
+        description: '请改用 localhost 或 https 访问；http://局域网IP 通常会被浏览器限制读取剪贴板。',
         variant: 'destructive',
       });
     });

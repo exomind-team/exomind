@@ -8,16 +8,26 @@ import {
   useState,
 } from 'react';
 import { Clipboard, Image, SendHorizontal } from 'lucide-react';
-import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
+import { getClipboardService } from '@/lib/services';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 
 interface NewNowInputRowProps {
   onSend: (content: string) => void;
   placeholder?: string;
 }
+
+const getClipboardDebugSnapshot = () => {
+  const protocol = typeof window !== 'undefined' ? window.location.protocol : 'unknown';
+  const host = typeof window !== 'undefined' ? window.location.host : 'unknown';
+  const secure = typeof window !== 'undefined' ? window.isSecureContext : false;
+  const hasNavigatorClipboard = typeof navigator !== 'undefined' && !!navigator.clipboard;
+  const hasReadText = typeof navigator !== 'undefined' && typeof navigator.clipboard?.readText === 'function';
+
+  return { protocol, host, secure, hasNavigatorClipboard, hasReadText };
+};
 
 export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRowProps>(function NewNowInputRow({
   onSend,
@@ -68,39 +78,19 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
     });
   }, []);
 
-  const readClipboardFromTauri = useCallback(async (): Promise<string | null> => {
-    const isRunningInTauri = await isTauri();
-    if (!isRunningInTauri) {
-      return null;
-    }
-
-    try {
-      const text = await invoke<string>('plugin:clipboard-manager|read_text');
-      return typeof text === 'string' ? text : '';
-    } catch (err) {
-      console.warn('[clipboard] tauri read failed:', err);
-      return null;
-    }
-  }, []);
-
   const handlePasteFromClipboard = useCallback(async () => {
-    try {
-      const tauriText = await readClipboardFromTauri();
-      if (tauriText !== null) {
-        insertClipboardText(tauriText);
-        return;
-      }
-
-      if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-        throw new Error('clipboard read not supported');
-      }
-      const text = await navigator.clipboard.readText();
-      insertClipboardText(text);
-    } catch (err) {
-      console.warn('[clipboard] readText failed:', err);
-      toast({ title: '读取剪贴板失败，请重试', variant: 'destructive' });
+    const result = await getClipboardService().readText();
+    if (!result.ok) {
+      console.warn('[clipboard] readText failed:', result.error, {
+        ...getClipboardDebugSnapshot(),
+        reason: result.reason,
+      });
+      textareaRef.current?.focus();
+      toast({ title: result.title, description: result.description, variant: 'destructive' });
+      return;
     }
-  }, [insertClipboardText, readClipboardFromTauri]);
+    insertClipboardText(result.text);
+  }, [insertClipboardText]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {

@@ -8,6 +8,7 @@
 import { useState, useCallback, useRef } from 'react';
 import { Copy, Check, Quote } from 'lucide-react';
 import { toast } from '@/components/ui/toast-hook';
+import { getClipboardService } from '@/lib/services';
 
 interface MessageActionsProps {
   content: string;
@@ -19,14 +20,14 @@ export function MessageActions({ content, align }: MessageActionsProps) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   const handleCopy = useCallback(async () => {
-    try {
-      await navigator.clipboard.writeText(content);
-      setCopied(true);
-      timerRef.current = setTimeout(() => setCopied(false), 1500);
-    } catch (err) {
-      console.error('[MessageActions] clipboard.writeText failed:', err);
-      toast({ title: '复制失败，请重试', variant: 'destructive' });
+    const result = await getClipboardService().writeText(content);
+    if (!result.ok) {
+      console.error('[MessageActions] clipboard.writeText failed:', result.error, { reason: result.reason });
+      toast({ title: result.title, description: result.description, variant: 'destructive' });
+      return;
     }
+    setCopied(true);
+    timerRef.current = setTimeout(() => setCopied(false), 1500);
   }, [content]);
 
   if (!content?.trim()) return null;

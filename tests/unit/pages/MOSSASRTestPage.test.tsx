@@ -18,7 +18,9 @@ const isDomAvailable = typeof document !== 'undefined';
 (isDomAvailable ? describe : describe.skip)('MOSSASRTestPage', () => {
   beforeEach(() => {
     latestVoiceButtonProps = null;
-    localStorage.clear();
+    if (typeof window.localStorage?.clear === 'function') {
+      window.localStorage.clear();
+    }
   });
 
   it('does not pass adapterConfig when apiKey is empty', () => {

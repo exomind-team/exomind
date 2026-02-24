@@ -13,6 +13,7 @@
 
 import type { IASRPort } from './interfaces/asr.port';
 import type { IAgentPort } from './interfaces/agent.port';
+import type { IClipboardPort } from './interfaces/clipboard.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
 import type { IMePort } from './interfaces/me.port';
 import type { IStoragePort } from './interfaces/storage.port';
@@ -27,6 +28,8 @@ import { getUseMockDataEnabled } from '@/config/mock-data';
 export interface Environment {
   /** 语音识别能力 */
   asr: IASRPort;
+  /** 剪贴板读取能力 */
+  clipboard: IClipboardPort;
   /** 存储能力 */
   storage: IStoragePort;
   /** 事件日志能力 */
@@ -46,6 +49,7 @@ export interface Environment {
  */
 export class ExoMindEnvironment implements Environment {
   asr: IASRPort;
+  clipboard: IClipboardPort;
   storage: IStoragePort;
   eventlog: IEventLogPort;
   task: ITaskPort;
@@ -61,6 +65,7 @@ export class ExoMindEnvironment implements Environment {
     const bootstrap = createRuntimeBootstrap({ runtime, useMockData: useMockDataEnabled });
     this.runtime = bootstrap.runtime;
     this.asr = bootstrap.asr;
+    this.clipboard = bootstrap.clipboard;
     this.storage = bootstrap.storage;
     this.eventlog = bootstrap.eventlog;
     this.task = bootstrap.task;
@@ -111,6 +116,7 @@ export class ExoMindEnvironment implements Environment {
   capabilities(): Record<string, boolean> {
     return {
       asr: this.asr.isAvailable(),
+      clipboard: this.clipboard.isAvailable(),
       storage: true,
       eventlog: true,
       task: true,
