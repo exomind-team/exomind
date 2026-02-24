@@ -8,8 +8,10 @@ import {
   useState,
 } from 'react';
 import { Clipboard, Image, SendHorizontal } from 'lucide-react';
+import { invoke } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
+import { toast } from '@/components/ui/toast-hook';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 
 interface NewNowInputRowProps {
@@ -47,30 +49,57 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
     setValue('');
   }, [onSend, value]);
 
-  const handlePasteFromClipboard = useCallback(async () => {
+  const insertClipboardText = useCallback((text: string) => {
+    if (!text) return;
+    setValue((prev) => {
+      const textarea = textareaRef.current;
+      if (textarea) {
+        const start = textarea.selectionStart;
+        const end = textarea.selectionEnd;
+        const next = prev.slice(0, start) + text + prev.slice(end);
+        // 延迟设置光标位置到粘贴文本之后
+        requestAnimationFrame(() => {
+          textarea.selectionStart = textarea.selectionEnd = start + text.length;
+          textarea.focus();
+        });
+        return next;
+      }
+      return prev + text;
+    });
+  }, []);
+
+  const readClipboardFromTauri = useCallback(async (): Promise<string | null> => {
+    if (typeof window === 'undefined' || window.__TAURI__ === undefined) {
+      return null;
+    }
+
     try {
-      const text = await navigator.clipboard.readText();
-      if (!text) return;
-      setValue((prev) => {
-        const textarea = textareaRef.current;
-        if (textarea) {
-          const start = textarea.selectionStart;
-          const end = textarea.selectionEnd;
-          const next = prev.slice(0, start) + text + prev.slice(end);
-          // 延迟设置光标位置到粘贴文本之后
-          requestAnimationFrame(() => {
-            textarea.selectionStart = textarea.selectionEnd = start + text.length;
-            textarea.focus();
-          });
-          return next;
-        }
-        return prev + text;
-      });
+      const text = await invoke<string>('plugin:clipboard-manager|read_text');
+      return typeof text === 'string' ? text : '';
     } catch (err) {
-      // 权限被拒绝或不支持
-      console.warn('[clipboard] readText failed:', err);
+      console.warn('[clipboard] tauri read failed:', err);
+      return null;
     }
   }, []);
+
+  const handlePasteFromClipboard = useCallback(async () => {
+    try {
+      const tauriText = await readClipboardFromTauri();
+      if (tauriText !== null) {
+        insertClipboardText(tauriText);
+        return;
+      }
+
+      if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
+        throw new Error('clipboard read not supported');
+      }
+      const text = await navigator.clipboard.readText();
+      insertClipboardText(text);
+    } catch (err) {
+      console.warn('[clipboard] readText failed:', err);
+      toast({ title: '读取剪贴板失败，请重试', variant: 'destructive' });
+    }
+  }, [insertClipboardText, readClipboardFromTauri]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
