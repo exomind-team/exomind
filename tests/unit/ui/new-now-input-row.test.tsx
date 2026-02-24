@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 
 const { mockReadClipboardText, mockToast } = vi.hoisted(() => ({
@@ -21,11 +21,14 @@ vi.mock('@/components/ui/toast-hook', () => ({
 
 describe('NewNowInputRow', () => {
   beforeEach(() => {
+    vi.useFakeTimers();
     mockReadClipboardText.mockReset();
     mockToast.mockReset();
   });
 
   afterEach(() => {
+    vi.runOnlyPendingTimers();
+    vi.useRealTimers();
     cleanup();
     vi.unstubAllGlobals();
   });
@@ -48,13 +51,18 @@ describe('NewNowInputRow', () => {
     mockReadClipboardText.mockResolvedValue({ ok: true, text: '服务层剪贴板文本' });
 
     render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
-    fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
-
-    await waitFor(() => {
-      expect(mockReadClipboardText).toHaveBeenCalledTimes(1);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
     });
+    expect(mockReadClipboardText).toHaveBeenCalledTimes(1);
     expect((screen.getByTestId('new-now-input-textarea') as HTMLTextAreaElement).value).toBe('服务层剪贴板文本');
+    expect(screen.getByText('已粘贴')).toBeInTheDocument();
     expect(mockToast).not.toHaveBeenCalled();
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText('已粘贴')).not.toBeInTheDocument();
   });
 
   it('shows secure-context guidance from clipboard service', async () => {
@@ -67,14 +75,19 @@ describe('NewNowInputRow', () => {
     });
 
     render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
-    fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
-
-    await waitFor(() => {
-      expect(mockToast).toHaveBeenCalledWith({
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
+    });
+    expect(mockToast).toHaveBeenCalledWith({
         title: '当前页面不支持读取剪贴板',
         description: '请改用 localhost 或 https 访问；http://局域网IP 通常会被浏览器限制读取剪贴板。',
         variant: 'destructive',
-      });
     });
+    expect(screen.getByTestId('new-now-input-inline-button').className).toContain('text-red-500');
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.getByTestId('new-now-input-inline-button').className).not.toContain('text-red-500');
   });
 });

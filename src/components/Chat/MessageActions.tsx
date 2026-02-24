@@ -5,7 +5,7 @@
  * 每条消息气泡下方显示复制/引用按钮
  */
 
-import { useState, useCallback, useRef } from 'react';
+import { useState, useCallback, useRef, useEffect } from 'react';
 import { Copy, Check, Quote } from 'lucide-react';
 import { toast } from '@/components/ui/toast-hook';
 import { getClipboardService } from '@/lib/services';
@@ -17,15 +17,34 @@ interface MessageActionsProps {
 
 export function MessageActions({ content, align }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
+  const [copyFailed, setCopyFailed] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
+  useEffect(() => () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+    }
+  }, []);
+
   const handleCopy = useCallback(async () => {
+    if (timerRef.current) {
+      clearTimeout(timerRef.current);
+      timerRef.current = undefined;
+    }
+
     const result = await getClipboardService().writeText(content);
     if (!result.ok) {
+      setCopied(false);
+      setCopyFailed(true);
+      timerRef.current = setTimeout(() => {
+        setCopyFailed(false);
+      }, 1500);
       console.error('[MessageActions] clipboard.writeText failed:', result.error, { reason: result.reason });
       toast({ title: result.title, description: result.description, variant: 'destructive' });
       return;
     }
+
+    setCopyFailed(false);
     setCopied(true);
     timerRef.current = setTimeout(() => setCopied(false), 1500);
   }, [content]);
@@ -40,7 +59,9 @@ export function MessageActions({ content, align }: MessageActionsProps) {
       <button
         data-testid="msg-copy-btn"
         onClick={handleCopy}
-        className="flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] text-[#C8C0BA] hover:bg-stone-100 dark:hover:bg-stone-800"
+        className={`flex items-center gap-1 rounded-lg px-2 py-1 text-[11px] hover:bg-stone-100 dark:hover:bg-stone-800 ${
+          copyFailed ? 'text-red-500 dark:text-red-400' : 'text-[#C8C0BA]'
+        }`}
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
         {copied ? '已复制' : '复制'}

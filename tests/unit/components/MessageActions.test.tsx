@@ -6,7 +6,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { render, screen, fireEvent, act, waitFor } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 import { MessageActions } from '@/components/Chat/MessageActions';
 
 const { mockClipboardWriteText } = vi.hoisted(() => ({
@@ -115,6 +115,13 @@ describe('MessageActions', () => {
     expect(screen.queryByText('已复制')).not.toBeInTheDocument();
     // Should still show original text
     expect(screen.getByText('复制')).toBeInTheDocument();
+    // Should show temporary error style
+    expect(screen.getByTestId('msg-copy-btn').className).toContain('text-red-500');
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.getByTestId('msg-copy-btn').className).not.toContain('text-red-500');
   });
 
   // --- 引用按钮预留 ---

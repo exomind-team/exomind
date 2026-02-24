@@ -34,7 +34,9 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   placeholder = '记录当下的事实...',
 }, ref) {
   const [value, setValue] = useState('');
+  const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -51,6 +53,13 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   useEffect(() => {
     resizeTextarea();
   }, [value, resizeTextarea]);
+
+  useEffect(() => () => {
+    if (pasteFeedbackTimerRef.current) {
+      clearTimeout(pasteFeedbackTimerRef.current);
+      pasteFeedbackTimerRef.current = null;
+    }
+  }, []);
 
   const submitInput = useCallback(() => {
     const trimmed = value.trim();
@@ -79,16 +88,32 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   }, []);
 
   const handlePasteFromClipboard = useCallback(async () => {
+    if (pasteFeedbackTimerRef.current) {
+      clearTimeout(pasteFeedbackTimerRef.current);
+      pasteFeedbackTimerRef.current = null;
+    }
+
     const result = await getClipboardService().readText();
     if (!result.ok) {
       console.warn('[clipboard] readText failed:', result.error, {
         ...getClipboardDebugSnapshot(),
         reason: result.reason,
       });
+      setPasteFeedback('error');
+      pasteFeedbackTimerRef.current = setTimeout(() => {
+        setPasteFeedback('idle');
+        pasteFeedbackTimerRef.current = null;
+      }, 1500);
       textareaRef.current?.focus();
       toast({ title: result.title, description: result.description, variant: 'destructive' });
       return;
     }
+
+    setPasteFeedback('success');
+    pasteFeedbackTimerRef.current = setTimeout(() => {
+      setPasteFeedback('idle');
+      pasteFeedbackTimerRef.current = null;
+    }, 1500);
     insertClipboardText(result.text);
   }, [insertClipboardText]);
 
@@ -136,17 +161,25 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               rows={1}
-              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 pr-10 text-sm text-stone-700 placeholder:text-stone-400 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 pr-16 text-sm text-stone-700 placeholder:text-stone-400 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
               data-testid="new-now-input-textarea"
             />
             <button
               type="button"
               onClick={handlePasteFromClipboard}
-              className="absolute right-[7px] top-1/2 flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] text-stone-400 dark:text-[#78716C]"
+              className={`absolute right-[7px] top-1/2 flex h-[30px] min-w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] px-2 ${
+                pasteFeedback === 'error'
+                  ? 'text-red-500 dark:text-red-400'
+                  : pasteFeedback === 'success'
+                    ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300'
+                    : 'text-stone-400 dark:text-[#78716C]'
+              }`}
               aria-label="剪贴板"
               data-testid="new-now-input-inline-button"
             >
-              <Clipboard size={16} />
+              {pasteFeedback === 'success'
+                ? <span className="text-[10px] font-medium leading-none">已粘贴</span>
+                : <Clipboard size={16} />}
             </button>
           </div>
 
