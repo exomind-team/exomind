@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { Switch } from '@/components/ui/switch';
@@ -155,9 +156,26 @@ export function NewSettingsPage() {
     try {
       const service = getEventLogService();
       const json = await service.exportEventsAsJson();
+      const payload = JSON.parse(json) as { events?: unknown[] };
+      const count = Array.isArray(payload.events) ? payload.events.length : 0;
+      const defaultName = buildBackupFileName();
 
-      downloadJsonFallback(json, buildBackupFileName());
-      setStatusMessage('已导出事件备份');
+      const isRunningInTauri = await isTauri();
+      if (isRunningInTauri) {
+        const savedPath = await invoke<string | null>('save_json_file', {
+          content: json,
+          defaultName,
+        });
+        if (!savedPath) {
+          setStatusMessage('已取消保存。');
+          return;
+        }
+        setStatusMessage(`导出成功，共 ${count} 条事件。保存路径：${savedPath}`);
+        return;
+      }
+
+      downloadJsonFallback(json, defaultName);
+      setStatusMessage(`导出成功，共 ${count} 条事件。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`导出失败：${message}`);
@@ -167,39 +185,65 @@ export function NewSettingsPage() {
   };
 
   const downloadJsonFallback = (json: string, filename: string) => {
-    const blob = new Blob([json], { type: 'application/json' });
+    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = filename;
-    a.click();
+    const anchor = document.createElement('a');
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.appendChild(anchor);
+    anchor.click();
+    anchor.remove();
     URL.revokeObjectURL(url);
   };
 
   const handleImportBackup = async () => {
     clearNotice();
-    fileInputRef.current?.click();
-  };
 
-  const handleFileInputChange = async (e: ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
-    const content = await file.text();
-    await processImport({ path: file.name, content });
-    e.target.value = '';
-  };
+    const isRunningInTauri = await isTauri();
+    if (!isRunningInTauri) {
+      fileInputRef.current?.click();
+      return;
+    }
 
-  const processImport = async (picked: PickedJsonFile) => {
     setLoading(true);
     try {
-      const service = getEventLogService();
-      const result = await service.importEventsFromJson(picked.content, importStrategy);
-      setStatusMessage(`已导入 ${result.imported} 条事件，跳过 ${result.skipped} 条`);
+      const picked = await invoke<PickedJsonFile | null>('pick_json_file');
+      if (!picked) {
+        setStatusMessage('已取消导入。');
+        return;
+      }
+      await processImport(picked);
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`导入失败：${message}`);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleFileInputChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    try {
+      const content = await file.text();
+      await processImport({ path: file.name, content });
+    } finally {
+      e.target.value = '';
+      setLoading(false);
+    }
+  };
+
+  const processImport = async (picked: PickedJsonFile) => {
+    try {
+      const service = getEventLogService();
+      const result = await service.importEventsFromJson(picked.content, importStrategy);
+      setStatusMessage(
+        `导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。来源：${picked.path}`
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`导入失败：${message}`);
     }
   };
 
