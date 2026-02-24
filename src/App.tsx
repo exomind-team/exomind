@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import { router } from "@/routes";
 import { newUiRouter } from "@/routes-new";
 import { ThemeController } from "@/components/ThemeController";
+import { Toaster } from "@/components/ui/toaster";
 import { getUIMode, subscribeUIModeChanges, type UIMode } from "@/config/ui-mode";
 import "./App.css";
 
@@ -21,6 +22,7 @@ function App() {
     <>
       <ThemeController />
       <RouterProvider key={uiMode} router={activeRouter} />
+      <Toaster />
     </>
   );
 }
