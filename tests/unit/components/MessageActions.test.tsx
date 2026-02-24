@@ -125,6 +125,33 @@ describe('MessageActions', () => {
     expect(screen.getByTestId('msg-copy-btn').className).not.toContain('text-red-500');
   });
 
+  it.each([
+    ['permission-denied', '无权限'],
+    ['not-focused', '未激活'],
+    ['insecure-context', '不支持'],
+  ])('maps %s failure reason to %s label', async (reason, label) => {
+    mockClipboardWriteText.mockResolvedValue({
+      ok: false,
+      reason,
+      title: '复制失败',
+      description: 'mock',
+      error: new Error('mock'),
+    });
+
+    render(<MessageActions content="test message" align="start" />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('msg-copy-btn'));
+    });
+
+    expect(screen.getByText(label)).toBeInTheDocument();
+    expect(screen.getByTestId('msg-copy-btn').className).toContain('text-red-500');
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText(label)).not.toBeInTheDocument();
+  });
+
   // --- 引用按钮预留 ---
 
   it('renders quote button as disabled placeholder', () => {

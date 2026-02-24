@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
 import { getClipboardService } from '@/lib/services';
+import type { ClipboardFailureReason } from '@/lib/services';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 
 interface NewNowInputRowProps {
@@ -29,12 +30,20 @@ const getClipboardDebugSnapshot = () => {
   return { protocol, host, secure, hasNavigatorClipboard, hasReadText };
 };
 
+function getPasteFailureLabel(reason: ClipboardFailureReason): string {
+  if (reason === 'permission-denied') return '无权限';
+  if (reason === 'not-focused') return '未激活';
+  if (reason === 'insecure-context' || reason === 'not-supported') return '不支持';
+  return '未粘贴';
+}
+
 export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRowProps>(function NewNowInputRow({
   onSend,
   placeholder = '记录当下的事实...',
 }, ref) {
   const [value, setValue] = useState('');
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
+  const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -99,6 +108,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
         ...getClipboardDebugSnapshot(),
         reason: result.reason,
       });
+      setPasteFailureLabel(getPasteFailureLabel(result.reason));
       setPasteFeedback('error');
       pasteFeedbackTimerRef.current = setTimeout(() => {
         setPasteFeedback('idle');
@@ -183,7 +193,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
                   ? (
                     <span className="inline-flex items-center gap-0.5 text-[10px] font-medium leading-none">
                       <X size={10} className="h-2.5 w-2.5" />
-                      未粘贴
+                      {pasteFailureLabel}
                     </span>
                   )
                   : <Clipboard size={16} />}

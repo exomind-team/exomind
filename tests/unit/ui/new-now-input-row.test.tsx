@@ -65,7 +65,7 @@ describe('NewNowInputRow', () => {
     expect(screen.queryByText('已粘贴')).not.toBeInTheDocument();
   });
 
-  it('shows secure-context guidance from clipboard service', async () => {
+  it('shows mapped "不支持" label for insecure-context', async () => {
     mockReadClipboardText.mockResolvedValue({
       ok: false,
       reason: 'insecure-context',
@@ -83,8 +83,51 @@ describe('NewNowInputRow', () => {
         description: '请改用 localhost 或 https 访问；http://局域网IP 通常会被浏览器限制读取剪贴板。',
         variant: 'destructive',
     });
-    expect(screen.getByText('未粘贴')).toBeInTheDocument();
+    expect(screen.getByText('不支持')).toBeInTheDocument();
     expect(screen.getByTestId('new-now-input-inline-button').className).toContain('text-red-500');
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText('不支持')).not.toBeInTheDocument();
+    expect(screen.getByTestId('new-now-input-inline-button').className).not.toContain('text-red-500');
+  });
+
+  it('shows mapped "无权限" label for permission-denied', async () => {
+    mockReadClipboardText.mockResolvedValue({
+      ok: false,
+      reason: 'permission-denied',
+      title: '浏览器阻止读取剪贴板',
+      description: '请在站点权限中允许剪贴板读取后重试，或直接在输入框内手动粘贴。',
+      error: new Error('permission denied'),
+    });
+
+    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
+    });
+    expect(screen.getByText('无权限')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText('无权限')).not.toBeInTheDocument();
+  });
+
+  it('falls back to "未粘贴" label for unknown reason', async () => {
+    mockReadClipboardText.mockResolvedValue({
+      ok: false,
+      reason: 'unknown',
+      title: '读取剪贴板失败，请重试',
+      description: '你可以先点击输入框，再使用 Ctrl/Cmd+V（移动端长按）手动粘贴。',
+      error: new Error('unknown'),
+    });
+
+    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
+    });
+    expect(screen.getByText('未粘贴')).toBeInTheDocument();
 
     act(() => {
       vi.advanceTimersByTime(1500);

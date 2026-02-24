@@ -9,15 +9,24 @@ import { useState, useCallback, useRef, useEffect } from 'react';
 import { Copy, Check, Quote, X } from 'lucide-react';
 import { toast } from '@/components/ui/toast-hook';
 import { getClipboardService } from '@/lib/services';
+import type { ClipboardFailureReason } from '@/lib/services';
 
 interface MessageActionsProps {
   content: string;
   align: 'start' | 'end';
 }
 
+function getCopyFailureLabel(reason: ClipboardFailureReason): string {
+  if (reason === 'permission-denied') return '无权限';
+  if (reason === 'not-focused') return '未激活';
+  if (reason === 'insecure-context' || reason === 'not-supported') return '不支持';
+  return '未复制';
+}
+
 export function MessageActions({ content, align }: MessageActionsProps) {
   const [copied, setCopied] = useState(false);
   const [copyFailed, setCopyFailed] = useState(false);
+  const [copyFailureLabel, setCopyFailureLabel] = useState('未复制');
   const timerRef = useRef<ReturnType<typeof setTimeout>>();
 
   useEffect(() => () => {
@@ -35,6 +44,7 @@ export function MessageActions({ content, align }: MessageActionsProps) {
     const result = await getClipboardService().writeText(content);
     if (!result.ok) {
       setCopied(false);
+      setCopyFailureLabel(getCopyFailureLabel(result.reason));
       setCopyFailed(true);
       timerRef.current = setTimeout(() => {
         setCopyFailed(false);
@@ -68,7 +78,7 @@ export function MessageActions({ content, align }: MessageActionsProps) {
           : copied
             ? <Check className="h-3.5 w-3.5" />
             : <Copy className="h-3.5 w-3.5" />}
-        {copyFailed ? '未复制' : copied ? '已复制' : '复制'}
+        {copyFailed ? copyFailureLabel : copied ? '已复制' : '复制'}
       </button>
       <button
         data-testid="msg-quote-btn"
