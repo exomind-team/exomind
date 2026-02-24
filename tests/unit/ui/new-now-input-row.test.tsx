@@ -47,6 +47,18 @@ describe('NewNowInputRow', () => {
     expect((textarea as HTMLTextAreaElement).value).toBe('');
   });
 
+  it('shows temporary "待开发" placeholder after attachment click', () => {
+    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    fireEvent.click(screen.getByTestId('new-now-attachment-button'));
+
+    expect(screen.getByText('待开发')).toBeInTheDocument();
+
+    act(() => {
+      vi.advanceTimersByTime(1500);
+    });
+    expect(screen.queryByText('待开发')).not.toBeInTheDocument();
+  });
+
   it('inserts clipboard text via clipboard service', async () => {
     mockReadClipboardText.mockResolvedValue({ ok: true, text: '服务层剪贴板文本' });
 

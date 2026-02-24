@@ -43,9 +43,11 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
 }, ref) {
   const [value, setValue] = useState('');
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
+  const [attachmentFeedback, setAttachmentFeedback] = useState<'idle' | 'pending'>('idle');
   const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attachmentFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -67,6 +69,10 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
     if (pasteFeedbackTimerRef.current) {
       clearTimeout(pasteFeedbackTimerRef.current);
       pasteFeedbackTimerRef.current = null;
+    }
+    if (attachmentFeedbackTimerRef.current) {
+      clearTimeout(attachmentFeedbackTimerRef.current);
+      attachmentFeedbackTimerRef.current = null;
     }
   }, []);
 
@@ -138,6 +144,19 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
     }
   }, [submitInput]);
 
+  const handleAttachmentClick = useCallback(() => {
+    if (attachmentFeedbackTimerRef.current) {
+      clearTimeout(attachmentFeedbackTimerRef.current);
+      attachmentFeedbackTimerRef.current = null;
+    }
+
+    setAttachmentFeedback('pending');
+    attachmentFeedbackTimerRef.current = setTimeout(() => {
+      setAttachmentFeedback('idle');
+      attachmentFeedbackTimerRef.current = null;
+    }, 1500);
+  }, []);
+
   useImperativeHandle(ref, () => ({
     focusText: () => {
       textareaRef.current?.focus();
@@ -153,11 +172,16 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E]"
-            aria-label="附件"
+            onClick={handleAttachmentClick}
+            className={`flex h-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] px-2 text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E] ${
+              attachmentFeedback === 'pending' ? 'min-w-[56px]' : 'w-9'
+            }`}
+            aria-label={attachmentFeedback === 'pending' ? '待开发' : '附件'}
             data-testid="new-now-attachment-button"
           >
-            <Image size={16} />
+            {attachmentFeedback === 'pending'
+              ? <span className="text-[10px] font-medium leading-none">待开发</span>
+              : <Image size={16} />}
           </button>
 
           <div className="relative flex-1">
