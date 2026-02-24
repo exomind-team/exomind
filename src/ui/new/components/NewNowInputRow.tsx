@@ -8,7 +8,7 @@ import {
   useState,
 } from 'react';
 import { Clipboard, Image, SendHorizontal } from 'lucide-react';
-import { invoke } from '@tauri-apps/api/core';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
@@ -69,7 +69,8 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   }, []);
 
   const readClipboardFromTauri = useCallback(async (): Promise<string | null> => {
-    if (typeof window === 'undefined' || window.__TAURI__ === undefined) {
+    const isRunningInTauri = await isTauri();
+    if (!isRunningInTauri) {
       return null;
     }
 

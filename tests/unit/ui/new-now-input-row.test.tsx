@@ -3,13 +3,15 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 
-const { mockInvoke, mockToast } = vi.hoisted(() => ({
+const { mockInvoke, mockIsTauri, mockToast } = vi.hoisted(() => ({
   mockInvoke: vi.fn(),
+  mockIsTauri: vi.fn(),
   mockToast: vi.fn(),
 }));
 
 vi.mock('@tauri-apps/api/core', () => ({
   invoke: mockInvoke,
+  isTauri: mockIsTauri,
 }));
 
 vi.mock('@/components/ui/toast-hook', () => ({
@@ -19,11 +21,11 @@ vi.mock('@/components/ui/toast-hook', () => ({
 describe('NewNowInputRow', () => {
   beforeEach(() => {
     mockInvoke.mockReset();
+    mockIsTauri.mockReset();
     mockToast.mockReset();
   });
 
   afterEach(() => {
-    delete (window as Window & { __TAURI__?: unknown }).__TAURI__;
     cleanup();
     vi.unstubAllGlobals();
   });
@@ -43,7 +45,7 @@ describe('NewNowInputRow', () => {
   });
 
   it('uses tauri clipboard command when running in tauri runtime', async () => {
-    Object.defineProperty(window, '__TAURI__', { value: {}, configurable: true });
+    mockIsTauri.mockResolvedValue(true);
     const mockReadText = vi.fn().mockResolvedValue('浏览器文本');
     vi.stubGlobal('navigator', {
       clipboard: { readText: mockReadText },
@@ -62,6 +64,7 @@ describe('NewNowInputRow', () => {
   });
 
   it('falls back to navigator clipboard on web runtime', async () => {
+    mockIsTauri.mockResolvedValue(false);
     const mockReadText = vi.fn().mockResolvedValue('Web 文本');
     vi.stubGlobal('navigator', {
       clipboard: { readText: mockReadText },
@@ -79,7 +82,7 @@ describe('NewNowInputRow', () => {
   });
 
   it('shows toast when tauri and web clipboard reads both fail', async () => {
-    Object.defineProperty(window, '__TAURI__', { value: {}, configurable: true });
+    mockIsTauri.mockResolvedValue(true);
     mockInvoke.mockRejectedValue(new Error('tauri denied'));
     const mockReadText = vi.fn().mockRejectedValue(new Error('web denied'));
     vi.stubGlobal('navigator', {
