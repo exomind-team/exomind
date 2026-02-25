@@ -48,6 +48,8 @@ export interface VoiceInputButtonProps {
   showPermissionUnlockButton?: boolean;
   /** 启用快捷键（仅非输入区域生效） */
   enableShortcut?: boolean;
+  /** 是否显示按钮下方辅助文案（快捷键/权限提示） */
+  showHelperText?: boolean;
   /** 按钮大小 */
   size?: number;
   /** 类名 */
@@ -92,6 +94,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   showTimer = true,
   showPermissionUnlockButton = true,
   enableShortcut = true,
+  showHelperText = true,
   size = 64,
   className,
   style,
@@ -837,7 +840,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       </button>
 
       {/* 快捷键提示 */}
-      {enableShortcut && state.state === 'idle' && permissionState === 'granted' && (
+      {showHelperText && enableShortcut && state.state === 'idle' && permissionState === 'granted' && (
         <div style={{
           position: 'absolute',
           bottom: -20,
@@ -877,7 +880,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       )}
 
       {/* 权限提示文字 */}
-      {permissionState !== 'granted' && permissionState !== 'checking' && (
+      {showHelperText && permissionState !== 'granted' && permissionState !== 'checking' && (
         <div style={{
           position: 'absolute',
           bottom: -20,
