@@ -34,11 +34,6 @@ const UserManagePage = lazy(async () => {
   return { default: module.UserManagePage };
 });
 
-const ASRTestPage = lazy(async () => {
-  const module = await import('@/pages/ASRTestPage');
-  return { default: module.ASRTestPage };
-});
-
 const MOSSASRTestPage = lazy(async () => {
   const module = await import('@/pages/MOSSASRTestPage');
   return { default: module.MOSSASRTestPage };
@@ -227,18 +222,6 @@ const newUserManageRoute = createRoute({
   },
 });
 
-const newAsrTestRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/asr-test',
-  component: function NewAsrTest() {
-    return (
-      <LazyPage>
-        <ASRTestPage />
-      </LazyPage>
-    );
-  },
-});
-
 const newMossTestRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/moss-test',
@@ -334,7 +317,6 @@ const newRouteTree = newRootRoute.addChildren([
   newMeRoute,
   newSettingsRoute,
   newUserManageRoute,
-  newAsrTestRoute,
   newMossTestRoute,
   newAgentsRoute,
   newUpdateRoute,

@@ -321,7 +321,7 @@ export function SettingsPage() {
         <div className="flex items-center justify-between gap-3">
           <div>
             <p className="text-sm font-medium">开发者模式</p>
-            <p className="text-xs text-muted-foreground">开启后显示 MOSS / ASR 测试入口</p>
+            <p className="text-xs text-muted-foreground">开启后显示 MOSS 语音测试入口</p>
           </div>
           <Switch
             checked={developerMode}
@@ -336,9 +336,6 @@ export function SettingsPage() {
           <div className="flex flex-wrap gap-2">
             <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/moss-test'; }}>
               打开 MOSS测试
-            </Button>
-            <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/asr-test'; }}>
-              打开 ASR测试
             </Button>
           </div>
         )}

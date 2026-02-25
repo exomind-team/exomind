@@ -7,12 +7,13 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Clipboard, Image, SendHorizontal, X } from 'lucide-react';
+import { Clipboard, Image, Mic, SendHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
 import { getClipboardService } from '@/lib/services';
 import type { ClipboardFailureReason } from '@/lib/services';
+import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 
 interface NewNowInputRowProps {
@@ -46,6 +47,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   const [attachmentFeedback, setAttachmentFeedback] = useState<'idle' | 'pending'>('idle');
   const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attachmentFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -133,6 +135,15 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
     insertClipboardText(result.text);
   }, [insertClipboardText]);
 
+  const handleVoiceResult = useCallback((text: string) => {
+    if (!text.trim()) return;
+    setValue((prev) => (prev.trim() ? `${prev} ${text}` : text));
+  }, []);
+
+  const handleVoiceError = useCallback((error: string) => {
+    console.error('[new-now-input][voice]', error);
+  }, []);
+
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
       textareaRef.current?.blur();
@@ -140,9 +151,14 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
     }
     if (event.key === 'Enter' && !event.shiftKey) {
       event.preventDefault();
-      submitInput();
+      if (value.trim()) {
+        submitInput();
+      } else {
+        textareaRef.current?.blur();
+        voiceButtonRef.current?.start();
+      }
     }
-  }, [submitInput]);
+  }, [submitInput, value]);
 
   const handleAttachmentClick = useCallback(() => {
     if (attachmentFeedbackTimerRef.current) {
@@ -162,7 +178,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
       textareaRef.current?.focus();
     },
     startVoiceRecording: () => {
-      // voice recording（语音录制）入口由后续专用按钮接入
+      voiceButtonRef.current?.start();
     },
   }), []);
 
@@ -183,6 +199,26 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
               ? <span className="text-[10px] font-medium leading-none">待开发</span>
               : <Image size={16} />}
           </button>
+
+          <VoiceInputButton
+            ref={voiceButtonRef}
+            onResult={handleVoiceResult}
+            onError={handleVoiceError}
+            showWaveform={true}
+            showTimer={false}
+            showPermissionUnlockButton={false}
+            enableShortcut={false}
+            size={36}
+            waveformColorVar="--brand-accent"
+            buttonClassName="shrink-0"
+            idleButtonClassName="bg-[#EDECE9] text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E]"
+            idleButtonStyle={{ boxShadow: 'none' }}
+            icons={{
+              idle: <Mic size={16} />,
+              recording: <Mic size={16} />,
+            }}
+            style={{ flexShrink: 0 }}
+          />
 
           <div className="relative flex-1">
             <Textarea

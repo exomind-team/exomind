@@ -16,6 +16,7 @@
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
 import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
+import { cn } from '../lib/utils';
 import {
   createCompatibleMediaRecorder,
   DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
@@ -47,12 +48,26 @@ export interface VoiceInputButtonProps {
   showPermissionUnlockButton?: boolean;
   /** 启用快捷键（仅非输入区域生效） */
   enableShortcut?: boolean;
+  /** 是否显示按钮下方辅助文案（快捷键/权限提示） */
+  showHelperText?: boolean;
   /** 按钮大小 */
   size?: number;
   /** 类名 */
   className?: string;
   /** 样式 */
   style?: React.CSSProperties;
+  /** 录音频谱颜色变量（例如 --brand-accent） */
+  waveformColorVar?: `--${string}` | string;
+  /** 主按钮额外类名 */
+  buttonClassName?: string;
+  /** idle 状态主按钮额外类名 */
+  idleButtonClassName?: string;
+  /** 主按钮额外样式 */
+  buttonStyle?: React.CSSProperties;
+  /** idle 状态主按钮额外样式 */
+  idleButtonStyle?: React.CSSProperties;
+  /** 图标覆盖 */
+  icons?: Partial<Record<VoiceButtonState, React.ReactNode>>;
 }
 
 export interface VoiceInputButtonHandle {
@@ -79,9 +94,16 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   showTimer = true,
   showPermissionUnlockButton = true,
   enableShortcut = true,
+  showHelperText = true,
   size = 64,
   className,
   style,
+  waveformColorVar = '--destructive',
+  buttonClassName,
+  idleButtonClassName,
+  buttonStyle,
+  idleButtonStyle,
+  icons,
 }, ref) {
   // 权限状态类型
   type PermissionState = 'checking' | 'granted' | 'denied' | 'prompt' | 'unavailable';
@@ -563,9 +585,13 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     const centerY = canvas.height / 2;
     const baseRadius = (size / 2) - 8;
     const rootStyle = getComputedStyle(document.documentElement);
-    const destructiveTriplet = rootStyle.getPropertyValue('--destructive');
-    const destructive0 = formatCssVarColor(destructiveTriplet, 0.9) ?? '#ff6b6b';
-    const destructive1 = formatCssVarColor(destructiveTriplet, 0.6) ?? '#ee5a5a';
+    const normalizedWaveformVar = waveformColorVar.startsWith('--')
+      ? waveformColorVar
+      : `--${waveformColorVar}`;
+    const waveformTriplet = rootStyle.getPropertyValue(normalizedWaveformVar)
+      || rootStyle.getPropertyValue('--destructive');
+    const waveform0 = formatCssVarColor(waveformTriplet, 0.9) ?? '#ff6b6b';
+    const waveform1 = formatCssVarColor(waveformTriplet, 0.6) ?? '#ee5a5a';
 
     const draw = () => {
       animationFrameId = requestAnimationFrame(draw);
@@ -589,8 +615,8 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         const y2 = centerY + Math.sin(angle) * (baseRadius + barHeight);
 
         const gradient = ctx.createLinearGradient(x1, y1, x2, y2);
-        gradient.addColorStop(0, destructive0);
-        gradient.addColorStop(1, destructive1);
+        gradient.addColorStop(0, waveform0);
+        gradient.addColorStop(1, waveform1);
 
         ctx.beginPath();
         ctx.moveTo(x1, y1);
@@ -610,7 +636,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         animationFrameId = null;
       }
     };
-  }, [showWaveform, state.state, size]);
+  }, [showWaveform, size, state.state, waveformColorVar]);
 
   // 计时器
   useEffect(() => {
@@ -643,6 +669,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
             'linear-gradient(135deg, hsl(var(--destructive)) 0%, hsl(var(--destructive) / 0.85) 100%)',
           shadow: '0 0 20px hsl(var(--destructive) / 0.6)',
           icon: '🎤',
+          iconColor: 'hsl(var(--destructive-foreground))',
         };
       case 'recognizing':
         return {
@@ -650,6 +677,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
             'linear-gradient(135deg, hsl(var(--brand)) 0%, hsl(var(--brand) / 0.85) 100%)',
           shadow: '0 0 20px hsl(var(--brand) / 0.6)',
           icon: '⏳',
+          iconColor: 'hsl(var(--brand-foreground))',
         };
       case 'completed':
         return {
@@ -657,6 +685,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
             'linear-gradient(135deg, hsl(var(--success)) 0%, hsl(var(--success) / 0.85) 100%)',
           shadow: '0 0 20px hsl(var(--success) / 0.6)',
           icon: '✓',
+          iconColor: 'hsl(var(--success-foreground))',
         };
       default:
         return {
@@ -664,11 +693,15 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
             'linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--secondary)) 100%)',
           shadow: '0 4px 12px hsl(var(--ring) / 0.2)',
           icon: '🎤',
+          iconColor: 'inherit',
         };
     }
   };
 
   const colors = getButtonColors();
+  const iconNode = icons?.[state.state] ?? colors.icon;
+  const isIdle = state.state === 'idle';
+  const useIdleClassVisual = Boolean(idleButtonClassName) && (state.state === 'idle' || state.state === 'completed');
   const buttonSize = size;
 
   // 格式化时间
@@ -722,18 +755,20 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       <button
         ref={buttonRef}
         onClick={handleClick}
+        className={cn(buttonClassName, useIdleClassVisual && idleButtonClassName)}
         style={{
           width: buttonSize,
           height: buttonSize,
           borderRadius: '50%',
           border: 'none',
-          background: colors.background,
-          boxShadow: colors.shadow,
+          background: useIdleClassVisual ? undefined : colors.background,
+          boxShadow: useIdleClassVisual ? undefined : colors.shadow,
           cursor: 'pointer',
           display: 'flex',
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: buttonSize * 0.4,
+          color: colors.iconColor,
           transition: 'all 0.3s ease',
           transform: state.state === 'recording' ? 'scale(1.05)' : 'scale(1)',
           animation: state.state === 'recording'
@@ -741,6 +776,8 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
             : 'none',
           position: 'relative',
           overflow: 'hidden',
+          ...(isIdle ? idleButtonStyle : undefined),
+          ...buttonStyle,
         }}
       >
         {/* 录音时的脉动效果 */}
@@ -798,12 +835,12 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         <span style={{
           transform: state.state === 'recognizing' ? 'scale(0.9)' : 'scale(1)',
         }}>
-          {colors.icon}
+          {iconNode}
         </span>
       </button>
 
       {/* 快捷键提示 */}
-      {enableShortcut && state.state === 'idle' && permissionState === 'granted' && (
+      {showHelperText && enableShortcut && state.state === 'idle' && permissionState === 'granted' && (
         <div style={{
           position: 'absolute',
           bottom: -20,
@@ -843,7 +880,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       )}
 
       {/* 权限提示文字 */}
-      {permissionState !== 'granted' && permissionState !== 'checking' && (
+      {showHelperText && permissionState !== 'granted' && permissionState !== 'checking' && (
         <div style={{
           position: 'absolute',
           bottom: -20,
