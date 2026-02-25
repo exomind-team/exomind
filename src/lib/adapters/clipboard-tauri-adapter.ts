@@ -7,11 +7,27 @@ export class TauriClipboardAdapter implements IClipboardPort {
   }
 
   async readText(): Promise<string> {
-    const text = await invoke<string>('plugin:clipboard-manager|read_text');
-    return typeof text === 'string' ? text : '';
+    try {
+      const text = await invoke<string>('plugin:clipboard-manager|read_text');
+      return typeof text === 'string' ? text : '';
+    } catch (tauriError) {
+      if (typeof navigator !== 'undefined' && typeof navigator.clipboard?.readText === 'function') {
+        return navigator.clipboard.readText();
+      }
+      throw tauriError;
+    }
   }
 
   async writeText(text: string): Promise<void> {
-    await invoke('plugin:clipboard-manager|write_text', { text });
+    try {
+      await invoke('plugin:clipboard-manager|write_text', { text });
+      return;
+    } catch (tauriError) {
+      if (typeof navigator !== 'undefined' && typeof navigator.clipboard?.writeText === 'function') {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+      throw tauriError;
+    }
   }
 }
