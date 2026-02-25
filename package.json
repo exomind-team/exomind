@@ -46,6 +46,7 @@
     "baseline-browser-mapping": "^2.10.0",
     "caniuse-lite": "^1.0.30001772",
     "class-variance-authority": "^0.7.1",
+    "eruda": "^3.4.3",
     "events": "^3.3.0",
     "katex": "^0.16.28",
     "lucide-react": "^0.563.0",

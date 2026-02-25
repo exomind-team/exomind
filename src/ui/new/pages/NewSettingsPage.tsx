@@ -35,7 +35,13 @@ import {
   setUseMockDataEnabled,
   subscribeUseMockDataChanges,
 } from '@/config/mock-data';
+import {
+  getDevtoolsEnabled,
+  setDevtoolsEnabled,
+  subscribeDevtoolsChanges,
+} from '@/config/devtools-mode';
 import { setUIMode } from '@/config/ui-mode';
+import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import {
   TIMER_END_SOUND_PRESETS,
   getTimerEndSoundPresetById,
@@ -89,6 +95,7 @@ export function NewSettingsPage() {
     () => getAgentPageEnabled()
   );
   const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
+  const [devtoolsEnabled, setDevtoolsEnabledState] = useState<boolean>(() => getDevtoolsEnabled());
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -250,6 +257,11 @@ export function NewSettingsPage() {
   const handleDeveloperModeToggle = (checked: boolean) => {
     setDeveloperModeEnabled(checked);
     setDeveloperMode(checked);
+    if (!checked) {
+      setDevtoolsEnabled(false);
+      setDevtoolsEnabledState(false);
+    }
+    void syncDevtoolsWithSettings();
   };
 
   const handleAgentPageEnabledToggle = (checked: boolean) => {
@@ -262,6 +274,12 @@ export function NewSettingsPage() {
     setUseMockData(checked);
     // Reload page（刷新页面）to re-bootstrap runtime adapters（重建运行时适配器注入）.
     window.location.reload();
+  };
+
+  const handleDevtoolsToggle = (checked: boolean) => {
+    setDevtoolsEnabled(checked);
+    setDevtoolsEnabledState(checked);
+    void syncDevtoolsWithSettings();
   };
 
   const navigate = useNavigate();
@@ -280,6 +298,12 @@ export function NewSettingsPage() {
   useEffect(() => {
     return subscribeUseMockDataChanges((enabled) => {
       setUseMockData(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeDevtoolsChanges((enabled) => {
+      setDevtoolsEnabledState(enabled);
     });
   }, []);
 
@@ -514,6 +538,18 @@ export function NewSettingsPage() {
                       data-testid="new-settings-use-mock-data-switch"
                       checked={useMockData}
                       onCheckedChange={handleUseMockDataToggle}
+                    />
+                  }
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="开发者工具"
+                  right={
+                    <Switch
+                      data-testid="new-settings-devtools-switch"
+                      checked={devtoolsEnabled}
+                      onCheckedChange={handleDevtoolsToggle}
                     />
                   }
                 />
