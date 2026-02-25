@@ -1,5 +1,6 @@
 import { ArrowLeft, Bot, MoreHorizontal, SendHorizontal, UserRound } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentConversationMessage } from '@/lib/types/agent-hub';
 
@@ -13,6 +14,7 @@ function createMessage(id: string, role: 'agent' | 'user', content: string): Age
 }
 
 export function AgentConversationPage({ agentId }: { agentId?: string }) {
+  const navigate = useNavigate();
   const [messages, setMessages] = useState<AgentConversationMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
@@ -79,7 +81,9 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
       <header data-testid="agent-conversation-header" className="flex items-center justify-between px-4 py-3">
         <button
           type="button"
-          onClick={() => window.history.back()}
+          onClick={() => {
+            void navigate({ to: '/agents' });
+          }}
           className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
           aria-label="返回（Back）"
         >

@@ -7,6 +7,7 @@ export const MOCK_TASKS_FIXTURE: TaskItem[] = [
     id: 'task-001',
     title: '完成 Task List 视图设计',
     note: 'Pencil 像素对齐检查',
+    dueAt: '2026-02-25T10:00:00.000Z',
     status: 'in_progress',
     progress: 42,
     estimatedMinutes: 120,
@@ -25,6 +26,7 @@ export const MOCK_TASKS_FIXTURE: TaskItem[] = [
     id: 'task-002',
     title: '设计 Agent Hub 认知架构视图',
     note: '先整理节点关系',
+    dueAt: '2026-02-26T09:00:00.000Z',
     status: 'todo',
     progress: 10,
     estimatedMinutes: 180,
@@ -40,6 +42,7 @@ export const MOCK_TASKS_FIXTURE: TaskItem[] = [
   {
     id: 'task-003',
     title: '暗色模式适配',
+    dueAt: '2026-03-02T12:00:00.000Z',
     status: 'todo',
     progress: 0,
     estimatedMinutes: 90,
@@ -72,6 +75,7 @@ export const MOCK_TASKS_FIXTURE: TaskItem[] = [
   {
     id: 'task-005',
     title: '集成测试与 Bug 修复',
+    dueAt: '2026-02-21T18:10:00.000Z',
     status: 'done',
     progress: 100,
     estimatedMinutes: 160,
@@ -374,4 +378,3 @@ export const MOCK_TASK_GOAL_GROUPS_FIXTURE: TaskGoalGroup[] = [
     ],
   },
 ];
-
