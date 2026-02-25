@@ -75,6 +75,15 @@ describe('NewNowInputRow', () => {
     render(<NewNowInputRow ref={ref} onSend={vi.fn()} placeholder="输入内容记录事件..." />);
 
     expect(screen.getByTestId('new-now-voice-button-mock')).toBeInTheDocument();
+    expect(getLatestVoiceProps()).toMatchObject({
+      showWaveform: true,
+      showTimer: false,
+      showPermissionUnlockButton: false,
+      size: 36,
+      waveformColorVar: '--brand-accent',
+    });
+    expect(getLatestVoiceProps()?.idleButtonClassName).toContain('bg-[#EDECE9]');
+    expect(getLatestVoiceProps()?.icons).toBeTruthy();
     act(() => {
       ref.current?.startVoiceRecording();
     });
