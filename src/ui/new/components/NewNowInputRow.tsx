@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Clipboard, Image, SendHorizontal, X } from 'lucide-react';
+import { Clipboard, Image, Mic, SendHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
@@ -204,10 +204,18 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
             ref={voiceButtonRef}
             onResult={handleVoiceResult}
             onError={handleVoiceError}
-            showWaveform={false}
+            showWaveform={true}
             showTimer={false}
             showPermissionUnlockButton={false}
             size={36}
+            waveformColorVar="--brand-accent"
+            buttonClassName="shrink-0"
+            idleButtonClassName="bg-[#EDECE9] text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E]"
+            idleButtonStyle={{ boxShadow: 'none' }}
+            icons={{
+              idle: <Mic size={16} />,
+              recording: <Mic size={16} />,
+            }}
             style={{ flexShrink: 0 }}
           />
 

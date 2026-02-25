@@ -382,15 +382,6 @@ export function NewSettingsPage() {
     navigate({ to: '/moss-test' });
   };
 
-  const handleOpenBrowserAsrTest = () => {
-    clearNotice();
-    if (!developerMode) {
-      setErrorMessage('请先开启开发者模式后使用语音测试');
-      return;
-    }
-    navigate({ to: '/asr-test' });
-  };
-
   useEffect(() => {
     const unsubscribe = subscribeTimerPreferencesChanges((nextPreferences) => {
       setTimerPreferencesState(nextPreferences);
@@ -591,20 +582,6 @@ export function NewSettingsPage() {
                 icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
                 label="MOSS 语音测试"
                 onClick={handleOpenVoiceTest}
-                right={
-                  <div className="flex items-center gap-1">
-                    <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
-                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
-                  </div>
-                }
-              />
-            </div>
-            <Divider />
-            <div data-testid="new-settings-asr-test-row">
-              <SettingRow
-                icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="浏览器 ASR 测试"
-                onClick={handleOpenBrowserAsrTest}
                 right={
                   <div className="flex items-center gap-1">
                     <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>

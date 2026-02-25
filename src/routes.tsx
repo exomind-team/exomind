@@ -5,7 +5,6 @@ import { cn } from "@/lib/utils";
 import { X, Settings, ClipboardList, Menu, Home, Users, Sun, Moon, SunMoon } from "lucide-react";
 import { ChatPage } from "@/components/Chat/ChatPage";
 import { SettingsPage } from "@/components/Settings/SettingsPage";
-import { ASRTestPage } from "@/pages/ASRTestPage";
 import { MOSSASRTestPage } from "@/pages/MOSSASRTestPage";
 import { HomePage } from "@/components/Home/HomePage";
 import { UserManagePage } from "@/ui/pages/UserManagePage";
@@ -187,15 +186,6 @@ const settingsRoute = createRoute({
   },
 });
 
-// ASR Test route (/asr-test)
-const asrTestRoute = createRoute({
-  getParentRoute: () => rootRoute,
-  path: 'asr-test',
-  component: function ASRTest() {
-    return <ASRTestPage />;
-  },
-});
-
 // MOSS ASR Test route (/moss-test)
 const mossTestRoute = createRoute({
   getParentRoute: () => rootRoute,
@@ -229,7 +219,6 @@ const routeTree = rootRoute.addChildren([
   homeRoute,
   indexRoute,
   settingsRoute,
-  asrTestRoute,
   mossTestRoute,
   userManageRoute,
   syncTestRoute,

@@ -220,7 +220,7 @@ export class MOSSASRAdapter implements IASRPort {
     const apiKey = this.resolveApiKey();
 
     if (!apiKey) {
-      throw new Error('MOSS API Key 未配置，请先在 MOSS 测试页保存 Key');
+      throw new Error('MOSS API Key 未配置，请先在设置页输入分组保存 Token');
     }
 
     let audioData: Uint8Array;

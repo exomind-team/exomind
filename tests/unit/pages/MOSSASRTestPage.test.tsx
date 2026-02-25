@@ -1,6 +1,6 @@
 import React from 'react';
-import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { render, screen, waitFor } from '@testing-library/react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { MOSSASRTestPage } from '@/pages/MOSSASRTestPage';
 
 let latestVoiceButtonProps: any = null;
@@ -23,19 +23,31 @@ const isDomAvailable = typeof document !== 'undefined';
     }
   });
 
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
   it('does not pass adapterConfig when apiKey is empty', () => {
     render(<MOSSASRTestPage />);
     expect(screen.getByTestId('mock-voice-input-button')).toBeInTheDocument();
     expect(latestVoiceButtonProps?.adapterConfig).toBeUndefined();
   });
 
-  it('passes adapterConfig with apiKey after input', () => {
+  it('passes adapterConfig with apiKey from settings storage', async () => {
+    vi.stubGlobal('localStorage', {
+      getItem: (key: string) => (key === 'moss_api_key' ? 'sk-test-key' : null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+      clear: vi.fn(),
+      key: vi.fn(),
+      length: 0,
+    } as unknown as Storage);
+
     render(<MOSSASRTestPage />);
 
-    const input = screen.getByPlaceholderText('sk-xxxxxxxxxxxxxxxxxxxxxxxx');
-    fireEvent.change(input, { target: { value: 'sk-test-key' } });
-
-    expect(latestVoiceButtonProps?.adapterConfig).toEqual({ apiKey: 'sk-test-key' });
+    await waitFor(() => {
+      expect(latestVoiceButtonProps?.adapterConfig).toEqual({ apiKey: 'sk-test-key' });
+    });
   });
 
   it('shortcut hints match implemented shortcuts', () => {

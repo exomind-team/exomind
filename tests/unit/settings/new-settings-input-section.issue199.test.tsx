@@ -17,7 +17,6 @@ describe('NewSettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
-    expect(screen.getByText('浏览器 ASR 测试')).toBeInTheDocument();
   });
 
   it('saves MOSS token from input settings dialog', () => {
