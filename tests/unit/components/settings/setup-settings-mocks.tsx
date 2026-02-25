@@ -63,6 +63,16 @@ vi.mock('@/config/mock-data', () => ({
   subscribeUseMockDataChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/devtools-mode', () => ({
+  getDevtoolsEnabled: vi.fn(() => false),
+  setDevtoolsEnabled: vi.fn(),
+  subscribeDevtoolsChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/lib/debug/devtools-runtime', () => ({
+  syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
+}));
+
 vi.mock('@/config/ui-mode', () => ({
   setUIMode: vi.fn(),
 }));
