@@ -207,6 +207,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
             showWaveform={true}
             showTimer={false}
             showPermissionUnlockButton={false}
+            enableShortcut={false}
             size={36}
             waveformColorVar="--brand-accent"
             buttonClassName="shrink-0"
