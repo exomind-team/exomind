@@ -76,9 +76,61 @@ type PickedJsonFile = {
   content: string;
 };
 
+const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
+
 function buildBackupFileName(): string {
   const date = new Date().toISOString().slice(0, 10);
   return `exomind-eventlog-${date}.json`;
+}
+
+function normalizeMossApiKey(value: string): string {
+  if (!value) return '';
+  let normalized = value.trim();
+  normalized = normalized.replace(/^['"]|['"]$/g, '');
+  normalized = normalized.replace(/^Bearer\s+/i, '');
+  return normalized.trim();
+}
+
+function readStoredMossApiKey(): string {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return '';
+  }
+  const storage = window.localStorage as Partial<Storage>;
+  if (typeof storage.getItem !== 'function') {
+    return '';
+  }
+  try {
+    return normalizeMossApiKey(storage.getItem(MOSS_API_KEY_STORAGE_KEY) || '');
+  } catch {
+    return '';
+  }
+}
+
+function writeStoredMossApiKey(value: string): void {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return;
+  }
+  const storage = window.localStorage as Partial<Storage>;
+  if (typeof storage.setItem !== 'function') {
+    return;
+  }
+  storage.setItem(MOSS_API_KEY_STORAGE_KEY, value);
+}
+
+function removeStoredMossApiKey(): void {
+  if (typeof window === 'undefined' || typeof window.localStorage === 'undefined') {
+    return;
+  }
+  const storage = window.localStorage as Partial<Storage>;
+  if (typeof storage.removeItem !== 'function') {
+    return;
+  }
+  storage.removeItem(MOSS_API_KEY_STORAGE_KEY);
+}
+
+function maskMossApiKey(value: string): string {
+  if (value.length <= 6) return `${value.slice(0, 2)}***`;
+  return `${value.slice(0, 4)}***${value.slice(-2)}`;
 }
 
 export function NewSettingsPage() {
@@ -101,6 +153,10 @@ export function NewSettingsPage() {
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [countdownModeDialogOpen, setCountdownModeDialogOpen] = useState(false);
   const [featureTogglesDialogOpen, setFeatureTogglesDialogOpen] = useState(false);
+  const [voiceInputDialogOpen, setVoiceInputDialogOpen] = useState(false);
+  const [mossApiKey, setMossApiKey] = useState(() => readStoredMossApiKey());
+  const [mossApiKeyDraft, setMossApiKeyDraft] = useState('');
+  const [showMossApiKey, setShowMossApiKey] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
@@ -288,6 +344,53 @@ export function NewSettingsPage() {
     setUIMode('old');
   };
 
+  const handleOpenVoiceInputSettings = () => {
+    clearNotice();
+    setMossApiKeyDraft(mossApiKey);
+    setShowMossApiKey(false);
+    setVoiceInputDialogOpen(true);
+  };
+
+  const handleSaveMossApiKey = () => {
+    clearNotice();
+    const normalized = normalizeMossApiKey(mossApiKeyDraft);
+    if (!normalized) {
+      setErrorMessage('MOSS API Token 不能为空');
+      return;
+    }
+    writeStoredMossApiKey(normalized);
+    setMossApiKey(normalized);
+    setVoiceInputDialogOpen(false);
+    setStatusMessage('MOSS API Token 已保存');
+  };
+
+  const handleClearMossApiKey = () => {
+    clearNotice();
+    removeStoredMossApiKey();
+    setMossApiKey('');
+    setMossApiKeyDraft('');
+    setVoiceInputDialogOpen(false);
+    setStatusMessage('MOSS API Token 已清除');
+  };
+
+  const handleOpenVoiceTest = () => {
+    clearNotice();
+    if (!developerMode) {
+      setErrorMessage('请先开启开发者模式后使用语音测试');
+      return;
+    }
+    navigate({ to: '/moss-test' });
+  };
+
+  const handleOpenBrowserAsrTest = () => {
+    clearNotice();
+    if (!developerMode) {
+      setErrorMessage('请先开启开发者模式后使用语音测试');
+      return;
+    }
+    navigate({ to: '/asr-test' });
+  };
+
   useEffect(() => {
     const unsubscribe = subscribeTimerPreferencesChanges((nextPreferences) => {
       setTimerPreferencesState(nextPreferences);
@@ -335,6 +438,10 @@ export function NewSettingsPage() {
     : '已关闭';
 
   const countdownEndModeLabel = timerPreferences.countdownEndMode === 'hard' ? '硬停止' : '柔和提醒';
+  const mossApiKeyStatusLabel = mossApiKey
+    ? `已配置 (${maskMossApiKey(mossApiKey)})`
+    : '未配置';
+  const voiceTestStatusLabel = developerMode ? '可用' : '需开发者模式';
 
   const syncHost = (() => {
     try {
@@ -458,6 +565,54 @@ export function NewSettingsPage() {
                 </div>
               }
             />
+          </SectionCard>
+        </section>
+
+        {/* ── Input Section (输入) ── */}
+        <section className="space-y-2" data-testid="new-settings-input-section">
+          <SectionTitle>输入</SectionTitle>
+          <SectionCard>
+            <div data-testid="new-settings-voice-token-row">
+              <SettingRow
+                icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="MOSS API Token"
+                onClick={handleOpenVoiceInputSettings}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{mossApiKeyStatusLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+            </div>
+            <Divider />
+            <div data-testid="new-settings-moss-test-row">
+              <SettingRow
+                icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="MOSS 语音测试"
+                onClick={handleOpenVoiceTest}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+            </div>
+            <Divider />
+            <div data-testid="new-settings-asr-test-row">
+              <SettingRow
+                icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="浏览器 ASR 测试"
+                onClick={handleOpenBrowserAsrTest}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+            </div>
           </SectionCard>
         </section>
 
@@ -660,6 +815,58 @@ export function NewSettingsPage() {
                 </button>
               );
             })}
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── Voice Input Dialog ── */}
+      <Dialog open={voiceInputDialogOpen} onOpenChange={setVoiceInputDialogOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>语音输入设置</DialogTitle>
+            <DialogDescription>配置 MOSS API Token（仅保存在当前设备）</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <input
+              type={showMossApiKey ? 'text' : 'password'}
+              value={mossApiKeyDraft}
+              onChange={(e) => setMossApiKeyDraft(e.target.value)}
+              placeholder="输入 MOSS API Token"
+              className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+            />
+            <div className="flex items-center justify-between">
+              <button
+                type="button"
+                onClick={() => setShowMossApiKey((prev) => !prev)}
+                className="text-xs text-[#78716C] underline-offset-2 hover:underline dark:text-[#A8A29E]"
+              >
+                {showMossApiKey ? '隐藏 Token' : '显示 Token'}
+              </button>
+              <span className="text-xs text-[#A8A29E]">用于新 UI 语音输入转写</span>
+            </div>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setVoiceInputDialogOpen(false)}
+                className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleClearMossApiKey}
+                className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
+              >
+                清除
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveMossApiKey}
+                className="flex-1 rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F]"
+              >
+                保存
+              </button>
+            </div>
           </div>
         </DialogContent>
       </Dialog>
