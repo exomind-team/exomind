@@ -7,11 +7,12 @@ import {
   useRef,
   useState,
 } from 'react';
-import { Clipboard, Image, SendHorizontal } from 'lucide-react';
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import { Clipboard, Image, SendHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
+import { getClipboardService } from '@/lib/services';
+import type { ClipboardFailureReason } from '@/lib/services';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 
 interface NewNowInputRowProps {
@@ -19,12 +20,34 @@ interface NewNowInputRowProps {
   placeholder?: string;
 }
 
+const getClipboardDebugSnapshot = () => {
+  const protocol = typeof window !== 'undefined' ? window.location.protocol : 'unknown';
+  const host = typeof window !== 'undefined' ? window.location.host : 'unknown';
+  const secure = typeof window !== 'undefined' ? window.isSecureContext : false;
+  const hasNavigatorClipboard = typeof navigator !== 'undefined' && !!navigator.clipboard;
+  const hasReadText = typeof navigator !== 'undefined' && typeof navigator.clipboard?.readText === 'function';
+
+  return { protocol, host, secure, hasNavigatorClipboard, hasReadText };
+};
+
+function getPasteFailureLabel(reason: ClipboardFailureReason): string {
+  if (reason === 'permission-denied') return '无权限';
+  if (reason === 'not-focused') return '未激活';
+  if (reason === 'insecure-context' || reason === 'not-supported') return '不支持';
+  return '未粘贴';
+}
+
 export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRowProps>(function NewNowInputRow({
   onSend,
   placeholder = '记录当下的事实...',
 }, ref) {
   const [value, setValue] = useState('');
+  const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
+  const [attachmentFeedback, setAttachmentFeedback] = useState<'idle' | 'pending'>('idle');
+  const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
+  const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const attachmentFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -41,6 +64,17 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   useEffect(() => {
     resizeTextarea();
   }, [value, resizeTextarea]);
+
+  useEffect(() => () => {
+    if (pasteFeedbackTimerRef.current) {
+      clearTimeout(pasteFeedbackTimerRef.current);
+      pasteFeedbackTimerRef.current = null;
+    }
+    if (attachmentFeedbackTimerRef.current) {
+      clearTimeout(attachmentFeedbackTimerRef.current);
+      attachmentFeedbackTimerRef.current = null;
+    }
+  }, []);
 
   const submitInput = useCallback(() => {
     const trimmed = value.trim();
@@ -68,39 +102,36 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
     });
   }, []);
 
-  const readClipboardFromTauri = useCallback(async (): Promise<string | null> => {
-    const isRunningInTauri = await isTauri();
-    if (!isRunningInTauri) {
-      return null;
-    }
-
-    try {
-      const text = await invoke<string>('plugin:clipboard-manager|read_text');
-      return typeof text === 'string' ? text : '';
-    } catch (err) {
-      console.warn('[clipboard] tauri read failed:', err);
-      return null;
-    }
-  }, []);
-
   const handlePasteFromClipboard = useCallback(async () => {
-    try {
-      const tauriText = await readClipboardFromTauri();
-      if (tauriText !== null) {
-        insertClipboardText(tauriText);
-        return;
-      }
-
-      if (typeof navigator === 'undefined' || !navigator.clipboard?.readText) {
-        throw new Error('clipboard read not supported');
-      }
-      const text = await navigator.clipboard.readText();
-      insertClipboardText(text);
-    } catch (err) {
-      console.warn('[clipboard] readText failed:', err);
-      toast({ title: '读取剪贴板失败，请重试', variant: 'destructive' });
+    if (pasteFeedbackTimerRef.current) {
+      clearTimeout(pasteFeedbackTimerRef.current);
+      pasteFeedbackTimerRef.current = null;
     }
-  }, [insertClipboardText, readClipboardFromTauri]);
+
+    const result = await getClipboardService().readText();
+    if (!result.ok) {
+      console.warn('[clipboard] readText failed:', result.error, {
+        ...getClipboardDebugSnapshot(),
+        reason: result.reason,
+      });
+      setPasteFailureLabel(getPasteFailureLabel(result.reason));
+      setPasteFeedback('error');
+      pasteFeedbackTimerRef.current = setTimeout(() => {
+        setPasteFeedback('idle');
+        pasteFeedbackTimerRef.current = null;
+      }, 1500);
+      textareaRef.current?.focus();
+      toast({ title: result.title, description: result.description, variant: 'destructive' });
+      return;
+    }
+
+    setPasteFeedback('success');
+    pasteFeedbackTimerRef.current = setTimeout(() => {
+      setPasteFeedback('idle');
+      pasteFeedbackTimerRef.current = null;
+    }, 1500);
+    insertClipboardText(result.text);
+  }, [insertClipboardText]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.key === 'Escape') {
@@ -112,6 +143,19 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
       submitInput();
     }
   }, [submitInput]);
+
+  const handleAttachmentClick = useCallback(() => {
+    if (attachmentFeedbackTimerRef.current) {
+      clearTimeout(attachmentFeedbackTimerRef.current);
+      attachmentFeedbackTimerRef.current = null;
+    }
+
+    setAttachmentFeedback('pending');
+    attachmentFeedbackTimerRef.current = setTimeout(() => {
+      setAttachmentFeedback('idle');
+      attachmentFeedbackTimerRef.current = null;
+    }, 1500);
+  }, []);
 
   useImperativeHandle(ref, () => ({
     focusText: () => {
@@ -128,11 +172,16 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
         <div className="flex items-center gap-2">
           <button
             type="button"
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E]"
-            aria-label="附件"
+            onClick={handleAttachmentClick}
+            className={`flex h-9 shrink-0 items-center justify-center rounded-full bg-[#EDECE9] px-2 text-stone-500 dark:bg-[#292524] dark:text-[#A8A29E] ${
+              attachmentFeedback === 'pending' ? 'min-w-[56px]' : 'w-9'
+            }`}
+            aria-label={attachmentFeedback === 'pending' ? '待开发' : '附件'}
             data-testid="new-now-attachment-button"
           >
-            <Image size={16} />
+            {attachmentFeedback === 'pending'
+              ? <span className="text-[10px] font-medium leading-none">待开发</span>
+              : <Image size={16} />}
           </button>
 
           <div className="relative flex-1">
@@ -146,17 +195,32 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
               onKeyDown={handleKeyDown}
               placeholder={placeholder}
               rows={1}
-              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 pr-10 text-sm text-stone-700 placeholder:text-stone-400 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              className="min-h-[44px] rounded-3xl border-[#E7E5E4] bg-white px-4 py-2 pr-16 text-sm text-stone-700 placeholder:text-stone-400 dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
               data-testid="new-now-input-textarea"
             />
             <button
               type="button"
               onClick={handlePasteFromClipboard}
-              className="absolute right-[7px] top-1/2 flex h-[30px] w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] text-stone-400 dark:text-[#78716C]"
+              className={`absolute right-[7px] top-1/2 flex h-[30px] min-w-[30px] -translate-y-1/2 items-center justify-center rounded-[15px] px-2 ${
+                pasteFeedback === 'error'
+                  ? 'text-red-500 dark:text-red-400'
+                  : pasteFeedback === 'success'
+                    ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-900/30 dark:text-emerald-300'
+                    : 'text-stone-400 dark:text-[#78716C]'
+              }`}
               aria-label="剪贴板"
               data-testid="new-now-input-inline-button"
             >
-              <Clipboard size={16} />
+              {pasteFeedback === 'success'
+                ? <span className="text-[10px] font-medium leading-none">已粘贴</span>
+                : pasteFeedback === 'error'
+                  ? (
+                    <span className="inline-flex items-center gap-0.5 text-[10px] font-medium leading-none">
+                      <X size={10} className="h-2.5 w-2.5" />
+                      {pasteFailureLabel}
+                    </span>
+                  )
+                  : <Clipboard size={16} />}
             </button>
           </div>
 

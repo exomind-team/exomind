@@ -15,6 +15,8 @@ export { MeServiceImpl, getMeService } from './me.service';
 export type { MeService } from './me.service';
 export { AgentHubServiceImpl, getAgentHubService } from './agent-hub.service';
 export type { AgentHubService } from './agent-hub.service';
+export { ClipboardServiceImpl, getClipboardService } from './clipboard.service';
+export type { ClipboardService, ClipboardReadResult, ClipboardFailureReason } from './clipboard.service';
 
 // 重新导出类型（这些类型在 types/event 中定义）
 export type { TimerMode, TimerConfig } from '../types/event';
