@@ -15,7 +15,7 @@ import { useEffect, useState, useRef, useCallback } from 'react';
 import { MOSSASRAdapter, MOSSASRResult } from '../lib/adapters/asr/moss-asr';
 import { VoiceInputButton } from '../components/VoiceInputButton';
 import type { ASRResult } from '../lib/environment/interfaces/asr.port';
-import { getEventLogService } from '@/lib/services';
+import { getClipboardService, getEventLogService } from '@/lib/services';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
@@ -56,6 +56,20 @@ export function MOSSASRTestPage() {
   const startTimeRef = useRef<number>(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
 
+  const storageGetItem = useCallback((key: string): string | null => {
+    if (typeof localStorage?.getItem !== 'function') {
+      return null;
+    }
+    return localStorage.getItem(key);
+  }, []);
+
+  const storageSetItem = useCallback((key: string, value: string): void => {
+    if (typeof localStorage?.setItem !== 'function') {
+      return;
+    }
+    localStorage.setItem(key, value);
+  }, []);
+
   // 初始化适配器
   const getAdapter = useCallback(() => {
     if (!adapterRef.current) {
@@ -68,12 +82,12 @@ export function MOSSASRTestPage() {
 
   // 从 localStorage 恢复 API Key
   useEffect(() => {
-    const savedKey = localStorage.getItem('moss_api_key');
+    const savedKey = storageGetItem('moss_api_key');
     if (savedKey) {
       setApiKey(savedKey);
       addLog('已恢复保存的 API Key');
     }
-  }, []);
+  }, [storageGetItem]);
 
   // 检查可用性
   useEffect(() => {
@@ -129,7 +143,7 @@ export function MOSSASRTestPage() {
 
   const handleSaveApiKey = () => {
     if (apiKey) {
-      localStorage.setItem('moss_api_key', apiKey);
+      storageSetItem('moss_api_key', apiKey);
       addLog('✓ API Key 已保存到本地');
     }
   };
@@ -395,6 +409,15 @@ export function MOSSASRTestPage() {
     });
   };
 
+  const handleCopyInputText = async () => {
+    const result = await getClipboardService().writeText(inputText);
+    if (!result.ok) {
+      addLogEntry(`⚠️ ${result.title}`);
+      return;
+    }
+    addLogEntry('📋 已复制识别文本');
+  };
+
   const voiceButtonAdapterConfig = apiKey ? { apiKey } : undefined;
 
   return (
@@ -601,7 +624,7 @@ export function MOSSASRTestPage() {
                     type="button"
                     variant="outline"
                     size="sm"
-                    onClick={() => navigator.clipboard.writeText(inputText)}
+                    onClick={handleCopyInputText}
                   >
                     复制
                   </Button>
