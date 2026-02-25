@@ -5,7 +5,7 @@
  * │  L4 UI                                  │
  * │  ─────────────────────────────────     │
  * │  测试 MOSS 语音识别功能                  │
- * │  - 可在页面配置 API Key                 │
+ * │  - Token 来源统一为设置页                │
  * │  - 原有的测试功能                       │
  * │  - 新增：VoiceInputButton 语音输入      │
  * └─────────────────────────────────────────┘
@@ -18,8 +18,6 @@ import type { ASRResult } from '../lib/environment/interfaces/asr.port';
 import { getClipboardService, getEventLogService } from '@/lib/services';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
 
@@ -37,8 +35,24 @@ interface LogEntry {
   text?: string;
 }
 
+const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
+
+function normalizeMossApiKey(value?: string): string {
+  if (!value) return '';
+  let normalized = value.trim();
+  normalized = normalized.replace(/^['"]|['"]$/g, '');
+  normalized = normalized.replace(/^Bearer\s+/i, '');
+  return normalized.trim();
+}
+
+function maskApiKey(value: string): string {
+  if (!value) return '';
+  if (value.length <= 8) return `${value.slice(0, 2)}***`;
+  return `${value.slice(0, 4)}***${value.slice(-2)}`;
+}
+
 export function MOSSASRTestPage() {
-  const [apiKey, setApiKey] = useState('');
+  const [configuredApiKey, setConfiguredApiKey] = useState('');
   const [recordingState, setRecordingState] = useState<RecordingState>('idle');
   const [recordingMethod, setRecordingMethod] = useState<RecordingMethod>('mediaRecorder');
   const [duration, setDuration] = useState(0);
@@ -63,46 +77,62 @@ export function MOSSASRTestPage() {
     return localStorage.getItem(key);
   }, []);
 
-  const storageSetItem = useCallback((key: string, value: string): void => {
-    if (typeof localStorage?.setItem !== 'function') {
-      return;
-    }
-    localStorage.setItem(key, value);
-  }, []);
+  const getConfiguredApiKey = useCallback((): string => {
+    const storageValue = normalizeMossApiKey(storageGetItem(MOSS_API_KEY_STORAGE_KEY) || '');
+    const envValue = normalizeMossApiKey(import.meta.env?.VITE_MOSS_API_KEY || '');
+    return storageValue || envValue;
+  }, [storageGetItem]);
 
   // 初始化适配器
   const getAdapter = useCallback(() => {
-    if (!adapterRef.current) {
-      adapterRef.current = new MOSSASRAdapter({ apiKey: apiKey || import.meta.env?.VITE_MOSS_API_KEY || '' });
-    } else {
-      adapterRef.current = new MOSSASRAdapter({ apiKey: apiKey || import.meta.env?.VITE_MOSS_API_KEY || '' });
-    }
+    adapterRef.current = new MOSSASRAdapter({ apiKey: configuredApiKey });
     return adapterRef.current;
-  }, [apiKey]);
+  }, [configuredApiKey]);
 
-  // 从 localStorage 恢复 API Key
+  // 从设置页同步 API Key（storage / env）
   useEffect(() => {
-    const savedKey = storageGetItem('moss_api_key');
-    if (savedKey) {
-      setApiKey(savedKey);
-      addLog('已恢复保存的 API Key');
-    }
-  }, [storageGetItem]);
+    const syncApiKey = () => {
+      setConfiguredApiKey(getConfiguredApiKey());
+    };
+    syncApiKey();
+
+    const handleFocus = () => syncApiKey();
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        syncApiKey();
+      }
+    };
+    const handleStorage = (event: StorageEvent) => {
+      if (!event.key || event.key === MOSS_API_KEY_STORAGE_KEY) {
+        syncApiKey();
+      }
+    };
+
+    window.addEventListener('focus', handleFocus);
+    window.addEventListener('storage', handleStorage);
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+
+    return () => {
+      window.removeEventListener('focus', handleFocus);
+      window.removeEventListener('storage', handleStorage);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
+  }, [getConfiguredApiKey]);
 
   // 检查可用性
   useEffect(() => {
     const adapter = getAdapter();
     setIsAvailable(adapter.isAvailable());
     setConnectionStatus(adapter.isAvailable() ? '就绪' : '未配置');
-    addLog(adapter.isAvailable() ? '✓ MOSS ASR 已就绪' : '✗ 请配置 API Key');
+    addLog(adapter.isAvailable() ? '✓ MOSS ASR 已就绪' : '✗ 请先在设置页配置 MOSS API Token');
     if (!adapter.isAvailable()) {
       addLog('');
       addLog('【配置步骤】');
       addLog('  1. 访问 https://studio.mosi.cn/');
       addLog('  2. 注册账号并获取 API Key');
-      addLog('  3. 在下方输入框中粘贴 API Key');
+      addLog('  3. 打开 设置 > 输入 > MOSS API Token 并保存');
     }
-  }, [apiKey]);
+  }, [configuredApiKey]);
 
   // 计时器
   useEffect(() => {
@@ -139,13 +169,6 @@ export function MOSSASRTestPage() {
   // 兼容旧代码
   const addLog = (msg: string) => {
     addLogEntry(msg);
-  };
-
-  const handleSaveApiKey = () => {
-    if (apiKey) {
-      storageSetItem('moss_api_key', apiKey);
-      addLog('✓ API Key 已保存到本地');
-    }
   };
 
   // WebM 转 WAV（不做重采样，不做增益）
@@ -418,7 +441,7 @@ export function MOSSASRTestPage() {
     addLogEntry('📋 已复制识别文本');
   };
 
-  const voiceButtonAdapterConfig = apiKey ? { apiKey } : undefined;
+  const voiceButtonAdapterConfig = configuredApiKey ? { apiKey: configuredApiKey } : undefined;
 
   return (
     <div className="p-6 max-w-3xl mx-auto space-y-4">
@@ -426,40 +449,24 @@ export function MOSSASRTestPage() {
 
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="text-sm">MOSS API Key 配置</CardTitle>
+          <CardTitle className="text-sm">MOSS Token 来源</CardTitle>
           <p className="text-xs text-muted-foreground">
-            申请地址:{' '}
-            <a
-              href="https://studio.mosi.cn/"
-              target="_blank"
-              rel="noreferrer"
-              className="text-brand underline underline-offset-4"
-            >
-              https://studio.mosi.cn/
-            </a>
+            Token 统一来自设置页：设置 &gt; 输入 &gt; MOSS API Token
           </p>
         </CardHeader>
-        <CardContent className="pt-0 space-y-2">
-          <div className="space-y-1">
-            <Label htmlFor="moss-api-key">API Key</Label>
-            <div className="flex gap-2">
-              <Input
-                id="moss-api-key"
-                type="password"
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="sk-xxxxxxxxxxxxxxxxxxxxxxxx"
-                className="font-mono"
-              />
-              <Button type="button" variant="brand" onClick={handleSaveApiKey}>
-                保存
-              </Button>
-            </div>
-          </div>
-
+        <CardContent className="pt-0 space-y-3">
           <div className="text-xs text-muted-foreground">
-            {apiKey ? '✓ 已配置' : '✗ 未配置'}
-            {apiKey && ` (${apiKey.slice(0, 4)}...${apiKey.slice(-4)})`}
+            {configuredApiKey ? `✓ 已配置 (${maskApiKey(configuredApiKey)})` : '✗ 未配置'}
+          </div>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" variant="outline" onClick={() => { window.location.pathname = '/settings'; }}>
+              前往设置页
+            </Button>
+            <Button type="button" variant="outline" asChild>
+              <a href="https://studio.mosi.cn/" target="_blank" rel="noreferrer">
+                申请 MOSS Token
+              </a>
+            </Button>
           </div>
         </CardContent>
       </Card>
@@ -485,7 +492,7 @@ export function MOSSASRTestPage() {
             </span>
           </div>
           <p className="mt-2 text-xs text-muted-foreground">
-            {isAvailable ? '直接调用 MOSS HTTP API，无需后端服务' : '请在上方配置 API Key'}
+            {isAvailable ? '直接调用 MOSS HTTP API，无需后端服务' : '请先到设置页配置 MOSS API Token'}
           </p>
         </CardHeader>
       </Card>
