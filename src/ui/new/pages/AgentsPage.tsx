@@ -22,6 +22,7 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { getAgentHubService } from '@/lib/services';
 import type {
   AgentAddNodeOption,
@@ -657,6 +658,7 @@ function AddNodeSheet({
 }
 
 export function AgentsPage() {
+  const navigate = useNavigate();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [topology, setTopology] = useState<AgentHubTopologyData>({ nodes: [], edges: [], selectedNodeId: null });
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
@@ -689,7 +691,7 @@ export function AgentsPage() {
   }, []);
 
   const navigateByPath = (path: string) => {
-    window.location.href = path;
+    void navigate({ to: path as never });
   };
 
   const content = useMemo(() => {

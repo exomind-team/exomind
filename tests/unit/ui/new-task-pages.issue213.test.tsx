@@ -1,19 +1,18 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { MOCK_TASK_GOAL_GROUPS_FIXTURE } from '@/lib/adapters/mock/fixtures/tasks';
 import { NewTaskTimerCard } from '@/ui/new/components/NewTaskTimerCard';
 import { NewTasksPage } from '@/ui/new/pages/NewTasksPage';
 import type { TaskItem } from '@/lib/types/task';
 
-const listTasksMock = vi.fn();
-const longTermGoalsMock = vi.fn();
+const listTasksByTabMock = vi.fn();
 const createTaskMock = vi.fn();
 
 vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
-    listTasks: listTasksMock,
-    getLongTermGoals: longTermGoalsMock,
+    listTasksByTab: listTasksByTabMock,
     createTask: createTaskMock,
+    listTasks: vi.fn(),
+    getLongTermGoals: vi.fn(),
     getTask: vi.fn(),
     setTimerMode: vi.fn(),
     pauseTask: vi.fn(),
@@ -26,6 +25,7 @@ const sampleTask: TaskItem = {
   id: 'task-1',
   title: '完成 Task List 视图设计',
   status: 'in_progress',
+  dueAt: '2026-02-25T10:00:00.000Z',
   progress: 45,
   createdAt: '2026-02-23T00:00:00.000Z',
   updatedAt: '2026-02-23T00:00:00.000Z',
@@ -40,11 +40,12 @@ const sampleTask: TaskItem = {
 
 describe('issue-213 task ui pages（任务页面还原）', () => {
   beforeEach(() => {
-    listTasksMock.mockReset();
-    longTermGoalsMock.mockReset();
+    listTasksByTabMock.mockReset();
     createTaskMock.mockReset();
-    listTasksMock.mockResolvedValue([sampleTask]);
-    longTermGoalsMock.mockResolvedValue(MOCK_TASK_GOAL_GROUPS_FIXTURE);
+    listTasksByTabMock.mockImplementation(async (tab: string) => {
+      if (tab === 'today') return [];
+      return [sampleTask];
+    });
     createTaskMock.mockResolvedValue(sampleTask);
   });
 
@@ -74,45 +75,29 @@ describe('issue-213 task ui pages（任务页面还原）', () => {
     expect(factInput).toBeInTheDocument();
   });
 
-  it('renders task list page and quick-add input（任务列表页与快速输入）', async () => {
+  it('renders task list tabs and quick-add input（任务列表与快速输入）', async () => {
     render(<NewTasksPage />);
     expect(screen.getByText('任务')).toBeInTheDocument();
     expect(screen.getByText('当下')).toBeInTheDocument();
     expect(screen.getByText('今日')).toBeInTheDocument();
+    expect(screen.getByText('一周')).toBeInTheDocument();
+    expect(screen.getByText('月')).toBeInTheDocument();
     expect(screen.getByPlaceholderText('快速添加任务...')).toBeInTheDocument();
 
     await waitFor(() => {
       expect(screen.getByText('完成 Task List 视图设计')).toBeInTheDocument();
     });
+
+    expect(listTasksByTabMock).toHaveBeenCalledWith('now');
   });
 
-  it('renders long-term goals from pencil fixture（长期页渲染设计稿数据）', async () => {
+  it('shows tab-specific empty state（按标签展示空状态）', async () => {
     render(<NewTasksPage />);
-    fireEvent.click(screen.getByRole('button', { name: '长期' }));
+    fireEvent.click(screen.getByRole('button', { name: '今日' }));
 
     await waitFor(() => {
-      expect(screen.getByTestId('tasks-goals-content')).toBeInTheDocument();
-      expect(screen.getByText('商业项目')).toBeInTheDocument();
-      expect(screen.getByText('Exomind v0.3 发布')).toBeInTheDocument();
-      expect(screen.getByText('科学研究')).toBeInTheDocument();
-      expect(screen.getByText('人工认知生命理论')).toBeInTheDocument();
-      expect(screen.getByText('知识学习')).toBeInTheDocument();
-      expect(screen.getByText('眼睛健康')).toBeInTheDocument();
+      expect(screen.getByText('今天还没有需要推进的任务。')).toBeInTheDocument();
     });
-  });
-
-  it('applies dark-mode classes for long-term goals section（长期区域暗色模式样式）', async () => {
-    render(<NewTasksPage />);
-    fireEvent.click(screen.getByRole('button', { name: '长期' }));
-
-    await waitFor(() => {
-      const group = screen.getByTestId('tasks-goals-group-goal-group-business');
-      const card = screen.getByTestId('tasks-goal-card-goal-biz-exomind-release');
-
-      expect(group.className).toContain('dark:text-[#FAFAF9]');
-      expect(card.className).toContain('dark:border-[#3A3432]');
-      expect(card.className).toContain('dark:bg-[#1C1917]');
-    });
+    expect(listTasksByTabMock).toHaveBeenCalledWith('today');
   });
 });
-

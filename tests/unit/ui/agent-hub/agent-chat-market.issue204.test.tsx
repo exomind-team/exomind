@@ -9,6 +9,11 @@ const serviceMocks = vi.hoisted(() => ({
   streamConversation: vi.fn(),
   listMarketCategories: vi.fn(),
   getMarketItems: vi.fn(),
+  navigate: vi.fn(),
+}));
+
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => serviceMocks.navigate,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -29,6 +34,7 @@ describe('agent chat and market issue-204（对话与市场）', () => {
     });
     serviceMocks.listMarketCategories.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.marketCategories);
     serviceMocks.getMarketItems.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.marketItems);
+    serviceMocks.navigate.mockReset();
   });
 
   it('renders chat history and streaming response（加载历史并流式输出）', async () => {
@@ -63,5 +69,8 @@ describe('agent chat and market issue-204（对话与市场）', () => {
     expect(screen.getByText('热门推荐')).toBeInTheDocument();
     expect(screen.getByText('Code Review Agent')).toBeInTheDocument();
     expect(screen.getByText('Google Calendar 数据源')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '返回' }));
+    expect(serviceMocks.navigate).toHaveBeenCalledWith({ to: '/agents' });
   });
 });

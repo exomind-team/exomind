@@ -8,6 +8,11 @@ const serviceMocks = vi.hoisted(() => ({
   getListView: vi.fn(),
   getDeviceView: vi.fn(),
   listAddNodeOptions: vi.fn(),
+  navigate: vi.fn(),
+}));
+
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => serviceMocks.navigate,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -25,6 +30,7 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     serviceMocks.getListView.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.listSections);
     serviceMocks.getDeviceView.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.deviceGroups);
     serviceMocks.listAddNodeOptions.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.addNodeOptions);
+    serviceMocks.navigate.mockReset();
   });
 
   it('switches topology/list/device views（支持拓扑/列表/设备切换）', async () => {
@@ -63,6 +69,19 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
 
     fireEvent.click(screen.getByTestId('agent-add-node-close'));
     expect(screen.queryByTestId('agent-add-node-sheet')).not.toBeInTheDocument();
+  });
+
+  it('navigates to market via router navigation（从弹窗跳转市场页）', async () => {
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-add-node-button'));
+    fireEvent.click(screen.getByTestId('agent-add-node-option-market'));
+
+    expect(serviceMocks.navigate).toHaveBeenCalledWith({ to: '/agents/market' });
   });
 
   it('keeps dark-mode classes on key surfaces（关键区域包含暗色样式类）', async () => {

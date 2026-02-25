@@ -7,6 +7,11 @@ import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
 const serviceMocks = vi.hoisted(() => ({
   getAgentDetail: vi.fn(),
   getActorDetail: vi.fn(),
+  navigate: vi.fn(),
+}));
+
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => serviceMocks.navigate,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -20,6 +25,7 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
   beforeEach(() => {
     serviceMocks.getAgentDetail.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.agentDetails['agent-daily']);
     serviceMocks.getActorDetail.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.actorDetails['actor-timer']);
+    serviceMocks.navigate.mockReset();
   });
 
   it('renders agent detail sections and chat CTA（Agent 详情区块与对话入口）', async () => {
@@ -36,6 +42,12 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByText('输出目标')).toBeInTheDocument();
     expect(screen.getByTestId('agent-detail-chat-button')).toBeInTheDocument();
     expect(screen.getByTestId('agent-detail-page').className).toContain('dark:bg-[#0C0A09]');
+
+    screen.getByTestId('agent-detail-chat-button').click();
+    expect(serviceMocks.navigate).toHaveBeenCalledWith({
+      to: '/agents/chat/$agentId',
+      params: { agentId: 'agent-daily' },
+    });
   });
 
   it('renders actor detail sections（Actor 详情区块）', async () => {

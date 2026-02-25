@@ -1,5 +1,6 @@
 import { ArrowLeft, CheckCheck, Clock3, MessageCircle, MoreHorizontal, Send, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentDetailData, AgentHubListItem } from '@/lib/types/agent-hub';
 
@@ -10,6 +11,7 @@ function getTargetIcon(target: AgentHubListItem) {
 }
 
 export function AgentDetailPage({ agentId }: { agentId?: string }) {
+  const navigate = useNavigate();
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const targetId = agentId ?? '';
@@ -66,7 +68,9 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
           <p className="mt-1 text-xs text-[#A8A29E] dark:text-[#78716C]">该节点可能已删除或尚未配置详情数据。</p>
           <button
             type="button"
-            onClick={() => window.history.back()}
+            onClick={() => {
+              void navigate({ to: '/agents' });
+            }}
             className="mt-4 rounded-lg bg-[#F5F0ED] px-3 py-2 text-xs font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
           >
             返回上一页
@@ -82,7 +86,9 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
         <button
           type="button"
           data-testid="agent-detail-back-button"
-          onClick={() => window.history.back()}
+          onClick={() => {
+            void navigate({ to: '/agents' });
+          }}
           className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
           aria-label="返回（Back）"
         >
@@ -191,7 +197,7 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
           data-testid="agent-detail-chat-button"
           onClick={() => {
             if (!targetId) return;
-            window.location.href = `/agents/chat/${targetId}`;
+            void navigate({ to: '/agents/chat/$agentId', params: { agentId: targetId } });
           }}
           className="w-full rounded-[14px] bg-[#C75B3A] px-4 py-3 text-sm font-semibold text-white"
         >

@@ -1,5 +1,6 @@
 import { ArrowDownToLine, ArrowLeft, Search, Sparkles, Store, Users } from 'lucide-react';
 import { useEffect, useState } from 'react';
+import { useNavigate } from '@tanstack/react-router';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentMarketCategory, AgentMarketItem } from '@/lib/types/agent-hub';
 
@@ -10,6 +11,7 @@ function getMarketCardIcon(item: AgentMarketItem) {
 }
 
 export function AgentMarketPage() {
+  const navigate = useNavigate();
   const [categories, setCategories] = useState<AgentMarketCategory[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState('all');
   const [items, setItems] = useState<AgentMarketItem[]>([]);
@@ -43,7 +45,9 @@ export function AgentMarketPage() {
       <header className="grid grid-cols-[auto,1fr,auto] items-center px-5 py-3">
         <button
           type="button"
-          onClick={() => window.history.back()}
+          onClick={() => {
+            void navigate({ to: '/agents' });
+          }}
           className="flex items-center gap-1 text-[12px] text-[#C75B3A]"
         >
           <ArrowLeft size={14} />

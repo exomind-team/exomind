@@ -13,6 +13,7 @@ export interface TaskItem {
   id: string;
   title: string;
   note?: string;
+  dueAt?: string; // due time（截止时间，ISO）
   status: TaskStatus;
   progress: number; // 0-100
   estimatedMinutes?: number;
@@ -74,4 +75,3 @@ export interface TaskGoalGroup {
   badgeTone: TaskGoalStatusTone;
   goals: TaskGoalCard[];
 }
-
