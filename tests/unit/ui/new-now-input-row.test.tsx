@@ -3,10 +3,31 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
 
-const { mockReadClipboardText, mockToast } = vi.hoisted(() => ({
-  mockReadClipboardText: vi.fn(),
-  mockToast: vi.fn(),
-}));
+const { mockReadClipboardText, mockToast, startVoiceSpy, setLatestVoiceProps, getLatestVoiceProps } = vi.hoisted(() => {
+  let latestVoiceProps: any = null;
+  return {
+    mockReadClipboardText: vi.fn(),
+    mockToast: vi.fn(),
+    startVoiceSpy: vi.fn(),
+    setLatestVoiceProps: (props: any) => {
+      latestVoiceProps = props;
+    },
+    getLatestVoiceProps: () => latestVoiceProps,
+  };
+});
+
+vi.mock('@/components/VoiceInputButton', async () => {
+  const React = await import('react');
+  return {
+    VoiceInputButton: React.forwardRef((props: any, ref: any) => {
+      setLatestVoiceProps(props);
+      React.useImperativeHandle(ref, () => ({
+        start: () => startVoiceSpy(),
+      }));
+      return <button type="button" data-testid="new-now-voice-button-mock">voice</button>;
+    }),
+  };
+});
 
 vi.mock('@/lib/services', () => ({
   getClipboardService: () => ({
@@ -24,6 +45,8 @@ describe('NewNowInputRow', () => {
     vi.useFakeTimers();
     mockReadClipboardText.mockReset();
     mockToast.mockReset();
+    startVoiceSpy.mockReset();
+    setLatestVoiceProps(null);
   });
 
   afterEach(() => {
@@ -45,6 +68,54 @@ describe('NewNowInputRow', () => {
 
     expect(onSend).toHaveBeenCalledWith('像素级复刻输入行');
     expect((textarea as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('renders voice button and starts voice recording by ref handle', () => {
+    const ref = React.createRef<{ startVoiceRecording: () => void }>();
+    render(<NewNowInputRow ref={ref} onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+
+    expect(screen.getByTestId('new-now-voice-button-mock')).toBeInTheDocument();
+    act(() => {
+      ref.current?.startVoiceRecording();
+    });
+    expect(startVoiceSpy).toHaveBeenCalledTimes(1);
+  });
+
+  it('starts voice recording when pressing Enter on empty textarea', () => {
+    const onSend = vi.fn();
+    render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    (textarea as HTMLTextAreaElement).focus();
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(startVoiceSpy).toHaveBeenCalledTimes(1);
+    expect(textarea).not.toHaveFocus();
+  });
+
+  it('inserts voice transcript into textarea', () => {
+    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    const textarea = screen.getByTestId('new-now-input-textarea');
+
+    fireEvent.change(textarea, { target: { value: '已有文本' } });
+    act(() => {
+      getLatestVoiceProps()?.onResult?.('语音识别内容');
+    });
+
+    expect((textarea as HTMLTextAreaElement).value).toBe('已有文本 语音识别内容');
+  });
+
+  it('logs voice errors for troubleshooting', () => {
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+
+    act(() => {
+      getLatestVoiceProps()?.onError?.('麦克风权限被拒绝');
+    });
+
+    expect(errorSpy).toHaveBeenCalledWith('[new-now-input][voice]', '麦克风权限被拒绝');
+    errorSpy.mockRestore();
   });
 
   it('shows temporary "待开发" placeholder after attachment click', () => {
