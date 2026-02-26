@@ -17,6 +17,10 @@ export { AgentHubServiceImpl, getAgentHubService } from './agent-hub.service';
 export type { AgentHubService } from './agent-hub.service';
 export { ClipboardServiceImpl, getClipboardService } from './clipboard.service';
 export type { ClipboardService, ClipboardReadResult, ClipboardFailureReason } from './clipboard.service';
+export { CommandRegistryServiceImpl, getCommandRegistryService } from './command-registry.service';
+export type { CommandRegistryService } from './command-registry.service';
+export { CommandPaletteServiceImpl, getCommandPaletteService } from './command-palette.service';
+export type { CommandPaletteService, CommandPaletteState } from './command-palette.service';
 
 // 重新导出类型（这些类型在 types/event 中定义）
 export type { TimerMode, TimerConfig } from '../types/event';
