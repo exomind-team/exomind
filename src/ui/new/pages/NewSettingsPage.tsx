@@ -40,7 +40,11 @@ import {
   setDevtoolsEnabled,
   subscribeDevtoolsChanges,
 } from '@/config/devtools-mode';
-import { setUIMode } from '@/config/ui-mode';
+import {
+  getCommandPaletteEnabled,
+  setCommandPaletteEnabled,
+  subscribeCommandPaletteEnabledChanges,
+} from '@/config/command-palette-enabled';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import {
   TIMER_END_SOUND_PRESETS,
@@ -59,13 +63,13 @@ import {
   Check,
   ChevronRight,
   Code,
+  Command,
   Download,
   Monitor,
   Moon,
   MoonStar,
   Sun,
   Timer,
-  Undo2,
   Upload,
   Wifi,
 } from 'lucide-react';
@@ -148,6 +152,7 @@ export function NewSettingsPage() {
   );
   const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
   const [devtoolsEnabled, setDevtoolsEnabledState] = useState<boolean>(() => getDevtoolsEnabled());
+  const [commandPaletteEnabled, setCommandPaletteEnabledState] = useState<boolean>(() => getCommandPaletteEnabled());
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -338,11 +343,12 @@ export function NewSettingsPage() {
     void syncDevtoolsWithSettings();
   };
 
-  const navigate = useNavigate();
-
-  const handleSwitchToOldUI = () => {
-    setUIMode('old');
+  const handleCommandPaletteToggle = (checked: boolean) => {
+    setCommandPaletteEnabled(checked);
+    setCommandPaletteEnabledState(checked);
   };
+
+  const navigate = useNavigate();
 
   const handleOpenVoiceInputSettings = () => {
     clearNotice();
@@ -398,6 +404,12 @@ export function NewSettingsPage() {
   useEffect(() => {
     return subscribeDevtoolsChanges((enabled) => {
       setDevtoolsEnabledState(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeCommandPaletteEnabledChanges((enabled) => {
+      setCommandPaletteEnabledState(enabled);
     });
   }, []);
 
@@ -692,13 +704,6 @@ export function NewSettingsPage() {
                   onClick={() => setFeatureTogglesDialogOpen(true)}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
-                <Divider />
-                <SettingRow
-                  icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="旧版页面"
-                  onClick={handleSwitchToOldUI}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
               </>
             )}
           </SectionCard>
@@ -858,10 +863,28 @@ export function NewSettingsPage() {
             <p className="mt-1 text-center text-xs text-[#A8A29E]">启用或关闭实验性功能</p>
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
-                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
+                <div className="flex items-center gap-2">
+                  <Bot className="h-[16px] w-[16px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
+                </div>
                 <Switch
+                  data-testid="feature-toggle-agent-page-switch"
                   checked={agentPageEnabled}
                   onCheckedChange={handleAgentPageEnabledToggle}
+                />
+              </div>
+              <div
+                className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]"
+                data-testid="feature-toggle-command-palette-row"
+              >
+                <div className="flex items-center gap-2">
+                  <Command className="h-[16px] w-[16px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">命令面板</span>
+                </div>
+                <Switch
+                  data-testid="feature-toggle-command-palette-switch"
+                  checked={commandPaletteEnabled}
+                  onCheckedChange={handleCommandPaletteToggle}
                 />
               </div>
             </div>
