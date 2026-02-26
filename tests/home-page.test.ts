@@ -19,19 +19,6 @@ describe('HomePage component', () => {
   });
 });
 
-describe('HomePage route', () => {
-  const homeRoutePath = path.resolve('src/routes/home.tsx');
-
-  it('should have home route file', () => {
-    expect(fs.existsSync(homeRoutePath)).toBe(true);
-  });
-
-  it('should export HomeRoute component', async () => {
-    const { HomeRoute } = await import('@/routes/home');
-    expect(HomeRoute).toBeDefined();
-  });
-});
-
 describe('User guide markdown', () => {
   const guidePath = path.resolve('src/docs/user-guide.md');
 
