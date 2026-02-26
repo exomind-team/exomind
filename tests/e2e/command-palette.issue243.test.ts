@@ -15,8 +15,8 @@ test.describe('Issue #243 command palette（命令面板）', () => {
     await page.waitForLoadState('networkidle');
 
     await page.getByRole('button', { name: '更多菜单' }).click();
-    await expect(page.getByTestId('tasks-open-command-palette')).toBeVisible();
-    await page.getByTestId('tasks-open-command-palette').click();
+    await expect(page.getByTestId('page-more-menu-open-command-palette')).toBeVisible();
+    await page.getByTestId('page-more-menu-open-command-palette').click();
     await expect(page.getByTestId('command-palette-overlay')).toBeVisible();
 
     await page.getByTestId('command-palette-input').fill('设置');

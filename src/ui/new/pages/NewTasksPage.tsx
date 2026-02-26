@@ -1,11 +1,9 @@
-import { EllipsisVertical, Github, Plus, SlidersHorizontal } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { Github, Plus, SlidersHorizontal } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import { getTaskService } from '@/lib/services';
 import type { TaskGoalCard, TaskGoalGroup, TaskGoalStatusTone, TaskItem } from '@/lib/types/task';
 import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
-import { getCommandPaletteService } from '@/lib/services/command-palette.service';
-import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
-import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
+import { PageMoreMenu } from '@/ui/new/components/PageMoreMenu';
 
 type TaskTab = 'now' | 'today' | 'week' | 'month' | 'goals';
 
@@ -155,11 +153,6 @@ export function NewTasksPage() {
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [goalGroups, setGoalGroups] = useState<TaskGoalGroup[]>([]);
   const [quickInput, setQuickInput] = useState('');
-  const [moreMenuOpen, setMoreMenuOpen] = useState(false);
-  const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
-  const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
-  const moreMenuRef = useRef<HTMLDivElement | null>(null);
-  const commandPaletteActive = developerModeEnabled && commandPaletteEnabled;
 
   useEffect(() => {
     let disposed = false;
@@ -178,32 +171,6 @@ export function NewTasksPage() {
       disposed = true;
     };
   }, []);
-
-  useEffect(() => {
-    return subscribeDeveloperModeChanges(setDeveloperModeEnabled);
-  }, []);
-
-  useEffect(() => {
-    return subscribeCommandPaletteEnabledChanges(setCommandPaletteEnabled);
-  }, []);
-
-  useEffect(() => {
-    if (!moreMenuOpen) {
-      return;
-    }
-
-    const handleDocumentClick = (event: MouseEvent) => {
-      const target = event.target as Node | null;
-      if (!target) return;
-      if (moreMenuRef.current?.contains(target)) return;
-      setMoreMenuOpen(false);
-    };
-
-    document.addEventListener('mousedown', handleDocumentClick);
-    return () => {
-      document.removeEventListener('mousedown', handleDocumentClick);
-    };
-  }, [moreMenuOpen]);
 
   const visibleTasks = useMemo(() => {
     if (activeTab === 'now') {
@@ -236,47 +203,7 @@ export function NewTasksPage() {
           <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
             <SlidersHorizontal size={18} />
           </button>
-          <div className="relative" ref={moreMenuRef}>
-            <button
-              type="button"
-              aria-label="更多菜单"
-              onClick={() => setMoreMenuOpen((prev) => !prev)}
-              className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F5F0ED] text-[#1C1917] dark:bg-[#292524] dark:text-[#FAFAF9]"
-            >
-              <EllipsisVertical size={18} />
-            </button>
-
-            {moreMenuOpen ? (
-              <div
-                role="menu"
-                data-testid="tasks-more-menu"
-                className="absolute right-0 top-11 z-30 min-w-[160px] rounded-2xl border border-[#E7E5E4] bg-white p-1.5 shadow-[0_16px_34px_-20px_rgba(0,0,0,0.45)] dark:border-[#292524] dark:bg-[#1C1917]"
-              >
-                {commandPaletteActive ? (
-                  <button
-                    type="button"
-                    role="menuitem"
-                    data-testid="tasks-open-command-palette"
-                    onClick={() => {
-                      getCommandPaletteService().open();
-                      setMoreMenuOpen(false);
-                    }}
-                    className="w-full rounded-xl px-3 py-2 text-left text-sm text-[#1C1917] hover:bg-[#F5F0ED] dark:text-[#FAFAF9] dark:hover:bg-[#292524]"
-                  >
-                    命令面板
-                  </button>
-                ) : null}
-                <button
-                  type="button"
-                  role="menuitem"
-                  disabled
-                  className="w-full rounded-xl px-3 py-2 text-left text-sm text-[#A8A29E] dark:text-[#78716C]"
-                >
-                  待开发
-                </button>
-              </div>
-            ) : null}
-          </div>
+          <PageMoreMenu />
         </div>
       </header>
 

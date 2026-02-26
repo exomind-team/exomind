@@ -64,7 +64,7 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
     });
 
     fireEvent.click(screen.getByRole('button', { name: '更多菜单' }));
-    const entry = screen.getByTestId('tasks-open-command-palette');
+    const entry = screen.getByTestId('page-more-menu-open-command-palette');
     expect(entry).toBeInTheDocument();
 
     fireEvent.click(entry);
@@ -80,6 +80,6 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
     });
 
     fireEvent.click(screen.getByRole('button', { name: '更多菜单' }));
-    expect(screen.queryByTestId('tasks-open-command-palette')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('page-more-menu-open-command-palette')).not.toBeInTheDocument();
   });
 });
