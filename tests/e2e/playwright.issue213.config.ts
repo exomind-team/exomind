@@ -17,10 +17,10 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: 'list',
-  use: getBaseUse(BASE_URL, 'retain-on-failure'),
+  use: getBaseUse(BASE_URL),
   projects: [getChromiumProject()],
   webServer: {
-    command: 'npm run dev --silent',
+    command: 'node Scripts/test/runtime-dispatch.cjs vite-dev',
     cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: false,

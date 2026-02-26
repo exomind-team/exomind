@@ -1,9 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import {
-  getBaseUse,
-  getChromiumProject,
-  withPlaywrightEnv,
-} from './playwright.termux';
+import { getBaseUse, getChromiumProject } from './playwright.termux';
 
 const PORT = 1436;
 const BASE_URL = `http://localhost:${PORT}`;
@@ -14,14 +10,13 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: 'list',
-  use: getBaseUse(BASE_URL, 'retain-on-failure'),
+  use: getBaseUse(BASE_URL),
   projects: [getChromiumProject()],
   webServer: {
-    command: `npx tsc && npx vite build && npx vite preview --port ${PORT} --strictPort --host 0.0.0.0`,
+    command: `node Scripts/test/runtime-dispatch.cjs issue77-preview ${PORT}`,
     cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: true,
     timeout: 180000,
-    env: withPlaywrightEnv(process.env),
   },
 });
