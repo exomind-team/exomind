@@ -79,10 +79,6 @@ vi.mock('@/lib/debug/devtools-runtime', () => ({
   syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
 
-vi.mock('@/config/ui-mode', () => ({
-  setUIMode: vi.fn(),
-}));
-
 vi.mock('@/lib/media/timer-end-sounds', () => ({
   TIMER_END_SOUND_PRESETS: [],
   getTimerEndSoundPresetById: vi.fn(() => ({ label: 'Bell' })),
