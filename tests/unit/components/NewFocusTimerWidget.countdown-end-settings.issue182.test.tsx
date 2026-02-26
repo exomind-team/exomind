@@ -152,4 +152,5 @@ describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支�
     expect(markEndingMock).not.toHaveBeenCalled();
     expect(playMock).toHaveBeenCalledTimes(1);
   });
+
 });

@@ -1,5 +1,6 @@
 import {
   forwardRef,
+  type KeyboardEvent,
   useCallback,
   useEffect,
   useImperativeHandle,
@@ -58,7 +59,7 @@ function isPresetCountdownMinutes(minutes: number): boolean {
 export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(function NewFocusTimerWidget(_, ref) {
   const timeBlockServiceRef = useRef(getTimeBlockService());
   const frameRef = useRef<number | null>(null);
-  const taskInputRef = useRef<HTMLInputElement | null>(null);
+  const taskInputRef = useRef<HTMLTextAreaElement | null>(null);
   const customDurationInputRef = useRef<HTMLInputElement | null>(null);
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
@@ -243,7 +244,9 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
   }, [countdownMinutes, syncIdleElapsedFromMode, timerMode, uiState]);
 
   const handleStart = useCallback(async () => {
-    const name = taskNameDraft.trim();
+    const lines = taskNameDraft.split(/\r?\n/);
+    const name = (lines[0] ?? '').trim();
+    const description = lines.slice(1).join('\n').trim();
     if (!name) {
       focusTaskInput();
       return;
@@ -259,13 +262,23 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     hardEndTriggeredRef.current = false;
     setCountdownOvertimeMs(0);
 
-    const block = await timeBlockServiceRef.current.startBlock(name, config, undefined);
+    const block = await timeBlockServiceRef.current.startBlock(name, config, description || undefined);
     setTaskName(name);
     setTaskNameDraft(name);
     setElapsedMs(Math.max(0, block.elapsed));
     setRunningSubState('running');
     setUiState('running');
   }, [countdownMinutes, focusTaskInput, taskNameDraft, timerMode]);
+
+  const handleTaskInputKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key !== 'Enter') return;
+    if (!(event.ctrlKey || event.metaKey)) return;
+    if (event.altKey || event.shiftKey) return;
+
+    event.preventDefault();
+    void handleStart();
+  }, [handleStart]);
 
   const handleCollapseToIdle = useCallback(() => {
     if (uiState !== 'config') return;
@@ -327,6 +340,16 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
   }, [countdownMinutes, feedback, syncIdleElapsedFromMode, timerMode]);
 
+  const handleFeedbackKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key !== 'Enter') return;
+    if (!(event.ctrlKey || event.metaKey)) return;
+    if (event.altKey || event.shiftKey) return;
+
+    event.preventDefault();
+    void handleConfirmEnd();
+  }, [handleConfirmEnd]);
+
   useImperativeHandle(
     ref,
     () => ({
@@ -373,7 +396,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                   <Target size={20} />
                 </div>
                 <div className="min-w-0">
-                  <p className="truncate text-[16px] font-semibold leading-[1.4] text-[#1C1917] dark:text-[#FAFAF9]">点击设置专注任务</p>
+                  <p className="truncate text-[16px] font-semibold leading-[1.4] text-[#1C1917] dark:text-[#FAFAF9]">点击开启时间块</p>
                   <p className="truncate text-[12px] leading-[1.4] text-[#78716C]">配置时间块、开始倒计时</p>
                 </div>
               </div>
@@ -407,13 +430,15 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
                 >
                   <Target size={20} />
                 </button>
-                <Input
+                <Textarea
                   ref={taskInputRef}
                   data-testid="new-focus-task-input"
                   value={taskNameDraft}
                   onChange={(event) => setTaskNameDraft(event.target.value)}
-                  placeholder="输入任务名称..."
-                  className="h-9 border-[#E7E5E4]/80 dark:border-[#FFFFFF20] bg-white/60 dark:bg-[#FFFFFF10] text-sm dark:text-[#FAFAF9]"
+                  onKeyDown={handleTaskInputKeyDown}
+                  placeholder="输入时间块名称..."
+                  rows={1}
+                  className="max-h-24 border-[#E7E5E4]/80 dark:border-[#FFFFFF20] bg-white/60 dark:bg-[#FFFFFF10] text-sm dark:text-[#FAFAF9]"
                 />
               </div>
 
@@ -593,6 +618,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
             data-testid="new-focus-feedback-textarea"
             value={feedback}
             onChange={(event) => setFeedback(event.target.value)}
+            onKeyDown={handleFeedbackKeyDown}
             placeholder="记录本次专注的反馈..."
             className="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
           />
@@ -613,4 +639,3 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     </div>
   );
 });
-
