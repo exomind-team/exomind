@@ -30,6 +30,7 @@
 | [SPEC-502-PairingSystem.md](./specs/SPEC-502-PairingSystem.md) | 设备配对系统设计 |
 | [SPEC-503-EncryptedCommunication.md](./specs/SPEC-503-EncryptedCommunication.md) | 端到端加密通信设计 |
 | [TEMPLATE.md](./specs/TEMPLATE.md) | 规格文档模板 |
+| [playwright-e2e-setup.md](./development/playwright-e2e-setup.md) | E2E 初始化（PC 默认 + Termux 可选） |
 
 **ADR**：Architecture Decision Record，架构决策记录
 

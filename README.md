@@ -111,7 +111,10 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\dev\run-test-stack.ps1
 | `bun run tauri android dev` | Android 开发                      |
 | `bun run build`             | TypeScript + Vite 构建            |
 | `bun run test`              | Vitest 单测                       |
+| `bun run test:e2e:setup`    | 安装 Playwright Chromium（首次）  |
+| `bun run test:e2e:smoke`    | Playwright 烟测（issue82）        |
 | `bun run test:e2e`          | Playwright E2E                    |
+| `bun run test:e2e:termux`   | Termux 模式 E2E                   |
 | `bun run gh:comment -- ...` | GitHub Issue/PR 评论自动化        |
 
 ### PowerShell 自动化脚本
@@ -158,8 +161,17 @@ bun run test
 # 指定同步测试
 bun run test:sync
 
-# 端到端测试
+# E2E 首次初始化（全新 clone 后先执行一次）
+bun run test:e2e:setup
+
+# E2E 烟测（推荐先跑）
+bun run test:e2e:smoke
+
+# 端到端测试（PC 默认）
 bun run test:e2e
+
+# Termux 可选路径
+bun run test:e2e:termux
 
 # Issue 专用 E2E 配置示例
 bun run test:e2e:issue27
@@ -167,6 +179,8 @@ bun run test:e2e:issue77
 bun run test:e2e:issue82
 bun run test:e2e:issue120
 ```
+
+详细步骤见：`docs/development/playwright-e2e-setup.md`
 
 ## 构建与发布（Build & Release / 构建发布）
 

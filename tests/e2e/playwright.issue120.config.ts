@@ -1,4 +1,9 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig } from '@playwright/test';
+import {
+  getBaseUse,
+  getChromiumProject,
+  withPlaywrightEnv,
+} from './playwright.runtime';
 
 // Note: avoid Chrome "unsafe ports" (e.g. 1720).
 const WEB_PORT = 1530;
@@ -13,26 +18,15 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: 'list',
-  use: {
-    baseURL: BASE_URL,
-    trace: 'retain-on-failure',
-    launchOptions: {
-      channel: 'chrome',
-    },
-  },
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    },
-  ],
+  use: getBaseUse(BASE_URL, 'retain-on-failure'),
+  projects: [getChromiumProject()],
   webServer: {
     command: 'bun run dev',
     cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: false,
     timeout: 180000,
-    env: {
+    env: withPlaywrightEnv({
       ...process.env,
       EXOMIND_WEB_PORT: String(WEB_PORT),
       EXOMIND_HMR_PORT: String(HMR_PORT),
@@ -40,6 +34,6 @@ export default defineConfig({
       EXOMIND_ASR_PORT: String(ASR_PORT),
       VITE_SYNC_SERVER_URL: `http://localhost:${POUCHDB_PORT}`,
       VITE_ASR_SERVER_URL: `http://localhost:${ASR_PORT}`,
-    },
+    }),
   },
 });
