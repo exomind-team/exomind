@@ -43,6 +43,12 @@
     --border-subtle: 30 10% 91%;
     --brand-accent: 14 76% 66%;
     --brand-gradient: 14 76% 66%, 14 68% 53%, 14 64% 48%;
+    --sidebar: 24 33% 96%;
+    --sidebar-foreground: 20 10% 16%;
+    --sidebar-muted: 20 5% 45%;
+    --sidebar-border: 24 16% 88%;
+    --sidebar-accent: 24 33% 90%;
+    --sidebar-accent-foreground: 20 12% 14%;
 
     /* UserCard 渐变背景和阴影 */
     --user-card-bg: radial-gradient(circle at 15% 0%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, #E8866F 0%, #D4664A 50%, #C75B3A 100%);
@@ -88,6 +94,12 @@
     --border-subtle: 20 5% 12%;      /* #211F1E Stone-850 approx */
     --brand-accent: 14 56% 50%;      /* #C75B3A */
     --brand-gradient: 14 56% 50%, 14 60% 42%, 14 65% 35%;
+    --sidebar: 24 13% 10%;
+    --sidebar-foreground: 20 6% 90%;
+    --sidebar-muted: 24 5% 64%;
+    --sidebar-border: 12 6% 15%;
+    --sidebar-accent: 24 10% 18%;
+    --sidebar-accent-foreground: 60 9% 98%;
 
     /* UserCard 渐变背景和阴影 - 暗色 */
     --user-card-bg: radial-gradient(circle at 15% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 50%), linear-gradient(145deg, #8B3A25 0%, #6B2E1E 50%, #4A1F14 100%);

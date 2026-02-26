@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useParams } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig, UserRound } from 'lucide-react';
+import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, ScrollText, Timer, Brain } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 
@@ -81,38 +81,44 @@ function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
 }
 
-function NewLayout() {
-  const location = useLocation();
+type ShellNavItem = {
+  title: string;
+  path: string;
+  icon: React.ComponentType<{ size?: number }>;
+};
 
-  const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
-
-  useEffect(() => {
-    return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
-  }, []);
-
-  const navItems = [
-    { title: '当下', path: '/eventlog', icon: Target },
-    { title: '任务', path: '/tasks', icon: SquareCheckBig },
-    { title: 'Me', path: '/me', icon: UserRound },
-    ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
-    { title: '设置', path: '/settings', icon: Settings },
-  ];
-
+function MobileShell({
+  locationPath,
+  navItems,
+  desktopFrame = false,
+}: {
+  locationPath: string;
+  navItems: ShellNavItem[];
+  desktopFrame?: boolean;
+}) {
   return (
-    <div className="min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09] md:p-6">
-      <div className="relative mx-auto h-[100dvh] w-full max-w-[393px] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09] md:h-[852px] md:rounded-[40px] md:border md:border-[#E6DFD8] md:dark:border-[#292524] md:shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]">
+    <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', desktopFrame && 'p-6')}>
+      <div
+        className={cn(
+          'relative mx-auto h-[100dvh] w-full max-w-[393px] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]',
+          desktopFrame && 'h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
+        )}
+      >
         <main className="absolute inset-x-0 top-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto">
           <Outlet />
         </main>
 
-        <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur">
+        <nav
+          data-testid="mobile-bottom-tab"
+          className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur"
+        >
           <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
             {navItems.map((item) => {
               const Icon = item.icon;
-              const active = location.pathname === item.path
-                || (item.path === '/eventlog' && location.pathname === '/')
-                || (item.path === '/tasks' && location.pathname.startsWith('/tasks'))
-                || (item.path === '/me' && location.pathname.startsWith('/me'));
+              const active = locationPath === item.path
+                || (item.path === '/eventlog' && locationPath === '/')
+                || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
+                || (item.path === '/me' && locationPath.startsWith('/me'));
               return (
                 <Link
                   key={item.path}
@@ -131,6 +137,156 @@ function NewLayout() {
         </nav>
       </div>
     </div>
+  );
+}
+
+function DesktopSidebar({ activePath }: { activePath: string }) {
+  const desktopNavItems = [
+    { title: '总览', path: '/dashboard', icon: LayoutDashboard, available: false },
+    { title: '事件日志', path: '/eventlog', icon: ScrollText, available: false },
+    { title: '专注计时', path: '/focus', icon: Timer, available: false },
+    { title: '设置', path: '/settings', icon: Settings, available: true },
+  ];
+
+  return (
+    <aside
+      data-testid="desktop-sidebar"
+      className="flex h-full w-64 shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))]"
+    >
+      <div className="border-b border-[hsl(var(--sidebar-border))] p-3">
+        <div className="flex items-center gap-3 rounded-md px-2 py-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
+            <Brain size={16} />
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-semibold">ExoMind</p>
+            <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">外心</p>
+          </div>
+        </div>
+      </div>
+
+      <nav className="flex-1 space-y-1 p-2">
+        {desktopNavItems.map((item) => {
+          const Icon = item.icon;
+          const active = activePath === item.path;
+          const itemClassName = cn(
+            'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+            active
+              ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
+              : 'text-[hsl(var(--sidebar-foreground))]'
+          );
+
+          if (item.available) {
+            return (
+              <Link key={item.path} to={item.path} className={itemClassName}>
+                <Icon size={16} />
+                <span>{item.title}</span>
+              </Link>
+            );
+          }
+
+          return (
+            <button key={item.path} type="button" disabled className={`${itemClassName} cursor-not-allowed opacity-55`}>
+              <Icon size={16} />
+              <span>{item.title}</span>
+              <span className="ml-auto text-[10px] text-[hsl(var(--sidebar-muted))]">待实现</span>
+            </button>
+          );
+        })}
+      </nav>
+
+      <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
+        <div className="flex items-center gap-3 rounded-md px-2 py-2">
+          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--sidebar-accent))] text-xs font-semibold text-[hsl(var(--sidebar-accent-foreground))]">
+            S
+          </div>
+          <div className="min-w-0">
+            <p className="truncate text-sm font-medium">Starlin</p>
+            <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">starlin@exomind.ai</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function DesktopLayout({ activePath }: { activePath: string }) {
+  const settingsNavItems = [
+    '账号与档案',
+    '同步与备份',
+    '主题与外观',
+    '专注与提醒',
+    '隐私与安全',
+    '开发者选项',
+    '关于 ExoMind',
+  ];
+
+  return (
+    <div className="min-h-[100dvh] bg-[#ECE6E1] p-6 dark:bg-[#0C0A09]">
+      <div className="mx-auto flex h-[calc(100dvh-48px)] max-w-[1400px] overflow-hidden rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[#FAF7F5] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)] dark:bg-[#0C0A09]">
+        <DesktopSidebar activePath={activePath} />
+        <div className="flex min-w-0 flex-1 bg-[#FAF7F5] dark:bg-[#0C0A09]">
+          <aside
+            data-testid="desktop-settings-nav"
+            className="w-[220px] shrink-0 border-r border-[hsl(var(--sidebar-border))] bg-[#FFFFFF] p-3 dark:bg-[#1C1917]"
+          >
+            <div className="space-y-1">
+              {settingsNavItems.map((item, index) => (
+                <button
+                  key={item}
+                  type="button"
+                  className={cn(
+                    'flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors',
+                    index === 0
+                      ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
+                      : 'text-[#44403C] hover:bg-[#F5F0ED] dark:text-[#D6D3D1] dark:hover:bg-[#292524]'
+                  )}
+                >
+                  {item}
+                </button>
+              ))}
+            </div>
+          </aside>
+          <main className="min-w-0 flex-1 overflow-y-auto">
+            <Outlet />
+          </main>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function NewLayout() {
+  const location = useLocation();
+
+  const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
+
+  useEffect(() => {
+    return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
+  }, []);
+
+  const navItems = [
+    { title: '当下', path: '/eventlog', icon: Target },
+    { title: '任务', path: '/tasks', icon: SquareCheckBig },
+    { title: 'Me', path: '/me', icon: UserRound },
+    ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
+    { title: '设置', path: '/settings', icon: Settings },
+  ];
+  const isDesktopSettingsRoute = location.pathname === '/settings';
+
+  return (
+    <>
+      <div className="md:hidden">
+        <MobileShell locationPath={location.pathname} navItems={navItems} />
+      </div>
+      <div className="hidden md:block">
+        {isDesktopSettingsRoute ? (
+          <DesktopLayout activePath={location.pathname} />
+        ) : (
+          <MobileShell locationPath={location.pathname} navItems={navItems} desktopFrame />
+        )}
+      </div>
+    </>
   );
 }
 
