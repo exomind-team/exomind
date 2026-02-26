@@ -84,6 +84,60 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
   });
 
+  it('starts block via Ctrl+Enter on task input（任务输入框 Ctrl+Enter 快速开始）', async () => {
+    render(<NewFocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    const taskInput = screen.getByTestId('new-focus-task-input');
+    fireEvent.change(taskInput, {
+      target: { value: '快捷键开始任务' },
+    });
+
+    fireEvent.keyDown(taskInput, { key: 'Enter', code: 'Enter', ctrlKey: true });
+
+    await waitFor(() => {
+      expect(startBlockMock).toHaveBeenCalledWith(
+        '快捷键开始任务',
+        expect.objectContaining({ mode: 'countdown', minutes: 25 }),
+        undefined,
+      );
+    });
+
+    expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+  });
+
+  it('splits multiline task input into title + description on start（多行任务名拆分标题与描述）', async () => {
+    render(<NewFocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    const taskInput = screen.getByTestId('new-focus-task-input');
+    fireEvent.change(taskInput, {
+      target: { value: '专注主任务\n补充描述第一行\n补充描述第二行' },
+    });
+    fireEvent.keyDown(taskInput, { key: 'Enter', code: 'Enter', ctrlKey: true });
+
+    await waitFor(() => {
+      expect(startBlockMock).toHaveBeenCalledWith(
+        '专注主任务',
+        expect.objectContaining({ mode: 'countdown', minutes: 25 }),
+        '补充描述第一行\n补充描述第二行',
+      );
+    });
+  });
+
+  it('does not start block on plain Enter in task input（普通回车不触发开始）', () => {
+    render(<NewFocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    const taskInput = screen.getByTestId('new-focus-task-input');
+    fireEvent.change(taskInput, {
+      target: { value: '仅回车不开始' },
+    });
+    fireEvent.keyDown(taskInput, { key: 'Enter', code: 'Enter' });
+
+    expect(startBlockMock).not.toHaveBeenCalled();
+  });
+
   it('supports config -> idle collapse and keeps draft values（配置收起并保留草稿）', async () => {
     render(<NewFocusTimerWidget />);
 
@@ -226,5 +280,29 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     expect(runningCard).toContainElement(screen.getByTestId('new-focus-running-clock'));
     expect(runningCard).toContainElement(screen.getByTestId('new-focus-pause-resume-button'));
     expect(runningCard).toContainElement(screen.getByTestId('new-focus-end-button'));
+  });
+
+  it('confirms feedback end with Ctrl+Enter（反馈弹窗 Ctrl+Enter 确认结束）', async () => {
+    render(<NewFocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '反馈快捷键任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    const feedback = await screen.findByTestId('new-focus-feedback-textarea');
+    fireEvent.change(feedback, { target: { value: '记录反馈' } });
+    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter', ctrlKey: true });
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith('记录反馈');
+    });
+    await waitFor(() => expect(screen.queryByTestId('new-focus-feedback-textarea')).toBeNull());
   });
 });

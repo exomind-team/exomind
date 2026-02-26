@@ -69,12 +69,14 @@ vi.mock('@/config/devtools-mode', () => ({
   subscribeDevtoolsChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/lib/debug/devtools-runtime', () => ({
-  syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/config/command-palette-enabled', () => ({
+  getCommandPaletteEnabled: vi.fn(() => false),
+  setCommandPaletteEnabled: vi.fn(),
+  subscribeCommandPaletteEnabledChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/config/ui-mode', () => ({
-  setUIMode: vi.fn(),
+vi.mock('@/lib/debug/devtools-runtime', () => ({
+  syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/media/timer-end-sounds', () => ({
