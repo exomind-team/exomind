@@ -4,11 +4,11 @@ const UI_MODE_STORAGE_KEY = 'exomind:uiMode'; // uiMode（界面模式）存储�
 const UI_MODE_CHANGED_EVENT = 'exomind:ui-mode-changed'; // 自定义事件（custom event）
 
 function normalizeUIMode(rawValue: string | null | undefined): UIMode {
-  return rawValue === 'new' ? 'new' : 'old';
+  return rawValue === 'old' ? 'old' : 'new';
 }
 
 export function getUIMode(): UIMode {
-  if (typeof window === 'undefined') return 'old';
+  if (typeof window === 'undefined') return 'new';
   return normalizeUIMode(window.localStorage.getItem(UI_MODE_STORAGE_KEY));
 }
 
@@ -41,4 +41,3 @@ export function subscribeUIModeChanges(listener: (mode: UIMode) => void): () => 
     window.removeEventListener(UI_MODE_CHANGED_EVENT, handleCustomEvent);
   };
 }
-

@@ -6,18 +6,41 @@ import {
   type UIMode,
 } from '@/config/ui-mode';
 
+function createLocalStorageMock() {
+  const store = new Map<string, string>();
+  return {
+    getItem: vi.fn((key: string) => (store.has(key) ? store.get(key)! : null)),
+    setItem: vi.fn((key: string, value: string) => {
+      store.set(key, value);
+    }),
+    removeItem: vi.fn((key: string) => {
+      store.delete(key);
+    }),
+    clear: vi.fn(() => {
+      store.clear();
+    }),
+  };
+}
+
 describe('ui mode（界面模式）', () => {
+  const localStorageMock = createLocalStorageMock();
+
   beforeEach(() => {
-    window.localStorage.clear();
+    localStorageMock.clear();
+    vi.stubGlobal('localStorage', localStorageMock);
+    Object.defineProperty(window, 'localStorage', {
+      value: localStorageMock,
+      configurable: true,
+    });
   });
 
-  it('defaults to old when not set（未设置时默认旧版）', () => {
-    expect(getUIMode()).toBe('old');
+  it('defaults to new when not set（未设置时默认新版）', () => {
+    expect(getUIMode()).toBe('new');
   });
 
-  it('falls back to old for invalid value（非法值回退 old）', () => {
+  it('falls back to new for invalid value（非法值回退 new）', () => {
     window.localStorage.setItem('exomind:uiMode', 'broken');
-    expect(getUIMode()).toBe('old');
+    expect(getUIMode()).toBe('new');
   });
 
   it('persists ui mode and notifies listener（持久化并通知订阅者）', () => {
@@ -45,4 +68,3 @@ describe('ui mode（界面模式）', () => {
     expect(modes).toEqual(['old', 'new']);
   });
 });
-

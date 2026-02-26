@@ -1,8 +1,14 @@
-import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useParams } from '@tanstack/react-router';
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams } from '@tanstack/react-router';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Target, Settings, Bot, SquareCheckBig, UserRound } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
+import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
+import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
+import { getCommandRegistryService } from '@/lib/services/command-registry.service';
+import { getCommandPaletteService } from '@/lib/services/command-palette.service';
+import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
+import { CommandPalette } from '@/ui/new/components/CommandPalette';
 
 const NewFocusPage = lazy(async () => {
   const module = await import('@/ui/new/pages/NewFocusPage');
@@ -81,14 +87,80 @@ function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
 }
 
+function resolveRuntimePlatform(): 'web' | 'tauri' | 'unknown' {
+  if (typeof window === 'undefined') return 'unknown';
+  return '__TAURI_INTERNALS__' in window ? 'tauri' : 'web';
+}
+
 function NewLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
+  const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
+  const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
+  const commandPaletteActive = developerModeEnabled && commandPaletteEnabled;
+  const registryService = useMemo(() => getCommandRegistryService(), []);
+  const paletteService = useMemo(() => getCommandPaletteService(), []);
 
   useEffect(() => {
     return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
   }, []);
+
+  useEffect(() => {
+    return subscribeDeveloperModeChanges(setDeveloperModeEnabled);
+  }, []);
+
+  useEffect(() => {
+    return subscribeCommandPaletteEnabledChanges(setCommandPaletteEnabled);
+  }, []);
+
+  useEffect(() => {
+    const navigateTo = async (path: CoreNavigationPath) => {
+      await navigate({ to: path });
+    };
+
+    registryService.setCommands('core-navigation', createCoreNavigationCommands({
+      navigate: navigateTo,
+    }));
+
+    return () => {
+      registryService.removeScope('core-navigation');
+    };
+  }, [navigate, registryService]);
+
+  useEffect(() => {
+    if (!commandPaletteActive) {
+      paletteService.close();
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== 'k') return;
+
+      event.preventDefault();
+      paletteService.toggle();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [commandPaletteActive, paletteService]);
+
+  const commandContext = useMemo(() => ({
+    currentPath: location.pathname,
+    platform: resolveRuntimePlatform(),
+    developerModeEnabled,
+    commandPaletteEnabled: commandPaletteActive,
+    featureFlags: {
+      agentPageEnabled,
+      goalsV2Enabled: false,
+    },
+  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname]);
 
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
@@ -104,6 +176,10 @@ function NewLayout() {
         <main className="absolute inset-x-0 top-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto">
           <Outlet />
         </main>
+
+        {commandPaletteActive ? (
+          <CommandPalette context={commandContext} />
+        ) : null}
 
         <nav className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur">
           <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
