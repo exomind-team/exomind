@@ -1,6 +1,6 @@
 /**
  * NewSettingsPage - Developer Section 单元测试
- * GH#217: Developer Section 对齐设计稿 — 功能开关行 + 旧版页面行
+ * GH#217: Developer Section 对齐设计稿 — 开发者功能开关
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -44,10 +44,5 @@ describe('NewSettingsPage - Developer Section (developerMode=true)', () => {
     fireEvent.click(toggle);
     expect(vi.mocked(setDevtoolsEnabled)).toHaveBeenCalledWith(true);
     expect(vi.mocked(syncDevtoolsWithSettings)).toHaveBeenCalled();
-  });
-
-  it('renders old pages row', () => {
-    render(<NewSettingsPage />);
-    expect(screen.getByText('旧版页面')).toBeInTheDocument();
   });
 });
