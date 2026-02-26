@@ -46,16 +46,14 @@ export const getBaseUse = (
         executablePath: resolveChromiumPath(),
         args: TERMUX_CHROMIUM_ARGS,
       }
-    : {
-        channel: 'chrome' as const,
-      },
+    : undefined,
 });
 
 export const getChromiumProject = () => ({
   name: 'chromium',
   use: useSystemChromium
-    ? { ...devices['Desktop Chrome'] }
-    : { ...devices['Desktop Chrome'], channel: 'chrome' as const },
+    ? { ...devices['Desktop Chromium'] }
+    : { ...devices['Desktop Chromium'] },
 });
 
 export const withPlaywrightEnv = (env: EnvMap = process.env): EnvMap => {
