@@ -1,5 +1,7 @@
 import { expect, test, type Page } from '@playwright/test';
 
+const enableIssue27 = process.env.EXOMIND_E2E_ISSUE27 === '1';
+
 async function resetClientStorage(page: Page) {
   await page.addInitScript(() => {
     const localKeys = Object.keys(localStorage);
@@ -32,6 +34,8 @@ async function seedLoggedInUser(page: Page, username: string) {
 }
 
 test.describe('Issue #27: EventLog multi-device sync (MVP)', () => {
+  test.skip(!enableIssue27, 'Run with EXOMIND_E2E_ISSUE27=1 and issue27 config.');
+
   test('same user on two devices: A sends event, B receives eventlog update', async ({ browser }) => {
     const username = `issue27-user-${Date.now()}`;
     const message = `issue27-event-${Date.now()}`;
@@ -49,21 +53,23 @@ test.describe('Issue #27: EventLog multi-device sync (MVP)', () => {
     ]);
 
     await pageA.goto('/eventlog');
-    await expect(pageA.locator('[data-testid="event-input-textarea"]')).toBeVisible();
+    const inputA = pageA.getByPlaceholder(/记录当下的事实|输入内容记录事件/);
+    await expect(inputA).toBeVisible();
     await pageB.goto('/eventlog');
-    await expect(pageB.locator('[data-testid="event-input-textarea"]')).toBeVisible();
+    const inputB = pageB.getByPlaceholder(/记录当下的事实|输入内容记录事件/);
+    await expect(inputB).toBeVisible();
 
-    await pageA.locator('[data-testid="event-input-textarea"]').fill(message);
-    await pageA.locator('[data-testid="event-send-button"]').click();
-    await expect(pageA.locator('[data-testid="event-list"]')).toContainText(message);
+    await inputA.fill(message);
+    await inputA.press('Control+Enter');
+    await expect(pageA.getByText(message)).toBeVisible();
 
     await expect.poll(
-      async () => (await pageB.locator('[data-testid="event-list"]').textContent()) ?? '',
+      async () => await pageB.getByText(message).isVisible(),
       {
         timeout: 20000,
         intervals: [500, 1000, 1500, 2000],
       }
-    ).toContain(message);
+    ).toBe(true);
 
     await contextA.close();
     await contextB.close();
