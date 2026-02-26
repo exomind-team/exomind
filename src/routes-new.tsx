@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useParams } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, ScrollText, Timer, Brain } from 'lucide-react';
+import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, ScrollText, Timer, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 
@@ -84,7 +84,7 @@ function LazyPage({ children }: { children: React.ReactNode }) {
 type ShellNavItem = {
   title: string;
   path: string;
-  icon: React.ComponentType<{ size?: number }>;
+  icon: LucideIcon;
 };
 
 function MobileShell({
