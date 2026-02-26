@@ -79,7 +79,7 @@ describe('NewNowInputRow', () => {
       showWaveform: true,
       showTimer: false,
       showPermissionUnlockButton: false,
-      enableShortcut: false,
+      enableShortcut: true,
       size: 36,
       waveformColorVar: '--brand-accent',
     });
@@ -91,17 +91,40 @@ describe('NewNowInputRow', () => {
     expect(startVoiceSpy).toHaveBeenCalledTimes(1);
   });
 
-  it('starts voice recording when pressing Enter on empty textarea', () => {
+  it('starts voice recording when pressing Ctrl+Enter on empty textarea', () => {
     const onSend = vi.fn();
     render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
 
     const textarea = screen.getByTestId('new-now-input-textarea');
     (textarea as HTMLTextAreaElement).focus();
-    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
     expect(onSend).not.toHaveBeenCalled();
     expect(startVoiceSpy).toHaveBeenCalledTimes(1);
     expect(textarea).not.toHaveFocus();
+  });
+
+  it('submits text when pressing Ctrl+Enter', () => {
+    const onSend = vi.fn();
+    render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    fireEvent.change(textarea, { target: { value: 'Ctrl+Enter 发送' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
+
+    expect(onSend).toHaveBeenCalledWith('Ctrl+Enter 发送');
+  });
+
+  it('does not submit when pressing Enter without Ctrl', () => {
+    const onSend = vi.fn();
+    render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    fireEvent.change(textarea, { target: { value: '仅回车不发送' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(startVoiceSpy).not.toHaveBeenCalled();
   });
 
   it('inserts voice transcript into textarea', () => {
