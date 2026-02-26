@@ -9,6 +9,7 @@ import { getCommandRegistryService } from '@/lib/services/command-registry.servi
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
 import { CommandPalette } from '@/ui/new/components/CommandPalette';
+import { subscribeTimeBlockNotificationAction } from '@/lib/services/timeblock-notification-dispatcher';
 
 const NewFocusPage = lazy(async () => {
   const module = await import('@/ui/new/pages/NewFocusPage');
@@ -155,6 +156,14 @@ function NewLayout() {
       window.removeEventListener('keydown', handleKeyDown);
     };
   }, [commandPaletteActive, paletteService]);
+
+  useEffect(() => {
+    return subscribeTimeBlockNotificationAction((action) => {
+      if (action === 'start' || action === 'end' || action === 'open') {
+        void navigate({ to: '/eventlog' });
+      }
+    });
+  }, [navigate]);
 
   const commandContext = useMemo(() => ({
     currentPath: location.pathname,

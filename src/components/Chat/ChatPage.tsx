@@ -35,6 +35,11 @@ import {
   normalizeStorageEventsAscending,
   prependOlderEventsAscending,
 } from './chat-event-pagination';
+import {
+  consumePendingTimeBlockNotificationAction,
+  subscribeTimeBlockNotificationAction,
+} from '@/lib/services/timeblock-notification-dispatcher';
+import { applyTimeBlockNotificationActionToWidget } from '@/lib/services/timeblock-notification-ui-action';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
@@ -302,6 +307,26 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [variant]);
+
+  useEffect(() => {
+    const resolveTimerWidget = () => (
+      variant === 'new-mobile'
+        ? newFocusTimerWidgetRef.current
+        : timeBlockWidgetRef.current
+    );
+
+    const handleAction = (action: 'start' | 'pause' | 'resume' | 'end' | 'open') => {
+      void applyTimeBlockNotificationActionToWidget(action, resolveTimerWidget());
+    };
+
+    const unsubscribe = subscribeTimeBlockNotificationAction(handleAction);
+    const pendingAction = consumePendingTimeBlockNotificationAction();
+    if (pendingAction) {
+      handleAction(pendingAction);
+    }
+
+    return unsubscribe;
   }, [variant]);
 
   // 格式化时间

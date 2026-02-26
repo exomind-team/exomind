@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -45,6 +45,11 @@ import {
   setCommandPaletteEnabled,
   subscribeCommandPaletteEnabledChanges,
 } from '@/config/command-palette-enabled';
+import {
+  getTimeblockNotificationEnabled,
+  setTimeblockNotificationEnabled,
+  subscribeTimeblockNotificationEnabledChanges,
+} from '@/config/timeblock-notification-enabled';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import {
   TIMER_END_SOUND_PRESETS,
@@ -69,6 +74,7 @@ import {
   Moon,
   MoonStar,
   Sun,
+  Target,
   Timer,
   Upload,
   Wifi,
@@ -153,6 +159,9 @@ export function NewSettingsPage() {
   const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
   const [devtoolsEnabled, setDevtoolsEnabledState] = useState<boolean>(() => getDevtoolsEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabledState] = useState<boolean>(() => getCommandPaletteEnabled());
+  const [timeblockNotificationEnabled, setTimeblockNotificationEnabledState] = useState<boolean>(
+    () => getTimeblockNotificationEnabled()
+  );
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -169,6 +178,12 @@ export function NewSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [comingSoonVisible, setComingSoonVisible] = useState(false);
   const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const timeblockNotificationSupported = useMemo(() => {
+    if (typeof window === 'undefined') return false;
+    const isTauriRuntime = '__TAURI_INTERNALS__' in window;
+    const userAgent = window.navigator?.userAgent ?? '';
+    return isTauriRuntime && /android/i.test(userAgent);
+  }, []);
 
   const showComingSoon = () => {
     if (comingSoonTimer.current) clearTimeout(comingSoonTimer.current);
@@ -348,6 +363,11 @@ export function NewSettingsPage() {
     setCommandPaletteEnabledState(checked);
   };
 
+  const handleTimeblockNotificationToggle = (checked: boolean) => {
+    setTimeblockNotificationEnabled(checked);
+    setTimeblockNotificationEnabledState(checked);
+  };
+
   const navigate = useNavigate();
 
   const handleOpenVoiceInputSettings = () => {
@@ -410,6 +430,12 @@ export function NewSettingsPage() {
   useEffect(() => {
     return subscribeCommandPaletteEnabledChanges((enabled) => {
       setCommandPaletteEnabledState(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeTimeblockNotificationEnabledChanges((enabled) => {
+      setTimeblockNotificationEnabledState(enabled);
     });
   }, []);
 
@@ -887,6 +913,22 @@ export function NewSettingsPage() {
                   onCheckedChange={handleCommandPaletteToggle}
                 />
               </div>
+              {timeblockNotificationSupported && (
+                <div
+                  className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]"
+                  data-testid="feature-toggle-timeblock-notification-row"
+                >
+                  <div className="flex items-center gap-2">
+                    <Target className="h-[16px] w-[16px] text-[#78716C]" />
+                    <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">时间块通知快捷控制</span>
+                  </div>
+                  <Switch
+                    data-testid="feature-toggle-timeblock-notification-switch"
+                    checked={timeblockNotificationEnabled}
+                    onCheckedChange={handleTimeblockNotificationToggle}
+                  />
+                </div>
+              )}
             </div>
           </div>
         </DrawerContent>

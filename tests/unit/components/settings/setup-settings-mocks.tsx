@@ -75,6 +75,12 @@ vi.mock('@/config/command-palette-enabled', () => ({
   subscribeCommandPaletteEnabledChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/timeblock-notification-enabled', () => ({
+  getTimeblockNotificationEnabled: vi.fn(() => false),
+  setTimeblockNotificationEnabled: vi.fn(),
+  subscribeTimeblockNotificationEnabledChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/lib/debug/devtools-runtime', () => ({
   syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
