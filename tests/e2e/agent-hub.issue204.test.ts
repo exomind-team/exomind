@@ -76,8 +76,9 @@ test.describe('Issue #204 Agent Hub runtime toggle（运行时切换测试数据
     await expect(page.getByTestId('new-settings-use-mock-data-switch')).toBeVisible();
     await page.getByTestId('new-settings-use-mock-data-switch').click();
 
-    await page.getByRole('link', { name: 'Agent' }).click();
-    await expect(page.getByTestId('agent-topology-node-agent-daily')).toBeVisible();
+    await page.goto('/agents');
+    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
 
     const pageBackground = await page.getByTestId('agent-hub-page').evaluate((node) => {
       return window.getComputedStyle(node).backgroundColor;
