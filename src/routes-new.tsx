@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useState } from 'react';
 import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, ScrollText, Timer, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
+import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 
 const NewFocusPage = lazy(async () => {
   const module = await import('@/ui/new/pages/NewFocusPage');
@@ -239,14 +240,19 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
 }
 
 function DesktopLayout({ activePath }: { activePath: string }) {
-  const settingsNavItems = [
-    '账号与档案',
-    '同步与备份',
-    '主题与外观',
-    '专注与提醒',
-    '隐私与安全',
-    '开发者选项',
-    '关于 ExoMind',
+  const settingsNavSections = [
+    {
+      title: '连接与同步',
+      items: ['账号与档案', '同步与备份'],
+    },
+    {
+      title: '体验与偏好',
+      items: ['主题与外观', '专注与提醒'],
+    },
+    {
+      title: '安全与系统',
+      items: ['隐私与安全', '开发者选项', '关于 ExoMind'],
+    },
   ];
 
   return (
@@ -258,20 +264,39 @@ function DesktopLayout({ activePath }: { activePath: string }) {
             data-testid="desktop-settings-nav"
             className="w-[220px] shrink-0 border-r border-[hsl(var(--sidebar-border))] bg-[#FFFFFF] p-3 dark:bg-[#1C1917]"
           >
-            <div className="space-y-1">
-              {settingsNavItems.map((item, index) => (
-                <button
-                  key={item}
-                  type="button"
-                  className={cn(
-                    'flex w-full items-center rounded-md px-3 py-2 text-left text-sm transition-colors',
-                    index === 0
-                      ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
-                      : 'text-[#44403C] hover:bg-[#F5F0ED] dark:text-[#D6D3D1] dark:hover:bg-[#292524]'
-                  )}
-                >
-                  {item}
-                </button>
+            <div data-testid="desktop-settings-nav-vc" className="space-y-3">
+              {settingsNavSections.map((section, sectionIndex) => (
+                <section key={section.title} className="space-y-2">
+                  <p className="px-1 text-[11px] font-medium tracking-wide text-[#A8A29E]">
+                    {section.title}
+                  </p>
+                  <div
+                    data-testid="desktop-settings-nav-card"
+                    className="overflow-hidden rounded-xl border border-[#EFE7E1] bg-white shadow-[0_2px_6px_rgba(28,25,23,0.04)] dark:border-[#2A2623] dark:bg-[#1C1917]"
+                  >
+                    {section.items.map((item, itemIndex) => {
+                      const isActive = sectionIndex === 0 && itemIndex === 0;
+                      return (
+                        <div key={item}>
+                          <button
+                            type="button"
+                            className={cn(
+                              'flex w-full items-center rounded-none px-4 py-3 text-left text-sm transition-colors',
+                              isActive
+                                ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
+                                : 'text-[#44403C] hover:bg-[#F8F4F0] dark:text-[#D6D3D1] dark:hover:bg-[#292524]'
+                            )}
+                          >
+                            {item}
+                          </button>
+                          {itemIndex < section.items.length - 1 && (
+                            <div className="mx-3 h-px bg-[#F0ECE8] dark:bg-[#2D2926]" />
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+                </section>
               ))}
             </div>
           </aside>
@@ -289,9 +314,13 @@ function NewLayout() {
   const isDesktop = useIsDesktop();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
+  const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
 
   useEffect(() => {
     return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeDesktopAdaptiveChanges(setDesktopAdaptiveEnabledState);
   }, []);
 
   const navItems = [
@@ -303,7 +332,7 @@ function NewLayout() {
   ];
   const isDesktopSettingsRoute = location.pathname === '/settings';
 
-  if (isDesktop && isDesktopSettingsRoute) {
+  if (isDesktop && desktopAdaptiveEnabled && isDesktopSettingsRoute) {
     return <DesktopLayout activePath={location.pathname} />;
   }
 

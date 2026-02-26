@@ -3,6 +3,7 @@ import { expect, test, type Page } from '@playwright/test';
 async function setupIssue198Flags(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('exomind:uiMode', 'new');
+    localStorage.setItem('exomind:developerMode', 'true');
   });
 }
 
@@ -28,5 +29,21 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
     await expect(page.getByRole('link', { name: '设置' })).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar')).toBeHidden();
+  });
+
+  test('desktop adaptive switch can fallback to mobile shell（桌面适配开关可回退移动壳层）', async ({ page }) => {
+    await page.goto('/settings');
+    await page.waitForLoadState('networkidle');
+
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+
+    const featureTogglesRow = page.getByText('功能开关');
+    await featureTogglesRow.scrollIntoViewIfNeeded();
+    await featureTogglesRow.click();
+
+    await page.getByTestId('new-settings-desktop-adaptive-switch').click();
+
+    await expect(page.getByTestId('desktop-sidebar')).toBeHidden();
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
   });
 });
