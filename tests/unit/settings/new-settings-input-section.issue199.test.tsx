@@ -1,7 +1,8 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 
 describe('NewSettingsPage input section（输入分组语音配置）', () => {
   beforeEach(() => {
@@ -15,8 +16,20 @@ describe('NewSettingsPage input section（输入分组语音配置）', () => {
     render(<NewSettingsPage />);
 
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
+    expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
+  });
+
+  it('toggles voice transcript send mode from input section', () => {
+    const setModeMock = vi.mocked(setVoiceTranscriptSendMode);
+    render(<NewSettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-transcript-mode-direct-send'));
+    expect(setModeMock).toHaveBeenCalledWith('direct-send');
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-transcript-mode-insert'));
+    expect(setModeMock).toHaveBeenCalledWith('insert');
   });
 
   it('saves MOSS token from input settings dialog', () => {

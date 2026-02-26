@@ -15,6 +15,11 @@ import { getClipboardService } from '@/lib/services';
 import type { ClipboardFailureReason } from '@/lib/services';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
+import {
+  getVoiceTranscriptSendMode,
+  subscribeVoiceTranscriptSendModeChanges,
+  type VoiceTranscriptSendMode,
+} from '@/config/voice-transcript-send-mode';
 
 interface NewNowInputRowProps {
   onSend: (content: string) => void;
@@ -46,6 +51,9 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const [attachmentFeedback, setAttachmentFeedback] = useState<'idle' | 'pending'>('idle');
   const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
+  const [voiceTranscriptSendMode, setVoiceTranscriptSendMode] = useState<VoiceTranscriptSendMode>(
+    () => getVoiceTranscriptSendMode()
+  );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -77,6 +85,8 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
       attachmentFeedbackTimerRef.current = null;
     }
   }, []);
+
+  useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
 
   const submitInput = useCallback(() => {
     const trimmed = value.trim();
@@ -136,9 +146,16 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
   }, [insertClipboardText]);
 
   const handleVoiceResult = useCallback((text: string) => {
-    if (!text.trim()) return;
-    setValue((prev) => (prev.trim() ? `${prev} ${text}` : text));
-  }, []);
+    const normalized = text.trim();
+    if (!normalized) return;
+
+    if (voiceTranscriptSendMode === 'direct-send') {
+      onSend(normalized);
+      return;
+    }
+
+    setValue((prev) => (prev.trim() ? `${prev} ${normalized}` : normalized));
+  }, [onSend, voiceTranscriptSendMode]);
 
   const handleVoiceError = useCallback((error: string) => {
     console.error('[new-now-input][voice]', error);
