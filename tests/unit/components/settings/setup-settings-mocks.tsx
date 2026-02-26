@@ -75,6 +75,12 @@ vi.mock('@/config/command-palette-enabled', () => ({
   subscribeCommandPaletteEnabledChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/voice-transcript-send-mode', () => ({
+  getVoiceTranscriptSendMode: vi.fn(() => 'insert'),
+  setVoiceTranscriptSendMode: vi.fn(),
+  subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/lib/debug/devtools-runtime', () => ({
   syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
