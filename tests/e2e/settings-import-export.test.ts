@@ -8,7 +8,7 @@ test.describe('设置页导入导出', () => {
 
     await page.goto('/eventlog');
     await page.getByPlaceholder('输入内容记录事件...').fill(marker);
-    await page.getByPlaceholder('输入内容记录事件...').press('Enter');
+    await page.getByPlaceholder('输入内容记录事件...').press('Control+Enter');
     await expect(page.getByText(marker)).toBeVisible();
 
     await page.goto('/settings');
@@ -26,4 +26,3 @@ test.describe('设置页导入导出', () => {
     expect(contents).toContain(marker);
   });
 });
-

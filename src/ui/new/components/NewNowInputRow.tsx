@@ -149,14 +149,16 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
       textareaRef.current?.blur();
       return;
     }
-    if (event.key === 'Enter' && !event.shiftKey) {
-      event.preventDefault();
-      if (value.trim()) {
-        submitInput();
-      } else {
-        textareaRef.current?.blur();
-        voiceButtonRef.current?.start();
-      }
+    if (event.key !== 'Enter') return;
+    if (!(event.ctrlKey || event.metaKey)) return;
+    if (event.altKey || event.shiftKey) return;
+
+    event.preventDefault();
+    if (value.trim()) {
+      submitInput();
+    } else {
+      textareaRef.current?.blur();
+      voiceButtonRef.current?.start();
     }
   }, [submitInput, value]);
 
@@ -207,7 +209,7 @@ export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRow
             showWaveform={true}
             showTimer={false}
             showPermissionUnlockButton={false}
-            enableShortcut={false}
+            enableShortcut={true}
             size={36}
             waveformColorVar="--brand-accent"
             buttonClassName="shrink-0"

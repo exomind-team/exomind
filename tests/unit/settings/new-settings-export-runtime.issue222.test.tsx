@@ -66,10 +66,6 @@ vi.mock('@/config/timer-preferences', () => ({
   }),
 }));
 
-vi.mock('@/config/ui-mode', () => ({
-  setUIMode: vi.fn(),
-}));
-
 vi.mock('@/ui/new/components/UserCard', () => ({
   UserCard: () => <div data-testid="mock-user-card" />,
 }));

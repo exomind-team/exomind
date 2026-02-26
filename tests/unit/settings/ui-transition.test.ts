@@ -1,18 +1,25 @@
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import fs from 'node:fs';
 
-describe('UI transition entry（旧 UI 仅保留切新入口）', () => {
-  const legacySettingsSource = readFileSync(path.resolve('src/components/Settings/SettingsPage.tsx'), 'utf-8');
+describe('UI transition retired（旧 UI 切换已下线）', () => {
+  const appSource = readFileSync(path.resolve('src/App.tsx'), 'utf-8');
   const newSettingsSource = readFileSync(path.resolve('src/ui/new/pages/NewSettingsPage.tsx'), 'utf-8');
 
-  it('legacy settings keeps switch-to-new action（旧设置页保留切新入口）', () => {
-    expect(legacySettingsSource).toContain('切换到新 UI');
-    expect(legacySettingsSource).toContain("setUIMode('new')");
+  it('app uses new router only（入口只使用新路由）', () => {
+    expect(appSource).toContain('newUiRouter');
+    expect(appSource).not.toContain('router } from "@/routes"');
+    expect(appSource).not.toContain('getUIMode');
   });
 
-  it('new settings no longer exposes switch-back action（新设置页不再提供回旧入口）', () => {
-    expect(newSettingsSource).not.toContain('label="旧版页面"');
-    expect(newSettingsSource).not.toContain("setUIMode('old')");
+  it('legacy settings and ui-mode files are removed（旧设置页和模式开关文件已删除）', () => {
+    expect(fs.existsSync(path.resolve('src/components/Settings/SettingsPage.tsx'))).toBe(false);
+    expect(fs.existsSync(path.resolve('src/config/ui-mode.ts'))).toBe(false);
+  });
+
+  it('new settings has no mode switch action（新设置页不含模式切换）', () => {
+    expect(newSettingsSource).not.toContain('旧版页面');
+    expect(newSettingsSource).not.toContain('setUIMode');
   });
 });

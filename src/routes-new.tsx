@@ -40,6 +40,11 @@ const UserManagePage = lazy(async () => {
   return { default: module.UserManagePage };
 });
 
+const SyncTestPage = lazy(async () => {
+  const module = await import('@/ui/pages/SyncTestPage');
+  return { default: module.SyncTestPage };
+});
+
 const MOSSASRTestPage = lazy(async () => {
   const module = await import('@/pages/MOSSASRTestPage');
   return { default: module.MOSSASRTestPage };
@@ -310,6 +315,18 @@ const newMossTestRoute = createRoute({
   },
 });
 
+const newSyncTestRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/sync-test',
+  component: function NewSyncTest() {
+    return (
+      <LazyPage>
+        <SyncTestPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newAgentsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents',
@@ -394,6 +411,7 @@ const newRouteTree = newRootRoute.addChildren([
   newSettingsRoute,
   newUserManageRoute,
   newMossTestRoute,
+  newSyncTestRoute,
   newAgentsRoute,
   newUpdateRoute,
   newAgentDetailRoute,

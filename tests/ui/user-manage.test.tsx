@@ -52,7 +52,7 @@ describe('UserManagePage 依赖检查', () => {
 });
 
 describe('UserManagePage 路由注册', () => {
-  const routesPath = path.resolve('src/routes.tsx');
+  const routesPath = path.resolve('src/routes-new.tsx');
   const routesContent = fs.readFileSync(routesPath, 'utf-8');
 
   it('应该导入 UserManagePage', () => {
@@ -60,7 +60,7 @@ describe('UserManagePage 路由注册', () => {
   });
 
   it('应该定义 /user-manage 路由', () => {
-    expect(routesContent).toContain("path: 'user-manage'");
+    expect(routesContent).toContain("path: '/user-manage'");
   });
 
   it('路由应该使用 UserManagePage 组件', () => {

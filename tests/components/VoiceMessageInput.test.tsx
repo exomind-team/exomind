@@ -83,26 +83,30 @@ describe('VoiceMessageInput 核心逻辑', () => {
 
   describe('键盘事件逻辑', () => {
     // 模拟键盘事件处理逻辑
-    const handleKeyDown = (key: string, shiftKey: boolean): boolean => {
-      if (key === 'Enter' && !shiftKey) {
+    const handleKeyDown = (key: string, ctrlKey: boolean, metaKey: boolean, shiftKey: boolean): boolean => {
+      if (key === 'Enter' && (ctrlKey || metaKey) && !shiftKey) {
         return true; // 发送
       }
       return false; // 不发送
     };
 
-    it('Enter 键应该触发发送', () => {
-      expect(handleKeyDown('Enter', false)).toBe(true);
+    it('Ctrl+Enter 键应该触发发送', () => {
+      expect(handleKeyDown('Enter', true, false, false)).toBe(true);
     });
 
-    it('Enter + Shift 不应该触发发送', () => {
-      expect(handleKeyDown('Enter', true)).toBe(false);
+    it('Meta+Enter 键应该触发发送', () => {
+      expect(handleKeyDown('Enter', false, true, false)).toBe(true);
+    });
+
+    it('Enter 或 Shift+Ctrl+Enter 不应该触发发送', () => {
+      expect(handleKeyDown('Enter', false, false, false)).toBe(false);
+      expect(handleKeyDown('Enter', true, false, true)).toBe(false);
     });
 
     it('其他键不应该触发发送', () => {
-      expect(handleKeyDown('Escape', false)).toBe(false);
-      expect(handleKeyDown('Tab', false)).toBe(false);
-      expect(handleKeyDown('a', false)).toBe(false);
-      expect(handleKeyDown('A', true)).toBe(false);
+      expect(handleKeyDown('Escape', false, false, false)).toBe(false);
+      expect(handleKeyDown('Tab', false, false, false)).toBe(false);
+      expect(handleKeyDown('a', false, false, false)).toBe(false);
     });
   });
 
