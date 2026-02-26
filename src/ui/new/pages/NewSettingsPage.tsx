@@ -25,6 +25,10 @@ import {
   setAgentPageEnabled,
 } from '@/config/agent-page-enabled';
 import {
+  getDesktopAdaptiveEnabled,
+  setDesktopAdaptiveEnabled,
+} from '@/config/desktop-adaptive';
+import {
   getTimerPreferences,
   subscribeTimerPreferencesChanges,
   updateTimerPreferences,
@@ -145,6 +149,9 @@ export function NewSettingsPage() {
   const [developerMode, setDeveloperMode] = useState<boolean>(() => getDeveloperModeEnabled());
   const [agentPageEnabled, setAgentPageEnabledState] = useState<boolean>(
     () => getAgentPageEnabled()
+  );
+  const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState<boolean>(
+    () => getDesktopAdaptiveEnabled()
   );
   const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
   const [devtoolsEnabled, setDevtoolsEnabledState] = useState<boolean>(() => getDevtoolsEnabled());
@@ -323,6 +330,11 @@ export function NewSettingsPage() {
   const handleAgentPageEnabledToggle = (checked: boolean) => {
     setAgentPageEnabled(checked);
     setAgentPageEnabledState(checked);
+  };
+
+  const handleDesktopAdaptiveToggle = (checked: boolean) => {
+    setDesktopAdaptiveEnabled(checked);
+    setDesktopAdaptiveEnabledState(checked);
   };
 
   const handleUseMockDataToggle = (checked: boolean) => {
@@ -857,6 +869,14 @@ export function NewSettingsPage() {
             </DrawerTitle>
             <p className="mt-1 text-center text-xs text-[#A8A29E]">启用或关闭实验性功能</p>
             <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
+                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">桌面端适配</span>
+                <Switch
+                  data-testid="new-settings-desktop-adaptive-switch"
+                  checked={desktopAdaptiveEnabled}
+                  onCheckedChange={handleDesktopAdaptiveToggle}
+                />
+              </div>
               <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
                 <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
                 <Switch
