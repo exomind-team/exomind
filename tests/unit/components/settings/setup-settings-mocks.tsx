@@ -69,6 +69,12 @@ vi.mock('@/config/devtools-mode', () => ({
   subscribeDevtoolsChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/command-palette-enabled', () => ({
+  getCommandPaletteEnabled: vi.fn(() => false),
+  setCommandPaletteEnabled: vi.fn(),
+  subscribeCommandPaletteEnabledChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/lib/debug/devtools-runtime', () => ({
   syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
