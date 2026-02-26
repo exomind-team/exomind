@@ -1,9 +1,5 @@
 import { defineConfig } from '@playwright/test';
-import {
-  getBaseUse,
-  getChromiumProject,
-  withPlaywrightEnv,
-} from './tests/e2e/playwright.termux';
+import { getBaseUse, getChromiumProject } from './tests/e2e/playwright.termux';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -15,9 +11,8 @@ export default defineConfig({
   use: getBaseUse('http://localhost:1420', 'on-first-retry'),
   projects: [getChromiumProject()],
   webServer: {
-    command: 'npm run dev --silent',
+    command: 'node Scripts/test/runtime-dispatch.cjs vite-dev',
     url: 'http://localhost:1420',
     reuseExistingServer: !process.env.CI,
-    env: withPlaywrightEnv(process.env),
   },
 });

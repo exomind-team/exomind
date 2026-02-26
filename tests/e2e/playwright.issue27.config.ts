@@ -18,11 +18,11 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: 'list',
-  use: getBaseUse(BASE_URL, 'retain-on-failure'),
+  use: getBaseUse(BASE_URL),
   projects: [getChromiumProject()],
   webServer: [
     {
-      command: 'bun run start',
+      command: 'node ../Scripts/test/runtime-dispatch.cjs server-start',
       cwd: '../../server',
       url: `${SYNC_SERVER_URL}/_all_dbs`,
       reuseExistingServer: false,
@@ -34,7 +34,7 @@ export default defineConfig({
       }),
     },
     {
-      command: 'npm run dev --silent',
+      command: 'node Scripts/test/runtime-dispatch.cjs vite-dev',
       cwd: '../..',
       url: BASE_URL,
       reuseExistingServer: false,
