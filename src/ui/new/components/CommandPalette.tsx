@@ -15,6 +15,7 @@ export function CommandPalette({ context }: CommandPaletteProps) {
   const [paletteState, setPaletteState] = useState(() => paletteService.getState());
   const [errorMessage, setErrorMessage] = useState('');
   const inputRef = useRef<HTMLInputElement | null>(null);
+  const listRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     return paletteService.subscribe(setPaletteState);
@@ -49,6 +50,18 @@ export function CommandPalette({ context }: CommandPaletteProps) {
       paletteService.setHighlightedIndex(0);
     }
   }, [commands.length, paletteService, paletteState.highlightedIndex, paletteState.open]);
+
+  useEffect(() => {
+    if (!paletteState.open || paletteState.highlightedIndex < 0 || commands.length === 0) {
+      return;
+    }
+
+    const activeItem = listRef.current?.querySelector<HTMLElement>('[data-active="true"]');
+    activeItem?.scrollIntoView({
+      block: 'nearest',
+      inline: 'nearest',
+    });
+  }, [commands, paletteState.highlightedIndex, paletteState.open]);
 
   const highlighted = paletteState.highlightedIndex >= 0
     ? commands[paletteState.highlightedIndex] ?? null
@@ -139,7 +152,11 @@ export function CommandPalette({ context }: CommandPaletteProps) {
           </label>
         </div>
 
-        <div className="max-h-[320px] overflow-y-auto p-2" data-testid="command-palette-list">
+        <div
+          ref={listRef}
+          className="max-h-[320px] overflow-y-auto p-2"
+          data-testid="command-palette-list"
+        >
           {commands.length === 0 ? (
             <div className="rounded-xl border border-dashed border-[#D6D3D1] px-3 py-4 text-center text-xs text-[#A8A29E] dark:border-[#3A3432] dark:text-[#B8B1AC]">
               未找到匹配命令
@@ -153,6 +170,7 @@ export function CommandPalette({ context }: CommandPaletteProps) {
                   <li key={command.id}>
                     <button
                       type="button"
+                      data-active={active ? 'true' : undefined}
                       data-testid={`command-palette-item-${command.id}`}
                       disabled={!command.available}
                       onClick={() => {
