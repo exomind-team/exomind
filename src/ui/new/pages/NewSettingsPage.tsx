@@ -45,6 +45,12 @@ import {
   setCommandPaletteEnabled,
   subscribeCommandPaletteEnabledChanges,
 } from '@/config/command-palette-enabled';
+import {
+  getVoiceTranscriptSendMode,
+  setVoiceTranscriptSendMode,
+  subscribeVoiceTranscriptSendModeChanges,
+  type VoiceTranscriptSendMode,
+} from '@/config/voice-transcript-send-mode';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import {
   TIMER_END_SOUND_PRESETS,
@@ -66,6 +72,7 @@ import {
   Command,
   Download,
   Monitor,
+  Mic,
   Moon,
   MoonStar,
   Sun,
@@ -153,6 +160,9 @@ export function NewSettingsPage() {
   const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
   const [devtoolsEnabled, setDevtoolsEnabledState] = useState<boolean>(() => getDevtoolsEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabledState] = useState<boolean>(() => getCommandPaletteEnabled());
+  const [voiceTranscriptSendMode, setVoiceTranscriptSendModeState] = useState<VoiceTranscriptSendMode>(
+    () => getVoiceTranscriptSendMode()
+  );
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -348,6 +358,11 @@ export function NewSettingsPage() {
     setCommandPaletteEnabledState(checked);
   };
 
+  const handleVoiceTranscriptSendModeChange = (mode: VoiceTranscriptSendMode) => {
+    setVoiceTranscriptSendMode(mode);
+    setVoiceTranscriptSendModeState(mode);
+  };
+
   const navigate = useNavigate();
 
   const handleOpenVoiceInputSettings = () => {
@@ -410,6 +425,12 @@ export function NewSettingsPage() {
   useEffect(() => {
     return subscribeCommandPaletteEnabledChanges((enabled) => {
       setCommandPaletteEnabledState(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeVoiceTranscriptSendModeChanges((mode) => {
+      setVoiceTranscriptSendModeState(mode);
     });
   }, []);
 
@@ -575,6 +596,52 @@ export function NewSettingsPage() {
         <section className="space-y-2" data-testid="new-settings-input-section">
           <SectionTitle>输入</SectionTitle>
           <SectionCard>
+            <div data-testid="new-settings-voice-transcript-mode-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="语音转写后"
+                right={(
+                  <div
+                    role="group"
+                    aria-label="语音转写后行为"
+                    className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                  >
+                    <button
+                      type="button"
+                      data-testid="new-settings-voice-transcript-mode-insert"
+                      aria-pressed={voiceTranscriptSendMode === 'insert'}
+                      onClick={() => handleVoiceTranscriptSendModeChange('insert')}
+                      disabled={loading}
+                      className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        voiceTranscriptSendMode === 'insert'
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      插入输入框
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="new-settings-voice-transcript-mode-direct-send"
+                      aria-pressed={voiceTranscriptSendMode === 'direct-send'}
+                      onClick={() => handleVoiceTranscriptSendModeChange('direct-send')}
+                      disabled={loading}
+                      className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        voiceTranscriptSendMode === 'direct-send'
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      直接发送
+                    </button>
+                  </div>
+                )}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">仅作用于「当下」页面输入框，默认插入输入框</span>
+            </div>
+            <Divider />
             <div data-testid="new-settings-voice-token-row">
               <SettingRow
                 icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
