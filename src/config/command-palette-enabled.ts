@@ -1,5 +1,5 @@
-const DEVELOPER_MODE_STORAGE_KEY = 'exomind:developerMode'; // developer mode（开发者模式）存储键
-const DEVELOPER_MODE_CHANGED_EVENT = 'exomind:developer-mode-changed'; // 自定义事件（custom event）
+const COMMAND_PALETTE_ENABLED_STORAGE_KEY = 'exomind:commandPaletteEnabled';
+const COMMAND_PALETTE_ENABLED_CHANGED_EVENT = 'exomind:command-palette-enabled-changed';
 
 function normalizeBoolean(rawValue: string | null | undefined): boolean {
   return rawValue === 'true';
@@ -16,26 +16,26 @@ function getStorage():
   return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
 }
 
-export function getDeveloperModeEnabled(): boolean {
+export function getCommandPaletteEnabled(): boolean {
   const storage = getStorage();
   if (!storage) return false;
-  return normalizeBoolean(storage.getItem(DEVELOPER_MODE_STORAGE_KEY));
+  return normalizeBoolean(storage.getItem(COMMAND_PALETTE_ENABLED_STORAGE_KEY));
 }
 
-export function setDeveloperModeEnabled(enabled: boolean): void {
+export function setCommandPaletteEnabled(enabled: boolean): void {
   const storage = getStorage();
   if (!storage) return;
-  storage.setItem(DEVELOPER_MODE_STORAGE_KEY, String(enabled));
-  window.dispatchEvent(new CustomEvent<boolean>(DEVELOPER_MODE_CHANGED_EVENT, { detail: enabled }));
+  storage.setItem(COMMAND_PALETTE_ENABLED_STORAGE_KEY, String(enabled));
+  window.dispatchEvent(new CustomEvent<boolean>(COMMAND_PALETTE_ENABLED_CHANGED_EVENT, { detail: enabled }));
 }
 
-export function subscribeDeveloperModeChanges(listener: (enabled: boolean) => void): () => void {
+export function subscribeCommandPaletteEnabledChanges(listener: (enabled: boolean) => void): () => void {
   if (typeof window === 'undefined') {
     return () => {};
   }
 
   const handleStorage = (event: StorageEvent) => {
-    if (event.key !== DEVELOPER_MODE_STORAGE_KEY) return;
+    if (event.key !== COMMAND_PALETTE_ENABLED_STORAGE_KEY) return;
     listener(normalizeBoolean(event.newValue));
   };
 
@@ -45,10 +45,10 @@ export function subscribeDeveloperModeChanges(listener: (enabled: boolean) => vo
   };
 
   window.addEventListener('storage', handleStorage);
-  window.addEventListener(DEVELOPER_MODE_CHANGED_EVENT, handleCustomEvent);
+  window.addEventListener(COMMAND_PALETTE_ENABLED_CHANGED_EVENT, handleCustomEvent);
 
   return () => {
     window.removeEventListener('storage', handleStorage);
-    window.removeEventListener(DEVELOPER_MODE_CHANGED_EVENT, handleCustomEvent);
+    window.removeEventListener(COMMAND_PALETTE_ENABLED_CHANGED_EVENT, handleCustomEvent);
   };
 }

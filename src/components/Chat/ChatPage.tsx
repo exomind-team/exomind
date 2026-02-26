@@ -20,6 +20,7 @@ import { NewFocusTimerWidget, type NewFocusTimerWidgetHandle } from '@/ui/new/co
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import { MessageActions } from '@/components/Chat/MessageActions';
 import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
+import { PageMoreMenu } from '@/ui/new/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
@@ -392,7 +393,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   const rootClassName =
     variant === 'new-mobile'
-      ? 'flex h-full min-h-0 flex-col bg-surface'
+      ? 'relative flex h-full min-h-0 flex-col bg-surface'
       : 'flex flex-col h-full max-h-[100dvh] lg:max-h-screen';
 
   const listClassName =
@@ -402,6 +403,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   return (
     <div className={rootClassName}>
+      {variant === 'new-mobile' ? (
+        <div className="pointer-events-none absolute right-4 top-3 z-20">
+          <div className="pointer-events-auto">
+            <PageMoreMenu />
+          </div>
+        </div>
+      ) : null}
+
       {/* 头部 */}
       {!hideHeader && (
         <div className="flex flex-col sm:flex-row sm:items-center justify-between px-4 sm:px-6 py-3 sm:py-4 border-b gap-2 shrink-0">

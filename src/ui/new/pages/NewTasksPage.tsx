@@ -1,7 +1,9 @@
-import { EllipsisVertical, Github, Plus, SlidersHorizontal } from 'lucide-react';
+import { Github, Plus, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getTaskService } from '@/lib/services';
 import type { TaskGoalCard, TaskGoalGroup, TaskGoalStatusTone, TaskItem } from '@/lib/types/task';
+import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
+import { PageMoreMenu } from '@/ui/new/components/PageMoreMenu';
 
 type TaskTab = 'now' | 'today' | 'week' | 'month' | 'goals';
 
@@ -128,8 +130,26 @@ function GoalGroupSection({ group }: { group: TaskGoalGroup }) {
   );
 }
 
+function resolveInitialTaskTab(): TaskTab {
+  const preferredTab = consumeTasksDefaultTab();
+  if (preferredTab) {
+    return preferredTab;
+  }
+
+  if (typeof window === 'undefined') {
+    return 'now';
+  }
+
+  const urlTab = new URLSearchParams(window.location.search).get('tab');
+  if (urlTab && TAB_ITEMS.some((tab) => tab.id === urlTab)) {
+    return urlTab as TaskTab;
+  }
+
+  return 'now';
+}
+
 export function NewTasksPage() {
-  const [activeTab, setActiveTab] = useState<TaskTab>('now');
+  const [activeTab, setActiveTab] = useState<TaskTab>(() => resolveInitialTaskTab());
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [goalGroups, setGoalGroups] = useState<TaskGoalGroup[]>([]);
   const [quickInput, setQuickInput] = useState('');
@@ -183,9 +203,7 @@ export function NewTasksPage() {
           <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
             <SlidersHorizontal size={18} />
           </button>
-          <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F5F0ED] text-[#1C1917] dark:bg-[#292524] dark:text-[#FAFAF9]">
-            <EllipsisVertical size={18} />
-          </button>
+          <PageMoreMenu />
         </div>
       </header>
 
@@ -265,4 +283,3 @@ export function NewTasksPage() {
     </div>
   );
 }
-
