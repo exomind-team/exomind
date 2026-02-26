@@ -48,7 +48,7 @@ describe('SyncTestPage 依赖检查', () => {
 });
 
 describe('SyncTestPage 路由注册', () => {
-  const routesPath = path.resolve('src/routes.tsx');
+  const routesPath = path.resolve('src/routes-new.tsx');
   const routesContent = fs.readFileSync(routesPath, 'utf-8');
 
   it('不应该在侧边栏显示同步测试入口', () => {
@@ -56,7 +56,7 @@ describe('SyncTestPage 路由注册', () => {
   });
 
   it('应该注册 /sync-test 路由（兼容旧入口）', () => {
-    expect(routesContent).toContain("path: 'sync-test'");
+    expect(routesContent).toContain("path: '/sync-test'");
   });
 });
 

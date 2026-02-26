@@ -14,12 +14,12 @@ test.describe('事件日志输入框 - 多行与滚动', () => {
     expect(height).toBeGreaterThanOrEqual(48);
   });
 
-  test('Enter 应发送消息并显示在事件列表', async ({ page }) => {
+  test('Ctrl+Enter 应发送消息并显示在事件列表', async ({ page }) => {
     const textarea = page.locator('[data-testid="event-input-textarea"]');
     const content = `e2e-${Date.now()}`;
 
     await textarea.fill(content);
-    await textarea.press('Enter');
+    await textarea.press('Control+Enter');
 
     await expect(page.locator('[data-testid="event-list"]')).toContainText(content);
   });
@@ -55,4 +55,3 @@ test.describe('事件日志输入框 - 多行与滚动', () => {
     expect(metrics.overflowY).toBe('auto');
   });
 });
-
