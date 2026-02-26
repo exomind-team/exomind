@@ -40,6 +40,11 @@ import {
   setDevtoolsEnabled,
   subscribeDevtoolsChanges,
 } from '@/config/devtools-mode';
+import {
+  getCommandPaletteEnabled,
+  setCommandPaletteEnabled,
+  subscribeCommandPaletteEnabledChanges,
+} from '@/config/command-palette-enabled';
 import { setUIMode } from '@/config/ui-mode';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import {
@@ -148,6 +153,7 @@ export function NewSettingsPage() {
   );
   const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
   const [devtoolsEnabled, setDevtoolsEnabledState] = useState<boolean>(() => getDevtoolsEnabled());
+  const [commandPaletteEnabled, setCommandPaletteEnabledState] = useState<boolean>(() => getCommandPaletteEnabled());
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -338,6 +344,11 @@ export function NewSettingsPage() {
     void syncDevtoolsWithSettings();
   };
 
+  const handleCommandPaletteToggle = (checked: boolean) => {
+    setCommandPaletteEnabled(checked);
+    setCommandPaletteEnabledState(checked);
+  };
+
   const navigate = useNavigate();
 
   const handleSwitchToOldUI = () => {
@@ -398,6 +409,12 @@ export function NewSettingsPage() {
   useEffect(() => {
     return subscribeDevtoolsChanges((enabled) => {
       setDevtoolsEnabledState(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeCommandPaletteEnabledChanges((enabled) => {
+      setCommandPaletteEnabledState(enabled);
     });
   }, []);
 
@@ -691,6 +708,18 @@ export function NewSettingsPage() {
                   label="功能开关"
                   onClick={() => setFeatureTogglesDialogOpen(true)}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="命令面板（测试）"
+                  right={
+                    <Switch
+                      data-testid="new-settings-command-palette-switch"
+                      checked={commandPaletteEnabled}
+                      onCheckedChange={handleCommandPaletteToggle}
+                    />
+                  }
                 />
                 <Divider />
                 <SettingRow
