@@ -81,6 +81,34 @@ function LazyPage({ children }: { children: React.ReactNode }) {
   return <Suspense fallback={<PageFallback />}>{children}</Suspense>;
 }
 
+function useIsDesktop(minWidth = 768): boolean {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+    return window.matchMedia(`(min-width: ${minWidth}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQueryList = window.matchMedia(`(min-width: ${minWidth}px)`);
+    const onChange = (event: MediaQueryListEvent) => {
+      setIsDesktop(event.matches);
+    };
+
+    setIsDesktop(mediaQueryList.matches);
+    mediaQueryList.addEventListener('change', onChange);
+    return () => {
+      mediaQueryList.removeEventListener('change', onChange);
+    };
+  }, [minWidth]);
+
+  return isDesktop;
+}
+
 type ShellNavItem = {
   title: string;
   path: string;
@@ -258,6 +286,7 @@ function DesktopLayout({ activePath }: { activePath: string }) {
 
 function NewLayout() {
   const location = useLocation();
+  const isDesktop = useIsDesktop();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
 
@@ -274,20 +303,11 @@ function NewLayout() {
   ];
   const isDesktopSettingsRoute = location.pathname === '/settings';
 
-  return (
-    <>
-      <div className="md:hidden">
-        <MobileShell locationPath={location.pathname} navItems={navItems} />
-      </div>
-      <div className="hidden md:block">
-        {isDesktopSettingsRoute ? (
-          <DesktopLayout activePath={location.pathname} />
-        ) : (
-          <MobileShell locationPath={location.pathname} navItems={navItems} desktopFrame />
-        )}
-      </div>
-    </>
-  );
+  if (isDesktop && isDesktopSettingsRoute) {
+    return <DesktopLayout activePath={location.pathname} />;
+  }
+
+  return <MobileShell locationPath={location.pathname} navItems={navItems} desktopFrame={isDesktop} />;
 }
 
 const newRootRoute = createRootRoute({
