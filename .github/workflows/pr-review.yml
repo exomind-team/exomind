@@ -42,8 +42,16 @@ jobs:
           ref: refs/pull/${{ steps.pr.outputs.number }}/head
           fetch-depth: 0
 
+      - name: Resolve base ref
+        id: base
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BASE=$(gh pr view ${{ steps.pr.outputs.number }} --json baseRefName -q '.baseRefName')
+          echo "ref=$BASE" >> "$GITHUB_OUTPUT"
+
       - name: Fetch base branch
-        run: git fetch origin ${{ github.event.pull_request.base.ref || 'dev' }} --no-tags
+        run: git fetch origin ${{ steps.base.outputs.ref }} --no-tags
 
       - name: Run Codex
         id: run_codex
@@ -55,7 +63,7 @@ jobs:
           effort: high
           prompt: |
             You are reviewing PR #${{ steps.pr.outputs.number }} for ${{ github.repository }}.
-            Review ONLY the changes in this PR. Use `git diff origin/${{ github.event.pull_request.base.ref || 'dev' }}...HEAD` to see the diff.
+            Review ONLY the changes in this PR. Use `git diff origin/${{ steps.base.outputs.ref }}...HEAD` to see the diff.
 
             Focus on:
             1. 规范性：commit message、PR 关联 Issue、代码风格
