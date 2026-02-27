@@ -24,16 +24,16 @@ const platforms = [
   {
     name: 'macOS',
     icon: 'macos',
-    active: false,
+    active: true,
     req: t('download.sysreq.macos'),
-    assetKey: 'macos-arm64',
+    assetKey: 'macos-aarch64',
   },
   {
     name: 'Linux',
     icon: 'linux',
-    active: false,
+    active: true,
     req: t('download.sysreq.linux'),
-    assetKey: 'linux-x64',
+    assetKey: 'linux-x64-appimage',
   },
 ];
 ---
@@ -352,13 +352,20 @@ const platforms = [
       if (extraLinks) {
         extraLinks.innerHTML = '';
         const archMap: Record<string, string[]> = {
+          'windows-x64-setup': ['windows-x64-installer'],
           'android-arm64': ['android-x86'],
+          'linux-x64-appimage': ['linux-x64-deb'],
         };
         const extras = archMap[platformKey] || [];
         for (const extraKey of extras) {
           const extraAsset = latest.assets?.[extraKey];
           if (!extraAsset) continue;
-          const label = extraKey === 'android-x86' ? 'x86 版本' : extraKey;
+          const labelMap: Record<string, string> = {
+            'windows-x64-installer': 'MSI 安装包',
+            'android-x86': 'x86 版本',
+            'linux-x64-deb': 'DEB 包',
+          };
+          const label = labelMap[extraKey] || extraKey;
           const href = `/api/download/${data.channel}/${latest.version}/${extraKey}`;
           extraLinks.innerHTML += `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand hover:text-brand-600 transition-colors underline underline-offset-2">${label}${extraAsset.size ? ' (' + formatSize(extraAsset.size) + ')' : ''}</a>`;
         }
