@@ -33,6 +33,29 @@ export interface UpdateInfo {
   publishedAt?: string;
 }
 
+export interface VersionAsset {
+  url: string;
+  size: number;
+  sha256: string;
+}
+
+export interface VersionsApiResponse {
+  channel: string;
+  latest: {
+    version: string;
+    tag: string;
+    published_at: string;
+    assets: Record<string, VersionAsset>;
+  } | null;
+  versions: Array<{
+    version: string;
+    tag: string;
+    published_at: string;
+    version_dir: string;
+  }>;
+  retention: number;
+}
+
 export interface VersionInfo {
   version: string;
   publishedAt: string;
@@ -73,31 +96,98 @@ export async function getCurrentVersion(): Promise<string> {
 }
 
 // ---------------------------------------------------------------------------
+// Version comparison
+// ---------------------------------------------------------------------------
+
+/**
+ * 将版本字符串解析为可比较的数组。
+ * 支持格式：'0.3.4', '0.3.4-build.20260227T1430', '0.3.4-beta.1'
+ * 返回 [major, minor, patch, prerelease_string]
+ */
+function parseVersion(v: string): [number, number, number, string] {
+  const cleaned = v.replace(/^v/, '');
+  const [core, ...rest] = cleaned.split('-');
+  const parts = core.split('.').map(Number);
+  return [parts[0] || 0, parts[1] || 0, parts[2] || 0, rest.join('-')];
+}
+
+/**
+ * 比较两个版本号。返回 1 (a > b), -1 (a < b), 0 (a == b)。
+ * 有 prerelease 标签的版本低于同版本号的正式版。
+ * build 后缀按字典序比较（build.20260227T1430 > build.20260226T1000）。
+ */
+export function compareVersions(a: string, b: string): number {
+  const [aMaj, aMin, aPat, aPre] = parseVersion(a);
+  const [bMaj, bMin, bPat, bPre] = parseVersion(b);
+
+  if (aMaj !== bMaj) return aMaj > bMaj ? 1 : -1;
+  if (aMin !== bMin) return aMin > bMin ? 1 : -1;
+  if (aPat !== bPat) return aPat > bPat ? 1 : -1;
+
+  // 无 prerelease > 有 prerelease（正式版 > 预发布）
+  if (!aPre && bPre) return 1;
+  if (aPre && !bPre) return -1;
+  if (aPre === bPre) return 0;
+  return aPre > bPre ? 1 : -1;
+}
+
+// ---------------------------------------------------------------------------
+// Platform asset key mapping
+// ---------------------------------------------------------------------------
+
+/**
+ * 将 getPlatform() 返回的平台标识映射到 API assets 中的 key。
+ */
+const PLATFORM_ASSET_KEY: Record<string, string> = {
+  'windows-x64': 'windows-x64-setup',
+  'android-arm64': 'android-arm64',
+  'macos-x64': 'macos-x64',
+  'linux-x64': 'linux-x64',
+};
+
+function getAssetKey(platform: string): string {
+  return PLATFORM_ASSET_KEY[platform] ?? platform;
+}
+
+// ---------------------------------------------------------------------------
 // API calls
 // ---------------------------------------------------------------------------
 
 /**
- * 调用后端 /api/update/check 接口检查是否有新版本。
+ * 通过 /api/versions 接口获取最新版本信息，在客户端做版本比较。
  */
 export async function checkForUpdate(params: UpdateCheckParams): Promise<UpdateInfo> {
-  const url = new URL('/api/update/check', API_BASE);
+  const url = new URL('/api/versions', API_BASE);
   url.searchParams.set('channel', params.channel);
-  url.searchParams.set('platform', params.platform);
-  url.searchParams.set('current_version', params.currentVersion);
 
   const res = await fetch(url.toString());
   if (!res.ok) {
     throw new Error(`Update check failed: ${res.status} ${res.statusText}`);
   }
-  const data = await res.json();
+  const data: VersionsApiResponse = await res.json();
+
+  if (!data.latest) {
+    return {
+      hasUpdate: false,
+      currentVersion: params.currentVersion,
+      latestVersion: params.currentVersion,
+    };
+  }
+
+  const latestVersion = data.latest.version;
+  const hasUpdate = compareVersions(latestVersion, params.currentVersion) > 0;
+
+  const assetKey = getAssetKey(params.platform);
+  const asset = data.latest.assets[assetKey];
+
   return {
-    hasUpdate: data.has_update,
-    currentVersion: data.current_version,
-    latestVersion: data.latest_version,
-    downloadUrl: data.download_url,
-    size: data.size,
-    sha256: data.sha256,
-    publishedAt: data.published_at,
+    hasUpdate,
+    currentVersion: params.currentVersion,
+    latestVersion,
+    downloadUrl: asset?.url,
+    size: asset?.size,
+    sha256: asset?.sha256,
+    publishedAt: data.latest.published_at,
   };
 }
 
@@ -112,12 +202,11 @@ export async function getVersions(channel: UpdateChannel): Promise<VersionInfo[]
   if (!res.ok) {
     throw new Error(`Get versions failed: ${res.status} ${res.statusText}`);
   }
-  const data = await res.json();
-  // API 可能返回 { versions: [...] } 或直接返回数组
-  const list = Array.isArray(data) ? data : (data.versions ?? [data.latest].filter(Boolean));
-  return list.map((v: Record<string, unknown>) => ({
-    version: v.version as string,
-    publishedAt: (v.published_at ?? v.publishedAt) as string,
+  const data: VersionsApiResponse = await res.json();
+  const list = data.versions?.length ? data.versions : (data.latest ? [data.latest] : []);
+  return list.map((v) => ({
+    version: v.version,
+    publishedAt: v.published_at,
   }));
 }
 
