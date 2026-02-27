@@ -63,12 +63,9 @@ import {
   ChevronRight,
   Code,
   Download,
-  Globe,
-  Heart,
   Monitor,
   Moon,
   MoonStar,
-  Shield,
   Sun,
   Timer,
   Undo2,
@@ -401,6 +398,11 @@ export function NewSettingsPage() {
     window.open('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
   };
 
+  const handleOpenSponsor = () => {
+    if (typeof window === 'undefined') return;
+    window.open('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
+  };
+
   const handleSwitchToOldUI = () => {
     setUIMode('old');
   };
@@ -507,8 +509,8 @@ export function NewSettingsPage() {
     { key: 'theme', label: '外观主题', ref: sectionThemeRef },
     { key: 'focus', label: '专注设置', ref: sectionFocusRef },
     { key: 'notification', label: '通知', ref: sectionNotificationRef },
-    { key: 'danger', label: '危险区域', ref: sectionDangerRef },
     { key: 'about', label: '关于', ref: sectionAboutRef },
+    { key: 'danger', label: '危险区域', ref: sectionDangerRef },
   ];
 
   const handleDesktopTabClick = (tabKey: DesktopTabKey, sectionRef: { current: HTMLElement | null }) => {
@@ -732,6 +734,21 @@ export function NewSettingsPage() {
             </SectionCard>
           </section>
 
+          <section ref={sectionAboutRef} className="space-y-5" data-testid="new-settings-desktop-vc-section-about">
+            <MoreSection
+              onNavigateUpdate={() => navigate({ to: '/update' })}
+              onComingSoon={showComingSoon}
+            />
+
+            <AboutSection
+              appVersion={versionBuildInfo.appVersion}
+              buildHash={versionBuildInfo.buildHash}
+              onOpenOfficialWebsite={handleOpenOfficialWebsite}
+              onOpenSponsor={handleOpenSponsor}
+              onOpenLegalSupport={handleOpenLegalSupport}
+            />
+          </section>
+
           <section ref={sectionDangerRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-danger">
             <SectionTitle>危险区域</SectionTitle>
             <div className="overflow-hidden rounded-2xl border border-[#DC2626] bg-white dark:bg-[#1C1917]">
@@ -763,44 +780,6 @@ export function NewSettingsPage() {
                 </button>
               </div>
             </div>
-          </section>
-
-          <section ref={sectionAboutRef} className="space-y-5" data-testid="new-settings-desktop-vc-section-about">
-            <section className="space-y-2">
-              <SectionTitle>关于</SectionTitle>
-              <SectionCard>
-                <SettingRow
-                  icon={<Globe className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="官网"
-                  onClick={handleOpenOfficialWebsite}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Heart className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="赞助开发者"
-                  onClick={showComingSoon}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="法律与支持"
-                  onClick={handleOpenLegalSupport}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-              </SectionCard>
-            </section>
-
-            <MoreSection
-              onNavigateUpdate={() => navigate({ to: '/update' })}
-              onComingSoon={showComingSoon}
-            />
-
-            <AboutSection
-              appVersion={versionBuildInfo.appVersion}
-              buildHash={versionBuildInfo.buildHash}
-            />
           </section>
 
           {statusMessage && (
