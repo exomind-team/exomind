@@ -25,8 +25,21 @@ env:
 
 jobs:
   build-windows:
+    # NOTE: build-android and build-windows both run on the same self-hosted Windows runner.
+    # Serializing them (windows after android) prevents resource contention on the single runner.
+    # If a dedicated second runner is added in future, this dependency can be removed.
     needs: build-android
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'windows') && (github.event.inputs.build_scope == 'windows' || needs.build-android.result == 'success') }}
+    if: |
+      always() &&
+      (
+        github.event_name != 'workflow_dispatch' ||
+        github.event.inputs.build_scope == 'all' ||
+        github.event.inputs.build_scope == 'windows'
+      ) &&
+      (
+        github.event.inputs.build_scope == 'windows' ||
+        needs.build-android.result == 'success'
+      )
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
@@ -879,13 +892,20 @@ jobs:
               echo "Cleaning up old preview: ${channel}/${old_dir}/"
               # List and delete all objects under this prefix
               # wrangler r2 object delete requires exact keys, so we list first
-              objects="$(npx wrangler r2 object list "${bucket}" \
-                --prefix "${channel}/${old_dir}/" 2>/dev/null \
-                | jq -r '.[].key' 2>/dev/null || true)"
+              list_output="$(npx wrangler r2 object list "${bucket}" \
+                --prefix "${channel}/${old_dir}/" 2>&1)" || true
+              objects="$(echo "$list_output" | jq -r '.[].key' 2>/dev/null)" || objects=""
+              count=$(echo "$objects" | grep -c . || true)
+              echo "  Found $count object(s) to delete"
+              deleted=0
               for obj in $objects; do
-                echo "  Deleting: $obj"
-                npx wrangler r2 object delete "${bucket}/${obj}" || true
+                if npx wrangler r2 object delete "${bucket}/${obj}" 2>/dev/null; then
+                  deleted=$((deleted + 1))
+                else
+                  echo "  WARNING: Failed to delete $obj"
+                fi
               done
+              echo "  Cleanup complete: $deleted/$count deleted"
             done
           fi
 
