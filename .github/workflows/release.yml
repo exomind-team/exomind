@@ -236,9 +236,7 @@ jobs:
         run: npm install -g bun
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@v1
-        with:
-          toolchain: stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Get short commit hash
         id: hash
@@ -314,9 +312,7 @@ jobs:
             libsoup-3.0-dev
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@v1
-        with:
-          toolchain: stable
+        uses: dtolnay/rust-toolchain@stable
 
       - name: Get short commit hash
         id: hash
