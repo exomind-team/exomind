@@ -49,11 +49,25 @@ function glassCardShadowClass(): string {
   return 'shadow-[0_1px_2px_rgba(0,0,0,0.03),0_8px_24px_-6px_rgba(0,0,0,0.08),0_20px_40px_-8px_rgba(0,0,0,0.05)]';
 }
 
+function expectedOptionClass(active: boolean): string {
+  return `relative z-10 h-8 w-full whitespace-nowrap rounded-[8px] px-[8px] text-center text-[12px] transition-colors duration-200 ${
+    active
+      ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9]'
+      : 'text-[#78716C] hover:text-[#57534E] dark:hover:text-[#D6D3D1]'
+  }`;
+}
+
 const PRESET_COUNTDOWN_MINUTES = [15, 25, 45] as const;
 const MAX_CUSTOM_COUNTDOWN_MINUTES = 720;
 
 function isPresetCountdownMinutes(minutes: number): boolean {
   return PRESET_COUNTDOWN_MINUTES.includes(minutes as (typeof PRESET_COUNTDOWN_MINUTES)[number]);
+}
+
+function resolveExpectedOptionIndex(mode: TimerMode, minutes: number): number {
+  if (mode === 'countup') return 0;
+  const presetIndex = PRESET_COUNTDOWN_MINUTES.indexOf(minutes as (typeof PRESET_COUNTDOWN_MINUTES)[number]);
+  return presetIndex >= 0 ? presetIndex + 1 : 4;
 }
 
 export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(function NewFocusTimerWidget(_, ref) {
@@ -83,8 +97,9 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
 
   const isRunningUi = uiState === 'running';
   const isPaused = isRunningUi && runningSubState === 'paused';
-  const isCustomDurationSelected = !isPresetCountdownMinutes(countdownMinutes);
+  const isCustomDurationSelected = timerMode === 'countdown' && !isPresetCountdownMinutes(countdownMinutes);
   const customDurationTriggerText = isCustomDurationSelected ? `${countdownMinutes}m` : '自定义';
+  const activeExpectedIndex = resolveExpectedOptionIndex(timerMode, countdownMinutes);
   const isCountdownOvertime =
     timerMode === 'countdown' && countdownOverrunRef.current;
   const isCountdownWarning =
@@ -298,6 +313,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
     const parsedValue = Number.parseInt(rawValue.trim(), 10);
     if (Number.isFinite(parsedValue)) {
       const safeMinutes = Math.max(1, Math.min(MAX_CUSTOM_COUNTDOWN_MINUTES, parsedValue));
+      setTimerMode('countdown');
       setCountdownMinutes(safeMinutes);
       setCustomDurationDraft(String(safeMinutes));
     } else {
@@ -444,94 +460,89 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
 
               <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />
 
-              <div className="flex items-center justify-between">
-                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">计时模式</span>
-                <div className="flex items-center gap-1">
+              <div className="flex min-w-0 flex-col gap-1.5">
+                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">预期时间</span>
+                <div
+                  className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#FFFFFF60] bg-white/35 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
+                  data-testid="new-focus-expected-time-row"
+                >
+                  <div
+                    data-testid="new-focus-expected-active-indicator"
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1/5 rounded-[8px] border border-[#FFFFFFCC] bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out dark:border-[#FFFFFF66] dark:bg-[#FFFFFF14]"
+                    style={{ transform: `translateX(${activeExpectedIndex * 100}%)` }}
+                  />
+                  <div className="relative z-10 grid min-w-0 grid-cols-5 gap-0">
                   <button
                     type="button"
-                    data-testid="new-focus-mode-countup"
-                    onClick={() => setTimerMode('countup')}
-                    className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${timerMode === 'countup' ? 'bg-white/90 dark:bg-[#FFFFFF20] text-[#1C1917] dark:text-[#FAFAF9]' : 'bg-transparent text-[#A8A29E]'}`}
+                    data-testid="new-focus-expected-countup"
+                    onClick={() => {
+                      setIsCustomDurationEditing(false);
+                      setTimerMode('countup');
+                    }}
+                    className={expectedOptionClass(timerMode === 'countup')}
                   >
                     正计时
                   </button>
-                  <button
-                    type="button"
-                    data-testid="new-focus-mode-countdown"
-                    onClick={() => setTimerMode('countdown')}
-                    className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${timerMode === 'countdown' ? 'bg-white/90 dark:bg-[#FFFFFF20] text-[#1C1917] dark:text-[#FAFAF9]' : 'bg-transparent text-[#A8A29E]'}`}
-                  >
-                    倒计时
-                  </button>
-                </div>
-              </div>
 
-              {timerMode === 'countdown' && (
-                <div className="flex items-center justify-between">
-                  <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">倒计时时长</span>
-                  <div className="flex items-center gap-[6px]">
+                  {PRESET_COUNTDOWN_MINUTES.map((minutes) => (
+                    <button
+                      key={minutes}
+                      type="button"
+                      data-testid={`new-focus-expected-${minutes}`}
+                      onClick={() => {
+                        setIsCustomDurationEditing(false);
+                        setTimerMode('countdown');
+                        setCountdownMinutes(minutes);
+                      }}
+                      className={expectedOptionClass(timerMode === 'countdown' && countdownMinutes === minutes)}
+                    >
+                      {minutes}m
+                    </button>
+                  ))}
+
+                  {isCustomDurationEditing ? (
+                    <Input
+                      ref={customDurationInputRef}
+                      data-testid="new-focus-expected-custom-input"
+                      value={customDurationDraft}
+                      onChange={(event) => {
+                        setCustomDurationDraft(event.target.value.replace(/[^\d]/g, ''));
+                      }}
+                      onBlur={() => applyCustomDuration(customDurationDraft)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter') {
+                          event.preventDefault();
+                          applyCustomDuration(customDurationDraft);
+                        }
+                        if (event.key === 'Escape') {
+                          event.preventDefault();
+                          setCustomDurationDraft(String(countdownMinutes));
+                          setIsCustomDurationEditing(false);
+                        }
+                      }}
+                      aria-label="自定义倒计时分钟（Custom countdown minutes）"
+                      placeholder="分钟"
+                      className="relative z-10 h-8 w-full border-transparent bg-transparent px-[6px] text-center text-[12px] font-semibold leading-none text-[#1C1917] shadow-none outline-none ring-0 focus-visible:ring-0 dark:text-[#FAFAF9]"
+                    />
+                  ) : (
                     <button
                       type="button"
-                      data-testid="new-focus-duration-custom-trigger"
+                      data-testid="new-focus-expected-custom-trigger"
                       onClick={handleOpenCustomDurationEditor}
-                      className={`flex items-center rounded-[8px] text-[12px] ${
-                        isCustomDurationEditing || isCustomDurationSelected
-                          ? 'bg-white/90 dark:bg-[#FFFFFF20] font-semibold text-[#C75B3A]'
-                          : 'bg-transparent text-[#C75B3A]'
-                      } ${
-                        isCustomDurationEditing ? 'h-8 w-8 justify-center p-0' : 'gap-1 px-[8px] py-[6px]'
+                      className={`relative z-10 flex h-8 w-full items-center justify-center gap-1 whitespace-nowrap rounded-[8px] px-[8px] text-[12px] transition-colors duration-200 ${
+                        isCustomDurationSelected
+                          ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9]'
+                          : 'text-[#C75B3A] hover:text-[#B24D2F]'
                       }`}
                       aria-label="自定义倒计时（Custom countdown）"
                     >
-                      <ChevronDown size={12} className={isCustomDurationEditing ? 'rotate-180 transition-transform' : 'transition-transform'} />
-                      {!isCustomDurationEditing && customDurationTriggerText}
+                      <ChevronDown size={12} className="transition-transform" />
+                      {customDurationTriggerText}
                     </button>
-
-                    {isCustomDurationEditing && (
-                      <Input
-                        ref={customDurationInputRef}
-                        data-testid="new-focus-duration-custom-input"
-                        value={customDurationDraft}
-                        onChange={(event) => {
-                          setCustomDurationDraft(event.target.value.replace(/[^\d]/g, ''));
-                        }}
-                        onBlur={() => applyCustomDuration(customDurationDraft)}
-                        onKeyDown={(event) => {
-                          if (event.key === 'Enter') {
-                            event.preventDefault();
-                            applyCustomDuration(customDurationDraft);
-                          }
-                          if (event.key === 'Escape') {
-                            event.preventDefault();
-                            setCustomDurationDraft(String(countdownMinutes));
-                            setIsCustomDurationEditing(false);
-                          }
-                        }}
-                        aria-label="自定义倒计时分钟（Custom countdown minutes）"
-                        placeholder="分钟"
-                        className="h-8 w-[72px] border-[#FFFFFF60] bg-white/90 dark:bg-[#FFFFFF20] px-2 text-[12px] font-medium text-[#1C1917] dark:text-[#FAFAF9]"
-                      />
-                    )}
-
-                    {PRESET_COUNTDOWN_MINUTES.map((minutes) => (
-                      <button
-                        key={minutes}
-                        type="button"
-                        data-testid={`new-focus-duration-${minutes}`}
-                        onClick={() => {
-                          setIsCustomDurationEditing(false);
-                          setCountdownMinutes(minutes);
-                        }}
-                        className={`rounded-[8px] px-[10px] py-[6px] text-[12px] ${
-                          countdownMinutes === minutes ? 'border border-[#FFFFFF60] bg-white/90 dark:bg-[#FFFFFF20] font-semibold text-[#1C1917] dark:text-[#FAFAF9]' : 'bg-transparent text-[#78716C]'
-                        }`}
-                      >
-                        {minutes}m
-                      </button>
-                    ))}
+                  )}
                   </div>
                 </div>
-              )}
+              </div>
 
               <Button
                 type="button"
