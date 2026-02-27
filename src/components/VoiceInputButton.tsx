@@ -18,6 +18,7 @@ import { Check, LoaderCircle, Mic, MicOff, Unlock } from 'lucide-react';
 import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 import { cn } from '../lib/utils';
+import { toast } from '@/components/ui/toast-hook';
 import {
   createCompatibleMediaRecorder,
   DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
@@ -500,12 +501,20 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // 处理按钮点击
   const handleClick = useCallback(() => {
+    if (permissionState === 'unavailable') {
+      toast({ title: '此设备不支持麦克风', variant: 'destructive' });
+      return;
+    }
+    if (permissionState === 'denied') {
+      toast({ title: '麦克风权限被拒绝，请在浏览器设置中允许', variant: 'destructive' });
+      return;
+    }
     if (state.state === 'idle' || state.state === 'completed') {
       startRecording();
     } else if (state.state === 'recording') {
       stopRecording();
     }
-  }, [state.state, startRecording, stopRecording]);
+  }, [permissionState, state.state, startRecording, stopRecording]);
 
   useImperativeHandle(ref, () => ({
     start: () => {
