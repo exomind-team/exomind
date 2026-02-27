@@ -1,10 +1,6 @@
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import type { IRuntimePort, StartRuntimeInput } from '@/lib/environment/interfaces/runtime.port';
 import type { RuntimeServiceStatus } from '@/lib/types/agent-hub';
-
-export interface StartRuntimeInput {
-  host: string;
-  port: number;
-}
+import { TauriRuntimeAdapter } from '@/lib/adapters/tauri-runtime-adapter';
 
 export interface RuntimeControlService {
   startRuntime(input: StartRuntimeInput): Promise<RuntimeServiceStatus>;
@@ -12,40 +8,21 @@ export interface RuntimeControlService {
   getStatus(): Promise<RuntimeServiceStatus>;
 }
 
-const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
-  running: false,
-  host: '127.0.0.1',
-  port: 4077,
-  error: 'tauri runtime control only',
-};
+export type { StartRuntimeInput };
 
 export class RuntimeControlServiceImpl implements RuntimeControlService {
+  constructor(private readonly runtimePort: IRuntimePort) {}
+
   async startRuntime(input: StartRuntimeInput): Promise<RuntimeServiceStatus> {
-    if (!(await isTauri())) {
-      return {
-        ...DEFAULT_RUNTIME_STATUS,
-        host: input.host,
-        port: input.port,
-      };
-    }
-    return invoke<RuntimeServiceStatus>('runtime_service_start', {
-      host: input.host,
-      port: input.port,
-    });
+    return this.runtimePort.startRuntime(input);
   }
 
   async stopRuntime(): Promise<RuntimeServiceStatus> {
-    if (!(await isTauri())) {
-      return DEFAULT_RUNTIME_STATUS;
-    }
-    return invoke<RuntimeServiceStatus>('runtime_service_stop');
+    return this.runtimePort.stopRuntime();
   }
 
   async getStatus(): Promise<RuntimeServiceStatus> {
-    if (!(await isTauri())) {
-      return DEFAULT_RUNTIME_STATUS;
-    }
-    return invoke<RuntimeServiceStatus>('runtime_service_status');
+    return this.runtimePort.getStatus();
   }
 }
 
@@ -53,7 +30,7 @@ let runtimeControlServiceInstance: RuntimeControlService | null = null;
 
 export function getRuntimeControlService(): RuntimeControlService {
   if (!runtimeControlServiceInstance) {
-    runtimeControlServiceInstance = new RuntimeControlServiceImpl();
+    runtimeControlServiceInstance = new RuntimeControlServiceImpl(new TauriRuntimeAdapter());
   }
   return runtimeControlServiceInstance;
 }

@@ -1,72 +1,59 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-
-const tauriMocks = vi.hoisted(() => ({
-  isTauri: vi.fn(),
-  invoke: vi.fn(),
-}));
-
-vi.mock('@tauri-apps/api/core', () => ({
-  isTauri: tauriMocks.isTauri,
-  invoke: tauriMocks.invoke,
-}));
-
+import type { IRuntimePort } from '@/lib/environment/interfaces/runtime.port';
 import { RuntimeControlServiceImpl } from '@/lib/services/runtime-control.service';
 
+function createMockRuntimePort(overrides: Partial<IRuntimePort> = {}): IRuntimePort {
+  return {
+    startRuntime: vi.fn().mockResolvedValue({
+      running: true, host: '127.0.0.1', port: 4077, pid: 9527,
+    }),
+    stopRuntime: vi.fn().mockResolvedValue({
+      running: false, host: '127.0.0.1', port: 4077,
+    }),
+    getStatus: vi.fn().mockResolvedValue({
+      running: true, host: '127.0.0.1', port: 4077, pid: 9527,
+    }),
+    ...overrides,
+  };
+}
+
 describe('runtime control service issue-205（Runtime 启停服务）', () => {
-  beforeEach(() => {
-    vi.clearAllMocks();
-  });
+  it('delegates startRuntime to port（委托 port 启动运行时）', async () => {
+    const port = createMockRuntimePort();
+    const service = new RuntimeControlServiceImpl(port);
+    const status = await service.startRuntime({ host: '127.0.0.1', port: 4077 });
 
-  it('calls tauri start command with host and port（调用 tauri 启动命令）', async () => {
-    tauriMocks.isTauri.mockResolvedValue(true);
-    tauriMocks.invoke.mockResolvedValue({
-      running: true,
-      host: '127.0.0.1',
-      port: 4077,
-      pid: 9527,
-    });
-
-    const service = new RuntimeControlServiceImpl();
-    const status = await service.startRuntime({
-      host: '127.0.0.1',
-      port: 4077,
-    });
-
-    expect(tauriMocks.invoke).toHaveBeenCalledWith('runtime_service_start', {
-      host: '127.0.0.1',
-      port: 4077,
-    });
+    expect(port.startRuntime).toHaveBeenCalledWith({ host: '127.0.0.1', port: 4077 });
     expect(status.running).toBe(true);
     expect(status.pid).toBe(9527);
   });
 
-  it('calls tauri stop/status commands（调用 tauri 停止与状态命令）', async () => {
-    tauriMocks.isTauri.mockResolvedValue(true);
-    tauriMocks.invoke.mockImplementation(async (command: string) => {
-      if (command === 'runtime_service_stop') {
-        return { running: false, host: '127.0.0.1', port: 4077 };
-      }
-      return { running: true, host: '127.0.0.1', port: 4077, pid: 9527 };
-    });
+  it('delegates stopRuntime and getStatus to port（委托 port 停止与查询状态）', async () => {
+    const port = createMockRuntimePort();
+    const service = new RuntimeControlServiceImpl(port);
 
-    const service = new RuntimeControlServiceImpl();
     const runningStatus = await service.getStatus();
     const stoppedStatus = await service.stopRuntime();
 
-    expect(tauriMocks.invoke).toHaveBeenCalledWith('runtime_service_status');
-    expect(tauriMocks.invoke).toHaveBeenCalledWith('runtime_service_stop');
+    expect(port.getStatus).toHaveBeenCalled();
+    expect(port.stopRuntime).toHaveBeenCalled();
     expect(runningStatus.running).toBe(true);
     expect(stoppedStatus.running).toBe(false);
   });
 
-  it('returns offline status in non-tauri runtime（非 tauri 环境返回离线状态）', async () => {
-    tauriMocks.isTauri.mockResolvedValue(false);
-
-    const service = new RuntimeControlServiceImpl();
+  it('works with non-tauri port implementation（兼容非 Tauri 实现）', async () => {
+    const port = createMockRuntimePort({
+      startRuntime: vi.fn().mockResolvedValue({
+        running: false, host: '127.0.0.1', port: 4077, error: 'not supported',
+      }),
+      getStatus: vi.fn().mockResolvedValue({
+        running: false, host: '127.0.0.1', port: 4077, error: 'not supported',
+      }),
+    });
+    const service = new RuntimeControlServiceImpl(port);
     const status = await service.getStatus();
 
     expect(status.running).toBe(false);
-    expect(status.error).toContain('tauri');
-    expect(tauriMocks.invoke).not.toHaveBeenCalled();
+    expect(status.error).toContain('not supported');
   });
 });
