@@ -44,7 +44,23 @@ import {
   setDevtoolsEnabled,
   subscribeDevtoolsChanges,
 } from '@/config/devtools-mode';
-import { setUIMode } from '@/config/ui-mode';
+import {
+  getCommandPaletteEnabled,
+  setCommandPaletteEnabled,
+  subscribeCommandPaletteEnabledChanges,
+} from '@/config/command-palette-enabled';
+import {
+  getVoiceTranscriptSendMode,
+  setVoiceTranscriptSendMode,
+  subscribeVoiceTranscriptSendModeChanges,
+  type VoiceTranscriptSendMode,
+} from '@/config/voice-transcript-send-mode';
+import {
+  getFeedbackPreferences,
+  setFeedbackPreferences,
+  subscribeFeedbackPreferencesChanges,
+  type FeedbackPreferences,
+} from '@/config/feedback-preferences';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import {
   TIMER_END_SOUND_PRESETS,
@@ -62,13 +78,15 @@ import {
   Check,
   ChevronRight,
   Code,
+  Command,
   Download,
   Monitor,
+  Mic,
   Moon,
   MoonStar,
+  List,
   Sun,
   Timer,
-  Undo2,
   Upload,
   Wifi,
 } from 'lucide-react';
@@ -184,6 +202,13 @@ export function NewSettingsPage() {
   );
   const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
   const [devtoolsEnabled, setDevtoolsEnabledState] = useState<boolean>(() => getDevtoolsEnabled());
+  const [commandPaletteEnabled, setCommandPaletteEnabledState] = useState<boolean>(() => getCommandPaletteEnabled());
+  const [voiceTranscriptSendMode, setVoiceTranscriptSendModeState] = useState<VoiceTranscriptSendMode>(
+    () => getVoiceTranscriptSendMode()
+  );
+  const [feedbackPreferences, setFeedbackPreferencesState] = useState<FeedbackPreferences>(
+    () => getFeedbackPreferences()
+  );
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
@@ -389,6 +414,11 @@ export function NewSettingsPage() {
 
   const navigate = useNavigate();
 
+  const handleCommandPaletteToggle = (checked: boolean) => {
+    setCommandPaletteEnabled(checked);
+    setCommandPaletteEnabledState(checked);
+  };
+
   const handleOpenLegalSupport = () => {
     navigate({ to: '/settings/legal-support' });
   };
@@ -403,8 +433,17 @@ export function NewSettingsPage() {
     window.open('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
   };
 
-  const handleSwitchToOldUI = () => {
-    setUIMode('old');
+  const handleVoiceTranscriptSendModeChange = (mode: VoiceTranscriptSendMode) => {
+    setVoiceTranscriptSendMode(mode);
+    setVoiceTranscriptSendModeState(mode);
+  };
+  const handleFeedbackPreferenceToggle = (key: keyof FeedbackPreferences) => {
+    const next = {
+      ...feedbackPreferences,
+      [key]: !feedbackPreferences[key],
+    };
+    setFeedbackPreferences(next);
+    setFeedbackPreferencesState(next);
   };
 
   const handleOpenVoiceInputSettings = () => {
@@ -461,6 +500,24 @@ export function NewSettingsPage() {
   useEffect(() => {
     return subscribeDevtoolsChanges((enabled) => {
       setDevtoolsEnabledState(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeCommandPaletteEnabledChanges((enabled) => {
+      setCommandPaletteEnabledState(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeVoiceTranscriptSendModeChanges((mode) => {
+      setVoiceTranscriptSendModeState(mode);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeFeedbackPreferencesChanges((nextPreferences) => {
+      setFeedbackPreferencesState(nextPreferences);
     });
   }, []);
 
@@ -722,13 +779,6 @@ export function NewSettingsPage() {
                     onClick={() => setFeatureTogglesDialogOpen(true)}
                     right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                   />
-                  <Divider />
-                  <SettingRow
-                    icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
-                    label="旧版页面"
-                    onClick={handleSwitchToOldUI}
-                    right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                  />
                 </>
               )}
             </SectionCard>
@@ -928,6 +978,52 @@ export function NewSettingsPage() {
         <section className="space-y-2" data-testid="new-settings-input-section">
           <SectionTitle>输入</SectionTitle>
           <SectionCard>
+            <div data-testid="new-settings-voice-transcript-mode-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="语音转写后"
+                right={(
+                  <div
+                    role="group"
+                    aria-label="语音转写后行为"
+                    className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                  >
+                    <button
+                      type="button"
+                      data-testid="new-settings-voice-transcript-mode-insert"
+                      aria-pressed={voiceTranscriptSendMode === 'insert'}
+                      onClick={() => handleVoiceTranscriptSendModeChange('insert')}
+                      disabled={loading}
+                      className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        voiceTranscriptSendMode === 'insert'
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      插入输入框
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="new-settings-voice-transcript-mode-direct-send"
+                      aria-pressed={voiceTranscriptSendMode === 'direct-send'}
+                      onClick={() => handleVoiceTranscriptSendModeChange('direct-send')}
+                      disabled={loading}
+                      className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        voiceTranscriptSendMode === 'direct-send'
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      直接发送
+                    </button>
+                  </div>
+                )}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">仅作用于「当下」页面输入框，默认插入输入框</span>
+            </div>
+            <Divider />
             <div data-testid="new-settings-voice-token-row">
               <SettingRow
                 icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
@@ -954,6 +1050,72 @@ export function NewSettingsPage() {
                   </div>
                 }
               />
+            </div>
+          </SectionCard>
+        </section>
+
+        {/* ── Feedback Section (反馈) ── */}
+        <section className="space-y-2" data-testid="new-settings-feedback-section">
+          <SectionTitle>时间块反馈</SectionTitle>
+          <SectionCard>
+            <div data-testid="new-settings-feedback-content-row">
+              <SettingRow
+                icon={<List className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="反馈内容"
+                right={(
+                  <div
+                    role="group"
+                    aria-label="时间块反馈内容"
+                    className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                  >
+                    <button
+                      type="button"
+                      data-testid="new-settings-feedback-content-timing"
+                      aria-pressed={feedbackPreferences.timingInfoEnabled}
+                      onClick={() => handleFeedbackPreferenceToggle('timingInfoEnabled')}
+                      disabled={loading}
+                      className={`rounded-l-[8px] rounded-r-none px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        feedbackPreferences.timingInfoEnabled
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      时刻信息
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="new-settings-feedback-content-statistics"
+                      aria-pressed={feedbackPreferences.statisticsEnabled}
+                      onClick={() => handleFeedbackPreferenceToggle('statisticsEnabled')}
+                      disabled={loading}
+                      className={`rounded-none px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        feedbackPreferences.statisticsEnabled
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      统计信息
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="new-settings-feedback-content-quick"
+                      aria-pressed={feedbackPreferences.quickFeedbackEnabled}
+                      onClick={() => handleFeedbackPreferenceToggle('quickFeedbackEnabled')}
+                      disabled={loading}
+                      className={`rounded-l-none rounded-r-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        feedbackPreferences.quickFeedbackEnabled
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      快速反馈
+                    </button>
+                  </div>
+                )}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">可多选，默认仅开启快速反馈</span>
             </div>
           </SectionCard>
         </section>
@@ -1056,13 +1218,6 @@ export function NewSettingsPage() {
                   icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="功能开关"
                   onClick={() => setFeatureTogglesDialogOpen(true)}
-                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-                />
-                <Divider />
-                <SettingRow
-                  icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="旧版页面"
-                  onClick={handleSwitchToOldUI}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
               </>
@@ -1267,10 +1422,28 @@ export function NewSettingsPage() {
                 />
               </div>
               <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
-                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
+                <div className="flex items-center gap-2">
+                  <Bot className="h-[16px] w-[16px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
+                </div>
                 <Switch
+                  data-testid="feature-toggle-agent-page-switch"
                   checked={agentPageEnabled}
                   onCheckedChange={handleAgentPageEnabledToggle}
+                />
+              </div>
+              <div
+                className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]"
+                data-testid="feature-toggle-command-palette-row"
+              >
+                <div className="flex items-center gap-2">
+                  <Command className="h-[16px] w-[16px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">命令面板</span>
+                </div>
+                <Switch
+                  data-testid="feature-toggle-command-palette-switch"
+                  checked={commandPaletteEnabled}
+                  onCheckedChange={handleCommandPaletteToggle}
                 />
               </div>
             </div>

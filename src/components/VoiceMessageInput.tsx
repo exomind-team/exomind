@@ -111,14 +111,16 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
       return;
     }
 
-    if (e.key === 'Enter' && !e.shiftKey) {
-      e.preventDefault();
-      if (value.trim()) {
-        handleSend();
-      } else {
-        textareaRef.current?.blur();
-        voiceButtonRef.current?.start();
-      }
+    if (e.key !== 'Enter') return;
+    if (!(e.ctrlKey || e.metaKey)) return;
+    if (e.altKey || e.shiftKey) return;
+
+    e.preventDefault();
+    if (value.trim()) {
+      handleSend();
+    } else {
+      textareaRef.current?.blur();
+      voiceButtonRef.current?.start();
     }
   };
 

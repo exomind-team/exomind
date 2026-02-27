@@ -54,7 +54,7 @@ async function seedActiveBlock(page: Page, mode: TimerMode, paused: boolean) {
 }
 
 async function readTimerSeconds(page: Page): Promise<number> {
-  const timer = page.locator('div.font-mono.text-lg span').first();
+  const timer = page.getByText(/^\d{2}:\d{2}(?::\d{2})?$/).first();
   await expect(timer).toBeVisible();
   const text = (await timer.textContent())?.trim() ?? '';
   return parseTimerToSeconds(text);
@@ -86,7 +86,7 @@ test.describe('Issue #82: TimeBlock timer restore behavior', () => {
     await page.getByRole('link', { name: '设置' }).click();
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(3200);
-    await page.getByRole('link', { name: '事件日志' }).click();
+    await page.getByRole('link', { name: /当下|事件日志/ }).click();
     await expect(page).toHaveURL(/\/eventlog/);
     const afterReturn = await readTimerSeconds(page);
     expect(afterReturn - beforeLeave).toBeGreaterThanOrEqual(2);
@@ -110,7 +110,7 @@ test.describe('Issue #82: TimeBlock timer restore behavior', () => {
     await page.getByRole('link', { name: '设置' }).click();
     await expect(page).toHaveURL(/\/settings/);
     await page.waitForTimeout(3200);
-    await page.getByRole('link', { name: '事件日志' }).click();
+    await page.getByRole('link', { name: /当下|事件日志/ }).click();
     await expect(page).toHaveURL(/\/eventlog/);
     const afterReturn = await readTimerSeconds(page);
     expect(afterReturn).toBe(beforeLeave);

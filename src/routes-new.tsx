@@ -1,9 +1,16 @@
-import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useParams } from '@tanstack/react-router';
-import { Suspense, lazy, useEffect, useState } from 'react';
+import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams } from '@tanstack/react-router';
+import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
+import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
+import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
+import { getCommandRegistryService } from '@/lib/services/command-registry.service';
+import { getCommandPaletteService } from '@/lib/services/command-palette.service';
+import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
+import { CommandPalette } from '@/ui/new/components/CommandPalette';
+import type { CommandContext } from '@/lib/types/command-palette';
 
 const NewFocusPage = lazy(async () => {
   const module = await import('@/ui/new/pages/NewFocusPage');
@@ -38,6 +45,11 @@ const NewMePage = lazy(async () => {
 const UserManagePage = lazy(async () => {
   const module = await import('@/ui/pages/UserManagePage');
   return { default: module.UserManagePage };
+});
+
+const SyncTestPage = lazy(async () => {
+  const module = await import('@/ui/pages/SyncTestPage');
+  return { default: module.SyncTestPage };
 });
 
 const MOSSASRTestPage = lazy(async () => {
@@ -115,6 +127,11 @@ function useIsDesktop(minWidth = 768): boolean {
   return isDesktop;
 }
 
+function resolveRuntimePlatform(): 'web' | 'tauri' | 'unknown' {
+  if (typeof window === 'undefined') return 'unknown';
+  return '__TAURI_INTERNALS__' in window ? 'tauri' : 'web';
+}
+
 type ShellNavItem = {
   title: string;
   path: string;
@@ -125,10 +142,14 @@ function MobileShell({
   locationPath,
   navItems,
   desktopFrame = false,
+  commandPaletteActive = false,
+  commandContext,
 }: {
   locationPath: string;
   navItems: ShellNavItem[];
   desktopFrame?: boolean;
+  commandPaletteActive?: boolean;
+  commandContext?: CommandContext;
 }) {
   return (
     <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', desktopFrame && 'p-6')}>
@@ -141,6 +162,10 @@ function MobileShell({
         <main className="absolute inset-x-0 top-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto">
           <Outlet />
         </main>
+
+        {commandPaletteActive && commandContext ? (
+          <CommandPalette context={commandContext} />
+        ) : null}
 
         <nav
           data-testid="mobile-bottom-tab"
@@ -255,10 +280,16 @@ function DesktopLayout({ activePath }: { activePath: string }) {
 
 function NewLayout() {
   const location = useLocation();
+  const navigate = useNavigate();
   const isDesktop = useIsDesktop();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
+  const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
+  const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
+  const commandPaletteActive = developerModeEnabled && commandPaletteEnabled;
+  const registryService = useMemo(() => getCommandRegistryService(), []);
+  const paletteService = useMemo(() => getCommandPaletteService(), []);
 
   useEffect(() => {
     return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
@@ -266,6 +297,59 @@ function NewLayout() {
   useEffect(() => {
     return subscribeDesktopAdaptiveChanges(setDesktopAdaptiveEnabledState);
   }, []);
+  useEffect(() => {
+    return subscribeDeveloperModeChanges(setDeveloperModeEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeCommandPaletteEnabledChanges(setCommandPaletteEnabled);
+  }, []);
+
+  useEffect(() => {
+    const navigateTo = async (path: CoreNavigationPath) => {
+      await navigate({ to: path });
+    };
+
+    registryService.setCommands('core-navigation', createCoreNavigationCommands({
+      navigate: navigateTo,
+    }));
+
+    return () => {
+      registryService.removeScope('core-navigation');
+    };
+  }, [navigate, registryService]);
+
+  useEffect(() => {
+    if (!commandPaletteActive) {
+      paletteService.close();
+      return;
+    }
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.defaultPrevented || event.isComposing) return;
+      if (!(event.metaKey || event.ctrlKey)) return;
+      if (event.altKey || event.shiftKey) return;
+      if (event.key.toLowerCase() !== 'k') return;
+
+      event.preventDefault();
+      paletteService.toggle();
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [commandPaletteActive, paletteService]);
+
+  const commandContext = useMemo<CommandContext>(() => ({
+    currentPath: location.pathname,
+    platform: resolveRuntimePlatform(),
+    developerModeEnabled,
+    commandPaletteEnabled: commandPaletteActive,
+    featureFlags: {
+      agentPageEnabled,
+      goalsV2Enabled: false,
+    },
+  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname]);
 
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
@@ -277,10 +361,23 @@ function NewLayout() {
   const isDesktopSettingsRoute = location.pathname === '/settings' || location.pathname.startsWith('/settings/');
 
   if (isDesktop && desktopAdaptiveEnabled && isDesktopSettingsRoute) {
-    return <DesktopLayout activePath={location.pathname} />;
+    return (
+      <>
+        <DesktopLayout activePath={location.pathname} />
+        {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
+      </>
+    );
   }
 
-  return <MobileShell locationPath={location.pathname} navItems={navItems} desktopFrame={isDesktop} />;
+  return (
+    <MobileShell
+      locationPath={location.pathname}
+      navItems={navItems}
+      desktopFrame={isDesktop}
+      commandPaletteActive={commandPaletteActive}
+      commandContext={commandContext}
+    />
+  );
 }
 
 const newRootRoute = createRootRoute({
@@ -407,6 +504,18 @@ const newMossTestRoute = createRoute({
   },
 });
 
+const newSyncTestRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/sync-test',
+  component: function NewSyncTest() {
+    return (
+      <LazyPage>
+        <SyncTestPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newAgentsRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents',
@@ -493,6 +602,7 @@ const newRouteTree = newRootRoute.addChildren([
   newLegalSupportRoute,
   newUserManageRoute,
   newMossTestRoute,
+  newSyncTestRoute,
   newAgentsRoute,
   newUpdateRoute,
   newAgentDetailRoute,

@@ -161,6 +161,13 @@ bun run test:sync
 # 端到端测试
 bun run test:e2e
 
+# Termux 端到端测试（系统 Chromium）
+pkg install x11-repo chromium
+export PLAYWRIGHT_TERMUX=1
+export PLAYWRIGHT_BROWSERS_PATH=0
+export CHROMIUM_PATH=/data/data/com.termux/files/usr/bin/chromium-browser
+bun run test:e2e:termux
+
 # Issue 专用 E2E 配置示例
 bun run test:e2e:issue27
 bun run test:e2e:issue77
