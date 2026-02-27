@@ -8,6 +8,19 @@ import { setFeedbackPreferences } from '@/config/feedback-preferences';
 describe('SettingsPage feedback section（反馈分组配置）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
   });
 
   it('renders feedback section and defaults to quick-feedback only', () => {

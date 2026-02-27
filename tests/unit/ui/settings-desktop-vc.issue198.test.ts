@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('issue-198 settings desktop VC layout（设置页桌面VC布局）', () => {
-  const routesPath = path.resolve('src/routes-new.tsx');
-  const settingsPagePath = path.resolve('src/ui/new/pages/NewSettingsPage.tsx');
+  const routesPath = path.resolve('src/routes.tsx');
+  const settingsPagePath = path.resolve('src/ui/app/pages/SettingsPage.tsx');
   const routesSource = readFileSync(routesPath, 'utf-8');
   const settingsSource = readFileSync(settingsPagePath, 'utf-8');
 

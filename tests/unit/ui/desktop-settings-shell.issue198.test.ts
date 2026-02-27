@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
-  const sourcePath = path.resolve('src/routes-new.tsx');
+  const sourcePath = path.resolve('src/routes.tsx');
   const source = readFileSync(sourcePath, 'utf-8');
   const desktopNavStart = source.indexOf('const desktopNavItems = [');
   const desktopNavEnd = source.indexOf('];', desktopNavStart);
