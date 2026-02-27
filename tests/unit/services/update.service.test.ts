@@ -126,9 +126,24 @@ describe('compareVersions', () => {
     expect(compareVersions('0.3.4-build.20260227T1430', '0.3.4')).toBe(-1);
   });
 
-  it('compares prerelease strings lexicographically', () => {
+  it('compares prerelease strings by segments', () => {
     expect(compareVersions('0.3.4-build.20260227T1430', '0.3.4-build.20260226T1000')).toBe(1);
     expect(compareVersions('0.3.4-build.20260226T1000', '0.3.4-build.20260227T1430')).toBe(-1);
+  });
+
+  it('compares new format with sequential build numbers numerically', () => {
+    expect(compareVersions('0.3.3-build.26.20260227T1415Z', '0.3.3-build.9.20260227T1000Z')).toBe(1);
+    expect(compareVersions('0.3.3-build.9.20260227T1000Z', '0.3.3-build.26.20260227T1415Z')).toBe(-1);
+  });
+
+  it('compares new format build numbers correctly at boundary', () => {
+    expect(compareVersions('0.3.3-build.10.20260227T1000Z', '0.3.3-build.9.20260227T0900Z')).toBe(1);
+  });
+
+  it('new format is considered newer than old format for same version', () => {
+    // Segment comparison: "build" == "build", then "26" vs "20260227T1247"
+    // String compare: '6' > '0' at index 1, so new format > old format ✓
+    expect(compareVersions('0.3.3-build.26.20260227T1415Z', '0.3.3-build.20260227T1247')).toBe(1);
   });
 
   it('equal prerelease returns 0', () => {

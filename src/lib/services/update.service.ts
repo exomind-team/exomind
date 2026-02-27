@@ -112,9 +112,37 @@ function parseVersion(v: string): [number, number, number, string] {
 }
 
 /**
+ * 按 `.` 分段比较 prerelease 字符串（遵循 semver 规则）。
+ * 纯数字段按数值比较，否则按字典序。
+ */
+function comparePrerelease(a: string, b: string): number {
+  const aParts = a.split('.');
+  const bParts = b.split('.');
+  const len = Math.max(aParts.length, bParts.length);
+
+  for (let i = 0; i < len; i++) {
+    // 段少的一方更小
+    if (i >= aParts.length) return -1;
+    if (i >= bParts.length) return 1;
+
+    const aIsNum = /^\d+$/.test(aParts[i]);
+    const bIsNum = /^\d+$/.test(bParts[i]);
+
+    if (aIsNum && bIsNum) {
+      const diff = Number(aParts[i]) - Number(bParts[i]);
+      if (diff !== 0) return diff > 0 ? 1 : -1;
+    } else {
+      if (aParts[i] < bParts[i]) return -1;
+      if (aParts[i] > bParts[i]) return 1;
+    }
+  }
+  return 0;
+}
+
+/**
  * 比较两个版本号。返回 1 (a > b), -1 (a < b), 0 (a == b)。
  * 有 prerelease 标签的版本低于同版本号的正式版。
- * build 后缀按字典序比较（build.20260227T1430 > build.20260226T1000）。
+ * prerelease 按 `.` 分段比较，数字段用数值比较。
  */
 export function compareVersions(a: string, b: string): number {
   const [aMaj, aMin, aPat, aPre] = parseVersion(a);
@@ -128,7 +156,7 @@ export function compareVersions(a: string, b: string): number {
   if (!aPre && bPre) return 1;
   if (aPre && !bPre) return -1;
   if (aPre === bPre) return 0;
-  return aPre > bPre ? 1 : -1;
+  return comparePrerelease(aPre, bPre);
 }
 
 // ---------------------------------------------------------------------------
