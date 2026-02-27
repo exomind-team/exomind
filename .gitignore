@@ -9,6 +9,7 @@ lerna-debug.log*
 
 # Dependencies
 node_modules
+/bun.lock
 
 # Build outputs
 dist
