@@ -53,7 +53,6 @@ import {
 } from '@/lib/media/timer-end-sounds';
 import { UserCard } from '@/ui/new/components/UserCard';
 import { MoreSection } from '@/ui/new/components/MoreSection';
-import { LegalSection } from '@/ui/new/components/LegalSection';
 import { AboutSection } from '@/ui/new/components/AboutSection';
 import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/new/components/settings-shared';
 import { useNavigate } from '@tanstack/react-router';
@@ -64,9 +63,12 @@ import {
   ChevronRight,
   Code,
   Download,
+  Globe,
+  Heart,
   Monitor,
   Moon,
   MoonStar,
+  Shield,
   Sun,
   Timer,
   Undo2,
@@ -389,6 +391,15 @@ export function NewSettingsPage() {
   };
 
   const navigate = useNavigate();
+
+  const handleOpenLegalSupport = () => {
+    navigate({ to: '/settings/legal-support' });
+  };
+
+  const handleOpenOfficialWebsite = () => {
+    if (typeof window === 'undefined') return;
+    window.open('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
+  };
 
   const handleSwitchToOldUI = () => {
     setUIMode('old');
@@ -759,16 +770,23 @@ export function NewSettingsPage() {
               <SectionTitle>关于</SectionTitle>
               <SectionCard>
                 <SettingRow
-                  icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="导出备份"
-                  onClick={handleExportBackup}
+                  icon={<Globe className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="官网"
+                  onClick={handleOpenOfficialWebsite}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
                 <Divider />
                 <SettingRow
-                  icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
-                  label="导入数据"
-                  onClick={handleImportBackup}
+                  icon={<Heart className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="赞助开发者"
+                  onClick={showComingSoon}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="法律与支持"
+                  onClick={handleOpenLegalSupport}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
               </SectionCard>
@@ -778,8 +796,6 @@ export function NewSettingsPage() {
               onNavigateUpdate={() => navigate({ to: '/update' })}
               onComingSoon={showComingSoon}
             />
-
-            <LegalSection onComingSoon={showComingSoon} />
 
             <AboutSection
               appVersion={versionBuildInfo.appVersion}
@@ -1001,12 +1017,36 @@ export function NewSettingsPage() {
           </SectionCard>
         </section>
 
+        <section className="space-y-2">
+          <SectionTitle>关于</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Globe className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="官网"
+              onClick={handleOpenOfficialWebsite}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Heart className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="赞助开发者"
+              onClick={showComingSoon}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="法律与支持"
+              onClick={handleOpenLegalSupport}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+            />
+          </SectionCard>
+        </section>
+
         <MoreSection
           onNavigateUpdate={() => navigate({ to: '/update' })}
           onComingSoon={showComingSoon}
         />
-
-        <LegalSection onComingSoon={showComingSoon} />
 
         <AboutSection
           appVersion={versionBuildInfo.appVersion}
