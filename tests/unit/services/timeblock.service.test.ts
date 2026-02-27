@@ -79,10 +79,14 @@ describe('TimeBlockServiceImpl', () => {
     await service.endBlock('felt good');
 
     expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
-    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({
+    const feedbackCall = addEventMock.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === 'block_feedback');
+    expect(feedbackCall).toEqual(expect.objectContaining({
       type: 'block_feedback',
-      content: expect.stringContaining('反馈：felt good'),
+      content: expect.stringContaining('felt good'),
     }));
+    expect(feedbackCall?.content).toContain('## write tests');
   });
 
   it('writes block_feedback event when ending without feedback', async () => {
@@ -93,9 +97,12 @@ describe('TimeBlockServiceImpl', () => {
     await service.markEnding();
     await service.endBlock();
 
-    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({
+    const feedbackCall = addEventMock.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === 'block_feedback');
+    expect(feedbackCall).toEqual(expect.objectContaining({
       type: 'block_feedback',
-      content: expect.stringContaining('反馈：（未填写）'),
+      content: expect.stringContaining('（未填写）'),
     }));
   });
 
@@ -158,7 +165,7 @@ describe('TimeBlockServiceImpl', () => {
     expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
     expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'block_feedback',
-      content: expect.stringContaining('反馈：done'),
+      content: expect.stringContaining('done'),
     }));
   });
 

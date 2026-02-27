@@ -2,6 +2,11 @@ import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
+const isTermuxRuntime =
+  Boolean(process.env.TERMUX_VERSION)
+  || process.platform === 'android'
+  || Boolean(process.env.ANDROID_ROOT);
+
 export default defineConfig({
   plugins: [react()],
   resolve: {
@@ -11,6 +16,8 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
+    maxWorkers: isTermuxRuntime ? 2 : undefined,
+    minWorkers: isTermuxRuntime ? 1 : undefined,
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
     exclude: [...configDefaults.exclude, 'tests/e2e/**'],
     setupFiles: ['tests/setup.ts'],

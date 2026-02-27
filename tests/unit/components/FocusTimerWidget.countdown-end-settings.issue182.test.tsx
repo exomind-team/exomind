@@ -125,8 +125,11 @@ describe('FocusTimerWidget countdown end behavior（新计时器结束分支）'
     render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), { target: { value: '硬结束任务' } });
+    rafCallbacks = [];
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
 
+    await waitFor(() => expect(startBlockMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument());
     await waitFor(() => expect(requestAnimationFrame).toHaveBeenCalled());
     expect(rafCallbacks.length).toBeGreaterThan(0);
 
@@ -154,8 +157,11 @@ describe('FocusTimerWidget countdown end behavior（新计时器结束分支）'
     render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), { target: { value: '软结束任务' } });
+    rafCallbacks = [];
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
 
+    await waitFor(() => expect(startBlockMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument());
     await waitFor(() => expect(requestAnimationFrame).toHaveBeenCalled());
     expect(rafCallbacks.length).toBeGreaterThan(0);
 
