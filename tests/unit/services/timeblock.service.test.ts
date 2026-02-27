@@ -90,8 +90,12 @@ describe('TimeBlockServiceImpl', () => {
         expectedDurationMs: null,
       }),
     }));
+    expect((feedbackCall as { content: string }).content).toContain('### 快速反馈');
+    expect((feedbackCall as { content: string }).content).toContain('反馈状态：**`已填写`**');
+    expect((feedbackCall as { content: string }).content).toContain('预期差异：**`无预期（正计时）`**');
     expect((feedbackCall as { content: string }).content).toContain('预期结束于：`∞`');
     expect((feedbackCall as { content: string }).content).not.toContain('超时投入');
+    expect((feedbackCall as { content: string }).content).toContain('---');
     expect((feedbackCall as { content: string }).content).toContain('felt good');
   });
 
@@ -109,13 +113,17 @@ describe('TimeBlockServiceImpl', () => {
 
     expect(feedbackCall).toEqual(expect.objectContaining({
       type: 'block_feedback',
-      content: expect.stringContaining('（未填写）'),
       metadata: expect.objectContaining({
         expectedDurationMs: null,
       }),
     }));
+    expect((feedbackCall as { content: string }).content).toContain('### 快速反馈');
+    expect((feedbackCall as { content: string }).content).toContain('反馈状态：**`未填写`**');
+    expect((feedbackCall as { content: string }).content).toContain('预期差异：**`无预期（正计时）`**');
     expect((feedbackCall as { content: string }).content).toContain('预期时长：**`∞`**');
     expect((feedbackCall as { content: string }).content).not.toContain('超时投入');
+    expect((feedbackCall as { content: string }).content).not.toContain('---');
+    expect((feedbackCall as { content: string }).content).not.toContain('（未填写）');
   });
 
   it('stores countdown expected duration in metadata and reports overtime based on workDuration', async () => {
@@ -149,6 +157,55 @@ describe('TimeBlockServiceImpl', () => {
     expect((feedbackCall as { content: string }).content).not.toContain('预期结束于：`∞`');
     expect((feedbackCall as { content: string }).content).toContain('预期时长：**`01:00`**');
     expect((feedbackCall as { content: string }).content).toContain('超时投入：**`00:30`**');
+    expect((feedbackCall as { content: string }).content).toContain('预期差异：**`🕒工作超时00:30`**');
+  });
+
+  it('reports early finish diff when action ends before expected end', async () => {
+    vi.useFakeTimers();
+    const base = new Date('2026-02-13T09:00:00.000Z');
+    vi.setSystemTime(base);
+
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('finish early', { mode: 'countdown', minutes: 1 });
+
+    vi.setSystemTime(new Date(base.getTime() + 30_000));
+    await service.markEnding();
+    vi.setSystemTime(new Date(base.getTime() + 33_000));
+    await service.endBlock('done');
+
+    const feedbackCall = addEventMock.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === 'block_feedback');
+
+    expect((feedbackCall as { content: string }).content).toContain('预期差异：**`🚀提前00:30完成`**');
+  });
+
+  it('reports delayed end diff when action ends late but work is still below expected duration', async () => {
+    vi.useFakeTimers();
+    const base = new Date('2026-02-13T10:00:00.000Z');
+    vi.setSystemTime(base);
+
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('late but within work', { mode: 'countdown', minutes: 1 });
+
+    vi.setSystemTime(new Date(base.getTime() + 20_000));
+    await service.pauseBlock();
+    vi.setSystemTime(new Date(base.getTime() + 90_000));
+    await service.markEnding();
+    vi.setSystemTime(new Date(base.getTime() + 95_000));
+    await service.endBlock('done');
+
+    const feedbackCall = addEventMock.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === 'block_feedback');
+
+    expect((feedbackCall as { content: string }).content).toContain(
+      '预期差异：**`✨时间块已完成，超出预期结束时间00:30`**',
+    );
   });
 
   it('accumulates paused duration and stores durations in feedback metadata', async () => {
