@@ -182,8 +182,16 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build Windows installers (构建 NSIS + MSI，单次 Rust 编译)
-        run: bun tauri build --bundles 'nsis,msi'
+      - name: Build Windows NSIS installer (构建 NSIS 安装包)
+        run: bun tauri build --bundles nsis
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Build Windows MSI installer (构建 MSI 安装包，复用已编译的 Rust)
+        run: bun tauri build --bundles msi
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
