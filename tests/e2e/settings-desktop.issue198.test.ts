@@ -22,6 +22,18 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('new-settings-desktop-vc-tabs')).toBeVisible();
     await expect(page.getByTestId('new-settings-desktop-vc-scroll')).toBeVisible();
     await expect(page.getByTestId('new-settings-desktop-vc-section-theme')).toBeVisible();
+    await expect(page.getByRole('button', { name: '外观主题' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '专注设置' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '通知' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '危险区域' })).toBeVisible();
+    const aboutTab = page.getByRole('button', { name: '关于' });
+    await expect(aboutTab).toBeVisible();
+    await aboutTab.click();
+    await expect(aboutTab).toHaveAttribute('aria-pressed', 'true');
+    await expect(page.getByTestId('new-settings-desktop-vc-section-about')).toBeVisible();
+    await expect(page.getByText('更新')).toBeVisible();
+    await expect(page.getByText('工作模式')).toHaveCount(0);
+    await expect(page.getByText('更新日志')).toHaveCount(0);
     await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-now')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-tasks')).toBeVisible();
