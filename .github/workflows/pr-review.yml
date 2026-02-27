@@ -141,7 +141,7 @@ jobs:
           ---
           *Codex 5.3 (reasoning: high) · ExoMind Feature Flow v2*"
 
-          gh pr comment "${{ needs.prepare.outputs.pr_number }}" --body "$BODY"
+          gh pr comment "${{ needs.prepare.outputs.pr_number }}" --repo "${{ github.repository }}" --body "$BODY"
 
   # ═══════════════════════════════════════════
   # 第二关：Claude 深度评审（Anthropic Messages API）
@@ -221,4 +221,4 @@ jobs:
           ---
           *Claude Opus 4.6 · ExoMind Feature Flow v2*"
 
-          gh pr comment "${{ needs.prepare.outputs.pr_number }}" --body "$BODY"
+          gh pr comment "${{ needs.prepare.outputs.pr_number }}" --repo "${{ github.repository }}" --body "$BODY"
