@@ -15,7 +15,8 @@ jobs:
   codex-review:
     if: |
       (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic'))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@critic'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -29,6 +30,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "issue_comment" ]; then
             echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           else
             echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
@@ -85,6 +88,8 @@ jobs:
         run: |
           if [ "${{ github.event_name }}" = "issue_comment" ]; then
             echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           else
             echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
@@ -110,13 +115,15 @@ jobs:
   claude-deep-review:
     if: |
       (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic'))
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic')) ||
+      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@critic'))
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
       contents: read
       pull-requests: write
       issues: write
+      id-token: write
     env:
       ANTHROPIC_BASE_URL: ${{ secrets.OPUS_API_BASE }}
     steps:
