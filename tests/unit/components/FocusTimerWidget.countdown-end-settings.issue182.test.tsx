@@ -1,9 +1,27 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NewFocusTimerWidget } from '@/ui/new/components/NewFocusTimerWidget';
+import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 
 const TIMER_PREFERENCES_STORAGE_KEY = 'exomind:timerPreferences';
+
+function clearLocalStorageSafely() {
+  const storage = window.localStorage as Partial<Storage>;
+  if (typeof storage.clear === 'function') {
+    storage.clear();
+    return;
+  }
+  if (typeof storage.removeItem !== 'function' || typeof storage.key !== 'function') {
+    return;
+  }
+  const keys: string[] = [];
+  const length = typeof storage.length === 'number' ? storage.length : 0;
+  for (let index = 0; index < length; index += 1) {
+    const key = storage.key(index);
+    if (key) keys.push(key);
+  }
+  keys.forEach((key) => storage.removeItem?.(key));
+}
 
 const {
   loadActiveBlockMock,
@@ -35,24 +53,24 @@ vi.mock('@/lib/services', () => ({
   }),
 }));
 
-describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支）', () => {
+describe('FocusTimerWidget countdown end behavior（新计时器结束分支）', () => {
   let now = 0;
-  let rafCallback: FrameRequestCallback | null = null;
+  let rafCallbacks: FrameRequestCallback[] = [];
   const playMock = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
     now = 0;
-    rafCallback = null;
+    rafCallbacks = [];
     vi.clearAllMocks();
-    window.localStorage.clear();
+    clearLocalStorageSafely();
 
     vi.spyOn(Date, 'now').mockImplementation(() => now);
 
     vi.stubGlobal(
       'requestAnimationFrame',
       vi.fn((cb: FrameRequestCallback) => {
-        rafCallback = cb;
-        return 1;
+        rafCallbacks.push(cb);
+        return rafCallbacks.length;
       }),
     );
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
@@ -104,17 +122,21 @@ describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支�
       }),
     );
 
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), { target: { value: '硬结束任务' } });
+    rafCallbacks = [];
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
 
+    await waitFor(() => expect(startBlockMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument());
     await waitFor(() => expect(requestAnimationFrame).toHaveBeenCalled());
-    expect(rafCallback).not.toBeNull();
+    expect(rafCallbacks.length).toBeGreaterThan(0);
 
     now = 100;
     await act(async () => {
-      rafCallback?.(0);
+      const callbacks = rafCallbacks.splice(0);
+      callbacks.forEach((callback) => callback(0));
     });
 
     await waitFor(() => expect(markEndingMock).toHaveBeenCalledTimes(1));
@@ -132,17 +154,21 @@ describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支�
       }),
     );
 
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), { target: { value: '软结束任务' } });
+    rafCallbacks = [];
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
 
+    await waitFor(() => expect(startBlockMock).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument());
     await waitFor(() => expect(requestAnimationFrame).toHaveBeenCalled());
-    expect(rafCallback).not.toBeNull();
+    expect(rafCallbacks.length).toBeGreaterThan(0);
 
     now = 100;
     await act(async () => {
-      rafCallback?.(0);
+      const callbacks = rafCallbacks.splice(0);
+      callbacks.forEach((callback) => callback(0));
     });
 
     await waitFor(() =>

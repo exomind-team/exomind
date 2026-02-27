@@ -32,7 +32,7 @@ describe('Vite pouchdb interop config', () => {
 
   it('aliases events to a browser-compatible polyfill', () => {
     expect(content).toMatch(
-      /alias\s*:\s*\{[\s\S]*?['"]events['"]\s*:\s*['"]events['"]/m
+      /alias\s*:\s*\{[\s\S]*?\bevents\b\s*:\s*['"]events\/?['"]/m
     );
   });
 });

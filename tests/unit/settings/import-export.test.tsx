@@ -2,8 +2,8 @@ import { describe, it, expect } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 
-describe('NewSettingsPage import/export', () => {
-  const newSettingsPath = path.resolve('src/ui/new/pages/NewSettingsPage.tsx');
+describe('SettingsPage import/export', () => {
+  const newSettingsPath = path.resolve('src/ui/app/pages/SettingsPage.tsx');
   const source = fs.readFileSync(newSettingsPath, 'utf-8');
 
   it('renders backup import/export controls', () => {
