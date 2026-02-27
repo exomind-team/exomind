@@ -66,7 +66,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     return errorResponse('Invalid version format', 400, corsOrigin);
   }
 
-  const validPlatforms = ['windows-x64', 'android-arm64'];
+  const validPlatforms = ['windows-x64', 'windows-x64-setup', 'android-arm64', 'android-x86'];
   if (!validPlatforms.includes(platform)) {
     return errorResponse(
       `Invalid platform. Must be one of: ${validPlatforms.join(', ')}`,
