@@ -13,6 +13,9 @@ export const ui = {
     'nav.changelog': '更新日志',
     'nav.docs': '文档',
     'nav.about': '关于',
+    'theme.toggle': '切换主题',
+    'theme.switch_to_dark': '切换到暗色模式',
+    'theme.switch_to_light': '切换到浅色模式',
     // Hero
     'hero.title': '你的生命成长助手',
     'hero.subtitle': '用 AI 帮你记录、反思、成长。掌控自己的生命过程。',
@@ -82,6 +85,9 @@ export const ui = {
     'nav.changelog': 'Changelog',
     'nav.docs': 'Docs',
     'nav.about': 'About',
+    'theme.toggle': 'Toggle theme',
+    'theme.switch_to_dark': 'Switch to dark mode',
+    'theme.switch_to_light': 'Switch to light mode',
     // Hero
     'hero.title': 'Your Life Growth Companion',
     'hero.subtitle': 'AI-powered journaling, reflection, and personal growth. Take control of your life process.',
