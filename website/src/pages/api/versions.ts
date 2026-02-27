@@ -57,17 +57,32 @@ export const GET: APIRoute = async ({ url, locals }) => {
     }
 
     // preview channel
-    const object = await r2.get('preview/versions.json');
-    if (!object) {
+    const [versionsObj, latestObj] = await Promise.all([
+      r2.get('preview/versions.json'),
+      r2.get('preview/latest.json'),
+    ]);
+
+    if (!versionsObj && !latestObj) {
       return errorResponse('No preview versions found', 404);
     }
 
-    const payload = await object.json();
-    const data = normalizePreviewVersionsPayload(payload);
+    const data = versionsObj
+      ? normalizePreviewVersionsPayload(await versionsObj.json())
+      : { versions: [], retention: 15 };
+
+    const latest: LatestJson | null = latestObj ? await latestObj.json() : null;
+
     return jsonResponse({
       channel: 'preview',
+      latest: latest
+        ? {
+            version: latest.version,
+            tag: latest.tag,
+            published_at: latest.published_at,
+            assets: latest.assets,
+          }
+        : null,
       versions: data.versions,
-      // retention: exposed for client-side display (e.g. "keeping last N versions")
       retention: data.retention,
     });
   } catch (err) {
