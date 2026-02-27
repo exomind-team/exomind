@@ -99,8 +99,8 @@ jobs:
       - name: Call Claude API
         id: claude
         env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-          ANTHROPIC_BASE_URL: ${{ secrets.ANTHROPIC_BASE_URL }}
+          ANTHROPIC_API_KEY: ${{ secrets.OPUS_API_KEY }}
+          ANTHROPIC_BASE_URL: ${{ secrets.OPUS_API_BASE }}
         run: |
           BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
           RESPONSE=$(curl -sS "${BASE_URL}/v1/messages" \
