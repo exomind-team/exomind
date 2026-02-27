@@ -996,32 +996,6 @@ export function NewSettingsPage() {
           </SectionCard>
         </section>
 
-        <section className="space-y-2">
-          <SectionTitle>关于</SectionTitle>
-          <SectionCard>
-            <SettingRow
-              icon={<Globe className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="官网"
-              onClick={handleOpenOfficialWebsite}
-              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Heart className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="赞助开发者"
-              onClick={showComingSoon}
-              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-            />
-            <Divider />
-            <SettingRow
-              icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
-              label="法律与支持"
-              onClick={handleOpenLegalSupport}
-              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-            />
-          </SectionCard>
-        </section>
-
         <MoreSection
           onNavigateUpdate={() => navigate({ to: '/update' })}
           onComingSoon={showComingSoon}
@@ -1030,6 +1004,9 @@ export function NewSettingsPage() {
         <AboutSection
           appVersion={versionBuildInfo.appVersion}
           buildHash={versionBuildInfo.buildHash}
+          onOpenOfficialWebsite={handleOpenOfficialWebsite}
+          onOpenSponsor={handleOpenSponsor}
+          onOpenLegalSupport={handleOpenLegalSupport}
         />
 
         {/* ── Developer Section (开发者) ── */}
@@ -1091,6 +1068,39 @@ export function NewSettingsPage() {
               </>
             )}
           </SectionCard>
+        </section>
+
+        <section className="space-y-2">
+          <SectionTitle>危险区域</SectionTitle>
+          <div className="overflow-hidden rounded-2xl border border-[#DC2626] bg-white dark:bg-[#1C1917]">
+            <div className="flex items-center justify-between px-4 py-[14px]">
+              <div>
+                <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">清空本地缓存</p>
+                <p className="mt-1 text-xs text-[#A8A29E]">将清除设备上的临时设置与缓存</p>
+              </div>
+              <button
+                type="button"
+                onClick={showComingSoon}
+                className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C]"
+              >
+                立即清空
+              </button>
+            </div>
+            <div className="mx-4 h-px bg-[#F0ECE8] dark:bg-[#292524]" />
+            <div className="flex items-center justify-between px-4 py-[14px]">
+              <div>
+                <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">重置所有设置</p>
+                <p className="mt-1 text-xs text-[#A8A29E]">恢复默认配置，不影响历史事件数据</p>
+              </div>
+              <button
+                type="button"
+                onClick={showComingSoon}
+                className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C]"
+              >
+                恢复默认
+              </button>
+            </div>
+          </div>
         </section>
 
         {/* Status / Error messages */}

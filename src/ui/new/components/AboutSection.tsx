@@ -27,14 +27,9 @@ export function AboutSection({
         <Divider />
         <SettingRow
           icon={<Heart className="h-[18px] w-[18px] text-[#78716C]" />}
-          label="赞助开发者"
+          label="赞助开发者（Starlin）"
           onClick={onOpenSponsor}
-          right={
-            <div className="flex items-center gap-2">
-              <span className="text-xs text-[#A8A29E]">Starlin</span>
-              <ChevronRight className="h-4 w-4 text-[#A8A29E]" />
-            </div>
-          }
+          right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
         />
         <Divider />
         <SettingRow
