@@ -9,6 +9,7 @@ lerna-debug.log*
 
 # Dependencies
 node_modules
+/bun.lock
 
 # Build outputs
 dist
@@ -100,6 +101,7 @@ pencil/.claude/settings.local.json
 
 # Agent 本地状态
 agent.test.local.state.json
+.claude/worktrees/
 
 # 临时截图和备份
 dark-mode-*.png
