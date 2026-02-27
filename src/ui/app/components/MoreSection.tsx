@@ -1,9 +1,11 @@
 import {
   Bug,
   ChevronRight,
+  LifeBuoy,
+  MessageSquare,
   RefreshCw,
   ScrollText,
-  Shield,
+  Activity,
 } from 'lucide-react';
 import { Divider, SectionCard, SectionTitle, SettingRow } from './settings-shared';
 
@@ -26,7 +28,21 @@ export function MoreSection({
         />
         <Divider />
         <SettingRow
-          icon={<Shield className="h-[18px] w-[18px] text-[#78716C]" />}
+          icon={<LifeBuoy className="h-[18px] w-[18px] text-[#78716C]" />}
+          label="帮助中心"
+          onClick={onComingSoon}
+          right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+        />
+        <Divider />
+        <SettingRow
+          icon={<MessageSquare className="h-[18px] w-[18px] text-[#78716C]" />}
+          label="反馈建议"
+          onClick={onComingSoon}
+          right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+        />
+        <Divider />
+        <SettingRow
+          icon={<Activity className="h-[18px] w-[18px] text-[#78716C]" />}
           label="遥测"
           onClick={onComingSoon}
           right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
