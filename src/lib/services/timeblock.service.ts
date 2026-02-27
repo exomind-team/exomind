@@ -13,6 +13,7 @@
 import { ExoMindEnvironment } from '../environment/environment';
 import { getEventStorage } from '../storage/event-storage';
 import type { TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
+import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -215,18 +216,30 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const feedbackDurationMs = Math.max(0, submittedAt - feedbackStartedAt);
     const totalDurationMs = Math.max(0, submittedAt - activeData.startTime);
     const workDurationMs = Math.max(0, actionDurationMs - pausedDurationMs);
+    const expectedDurationMs = activeData.mode === 'countdown'
+      ? (activeData.targetMinutes ?? 25) * 60 * 1000
+      : null;
+    const expectedEndAt = expectedDurationMs === null
+      ? null
+      : actionStartAt + expectedDurationMs;
 
     const endId = crypto.randomUUID();
 
     const timeBlockName = activeData.name;
-    const feedbackText = feedback?.trim() ? feedback.trim() : '（未填写）';
+    const feedbackText = feedback?.trim() ?? '';
+    const hasFeedback = feedbackText.length > 0;
+    const feedbackPreferences = getFeedbackPreferences();
     const report = this.buildFeedbackReport({
       timeBlockName,
       feedbackText,
+      hasFeedback,
+      feedbackPreferences,
       feedbackDurationMs,
       pausedDurationMs,
       workDurationMs,
       totalDurationMs,
+      expectedDurationMs,
+      expectedEndAt,
       actionStartAt,
       actionEndedAt,
       submittedAt,
@@ -248,6 +261,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         pausedDurationMs,
         workDurationMs,
         totalDurationMs,
+        expectedDurationMs,
       },
     });
 
@@ -378,37 +392,90 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private buildFeedbackReport(input: {
     timeBlockName: string;
     feedbackText: string;
+    hasFeedback: boolean;
+    feedbackPreferences: FeedbackPreferences;
     feedbackDurationMs: number;
     pausedDurationMs: number;
     workDurationMs: number;
     totalDurationMs: number;
+    expectedDurationMs: number | null;
+    expectedEndAt: number | null;
     actionStartAt: number;
     actionEndedAt: number;
     submittedAt: number;
   }): string {
+    const hasExpectedDuration = input.expectedDurationMs !== null;
+    const expectedDurationMs = input.expectedDurationMs ?? 0;
+    const expectedEndAt = input.expectedEndAt ?? 0;
+    const overtimeMs = hasExpectedDuration
+      ? Math.max(0, input.workDurationMs - expectedDurationMs)
+      : 0;
+    const expectedDiff = !hasExpectedDuration
+      ? '无预期（正计时）'
+      : input.actionEndedAt < expectedEndAt
+        ? `🚀提前${this.formatDuration(expectedEndAt - input.actionEndedAt)}完成`
+        : input.actionEndedAt > expectedEndAt && input.workDurationMs < expectedDurationMs
+          ? `✨时间块已完成，超出预期结束时间${this.formatDuration(input.actionEndedAt - expectedEndAt)}`
+          : input.workDurationMs > expectedDurationMs
+            ? `🕒工作超时${this.formatDuration(input.workDurationMs - expectedDurationMs)}`
+            : '与预期一致';
+    const focusRhythm = input.pausedDurationMs > 0
+      ? `有暂停 ${this.formatDuration(input.pausedDurationMs)}`
+      : '连续专注';
+    const feedbackStatus = input.hasFeedback ? '已填写' : '未填写';
+
     let result = ''
     let print = (...lines: string[]) => { for (const line of lines) { result += line + '\n' } }
-    print(
-      `## ${input.timeBlockName}`,
-      ``,
-      `### 时刻信息`,
-      ``,
-      `- 时间开始于：\`${this.formatClock(input.actionStartAt)}\``,
-      `- 时间结束于：\`${this.formatClock(input.actionEndedAt)}\``,
-      `- 反馈提交于：\`${this.formatClock(input.submittedAt)}\``,
-      ``,
-      `### 统计信息`,
-      ``,
-      `- 总共时长：**\`${this.formatDuration(input.totalDurationMs)}\`**`);
-    if (input.workDurationMs > 0) print(`- 实际工作：**\`${this.formatDuration(input.workDurationMs)}\`**`)
-    if (input.pausedDurationMs > 0) print(`- 暂停时长：**\`${this.formatDuration(input.pausedDurationMs)}\`**`)
-    if (input.feedbackDurationMs > 0) print(`- 反馈用时：**\`${this.formatDuration(input.feedbackDurationMs)}\`**`)
-    print(
-      ``,
-      `---`,
-      ``,
-      `${input.feedbackText}`,
-    );
+    print(`## ${input.timeBlockName}`, ``);
+
+    if (input.feedbackPreferences.timingInfoEnabled) {
+      print(
+        `### 时刻信息`,
+        ``,
+        `- 时间开始于：\`${this.formatClock(input.actionStartAt)}\``,
+        `- 预期结束于：\`${input.expectedEndAt === null ? '∞' : this.formatClock(input.expectedEndAt)}\``,
+        `- 时间结束于：\`${this.formatClock(input.actionEndedAt)}\``,
+        `- 反馈提交于：\`${this.formatClock(input.submittedAt)}\``,
+        ``,
+      );
+    }
+
+    if (input.feedbackPreferences.statisticsEnabled) {
+      print(
+        `### 统计信息`,
+        ``,
+        `- 总共时长：**\`${this.formatDuration(input.totalDurationMs)}\`**`,
+      );
+      if (input.expectedDurationMs === null) {
+        print(`- 预期时长：**\`∞\`**`)
+      } else {
+        print(`- 预期时长：**\`${this.formatDuration(input.expectedDurationMs)}\`**`)
+      }
+      if (input.workDurationMs > 0) print(`- 实际工作：**\`${this.formatDuration(input.workDurationMs)}\`**`)
+      if (input.pausedDurationMs > 0) print(`- 暂停时长：**\`${this.formatDuration(input.pausedDurationMs)}\`**`)
+      if (input.feedbackDurationMs > 0) print(`- 反馈用时：**\`${this.formatDuration(input.feedbackDurationMs)}\`**`)
+      if (hasExpectedDuration && overtimeMs > 0) print(`- 超时投入：**\`${this.formatDuration(overtimeMs)}\`**`)
+      print(``);
+    }
+
+    if (input.feedbackPreferences.quickFeedbackEnabled) {
+      print(
+        `### 快速反馈`,
+        ``,
+        `- 预期差异：**\`${expectedDiff}\`**`,
+        `- 专注节奏：**\`${focusRhythm}\`**`,
+        `- 反馈状态：**\`${feedbackStatus}\`**`,
+      );
+    }
+
+    if (input.hasFeedback) {
+      print(
+        ``,
+        `---`,
+        ``,
+        `${input.feedbackText}`,
+      );
+    }
     return result.trimEnd()
   }
 }

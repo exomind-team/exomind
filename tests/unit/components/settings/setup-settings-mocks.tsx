@@ -1,10 +1,10 @@
 /**
- * Shared vi.mock() blocks for NewSettingsPage section tests.
+ * Shared vi.mock() blocks for SettingsPage section tests.
  * Import this file (side-effect only) before importing the component under test.
  *
  * Usage:
  *   import './setup-settings-mocks';
- *   import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+ *   import { SettingsPage } from '@/ui/app/pages/SettingsPage';
  *
  * If a test needs to override a specific mock (e.g. developer-mode),
  * call vi.mock() again AFTER this import — Vitest hoists all vi.mock()
@@ -47,6 +47,11 @@ vi.mock('@/config/agent-page-enabled', () => ({
   setAgentPageEnabled: vi.fn(),
 }));
 
+vi.mock('@/config/desktop-adaptive', () => ({
+  getDesktopAdaptiveEnabled: vi.fn(() => true),
+  setDesktopAdaptiveEnabled: vi.fn(),
+}));
+
 vi.mock('@/config/timer-preferences', () => ({
   getTimerPreferences: vi.fn(() => ({
     countdownEndMode: 'soft',
@@ -81,6 +86,16 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/feedback-preferences', () => ({
+  getFeedbackPreferences: vi.fn(() => ({
+    timingInfoEnabled: false,
+    statisticsEnabled: false,
+    quickFeedbackEnabled: true,
+  })),
+  setFeedbackPreferences: vi.fn(),
+  subscribeFeedbackPreferencesChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/lib/debug/devtools-runtime', () => ({
   syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
@@ -90,7 +105,7 @@ vi.mock('@/lib/media/timer-end-sounds', () => ({
   getTimerEndSoundPresetById: vi.fn(() => ({ label: 'Bell' })),
 }));
 
-vi.mock('@/ui/new/components/UserCard', () => ({
+vi.mock('@/ui/app/components/UserCard', () => ({
   UserCard: () => null,
 }));
 

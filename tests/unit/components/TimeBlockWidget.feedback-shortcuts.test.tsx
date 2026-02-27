@@ -9,6 +9,7 @@ const {
   pauseBlockMock,
   resumeBlockMock,
   endBlockMock,
+  markEndingMock,
   updateElapsedMock,
 } = vi.hoisted(() => ({
   loadActiveBlockMock: vi.fn(),
@@ -16,6 +17,7 @@ const {
   pauseBlockMock: vi.fn(),
   resumeBlockMock: vi.fn(),
   endBlockMock: vi.fn(),
+  markEndingMock: vi.fn(),
   updateElapsedMock: vi.fn(),
 }));
 
@@ -26,6 +28,7 @@ vi.mock('@/lib/services', () => ({
     pauseBlock: pauseBlockMock,
     resumeBlock: resumeBlockMock,
     endBlock: endBlockMock,
+    markEnding: markEndingMock,
     updateElapsed: updateElapsedMock,
   }),
 }));
@@ -42,6 +45,7 @@ describe('TimeBlockWidget feedback shortcuts', () => {
     pauseBlockMock.mockReset();
     resumeBlockMock.mockReset();
     endBlockMock.mockReset();
+    markEndingMock.mockReset();
     updateElapsedMock.mockReset();
 
     loadActiveBlockMock.mockResolvedValue({
@@ -53,6 +57,7 @@ describe('TimeBlockWidget feedback shortcuts', () => {
       paused: false,
     });
     endBlockMock.mockResolvedValue(null);
+    markEndingMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -68,6 +73,10 @@ describe('TimeBlockWidget feedback shortcuts', () => {
     });
 
     fireEvent.click(screen.getByRole('button', { name: '结束' }));
+
+    await waitFor(() => {
+      expect(markEndingMock).toHaveBeenCalledTimes(1);
+    });
 
     const feedback = await screen.findByTestId('timeblock-feedback-textarea');
     fireEvent.change(feedback, { target: { value: '有点累，但完成了' } });
@@ -87,6 +96,10 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '结束' }));
 
+    await waitFor(() => {
+      expect(markEndingMock).toHaveBeenCalledTimes(1);
+    });
+
     const feedback = await screen.findByTestId('timeblock-feedback-textarea');
     fireEvent.change(feedback, { target: { value: '第一行' } });
     fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter', shiftKey: true });
@@ -95,4 +108,3 @@ describe('TimeBlockWidget feedback shortcuts', () => {
     expect(endBlockMock).not.toHaveBeenCalled();
   });
 });
-

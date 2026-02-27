@@ -17,7 +17,7 @@ const PASSWORD_HASH_SALT = 'exomind-password-v1';
 
 const PBKDF2_ITERATIONS = 100000;  // NIST 推荐至少 100,000 次
 const IV_LENGTH = 12;  // NIST 推荐 12 字节 = 96 位
-const KEY_LENGTH = 32;  // 256 位
+const KEY_LENGTH = 256;  // 256 位（Crypto API expects bits）
 
 function getCryptoApi(): Crypto {
   if (typeof globalThis.crypto === 'undefined') {

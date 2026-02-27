@@ -105,9 +105,8 @@ describe('加密功能', () => {
 
         const result = await encryptAes256(plaintext, password);
         expect(result).toBeDefined();
-        expect(result.ciphertext).toBeDefined();
-        expect(result.iv).toBeDefined();
-        expect(result.salt).toBeDefined();
+        expect(typeof result).toBe('string');
+        expect(result.length).toBeGreaterThan(0);
 
         const decrypted = await decryptAes256(result, password);
         expect(decrypted).toBe(plaintext);
@@ -147,7 +146,7 @@ describe('加密功能', () => {
         const encrypted1 = await encryptAes256(plaintext, 'password-1');
         const encrypted2 = await encryptAes256(plaintext, 'password-2');
 
-        expect(encrypted1.ciphertext).not.toBe(encrypted2.ciphertext);
+        expect(encrypted1).not.toBe(encrypted2);
       } catch (error) {
         if (error instanceof Error && error.message.includes('derivedKeyType')) {
           console.warn('crypto.subtle 完整功能不可用，跳过不同密码测试');
@@ -166,7 +165,7 @@ describe('加密功能', () => {
         const encrypted2 = await encryptAes256(plaintext, password);
 
         // 由于使用随机 IV，密文应该不同
-        expect(encrypted1.ciphertext).not.toEqual(encrypted2.ciphertext);
+        expect(encrypted1).not.toEqual(encrypted2);
         // 但都可以用相同密码解密
         const decrypted1 = await decryptAes256(encrypted1, password);
         const decrypted2 = await decryptAes256(encrypted2, password);

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { AgentsPage } from '@/ui/new/pages/AgentsPage';
+import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
 
 const serviceMocks = vi.hoisted(() => ({

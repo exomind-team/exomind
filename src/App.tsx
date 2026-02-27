@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { RouterProvider } from "@tanstack/react-router";
-import { newUiRouter } from "@/routes-new";
+import { appRouter } from "@/routes";
 import { ThemeController } from "@/components/ThemeController";
 import { Toaster } from "@/components/ui/toaster";
 import { UpdateToast } from "@/ui/components/UpdateToast";
@@ -19,7 +19,7 @@ function App() {
   return (
     <>
       <ThemeController />
-      <RouterProvider router={newUiRouter} />
+      <RouterProvider router={appRouter} />
       <Toaster />
       <UpdateToast />
     </>
