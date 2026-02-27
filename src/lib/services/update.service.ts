@@ -72,7 +72,12 @@ export function getPlatform(): string {
   const ua = navigator.userAgent.toLowerCase();
   if (ua.includes('android')) return 'android-arm64';
   if (ua.includes('win')) return 'windows-x64';
-  if (ua.includes('mac')) return 'macos-x64';
+  if (ua.includes('mac')) {
+    // Apple Silicon detection via platform or architecture hints
+    const platform = navigator.platform?.toLowerCase() ?? '';
+    if (platform.includes('arm') || platform.includes('aarch64')) return 'macos-aarch64';
+    return 'macos-aarch64'; // macos-latest builds aarch64 by default
+  }
   if (ua.includes('linux')) return 'linux-x64';
   return 'unknown';
 }
@@ -169,8 +174,9 @@ export function compareVersions(a: string, b: string): number {
 const PLATFORM_ASSET_KEY: Record<string, string> = {
   'windows-x64': 'windows-x64-setup',
   'android-arm64': 'android-arm64',
+  'macos-aarch64': 'macos-aarch64',
   'macos-x64': 'macos-x64',
-  'linux-x64': 'linux-x64',
+  'linux-x64': 'linux-x64-appimage',
 };
 
 function getAssetKey(platform: string): string {
