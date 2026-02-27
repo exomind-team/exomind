@@ -9,7 +9,7 @@ directory = "./website/dist"
 
 # R2 bucket for build artifacts (release & preview channels)
 [[r2_buckets]]
-binding = "R2"
+binding = "RELEASES"
 bucket_name = "exomind-releases"
 
 [observability]
