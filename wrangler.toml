@@ -3,3 +3,8 @@ compatibility_date = "2025-02-27"
 
 [assets]
 directory = "./website/dist"
+
+# R2 bucket for build artifacts (release & preview channels)
+[[r2_buckets]]
+binding = "R2"
+bucket_name = "exomind-releases"
