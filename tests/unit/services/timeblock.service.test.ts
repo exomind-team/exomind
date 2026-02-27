@@ -78,11 +78,20 @@ describe('TimeBlockServiceImpl', () => {
     await service.markEnding();
     await service.endBlock('felt good');
 
+    const feedbackCall = addEventMock.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === 'block_feedback');
+
     expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
-    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({
+    expect(feedbackCall).toEqual(expect.objectContaining({
       type: 'block_feedback',
-      content: expect.stringContaining('反馈：felt good'),
+      content: expect.stringContaining('预期时长：**`∞`**'),
+      metadata: expect.objectContaining({
+        expectedDurationMs: null,
+      }),
     }));
+    expect((feedbackCall as { content: string }).content).not.toContain('超时投入');
+    expect((feedbackCall as { content: string }).content).toContain('felt good');
   });
 
   it('writes block_feedback event when ending without feedback', async () => {
@@ -93,10 +102,50 @@ describe('TimeBlockServiceImpl', () => {
     await service.markEnding();
     await service.endBlock();
 
-    expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({
+    const feedbackCall = addEventMock.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === 'block_feedback');
+
+    expect(feedbackCall).toEqual(expect.objectContaining({
       type: 'block_feedback',
-      content: expect.stringContaining('反馈：（未填写）'),
+      content: expect.stringContaining('（未填写）'),
+      metadata: expect.objectContaining({
+        expectedDurationMs: null,
+      }),
     }));
+    expect((feedbackCall as { content: string }).content).toContain('预期时长：**`∞`**');
+    expect((feedbackCall as { content: string }).content).not.toContain('超时投入');
+  });
+
+  it('stores countdown expected duration in metadata and reports overtime based on workDuration', async () => {
+    vi.useFakeTimers();
+    const base = new Date('2026-02-13T08:00:00.000Z');
+    vi.setSystemTime(base);
+
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('focus countdown', { mode: 'countdown', minutes: 1 });
+
+    vi.setSystemTime(new Date(base.getTime() + 90_000));
+    await service.markEnding();
+
+    vi.setSystemTime(new Date(base.getTime() + 95_000));
+    await service.endBlock('overtime happened');
+
+    const feedbackCall = addEventMock.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === 'block_feedback');
+
+    expect(feedbackCall).toEqual(expect.objectContaining({
+      type: 'block_feedback',
+      metadata: expect.objectContaining({
+        expectedDurationMs: 60_000,
+        workDurationMs: 90_000,
+      }),
+    }));
+    expect((feedbackCall as { content: string }).content).toContain('预期时长：**`01:00`**');
+    expect((feedbackCall as { content: string }).content).toContain('超时投入：**`00:30`**');
   });
 
   it('accumulates paused duration and stores durations in feedback metadata', async () => {
@@ -134,6 +183,7 @@ describe('TimeBlockServiceImpl', () => {
         pausedDurationMs: 5_000,
         workDurationMs: 30_000,
         totalDurationMs: 42_000,
+        expectedDurationMs: null,
       }),
     }));
   });
@@ -158,7 +208,7 @@ describe('TimeBlockServiceImpl', () => {
     expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
     expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({
       type: 'block_feedback',
-      content: expect.stringContaining('反馈：done'),
+      content: expect.stringContaining('done'),
     }));
   });
 

@@ -147,7 +147,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     fireEvent.change(screen.getByTestId('new-focus-task-input'), {
       target: { value: '保留草稿任务' },
     });
-    fireEvent.click(screen.getByTestId('new-focus-duration-45'));
+    fireEvent.click(screen.getByTestId('new-focus-expected-45'));
 
     fireEvent.click(screen.getByTestId('new-focus-config-collapse-button'));
     expect(screen.getByTestId('new-focus-state-idle')).toBeInTheDocument();
@@ -176,9 +176,11 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     expect(configContainer.className).not.toContain('h-[253px]');
     expect(glowNode?.className).not.toContain('h-[227px]');
 
-    fireEvent.click(screen.getByTestId('new-focus-mode-countup'));
-
+    expect(screen.getByText('预期时间')).toBeInTheDocument();
+    expect(screen.queryByText('计时模式')).toBeNull();
     expect(screen.queryByText('倒计时时长')).toBeNull();
+    fireEvent.click(screen.getByTestId('new-focus-expected-countup'));
+
     expect(configContainer.className).toContain('pb-3');
     expect(glowNode?.className).toContain('bottom-[10px]');
   });
@@ -211,11 +213,11 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
       target: { value: '自定义时长任务' },
     });
 
-    fireEvent.click(screen.getByTestId('new-focus-duration-custom-trigger'));
-    const customInput = screen.getByTestId('new-focus-duration-custom-input');
+    fireEvent.click(screen.getByTestId('new-focus-expected-custom-trigger'));
+    const customInput = screen.getByTestId('new-focus-expected-custom-input');
     fireEvent.change(customInput, { target: { value: '37' } });
     fireEvent.blur(customInput);
-    expect(screen.getByTestId('new-focus-duration-custom-trigger')).toHaveTextContent('37m');
+    expect(screen.getByTestId('new-focus-expected-custom-trigger')).toHaveTextContent('37m');
 
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
     await waitFor(() => {
@@ -227,22 +229,22 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     });
   });
 
-  it('shows icon-only custom trigger while editing（自定义编辑态仅显示箭头）', () => {
+  it('switches custom trigger to input while editing（自定义编辑态切换为输入框）', () => {
     render(<NewFocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
 
-    const trigger = screen.getByTestId('new-focus-duration-custom-trigger');
+    const trigger = screen.getByTestId('new-focus-expected-custom-trigger');
     fireEvent.click(trigger);
 
-    expect(trigger.textContent?.trim()).toBe('');
-    expect(screen.getByTestId('new-focus-duration-custom-input')).toBeInTheDocument();
+    expect(screen.getByTestId('new-focus-expected-custom-input')).toBeInTheDocument();
+    expect(screen.queryByTestId('new-focus-expected-custom-trigger')).toBeNull();
   });
 
   it('shows red glow and removes right chevron in running countup mode（正计时运行态显示红色背景并移除右箭头）', async () => {
     render(<NewFocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
-    fireEvent.click(screen.getByTestId('new-focus-mode-countup'));
+    fireEvent.click(screen.getByTestId('new-focus-expected-countup'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), {
       target: { value: '正计时任务' },
     });
@@ -261,6 +263,37 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     const chevronNode = runningSection.querySelector("[data-lucide='chevron-down']");
     expect(glowNode).not.toBeNull();
     expect(chevronNode).toBeNull();
+  });
+
+  it('renders unified expected-time options row（统一预期时间选择器）', () => {
+    render(<NewFocusTimerWidget />);
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+
+    expect(screen.getByTestId('new-focus-expected-countup')).toBeInTheDocument();
+    expect(screen.getByTestId('new-focus-expected-15')).toBeInTheDocument();
+    expect(screen.getByTestId('new-focus-expected-25')).toBeInTheDocument();
+    expect(screen.getByTestId('new-focus-expected-45')).toBeInTheDocument();
+    expect(screen.getByTestId('new-focus-expected-custom-trigger')).toBeInTheDocument();
+  });
+
+  it('slides active indicator across expected-time options（预期时间滑块随选项横向滑动）', () => {
+    render(<NewFocusTimerWidget />);
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+
+    const indicator = screen.getByTestId('new-focus-expected-active-indicator');
+    expect(indicator).toHaveStyle({ transform: 'translateX(200%)' }); // 默认 countdown 25m
+
+    fireEvent.click(screen.getByTestId('new-focus-expected-countup'));
+    expect(indicator).toHaveStyle({ transform: 'translateX(0%)' });
+
+    fireEvent.click(screen.getByTestId('new-focus-expected-45'));
+    expect(indicator).toHaveStyle({ transform: 'translateX(300%)' });
+
+    fireEvent.click(screen.getByTestId('new-focus-expected-custom-trigger'));
+    const customInput = screen.getByTestId('new-focus-expected-custom-input');
+    fireEvent.change(customInput, { target: { value: '37' } });
+    fireEvent.blur(customInput);
+    expect(indicator).toHaveStyle({ transform: 'translateX(400%)' });
   });
 
   it('keeps timer and controls inside one running task card（运行态计时与控制整合在同一卡片）', async () => {

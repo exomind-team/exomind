@@ -215,6 +215,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const feedbackDurationMs = Math.max(0, submittedAt - feedbackStartedAt);
     const totalDurationMs = Math.max(0, submittedAt - activeData.startTime);
     const workDurationMs = Math.max(0, actionDurationMs - pausedDurationMs);
+    const expectedDurationMs = activeData.mode === 'countdown'
+      ? (activeData.targetMinutes ?? 25) * 60 * 1000
+      : null;
 
     const endId = crypto.randomUUID();
 
@@ -227,6 +230,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pausedDurationMs,
       workDurationMs,
       totalDurationMs,
+      expectedDurationMs,
       actionStartAt,
       actionEndedAt,
       submittedAt,
@@ -248,6 +252,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         pausedDurationMs,
         workDurationMs,
         totalDurationMs,
+        expectedDurationMs,
       },
     });
 
@@ -382,10 +387,15 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     pausedDurationMs: number;
     workDurationMs: number;
     totalDurationMs: number;
+    expectedDurationMs: number | null;
     actionStartAt: number;
     actionEndedAt: number;
     submittedAt: number;
   }): string {
+    const overtimeMs = input.expectedDurationMs === null
+      ? null
+      : Math.max(0, input.workDurationMs - input.expectedDurationMs);
+
     let result = ''
     let print = (...lines: string[]) => { for (const line of lines) { result += line + '\n' } }
     print(
@@ -400,9 +410,15 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       `### 统计信息`,
       ``,
       `- 总共时长：**\`${this.formatDuration(input.totalDurationMs)}\`**`);
+    if (input.expectedDurationMs === null) {
+      print(`- 预期时长：**\`∞\`**`)
+    } else {
+      print(`- 预期时长：**\`${this.formatDuration(input.expectedDurationMs)}\`**`)
+    }
     if (input.workDurationMs > 0) print(`- 实际工作：**\`${this.formatDuration(input.workDurationMs)}\`**`)
     if (input.pausedDurationMs > 0) print(`- 暂停时长：**\`${this.formatDuration(input.pausedDurationMs)}\`**`)
     if (input.feedbackDurationMs > 0) print(`- 反馈用时：**\`${this.formatDuration(input.feedbackDurationMs)}\`**`)
+    if (overtimeMs !== null && overtimeMs > 0) print(`- 超时投入：**\`${this.formatDuration(overtimeMs)}\`**`)
     print(
       ``,
       `---`,
