@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
-import { LegalSection } from '@/ui/new/components/LegalSection';
+import { LegalSection } from '@/ui/app/components/LegalSection';
 
 describe('LegalSection（法律与支持组件）', () => {
   it('renders only legal items（仅渲染法务三项）', () => {

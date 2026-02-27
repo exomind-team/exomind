@@ -209,7 +209,7 @@
 - Modify: `src/routes-new.tsx`
 - Modify (按需): `src/ui/new/pages/NewSettingsPage.tsx`
 - Test: `tests/unit/ui/agent-hub/agent-routing.issue204.test.ts`
-- Test (按需补充): `tests/unit/settings/new-settings-mock-data-toggle.issue204.test.tsx`
+- Test (按需补充): `tests/unit/settings/settings-mock-data-toggle.issue204.test.tsx`
 
 **Step 1: 写失败测试（RED）**
 - 断言新增路由：
@@ -231,7 +231,7 @@
 - 同上命令，Expected: PASS
 
 **Step 5: Commit**
-- `git add src/routes-new.tsx src/ui/new/pages/NewSettingsPage.tsx tests/unit/ui/agent-hub/agent-routing.issue204.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue204.test.tsx`
+- `git add src/routes-new.tsx src/ui/new/pages/NewSettingsPage.tsx tests/unit/ui/agent-hub/agent-routing.issue204.test.ts tests/unit/settings/settings-mock-data-toggle.issue204.test.tsx`
 - `git commit -m "feat(agent-hub): wire routes and keep settings mock-data toggle"`
 
 ## 任务 9：Playwright 自动化（issue204 独立端口）
@@ -271,7 +271,7 @@
 - Create: `docs/pr/issue-204-review-comment.md`
 
 **Step 1: 运行验证**
-- `bun vitest tests/unit/agent-hub tests/unit/environment/bootstrap.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue204.test.tsx`
+- `bun vitest tests/unit/agent-hub tests/unit/environment/bootstrap.test.ts tests/unit/settings/settings-mock-data-toggle.issue204.test.tsx`
 - `bun run test:e2e:issue204`
 - `bun run build`
 

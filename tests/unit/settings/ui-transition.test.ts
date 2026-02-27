@@ -5,11 +5,12 @@ import fs from 'node:fs';
 
 describe('UI transition retired（旧 UI 切换已下线）', () => {
   const appSource = readFileSync(path.resolve('src/App.tsx'), 'utf-8');
-  const newSettingsSource = readFileSync(path.resolve('src/ui/new/pages/NewSettingsPage.tsx'), 'utf-8');
+  const newSettingsSource = readFileSync(path.resolve('src/ui/app/pages/SettingsPage.tsx'), 'utf-8');
 
   it('app uses new router only（入口只使用新路由）', () => {
-    expect(appSource).toContain('newUiRouter');
-    expect(appSource).not.toContain('router } from "@/routes"');
+    expect(appSource).toContain('appRouter');
+    expect(appSource).toContain('appRouter } from "@/routes"');
+    expect(appSource).not.toContain('routes-new');
     expect(appSource).not.toContain('getUIMode');
   });
 

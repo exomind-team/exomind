@@ -165,7 +165,7 @@ git commit -m "feat(task): add task service over environment task port"
 - Create: `src/ui/new/pages/NewTasksPage.tsx`
 - Create: `src/ui/new/pages/NewTaskDetailPage.tsx`
 - Create: `src/ui/new/components/NewTaskTimerCard.tsx`
-- Create: `tests/unit/ui/new-task-pages.issue213.test.tsx`
+- Create: `tests/unit/ui/task-pages.issue213.test.tsx`
 
 **Step 1: Write failing UI tests (structure tokens + key interactions)**
 
@@ -176,7 +176,7 @@ it('supports timer mode switch, pause button, and task input', () => { ... })
 
 **Step 2: Run test to verify red**
 
-Run: `bun vitest tests/unit/ui/new-task-pages.issue213.test.tsx`
+Run: `bun vitest tests/unit/ui/task-pages.issue213.test.tsx`
 
 Expected: FAIL.
 
@@ -188,14 +188,14 @@ Expected: FAIL.
 
 **Step 4: Run test to verify green**
 
-Run: `bun vitest tests/unit/ui/new-task-pages.issue213.test.tsx`
+Run: `bun vitest tests/unit/ui/task-pages.issue213.test.tsx`
 
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add src/ui/new/pages/NewTasksPage.tsx src/ui/new/pages/NewTaskDetailPage.tsx src/ui/new/components/NewTaskTimerCard.tsx tests/unit/ui/new-task-pages.issue213.test.tsx
+git add src/ui/new/pages/NewTasksPage.tsx src/ui/new/pages/NewTaskDetailPage.tsx src/ui/new/components/NewTaskTimerCard.tsx tests/unit/ui/task-pages.issue213.test.tsx
 git commit -m "feat(task-ui): implement task list/detail pages with pencil-aligned timer card"
 ```
 
@@ -204,8 +204,8 @@ git commit -m "feat(task-ui): implement task list/detail pages with pencil-align
 **Files:**
 - Modify: `src/routes-new.tsx`
 - Modify: `src/ui/new/pages/NewSettingsPage.tsx`
-- Create: `tests/unit/ui/new-task-routing.issue213.test.ts`
-- Create: `tests/unit/settings/new-settings-mock-data-toggle.issue213.test.tsx`
+- Create: `tests/unit/ui/task-routing.issue213.test.ts`
+- Create: `tests/unit/settings/settings-mock-data-toggle.issue213.test.tsx`
 
 **Step 1: Write failing tests for route + toggle**
 
@@ -216,7 +216,7 @@ expect(screen.getByText('使用测试数据')).toBeInTheDocument();
 
 **Step 2: Run test to verify red**
 
-Run: `bun vitest tests/unit/ui/new-task-routing.issue213.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue213.test.tsx`
+Run: `bun vitest tests/unit/ui/task-routing.issue213.test.ts tests/unit/settings/settings-mock-data-toggle.issue213.test.tsx`
 
 Expected: FAIL.
 
@@ -228,14 +228,14 @@ Expected: FAIL.
 
 **Step 4: Run test to verify green**
 
-Run: `bun vitest tests/unit/ui/new-task-routing.issue213.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue213.test.tsx`
+Run: `bun vitest tests/unit/ui/task-routing.issue213.test.ts tests/unit/settings/settings-mock-data-toggle.issue213.test.tsx`
 
 Expected: PASS.
 
 **Step 5: Commit**
 
 ```bash
-git add src/routes-new.tsx src/ui/new/pages/NewSettingsPage.tsx tests/unit/ui/new-task-routing.issue213.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue213.test.tsx
+git add src/routes-new.tsx src/ui/new/pages/NewSettingsPage.tsx tests/unit/ui/task-routing.issue213.test.ts tests/unit/settings/settings-mock-data-toggle.issue213.test.tsx
 git commit -m "feat(task-ui): add tasks routes/nav and developer mock-data toggle"
 ```
 
@@ -283,7 +283,7 @@ git commit -m "test(e2e): add issue-213 playwright coverage for task ui flow"
 **Step 1: Run required verification set**
 
 Run:
-- `bun vitest tests/unit/config/mock-data.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/services/task.service.test.ts tests/unit/ui/new-task-pages.issue213.test.tsx tests/unit/ui/new-task-routing.issue213.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue213.test.tsx`
+- `bun vitest tests/unit/config/mock-data.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/services/task.service.test.ts tests/unit/ui/task-pages.issue213.test.tsx tests/unit/ui/task-routing.issue213.test.ts tests/unit/settings/settings-mock-data-toggle.issue213.test.tsx`
 - `bunx playwright test -c tests/e2e/playwright.issue213.config.ts tests/e2e/task-ui.issue213.test.ts`
 - `bun run build`
 
