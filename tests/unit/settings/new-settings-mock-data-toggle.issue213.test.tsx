@@ -48,10 +48,6 @@ vi.mock('@/config/timer-preferences', () => ({
   updateTimerPreferences: (value: unknown) => value,
 }));
 
-vi.mock('@/config/ui-mode', () => ({
-  setUIMode: vi.fn(),
-}));
-
 vi.mock('@/config/mock-data', () => ({
   getUseMockDataEnabled: () => false,
   setUseMockDataEnabled: mocks.setUseMockDataEnabled,

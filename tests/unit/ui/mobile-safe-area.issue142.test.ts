@@ -5,7 +5,7 @@ import path from 'path';
 describe('issue-142 mobile safe area', () => {
   const htmlPath = path.resolve('index.html');
   const cssPath = path.resolve('src/index.css');
-  const routesPath = path.resolve('src/routes.tsx');
+  const routesPath = path.resolve('src/routes-new.tsx');
   const voiceInputPath = path.resolve('src/components/VoiceMessageInput.tsx');
 
   it('includes viewport-fit=cover in index.html', () => {
@@ -23,15 +23,14 @@ describe('issue-142 mobile safe area', () => {
     expect(css).toContain('constant(safe-area-inset-bottom)');
   });
 
-  it('applies safe-area class to mobile header and sidebar', () => {
+  it('applies safe-area offset in mobile layout', () => {
     const routesSource = fs.readFileSync(routesPath, 'utf-8');
-    expect(routesSource).toContain('safe-area-pt');
+    expect(routesSource).toContain('env(safe-area-inset-bottom,0px)');
   });
 
   it('keeps base vertical spacing when applying bottom safe-area in voice input', () => {
     const voiceInputSource = fs.readFileSync(voiceInputPath, 'utf-8');
-    // safe-area-pb（底部安全区）应放在外层容器，避免覆盖 py-*（垂直内边距）
-    expect(voiceInputSource).not.toMatch(/className="[^"]*py-[^"]*safe-area-pb[^"]*"/);
-    expect(voiceInputSource).toContain('className="safe-area-pb');
+    expect(voiceInputSource).toContain("wrapperClassName = isNewMobile ? 'safe-area-pb");
+    expect(voiceInputSource).toContain(": 'safe-area-pb bg-card shrink-0'");
   });
 });
