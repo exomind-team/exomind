@@ -1,100 +1,93 @@
-# [GH#205] Agent Hub RuntimeHost + Tauri 托管实施计划（待审批）
+# [GH#205] P0 验收标准与任务清单（可观察现象版）
 
-## 先说结论（推荐方案）
-采用 **方案 B：RuntimeHost 管理 + Tauri 内置服务托管（单 PR）**。  
-本轮先解决“电脑端可运行 Agent，设备页可接入多主机”：
-1. `/agents` 设备页可手动录入 `IP + Port`，并连接多个局域网 `RuntimeHost`。  
-2. Tauri 桌面端托管后端服务（先 `sync-server`，预留 `agent-runner`），不再依赖命令行单独起服务。  
-3. 设置页可配置 `Host/Port/AutoStart`；设备页可实时展示服务状态（running/stopped/error）。  
+## 结论（本 PR 目标）
+本 PR 固定为 **P0：真实可验收闭环**，聚焦 3 个“可见现象”：
+1. 点击信号池内某个信号，可完成真实信号写入与读取（非 mock）。
+2. 点击 Agent 节点可进入对话页，并完成真实 Agent 对话（非占位流式文本）。
+3. Agent 网络展示真实在线状态（来源于探测/心跳，而非静态 fixture）。
 
----
-
-## 我对现有实现的调研结论
-
-### 现状
-1. `src/ui/new/pages/AgentsPage.tsx` 设备页为静态卡片展示，暂无“新增 RuntimeHost”交互与连接探测。  
-2. `src-tauri/src/lib.rs` 仅注册文件、WS、EventLog 命令，尚无服务生命周期命令（start/stop/status）。  
-3. `server/pouchdb-server.js` 目前通过脚本手动启动，未被 Tauri 进程统一托管。  
-
-### `packages/ts-agent-cli` 可复用点
-1. `Agent`（编排层）与 `ClaudeClient`（协议/流式层）职责清晰，适合在 ExoMind 继续“Service + Adapter”分层。  
-2. `State` 的会话和健康信息模型可作为后续 `RuntimeHost health` 结构参考。  
+同时保留 RuntimeHost 多设备接入与 Tauri 托管服务目标（单 PR 完成 P0）。
 
 ---
 
-## 本轮范围（单 PR，TDD + 分步 commit）
+## P0 验收标准（必须全部通过）
 
-1. **RuntimeHost 领域模型与配置模型**
-   - 文件：`src/lib/types/agent-hub.ts`（扩展）或新增 `src/lib/types/runtime-host.ts`
-   - 增加：`RuntimeHostConfig`、`RuntimeHostConnectionState`、`RuntimeServiceStatus`
-   - 目标：明确“手动地址、连接状态、最近探测时间、错误信息”契约
+### AC-1 真实信号读写（Signal R/W）
+- 在 `/agents` 信号池中点击任一信号输入节点，执行“写入测试信号”。
+- UI 立即显示写入成功，且可点击“读取最新信号”读取回显内容。
+- 数据源为真实存储（EventLog/PouchDB/Tauri 命令），不是内存临时数组。
+- 自动化证据：
+  - Unit：`signal.service` 写入后可读回
+  - E2E：页面点击写入 -> 读取 -> 文本断言通过
 
-2. **前端服务层：RuntimeHost 管理（Web/Tauri 通用接口）**
-   - 新增：`src/lib/services/runtime-host.service.ts`
-   - 能力：`addHost/removeHost/listHosts/probeHost`
-   - 存储：localStorage（`*_v1` key）+ 订阅机制（storage/custom event）
+### AC-2 真实 Agent 对话（Real Chat）
+- 在 `/agents` 点击 Agent 节点进入 `/agents/chat/$agentId`。
+- 发送消息后，返回内容来自真实 runtime 端口（RuntimeHost API / stream），非 `placeholder response`。
+- 对话历史刷新后仍存在（持久化通过）。
+- 自动化证据：
+  - Unit：`chat.service` 调用 runtime adapter 并持久化
+  - E2E：输入消息后出现真实回复片段 + 刷新页面后历史仍在
 
-3. **Tauri 服务托管命令（核心）**
-   - 新增：`src-tauri/src/commands/runtime_commands.rs`
-   - 注册到：`src-tauri/src/commands/mod.rs`、`src-tauri/src/lib.rs`
-   - 命令：`runtime_service_start`、`runtime_service_stop`、`runtime_service_status`
-   - 托管对象：`sync-server`（本轮落地）+ `agent-runner`（接口预留）
+### AC-3 真实在线状态（Online Status）
+- 设备页可显示 RuntimeHost 在线/离线/异常状态，状态变化有时间戳。
+- Agent 网络节点状态由真实探测结果驱动（心跳 TTL/探测失败回退），不是静态写死。
+- 自动化证据：
+  - Unit：状态机/TTL 过期测试
+  - E2E：模拟主机断连后状态从 online -> offline
 
-4. **设置页：运行时配置（Config）**
-   - 修改：`src/ui/new/pages/NewSettingsPage.tsx`
-   - 增加分组：`Agent Runtime（运行时）`
-   - 字段：`Host`、`Port`、`AutoStart`、`Service Target`
-   - 行为：保存配置 -> 触发状态刷新
+### AC-4 配置与托管（Runtime Config + Tauri Host）
+- 设置页可配置 Host/Port/AutoStart，并立即影响探测与连接。
+- Tauri 桌面端可显示服务启停状态（start/stop/status），替代手工命令行观测。
+- 自动化证据：
+  - Unit：配置持久化 + 命令映射
+  - 手工验证：桌面端点击启停后状态变化可见
 
-5. **设备页：多 RuntimeHost 连接管理（Device View）**
-   - 修改：`src/ui/new/pages/AgentsPage.tsx`
-   - 增加：手动输入 `IP:Port`、连接按钮、列表状态徽标、错误提示
-   - 验收：连续添加多台主机并显示连接状态
-
-6. **测试（先失败再实现）**
-   - Unit：
-     - `tests/unit/services/runtime-host.service.issue205.test.ts`
-     - `tests/unit/settings/new-settings-runtime-host.issue205.test.tsx`
-     - `tests/unit/ui/agent-hub/agent-device-runtime-host.issue205.test.tsx`
-     - `tests/unit/tauri/runtime-commands.issue205.test.ts`（命令注册与契约）
-   - E2E：
-     - `tests/e2e/agent-runtime-host.issue205.test.ts`
-     - `tests/e2e/playwright.issue205.config.ts`（独立端口）
-
-7. **PR 文档与评审**
-   - 更新：`docs/pr/issue-205-progress-comment.md`
-   - 更新：`docs/pr/issue-205-review-comment.md`
-   - 每阶段提交后同步 PR 评论，最终附评审结论与风险清单
+### AC-5 发布门槛（Release Gate）
+- `bun vitest`（本次新增用例）通过。
+- `bun run test:e2e:issue205` 通过。
+- `bun run build` 通过。
 
 ---
 
-## 验收标准（对应你的要求）
-1. `/agents` 设备页可手动录入并连接多台局域网 `RuntimeHost`。  
-2. 设置页可修改运行时 `IP/Port` 等配置并持久化。  
-3. 设备页可实时看到服务状态（替代命令行手动观察 DB 启停）。  
-4. 单 PR 同时交付“服务集成 + 配置/状态页”。  
-5. 全链路证据：Unit + Playwright + `bun run build`。  
+## P0 任务清单（按 TDD + 每步 commit）
+
+### Task 1: 信号池真实读写闭环
+- 新增 `signal.service`（或在 `agent.service` 扩展）实现真实写入/读取。
+- 将信号节点点击行为接入读写动作（UI 有可见反馈）。
+- 先补失败测试，再实现。
+
+### Task 2: Agent 真实对话链路
+- 增加 RuntimeHost chat adapter（HTTP/SSE）并接入 `AgentHubService.streamConversation`。
+- 替换当前 web/mock 占位回复路径，保留 mock 仅作回退。
+- 对话历史持久化与恢复测试补齐。
+
+### Task 3: 在线状态真实化
+- 新增 RuntimeHost 探测 + 心跳 TTL 状态机（online/offline/warning）。
+- 设备页与 Agent 网络节点状态绑定真实状态源。
+
+### Task 4: Tauri 托管与设置页联动
+- 增加 `runtime_service_start/stop/status` 命令并注入 `invoke_handler`。
+- 设置页增加 RuntimeHost 配置项，保存后触发状态刷新。
+
+### Task 5: 自动化验收
+- Unit：signal/chat/status/config/tauri command。
+- E2E：信号写读、节点跳转真实对话、在线状态切换。
+
+### Task 6: 评审与证据评论
+- 更新进度评论与评审评论（命令 + 结果 + 风险）。
+- 评论同步到 Issue #205 与 PR #251。
 
 ---
 
-## 分步提交策略（每步都 commit）
-1. `test(issue-205): add failing tests for runtime host models and service`
-2. `feat(agent-hub): add runtime host service and storage contracts`
-3. `feat(tauri): add runtime service lifecycle commands for desktop host`
-4. `feat(settings): add runtime host config section and persistence`
-5. `feat(agent-hub): add device runtime host connect UI and status badges`
-6. `test(e2e): cover multi-runtimehost connect flow on agents device view`
-7. `docs(issue-205): add progress and review comments for PR evidence`
+## P1（拆分到新 PR，不在本 PR 实现）
+1. Agent 级细粒度健康指标（token/cost/latency 面板）。
+2. 多 RuntimeHost 负载均衡与故障转移策略。
+3. Signal 路由可视化编排（批量规则、重试策略、回放）。
+4. 多模型供应商策略与成本路由。
 
 ---
 
-## 风险与处理
-1. **子进程生命周期泄漏风险**：Rust state 统一持有 child handle，应用退出时显式 stop。  
-2. **端口冲突**：状态接口返回结构化错误（`port_in_use`），前端直接提示。  
-3. **跨端差异**：先保证桌面端（Tauri）闭环，移动端/Web 仅保留接口不强耦合。  
-
----
-
-## 需要你审批的一句话
-请确认是否按此计划执行（回复关键词：`批准执行 RuntimeHost 方案`）。  
-你一批准，我就按 TDD 开始：先写失败测试，再逐步实现，并在每个任务后提交 commit + 更新 PR 评论。
+## 风险与控制
+1. **真实对话外部依赖风险**：提供 mock 回退开关，但默认走真实链路。
+2. **状态抖动风险**：加入 TTL + 连续失败阈值，避免一跳离线。
+3. **跨端行为差异**：Web/Tauri 共享 service 契约，Tauri 仅补托管命令层。
