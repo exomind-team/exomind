@@ -1,7 +1,7 @@
 import { useNavigate } from '@tanstack/react-router';
 import { ArrowLeft } from 'lucide-react';
-import { UpdateStatusCard } from '@/ui/new/components/UpdateStatusCard';
-import { UpdateSettingsCard } from '@/ui/new/components/UpdateSettingsCard';
+import { UpdateStatusCard } from '@/ui/app/components/UpdateStatusCard';
+import { UpdateSettingsCard } from '@/ui/app/components/UpdateSettingsCard';
 
 export function UpdatePage() {
   const navigate = useNavigate();
