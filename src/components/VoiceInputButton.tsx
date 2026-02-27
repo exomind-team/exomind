@@ -14,7 +14,7 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
-import { AlertTriangle, Check, CircleX, LoaderCircle, Mic, Unlock } from 'lucide-react';
+import { Check, LoaderCircle, Mic, MicOff, Unlock } from 'lucide-react';
 import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 import { cn } from '../lib/utils';
@@ -49,8 +49,6 @@ export interface VoiceInputButtonProps {
   showPermissionUnlockButton?: boolean;
   /** 启用快捷键（仅非输入区域生效） */
   enableShortcut?: boolean;
-  /** 是否显示辅助提示（权限提示徽标） */
-  showHelperText?: boolean;
   /** 按钮大小 */
   size?: number;
   /** 类名 */
@@ -95,7 +93,6 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   showTimer = true,
   showPermissionUnlockButton = true,
   enableShortcut = true,
-  showHelperText = true,
   size = 64,
   className,
   style,
@@ -607,7 +604,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
       for (let i = 0; i < bars; i++) {
         const value = dataArray[i] || 0;
-        const barHeight = (value / 255) * 30 + 5;
+        const barHeight = (value / 255) * 12 + 2;
         const angle = i * angleStep - Math.PI / 2;
 
         const x1 = centerX + Math.cos(angle) * baseRadius;
@@ -687,7 +684,23 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           icon: <Check size={Math.max(16, Math.floor(size * 0.34))} />,
           iconColor: '#ffffff',
         };
-      default:
+      default: {
+        if (permissionState === 'unavailable') {
+          return {
+            background: 'hsl(var(--muted))',
+            shadow: 'none',
+            icon: <MicOff size={Math.max(16, Math.floor(size * 0.34))} />,
+            iconColor: 'hsl(var(--destructive) / 0.6)',
+          };
+        }
+        if (permissionState === 'prompt' || permissionState === 'denied') {
+          return {
+            background: 'hsl(var(--muted))',
+            shadow: 'none',
+            icon: <MicOff size={Math.max(16, Math.floor(size * 0.34))} />,
+            iconColor: 'hsl(var(--warning) / 0.8)',
+          };
+        }
         return {
           background:
             'linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--secondary)) 100%)',
@@ -695,6 +708,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           icon: <Mic size={Math.max(16, Math.floor(size * 0.34))} />,
           iconColor: 'inherit',
         };
+      }
     }
   };
 
@@ -703,8 +717,6 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   const isIdle = state.state === 'idle';
   const useIdleClassVisual = Boolean(idleButtonClassName) && state.state === 'idle';
   const buttonSize = size;
-  const showPermissionBadge = showHelperText && permissionState !== 'granted' && permissionState !== 'checking';
-  const permissionLabel = permissionState === 'unavailable' ? '不支持' : '需要权限';
 
   // 格式化时间
   const formatTime = (seconds: number) => {
@@ -720,12 +732,12 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       {showWaveform && state.state === 'recording' && (
         <canvas
           ref={canvasRef}
-          width={buttonSize + 80}
-          height={buttonSize + 80}
+          width={buttonSize + 24}
+          height={buttonSize + 24}
           style={{
             position: 'absolute',
-            top: -40,
-            left: -40,
+            top: -12,
+            left: -12,
             pointerEvents: 'none',
           }}
         />
@@ -812,27 +824,6 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           `}</style>
         )}
 
-        {/* 录音指示灯 */}
-        {state.state === 'recording' && (
-          <span style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: 'hsl(var(--foreground))',
-            animation: 'blink 1s ease-in-out infinite',
-          }}>
-            <style>{`
-              @keyframes blink {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.3; }
-              }
-            `}</style>
-          </span>
-        )}
-
         {/* 图标 */}
         <span style={{
           transform: state.state === 'recognizing' ? 'scale(0.9)' : 'scale(1)',
@@ -868,31 +859,6 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         </button>
       )}
 
-      {/* 权限提示徽标 */}
-      {showPermissionBadge && (
-        <div style={{
-          position: 'absolute',
-          top: -10,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          padding: '2px 8px',
-          borderRadius: 999,
-          fontSize: 10,
-          fontWeight: 600,
-          whiteSpace: 'nowrap',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: 4,
-          border: permissionState === 'unavailable' ? '1px solid #FECACA' : '1px solid #FDE68A',
-          background: permissionState === 'unavailable' ? '#FEE2E2' : '#FEF3C7',
-          color: permissionState === 'unavailable' ? '#B91C1C' : '#92400E',
-        }}>
-          {permissionState === 'unavailable'
-            ? <CircleX size={11} />
-            : <AlertTriangle size={11} />}
-          {permissionLabel}
-        </div>
-      )}
     </div>
   );
 });
