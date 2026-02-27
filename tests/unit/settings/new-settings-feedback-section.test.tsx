@@ -2,16 +2,16 @@ import React from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
-import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setFeedbackPreferences } from '@/config/feedback-preferences';
 
-describe('NewSettingsPage feedback section（反馈分组配置）', () => {
+describe('SettingsPage feedback section（反馈分组配置）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
   it('renders feedback section and defaults to quick-feedback only', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     expect(screen.getByTestId('new-settings-feedback-section')).toBeInTheDocument();
     expect(screen.getByTestId('new-settings-feedback-content-row')).toBeInTheDocument();
@@ -22,7 +22,7 @@ describe('NewSettingsPage feedback section（反馈分组配置）', () => {
   });
 
   it('supports multi-select toggles and keeps middle option without rounded corners', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     const timing = screen.getByTestId('new-settings-feedback-content-timing');
     const statistics = screen.getByTestId('new-settings-feedback-content-statistics');

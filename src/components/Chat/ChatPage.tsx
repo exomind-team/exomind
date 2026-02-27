@@ -17,11 +17,11 @@ import { Play, Pause, Square, FileText, NotepadText } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
-import { NewFocusTimerWidget, type NewFocusTimerWidgetHandle } from '@/ui/new/components/NewFocusTimerWidget';
+import { FocusTimerWidget, type FocusTimerWidgetHandle } from '@/ui/app/components/FocusTimerWidget';
 import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import { MessageActions } from '@/components/Chat/MessageActions';
-import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
-import { PageMoreMenu } from '@/ui/new/components/PageMoreMenu';
+import { NowInputRow } from '@/ui/app/components/NowInputRow';
+import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
@@ -84,7 +84,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const { currentUser, isLoggedIn, credentials } = useSyncStore();
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
   const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
-  const newFocusTimerWidgetRef = useRef<NewFocusTimerWidgetHandle | null>(null);
+  const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
   const userDisplayName = currentUser || 'Hailay';
   const userMeta = useMemo(() => {
     const deviceName = credentials?.deviceName?.trim() || '本机设备';
@@ -269,7 +269,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       if (isEditableTarget(e.target)) return;
 
       const timerWidget = variant === 'new-mobile'
-        ? newFocusTimerWidgetRef.current
+        ? focusTimerWidgetRef.current
         : timeBlockWidgetRef.current;
 
       // Ctrl+Enter: 弹出反馈对话框（正在计时或暂停中）
@@ -438,7 +438,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
       {/* TimeBlock 控件栏 */}
       {variant === 'new-mobile' ? (
-        <NewFocusTimerWidget ref={newFocusTimerWidgetRef} />
+        <FocusTimerWidget ref={focusTimerWidgetRef} />
       ) : (
         <TimeBlockWidget ref={timeBlockWidgetRef} variant="default" />
       )}
@@ -587,7 +587,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
       {/* 输入区域 */}
       {variant === 'new-mobile' ? (
-        <NewNowInputRow
+        <NowInputRow
           ref={voiceMessageInputRef}
           onSend={handleSend}
           placeholder="记录当下的事实..."

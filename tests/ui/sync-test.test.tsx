@@ -48,7 +48,7 @@ describe('SyncTestPage 依赖检查', () => {
 });
 
 describe('SyncTestPage 路由注册', () => {
-  const routesPath = path.resolve('src/routes-new.tsx');
+  const routesPath = path.resolve('src/routes.tsx');
   const routesContent = fs.readFileSync(routesPath, 'utf-8');
 
   it('不应该在侧边栏显示同步测试入口', () => {

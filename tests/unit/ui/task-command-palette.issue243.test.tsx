@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { NewTasksPage } from '@/ui/new/pages/NewTasksPage';
+import { TasksPage } from '@/ui/app/pages/TasksPage';
 
 const openPaletteMock = vi.fn();
 const listTasksMock = vi.fn();
@@ -57,7 +57,7 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
   });
 
   it('shows command palette entry when feature is active（功能开启时展示入口）', async () => {
-    render(<NewTasksPage />);
+    render(<TasksPage />);
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
       expect(longTermGoalsMock).toHaveBeenCalled();
@@ -73,7 +73,7 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
 
   it('hides command palette entry when feature is disabled（功能关闭时隐藏入口）', async () => {
     runtimeFlags.commandPaletteEnabled = false;
-    render(<NewTasksPage />);
+    render(<TasksPage />);
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
       expect(longTermGoalsMock).toHaveBeenCalled();

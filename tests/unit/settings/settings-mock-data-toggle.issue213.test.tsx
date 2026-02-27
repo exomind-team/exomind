@@ -58,7 +58,7 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
 }));
 
-import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
 describe('settings mock-data toggle issue-213（设置页测试数据开关）', () => {
   beforeEach(() => {
@@ -66,13 +66,13 @@ describe('settings mock-data toggle issue-213（设置页测试数据开关）',
   });
 
   it('shows use-mock-data toggle when developer mode is enabled（开发者模式显示测试数据开关）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     expect(screen.getByText('使用测试数据')).toBeInTheDocument();
   });
 
   it('calls setUseMockDataEnabled after toggle click（点击后更新 mock 开关）', () => {
     const reloadSpy = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     const switchEl = screen.getByTestId('new-settings-use-mock-data-switch');
     fireEvent.click(switchEl);
     expect(mocks.setUseMockDataEnabled).toHaveBeenCalledWith(true);

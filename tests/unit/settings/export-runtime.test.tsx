@@ -2,8 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-describe('NewSettingsPage export runtime routing', () => {
-  const newSettingsSource = readFileSync(path.resolve('src/ui/new/pages/NewSettingsPage.tsx'), 'utf-8');
+describe('SettingsPage export runtime routing', () => {
+  const newSettingsSource = readFileSync(path.resolve('src/ui/app/pages/SettingsPage.tsx'), 'utf-8');
 
   it('uses tauri native commands for export/import', () => {
     expect(newSettingsSource).toContain("invoke<string | null>('save_json_file'");

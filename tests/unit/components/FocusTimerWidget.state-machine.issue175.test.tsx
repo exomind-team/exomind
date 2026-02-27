@@ -1,7 +1,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { NewFocusTimerWidget } from '@/ui/new/components/NewFocusTimerWidget';
+import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 
 const loadActiveBlockMock = vi.fn();
 const startBlockMock = vi.fn();
@@ -25,7 +25,7 @@ vi.mock('@/lib/services', () => ({
   }),
 }));
 
-describe('NewFocusTimerWidget state machine（新专注计时组件状态机）', () => {
+describe('FocusTimerWidget state machine（新专注计时组件状态机）', () => {
   beforeEach(() => {
     originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
@@ -61,7 +61,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('transitions idle -> config -> running（状态切换）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     expect(screen.getByTestId('new-focus-state-idle')).toBeInTheDocument();
 
@@ -85,7 +85,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('starts block via Ctrl+Enter on task input（任务输入框 Ctrl+Enter 快速开始）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     const taskInput = screen.getByTestId('new-focus-task-input');
@@ -107,7 +107,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('splits multiline task input into title + description on start（多行任务名拆分标题与描述）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     const taskInput = screen.getByTestId('new-focus-task-input');
@@ -126,7 +126,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('does not start block on plain Enter in task input（普通回车不触发开始）', () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     const taskInput = screen.getByTestId('new-focus-task-input');
@@ -139,7 +139,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('supports config -> idle collapse and keeps draft values（配置收起并保留草稿）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     expect(screen.getByTestId('new-focus-state-config')).toBeInTheDocument();
@@ -167,7 +167,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('uses adaptive config layout for countup switch（正计时切换时配置布局自适应）', () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
 
@@ -186,7 +186,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('adds a11y attrs and forbids collapse from running（可访问性与运行态禁收起）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     const idleCard = screen.getByTestId('new-focus-idle-card');
     expect(idleCard).toHaveAttribute('aria-expanded', 'false');
@@ -206,7 +206,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('supports custom countdown input（支持自定义倒计时输入）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), {
@@ -230,7 +230,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('switches custom trigger to input while editing（自定义编辑态切换为输入框）', () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
 
     const trigger = screen.getByTestId('new-focus-expected-custom-trigger');
@@ -241,7 +241,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('shows red glow and removes right chevron in running countup mode（正计时运行态显示红色背景并移除右箭头）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.click(screen.getByTestId('new-focus-expected-countup'));
@@ -266,7 +266,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('renders unified expected-time options row（统一预期时间选择器）', () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
 
     expect(screen.getByTestId('new-focus-expected-countup')).toBeInTheDocument();
@@ -277,7 +277,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('slides active indicator across expected-time options（预期时间滑块随选项横向滑动）', () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
 
     const indicator = screen.getByTestId('new-focus-expected-active-indicator');
@@ -297,7 +297,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('keeps timer and controls inside one running task card（运行态计时与控制整合在同一卡片）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), {
@@ -316,7 +316,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
   });
 
   it('confirms feedback end with Ctrl+Enter（反馈弹窗 Ctrl+Enter 确认结束）', async () => {
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), {

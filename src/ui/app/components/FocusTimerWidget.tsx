@@ -28,11 +28,11 @@ import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/ser
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
-export type NewFocusTimerState = 'idle' | 'running' | 'paused';
+export type FocusTimerState = 'idle' | 'running' | 'paused';
 
-export interface NewFocusTimerWidgetHandle {
+export interface FocusTimerWidgetHandle {
   expandAndFocusTaskName: () => void;
-  getTimerState: () => NewFocusTimerState;
+  getTimerState: () => FocusTimerState;
   pauseOrResume: () => Promise<void>;
   endDialog: () => void;
 }
@@ -70,7 +70,7 @@ function resolveExpectedOptionIndex(mode: TimerMode, minutes: number): number {
   return presetIndex >= 0 ? presetIndex + 1 : 4;
 }
 
-export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(function NewFocusTimerWidget(_, ref) {
+export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function FocusTimerWidget(_, ref) {
   const timeBlockServiceRef = useRef(getTimeBlockService());
   const frameRef = useRef<number | null>(null);
   const taskInputRef = useRef<HTMLTextAreaElement | null>(null);

@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 describe('issue-213 task routing wiring（任务路由接线）', () => {
-  const sourcePath = path.resolve('src/routes-new.tsx');
+  const sourcePath = path.resolve('src/routes.tsx');
   const source = readFileSync(sourcePath, 'utf-8');
 
   it('adds tasks entry to bottom nav（底部导航新增任务入口）', () => {

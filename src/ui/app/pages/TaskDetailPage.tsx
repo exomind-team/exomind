@@ -3,9 +3,9 @@ import { Link, useParams } from '@tanstack/react-router';
 import { useEffect, useState } from 'react';
 import { getTaskService } from '@/lib/services';
 import type { TaskItem } from '@/lib/types/task';
-import { NewTaskTimerCard } from '@/ui/new/components/NewTaskTimerCard';
+import { TaskTimerCard } from '@/ui/app/components/TaskTimerCard';
 
-export function NewTaskDetailPage() {
+export function TaskDetailPage() {
   const { taskId } = useParams({ strict: false }) as { taskId?: string };
   const [task, setTask] = useState<TaskItem | null>(null);
 
@@ -43,7 +43,7 @@ export function NewTaskDetailPage() {
         <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务详情</h1>
       </header>
 
-      <NewTaskTimerCard
+      <TaskTimerCard
         task={task}
         onModeChange={(mode) => {
           void getTaskService().setTimerMode(task.id, mode).then((updated) => {

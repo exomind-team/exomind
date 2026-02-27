@@ -10,13 +10,13 @@ function formatClock(ms: number): string {
   return `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
 }
 
-export interface NewTaskTimerCardProps {
+export interface TaskTimerCardProps {
   task: TaskItem;
   onModeChange?: (mode: TaskTimerMode) => void;
   onPauseToggle?: (paused: boolean) => void;
 }
 
-export function NewTaskTimerCard({ task, onModeChange, onPauseToggle }: NewTaskTimerCardProps) {
+export function TaskTimerCard({ task, onModeChange, onPauseToggle }: TaskTimerCardProps) {
   const [mode, setMode] = useState<TaskTimerMode>(task.timer.mode);
   const [paused, setPaused] = useState<boolean>(task.timer.paused);
   const [factInput, setFactInput] = useState('');

@@ -8,31 +8,31 @@ import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from 
 import { getCommandRegistryService } from '@/lib/services/command-registry.service';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
-import { CommandPalette } from '@/ui/new/components/CommandPalette';
+import { CommandPalette } from '@/ui/app/components/CommandPalette';
 
-const NewFocusPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/NewFocusPage');
-  return { default: module.NewFocusPage };
+const FocusPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/FocusPage');
+  return { default: module.FocusPage };
 });
 
-const NewSettingsPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/NewSettingsPage');
-  return { default: module.NewSettingsPage };
+const SettingsPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/SettingsPage');
+  return { default: module.SettingsPage };
 });
 
-const NewTasksPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/NewTasksPage');
-  return { default: module.NewTasksPage };
+const TasksPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TasksPage');
+  return { default: module.TasksPage };
 });
 
-const NewTaskDetailPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/NewTaskDetailPage');
-  return { default: module.NewTaskDetailPage };
+const TaskDetailPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskDetailPage');
+  return { default: module.TaskDetailPage };
 });
 
-const NewMePage = lazy(async () => {
-  const module = await import('@/ui/new/pages/NewMePage');
-  return { default: module.NewMePage };
+const MePage = lazy(async () => {
+  const module = await import('@/ui/app/pages/MePage');
+  return { default: module.MePage };
 });
 
 const UserManagePage = lazy(async () => {
@@ -51,32 +51,32 @@ const MOSSASRTestPage = lazy(async () => {
 });
 
 const AgentsPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/AgentsPage');
+  const module = await import('@/ui/app/pages/AgentsPage');
   return { default: module.AgentsPage };
 });
 
 const UpdatePage = lazy(async () => {
-  const module = await import('@/ui/new/pages/UpdatePage');
+  const module = await import('@/ui/app/pages/UpdatePage');
   return { default: module.UpdatePage };
 });
 
 const AgentDetailPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/agents/AgentDetailPage');
+  const module = await import('@/ui/app/pages/agents/AgentDetailPage');
   return { default: module.AgentDetailPage };
 });
 
 const ActorDetailPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/agents/ActorDetailPage');
+  const module = await import('@/ui/app/pages/agents/ActorDetailPage');
   return { default: module.ActorDetailPage };
 });
 
 const AgentConversationPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/agents/AgentConversationPage');
+  const module = await import('@/ui/app/pages/agents/AgentConversationPage');
   return { default: module.AgentConversationPage };
 });
 
 const AgentMarketPage = lazy(async () => {
-  const module = await import('@/ui/new/pages/agents/AgentMarketPage');
+  const module = await import('@/ui/app/pages/agents/AgentMarketPage');
   return { default: module.AgentMarketPage };
 });
 
@@ -97,7 +97,7 @@ function resolveRuntimePlatform(): 'web' | 'tauri' | 'unknown' {
   return '__TAURI_INTERNALS__' in window ? 'tauri' : 'web';
 }
 
-function NewLayout() {
+function AppLayout() {
   const location = useLocation();
   const navigate = useNavigate();
 
@@ -215,86 +215,86 @@ function NewLayout() {
   );
 }
 
-const newRootRoute = createRootRoute({
-  component: NewLayout,
+const rootRoute = createRootRoute({
+  component: AppLayout,
 });
 
-const newHomeRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const homeRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/',
-  component: function NewHome() {
+  component: function Home() {
     return (
       <LazyPage>
-        <NewFocusPage />
+        <FocusPage />
       </LazyPage>
     );
   },
 });
 
-const newEventlogRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const eventlogRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/eventlog',
-  component: function NewEventlog() {
+  component: function Eventlog() {
     return (
       <LazyPage>
-        <NewFocusPage />
+        <FocusPage />
       </LazyPage>
     );
   },
 });
 
-const newTasksRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const tasksRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/tasks',
-  component: function NewTasks() {
+  component: function Tasks() {
     return (
       <LazyPage>
-        <NewTasksPage />
+        <TasksPage />
       </LazyPage>
     );
   },
 });
 
-const newTaskDetailRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const taskDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/tasks/$taskId',
-  component: function NewTaskDetail() {
+  component: function TaskDetail() {
     return (
       <LazyPage>
-        <NewTaskDetailPage />
+        <TaskDetailPage />
       </LazyPage>
     );
   },
 });
 
-const newMeRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const meRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/me',
-  component: function NewMe() {
+  component: function Me() {
     return (
       <LazyPage>
-        <NewMePage />
+        <MePage />
       </LazyPage>
     );
   },
 });
 
-const newSettingsRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const settingsRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/settings',
-  component: function NewSettings() {
+  component: function Settings() {
     return (
       <LazyPage>
-        <NewSettingsPage />
+        <SettingsPage />
       </LazyPage>
     );
   },
 });
 
-const newUserManageRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const userManageRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/user-manage',
-  component: function NewUserManage() {
+  component: function UserManage() {
     return (
       <LazyPage>
         <UserManagePage />
@@ -303,10 +303,10 @@ const newUserManageRoute = createRoute({
   },
 });
 
-const newMossTestRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const mossTestRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/moss-test',
-  component: function NewMossTest() {
+  component: function MossTest() {
     return (
       <LazyPage>
         <MOSSASRTestPage />
@@ -315,10 +315,10 @@ const newMossTestRoute = createRoute({
   },
 });
 
-const newSyncTestRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const syncTestRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/sync-test',
-  component: function NewSyncTest() {
+  component: function SyncTest() {
     return (
       <LazyPage>
         <SyncTestPage />
@@ -327,10 +327,10 @@ const newSyncTestRoute = createRoute({
   },
 });
 
-const newAgentsRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const agentsRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/agents',
-  component: function NewAgents() {
+  component: function Agents() {
     return (
       <LazyPage>
         <AgentsPage />
@@ -339,10 +339,10 @@ const newAgentsRoute = createRoute({
   },
 });
 
-const newUpdateRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const updateRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/update',
-  component: function NewUpdate() {
+  component: function Update() {
     return (
       <LazyPage>
         <UpdatePage />
@@ -351,10 +351,10 @@ const newUpdateRoute = createRoute({
   },
 });
 
-const newAgentDetailRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const agentDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/agents/agent/$agentId',
-  component: function NewAgentDetail() {
+  component: function AgentDetail() {
     const { agentId } = useParams({ strict: false }) as { agentId?: string };
     return (
       <LazyPage>
@@ -364,10 +364,10 @@ const newAgentDetailRoute = createRoute({
   },
 });
 
-const newActorDetailRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const actorDetailRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/agents/actor/$actorId',
-  component: function NewActorDetail() {
+  component: function ActorDetail() {
     const { actorId } = useParams({ strict: false }) as { actorId?: string };
     return (
       <LazyPage>
@@ -377,10 +377,10 @@ const newActorDetailRoute = createRoute({
   },
 });
 
-const newAgentConversationRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const agentConversationRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/agents/chat/$agentId',
-  component: function NewAgentConversation() {
+  component: function AgentConversation() {
     const { agentId } = useParams({ strict: false }) as { agentId?: string };
     return (
       <LazyPage>
@@ -390,10 +390,10 @@ const newAgentConversationRoute = createRoute({
   },
 });
 
-const newAgentMarketRoute = createRoute({
-  getParentRoute: () => newRootRoute,
+const agentMarketRoute = createRoute({
+  getParentRoute: () => rootRoute,
   path: '/agents/market',
-  component: function NewAgentMarket() {
+  component: function AgentMarket() {
     return (
       <LazyPage>
         <AgentMarketPage />
@@ -402,24 +402,24 @@ const newAgentMarketRoute = createRoute({
   },
 });
 
-const newRouteTree = newRootRoute.addChildren([
-  newHomeRoute,
-  newEventlogRoute,
-  newTasksRoute,
-  newTaskDetailRoute,
-  newMeRoute,
-  newSettingsRoute,
-  newUserManageRoute,
-  newMossTestRoute,
-  newSyncTestRoute,
-  newAgentsRoute,
-  newUpdateRoute,
-  newAgentDetailRoute,
-  newActorDetailRoute,
-  newAgentConversationRoute,
-  newAgentMarketRoute,
+const routeTree = rootRoute.addChildren([
+  homeRoute,
+  eventlogRoute,
+  tasksRoute,
+  taskDetailRoute,
+  meRoute,
+  settingsRoute,
+  userManageRoute,
+  mossTestRoute,
+  syncTestRoute,
+  agentsRoute,
+  updateRoute,
+  agentDetailRoute,
+  actorDetailRoute,
+  agentConversationRoute,
+  agentMarketRoute,
 ]);
 
-const newUiRouter = createRouter({ routeTree: newRouteTree });
+const appRouter = createRouter({ routeTree: routeTree });
 
-export { newUiRouter };
+export { appRouter };
