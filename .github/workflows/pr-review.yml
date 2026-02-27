@@ -73,9 +73,20 @@ jobs:
 
       - name: Build prompt
         id: prompt
+        env:
+          PR_TITLE: ${{ github.event.pull_request.title }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
         run: |
           DIFF=$(cat /tmp/pr_diff_trimmed.txt)
-          TEMPLATE='You are a senior code reviewer ("Black Hat Critic") for PR #${{ github.event.pull_request.number }}: ${{ github.event.pull_request.title }}.
+          DIFF_SIZE=$(wc -c < /tmp/pr_diff.txt)
+          TRIMMED_SIZE=$(wc -c < /tmp/pr_diff_trimmed.txt)
+          TRUNCATION_NOTE=""
+          if [ "$DIFF_SIZE" -gt "$TRIMMED_SIZE" ]; then
+            TRUNCATION_NOTE="
+
+          ⚠️ Diff was truncated from ${DIFF_SIZE} to ${TRIMMED_SIZE} bytes. Some changes may not be visible."
+          fi
+          TEMPLATE="You are a senior code reviewer (\"Black Hat Critic\") for PR #${PR_NUMBER}: ${PR_TITLE}.
 
           Review focus:
           1. P0 严重 bug、安全漏洞、数据丢失风险
@@ -86,9 +97,9 @@ jobs:
           - 按优先级分组：🔴 P0 / 🟡 P1 / 🟢 P2
           - 每项简明扼要，附文件名和行号
           - 最后给结论：✅ 可合并 / ⚠️ 建议修改后合并 / ❌ 需要修改
-
+          ${TRUNCATION_NOTE}
           Diff:
-          '
+          "
           PROMPT=$(jq -rn --arg t "$TEMPLATE" --arg d "$DIFF" '$t + $d')
           PAYLOAD=$(jq -n \
             --arg model "claude-opus-4-6" \
@@ -103,16 +114,17 @@ jobs:
           ANTHROPIC_BASE_URL: ${{ secrets.OPUS_API_BASE }}
         run: |
           BASE_URL="${ANTHROPIC_BASE_URL:-https://api.anthropic.com}"
-          RESPONSE=$(curl -sS "${BASE_URL}/v1/messages" \
+          RESPONSE=$(curl -sS --max-time 120 "${BASE_URL}/v1/messages" \
             -H "x-api-key: ${ANTHROPIC_API_KEY}" \
             -H "anthropic-version: 2023-06-01" \
             -H "content-type: application/json" \
             -d @/tmp/payload.json)
           REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text // "(Claude 未返回评审内容)"')
+          DELIM="CLAUDE_REVIEW_$(date +%s)"
           {
-            echo "review<<CLAUDE_EOF"
+            echo "review<<${DELIM}"
             echo "$REVIEW"
-            echo "CLAUDE_EOF"
+            echo "${DELIM}"
           } >> "$GITHUB_OUTPUT"
 
   # ═══════════════════════════════════════════
@@ -141,11 +153,11 @@ jobs:
             const codexStatus = process.env.CODEX_STATUS;
             const claudeStatus = process.env.CLAUDE_STATUS;
 
-            const codexSection = codexStatus === 'success' && codexReview
+            const codexSection = codexReview
               ? codexReview
               : `> ⚠️ Codex 评审未完成 (status: ${codexStatus})`;
 
-            const claudeSection = claudeStatus === 'success' && claudeReview
+            const claudeSection = claudeReview
               ? claudeReview
               : `> ⚠️ Claude 评审未完成 (status: ${claudeStatus})`;
 
