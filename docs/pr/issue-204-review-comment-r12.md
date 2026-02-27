@@ -19,7 +19,7 @@
 
 ## 验证证据
 ```bash
-bun vitest tests/unit/agent-hub tests/unit/adapters/agent-mock-adapter.issue204.test.ts tests/unit/adapters/agent-web-adapter.issue204.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/environment/environment-mock-data-sync.issue204.test.ts tests/unit/services/agent-hub.service.issue204.test.ts tests/unit/services/agent-hub-service-mock-toggle.issue204.test.ts tests/unit/ui/agent-hub/agents-page.issue204.test.tsx tests/unit/ui/agent-hub/agent-actor-detail.issue204.test.tsx tests/unit/ui/agent-hub/agent-chat-market.issue204.test.tsx tests/unit/ui/agent-hub/agent-routing.issue204.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue213.test.tsx
+bun vitest tests/unit/agent-hub tests/unit/adapters/agent-mock-adapter.issue204.test.ts tests/unit/adapters/agent-web-adapter.issue204.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/environment/environment-mock-data-sync.issue204.test.ts tests/unit/services/agent-hub.service.issue204.test.ts tests/unit/services/agent-hub-service-mock-toggle.issue204.test.ts tests/unit/ui/agent-hub/agents-page.issue204.test.tsx tests/unit/ui/agent-hub/agent-actor-detail.issue204.test.tsx tests/unit/ui/agent-hub/agent-chat-market.issue204.test.tsx tests/unit/ui/agent-hub/agent-routing.issue204.test.ts tests/unit/settings/settings-mock-data-toggle.issue213.test.tsx
 bun run test:e2e:issue204
 bun run build
 ```

@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { PageMoreMenu } from '@/ui/new/components/PageMoreMenu';
+import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 
 const openPaletteMock = vi.fn();
 

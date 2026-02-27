@@ -31,19 +31,19 @@ test.describe('SyncTestPage 静态测试', () => {
   test.describe('SyncTestPage 路由注册测试', () => {
     test('路由应该导入 SyncTestPage', async () => {
       const fs = await import('fs');
-      const routesContent = fs.readFileSync('./src/routes-new.tsx', 'utf-8');
+      const routesContent = fs.readFileSync('./src/routes.tsx', 'utf-8');
       expect(routesContent).toContain('SyncTestPage');
     });
 
     test('路由应该定义 /sync-test 路径', async () => {
       const fs = await import('fs');
-      const routesContent = fs.readFileSync('./src/routes-new.tsx', 'utf-8');
+      const routesContent = fs.readFileSync('./src/routes.tsx', 'utf-8');
       expect(routesContent).toContain("path: '/sync-test'");
     });
 
     test('路由应该使用 SyncTestPage 组件', async () => {
       const fs = await import('fs');
-      const routesContent = fs.readFileSync('./src/routes-new.tsx', 'utf-8');
+      const routesContent = fs.readFileSync('./src/routes.tsx', 'utf-8');
       expect(routesContent).toContain('<SyncTestPage />');
     });
   });
@@ -255,19 +255,19 @@ test.describe('SyncTestPage 静态测试', () => {
   test.describe('SyncTestPage 侧边栏导航测试', () => {
     test('侧边栏不应该包含同步测试导航项（仅保留兼容路由）', async () => {
       const fs = await import('fs');
-      const routesContent = fs.readFileSync('./src/routes-new.tsx', 'utf-8');
+      const routesContent = fs.readFileSync('./src/routes.tsx', 'utf-8');
       expect(routesContent).not.toContain('同步测试');
     });
 
     test('同步测试不应该出现在底部导航项中', async () => {
       const fs = await import('fs');
-      const routesContent = fs.readFileSync('./src/routes-new.tsx', 'utf-8');
+      const routesContent = fs.readFileSync('./src/routes.tsx', 'utf-8');
       expect(routesContent).not.toContain("title: '同步测试'");
     });
 
     test('同步测试路径应该为 /sync-test', async () => {
       const fs = await import('fs');
-      const routesContent = fs.readFileSync('./src/routes-new.tsx', 'utf-8');
+      const routesContent = fs.readFileSync('./src/routes.tsx', 'utf-8');
       expect(routesContent).toContain("path: '/sync-test'");
     });
   });

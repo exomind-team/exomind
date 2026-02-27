@@ -7,7 +7,7 @@
   - 修复策略：无数据/坏数据返回 `empty state（空状态）`，仅在 `useMockData=true` 时使用 `MeMockAdapter`。
 
 ## 验证证据（fresh run）
-- `bunx vitest run tests/unit/adapters/me-web-adapter.issue215.test.ts tests/unit/me/me-types-contract.issue215.test.ts tests/unit/services/me.service.issue215.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/ui/new-me-pages.issue215.test.tsx tests/unit/ui/new-me-routing.issue215.test.ts`  
+- `bunx vitest run tests/unit/adapters/me-web-adapter.issue215.test.ts tests/unit/me/me-types-contract.issue215.test.ts tests/unit/services/me.service.issue215.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/ui/me-pages.issue215.test.tsx tests/unit/ui/me-routing.issue215.test.ts`  
   - 结果：`6 files / 16 tests passed`
 - `bun run test:e2e:issue215`  
   - 结果：`2 passed`

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
 
 describe('issue-204 agent routing wiring（Agent 路由接线）', () => {
-  const sourcePath = path.resolve('src/routes-new.tsx');
+  const sourcePath = path.resolve('src/routes.tsx');
   const source = readFileSync(sourcePath, 'utf-8');
 
   it('keeps /agents main route（保留主入口）', () => {
