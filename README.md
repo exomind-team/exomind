@@ -2,6 +2,10 @@
 
 > 本地优先（Local-first / 本地优先）的个人 AI 助手，聚焦事件日志（Event Log / 事件日志）、时间块（TimeBlock / 时间块）与多端同步（Multi-device Sync / 多端同步）。
 
+## CI/CD
+
+- **Black Hat Critic**: PR 自动双关评审（Codex 5.3 + Claude Opus 4.6）
+
 ## 项目概览
 
 ExoMind 是一个基于 Tauri v2 的跨平台应用（Windows/macOS/Linux/Android），前端使用 React + TypeScript，数据层使用 PouchDB（IndexedDB）并支持局域网同步。
