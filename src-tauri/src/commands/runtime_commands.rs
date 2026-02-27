@@ -99,24 +99,67 @@ fn runtime_entry_candidates(base_dir: &Path) -> Vec<PathBuf> {
 }
 
 fn resolve_runtime_entry_path_from_base(base_dir: &Path) -> Result<PathBuf, String> {
-    let candidates = runtime_entry_candidates(base_dir);
+    // Canonicalize base_dir to prevent path traversal
+    let canonical_base = base_dir
+        .canonicalize()
+        .map_err(|e| format!("failed to canonicalize base directory: {e}"))?;
+
+    let candidates = runtime_entry_candidates(&canonical_base);
     for path in &candidates {
         if path.exists() {
-            return Ok(path.clone());
+            // Canonicalize resolved path to eliminate any remaining .. components
+            let canonical = path
+                .canonicalize()
+                .map_err(|e| format!("failed to canonicalize runtime entry path: {e}"))?;
+            return Ok(canonical);
         }
     }
 
-    let searched = candidates
-        .iter()
-        .map(|item| item.to_string_lossy().to_string())
-        .collect::<Vec<String>>()
-        .join(" | ");
-    Err(format!("runtime entry not found: {searched}"))
+    #[cfg(debug_assertions)]
+    {
+        let searched = candidates
+            .iter()
+            .map(|item| item.to_string_lossy().to_string())
+            .collect::<Vec<String>>()
+            .join(" | ");
+        Err(format!("runtime entry not found: {searched}"))
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        Err("runtime entry not found".to_string())
+    }
+}
+
+fn is_valid_host(host: &str) -> bool {
+    // Allow IPv4
+    if host.parse::<std::net::Ipv4Addr>().is_ok() {
+        return true;
+    }
+    // Allow IPv6
+    if host.parse::<std::net::Ipv6Addr>().is_ok() {
+        return true;
+    }
+    // Allow valid hostnames: alphanumeric, hyphens, dots
+    if host.is_empty() || host.len() > 253 {
+        return false;
+    }
+    host.split('.').all(|label| {
+        !label.is_empty()
+            && label.len() <= 63
+            && label.chars().all(|c| c.is_ascii_alphanumeric() || c == '-')
+            && !label.starts_with('-')
+            && !label.ends_with('-')
+    })
 }
 
 fn resolve_runtime_entry_path() -> Result<PathBuf, String> {
     let base_dir = std::env::current_dir()
-        .map_err(|error| format!("failed to resolve current directory: {error}"))?;
+        .map_err(|_error| {
+            #[cfg(debug_assertions)]
+            { format!("failed to resolve current directory: {_error}") }
+            #[cfg(not(debug_assertions))]
+            { "failed to resolve current directory".to_string() }
+        })?;
     resolve_runtime_entry_path_from_base(&base_dir)
 }
 
@@ -130,6 +173,10 @@ pub fn runtime_service_start(
     let runtime_host = host.unwrap_or_else(|| "127.0.0.1".to_string()).trim().to_string();
     if runtime_host.is_empty() {
         return Err("runtime host is required".to_string());
+    }
+
+    if !is_valid_host(&runtime_host) {
+        return Err("invalid host format: must be a valid IP address or hostname".to_string());
     }
 
     let runtime_port = port.unwrap_or(4077);
@@ -222,7 +269,8 @@ mod tests {
         fs::write(&entry, "// runtime server").expect("should create runtime entry");
 
         let resolved = resolve_runtime_entry_path_from_base(&src_tauri).expect("should resolve runtime entry");
-        assert_eq!(resolved, entry);
+        let expected = entry.canonicalize().expect("should canonicalize expected entry");
+        assert_eq!(resolved, expected);
 
         let _ = fs::remove_dir_all(&root);
     }
@@ -238,5 +286,28 @@ mod tests {
         assert!(resolved.exists());
 
         let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn is_valid_host_accepts_ipv4() {
+        assert!(super::is_valid_host("127.0.0.1"));
+        assert!(super::is_valid_host("192.168.1.1"));
+        assert!(super::is_valid_host("0.0.0.0"));
+    }
+
+    #[test]
+    fn is_valid_host_accepts_hostname() {
+        assert!(super::is_valid_host("localhost"));
+        assert!(super::is_valid_host("my-server.local"));
+        assert!(super::is_valid_host("agent.exomind.dev"));
+    }
+
+    #[test]
+    fn is_valid_host_rejects_invalid() {
+        assert!(!super::is_valid_host(""));
+        assert!(!super::is_valid_host("host with spaces"));
+        assert!(!super::is_valid_host("../etc/passwd"));
+        assert!(!super::is_valid_host("-invalid"));
+        assert!(!super::is_valid_host("invalid-"));
     }
 }
