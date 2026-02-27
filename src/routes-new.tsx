@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useParams } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, ScrollText, Timer, Brain, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
@@ -171,10 +171,11 @@ function MobileShell({
 
 function DesktopSidebar({ activePath }: { activePath: string }) {
   const desktopNavItems = [
-    { title: '总览', path: '/dashboard', icon: LayoutDashboard, available: false },
-    { title: '事件日志', path: '/eventlog', icon: ScrollText, available: false },
-    { title: '专注计时', path: '/focus', icon: Timer, available: false },
-    { title: '设置', path: '/settings', icon: Settings, available: true },
+    { key: 'dashboard', title: '总览', path: '/dashboard', icon: LayoutDashboard, match: (path: string) => path === '/dashboard' },
+    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
+    { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
+    { key: 'agents', title: 'Agent', path: '/agents', icon: Bot, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
+    { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' },
   ];
 
   return (
@@ -197,29 +198,23 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
       <nav className="flex-1 space-y-1 p-2">
         {desktopNavItems.map((item) => {
           const Icon = item.icon;
-          const active = activePath === item.path;
+          const active = item.match(activePath);
           const itemClassName = cn(
             'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
             active
               ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
               : 'text-[hsl(var(--sidebar-foreground))]'
           );
-
-          if (item.available) {
-            return (
-              <Link key={item.path} to={item.path} className={itemClassName}>
-                <Icon size={16} />
-                <span>{item.title}</span>
-              </Link>
-            );
-          }
-
           return (
-            <button key={item.path} type="button" disabled className={`${itemClassName} cursor-not-allowed opacity-55`}>
+            <Link
+              key={item.path}
+              to={item.path}
+              data-testid={`desktop-sidebar-item-${item.key}`}
+              className={itemClassName}
+            >
               <Icon size={16} />
               <span>{item.title}</span>
-              <span className="ml-auto text-[10px] text-[hsl(var(--sidebar-muted))]">待实现</span>
-            </button>
+            </Link>
           );
         })}
       </nav>
@@ -347,6 +342,18 @@ const newHomeRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/',
   component: function NewHome() {
+    return (
+      <LazyPage>
+        <NewFocusPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newDashboardRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/dashboard',
+  component: function NewDashboard() {
     return (
       <LazyPage>
         <NewFocusPage />
@@ -516,6 +523,7 @@ const newAgentMarketRoute = createRoute({
 
 const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
+  newDashboardRoute,
   newEventlogRoute,
   newTasksRoute,
   newTaskDetailRoute,

@@ -20,11 +20,11 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   });
 
   it('uses five desktop nav items with dashboard entry（桌面导航使用5项并包含总览dashboard）', () => {
-    expect(desktopNavBlock).toContain("{ title: '总览', path: '/dashboard'");
-    expect(desktopNavBlock).toContain("{ title: '当下', path: '/eventlog'");
-    expect(desktopNavBlock).toContain("{ title: '任务', path: '/tasks'");
-    expect(desktopNavBlock).toContain("{ title: 'Agent', path: '/agents'");
-    expect(desktopNavBlock).toContain("{ title: '设置', path: '/settings'");
+    expect(desktopNavBlock).toContain("title: '总览', path: '/dashboard'");
+    expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
+    expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
+    expect(desktopNavBlock).toContain("title: 'Agent', path: '/agents'");
+    expect(desktopNavBlock).toContain("title: '设置', path: '/settings'");
     expect(desktopNavBlock).not.toContain('事件日志');
     expect(desktopNavBlock).not.toContain('专注计时');
     expect(desktopNavBlock).not.toContain('available');
