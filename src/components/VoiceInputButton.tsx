@@ -695,10 +695,10 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         }
         if (permissionState === 'prompt' || permissionState === 'denied') {
           return {
-            background: 'hsl(var(--muted))',
+            background: 'hsl(var(--warning) / 0.15)',
             shadow: 'none',
             icon: <MicOff size={Math.max(16, Math.floor(size * 0.34))} />,
-            iconColor: 'hsl(var(--warning) / 0.8)',
+            iconColor: 'hsl(var(--warning))',
           };
         }
         return {
