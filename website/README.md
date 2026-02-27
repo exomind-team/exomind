@@ -33,6 +33,17 @@ bun run website:cf:dry-run
 ## Automated Test / 自动化测试
 
 ```bash
+# Local website E2E (本地站点 E2E)
 bun run test:e2e:website
+
+# Production smoke test (线上官网冒烟测试)
+bun run test:e2e:website:prod
 ```
 
+If you need to test another deployment URL, set:
+
+```bash
+# EXOMIND_WEBSITE_BASE_URL (官网基准地址)
+$env:EXOMIND_WEBSITE_BASE_URL="https://exo-mind.ai"
+bun run test:e2e:website:prod
+```
