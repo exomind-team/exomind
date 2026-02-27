@@ -1,0 +1,56 @@
+---
+import { getLangFromUrl, useTranslations, getLocalizedPath } from '../i18n';
+
+const lang = getLangFromUrl(Astro.url);
+const t = useTranslations(lang);
+---
+
+<footer class="border-t border-stone-200 bg-white dark:border-stone-800 dark:bg-stone-950">
+  <div class="section-container py-16">
+    <div class="grid grid-cols-2 gap-8 md:grid-cols-4">
+      {/* Brand */}
+      <div class="col-span-2 md:col-span-1">
+        <a href={getLocalizedPath('/', lang)} class="flex items-center gap-2.5">
+          <div class="flex h-8 w-8 items-center justify-center rounded-lg bg-brand">
+            <span class="text-sm font-bold text-white">E</span>
+          </div>
+          <span class="text-lg font-semibold tracking-tight">ExoMind</span>
+        </a>
+        <p class="mt-4 text-sm leading-relaxed text-stone-500">
+          {lang === 'zh' ? '你的生命成长助手' : 'Your Life Growth Companion'}
+        </p>
+      </div>
+
+      {/* Product */}
+      <div>
+        <h3 class="text-sm font-semibold text-stone-900 dark:text-stone-50">{t('footer.product')}</h3>
+        <ul class="mt-4 space-y-3">
+          <li><a href={getLocalizedPath('/features', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.features')}</a></li>
+          <li><a href={getLocalizedPath('/download', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.download')}</a></li>
+          <li><a href={getLocalizedPath('/changelog', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.changelog')}</a></li>
+        </ul>
+      </div>
+
+      {/* Resources */}
+      <div>
+        <h3 class="text-sm font-semibold text-stone-900 dark:text-stone-50">{t('footer.resources')}</h3>
+        <ul class="mt-4 space-y-3">
+          <li><a href={getLocalizedPath('/docs', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.docs')}</a></li>
+          <li><a href={getLocalizedPath('/about', lang)} class="text-sm text-stone-500 hover:text-brand">{t('nav.about')}</a></li>
+        </ul>
+      </div>
+
+      {/* Community */}
+      <div>
+        <h3 class="text-sm font-semibold text-stone-900 dark:text-stone-50">{t('footer.community')}</h3>
+        <ul class="mt-4 space-y-3">
+          <li><a href="https://github.com/exomind-team/exomind" target="_blank" rel="noopener" class="text-sm text-stone-500 hover:text-brand">{t('footer.github')}</a></li>
+        </ul>
+      </div>
+    </div>
+
+    <div class="mt-12 border-t border-stone-200 pt-8 dark:border-stone-800">
+      <p class="text-center text-sm text-stone-400">{t('footer.copyright')}</p>
+    </div>
+  </div>
+</footer>
