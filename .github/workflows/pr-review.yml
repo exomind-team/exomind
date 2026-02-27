@@ -23,7 +23,7 @@ jobs:
       pull-requests: read
       issues: read
     outputs:
-      final_message: ${{ steps.run_codex.outputs.final-message }}
+      final_message: ${{ steps.run_codex.outputs['final-message'] }}
       pr_number: ${{ steps.pr.outputs.number }}
     steps:
       - name: Resolve PR number
