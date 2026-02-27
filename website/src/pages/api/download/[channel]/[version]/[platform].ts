@@ -31,14 +31,11 @@ function errorResponse(message: string, status: number, corsOrigin: string) {
 
 /** Map platform slug to filename pattern */
 function getFilename(version: string, platform: string): string | null {
-  // Strip leading "v" from version for filename (v0.3.3 -> 0.3.3)
-  const ver = version.startsWith('v') ? version.slice(1) : version;
-
-  // TODO: Consider reading filename from latest.json instead of reconstructing here,
-  // to avoid coupling with CI build artifact naming convention.
   const map: Record<string, string> = {
-    'windows-x64': `ExoMind-${ver}-windows-x64-setup.exe`,
-    'android-arm64': `ExoMind-${ver}-android-arm64.apk`,
+    'windows-x64-setup': `ExoMind-${version}-windows-x64-setup.exe`,
+    'windows-x64': `ExoMind-${version}-windows-x64-setup.exe`,
+    'android-arm64': `ExoMind-${version}-android-arm64.apk`,
+    'android-x86': `ExoMind-${version}-android-x86.apk`,
   };
 
   return map[platform] ?? null;
