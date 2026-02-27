@@ -176,7 +176,7 @@ describe('NewFocusTimerWidget state machine（新专注计时组件状态机）'
     expect(configContainer.className).not.toContain('h-[253px]');
     expect(glowNode?.className).not.toContain('h-[227px]');
 
-    expect(screen.getByText('预期时间')).toBeInTheDocument();
+    expect(screen.getByText('预期时长')).toBeInTheDocument();
     expect(screen.queryByText('计时模式')).toBeNull();
     expect(screen.queryByText('倒计时时长')).toBeNull();
     fireEvent.click(screen.getByTestId('new-focus-expected-countup'));

@@ -218,6 +218,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const expectedDurationMs = activeData.mode === 'countdown'
       ? (activeData.targetMinutes ?? 25) * 60 * 1000
       : null;
+    const expectedEndAt = expectedDurationMs === null
+      ? null
+      : actionStartAt + expectedDurationMs;
 
     const endId = crypto.randomUUID();
 
@@ -231,6 +234,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       workDurationMs,
       totalDurationMs,
       expectedDurationMs,
+      expectedEndAt,
       actionStartAt,
       actionEndedAt,
       submittedAt,
@@ -388,6 +392,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     workDurationMs: number;
     totalDurationMs: number;
     expectedDurationMs: number | null;
+    expectedEndAt: number | null;
     actionStartAt: number;
     actionEndedAt: number;
     submittedAt: number;
@@ -404,6 +409,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       `### 时刻信息`,
       ``,
       `- 时间开始于：\`${this.formatClock(input.actionStartAt)}\``,
+      `- 预期结束于：\`${input.expectedEndAt === null ? '∞' : this.formatClock(input.expectedEndAt)}\``,
       `- 时间结束于：\`${this.formatClock(input.actionEndedAt)}\``,
       `- 反馈提交于：\`${this.formatClock(input.submittedAt)}\``,
       ``,

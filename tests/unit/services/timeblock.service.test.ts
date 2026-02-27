@@ -90,6 +90,7 @@ describe('TimeBlockServiceImpl', () => {
         expectedDurationMs: null,
       }),
     }));
+    expect((feedbackCall as { content: string }).content).toContain('预期结束于：`∞`');
     expect((feedbackCall as { content: string }).content).not.toContain('超时投入');
     expect((feedbackCall as { content: string }).content).toContain('felt good');
   });
@@ -144,6 +145,8 @@ describe('TimeBlockServiceImpl', () => {
         workDurationMs: 90_000,
       }),
     }));
+    expect((feedbackCall as { content: string }).content).toContain('预期结束于：`');
+    expect((feedbackCall as { content: string }).content).not.toContain('预期结束于：`∞`');
     expect((feedbackCall as { content: string }).content).toContain('预期时长：**`01:00`**');
     expect((feedbackCall as { content: string }).content).toContain('超时投入：**`00:30`**');
   });
