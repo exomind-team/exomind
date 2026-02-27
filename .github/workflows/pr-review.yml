@@ -1,0 +1,252 @@
+name: "Black Hat Critic - PR Review"
+
+on:
+  pull_request:
+    types: [opened, synchronize]
+  issue_comment:
+    types: [created]
+
+jobs:
+  prepare:
+    if: |
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic'))
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: read
+      issues: read
+    outputs:
+      pr_number: ${{ steps.diff.outputs.pr_number }}
+      issue_found: ${{ steps.issue.outputs.found }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            PR_NUMBER=$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")
+          else
+            PR_NUMBER=${{ github.event.pull_request.number }}
+          fi
+          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
+          gh pr diff "$PR_NUMBER" > /tmp/pr.diff
+          gh pr view "$PR_NUMBER" --json body,title,commits -q '.' > /tmp/pr_meta.json
+
+      - name: Get linked Issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          PR_BODY=$(jq -r '.body // ""' /tmp/pr_meta.json)
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '(?:Closes|Fixes|Resolves)\s*#\K\d+' | head -1)
+          if [ -n "$ISSUE_NUM" ]; then
+            gh issue view "$ISSUE_NUM" --json body,title -q '.' > /tmp/issue_meta.json
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo '{"title":"","body":""}' > /tmp/issue_meta.json
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: pr-context
+          path: |
+            /tmp/pr.diff
+            /tmp/pr_meta.json
+            /tmp/issue_meta.json
+
+  # ═══════════════════════════════════════════
+  # 第一关：Codex 快速扫描
+  # ═══════════════════════════════════════════
+  codex-review:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-context
+          path: /tmp
+
+      - name: Codex Review
+        env:
+          CODEX_API_KEY: ${{ secrets.CODEX_API_KEY }}
+          CODEX_API_BASE: ${{ secrets.CODEX_API_BASE }}
+        run: |
+          PR_DIFF=$(head -c 12000 /tmp/pr.diff)
+          PR_META=$(cat /tmp/pr_meta.json)
+          ISSUE_META=$(cat /tmp/issue_meta.json)
+
+          SYSTEM_PROMPT="你是 ExoMind 项目的「黑帽 Critic」第一关 — Codex 快速扫描员。
+          用中文回复。快速扫描以下维度，每个问题标注严重程度（🔴必须修/🟡建议修/🟢可选）：
+
+          1. 范围检查：改动是否在 Issue 范围内？有无 scope creep？
+          2. 安全扫描：硬编码密钥？XSS/注入？Tauri 权限声明？
+          3. 返工信号：TODO/FIXME/HACK？any 类型？吞掉的错误？
+          4. commit 规范：是否引用 Issue？是否 conventional commits？
+
+          如果没问题就说没问题，不要为了找问题而找问题。简洁直接。"
+
+          USER_CONTENT="PR 信息：
+          $(echo "$PR_META" | jq -r '"标题: \(.title)\n描述: \(.body // "无")"')
+
+          关联 Issue：
+          $(echo "$ISSUE_META" | jq -r '"标题: \(.title // "未关联")\n内容: \(.body // "无")"')
+
+          Diff：
+          $PR_DIFF"
+
+          RESPONSE=$(curl -s -X POST "${CODEX_API_BASE}/chat/completions" \
+            -H "Content-Type: application/json" \
+            -H "Authorization: Bearer ${CODEX_API_KEY}" \
+            -d "$(jq -n \
+              --arg system "$SYSTEM_PROMPT" \
+              --arg user "$USER_CONTENT" \
+              '{
+                model: "codex-mini-latest",
+                max_tokens: 2048,
+                messages: [
+                  {role: "system", content: $system},
+                  {role: "user", content: $user}
+                ]
+              }')")
+
+          REVIEW=$(echo "$RESPONSE" | jq -r '.choices[0].message.content // .error.message // "Codex API 调用失败"')
+          echo "$REVIEW" > /tmp/codex_review.md
+
+      - name: Post Codex Review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REVIEW=$(cat /tmp/codex_review.md)
+          BODY=$(cat <<'COMMENT_EOF'
+          ## 🎩⚡ 黑帽 Critic — 第一关 Codex 快速扫描
+
+          COMMENT_EOF
+          )
+          BODY="${BODY}${REVIEW}"
+          BODY="${BODY}
+
+          ---
+          *Codex Quick Scan · ExoMind Feature Flow v2*"
+
+          gh pr comment "${{ needs.prepare.outputs.pr_number }}" --body "$BODY"
+
+  # ═══════════════════════════════════════════
+  # 第二关：Claude Opus 深度评审
+  # ═══════════════════════════════════════════
+  opus-deep-review:
+    needs: prepare
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          name: pr-context
+          path: /tmp
+
+      - name: Opus Deep Review
+        env:
+          OPUS_API_KEY: ${{ secrets.OPUS_API_KEY }}
+          OPUS_API_BASE: ${{ secrets.OPUS_API_BASE }}
+        run: |
+          PR_DIFF=$(head -c 30000 /tmp/pr.diff)
+          PR_META=$(cat /tmp/pr_meta.json)
+          ISSUE_META=$(cat /tmp/issue_meta.json)
+
+          SYSTEM_PROMPT="你是 ExoMind 项目的「黑帽 Critic」第二关 — Opus 深度评审员。
+          你是最严格的一关，用中文回复。
+
+          ## 审查维度（按优先级）
+
+          ### 1. 范围与意图
+          - PR 改动是否在关联 Issue 描述的范围内？
+          - 有没有 scope creep（偷偷加了 Issue 没提到的功能）？
+          - 如果没有关联 Issue，标记为 ⚠️
+
+          ### 2. 安全审计
+          - 硬编码的密钥、token、密码？
+          - XSS、注入、路径遍历等 OWASP Top 10？
+          - Tauri 命令权限声明是否正确？
+          - 敏感数据是否暴露到前端？
+
+          ### 3. 架构与设计
+          - 是否遵循项目现有的模块结构和命名约定？
+          - 新增依赖是否必要？有没有更轻量的替代？
+          - 是否有重复代码可以复用已有模块？
+          - 错误处理是否充分？边界情况是否覆盖？
+
+          ### 4. 返工风险预判
+          - 哪些地方可能在下一个 PR 被改？为什么？
+          - 类型定义是否完整（避免 any、as unknown）？
+          - 有没有 TODO/FIXME/HACK 留下的技术债？
+
+          ### 5. 验收标准对照
+          - 如果 Issue 有验收标准，逐条检查 diff 是否满足
+          - 如果没有验收标准，指出这个流程缺失
+
+          ## 输出格式
+          按维度分段，每个问题标注：
+          - 🔴 必须修复（安全问题、明确的 bug）
+          - 🟡 建议修复（返工风险、架构偏离）
+          - 🟢 可选优化（代码风格、命名建议）
+
+          最后给出总体评级：✅ 可合并 / ⚠️ 需修改后合并 / ❌ 需重大修改
+
+          如果 PR 质量很好，明确说没有发现问题。不要为了找问题而找问题。"
+
+          USER_CONTENT="PR 信息：
+          $(echo "$PR_META" | jq -r '"标题: \(.title)\n描述: \(.body // "无")"')
+
+          关联 Issue：
+          $(echo "$ISSUE_META" | jq -r '"标题: \(.title // "未关联")\n内容: \(.body // "无")"')
+
+          Diff（完整）：
+          $PR_DIFF"
+
+          RESPONSE=$(curl -s -X POST "${OPUS_API_BASE}/v1/messages" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${OPUS_API_KEY}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "$(jq -n \
+              --arg system "$SYSTEM_PROMPT" \
+              --arg user "$USER_CONTENT" \
+              '{
+                model: "claude-opus-4-20250514",
+                max_tokens: 4096,
+                system: $system,
+                messages: [{role: "user", content: $user}]
+              }')")
+
+          REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text // .error.message // "Opus API 调用失败，请检查 OPUS_API_KEY 和 OPUS_API_BASE 配置。"')
+          echo "$REVIEW" > /tmp/opus_review.md
+
+      - name: Post Opus Review
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          REVIEW=$(cat /tmp/opus_review.md)
+          BODY=$(cat <<'COMMENT_EOF'
+          ## 🎩🔮 黑帽 Critic — 第二关 Opus 深度评审
+
+          COMMENT_EOF
+          )
+          BODY="${BODY}${REVIEW}"
+          BODY="${BODY}
+
+          ---
+          *Deep Review (Opus) · ExoMind Feature Flow v2*"
+
+          gh pr comment "${{ needs.prepare.outputs.pr_number }}" --body "$BODY"
