@@ -324,12 +324,22 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件图标
   const getEventIcon = (event: Event) => {
-    if (event.tags.has('block_start')) return <Play size={14} className="text-success" />;
-    if (event.tags.has('block_pause')) return <Pause size={14} className="text-warning" />;
-    if (event.tags.has('block_resume')) return <Play size={14} className="text-success" />;
-    if (event.tags.has('block_end')) return <Square size={14} className="text-destructive" />;
-    if (event.tags.has('block_feedback')) return <NotepadText size={14} className="text-primary" />;
+    if (event.tags.has('block_start')) return <Play size={14} />;
+    if (event.tags.has('block_pause')) return <Pause size={14} />;
+    if (event.tags.has('block_resume')) return <Play size={14} />;
+    if (event.tags.has('block_end')) return <Square size={14} />;
+    if (event.tags.has('block_feedback')) return <NotepadText size={14} />;
     return <FileText size={14} />;
+  };
+
+  // 获取事件头像背景色
+  const getEventAvatarColor = (event: Event) => {
+    if (event.tags.has('block_start')) return 'bg-success';
+    if (event.tags.has('block_pause')) return 'bg-warning';
+    if (event.tags.has('block_resume')) return 'bg-success';
+    if (event.tags.has('block_end')) return 'bg-destructive';
+    if (event.tags.has('block_feedback')) return 'bg-primary';
+    return 'bg-primary';
   };
 
   // 获取事件背景色
@@ -473,7 +483,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                     data-testid="new-mobile-system-message-row"
                   >
                     <Avatar className="mt-0.5 h-8 w-8 shrink-0">
-                      <AvatarFallback className="rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 flex items-center justify-center">
+                      <AvatarFallback className={`rounded-full flex items-center justify-center text-white ${getEventAvatarColor(event)}`}>
                         {getEventIcon(event)}
                       </AvatarFallback>
                     </Avatar>
