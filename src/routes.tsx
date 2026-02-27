@@ -159,7 +159,7 @@ function MobileShell({
           desktopFrame && 'h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
         )}
       >
-        <main className="absolute inset-x-0 top-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto">
+        <main className={cn("absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto", desktopFrame ? "top-0" : "top-[env(safe-area-inset-top,0px)]")}>
           <Outlet />
         </main>
 

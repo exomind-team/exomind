@@ -391,7 +391,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   return (
     <div className="bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-focus-timer-widget">
       {uiState === 'idle' && (
-        <section className="safe-area-pt-plus">
+        <section className="pt-[10px]">
           <div className="relative mx-auto h-[104px] w-full max-w-[390px]" data-testid="new-focus-state-idle">
             <div
               className="absolute left-1/2 top-[18px] h-[74px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14] blur-[8px]"
@@ -423,7 +423,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       )}
 
       {uiState === 'config' && (
-        <section className="safe-area-pt-plus">
+        <section className="pt-[10px]">
           <div className="relative mx-auto w-full max-w-[390px] px-4 pb-3 pt-4" data-testid="new-focus-state-config">
             <div
               className="absolute inset-x-4 bottom-[10px] top-[14px] rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14] blur-[8px]"
@@ -561,7 +561,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       )}
 
       {uiState === 'running' && (
-        <section className="safe-area-pt-plus" data-testid="new-focus-state-running">
+        <section className="pt-[10px]" data-testid="new-focus-state-running">
           <div className="relative mx-auto h-[200px] w-full max-w-[390px]">
             <div
               className="absolute left-1/2 top-[20px] h-[163px] w-[calc(100%-40px)] max-w-[353px] -translate-x-1/2 rounded-[22px] bg-gradient-to-br from-[#EDADA0] via-[#E08E7A] to-[#D4785F] dark:from-[#8B3A25] dark:via-[#6B2E1E] dark:to-[#4A1F14] blur-[8px]"
