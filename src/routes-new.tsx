@@ -15,6 +15,11 @@ const NewSettingsPage = lazy(async () => {
   return { default: module.NewSettingsPage };
 });
 
+const LegalSupportPage = lazy(async () => {
+  const module = await import('@/ui/new/pages/LegalSupportPage');
+  return { default: module.LegalSupportPage };
+});
+
 const NewTasksPage = lazy(async () => {
   const module = await import('@/ui/new/pages/NewTasksPage');
   return { default: module.NewTasksPage };
@@ -147,7 +152,8 @@ function MobileShell({
               const active = locationPath === item.path
                 || (item.path === '/eventlog' && locationPath === '/')
                 || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
-                || (item.path === '/me' && locationPath.startsWith('/me'));
+                || (item.path === '/me' && locationPath.startsWith('/me'))
+                || (item.path === '/settings' && locationPath.startsWith('/settings'));
               return (
                 <Link
                   key={item.path}
@@ -175,7 +181,7 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
     { key: 'agents', title: 'Agent', path: '/agents', icon: Bot, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
-    { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' },
+    { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
   return (
@@ -268,7 +274,7 @@ function NewLayout() {
     ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
-  const isDesktopSettingsRoute = location.pathname === '/settings';
+  const isDesktopSettingsRoute = location.pathname === '/settings' || location.pathname.startsWith('/settings/');
 
   if (isDesktop && desktopAdaptiveEnabled && isDesktopSettingsRoute) {
     return <DesktopLayout activePath={location.pathname} />;
@@ -360,6 +366,18 @@ const newSettingsRoute = createRoute({
     return (
       <LazyPage>
         <NewSettingsPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newLegalSupportRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/settings/legal-support',
+  component: function NewLegalSupport() {
+    return (
+      <LazyPage>
+        <LegalSupportPage />
       </LazyPage>
     );
   },
@@ -472,6 +490,7 @@ const newRouteTree = newRootRoute.addChildren([
   newTaskDetailRoute,
   newMeRoute,
   newSettingsRoute,
+  newLegalSupportRoute,
   newUserManageRoute,
   newMossTestRoute,
   newAgentsRoute,
