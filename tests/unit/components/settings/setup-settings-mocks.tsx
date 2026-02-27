@@ -47,6 +47,11 @@ vi.mock('@/config/agent-page-enabled', () => ({
   setAgentPageEnabled: vi.fn(),
 }));
 
+vi.mock('@/config/desktop-adaptive', () => ({
+  getDesktopAdaptiveEnabled: vi.fn(() => true),
+  setDesktopAdaptiveEnabled: vi.fn(),
+}));
+
 vi.mock('@/config/timer-preferences', () => ({
   getTimerPreferences: vi.fn(() => ({
     countdownEndMode: 'soft',

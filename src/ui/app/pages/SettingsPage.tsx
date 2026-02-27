@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+﻿import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -24,6 +24,10 @@ import {
   getAgentPageEnabled,
   setAgentPageEnabled,
 } from '@/config/agent-page-enabled';
+import {
+  getDesktopAdaptiveEnabled,
+  setDesktopAdaptiveEnabled,
+} from '@/config/desktop-adaptive';
 import {
   getTimerPreferences,
   subscribeTimerPreferencesChanges,
@@ -65,7 +69,6 @@ import {
 } from '@/lib/media/timer-end-sounds';
 import { UserCard } from '@/ui/app/components/UserCard';
 import { MoreSection } from '@/ui/app/components/MoreSection';
-import { LegalSection } from '@/ui/app/components/LegalSection';
 import { AboutSection } from '@/ui/app/components/AboutSection';
 import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/app/components/settings-shared';
 import { useNavigate } from '@tanstack/react-router';
@@ -93,6 +96,8 @@ type PickedJsonFile = {
   path: string;
   content: string;
 };
+
+type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'about' | 'danger';
 
 const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
@@ -151,6 +156,34 @@ function maskMossApiKey(value: string): string {
   return `${value.slice(0, 4)}***${value.slice(-2)}`;
 }
 
+function useIsDesktop(minWidth = 768): boolean {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+    return window.matchMedia(`(min-width: ${minWidth}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQueryList = window.matchMedia(`(min-width: ${minWidth}px)`);
+    const onChange = (event: MediaQueryListEvent) => {
+      setIsDesktop(event.matches);
+    };
+
+    setIsDesktop(mediaQueryList.matches);
+    mediaQueryList.addEventListener('change', onChange);
+    return () => {
+      mediaQueryList.removeEventListener('change', onChange);
+    };
+  }, [minWidth]);
+
+  return isDesktop;
+}
+
 export function SettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.3');
@@ -163,6 +196,9 @@ export function SettingsPage() {
   const [developerMode, setDeveloperMode] = useState<boolean>(() => getDeveloperModeEnabled());
   const [agentPageEnabled, setAgentPageEnabledState] = useState<boolean>(
     () => getAgentPageEnabled()
+  );
+  const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState<boolean>(
+    () => getDesktopAdaptiveEnabled()
   );
   const [useMockData, setUseMockData] = useState<boolean>(() => getUseMockDataEnabled());
   const [devtoolsEnabled, setDevtoolsEnabledState] = useState<boolean>(() => getDevtoolsEnabled());
@@ -189,6 +225,14 @@ export function SettingsPage() {
   const [loading, setLoading] = useState(false);
   const [comingSoonVisible, setComingSoonVisible] = useState(false);
   const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [activeDesktopTab, setActiveDesktopTab] = useState<DesktopTabKey>('theme');
+  const sectionThemeRef = useRef<HTMLElement | null>(null);
+  const sectionFocusRef = useRef<HTMLElement | null>(null);
+  const sectionNotificationRef = useRef<HTMLElement | null>(null);
+  const sectionDangerRef = useRef<HTMLElement | null>(null);
+  const sectionAboutRef = useRef<HTMLElement | null>(null);
+  const isDesktop = useIsDesktop();
+  const isDesktopVcLayout = isDesktop && desktopAdaptiveEnabled;
 
   const showComingSoon = () => {
     if (comingSoonTimer.current) clearTimeout(comingSoonTimer.current);
@@ -350,6 +394,11 @@ export function SettingsPage() {
     setAgentPageEnabledState(checked);
   };
 
+  const handleDesktopAdaptiveToggle = (checked: boolean) => {
+    setDesktopAdaptiveEnabled(checked);
+    setDesktopAdaptiveEnabledState(checked);
+  };
+
   const handleUseMockDataToggle = (checked: boolean) => {
     setUseMockDataEnabled(checked);
     setUseMockData(checked);
@@ -363,9 +412,25 @@ export function SettingsPage() {
     void syncDevtoolsWithSettings();
   };
 
+  const navigate = useNavigate();
+
   const handleCommandPaletteToggle = (checked: boolean) => {
     setCommandPaletteEnabled(checked);
     setCommandPaletteEnabledState(checked);
+  };
+
+  const handleOpenLegalSupport = () => {
+    navigate({ to: '/settings/legal-support' });
+  };
+
+  const handleOpenOfficialWebsite = () => {
+    if (typeof window === 'undefined') return;
+    window.open('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
+  };
+
+  const handleOpenSponsor = () => {
+    if (typeof window === 'undefined') return;
+    window.open('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
   };
 
   const handleVoiceTranscriptSendModeChange = (mode: VoiceTranscriptSendMode) => {
@@ -380,8 +445,6 @@ export function SettingsPage() {
     setFeedbackPreferences(next);
     setFeedbackPreferencesState(next);
   };
-
-  const navigate = useNavigate();
 
   const handleOpenVoiceInputSettings = () => {
     clearNotice();
@@ -499,8 +562,300 @@ export function SettingsPage() {
     }
   })();
 
+  const desktopTabItems: Array<{ key: DesktopTabKey; label: string; ref: { current: HTMLElement | null } }> = [
+    { key: 'theme', label: '外观主题', ref: sectionThemeRef },
+    { key: 'focus', label: '专注设置', ref: sectionFocusRef },
+    { key: 'notification', label: '通知', ref: sectionNotificationRef },
+    { key: 'about', label: '关于', ref: sectionAboutRef },
+    { key: 'danger', label: '危险区域', ref: sectionDangerRef },
+  ];
+
+  const handleDesktopTabClick = (tabKey: DesktopTabKey, sectionRef: { current: HTMLElement | null }) => {
+    setActiveDesktopTab(tabKey);
+    sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
+  const renderDesktopVcContent = () => (
+    <div data-testid="new-settings-desktop-vc-root" className="flex h-full min-h-full flex-col">
+      <header className="border-b border-[#F0ECE8] px-10 pb-4 pt-8 dark:border-[#292524]">
+        <h1 className="text-[22px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">设置</h1>
+        <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">管理你的应用偏好和账户设置</p>
+      </header>
+
+      <div className="border-b border-[#F0ECE8] px-10 py-3 dark:border-[#292524]">
+        <div data-testid="new-settings-desktop-vc-tabs" className="inline-flex items-center gap-1 rounded-lg bg-[#F5F0ED] p-1 dark:bg-[#292524]">
+          {desktopTabItems.map((tab) => (
+            <button
+              key={tab.key}
+              type="button"
+              aria-pressed={activeDesktopTab === tab.key}
+              onClick={() => handleDesktopTabClick(tab.key, tab.ref)}
+              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                activeDesktopTab === tab.key
+                  ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_2px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                  : 'text-[#78716C] dark:text-[#A8A29E]'
+              }`}
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div data-testid="new-settings-desktop-vc-scroll" className="flex-1 overflow-y-auto px-10 py-6">
+        <div className="mx-auto w-full max-w-[980px] space-y-6 pb-10">
+          <section ref={sectionThemeRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-theme">
+            <SectionTitle>外观主题</SectionTitle>
+            <SectionCard>
+              <div className="flex items-center justify-between px-4 py-[14px]">
+                <div className="flex items-center gap-3">
+                  <MoonStar className="h-[18px] w-[18px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">主题</span>
+                </div>
+                <div
+                  id="theme-preference-new"
+                  role="group"
+                  aria-label="主题"
+                  className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                >
+                  <button
+                    type="button"
+                    data-testid="new-settings-theme-system"
+                    aria-pressed={themePreference === 'system'}
+                    onClick={() => handleThemePreferenceChange('system')}
+                    disabled={loading}
+                    className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                      themePreference === 'system'
+                        ? 'bg-white font-medium text-[#1C1917] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                        : 'text-[#A8A29E]'
+                    }`}
+                  >
+                    自动
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="new-settings-theme-light"
+                    aria-pressed={themePreference === 'light'}
+                    onClick={() => handleThemePreferenceChange('light')}
+                    disabled={loading}
+                    className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                      themePreference === 'light'
+                        ? 'bg-white font-medium text-[#1C1917] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                        : 'text-[#A8A29E]'
+                    }`}
+                  >
+                    浅色
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="new-settings-theme-dark"
+                    aria-pressed={themePreference === 'dark'}
+                    onClick={() => handleThemePreferenceChange('dark')}
+                    disabled={loading}
+                    className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                      themePreference === 'dark'
+                        ? 'bg-white font-medium text-[#1C1917] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                        : 'text-[#A8A29E]'
+                    }`}
+                  >
+                    深色
+                  </button>
+                </div>
+              </div>
+            </SectionCard>
+          </section>
+
+          <section ref={sectionFocusRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-focus">
+            <SectionTitle>专注设置</SectionTitle>
+            <SectionCard>
+              <SettingRow
+                icon={<Timer className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="倒计时结束"
+                onClick={() => setCountdownModeDialogOpen(true)}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{countdownEndModeLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+              <Divider />
+              <SettingRow
+                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="提示音"
+                onClick={() => setSoundPickerOpen(true)}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{currentSoundLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+            </SectionCard>
+          </section>
+
+          <section ref={sectionNotificationRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-notification">
+            <SectionTitle>通知</SectionTitle>
+            <SectionCard>
+              <SettingRow
+                icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="同步服务器"
+                onClick={() => setSyncDialogOpen(true)}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{syncHost}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+              <div data-testid="new-settings-input-section">
+                <Divider />
+                <div data-testid="new-settings-voice-token-row">
+                  <SettingRow
+                    icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="MOSS API Token"
+                    onClick={handleOpenVoiceInputSettings}
+                    right={
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm text-[#A8A29E]">{mossApiKeyStatusLabel}</span>
+                        <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                      </div>
+                    }
+                  />
+                </div>
+                <Divider />
+                <div data-testid="new-settings-moss-test-row">
+                  <SettingRow
+                    icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="MOSS 语音测试"
+                    onClick={handleOpenVoiceTest}
+                    right={
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
+                        <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                      </div>
+                    }
+                  />
+                </div>
+              </div>
+              <Divider />
+              <SettingRow
+                icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="开发者模式"
+                right={<Switch checked={developerMode} onCheckedChange={handleDeveloperModeToggle} />}
+              />
+              {developerMode && (
+                <>
+                  <div className="pb-[14px] pl-[46px] pr-4">
+                    <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
+                  </div>
+                  <SettingRow
+                    icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="使用测试数据"
+                    right={
+                      <Switch
+                        data-testid="new-settings-use-mock-data-switch"
+                        checked={useMockData}
+                        onCheckedChange={handleUseMockDataToggle}
+                      />
+                    }
+                  />
+                  <Divider />
+                  <SettingRow
+                    icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="开发者工具"
+                    right={
+                      <Switch
+                        data-testid="new-settings-devtools-switch"
+                        checked={devtoolsEnabled}
+                        onCheckedChange={handleDevtoolsToggle}
+                      />
+                    }
+                  />
+                  <Divider />
+                  <SettingRow
+                    icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="功能开关"
+                    onClick={() => setFeatureTogglesDialogOpen(true)}
+                    right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                  />
+                </>
+              )}
+            </SectionCard>
+          </section>
+
+          <section ref={sectionAboutRef} className="space-y-5" data-testid="new-settings-desktop-vc-section-about">
+            <MoreSection
+              onNavigateUpdate={() => navigate({ to: '/update' })}
+              onComingSoon={showComingSoon}
+            />
+
+            <AboutSection
+              appVersion={versionBuildInfo.appVersion}
+              buildHash={versionBuildInfo.buildHash}
+              onOpenOfficialWebsite={handleOpenOfficialWebsite}
+              onOpenSponsor={handleOpenSponsor}
+              onOpenLegalSupport={handleOpenLegalSupport}
+            />
+          </section>
+
+          <section ref={sectionDangerRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-danger">
+            <SectionTitle>危险区域</SectionTitle>
+            <div className="overflow-hidden rounded-2xl border border-[#DC2626] bg-white dark:bg-[#1C1917]">
+              <div className="flex items-center justify-between px-4 py-[14px]">
+                <div>
+                  <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">清空本地缓存</p>
+                  <p className="mt-1 text-xs text-[#A8A29E]">将清除设备上的临时设置与缓存</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={showComingSoon}
+                  className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C]"
+                >
+                  立即清空
+                </button>
+              </div>
+              <div className="mx-4 h-px bg-[#F0ECE8] dark:bg-[#292524]" />
+              <div className="flex items-center justify-between px-4 py-[14px]">
+                <div>
+                  <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">重置所有设置</p>
+                  <p className="mt-1 text-xs text-[#A8A29E]">恢复默认配置，不影响历史事件数据</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={showComingSoon}
+                  className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C]"
+                >
+                  恢复默认
+                </button>
+              </div>
+            </div>
+          </section>
+
+          {statusMessage && (
+            <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              {statusMessage}
+            </div>
+          )}
+          {errorMessage && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {errorMessage}
+            </div>
+          )}
+
+          <footer className="flex flex-col items-center gap-1 pt-2 text-xs text-[#A8A29E]">
+            <span>ExoMind {versionBuildInfo.appVersion}</span>
+            <span>Build {versionBuildInfo.buildHash}</span>
+          </footer>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
+    <div
+      className={isDesktopVcLayout ? 'h-full min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]' : 'min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]'}
+    >
       {/* Hidden file input for import */}
       <input
         ref={fileInputRef}
@@ -509,6 +864,9 @@ export function SettingsPage() {
         className="hidden"
         onChange={handleFileInputChange}
       />
+
+      {isDesktopVcLayout ? renderDesktopVcContent() : (
+        <>
 
       {/* Header */}
       <header className="flex items-center justify-center px-6 py-3">
@@ -805,11 +1163,12 @@ export function SettingsPage() {
           onComingSoon={showComingSoon}
         />
 
-        <LegalSection onComingSoon={showComingSoon} />
-
         <AboutSection
           appVersion={versionBuildInfo.appVersion}
           buildHash={versionBuildInfo.buildHash}
+          onOpenOfficialWebsite={handleOpenOfficialWebsite}
+          onOpenSponsor={handleOpenSponsor}
+          onOpenLegalSupport={handleOpenLegalSupport}
         />
 
         {/* ── Developer Section (开发者) ── */}
@@ -866,6 +1225,39 @@ export function SettingsPage() {
           </SectionCard>
         </section>
 
+        <section className="space-y-2">
+          <SectionTitle>危险区域</SectionTitle>
+          <div className="overflow-hidden rounded-2xl border border-[#DC2626] bg-white dark:bg-[#1C1917]">
+            <div className="flex items-center justify-between px-4 py-[14px]">
+              <div>
+                <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">清空本地缓存</p>
+                <p className="mt-1 text-xs text-[#A8A29E]">将清除设备上的临时设置与缓存</p>
+              </div>
+              <button
+                type="button"
+                onClick={showComingSoon}
+                className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C]"
+              >
+                立即清空
+              </button>
+            </div>
+            <div className="mx-4 h-px bg-[#F0ECE8] dark:bg-[#292524]" />
+            <div className="flex items-center justify-between px-4 py-[14px]">
+              <div>
+                <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">重置所有设置</p>
+                <p className="mt-1 text-xs text-[#A8A29E]">恢复默认配置，不影响历史事件数据</p>
+              </div>
+              <button
+                type="button"
+                onClick={showComingSoon}
+                className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C]"
+              >
+                恢复默认
+              </button>
+            </div>
+          </div>
+        </section>
+
         {/* Status / Error messages */}
         {statusMessage && (
           <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
@@ -878,10 +1270,12 @@ export function SettingsPage() {
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* Coming Soon Toast */}
       {comingSoonVisible && (
-        <div className="fixed inset-x-0 bottom-28 z-50 flex justify-center">
+        <div className={`fixed inset-x-0 z-50 flex justify-center ${isDesktopVcLayout ? 'bottom-8' : 'bottom-28'}`}>
           <div className="rounded-full bg-[#1C1917] px-4 py-2 text-sm text-white shadow-lg dark:bg-[#FAFAF9] dark:text-[#1C1917]">
             即将推出
           </div>
@@ -1019,6 +1413,14 @@ export function SettingsPage() {
             </DrawerTitle>
             <p className="mt-1 text-center text-xs text-[#A8A29E]">启用或关闭实验性功能</p>
             <div className="mt-4 space-y-2">
+              <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
+                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">桌面端适配</span>
+                <Switch
+                  data-testid="new-settings-desktop-adaptive-switch"
+                  checked={desktopAdaptiveEnabled}
+                  onCheckedChange={handleDesktopAdaptiveToggle}
+                />
+              </div>
               <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
                 <div className="flex items-center gap-2">
                   <Bot className="h-[16px] w-[16px] text-[#78716C]" />
