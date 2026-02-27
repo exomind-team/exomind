@@ -81,6 +81,16 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/feedback-preferences', () => ({
+  getFeedbackPreferences: vi.fn(() => ({
+    timingInfoEnabled: false,
+    statisticsEnabled: false,
+    quickFeedbackEnabled: true,
+  })),
+  setFeedbackPreferences: vi.fn(),
+  subscribeFeedbackPreferencesChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/lib/debug/devtools-runtime', () => ({
   syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
