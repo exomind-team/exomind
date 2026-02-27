@@ -793,7 +793,8 @@ jobs:
             echo "Uploading $filename → $r2_key (Content-Type: $ct)"
             npx wrangler r2 object put "${bucket}/${r2_key}" \
               --file "$file" \
-              --content-type "$ct"
+              --content-type "$ct" \
+              --remote
           done
 
       - name: Generate and upload latest.json (生成并上传 latest.json)
@@ -860,7 +861,8 @@ jobs:
 
           npx wrangler r2 object put "${bucket}/${channel}/latest.json" \
             --file latest.json \
-            --content-type "application/json"
+            --content-type "application/json" \
+            --remote
 
       - name: Update versions.json and cleanup old previews (更新版本列表 + 清理旧版本)
         if: steps.r2meta.outputs.channel == 'preview'
@@ -882,7 +884,7 @@ jobs:
           # Try to fetch existing versions.json
           existing_versions="[]"
           if npx wrangler r2 object get "${bucket}/${channel}/versions.json" \
-               --file existing-versions.json 2>/dev/null; then
+               --file existing-versions.json --remote 2>/dev/null; then
             existing_payload="$(cat existing-versions.json)"
             if echo "$existing_payload" | jq -e 'type == "array"' >/dev/null 2>&1; then
               # backward-compat: old format was a raw array
@@ -923,13 +925,13 @@ jobs:
               # List and delete all objects under this prefix
               # wrangler r2 object delete requires exact keys, so we list first
               list_output="$(npx wrangler r2 object list "${bucket}" \
-                --prefix "${channel}/${old_dir}/" 2>&1)" || true
+                --prefix "${channel}/${old_dir}/" --remote 2>&1)" || true
               objects="$(echo "$list_output" | jq -r '.[].key' 2>/dev/null)" || objects=""
               count=$(echo "$objects" | grep -c . || true)
               echo "  Found $count object(s) to delete"
               deleted=0
               for obj in $objects; do
-                if npx wrangler r2 object delete "${bucket}/${obj}" 2>/dev/null; then
+                if npx wrangler r2 object delete "${bucket}/${obj}" --remote 2>/dev/null; then
                   deleted=$((deleted + 1))
                 else
                   echo "  WARNING: Failed to delete $obj"
@@ -952,4 +954,5 @@ jobs:
 
           npx wrangler r2 object put "${bucket}/${channel}/versions.json" \
             --file versions.json \
-            --content-type "application/json"
+            --content-type "application/json" \
+            --remote
