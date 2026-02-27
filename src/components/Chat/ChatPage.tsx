@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Play, Pause, Square, MessageSquare, FileText } from 'lucide-react';
+import { Play, Pause, Square, FileText, NotepadText } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
@@ -324,11 +324,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件图标
   const getEventIcon = (event: Event) => {
-    if (event.tags.has('block_start')) return <Play size={14} />;
-    if (event.tags.has('block_pause')) return <Pause size={14} />;
-    if (event.tags.has('block_resume')) return <Play size={14} />;
-    if (event.tags.has('block_end')) return <Square size={14} />;
-    if (event.tags.has('block_feedback')) return <MessageSquare size={14} />;
+    if (event.tags.has('block_start')) return <Play size={14} className="text-success" />;
+    if (event.tags.has('block_pause')) return <Pause size={14} className="text-warning" />;
+    if (event.tags.has('block_resume')) return <Play size={14} className="text-success" />;
+    if (event.tags.has('block_end')) return <Square size={14} className="text-destructive" />;
+    if (event.tags.has('block_feedback')) return <NotepadText size={14} className="text-primary" />;
     return <FileText size={14} />;
   };
 
