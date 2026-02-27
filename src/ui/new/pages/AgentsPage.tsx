@@ -23,6 +23,8 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
+import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import type {
   AgentAddNodeOption,
   AgentDeviceGroup,
@@ -32,6 +34,8 @@ import type {
   AgentHubNode,
   AgentHubTopologyData,
   AgentHubViewMode,
+  RuntimeHostRecord,
+  RuntimeServiceStatus,
 } from '@/lib/types/agent-hub';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
@@ -499,11 +503,186 @@ function ListView({
   );
 }
 
-function DeviceView({ groups }: { groups: AgentDeviceGroup[] }) {
+function DeviceView({
+  groups,
+  runtimeHosts,
+  runtimeServiceStatus,
+  runtimeHostName,
+  runtimeHostAddress,
+  runtimeHostPort,
+  runtimeHostError,
+  onRuntimeHostNameChange,
+  onRuntimeHostAddressChange,
+  onRuntimeHostPortChange,
+  onRuntimeHostAdd,
+  onRuntimeHostProbe,
+  onRuntimeStart,
+  onRuntimeStop,
+}: {
+  groups: AgentDeviceGroup[];
+  runtimeHosts: RuntimeHostRecord[];
+  runtimeServiceStatus: RuntimeServiceStatus | null;
+  runtimeHostName: string;
+  runtimeHostAddress: string;
+  runtimeHostPort: string;
+  runtimeHostError: string;
+  onRuntimeHostNameChange: (value: string) => void;
+  onRuntimeHostAddressChange: (value: string) => void;
+  onRuntimeHostPortChange: (value: string) => void;
+  onRuntimeHostAdd: () => Promise<void>;
+  onRuntimeHostProbe: (hostId: string) => Promise<void>;
+  onRuntimeStart: () => Promise<void>;
+  onRuntimeStop: () => Promise<void>;
+}) {
   const hostCard = groups.flatMap((group) => group.cards).find((card) => card.isHost) ?? groups[0]?.cards[0];
 
   return (
     <section data-testid="agent-device-view" className="space-y-4">
+      <article
+        data-testid="runtime-host-panel"
+        className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
+      >
+        <div className="flex items-center justify-between">
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Runtime Hosts</h3>
+          <span className="text-[11px] text-[#A8A29E]">{runtimeHosts.length} 台</span>
+        </div>
+
+        <div className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#292524]">
+          <div className="flex items-center justify-between">
+            <p className="text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Local Runtime</p>
+            <span
+              data-testid="runtime-local-status"
+              className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                runtimeServiceStatus?.running
+                  ? 'bg-[#22C55E20] text-[#16A34A]'
+                  : 'bg-[#E7E5E4] text-[#57534E]'
+              }`}
+            >
+              {runtimeServiceStatus?.running ? 'running' : 'stopped'}
+            </span>
+          </div>
+          <p className="mt-1 text-[10px] text-[#A8A29E]">
+            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 4077}
+          </p>
+          {runtimeServiceStatus?.pid && (
+            <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
+          )}
+          {runtimeServiceStatus?.error && (
+            <p className="mt-1 text-[10px] text-[#DC2626]">{runtimeServiceStatus.error}</p>
+          )}
+          <div className="mt-2 flex items-center gap-2">
+            <button
+              type="button"
+              data-testid="runtime-local-start-button"
+              onClick={() => {
+                void onRuntimeStart();
+              }}
+              className="rounded bg-[#C75B3A] px-2 py-1 text-[10px] text-white"
+            >
+              Start
+            </button>
+            <button
+              type="button"
+              data-testid="runtime-local-stop-button"
+              onClick={() => {
+                void onRuntimeStop();
+              }}
+              className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]"
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 gap-2">
+          <input
+            data-testid="runtime-host-name-input"
+            value={runtimeHostName}
+            onChange={(event) => onRuntimeHostNameChange(event.target.value)}
+            placeholder="Name（名称）"
+            className="h-9 rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
+          />
+          <div className="grid grid-cols-[1fr_96px] gap-2">
+            <input
+              data-testid="runtime-host-address-input"
+              value={runtimeHostAddress}
+              onChange={(event) => onRuntimeHostAddressChange(event.target.value)}
+              placeholder="IP / Host"
+              className="h-9 rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
+            />
+            <input
+              data-testid="runtime-host-port-input"
+              value={runtimeHostPort}
+              onChange={(event) => onRuntimeHostPortChange(event.target.value)}
+              placeholder="Port"
+              className="h-9 rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
+            />
+          </div>
+          <button
+            type="button"
+            data-testid="runtime-host-add-button"
+            onClick={() => {
+              void onRuntimeHostAdd();
+            }}
+            className="h-9 rounded-lg bg-[#C75B3A] text-xs font-semibold text-white"
+          >
+            添加 RuntimeHost
+          </button>
+        </div>
+
+        {runtimeHostError && (
+          <p className="rounded-md bg-[#EF444410] px-2 py-1 text-[11px] text-[#DC2626]">{runtimeHostError}</p>
+        )}
+
+        <div className="space-y-2">
+          {runtimeHosts.map((host) => (
+            <div
+              key={host.id}
+              className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#292524]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{host.name}</p>
+                  <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{host.host}:{host.port}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    data-testid={`runtime-host-status-${host.id}`}
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      host.status === 'online'
+                        ? 'bg-[#22C55E20] text-[#16A34A]'
+                        : host.status === 'offline'
+                          ? 'bg-[#EF444420] text-[#DC2626]'
+                          : host.status === 'warning'
+                            ? 'bg-[#F59E0B20] text-[#D97706]'
+                            : 'bg-[#E7E5E4] text-[#57534E]'
+                    }`}
+                  >
+                    {host.status}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid={`runtime-host-probe-${host.id}`}
+                    onClick={() => {
+                      void onRuntimeHostProbe(host.id);
+                    }}
+                    className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]"
+                  >
+                    探测
+                  </button>
+                </div>
+              </div>
+              {host.lastCheckedAt && (
+                <p className="mt-1 text-[10px] text-[#A8A29E]">last: {host.lastCheckedAt}</p>
+              )}
+              {host.lastError && (
+                <p className="mt-1 text-[10px] text-[#DC2626]">{host.lastError}</p>
+              )}
+            </div>
+          ))}
+        </div>
+      </article>
+
       {hostCard && (
         <article
           data-testid="agent-device-overview-card"
@@ -661,6 +840,12 @@ export function AgentsPage() {
   const [topology, setTopology] = useState<AgentHubTopologyData>({ nodes: [], edges: [], selectedNodeId: null });
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
+  const [runtimeHosts, setRuntimeHosts] = useState<RuntimeHostRecord[]>([]);
+  const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
+  const [runtimeHostName, setRuntimeHostName] = useState('');
+  const [runtimeHostAddress, setRuntimeHostAddress] = useState('');
+  const [runtimeHostPort, setRuntimeHostPort] = useState('4077');
+  const [runtimeHostError, setRuntimeHostError] = useState('');
   const [addNodeOptions, setAddNodeOptions] = useState<AgentAddNodeOption[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -668,12 +853,16 @@ export function AgentsPage() {
   useEffect(() => {
     let disposed = false;
     const service = getAgentHubService();
+    const runtimeHostService = getRuntimeHostService();
+    const runtimeControlService = getRuntimeControlService();
     const load = async () => {
-      const [nextTopology, nextList, nextDevice, nextAddOptions] = await Promise.all([
+      const [nextTopology, nextList, nextDevice, nextAddOptions, nextRuntimeHosts, nextRuntimeStatus] = await Promise.all([
         service.getTopology(),
         service.getListView(),
         service.getDeviceView(),
         service.listAddNodeOptions(),
+        runtimeHostService.listHosts(),
+        runtimeControlService.getStatus(),
       ]);
       if (disposed) return;
       setTopology(nextTopology);
@@ -681,12 +870,90 @@ export function AgentsPage() {
       setListSections(nextList);
       setDeviceGroups(nextDevice);
       setAddNodeOptions(nextAddOptions);
+      setRuntimeHosts(nextRuntimeHosts);
+      setRuntimeServiceStatus(nextRuntimeStatus);
     };
     void load();
     return () => {
       disposed = true;
     };
   }, []);
+
+  const refreshRuntimeHosts = async () => {
+    const nextHosts = await getRuntimeHostService().listHosts();
+    setRuntimeHosts(nextHosts);
+  };
+
+  const handleAddRuntimeHost = async () => {
+    const host = runtimeHostAddress.trim();
+    const port = Number.parseInt(runtimeHostPort, 10);
+    if (!host) {
+      setRuntimeHostError('Host 不能为空');
+      return;
+    }
+    if (!Number.isInteger(port) || port <= 0) {
+      setRuntimeHostError('Port 非法');
+      return;
+    }
+
+    try {
+      setRuntimeHostError('');
+      await getRuntimeHostService().addHost({
+        name: runtimeHostName.trim(),
+        host,
+        port,
+      });
+      setRuntimeHostName('');
+      await refreshRuntimeHosts();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeHostError(message);
+    }
+  };
+
+  const handleProbeRuntimeHost = async (hostId: string) => {
+    try {
+      setRuntimeHostError('');
+      const updated = await getRuntimeHostService().probeHost(hostId);
+      setRuntimeHosts((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeHostError(message);
+    }
+  };
+
+  const handleRuntimeStart = async () => {
+    try {
+      const status = await getRuntimeControlService().startRuntime({
+        host: '127.0.0.1',
+        port: 4077,
+      });
+      setRuntimeServiceStatus(status);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeServiceStatus({
+        running: false,
+        host: '127.0.0.1',
+        port: 4077,
+        error: message,
+      });
+    }
+  };
+
+  const handleRuntimeStop = async () => {
+    try {
+      const status = await getRuntimeControlService().stopRuntime();
+      setRuntimeServiceStatus(status);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeServiceStatus({
+        running: false,
+        host: '127.0.0.1',
+        port: 4077,
+        error: message,
+      });
+    }
+  };
 
   const navigateByPath = (path: string) => {
     window.location.href = path;
@@ -697,7 +964,24 @@ export function AgentsPage() {
       return <ListView sections={listSections} onItemNavigate={navigateByPath} />;
     }
     if (viewMode === 'device') {
-      return <DeviceView groups={deviceGroups} />;
+      return (
+        <DeviceView
+          groups={deviceGroups}
+          runtimeHosts={runtimeHosts}
+          runtimeServiceStatus={runtimeServiceStatus}
+          runtimeHostName={runtimeHostName}
+          runtimeHostAddress={runtimeHostAddress}
+          runtimeHostPort={runtimeHostPort}
+          runtimeHostError={runtimeHostError}
+          onRuntimeHostNameChange={setRuntimeHostName}
+          onRuntimeHostAddressChange={setRuntimeHostAddress}
+          onRuntimeHostPortChange={setRuntimeHostPort}
+          onRuntimeHostAdd={handleAddRuntimeHost}
+          onRuntimeHostProbe={handleProbeRuntimeHost}
+          onRuntimeStart={handleRuntimeStart}
+          onRuntimeStop={handleRuntimeStop}
+        />
+      );
     }
     return (
       <TopologyView
@@ -707,7 +991,23 @@ export function AgentsPage() {
         onClearSelection={() => setSelectedNodeId(null)}
       />
     );
-  }, [deviceGroups, listSections, selectedNodeId, topology, viewMode]);
+  }, [
+    deviceGroups,
+    listSections,
+    runtimeHosts,
+    runtimeHostName,
+    runtimeHostAddress,
+    runtimeHostPort,
+    runtimeHostError,
+    runtimeServiceStatus,
+    handleAddRuntimeHost,
+    handleProbeRuntimeHost,
+    handleRuntimeStart,
+    handleRuntimeStop,
+    selectedNodeId,
+    topology,
+    viewMode,
+  ]);
 
   return (
     <div data-testid="agent-hub-page" className="relative min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
