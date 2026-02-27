@@ -33,4 +33,10 @@ describe('NewSettingsPage - More Section', () => {
     render(<NewSettingsPage />);
     expect(screen.getByText('调试日志')).toBeInTheDocument();
   });
+
+  it('renders help and feedback rows（更多中包含帮助与反馈）', () => {
+    render(<NewSettingsPage />);
+    expect(screen.getByText('帮助中心')).toBeInTheDocument();
+    expect(screen.getByText('反馈建议')).toBeInTheDocument();
+  });
 });
