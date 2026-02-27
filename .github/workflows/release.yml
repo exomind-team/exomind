@@ -523,7 +523,16 @@ jobs:
     needs: [build-windows, build-android]
     runs-on: ubuntu-latest
     # 对 release/* 和 build/* tag 执行发布步骤
-    if: startsWith(github.ref, 'refs/tags/release/') || startsWith(github.ref, 'refs/tags/build/')
+    if: |
+      always() &&
+      (
+        startsWith(github.ref, 'refs/tags/release/') ||
+        startsWith(github.ref, 'refs/tags/build/')
+      ) &&
+      (
+        needs.build-windows.result == 'success' ||
+        needs.build-android.result == 'success'
+      )
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -860,10 +869,20 @@ jobs:
           max_versions=15
 
           # Try to fetch existing versions.json
-          existing_json="[]"
+          existing_versions="[]"
           if npx wrangler r2 object get "${bucket}/${channel}/versions.json" \
                --file existing-versions.json 2>/dev/null; then
-            existing_json="$(cat existing-versions.json)"
+            existing_payload="$(cat existing-versions.json)"
+            if echo "$existing_payload" | jq -e 'type == "array"' >/dev/null 2>&1; then
+              # backward-compat: old format was a raw array
+              existing_versions="$existing_payload"
+            else
+              existing_versions="$(echo "$existing_payload" | jq '.versions // []')"
+              configured_retention="$(echo "$existing_payload" | jq -r '.retention // empty')"
+              if [[ "$configured_retention" =~ ^[0-9]+$ ]] && (( configured_retention > 0 )); then
+                max_versions="$configured_retention"
+              fi
+            fi
           fi
 
           # Prepend new version entry
@@ -874,18 +893,18 @@ jobs:
             --arg version_dir "$version_dir" \
             '{version: $version, tag: $tag, published_at: $published_at, version_dir: $version_dir}')"
 
-          updated_json="$(echo "$existing_json" | jq \
+          updated_versions="$(echo "$existing_versions" | jq \
             --argjson entry "$new_entry" \
             '[$entry] + . | unique_by(.version)')"
 
           # Identify versions to delete (beyond max_versions)
-          total="$(echo "$updated_json" | jq 'length')"
+          total="$(echo "$updated_versions" | jq 'length')"
           if (( total > max_versions )); then
             # Extract old version dirs to delete
-            old_versions="$(echo "$updated_json" | jq -r ".[$max_versions:][].version_dir")"
+            old_versions="$(echo "$updated_versions" | jq -r ".[$max_versions:][].version_dir")"
 
             # Trim the list
-            updated_json="$(echo "$updated_json" | jq ".[:$max_versions]")"
+            updated_versions="$(echo "$updated_versions" | jq ".[:$max_versions]")"
 
             # Delete old version directories from R2
             for old_dir in $old_versions; do
@@ -909,9 +928,15 @@ jobs:
             done
           fi
 
+          kept_total="$(echo "$updated_versions" | jq 'length')"
+          updated_json="$(jq -n \
+            --argjson versions "$updated_versions" \
+            --argjson retention "$max_versions" \
+            '{versions: $versions, retention: $retention}')"
+
           # Upload updated versions.json
           echo "$updated_json" | jq '.' > versions.json
-          echo "=== versions.json (${total} entries, keeping $max_versions) ==="
+          echo "=== versions.json (input=${total}, kept=${kept_total}, retention=${max_versions}) ==="
           cat versions.json
 
           npx wrangler r2 object put "${bucket}/${channel}/versions.json" \

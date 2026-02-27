@@ -40,9 +40,15 @@ export function UpdateStatusCard() {
     getCurrentVersion().then(setCurrentVersion);
   }, []);
 
-  const handleDownload = () => {
+  const handleDownload = async () => {
     if (updateAvailable?.downloadUrl) {
-      downloadUpdate(updateAvailable.downloadUrl);
+      try {
+        await downloadUpdate(updateAvailable.downloadUrl, updateAvailable.sha256);
+      } catch (err) {
+        useUpdateStore.setState({
+          error: err instanceof Error ? `下载更新失败：${err.message}` : '下载更新失败',
+        });
+      }
     }
   };
 

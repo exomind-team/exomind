@@ -4,7 +4,7 @@ import cloudflare from '@astrojs/cloudflare';
 
 export default defineConfig({
   site: 'https://exo-mind.ai',
-  output: 'hybrid',
+  output: 'server',
   adapter: cloudflare({
     platformProxy: {
       enabled: true,

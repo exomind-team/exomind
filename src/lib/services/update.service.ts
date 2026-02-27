@@ -5,6 +5,9 @@
  * 支持 release / preview 双通道，Windows / Android 双平台。
  */
 
+import { bytesToHex } from '@noble/hashes/utils.js';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
+
 const API_BASE = import.meta.env.VITE_UPDATE_BASE_URL || 'https://exo-mind.ai';
 
 // ---------------------------------------------------------------------------
@@ -124,18 +127,40 @@ export async function getVersions(channel: UpdateChannel): Promise<VersionInfo[]
 
 /**
  * 触发下载更新。
- * Windows / Android 均通过 Tauri opener 插件在系统浏览器中打开下载链接。
- * 非 Tauri 环境回退到 window.open。
+ * 有 sha256 时先做完整性预检（integrity preflight，完整性预检），再打开下载链接。
+ * Windows / Android 优先通过 Tauri opener 在系统浏览器中打开，非 Tauri 环境回退到 window.open。
  */
-export async function downloadUpdate(downloadUrl: string): Promise<void> {
+export async function downloadUpdate(downloadUrl: string, expectedSha256?: string): Promise<void> {
+  const resolvedUrl = new URL(downloadUrl, API_BASE).toString();
+
+  if (expectedSha256) {
+    const normalizedExpected = expectedSha256.trim().toLowerCase();
+    if (!/^[a-f0-9]{64}$/.test(normalizedExpected)) {
+      throw new Error('Invalid SHA-256 format');
+    }
+
+    const preflightRes = await fetch(resolvedUrl);
+    if (!preflightRes.ok) {
+      throw new Error(
+        `Download integrity preflight failed: ${preflightRes.status} ${preflightRes.statusText}`,
+      );
+    }
+
+    const bytes = new Uint8Array(await preflightRes.arrayBuffer());
+    const actualSha256 = bytesToHex(nobleSha256(bytes));
+    if (actualSha256 !== normalizedExpected) {
+      throw new Error(`SHA-256 mismatch: expected ${normalizedExpected}, got ${actualSha256}`);
+    }
+  }
+
   try {
     const { openUrl } = await import('@tauri-apps/plugin-opener');
-    await openUrl(downloadUrl);
+    await openUrl(resolvedUrl);
     return;
   } catch {
     // 非 Tauri 环境
   }
-  window.open(downloadUrl, '_blank');
+  window.open(resolvedUrl, '_blank');
 }
 
 // ---------------------------------------------------------------------------
@@ -149,26 +174,35 @@ const INTERVAL_MS: Record<CheckInterval, number> = {
   manual: 0,
 };
 
-let timerId: ReturnType<typeof setInterval> | null = null;
-
-/**
- * 启动自动检查定时器。
- * @param interval  检查频率
- * @param callback  每次触发时执行的回调（通常是 store.checkForUpdate）
- */
-export function startAutoCheck(interval: CheckInterval, callback: () => void): void {
-  stopAutoCheck();
-  const ms = INTERVAL_MS[interval];
-  if (ms <= 0) return; // manual 模式不启动定时器
-  timerId = setInterval(callback, ms);
+export interface AutoCheckController {
+  start: (interval: CheckInterval, callback: () => void) => void;
+  stop: () => void;
 }
 
 /**
- * 停止自动检查定时器。
+ * 创建自动检查控制器（controller，控制器）。
+ * 每个 controller 持有独立 timer，避免模块级全局状态引发竞态。
  */
-export function stopAutoCheck(): void {
-  if (timerId !== null) {
-    clearInterval(timerId);
-    timerId = null;
-  }
+export function createAutoCheckController(): AutoCheckController {
+  let timerId: ReturnType<typeof setInterval> | null = null;
+
+  return {
+    start(interval, callback) {
+      if (timerId !== null) {
+        clearInterval(timerId);
+        timerId = null;
+      }
+
+      const ms = INTERVAL_MS[interval];
+      if (ms <= 0) return; // manual 模式不启动定时器
+
+      timerId = setInterval(callback, ms);
+    },
+    stop() {
+      if (timerId !== null) {
+        clearInterval(timerId);
+        timerId = null;
+      }
+    },
+  };
 }

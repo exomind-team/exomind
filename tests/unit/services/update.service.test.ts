@@ -5,8 +5,11 @@ import {
   getVersions,
   downloadUpdate,
   getPlatform,
+  createAutoCheckController,
   type UpdateInfo,
 } from '@/lib/services/update.service';
+import { bytesToHex } from '@noble/hashes/utils.js';
+import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
 
 // ---------------------------------------------------------------------------
 // Mocks
@@ -30,6 +33,16 @@ function mockFetchJson(data: unknown, ok = true, status = 200) {
     status,
     statusText: ok ? 'OK' : 'Error',
     json: () => Promise.resolve(data),
+  } as unknown as Response;
+  return vi.spyOn(globalThis, 'fetch').mockResolvedValue(res);
+}
+
+function mockFetchBinary(data: Uint8Array, ok = true, status = 200) {
+  const res = {
+    ok,
+    status,
+    statusText: ok ? 'OK' : 'Error',
+    arrayBuffer: () => Promise.resolve(data.buffer.slice(0)),
   } as unknown as Response;
   return vi.spyOn(globalThis, 'fetch').mockResolvedValue(res);
 }
@@ -216,6 +229,10 @@ describe('getVersions', () => {
 // ---------------------------------------------------------------------------
 
 describe('downloadUpdate', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });
@@ -227,7 +244,36 @@ describe('downloadUpdate', () => {
 
     expect(openUrl).toHaveBeenCalledTimes(1);
     const calledUrl = (openUrl as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
-    expect(calledUrl).toContain('/api/download/release/v2.0.0/windows-x64');
+    expect(calledUrl).toBe('https://exo-mind.ai/api/download/release/v2.0.0/windows-x64');
+  });
+
+  it('verifies SHA-256 before opening URL', async () => {
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    const payload = new TextEncoder().encode('exo-update-binary');
+    const sha256 = bytesToHex(nobleSha256(payload));
+    const fetchSpy = mockFetchBinary(payload);
+
+    await downloadUpdate('/api/download/release/v2.0.0/windows-x64', sha256);
+
+    expect(fetchSpy).toHaveBeenCalledTimes(1);
+    const [calledUrl] = fetchSpy.mock.calls[0];
+    expect(calledUrl).toBe('https://exo-mind.ai/api/download/release/v2.0.0/windows-x64');
+    expect(openUrl).toHaveBeenCalledTimes(1);
+  });
+
+  it('throws when SHA-256 mismatches and should not open URL', async () => {
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    const payload = new TextEncoder().encode('tampered-binary');
+    mockFetchBinary(payload);
+
+    await expect(
+      downloadUpdate(
+        '/api/download/release/v2.0.0/windows-x64',
+        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+      ),
+    ).rejects.toThrow('SHA-256 mismatch');
+
+    expect(openUrl).not.toHaveBeenCalled();
   });
 });
 
@@ -299,5 +345,41 @@ describe('getPlatform', () => {
     });
 
     expect(getPlatform()).toBe('unknown');
+  });
+});
+
+describe('createAutoCheckController', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.restoreAllMocks();
+  });
+
+  it('isolates timers across multiple controllers', () => {
+    const c1 = createAutoCheckController();
+    const c2 = createAutoCheckController();
+    const cb1 = vi.fn();
+    const cb2 = vi.fn();
+
+    c1.start('hourly', cb1);
+    c2.start('hourly', cb2);
+    c1.stop();
+    vi.advanceTimersByTime(60 * 60 * 1000);
+
+    expect(cb1).not.toHaveBeenCalled();
+    expect(cb2).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not start timer for manual interval', () => {
+    const c = createAutoCheckController();
+    const cb = vi.fn();
+
+    c.start('manual', cb);
+    vi.advanceTimersByTime(24 * 60 * 60 * 1000);
+
+    expect(cb).not.toHaveBeenCalled();
   });
 });
