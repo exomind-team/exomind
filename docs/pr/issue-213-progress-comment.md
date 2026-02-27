@@ -37,13 +37,13 @@
 ## TDD 与自动化测试证据
 ### 1) 单测（红转绿）
 ```bash
-bun vitest tests/unit/ui/new-task-routing.issue213.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue213.test.tsx
+bun vitest tests/unit/ui/task-routing.issue213.test.ts tests/unit/settings/settings-mock-data-toggle.issue213.test.tsx
 ```
 结果：`2 files, 5 tests passed`
 
 ### 2) 任务相关回归单测
 ```bash
-bun vitest tests/unit/config/mock-data.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/services/task.service.test.ts tests/unit/ui/new-task-pages.issue213.test.tsx tests/unit/ui/new-task-routing.issue213.test.ts tests/unit/settings/new-settings-mock-data-toggle.issue213.test.tsx
+bun vitest tests/unit/config/mock-data.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/services/task.service.test.ts tests/unit/ui/task-pages.issue213.test.tsx tests/unit/ui/task-routing.issue213.test.ts tests/unit/settings/settings-mock-data-toggle.issue213.test.tsx
 ```
 结果：`6 files, 19 tests passed`
 

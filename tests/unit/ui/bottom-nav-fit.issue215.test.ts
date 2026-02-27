@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 describe('issue-215 bottom nav fit（底部导航适配 5 菜单）', () => {
-  const sourcePath = path.resolve('src/routes-new.tsx');
+  const sourcePath = path.resolve('src/routes.tsx');
   const source = readFileSync(sourcePath, 'utf-8');
 
   it('uses equal-width flexible nav items for mobile（菜单项均分宽度）', () => {

@@ -57,7 +57,7 @@ function habitLoopToneClass(loop: MeHabitLoop): string {
   return 'bg-[#EFF6FF] dark:bg-[#1D2837]';
 }
 
-export function NewMePage() {
+export function MePage() {
   const [activeTab, setActiveTab] = useState<MeViewType>('status');
   const [data, setData] = useState<MeDashboardData | null>(null);
 

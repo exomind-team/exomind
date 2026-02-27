@@ -121,7 +121,7 @@ git commit -m "feat(issue-215): add me service layer"
 
 **Files:**
 - Create: `src/ui/new/pages/NewMePage.tsx`
-- Create: `tests/unit/ui/new-me-pages.issue215.test.tsx`
+- Create: `tests/unit/ui/me-pages.issue215.test.tsx`
 
 **Step 1: Write the failing test**
 
@@ -131,7 +131,7 @@ git commit -m "feat(issue-215): add me service layer"
 
 **Step 2: Run test to verify it fails**
 
-Run: `bunx vitest run tests/unit/ui/new-me-pages.issue215.test.tsx`  
+Run: `bunx vitest run tests/unit/ui/me-pages.issue215.test.tsx`  
 Expected: FAIL（页面不存在）
 
 **Step 3: Write minimal implementation**
@@ -143,13 +143,13 @@ Expected: FAIL（页面不存在）
 
 **Step 4: Run test to verify it passes**
 
-Run: `bunx vitest run tests/unit/ui/new-me-pages.issue215.test.tsx`  
+Run: `bunx vitest run tests/unit/ui/me-pages.issue215.test.tsx`  
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git add src/ui/new/pages/NewMePage.tsx tests/unit/ui/new-me-pages.issue215.test.tsx
+git add src/ui/new/pages/NewMePage.tsx tests/unit/ui/me-pages.issue215.test.tsx
 git commit -m "feat(issue-215): implement me page with status learn implicit tabs"
 ```
 
@@ -157,7 +157,7 @@ git commit -m "feat(issue-215): implement me page with status learn implicit tab
 
 **Files:**
 - Modify: `src/routes-new.tsx`
-- Create: `tests/unit/ui/new-me-routing.issue215.test.ts`
+- Create: `tests/unit/ui/me-routing.issue215.test.ts`
 
 **Step 1: Write the failing test**
 
@@ -165,7 +165,7 @@ git commit -m "feat(issue-215): implement me page with status learn implicit tab
 
 **Step 2: Run test to verify it fails**
 
-Run: `bunx vitest run tests/unit/ui/new-me-routing.issue215.test.ts`  
+Run: `bunx vitest run tests/unit/ui/me-routing.issue215.test.ts`  
 Expected: FAIL
 
 **Step 3: Write minimal implementation**
@@ -176,13 +176,13 @@ Expected: FAIL
 
 **Step 4: Run test to verify it passes**
 
-Run: `bunx vitest run tests/unit/ui/new-me-routing.issue215.test.ts`  
+Run: `bunx vitest run tests/unit/ui/me-routing.issue215.test.ts`  
 Expected: PASS
 
 **Step 5: Commit**
 
 ```bash
-git add src/routes-new.tsx tests/unit/ui/new-me-routing.issue215.test.ts
+git add src/routes-new.tsx tests/unit/ui/me-routing.issue215.test.ts
 git commit -m "feat(issue-215): add me route and bottom navigation entry"
 ```
 
@@ -213,7 +213,7 @@ Expected: FAIL（脚本/配置不存在）
 **Step 4: Run test to verify it passes**
 
 Run:
-- `bunx vitest run tests/unit/environment/bootstrap.test.ts tests/unit/services/me.service.issue215.test.ts tests/unit/ui/new-me-pages.issue215.test.tsx tests/unit/ui/new-me-routing.issue215.test.ts`
+- `bunx vitest run tests/unit/environment/bootstrap.test.ts tests/unit/services/me.service.issue215.test.ts tests/unit/ui/me-pages.issue215.test.tsx tests/unit/ui/me-routing.issue215.test.ts`
 - `bun run test:e2e:issue215`
 - `bun run build`
 

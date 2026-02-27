@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 describe('new focus layout issue-175 structure', () => {
-  const focusPagePath = path.resolve('src/ui/new/pages/NewFocusPage.tsx');
+  const focusPagePath = path.resolve('src/ui/app/pages/FocusPage.tsx');
   const source = readFileSync(focusPagePath, 'utf-8');
 
   it('removes legacy top hero card and keeps only chat container（移除旧顶部卡片）', () => {

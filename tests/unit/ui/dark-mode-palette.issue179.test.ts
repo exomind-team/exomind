@@ -3,11 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 describe('new ui dark mode palette issue-179（新UI暗色配色）', () => {
-  const newLayoutSource = readFileSync(path.resolve('src/routes-new.tsx'), 'utf-8');
-  const focusWidgetSource = readFileSync(path.resolve('src/ui/new/components/NewFocusTimerWidget.tsx'), 'utf-8');
+  const newLayoutSource = readFileSync(path.resolve('src/routes.tsx'), 'utf-8');
+  const focusWidgetSource = readFileSync(path.resolve('src/ui/app/components/FocusTimerWidget.tsx'), 'utf-8');
   const switchSource = readFileSync(path.resolve('src/components/ui/switch.tsx'), 'utf-8');
 
-  it('applies dark nav shell tokens on NewLayout（NewLayout 应有暗色外壳与底栏）', () => {
+  it('applies dark nav shell tokens on AppLayout（AppLayout 应有暗色外壳与底栏）', () => {
     expect(newLayoutSource).toContain('dark:bg-[#0C0A09]');
     expect(newLayoutSource).toContain('dark:border-[#292524]');
     expect(newLayoutSource).toContain('dark:bg-[#0C0A09]/95');

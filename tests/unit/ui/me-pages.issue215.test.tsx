@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { NewMePage } from '@/ui/new/pages/NewMePage';
+import { MePage } from '@/ui/app/pages/MePage';
 import { MOCK_ME_DASHBOARD_FIXTURE } from '@/lib/adapters/mock/fixtures/me';
 
 const getDashboardDataMock = vi.fn();
@@ -18,7 +18,7 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
   });
 
   it('renders status view by default（默认展示状态视图）', async () => {
-    render(<NewMePage />);
+    render(<MePage />);
 
     expect(await screen.findByRole('heading', { name: 'Me' })).toBeInTheDocument();
     const statusTab = screen.getByRole('button', { name: '状态' });
@@ -31,7 +31,7 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
   });
 
   it('uses task-like pill tab style（顶部标签与任务页胶囊风格统一）', async () => {
-    render(<NewMePage />);
+    render(<MePage />);
 
     await waitFor(() => {
       expect(screen.getByText('当前状态')).toBeInTheDocument();
@@ -48,7 +48,7 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
   });
 
   it('switches to learn and implicit tabs（可切换到学习与内隐）', async () => {
-    render(<NewMePage />);
+    render(<MePage />);
 
     await waitFor(() => {
       expect(screen.getByText('当前状态')).toBeInTheDocument();
@@ -70,7 +70,7 @@ describe('issue-215 me ui page（Me 三视图页面）', () => {
   });
 
   it('applies dark-readable classes for key child cards（关键子卡片具备暗色可读样式）', async () => {
-    render(<NewMePage />);
+    render(<MePage />);
 
     await waitFor(() => {
       expect(screen.getByText('读 3 页商业书')).toBeInTheDocument();

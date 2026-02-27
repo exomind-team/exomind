@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
-import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 
-describe('NewSettingsPage input section（输入分组语音配置）', () => {
+describe('SettingsPage input section（输入分组语音配置）', () => {
   beforeEach(() => {
     const storage = window.localStorage as Partial<Storage>;
     if (typeof storage.removeItem === 'function') {
@@ -13,7 +13,7 @@ describe('NewSettingsPage input section（输入分组语音配置）', () => {
   });
 
   it('renders input section with voice-related rows', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
@@ -23,7 +23,7 @@ describe('NewSettingsPage input section（输入分组语音配置）', () => {
 
   it('toggles voice transcript send mode from input section', () => {
     const setModeMock = vi.mocked(setVoiceTranscriptSendMode);
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     fireEvent.click(screen.getByTestId('new-settings-voice-transcript-mode-direct-send'));
     expect(setModeMock).toHaveBeenCalledWith('direct-send');
@@ -33,7 +33,7 @@ describe('NewSettingsPage input section（输入分组语音配置）', () => {
   });
 
   it('saves MOSS token from input settings dialog', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     fireEvent.click(screen.getByText('MOSS API Token'));
     expect(screen.getByText('语音输入设置')).toBeInTheDocument();
@@ -47,7 +47,7 @@ describe('NewSettingsPage input section（输入分组语音配置）', () => {
   });
 
   it('shows guidance when voice test is clicked without developer mode', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     fireEvent.click(screen.getByText('MOSS 语音测试'));
 
