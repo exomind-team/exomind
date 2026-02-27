@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 
 export const prerender = false;
 
+// Intentionally public read-only API — wildcard CORS is acceptable here.
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Content-Type': 'application/json',
@@ -37,6 +38,9 @@ function compareVersions(a: string, b: string): number {
   // Equal core: no pre-release > pre-release (e.g. 0.3.4 > 0.3.4-build.xxx)
   if (!preA && preB) return 1;
   if (preA && !preB) return -1;
+  // Pre-release format is fixed as `build.YYYYMMDDTHHMMSS` (timestamp),
+  // so lexicographic string comparison produces correct ordering.
+  // If format changes, switch to SemVer segment-by-segment comparison.
   if (preA && preB) return preA < preB ? -1 : preA > preB ? 1 : 0;
 
   return 0;

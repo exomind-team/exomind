@@ -4,6 +4,7 @@ import {
   checkForUpdate,
   getVersions,
   downloadUpdate,
+  getPlatform,
   type UpdateInfo,
 } from '@/lib/services/update.service';
 
@@ -227,5 +228,76 @@ describe('downloadUpdate', () => {
     expect(openUrl).toHaveBeenCalledTimes(1);
     const calledUrl = (openUrl as ReturnType<typeof vi.fn>).mock.calls[0][0] as string;
     expect(calledUrl).toContain('/api/download/release/v2.0.0/windows-x64');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Network error scenarios
+// ---------------------------------------------------------------------------
+
+describe('checkForUpdate - network error scenarios', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should handle network timeout (fetch rejects)', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await expect(
+      checkForUpdate({
+        channel: 'release',
+        platform: 'windows-x64',
+        currentVersion: '0.3.0',
+      }),
+    ).rejects.toThrow('Failed to fetch');
+  });
+
+  it('should handle AbortError', async () => {
+    const abortError = new DOMException('The operation was aborted.', 'AbortError');
+    globalThis.fetch = vi.fn().mockRejectedValue(abortError);
+
+    await expect(
+      checkForUpdate({
+        channel: 'release',
+        platform: 'windows-x64',
+        currentVersion: '0.3.0',
+      }),
+    ).rejects.toThrow('The operation was aborted.');
+  });
+});
+
+describe('getVersions - network error scenarios', () => {
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('should handle network failure', async () => {
+    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
+
+    await expect(getVersions('release')).rejects.toThrow('Failed to fetch');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// getPlatform()
+// ---------------------------------------------------------------------------
+
+describe('getPlatform', () => {
+  const originalUserAgent = navigator.userAgent;
+
+  afterEach(() => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value: originalUserAgent,
+      configurable: true,
+    });
+  });
+
+  it('returns unknown for unrecognized platform', () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (PlayStation 5)',
+      configurable: true,
+    });
+
+    expect(getPlatform()).toBe('unknown');
   });
 });
