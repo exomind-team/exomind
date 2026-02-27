@@ -1,7 +1,11 @@
 name = "exomind"
 compatibility_date = "2025-02-27"
 
-pages_build_output_dir = "./website/dist"
+main = "./website/dist/_worker.js/index.js"
+
+[assets]
+directory = "./website/dist"
+exclude = ["_worker.js"]
 
 # R2 bucket for build artifacts (release & preview channels)
 [[r2_buckets]]
