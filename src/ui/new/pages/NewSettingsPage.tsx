@@ -80,6 +80,8 @@ type PickedJsonFile = {
   content: string;
 };
 
+type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'danger' | 'about';
+
 const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
 function buildBackupFileName(): string {
@@ -199,10 +201,12 @@ export function NewSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [comingSoonVisible, setComingSoonVisible] = useState(false);
   const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const [focusRhythmEnabled, setFocusRhythmEnabled] = useState(true);
-  const [dailyDigestEnabled, setDailyDigestEnabled] = useState(true);
-  const [soundNoticeEnabled, setSoundNoticeEnabled] = useState(true);
-  const [systemNoticeEnabled, setSystemNoticeEnabled] = useState(false);
+  const [activeDesktopTab, setActiveDesktopTab] = useState<DesktopTabKey>('theme');
+  const sectionThemeRef = useRef<HTMLElement | null>(null);
+  const sectionFocusRef = useRef<HTMLElement | null>(null);
+  const sectionNotificationRef = useRef<HTMLElement | null>(null);
+  const sectionDangerRef = useRef<HTMLElement | null>(null);
+  const sectionAboutRef = useRef<HTMLElement | null>(null);
   const isDesktop = useIsDesktop();
   const isDesktopVcLayout = isDesktop && desktopAdaptiveEnabled;
 
@@ -488,6 +492,19 @@ export function NewSettingsPage() {
     }
   })();
 
+  const desktopTabItems: Array<{ key: DesktopTabKey; label: string; ref: { current: HTMLElement | null } }> = [
+    { key: 'theme', label: '外观主题', ref: sectionThemeRef },
+    { key: 'focus', label: '专注设置', ref: sectionFocusRef },
+    { key: 'notification', label: '通知', ref: sectionNotificationRef },
+    { key: 'danger', label: '危险区域', ref: sectionDangerRef },
+    { key: 'about', label: '关于', ref: sectionAboutRef },
+  ];
+
+  const handleDesktopTabClick = (tabKey: DesktopTabKey, sectionRef: { current: HTMLElement | null }) => {
+    setActiveDesktopTab(tabKey);
+    sectionRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+  };
+
   const renderDesktopVcContent = () => (
     <div data-testid="new-settings-desktop-vc-root" className="flex h-full min-h-full flex-col">
       <header className="border-b border-[#F0ECE8] px-10 pb-4 pt-8 dark:border-[#292524]">
@@ -497,17 +514,19 @@ export function NewSettingsPage() {
 
       <div className="border-b border-[#F0ECE8] px-10 py-3 dark:border-[#292524]">
         <div data-testid="new-settings-desktop-vc-tabs" className="inline-flex items-center gap-1 rounded-lg bg-[#F5F0ED] p-1 dark:bg-[#292524]">
-          {['通用', '同步', '隐私', '开发者'].map((tab, index) => (
+          {desktopTabItems.map((tab) => (
             <button
-              key={tab}
+              key={tab.key}
               type="button"
+              aria-pressed={activeDesktopTab === tab.key}
+              onClick={() => handleDesktopTabClick(tab.key, tab.ref)}
               className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
-                index === 0
+                activeDesktopTab === tab.key
                   ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_2px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
                   : 'text-[#78716C] dark:text-[#A8A29E]'
               }`}
             >
-              {tab}
+              {tab.label}
             </button>
           ))}
         </div>
@@ -515,15 +534,9 @@ export function NewSettingsPage() {
 
       <div data-testid="new-settings-desktop-vc-scroll" className="flex-1 overflow-y-auto px-10 py-6">
         <div className="mx-auto w-full max-w-[980px] space-y-6 pb-10">
-          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-theme">
+          <section ref={sectionThemeRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-theme">
             <SectionTitle>外观主题</SectionTitle>
             <SectionCard>
-              <SettingRow
-                icon={<Monitor className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="工作模式"
-                right={<span className="text-sm text-[#A8A29E]">默认模式 · 下午 5:00</span>}
-              />
-              <Divider />
               <div className="flex items-center justify-between px-4 py-[14px]">
                 <div className="flex items-center gap-3">
                   <MoonStar className="h-[18px] w-[18px] text-[#78716C]" />
@@ -582,7 +595,7 @@ export function NewSettingsPage() {
             </SectionCard>
           </section>
 
-          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-focus">
+          <section ref={sectionFocusRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-focus">
             <SectionTitle>专注设置</SectionTitle>
             <SectionCard>
               <SettingRow
@@ -608,28 +621,10 @@ export function NewSettingsPage() {
                   </div>
                 }
               />
-              <Divider />
-              <SettingRow
-                icon={<Timer className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="番茄时长"
-                right={<span className="text-sm text-[#A8A29E]">25 分钟</span>}
-              />
-              <Divider />
-              <SettingRow
-                icon={<Timer className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="自动休息"
-                right={<span className="text-sm text-[#A8A29E]">5 分钟</span>}
-              />
-              <Divider />
-              <SettingRow
-                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="节律提醒"
-                right={<Switch checked={focusRhythmEnabled} onCheckedChange={setFocusRhythmEnabled} />}
-              />
             </SectionCard>
           </section>
 
-          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-notification">
+          <section ref={sectionNotificationRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-notification">
             <SectionTitle>通知</SectionTitle>
             <SectionCard>
               <SettingRow
@@ -642,24 +637,6 @@ export function NewSettingsPage() {
                     <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
                   </div>
                 }
-              />
-              <Divider />
-              <SettingRow
-                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="每日总结通知"
-                right={<Switch checked={dailyDigestEnabled} onCheckedChange={setDailyDigestEnabled} />}
-              />
-              <Divider />
-              <SettingRow
-                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="声音提醒"
-                right={<Switch checked={soundNoticeEnabled} onCheckedChange={setSoundNoticeEnabled} />}
-              />
-              <Divider />
-              <SettingRow
-                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="系统消息"
-                right={<Switch checked={systemNoticeEnabled} onCheckedChange={setSystemNoticeEnabled} />}
               />
               <div data-testid="new-settings-input-section">
                 <Divider />
@@ -732,12 +709,19 @@ export function NewSettingsPage() {
                     onClick={() => setFeatureTogglesDialogOpen(true)}
                     right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                   />
+                  <Divider />
+                  <SettingRow
+                    icon={<Undo2 className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="旧版页面"
+                    onClick={handleSwitchToOldUI}
+                    right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                  />
                 </>
               )}
             </SectionCard>
           </section>
 
-          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-danger">
+          <section ref={sectionDangerRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-danger">
             <SectionTitle>危险区域</SectionTitle>
             <div className="overflow-hidden rounded-2xl border border-[#DC2626] bg-white dark:bg-[#1C1917]">
               <div className="flex items-center justify-between px-4 py-[14px]">
@@ -770,42 +754,37 @@ export function NewSettingsPage() {
             </div>
           </section>
 
-          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-about">
-            <SectionTitle>关于</SectionTitle>
-            <SectionCard>
-              <SettingRow
-                icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="应用版本"
-                right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.appVersion}</span>}
-              />
-              <Divider />
-              <SettingRow
-                icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="构建号"
-                right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.buildHash}</span>}
-              />
-              <Divider />
-              <SettingRow
-                icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="导出备份"
-                onClick={handleExportBackup}
-                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-              />
-              <Divider />
-              <SettingRow
-                icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="导入数据"
-                onClick={handleImportBackup}
-                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-              />
-              <Divider />
-              <SettingRow
-                icon={<ChevronRight className="h-[18px] w-[18px] text-[#78716C]" />}
-                label="更新日志"
-                onClick={() => navigate({ to: '/update' })}
-                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
-              />
-            </SectionCard>
+          <section ref={sectionAboutRef} className="space-y-5" data-testid="new-settings-desktop-vc-section-about">
+            <section className="space-y-2">
+              <SectionTitle>关于</SectionTitle>
+              <SectionCard>
+                <SettingRow
+                  icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="导出备份"
+                  onClick={handleExportBackup}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="导入数据"
+                  onClick={handleImportBackup}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+              </SectionCard>
+            </section>
+
+            <MoreSection
+              onNavigateUpdate={() => navigate({ to: '/update' })}
+              onComingSoon={showComingSoon}
+            />
+
+            <LegalSection onComingSoon={showComingSoon} />
+
+            <AboutSection
+              appVersion={versionBuildInfo.appVersion}
+              buildHash={versionBuildInfo.buildHash}
+            />
           </section>
 
           {statusMessage && (
