@@ -16,7 +16,7 @@ export default defineConfig({
   },
   test: {
     environment: 'happy-dom',
-    maxWorkers: isTermuxRuntime ? 2 : undefined,
+    maxWorkers: isTermuxRuntime ? 1 : undefined,
     minWorkers: isTermuxRuntime ? 1 : undefined,
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
     exclude: [...configDefaults.exclude, 'tests/e2e/**'],
