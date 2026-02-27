@@ -461,7 +461,7 @@ export const NewFocusTimerWidget = forwardRef<NewFocusTimerWidgetHandle>(functio
               <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />
 
               <div className="flex min-w-0 flex-col gap-1.5">
-                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">预期时间</span>
+                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</span>
                 <div
                   className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#FFFFFF60] bg-white/35 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
                   data-testid="new-focus-expected-time-row"
