@@ -24,9 +24,21 @@ if (!Number.isInteger(port) || port <= 0 || port > 65535) {
 }
 
 const startedAt = new Date().toISOString();
+const CORS_HEADERS = {
+  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Methods': 'GET, OPTIONS',
+  'Access-Control-Allow-Headers': 'Content-Type',
+  'Access-Control-Allow-Private-Network': 'true',
+};
 
 const server = createServer((request, response) => {
   const { url = '/' } = request;
+
+  if (request.method === 'OPTIONS') {
+    response.writeHead(204, CORS_HEADERS);
+    response.end();
+    return;
+  }
 
   if (url === '/health') {
     const payload = {
@@ -36,7 +48,7 @@ const server = createServer((request, response) => {
       startedAt,
       service: 'agent-runtime',
     };
-    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.writeHead(200, { 'Content-Type': 'application/json', ...CORS_HEADERS });
     response.end(JSON.stringify(payload));
     return;
   }
@@ -49,12 +61,12 @@ const server = createServer((request, response) => {
       startedAt,
       pid: process.pid,
     };
-    response.writeHead(200, { 'Content-Type': 'application/json' });
+    response.writeHead(200, { 'Content-Type': 'application/json', ...CORS_HEADERS });
     response.end(JSON.stringify(payload));
     return;
   }
 
-  response.writeHead(404, { 'Content-Type': 'application/json' });
+  response.writeHead(404, { 'Content-Type': 'application/json', ...CORS_HEADERS });
   response.end(JSON.stringify({ error: 'not_found', path: url }));
 });
 

@@ -61,7 +61,7 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
 
   constructor(options: RuntimeHostServiceOptions = {}) {
     this.storage = options.storage ?? ExoMindEnvironment.getInstance().storage;
-    this.fetchImpl = options.fetchImpl ?? fetch;
+    this.fetchImpl = options.fetchImpl ?? ((input, init) => globalThis.fetch(input, init));
     this.now = options.now ?? (() => new Date());
     this.timeoutMs = options.timeoutMs ?? DEFAULT_PROBE_TIMEOUT_MS;
   }
