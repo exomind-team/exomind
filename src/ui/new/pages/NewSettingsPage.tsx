@@ -51,6 +51,12 @@ import {
   subscribeVoiceTranscriptSendModeChanges,
   type VoiceTranscriptSendMode,
 } from '@/config/voice-transcript-send-mode';
+import {
+  getFeedbackPreferences,
+  setFeedbackPreferences,
+  subscribeFeedbackPreferencesChanges,
+  type FeedbackPreferences,
+} from '@/config/feedback-preferences';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import {
   TIMER_END_SOUND_PRESETS,
@@ -75,6 +81,7 @@ import {
   Mic,
   Moon,
   MoonStar,
+  List,
   Sun,
   Timer,
   Upload,
@@ -162,6 +169,9 @@ export function NewSettingsPage() {
   const [commandPaletteEnabled, setCommandPaletteEnabledState] = useState<boolean>(() => getCommandPaletteEnabled());
   const [voiceTranscriptSendMode, setVoiceTranscriptSendModeState] = useState<VoiceTranscriptSendMode>(
     () => getVoiceTranscriptSendMode()
+  );
+  const [feedbackPreferences, setFeedbackPreferencesState] = useState<FeedbackPreferences>(
+    () => getFeedbackPreferences()
   );
   const [timerPreferences, setTimerPreferencesState] = useState(() => getTimerPreferences());
   const [soundPickerOpen, setSoundPickerOpen] = useState(false);
@@ -362,6 +372,14 @@ export function NewSettingsPage() {
     setVoiceTranscriptSendMode(mode);
     setVoiceTranscriptSendModeState(mode);
   };
+  const handleFeedbackPreferenceToggle = (key: keyof FeedbackPreferences) => {
+    const next = {
+      ...feedbackPreferences,
+      [key]: !feedbackPreferences[key],
+    };
+    setFeedbackPreferences(next);
+    setFeedbackPreferencesState(next);
+  };
 
   const navigate = useNavigate();
 
@@ -431,6 +449,12 @@ export function NewSettingsPage() {
   useEffect(() => {
     return subscribeVoiceTranscriptSendModeChanges((mode) => {
       setVoiceTranscriptSendModeState(mode);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeFeedbackPreferencesChanges((nextPreferences) => {
+      setFeedbackPreferencesState(nextPreferences);
     });
   }, []);
 
@@ -668,6 +692,72 @@ export function NewSettingsPage() {
                   </div>
                 }
               />
+            </div>
+          </SectionCard>
+        </section>
+
+        {/* ── Feedback Section (反馈) ── */}
+        <section className="space-y-2" data-testid="new-settings-feedback-section">
+          <SectionTitle>时间块反馈</SectionTitle>
+          <SectionCard>
+            <div data-testid="new-settings-feedback-content-row">
+              <SettingRow
+                icon={<List className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="反馈内容"
+                right={(
+                  <div
+                    role="group"
+                    aria-label="时间块反馈内容"
+                    className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                  >
+                    <button
+                      type="button"
+                      data-testid="new-settings-feedback-content-timing"
+                      aria-pressed={feedbackPreferences.timingInfoEnabled}
+                      onClick={() => handleFeedbackPreferenceToggle('timingInfoEnabled')}
+                      disabled={loading}
+                      className={`rounded-l-[8px] rounded-r-none px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        feedbackPreferences.timingInfoEnabled
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      时刻信息
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="new-settings-feedback-content-statistics"
+                      aria-pressed={feedbackPreferences.statisticsEnabled}
+                      onClick={() => handleFeedbackPreferenceToggle('statisticsEnabled')}
+                      disabled={loading}
+                      className={`rounded-none px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        feedbackPreferences.statisticsEnabled
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      统计信息
+                    </button>
+                    <button
+                      type="button"
+                      data-testid="new-settings-feedback-content-quick"
+                      aria-pressed={feedbackPreferences.quickFeedbackEnabled}
+                      onClick={() => handleFeedbackPreferenceToggle('quickFeedbackEnabled')}
+                      disabled={loading}
+                      className={`rounded-l-none rounded-r-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                        feedbackPreferences.quickFeedbackEnabled
+                          ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                          : 'text-[#A8A29E]'
+                      }`}
+                    >
+                      快速反馈
+                    </button>
+                  </div>
+                )}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">可多选，默认仅开启快速反馈</span>
             </div>
           </SectionCard>
         </section>

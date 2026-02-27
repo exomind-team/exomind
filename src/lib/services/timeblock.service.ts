@@ -13,6 +13,7 @@
 import { ExoMindEnvironment } from '../environment/environment';
 import { getEventStorage } from '../storage/event-storage';
 import type { TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
+import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -227,10 +228,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const timeBlockName = activeData.name;
     const feedbackText = feedback?.trim() ?? '';
     const hasFeedback = feedbackText.length > 0;
+    const feedbackPreferences = getFeedbackPreferences();
     const report = this.buildFeedbackReport({
       timeBlockName,
       feedbackText,
       hasFeedback,
+      feedbackPreferences,
       feedbackDurationMs,
       pausedDurationMs,
       workDurationMs,
@@ -390,6 +393,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     timeBlockName: string;
     feedbackText: string;
     hasFeedback: boolean;
+    feedbackPreferences: FeedbackPreferences;
     feedbackDurationMs: number;
     pausedDurationMs: number;
     workDurationMs: number;
@@ -422,36 +426,48 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     let result = ''
     let print = (...lines: string[]) => { for (const line of lines) { result += line + '\n' } }
-    print(
-      `## ${input.timeBlockName}`,
-      ``,
-      `### 时刻信息`,
-      ``,
-      `- 时间开始于：\`${this.formatClock(input.actionStartAt)}\``,
-      `- 预期结束于：\`${input.expectedEndAt === null ? '∞' : this.formatClock(input.expectedEndAt)}\``,
-      `- 时间结束于：\`${this.formatClock(input.actionEndedAt)}\``,
-      `- 反馈提交于：\`${this.formatClock(input.submittedAt)}\``,
-      ``,
-      `### 统计信息`,
-      ``,
-      `- 总共时长：**\`${this.formatDuration(input.totalDurationMs)}\`**`);
-    if (input.expectedDurationMs === null) {
-      print(`- 预期时长：**\`∞\`**`)
-    } else {
-      print(`- 预期时长：**\`${this.formatDuration(input.expectedDurationMs)}\`**`)
+    print(`## ${input.timeBlockName}`, ``);
+
+    if (input.feedbackPreferences.timingInfoEnabled) {
+      print(
+        `### 时刻信息`,
+        ``,
+        `- 时间开始于：\`${this.formatClock(input.actionStartAt)}\``,
+        `- 预期结束于：\`${input.expectedEndAt === null ? '∞' : this.formatClock(input.expectedEndAt)}\``,
+        `- 时间结束于：\`${this.formatClock(input.actionEndedAt)}\``,
+        `- 反馈提交于：\`${this.formatClock(input.submittedAt)}\``,
+        ``,
+      );
     }
-    if (input.workDurationMs > 0) print(`- 实际工作：**\`${this.formatDuration(input.workDurationMs)}\`**`)
-    if (input.pausedDurationMs > 0) print(`- 暂停时长：**\`${this.formatDuration(input.pausedDurationMs)}\`**`)
-    if (input.feedbackDurationMs > 0) print(`- 反馈用时：**\`${this.formatDuration(input.feedbackDurationMs)}\`**`)
-    if (hasExpectedDuration && overtimeMs > 0) print(`- 超时投入：**\`${this.formatDuration(overtimeMs)}\`**`)
-    print(
-      ``,
-      `### 快速反馈`,
-      ``,
-      `- 预期差异：**\`${expectedDiff}\`**`,
-      `- 专注节奏：**\`${focusRhythm}\`**`,
-      `- 反馈状态：**\`${feedbackStatus}\`**`,
-    );
+
+    if (input.feedbackPreferences.statisticsEnabled) {
+      print(
+        `### 统计信息`,
+        ``,
+        `- 总共时长：**\`${this.formatDuration(input.totalDurationMs)}\`**`,
+      );
+      if (input.expectedDurationMs === null) {
+        print(`- 预期时长：**\`∞\`**`)
+      } else {
+        print(`- 预期时长：**\`${this.formatDuration(input.expectedDurationMs)}\`**`)
+      }
+      if (input.workDurationMs > 0) print(`- 实际工作：**\`${this.formatDuration(input.workDurationMs)}\`**`)
+      if (input.pausedDurationMs > 0) print(`- 暂停时长：**\`${this.formatDuration(input.pausedDurationMs)}\`**`)
+      if (input.feedbackDurationMs > 0) print(`- 反馈用时：**\`${this.formatDuration(input.feedbackDurationMs)}\`**`)
+      if (hasExpectedDuration && overtimeMs > 0) print(`- 超时投入：**\`${this.formatDuration(overtimeMs)}\`**`)
+      print(``);
+    }
+
+    if (input.feedbackPreferences.quickFeedbackEnabled) {
+      print(
+        `### 快速反馈`,
+        ``,
+        `- 预期差异：**\`${expectedDiff}\`**`,
+        `- 专注节奏：**\`${focusRhythm}\`**`,
+        `- 反馈状态：**\`${feedbackStatus}\`**`,
+      );
+    }
+
     if (input.hasFeedback) {
       print(
         ``,
