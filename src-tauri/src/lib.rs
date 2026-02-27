@@ -11,6 +11,9 @@ use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
     list_files, pick_json_file, read_file, read_file_binary, save_json_file, write_file,
 };
+use commands::runtime_commands::{
+    runtime_service_start, runtime_service_status, runtime_service_stop, RuntimeProcessState,
+};
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 
 #[tauri::command]
@@ -21,6 +24,7 @@ fn greet(name: &str) -> String {
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let ws_client_state = std::sync::Arc::new(WsClientState::default());
+    let runtime_process_state = std::sync::Arc::new(RuntimeProcessState::new());
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
@@ -28,6 +32,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(ws_client_state.clone())
+        .manage(runtime_process_state.clone())
         .invoke_handler(tauri::generate_handler![
             greet,
             // WebSocket 客户端命令
@@ -54,6 +59,10 @@ pub fn run() {
             eventlog_clear,
             eventlog_mirror_status,
             eventlog_rebuild_markdown,
+            // Runtime 服务命令
+            runtime_service_start,
+            runtime_service_stop,
+            runtime_service_status,
         ]);
 
     #[cfg(debug_assertions)]
