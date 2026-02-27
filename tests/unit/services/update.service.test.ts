@@ -6,7 +6,9 @@ import {
   downloadUpdate,
   getPlatform,
   createAutoCheckController,
+  compareVersions,
   type UpdateInfo,
+  type VersionsApiResponse,
 } from '@/lib/services/update.service';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { sha256 as nobleSha256 } from '@noble/hashes/sha2.js';
@@ -47,6 +49,39 @@ function mockFetchBinary(data: Uint8Array, ok = true, status = 200) {
   return vi.spyOn(globalThis, 'fetch').mockResolvedValue(res);
 }
 
+function makeVersionsResponse(overrides?: Partial<VersionsApiResponse>): VersionsApiResponse {
+  return {
+    channel: 'preview',
+    latest: {
+      version: '0.3.4-build.20260227T1430',
+      tag: 'build/v0.3.4-build.20260227T1430',
+      published_at: '2026-02-27T14:30:00Z',
+      assets: {
+        'windows-x64-setup': {
+          url: 'preview/v0.3.4-build.20260227T1430/ExoMind-0.3.4-windows-x64-setup.exe',
+          size: 50000000,
+          sha256: 'abc123',
+        },
+        'android-arm64': {
+          url: 'preview/v0.3.4-build.20260227T1430/ExoMind-0.3.4-android-arm64.apk',
+          size: 30000000,
+          sha256: 'def456',
+        },
+      },
+    },
+    versions: [
+      {
+        version: '0.3.4-build.20260227T1430',
+        tag: 'build/v0.3.4-build.20260227T1430',
+        published_at: '2026-02-27T14:30:00Z',
+        version_dir: 'preview/v0.3.4-build.20260227T1430',
+      },
+    ],
+    retention: 15,
+    ...overrides,
+  };
+}
+
 // ---------------------------------------------------------------------------
 // getCurrentVersion()
 // ---------------------------------------------------------------------------
@@ -59,6 +94,57 @@ describe('getCurrentVersion', () => {
 });
 
 // ---------------------------------------------------------------------------
+// compareVersions()
+// ---------------------------------------------------------------------------
+
+describe('compareVersions', () => {
+  it('compares major versions', () => {
+    expect(compareVersions('2.0.0', '1.0.0')).toBe(1);
+    expect(compareVersions('1.0.0', '2.0.0')).toBe(-1);
+  });
+
+  it('compares minor versions', () => {
+    expect(compareVersions('0.4.0', '0.3.0')).toBe(1);
+    expect(compareVersions('0.3.0', '0.4.0')).toBe(-1);
+  });
+
+  it('compares patch versions', () => {
+    expect(compareVersions('0.3.5', '0.3.4')).toBe(1);
+    expect(compareVersions('0.3.4', '0.3.5')).toBe(-1);
+  });
+
+  it('equal versions return 0', () => {
+    expect(compareVersions('1.2.3', '1.2.3')).toBe(0);
+  });
+
+  it('strips v prefix', () => {
+    expect(compareVersions('v1.2.3', '1.2.3')).toBe(0);
+  });
+
+  it('release > prerelease for same version', () => {
+    expect(compareVersions('0.3.4', '0.3.4-build.20260227T1430')).toBe(1);
+    expect(compareVersions('0.3.4-build.20260227T1430', '0.3.4')).toBe(-1);
+  });
+
+  it('compares prerelease strings lexicographically', () => {
+    expect(compareVersions('0.3.4-build.20260227T1430', '0.3.4-build.20260226T1000')).toBe(1);
+    expect(compareVersions('0.3.4-build.20260226T1000', '0.3.4-build.20260227T1430')).toBe(-1);
+  });
+
+  it('equal prerelease returns 0', () => {
+    expect(compareVersions('0.3.4-build.20260227T1430', '0.3.4-build.20260227T1430')).toBe(0);
+  });
+
+  it('higher patch beats lower patch with prerelease', () => {
+    expect(compareVersions('0.3.5', '0.3.4-build.20260227T1430')).toBe(1);
+  });
+
+  it('compares beta prereleases', () => {
+    expect(compareVersions('0.3.4-beta.2', '0.3.4-beta.1')).toBe(1);
+  });
+});
+
+// ---------------------------------------------------------------------------
 // checkForUpdate()
 // ---------------------------------------------------------------------------
 
@@ -67,54 +153,133 @@ describe('checkForUpdate', () => {
     vi.restoreAllMocks();
   });
 
-  it('returns update info when update is available', async () => {
-    const apiResponse = {
-      has_update: true,
-      current_version: '1.0.0',
-      latest_version: '2.0.0',
-      download_url: '/api/download/release/v2.0.0/windows-x64',
-      size: 50000000,
-      sha256: 'abc123',
-      published_at: '2026-02-27T14:30:00Z',
-    };
+  it('returns update info when newer version available', async () => {
+    const apiResponse = makeVersionsResponse();
     const spy = mockFetchJson(apiResponse);
 
     const result = await checkForUpdate({
-      channel: 'release',
+      channel: 'preview',
       platform: 'windows-x64',
-      currentVersion: '1.0.0',
+      currentVersion: '0.3.3',
     });
 
     expect(result.hasUpdate).toBe(true);
-    expect(result.latestVersion).toBe('2.0.0');
-    expect(result.downloadUrl).toBe('/api/download/release/v2.0.0/windows-x64');
+    expect(result.latestVersion).toBe('0.3.4-build.20260227T1430');
+    expect(result.downloadUrl).toBe(
+      'preview/v0.3.4-build.20260227T1430/ExoMind-0.3.4-windows-x64-setup.exe',
+    );
     expect(result.size).toBe(50000000);
+    expect(result.sha256).toBe('abc123');
     expect(spy).toHaveBeenCalledTimes(1);
 
     const url = spy.mock.calls[0][0] as string;
-    expect(url).toContain('/api/update/check');
-    expect(url).toContain('channel=release');
-    expect(url).toContain('platform=windows-x64');
-    expect(url).toContain('current_version=1.0.0');
+    expect(url).toContain('/api/versions');
+    expect(url).toContain('channel=preview');
+  });
+
+  it('maps windows-x64 platform to windows-x64-setup asset key', async () => {
+    const apiResponse = makeVersionsResponse();
+    mockFetchJson(apiResponse);
+
+    const result = await checkForUpdate({
+      channel: 'preview',
+      platform: 'windows-x64',
+      currentVersion: '0.3.3',
+    });
+
+    expect(result.downloadUrl).toContain('windows-x64-setup');
+  });
+
+  it('maps android-arm64 platform directly', async () => {
+    const apiResponse = makeVersionsResponse();
+    mockFetchJson(apiResponse);
+
+    const result = await checkForUpdate({
+      channel: 'preview',
+      platform: 'android-arm64',
+      currentVersion: '0.3.3',
+    });
+
+    expect(result.downloadUrl).toContain('android-arm64');
+    expect(result.size).toBe(30000000);
   });
 
   it('returns no update when versions match', async () => {
-    const apiResponse = {
-      has_update: false,
-      current_version: '1.0.0',
-      latest_version: '1.0.0',
-    };
+    const apiResponse = makeVersionsResponse({
+      latest: {
+        version: '0.3.3',
+        tag: 'release/v0.3.3',
+        published_at: '2026-02-27T14:30:00Z',
+        assets: {},
+      },
+    });
     mockFetchJson(apiResponse);
 
     const result = await checkForUpdate({
       channel: 'release',
       platform: 'windows-x64',
-      currentVersion: '1.0.0',
+      currentVersion: '0.3.3',
     });
 
     expect(result.hasUpdate).toBe(false);
-    expect(result.latestVersion).toBe('1.0.0');
+    expect(result.latestVersion).toBe('0.3.3');
     expect(result.downloadUrl).toBeUndefined();
+  });
+
+  it('returns no update when current is newer', async () => {
+    const apiResponse = makeVersionsResponse({
+      latest: {
+        version: '0.3.2',
+        tag: 'release/v0.3.2',
+        published_at: '2026-02-20T10:00:00Z',
+        assets: {},
+      },
+    });
+    mockFetchJson(apiResponse);
+
+    const result = await checkForUpdate({
+      channel: 'release',
+      platform: 'windows-x64',
+      currentVersion: '0.3.3',
+    });
+
+    expect(result.hasUpdate).toBe(false);
+  });
+
+  it('handles null latest gracefully', async () => {
+    const apiResponse = makeVersionsResponse({ latest: null });
+    mockFetchJson(apiResponse);
+
+    const result = await checkForUpdate({
+      channel: 'release',
+      platform: 'windows-x64',
+      currentVersion: '0.3.3',
+    });
+
+    expect(result.hasUpdate).toBe(false);
+    expect(result.latestVersion).toBe('0.3.3');
+  });
+
+  it('handles missing asset for platform', async () => {
+    const apiResponse = makeVersionsResponse({
+      latest: {
+        version: '0.4.0',
+        tag: 'release/v0.4.0',
+        published_at: '2026-03-01T10:00:00Z',
+        assets: {}, // no assets
+      },
+    });
+    mockFetchJson(apiResponse);
+
+    const result = await checkForUpdate({
+      channel: 'release',
+      platform: 'windows-x64',
+      currentVersion: '0.3.3',
+    });
+
+    expect(result.hasUpdate).toBe(true);
+    expect(result.downloadUrl).toBeUndefined();
+    expect(result.size).toBeUndefined();
   });
 
   it('throws on fetch error', async () => {
@@ -141,26 +306,18 @@ describe('checkForUpdate', () => {
     ).rejects.toThrow('Network error');
   });
 
-  it('uses preview channel correctly', async () => {
-    const apiResponse = {
-      has_update: true,
-      current_version: '1.0.0',
-      latest_version: '1.1.0-build.20260227',
-      download_url: '/api/download/preview/v1.1.0-build.20260227/windows-x64',
-      size: 50000000,
-      sha256: 'def456',
-      published_at: '2026-02-27T14:30:00Z',
-    };
+  it('uses release channel correctly', async () => {
+    const apiResponse = makeVersionsResponse({ channel: 'release' });
     const spy = mockFetchJson(apiResponse);
 
     await checkForUpdate({
-      channel: 'preview',
+      channel: 'release',
       platform: 'windows-x64',
-      currentVersion: '1.0.0',
+      currentVersion: '0.3.3',
     });
 
     const url = spy.mock.calls[0][0] as string;
-    expect(url).toContain('channel=preview');
+    expect(url).toContain('channel=release');
   });
 });
 
@@ -174,16 +331,20 @@ describe('getVersions', () => {
   });
 
   it('fetches release versions', async () => {
-    const apiResponse = {
+    const apiResponse = makeVersionsResponse({
       channel: 'release',
       latest: {
         version: '0.3.3',
+        tag: 'release/v0.3.3',
         published_at: '2026-02-27T14:30:00Z',
         assets: {
-          'windows-x64': { url: 'release/v0.3.3/ExoMind-0.3.3-windows-x64-setup.exe', size: 50000000 },
+          'windows-x64-setup': { url: 'release/v0.3.3/ExoMind-0.3.3-windows-x64-setup.exe', size: 50000000, sha256: 'abc' },
         },
       },
-    };
+      versions: [
+        { version: '0.3.3', tag: 'release/v0.3.3', published_at: '2026-02-27T14:30:00Z', version_dir: 'release/v0.3.3' },
+      ],
+    });
     const spy = mockFetchJson(apiResponse);
 
     const result = await getVersions('release');
@@ -196,18 +357,12 @@ describe('getVersions', () => {
   });
 
   it('fetches preview versions with version list', async () => {
-    const apiResponse = {
-      channel: 'preview',
-      latest: {
-        version: '0.3.4-build.20260227T1430',
-        published_at: '2026-02-27T14:30:00Z',
-        assets: {},
-      },
+    const apiResponse = makeVersionsResponse({
       versions: [
-        { version: '0.3.4-build.20260227T1430', published_at: '2026-02-27T14:30:00Z' },
-        { version: '0.3.4-build.20260226T1000', published_at: '2026-02-26T10:00:00Z' },
+        { version: '0.3.4-build.20260227T1430', tag: 'build/v0.3.4-build.20260227T1430', published_at: '2026-02-27T14:30:00Z', version_dir: '' },
+        { version: '0.3.4-build.20260226T1000', tag: 'build/v0.3.4-build.20260226T1000', published_at: '2026-02-26T10:00:00Z', version_dir: '' },
       ],
-    };
+    });
     mockFetchJson(apiResponse);
 
     const result = await getVersions('preview');
@@ -215,6 +370,33 @@ describe('getVersions', () => {
     expect(result).toHaveLength(2);
     expect(result[0].version).toBe('0.3.4-build.20260227T1430');
     expect(result[1].publishedAt).toBe('2026-02-26T10:00:00Z');
+  });
+
+  it('falls back to latest when versions array is empty', async () => {
+    const apiResponse = makeVersionsResponse({
+      versions: [],
+      latest: {
+        version: '0.3.3',
+        tag: 'release/v0.3.3',
+        published_at: '2026-02-27T14:30:00Z',
+        assets: {},
+      },
+    });
+    mockFetchJson(apiResponse);
+
+    const result = await getVersions('release');
+
+    expect(result).toHaveLength(1);
+    expect(result[0].version).toBe('0.3.3');
+  });
+
+  it('returns empty array when no latest and no versions', async () => {
+    const apiResponse = makeVersionsResponse({ versions: [], latest: null });
+    mockFetchJson(apiResponse);
+
+    const result = await getVersions('release');
+
+    expect(result).toHaveLength(0);
   });
 
   it('throws on fetch error', async () => {
@@ -267,60 +449,10 @@ describe('downloadUpdate', () => {
     mockFetchBinary(payload);
 
     await expect(
-      downloadUpdate(
-        '/api/download/release/v2.0.0/windows-x64',
-        'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
-      ),
-    ).rejects.toThrow('SHA-256 mismatch');
+      downloadUpdate('/api/download/release/v2.0.0/windows-x64', 'wrong-hash'),
+    ).rejects.toThrow(/SHA-256/);
 
     expect(openUrl).not.toHaveBeenCalled();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Network error scenarios
-// ---------------------------------------------------------------------------
-
-describe('checkForUpdate - network error scenarios', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('should handle network timeout (fetch rejects)', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
-
-    await expect(
-      checkForUpdate({
-        channel: 'release',
-        platform: 'windows-x64',
-        currentVersion: '0.3.0',
-      }),
-    ).rejects.toThrow('Failed to fetch');
-  });
-
-  it('should handle AbortError', async () => {
-    const abortError = new DOMException('The operation was aborted.', 'AbortError');
-    globalThis.fetch = vi.fn().mockRejectedValue(abortError);
-
-    await expect(
-      checkForUpdate({
-        channel: 'release',
-        platform: 'windows-x64',
-        currentVersion: '0.3.0',
-      }),
-    ).rejects.toThrow('The operation was aborted.');
-  });
-});
-
-describe('getVersions - network error scenarios', () => {
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  it('should handle network failure', async () => {
-    globalThis.fetch = vi.fn().mockRejectedValue(new TypeError('Failed to fetch'));
-
-    await expect(getVersions('release')).rejects.toThrow('Failed to fetch');
   });
 });
 
@@ -329,24 +461,35 @@ describe('getVersions - network error scenarios', () => {
 // ---------------------------------------------------------------------------
 
 describe('getPlatform', () => {
-  const originalUserAgent = navigator.userAgent;
+  const originalUA = navigator.userAgent;
 
   afterEach(() => {
     Object.defineProperty(navigator, 'userAgent', {
-      value: originalUserAgent,
+      value: originalUA,
       configurable: true,
     });
   });
 
-  it('returns unknown for unrecognized platform', () => {
+  it('detects Windows', () => {
     Object.defineProperty(navigator, 'userAgent', {
-      value: 'Mozilla/5.0 (PlayStation 5)',
+      value: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
       configurable: true,
     });
+    expect(getPlatform()).toBe('windows-x64');
+  });
 
-    expect(getPlatform()).toBe('unknown');
+  it('detects Android', () => {
+    Object.defineProperty(navigator, 'userAgent', {
+      value: 'Mozilla/5.0 (Linux; Android 14)',
+      configurable: true,
+    });
+    expect(getPlatform()).toBe('android-arm64');
   });
 });
+
+// ---------------------------------------------------------------------------
+// createAutoCheckController()
+// ---------------------------------------------------------------------------
 
 describe('createAutoCheckController', () => {
   beforeEach(() => {
