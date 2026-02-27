@@ -2,13 +2,13 @@ import type { EventData } from '../types/event';
 
 export type ImportStrategy = 'merge' | 'overwrite';
 
-export interface EventLogBackupV1 {
+export interface EventLogTransferPayloadV1 {
   version: 1;
   exportedAt: string;
   events: EventData[];
 }
 
-const BACKUP_VERSION = 1;
+const TRANSFER_VERSION = 1;
 
 function isEventData(value: unknown): value is EventData {
   if (!value || typeof value !== 'object') {
@@ -26,7 +26,7 @@ function isEventData(value: unknown): value is EventData {
   );
 }
 
-export function createBackupPayload(events: EventData[]): EventLogBackupV1 {
+export function createTransferPayload(events: EventData[]): EventLogTransferPayloadV1 {
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
@@ -34,7 +34,7 @@ export function createBackupPayload(events: EventData[]): EventLogBackupV1 {
   };
 }
 
-export function parseBackupPayload(raw: string): EventLogBackupV1 {
+export function parseTransferPayload(raw: string): EventLogTransferPayloadV1 {
   let parsed: unknown;
 
   try {
@@ -49,7 +49,7 @@ export function parseBackupPayload(raw: string): EventLogBackupV1 {
 
   const payload = parsed as Record<string, unknown>;
 
-  if (payload.version !== BACKUP_VERSION) {
+  if (payload.version !== TRANSFER_VERSION) {
     throw new Error('不支持的备份版本');
   }
 

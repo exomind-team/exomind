@@ -109,3 +109,7 @@ dark-mode-*.png
 
 # 测试输出
 vitest-output.txt
+
+# 临时构建产物与 PR 草稿
+artifacts/
+docs/pr/
