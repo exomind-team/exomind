@@ -3,10 +3,12 @@
  * GH#217: 新增 More Section（更新/遥测/报告问题/调试日志）
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
+import userEvent from '@testing-library/user-event';
 import './setup-settings-mocks.tsx';
 import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { MoreSection } from '@/ui/new/components/MoreSection';
 
 describe('NewSettingsPage - More Section', () => {
   it('renders More section title', () => {
@@ -38,5 +40,28 @@ describe('NewSettingsPage - More Section', () => {
     render(<NewSettingsPage />);
     expect(screen.getByText('帮助中心')).toBeInTheDocument();
     expect(screen.getByText('反馈建议')).toBeInTheDocument();
+  });
+});
+
+describe('MoreSection（更多组件 - 点击回调）', () => {
+  it('clicking 帮助中心 calls onComingSoon', async () => {
+    const onComingSoon = vi.fn();
+    render(<MoreSection onNavigateUpdate={() => {}} onComingSoon={onComingSoon} />);
+    await userEvent.click(screen.getByText('帮助中心'));
+    expect(onComingSoon).toHaveBeenCalledOnce();
+  });
+
+  it('clicking 反馈建议 calls onComingSoon', async () => {
+    const onComingSoon = vi.fn();
+    render(<MoreSection onNavigateUpdate={() => {}} onComingSoon={onComingSoon} />);
+    await userEvent.click(screen.getByText('反馈建议'));
+    expect(onComingSoon).toHaveBeenCalledOnce();
+  });
+
+  it('clicking 更新 calls onNavigateUpdate', async () => {
+    const onNavigateUpdate = vi.fn();
+    render(<MoreSection onNavigateUpdate={onNavigateUpdate} onComingSoon={() => {}} />);
+    await userEvent.click(screen.getByText('更新'));
+    expect(onNavigateUpdate).toHaveBeenCalledOnce();
   });
 });

@@ -79,7 +79,7 @@ type PickedJsonFile = {
   content: string;
 };
 
-type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'danger' | 'about';
+type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'about' | 'danger';
 
 const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
