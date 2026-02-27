@@ -344,7 +344,7 @@ const platforms = [
         metaEl.textContent = parts.join(' · ');
       }
       if (downloadBtn) {
-        downloadBtn.href = asset.url || `/api/download/${data.channel}/${latest.version}/${platformKey}`;
+        downloadBtn.href = `/api/download/${data.channel}/${latest.version}/${platformKey}`;
       }
 
       // Render extra architecture links for Android
@@ -359,7 +359,7 @@ const platforms = [
           const extraAsset = latest.assets?.[extraKey];
           if (!extraAsset) continue;
           const label = extraKey === 'android-x86' ? 'x86 版本' : extraKey;
-          const href = extraAsset.url || `/api/download/${data.channel}/${latest.version}/${extraKey}`;
+          const href = `/api/download/${data.channel}/${latest.version}/${extraKey}`;
           extraLinks.innerHTML += `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand hover:text-brand-600 transition-colors underline underline-offset-2">${label}${extraAsset.size ? ' (' + formatSize(extraAsset.size) + ')' : ''}</a>`;
         }
       }
