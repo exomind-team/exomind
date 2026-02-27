@@ -1,4 +1,8 @@
-# GH#205 Agent Hub Backend Implementation Plan
+# GH#205 Agent Hub Backend Implementation Plan（已被 P0 方案替代）
+
+> 状态说明：本文件为 2026-02-26 旧方案（后端模型优先）。  
+> 最新执行基线请改用：`docs/plans/2026-02-27-issue-205-p0-runtimehost-acceptance-plan.md`  
+> 替代原因：验收标准升级为“真实信号读写 + 真实 Agent 对话 + 真实在线状态”可观察现象。
 
 > **For Claude:** REQUIRED SUB-SKILL: Use superpowers:executing-plans to implement this plan task-by-task.
 
