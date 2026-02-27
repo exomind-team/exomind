@@ -335,11 +335,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   // 获取事件头像背景色
   const getEventAvatarColor = (event: Event) => {
     if (event.tags.has('block_start')) return 'bg-success';
-    if (event.tags.has('block_pause')) return 'bg-amber-500 dark:bg-amber-600';
+    if (event.tags.has('block_pause')) return 'bg-warning';
     if (event.tags.has('block_resume')) return 'bg-success';
     if (event.tags.has('block_end')) return 'bg-destructive';
-    if (event.tags.has('block_feedback')) return 'bg-blue-600 dark:bg-blue-500';
-    return 'bg-blue-600 dark:bg-blue-500';
+    if (event.tags.has('block_feedback')) return 'bg-brand';
+    return 'bg-brand';
   };
 
   // 获取事件背景色
