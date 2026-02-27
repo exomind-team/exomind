@@ -2,8 +2,10 @@ import type { APIRoute } from 'astro';
 
 export const prerender = false;
 
+// Restricted to the official site — binary streaming endpoint should not be
+// open to arbitrary origins. Rate limiting is handled at the Cloudflare layer.
 const CORS_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
+  'Access-Control-Allow-Origin': 'https://exo-mind.ai',
 };
 
 function errorResponse(message: string, status: number) {
@@ -18,6 +20,8 @@ function getFilename(version: string, platform: string): string | null {
   // Strip leading "v" from version for filename (v0.3.3 -> 0.3.3)
   const ver = version.startsWith('v') ? version.slice(1) : version;
 
+  // TODO: Consider reading filename from latest.json instead of reconstructing here,
+  // to avoid coupling with CI build artifact naming convention.
   const map: Record<string, string> = {
     'windows-x64': `ExoMind-${ver}-windows-x64-setup.exe`,
     'android-arm64': `ExoMind-${ver}-android-arm64.apk`,

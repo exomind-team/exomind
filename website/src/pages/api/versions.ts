@@ -2,6 +2,7 @@ import type { APIRoute } from 'astro';
 
 export const prerender = false;
 
+// Intentionally public read-only API — wildcard CORS is acceptable here.
 const CORS_HEADERS = {
   'Access-Control-Allow-Origin': '*',
   'Content-Type': 'application/json',
@@ -75,6 +76,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
     return jsonResponse({
       channel: 'preview',
       versions: data.versions,
+      // retention: exposed for client-side display (e.g. "keeping last N versions")
       retention: data.retention,
     });
   } catch (err) {

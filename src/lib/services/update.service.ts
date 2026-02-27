@@ -5,7 +5,7 @@
  * 支持 release / preview 双通道，Windows / Android 双平台。
  */
 
-const API_BASE = 'https://exo-mind.ai';
+const API_BASE = import.meta.env.VITE_UPDATE_BASE_URL || 'https://exo-mind.ai';
 
 // ---------------------------------------------------------------------------
 // Types

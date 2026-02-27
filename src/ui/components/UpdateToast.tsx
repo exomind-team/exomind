@@ -65,8 +65,7 @@ export function UpdateToast() {
     >
       {/* 图标 */}
       <ArrowUpCircle
-        className="h-5 w-5 shrink-0"
-        style={{ color: '#C75B3A' }}
+        className="h-5 w-5 shrink-0 text-[#C75B3A]"
       />
 
       {/* 文本 */}
@@ -77,14 +76,7 @@ export function UpdateToast() {
       {/* 查看详情 */}
       <button
         type="button"
-        className="shrink-0 rounded-md px-3 py-1 text-xs font-medium text-white transition-colors"
-        style={{ backgroundColor: '#C75B3A' }}
-        onMouseEnter={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#b5502f';
-        }}
-        onMouseLeave={(e) => {
-          (e.currentTarget as HTMLButtonElement).style.backgroundColor = '#C75B3A';
-        }}
+        className="shrink-0 rounded-md px-3 py-1 text-xs font-medium text-white transition-colors bg-[#C75B3A] hover:bg-[#b5502f]"
         onClick={() => {
           navigate({ to: '/settings/update' });
           dismissToast();
