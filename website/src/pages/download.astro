@@ -140,6 +140,7 @@ const platforms = [
                         {t('download.btn')}
                       </a>
                     </div>
+                    <div class="card-extra-links mt-3 flex flex-wrap justify-center gap-3"></div>
                   </div>
                   {/* Error state (hidden initially) */}
                   <div class="card-error hidden">
@@ -335,7 +336,7 @@ const platforms = [
       const metaEl = card.querySelector('.card-meta') as HTMLElement;
       const downloadBtn = card.querySelector('.card-download-btn') as HTMLAnchorElement;
 
-      if (versionEl) versionEl.textContent = `v${latest.version}`;
+      if (versionEl) versionEl.textContent = latest.version;
       if (metaEl) {
         const parts: string[] = [];
         if (latest.published_at) parts.push(formatDate(latest.published_at));
@@ -344,6 +345,23 @@ const platforms = [
       }
       if (downloadBtn) {
         downloadBtn.href = asset.url || `/api/download/${data.channel}/${latest.version}/${platformKey}`;
+      }
+
+      // Render extra architecture links for Android
+      const extraLinks = card.querySelector('.card-extra-links') as HTMLElement;
+      if (extraLinks) {
+        extraLinks.innerHTML = '';
+        const archMap: Record<string, string[]> = {
+          'android-arm64': ['android-x86'],
+        };
+        const extras = archMap[platformKey] || [];
+        for (const extraKey of extras) {
+          const extraAsset = latest.assets?.[extraKey];
+          if (!extraAsset) continue;
+          const label = extraKey === 'android-x86' ? 'x86 版本' : extraKey;
+          const href = extraAsset.url || `/api/download/${data.channel}/${latest.version}/${extraKey}`;
+          extraLinks.innerHTML += `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand hover:text-brand-600 transition-colors underline underline-offset-2">${label}${extraAsset.size ? ' (' + formatSize(extraAsset.size) + ')' : ''}</a>`;
+        }
       }
 
       if (loaded) loaded.classList.remove('hidden');
