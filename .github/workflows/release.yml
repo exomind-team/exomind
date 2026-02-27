@@ -272,7 +272,7 @@ jobs:
         run: bun install
 
       - name: Build macOS app (构建 macOS 应用)
-        run: bun tauri build
+        run: npx tauri build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
@@ -348,7 +348,7 @@ jobs:
         run: bun install
 
       - name: Build Linux app (构建 Linux 应用)
-        run: bun tauri build
+        run: npx tauri build
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
