@@ -782,7 +782,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: buttonSize * 0.4,
-          color: colors.iconColor,
+          color: useIdleClassVisual ? undefined : colors.iconColor,
           transition: 'all 0.3s ease',
           transform: state.state === 'recording' ? 'scale(1.05)' : 'scale(1)',
           animation: state.state === 'recording'
