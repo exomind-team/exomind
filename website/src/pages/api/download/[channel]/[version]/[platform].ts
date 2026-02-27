@@ -36,6 +36,10 @@ function getFilename(version: string, platform: string): string | null {
     'windows-x64': `ExoMind-${version}-windows-x64-setup.exe`,
     'android-arm64': `ExoMind-${version}-android-arm64.apk`,
     'android-x86': `ExoMind-${version}-android-x86.apk`,
+    'macos-aarch64': `ExoMind-${version}-macos-aarch64.dmg`,
+    'macos-x64': `ExoMind-${version}-macos-x64.dmg`,
+    'linux-x64-appimage': `ExoMind-${version}-linux-x64.AppImage`,
+    'linux-x64-deb': `ExoMind-${version}-linux-x64.deb`,
   };
 
   return map[platform] ?? null;
@@ -45,7 +49,13 @@ function getFilename(version: string, platform: string): string | null {
 function getContentType(platform: string): string {
   const map: Record<string, string> = {
     'windows-x64': 'application/vnd.microsoft.portable-executable',
+    'windows-x64-setup': 'application/vnd.microsoft.portable-executable',
     'android-arm64': 'application/vnd.android.package-archive',
+    'android-x86': 'application/vnd.android.package-archive',
+    'macos-aarch64': 'application/x-apple-diskimage',
+    'macos-x64': 'application/x-apple-diskimage',
+    'linux-x64-appimage': 'application/octet-stream',
+    'linux-x64-deb': 'application/vnd.debian.binary-package',
   };
   return map[platform] ?? 'application/octet-stream';
 }
@@ -66,7 +76,12 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     return errorResponse('Invalid version format', 400, corsOrigin);
   }
 
-  const validPlatforms = ['windows-x64', 'windows-x64-setup', 'android-arm64', 'android-x86'];
+  const validPlatforms = [
+    'windows-x64', 'windows-x64-setup',
+    'android-arm64', 'android-x86',
+    'macos-aarch64', 'macos-x64',
+    'linux-x64-appimage', 'linux-x64-deb',
+  ];
   if (!validPlatforms.includes(platform)) {
     return errorResponse(
       `Invalid platform. Must be one of: ${validPlatforms.join(', ')}`,

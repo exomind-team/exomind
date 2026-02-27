@@ -16,6 +16,8 @@ on:
           - all
           - android
           - windows
+          - macos
+          - linux
 
 permissions:
   contents: write
@@ -217,6 +219,157 @@ jobs:
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
           path: src-tauri/target/release/bundle/msi/
+          if-no-files-found: ignore
+
+  build-macos:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'macos' }}
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Bun
+        run: npm install -g bun
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@v1
+        with:
+          toolchain: stable
+
+      - name: Get short commit hash
+        id: hash
+        run: echo "HASH=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve app version
+        id: app_version
+        run: |
+          ref_name="${{ github.ref_name }}"
+          app_version=""
+
+          if [[ "$ref_name" == release/* ]]; then
+            app_version="${ref_name#release/}"
+          elif [[ "$ref_name" == build/* ]]; then
+            app_version="${ref_name#build/}"
+          fi
+
+          if [ -z "$app_version" ]; then
+            app_version="$(jq -r '.version' package.json)"
+          fi
+
+          app_version="${app_version#v}"
+
+          if [ -z "$app_version" ]; then
+            echo "Cannot resolve app version from tag or package.json." >&2
+            exit 1
+          fi
+
+          echo "APP_VERSION=$app_version" >> "$GITHUB_OUTPUT"
+          echo "Resolved app version: $app_version"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build macOS app (构建 macOS 应用)
+        run: bun tauri build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Upload macOS DMG Artifact (上传 DMG)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/dmg/
+          if-no-files-found: ignore
+
+  build-linux:
+    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'linux' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Bun
+        run: npm install -g bun
+
+      - name: Install Linux system dependencies (安装 Linux 系统依赖)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libsoup-3.0-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-action@v1
+        with:
+          toolchain: stable
+
+      - name: Get short commit hash
+        id: hash
+        run: echo "HASH=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve app version
+        id: app_version
+        run: |
+          ref_name="${{ github.ref_name }}"
+          app_version=""
+
+          if [[ "$ref_name" == release/* ]]; then
+            app_version="${ref_name#release/}"
+          elif [[ "$ref_name" == build/* ]]; then
+            app_version="${ref_name#build/}"
+          fi
+
+          if [ -z "$app_version" ]; then
+            app_version="$(jq -r '.version' package.json)"
+          fi
+
+          app_version="${app_version#v}"
+
+          if [ -z "$app_version" ]; then
+            echo "Cannot resolve app version from tag or package.json." >&2
+            exit 1
+          fi
+
+          echo "APP_VERSION=$app_version" >> "$GITHUB_OUTPUT"
+          echo "Resolved app version: $app_version"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build Linux app (构建 Linux 应用)
+        run: bun tauri build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Upload Linux DEB Artifact (上传 DEB)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/deb/
+          if-no-files-found: ignore
+
+      - name: Upload Linux AppImage Artifact (上传 AppImage)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/appimage/
           if-no-files-found: ignore
 
   build-android:
@@ -531,7 +684,7 @@ jobs:
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
 
   create-release:
-    needs: [build-windows, build-android]
+    needs: [build-windows, build-macos, build-linux, build-android]
     runs-on: ubuntu-latest
     # 对 release/* 和 build/* tag 执行发布步骤
     if: |
@@ -542,6 +695,8 @@ jobs:
       ) &&
       (
         needs.build-windows.result == 'success' ||
+        needs.build-macos.result == 'success' ||
+        needs.build-linux.result == 'success' ||
         needs.build-android.result == 'success'
       )
     steps:
@@ -677,6 +832,20 @@ jobs:
           path: download-artifacts
           merge-multiple: true
 
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          path: download-artifacts
+          merge-multiple: true
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: linux-*
+          path: download-artifacts
+          merge-multiple: true
+
       - name: Download Android artifacts
         uses: actions/download-artifact@v4
         with:
@@ -759,6 +928,32 @@ jobs:
             fi
           done
 
+          # Find and copy macOS DMG
+          dmg_files=("$src"/**/*.dmg)
+          for dmg in "${dmg_files[@]}"; do
+            file_name="$(basename "$dmg" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$file_name" == *"aarch64"* || "$file_name" == *"arm64"* ]]; then
+              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
+            elif [[ "$file_name" == *"x64"* || "$file_name" == *"x86_64"* ]]; then
+              cp "$dmg" "$dest/ExoMind-${version}-macos-x64.dmg"
+            else
+              # macos-latest is Apple Silicon (aarch64)
+              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
+            fi
+          done
+
+          # Find and copy Linux AppImage
+          appimage_files=("$src"/**/*.AppImage)
+          for ai in "${appimage_files[@]}"; do
+            cp "$ai" "$dest/ExoMind-${version}-linux-x64.AppImage"
+          done
+
+          # Find and copy Linux DEB
+          deb_files=("$src"/**/*.deb)
+          for deb in "${deb_files[@]}"; do
+            cp "$deb" "$dest/ExoMind-${version}-linux-x64.deb"
+          done
+
           echo "=== Files prepared for R2 upload ==="
           ls -la "$dest/"
 
@@ -777,11 +972,14 @@ jobs:
 
           content_type_for() {
             case "$1" in
-              *.exe)  echo "application/octet-stream" ;;
-              *.msi)  echo "application/octet-stream" ;;
-              *.apk)  echo "application/vnd.android.package-archive" ;;
-              *.json) echo "application/json" ;;
-              *)      echo "application/octet-stream" ;;
+              *.exe)      echo "application/octet-stream" ;;
+              *.msi)      echo "application/octet-stream" ;;
+              *.apk)      echo "application/vnd.android.package-archive" ;;
+              *.dmg)      echo "application/x-apple-diskimage" ;;
+              *.AppImage) echo "application/octet-stream" ;;
+              *.deb)      echo "application/vnd.debian.binary-package" ;;
+              *.json)     echo "application/json" ;;
+              *)          echo "application/octet-stream" ;;
             esac
           }
 
@@ -846,6 +1044,22 @@ jobs:
           add_asset "android-x86" \
             "$src/ExoMind-${version}-android-x86.apk" \
             "${channel}/${version_dir}/ExoMind-${version}-android-x86.apk"
+
+          add_asset "macos-aarch64" \
+            "$src/ExoMind-${version}-macos-aarch64.dmg" \
+            "${channel}/${version_dir}/ExoMind-${version}-macos-aarch64.dmg"
+
+          add_asset "macos-x64" \
+            "$src/ExoMind-${version}-macos-x64.dmg" \
+            "${channel}/${version_dir}/ExoMind-${version}-macos-x64.dmg"
+
+          add_asset "linux-x64-appimage" \
+            "$src/ExoMind-${version}-linux-x64.AppImage" \
+            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.AppImage"
+
+          add_asset "linux-x64-deb" \
+            "$src/ExoMind-${version}-linux-x64.deb" \
+            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.deb"
 
           # Compose latest.json
           latest_json="$(jq -n \
