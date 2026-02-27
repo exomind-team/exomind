@@ -5,14 +5,14 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { UserCard } from '@/ui/new/components/UserCard';
+import { UserCard } from '@/ui/app/components/UserCard';
 
 // Mock dependencies
 vi.mock('@/ui/stores/sync-store', () => ({
   useSyncStore: vi.fn(),
 }));
 
-vi.mock('@/ui/new/components/SwitchAccountSheet', () => ({
+vi.mock('@/ui/app/components/SwitchAccountSheet', () => ({
   SwitchAccountSheet: () => <div data-testid="switch-account-sheet" />,
 }));
 

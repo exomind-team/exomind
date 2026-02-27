@@ -1,3 +1,7 @@
+// Re-export split types for backward compatibility
+export type { RuntimeHostStatus, RuntimeHostRecord, RuntimeServiceStatus } from './agent-hub-runtime';
+export type { AgentMarketCategory, AgentMarketItem } from './agent-hub-market';
+
 // Agent Hub view modes（视图模式）
 export const AGENT_HUB_VIEW_MODES = ['topology', 'list', 'device'] as const;
 export type AgentHubViewMode = (typeof AGENT_HUB_VIEW_MODES)[number];
@@ -121,22 +125,6 @@ export interface AgentDetailData {
   triggerRules: AgentDetailKV[];
   targets: AgentHubListItem[];
   recentLogs: AgentDetailTimelineItem[];
-}
-
-export interface AgentMarketCategory {
-  id: string;
-  label: string;
-}
-
-export interface AgentMarketItem {
-  id: string;
-  name: string;
-  summary: string;
-  icon: string;
-  tintColor: string;
-  tags: string[];
-  installsText: string;
-  ratingText: string;
 }
 
 export type AgentConversationRole = 'agent' | 'user';

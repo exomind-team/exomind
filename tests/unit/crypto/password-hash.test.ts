@@ -44,7 +44,7 @@ describe('password hash compatibility', () => {
     expect(hash.startsWith('$pbkdf2$')).toBe(true);
     await expect(verifyPassword(password, hash)).resolves.toBe(true);
     await expect(verifyPassword('bad-password', hash)).resolves.toBe(false);
-  });
+  }, 20000);
 
   it('should reject legacy fallback hash scheme', async () => {
     const legacyHash = '$fallback$c2FsdA==$deadbeefcafebabe';

@@ -20,8 +20,8 @@
   - 单测：
     - `tests/unit/me/me-types-contract.issue215.test.ts`
     - `tests/unit/services/me.service.issue215.test.ts`
-    - `tests/unit/ui/new-me-pages.issue215.test.tsx`
-    - `tests/unit/ui/new-me-routing.issue215.test.ts`
+    - `tests/unit/ui/me-pages.issue215.test.tsx`
+    - `tests/unit/ui/me-routing.issue215.test.ts`
     - `tests/unit/environment/bootstrap.test.ts`（扩展 me 注入断言）
   - E2E：
     - `tests/e2e/me-ui.issue215.test.ts`
@@ -34,7 +34,7 @@
 
 ## 测试证据
 ```bash
-bunx vitest run tests/unit/me/me-types-contract.issue215.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/services/me.service.issue215.test.ts tests/unit/ui/new-me-pages.issue215.test.tsx tests/unit/ui/new-me-routing.issue215.test.ts
+bunx vitest run tests/unit/me/me-types-contract.issue215.test.ts tests/unit/environment/bootstrap.test.ts tests/unit/services/me.service.issue215.test.ts tests/unit/ui/me-pages.issue215.test.tsx tests/unit/ui/me-routing.issue215.test.ts
 # 结果：5 files / 13 tests 全部通过
 
 bun run test:e2e:issue215

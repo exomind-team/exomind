@@ -52,7 +52,7 @@ describe('UserManagePage 依赖检查', () => {
 });
 
 describe('UserManagePage 路由注册', () => {
-  const routesPath = path.resolve('src/routes-new.tsx');
+  const routesPath = path.resolve('src/routes.tsx');
   const routesContent = fs.readFileSync(routesPath, 'utf-8');
 
   it('应该导入 UserManagePage', () => {
