@@ -1,5 +1,5 @@
 /**
- * NewSettingsPage - Developer Section 单元测试
+ * SettingsPage - Developer Section 单元测试
  * GH#217: Developer Section 对齐设计稿 — 开发者功能开关
  */
 
@@ -10,20 +10,20 @@ import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setDevtoolsEnabled } from '@/config/devtools-mode';
 import { setCommandPaletteEnabled } from '@/config/command-palette-enabled';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
-import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
 beforeEach(() => {
   vi.mocked(getDeveloperModeEnabled).mockReturnValue(true);
 });
 
-describe('NewSettingsPage - Developer Section (developerMode=true)', () => {
+describe('SettingsPage - Developer Section (developerMode=true)', () => {
   it('renders feature toggles row', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     expect(screen.getByText('功能开关')).toBeInTheDocument();
   });
 
   it('opens feature toggles drawer on click', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     const row = screen.getByText('功能开关');
     fireEvent.click(row);
     expect(screen.getByText('Agent 页面')).toBeInTheDocument();
@@ -31,17 +31,17 @@ describe('NewSettingsPage - Developer Section (developerMode=true)', () => {
   });
 
   it('renders mock data toggle', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     expect(screen.getByText('使用测试数据')).toBeInTheDocument();
   });
 
   it('renders devtools toggle', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     expect(screen.getByText('开发者工具')).toBeInTheDocument();
   });
 
   it('updates devtools state and syncs runtime on toggle', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     const toggle = screen.getByTestId('new-settings-devtools-switch');
     fireEvent.click(toggle);
     expect(vi.mocked(setDevtoolsEnabled)).toHaveBeenCalledWith(true);
@@ -49,7 +49,7 @@ describe('NewSettingsPage - Developer Section (developerMode=true)', () => {
   });
 
   it('updates command palette state inside feature toggles drawer', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     fireEvent.click(screen.getByText('功能开关'));
 
     const toggle = screen.getByTestId('feature-toggle-command-palette-switch');

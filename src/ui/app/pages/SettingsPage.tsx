@@ -57,11 +57,11 @@ import {
   getTimerEndSoundPresetById,
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
-import { UserCard } from '@/ui/new/components/UserCard';
-import { MoreSection } from '@/ui/new/components/MoreSection';
-import { LegalSection } from '@/ui/new/components/LegalSection';
-import { AboutSection } from '@/ui/new/components/AboutSection';
-import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/new/components/settings-shared';
+import { UserCard } from '@/ui/app/components/UserCard';
+import { MoreSection } from '@/ui/app/components/MoreSection';
+import { LegalSection } from '@/ui/app/components/LegalSection';
+import { AboutSection } from '@/ui/app/components/AboutSection';
+import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/app/components/settings-shared';
 import { useNavigate } from '@tanstack/react-router';
 import {
   Bell,
@@ -144,7 +144,7 @@ function maskMossApiKey(value: string): string {
   return `${value.slice(0, 4)}***${value.slice(-2)}`;
 }
 
-export function NewSettingsPage() {
+export function SettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.3');
   const autoSyncServerUrl = resolveSyncServerUrl(envMap, {

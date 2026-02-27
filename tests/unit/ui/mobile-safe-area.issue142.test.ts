@@ -5,7 +5,7 @@ import path from 'path';
 describe('issue-142 mobile safe area', () => {
   const htmlPath = path.resolve('index.html');
   const cssPath = path.resolve('src/index.css');
-  const routesPath = path.resolve('src/routes-new.tsx');
+  const routesPath = path.resolve('src/routes.tsx');
   const voiceInputPath = path.resolve('src/components/VoiceMessageInput.tsx');
 
   it('includes viewport-fit=cover in index.html', () => {

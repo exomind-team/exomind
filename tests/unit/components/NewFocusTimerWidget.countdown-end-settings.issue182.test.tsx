@@ -1,9 +1,27 @@
 import React from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { NewFocusTimerWidget } from '@/ui/new/components/NewFocusTimerWidget';
+import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 
 const TIMER_PREFERENCES_STORAGE_KEY = 'exomind:timerPreferences';
+
+function clearLocalStorageSafely() {
+  const storage = window.localStorage as Partial<Storage>;
+  if (typeof storage.clear === 'function') {
+    storage.clear();
+    return;
+  }
+  if (typeof storage.removeItem !== 'function' || typeof storage.key !== 'function') {
+    return;
+  }
+  const keys: string[] = [];
+  const length = typeof storage.length === 'number' ? storage.length : 0;
+  for (let index = 0; index < length; index += 1) {
+    const key = storage.key(index);
+    if (key) keys.push(key);
+  }
+  keys.forEach((key) => storage.removeItem?.(key));
+}
 
 const {
   loadActiveBlockMock,
@@ -35,7 +53,7 @@ vi.mock('@/lib/services', () => ({
   }),
 }));
 
-describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支）', () => {
+describe('FocusTimerWidget countdown end behavior（新计时器结束分支）', () => {
   let now = 0;
   let rafCallback: FrameRequestCallback | null = null;
   const playMock = vi.fn().mockResolvedValue(undefined);
@@ -44,7 +62,7 @@ describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支�
     now = 0;
     rafCallback = null;
     vi.clearAllMocks();
-    window.localStorage.clear();
+    clearLocalStorageSafely();
 
     vi.spyOn(Date, 'now').mockImplementation(() => now);
 
@@ -104,7 +122,7 @@ describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支�
       }),
     );
 
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), { target: { value: '硬结束任务' } });
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
@@ -132,7 +150,7 @@ describe('NewFocusTimerWidget countdown end behavior（新计时器结束分支�
       }),
     );
 
-    render(<NewFocusTimerWidget />);
+    render(<FocusTimerWidget />);
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
     fireEvent.change(screen.getByTestId('new-focus-task-input'), { target: { value: '软结束任务' } });
     fireEvent.click(screen.getByTestId('new-focus-start-button'));

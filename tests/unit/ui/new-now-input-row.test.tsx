@@ -1,7 +1,7 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import { NewNowInputRow } from '@/ui/new/components/NewNowInputRow';
+import { NowInputRow } from '@/ui/app/components/NowInputRow';
 
 const {
   mockReadClipboardText,
@@ -72,7 +72,7 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges,
 }));
 
-describe('NewNowInputRow', () => {
+describe('NowInputRow', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     mockReadClipboardText.mockReset();
@@ -93,7 +93,7 @@ describe('NewNowInputRow', () => {
 
   it('submits text by send button and clears input', () => {
     const onSend = vi.fn();
-    render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
 
     const textarea = screen.getByTestId('new-now-input-textarea');
     fireEvent.change(textarea, { target: { value: '像素级复刻输入行' } });
@@ -107,7 +107,7 @@ describe('NewNowInputRow', () => {
 
   it('renders voice button and starts voice recording by ref handle', () => {
     const ref = React.createRef<{ startVoiceRecording: () => void }>();
-    render(<NewNowInputRow ref={ref} onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow ref={ref} onSend={vi.fn()} placeholder="输入内容记录事件..." />);
 
     expect(screen.getByTestId('new-now-voice-button-mock')).toBeInTheDocument();
     expect(getLatestVoiceProps()).toMatchObject({
@@ -128,7 +128,7 @@ describe('NewNowInputRow', () => {
 
   it('starts voice recording when pressing Ctrl+Enter on empty textarea', () => {
     const onSend = vi.fn();
-    render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
 
     const textarea = screen.getByTestId('new-now-input-textarea');
     (textarea as HTMLTextAreaElement).focus();
@@ -141,7 +141,7 @@ describe('NewNowInputRow', () => {
 
   it('submits text when pressing Ctrl+Enter', () => {
     const onSend = vi.fn();
-    render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
 
     const textarea = screen.getByTestId('new-now-input-textarea');
     fireEvent.change(textarea, { target: { value: 'Ctrl+Enter 发送' } });
@@ -152,7 +152,7 @@ describe('NewNowInputRow', () => {
 
   it('does not submit when pressing Enter without Ctrl', () => {
     const onSend = vi.fn();
-    render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
 
     const textarea = screen.getByTestId('new-now-input-textarea');
     fireEvent.change(textarea, { target: { value: '仅回车不发送' } });
@@ -163,7 +163,7 @@ describe('NewNowInputRow', () => {
   });
 
   it('inserts voice transcript into textarea', () => {
-    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
     const textarea = screen.getByTestId('new-now-input-textarea');
 
     fireEvent.change(textarea, { target: { value: '已有文本' } });
@@ -177,7 +177,7 @@ describe('NewNowInputRow', () => {
   it('sends voice transcript directly when mode is direct-send', () => {
     const onSend = vi.fn();
     emitVoiceTranscriptMode('direct-send');
-    render(<NewNowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
     const textarea = screen.getByTestId('new-now-input-textarea');
 
     act(() => {
@@ -190,7 +190,7 @@ describe('NewNowInputRow', () => {
 
   it('logs voice errors for troubleshooting', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
-    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
 
     act(() => {
       getLatestVoiceProps()?.onError?.('麦克风权限被拒绝');
@@ -201,7 +201,7 @@ describe('NewNowInputRow', () => {
   });
 
   it('shows temporary "待开发" placeholder after attachment click', () => {
-    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
     fireEvent.click(screen.getByTestId('new-now-attachment-button'));
 
     expect(screen.getByText('待开发')).toBeInTheDocument();
@@ -215,7 +215,7 @@ describe('NewNowInputRow', () => {
   it('inserts clipboard text via clipboard service', async () => {
     mockReadClipboardText.mockResolvedValue({ ok: true, text: '服务层剪贴板文本' });
 
-    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
     await act(async () => {
       fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
     });
@@ -239,7 +239,7 @@ describe('NewNowInputRow', () => {
       error: new Error('secure context'),
     });
 
-    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
     await act(async () => {
       fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
     });
@@ -267,7 +267,7 @@ describe('NewNowInputRow', () => {
       error: new Error('permission denied'),
     });
 
-    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
     await act(async () => {
       fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
     });
@@ -288,7 +288,7 @@ describe('NewNowInputRow', () => {
       error: new Error('unknown'),
     });
 
-    render(<NewNowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+    render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
     await act(async () => {
       fireEvent.click(screen.getByTestId('new-now-input-inline-button'));
     });

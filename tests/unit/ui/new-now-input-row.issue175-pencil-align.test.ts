@@ -2,8 +2,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-describe('NewNowInputRow issue-175 pencil align', () => {
-  const filePath = path.resolve('src/ui/new/components/NewNowInputRow.tsx');
+describe('NowInputRow issue-175 pencil align', () => {
+  const filePath = path.resolve('src/ui/app/components/NowInputRow.tsx');
   const source = readFileSync(filePath, 'utf-8');
 
   it('uses clipboard icon instead of pen-line icon in input trailing action', () => {

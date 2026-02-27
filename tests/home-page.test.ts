@@ -2,24 +2,23 @@ import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
 describe('New home entry', () => {
-  const newFocusPagePath = path.resolve('src/ui/new/pages/NewFocusPage.tsx');
-  const newRoutesPath = path.resolve('src/routes-new.tsx');
+  const newFocusPagePath = path.resolve('src/ui/app/pages/FocusPage.tsx');
+  const newRoutesPath = path.resolve('src/routes.tsx');
 
-  it('should have NewFocusPage component file', () => {
+  it('should have FocusPage component file', () => {
     expect(fs.existsSync(newFocusPagePath)).toBe(true);
   });
 
-  it('should have NewFocusPage export', async () => {
-    const { NewFocusPage } = await import('@/ui/new/pages/NewFocusPage');
-    expect(NewFocusPage).toBeDefined();
-    expect(typeof NewFocusPage).toBe('function');
+  it('should have FocusPage export', () => {
+    const source = fs.readFileSync(newFocusPagePath, 'utf-8');
+    expect(source).toContain('export function FocusPage');
   });
 
-  it('should register / and /eventlog to NewFocusPage in new router', () => {
+  it('should register / and /eventlog to FocusPage in new router', () => {
     const content = fs.readFileSync(newRoutesPath, 'utf-8');
     expect(content).toContain("path: '/'");
     expect(content).toContain("path: '/eventlog'");
-    expect(content).toContain('<NewFocusPage />');
+    expect(content).toContain('<FocusPage />');
   });
 });
 

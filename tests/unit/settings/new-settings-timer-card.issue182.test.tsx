@@ -42,18 +42,36 @@ vi.mock('@/ui/pages/UserManagePage', () => ({
   UserManagePage: () => <div data-testid="user-manage-page-mock">UserManagePage</div>,
 }));
 
-import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
-describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
+function clearLocalStorageSafely() {
+  const storage = window.localStorage as Partial<Storage>;
+  if (typeof storage.clear === 'function') {
+    storage.clear();
+    return;
+  }
+  if (typeof storage.removeItem !== 'function' || typeof storage.key !== 'function') {
+    return;
+  }
+  const keys: string[] = [];
+  const length = typeof storage.length === 'number' ? storage.length : 0;
+  for (let index = 0; index < length; index += 1) {
+    const key = storage.key(index);
+    if (key) keys.push(key);
+  }
+  keys.forEach((key) => storage.removeItem?.(key));
+}
+
+describe('SettingsPage timer card（新设置页计时器卡片）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isTauri.mockResolvedValue(false);
     mocks.invoke.mockResolvedValue(null);
-    window.localStorage.clear();
+    clearLocalStorageSafely();
   });
 
   it('renders end-mode segmented controls from pencil（显示结束模式分段切换）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     expect(screen.getByText('结束模式')).toBeInTheDocument();
     expect(screen.getByText('倒计时结束后的行为')).toBeInTheDocument();
@@ -62,7 +80,7 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
   });
 
   it('toggles theme segmented controls and persists preference（切换主题分段按钮并持久化）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     const systemButton = screen.getByTestId('new-settings-theme-system');
     const lightButton = screen.getByTestId('new-settings-theme-light');
@@ -82,7 +100,7 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
   });
 
   it('toggles end mode and persists selection（切换结束模式并持久化）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     const hardButton = screen.getByTestId('new-settings-end-mode-hard');
     const softButton = screen.getByTestId('new-settings-end-mode-soft');
@@ -104,7 +122,7 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
   });
 
   it('opens sound picker and updates selected preset（提示音可打开选择并更新）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     fireEvent.click(screen.getByRole('button', { name: '提示音' }));
 
@@ -115,7 +133,7 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
   });
 
   it('renders import-export section in new row style（导入导出区使用新行式风格）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     expect(screen.getByTestId('new-settings-import-export-card')).toBeInTheDocument();
     expect(screen.getByTestId('new-settings-import-strategy-row')).toBeInTheDocument();
@@ -126,7 +144,7 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
   });
 
   it('toggles import strategy segmented controls（切换导入策略分段按钮）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     const mergeButton = screen.getByTestId('new-settings-import-strategy-merge');
     const overwriteButton = screen.getByTestId('new-settings-import-strategy-overwrite');

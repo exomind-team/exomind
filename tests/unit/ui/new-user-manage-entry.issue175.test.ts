@@ -3,8 +3,8 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 describe('new ui user-manage entry issue-175', () => {
-  const routesNewPath = path.resolve('src/routes-new.tsx');
-  const newSettingsPath = path.resolve('src/ui/new/pages/NewSettingsPage.tsx');
+  const routesNewPath = path.resolve('src/routes.tsx');
+  const newSettingsPath = path.resolve('src/ui/app/pages/SettingsPage.tsx');
   const routesSource = readFileSync(routesNewPath, 'utf-8');
   const settingsSource = readFileSync(newSettingsPath, 'utf-8');
 

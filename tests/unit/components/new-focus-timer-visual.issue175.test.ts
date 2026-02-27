@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
 describe('new focus timer visual tokens issue-175（视觉尺寸令牌）', () => {
-  const sourcePath = path.resolve('src/ui/new/components/NewFocusTimerWidget.tsx');
+  const sourcePath = path.resolve('src/ui/app/components/FocusTimerWidget.tsx');
   const source = readFileSync(sourcePath, 'utf-8');
 
   it('contains idle card sizing tokens from pencil（未开始卡片尺寸）', () => {
