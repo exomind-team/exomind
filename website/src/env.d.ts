@@ -3,7 +3,7 @@
 type R2Bucket = import('@cloudflare/workers-types').R2Bucket;
 
 interface Env {
-  R2: R2Bucket;
+  RELEASES: R2Bucket;
 }
 
 type Runtime = import('@astrojs/cloudflare').Runtime<Env>;

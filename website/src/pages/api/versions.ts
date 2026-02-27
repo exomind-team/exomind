@@ -36,7 +36,7 @@ export const GET: APIRoute = async ({ url, locals }) => {
   }
 
   try {
-    const r2 = locals.runtime.env.R2;
+    const r2 = locals.runtime.env.RELEASES;
 
     if (channel === 'release') {
       const object = await r2.get('release/latest.json');

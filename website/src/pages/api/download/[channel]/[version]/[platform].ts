@@ -84,7 +84,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
   }
 
   try {
-    const r2 = locals.runtime.env.R2;
+    const r2 = locals.runtime.env.RELEASES;
     const key = `${channel}/${version}/${filename}`;
     const object = await r2.get(key);
 
