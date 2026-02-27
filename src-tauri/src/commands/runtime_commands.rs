@@ -3,6 +3,7 @@
 
 use chrono::Utc;
 use serde::Serialize;
+use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, State};
@@ -73,6 +74,52 @@ fn refresh_child_running_state(child: &mut Option<Child>) -> Result<(bool, Optio
     }
 }
 
+fn runtime_entry_candidates(base_dir: &Path) -> Vec<PathBuf> {
+    let mut candidates = Vec::new();
+    let mut push_candidate = |path: PathBuf| {
+        if !candidates.iter().any(|item| item == &path) {
+            candidates.push(path);
+        }
+    };
+
+    push_candidate(base_dir.join("server").join("agent-runtime-server.js"));
+
+    if let Some(parent) = base_dir.parent() {
+        push_candidate(parent.join("server").join("agent-runtime-server.js"));
+    }
+
+    let manifest_parent = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+        .parent()
+        .map(|path| path.to_path_buf());
+    if let Some(root) = manifest_parent {
+        push_candidate(root.join("server").join("agent-runtime-server.js"));
+    }
+
+    candidates
+}
+
+fn resolve_runtime_entry_path_from_base(base_dir: &Path) -> Result<PathBuf, String> {
+    let candidates = runtime_entry_candidates(base_dir);
+    for path in &candidates {
+        if path.exists() {
+            return Ok(path.clone());
+        }
+    }
+
+    let searched = candidates
+        .iter()
+        .map(|item| item.to_string_lossy().to_string())
+        .collect::<Vec<String>>()
+        .join(" | ");
+    Err(format!("runtime entry not found: {searched}"))
+}
+
+fn resolve_runtime_entry_path() -> Result<PathBuf, String> {
+    let base_dir = std::env::current_dir()
+        .map_err(|error| format!("failed to resolve current directory: {error}"))?;
+    resolve_runtime_entry_path_from_base(&base_dir)
+}
+
 #[tauri::command]
 pub fn runtime_service_start(
     _app: AppHandle,
@@ -96,14 +143,7 @@ pub fn runtime_service_start(
         return current_status(&state.inner().clone(), true, pid, None);
     }
 
-    let script_path = std::env::current_dir()
-        .map_err(|error| format!("failed to resolve current directory: {error}"))?
-        .join("server")
-        .join("agent-runtime-server.js");
-
-    if !script_path.exists() {
-        return Err(format!("runtime entry not found: {}", script_path.to_string_lossy()));
-    }
+    let script_path = resolve_runtime_entry_path()?;
 
     let child = Command::new("bun")
         .arg(script_path.to_string_lossy().to_string())
@@ -153,4 +193,50 @@ pub fn runtime_service_status(state: State<'_, Arc<RuntimeProcessState>>) -> Res
     }
 
     current_status(&state.inner().clone(), running, pid, None)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::resolve_runtime_entry_path_from_base;
+    use std::fs;
+    use std::path::PathBuf;
+    use std::time::{SystemTime, UNIX_EPOCH};
+
+    fn make_temp_root(prefix: &str) -> PathBuf {
+        let now = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("system time should be after unix epoch")
+            .as_nanos();
+        std::env::temp_dir().join(format!("{prefix}-{now}-{}", std::process::id()))
+    }
+
+    #[test]
+    fn resolve_runtime_entry_uses_project_root_server_when_cwd_is_src_tauri() {
+        let root = make_temp_root("runtime-entry-success");
+        let src_tauri = root.join("src-tauri");
+        let server_dir = root.join("server");
+        let entry = server_dir.join("agent-runtime-server.js");
+
+        fs::create_dir_all(&src_tauri).expect("should create src-tauri directory");
+        fs::create_dir_all(&server_dir).expect("should create server directory");
+        fs::write(&entry, "// runtime server").expect("should create runtime entry");
+
+        let resolved = resolve_runtime_entry_path_from_base(&src_tauri).expect("should resolve runtime entry");
+        assert_eq!(resolved, entry);
+
+        let _ = fs::remove_dir_all(&root);
+    }
+
+    #[test]
+    fn resolve_runtime_entry_falls_back_to_manifest_root() {
+        let root = make_temp_root("runtime-entry-missing");
+        let src_tauri = root.join("src-tauri");
+        fs::create_dir_all(&src_tauri).expect("should create src-tauri directory");
+
+        let resolved = resolve_runtime_entry_path_from_base(&src_tauri).expect("should fallback to manifest root server path");
+        assert!(resolved.ends_with(PathBuf::from("server").join("agent-runtime-server.js")));
+        assert!(resolved.exists());
+
+        let _ = fs::remove_dir_all(&root);
+    }
 }
