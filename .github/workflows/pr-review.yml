@@ -45,9 +45,8 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           PR_BODY=$(jq -r '.body // ""' /tmp/pr_meta.json)
-          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '(?:Closes|Fixes|Resolves)\s*#\K\d+' | head -1)
-          if [ -n "$ISSUE_NUM" ]; then
-            gh issue view "$ISSUE_NUM" --json body,title -q '.' > /tmp/issue_meta.json
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '(?:Closes|Fixes|Resolves)\s*#\K[1-9]\d*' | head -1)
+          if [ -n "$ISSUE_NUM" ] && gh issue view "$ISSUE_NUM" --json body,title -q '.' > /tmp/issue_meta.json 2>/dev/null; then
             echo "found=true" >> "$GITHUB_OUTPUT"
           else
             echo '{"title":"","body":""}' > /tmp/issue_meta.json
