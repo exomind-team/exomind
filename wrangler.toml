@@ -1,8 +1,7 @@
 name = "exomind"
 compatibility_date = "2025-02-27"
 
-[assets]
-directory = "./website/dist"
+pages_build_output_dir = "./website/dist"
 
 # R2 bucket for build artifacts (release & preview channels)
 [[r2_buckets]]
