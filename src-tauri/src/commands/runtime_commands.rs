@@ -37,7 +37,7 @@ pub struct RuntimeServiceStatus {
     pub error: Option<String>,
 }
 
-fn lock_or_error<T>(mutex: &Mutex<T>, label: &str) -> Result<std::sync::MutexGuard<'_, T>, String> {
+fn lock_or_error<'a, T>(mutex: &'a Mutex<T>, label: &str) -> Result<std::sync::MutexGuard<'a, T>, String> {
     mutex
         .lock()
         .map_err(|_| format!("failed to lock runtime state: {label}"))
@@ -131,9 +131,11 @@ pub fn runtime_service_start(
 pub fn runtime_service_stop(state: State<'_, Arc<RuntimeProcessState>>) -> Result<RuntimeServiceStatus, String> {
     let mut child_guard = lock_or_error(&state.child, "child")?;
 
-    if let Some(child) = child_guard.as_mut() {
-        let _ = child.kill();
-        let _ = child.wait();
+    if let Some(process) = child_guard.as_mut() {
+        process
+            .kill()
+            .map_err(|error| format!("failed to stop runtime process: {error}"))?;
+        let _ = process.wait();
     }
     *child_guard = None;
     *lock_or_error(&state.started_at, "started_at")? = None;
