@@ -15,11 +15,11 @@ import type { Event, NoteContent, Tag, EventData } from '../types/event';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { createUuidV4 } from '../utils/uuid';
 import {
-  createBackupPayload,
-  parseBackupPayload,
+  createTransferPayload,
+  parseTransferPayload,
   mergeEventsById,
   type ImportStrategy,
-} from '../eventlog/backup';
+} from '../eventlog/transfer';
 
 // 标签常量
 const NOTE_TAG: Tag = 'note';
@@ -84,12 +84,12 @@ export class EventLogServiceImpl implements EventLogService {
 
   async exportEventsAsJson(): Promise<string> {
     const events = await this.readEventData();
-    const payload = createBackupPayload(events);
+    const payload = createTransferPayload(events);
     return JSON.stringify(payload, null, 2);
   }
 
   async importEventsFromJson(json: string, strategy: ImportStrategy): Promise<ImportEventsResult> {
-    const payload = parseBackupPayload(json);
+    const payload = parseTransferPayload(json);
     const incoming = mergeEventsById([], payload.events);
     const existing = await this.readEventData();
 
