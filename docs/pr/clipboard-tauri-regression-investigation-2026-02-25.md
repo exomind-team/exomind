@@ -176,7 +176,7 @@ it('falls back to navigator clipboard write when tauri invoke fails', async () =
 
 ```bash
 npx vitest run tests/unit/adapters/clipboard-tauri-adapter.test.ts tests/unit/adapters/clipboard-web-adapter.test.ts tests/unit/services/clipboard.service.test.ts
-npx vitest run tests/unit/components/MessageActions.test.tsx tests/unit/ui/new-now-input-row.test.tsx
+npx vitest run tests/unit/components/MessageActions.test.tsx tests/unit/ui/now-input-row.test.tsx
 npx tsc --noEmit
 npx vite build
 ```

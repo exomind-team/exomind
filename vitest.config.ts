@@ -1,4 +1,4 @@
-import { defineConfig } from 'vitest/config';
+import { configDefaults, defineConfig } from 'vitest/config';
 import react from '@vitejs/plugin-react';
 import path from 'path';
 
@@ -12,6 +12,7 @@ export default defineConfig({
   test: {
     environment: 'happy-dom',
     include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+    exclude: [...configDefaults.exclude, 'tests/e2e/**'],
     setupFiles: ['tests/setup.ts'],
     globals: true,
     coverage: {

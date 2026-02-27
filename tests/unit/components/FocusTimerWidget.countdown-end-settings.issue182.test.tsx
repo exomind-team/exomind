@@ -55,12 +55,12 @@ vi.mock('@/lib/services', () => ({
 
 describe('FocusTimerWidget countdown end behavior（新计时器结束分支）', () => {
   let now = 0;
-  let rafCallback: FrameRequestCallback | null = null;
+  let rafCallbacks: FrameRequestCallback[] = [];
   const playMock = vi.fn().mockResolvedValue(undefined);
 
   beforeEach(() => {
     now = 0;
-    rafCallback = null;
+    rafCallbacks = [];
     vi.clearAllMocks();
     clearLocalStorageSafely();
 
@@ -69,8 +69,8 @@ describe('FocusTimerWidget countdown end behavior（新计时器结束分支）'
     vi.stubGlobal(
       'requestAnimationFrame',
       vi.fn((cb: FrameRequestCallback) => {
-        rafCallback = cb;
-        return 1;
+        rafCallbacks.push(cb);
+        return rafCallbacks.length;
       }),
     );
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
@@ -128,11 +128,12 @@ describe('FocusTimerWidget countdown end behavior（新计时器结束分支）'
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
 
     await waitFor(() => expect(requestAnimationFrame).toHaveBeenCalled());
-    expect(rafCallback).not.toBeNull();
+    expect(rafCallbacks.length).toBeGreaterThan(0);
 
     now = 100;
     await act(async () => {
-      rafCallback?.(0);
+      const callbacks = rafCallbacks.splice(0);
+      callbacks.forEach((callback) => callback(0));
     });
 
     await waitFor(() => expect(markEndingMock).toHaveBeenCalledTimes(1));
@@ -156,11 +157,12 @@ describe('FocusTimerWidget countdown end behavior（新计时器结束分支）'
     fireEvent.click(screen.getByTestId('new-focus-start-button'));
 
     await waitFor(() => expect(requestAnimationFrame).toHaveBeenCalled());
-    expect(rafCallback).not.toBeNull();
+    expect(rafCallbacks.length).toBeGreaterThan(0);
 
     now = 100;
     await act(async () => {
-      rafCallback?.(0);
+      const callbacks = rafCallbacks.splice(0);
+      callbacks.forEach((callback) => callback(0));
     });
 
     await waitFor(() =>
