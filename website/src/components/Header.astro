@@ -35,6 +35,49 @@ const navItems = [
     </nav>
 
     <div class="flex items-center gap-3">
+      <button
+        id="theme-toggle"
+        type="button"
+        data-testid="theme-toggle"
+        data-label-dark={t('theme.switch_to_dark')}
+        data-label-light={t('theme.switch_to_light')}
+        class="inline-flex h-9 w-9 items-center justify-center rounded-lg border border-stone-200 text-stone-600 transition-colors hover:bg-stone-100 hover:text-stone-900 dark:border-stone-800 dark:text-stone-300 dark:hover:bg-stone-800 dark:hover:text-stone-50"
+        aria-label={t('theme.switch_to_dark')}
+        aria-pressed="false"
+      >
+        <svg
+          data-theme-icon="moon"
+          class="h-4 w-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
+          <path stroke-linecap="round" stroke-linejoin="round" d="M21 12.79A9 9 0 1 1 11.21 3a7 7 0 0 0 9.79 9.79z" />
+        </svg>
+        <svg
+          data-theme-icon="sun"
+          class="hidden h-4 w-4"
+          fill="none"
+          viewBox="0 0 24 24"
+          stroke="currentColor"
+          stroke-width="2"
+          aria-hidden="true"
+        >
+          <circle cx="12" cy="12" r="4" />
+          <path d="M12 2v2" />
+          <path d="M12 20v2" />
+          <path d="m4.93 4.93 1.41 1.41" />
+          <path d="m17.66 17.66 1.41 1.41" />
+          <path d="M2 12h2" />
+          <path d="M20 12h2" />
+          <path d="m6.34 17.66-1.41 1.41" />
+          <path d="m19.07 4.93-1.41 1.41" />
+        </svg>
+        <span class="sr-only">{t('theme.toggle')}</span>
+      </button>
+
       {/* Language switcher */}
       <div class="flex items-center gap-1 rounded-lg border border-stone-200 p-0.5 dark:border-stone-800">
         {Object.entries(languages).map(([code, name]) => (
@@ -87,7 +130,64 @@ const navItems = [
 <script>
   const btn = document.getElementById('mobile-menu-btn');
   const menu = document.getElementById('mobile-menu');
+  const themeToggle = document.getElementById('theme-toggle');
+  const root = document.documentElement;
+  const themeStorageKey = 'exomind-theme';
+
+  const moonIcon = themeToggle?.querySelector('[data-theme-icon="moon"]');
+  const sunIcon = themeToggle?.querySelector('[data-theme-icon="sun"]');
+  const darkModeLabel = themeToggle?.getAttribute('data-label-dark') ?? 'Switch to dark mode';
+  const lightModeLabel = themeToggle?.getAttribute('data-label-light') ?? 'Switch to light mode';
+
+  const getCurrentTheme = () => (root.classList.contains('dark') ? 'dark' : 'light');
+
+  const updateThemeButton = (theme) => {
+    const isDark = theme === 'dark';
+    themeToggle?.setAttribute('aria-pressed', isDark ? 'true' : 'false');
+    themeToggle?.setAttribute('aria-label', isDark ? lightModeLabel : darkModeLabel);
+    moonIcon?.classList.toggle('hidden', isDark);
+    sunIcon?.classList.toggle('hidden', !isDark);
+  };
+
+  const applyTheme = (theme, persistPreference = false) => {
+    const isDark = theme === 'dark';
+    root.classList.toggle('dark', isDark);
+    root.dataset.theme = theme;
+    root.style.colorScheme = theme;
+
+    if (persistPreference) {
+      try {
+        window.localStorage.setItem(themeStorageKey, theme);
+      } catch {
+        // Ignore storage failures in private browsing modes.
+      }
+    }
+
+    updateThemeButton(theme);
+  };
+
   btn?.addEventListener('click', () => {
     menu?.classList.toggle('hidden');
+  });
+
+  updateThemeButton(getCurrentTheme());
+
+  themeToggle?.addEventListener('click', () => {
+    const nextTheme = getCurrentTheme() === 'dark' ? 'light' : 'dark';
+    applyTheme(nextTheme, true);
+  });
+
+  const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
+  mediaQuery.addEventListener?.('change', (event) => {
+    let storedTheme = null;
+    try {
+      storedTheme = window.localStorage.getItem(themeStorageKey);
+    } catch {
+      storedTheme = null;
+    }
+    if (storedTheme === 'dark' || storedTheme === 'light') {
+      return;
+    }
+    applyTheme(event.matches ? 'dark' : 'light', false);
   });
 </script>

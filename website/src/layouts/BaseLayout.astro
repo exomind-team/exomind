@@ -12,6 +12,28 @@ interface Props {
 const lang = getLangFromUrl(Astro.url);
 const defaultDescription = lang === 'zh' ? 'ExoMind - 你的生命成长助手' : 'ExoMind - Your Life Growth Companion';
 const { title, description = defaultDescription } = Astro.props;
+const themeBootScript = String.raw`
+(() => {
+  const THEME_STORAGE_KEY = 'exomind-theme';
+  const root = document.documentElement;
+
+  let storedTheme = null;
+  try {
+    storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    storedTheme = null;
+  }
+
+  const isStoredThemeValid = storedTheme === 'dark' || storedTheme === 'light';
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme = isStoredThemeValid ? storedTheme : prefersDark ? 'dark' : 'light';
+  const isDark = theme === 'dark';
+
+  root.classList.toggle('dark', isDark);
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+})();
+`;
 ---
 
 <!doctype html>
@@ -20,6 +42,8 @@ const { title, description = defaultDescription } = Astro.props;
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta name="description" content={description} />
+    <meta name="color-scheme" content="light dark" />
+    <script is:inline set:html={themeBootScript}></script>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <title>{title} | ExoMind</title>
   </head>
