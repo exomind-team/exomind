@@ -137,6 +137,34 @@ function maskMossApiKey(value: string): string {
   return `${value.slice(0, 4)}***${value.slice(-2)}`;
 }
 
+function useIsDesktop(minWidth = 768): boolean {
+  const [isDesktop, setIsDesktop] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+    return window.matchMedia(`(min-width: ${minWidth}px)`).matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQueryList = window.matchMedia(`(min-width: ${minWidth}px)`);
+    const onChange = (event: MediaQueryListEvent) => {
+      setIsDesktop(event.matches);
+    };
+
+    setIsDesktop(mediaQueryList.matches);
+    mediaQueryList.addEventListener('change', onChange);
+    return () => {
+      mediaQueryList.removeEventListener('change', onChange);
+    };
+  }, [minWidth]);
+
+  return isDesktop;
+}
+
 export function NewSettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.3');
@@ -171,6 +199,12 @@ export function NewSettingsPage() {
   const [loading, setLoading] = useState(false);
   const [comingSoonVisible, setComingSoonVisible] = useState(false);
   const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const [focusRhythmEnabled, setFocusRhythmEnabled] = useState(true);
+  const [dailyDigestEnabled, setDailyDigestEnabled] = useState(true);
+  const [soundNoticeEnabled, setSoundNoticeEnabled] = useState(true);
+  const [systemNoticeEnabled, setSystemNoticeEnabled] = useState(false);
+  const isDesktop = useIsDesktop();
+  const isDesktopVcLayout = isDesktop && desktopAdaptiveEnabled;
 
   const showComingSoon = () => {
     if (comingSoonTimer.current) clearTimeout(comingSoonTimer.current);
@@ -454,8 +488,350 @@ export function NewSettingsPage() {
     }
   })();
 
+  const renderDesktopVcContent = () => (
+    <div data-testid="new-settings-desktop-vc-root" className="flex h-full min-h-full flex-col">
+      <header className="border-b border-[#F0ECE8] px-10 pb-4 pt-8 dark:border-[#292524]">
+        <h1 className="text-[22px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">设置</h1>
+        <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">管理你的应用偏好和账户设置</p>
+      </header>
+
+      <div className="border-b border-[#F0ECE8] px-10 py-3 dark:border-[#292524]">
+        <div data-testid="new-settings-desktop-vc-tabs" className="inline-flex items-center gap-1 rounded-lg bg-[#F5F0ED] p-1 dark:bg-[#292524]">
+          {['通用', '同步', '隐私', '开发者'].map((tab, index) => (
+            <button
+              key={tab}
+              type="button"
+              className={`rounded-md px-3 py-1.5 text-xs transition-colors ${
+                index === 0
+                  ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_2px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                  : 'text-[#78716C] dark:text-[#A8A29E]'
+              }`}
+            >
+              {tab}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div data-testid="new-settings-desktop-vc-scroll" className="flex-1 overflow-y-auto px-10 py-6">
+        <div className="mx-auto w-full max-w-[980px] space-y-6 pb-10">
+          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-theme">
+            <SectionTitle>外观主题</SectionTitle>
+            <SectionCard>
+              <SettingRow
+                icon={<Monitor className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="工作模式"
+                right={<span className="text-sm text-[#A8A29E]">默认模式 · 下午 5:00</span>}
+              />
+              <Divider />
+              <div className="flex items-center justify-between px-4 py-[14px]">
+                <div className="flex items-center gap-3">
+                  <MoonStar className="h-[18px] w-[18px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">主题</span>
+                </div>
+                <div
+                  id="theme-preference-new"
+                  role="group"
+                  aria-label="主题"
+                  className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                >
+                  <button
+                    type="button"
+                    data-testid="new-settings-theme-system"
+                    aria-pressed={themePreference === 'system'}
+                    onClick={() => handleThemePreferenceChange('system')}
+                    disabled={loading}
+                    className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                      themePreference === 'system'
+                        ? 'bg-white font-medium text-[#1C1917] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                        : 'text-[#A8A29E]'
+                    }`}
+                  >
+                    自动
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="new-settings-theme-light"
+                    aria-pressed={themePreference === 'light'}
+                    onClick={() => handleThemePreferenceChange('light')}
+                    disabled={loading}
+                    className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                      themePreference === 'light'
+                        ? 'bg-white font-medium text-[#1C1917] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                        : 'text-[#A8A29E]'
+                    }`}
+                  >
+                    浅色
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="new-settings-theme-dark"
+                    aria-pressed={themePreference === 'dark'}
+                    onClick={() => handleThemePreferenceChange('dark')}
+                    disabled={loading}
+                    className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                      themePreference === 'dark'
+                        ? 'bg-white font-medium text-[#1C1917] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                        : 'text-[#A8A29E]'
+                    }`}
+                  >
+                    深色
+                  </button>
+                </div>
+              </div>
+            </SectionCard>
+          </section>
+
+          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-focus">
+            <SectionTitle>专注设置</SectionTitle>
+            <SectionCard>
+              <SettingRow
+                icon={<Timer className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="倒计时结束"
+                onClick={() => setCountdownModeDialogOpen(true)}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{countdownEndModeLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+              <Divider />
+              <SettingRow
+                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="提示音"
+                onClick={() => setSoundPickerOpen(true)}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{currentSoundLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+              <Divider />
+              <SettingRow
+                icon={<Timer className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="番茄时长"
+                right={<span className="text-sm text-[#A8A29E]">25 分钟</span>}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Timer className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="自动休息"
+                right={<span className="text-sm text-[#A8A29E]">5 分钟</span>}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="节律提醒"
+                right={<Switch checked={focusRhythmEnabled} onCheckedChange={setFocusRhythmEnabled} />}
+              />
+            </SectionCard>
+          </section>
+
+          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-notification">
+            <SectionTitle>通知</SectionTitle>
+            <SectionCard>
+              <SettingRow
+                icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="同步服务器"
+                onClick={() => setSyncDialogOpen(true)}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{syncHost}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+              <Divider />
+              <SettingRow
+                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="每日总结通知"
+                right={<Switch checked={dailyDigestEnabled} onCheckedChange={setDailyDigestEnabled} />}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="声音提醒"
+                right={<Switch checked={soundNoticeEnabled} onCheckedChange={setSoundNoticeEnabled} />}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="系统消息"
+                right={<Switch checked={systemNoticeEnabled} onCheckedChange={setSystemNoticeEnabled} />}
+              />
+              <div data-testid="new-settings-input-section">
+                <Divider />
+                <div data-testid="new-settings-voice-token-row">
+                  <SettingRow
+                    icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="MOSS API Token"
+                    onClick={handleOpenVoiceInputSettings}
+                    right={
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm text-[#A8A29E]">{mossApiKeyStatusLabel}</span>
+                        <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                      </div>
+                    }
+                  />
+                </div>
+                <Divider />
+                <div data-testid="new-settings-moss-test-row">
+                  <SettingRow
+                    icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="MOSS 语音测试"
+                    onClick={handleOpenVoiceTest}
+                    right={
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
+                        <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                      </div>
+                    }
+                  />
+                </div>
+              </div>
+              <Divider />
+              <SettingRow
+                icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="开发者模式"
+                right={<Switch checked={developerMode} onCheckedChange={handleDeveloperModeToggle} />}
+              />
+              {developerMode && (
+                <>
+                  <div className="pb-[14px] pl-[46px] pr-4">
+                    <span className="text-xs text-[#A8A29E]">开启后可使用语音测试等实验功能</span>
+                  </div>
+                  <SettingRow
+                    icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="使用测试数据"
+                    right={
+                      <Switch
+                        data-testid="new-settings-use-mock-data-switch"
+                        checked={useMockData}
+                        onCheckedChange={handleUseMockDataToggle}
+                      />
+                    }
+                  />
+                  <Divider />
+                  <SettingRow
+                    icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="开发者工具"
+                    right={
+                      <Switch
+                        data-testid="new-settings-devtools-switch"
+                        checked={devtoolsEnabled}
+                        onCheckedChange={handleDevtoolsToggle}
+                      />
+                    }
+                  />
+                  <Divider />
+                  <SettingRow
+                    icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="功能开关"
+                    onClick={() => setFeatureTogglesDialogOpen(true)}
+                    right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                  />
+                </>
+              )}
+            </SectionCard>
+          </section>
+
+          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-danger">
+            <SectionTitle>危险区域</SectionTitle>
+            <div className="overflow-hidden rounded-2xl border border-[#DC2626] bg-white dark:bg-[#1C1917]">
+              <div className="flex items-center justify-between px-4 py-[14px]">
+                <div>
+                  <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">清空本地缓存</p>
+                  <p className="mt-1 text-xs text-[#A8A29E]">将清除设备上的临时设置与缓存</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={showComingSoon}
+                  className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C]"
+                >
+                  立即清空
+                </button>
+              </div>
+              <div className="mx-4 h-px bg-[#F0ECE8] dark:bg-[#292524]" />
+              <div className="flex items-center justify-between px-4 py-[14px]">
+                <div>
+                  <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">重置所有设置</p>
+                  <p className="mt-1 text-xs text-[#A8A29E]">恢复默认配置，不影响历史事件数据</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={showComingSoon}
+                  className="rounded-md bg-[#DC2626] px-3 py-1.5 text-xs font-medium text-white hover:bg-[#B91C1C]"
+                >
+                  恢复默认
+                </button>
+              </div>
+            </div>
+          </section>
+
+          <section className="space-y-2" data-testid="new-settings-desktop-vc-section-about">
+            <SectionTitle>关于</SectionTitle>
+            <SectionCard>
+              <SettingRow
+                icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="应用版本"
+                right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.appVersion}</span>}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="构建号"
+                right={<span className="text-sm text-[#A8A29E]">{versionBuildInfo.buildHash}</span>}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="导出备份"
+                onClick={handleExportBackup}
+                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="导入数据"
+                onClick={handleImportBackup}
+                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+              />
+              <Divider />
+              <SettingRow
+                icon={<ChevronRight className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="更新日志"
+                onClick={() => navigate({ to: '/update' })}
+                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+              />
+            </SectionCard>
+          </section>
+
+          {statusMessage && (
+            <div className="rounded-2xl border border-green-200 bg-green-50 px-4 py-3 text-sm text-green-700">
+              {statusMessage}
+            </div>
+          )}
+          {errorMessage && (
+            <div className="rounded-2xl border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700">
+              {errorMessage}
+            </div>
+          )}
+
+          <footer className="flex flex-col items-center gap-1 pt-2 text-xs text-[#A8A29E]">
+            <span>ExoMind {versionBuildInfo.appVersion}</span>
+            <span>Build {versionBuildInfo.buildHash}</span>
+          </footer>
+        </div>
+      </div>
+    </div>
+  );
+
   return (
-    <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
+    <div
+      className={isDesktopVcLayout ? 'h-full min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]' : 'min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]'}
+    >
       {/* Hidden file input for import */}
       <input
         ref={fileInputRef}
@@ -464,6 +840,9 @@ export function NewSettingsPage() {
         className="hidden"
         onChange={handleFileInputChange}
       />
+
+      {isDesktopVcLayout ? renderDesktopVcContent() : (
+        <>
 
       {/* Header */}
       <header className="flex items-center justify-center px-6 py-3">
@@ -728,10 +1107,12 @@ export function NewSettingsPage() {
           </div>
         )}
       </div>
+        </>
+      )}
 
       {/* Coming Soon Toast */}
       {comingSoonVisible && (
-        <div className="fixed inset-x-0 bottom-28 z-50 flex justify-center">
+        <div className={`fixed inset-x-0 z-50 flex justify-center ${isDesktopVcLayout ? 'bottom-8' : 'bottom-28'}`}>
           <div className="rounded-full bg-[#1C1917] px-4 py-2 text-sm text-white shadow-lg dark:bg-[#FAFAF9] dark:text-[#1C1917]">
             即将推出
           </div>

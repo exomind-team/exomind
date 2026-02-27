@@ -39,8 +39,8 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).toContain('desktopAdaptiveEnabled');
   });
 
-  it('uses V-C segmented card menu marker（中间菜单使用 V-C 分段大卡片标识）', () => {
-    expect(source).toContain('data-testid="desktop-settings-nav-vc"');
-    expect(source).toContain('data-testid="desktop-settings-nav-card"');
+  it('uses settings content area marker（设置内容区标识）', () => {
+    expect(source).toContain('data-testid="desktop-settings-content"');
+    expect(source).not.toContain('data-testid="desktop-settings-nav"');
   });
 });
