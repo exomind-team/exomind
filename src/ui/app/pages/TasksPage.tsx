@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { getTaskService } from '@/lib/services';
 import type { TaskGoalCard, TaskGoalGroup, TaskGoalStatusTone, TaskItem } from '@/lib/types/task';
 import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
-import { PageMoreMenu } from '@/ui/new/components/PageMoreMenu';
+import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 
 type TaskTab = 'now' | 'today' | 'week' | 'month' | 'goals';
 
@@ -148,7 +148,7 @@ function resolveInitialTaskTab(): TaskTab {
   return 'now';
 }
 
-export function NewTasksPage() {
+export function TasksPage() {
   const [activeTab, setActiveTab] = useState<TaskTab>(() => resolveInitialTaskTab());
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [goalGroups, setGoalGroups] = useState<TaskGoalGroup[]>([]);

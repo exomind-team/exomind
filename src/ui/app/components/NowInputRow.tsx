@@ -21,7 +21,7 @@ import {
   type VoiceTranscriptSendMode,
 } from '@/config/voice-transcript-send-mode';
 
-interface NewNowInputRowProps {
+interface NowInputRowProps {
   onSend: (content: string) => void;
   placeholder?: string;
 }
@@ -43,7 +43,7 @@ function getPasteFailureLabel(reason: ClipboardFailureReason): string {
   return '未粘贴';
 }
 
-export const NewNowInputRow = forwardRef<VoiceMessageInputHandle, NewNowInputRowProps>(function NewNowInputRow({
+export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>(function NowInputRow({
   onSend,
   placeholder = '记录当下的事实...',
 }, ref) {

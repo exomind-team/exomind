@@ -66,23 +66,23 @@ vi.mock('@/config/timer-preferences', () => ({
   }),
 }));
 
-vi.mock('@/ui/new/components/UserCard', () => ({
+vi.mock('@/ui/app/components/UserCard', () => ({
   UserCard: () => <div data-testid="mock-user-card" />,
 }));
 
-vi.mock('@/ui/new/components/MoreSection', () => ({
+vi.mock('@/ui/app/components/MoreSection', () => ({
   MoreSection: () => null,
 }));
 
-vi.mock('@/ui/new/components/LegalSection', () => ({
+vi.mock('@/ui/app/components/LegalSection', () => ({
   LegalSection: () => null,
 }));
 
-vi.mock('@/ui/new/components/AboutSection', () => ({
+vi.mock('@/ui/app/components/AboutSection', () => ({
   AboutSection: () => null,
 }));
 
-import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
 const createObjectURLMock = vi.fn(() => 'blob:mock');
 const revokeObjectURLMock = vi.fn();
@@ -97,7 +97,7 @@ Object.defineProperty(URL, 'revokeObjectURL', {
   writable: true,
 });
 
-describe('NewSettingsPage export/import runtime routing (issue-222)', () => {
+describe('SettingsPage export/import runtime routing (issue-222)', () => {
   let anchorClickSpy: ReturnType<typeof vi.spyOn>;
 
   beforeEach(() => {
@@ -117,7 +117,7 @@ describe('NewSettingsPage export/import runtime routing (issue-222)', () => {
     mocks.isTauri.mockResolvedValue(true);
     mocks.invoke.mockResolvedValue('/storage/emulated/0/Download/exomind-eventlog-2026-02-24.json');
 
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: '导出备份' }));
 
     await waitFor(() => {
@@ -134,7 +134,7 @@ describe('NewSettingsPage export/import runtime routing (issue-222)', () => {
   it('keeps blob download fallback in web runtime', async () => {
     mocks.isTauri.mockResolvedValue(false);
 
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: '导出备份' }));
 
     await waitFor(() => {
@@ -164,7 +164,7 @@ describe('NewSettingsPage export/import runtime routing (issue-222)', () => {
     });
     mocks.importEventsFromJson.mockResolvedValue({ imported: 1, skipped: 0, total: 2 });
 
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: '导入数据' }));
 
     await waitFor(() => {

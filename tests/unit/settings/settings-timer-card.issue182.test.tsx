@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   isTauri: vi.fn(),
@@ -42,27 +42,53 @@ vi.mock('@/ui/pages/UserManagePage', () => ({
   UserManagePage: () => <div data-testid="user-manage-page-mock">UserManagePage</div>,
 }));
 
-import { NewSettingsPage } from '@/ui/new/pages/NewSettingsPage';
+vi.mock('@tanstack/react-router', () => ({
+  useNavigate: () => vi.fn(),
+}));
 
-describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
+import { SettingsPage } from '@/ui/app/pages/SettingsPage';
+
+function clearLocalStorageSafely() {
+  const storage = window.localStorage as Partial<Storage>;
+  if (typeof storage.clear === 'function') {
+    storage.clear();
+    return;
+  }
+  if (typeof storage.removeItem !== 'function' || typeof storage.key !== 'function') {
+    return;
+  }
+  const keys: string[] = [];
+  const length = typeof storage.length === 'number' ? storage.length : 0;
+  for (let index = 0; index < length; index += 1) {
+    const key = storage.key(index);
+    if (key) keys.push(key);
+  }
+  keys.forEach((key) => storage.removeItem?.(key));
+}
+
+describe('SettingsPage timer card（新设置页计时器卡片）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mocks.isTauri.mockResolvedValue(false);
     mocks.invoke.mockResolvedValue(null);
-    window.localStorage.clear();
+    clearLocalStorageSafely();
   });
 
   it('renders end-mode segmented controls from pencil（显示结束模式分段切换）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
-    expect(screen.getByText('结束模式')).toBeInTheDocument();
-    expect(screen.getByText('倒计时结束后的行为')).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '硬结束' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '软结束' })).toBeInTheDocument();
+    const trigger = screen.getByText('倒计时结束').closest('button');
+    expect(trigger).not.toBeNull();
+    fireEvent.click(trigger as HTMLButtonElement);
+
+    const dialog = screen.getByRole('dialog', { name: '倒计时结束模式' });
+    expect(within(dialog).getByText('选择倒计时结束后的行为')).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /硬停止/ })).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: /柔和提醒/ })).toBeInTheDocument();
   });
 
   it('toggles theme segmented controls and persists preference（切换主题分段按钮并持久化）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
     const systemButton = screen.getByTestId('new-settings-theme-system');
     const lightButton = screen.getByTestId('new-settings-theme-light');
@@ -82,21 +108,22 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
   });
 
   it('toggles end mode and persists selection（切换结束模式并持久化）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
-    const hardButton = screen.getByTestId('new-settings-end-mode-hard');
-    const softButton = screen.getByTestId('new-settings-end-mode-soft');
+    const trigger = screen.getByText('倒计时结束').closest('button');
+    expect(trigger).not.toBeNull();
+    fireEvent.click(trigger as HTMLButtonElement);
 
+    const hardButton = screen.getByRole('button', { name: /硬停止/ });
     fireEvent.click(hardButton);
-    expect(hardButton).toHaveAttribute('aria-pressed', 'true');
-    expect(softButton).toHaveAttribute('aria-pressed', 'false');
 
     const hardRaw = window.localStorage.getItem('exomind:timerPreferences');
     expect(hardRaw).not.toBeNull();
     expect(JSON.parse(hardRaw || '{}').countdownEndMode).toBe('hard');
 
+    fireEvent.click(trigger as HTMLButtonElement);
+    const softButton = screen.getByRole('button', { name: /柔和提醒/ });
     fireEvent.click(softButton);
-    expect(softButton).toHaveAttribute('aria-pressed', 'true');
 
     const softRaw = window.localStorage.getItem('exomind:timerPreferences');
     expect(softRaw).not.toBeNull();
@@ -104,42 +131,33 @@ describe('NewSettingsPage timer card（新设置页计时器卡片）', () => {
   });
 
   it('opens sound picker and updates selected preset（提示音可打开选择并更新）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
-    fireEvent.click(screen.getByRole('button', { name: '提示音' }));
+    const trigger = screen.getByText('提示音').closest('button');
+    expect(trigger).not.toBeNull();
+    fireEvent.click(trigger as HTMLButtonElement);
 
-    expect(screen.getByRole('dialog', { name: '选择提示音' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Ring 10' }));
+    const dialog = screen.getByRole('dialog', { name: '选择提示音' });
+    expect(dialog).toBeInTheDocument();
+    fireEvent.click(within(dialog).getByRole('button', { name: 'Ring 10' }));
 
     expect(screen.getByText('Ring 10')).toBeInTheDocument();
   });
 
   it('renders import-export section in new row style（导入导出区使用新行式风格）', () => {
-    render(<NewSettingsPage />);
+    render(<SettingsPage />);
 
-    expect(screen.getByTestId('new-settings-import-export-card')).toBeInTheDocument();
-    expect(screen.getByTestId('new-settings-import-strategy-row')).toBeInTheDocument();
-    expect(screen.getByTestId('new-settings-import-strategy-merge')).toBeInTheDocument();
-    expect(screen.getByTestId('new-settings-import-strategy-overwrite')).toBeInTheDocument();
-    expect(screen.getByTestId('new-settings-export-row')).toBeInTheDocument();
-    expect(screen.getByTestId('new-settings-import-row')).toBeInTheDocument();
+    expect(screen.getByText('数据')).toBeInTheDocument();
+    expect(screen.getByText('导出备份')).toBeInTheDocument();
+    expect(screen.getByText('导入数据')).toBeInTheDocument();
   });
 
-  it('toggles import strategy segmented controls（切换导入策略分段按钮）', () => {
-    render(<NewSettingsPage />);
+  it('removes legacy import strategy segmented controls（移除旧导入策略分段按钮）', () => {
+    render(<SettingsPage />);
 
-    const mergeButton = screen.getByTestId('new-settings-import-strategy-merge');
-    const overwriteButton = screen.getByTestId('new-settings-import-strategy-overwrite');
-
-    expect(mergeButton).toHaveAttribute('aria-pressed', 'true');
-    expect(overwriteButton).toHaveAttribute('aria-pressed', 'false');
-
-    fireEvent.click(overwriteButton);
-    expect(overwriteButton).toHaveAttribute('aria-pressed', 'true');
-    expect(mergeButton).toHaveAttribute('aria-pressed', 'false');
-
-    fireEvent.click(mergeButton);
-    expect(mergeButton).toHaveAttribute('aria-pressed', 'true');
-    expect(overwriteButton).toHaveAttribute('aria-pressed', 'false');
+    expect(screen.queryByTestId('new-settings-import-strategy-merge')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('new-settings-import-strategy-overwrite')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('new-settings-end-mode-hard')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('new-settings-end-mode-soft')).not.toBeInTheDocument();
   });
 });

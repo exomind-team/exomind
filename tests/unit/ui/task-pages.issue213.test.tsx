@@ -1,8 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { MOCK_TASK_GOAL_GROUPS_FIXTURE } from '@/lib/adapters/mock/fixtures/tasks';
-import { NewTaskTimerCard } from '@/ui/new/components/NewTaskTimerCard';
-import { NewTasksPage } from '@/ui/new/pages/NewTasksPage';
+import { TaskTimerCard } from '@/ui/app/components/TaskTimerCard';
+import { TasksPage } from '@/ui/app/pages/TasksPage';
 import type { TaskItem } from '@/lib/types/task';
 
 const listTasksMock = vi.fn();
@@ -49,7 +49,7 @@ describe('issue-213 task ui pages（任务页面还原）', () => {
   });
 
   it('renders gradient glow + translucent card + 24 radius（卡片视觉令牌）', () => {
-    render(<NewTaskTimerCard task={sampleTask} />);
+    render(<TaskTimerCard task={sampleTask} />);
 
     const card = screen.getByTestId('task-timer-main-card');
     const glow = screen.getByTestId('task-timer-glow');
@@ -60,7 +60,7 @@ describe('issue-213 task ui pages（任务页面还原）', () => {
   });
 
   it('supports timer mode switch + pause button + input（计时模式/暂停/输入）', () => {
-    render(<NewTaskTimerCard task={sampleTask} />);
+    render(<TaskTimerCard task={sampleTask} />);
 
     const countup = screen.getByTestId('task-mode-countup');
     const countdown = screen.getByTestId('task-mode-countdown');
@@ -75,7 +75,7 @@ describe('issue-213 task ui pages（任务页面还原）', () => {
   });
 
   it('renders task list page and quick-add input（任务列表页与快速输入）', async () => {
-    render(<NewTasksPage />);
+    render(<TasksPage />);
     expect(screen.getByText('任务')).toBeInTheDocument();
     expect(screen.getByText('当下')).toBeInTheDocument();
     expect(screen.getByText('今日')).toBeInTheDocument();
@@ -87,7 +87,7 @@ describe('issue-213 task ui pages（任务页面还原）', () => {
   });
 
   it('renders long-term goals from pencil fixture（长期页渲染设计稿数据）', async () => {
-    render(<NewTasksPage />);
+    render(<TasksPage />);
     fireEvent.click(screen.getByRole('button', { name: '长期' }));
 
     await waitFor(() => {
@@ -102,7 +102,7 @@ describe('issue-213 task ui pages（任务页面还原）', () => {
   });
 
   it('applies dark-mode classes for long-term goals section（长期区域暗色模式样式）', async () => {
-    render(<NewTasksPage />);
+    render(<TasksPage />);
     fireEvent.click(screen.getByRole('button', { name: '长期' }));
 
     await waitFor(() => {

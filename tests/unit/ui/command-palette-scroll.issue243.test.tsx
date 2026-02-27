@@ -1,6 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { CommandPalette } from '@/ui/new/components/CommandPalette';
+import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import type { CommandContext } from '@/lib/types/command-palette';
 
 type PaletteState = {

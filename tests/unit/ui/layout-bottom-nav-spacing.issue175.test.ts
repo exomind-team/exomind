@@ -2,8 +2,8 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { readFileSync } from 'node:fs';
 
-describe('NewLayout bottom nav spacing issue-175', () => {
-  const filePath = path.resolve('src/routes-new.tsx');
+describe('AppLayout bottom nav spacing issue-175', () => {
+  const filePath = path.resolve('src/routes.tsx');
   const source = readFileSync(filePath, 'utf-8');
 
   it('uses bottom offset for main container instead of padding-bottom reservation', () => {

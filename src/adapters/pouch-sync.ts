@@ -18,6 +18,7 @@ import type {
   SyncResult,
   Conflict,
 } from '@/environment/interfaces/sync.port';
+import { buildRemoteDbUrl, normalizeBaseUrl } from '@/lib/sync/remote-db-url';
 
 // PouchDB 插件
 import pouchdbAdapterIdb from 'pouchdb-adapter-idb';
@@ -28,14 +29,6 @@ PouchDB.plugin(pouchdbAdapterIdb);
 // 设备信息存储键
 const DEVICE_ID_KEY = 'exomind:deviceId';
 type SyncAuthMode = 'enabled' | 'disabled';
-
-function normalizeSyncServerBaseUrl(url: string): string {
-  const trimmed = url.replace(/\/+$/, '');
-  if (trimmed.endsWith('/database')) {
-    return trimmed.slice(0, -'/database'.length);
-  }
-  return trimmed;
-}
 
 function normalizeSyncAuthMode(rawValue: string | undefined): SyncAuthMode {
   const value = rawValue?.trim().toLowerCase();
@@ -117,18 +110,16 @@ export class PouchSyncAdapter implements ISyncPort {
 
     const { username } = credentials;
     const authMode = resolveSyncAuthMode();
-    const normalizedUrl = normalizeSyncServerBaseUrl(url);
-    const remoteDbName = encodeURIComponent(username);
+    const normalizedUrl = normalizeBaseUrl(url);
 
     // 创建本地数据库（使用 IndexedDB）
     const dbName = `local_${username}`;
     this.localDB = new PouchDB(dbName, { adapter: 'idb' });
 
     // 创建远程数据库连接
-    // 注意：当前 server/pouchdb-server.js 启动的是官方 pouchdb-server，
-    // 数据库路径为 `/<dbname>`，不是 `/database/<dbname>`。
+    // 注意：当前 server/pouchdb-server.js 启动的是官方 pouchdb-server。
     // 可通过 EXOMIND_SYNC_AUTH_MODE / VITE_SYNC_AUTH_MODE=enabled 开启 basic auth。
-    const remoteUrl = `${normalizedUrl}/${remoteDbName}`;
+    const remoteUrl = buildRemoteDbUrl(normalizedUrl, username);
     const remoteConfig = authMode === 'enabled'
       ? { auth: { username, password: credentials.passwordHash } }
       : undefined;
