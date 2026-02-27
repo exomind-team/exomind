@@ -182,29 +182,23 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build Windows NSIS installer (构建 Windows EXE/NSIS 安装包)
-        run: bun tauri build --bundles 'nsis'
+      - name: Build Windows installers (构建 NSIS + MSI，单次 Rust 编译)
+        run: bun tauri build --bundles 'nsis,msi'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
-
-      - name: Build Windows MSI installer (可选 MSI，失败不阻断)
-        id: build_msi
-        continue-on-error: true
-        run: bun tauri build --bundles 'msi'
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
-          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
-
-      - name: Warn MSI optional failure (提示 MSI 可选失败)
-        if: ${{ steps.build_msi.outcome != 'success' }}
-        shell: powershell
-        run: |
-          Write-Warning "MSI bundling failed but job continues. Common cause: VBSCRIPT optional feature disabled on self-hosted Windows."
 
       - name: Upload Windows EXE Artifact (上传 EXE)
+        id: upload_exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/nsis/
+        continue-on-error: true
+
+      - name: Retry Upload Windows EXE Artifact
+        if: steps.upload_exe.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
@@ -514,6 +508,15 @@ jobs:
           }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
+        id: upload_apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-signed-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/gen/android/app/build/outputs/apk-signed/
+        continue-on-error: true
+
+      - name: Retry Upload Android signed APK Artifact
+        if: steps.upload_apk.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
