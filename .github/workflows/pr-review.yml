@@ -5,220 +5,140 @@ on:
     types: [opened, synchronize]
   issue_comment:
     types: [created]
+  pull_request_review_comment:
+    types: [created]
 
 jobs:
-  prepare:
+  # ═══════════════════════════════════════════
+  # 第一关：Codex 5.3 CLI 快速扫描
+  # ═══════════════════════════════════════════
+  codex-review:
     if: |
       (github.event_name == 'pull_request') ||
       (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: read
-      issues: read
+      pull-requests: write
+      issues: write
     outputs:
-      pr_number: ${{ steps.diff.outputs.pr_number }}
-      issue_found: ${{ steps.issue.outputs.found }}
+      final_message: ${{ steps.run_codex.outputs.final-message }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Get PR diff
-        id: diff
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Resolve PR number
+        id: pr
         run: |
           if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            PR_NUMBER=$(jq -r '.issue.number' "$GITHUB_EVENT_PATH")
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
           else
-            PR_NUMBER=${{ github.event.pull_request.number }}
-          fi
-          echo "pr_number=$PR_NUMBER" >> "$GITHUB_OUTPUT"
-          gh pr diff "$PR_NUMBER" > /tmp/pr.diff
-          gh pr view "$PR_NUMBER" --json body,title,commits -q '.' > /tmp/pr_meta.json
-
-      - name: Get linked Issue
-        id: issue
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          PR_BODY=$(jq -r '.body // ""' /tmp/pr_meta.json)
-          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '(?:Closes|Fixes|Resolves)\s*#\K[1-9]\d*' | head -1)
-          if [ -n "$ISSUE_NUM" ] && gh issue view "$ISSUE_NUM" --json body,title -q '.' > /tmp/issue_meta.json 2>/dev/null; then
-            echo "found=true" >> "$GITHUB_OUTPUT"
-          else
-            echo '{"title":"","body":""}' > /tmp/issue_meta.json
-            echo "found=false" >> "$GITHUB_OUTPUT"
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+      - uses: actions/checkout@v4
         with:
-          name: pr-context
-          path: |
-            /tmp/pr.diff
-            /tmp/pr_meta.json
-            /tmp/issue_meta.json
+          ref: refs/pull/${{ steps.pr.outputs.number }}/merge
 
-  # ═══════════════════════════════════════════
-  # 第一关：Codex 5.3 快速扫描（Responses API）
-  # ═══════════════════════════════════════════
-  codex-review:
-    needs: prepare
+      - name: Pre-fetch base and head refs
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            git fetch --no-tags origin \
+              ${{ github.event.pull_request.base.ref }} \
+              +refs/pull/${{ github.event.pull_request.number }}/head
+          else
+            git fetch --no-tags origin
+          fi
+
+      - name: Run Codex
+        id: run_codex
+        uses: openai/codex-action@v1
+        with:
+          openai-api-key: ${{ secrets.REVIEW_API_KEY }}
+          responses-api-endpoint: ${{ secrets.REVIEW_API_BASE }}/responses
+          model: codex-5.3
+          effort: high
+          prompt: |
+            This is PR #${{ steps.pr.outputs.number }} for ${{ github.repository }}.
+            Review ONLY the changes introduced by the PR:
+              git log --oneline ${{ github.event.pull_request.base.sha || 'HEAD~1' }}...${{ github.event.pull_request.head.sha || 'HEAD' }}
+
+            Focus on:
+            1. 规范性：commit message、PR 关联 Issue、代码风格
+            2. 明显 bug 或安全隐患
+            3. 不必要的复杂度
+
+            PR title: ${{ github.event.pull_request.title || github.event.issue.title }}
+
+            输出格式：
+            - 每项用 🟢(pass) 🟡(建议) 🔴(必须修) 标记
+            - 最后一行给出结论：✅ 可合并 / ⚠️ 建议修改后合并 / ❌ 需要修改
+            - 言简意赅，不要废话
+
+  post-codex-feedback:
+    needs: codex-review
     runs-on: ubuntu-latest
+    if: needs.codex-review.outputs.final_message != ''
     permissions:
       pull-requests: write
+      issues: write
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
-        with:
-          name: pr-context
-          path: /tmp
-
-      - name: Codex Review
-        env:
-          API_KEY: ${{ secrets.REVIEW_API_KEY }}
-          API_BASE: ${{ secrets.REVIEW_API_BASE }}
+      - name: Resolve PR number
+        id: pr
         run: |
-          DIFF=$(head -c 30000 /tmp/pr.diff)
-          PR_META=$(cat /tmp/pr_meta.json)
-          ISSUE_META=$(cat /tmp/issue_meta.json)
-
-          INPUT="你是 ExoMind 项目的「黑帽 Critic」第一关 — 快速扫描员。
-
-          ## 审查维度
-          1. **范围检查** — PR 改动是否在关联 Issue 范围内？有无 scope creep？
-          2. **安全检查** — 硬编码密钥？XSS/注入？Tauri 权限声明？
-          3. **类型安全** — any 类型？as unknown？缺少错误处理？
-          4. **commit 规范** — 引用 Issue 编号？conventional commits 格式？
-
-          ## 输出格式
-          用中文回复。每个问题标注：🔴 必须修复 / 🟡 建议修复 / 🟢 可选优化
-          如果没问题就说没问题，不要硬找。
-
-          ---
-          PR 信息：
-          $(echo "$PR_META" | jq -r '"标题: \(.title)\n描述: \(.body // "无")"')
-
-          关联 Issue：
-          $(echo "$ISSUE_META" | jq -r '"标题: \(.title // "无")\n内容: \(.body // "无关联 Issue")"')
-
-          Diff（截取前 30000 字符）：
-          \`\`\`diff
-          $DIFF
-          \`\`\`"
-
-          RESPONSE=$(curl -s --max-time 120 \
-            "${API_BASE}/responses" \
-            -H "Content-Type: application/json" \
-            -H "Authorization: Bearer $API_KEY" \
-            -d "$(jq -n \
-              --arg input "$INPUT" \
-              '{
-                model: "codex-5.3",
-                input: $input,
-                reasoning: {effort: "high"},
-                max_output_tokens: 4096
-              }')")
-
-          REVIEW=$(echo "$RESPONSE" | jq -r '.output[] | select(.type == "message") | .content[] | select(.type == "output_text") | .text // empty' 2>/dev/null)
-          if [ -z "$REVIEW" ]; then
-            REVIEW="Codex API 调用失败。响应: $(echo "$RESPONSE" | head -c 500)"
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
           fi
-          echo "$REVIEW" > /tmp/codex_review.md
 
       - name: Post Codex Review
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          REVIEW=$(cat /tmp/codex_review.md)
-          BODY="## 🎩⚡ 黑帽 Critic — 第一关 Codex 快速扫描
-
-          ${REVIEW}
-
-          ---
-          *Codex 5.3 (reasoning: high) · ExoMind Feature Flow v2*"
-
-          gh pr comment "${{ needs.prepare.outputs.pr_number }}" --repo "${{ github.repository }}" --body "$BODY"
+          CODEX_FINAL_MESSAGE: ${{ needs.codex-review.outputs.final_message }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const body = `## 🎩⚡ 黑帽 Critic — 第一关 Codex 快速扫描\n\n${process.env.CODEX_FINAL_MESSAGE}\n\n---\n*Codex 5.3 (reasoning: high) · ExoMind Feature Flow v2*`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ steps.pr.outputs.number }},
+              body,
+            });
 
   # ═══════════════════════════════════════════
-  # 第二关：Claude 深度评审（Anthropic Messages API）
+  # 第二关：Claude Opus 4.6 CLI 深度评审
   # ═══════════════════════════════════════════
   claude-deep-review:
-    needs: prepare
+    if: |
+      (github.event_name == 'pull_request') ||
+      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic'))
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
+      contents: read
       pull-requests: write
+      issues: write
+    env:
+      ANTHROPIC_BASE_URL: ${{ secrets.OPUS_API_BASE }}
     steps:
-      - name: Download artifacts
-        uses: actions/download-artifact@v4
+      - uses: anthropics/claude-code-action@v1
         with:
-          name: pr-context
-          path: /tmp
+          anthropic_api_key: ${{ secrets.OPUS_API_KEY }}
+          claude_args: "--model claude-opus-4-6"
+          trigger_phrase: "@critic"
+          prompt: |
+            你是 ExoMind 项目的黑帽 Critic（Feature Flow v2）。对这个 PR 做深度评审。
 
-      - name: Claude Deep Review
-        env:
-          API_KEY: ${{ secrets.OPUS_API_KEY }}
-          API_BASE: ${{ secrets.OPUS_API_BASE }}
-        run: |
-          DIFF=$(head -c 50000 /tmp/pr.diff)
-          PR_META=$(cat /tmp/pr_meta.json)
-          ISSUE_META=$(cat /tmp/issue_meta.json)
+            评审维度：
+            1. 架构合理性：是否符合项目现有模式
+            2. 边界条件与错误处理
+            3. 性能影响
+            4. 返工风险：这段代码未来大概率需要改的地方
 
-          SYSTEM_PROMPT="你是 ExoMind 项目的「黑帽 Critic」第二关 — 深度评审员（Claude）。
+            输出要求：
+            - 每项用 🟢(pass) 🟡(建议) 🔴(必须修) 标记
+            - 言简意赅，每条不超过2行
+            - 最后必须给出明确结论，用以下格式之一：
 
-          你的职责比第一关更深入：
-          1. **架构一致性** — 是否遵循项目模块结构和命名约定？新依赖是否必要？
-          2. **返工风险** — 有没有 TODO/FIXME/HACK？有没有明显会在下个 commit 被改的临时代码？
-          3. **设计合理性** — 抽象层次对吗？有没有过度工程或欠设计？
-          4. **验收标准对照** — 如果 Issue 有验收标准，逐条检查 diff 是否满足
-          5. **知识短板提醒** — 如果 diff 涉及不熟悉的领域（如 CI/CD、部署），提醒需要本地验证
-
-          用中文回复。严重程度：🔴 必须修复 / 🟡 建议修复 / 🟢 可选优化
-          如果 PR 质量好，明确说没问题。"
-
-          USER_CONTENT="PR 信息：
-          $(echo "$PR_META" | jq -r '"标题: \(.title)\n描述: \(.body // "无")"')
-
-          关联 Issue：
-          $(echo "$ISSUE_META" | jq -r '"标题: \(.title // "无")\n内容: \(.body // "无关联 Issue")"')
-
-          Diff（截取前 50000 字符）：
-          \`\`\`diff
-          $DIFF
-          \`\`\`"
-
-          RESPONSE=$(curl -s --max-time 180 \
-            "${API_BASE}/v1/messages" \
-            -H "Content-Type: application/json" \
-            -H "x-api-key: $API_KEY" \
-            -H "anthropic-version: 2023-06-01" \
-            -d "$(jq -n \
-              --arg system "$SYSTEM_PROMPT" \
-              --arg user "$USER_CONTENT" \
-              '{
-                model: "claude-opus-4-6",
-                max_tokens: 4096,
-                system: $system,
-                messages: [{role: "user", content: $user}]
-              }')")
-
-          REVIEW=$(echo "$RESPONSE" | jq -r '.content[0].text // .error.message // "Claude API 调用失败，请检查 OPUS_API_KEY 和 OPUS_API_BASE 配置。"')
-          echo "$REVIEW" > /tmp/claude_review.md
-
-      - name: Post Claude Review
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          REVIEW=$(cat /tmp/claude_review.md)
-          BODY="## 🎩🔮 黑帽 Critic — 第二关 Claude 深度评审
-
-          ${REVIEW}
-
-          ---
-          *Claude Opus 4.6 · ExoMind Feature Flow v2*"
-
-          gh pr comment "${{ needs.prepare.outputs.pr_number }}" --repo "${{ github.repository }}" --body "$BODY"
+            ### ✅ 可合并
+            ### ⚠️ 建议修改后合并
+            ### ❌ 需要修改后重新评审
