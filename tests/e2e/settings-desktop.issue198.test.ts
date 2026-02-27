@@ -12,12 +12,16 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await setupIssue198Flags(page);
   });
 
-  test('desktop shows sidebar and settings nav（桌面显示侧栏和设置导航）', async ({ page }) => {
+  test('desktop shows sidebar and VC settings content（桌面显示侧栏和VC设置内容）', async ({ page }) => {
     await page.goto('/settings');
     await page.waitForLoadState('networkidle');
 
     await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
-    await expect(page.getByTestId('desktop-settings-nav')).toBeVisible();
+    await expect(page.getByTestId('desktop-settings-content')).toBeVisible();
+    await expect(page.getByTestId('new-settings-desktop-vc-root')).toBeVisible();
+    await expect(page.getByTestId('new-settings-desktop-vc-tabs')).toBeVisible();
+    await expect(page.getByTestId('new-settings-desktop-vc-scroll')).toBeVisible();
+    await expect(page.getByTestId('new-settings-desktop-vc-section-theme')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-now')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-tasks')).toBeVisible();

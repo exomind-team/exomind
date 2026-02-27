@@ -235,70 +235,13 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
 }
 
 function DesktopLayout({ activePath }: { activePath: string }) {
-  const settingsNavSections = [
-    {
-      title: '连接与同步',
-      items: ['账号与档案', '同步与备份'],
-    },
-    {
-      title: '体验与偏好',
-      items: ['主题与外观', '专注与提醒'],
-    },
-    {
-      title: '安全与系统',
-      items: ['隐私与安全', '开发者选项', '关于 ExoMind'],
-    },
-  ];
-
   return (
     <div className="min-h-[100dvh] bg-[#ECE6E1] p-6 dark:bg-[#0C0A09]">
       <div className="mx-auto flex h-[calc(100dvh-48px)] max-w-[1400px] overflow-hidden rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[#FAF7F5] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)] dark:bg-[#0C0A09]">
         <DesktopSidebar activePath={activePath} />
-        <div className="flex min-w-0 flex-1 bg-[#FAF7F5] dark:bg-[#0C0A09]">
-          <aside
-            data-testid="desktop-settings-nav"
-            className="w-[220px] shrink-0 border-r border-[hsl(var(--sidebar-border))] bg-[#FFFFFF] p-3 dark:bg-[#1C1917]"
-          >
-            <div data-testid="desktop-settings-nav-vc" className="space-y-3">
-              {settingsNavSections.map((section, sectionIndex) => (
-                <section key={section.title} className="space-y-2">
-                  <p className="px-1 text-[11px] font-medium tracking-wide text-[#A8A29E]">
-                    {section.title}
-                  </p>
-                  <div
-                    data-testid="desktop-settings-nav-card"
-                    className="overflow-hidden rounded-xl border border-[#EFE7E1] bg-white shadow-[0_2px_6px_rgba(28,25,23,0.04)] dark:border-[#2A2623] dark:bg-[#1C1917]"
-                  >
-                    {section.items.map((item, itemIndex) => {
-                      const isActive = sectionIndex === 0 && itemIndex === 0;
-                      return (
-                        <div key={item}>
-                          <button
-                            type="button"
-                            className={cn(
-                              'flex w-full items-center rounded-none px-4 py-3 text-left text-sm transition-colors',
-                              isActive
-                                ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
-                                : 'text-[#44403C] hover:bg-[#F8F4F0] dark:text-[#D6D3D1] dark:hover:bg-[#292524]'
-                            )}
-                          >
-                            {item}
-                          </button>
-                          {itemIndex < section.items.length - 1 && (
-                            <div className="mx-3 h-px bg-[#F0ECE8] dark:bg-[#2D2926]" />
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-                </section>
-              ))}
-            </div>
-          </aside>
-          <main className="min-w-0 flex-1 overflow-y-auto">
-            <Outlet />
-          </main>
-        </div>
+        <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
+          <Outlet />
+        </main>
       </div>
     </div>
   );
