@@ -15,15 +15,16 @@ jobs:
   codex-review:
     if: |
       (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@critic')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@critic'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
-      pull-requests: write
-      issues: write
+      pull-requests: read
+      issues: read
     outputs:
       final_message: ${{ steps.run_codex.outputs.final-message }}
+      pr_number: ${{ steps.pr.outputs.number }}
     steps:
       - name: Resolve PR number
         id: pr
@@ -39,16 +40,7 @@ jobs:
       - uses: actions/checkout@v4
         with:
           ref: refs/pull/${{ steps.pr.outputs.number }}/merge
-
-      - name: Pre-fetch base and head refs
-        run: |
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            git fetch --no-tags origin \
-              ${{ github.event.pull_request.base.ref }} \
-              +refs/pull/${{ github.event.pull_request.number }}/head
-          else
-            git fetch --no-tags origin
-          fi
+          fetch-depth: 0
 
       - name: Run Codex
         id: run_codex
@@ -59,9 +51,8 @@ jobs:
           model: codex-5.3
           effort: high
           prompt: |
-            This is PR #${{ steps.pr.outputs.number }} for ${{ github.repository }}.
-            Review ONLY the changes introduced by the PR:
-              git log --oneline ${{ github.event.pull_request.base.sha || 'HEAD~1' }}...${{ github.event.pull_request.head.sha || 'HEAD' }}
+            You are reviewing PR #${{ steps.pr.outputs.number }} for ${{ github.repository }}.
+            Review ONLY the changes in this PR. Use `git diff origin/dev...HEAD` to see the diff.
 
             Focus on:
             1. 规范性：commit message、PR 关联 Issue、代码风格
@@ -78,34 +69,24 @@ jobs:
   post-codex-feedback:
     needs: codex-review
     runs-on: ubuntu-latest
-    if: needs.codex-review.outputs.final_message != ''
+    if: always() && needs.codex-review.result == 'success'
     permissions:
       pull-requests: write
       issues: write
     steps:
-      - name: Resolve PR number
-        id: pr
-        run: |
-          if [ "${{ github.event_name }}" = "issue_comment" ]; then
-            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
-          elif [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
-            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-          else
-            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
-          fi
-
       - name: Post Codex Review
         uses: actions/github-script@v7
         env:
-          CODEX_FINAL_MESSAGE: ${{ needs.codex-review.outputs.final_message }}
+          CODEX_MSG: ${{ needs.codex-review.outputs.final_message }}
         with:
           github-token: ${{ github.token }}
           script: |
-            const body = `## 🎩⚡ 黑帽 Critic — 第一关 Codex 快速扫描\n\n${process.env.CODEX_FINAL_MESSAGE}\n\n---\n*Codex 5.3 (reasoning: high) · ExoMind Feature Flow v2*`;
+            const msg = process.env.CODEX_MSG || '(Codex 未返回评审内容)';
+            const body = `## 🎩⚡ 黑帽 Critic — 第一关 Codex 快速扫描\n\n${msg}\n\n---\n*Codex 5.3 (reasoning: high) · ExoMind Feature Flow v2*`;
             await github.rest.issues.createComment({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              issue_number: ${{ steps.pr.outputs.number }},
+              issue_number: Number('${{ needs.codex-review.outputs.pr_number }}'),
               body,
             });
 
@@ -115,7 +96,7 @@ jobs:
   claude-deep-review:
     if: |
       (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && contains(github.event.comment.body, '@critic')) ||
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@critic')) ||
       (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@critic'))
     runs-on: ubuntu-latest
     continue-on-error: true
@@ -140,12 +121,10 @@ jobs:
           fetch-depth: 0
 
       - name: Get PR diff
-        id: diff
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh pr diff "${{ steps.pr.outputs.number }}" > /tmp/pr_diff.txt 2>/dev/null || git diff HEAD~1 > /tmp/pr_diff.txt
-          # Truncate to 8000 chars to fit API limits
           head -c 8000 /tmp/pr_diff.txt > /tmp/pr_diff_trimmed.txt
 
       - name: Get linked Issue
@@ -164,19 +143,9 @@ jobs:
 
       - name: Claude Review
         run: |
-          DIFF=$(cat /tmp/pr_diff_trimmed.txt)
-          ISSUE_META=$(cat /tmp/issue_meta.json)
-          PR_TITLE="${{ github.event.pull_request.title || github.event.issue.title }}"
-
-          PROMPT="你是 ExoMind 项目的黑帽 Critic（Feature Flow v2）。对这个 PR 做深度评审。
-
-          PR: #${{ steps.pr.outputs.number }} ${PR_TITLE}
-          关联 Issue: ${ISSUE_META}
-
-          Diff:
-          \`\`\`
-          ${DIFF}
-          \`\`\`
+          # Write prompt to file to avoid shell injection from diff content
+          cat > /tmp/prompt_template.txt <<'PROMPT_EOF'
+          你是 ExoMind 项目的黑帽 Critic（Feature Flow v2）。对这个 PR 做深度评审。
 
           评审维度：
           1. 架构合理性：是否符合项目现有模式
@@ -190,11 +159,23 @@ jobs:
           - 最后必须给出明确结论，用以下格式之一：
           ### ✅ 可合并
           ### ⚠️ 建议修改后合并
-          ### ❌ 需要修改后重新评审"
+          ### ❌ 需要修改后重新评审
+          PROMPT_EOF
+
+          PR_TITLE="${{ github.event.pull_request.title || github.event.issue.title }}"
+
+          # Build prompt safely via jq (no shell interpolation of untrusted content)
+          PROMPT=$(jq -n \
+            --arg template "$(cat /tmp/prompt_template.txt)" \
+            --arg pr_num "${{ steps.pr.outputs.number }}" \
+            --arg pr_title "$PR_TITLE" \
+            --arg issue_meta "$(cat /tmp/issue_meta.json)" \
+            --arg diff "$(cat /tmp/pr_diff_trimmed.txt)" \
+            '$template + "\n\nPR: #" + $pr_num + " " + $pr_title + "\n关联 Issue: " + $issue_meta + "\n\nDiff:\n```\n" + $diff + "\n```"')
 
           PAYLOAD=$(jq -n \
             --arg model "claude-opus-4-6" \
-            --arg prompt "$PROMPT" \
+            --argjson prompt "$PROMPT" \
             '{model: $model, max_tokens: 2048, messages: [{role: "user", content: $prompt}]}')
 
           RESPONSE=$(curl -s -w "\n%{http_code}" \
@@ -214,15 +195,18 @@ jobs:
           fi
 
       - name: Post Claude Review
+        uses: actions/github-script@v7
         env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          REVIEW=$(cat /tmp/claude_review.md)
-          BODY="## 🎩🔮 黑帽 Critic — 第二关 Claude 深度评审
-
-          ${REVIEW}
-
-          ---
-          *Claude Opus 4.6 · ExoMind Feature Flow v2*"
-
-          gh pr comment "${{ steps.pr.outputs.number }}" --repo "${{ github.repository }}" --body "$BODY"
+          REVIEW: ${{ '' }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const review = fs.readFileSync('/tmp/claude_review.md', 'utf8');
+            const body = `## 🎩🔮 黑帽 Critic — 第二关 Claude 深度评审\n\n${review}\n\n---\n*Claude Opus 4.6 · ExoMind Feature Flow v2*`;
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number('${{ steps.pr.outputs.number }}'),
+              body,
+            });
