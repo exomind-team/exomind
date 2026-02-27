@@ -3,13 +3,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   getEventStorageMock,
   addEventMock,
+  getFeedbackPreferencesMock,
 } = vi.hoisted(() => ({
   getEventStorageMock: vi.fn(),
   addEventMock: vi.fn(),
+  getFeedbackPreferencesMock: vi.fn(),
 }));
 
 vi.mock('../../../src/lib/storage/event-storage', () => ({
   getEventStorage: getEventStorageMock,
+}));
+
+vi.mock('@/config/feedback-preferences', () => ({
+  getFeedbackPreferences: getFeedbackPreferencesMock,
 }));
 
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
@@ -50,6 +56,12 @@ describe('TimeBlockServiceImpl', () => {
     addEventMock.mockReset();
     getEventStorageMock.mockReset();
     getEventStorageMock.mockReturnValue(createStorage());
+    getFeedbackPreferencesMock.mockReset();
+    getFeedbackPreferencesMock.mockReturnValue({
+      timingInfoEnabled: true,
+      statisticsEnabled: true,
+      quickFeedbackEnabled: true,
+    });
   });
 
   afterEach(() => {
