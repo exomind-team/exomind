@@ -201,7 +201,7 @@ jobs:
               --arg system "$SYSTEM_PROMPT" \
               --arg user "$USER_CONTENT" \
               '{
-                model: "claude-3-5-sonnet-20241022",
+                model: "claude-opus-4-6",
                 max_tokens: 4096,
                 system: $system,
                 messages: [{role: "user", content: $user}]
@@ -220,6 +220,6 @@ jobs:
           ${REVIEW}
 
           ---
-          *Claude 3.5 Sonnet · ExoMind Feature Flow v2*"
+          *Claude Opus 4.6 · ExoMind Feature Flow v2*"
 
           gh pr comment "${{ needs.prepare.outputs.pr_number }}" --body "$BODY"
