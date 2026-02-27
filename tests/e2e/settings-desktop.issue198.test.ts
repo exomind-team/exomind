@@ -32,6 +32,12 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(aboutTab).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('new-settings-desktop-vc-section-about')).toBeVisible();
     await expect(page.getByText('更新')).toBeVisible();
+    await expect(page.getByText('法律与支持')).toBeVisible();
+    await expect(page.getByText('帮助中心')).toBeVisible();
+    await expect(page.getByText('反馈建议')).toBeVisible();
+    await expect(page.getByText('隐私政策')).toHaveCount(0);
+    await expect(page.getByText('用户协议')).toHaveCount(0);
+    await expect(page.getByText('开源软件使用声明')).toHaveCount(0);
     await expect(page.getByText('工作模式')).toHaveCount(0);
     await expect(page.getByText('更新日志')).toHaveCount(0);
     await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toBeVisible();
@@ -51,6 +57,24 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
     await expect(page.getByRole('link', { name: '设置' })).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar')).toBeHidden();
+  });
+
+  test('legal-support page contains only legal three items（法律与支持页仅法务三项）', async ({ page }) => {
+    await page.goto('/settings');
+    await page.waitForLoadState('networkidle');
+
+    const aboutTab = page.getByRole('button', { name: '关于' });
+    await aboutTab.click();
+    await page.getByText('法律与支持').click();
+
+    await expect(page).toHaveURL(/\/settings\/legal-support$/);
+    await expect(page.getByText('隐私政策')).toBeVisible();
+    await expect(page.getByText('用户协议')).toBeVisible();
+    await expect(page.getByText('开源软件使用声明')).toBeVisible();
+    await expect(page.getByText('帮助中心')).toHaveCount(0);
+    await expect(page.getByText('反馈建议')).toHaveCount(0);
+    await expect(page.getByText('官网')).toHaveCount(0);
+    await expect(page.getByText('赞助开发者')).toHaveCount(0);
   });
 
   test('desktop adaptive switch can fallback to mobile shell（桌面适配开关可回退移动壳层）', async ({ page }) => {

@@ -34,6 +34,10 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).toContain("path: '/dashboard'");
   });
 
+  it('registers legal-support route（注册法律与支持二级路由）', () => {
+    expect(source).toContain("path: '/settings/legal-support'");
+  });
+
   it('supports desktop adaptive toggle guard（支持桌面适配开关守卫）', () => {
     expect(source).toContain('getDesktopAdaptiveEnabled');
     expect(source).toContain('desktopAdaptiveEnabled');
