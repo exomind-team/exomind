@@ -7,8 +7,7 @@ import {
   checkForUpdate,
   getCurrentVersion,
   getPlatform,
-  startAutoCheck,
-  stopAutoCheck,
+  createAutoCheckController,
 } from '@/lib/services/update.service';
 
 // ---------------------------------------------------------------------------
@@ -44,6 +43,8 @@ interface UpdateState {
 // ---------------------------------------------------------------------------
 // Store
 // ---------------------------------------------------------------------------
+
+const autoCheckController = createAutoCheckController();
 
 export const useUpdateStore = create<UpdateState>()(
   persist(
@@ -128,7 +129,7 @@ export const useUpdateStore = create<UpdateState>()(
 
       initAutoCheck: () => {
         const { checkInterval } = get();
-        startAutoCheck(checkInterval, () => {
+        autoCheckController.start(checkInterval, () => {
           get().checkForUpdate();
         });
       },
@@ -160,5 +161,5 @@ export function initUpdateChecker(): void {
  * 在应用卸载时调用，清理定时器。
  */
 export function destroyUpdateChecker(): void {
-  stopAutoCheck();
+  autoCheckController.stop();
 }

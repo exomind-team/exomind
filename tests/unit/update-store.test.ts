@@ -2,13 +2,20 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { useUpdateStore } from '@/ui/stores/update-store';
 import type { UpdateInfo } from '@/lib/services/update.service';
 
+const { mockAutoCheckStart, mockAutoCheckStop } = vi.hoisted(() => ({
+  mockAutoCheckStart: vi.fn(),
+  mockAutoCheckStop: vi.fn(),
+}));
+
 // Mock update.service
 vi.mock('@/lib/services/update.service', () => ({
   checkForUpdate: vi.fn(),
   getCurrentVersion: vi.fn().mockResolvedValue('0.1.0'),
   getPlatform: vi.fn().mockReturnValue('windows-x64'),
-  startAutoCheck: vi.fn(),
-  stopAutoCheck: vi.fn(),
+  createAutoCheckController: vi.fn(() => ({
+    start: mockAutoCheckStart,
+    stop: mockAutoCheckStop,
+  })),
 }));
 
 describe('update-store', () => {

@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { normalizePreviewVersionsPayload } from '../../lib/update-api-utils';
 
 export const prerender = false;
 
@@ -21,17 +22,6 @@ interface LatestJson {
   tag: string;
   published_at: string;
   assets: Record<string, { url: string; size: number; sha256: string }>;
-}
-
-interface VersionEntry {
-  version: string;
-  tag: string;
-  published_at: string;
-}
-
-interface VersionsJson {
-  versions: VersionEntry[];
-  retention: number;
 }
 
 export const GET: APIRoute = async ({ url, locals }) => {
@@ -72,7 +62,8 @@ export const GET: APIRoute = async ({ url, locals }) => {
       return errorResponse('No preview versions found', 404);
     }
 
-    const data: VersionsJson = await object.json();
+    const payload = await object.json();
+    const data = normalizePreviewVersionsPayload(payload);
     return jsonResponse({
       channel: 'preview',
       versions: data.versions,
