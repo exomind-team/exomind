@@ -225,10 +225,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const endId = crypto.randomUUID();
 
     const timeBlockName = activeData.name;
-    const feedbackText = feedback?.trim() ? feedback.trim() : '（未填写）';
+    const feedbackText = feedback?.trim() ?? '';
+    const hasFeedback = feedbackText.length > 0;
     const report = this.buildFeedbackReport({
       timeBlockName,
       feedbackText,
+      hasFeedback,
       feedbackDurationMs,
       pausedDurationMs,
       workDurationMs,
@@ -387,6 +389,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private buildFeedbackReport(input: {
     timeBlockName: string;
     feedbackText: string;
+    hasFeedback: boolean;
     feedbackDurationMs: number;
     pausedDurationMs: number;
     workDurationMs: number;
@@ -397,9 +400,25 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     actionEndedAt: number;
     submittedAt: number;
   }): string {
-    const overtimeMs = input.expectedDurationMs === null
-      ? null
-      : Math.max(0, input.workDurationMs - input.expectedDurationMs);
+    const hasExpectedDuration = input.expectedDurationMs !== null;
+    const expectedDurationMs = input.expectedDurationMs ?? 0;
+    const expectedEndAt = input.expectedEndAt ?? 0;
+    const overtimeMs = hasExpectedDuration
+      ? Math.max(0, input.workDurationMs - expectedDurationMs)
+      : 0;
+    const expectedDiff = !hasExpectedDuration
+      ? '无预期（正计时）'
+      : input.actionEndedAt < expectedEndAt
+        ? `🚀提前${this.formatDuration(expectedEndAt - input.actionEndedAt)}完成`
+        : input.actionEndedAt > expectedEndAt && input.workDurationMs < expectedDurationMs
+          ? `✨时间块已完成，超出预期结束时间${this.formatDuration(input.actionEndedAt - expectedEndAt)}`
+          : input.workDurationMs > expectedDurationMs
+            ? `🕒工作超时${this.formatDuration(input.workDurationMs - expectedDurationMs)}`
+            : '与预期一致';
+    const focusRhythm = input.pausedDurationMs > 0
+      ? `有暂停 ${this.formatDuration(input.pausedDurationMs)}`
+      : '连续专注';
+    const feedbackStatus = input.hasFeedback ? '已填写' : '未填写';
 
     let result = ''
     let print = (...lines: string[]) => { for (const line of lines) { result += line + '\n' } }
@@ -424,13 +443,23 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (input.workDurationMs > 0) print(`- 实际工作：**\`${this.formatDuration(input.workDurationMs)}\`**`)
     if (input.pausedDurationMs > 0) print(`- 暂停时长：**\`${this.formatDuration(input.pausedDurationMs)}\`**`)
     if (input.feedbackDurationMs > 0) print(`- 反馈用时：**\`${this.formatDuration(input.feedbackDurationMs)}\`**`)
-    if (overtimeMs !== null && overtimeMs > 0) print(`- 超时投入：**\`${this.formatDuration(overtimeMs)}\`**`)
+    if (hasExpectedDuration && overtimeMs > 0) print(`- 超时投入：**\`${this.formatDuration(overtimeMs)}\`**`)
     print(
       ``,
-      `---`,
+      `### 快速反馈`,
       ``,
-      `${input.feedbackText}`,
+      `- 预期差异：**\`${expectedDiff}\`**`,
+      `- 专注节奏：**\`${focusRhythm}\`**`,
+      `- 反馈状态：**\`${feedbackStatus}\`**`,
     );
+    if (input.hasFeedback) {
+      print(
+        ``,
+        `---`,
+        ``,
+        `${input.feedbackText}`,
+      );
+    }
     return result.trimEnd()
   }
 }
