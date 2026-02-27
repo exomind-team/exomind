@@ -109,4 +109,25 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     expect(probed.lastError).toContain('ECONNREFUSED');
     expect(probed.lastCheckedAt).toBe('2026-02-27T10:10:00.000Z');
   });
+
+  it('maps aborted signal error to timeout hint（中止信号错误映射为超时提示）', async () => {
+    const fetchImpl = vi.fn(async () => {
+      throw new Error('signal is aborted without reason');
+    });
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl,
+      now: () => new Date('2026-02-27T10:20:00.000Z'),
+    });
+    const host = await service.addHost({
+      name: 'Timeout Runtime',
+      host: '192.168.1.99',
+      port: 4077,
+    });
+
+    const probed = await service.probeHost(host.id);
+    expect(probed.status).toBe('offline');
+    expect(probed.lastError).toContain('probe timeout（探测超时）');
+    expect(probed.lastCheckedAt).toBe('2026-02-27T10:20:00.000Z');
+  });
 });

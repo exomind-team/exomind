@@ -53,6 +53,15 @@ function ensureHost(host: string): string {
   return value;
 }
 
+function normalizeProbeError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const lowerMessage = message.toLowerCase();
+  if (lowerMessage.includes('aborterror') || lowerMessage.includes('aborted without reason') || lowerMessage.includes('signal is aborted')) {
+    return 'probe timeout（探测超时）';
+  }
+  return message;
+}
+
 export class RuntimeHostServiceImpl implements RuntimeHostService {
   private readonly storage: IStoragePort;
   private readonly fetchImpl: RuntimeFetch;
@@ -168,10 +177,9 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       const lastError = response.ok ? undefined : `HTTP ${response.status}`;
       return { status, lastError };
     } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
       return {
         status: 'offline',
-        lastError: message,
+        lastError: normalizeProbeError(error),
       };
     } finally {
       if (timer) {
