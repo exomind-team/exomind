@@ -42,6 +42,9 @@ jobs:
           ref: refs/pull/${{ steps.pr.outputs.number }}/head
           fetch-depth: 0
 
+      - name: Fetch base branch
+        run: git fetch origin ${{ github.event.pull_request.base.ref || 'dev' }} --no-tags
+
       - name: Run Codex
         id: run_codex
         uses: openai/codex-action@v1
@@ -52,7 +55,7 @@ jobs:
           effort: high
           prompt: |
             You are reviewing PR #${{ steps.pr.outputs.number }} for ${{ github.repository }}.
-            Review ONLY the changes in this PR. Use `git diff origin/dev...HEAD` to see the diff.
+            Review ONLY the changes in this PR. Use `git diff origin/${{ github.event.pull_request.base.ref || 'dev' }}...HEAD` to see the diff.
 
             Focus on:
             1. 规范性：commit message、PR 关联 Issue、代码风格
