@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Bot, Play, Pause, Square, MessageSquare, FileText } from 'lucide-react';
+import { Play, Pause, Square, MessageSquare, FileText } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
@@ -474,7 +474,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                   >
                     <Avatar className="mt-0.5 h-8 w-8 shrink-0">
                       <AvatarFallback className="rounded-full bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 flex items-center justify-center">
-                        <Bot size={16} />
+                        {getEventIcon(event)}
                       </AvatarFallback>
                     </Avatar>
                     <div className="min-w-0 max-w-[85%] flex-1">
