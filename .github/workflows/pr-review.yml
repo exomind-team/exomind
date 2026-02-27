@@ -110,7 +110,7 @@ jobs:
             });
 
   # ═══════════════════════════════════════════
-  # 第二关：Claude Opus 4.6 CLI 深度评审
+  # 第二关：Claude Opus 4.6 深度评审（Anthropic Messages API）
   # ═══════════════════════════════════════════
   claude-deep-review:
     if: |
@@ -123,29 +123,106 @@ jobs:
       contents: read
       pull-requests: write
       issues: write
-      id-token: write
-    env:
-      ANTHROPIC_BASE_URL: ${{ secrets.OPUS_API_BASE }}
     steps:
-      - uses: anthropics/claude-code-action@v1
+      - name: Resolve PR number
+        id: pr
+        run: |
+          if [ "${{ github.event_name }}" = "issue_comment" ]; then
+            echo "number=${{ github.event.issue.number }}" >> "$GITHUB_OUTPUT"
+          elif [ "${{ github.event_name }}" = "pull_request_review_comment" ]; then
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "number=${{ github.event.pull_request.number }}" >> "$GITHUB_OUTPUT"
+          fi
+
+      - uses: actions/checkout@v4
         with:
-          anthropic_api_key: ${{ secrets.OPUS_API_KEY }}
-          claude_args: "--model claude-opus-4-6"
-          trigger_phrase: "@critic"
-          prompt: |
-            你是 ExoMind 项目的黑帽 Critic（Feature Flow v2）。对这个 PR 做深度评审。
+          fetch-depth: 0
 
-            评审维度：
-            1. 架构合理性：是否符合项目现有模式
-            2. 边界条件与错误处理
-            3. 性能影响
-            4. 返工风险：这段代码未来大概率需要改的地方
+      - name: Get PR diff
+        id: diff
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh pr diff "${{ steps.pr.outputs.number }}" > /tmp/pr_diff.txt 2>/dev/null || git diff HEAD~1 > /tmp/pr_diff.txt
+          # Truncate to 8000 chars to fit API limits
+          head -c 8000 /tmp/pr_diff.txt > /tmp/pr_diff_trimmed.txt
 
-            输出要求：
-            - 每项用 🟢(pass) 🟡(建议) 🔴(必须修) 标记
-            - 言简意赅，每条不超过2行
-            - 最后必须给出明确结论，用以下格式之一：
+      - name: Get linked Issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          PR_BODY=$(gh pr view "${{ steps.pr.outputs.number }}" --json body -q '.body')
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP '(?:Closes|Fixes|Resolves)\s*#\K[1-9]\d*' | head -1)
+          if [ -n "$ISSUE_NUM" ] && gh issue view "$ISSUE_NUM" --json body,title -q '.' > /tmp/issue_meta.json 2>/dev/null; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          else
+            echo '{"title":"","body":""}' > /tmp/issue_meta.json
+            echo "found=false" >> "$GITHUB_OUTPUT"
+          fi
 
-            ### ✅ 可合并
-            ### ⚠️ 建议修改后合并
-            ### ❌ 需要修改后重新评审
+      - name: Claude Review
+        run: |
+          DIFF=$(cat /tmp/pr_diff_trimmed.txt)
+          ISSUE_META=$(cat /tmp/issue_meta.json)
+          PR_TITLE="${{ github.event.pull_request.title || github.event.issue.title }}"
+
+          PROMPT="你是 ExoMind 项目的黑帽 Critic（Feature Flow v2）。对这个 PR 做深度评审。
+
+          PR: #${{ steps.pr.outputs.number }} ${PR_TITLE}
+          关联 Issue: ${ISSUE_META}
+
+          Diff:
+          \`\`\`
+          ${DIFF}
+          \`\`\`
+
+          评审维度：
+          1. 架构合理性：是否符合项目现有模式
+          2. 边界条件与错误处理
+          3. 性能影响
+          4. 返工风险：未来大概率需要改的地方
+
+          输出要求：
+          - 每项用 🟢(pass) 🟡(建议) 🔴(必须修) 标记
+          - 言简意赅，每条不超过2行
+          - 最后必须给出明确结论，用以下格式之一：
+          ### ✅ 可合并
+          ### ⚠️ 建议修改后合并
+          ### ❌ 需要修改后重新评审"
+
+          PAYLOAD=$(jq -n \
+            --arg model "claude-opus-4-6" \
+            --arg prompt "$PROMPT" \
+            '{model: $model, max_tokens: 2048, messages: [{role: "user", content: $prompt}]}')
+
+          RESPONSE=$(curl -s -w "\n%{http_code}" \
+            "${{ secrets.OPUS_API_BASE }}/v1/messages" \
+            -H "Content-Type: application/json" \
+            -H "x-api-key: ${{ secrets.OPUS_API_KEY }}" \
+            -H "anthropic-version: 2023-06-01" \
+            -d "$PAYLOAD")
+
+          HTTP_CODE=$(echo "$RESPONSE" | tail -1)
+          BODY=$(echo "$RESPONSE" | sed '$d')
+
+          if [ "$HTTP_CODE" -eq 200 ]; then
+            echo "$BODY" | jq -r '.content[0].text' > /tmp/claude_review.md
+          else
+            echo "API 调用失败 (HTTP $HTTP_CODE): $BODY" > /tmp/claude_review.md
+          fi
+
+      - name: Post Claude Review
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          REVIEW=$(cat /tmp/claude_review.md)
+          BODY="## 🎩🔮 黑帽 Critic — 第二关 Claude 深度评审
+
+          ${REVIEW}
+
+          ---
+          *Claude Opus 4.6 · ExoMind Feature Flow v2*"
+
+          gh pr comment "${{ steps.pr.outputs.number }}" --repo "${{ github.repository }}" --body "$BODY"
