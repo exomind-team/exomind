@@ -13,6 +13,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
+import { Play, Pause, Square, FileText, NotepadText } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
@@ -323,12 +324,22 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件图标
   const getEventIcon = (event: Event) => {
-    if (event.tags.has('block_start')) return '🔷';
-    if (event.tags.has('block_pause')) return '⏸️';
-    if (event.tags.has('block_resume')) return '▶️';
-    if (event.tags.has('block_end')) return '🔴';
-    if (event.tags.has('block_feedback')) return '📝';
-    return '📝';
+    if (event.tags.has('block_start')) return <Play size={14} />;
+    if (event.tags.has('block_pause')) return <Pause size={14} />;
+    if (event.tags.has('block_resume')) return <Play size={14} />;
+    if (event.tags.has('block_end')) return <Square size={14} />;
+    if (event.tags.has('block_feedback')) return <NotepadText size={14} />;
+    return <FileText size={14} />;
+  };
+
+  // 获取事件头像背景色
+  const getEventAvatarColor = (event: Event) => {
+    if (event.tags.has('block_start')) return 'bg-success';
+    if (event.tags.has('block_pause')) return 'bg-warning';
+    if (event.tags.has('block_resume')) return 'bg-success';
+    if (event.tags.has('block_end')) return 'bg-destructive';
+    if (event.tags.has('block_feedback')) return 'bg-brand';
+    return 'bg-brand';
   };
 
   // 获取事件背景色
@@ -348,13 +359,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     return 'bg-muted rounded-bl-md';
   };
 
-  // 获取事件前缀
-  const getEventPrefix = (event: Event) => {
-    if (event.tags.has('block_start')) return '🔷';
-    if (event.tags.has('block_pause')) return '⏸️';
-    if (event.tags.has('block_resume')) return '▶️';
-    if (event.tags.has('block_end')) return '🔴';
-    if (event.tags.has('block_feedback')) return '📝';
+  // 获取事件前缀（已移除，由 Avatar 头像承担事件类型区分）
+  const getEventPrefix = (_event: Event) => {
     return null;
   };
 
@@ -451,7 +457,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         ) : events.length === 0 ? (
           <div className="flex h-full flex-col items-center justify-center px-6 text-center">
             <div className={variant === 'new-mobile' ? 'mb-4 flex h-14 w-14 items-center justify-center rounded-full bg-surface' : 'w-12 h-12 sm:w-16 sm:h-16 rounded-full bg-muted flex items-center justify-center mb-3 sm:mb-4'}>
-              <span className="text-2xl sm:text-3xl">📝</span>
+              <FileText size={28} className="text-muted-foreground" />
             </div>
             <p className="mb-1 text-base font-semibold text-strong sm:text-lg">暂无事件记录</p>
             <p className="text-xs text-muted-foreground sm:text-sm">
@@ -477,7 +483,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                     data-testid="new-mobile-system-message-row"
                   >
                     <Avatar className="mt-0.5 h-8 w-8 shrink-0">
-                      <AvatarFallback className="rounded-full bg-blue-100 text-[11px] text-blue-800 dark:bg-blue-950 dark:text-blue-100">
+                      <AvatarFallback className={`rounded-full flex items-center justify-center text-white ${getEventAvatarColor(event)}`}>
                         {getEventIcon(event)}
                       </AvatarFallback>
                     </Avatar>

@@ -14,9 +14,11 @@
  */
 
 import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
+import { Check, LoaderCircle, Mic, MicOff, Unlock } from 'lucide-react';
 import type { IASRPort, IASRConfig } from '../lib/ports/asr-port';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 import { cn } from '../lib/utils';
+import { toast } from '@/components/ui/toast-hook';
 import {
   createCompatibleMediaRecorder,
   DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
@@ -48,8 +50,6 @@ export interface VoiceInputButtonProps {
   showPermissionUnlockButton?: boolean;
   /** 启用快捷键（仅非输入区域生效） */
   enableShortcut?: boolean;
-  /** 是否显示按钮下方辅助文案（快捷键/权限提示） */
-  showHelperText?: boolean;
   /** 按钮大小 */
   size?: number;
   /** 类名 */
@@ -94,7 +94,6 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   showTimer = true,
   showPermissionUnlockButton = true,
   enableShortcut = true,
-  showHelperText = true,
   size = 64,
   className,
   style,
@@ -502,12 +501,20 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // 处理按钮点击
   const handleClick = useCallback(() => {
+    if (permissionState === 'unavailable') {
+      toast({ title: '此设备不支持麦克风', variant: 'destructive' });
+      return;
+    }
+    if (permissionState === 'denied') {
+      toast({ title: '麦克风权限被拒绝，请在浏览器设置中允许', variant: 'destructive' });
+      return;
+    }
     if (state.state === 'idle' || state.state === 'completed') {
       startRecording();
     } else if (state.state === 'recording') {
       stopRecording();
     }
-  }, [state.state, startRecording, stopRecording]);
+  }, [permissionState, state.state, startRecording, stopRecording]);
 
   useImperativeHandle(ref, () => ({
     start: () => {
@@ -606,7 +613,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
       for (let i = 0; i < bars; i++) {
         const value = dataArray[i] || 0;
-        const barHeight = (value / 255) * 30 + 5;
+        const barHeight = (value / 255) * 12 + 2;
         const angle = i * angleStep - Math.PI / 2;
 
         const x1 = centerX + Math.cos(angle) * baseRadius;
@@ -668,7 +675,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           background:
             'linear-gradient(135deg, hsl(var(--destructive)) 0%, hsl(var(--destructive) / 0.85) 100%)',
           shadow: '0 0 20px hsl(var(--destructive) / 0.6)',
-          icon: '🎤',
+          icon: <Mic size={Math.max(16, Math.floor(size * 0.34))} />,
           iconColor: 'hsl(var(--destructive-foreground))',
         };
       case 'recognizing':
@@ -676,32 +683,48 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           background:
             'linear-gradient(135deg, hsl(var(--brand)) 0%, hsl(var(--brand) / 0.85) 100%)',
           shadow: '0 0 20px hsl(var(--brand) / 0.6)',
-          icon: '⏳',
+          icon: <LoaderCircle size={Math.max(16, Math.floor(size * 0.34))} />,
           iconColor: 'hsl(var(--brand-foreground))',
         };
       case 'completed':
         return {
-          background:
-            'linear-gradient(135deg, hsl(var(--success)) 0%, hsl(var(--success) / 0.85) 100%)',
+          background: 'linear-gradient(135deg, #22c55e 0%, #16a34a 100%)',
           shadow: '0 0 20px hsl(var(--success) / 0.6)',
-          icon: '✓',
-          iconColor: 'hsl(var(--success-foreground))',
+          icon: <Check size={Math.max(16, Math.floor(size * 0.34))} />,
+          iconColor: '#ffffff',
         };
-      default:
+      default: {
+        if (permissionState === 'unavailable') {
+          return {
+            background: 'hsl(var(--muted-foreground) / 0.2)',
+            shadow: 'none',
+            icon: <MicOff size={Math.max(16, Math.floor(size * 0.34))} />,
+            iconColor: 'hsl(var(--muted-foreground) / 0.5)',
+          };
+        }
+        if (permissionState === 'prompt' || permissionState === 'denied') {
+          return {
+            background: 'hsl(var(--warning) / 0.15)',
+            shadow: 'none',
+            icon: <MicOff size={Math.max(16, Math.floor(size * 0.34))} />,
+            iconColor: 'hsl(var(--warning))',
+          };
+        }
         return {
           background:
             'linear-gradient(135deg, hsl(var(--muted)) 0%, hsl(var(--secondary)) 100%)',
           shadow: '0 4px 12px hsl(var(--ring) / 0.2)',
-          icon: '🎤',
+          icon: <Mic size={Math.max(16, Math.floor(size * 0.34))} />,
           iconColor: 'inherit',
         };
+      }
     }
   };
 
   const colors = getButtonColors();
   const iconNode = icons?.[state.state] ?? colors.icon;
   const isIdle = state.state === 'idle';
-  const useIdleClassVisual = Boolean(idleButtonClassName) && (state.state === 'idle' || state.state === 'completed');
+  const useIdleClassVisual = Boolean(idleButtonClassName) && state.state === 'idle' && permissionState === 'granted';
   const buttonSize = size;
 
   // 格式化时间
@@ -718,12 +741,12 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       {showWaveform && state.state === 'recording' && (
         <canvas
           ref={canvasRef}
-          width={buttonSize + 80}
-          height={buttonSize + 80}
+          width={buttonSize + 24}
+          height={buttonSize + 24}
           style={{
             position: 'absolute',
-            top: -40,
-            left: -40,
+            top: -12,
+            left: -12,
             pointerEvents: 'none',
           }}
         />
@@ -768,7 +791,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           alignItems: 'center',
           justifyContent: 'center',
           fontSize: buttonSize * 0.4,
-          color: colors.iconColor,
+          color: useIdleClassVisual ? undefined : colors.iconColor,
           transition: 'all 0.3s ease',
           transform: state.state === 'recording' ? 'scale(1.05)' : 'scale(1)',
           animation: state.state === 'recording'
@@ -810,49 +833,15 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           `}</style>
         )}
 
-        {/* 录音指示灯 */}
-        {state.state === 'recording' && (
-          <span style={{
-            position: 'absolute',
-            top: 8,
-            right: 8,
-            width: 8,
-            height: 8,
-            borderRadius: '50%',
-            background: 'hsl(var(--foreground))',
-            animation: 'blink 1s ease-in-out infinite',
-          }}>
-            <style>{`
-              @keyframes blink {
-                0%, 100% { opacity: 1; }
-                50% { opacity: 0.3; }
-              }
-            `}</style>
-          </span>
-        )}
-
         {/* 图标 */}
         <span style={{
           transform: state.state === 'recognizing' ? 'scale(0.9)' : 'scale(1)',
+          animation: state.state === 'recognizing' ? 'spin 1s linear infinite' : 'none',
+          display: 'inline-flex',
         }}>
           {iconNode}
         </span>
       </button>
-
-      {/* 快捷键提示 */}
-      {showHelperText && enableShortcut && state.state === 'idle' && permissionState === 'granted' && (
-        <div style={{
-          position: 'absolute',
-          bottom: -20,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          fontSize: 10,
-          color: 'hsl(var(--muted-foreground))',
-          whiteSpace: 'nowrap',
-        }}>
-          按 [空格] 开始/停止
-        </div>
-      )}
 
       {/* 权限未授予时显示获取权限按钮 */}
       {showPermissionUnlockButton && permissionState !== 'granted' && permissionState !== 'checking' && (
@@ -875,24 +864,10 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
           }}
           title="点击获取麦克风权限"
         >
-          🔓
+          <Unlock size={Math.max(14, Math.floor(buttonSize * 0.28))} color="#ffffff" />
         </button>
       )}
 
-      {/* 权限提示文字 */}
-      {showHelperText && permissionState !== 'granted' && permissionState !== 'checking' && (
-        <div style={{
-          position: 'absolute',
-          bottom: -20,
-          left: '50%',
-          transform: 'translateX(-50%)',
-          fontSize: 10,
-          color: 'hsl(var(--warning))',
-          whiteSpace: 'nowrap',
-        }}>
-          {permissionState === 'unavailable' ? '不支持' : '需要权限'}
-        </div>
-      )}
     </div>
   );
 });
