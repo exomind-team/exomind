@@ -1,4 +1,5 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig } from '@playwright/test';
+import { getBaseUse, getChromiumProject } from './tests/e2e/playwright.termux';
 
 export default defineConfig({
   testDir: './tests/e2e',
@@ -7,21 +8,10 @@ export default defineConfig({
   retries: process.env.CI ? 2 : 0,
   workers: process.env.CI ? 1 : undefined,
   reporter: 'html',
-  use: {
-    baseURL: 'http://localhost:1420',
-    trace: 'on-first-retry',
-    launchOptions: {
-      channel: 'chrome',
-    },
-  },
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    },
-  ],
+  use: getBaseUse('http://localhost:1420', 'on-first-retry'),
+  projects: [getChromiumProject()],
   webServer: {
-    command: 'bun run dev',
+    command: 'node Scripts/test/runtime-dispatch.cjs vite-dev',
     url: 'http://localhost:1420',
     reuseExistingServer: !process.env.CI,
   },

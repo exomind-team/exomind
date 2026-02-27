@@ -75,12 +75,24 @@ vi.mock('@/config/command-palette-enabled', () => ({
   subscribeCommandPaletteEnabledChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/lib/debug/devtools-runtime', () => ({
-  syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
+vi.mock('@/config/voice-transcript-send-mode', () => ({
+  getVoiceTranscriptSendMode: vi.fn(() => 'insert'),
+  setVoiceTranscriptSendMode: vi.fn(),
+  subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/config/ui-mode', () => ({
-  setUIMode: vi.fn(),
+vi.mock('@/config/feedback-preferences', () => ({
+  getFeedbackPreferences: vi.fn(() => ({
+    timingInfoEnabled: false,
+    statisticsEnabled: false,
+    quickFeedbackEnabled: true,
+  })),
+  setFeedbackPreferences: vi.fn(),
+  subscribeFeedbackPreferencesChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/lib/debug/devtools-runtime', () => ({
+  syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/media/timer-end-sounds', () => ({
