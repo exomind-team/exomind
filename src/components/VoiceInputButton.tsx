@@ -724,7 +724,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   const colors = getButtonColors();
   const iconNode = icons?.[state.state] ?? colors.icon;
   const isIdle = state.state === 'idle';
-  const useIdleClassVisual = Boolean(idleButtonClassName) && state.state === 'idle';
+  const useIdleClassVisual = Boolean(idleButtonClassName) && state.state === 'idle' && permissionState === 'granted';
   const buttonSize = size;
 
   // 格式化时间
