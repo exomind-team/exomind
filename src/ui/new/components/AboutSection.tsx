@@ -1,4 +1,4 @@
-import { ChevronRight, Globe, Heart, Package, Shield } from 'lucide-react';
+import { ChevronRight, GitCommit, Globe, Heart, Shield, Tag } from 'lucide-react';
 import { Divider, SectionCard, SectionTitle, SettingRow } from './settings-shared';
 
 export function AboutSection({
@@ -40,13 +40,13 @@ export function AboutSection({
         />
         <Divider />
         <SettingRow
-          icon={<Package className="h-[18px] w-[18px] text-[#78716C]" />}
+          icon={<Tag className="h-[18px] w-[18px] text-[#78716C]" />}
           label="版本"
           right={<span className="text-sm text-[#A8A29E]">{appVersion}</span>}
         />
         <Divider />
         <SettingRow
-          icon={<Package className="h-[18px] w-[18px] text-[#78716C]" />}
+          icon={<GitCommit className="h-[18px] w-[18px] text-[#78716C]" />}
           label="构建"
           right={<span className="text-sm text-[#A8A29E]">{buildHash || '—'}</span>}
         />
