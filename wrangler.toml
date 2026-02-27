@@ -1,11 +1,11 @@
 name = "exomind"
 compatibility_date = "2025-02-27"
+compatibility_flags = ["nodejs_compat"]
 
 main = "./website/dist/_worker.js/index.js"
 
 [assets]
 directory = "./website/dist"
-exclude = ["_worker.js"]
 
 # R2 bucket for build artifacts (release & preview channels)
 [[r2_buckets]]
