@@ -15,8 +15,8 @@ jobs:
   codex-review:
     if: |
       (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@critic')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@critic'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(github.event.comment.body, '@critic')) ||
+      (github.event_name == 'pull_request_review_comment' && github.event.comment.user.type != 'Bot' && contains(github.event.comment.body, '@critic'))
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,7 +39,7 @@ jobs:
 
       - uses: actions/checkout@v4
         with:
-          ref: refs/pull/${{ steps.pr.outputs.number }}/merge
+          ref: refs/pull/${{ steps.pr.outputs.number }}/head
           fetch-depth: 0
 
       - name: Run Codex
@@ -96,8 +96,8 @@ jobs:
   claude-deep-review:
     if: |
       (github.event_name == 'pull_request') ||
-      (github.event_name == 'issue_comment' && github.event.issue.pull_request && contains(github.event.comment.body, '@critic')) ||
-      (github.event_name == 'pull_request_review_comment' && contains(github.event.comment.body, '@critic'))
+      (github.event_name == 'issue_comment' && github.event.issue.pull_request && github.event.comment.user.type != 'Bot' && contains(github.event.comment.body, '@critic')) ||
+      (github.event_name == 'pull_request_review_comment' && github.event.comment.user.type != 'Bot' && contains(github.event.comment.body, '@critic'))
     runs-on: ubuntu-latest
     continue-on-error: true
     permissions:
@@ -175,7 +175,7 @@ jobs:
 
           PAYLOAD=$(jq -n \
             --arg model "claude-opus-4-6" \
-            --argjson prompt "$PROMPT" \
+            --arg prompt "$PROMPT" \
             '{model: $model, max_tokens: 2048, messages: [{role: "user", content: $prompt}]}')
 
           RESPONSE=$(curl -s -w "\n%{http_code}" \
