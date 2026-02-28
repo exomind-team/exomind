@@ -151,3 +151,42 @@ async fn session_info_during_processing_keeps_real_message_count() {
     assert_eq!(after.status, "idle");
     assert_eq!(after.message_count, 1);
 }
+
+#[tokio::test]
+async fn close_processing_session_does_not_leave_ghost_snapshot() {
+    let agent = ClaudeAgent::with_command_and_args(
+        fake_cli_command_path(),
+        vec!["--delay-ms=1200".to_string()],
+    );
+
+    let mut stream = agent.chat_stream(ChatRequest {
+        message: "hello".to_string(),
+        session_id: None,
+    });
+
+    let first = stream
+        .next()
+        .await
+        .expect("first chunk should be available");
+    let session_id = first
+        .session_id
+        .clone()
+        .expect("first chunk should include session_id");
+
+    assert!(
+        agent.close_session(&session_id),
+        "close_session should succeed for active session"
+    );
+    assert_eq!(
+        agent.get_session(&session_id),
+        None,
+        "session snapshot should be removed immediately after close"
+    );
+
+    let _rest = stream.collect::<Vec<_>>().await;
+    assert_eq!(
+        agent.get_session(&session_id),
+        None,
+        "session snapshot should not reappear after in-flight turn exits"
+    );
+}
