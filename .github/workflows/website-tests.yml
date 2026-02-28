@@ -1,0 +1,79 @@
+name: Website Tests
+
+on:
+  pull_request:
+    paths:
+      - 'website/**'
+      - 'tests/e2e/website*.test.ts'
+      - 'tests/e2e/playwright.website*.config.ts'
+      - 'package.json'
+      - 'bun.lock'
+  push:
+    branches:
+      - dev
+    paths:
+      - 'website/**'
+      - 'tests/e2e/website*.test.ts'
+      - 'tests/e2e/playwright.website*.config.ts'
+      - 'package.json'
+      - 'bun.lock'
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Production base URL / 线上基准地址'
+        required: false
+        default: 'https://exo-mind.ai'
+
+jobs:
+  website-local-e2e:
+    name: Website Local E2E (本地端到端测试)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout repository (检出代码)
+        uses: actions/checkout@v4
+
+      - name: Setup Bun (安装 Bun)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install root dependencies (安装根目录依赖)
+        run: bun install --frozen-lockfile
+
+      - name: Install website dependencies (安装 website 依赖)
+        run: bun run website:install
+
+      - name: Install Playwright Chromium (安装 Playwright Chromium 浏览器)
+        run: bun x playwright install chromium --with-deps
+
+      - name: Run website E2E tests (执行官网本地 E2E 测试)
+        run: bun run test:e2e:website
+
+  website-prod-smoke:
+    name: Website Prod Smoke (线上冒烟测试)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Checkout repository (检出代码)
+        uses: actions/checkout@v4
+
+      - name: Setup Bun (安装 Bun)
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install root dependencies (安装根目录依赖)
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium (安装 Playwright Chromium 浏览器)
+        run: bun x playwright install chromium --with-deps
+
+      - name: Run production smoke tests (执行线上冒烟测试)
+        shell: bash
+        run: |
+          BASE_URL="${{ github.event.inputs.base_url }}"
+          if [ -z "$BASE_URL" ]; then
+            BASE_URL="https://exo-mind.ai"
+          fi
+          echo "Running smoke tests on: $BASE_URL"
+          EXOMIND_WEBSITE_BASE_URL="$BASE_URL" bun run test:e2e:website:prod
