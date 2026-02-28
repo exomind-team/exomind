@@ -1,14 +1,15 @@
-use super::{Agent, ChatChunk, ChatRequest};
+use super::{Agent, ChatChunk, ChatRequest, SessionInfo};
+use chrono::{DateTime, SecondsFormat, Utc};
 use futures_util::stream::{self, BoxStream, StreamExt};
 use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::process::Stdio;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard};
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{Mutex, mpsc};
+use tokio::sync::{Mutex as AsyncMutex, mpsc};
 use uuid::Uuid;
 
 const MAX_CLAUDE_SESSIONS: usize = 64;
@@ -70,6 +71,16 @@ enum SessionStatus {
     Crashed,
 }
 
+impl SessionStatus {
+    fn as_str(self) -> &'static str {
+        match self {
+            SessionStatus::Idle => "idle",
+            SessionStatus::Processing => "processing",
+            SessionStatus::Crashed => "crashed",
+        }
+    }
+}
+
 /// Claude process session（Claude 子进程会话）.
 #[derive(Debug)]
 struct ClaudeSession {
@@ -80,6 +91,8 @@ struct ClaudeSession {
     stdout: BufReader<ChildStdout>,
     status: SessionStatus,
     created_at: Instant,
+    created_wall: DateTime<Utc>,
+    last_active: Instant,
     message_count: u64,
     token_usage: TokenUsage,
     total_cost_usd: f64,
@@ -113,14 +126,49 @@ enum ClaudeStreamEvent {
     },
 }
 
-type SharedClaudeSession = Arc<Mutex<ClaudeSession>>;
+#[derive(Debug, Clone)]
+struct SessionSnapshot {
+    session_id: String,
+    status: SessionStatus,
+    created_at: Instant,
+    created_wall: DateTime<Utc>,
+    last_active_wall: DateTime<Utc>,
+    message_count: u64,
+}
+
+impl SessionSnapshot {
+    fn from_session(session: &ClaudeSession) -> Self {
+        Self {
+            session_id: session.session_id.clone(),
+            status: session.status,
+            created_at: session.created_at,
+            created_wall: session.created_wall,
+            last_active_wall: compute_last_active_wall(session),
+            message_count: session.message_count,
+        }
+    }
+
+    fn to_session_info(&self) -> SessionInfo {
+        SessionInfo {
+            session_id: self.session_id.clone(),
+            status: self.status.as_str().to_string(),
+            created_at: format_utc_iso8601(self.created_wall),
+            last_active: format_utc_iso8601(self.last_active_wall),
+            message_count: self.message_count,
+            uptime_secs: self.created_at.elapsed().as_secs(),
+        }
+    }
+}
+
+type SharedClaudeSession = Arc<AsyncMutex<ClaudeSession>>;
 
 /// Built-in Claude agent (内置 Claude Agent，通过 Claude CLI 输出流式文本).
 #[derive(Debug, Clone)]
 pub struct ClaudeAgent {
     command: String,
     persistent_args: Vec<String>,
-    sessions: Arc<Mutex<HashMap<String, SharedClaudeSession>>>,
+    sessions: Arc<StdMutex<HashMap<String, SharedClaudeSession>>>,
+    session_snapshots: Arc<StdMutex<HashMap<String, SessionSnapshot>>>,
 }
 
 impl ClaudeAgent {
@@ -132,8 +180,38 @@ impl ClaudeAgent {
         Self {
             command: command.into(),
             persistent_args,
-            sessions: Arc::new(Mutex::new(HashMap::new())),
+            sessions: Arc::new(StdMutex::new(HashMap::new())),
+            session_snapshots: Arc::new(StdMutex::new(HashMap::new())),
         }
+    }
+
+    fn lock_sessions(&self) -> StdMutexGuard<'_, HashMap<String, SharedClaudeSession>> {
+        match self.sessions.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn lock_session_snapshots(&self) -> StdMutexGuard<'_, HashMap<String, SessionSnapshot>> {
+        match self.session_snapshots.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn upsert_snapshot_from_session(&self, session: &ClaudeSession) {
+        let snapshot = SessionSnapshot::from_session(session);
+        let sessions = self.lock_sessions();
+        let mut snapshots = self.lock_session_snapshots();
+        if sessions.contains_key(&session.session_id) {
+            snapshots.insert(snapshot.session_id.clone(), snapshot);
+        } else {
+            snapshots.remove(&session.session_id);
+        }
+    }
+
+    fn remove_snapshot(&self, session_id: &str) {
+        self.lock_session_snapshots().remove(session_id);
     }
 
     fn spawn_streaming_task(&self, request: ChatRequest) -> mpsc::Receiver<ChatChunk> {
@@ -150,7 +228,7 @@ impl ClaudeAgent {
     async fn handle_chat_request(&self, request: ChatRequest, sender: mpsc::Sender<ChatChunk>) {
         let normalized_session_id = normalize_session_id(request.session_id.as_deref());
         let existing_session = if let Some(session_id) = normalized_session_id.as_deref() {
-            self.find_session(session_id).await
+            self.find_session(session_id)
         } else {
             None
         };
@@ -159,7 +237,7 @@ impl ClaudeAgent {
             decide_session_action(normalized_session_id.as_deref(), existing_session.is_some());
 
         let (session_id, session_handle, needs_session_chunk) = match action {
-            SessionAction::CreateNew => match self.create_session().await {
+            SessionAction::CreateNew => match self.create_session() {
                 Ok(created) => (created.0, created.1, true),
                 Err(error_message) => {
                     emit_error_chunk(&sender, error_message).await;
@@ -189,12 +267,12 @@ impl ClaudeAgent {
         .await;
     }
 
-    async fn find_session(&self, session_id: &str) -> Option<SharedClaudeSession> {
-        self.sessions.lock().await.get(session_id).cloned()
+    fn find_session(&self, session_id: &str) -> Option<SharedClaudeSession> {
+        self.lock_sessions().get(session_id).cloned()
     }
 
-    async fn create_session(&self) -> Result<(String, SharedClaudeSession), String> {
-        self.evict_dead_sessions().await;
+    fn create_session(&self) -> Result<(String, SharedClaudeSession), String> {
+        self.evict_dead_sessions();
 
         let session_id = Uuid::new_v4().to_string();
         let mut child = Command::new(&self.command)
@@ -214,6 +292,7 @@ impl ClaudeAgent {
             .take()
             .ok_or_else(|| "Claude stdout 不可用".to_string())?;
 
+        let created_at = Instant::now();
         let mut session = ClaudeSession {
             session_id: session_id.clone(),
             claude_session_id: None,
@@ -221,13 +300,15 @@ impl ClaudeAgent {
             stdin,
             stdout: BufReader::new(stdout),
             status: SessionStatus::Idle,
-            created_at: Instant::now(),
+            created_at,
+            created_wall: Utc::now(),
+            last_active: created_at,
             message_count: 0,
             token_usage: TokenUsage::default(),
             total_cost_usd: 0.0,
         };
 
-        let mut sessions = self.sessions.lock().await;
+        let mut sessions = self.lock_sessions();
         if sessions.len() >= MAX_CLAUDE_SESSIONS {
             let _ = session.child.start_kill();
             return Err(format!(
@@ -235,14 +316,16 @@ impl ClaudeAgent {
             ));
         }
 
-        let shared_session = Arc::new(Mutex::new(session));
+        self.lock_session_snapshots()
+            .insert(session_id.clone(), SessionSnapshot::from_session(&session));
+        let shared_session = Arc::new(AsyncMutex::new(session));
         sessions.insert(session_id.clone(), shared_session.clone());
         Ok((session_id, shared_session))
     }
 
     async fn collect_stats(&self, session_id: Option<&str>) -> Option<ClaudeAgentStats> {
         let target_sessions = {
-            let sessions = self.sessions.lock().await;
+            let sessions = self.lock_sessions();
             match session_id {
                 Some(id) => {
                     let handle = sessions.get(id)?.clone();
@@ -313,10 +396,13 @@ impl ClaudeAgent {
 
         session.status = SessionStatus::Processing;
         session.message_count += 1;
+        session.last_active = Instant::now();
+        self.upsert_snapshot_from_session(&session);
 
         let input_line = build_stream_json_user_input(&message);
         if let Err(error) = write_user_input_line(&mut session.stdin, &input_line).await {
             session.status = SessionStatus::Crashed;
+            self.upsert_snapshot_from_session(&session);
             drop(session);
             self.cleanup_session(&session_id).await;
             emit_error_chunk(&sender, format!("Claude 输入写入失败: {error}")).await;
@@ -327,11 +413,15 @@ impl ClaudeAgent {
         loop {
             match read_next_stream_event(&mut session.stdout).await {
                 Ok(Some(ClaudeStreamEvent::System { claude_session_id })) => {
+                    session.last_active = Instant::now();
                     if let Some(value) = claude_session_id {
                         session.claude_session_id = Some(value);
                     }
+                    self.upsert_snapshot_from_session(&session);
                 }
                 Ok(Some(ClaudeStreamEvent::AssistantChunk { content })) => {
+                    session.last_active = Instant::now();
+                    self.upsert_snapshot_from_session(&session);
                     let chunk = ChatChunk {
                         content,
                         session_id: if pending_session_chunk {
@@ -344,6 +434,7 @@ impl ClaudeAgent {
 
                     if sender.send(chunk).await.is_err() {
                         session.status = SessionStatus::Idle;
+                        self.upsert_snapshot_from_session(&session);
                         return;
                     }
                 }
@@ -351,13 +442,13 @@ impl ClaudeAgent {
                     usage,
                     total_cost_usd,
                 })) => {
+                    session.last_active = Instant::now();
                     let turn_cost_usd = resolve_turn_cost_usd(usage.as_ref(), total_cost_usd);
 
                     if let Some(turn_usage) = usage {
                         session.token_usage.accumulate(&turn_usage);
                     }
                     session.total_cost_usd += turn_cost_usd;
-
                     if pending_session_chunk {
                         let _ = sender
                             .send(ChatChunk {
@@ -367,10 +458,12 @@ impl ClaudeAgent {
                             .await;
                     }
                     session.status = SessionStatus::Idle;
+                    self.upsert_snapshot_from_session(&session);
                     return;
                 }
                 Ok(None) => {
                     session.status = SessionStatus::Crashed;
+                    self.upsert_snapshot_from_session(&session);
                     let message = build_session_ended_error_message(&mut session);
                     drop(session);
                     self.cleanup_session(&session_id).await;
@@ -379,6 +472,7 @@ impl ClaudeAgent {
                 }
                 Err(error) => {
                     session.status = SessionStatus::Crashed;
+                    self.upsert_snapshot_from_session(&session);
                     drop(session);
                     self.cleanup_session(&session_id).await;
                     emit_error_chunk(&sender, format!("Claude 输出读取失败: {error}")).await;
@@ -389,17 +483,19 @@ impl ClaudeAgent {
     }
 
     async fn cleanup_session(&self, session_id: &str) {
-        let removed = self.sessions.lock().await.remove(session_id);
+        let removed = self.lock_sessions().remove(session_id);
+        self.remove_snapshot(session_id);
         if let Some(handle) = removed {
             let mut session = handle.lock().await;
             session.status = SessionStatus::Crashed;
+            session.last_active = Instant::now();
             let _ = session.child.start_kill();
         }
     }
 
-    async fn evict_dead_sessions(&self) {
+    fn evict_dead_sessions(&self) {
         let snapshots = {
-            let sessions = self.sessions.lock().await;
+            let sessions = self.lock_sessions();
             sessions
                 .iter()
                 .map(|(id, handle)| (id.clone(), handle.clone()))
@@ -422,9 +518,10 @@ impl ClaudeAgent {
             return;
         }
 
-        let mut sessions = self.sessions.lock().await;
+        let mut sessions = self.lock_sessions();
         for id in stale_ids {
             sessions.remove(&id);
+            self.remove_snapshot(&id);
         }
     }
 }
@@ -456,6 +553,47 @@ impl Agent for ClaudeAgent {
         .boxed()
     }
 
+    fn list_sessions(&self) -> Vec<SessionInfo> {
+        self.evict_dead_sessions();
+        let mut sessions = self
+            .lock_session_snapshots()
+            .values()
+            .map(SessionSnapshot::to_session_info)
+            .collect::<Vec<_>>();
+        sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+        sessions
+    }
+
+    fn get_session(&self, session_id: &str) -> Option<SessionInfo> {
+        self.evict_dead_sessions();
+        self.lock_session_snapshots()
+            .get(session_id)
+            .map(SessionSnapshot::to_session_info)
+    }
+
+    fn close_session(&self, session_id: &str) -> bool {
+        let removed = self.lock_sessions().remove(session_id);
+        let Some(handle) = removed else {
+            return false;
+        };
+        self.remove_snapshot(session_id);
+
+        if let Ok(mut session) = handle.try_lock() {
+            session.status = SessionStatus::Crashed;
+            session.last_active = Instant::now();
+            let _ = session.child.start_kill();
+        } else if let Ok(runtime) = tokio::runtime::Handle::try_current() {
+            runtime.spawn(async move {
+                let mut session = handle.lock().await;
+                session.status = SessionStatus::Crashed;
+                session.last_active = Instant::now();
+                let _ = session.child.start_kill();
+            });
+        }
+
+        true
+    }
+
     fn stats(
         &self,
         session_id: Option<String>,
@@ -465,6 +603,19 @@ impl Agent for ClaudeAgent {
             serde_json::to_value(stats).ok()
         })
     }
+}
+
+fn compute_last_active_wall(session: &ClaudeSession) -> DateTime<Utc> {
+    let since_created = session
+        .last_active
+        .saturating_duration_since(session.created_at);
+    let offset =
+        chrono::Duration::from_std(since_created).unwrap_or_else(|_| chrono::Duration::zero());
+    session.created_wall + offset
+}
+
+fn format_utc_iso8601(value: DateTime<Utc>) -> String {
+    value.to_rfc3339_opts(SecondsFormat::Secs, true)
 }
 
 fn normalize_session_id(session_id: Option<&str>) -> Option<String> {
@@ -916,5 +1067,23 @@ mod tests {
     fn decide_session_action_returns_create_for_empty_session_id() {
         let action = decide_session_action(normalize_session_id(Some("   ")).as_deref(), false);
         assert_eq!(action, SessionAction::CreateNew);
+    }
+
+    #[test]
+    fn list_sessions_returns_empty_initially() {
+        let agent = ClaudeAgent::with_command_and_args("unused-command", vec![]);
+        assert_eq!(agent.list_sessions(), Vec::new());
+    }
+
+    #[test]
+    fn get_session_returns_none_for_unknown() {
+        let agent = ClaudeAgent::with_command_and_args("unused-command", vec![]);
+        assert_eq!(agent.get_session("missing-session"), None);
+    }
+
+    #[test]
+    fn close_session_returns_false_for_unknown() {
+        let agent = ClaudeAgent::with_command_and_args("unused-command", vec![]);
+        assert!(!agent.close_session("missing-session"));
     }
 }
