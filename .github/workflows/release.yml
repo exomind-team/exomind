@@ -184,7 +184,37 @@ jobs:
           Write-Host "Resolved app version: $appVersion"
 
       - name: Install dependencies
-        run: bun install
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 900, [int]$MaxAttempts = 2) {
+            for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+              Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
+              Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
+
+              $proc = Start-Process -FilePath "bun" -ArgumentList @("install", "--frozen-lockfile") -NoNewWindow -PassThru
+              if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                Write-Warning "bun install timed out after $TimeoutSeconds seconds."
+                if ($attempt -eq $MaxAttempts) {
+                  throw "bun install exceeded timeout and all retries are exhausted."
+                }
+                continue
+              }
+
+              if ($proc.ExitCode -eq 0) {
+                return
+              }
+
+              Write-Warning "bun install exited with code $($proc.ExitCode)."
+              if ($attempt -eq $MaxAttempts) {
+                throw "bun install failed after $MaxAttempts attempts."
+              }
+            }
+          }
+
+          Invoke-BunInstallWithRetry
 
       - name: Build Windows NSIS installer (构建 NSIS 安装包)
         run: bun tauri build --bundles nsis
@@ -897,7 +927,37 @@ jobs:
           Write-Host "Resolved app version: $appVersion"
 
       - name: Install dependencies
-        run: bun install
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 900, [int]$MaxAttempts = 2) {
+            for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
+              Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
+              Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
+
+              $proc = Start-Process -FilePath "bun" -ArgumentList @("install", "--frozen-lockfile") -NoNewWindow -PassThru
+              if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+                Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
+                Write-Warning "bun install timed out after $TimeoutSeconds seconds."
+                if ($attempt -eq $MaxAttempts) {
+                  throw "bun install exceeded timeout and all retries are exhausted."
+                }
+                continue
+              }
+
+              if ($proc.ExitCode -eq 0) {
+                return
+              }
+
+              Write-Warning "bun install exited with code $($proc.ExitCode)."
+              if ($attempt -eq $MaxAttempts) {
+                throw "bun install failed after $MaxAttempts attempts."
+              }
+            }
+          }
+
+          Invoke-BunInstallWithRetry
 
       - name: Init Android
         run: bun tauri android init
