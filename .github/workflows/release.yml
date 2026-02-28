@@ -199,29 +199,122 @@ jobs:
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
-      - name: Upload Windows EXE Artifact (上传 EXE)
-        id: upload_exe
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-exe-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/nsis/
-          retention-days: 1
-        continue-on-error: true
+      - name: Resolve R2 channel and version (解析 R2 通道与版本)
+        id: r2meta
+        shell: powershell
+        run: |
+          $tagName = "${{ github.ref_name }}"
+          if ($tagName.StartsWith("release/")) {
+            $channel = "release"
+            $version = $tagName.Substring("release/".Length)
+          } elseif ($tagName.StartsWith("build/")) {
+            $channel = "preview"
+            $version = $tagName.Substring("build/".Length)
+          } else {
+            throw "Unsupported tag format: $tagName"
+          }
 
-      - name: Retry Upload Windows EXE Artifact
-        if: steps.upload_exe.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-exe-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/nsis/
-          retention-days: 1
+          "CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "VERSION_DIR=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-      - name: Upload Windows MSI Artifact (上传 MSI)
+      - name: Normalize Windows assets for R2 (整理 Windows 产物并规范命名)
+        id: normalize_windows
+        shell: powershell
+        run: |
+          $version = "${{ steps.r2meta.outputs.VERSION }}"
+          $outputDir = "artifacts/r2-upload/windows"
+          New-Item -Path $outputDir -ItemType Directory -Force | Out-Null
+
+          $exe = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Recurse -File -Filter *.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if (-not $exe) {
+            throw "Missing Windows EXE artifact under nsis bundle path."
+          }
+          $exeOut = Join-Path $outputDir "ExoMind-$version-windows-x64-setup.exe"
+          Copy-Item -Path $exe.FullName -Destination $exeOut -Force
+          "EXE_OUT=$exeOut" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+          $msi = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          if ($msi) {
+            $msiOut = Join-Path $outputDir "ExoMind-$version-windows-x64-installer.msi"
+            Copy-Item -Path $msi.FullName -Destination $msiOut -Force
+            "MSI_OUT=$msiOut" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          }
+
+      - name: Upload Windows assets to R2 (上传 Windows 产物到 R2)
+        shell: powershell
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          function Upload-R2File([string]$FilePath, [string]$ObjectKey, [string]$ContentType) {
+            if (-not (Test-Path $FilePath)) {
+              throw "File not found: $FilePath"
+            }
+            $bucket = "exomind-releases"
+            Write-Host "Uploading $FilePath -> $ObjectKey"
+            npx wrangler r2 object put "$bucket/$ObjectKey" --file "$FilePath" --content-type "$ContentType" --remote
+            if ($LASTEXITCODE -ne 0) {
+              throw "Upload failed for $FilePath"
+            }
+          }
+
+          $channel = "${{ steps.r2meta.outputs.CHANNEL }}"
+          $versionDir = "${{ steps.r2meta.outputs.VERSION_DIR }}"
+
+          $exePath = "${{ steps.normalize_windows.outputs.EXE_OUT }}"
+          Upload-R2File -FilePath $exePath -ObjectKey "$channel/$versionDir/ExoMind-${{ steps.r2meta.outputs.VERSION }}-windows-x64-setup.exe" -ContentType "application/octet-stream"
+
+          $msiPath = "${{ steps.normalize_windows.outputs.MSI_OUT }}"
+          if ($msiPath -and (Test-Path $msiPath)) {
+            Upload-R2File -FilePath $msiPath -ObjectKey "$channel/$versionDir/ExoMind-${{ steps.r2meta.outputs.VERSION }}-windows-x64-installer.msi" -ContentType "application/octet-stream"
+          }
+
+      - name: Generate Windows manifest (生成 Windows 轻量 manifest 清单)
+        id: manifest_windows
+        shell: powershell
+        run: |
+          function New-AssetEntry([string]$RelativeUrl, [string]$FilePath) {
+            $size = (Get-Item -LiteralPath $FilePath).Length
+            $sha256 = (Get-FileHash -Algorithm SHA256 -Path $FilePath).Hash.ToLowerInvariant()
+            return @{
+              url = $RelativeUrl
+              size = $size
+              sha256 = $sha256
+            }
+          }
+
+          $channel = "${{ steps.r2meta.outputs.CHANNEL }}"
+          $version = "${{ steps.r2meta.outputs.VERSION }}"
+          $versionDir = "${{ steps.r2meta.outputs.VERSION_DIR }}"
+          $manifestDir = "artifacts/manifest"
+          New-Item -Path $manifestDir -ItemType Directory -Force | Out-Null
+
+          $assets = @{}
+          $exePath = "${{ steps.normalize_windows.outputs.EXE_OUT }}"
+          $assets["windows-x64-setup"] = New-AssetEntry -RelativeUrl "$channel/$versionDir/ExoMind-$version-windows-x64-setup.exe" -FilePath $exePath
+
+          $msiPath = "${{ steps.normalize_windows.outputs.MSI_OUT }}"
+          if ($msiPath -and (Test-Path $msiPath)) {
+            $assets["windows-x64-installer"] = New-AssetEntry -RelativeUrl "$channel/$versionDir/ExoMind-$version-windows-x64-installer.msi" -FilePath $msiPath
+          }
+
+          $manifest = @{
+            channel = $channel
+            version = $version
+            tag = "${{ github.ref_name }}"
+            assets = $assets
+          }
+
+          $manifestPath = Join-Path $manifestDir "windows-manifest.json"
+          $manifest | ConvertTo-Json -Depth 12 | Set-Content -Path $manifestPath -Encoding UTF8
+          "PATH=$manifestPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload Windows manifest artifact (上传 Windows 轻量清单)
         uses: actions/upload-artifact@v4
         with:
-          name: windows-msi-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/msi/
-          if-no-files-found: ignore
+          name: windows-manifest-${{ steps.hash.outputs.HASH }}
+          path: ${{ steps.manifest_windows.outputs.PATH }}
           retention-days: 1
 
   build-macos:
@@ -281,12 +374,129 @@ jobs:
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
-      - name: Upload macOS DMG Artifact (上传 DMG)
+      - name: Resolve R2 channel and version (解析 R2 通道与版本)
+        id: r2meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_name="${GITHUB_REF_NAME}"
+          if [[ "$tag_name" == release/* ]]; then
+            channel="release"
+            version="${tag_name#release/}"
+          elif [[ "$tag_name" == build/* ]]; then
+            channel="preview"
+            version="${tag_name#build/}"
+          else
+            echo "::error::Unsupported tag format: $tag_name"
+            exit 1
+          fi
+
+          echo "CHANNEL=$channel" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$version" >> "$GITHUB_OUTPUT"
+          echo "VERSION_DIR=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Normalize macOS assets for R2 (整理 macOS 产物并规范命名)
+        id: normalize_macos
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+
+          version="${{ steps.r2meta.outputs.VERSION }}"
+          output_dir="artifacts/r2-upload/macos"
+          mkdir -p "$output_dir"
+
+          dmg_files=(src-tauri/target/release/bundle/dmg/**/*.dmg)
+          if (( ${#dmg_files[@]} == 0 )); then
+            echo "::error::Missing macOS DMG artifact."
+            exit 1
+          fi
+
+          dmg_src="${dmg_files[0]}"
+          file_name="$(basename "$dmg_src" | tr '[:upper:]' '[:lower:]')"
+          if [[ "$file_name" == *"x64"* || "$file_name" == *"x86_64"* ]]; then
+            asset_key="macos-x64"
+            output_name="ExoMind-${version}-macos-x64.dmg"
+          else
+            asset_key="macos-aarch64"
+            output_name="ExoMind-${version}-macos-aarch64.dmg"
+          fi
+
+          dmg_out="$output_dir/$output_name"
+          cp "$dmg_src" "$dmg_out"
+
+          echo "DMG_OUT=$dmg_out" >> "$GITHUB_OUTPUT"
+          echo "ASSET_KEY=$asset_key" >> "$GITHUB_OUTPUT"
+          echo "OUTPUT_NAME=$output_name" >> "$GITHUB_OUTPUT"
+
+      - name: Upload macOS assets to R2 (上传 macOS 产物到 R2)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          bucket="exomind-releases"
+          channel="${{ steps.r2meta.outputs.CHANNEL }}"
+          version_dir="${{ steps.r2meta.outputs.VERSION_DIR }}"
+          output_name="${{ steps.normalize_macos.outputs.OUTPUT_NAME }}"
+          dmg_out="${{ steps.normalize_macos.outputs.DMG_OUT }}"
+
+          object_key="${channel}/${version_dir}/${output_name}"
+          echo "Uploading $dmg_out -> $object_key"
+          npx wrangler r2 object put "${bucket}/${object_key}" \
+            --file "$dmg_out" \
+            --content-type "application/x-apple-diskimage" \
+            --remote
+
+      - name: Generate macOS manifest (生成 macOS 轻量 manifest 清单)
+        id: manifest_macos
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          channel="${{ steps.r2meta.outputs.CHANNEL }}"
+          version="${{ steps.r2meta.outputs.VERSION }}"
+          version_dir="${{ steps.r2meta.outputs.VERSION_DIR }}"
+          asset_key="${{ steps.normalize_macos.outputs.ASSET_KEY }}"
+          output_name="${{ steps.normalize_macos.outputs.OUTPUT_NAME }}"
+          dmg_out="${{ steps.normalize_macos.outputs.DMG_OUT }}"
+          size="$(wc -c < "$dmg_out" | tr -d '[:space:]')"
+          sha256="$(shasum -a 256 "$dmg_out" | awk '{print $1}')"
+
+          manifest_dir="artifacts/manifest"
+          mkdir -p "$manifest_dir"
+          manifest_path="$manifest_dir/macos-manifest.json"
+
+          jq -n \
+            --arg channel "$channel" \
+            --arg version "$version" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg asset_key "$asset_key" \
+            --arg url "${channel}/${version_dir}/${output_name}" \
+            --argjson size "$size" \
+            --arg sha256 "$sha256" \
+            '{
+              channel: $channel,
+              version: $version,
+              tag: $tag,
+              assets: {
+                ($asset_key): {
+                  url: $url,
+                  size: $size,
+                  sha256: $sha256
+                }
+              }
+            }' > "$manifest_path"
+
+          echo "PATH=$manifest_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload macOS manifest artifact (上传 macOS 轻量清单)
         uses: actions/upload-artifact@v4
         with:
-          name: macos-dmg-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/dmg/
-          if-no-files-found: ignore
+          name: macos-manifest-${{ steps.hash.outputs.HASH }}
+          path: ${{ steps.manifest_macos.outputs.PATH }}
           retention-days: 1
 
   build-linux:
@@ -358,20 +568,139 @@ jobs:
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
-      - name: Upload Linux DEB Artifact (上传 DEB)
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-deb-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/deb/
-          if-no-files-found: ignore
-          retention-days: 1
+      - name: Resolve R2 channel and version (解析 R2 通道与版本)
+        id: r2meta
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_name="${GITHUB_REF_NAME}"
+          if [[ "$tag_name" == release/* ]]; then
+            channel="release"
+            version="${tag_name#release/}"
+          elif [[ "$tag_name" == build/* ]]; then
+            channel="preview"
+            version="${tag_name#build/}"
+          else
+            echo "::error::Unsupported tag format: $tag_name"
+            exit 1
+          fi
 
-      - name: Upload Linux AppImage Artifact (上传 AppImage)
+          echo "CHANNEL=$channel" >> "$GITHUB_OUTPUT"
+          echo "VERSION=$version" >> "$GITHUB_OUTPUT"
+          echo "VERSION_DIR=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Normalize Linux assets for R2 (整理 Linux 产物并规范命名)
+        id: normalize_linux
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+
+          version="${{ steps.r2meta.outputs.VERSION }}"
+          output_dir="artifacts/r2-upload/linux"
+          mkdir -p "$output_dir"
+
+          deb_files=(src-tauri/target/release/bundle/deb/**/*.deb)
+          appimage_files=(src-tauri/target/release/bundle/appimage/**/*.AppImage)
+
+          if (( ${#deb_files[@]} == 0 )); then
+            echo "::error::Missing Linux DEB artifact."
+            exit 1
+          fi
+          if (( ${#appimage_files[@]} == 0 )); then
+            echo "::error::Missing Linux AppImage artifact."
+            exit 1
+          fi
+
+          deb_out="$output_dir/ExoMind-${version}-linux-x64.deb"
+          appimage_out="$output_dir/ExoMind-${version}-linux-x64.AppImage"
+          cp "${deb_files[0]}" "$deb_out"
+          cp "${appimage_files[0]}" "$appimage_out"
+
+          echo "DEB_OUT=$deb_out" >> "$GITHUB_OUTPUT"
+          echo "APPIMAGE_OUT=$appimage_out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Linux assets to R2 (上传 Linux 产物到 R2)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          bucket="exomind-releases"
+          channel="${{ steps.r2meta.outputs.CHANNEL }}"
+          version_dir="${{ steps.r2meta.outputs.VERSION_DIR }}"
+          version="${{ steps.r2meta.outputs.VERSION }}"
+          deb_out="${{ steps.normalize_linux.outputs.DEB_OUT }}"
+          appimage_out="${{ steps.normalize_linux.outputs.APPIMAGE_OUT }}"
+
+          npx wrangler r2 object put "${bucket}/${channel}/${version_dir}/ExoMind-${version}-linux-x64.deb" \
+            --file "$deb_out" \
+            --content-type "application/vnd.debian.binary-package" \
+            --remote
+
+          npx wrangler r2 object put "${bucket}/${channel}/${version_dir}/ExoMind-${version}-linux-x64.AppImage" \
+            --file "$appimage_out" \
+            --content-type "application/octet-stream" \
+            --remote
+
+      - name: Generate Linux manifest (生成 Linux 轻量 manifest 清单)
+        id: manifest_linux
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          channel="${{ steps.r2meta.outputs.CHANNEL }}"
+          version="${{ steps.r2meta.outputs.VERSION }}"
+          version_dir="${{ steps.r2meta.outputs.VERSION_DIR }}"
+          deb_out="${{ steps.normalize_linux.outputs.DEB_OUT }}"
+          appimage_out="${{ steps.normalize_linux.outputs.APPIMAGE_OUT }}"
+
+          deb_size="$(wc -c < "$deb_out" | tr -d '[:space:]')"
+          deb_sha256="$(sha256sum "$deb_out" | awk '{print $1}')"
+          appimage_size="$(wc -c < "$appimage_out" | tr -d '[:space:]')"
+          appimage_sha256="$(sha256sum "$appimage_out" | awk '{print $1}')"
+
+          manifest_dir="artifacts/manifest"
+          mkdir -p "$manifest_dir"
+          manifest_path="$manifest_dir/linux-manifest.json"
+
+          jq -n \
+            --arg channel "$channel" \
+            --arg version "$version" \
+            --arg tag "$GITHUB_REF_NAME" \
+            --arg deb_url "${channel}/${version_dir}/ExoMind-${version}-linux-x64.deb" \
+            --argjson deb_size "$deb_size" \
+            --arg deb_sha256 "$deb_sha256" \
+            --arg appimage_url "${channel}/${version_dir}/ExoMind-${version}-linux-x64.AppImage" \
+            --argjson appimage_size "$appimage_size" \
+            --arg appimage_sha256 "$appimage_sha256" \
+            '{
+              channel: $channel,
+              version: $version,
+              tag: $tag,
+              assets: {
+                "linux-x64-deb": {
+                  url: $deb_url,
+                  size: $deb_size,
+                  sha256: $deb_sha256
+                },
+                "linux-x64-appimage": {
+                  url: $appimage_url,
+                  size: $appimage_size,
+                  sha256: $appimage_sha256
+                }
+              }
+            }' > "$manifest_path"
+
+          echo "PATH=$manifest_path" >> "$GITHUB_OUTPUT"
+
+      - name: Upload Linux manifest artifact (上传 Linux 轻量清单)
         uses: actions/upload-artifact@v4
         with:
-          name: linux-appimage-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/appimage/
-          if-no-files-found: ignore
+          name: linux-manifest-${{ steps.hash.outputs.HASH }}
+          path: ${{ steps.manifest_linux.outputs.PATH }}
           retention-days: 1
 
   build-android:
@@ -670,64 +999,180 @@ jobs:
             Write-Host "Signed APK: $signedApk"
           }
 
-      - name: Upload Android signed APK Artifact (上传已签名 APK)
-        id: upload_apk
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-apk-signed-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/gen/android/app/build/outputs/apk-signed/
-          retention-days: 1
-        continue-on-error: true
+      - name: Resolve R2 channel and version (解析 R2 通道与版本)
+        id: r2meta
+        shell: powershell
+        run: |
+          $tagName = "${{ github.ref_name }}"
+          if ($tagName.StartsWith("release/")) {
+            $channel = "release"
+            $version = $tagName.Substring("release/".Length)
+          } elseif ($tagName.StartsWith("build/")) {
+            $channel = "preview"
+            $version = $tagName.Substring("build/".Length)
+          } else {
+            throw "Unsupported tag format: $tagName"
+          }
 
-      - name: Retry Upload Android signed APK Artifact
-        if: steps.upload_apk.outcome == 'failure'
+          "CHANNEL=$channel" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "VERSION=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "VERSION_DIR=$version" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Normalize Android assets for R2 (整理 Android 产物并规范命名)
+        id: normalize_android
+        shell: powershell
+        run: |
+          $version = "${{ steps.r2meta.outputs.VERSION }}"
+          $signedApkDir = "src-tauri/gen/android/app/build/outputs/apk-signed"
+          $outputDir = "artifacts/r2-upload/android"
+          New-Item -Path $outputDir -ItemType Directory -Force | Out-Null
+
+          $apkFiles = Get-ChildItem -Path $signedApkDir -Recurse -File -Filter *.apk
+          if (-not $apkFiles -or $apkFiles.Count -eq 0) {
+            throw "No signed APK artifacts found under: $signedApkDir"
+          }
+
+          $arm64Apk = $null
+          $x86Apk = $null
+          foreach ($apk in $apkFiles) {
+            $name = $apk.Name.ToLowerInvariant()
+            if (-not $arm64Apk -and ($name -match "arm64|aarch64|arm64-v8a")) {
+              $arm64Apk = $apk
+              continue
+            }
+            if (-not $x86Apk -and ($name -match "i686|x86") -and ($name -notmatch "x86_64")) {
+              $x86Apk = $apk
+            }
+          }
+
+          if (-not $arm64Apk) {
+            throw "Missing Android arm64 signed APK artifact."
+          }
+          if (-not $x86Apk) {
+            throw "Missing Android x86 signed APK artifact."
+          }
+
+          $arm64Out = Join-Path $outputDir "ExoMind-$version-android-arm64.apk"
+          $x86Out = Join-Path $outputDir "ExoMind-$version-android-x86.apk"
+          Copy-Item -Path $arm64Apk.FullName -Destination $arm64Out -Force
+          Copy-Item -Path $x86Apk.FullName -Destination $x86Out -Force
+
+          "ARM64_OUT=$arm64Out" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          "X86_OUT=$x86Out" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload Android assets to R2 (上传 Android 产物到 R2)
+        shell: powershell
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          function Upload-R2File([string]$FilePath, [string]$ObjectKey, [string]$ContentType) {
+            if (-not (Test-Path $FilePath)) {
+              throw "File not found: $FilePath"
+            }
+            $bucket = "exomind-releases"
+            Write-Host "Uploading $FilePath -> $ObjectKey"
+            npx wrangler r2 object put "$bucket/$ObjectKey" --file "$FilePath" --content-type "$ContentType" --remote
+            if ($LASTEXITCODE -ne 0) {
+              throw "Upload failed for $FilePath"
+            }
+          }
+
+          $channel = "${{ steps.r2meta.outputs.CHANNEL }}"
+          $version = "${{ steps.r2meta.outputs.VERSION }}"
+          $versionDir = "${{ steps.r2meta.outputs.VERSION_DIR }}"
+          $arm64Path = "${{ steps.normalize_android.outputs.ARM64_OUT }}"
+          $x86Path = "${{ steps.normalize_android.outputs.X86_OUT }}"
+
+          Upload-R2File -FilePath $arm64Path -ObjectKey "$channel/$versionDir/ExoMind-$version-android-arm64.apk" -ContentType "application/vnd.android.package-archive"
+          Upload-R2File -FilePath $x86Path -ObjectKey "$channel/$versionDir/ExoMind-$version-android-x86.apk" -ContentType "application/vnd.android.package-archive"
+
+      - name: Generate Android manifest (生成 Android 轻量 manifest 清单)
+        id: manifest_android
+        shell: powershell
+        run: |
+          function New-AssetEntry([string]$RelativeUrl, [string]$FilePath) {
+            $size = (Get-Item -LiteralPath $FilePath).Length
+            $sha256 = (Get-FileHash -Algorithm SHA256 -Path $FilePath).Hash.ToLowerInvariant()
+            return @{
+              url = $RelativeUrl
+              size = $size
+              sha256 = $sha256
+            }
+          }
+
+          $channel = "${{ steps.r2meta.outputs.CHANNEL }}"
+          $version = "${{ steps.r2meta.outputs.VERSION }}"
+          $versionDir = "${{ steps.r2meta.outputs.VERSION_DIR }}"
+          $arm64Path = "${{ steps.normalize_android.outputs.ARM64_OUT }}"
+          $x86Path = "${{ steps.normalize_android.outputs.X86_OUT }}"
+          $manifestDir = "artifacts/manifest"
+          New-Item -Path $manifestDir -ItemType Directory -Force | Out-Null
+
+          $assets = @{
+            "android-arm64" = (New-AssetEntry -RelativeUrl "$channel/$versionDir/ExoMind-$version-android-arm64.apk" -FilePath $arm64Path)
+            "android-x86" = (New-AssetEntry -RelativeUrl "$channel/$versionDir/ExoMind-$version-android-x86.apk" -FilePath $x86Path)
+          }
+
+          $manifest = @{
+            channel = $channel
+            version = $version
+            tag = "${{ github.ref_name }}"
+            assets = $assets
+          }
+          $manifestPath = Join-Path $manifestDir "android-manifest.json"
+          $manifest | ConvertTo-Json -Depth 12 | Set-Content -Path $manifestPath -Encoding UTF8
+          "PATH=$manifestPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
+      - name: Upload Android manifest artifact (上传 Android 轻量清单)
         uses: actions/upload-artifact@v4
         with:
-          name: android-apk-signed-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/gen/android/app/build/outputs/apk-signed/
+          name: android-manifest-${{ steps.hash.outputs.HASH }}
+          path: ${{ steps.manifest_android.outputs.PATH }}
           retention-days: 1
 
   create-release:
     needs: [build-windows, build-macos, build-linux, build-android]
     runs-on: ubuntu-latest
-    # 对 release/* 和 build/* tag 执行发布步骤
+    # 对 release/* 和 build/* tag 执行发布步骤，要求全平台构建成功
     if: |
       always() &&
       (
         startsWith(github.ref, 'refs/tags/release/') ||
         startsWith(github.ref, 'refs/tags/build/')
       ) &&
-      (
-        needs.build-windows.result == 'success' ||
-        needs.build-macos.result == 'success' ||
-        needs.build-linux.result == 'success' ||
-        needs.build-android.result == 'success'
-      )
+      needs.build-windows.result == 'success' &&
+      needs.build-macos.result == 'success' &&
+      needs.build-linux.result == 'success' &&
+      needs.build-android.result == 'success'
     steps:
-      - name: Download Artifacts
+      - name: Download manifest artifacts (下载各平台轻量清单)
         uses: actions/download-artifact@v4
         with:
-          path: release-files
+          pattern: "*-manifest-*"
+          path: release-manifests
           merge-multiple: true
 
-      - name: List Files
-        run: ls -la release-files/
+      - name: List manifest files
+        run: ls -la release-manifests/
 
       - name: Resolve release metadata (解析发布元信息)
         id: meta
         shell: bash
         run: |
           set -euo pipefail
-          short_hash="${GITHUB_SHA::7}"
+          ref_name="${GITHUB_REF_NAME}"
+          version=""
+          storage_channel=""
 
-          if [[ "$GITHUB_REF_NAME" == build/* ]]; then
-            # build/v0.3.3-build.20260222T1430 → version=v0.3.3-build.20260222T1430
-            version="${GITHUB_REF_NAME#build/}"
+          if [[ "$ref_name" == build/* ]]; then
+            version="${ref_name#build/}"
+            storage_channel="preview"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
             echo "title=Pre-release $version" >> "$GITHUB_OUTPUT"
           else
-            # release/v0.3.3 → version=v0.3.3
-            version="${GITHUB_REF_NAME#release/}"
+            version="${ref_name#release/}"
+            storage_channel="release"
             lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
             channel=""
             if [[ "$lower_version" == *"-alpha."* ]]; then
@@ -748,343 +1193,86 @@ jobs:
               echo "title=Release $version" >> "$GITHUB_OUTPUT"
             fi
           fi
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
 
-      - name: Normalize release artifact names (统一发布产物命名)
+          if [[ -z "$version" || -z "$storage_channel" ]]; then
+            echo "::error::Cannot resolve release metadata from ref: $ref_name"
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "storage_channel=$storage_channel" >> "$GITHUB_OUTPUT"
+          echo "version_dir=$version" >> "$GITHUB_OUTPUT"
+
+      - name: Merge manifests and generate latest.json (合并清单并生成 latest.json)
+        id: latest
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob globstar
+          shopt -s nullglob
 
           version="${{ steps.meta.outputs.version }}"
-          short_hash="${{ steps.meta.outputs.short_hash }}"
-          source_dir="release-files"
-          output_dir="release-assets"
-          mkdir -p "$output_dir"
-
-          exe_files=("$source_dir"/**/*.exe)
-          if (( ${#exe_files[@]} == 0 )); then
-            echo "::error::Missing Windows EXE artifact."
-            exit 1
-          fi
-          cp "${exe_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
-
-          msi_files=("$source_dir"/**/*.msi)
-          if (( ${#msi_files[@]} > 0 )); then
-            cp "${msi_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-installer.msi"
-          fi
-
-          apk_files=("$source_dir"/**/*signed.apk)
-          if (( ${#apk_files[@]} == 0 )); then
-            apk_files=("$source_dir"/**/*.apk)
-          fi
-
-          arm64_apk=""
-          x86_apk=""
-          for apk in "${apk_files[@]}"; do
-            file_name="$(basename "$apk" | tr '[:upper:]' '[:lower:]')"
-            if [[ -z "$arm64_apk" && ( "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"arm64-v8a"* ) ]]; then
-              arm64_apk="$apk"
-              continue
-            fi
-            if [[ -z "$x86_apk" && ( "$file_name" == *"i686"* || "$file_name" == *"x86"* ) && "$file_name" != *"x86_64"* ]]; then
-              x86_apk="$apk"
-            fi
-          done
-
-          if [[ -z "$arm64_apk" ]]; then
-            echo "::error::Missing Android arm64 APK artifact."
-            exit 1
-          fi
-          if [[ -z "$x86_apk" ]]; then
-            echo "::error::Missing Android x86 APK artifact."
+          manifest_files=(release-manifests/*.json)
+          if (( ${#manifest_files[@]} == 0 )); then
+            echo "::error::No manifest files found."
             exit 1
           fi
 
-          cp "$arm64_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-arm64.apk"
-          cp "$x86_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-x86.apk"
-
-      - name: List Normalized Files
-        run: ls -la release-assets/
-
-      - name: Create Release
-        uses: softprops/action-gh-release@v2
-        with:
-          files: release-assets/**
-          # 从 tag 名称提取版本号 (去掉 release/ 前缀)
-          tag_name: ${{ github.ref_name }}
-          name: ${{ steps.meta.outputs.title }}
-          draft: false
-          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
-          generate_release_notes: true
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-  # ─────────────────────────────────────────────────────────────
-  # Job 4: Upload to Cloudflare R2 (构建产物上传 R2)
-  # ─────────────────────────────────────────────────────────────
-  upload-r2:
-    needs: create-release
-    if: always() && needs.create-release.result == 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download Windows artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: windows-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: Download macOS artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: macos-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: Download Linux artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: linux-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: Download Android artifacts
-        uses: actions/download-artifact@v4
-        with:
-          pattern: android-*
-          path: download-artifacts
-          merge-multiple: true
-
-      - name: List downloaded artifacts
-        run: ls -laR download-artifacts/
-
-      - name: Determine channel and version (确定通道与版本)
-        id: r2meta
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          tag_name="${GITHUB_REF_NAME}"
-          short_hash="${GITHUB_SHA::7}"
-
-          if [[ "$tag_name" == release/* ]]; then
-            channel="release"
-            version="${tag_name#release/}"
-          elif [[ "$tag_name" == build/* ]]; then
-            channel="preview"
-            version="${tag_name#build/}"
-          else
-            echo "::error::Unexpected tag format: $tag_name"
-            exit 1
-          fi
-
-          # version_dir: release → v0.3.3, preview → v0.3.4-build.20260227T1430
-          version_dir="$version"
-
-          echo "channel=$channel" >> "$GITHUB_OUTPUT"
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          echo "version_dir=$version_dir" >> "$GITHUB_OUTPUT"
-          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
-          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
-
-          echo "Channel: $channel"
-          echo "Version: $version"
-          echo "Version dir: $version_dir"
-
-      - name: Normalize filenames for R2 (去掉 hash 重命名)
-        shell: bash
-        run: |
-          set -euo pipefail
-          shopt -s nullglob globstar
-
-          version="${{ steps.r2meta.outputs.version }}"
-          short_hash="${{ steps.r2meta.outputs.short_hash }}"
-          src="download-artifacts"
-          dest="r2-upload"
-          mkdir -p "$dest"
-
-          # Find and copy Windows EXE
-          exe_files=("$src"/**/*.exe)
-          if (( ${#exe_files[@]} > 0 )); then
-            cp "${exe_files[0]}" "$dest/ExoMind-${version}-windows-x64-setup.exe"
-          fi
-
-          # Find and copy Windows MSI
-          msi_files=("$src"/**/*.msi)
-          if (( ${#msi_files[@]} > 0 )); then
-            cp "${msi_files[0]}" "$dest/ExoMind-${version}-windows-x64-installer.msi"
-          fi
-
-          # Find and copy Android APKs
-          apk_files=("$src"/**/*signed.apk)
-          if (( ${#apk_files[@]} == 0 )); then
-            apk_files=("$src"/**/*.apk)
-          fi
-
-          for apk in "${apk_files[@]}"; do
-            file_name="$(basename "$apk" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"arm64-v8a"* ]]; then
-              cp "$apk" "$dest/ExoMind-${version}-android-arm64.apk"
-            elif [[ "$file_name" == *"i686"* || "$file_name" == *"x86"* ]] && [[ "$file_name" != *"x86_64"* ]]; then
-              cp "$apk" "$dest/ExoMind-${version}-android-x86.apk"
-            fi
-          done
-
-          # Find and copy macOS DMG
-          dmg_files=("$src"/**/*.dmg)
-          for dmg in "${dmg_files[@]}"; do
-            file_name="$(basename "$dmg" | tr '[:upper:]' '[:lower:]')"
-            if [[ "$file_name" == *"aarch64"* || "$file_name" == *"arm64"* ]]; then
-              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
-            elif [[ "$file_name" == *"x64"* || "$file_name" == *"x86_64"* ]]; then
-              cp "$dmg" "$dest/ExoMind-${version}-macos-x64.dmg"
-            else
-              # macos-latest is Apple Silicon (aarch64)
-              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
-            fi
-          done
-
-          # Find and copy Linux AppImage
-          appimage_files=("$src"/**/*.AppImage)
-          for ai in "${appimage_files[@]}"; do
-            cp "$ai" "$dest/ExoMind-${version}-linux-x64.AppImage"
-          done
-
-          # Find and copy Linux DEB
-          deb_files=("$src"/**/*.deb)
-          for deb in "${deb_files[@]}"; do
-            cp "$deb" "$dest/ExoMind-${version}-linux-x64.deb"
-          done
-
-          echo "=== Files prepared for R2 upload ==="
-          ls -la "$dest/"
-
-      - name: Upload assets to R2 (上传构建产物到 R2)
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          bucket="exomind-releases"
-          src="r2-upload"
-
-          content_type_for() {
-            case "$1" in
-              *.exe)      echo "application/octet-stream" ;;
-              *.msi)      echo "application/octet-stream" ;;
-              *.apk)      echo "application/vnd.android.package-archive" ;;
-              *.dmg)      echo "application/x-apple-diskimage" ;;
-              *.AppImage) echo "application/octet-stream" ;;
-              *.deb)      echo "application/vnd.debian.binary-package" ;;
-              *.tar.gz)   echo "application/gzip" ;;
-              *.json)     echo "application/json" ;;
-              *)          echo "application/octet-stream" ;;
-            esac
-          }
-
-          for file in "$src"/*; do
-            [ -f "$file" ] || continue
-            filename="$(basename "$file")"
-            r2_key="${channel}/${version_dir}/${filename}"
-            ct="$(content_type_for "$filename")"
-            echo "Uploading $filename → $r2_key (Content-Type: $ct)"
-            npx wrangler r2 object put "${bucket}/${r2_key}" \
-              --file "$file" \
-              --content-type "$ct" \
-              --remote
-          done
-
-      - name: Generate and upload latest.json (生成并上传 latest.json)
-        shell: bash
-        env:
-          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
-          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: |
-          set -euo pipefail
-
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version="${{ steps.r2meta.outputs.version }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          tag_name="${{ steps.r2meta.outputs.tag_name }}"
-          bucket="exomind-releases"
-          src="r2-upload"
+          assets_json="$(jq -s 'reduce .[] as $item ({}; . + ($item.assets // {}))' "${manifest_files[@]}")"
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
 
-          # Build assets JSON object
-          assets_json="{}"
-
-          add_asset() {
-            local key="$1" file="$2" url="$3"
-            if [ -f "$file" ]; then
-              local size sha256
-              size="$(stat --format=%s "$file")"
-              sha256="$(sha256sum "$file" | awk '{print $1}')"
-              assets_json="$(echo "$assets_json" | jq \
-                --arg k "$key" \
-                --arg url "$url" \
-                --argjson size "$size" \
-                --arg sha256 "$sha256" \
-                '. + {($k): {"url": $url, "size": $size, "sha256": $sha256}}')"
-            fi
-          }
-
-          add_asset "windows-x64-setup" \
-            "$src/ExoMind-${version}-windows-x64-setup.exe" \
-            "${channel}/${version_dir}/ExoMind-${version}-windows-x64-setup.exe"
-
-          add_asset "windows-x64-installer" \
-            "$src/ExoMind-${version}-windows-x64-installer.msi" \
-            "${channel}/${version_dir}/ExoMind-${version}-windows-x64-installer.msi"
-
-          add_asset "android-arm64" \
-            "$src/ExoMind-${version}-android-arm64.apk" \
-            "${channel}/${version_dir}/ExoMind-${version}-android-arm64.apk"
-
-          add_asset "android-x86" \
-            "$src/ExoMind-${version}-android-x86.apk" \
-            "${channel}/${version_dir}/ExoMind-${version}-android-x86.apk"
-
-          add_asset "macos-aarch64" \
-            "$src/ExoMind-${version}-macos-aarch64.dmg" \
-            "${channel}/${version_dir}/ExoMind-${version}-macos-aarch64.dmg"
-
-          add_asset "macos-x64" \
-            "$src/ExoMind-${version}-macos-x64.dmg" \
-            "${channel}/${version_dir}/ExoMind-${version}-macos-x64.dmg"
-
-          add_asset "linux-x64-appimage" \
-            "$src/ExoMind-${version}-linux-x64.AppImage" \
-            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.AppImage"
-
-          add_asset "linux-x64-deb" \
-            "$src/ExoMind-${version}-linux-x64.deb" \
-            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.deb"
-
-          # Compose latest.json
-          latest_json="$(jq -n \
+          jq -n \
             --arg version "$version" \
-            --arg tag "$tag_name" \
+            --arg tag "$GITHUB_REF_NAME" \
             --arg published_at "$published_at" \
             --argjson assets "$assets_json" \
-            '{version: $version, tag: $tag, published_at: $published_at, assets: $assets}')"
+            '{version: $version, tag: $tag, published_at: $published_at, assets: $assets}' > latest.json
 
-          echo "$latest_json" > latest.json
-          echo "=== latest.json ==="
-          cat latest.json
+          required_keys=(
+            "windows-x64-setup"
+            "android-arm64"
+            "android-x86"
+            "macos-aarch64"
+            "linux-x64-appimage"
+            "linux-x64-deb"
+          )
 
-          npx wrangler r2 object put "${bucket}/${channel}/latest.json" \
+          missing_keys=()
+          for key in "${required_keys[@]}"; do
+            if ! jq -e --arg k "$key" '.assets[$k] != null' latest.json >/dev/null; then
+              missing_keys+=("$key")
+            fi
+          done
+          if (( ${#missing_keys[@]} > 0 )); then
+            echo "::error::Missing required asset keys: ${missing_keys[*]}"
+            cat latest.json
+            exit 1
+          fi
+
+          echo "PATH=latest.json" >> "$GITHUB_OUTPUT"
+
+      - name: Upload release manifest artifact (上传发布 manifest 轻量清单)
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-manifest-${{ github.sha }}
+          path: ${{ steps.latest.outputs.PATH }}
+          retention-days: 1
+
+      - name: Upload latest.json to R2 (上传 latest.json 到 R2)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          bucket="exomind-releases"
+          storage_channel="${{ steps.meta.outputs.storage_channel }}"
+          npx wrangler r2 object put "${bucket}/${storage_channel}/latest.json" \
             --file latest.json \
             --content-type "application/json" \
             --remote
 
-      - name: Update versions.json and cleanup old previews (更新版本列表 + 清理旧版本)
-        if: steps.r2meta.outputs.channel == 'preview'
+      - name: Update versions.json and cleanup old previews (更新预发布版本列表并清理旧版本)
+        if: steps.meta.outputs.storage_channel == 'preview'
         shell: bash
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -1092,21 +1280,18 @@ jobs:
         run: |
           set -euo pipefail
 
-          channel="${{ steps.r2meta.outputs.channel }}"
-          version="${{ steps.r2meta.outputs.version }}"
-          version_dir="${{ steps.r2meta.outputs.version_dir }}"
-          tag_name="${{ steps.r2meta.outputs.tag_name }}"
+          channel="${{ steps.meta.outputs.storage_channel }}"
+          version="${{ steps.meta.outputs.version }}"
+          version_dir="${{ steps.meta.outputs.version_dir }}"
+          tag_name="${GITHUB_REF_NAME}"
           bucket="exomind-releases"
           published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           max_versions=15
 
-          # Try to fetch existing versions.json
           existing_versions="[]"
-          if npx wrangler r2 object get "${bucket}/${channel}/versions.json" \
-               --file existing-versions.json --remote 2>/dev/null; then
+          if npx wrangler r2 object get "${bucket}/${channel}/versions.json" --file existing-versions.json --remote 2>/dev/null; then
             existing_payload="$(cat existing-versions.json)"
             if echo "$existing_payload" | jq -e 'type == "array"' >/dev/null 2>&1; then
-              # backward-compat: old format was a raw array
               existing_versions="$existing_payload"
             else
               existing_versions="$(echo "$existing_payload" | jq '.versions // []')"
@@ -1117,7 +1302,6 @@ jobs:
             fi
           fi
 
-          # Prepend new version entry
           new_entry="$(jq -n \
             --arg version "$version" \
             --arg tag "$tag_name" \
@@ -1129,22 +1313,14 @@ jobs:
             --argjson entry "$new_entry" \
             '[$entry] + . | unique_by(.version)')"
 
-          # Identify versions to delete (beyond max_versions)
           total="$(echo "$updated_versions" | jq 'length')"
           if (( total > max_versions )); then
-            # Extract old version dirs to delete
             old_versions="$(echo "$updated_versions" | jq -r ".[$max_versions:][].version_dir")"
-
-            # Trim the list
             updated_versions="$(echo "$updated_versions" | jq ".[:$max_versions]")"
 
-            # Delete old version directories from R2
             for old_dir in $old_versions; do
               echo "Cleaning up old preview: ${channel}/${old_dir}/"
-              # List and delete all objects under this prefix
-              # wrangler r2 object delete requires exact keys, so we list first
-              list_output="$(npx wrangler r2 object list "${bucket}" \
-                --prefix "${channel}/${old_dir}/" --remote 2>&1)" || true
+              list_output="$(npx wrangler r2 object list "${bucket}" --prefix "${channel}/${old_dir}/" --remote 2>&1)" || true
               objects="$(echo "$list_output" | jq -r '.[].key' 2>/dev/null)" || objects=""
               count=$(echo "$objects" | grep -c . || true)
               echo "  Found $count object(s) to delete"
@@ -1166,7 +1342,6 @@ jobs:
             --argjson retention "$max_versions" \
             '{versions: $versions, retention: $retention}')"
 
-          # Upload updated versions.json
           echo "$updated_json" | jq '.' > versions.json
           echo "=== versions.json (input=${total}, kept=${kept_total}, retention=${max_versions}) ==="
           cat versions.json
@@ -1175,3 +1350,16 @@ jobs:
             --file versions.json \
             --content-type "application/json" \
             --remote
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: latest.json
+          # 从 tag 名称提取版本号 (去掉 release/ 前缀)
+          tag_name: ${{ github.ref_name }}
+          name: ${{ steps.meta.outputs.title }}
+          draft: false
+          prerelease: ${{ steps.meta.outputs.prerelease == 'true' }}
+          generate_release_notes: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
