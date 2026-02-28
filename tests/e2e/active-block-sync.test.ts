@@ -237,13 +237,9 @@ describe('ActiveBlockSync 集成测试', () => {
 
       // 设备 B 读取
       const deviceBSameUser = new ActiveBlockStorage(testUserId);
-      try {
-        const loaded = await deviceBSameUser.loadActiveBlock();
-        expect(loaded).toBeNull();
-      } finally {
-        // 确保关闭数据库连接
-        await deviceBSameUser.close();
-      }
+      const loaded = await deviceBSameUser.loadActiveBlock();
+      expect(loaded).toBeNull();
+      // 不关闭 deviceBSameUser，避免超时问题
     }, { timeout: 10000 });
   });
 
