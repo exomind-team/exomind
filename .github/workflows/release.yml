@@ -196,49 +196,47 @@ jobs:
             Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
           }
 
-          function Clear-StaleBunProcesses() {
-            $staleBun = @(Get-CimInstance Win32_Process -Filter "Name = 'bun.exe'" -ErrorAction SilentlyContinue | Where-Object { [string]::IsNullOrWhiteSpace($_.CommandLine) })
-            foreach ($proc in $staleBun) {
-              Write-Warning "Killing stale bun process PID=$($proc.ProcessId) (清理残留 bun 进程)"
-              Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+          function Invoke-InstallCommandWithTimeout([string]$Command, [int]$TimeoutSeconds) {
+            $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $Command) -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
+            if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+              Stop-ProcessTree -RootPid $proc.Id
+              return $null
             }
-
-            $staleCmd = @(Get-CimInstance Win32_Process -Filter "Name = 'cmd.exe'" -ErrorAction SilentlyContinue | Where-Object { [string]::IsNullOrWhiteSpace($_.CommandLine) })
-            foreach ($proc in $staleCmd) {
-              Write-Warning "Killing stale cmd process PID=$($proc.ProcessId) (清理残留 cmd 进程)"
-              Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
-            }
+            return $proc.ExitCode
           }
 
           function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 900, [int]$MaxAttempts = 2) {
-            Clear-StaleBunProcesses
             for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
               Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
               Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
 
-              $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "bun install --frozen-lockfile") -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
-              if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-                Stop-ProcessTree -RootPid $proc.Id
-                Clear-StaleBunProcesses
+              $exitCode = Invoke-InstallCommandWithTimeout -Command "bun install --frozen-lockfile" -TimeoutSeconds $TimeoutSeconds
+              if ($null -eq $exitCode) {
                 Write-Warning "bun install timed out after $TimeoutSeconds seconds."
-                if ($attempt -eq $MaxAttempts) {
-                  throw "bun install exceeded timeout and all retries are exhausted."
-                }
                 continue
               }
-
-              if ($proc.ExitCode -eq 0) {
-                return
+              if ($exitCode -eq 0) {
+                return $true
               }
+              Write-Warning "bun install exited with code $exitCode."
+            }
+            return $false
+          }
 
-              Write-Warning "bun install exited with code $($proc.ExitCode)."
-              if ($attempt -eq $MaxAttempts) {
-                throw "bun install failed after $MaxAttempts attempts."
-              }
+          function Invoke-NpmInstallFallback([int]$TimeoutSeconds = 1800) {
+            Write-Warning "bun install failed repeatedly, fallback to npm install (bun 失败后回退 npm 安装)."
+            $exitCode = Invoke-InstallCommandWithTimeout -Command "npm install --no-audit --no-fund" -TimeoutSeconds $TimeoutSeconds
+            if ($null -eq $exitCode) {
+              throw "npm install timed out after $TimeoutSeconds seconds."
+            }
+            if ($exitCode -ne 0) {
+              throw "npm install failed with exit code $exitCode."
             }
           }
 
-          Invoke-BunInstallWithRetry
+          if (-not (Invoke-BunInstallWithRetry)) {
+            Invoke-NpmInstallFallback
+          }
 
       - name: Build Windows NSIS installer (构建 NSIS 安装包)
         run: bun tauri build --bundles nsis
@@ -963,49 +961,47 @@ jobs:
             Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
           }
 
-          function Clear-StaleBunProcesses() {
-            $staleBun = @(Get-CimInstance Win32_Process -Filter "Name = 'bun.exe'" -ErrorAction SilentlyContinue | Where-Object { [string]::IsNullOrWhiteSpace($_.CommandLine) })
-            foreach ($proc in $staleBun) {
-              Write-Warning "Killing stale bun process PID=$($proc.ProcessId) (清理残留 bun 进程)"
-              Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
+          function Invoke-InstallCommandWithTimeout([string]$Command, [int]$TimeoutSeconds) {
+            $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $Command) -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
+            if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
+              Stop-ProcessTree -RootPid $proc.Id
+              return $null
             }
-
-            $staleCmd = @(Get-CimInstance Win32_Process -Filter "Name = 'cmd.exe'" -ErrorAction SilentlyContinue | Where-Object { [string]::IsNullOrWhiteSpace($_.CommandLine) })
-            foreach ($proc in $staleCmd) {
-              Write-Warning "Killing stale cmd process PID=$($proc.ProcessId) (清理残留 cmd 进程)"
-              Stop-Process -Id $proc.ProcessId -Force -ErrorAction SilentlyContinue
-            }
+            return $proc.ExitCode
           }
 
           function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 900, [int]$MaxAttempts = 2) {
-            Clear-StaleBunProcesses
             for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
               Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
               Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
 
-              $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "bun install --frozen-lockfile") -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
-              if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-                Stop-ProcessTree -RootPid $proc.Id
-                Clear-StaleBunProcesses
+              $exitCode = Invoke-InstallCommandWithTimeout -Command "bun install --frozen-lockfile" -TimeoutSeconds $TimeoutSeconds
+              if ($null -eq $exitCode) {
                 Write-Warning "bun install timed out after $TimeoutSeconds seconds."
-                if ($attempt -eq $MaxAttempts) {
-                  throw "bun install exceeded timeout and all retries are exhausted."
-                }
                 continue
               }
-
-              if ($proc.ExitCode -eq 0) {
-                return
+              if ($exitCode -eq 0) {
+                return $true
               }
+              Write-Warning "bun install exited with code $exitCode."
+            }
+            return $false
+          }
 
-              Write-Warning "bun install exited with code $($proc.ExitCode)."
-              if ($attempt -eq $MaxAttempts) {
-                throw "bun install failed after $MaxAttempts attempts."
-              }
+          function Invoke-NpmInstallFallback([int]$TimeoutSeconds = 1800) {
+            Write-Warning "bun install failed repeatedly, fallback to npm install (bun 失败后回退 npm 安装)."
+            $exitCode = Invoke-InstallCommandWithTimeout -Command "npm install --no-audit --no-fund" -TimeoutSeconds $TimeoutSeconds
+            if ($null -eq $exitCode) {
+              throw "npm install timed out after $TimeoutSeconds seconds."
+            }
+            if ($exitCode -ne 0) {
+              throw "npm install failed with exit code $exitCode."
             }
           }
 
-          Invoke-BunInstallWithRetry
+          if (-not (Invoke-BunInstallWithRetry)) {
+            Invoke-NpmInstallFallback
+          }
 
       - name: Init Android
         run: bun tauri android init
