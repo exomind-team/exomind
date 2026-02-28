@@ -10,6 +10,8 @@ use tokio::process::{Child, ChildStdin, ChildStdout, Command};
 use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
+const MAX_CLAUDE_SESSIONS: usize = 64;
+
 /// Session status（会话状态）.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum SessionStatus {
@@ -29,6 +31,13 @@ struct ClaudeSession {
     status: SessionStatus,
     created_at: Instant,
     message_count: u64,
+}
+
+impl Drop for ClaudeSession {
+    fn drop(&mut self) {
+        // Best-effort process termination（尽力终止子进程，避免僵尸/泄漏）.
+        let _ = self.child.start_kill();
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -60,10 +69,7 @@ impl ClaudeAgent {
         Self::with_command_and_args("claude", build_claude_persistent_args())
     }
 
-    pub fn with_command_and_args(
-        command: impl Into<String>,
-        persistent_args: Vec<String>,
-    ) -> Self {
+    pub fn with_command_and_args(command: impl Into<String>, persistent_args: Vec<String>) -> Self {
         Self {
             command: command.into(),
             persistent_args,
@@ -90,7 +96,8 @@ impl ClaudeAgent {
             None
         };
 
-        let action = decide_session_action(normalized_session_id.as_deref(), existing_session.is_some());
+        let action =
+            decide_session_action(normalized_session_id.as_deref(), existing_session.is_some());
 
         let (session_id, session_handle, needs_session_chunk) = match action {
             SessionAction::CreateNew => match self.create_session().await {
@@ -128,6 +135,8 @@ impl ClaudeAgent {
     }
 
     async fn create_session(&self) -> Result<(String, SharedClaudeSession), String> {
+        self.evict_dead_sessions().await;
+
         let session_id = Uuid::new_v4().to_string();
         let mut child = Command::new(&self.command)
             .args(&self.persistent_args)
@@ -146,7 +155,7 @@ impl ClaudeAgent {
             .take()
             .ok_or_else(|| "Claude stdout 不可用".to_string())?;
 
-        let session = ClaudeSession {
+        let mut session = ClaudeSession {
             session_id: session_id.clone(),
             claude_session_id: None,
             child,
@@ -157,11 +166,16 @@ impl ClaudeAgent {
             message_count: 0,
         };
 
+        let mut sessions = self.sessions.lock().await;
+        if sessions.len() >= MAX_CLAUDE_SESSIONS {
+            let _ = session.child.start_kill();
+            return Err(format!(
+                "Claude 会话数已达上限({MAX_CLAUDE_SESSIONS})，请复用已有会话"
+            ));
+        }
+
         let shared_session = Arc::new(Mutex::new(session));
-        self.sessions
-            .lock()
-            .await
-            .insert(session_id.clone(), shared_session.clone());
+        sessions.insert(session_id.clone(), shared_session.clone());
         Ok((session_id, shared_session))
     }
 
@@ -175,8 +189,24 @@ impl ClaudeAgent {
     ) {
         let mut session = session_handle.lock().await;
 
-        if let Err(error_message) = ensure_session_ready_for_turn(&mut session) {
+        match session.status {
+            SessionStatus::Idle => {}
+            SessionStatus::Processing => {
+                emit_error_chunk(&sender, "Claude 会话正在处理中，请稍后重试".to_string()).await;
+                return;
+            }
+            SessionStatus::Crashed => {
+                drop(session);
+                self.cleanup_session(&session_id).await;
+                emit_error_chunk(&sender, "Claude 会话已崩溃，请新建会话".to_string()).await;
+                return;
+            }
+        }
+
+        if let Err(error_message) = ensure_session_process_alive(&mut session) {
             session.status = SessionStatus::Crashed;
+            drop(session);
+            self.cleanup_session(&session_id).await;
             emit_error_chunk(&sender, error_message).await;
             return;
         }
@@ -187,6 +217,8 @@ impl ClaudeAgent {
         let input_line = build_stream_json_user_input(&message);
         if let Err(error) = write_user_input_line(&mut session.stdin, &input_line).await {
             session.status = SessionStatus::Crashed;
+            drop(session);
+            self.cleanup_session(&session_id).await;
             emit_error_chunk(&sender, format!("Claude 输入写入失败: {error}")).await;
             return;
         }
@@ -230,15 +262,59 @@ impl ClaudeAgent {
                 Ok(None) => {
                     session.status = SessionStatus::Crashed;
                     let message = build_session_ended_error_message(&mut session);
+                    drop(session);
+                    self.cleanup_session(&session_id).await;
                     emit_error_chunk(&sender, message).await;
                     return;
                 }
                 Err(error) => {
                     session.status = SessionStatus::Crashed;
+                    drop(session);
+                    self.cleanup_session(&session_id).await;
                     emit_error_chunk(&sender, format!("Claude 输出读取失败: {error}")).await;
                     return;
                 }
             }
+        }
+    }
+
+    async fn cleanup_session(&self, session_id: &str) {
+        let removed = self.sessions.lock().await.remove(session_id);
+        if let Some(handle) = removed {
+            let mut session = handle.lock().await;
+            session.status = SessionStatus::Crashed;
+            let _ = session.child.start_kill();
+        }
+    }
+
+    async fn evict_dead_sessions(&self) {
+        let snapshots = {
+            let sessions = self.sessions.lock().await;
+            sessions
+                .iter()
+                .map(|(id, handle)| (id.clone(), handle.clone()))
+                .collect::<Vec<_>>()
+        };
+
+        let mut stale_ids = Vec::new();
+        for (id, handle) in snapshots {
+            if let Ok(mut session) = handle.try_lock() {
+                let dead = matches!(session.status, SessionStatus::Crashed)
+                    || matches!(session.child.try_wait(), Ok(Some(_)) | Err(_));
+                if dead {
+                    let _ = session.child.start_kill();
+                    stale_ids.push(id);
+                }
+            }
+        }
+
+        if stale_ids.is_empty() {
+            return;
+        }
+
+        let mut sessions = self.sessions.lock().await;
+        for id in stale_ids {
+            sessions.remove(&id);
         }
     }
 }
@@ -290,13 +366,7 @@ fn decide_session_action(session_id: Option<&str>, has_existing_session: bool) -
     }
 }
 
-fn ensure_session_ready_for_turn(session: &mut ClaudeSession) -> Result<(), String> {
-    match session.status {
-        SessionStatus::Idle => {}
-        SessionStatus::Processing => return Err("Claude 会话正在处理中，请稍后重试".to_string()),
-        SessionStatus::Crashed => return Err("Claude 会话已崩溃，请新建会话".to_string()),
-    }
-
+fn ensure_session_process_alive(session: &mut ClaudeSession) -> Result<(), String> {
     match session.child.try_wait() {
         Ok(Some(status)) => Err(build_exit_status_error_message(status.code())),
         Ok(None) => Ok(()),
@@ -515,7 +585,10 @@ mod tests {
         let chunks = collect_chunks_from_mock_stdout(mock_stdout);
         assert_eq!(
             chunks,
-            vec![ChatChunk::content_only("你好"), ChatChunk::content_only("！")]
+            vec![
+                ChatChunk::content_only("你好"),
+                ChatChunk::content_only("！")
+            ]
         );
     }
 

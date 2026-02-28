@@ -19,7 +19,9 @@ async fn reuses_same_session_and_keeps_conversation_context() {
         .await;
 
     assert!(
-        first_chunks.iter().any(|chunk| chunk.content.contains("xiaoming")),
+        first_chunks
+            .iter()
+            .any(|chunk| chunk.content.contains("xiaoming")),
         "first_chunks={first_chunks:?}"
     );
 
@@ -80,5 +82,25 @@ async fn returns_error_after_reusing_session_with_exited_process() {
             .iter()
             .any(|chunk| chunk.content.contains("退出码") || chunk.content.contains("提前结束")),
         "second_chunks={second_chunks:?}"
+    );
+
+    let third_chunks = agent
+        .chat_stream(ChatRequest {
+            message: "what is my name?".to_string(),
+            session_id: Some(
+                first_chunks
+                    .iter()
+                    .find_map(|chunk| chunk.session_id.clone())
+                    .expect("first turn should include session_id"),
+            ),
+        })
+        .collect::<Vec<_>>()
+        .await;
+
+    assert!(
+        third_chunks
+            .iter()
+            .any(|chunk| chunk.content.contains("会话不存在")),
+        "third_chunks={third_chunks:?}"
     );
 }

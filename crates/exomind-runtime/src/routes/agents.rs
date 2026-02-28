@@ -7,8 +7,8 @@ use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 use std::convert::Infallible;
 
-use crate::agent::{ChatChunk, ChatRequest};
 use crate::AppState;
+use crate::agent::{ChatChunk, ChatRequest};
 
 #[derive(Debug, Deserialize)]
 struct ChatRequestPayload {

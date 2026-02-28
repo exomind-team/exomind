@@ -1,9 +1,9 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use serde::Serialize;
 use std::sync::OnceLock;
 use sysinfo::System;
 
-use crate::{RuntimeState, RUNTIME_VERSION};
+use crate::{RUNTIME_VERSION, RuntimeState};
 
 #[derive(Debug, Clone)]
 struct TopologyStaticInfo {
