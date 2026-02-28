@@ -1,4 +1,5 @@
 use super::{Agent, ChatChunk};
+use futures_util::stream::{self, BoxStream, StreamExt};
 
 /// Built-in echo agent (内置回显 Agent).
 #[derive(Debug, Default)]
@@ -23,9 +24,10 @@ impl Agent for EchoAgent {
         "回显输入内容"
     }
 
-    fn chat_chunks(&self, message: String) -> Vec<ChatChunk> {
-        vec![ChatChunk {
+    fn chat_stream(&self, message: String) -> BoxStream<'static, ChatChunk> {
+        stream::iter(vec![ChatChunk {
             content: format!("Echo: {message}"),
-        }]
+        }])
+        .boxed()
     }
 }
