@@ -26,20 +26,32 @@ describe('VoiceMessageInput Issue-120 behaviors', () => {
     vi.clearAllMocks();
   });
 
-  it('pressing Enter on empty textarea should start voice recording', () => {
+  it('pressing Ctrl+Enter on empty textarea should start voice recording', () => {
     const onSend = vi.fn();
     render(<VoiceMessageInput onSend={onSend} placeholder="输入内容记录事件..." />);
 
     const textarea = screen.getByTestId('event-input-textarea');
     (textarea as HTMLTextAreaElement).focus();
-    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
     expect(onSend).not.toHaveBeenCalled();
     expect(startVoiceSpy).toHaveBeenCalledTimes(1);
     expect(textarea).not.toHaveFocus();
   });
 
-  it('pressing Enter with content should send instead of starting voice', () => {
+  it('pressing Ctrl+Enter with content should send instead of starting voice', () => {
+    const onSend = vi.fn();
+    render(<VoiceMessageInput onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('event-input-textarea');
+    fireEvent.change(textarea, { target: { value: '测试事件' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
+
+    expect(onSend).toHaveBeenCalledWith('测试事件');
+    expect(startVoiceSpy).not.toHaveBeenCalled();
+  });
+
+  it('pressing Enter without Ctrl should not trigger quick send', () => {
     const onSend = vi.fn();
     render(<VoiceMessageInput onSend={onSend} placeholder="输入内容记录事件..." />);
 
@@ -47,7 +59,7 @@ describe('VoiceMessageInput Issue-120 behaviors', () => {
     fireEvent.change(textarea, { target: { value: '测试事件' } });
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
 
-    expect(onSend).toHaveBeenCalledWith('测试事件');
+    expect(onSend).not.toHaveBeenCalled();
     expect(startVoiceSpy).not.toHaveBeenCalled();
   });
 

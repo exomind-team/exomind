@@ -9,11 +9,13 @@ lerna-debug.log*
 
 # Dependencies
 node_modules
+/bun.lock
 
 # Build outputs
 dist
 dist-ssr
 *.local
+/target/
 
 # Editor directories and files
 .vscode/*
@@ -74,6 +76,7 @@ htmlcov/
 *.tmp
 *.temp
 .cache/
+.tmp/pouchdb-event-storage/
 .turbo/
 pnpm-store/
 
@@ -97,3 +100,19 @@ events_*/
 
 # 配置文件不同步
 pencil/.claude/settings.local.json
+
+# Agent 本地状态
+agent.test.local.state.json
+.claude/worktrees/
+
+# 临时截图和备份
+dark-mode-*.png
+*-backup.md
+
+# 测试输出
+vitest-output.txt
+
+# 临时构建产物与 PR 草稿
+artifacts/
+docs/pr/
+.wrangler/*

@@ -12,9 +12,14 @@
  */
 
 import type { IASRPort } from './interfaces/asr.port';
+import type { IAgentPort } from './interfaces/agent.port';
+import type { IClipboardPort } from './interfaces/clipboard.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
+import type { IMePort } from './interfaces/me.port';
 import type { IStoragePort } from './interfaces/storage.port';
+import type { ITaskPort } from './interfaces/task.port';
 import { createRuntimeBootstrap, type RuntimeKind } from './bootstrap';
+import { getUseMockDataEnabled } from '@/config/mock-data';
 
 /**
  * Environment 接口
@@ -23,10 +28,18 @@ import { createRuntimeBootstrap, type RuntimeKind } from './bootstrap';
 export interface Environment {
   /** 语音识别能力 */
   asr: IASRPort;
+  /** 剪贴板读取能力 */
+  clipboard: IClipboardPort;
   /** 存储能力 */
   storage: IStoragePort;
   /** 事件日志能力 */
   eventlog: IEventLogPort;
+  /** 任务能力 */
+  task: ITaskPort;
+  /** Me 页面能力 */
+  me: IMePort;
+  /** Agent Hub 能力 */
+  agent: IAgentPort;
   /** 运行时类型 */
   runtime: RuntimeKind;
 }
@@ -36,19 +49,47 @@ export interface Environment {
  */
 export class ExoMindEnvironment implements Environment {
   asr: IASRPort;
+  clipboard: IClipboardPort;
   storage: IStoragePort;
   eventlog: IEventLogPort;
+  task: ITaskPort;
+  me: IMePort;
+  agent: IAgentPort;
   runtime: RuntimeKind;
+  private useMockDataEnabled: boolean;
 
   private static instance: ExoMindEnvironment | null = null;
 
   private constructor(runtime?: RuntimeKind) {
-    const bootstrap = createRuntimeBootstrap({ runtime });
+    const useMockDataEnabled = getUseMockDataEnabled();
+    const bootstrap = createRuntimeBootstrap({ runtime, useMockData: useMockDataEnabled });
     this.runtime = bootstrap.runtime;
     this.asr = bootstrap.asr;
+    this.clipboard = bootstrap.clipboard;
     this.storage = bootstrap.storage;
     this.eventlog = bootstrap.eventlog;
+    this.task = bootstrap.task;
+    this.me = bootstrap.me;
+    this.agent = bootstrap.agent;
+    this.useMockDataEnabled = useMockDataEnabled;
     console.log(`[Environment] ExoMindEnvironment 初始化完成: ${this.runtime}`);
+  }
+
+  // Runtime sync（运行时同步）: 切换 mock-data 开关后，刷新与数据源相关的 adapter。
+  private refreshDataAdaptersIfNeeded(): void {
+    const nextUseMockDataEnabled = getUseMockDataEnabled();
+    if (nextUseMockDataEnabled === this.useMockDataEnabled) {
+      return;
+    }
+
+    const bootstrap = createRuntimeBootstrap({
+      runtime: this.runtime,
+      useMockData: nextUseMockDataEnabled,
+    });
+    this.task = bootstrap.task;
+    this.me = bootstrap.me;
+    this.agent = bootstrap.agent;
+    this.useMockDataEnabled = nextUseMockDataEnabled;
   }
 
   /**
@@ -58,6 +99,7 @@ export class ExoMindEnvironment implements Environment {
     if (!ExoMindEnvironment.instance) {
       ExoMindEnvironment.instance = new ExoMindEnvironment();
     }
+    ExoMindEnvironment.instance.refreshDataAdaptersIfNeeded();
     return ExoMindEnvironment.instance;
   }
 
@@ -74,8 +116,12 @@ export class ExoMindEnvironment implements Environment {
   capabilities(): Record<string, boolean> {
     return {
       asr: this.asr.isAvailable(),
+      clipboard: this.clipboard.isAvailable(),
       storage: true,
       eventlog: true,
+      task: true,
+      me: true,
+      agent: true,
     };
   }
 }

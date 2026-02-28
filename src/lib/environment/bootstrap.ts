@@ -1,22 +1,40 @@
+import { getUseMockDataEnabled } from '@/config/mock-data';
+import { MeWebAdapter } from '@/lib/adapters/me-web-adapter';
+import { MeMockAdapter } from '@/lib/adapters/mock/me-mock-adapter';
+import { AgentWebAdapter } from '@/lib/adapters/agent-web-adapter';
+import { AgentMockAdapter } from '@/lib/adapters/mock/agent-mock-adapter';
+import { TaskMockAdapter } from '@/lib/adapters/mock/task-mock-adapter';
+import { TaskWebAdapter } from '@/lib/adapters/task-web-adapter';
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
+import { TauriClipboardAdapter } from '../adapters/clipboard-tauri-adapter';
+import { WebClipboardAdapter } from '../adapters/clipboard-web-adapter';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { WebStorageAdapter } from '../adapters/web-storage';
+import type { IAgentPort } from './interfaces/agent.port';
 import type { IASRPort } from './interfaces/asr.port';
+import type { IClipboardPort } from './interfaces/clipboard.port';
 import type { IEventLogPort } from './interfaces/eventlog.port';
+import type { IMePort } from './interfaces/me.port';
 import type { IStoragePort } from './interfaces/storage.port';
+import type { ITaskPort } from './interfaces/task.port';
 
 export type RuntimeKind = 'web' | 'tauri';
 
 export interface RuntimeBootstrapResult {
   runtime: RuntimeKind;
   asr: IASRPort;
+  clipboard: IClipboardPort;
   storage: IStoragePort;
   eventlog: IEventLogPort;
+  task: ITaskPort;
+  me: IMePort;
+  agent: IAgentPort;
 }
 
 export interface RuntimeBootstrapOptions {
   runtime?: RuntimeKind;
   globalObject?: unknown;
+  useMockData?: boolean;
 }
 
 /**
@@ -46,21 +64,34 @@ export function detectRuntime(globalObject: unknown = globalThis): RuntimeKind {
 export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): RuntimeBootstrapResult {
   const runtime = options.runtime ?? detectRuntime(options.globalObject);
   const asr = new VolcanoEngineASRAdapter();
+  const clipboard: IClipboardPort = runtime === 'tauri' ? new TauriClipboardAdapter() : new WebClipboardAdapter();
+  const useMockData = options.useMockData ?? getUseMockDataEnabled();
+  const task: ITaskPort = useMockData ? new TaskMockAdapter() : new TaskWebAdapter();
+  const me: IMePort = useMockData ? new MeMockAdapter() : new MeWebAdapter();
+  const agent: IAgentPort = useMockData ? new AgentMockAdapter() : new AgentWebAdapter();
 
   if (runtime === 'tauri') {
     return {
       runtime,
       asr,
+      clipboard,
       storage: new TauriStorageAdapter(),
       // 临时统一到 PouchDB，避免 Tauri 原生 EventLog 与 UI 读取源分裂（#144）
       eventlog: new WebEventLogStorageAdapter(),
+      task,
+      me,
+      agent,
     };
   }
 
   return {
     runtime,
     asr,
+    clipboard,
     storage: new WebStorageAdapter(),
     eventlog: new WebEventLogStorageAdapter(),
+    task,
+    me,
+    agent,
   };
 }

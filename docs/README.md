@@ -49,6 +49,14 @@
 
 ---
 
+### 1.4 开发与运行文档
+
+| 文档 | 职责 |
+|------|------|
+| [development/exomind-runtime-agents-api.md](./development/exomind-runtime-agents-api.md) | Runtime Agent HTTP/SSE 接口说明（含 `session_id` 复用） |
+
+---
+
 ## 二、软件工程文档规范
 
 本项目遵循软件工程最佳实践，文档分为以下层次：

@@ -43,6 +43,16 @@
     --border-subtle: 30 10% 91%;
     --brand-accent: 14 76% 66%;
     --brand-gradient: 14 76% 66%, 14 68% 53%, 14 64% 48%;
+    --sidebar: 24 33% 96%;
+    --sidebar-foreground: 20 10% 16%;
+    --sidebar-muted: 20 5% 45%;
+    --sidebar-border: 24 16% 88%;
+    --sidebar-accent: 24 33% 90%;
+    --sidebar-accent-foreground: 20 12% 14%;
+
+    /* UserCard 渐变背景和阴影 */
+    --user-card-bg: radial-gradient(circle at 15% 0%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, #E8866F 0%, #D4664A 50%, #C75B3A 100%);
+    --user-card-shadow: 0 8px 24px -4px rgba(199,91,58,0.19), 0 20px 40px -8px rgba(199,91,58,0.13), 0 3px 8px rgba(255,255,255,0.31);
   }
 
   .dark {
@@ -73,17 +83,27 @@
     --warning: 38 92% 55%;
     --warning-foreground: 222.2 84% 4.9%;
 
-    /* 语义化颜色变量 - 深色模式 */
-    --text-primary: 270 31% 94%;
-    --text-strong: 270 30% 88%;
-    --text-secondary: 270 25% 68%;
-    --text-muted: 270 20% 55%;
-    --bg-card: 270 30% 18%;
-    --bg-surface: 270 25% 14%;
-    --border-card: 270 30% 25%;
-    --border-subtle: 270 25% 20%;
-    --brand-accent: 271 81% 76%;
-    --brand-gradient: 271 81% 76%, 271 75% 65%, 271 70% 55%;
+    /* 语义化颜色变量 - 深色模式 (Stone warm tone) */
+    --text-primary: 60 9% 98%;       /* #FAFAF9 Stone-50 */
+    --text-strong: 20 6% 90%;        /* #E7E5E4 Stone-200 */
+    --text-secondary: 24 5% 64%;     /* #A8A29E Stone-400 */
+    --text-muted: 25 5% 45%;         /* #78716C Stone-500 */
+    --bg-card: 24 10% 10%;           /* #1C1917 Stone-900 */
+    --bg-surface: 20 14% 4%;         /* #0C0A09 Stone-950 */
+    --border-card: 12 6% 15%;        /* #292524 Stone-800 */
+    --border-subtle: 20 5% 12%;      /* #211F1E Stone-850 approx */
+    --brand-accent: 14 56% 50%;      /* #C75B3A */
+    --brand-gradient: 14 56% 50%, 14 60% 42%, 14 65% 35%;
+    --sidebar: 24 13% 10%;
+    --sidebar-foreground: 20 6% 90%;
+    --sidebar-muted: 24 5% 64%;
+    --sidebar-border: 12 6% 15%;
+    --sidebar-accent: 24 10% 18%;
+    --sidebar-accent-foreground: 60 9% 98%;
+
+    /* UserCard 渐变背景和阴影 - 暗色 */
+    --user-card-bg: radial-gradient(circle at 15% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 50%), linear-gradient(145deg, #8B3A25 0%, #6B2E1E 50%, #4A1F14 100%);
+    --user-card-shadow: 0 8px 24px -4px rgba(199,91,58,0.12), 0 20px 40px -8px rgba(199,91,58,0.08);
   }
 }
 
@@ -97,16 +117,7 @@
 }
 
 @layer utilities {
-  /* Safe area utilities / 安全区工具类（顶部与底部） */
-  .safe-area-pt {
-    padding-top: constant(safe-area-inset-top);
-    padding-top: env(safe-area-inset-top, 0px);
-  }
-
-  .safe-area-pt-plus {
-    padding-top: calc(env(safe-area-inset-top, 0px) + 10px);
-  }
-
+  /* Safe area utilities / 安全区工具类（底部） */
   .safe-area-pb {
     padding-bottom: constant(safe-area-inset-bottom);
     padding-bottom: env(safe-area-inset-bottom, 0px);

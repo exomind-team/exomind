@@ -1,34 +1,24 @@
 import { describe, it, expect } from 'vitest';
 import fs from 'fs';
 import path from 'path';
-import { render, screen, fireEvent } from '@testing-library/react';
-import { createMemoryHistory } from '@tanstack/react-router';
-import { RouterProvider } from '@tanstack/react-router';
+describe('New home entry', () => {
+  const newFocusPagePath = path.resolve('src/ui/app/pages/FocusPage.tsx');
+  const newRoutesPath = path.resolve('src/routes.tsx');
 
-describe('HomePage component', () => {
-  const homePagePath = path.resolve('src/components/Home/HomePage.tsx');
-
-  it('should have HomePage component file', () => {
-    expect(fs.existsSync(homePagePath)).toBe(true);
+  it('should have FocusPage component file', () => {
+    expect(fs.existsSync(newFocusPagePath)).toBe(true);
   });
 
-  it('should have HomePage export', async () => {
-    const { HomePage } = await import('@/components/Home/HomePage');
-    expect(HomePage).toBeDefined();
-    expect(typeof HomePage).toBe('function');
-  });
-});
-
-describe('HomePage route', () => {
-  const homeRoutePath = path.resolve('src/routes/home.tsx');
-
-  it('should have home route file', () => {
-    expect(fs.existsSync(homeRoutePath)).toBe(true);
+  it('should have FocusPage export', () => {
+    const source = fs.readFileSync(newFocusPagePath, 'utf-8');
+    expect(source).toContain('export function FocusPage');
   });
 
-  it('should export HomeRoute component', async () => {
-    const { HomeRoute } = await import('@/routes/home');
-    expect(HomeRoute).toBeDefined();
+  it('should register / and /eventlog to FocusPage in new router', () => {
+    const content = fs.readFileSync(newRoutesPath, 'utf-8');
+    expect(content).toContain("path: '/'");
+    expect(content).toContain("path: '/eventlog'");
+    expect(content).toContain('<FocusPage />');
   });
 });
 

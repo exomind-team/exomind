@@ -16,7 +16,25 @@ function Resolve-Port {
     return $Default
 }
 
-$webPort = Resolve-Port $env:EXOMIND_WEB_PORT 1420
+$webPort = Resolve-Port $env:EXOMIND_WEB_PORT 0
+# If no explicit port, find a free one (未指定端口时自动寻找空闲端口)
+if ($webPort -eq 0) {
+    $findPortScript = Join-Path $PSScriptRoot "Scripts\dev\find-free-port.ts"
+    if (Test-Path -LiteralPath $findPortScript) {
+        try {
+            $freePort = (& bun $findPortScript 1420 2>$null).Trim()
+            if ($freePort -match '^\d+$') {
+                $webPort = [int]$freePort
+            } else {
+                $webPort = 1420
+            }
+        } catch {
+            $webPort = 1420
+        }
+    } else {
+        $webPort = 1420
+    }
+}
 $hmrPort = Resolve-Port $env:EXOMIND_HMR_PORT (if ($webPort -lt 65535) { $webPort + 1 } else { 1421 })
 $pouchdbPort = Resolve-Port $env:EXOMIND_POUCHDB_PORT 6984
 $asrPort = Resolve-Port $env:EXOMIND_ASR_PORT 1949

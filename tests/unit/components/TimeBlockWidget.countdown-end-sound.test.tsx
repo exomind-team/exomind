@@ -165,7 +165,6 @@ describe('TimeBlockWidget countdown end sound', () => {
 
     render(<TimeBlockWidget expanded />);
 
-    await user.click(screen.getByRole('switch', { name: '软结束（结束后继续计时）' }));
     await user.type(screen.getByPlaceholderText('输入任务标题...'), 'Meditation');
     await user.click(screen.getByRole('button', { name: '开始' }));
 
@@ -178,9 +177,7 @@ describe('TimeBlockWidget countdown end sound', () => {
     });
 
     await waitFor(() => expect(screen.getByText('+0:00')).toBeVisible());
-    await waitFor(() =>
-      expect(screen.getByRole('button', { name: '暂停', hidden: true })).toBeVisible(),
-    );
+    await waitFor(() => expect(screen.getByRole('button', { name: '暂停' })).toBeVisible());
 
     now = 2100;
     await act(async () => {
