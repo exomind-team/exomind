@@ -12,10 +12,13 @@
 - 默认路由（Routes，路由）:
   - `GET /agents`
   - `POST /agents/:id/chat`
+  - `GET /agents/:id/sessions`
+  - `GET /agents/:id/sessions/:sid`
+  - `DELETE /agents/:id/sessions/:sid`
 - 当前内置 Agent（Built-in Agents，内置 Agent）:
   - `claude`
   - `echo`
-- CORS（跨域）: 允许任意来源（`*`）、`GET/POST/OPTIONS`
+- CORS（跨域）: 允许任意来源（`*`）、`GET/POST/DELETE/OPTIONS`
 
 ---
 
@@ -114,10 +117,93 @@ data: [DONE]
 
 ---
 
-## 5. 状态码与错误（Status Codes & Errors，状态码与错误）
+## 5. `GET /agents/:id/sessions`
 
-- `200 OK`: 成功建立 SSE 流
-- `404 Not Found`: `:id` 对应 Agent 不存在
+### 5.1 作用（Purpose，用途）
+
+返回指定 Agent 的所有活跃会话列表。
+
+### 5.2 响应示例（Response Example，响应示例）
+
+```json
+[
+  {
+    "session_id": "a1b2c3d4-...",
+    "status": "idle",
+    "created_at": "2026-02-28T10:30:00Z",
+    "last_active": "2026-02-28T10:35:00Z",
+    "message_count": 3,
+    "uptime_secs": 300
+  }
+]
+```
+
+### 5.3 状态码（Status Codes，状态码）
+
+- `200 OK`: 返回 JSON 数组（可能为空 `[]`）
+- `404 Not Found`: Agent 不存在
+
+---
+
+## 6. `GET /agents/:id/sessions/:sid`
+
+### 6.1 作用（Purpose，用途）
+
+返回指定会话的详细信息。
+
+### 6.2 响应示例（Response Example，响应示例）
+
+```json
+{
+  "session_id": "a1b2c3d4-...",
+  "status": "idle",
+  "created_at": "2026-02-28T10:30:00Z",
+  "last_active": "2026-02-28T10:35:00Z",
+  "message_count": 3,
+  "uptime_secs": 300
+}
+```
+
+### 6.3 状态码（Status Codes，状态码）
+
+- `200 OK`: 返回 JSON 对象
+- `404 Not Found`: Agent 或 Session 不存在
+
+---
+
+## 7. `DELETE /agents/:id/sessions/:sid`
+
+### 7.1 作用（Purpose，用途）
+
+关闭指定会话，终止 Claude 子进程并清理资源。
+
+### 7.2 响应示例（Response Example，响应示例）
+
+```json
+{
+  "status": "closed",
+  "session_id": "a1b2c3d4-..."
+}
+```
+
+### 7.3 状态码（Status Codes，状态码）
+
+- `200 OK`: 会话已关闭
+- `404 Not Found`: Agent 或 Session 不存在
+
+---
+
+## 8. 状态码与错误（Status Codes & Errors，状态码与错误）
+
+- `200 OK`:
+  - `GET /agents`
+  - `POST /agents/:id/chat`（成功建立 SSE 流）
+  - `GET /agents/:id/sessions`
+  - `GET /agents/:id/sessions/:sid`
+  - `DELETE /agents/:id/sessions/:sid`
+- `404 Not Found`:
+  - `:id` 对应 Agent 不存在
+  - `:sid` 对应 Session 不存在（`GET/DELETE /agents/:id/sessions/:sid`）
 - `400 Bad Request`: 请求 JSON 非法（例如格式错误）
 
 说明:
@@ -126,9 +212,9 @@ data: [DONE]
 
 ---
 
-## 6. 联调示例（Examples，示例）
+## 9. 联调示例（Examples，示例）
 
-### 6.1 cURL（PowerShell）首轮创建会话
+### 9.1 cURL（PowerShell）首轮创建会话
 
 ```powershell
 $enc = New-Object System.Text.UTF8Encoding($false)
@@ -147,7 +233,7 @@ data: {"content":"...","session_id":"<uuid>"}
 data: [DONE]
 ```
 
-### 6.2 cURL（PowerShell）复用同一会话
+### 9.2 cURL（PowerShell）复用同一会话
 
 ```powershell
 $sid = "<首轮返回的 session_id>"
@@ -162,7 +248,7 @@ curl.exe -N -X POST "http://127.0.0.1:1919/agents/claude/chat" `
 
 ---
 
-## 7. Reqable 使用要点（Reqable Tips，Reqable 要点）
+## 10. Reqable 使用要点（Reqable Tips，Reqable 要点）
 
 1. Method（方法）: `POST`
 2. URL: `http://127.0.0.1:<port>/agents/claude/chat`
@@ -176,9 +262,10 @@ curl.exe -N -X POST "http://127.0.0.1:1919/agents/claude/chat" `
 
 ---
 
-## 8. 代码对应（Source Mapping，代码映射）
+## 11. 代码对应（Source Mapping，代码映射）
 
 - 路由与 SSE 封装: `crates/exomind-runtime/src/routes/agents.rs`
-- `ChatChunk` / `ChatRequest` 结构: `crates/exomind-runtime/src/agent/mod.rs`
+- `ChatChunk` / `ChatRequest` / `SessionInfo` 结构: `crates/exomind-runtime/src/agent/mod.rs`
 - Claude 会话管理与复用逻辑: `crates/exomind-runtime/src/agent/claude.rs`
+- CORS 方法配置（含 `DELETE`）: `crates/exomind-runtime/src/lib.rs`
 
