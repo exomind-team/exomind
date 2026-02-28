@@ -38,21 +38,13 @@ pub struct RuntimeServiceStatus {
     pub error: Option<String>,
 }
 
-fn lock_or_error<'a, T>(
-    mutex: &'a Mutex<T>,
-    label: &str,
-) -> Result<std::sync::MutexGuard<'a, T>, String> {
+fn lock_or_error<'a, T>(mutex: &'a Mutex<T>, label: &str) -> Result<std::sync::MutexGuard<'a, T>, String> {
     mutex
         .lock()
         .map_err(|_| format!("failed to lock runtime state: {label}"))
 }
 
-fn current_status(
-    state: &Arc<RuntimeProcessState>,
-    running: bool,
-    pid: Option<u32>,
-    error: Option<String>,
-) -> Result<RuntimeServiceStatus, String> {
+fn current_status(state: &Arc<RuntimeProcessState>, running: bool, pid: Option<u32>, error: Option<String>) -> Result<RuntimeServiceStatus, String> {
     let host = lock_or_error(&state.host, "host")?.clone();
     let port = *lock_or_error(&state.port, "port")?;
     let started_at = lock_or_error(&state.started_at, "started_at")?.clone();
@@ -161,16 +153,13 @@ fn is_valid_host(host: &str) -> bool {
 }
 
 fn resolve_runtime_entry_path() -> Result<PathBuf, String> {
-    let base_dir = std::env::current_dir().map_err(|_error| {
-        #[cfg(debug_assertions)]
-        {
-            format!("failed to resolve current directory: {_error}")
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            "failed to resolve current directory".to_string()
-        }
-    })?;
+    let base_dir = std::env::current_dir()
+        .map_err(|_error| {
+            #[cfg(debug_assertions)]
+            { format!("failed to resolve current directory: {_error}") }
+            #[cfg(not(debug_assertions))]
+            { "failed to resolve current directory".to_string() }
+        })?;
     resolve_runtime_entry_path_from_base(&base_dir)
 }
 
@@ -181,10 +170,7 @@ pub fn runtime_service_start(
     host: Option<String>,
     port: Option<u16>,
 ) -> Result<RuntimeServiceStatus, String> {
-    let runtime_host = host
-        .unwrap_or_else(|| "127.0.0.1".to_string())
-        .trim()
-        .to_string();
+    let runtime_host = host.unwrap_or_else(|| "127.0.0.1".to_string()).trim().to_string();
     if runtime_host.is_empty() {
         return Err("runtime host is required".to_string());
     }
@@ -229,9 +215,7 @@ pub fn runtime_service_start(
 }
 
 #[tauri::command]
-pub fn runtime_service_stop(
-    state: State<'_, Arc<RuntimeProcessState>>,
-) -> Result<RuntimeServiceStatus, String> {
+pub fn runtime_service_stop(state: State<'_, Arc<RuntimeProcessState>>) -> Result<RuntimeServiceStatus, String> {
     let mut child_guard = lock_or_error(&state.child, "child")?;
 
     if let Some(process) = child_guard.as_mut() {
@@ -247,9 +231,7 @@ pub fn runtime_service_stop(
 }
 
 #[tauri::command]
-pub fn runtime_service_status(
-    state: State<'_, Arc<RuntimeProcessState>>,
-) -> Result<RuntimeServiceStatus, String> {
+pub fn runtime_service_status(state: State<'_, Arc<RuntimeProcessState>>) -> Result<RuntimeServiceStatus, String> {
     let mut child_guard = lock_or_error(&state.child, "child")?;
     let (running, pid) = refresh_child_running_state(&mut child_guard)?;
 
@@ -286,11 +268,8 @@ mod tests {
         fs::create_dir_all(&server_dir).expect("should create server directory");
         fs::write(&entry, "// runtime server").expect("should create runtime entry");
 
-        let resolved =
-            resolve_runtime_entry_path_from_base(&src_tauri).expect("should resolve runtime entry");
-        let expected = entry
-            .canonicalize()
-            .expect("should canonicalize expected entry");
+        let resolved = resolve_runtime_entry_path_from_base(&src_tauri).expect("should resolve runtime entry");
+        let expected = entry.canonicalize().expect("should canonicalize expected entry");
         assert_eq!(resolved, expected);
 
         let _ = fs::remove_dir_all(&root);
@@ -302,8 +281,7 @@ mod tests {
         let src_tauri = root.join("src-tauri");
         fs::create_dir_all(&src_tauri).expect("should create src-tauri directory");
 
-        let resolved = resolve_runtime_entry_path_from_base(&src_tauri)
-            .expect("should fallback to manifest root server path");
+        let resolved = resolve_runtime_entry_path_from_base(&src_tauri).expect("should fallback to manifest root server path");
         assert!(resolved.ends_with(PathBuf::from("server").join("agent-runtime-server.js")));
         assert!(resolved.exists());
 

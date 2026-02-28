@@ -49,13 +49,7 @@ fn sanitize_user_id(user_id: Option<&str>) -> String {
     }
 
     raw.chars()
-        .map(|ch| {
-            if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' {
-                ch
-            } else {
-                '_'
-            }
-        })
+        .map(|ch| if ch.is_ascii_alphanumeric() || ch == '-' || ch == '_' { ch } else { '_' })
         .collect()
 }
 
@@ -90,8 +84,7 @@ fn read_events(path: &Path) -> Result<Vec<EventRecord>, String> {
         return Ok(Vec::new());
     }
 
-    let raw =
-        fs::read_to_string(path).map_err(|err| format!("failed to read eventlog file: {err}"))?;
+    let raw = fs::read_to_string(path).map_err(|err| format!("failed to read eventlog file: {err}"))?;
     if raw.trim().is_empty() {
         return Ok(Vec::new());
     }
@@ -110,8 +103,7 @@ fn read_checkpoint(path: &Path) -> Result<Option<MirrorCheckpoint>, String> {
         return Ok(None);
     }
 
-    let raw =
-        fs::read_to_string(path).map_err(|err| format!("failed to read checkpoint file: {err}"))?;
+    let raw = fs::read_to_string(path).map_err(|err| format!("failed to read checkpoint file: {err}"))?;
     if raw.trim().is_empty() {
         return Ok(None);
     }
@@ -143,7 +135,8 @@ fn sort_events_desc(events: &mut [EventRecord]) {
 
 fn sort_events_asc(events: &mut [EventRecord]) {
     events.sort_by(|left, right| {
-        left.timestamp
+        left
+            .timestamp
             .cmp(&right.timestamp)
             .then_with(|| left.id.cmp(&right.id))
     });
@@ -153,7 +146,8 @@ fn latest_event_id(events: &[EventRecord]) -> Option<String> {
     events
         .iter()
         .max_by(|left, right| {
-            left.timestamp
+            left
+                .timestamp
                 .cmp(&right.timestamp)
                 .then_with(|| left.id.cmp(&right.id))
         })
@@ -188,8 +182,7 @@ fn rebuild_markdown(paths: &EventLogPaths, events: &[EventRecord]) -> Result<(),
         markdown.push_str(&format_event_markdown(event));
     }
 
-    fs::write(&paths.mirror, markdown)
-        .map_err(|err| format!("failed to write markdown mirror: {err}"))?;
+    fs::write(&paths.mirror, markdown).map_err(|err| format!("failed to write markdown mirror: {err}"))?;
     let checkpoint_event = ordered.last().map(|event| event.id.clone());
     write_checkpoint(&paths.checkpoint, checkpoint_event)
 }
@@ -203,8 +196,7 @@ fn count_mirrored_events(path: &Path) -> Result<usize, String> {
         return Ok(0);
     }
 
-    let raw =
-        fs::read_to_string(path).map_err(|err| format!("failed to read markdown mirror: {err}"))?;
+    let raw = fs::read_to_string(path).map_err(|err| format!("failed to read markdown mirror: {err}"))?;
     Ok(raw
         .lines()
         .filter(|line| line.trim_start().starts_with("event_id: "))
@@ -220,11 +212,7 @@ pub fn eventlog_list(app: AppHandle, user_id: Option<String>) -> Result<Vec<Even
 }
 
 #[tauri::command]
-pub fn eventlog_append(
-    app: AppHandle,
-    user_id: Option<String>,
-    event: EventRecord,
-) -> Result<(), String> {
+pub fn eventlog_append(app: AppHandle, user_id: Option<String>, event: EventRecord) -> Result<(), String> {
     let paths = resolve_eventlog_paths(&app, user_id.as_deref())?;
     let mut events = read_events(&paths.events)?;
 
@@ -240,11 +228,7 @@ pub fn eventlog_append(
 }
 
 #[tauri::command]
-pub fn eventlog_get(
-    app: AppHandle,
-    user_id: Option<String>,
-    id: String,
-) -> Result<Option<EventRecord>, String> {
+pub fn eventlog_get(app: AppHandle, user_id: Option<String>, id: String) -> Result<Option<EventRecord>, String> {
     let paths = resolve_eventlog_paths(&app, user_id.as_deref())?;
     let events = read_events(&paths.events)?;
     Ok(events.into_iter().find(|event| event.id == id))
@@ -258,10 +242,7 @@ pub fn eventlog_clear(app: AppHandle, user_id: Option<String>) -> Result<(), Str
 }
 
 #[tauri::command]
-pub fn eventlog_mirror_status(
-    app: AppHandle,
-    user_id: Option<String>,
-) -> Result<MirrorStatus, String> {
+pub fn eventlog_mirror_status(app: AppHandle, user_id: Option<String>) -> Result<MirrorStatus, String> {
     let paths = resolve_eventlog_paths(&app, user_id.as_deref())?;
     let events = read_events(&paths.events)?;
     let checkpoint = read_checkpoint(&paths.checkpoint)?;
@@ -285,10 +266,7 @@ pub fn eventlog_mirror_status(
 }
 
 #[tauri::command]
-pub fn eventlog_rebuild_markdown(
-    app: AppHandle,
-    user_id: Option<String>,
-) -> Result<MirrorStatus, String> {
+pub fn eventlog_rebuild_markdown(app: AppHandle, user_id: Option<String>) -> Result<MirrorStatus, String> {
     let paths = resolve_eventlog_paths(&app, user_id.as_deref())?;
     let events = read_events(&paths.events)?;
     sync_markdown_mirror(&paths, &events)?;

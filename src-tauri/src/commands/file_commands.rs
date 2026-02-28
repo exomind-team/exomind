@@ -428,10 +428,7 @@ where
         message: format!("导入文件不是 UTF-8 文本: {}", e),
     })?;
 
-    Ok(PickedJsonFile {
-        path: display,
-        content,
-    })
+    Ok(PickedJsonFile { path: display, content })
 }
 
 /// 导出所有消息到 Markdown 文件
@@ -685,10 +682,7 @@ mod tests {
         .expect("url variant should be readable");
 
         assert!(read_uri);
-        assert_eq!(
-            picked.path,
-            "content://com.android.providers.downloads/doc/42"
-        );
+        assert_eq!(picked.path, "content://com.android.providers.downloads/doc/42");
         assert!(picked.content.contains("\"version\":1"));
     }
 }

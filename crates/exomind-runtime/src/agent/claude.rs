@@ -98,8 +98,15 @@ async fn stream_claude_stdout(command: String, message: String, sender: mpsc::Se
         }
     }
 
-    if let Err(error) = child.wait().await {
-        emit_error_chunk(&sender, format!("Claude 进程等待失败: {error}")).await;
+    match child.wait().await {
+        Ok(status) => {
+            if !status.success() {
+                emit_error_chunk(&sender, build_exit_status_error_message(status.code())).await;
+            }
+        }
+        Err(error) => {
+            emit_error_chunk(&sender, format!("Claude 进程等待失败: {error}")).await;
+        }
     }
 }
 
@@ -116,6 +123,13 @@ fn build_claude_args(message: &str) -> Vec<String> {
         "--dangerously-skip-permissions".to_string(),
         message.to_string(),
     ]
+}
+
+fn build_exit_status_error_message(code: Option<i32>) -> String {
+    match code {
+        Some(value) => format!("Claude 进程异常退出，退出码: {value}"),
+        None => "Claude 进程异常退出，退出码未知".to_string(),
+    }
 }
 
 fn parse_stream_json_line(line: &str) -> Option<ChatChunk> {
@@ -189,6 +203,22 @@ mod tests {
                 "--dangerously-skip-permissions".to_string(),
                 "你好".to_string(),
             ]
+        );
+    }
+
+    #[test]
+    fn build_exit_status_error_message_with_code() {
+        assert_eq!(
+            build_exit_status_error_message(Some(7)),
+            "Claude 进程异常退出，退出码: 7".to_string()
+        );
+    }
+
+    #[test]
+    fn build_exit_status_error_message_without_code() {
+        assert_eq!(
+            build_exit_status_error_message(None),
+            "Claude 进程异常退出，退出码未知".to_string()
         );
     }
 
