@@ -64,7 +64,6 @@ export class AgentHubServiceImpl implements AgentHubService {
 
     for (const host of aggregatedData.hosts) {
       const hostAgents = aggregatedData.agents.filter(a => a.hostId === host.id);
-      const topology = aggregatedData.topologies.get(host.id);
 
       // 构建设备卡片
       const cards = hostAgents.map(agent => ({

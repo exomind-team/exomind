@@ -9,4 +9,6 @@ export interface RuntimeTopologyResponse {
   uptime_secs: number; // 保持 snake_case 与 Rust JSON 契约一致（wire format alignment）
   version: string; // runtime 版本
   port: number; // runtime 监听端口
+  total_memory_mb?: number; // 总内存（MB）
+  used_memory_mb?: number; // 已用内存（MB）
 }
