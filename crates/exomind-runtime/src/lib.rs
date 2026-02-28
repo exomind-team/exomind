@@ -1,16 +1,13 @@
 use axum::{routing::get, Json, Router};
 use serde::Serialize;
 use std::env;
+use std::sync::Arc;
 use thiserror::Error;
 
+pub mod agent;
 pub mod routes;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
-
-#[derive(Clone, Debug)]
-pub struct RuntimeState {
-    pub port: u16,
-}
 
 #[derive(Debug, Error)]
 pub enum PortConfigError {
@@ -34,11 +31,27 @@ pub fn configured_port_from_env() -> Result<u16, PortConfigError> {
 
 /// Build HTTP router (HTTP 路由构建入口).
 pub fn app(runtime_port: u16) -> Router {
-    Router::<RuntimeState>::new()
+    Router::new()
         .route("/health", get(health))
         .merge(routes::router())
-        .with_state(RuntimeState { port: runtime_port })
+        .with_state(AppState::new(runtime_port))
 }
+
+#[derive(Clone, Debug)]
+pub struct AppState {
+    pub port: u16,
+    pub registry: agent::AgentRegistry,
+}
+
+impl AppState {
+    fn new(port: u16) -> Self {
+        let registry = agent::AgentRegistry::new();
+        registry.register(Arc::new(agent::echo::EchoAgent::new()));
+        Self { port, registry }
+    }
+}
+
+pub type RuntimeState = AppState;
 
 #[derive(Debug, Serialize)]
 struct HealthResponse {
@@ -113,5 +126,71 @@ mod tests {
         assert!(payload["uptime_secs"].is_u64());
         assert_eq!(payload["version"], RUNTIME_VERSION);
         assert_eq!(payload["port"], serde_json::json!(TEST_PORT));
+    }
+
+    #[tokio::test]
+    async fn agents_endpoint_returns_echo_agent() {
+        const TEST_PORT: u16 = 3003;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert_eq!(
+            payload,
+            serde_json::json!([
+                {
+                    "id": "echo",
+                    "name": "Echo Agent",
+                    "description": "回显输入内容",
+                    "status": "available"
+                }
+            ])
+        );
+    }
+
+    #[tokio::test]
+    async fn echo_chat_stream_returns_data_and_done() {
+        const TEST_PORT: u16 = 3003;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/agents/echo/chat")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"message":"hello"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+        assert_eq!(
+            response
+                .headers()
+                .get("content-type")
+                .and_then(|value| value.to_str().ok()),
+            Some("text/event-stream")
+        );
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
+
+        let data_marker = r#"data: {"content":"Echo: hello"}"#;
+        let done_marker = "data: [DONE]";
+        let data_index = body_text.find(data_marker).unwrap();
+        let done_index = body_text.find(done_marker).unwrap();
+
+        assert!(data_index < done_index);
     }
 }
