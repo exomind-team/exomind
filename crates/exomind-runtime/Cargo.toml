@@ -2,6 +2,7 @@
 name = "exomind-runtime"
 version = "0.1.0"
 edition = "2024"
+default-run = "exomind-rt"
 
 [[bin]]
 name = "exomind-rt"
