@@ -31,6 +31,8 @@ jobs:
     # Serializing them (windows after android) prevents resource contention on the single runner.
     # If a dedicated second runner is added in future, this dependency can be removed.
     needs: build-android
+    outputs:
+      manifest_json: ${{ steps.manifest_windows.outputs.JSON }}
     if: |
       always() &&
       (
@@ -322,16 +324,13 @@ jobs:
 
           $manifestPath = Join-Path $manifestDir "windows-manifest.json"
           $manifest | ConvertTo-Json -Depth 12 | Set-Content -Path $manifestPath -Encoding UTF8
+          $manifestJson = $manifest | ConvertTo-Json -Depth 12 -Compress
           "PATH=$manifestPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Upload Windows manifest artifact (上传 Windows 轻量清单)
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-manifest-${{ steps.hash.outputs.HASH }}
-          path: ${{ steps.manifest_windows.outputs.PATH }}
-          retention-days: 1
+          "JSON=$manifestJson" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
   build-macos:
+    outputs:
+      manifest_json: ${{ steps.manifest_macos.outputs.JSON }}
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'macos' }}
     runs-on: macos-latest
     steps:
@@ -514,15 +513,11 @@ jobs:
             }' > "$manifest_path"
 
           echo "PATH=$manifest_path" >> "$GITHUB_OUTPUT"
-
-      - name: Upload macOS manifest artifact (上传 macOS 轻量清单)
-        uses: actions/upload-artifact@v4
-        with:
-          name: macos-manifest-${{ steps.hash.outputs.HASH }}
-          path: ${{ steps.manifest_macos.outputs.PATH }}
-          retention-days: 1
+          echo "JSON=$(jq -c '.' "$manifest_path")" >> "$GITHUB_OUTPUT"
 
   build-linux:
+    outputs:
+      manifest_json: ${{ steps.manifest_linux.outputs.JSON }}
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'linux' }}
     runs-on: ubuntu-22.04
     steps:
@@ -740,15 +735,11 @@ jobs:
             }' > "$manifest_path"
 
           echo "PATH=$manifest_path" >> "$GITHUB_OUTPUT"
-
-      - name: Upload Linux manifest artifact (上传 Linux 轻量清单)
-        uses: actions/upload-artifact@v4
-        with:
-          name: linux-manifest-${{ steps.hash.outputs.HASH }}
-          path: ${{ steps.manifest_linux.outputs.PATH }}
-          retention-days: 1
+          echo "JSON=$(jq -c '.' "$manifest_path")" >> "$GITHUB_OUTPUT"
 
   build-android:
+    outputs:
+      manifest_json: ${{ steps.manifest_android.outputs.JSON }}
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'android' }}
     runs-on: [self-hosted, Windows, X64]
     steps:
@@ -1167,14 +1158,9 @@ jobs:
           }
           $manifestPath = Join-Path $manifestDir "android-manifest.json"
           $manifest | ConvertTo-Json -Depth 12 | Set-Content -Path $manifestPath -Encoding UTF8
+          $manifestJson = $manifest | ConvertTo-Json -Depth 12 -Compress
           "PATH=$manifestPath" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
-
-      - name: Upload Android manifest artifact (上传 Android 轻量清单)
-        uses: actions/upload-artifact@v4
-        with:
-          name: android-manifest-${{ steps.hash.outputs.HASH }}
-          path: ${{ steps.manifest_android.outputs.PATH }}
-          retention-days: 1
+          "JSON=$manifestJson" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
   create-release:
     needs: [build-windows, build-macos, build-linux, build-android]
@@ -1191,15 +1177,33 @@ jobs:
       needs.build-linux.result == 'success' &&
       needs.build-android.result == 'success'
     steps:
-      - name: Download manifest artifacts (下载各平台轻量清单)
-        uses: actions/download-artifact@v4
-        with:
-          pattern: "*-manifest-*"
-          path: release-manifests
-          merge-multiple: true
+      - name: Materialize platform manifests from job outputs (从 job 输出落盘平台 manifest)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-manifests
+          cat <<'JSON' > release-manifests/windows-manifest.json
+          ${{ needs.build-windows.outputs.manifest_json }}
+          JSON
+          cat <<'JSON' > release-manifests/macos-manifest.json
+          ${{ needs.build-macos.outputs.manifest_json }}
+          JSON
+          cat <<'JSON' > release-manifests/linux-manifest.json
+          ${{ needs.build-linux.outputs.manifest_json }}
+          JSON
+          cat <<'JSON' > release-manifests/android-manifest.json
+          ${{ needs.build-android.outputs.manifest_json }}
+          JSON
 
-      - name: List manifest files
-        run: ls -la release-manifests/
+          for file in release-manifests/*.json; do
+            if [[ ! -s "$file" ]]; then
+              echo "::error::Manifest file is empty: $file"
+              exit 1
+            fi
+            jq -e . "$file" >/dev/null
+          done
+
+          ls -la release-manifests/
 
       - name: Resolve release metadata (解析发布元信息)
         id: meta
@@ -1276,7 +1280,6 @@ jobs:
             "windows-x64-setup"
             "android-arm64"
             "android-x86"
-            "macos-aarch64"
             "linux-x64-appimage"
             "linux-x64-deb"
           )
@@ -1293,14 +1296,13 @@ jobs:
             exit 1
           fi
 
-          echo "PATH=latest.json" >> "$GITHUB_OUTPUT"
+          if ! jq -e '.assets["macos-aarch64"] != null or .assets["macos-x64"] != null' latest.json >/dev/null; then
+            echo "::error::Missing macOS asset key: expected one of macos-aarch64 / macos-x64"
+            cat latest.json
+            exit 1
+          fi
 
-      - name: Upload release manifest artifact (上传发布 manifest 轻量清单)
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-manifest-${{ github.sha }}
-          path: ${{ steps.latest.outputs.PATH }}
-          retention-days: 1
+          echo "PATH=latest.json" >> "$GITHUB_OUTPUT"
 
       - name: Upload latest.json to R2 (上传 latest.json 到 R2)
         shell: bash
