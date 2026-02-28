@@ -187,66 +187,13 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
-          function Stop-ProcessTree([int]$RootPid) {
-            $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $RootPid" -ErrorAction SilentlyContinue)
-            foreach ($child in $children) {
-              Stop-ProcessTree -RootPid $child.ProcessId
-            }
-            Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
+          Write-Host "Use npm ci as primary installer to avoid Bun timeout on self-hosted Windows runner (优先使用 npm ci，避免 Bun 在自部署 Windows Runner 超时卡住)."
+          if (-not (Test-Path "package-lock.json")) {
+            throw "package-lock.json not found. npm ci requires a lockfile."
           }
-
-          function Invoke-InstallCommandWithTimeout([string]$Command, [int]$TimeoutSeconds) {
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = "cmd.exe"
-            $psi.Arguments = "/c $Command"
-            $psi.WorkingDirectory = (Get-Location).Path
-            $psi.UseShellExecute = $false
-            $psi.RedirectStandardOutput = $false
-            $psi.RedirectStandardError = $false
-            $psi.CreateNoWindow = $true
-
-            $proc = [System.Diagnostics.Process]::Start($psi)
-            if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-              Stop-ProcessTree -RootPid $proc.Id
-              return $null
-            }
-
-            $proc.WaitForExit()
-            return [int]$proc.ExitCode
-          }
-
-          function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 600, [int]$MaxAttempts = 1) {
-            for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-              Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
-              Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
-
-              $exitCode = Invoke-InstallCommandWithTimeout -Command "bun install --frozen-lockfile" -TimeoutSeconds $TimeoutSeconds
-              if ($null -eq $exitCode) {
-                Write-Warning "bun install timed out after $TimeoutSeconds seconds."
-                continue
-              }
-              if ($exitCode -eq 0) {
-                return $true
-              }
-              Write-Warning "bun install exited with code $exitCode."
-            }
-            return $false
-          }
-
-          function Invoke-NpmInstallFallback([int]$TimeoutSeconds = 1800) {
-            Write-Warning "bun install failed repeatedly, fallback to npm install (bun 失败后回退 npm 安装)."
-            $exitCode = Invoke-InstallCommandWithTimeout -Command "npm install --no-audit --no-fund" -TimeoutSeconds $TimeoutSeconds
-            if ($null -eq $exitCode) {
-              throw "npm install timed out after $TimeoutSeconds seconds."
-            }
-            if ($exitCode -ne 0) {
-              throw "npm install failed with exit code $exitCode."
-            }
-          }
-
-          if (-not (Invoke-BunInstallWithRetry)) {
-            Invoke-NpmInstallFallback
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) {
+            throw "npm ci failed with exit code $LASTEXITCODE."
           }
 
       - name: Build Windows NSIS installer (构建 NSIS 安装包)
@@ -963,66 +910,13 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-
-          function Stop-ProcessTree([int]$RootPid) {
-            $children = @(Get-CimInstance Win32_Process -Filter "ParentProcessId = $RootPid" -ErrorAction SilentlyContinue)
-            foreach ($child in $children) {
-              Stop-ProcessTree -RootPid $child.ProcessId
-            }
-            Stop-Process -Id $RootPid -Force -ErrorAction SilentlyContinue
+          Write-Host "Use npm ci as primary installer to avoid Bun timeout on self-hosted Windows runner (优先使用 npm ci，避免 Bun 在自部署 Windows Runner 超时卡住)."
+          if (-not (Test-Path "package-lock.json")) {
+            throw "package-lock.json not found. npm ci requires a lockfile."
           }
-
-          function Invoke-InstallCommandWithTimeout([string]$Command, [int]$TimeoutSeconds) {
-            $psi = New-Object System.Diagnostics.ProcessStartInfo
-            $psi.FileName = "cmd.exe"
-            $psi.Arguments = "/c $Command"
-            $psi.WorkingDirectory = (Get-Location).Path
-            $psi.UseShellExecute = $false
-            $psi.RedirectStandardOutput = $false
-            $psi.RedirectStandardError = $false
-            $psi.CreateNoWindow = $true
-
-            $proc = [System.Diagnostics.Process]::Start($psi)
-            if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
-              Stop-ProcessTree -RootPid $proc.Id
-              return $null
-            }
-
-            $proc.WaitForExit()
-            return [int]$proc.ExitCode
-          }
-
-          function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 600, [int]$MaxAttempts = 1) {
-            for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
-              Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
-              Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
-
-              $exitCode = Invoke-InstallCommandWithTimeout -Command "bun install --frozen-lockfile" -TimeoutSeconds $TimeoutSeconds
-              if ($null -eq $exitCode) {
-                Write-Warning "bun install timed out after $TimeoutSeconds seconds."
-                continue
-              }
-              if ($exitCode -eq 0) {
-                return $true
-              }
-              Write-Warning "bun install exited with code $exitCode."
-            }
-            return $false
-          }
-
-          function Invoke-NpmInstallFallback([int]$TimeoutSeconds = 1800) {
-            Write-Warning "bun install failed repeatedly, fallback to npm install (bun 失败后回退 npm 安装)."
-            $exitCode = Invoke-InstallCommandWithTimeout -Command "npm install --no-audit --no-fund" -TimeoutSeconds $TimeoutSeconds
-            if ($null -eq $exitCode) {
-              throw "npm install timed out after $TimeoutSeconds seconds."
-            }
-            if ($exitCode -ne 0) {
-              throw "npm install failed with exit code $exitCode."
-            }
-          }
-
-          if (-not (Invoke-BunInstallWithRetry)) {
-            Invoke-NpmInstallFallback
+          npm ci --no-audit --no-fund
+          if ($LASTEXITCODE -ne 0) {
+            throw "npm ci failed with exit code $LASTEXITCODE."
           }
 
       - name: Init Android
