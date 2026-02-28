@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use futures_util::stream;
+use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 use std::convert::Infallible;
 
@@ -35,22 +35,16 @@ async fn chat_with_agent(
         return Err(StatusCode::NOT_FOUND);
     };
 
-    let events = agent
-        .chat_chunks(payload.message)
-        .into_iter()
-        .map(|chunk: ChatChunk| {
-            serde_json::to_string(&chunk)
-                .map(|encoded| Event::default().data(encoded))
-                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
-        })
-        .collect::<Result<Vec<_>, _>>()?;
+    let data_stream = agent.chat_stream(payload.message).map(|chunk: ChatChunk| {
+        // ChatChunk currently only contains strings, JSON serialization is expected infallible.
+        let encoded = serde_json::to_string(&chunk).expect("ChatChunk serialization failed");
+        Ok::<Event, Infallible>(Event::default().data(encoded))
+    });
 
-    let stream = stream::iter(
-        events
-            .into_iter()
-            .chain(std::iter::once(Event::default().data("[DONE]")))
-            .map(Ok::<Event, Infallible>),
-    );
+    let done_stream =
+        stream::once(async { Ok::<Event, Infallible>(Event::default().data("[DONE]")) });
+
+    let stream = data_stream.chain(done_stream);
 
     Ok(Sse::new(stream))
 }

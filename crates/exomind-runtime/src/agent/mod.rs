@@ -1,6 +1,7 @@
+use futures_util::stream::BoxStream;
 use serde::Serialize;
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub mod echo;
 
@@ -29,7 +30,7 @@ pub trait Agent: Send + Sync {
         "available"
     }
 
-    fn chat_chunks(&self, message: String) -> Vec<ChatChunk>;
+    fn chat_stream(&self, message: String) -> BoxStream<'static, ChatChunk>;
 }
 
 #[derive(Clone, Default)]
@@ -42,37 +43,46 @@ impl AgentRegistry {
         Self::default()
     }
 
+    fn read_agents(&self) -> RwLockReadGuard<'_, HashMap<String, Arc<dyn Agent>>> {
+        match self.agents.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn write_agents(&self) -> RwLockWriteGuard<'_, HashMap<String, Arc<dyn Agent>>> {
+        match self.agents.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
     /// Register an agent at runtime (运行时注册 Agent).
     pub fn register(&self, agent: Arc<dyn Agent>) -> Option<Arc<dyn Agent>> {
         let id = agent.id().to_string();
-        self.agents.write().ok()?.insert(id, agent)
+        self.write_agents().insert(id, agent)
     }
 
     /// Unregister by id at runtime (运行时注销 Agent).
     pub fn unregister(&self, id: &str) -> Option<Arc<dyn Agent>> {
-        self.agents.write().ok()?.remove(id)
+        self.write_agents().remove(id)
     }
 
     pub fn get(&self, id: &str) -> Option<Arc<dyn Agent>> {
-        self.agents.read().ok()?.get(id).cloned()
+        self.read_agents().get(id).cloned()
     }
 
     pub fn list(&self) -> Vec<AgentSummary> {
         let mut summaries = self
-            .agents
-            .read()
-            .map(|agents| {
-                agents
-                    .values()
-                    .map(|agent| AgentSummary {
-                        id: agent.id().to_string(),
-                        name: agent.name().to_string(),
-                        description: agent.description().to_string(),
-                        status: agent.status().to_string(),
-                    })
-                    .collect::<Vec<_>>()
+            .read_agents()
+            .values()
+            .map(|agent| AgentSummary {
+                id: agent.id().to_string(),
+                name: agent.name().to_string(),
+                description: agent.description().to_string(),
+                status: agent.status().to_string(),
             })
-            .unwrap_or_default();
+            .collect::<Vec<_>>();
 
         summaries.sort_by(|left, right| left.id.cmp(&right.id));
         summaries
@@ -82,6 +92,8 @@ impl AgentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use futures_util::stream::{self, StreamExt};
+    use std::panic::{self, AssertUnwindSafe};
 
     struct TempAgent;
 
@@ -98,8 +110,8 @@ mod tests {
             "Temporary testing agent"
         }
 
-        fn chat_chunks(&self, message: String) -> Vec<ChatChunk> {
-            vec![ChatChunk { content: message }]
+        fn chat_stream(&self, message: String) -> BoxStream<'static, ChatChunk> {
+            stream::iter(vec![ChatChunk { content: message }]).boxed()
         }
     }
 
@@ -120,6 +132,26 @@ mod tests {
                 status: "available".to_string(),
             }]
         );
+
+        let removed = registry.unregister("temp");
+        assert!(removed.is_some());
+        assert!(registry.list().is_empty());
+    }
+
+    #[test]
+    fn registry_recovers_after_lock_poisoning() {
+        let registry = AgentRegistry::new();
+        registry.register(Arc::new(TempAgent));
+
+        let inner = registry.agents.clone();
+        let _ = panic::catch_unwind(AssertUnwindSafe(move || {
+            let _guard = inner.write().unwrap();
+            panic!("poison lock for test");
+        }));
+
+        let summaries = registry.list();
+        assert_eq!(summaries.len(), 1);
+        assert_eq!(summaries[0].id, "temp");
 
         let removed = registry.unregister("temp");
         assert!(removed.is_some());
