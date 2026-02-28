@@ -32,7 +32,13 @@
     "test:e2e:issue204": "node Scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.issue204.test.ts --config tests/e2e/playwright.issue204.config.ts",
     "test:e2e:issue205": "node Scripts/test/playwright-runner.cjs test tests/e2e/agent-runtime-host.issue205.test.ts --config tests/e2e/playwright.issue205.config.ts",
     "test:e2e:issue243": "node Scripts/test/playwright-runner.cjs test tests/e2e/command-palette.issue243.test.ts --config tests/e2e/playwright.issue243.config.ts",
-    "test:e2e:report": "node Scripts/test/playwright-runner.cjs test --reporter=html"
+    "test:e2e:report": "node Scripts/test/playwright-runner.cjs test --reporter=html",
+    "test:e2e:website": "node Scripts/test/playwright-runner.cjs test tests/e2e/website.dark-mode.test.ts tests/e2e/website.smoke.test.ts --config tests/e2e/playwright.website.config.ts",
+    "test:e2e:website:prod": "node Scripts/test/playwright-runner.cjs test tests/e2e/website.smoke.test.ts --config tests/e2e/playwright.website.prod.config.ts",
+    "website:install": "bun install --cwd website --frozen-lockfile",
+    "website:build": "bun run --cwd website build",
+    "website:cf:dev": "bun run website:build && npx wrangler dev --config wrangler.toml --port 8788 --local",
+    "website:cf:dry-run": "bun run website:build && npx wrangler deploy --config wrangler.toml --dry-run"
   },
   "dependencies": {
     "@noble/hashes": "^2.0.1",
