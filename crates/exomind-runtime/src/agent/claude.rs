@@ -412,6 +412,7 @@ fn build_claude_persistent_args() -> Vec<String> {
         "stream-json".to_string(),
         "--output-format".to_string(),
         "stream-json".to_string(),
+        "--replay-user-messages".to_string(),
         "--verbose".to_string(),
         "--dangerously-skip-permissions".to_string(),
     ]
@@ -603,6 +604,7 @@ mod tests {
                 "stream-json".to_string(),
                 "--output-format".to_string(),
                 "stream-json".to_string(),
+                "--replay-user-messages".to_string(),
                 "--verbose".to_string(),
                 "--dangerously-skip-permissions".to_string(),
             ]
