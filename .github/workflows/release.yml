@@ -199,6 +199,22 @@ jobs:
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
+      - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
+        shell: powershell
+        run: cargo build --release -p exomind-runtime
+
+      - name: Package exomind-rt runtime (打包 exomind-rt 运行时产物)
+        shell: powershell
+        run: |
+          New-Item -ItemType Directory -Force -Path artifacts/runtime | Out-Null
+          Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
+
+      - name: Upload Windows runtime Artifact (上传 Windows runtime)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-${{ steps.hash.outputs.HASH }}
+          path: artifacts/runtime/exomind-rt-windows-x64.exe
+
       - name: Upload Windows EXE Artifact (上传 EXE)
         id: upload_exe
         uses: actions/upload-artifact@v4
@@ -278,6 +294,23 @@ jobs:
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
+      - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
+        run: cargo build --release -p exomind-runtime
+
+      - name: Package exomind-rt runtime (打包 exomind-rt 运行时产物)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/runtime
+          cp target/release/exomind-rt artifacts/runtime/exomind-rt-macos-aarch64
+          tar -czf artifacts/runtime/exomind-rt-macos-aarch64.tar.gz -C artifacts/runtime exomind-rt-macos-aarch64
+
+      - name: Upload macOS runtime Artifact (上传 macOS runtime)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-runtime-${{ steps.hash.outputs.HASH }}
+          path: artifacts/runtime/exomind-rt-macos-aarch64.tar.gz
+
       - name: Upload macOS DMG Artifact (上传 DMG)
         uses: actions/upload-artifact@v4
         with:
@@ -353,6 +386,23 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
+        run: cargo build --release -p exomind-runtime
+
+      - name: Package exomind-rt runtime (打包 exomind-rt 运行时产物)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/runtime
+          cp target/release/exomind-rt artifacts/runtime/exomind-rt-linux-x64
+          tar -czf artifacts/runtime/exomind-rt-linux-x64.tar.gz -C artifacts/runtime exomind-rt-linux-x64
+
+      - name: Upload Linux runtime Artifact (上传 Linux runtime)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-runtime-${{ steps.hash.outputs.HASH }}
+          path: artifacts/runtime/exomind-rt-linux-x64.tar.gz
 
       - name: Upload Linux DEB Artifact (上传 DEB)
         uses: actions/upload-artifact@v4
@@ -797,6 +847,21 @@ jobs:
           cp "$arm64_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-arm64.apk"
           cp "$x86_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-x86.apk"
 
+          runtime_win_files=("$source_dir"/**/exomind-rt-windows-x64.exe)
+          if (( ${#runtime_win_files[@]} > 0 )); then
+            cp "${runtime_win_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-windows-x64.exe"
+          fi
+
+          runtime_macos_files=("$source_dir"/**/exomind-rt-macos-aarch64.tar.gz)
+          if (( ${#runtime_macos_files[@]} > 0 )); then
+            cp "${runtime_macos_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-macos-aarch64.tar.gz"
+          fi
+
+          runtime_linux_files=("$source_dir"/**/exomind-rt-linux-x64.tar.gz)
+          if (( ${#runtime_linux_files[@]} > 0 )); then
+            cp "${runtime_linux_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-linux-x64.tar.gz"
+          fi
+
       - name: List Normalized Files
         run: ls -la release-assets/
 
@@ -950,6 +1015,22 @@ jobs:
             cp "$deb" "$dest/ExoMind-${version}-linux-x64.deb"
           done
 
+          # Find and copy exomind-rt runtime binaries
+          runtime_win_files=("$src"/**/exomind-rt-windows-x64.exe)
+          if (( ${#runtime_win_files[@]} > 0 )); then
+            cp "${runtime_win_files[0]}" "$dest/ExoMind-RT-${version}-windows-x64.exe"
+          fi
+
+          runtime_macos_files=("$src"/**/exomind-rt-macos-aarch64.tar.gz)
+          if (( ${#runtime_macos_files[@]} > 0 )); then
+            cp "${runtime_macos_files[0]}" "$dest/ExoMind-RT-${version}-macos-aarch64.tar.gz"
+          fi
+
+          runtime_linux_files=("$src"/**/exomind-rt-linux-x64.tar.gz)
+          if (( ${#runtime_linux_files[@]} > 0 )); then
+            cp "${runtime_linux_files[0]}" "$dest/ExoMind-RT-${version}-linux-x64.tar.gz"
+          fi
+
           echo "=== Files prepared for R2 upload ==="
           ls -la "$dest/"
 
@@ -974,6 +1055,7 @@ jobs:
               *.dmg)      echo "application/x-apple-diskimage" ;;
               *.AppImage) echo "application/octet-stream" ;;
               *.deb)      echo "application/vnd.debian.binary-package" ;;
+              *.tar.gz)   echo "application/gzip" ;;
               *.json)     echo "application/json" ;;
               *)          echo "application/octet-stream" ;;
             esac
@@ -1056,6 +1138,18 @@ jobs:
           add_asset "linux-x64-deb" \
             "$src/ExoMind-${version}-linux-x64.deb" \
             "${channel}/${version_dir}/ExoMind-${version}-linux-x64.deb"
+
+          add_asset "runtime-windows-x64" \
+            "$src/ExoMind-RT-${version}-windows-x64.exe" \
+            "${channel}/${version_dir}/ExoMind-RT-${version}-windows-x64.exe"
+
+          add_asset "runtime-macos-aarch64" \
+            "$src/ExoMind-RT-${version}-macos-aarch64.tar.gz" \
+            "${channel}/${version_dir}/ExoMind-RT-${version}-macos-aarch64.tar.gz"
+
+          add_asset "runtime-linux-x64" \
+            "$src/ExoMind-RT-${version}-linux-x64.tar.gz" \
+            "${channel}/${version_dir}/ExoMind-RT-${version}-linux-x64.tar.gz"
 
           # Compose latest.json
           latest_json="$(jq -n \

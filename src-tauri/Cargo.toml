@@ -40,8 +40,3 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tauri-plugin-mcp-bridge= "0.8"
 thiserror = "1"
 
-[profile.release]
-lto = true
-opt-level = "s"
-panic = "abort"
-strip = true
