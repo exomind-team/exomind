@@ -7,7 +7,7 @@ pub mod routes;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
-#[derive(Clone, Copy, Debug)]
+#[derive(Clone, Debug)]
 pub struct RuntimeState {
     pub port: u16,
 }
@@ -64,7 +64,8 @@ mod tests {
 
     #[tokio::test]
     async fn health_endpoint_returns_ok_with_version() {
-        let response = app(3001)
+        const TEST_PORT: u16 = 3001;
+        let response = app(TEST_PORT)
             .oneshot(
                 Request::builder()
                     .uri("/health")
@@ -90,7 +91,8 @@ mod tests {
 
     #[tokio::test]
     async fn topology_endpoint_returns_runtime_topology() {
-        let response = app(3002)
+        const TEST_PORT: u16 = 3002;
+        let response = app(TEST_PORT)
             .oneshot(
                 Request::builder()
                     .uri("/topology")
@@ -110,6 +112,6 @@ mod tests {
         assert!(!payload["arch"].as_str().unwrap_or_default().is_empty());
         assert!(payload["uptime_secs"].is_u64());
         assert_eq!(payload["version"], RUNTIME_VERSION);
-        assert_eq!(payload["port"], serde_json::json!(3002));
+        assert_eq!(payload["port"], serde_json::json!(TEST_PORT));
     }
 }
