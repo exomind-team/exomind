@@ -19,6 +19,24 @@ pub struct AgentSummary {
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 pub struct ChatChunk {
     pub content: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_id: Option<String>,
+}
+
+impl ChatChunk {
+    pub fn content_only(content: impl Into<String>) -> Self {
+        Self {
+            content: content.into(),
+            session_id: None,
+        }
+    }
+}
+
+/// Chat request payload (聊天请求载荷).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ChatRequest {
+    pub message: String,
+    pub session_id: Option<String>,
 }
 
 /// Agent behavior contract (Agent 行为契约).
@@ -31,7 +49,7 @@ pub trait Agent: Send + Sync {
         "available"
     }
 
-    fn chat_stream(&self, message: String) -> BoxStream<'static, ChatChunk>;
+    fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk>;
 }
 
 #[derive(Clone, Default)]
@@ -111,8 +129,8 @@ mod tests {
             "Temporary testing agent"
         }
 
-        fn chat_stream(&self, message: String) -> BoxStream<'static, ChatChunk> {
-            stream::iter(vec![ChatChunk { content: message }]).boxed()
+        fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk> {
+            stream::iter(vec![ChatChunk::content_only(request.message)]).boxed()
         }
     }
 

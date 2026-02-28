@@ -102,8 +102,8 @@ mod tests {
             "用于路由注册/注销可见性测试"
         }
 
-        fn chat_stream(&self, message: String) -> BoxStream<'static, agent::ChatChunk> {
-            stream::iter(vec![agent::ChatChunk { content: message }]).boxed()
+        fn chat_stream(&self, request: agent::ChatRequest) -> BoxStream<'static, agent::ChatChunk> {
+            stream::iter(vec![agent::ChatChunk::content_only(request.message)]).boxed()
         }
     }
 

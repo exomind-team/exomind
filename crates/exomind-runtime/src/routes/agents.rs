@@ -7,12 +7,14 @@ use futures_util::stream::{self, StreamExt};
 use serde::Deserialize;
 use std::convert::Infallible;
 
-use crate::agent::ChatChunk;
+use crate::agent::{ChatChunk, ChatRequest};
 use crate::AppState;
 
 #[derive(Debug, Deserialize)]
-struct ChatRequest {
+struct ChatRequestPayload {
     message: String,
+    #[serde(default)]
+    session_id: Option<String>,
 }
 
 /// Agent routes (Agent 相关路由).
@@ -29,13 +31,21 @@ async fn list_agents(State(state): State<AppState>) -> Json<Vec<crate::agent::Ag
 async fn chat_with_agent(
     Path(id): Path<String>,
     State(state): State<AppState>,
-    Json(payload): Json<ChatRequest>,
+    Json(payload): Json<ChatRequestPayload>,
 ) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, StatusCode> {
     let Some(agent) = state.registry.get(&id) else {
         return Err(StatusCode::NOT_FOUND);
     };
 
-    let data_stream = agent.chat_stream(payload.message).map(|chunk: ChatChunk| {
+    let request = ChatRequest {
+        message: payload.message,
+        session_id: payload
+            .session_id
+            .map(|session| session.trim().to_string())
+            .filter(|session| !session.is_empty()),
+    };
+
+    let data_stream = agent.chat_stream(request).map(|chunk: ChatChunk| {
         // ChatChunk currently only contains strings, JSON serialization is expected infallible.
         let encoded = serde_json::to_string(&chunk).expect("ChatChunk serialization failed");
         Ok::<Event, Infallible>(Event::default().data(encoded))
