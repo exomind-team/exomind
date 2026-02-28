@@ -1,22 +1,23 @@
 name: Website Tests
 
 on:
-  pull_request:
-    paths:
-      - 'website/**'
-      - 'tests/e2e/website*.test.ts'
-      - 'tests/e2e/playwright.website*.config.ts'
-      - 'package.json'
-      - 'bun.lock'
-  push:
-    branches:
-      - dev
-    paths:
-      - 'website/**'
-      - 'tests/e2e/website*.test.ts'
-      - 'tests/e2e/playwright.website*.config.ts'
-      - 'package.json'
-      - 'bun.lock'
+  # PAUSED: 额度不足，暂停自动触发。手动触发仍可用。
+  # pull_request:
+  #   paths:
+  #     - 'website/**'
+  #     - 'tests/e2e/website*.test.ts'
+  #     - 'tests/e2e/playwright.website*.config.ts'
+  #     - 'package.json'
+  #     - 'bun.lock'
+  # push:
+  #   branches:
+  #     - dev
+  #   paths:
+  #     - 'website/**'
+  #     - 'tests/e2e/website*.test.ts'
+  #     - 'tests/e2e/playwright.website*.config.ts'
+  #     - 'package.json'
+  #     - 'bun.lock'
   workflow_dispatch:
     inputs:
       base_url:
