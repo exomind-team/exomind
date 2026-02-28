@@ -34,6 +34,9 @@ import {
   TIMER_END_SOUND_PRESETS,
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
+import { useSyncStore } from '@/ui/stores/sync-store';
+import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
+import { resolveSyncServerUrl } from '@/config/port-env';
 
 interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
@@ -136,7 +139,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // 加载进行中的时间块
+  // 加载进行中的时间块 + 启动同步
   useEffect(() => {
     const loadActiveBlock = async () => {
       const block = await timeBlockService.loadActiveBlock();
@@ -148,8 +151,24 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
         startTimeRef.current = block.startTime;
       }
     };
-    loadActiveBlock();
-  }, []);
+
+    const startSyncIfLoggedIn = async () => {
+      const syncStore = useSyncStore.getState();
+      if (syncStore.isLoggedIn && syncStore.currentUser) {
+        const syncServerUrl = resolveSyncServerUrl(import.meta.env);
+        const remoteUrl = buildRemoteDbUrl(syncServerUrl, syncStore.currentUser);
+        await timeBlockService.startSync(remoteUrl);
+      }
+    };
+
+    void loadActiveBlock();
+    void startSyncIfLoggedIn();
+
+    // 清理：组件卸载时停止同步
+    return () => {
+      void timeBlockService.stopSync();
+    };
+  }, [timeBlockService]);
 
   // 启动定时器
   const startTimer = useCallback(() => {

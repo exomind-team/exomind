@@ -25,6 +25,9 @@ import {
 } from '@/config/timer-preferences';
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
 import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
+import { useSyncStore } from '@/ui/stores/sync-store';
+import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
+import { resolveSyncServerUrl } from '@/config/port-env';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
@@ -166,9 +169,22 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       setRunningSubState(block.paused ? 'paused' : 'running');
     };
 
+    const startSyncIfLoggedIn = async () => {
+      if (cancelled) return;
+      const syncStore = useSyncStore.getState();
+      if (syncStore.isLoggedIn && syncStore.currentUser) {
+        const syncServerUrl = resolveSyncServerUrl(import.meta.env);
+        const remoteUrl = buildRemoteDbUrl(syncServerUrl, syncStore.currentUser);
+        await timeBlockServiceRef.current.startSync(remoteUrl);
+      }
+    };
+
     void loadActiveBlock();
+    void startSyncIfLoggedIn();
+
     return () => {
       cancelled = true;
+      void timeBlockServiceRef.current.stopSync();
     };
   }, []);
 
