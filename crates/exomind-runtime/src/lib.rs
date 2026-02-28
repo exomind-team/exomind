@@ -1,5 +1,5 @@
-use axum::{routing::get, Json, Router};
 use axum::http::Method;
+use axum::{routing::get, Json, Router};
 use serde::Serialize;
 use std::env;
 use std::sync::Arc;
@@ -55,6 +55,7 @@ pub struct AppState {
 impl AppState {
     fn new(port: u16) -> Self {
         let registry = agent::AgentRegistry::new();
+        registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
         registry.register(Arc::new(agent::echo::EchoAgent::new()));
         Self { port, registry }
     }
@@ -162,7 +163,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn agents_endpoint_returns_echo_agent() {
+    async fn agents_endpoint_returns_builtin_agents() {
         const TEST_PORT: u16 = 3003;
         let response = app(TEST_PORT)
             .oneshot(
@@ -182,6 +183,12 @@ mod tests {
         assert_eq!(
             payload,
             serde_json::json!([
+                {
+                    "id": "claude",
+                    "name": "Claude Agent",
+                    "description": "通过 Claude Code CLI 提供流式对话",
+                    "status": "available"
+                },
                 {
                     "id": "echo",
                     "name": "Echo Agent",
