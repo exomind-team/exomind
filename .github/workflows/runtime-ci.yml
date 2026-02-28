@@ -1,0 +1,45 @@
+name: Runtime CI
+
+on:
+  pull_request:
+    branches: [dev]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/exomind-runtime/**"
+      - "Scripts/test/exomind-runtime-smoke.ps1"
+      - ".github/workflows/runtime-ci.yml"
+      - ".github/workflows/release.yml"
+  push:
+    branches: [dev]
+    paths:
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - "crates/exomind-runtime/**"
+      - "Scripts/test/exomind-runtime-smoke.ps1"
+      - ".github/workflows/runtime-ci.yml"
+      - ".github/workflows/release.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  runtime-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Rust (配置 Rust)
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Build exomind-runtime (构建 runtime)
+        run: cargo build -p exomind-runtime
+
+      - name: Test exomind-runtime (运行 runtime 测试)
+        run: cargo test -p exomind-runtime
+
+      - name: Smoke test via cargo run (通过 cargo run 冒烟验证)
+        shell: pwsh
+        run: ./Scripts/test/exomind-runtime-smoke.ps1 -Port 39081
+
