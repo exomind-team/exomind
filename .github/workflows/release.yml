@@ -47,6 +47,8 @@ jobs:
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
@@ -345,6 +347,8 @@ jobs:
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          clean: false
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
