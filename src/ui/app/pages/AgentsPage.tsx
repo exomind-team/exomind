@@ -2,6 +2,7 @@ import {
   AlarmClock,
   Bot,
   Brain,
+  CircleAlert,
   ChevronRight,
   Filter,
   List,
@@ -24,19 +25,22 @@ import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
-import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import type {
-  AgentAddNodeOption,
   AgentDeviceGroup,
   AgentHubEdge,
   AgentHubListItem,
   AgentHubListSection,
+  AgentHubNodeStatus,
   AgentHubNode,
   AgentHubTopologyData,
   AgentHubViewMode,
-  RuntimeHostRecord,
   RuntimeServiceStatus,
 } from '@/lib/types/agent-hub';
+import {
+  getRuntimeManager,
+  type RuntimeAggregatedAgent,
+  type RuntimeHostSnapshot,
+} from '@/services/runtime-manager';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Bot, label: '拓扑' },
@@ -51,6 +55,22 @@ const LIST_FILTERS = [
   { id: 'actor', label: 'Actor' },
   { id: 'output', label: '输出' },
 ] as const;
+
+type AddNodeOption = {
+  id: 'device';
+  title: string;
+  description: string;
+  tintColor: string;
+};
+
+const ADD_NODE_OPTIONS: AddNodeOption[] = [
+  {
+    id: 'device',
+    title: '添加设备',
+    description: '连接 exomind-rt 主机并聚合 Agent 列表',
+    tintColor: '#0D9488',
+  },
+];
 
 type TopologyLayoutItem = {
   x: number;
@@ -110,12 +130,67 @@ function getListItemIcon(item: AgentHubListItem): LucideIcon {
   return Waypoints;
 }
 
-function getAddOptionIcon(optionId: AgentAddNodeOption['id']): LucideIcon {
-  if (optionId === 'input') return Rss;
-  if (optionId === 'agent') return Brain;
-  if (optionId === 'actor') return AlarmClock;
-  if (optionId === 'output') return Send;
-  return Sparkles;
+function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
+  if (optionId === 'device') return Monitor;
+  return Plus;
+}
+
+function mapRuntimeStatusToNodeStatus(status: string): AgentHubNodeStatus {
+  if (status === 'available' || status === 'running') return 'running';
+  if (status === 'busy') return 'warning';
+  if (status === 'error') return 'warning';
+  return 'idle';
+}
+
+function formatHostUptime(uptimeSecs?: number): string {
+  if (!uptimeSecs || uptimeSecs <= 0) return '--';
+  const days = Math.floor(uptimeSecs / 86400);
+  const hours = Math.floor((uptimeSecs % 86400) / 3600);
+  const minutes = Math.floor((uptimeSecs % 3600) / 60);
+  if (days > 0) return `${days}d ${hours}h`;
+  if (hours > 0) return `${hours}h ${minutes}m`;
+  return `${minutes}m`;
+}
+
+function formatHostMemory(usedMb?: number, totalMb?: number): string {
+  if (typeof usedMb !== 'number' || typeof totalMb !== 'number' || totalMb <= 0) return '--';
+  const usedGb = (usedMb / 1024).toFixed(1);
+  const totalGb = (totalMb / 1024).toFixed(1);
+  return `${usedGb} / ${totalGb} GB`;
+}
+
+function getHostStatusBadgeClass(connectionState: RuntimeHostSnapshot['connectionState']): string {
+  if (connectionState === 'online') return 'bg-[#22C55E20] text-[#16A34A]';
+  if (connectionState === 'offline') return 'bg-[#EF444420] text-[#DC2626]';
+  return 'bg-[#F59E0B20] text-[#D97706]';
+}
+
+function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): AgentHubListSection[] {
+  const groupedByHost = new Map<string, RuntimeAggregatedAgent[]>();
+  for (const agent of agents) {
+    const key = JSON.stringify([agent.sourceHostId, agent.sourceHostName]);
+    const existing = groupedByHost.get(key) ?? [];
+    existing.push(agent);
+    groupedByHost.set(key, existing);
+  }
+
+  return Array.from(groupedByHost.entries()).map(([key, hostAgents], index) => {
+    const [hostId, hostName] = JSON.parse(key) as [string, string];
+    return {
+      id: `runtime-${hostId}-${index}`,
+      title: hostName || 'Runtime Host',
+      count: hostAgents.length,
+      items: hostAgents.map((agent) => ({
+        id: `${agent.sourceHostId}__${agent.id}`,
+        type: 'agent',
+        name: agent.name,
+        description: `来源 ${agent.sourceHostAddress}${agent.description ? ` · ${agent.description}` : ''}`,
+        status: mapRuntimeStatusToNodeStatus(agent.status),
+        icon: 'brain',
+        badgeText: agent.sourceHostName,
+      })),
+    };
+  });
 }
 
 function getDeviceTypeIcon(groupId: string): LucideIcon {
@@ -428,11 +503,17 @@ function TopologyView({
 
 function ListView({
   sections,
+  hostSnapshots,
+  onRetryHost,
   onItemNavigate,
 }: {
   sections: AgentHubListSection[];
+  hostSnapshots: RuntimeHostSnapshot[];
+  onRetryHost: (hostId: string) => Promise<void>;
   onItemNavigate: (path: string) => void;
 }) {
+  const problemHosts = hostSnapshots.filter((item) => item.connectionState !== 'online');
+
   return (
     <section data-testid="agent-list-view" className="space-y-4">
       <div className="flex gap-2 overflow-x-auto pb-1">
@@ -453,6 +534,57 @@ function ListView({
         })}
       </div>
 
+      {problemHosts.length > 0 && (
+        <article className="space-y-2 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-3 dark:border-[#7F1D1D] dark:bg-[#2B1111]">
+          <div className="flex items-center gap-2 text-[#B91C1C] dark:text-[#FCA5A5]">
+            <CircleAlert size={14} />
+            <p className="text-xs font-semibold">连接异常主机</p>
+          </div>
+          <div className="space-y-2">
+            {problemHosts.map((item) => (
+              <div key={item.host.id} className="rounded-xl border border-[#FECACA] bg-white px-3 py-2 dark:border-[#7F1D1D] dark:bg-[#1C1917]">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="min-w-0">
+                    <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.host.name}</p>
+                    <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{item.host.host}:{item.host.port}</p>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span
+                      data-testid={`runtime-host-status-${item.host.id}`}
+                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                        item.connectionState === 'offline'
+                          ? 'bg-[#EF444420] text-[#DC2626]'
+                          : 'bg-[#F59E0B20] text-[#D97706]'
+                      }`}
+                    >
+                      {item.connectionState}
+                    </span>
+                    <button
+                      type="button"
+                      data-testid={`runtime-host-probe-${item.host.id}`}
+                      onClick={() => {
+                        void onRetryHost(item.host.id);
+                      }}
+                      className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]"
+                    >
+                      重试
+                    </button>
+                  </div>
+                </div>
+                {item.error && <p className="mt-1 text-[10px] text-[#DC2626]">{item.error}</p>}
+              </div>
+            ))}
+          </div>
+        </article>
+      )}
+
+      {sections.length === 0 && (
+        <article className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-6 text-center dark:border-[#292524] dark:bg-[#1C1917]">
+          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">暂无可用 Agent</p>
+          <p className="mt-1 text-xs text-[#A8A29E]">请先添加 exomind-rt 主机并确认连接状态</p>
+        </article>
+      )}
+
       {sections.map((section) => (
         <article key={section.id} className="space-y-2">
           <div className="flex items-center justify-between">
@@ -468,11 +600,12 @@ function ListView({
                     type="button"
                     data-testid={`agent-list-item-${item.id}`}
                     onClick={() => {
+                      const runtimeAgentId = item.id.includes('__') ? item.id.split('__')[1] ?? item.id : item.id;
                       if (item.type === 'agent') {
-                        onItemNavigate(`/agents/agent/${item.id}`);
+                        onItemNavigate(`/agents/agent/${runtimeAgentId}`);
                       }
                       if (item.type === 'actor') {
-                        onItemNavigate(`/agents/actor/${item.id}`);
+                        onItemNavigate(`/agents/actor/${runtimeAgentId}`);
                       }
                     }}
                     className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
@@ -505,34 +638,22 @@ function ListView({
 
 function DeviceView({
   groups,
-  runtimeHosts,
+  runtimeHostSnapshots,
   runtimeServiceStatus,
-  runtimeHostName,
-  runtimeHostAddress,
-  runtimeHostPort,
   runtimeHostError,
-  onRuntimeHostNameChange,
-  onRuntimeHostAddressChange,
-  onRuntimeHostPortChange,
-  onRuntimeHostAdd,
   onRuntimeHostProbe,
   onRuntimeStart,
   onRuntimeStop,
+  onOpenHostManager,
 }: {
   groups: AgentDeviceGroup[];
-  runtimeHosts: RuntimeHostRecord[];
+  runtimeHostSnapshots: RuntimeHostSnapshot[];
   runtimeServiceStatus: RuntimeServiceStatus | null;
-  runtimeHostName: string;
-  runtimeHostAddress: string;
-  runtimeHostPort: string;
   runtimeHostError: string;
-  onRuntimeHostNameChange: (value: string) => void;
-  onRuntimeHostAddressChange: (value: string) => void;
-  onRuntimeHostPortChange: (value: string) => void;
-  onRuntimeHostAdd: () => Promise<void>;
   onRuntimeHostProbe: (hostId: string) => Promise<void>;
   onRuntimeStart: () => Promise<void>;
   onRuntimeStop: () => Promise<void>;
+  onOpenHostManager: () => void;
 }) {
   const hostCard = groups.flatMap((group) => group.cards).find((card) => card.isHost) ?? groups[0]?.cards[0];
 
@@ -542,9 +663,21 @@ function DeviceView({
         data-testid="runtime-host-panel"
         className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
       >
-        <div className="flex items-center justify-between">
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Runtime Hosts</h3>
-          <span className="text-[11px] text-[#A8A29E]">{runtimeHosts.length} 台</span>
+        <div className="flex items-center justify-between gap-3">
+          <div className="min-w-0">
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Runtime 设备</h3>
+            <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
+              {runtimeHostSnapshots.length} 台在线配置
+            </p>
+          </div>
+          <button
+            type="button"
+            data-testid="runtime-host-manage-button"
+            onClick={onOpenHostManager}
+            className="rounded-lg bg-[#C75B3A] px-2.5 py-1 text-[11px] font-semibold text-white"
+          >
+            管理主机
+          </button>
         </div>
 
         <div className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#292524]">
@@ -594,89 +727,105 @@ function DeviceView({
           </div>
         </div>
 
-        <div className="grid grid-cols-1 gap-2">
-          <input
-            data-testid="runtime-host-name-input"
-            value={runtimeHostName}
-            onChange={(event) => onRuntimeHostNameChange(event.target.value)}
-            placeholder="Name（名称）"
-            className="h-9 rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
-          />
-          <div className="grid grid-cols-[1fr_96px] gap-2">
-            <input
-              data-testid="runtime-host-address-input"
-              value={runtimeHostAddress}
-              onChange={(event) => onRuntimeHostAddressChange(event.target.value)}
-              placeholder="IP / Host"
-              className="h-9 rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
-            />
-            <input
-              data-testid="runtime-host-port-input"
-              value={runtimeHostPort}
-              onChange={(event) => onRuntimeHostPortChange(event.target.value)}
-              placeholder="Port"
-              className="h-9 rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
-            />
-          </div>
-          <button
-            type="button"
-            data-testid="runtime-host-add-button"
-            onClick={() => {
-              void onRuntimeHostAdd();
-            }}
-            className="h-9 rounded-lg bg-[#C75B3A] text-xs font-semibold text-white"
-          >
-            添加 RuntimeHost
-          </button>
-        </div>
-
         {runtimeHostError && (
           <p className="rounded-md bg-[#EF444410] px-2 py-1 text-[11px] text-[#DC2626]">{runtimeHostError}</p>
         )}
 
         <div className="space-y-2">
-          {runtimeHosts.map((host) => (
+          {runtimeHostSnapshots.length === 0 && (
+            <div className="rounded-xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-3 py-3 text-[11px] text-[#78716C] dark:border-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E]">
+              暂无 Runtime 设备，请点击「管理主机」添加 `host:port`。
+            </div>
+          )}
+          {runtimeHostSnapshots.map((item) => (
             <div
-              key={host.id}
-              className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#292524]"
+              key={item.host.id}
+              data-testid={`runtime-host-device-card-${item.host.id}`}
+              className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2.5 dark:border-[#292524] dark:bg-[#292524]"
             >
               <div className="flex items-center justify-between gap-2">
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{host.name}</p>
-                  <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{host.host}:{host.port}</p>
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <div className="flex h-7 w-7 items-center justify-center rounded-lg bg-[#0D948820] text-[#0D9488]">
+                      <Monitor size={13} />
+                    </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.host.name}</p>
+                      <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">
+                        {item.host.host}:{item.host.port}
+                      </p>
+                    </div>
+                  </div>
                 </div>
                 <div className="flex items-center gap-2">
                   <span
-                    data-testid={`runtime-host-status-${host.id}`}
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      host.status === 'online'
-                        ? 'bg-[#22C55E20] text-[#16A34A]'
-                        : host.status === 'offline'
-                          ? 'bg-[#EF444420] text-[#DC2626]'
-                          : host.status === 'warning'
-                            ? 'bg-[#F59E0B20] text-[#D97706]'
-                            : 'bg-[#E7E5E4] text-[#57534E]'
-                    }`}
+                    data-testid={`runtime-host-status-${item.host.id}`}
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${getHostStatusBadgeClass(item.connectionState)}`}
                   >
-                    {host.status}
+                    {item.connectionState}
                   </span>
                   <button
                     type="button"
-                    data-testid={`runtime-host-probe-${host.id}`}
+                    data-testid={`runtime-host-probe-${item.host.id}`}
                     onClick={() => {
-                      void onRuntimeHostProbe(host.id);
+                      void onRuntimeHostProbe(item.host.id);
                     }}
                     className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]"
                   >
-                    探测
+                    重试
                   </button>
                 </div>
               </div>
-              {host.lastCheckedAt && (
-                <p className="mt-1 text-[10px] text-[#A8A29E]">last: {host.lastCheckedAt}</p>
+
+              <div className="mt-2 grid grid-cols-2 gap-2">
+                <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
+                  <p className="text-[10px] text-[#A8A29E]">设备名称</p>
+                  <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                    {item.topology?.hostname ?? '--'}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
+                  <p className="text-[10px] text-[#A8A29E]">系统</p>
+                  <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                    {item.topology?.os ?? '--'}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
+                  <p className="text-[10px] text-[#A8A29E]">架构</p>
+                  <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                    {item.topology?.arch ?? '--'}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
+                  <p className="text-[10px] text-[#A8A29E]">内存</p>
+                  <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                    {formatHostMemory(item.topology?.used_memory_mb, item.topology?.total_memory_mb)}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
+                  <p className="text-[10px] text-[#A8A29E]">延迟</p>
+                  <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                    {item.latencyMs ? `${item.latencyMs} ms` : '--'}
+                  </p>
+                </div>
+                <div className="rounded-lg bg-white px-2 py-1.5 dark:bg-[#1C1917]">
+                  <p className="text-[10px] text-[#A8A29E]">在线时长</p>
+                  <p className="truncate text-[11px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                    {formatHostUptime(item.topology?.uptime_secs)}
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-2 flex flex-wrap items-center gap-2 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+                <span>runtime: {item.topology?.version ?? '--'}</span>
+                <span>port: {item.topology?.port ?? item.host.port}</span>
+              </div>
+
+              {item.host.lastCheckedAt && (
+                <p className="mt-1 text-[10px] text-[#A8A29E]">last: {item.host.lastCheckedAt}</p>
               )}
-              {host.lastError && (
-                <p className="mt-1 text-[10px] text-[#DC2626]">{host.lastError}</p>
+              {item.error && (
+                <p className="mt-1 text-[10px] text-[#DC2626]">{item.error}</p>
               )}
             </div>
           ))}
@@ -764,11 +913,11 @@ function DeviceView({
 function AddNodeSheet({
   options,
   onClose,
-  onNavigate,
+  onAddDevice,
 }: {
-  options: AgentAddNodeOption[];
+  options: AddNodeOption[];
   onClose: () => void;
-  onNavigate: (path: string) => void;
+  onAddDevice: () => void;
 }) {
   return (
     <>
@@ -806,9 +955,9 @@ function AddNodeSheet({
                 type="button"
                 data-testid={`agent-add-node-option-${option.id}`}
                 onClick={() => {
-                  if (option.id === 'market') {
+                  if (option.id === 'device') {
                     onClose();
-                    onNavigate('/agents/market');
+                    onAddDevice();
                   }
                 }}
                 className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left dark:bg-[#292524]"
@@ -835,75 +984,217 @@ function AddNodeSheet({
   );
 }
 
+function RuntimeHostManagerSheet({
+  hostSnapshots,
+  runtimeHostName,
+  runtimeHostAddress,
+  runtimeHostError,
+  onRuntimeHostNameChange,
+  onRuntimeHostAddressChange,
+  onRuntimeHostAdd,
+  onRuntimeHostProbe,
+  onRuntimeHostRemove,
+  onClose,
+}: {
+  hostSnapshots: RuntimeHostSnapshot[];
+  runtimeHostName: string;
+  runtimeHostAddress: string;
+  runtimeHostError: string;
+  onRuntimeHostNameChange: (value: string) => void;
+  onRuntimeHostAddressChange: (value: string) => void;
+  onRuntimeHostAdd: () => Promise<void>;
+  onRuntimeHostProbe: (hostId: string) => Promise<void>;
+  onRuntimeHostRemove: (hostId: string) => Promise<void>;
+  onClose: () => void;
+}) {
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="agent-host-manager-overlay"
+        aria-label="关闭主机管理弹窗（Close Runtime Host Manager）"
+        className="absolute inset-0 z-20 bg-black/35"
+        onClick={onClose}
+      />
+      <section
+        data-testid="agent-host-manager-sheet"
+        className="absolute inset-x-0 bottom-0 z-30 rounded-t-[24px] bg-white pb-7 shadow-[0_-8px_28px_rgba(0,0,0,0.12)] dark:bg-[#1C1917] dark:shadow-[0_-8px_28px_rgba(0,0,0,0.45)]"
+      >
+        <div className="flex justify-center pt-2">
+          <div className="h-1 w-10 rounded bg-[#D6D3D1] dark:bg-[#57534E]" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3">
+          <h2 className="text-[18px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">添加设备</h2>
+          <button
+            type="button"
+            data-testid="agent-host-manager-close"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-2 px-5">
+          <input
+            data-testid="runtime-host-name-input"
+            value={runtimeHostName}
+            onChange={(event) => onRuntimeHostNameChange(event.target.value)}
+            placeholder="Name（名称，可选）"
+            className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
+          />
+          <input
+            data-testid="runtime-host-address-input"
+            value={runtimeHostAddress}
+            onChange={(event) => onRuntimeHostAddressChange(event.target.value)}
+            placeholder="host:port（例如 127.0.0.1:1919）"
+            className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
+          />
+          <button
+            type="button"
+            data-testid="runtime-host-add-button"
+            onClick={() => {
+              void onRuntimeHostAdd();
+            }}
+            className="h-9 w-full rounded-lg bg-[#C75B3A] text-xs font-semibold text-white"
+          >
+            添加 exomind-rt
+          </button>
+        </div>
+
+        {runtimeHostError && (
+          <p className="mx-5 mt-2 rounded-md bg-[#EF444410] px-2 py-1 text-[11px] text-[#DC2626]">{runtimeHostError}</p>
+        )}
+
+        <div className="mt-3 space-y-2 px-5">
+          {hostSnapshots.map((item) => (
+            <div
+              key={item.host.id}
+              className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#292524]"
+            >
+              <div className="flex items-center justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.host.name}</p>
+                  <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{item.host.host}:{item.host.port}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    data-testid={`runtime-host-status-${item.host.id}`}
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      item.connectionState === 'online'
+                        ? 'bg-[#22C55E20] text-[#16A34A]'
+                        : item.connectionState === 'offline'
+                          ? 'bg-[#EF444420] text-[#DC2626]'
+                          : 'bg-[#F59E0B20] text-[#D97706]'
+                    }`}
+                  >
+                    {item.connectionState}
+                  </span>
+                  <button
+                    type="button"
+                    data-testid={`runtime-host-probe-${item.host.id}`}
+                    onClick={() => {
+                      void onRuntimeHostProbe(item.host.id);
+                    }}
+                    className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]"
+                  >
+                    重试
+                  </button>
+                  <button
+                    type="button"
+                    data-testid={`runtime-host-remove-${item.host.id}`}
+                    onClick={() => {
+                      void onRuntimeHostRemove(item.host.id);
+                    }}
+                    className="rounded bg-[#FEE2E2] px-2 py-1 text-[10px] text-[#B91C1C] dark:bg-[#451A1A] dark:text-[#FCA5A5]"
+                  >
+                    删除
+                  </button>
+                </div>
+              </div>
+              {item.error && <p className="mt-1 text-[10px] text-[#DC2626]">{item.error}</p>}
+            </div>
+          ))}
+        </div>
+      </section>
+    </>
+  );
+}
+
 export function AgentsPage() {
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [topology, setTopology] = useState<AgentHubTopologyData>({ nodes: [], edges: [], selectedNodeId: null });
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
-  const [runtimeHosts, setRuntimeHosts] = useState<RuntimeHostRecord[]>([]);
+  const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
   const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
-  const [runtimeHostName, setRuntimeHostName] = useState('');
-  const [runtimeHostAddress, setRuntimeHostAddress] = useState('');
-  const [runtimeHostPort, setRuntimeHostPort] = useState('4077');
+  const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
+  const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState('127.0.0.1:1919');
   const [runtimeHostError, setRuntimeHostError] = useState('');
-  const [addNodeOptions, setAddNodeOptions] = useState<AgentAddNodeOption[]>([]);
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [hostManagerOpen, setHostManagerOpen] = useState(false);
+
+  const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
+    setRuntimeHostSnapshots(snapshot.hosts);
+    setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
+  };
+
+  const refreshRuntimeSnapshot = async () => {
+    const snapshot = await getRuntimeManager().refreshSnapshot();
+    applyRuntimeSnapshot(snapshot);
+  };
 
   useEffect(() => {
     let disposed = false;
     const service = getAgentHubService();
-    const runtimeHostService = getRuntimeHostService();
     const runtimeControlService = getRuntimeControlService();
+
     const load = async () => {
-      const [nextTopology, nextList, nextDevice, nextAddOptions, nextRuntimeHosts, nextRuntimeStatus] = await Promise.all([
+      const [nextTopology, nextDevice, nextRuntimeStatus, nextRuntimeSnapshot] = await Promise.all([
         service.getTopology(),
-        service.getListView(),
         service.getDeviceView(),
-        service.listAddNodeOptions(),
-        runtimeHostService.listHosts(),
         runtimeControlService.getStatus(),
+        getRuntimeManager().refreshSnapshot(),
       ]);
       if (disposed) return;
       setTopology(nextTopology);
       setSelectedNodeId(nextTopology.selectedNodeId ?? null);
-      setListSections(nextList);
       setDeviceGroups(nextDevice);
-      setAddNodeOptions(nextAddOptions);
-      setRuntimeHosts(nextRuntimeHosts);
       setRuntimeServiceStatus(nextRuntimeStatus);
+      applyRuntimeSnapshot(nextRuntimeSnapshot);
     };
+
+    const refreshInterval = setInterval(() => {
+      void (async () => {
+        try {
+          const nextRuntimeSnapshot = await getRuntimeManager().refreshSnapshot();
+          if (disposed) return;
+          applyRuntimeSnapshot(nextRuntimeSnapshot);
+        } catch {
+          // Ignore polling errors（轮询错误不打断页面渲染）
+        }
+      })();
+    }, 8000);
+
     void load();
+
     return () => {
       disposed = true;
+      clearInterval(refreshInterval);
     };
   }, []);
 
   const refreshRuntimeHosts = async () => {
-    const nextHosts = await getRuntimeHostService().listHosts();
-    setRuntimeHosts(nextHosts);
+    const nextSnapshot = await getRuntimeManager().refreshSnapshot();
+    applyRuntimeSnapshot(nextSnapshot);
   };
 
-  const handleAddRuntimeHost = async () => {
-    const host = runtimeHostAddress.trim();
-    const port = Number.parseInt(runtimeHostPort, 10);
-    if (!host) {
-      setRuntimeHostError('Host 不能为空');
-      return;
-    }
-    if (!Number.isInteger(port) || port <= 0) {
-      setRuntimeHostError('Port 非法');
-      return;
-    }
-
+  const handleAddRuntimeHostFromManagerSheet = async () => {
     try {
       setRuntimeHostError('');
-      await getRuntimeHostService().addHost({
-        name: runtimeHostName.trim(),
-        host,
-        port,
-      });
-      setRuntimeHostName('');
+      await getRuntimeManager().addHostFromAddress(runtimeHostModalAddress, runtimeHostModalName.trim());
+      setRuntimeHostModalName('');
       await refreshRuntimeHosts();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -914,8 +1205,19 @@ export function AgentsPage() {
   const handleProbeRuntimeHost = async (hostId: string) => {
     try {
       setRuntimeHostError('');
-      const updated = await getRuntimeHostService().probeHost(hostId);
-      setRuntimeHosts((prev) => prev.map((item) => (item.id === updated.id ? updated : item)));
+      await getRuntimeManager().retryHost(hostId);
+      await refreshRuntimeHosts();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeHostError(message);
+    }
+  };
+
+  const handleRemoveRuntimeHost = async (hostId: string) => {
+    try {
+      setRuntimeHostError('');
+      await getRuntimeManager().removeHost(hostId);
+      await refreshRuntimeHosts();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRuntimeHostError(message);
@@ -929,6 +1231,7 @@ export function AgentsPage() {
         port: 4077,
       });
       setRuntimeServiceStatus(status);
+      await refreshRuntimeSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRuntimeServiceStatus({
@@ -944,6 +1247,7 @@ export function AgentsPage() {
     try {
       const status = await getRuntimeControlService().stopRuntime();
       setRuntimeServiceStatus(status);
+      await refreshRuntimeSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRuntimeServiceStatus({
@@ -961,25 +1265,26 @@ export function AgentsPage() {
 
   const content = useMemo(() => {
     if (viewMode === 'list') {
-      return <ListView sections={listSections} onItemNavigate={navigateByPath} />;
+      return (
+        <ListView
+          sections={listSections}
+          hostSnapshots={runtimeHostSnapshots}
+          onRetryHost={handleProbeRuntimeHost}
+          onItemNavigate={navigateByPath}
+        />
+      );
     }
     if (viewMode === 'device') {
       return (
         <DeviceView
           groups={deviceGroups}
-          runtimeHosts={runtimeHosts}
+          runtimeHostSnapshots={runtimeHostSnapshots}
           runtimeServiceStatus={runtimeServiceStatus}
-          runtimeHostName={runtimeHostName}
-          runtimeHostAddress={runtimeHostAddress}
-          runtimeHostPort={runtimeHostPort}
           runtimeHostError={runtimeHostError}
-          onRuntimeHostNameChange={setRuntimeHostName}
-          onRuntimeHostAddressChange={setRuntimeHostAddress}
-          onRuntimeHostPortChange={setRuntimeHostPort}
-          onRuntimeHostAdd={handleAddRuntimeHost}
           onRuntimeHostProbe={handleProbeRuntimeHost}
           onRuntimeStart={handleRuntimeStart}
           onRuntimeStop={handleRuntimeStop}
+          onOpenHostManager={() => setHostManagerOpen(true)}
         />
       );
     }
@@ -994,16 +1299,9 @@ export function AgentsPage() {
   }, [
     deviceGroups,
     listSections,
-    runtimeHosts,
-    runtimeHostName,
-    runtimeHostAddress,
-    runtimeHostPort,
+    runtimeHostSnapshots,
     runtimeHostError,
     runtimeServiceStatus,
-    handleAddRuntimeHost,
-    handleProbeRuntimeHost,
-    handleRuntimeStart,
-    handleRuntimeStop,
     selectedNodeId,
     topology,
     viewMode,
@@ -1040,9 +1338,24 @@ export function AgentsPage() {
 
       {sheetOpen && (
         <AddNodeSheet
-          options={addNodeOptions}
+          options={ADD_NODE_OPTIONS}
           onClose={() => setSheetOpen(false)}
-          onNavigate={navigateByPath}
+          onAddDevice={() => setHostManagerOpen(true)}
+        />
+      )}
+
+      {hostManagerOpen && (
+        <RuntimeHostManagerSheet
+          hostSnapshots={runtimeHostSnapshots}
+          runtimeHostName={runtimeHostModalName}
+          runtimeHostAddress={runtimeHostModalAddress}
+          runtimeHostError={runtimeHostError}
+          onRuntimeHostNameChange={setRuntimeHostModalName}
+          onRuntimeHostAddressChange={setRuntimeHostModalAddress}
+          onRuntimeHostAdd={handleAddRuntimeHostFromManagerSheet}
+          onRuntimeHostProbe={handleProbeRuntimeHost}
+          onRuntimeHostRemove={handleRemoveRuntimeHost}
+          onClose={() => setHostManagerOpen(false)}
         />
       )}
     </div>
