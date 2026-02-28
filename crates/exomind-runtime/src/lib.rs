@@ -36,7 +36,7 @@ pub fn app(runtime_port: u16) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
         .allow_headers(Any);
 
     Router::new()
@@ -84,7 +84,9 @@ mod tests {
     use futures_util::stream::{self, BoxStream, StreamExt};
     use http_body_util::BodyExt;
     use serde_json::Value;
+    use std::collections::HashMap;
     use std::sync::Arc;
+    use std::sync::Mutex as StdMutex;
     use tower::util::ServiceExt;
 
     struct TempRouteAgent;
@@ -104,6 +106,69 @@ mod tests {
 
         fn chat_stream(&self, request: agent::ChatRequest) -> BoxStream<'static, agent::ChatChunk> {
             stream::iter(vec![agent::ChatChunk::content_only(request.message)]).boxed()
+        }
+    }
+
+    #[derive(Default)]
+    struct TempSessionAgent {
+        sessions: Arc<StdMutex<HashMap<String, agent::SessionInfo>>>,
+    }
+
+    impl TempSessionAgent {
+        fn new_with_one_session() -> Self {
+            let session = agent::SessionInfo {
+                session_id: "temp-session-1".to_string(),
+                status: "idle".to_string(),
+                created_at: "2026-02-28T10:30:00Z".to_string(),
+                last_active: "2026-02-28T10:35:00Z".to_string(),
+                message_count: 3,
+                uptime_secs: 300,
+            };
+
+            let mut sessions = HashMap::new();
+            sessions.insert(session.session_id.clone(), session);
+            Self {
+                sessions: Arc::new(StdMutex::new(sessions)),
+            }
+        }
+
+        fn lock_sessions(&self) -> std::sync::MutexGuard<'_, HashMap<String, agent::SessionInfo>> {
+            match self.sessions.lock() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            }
+        }
+    }
+
+    impl agent::Agent for TempSessionAgent {
+        fn id(&self) -> &'static str {
+            "temp-session"
+        }
+
+        fn name(&self) -> &'static str {
+            "Temp Session Agent"
+        }
+
+        fn description(&self) -> &'static str {
+            "用于会话端点 JSON 结构测试"
+        }
+
+        fn chat_stream(&self, request: agent::ChatRequest) -> BoxStream<'static, agent::ChatChunk> {
+            stream::iter(vec![agent::ChatChunk::content_only(request.message)]).boxed()
+        }
+
+        fn list_sessions(&self) -> Vec<agent::SessionInfo> {
+            let mut sessions = self.lock_sessions().values().cloned().collect::<Vec<_>>();
+            sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
+            sessions
+        }
+
+        fn get_session(&self, session_id: &str) -> Option<agent::SessionInfo> {
+            self.lock_sessions().get(session_id).cloned()
+        }
+
+        fn close_session(&self, session_id: &str) -> bool {
+            self.lock_sessions().remove(session_id).is_some()
         }
     }
 
@@ -274,6 +339,215 @@ mod tests {
             .unwrap();
 
         assert_eq!(StatusCode::NOT_FOUND, response.status());
+    }
+
+    #[tokio::test]
+    async fn sessions_endpoint_returns_empty_array_for_echo_agent() {
+        const TEST_PORT: u16 = 3005;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/echo/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(payload, serde_json::json!([]));
+    }
+
+    #[tokio::test]
+    async fn unknown_agent_sessions_returns_not_found() {
+        const TEST_PORT: u16 = 3006;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/not-found/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::NOT_FOUND, response.status());
+    }
+
+    #[tokio::test]
+    async fn unknown_session_detail_returns_not_found() {
+        const TEST_PORT: u16 = 3007;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/echo/sessions/missing-session")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::NOT_FOUND, response.status());
+    }
+
+    #[tokio::test]
+    async fn close_unknown_session_returns_not_found() {
+        const TEST_PORT: u16 = 3008;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/agents/echo/sessions/missing-session")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::NOT_FOUND, response.status());
+    }
+
+    #[tokio::test]
+    async fn session_endpoints_return_expected_json_payloads() {
+        let registry = agent::AgentRegistry::new();
+        registry.register(Arc::new(TempSessionAgent::new_with_one_session()));
+
+        let router = routes::router().with_state(AppState {
+            port: 3009,
+            registry: registry.clone(),
+        });
+
+        let list_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/temp-session/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(StatusCode::OK, list_response.status());
+        let list_body = list_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let list_payload: Value = serde_json::from_slice(&list_body).unwrap();
+        assert_eq!(
+            list_payload,
+            serde_json::json!([
+                {
+                    "session_id": "temp-session-1",
+                    "status": "idle",
+                    "created_at": "2026-02-28T10:30:00Z",
+                    "last_active": "2026-02-28T10:35:00Z",
+                    "message_count": 3,
+                    "uptime_secs": 300
+                }
+            ])
+        );
+
+        let get_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/temp-session/sessions/temp-session-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(StatusCode::OK, get_response.status());
+        let get_body = get_response.into_body().collect().await.unwrap().to_bytes();
+        let get_payload: Value = serde_json::from_slice(&get_body).unwrap();
+        assert_eq!(
+            get_payload,
+            serde_json::json!({
+                "session_id": "temp-session-1",
+                "status": "idle",
+                "created_at": "2026-02-28T10:30:00Z",
+                "last_active": "2026-02-28T10:35:00Z",
+                "message_count": 3,
+                "uptime_secs": 300
+            })
+        );
+
+        let delete_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/agents/temp-session/sessions/temp-session-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(StatusCode::OK, delete_response.status());
+        let delete_body = delete_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
+        let delete_payload: Value = serde_json::from_slice(&delete_body).unwrap();
+        assert_eq!(
+            delete_payload,
+            serde_json::json!({
+                "status": "closed",
+                "session_id": "temp-session-1"
+            })
+        );
+
+        let after_close_response = router
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/temp-session/sessions/temp-session-1")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(StatusCode::NOT_FOUND, after_close_response.status());
+    }
+
+    #[tokio::test]
+    async fn unknown_session_on_existing_agent_returns_not_found() {
+        let registry = agent::AgentRegistry::new();
+        registry.register(Arc::new(TempSessionAgent::new_with_one_session()));
+
+        let router = routes::router().with_state(AppState {
+            port: 3010,
+            registry,
+        });
+
+        let get_response = router
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/temp-session/sessions/not-found")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(StatusCode::NOT_FOUND, get_response.status());
+
+        let delete_response = router
+            .oneshot(
+                Request::builder()
+                    .method("DELETE")
+                    .uri("/agents/temp-session/sessions/not-found")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(StatusCode::NOT_FOUND, delete_response.status());
     }
 
     #[tokio::test]
