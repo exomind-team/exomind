@@ -1,5 +1,7 @@
+use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -72,6 +74,10 @@ pub trait Agent: Send + Sync {
 
     fn close_session(&self, _session_id: &str) -> bool {
         false
+    }
+
+    fn stats(&self, _session_id: Option<String>) -> BoxFuture<'_, Option<Value>> {
+        Box::pin(async { None })
     }
 }
 

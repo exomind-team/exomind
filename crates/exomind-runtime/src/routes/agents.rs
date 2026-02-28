@@ -1,10 +1,11 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::stream::{self, StreamExt};
 use serde::{Deserialize, Serialize};
+use serde_json::Value as JsonValue;
 use std::convert::Infallible;
 
 use crate::AppState;
@@ -17,11 +18,18 @@ struct ChatRequestPayload {
     session_id: Option<String>,
 }
 
+#[derive(Debug, Deserialize, Default)]
+struct AgentStatsQuery {
+    #[serde(default)]
+    session_id: Option<String>,
+}
+
 /// Agent routes (Agent 相关路由).
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/agents", get(list_agents))
         .route("/agents/:id/chat", post(chat_with_agent))
+        .route("/agents/:id/stats", get(agent_stats))
         .route("/agents/:id/sessions", get(list_sessions))
         .route(
             "/agents/:id/sessions/:sid",
@@ -68,6 +76,27 @@ async fn chat_with_agent(
 struct CloseSessionResponse {
     status: String,
     session_id: String,
+}
+
+async fn agent_stats(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<AgentStatsQuery>,
+) -> Result<Json<JsonValue>, StatusCode> {
+    let Some(agent) = state.registry.get(&id) else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    let session_id = query
+        .session_id
+        .map(|session| session.trim().to_string())
+        .filter(|session| !session.is_empty());
+
+    let Some(stats) = agent.stats(session_id).await else {
+        return Err(StatusCode::NOT_FOUND);
+    };
+
+    Ok(Json(stats))
 }
 
 async fn list_sessions(
