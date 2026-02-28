@@ -58,7 +58,7 @@ fn read_hostname() -> String {
 
 fn read_os() -> String {
     System::long_os_version()
-        .or_else(|| System::name())
+        .or_else(System::name)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| std::env::consts::OS.to_string())
 }
