@@ -9,6 +9,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     println!("exomind-rt listening on http://{local_addr}");
 
-    axum::serve(listener, exomind_runtime::app()).await?;
+    axum::serve(listener, exomind_runtime::app(local_addr.port())).await?;
     Ok(())
 }

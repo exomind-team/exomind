@@ -3,7 +3,14 @@ use serde::Serialize;
 use std::env;
 use thiserror::Error;
 
+pub mod routes;
+
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
+
+#[derive(Clone, Copy, Debug)]
+pub struct RuntimeState {
+    pub port: u16,
+}
 
 #[derive(Debug, Error)]
 pub enum PortConfigError {
@@ -26,8 +33,11 @@ pub fn configured_port_from_env() -> Result<u16, PortConfigError> {
 }
 
 /// Build HTTP router (HTTP 路由构建入口).
-pub fn app() -> Router {
-    Router::new().route("/health", get(health))
+pub fn app(runtime_port: u16) -> Router {
+    Router::<RuntimeState>::new()
+        .route("/health", get(health))
+        .merge(routes::router())
+        .with_state(RuntimeState { port: runtime_port })
 }
 
 #[derive(Debug, Serialize)]
@@ -54,7 +64,7 @@ mod tests {
 
     #[tokio::test]
     async fn health_endpoint_returns_ok_with_version() {
-        let response = app()
+        let response = app(3001)
             .oneshot(
                 Request::builder()
                     .uri("/health")
@@ -76,5 +86,30 @@ mod tests {
                 "version": RUNTIME_VERSION
             })
         );
+    }
+
+    #[tokio::test]
+    async fn topology_endpoint_returns_runtime_topology() {
+        let response = app(3002)
+            .oneshot(
+                Request::builder()
+                    .uri("/topology")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body_bytes).unwrap();
+
+        assert!(!payload["hostname"].as_str().unwrap_or_default().is_empty());
+        assert!(!payload["os"].as_str().unwrap_or_default().is_empty());
+        assert!(!payload["arch"].as_str().unwrap_or_default().is_empty());
+        assert!(payload["uptime_secs"].is_u64());
+        assert_eq!(payload["version"], RUNTIME_VERSION);
+        assert_eq!(payload["port"], serde_json::json!(3002));
     }
 }
