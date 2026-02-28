@@ -10,6 +10,7 @@ jobs:
   # ═══════════════════════════════════════════
   codex-review:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     continue-on-error: true
     permissions:
       contents: read
@@ -53,6 +54,7 @@ jobs:
   # ═══════════════════════════════════════════
   claude-deep-review:
     runs-on: ubuntu-latest
+    timeout-minutes: 5
     continue-on-error: true
     permissions:
       contents: read
@@ -128,56 +130,85 @@ jobs:
           } >> "$GITHUB_OUTPUT"
 
   # ═══════════════════════════════════════════
-  # 合并评论：两关结果合并为一条 PR Comment
+  # 独立评论：Codex 结果独立输出（不阻塞 Claude）
   # ═══════════════════════════════════════════
-  post-combined-review:
-    needs: [codex-review, claude-deep-review]
+  post-codex-review:
+    needs: [codex-review]
     if: always()
     runs-on: ubuntu-latest
     permissions:
       pull-requests: write
       issues: write
     steps:
-      - name: Post Combined Review
+      - name: Post Codex Review
         uses: actions/github-script@v7
         env:
           CODEX_REVIEW: ${{ needs.codex-review.outputs.review }}
-          CLAUDE_REVIEW: ${{ needs.claude-deep-review.outputs.review }}
           CODEX_STATUS: ${{ needs.codex-review.result }}
-          CLAUDE_STATUS: ${{ needs.claude-deep-review.result }}
         with:
           github-token: ${{ github.token }}
           script: |
             const codexReview = process.env.CODEX_REVIEW || '';
-            const claudeReview = process.env.CLAUDE_REVIEW || '';
-            const codexStatus = process.env.CODEX_STATUS;
-            const claudeStatus = process.env.CLAUDE_STATUS;
-
+            const codexStatus = process.env.CODEX_STATUS || 'unknown';
             const codexSection = codexReview
               ? codexReview
-              : `> ⚠️ Codex 评审未完成 (status: ${codexStatus})`;
-
-            const claudeSection = claudeReview
-              ? claudeReview
-              : `> ⚠️ Claude 评审未完成 (status: ${claudeStatus})`;
-
+              : [
+                  `> ⚠️ Codex 评审未完成 (status: ${codexStatus})`,
+                  '> 可能原因: timeout(超时) / API 异常 / runner 执行失败。',
+                ].join('\n');
             const body = [
               '# 🎩 Black Hat Critic — Codex 5.3 快速扫描',
               '',
-              '> `model: codex-5.3` · `effort: high` · `via: openai/codex-action`',
+              '> `model: codex-5.3` · `effort: high` · `timeout: 5m` · `via: openai/codex-action`',
               '',
               codexSection,
               '',
-              '---',
-              '',
+              `*Black Hat Critic · Codex Review · PR #${{ github.event.pull_request.number }}*`,
+            ].join('\n');
+
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: ${{ github.event.pull_request.number }},
+              body,
+            });
+
+  # ═══════════════════════════════════════════
+  # 独立评论：Claude 结果独立输出（不阻塞 Codex）
+  # ═══════════════════════════════════════════
+  post-claude-review:
+    needs: [claude-deep-review]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      pull-requests: write
+      issues: write
+    steps:
+      - name: Post Claude Review
+        uses: actions/github-script@v7
+        env:
+          CLAUDE_REVIEW: ${{ needs.claude-deep-review.outputs.review }}
+          CLAUDE_STATUS: ${{ needs.claude-deep-review.result }}
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const claudeReview = process.env.CLAUDE_REVIEW || '';
+            const claudeStatus = process.env.CLAUDE_STATUS || 'unknown';
+            const claudeSection = claudeReview
+              ? claudeReview
+              : [
+                  `> ⚠️ Claude 评审未完成 (status: ${claudeStatus})`,
+                  '> 可能原因: timeout(超时) / API 异常 / runner 执行失败。',
+                ].join('\n');
+
+            const body = [
               '# 🔬 Black Hat Critic — Claude Opus 4.6 深度评审',
               '',
-              '> `model: claude-opus-4-6` · `max_tokens: 4096` · `via: Anthropic Messages API`',
+              '> `model: claude-opus-4-6` · `max_tokens: 8192` · `timeout: 5m` · `via: Anthropic Messages API`',
               '',
               claudeSection,
               '',
-              '---',
-              `*Black Hat Critic · ExoMind Feature Flow v2 · PR #${{ github.event.pull_request.number }}*`,
+              `*Black Hat Critic · Claude Review · PR #${{ github.event.pull_request.number }}*`,
             ].join('\n');
 
             await github.rest.issues.createComment({
