@@ -18,7 +18,7 @@ import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/f
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
-const ACTIVE_BLOCK_KEY = 'active_block';
+// ACTIVE_BLOCK_KEY 已废弃，现在使用 ActiveBlockStorage
 
 export interface TimeBlockService {
   /** 加载已完成的时间块 */

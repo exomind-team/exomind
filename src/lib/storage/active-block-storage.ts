@@ -224,7 +224,7 @@ export class ActiveBlockStorage {
   /**
    * 处理远程变更
    */
-  private async handleRemoteChange(change: unknown): Promise<void> {
+  private async handleRemoteChange(_change: unknown): Promise<void> {
     // 从远程拉取最新数据
     const block = await this.loadActiveBlock();
     this.notifyChangeListeners(block);
