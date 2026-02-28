@@ -8,6 +8,9 @@
 // 使用默认导入
 import PouchDB from 'pouchdb';
 
+const POUCHDB_PREFIX_ENV = 'EXOMIND_EVENT_STORAGE_PREFIX';
+const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-event-storage/';
+
 /**
  * 事件接口
  */
@@ -56,8 +59,53 @@ const BY_ID_MAP = `function(doc) {
   }
 }`;
 
+interface EventStorageOptions {
+  /**
+   * Optional PouchDB prefix override（可选：覆盖 PouchDB 落盘前缀）
+   */
+  pouchDbPrefix?: string;
+}
+
+function normalizePouchDbPrefix(prefix: string): string {
+  const trimmed = prefix.trim();
+  if (trimmed.length === 0) {
+    return DEFAULT_TEST_POUCHDB_PREFIX;
+  }
+  const normalized = trimmed.replace(/\\/g, '/');
+  return normalized.endsWith('/') ? normalized : `${normalized}/`;
+}
+
+function readNodeEnv(name: string): string | undefined {
+  if (typeof process === 'undefined' || !process.env) {
+    return undefined;
+  }
+  return process.env[name];
+}
+
+function resolvePouchDbPrefix(explicitPrefix?: string): string | undefined {
+  if (typeof explicitPrefix === 'string' && explicitPrefix.trim().length > 0) {
+    return normalizePouchDbPrefix(explicitPrefix);
+  }
+
+  const envPrefix = readNodeEnv(POUCHDB_PREFIX_ENV);
+  if (typeof envPrefix === 'string' && envPrefix.trim().length > 0) {
+    return normalizePouchDbPrefix(envPrefix);
+  }
+
+  // Vitest in Node runtime writes LevelDB files; isolate under .tmp to avoid root pollution.
+  if (readNodeEnv('VITEST') || readNodeEnv('VITEST_WORKER_ID') || readNodeEnv('NODE_ENV') === 'test') {
+    return DEFAULT_TEST_POUCHDB_PREFIX;
+  }
+
+  return undefined;
+}
+
 // 单例缓存
 const storageInstances: Map<string, EventStorage> = new Map();
+
+function buildStorageCacheKey(userId: string, prefix?: string): string {
+  return `${prefix ?? ''}::${userId}`;
+}
 
 /**
  * 获取当前用户 ID（与 ChatPage 保持一致）
@@ -93,12 +141,14 @@ export function getCurrentUserId(): string {
  */
 export function getEventStorage(userId?: string): EventStorage {
   const id = userId || getCurrentUserId();
+  const prefix = resolvePouchDbPrefix();
+  const cacheKey = buildStorageCacheKey(id, prefix);
 
-  if (!storageInstances.has(id)) {
-    storageInstances.set(id, new EventStorage(id));
+  if (!storageInstances.has(cacheKey)) {
+    storageInstances.set(cacheKey, new EventStorage(id, { pouchDbPrefix: prefix }));
   }
 
-  return storageInstances.get(id)!;
+  return storageInstances.get(cacheKey)!;
 }
 
 /**
@@ -125,9 +175,12 @@ export class EventStorage {
    *
    * @param userId - 用户 ID，用于隔离不同用户的数据
    */
-  constructor(userId: string) {
+  constructor(userId: string, options: EventStorageOptions = {}) {
     const dbName = `events_${userId}`;
-    this.db = new PouchDB<Event>(dbName);
+    const prefix = resolvePouchDbPrefix(options.pouchDbPrefix);
+    this.db = prefix
+      ? new PouchDB<Event>(dbName, { prefix })
+      : new PouchDB<Event>(dbName);
     this.initializeDesignDoc();
   }
 
