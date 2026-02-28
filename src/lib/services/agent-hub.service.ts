@@ -11,6 +11,7 @@ import type {
   AgentMarketCategory,
   AgentMarketItem,
 } from '@/lib/types/agent-hub';
+import { getRuntimeAggregatorService } from './runtime-aggregator.service';
 
 type AgentEnvironmentLike = {
   agent: IAgentPort;
@@ -54,7 +55,50 @@ export class AgentHubServiceImpl implements AgentHubService {
   }
 
   async getDeviceView(): Promise<AgentDeviceGroup[]> {
-    return this.getAgentPort().getDeviceView();
+    // 获取聚合的运行时数据
+    const aggregatorService = getRuntimeAggregatorService();
+    const aggregatedData = await aggregatorService.aggregateAll();
+
+    // 按主机分组 agents
+    const groups: AgentDeviceGroup[] = [];
+
+    for (const host of aggregatedData.hosts) {
+      const hostAgents = aggregatedData.agents.filter(a => a.hostId === host.id);
+      const topology = aggregatedData.topologies.get(host.id);
+
+      // 构建设备卡片
+      const cards = hostAgents.map(agent => ({
+        id: agent.id,
+        name: agent.name,
+        type: 'server' as const,
+        status: host.status === 'online' ? 'online' as const : 'offline' as const,
+        summary: agent.description,
+        metrics: [
+          { label: 'Host', value: host.name },
+          { label: 'Status', value: agent.status },
+        ],
+        tags: [
+          { id: `${agent.id}-host`, label: host.name, color: '#C75B3A' },
+        ],
+        isHost: host.isLocal,
+      }));
+
+      if (cards.length > 0 || host.status === 'online') {
+        groups.push({
+          id: host.id,
+          title: host.name,
+          summary: `${host.host}:${host.port} - ${hostAgents.length} agents`,
+          cards,
+        });
+      }
+    }
+
+    // 如果没有任何主机，返回 mock 数据作为后备
+    if (groups.length === 0) {
+      return this.getAgentPort().getDeviceView();
+    }
+
+    return groups;
   }
 
   async listAddNodeOptions(): Promise<AgentAddNodeOption[]> {
