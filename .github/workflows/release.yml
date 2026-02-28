@@ -189,13 +189,10 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          Write-Host "Use npm ci as primary installer to avoid Bun timeout on self-hosted Windows runner (优先使用 npm ci，避免 Bun 在自部署 Windows Runner 超时卡住)."
-          if (-not (Test-Path "package-lock.json")) {
-            throw "package-lock.json not found. npm ci requires a lockfile."
-          }
-          npm ci --no-audit --no-fund
+          Write-Host "Use npm install as primary installer to avoid Bun timeout on self-hosted Windows runner (优先使用 npm install，避免 Bun 在自部署 Windows Runner 超时卡住)."
+          npm install --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) {
-            throw "npm ci failed with exit code $LASTEXITCODE."
+            throw "npm install failed with exit code $LASTEXITCODE."
           }
 
       - name: Build Windows NSIS installer (构建 NSIS 安装包)
@@ -914,13 +911,10 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = "Stop"
-          Write-Host "Use npm ci as primary installer to avoid Bun timeout on self-hosted Windows runner (优先使用 npm ci，避免 Bun 在自部署 Windows Runner 超时卡住)."
-          if (-not (Test-Path "package-lock.json")) {
-            throw "package-lock.json not found. npm ci requires a lockfile."
-          }
-          npm ci --no-audit --no-fund
+          Write-Host "Use npm install as primary installer to avoid Bun timeout on self-hosted Windows runner (优先使用 npm install，避免 Bun 在自部署 Windows Runner 超时卡住)."
+          npm install --no-audit --no-fund
           if ($LASTEXITCODE -ne 0) {
-            throw "npm ci failed with exit code $LASTEXITCODE."
+            throw "npm install failed with exit code $LASTEXITCODE."
           }
 
       - name: Init Android
