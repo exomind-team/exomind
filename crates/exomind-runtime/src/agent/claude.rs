@@ -67,6 +67,40 @@ enum ClaudeStreamEvent {
     Result,
 }
 
+#[derive(Debug, Clone)]
+struct SessionSnapshot {
+    session_id: String,
+    status: SessionStatus,
+    created_at: Instant,
+    created_wall: DateTime<Utc>,
+    last_active_wall: DateTime<Utc>,
+    message_count: u64,
+}
+
+impl SessionSnapshot {
+    fn from_session(session: &ClaudeSession) -> Self {
+        Self {
+            session_id: session.session_id.clone(),
+            status: session.status,
+            created_at: session.created_at,
+            created_wall: session.created_wall,
+            last_active_wall: compute_last_active_wall(session),
+            message_count: session.message_count,
+        }
+    }
+
+    fn to_session_info(&self) -> SessionInfo {
+        SessionInfo {
+            session_id: self.session_id.clone(),
+            status: self.status.as_str().to_string(),
+            created_at: format_utc_iso8601(self.created_wall),
+            last_active: format_utc_iso8601(self.last_active_wall),
+            message_count: self.message_count,
+            uptime_secs: self.created_at.elapsed().as_secs(),
+        }
+    }
+}
+
 type SharedClaudeSession = Arc<AsyncMutex<ClaudeSession>>;
 
 /// Built-in Claude agent (内置 Claude Agent，通过 Claude CLI 输出流式文本).
@@ -75,6 +109,7 @@ pub struct ClaudeAgent {
     command: String,
     persistent_args: Vec<String>,
     sessions: Arc<StdMutex<HashMap<String, SharedClaudeSession>>>,
+    session_snapshots: Arc<StdMutex<HashMap<String, SessionSnapshot>>>,
 }
 
 impl ClaudeAgent {
@@ -87,6 +122,7 @@ impl ClaudeAgent {
             command: command.into(),
             persistent_args,
             sessions: Arc::new(StdMutex::new(HashMap::new())),
+            session_snapshots: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
 
@@ -95,6 +131,23 @@ impl ClaudeAgent {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         }
+    }
+
+    fn lock_session_snapshots(&self) -> StdMutexGuard<'_, HashMap<String, SessionSnapshot>> {
+        match self.session_snapshots.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn upsert_snapshot_from_session(&self, session: &ClaudeSession) {
+        let snapshot = SessionSnapshot::from_session(session);
+        self.lock_session_snapshots()
+            .insert(snapshot.session_id.clone(), snapshot);
+    }
+
+    fn remove_snapshot(&self, session_id: &str) {
+        self.lock_session_snapshots().remove(session_id);
     }
 
     fn spawn_streaming_task(&self, request: ChatRequest) -> mpsc::Receiver<ChatChunk> {
@@ -197,6 +250,8 @@ impl ClaudeAgent {
             ));
         }
 
+        self.lock_session_snapshots()
+            .insert(session_id.clone(), SessionSnapshot::from_session(&session));
         let shared_session = Arc::new(AsyncMutex::new(session));
         sessions.insert(session_id.clone(), shared_session.clone());
         Ok((session_id, shared_session))
@@ -237,10 +292,12 @@ impl ClaudeAgent {
         session.status = SessionStatus::Processing;
         session.message_count += 1;
         session.last_active = Instant::now();
+        self.upsert_snapshot_from_session(&session);
 
         let input_line = build_stream_json_user_input(&message);
         if let Err(error) = write_user_input_line(&mut session.stdin, &input_line).await {
             session.status = SessionStatus::Crashed;
+            self.upsert_snapshot_from_session(&session);
             drop(session);
             self.cleanup_session(&session_id).await;
             emit_error_chunk(&sender, format!("Claude 输入写入失败: {error}")).await;
@@ -255,9 +312,11 @@ impl ClaudeAgent {
                     if let Some(value) = claude_session_id {
                         session.claude_session_id = Some(value);
                     }
+                    self.upsert_snapshot_from_session(&session);
                 }
                 Ok(Some(ClaudeStreamEvent::AssistantChunk { content })) => {
                     session.last_active = Instant::now();
+                    self.upsert_snapshot_from_session(&session);
                     let chunk = ChatChunk {
                         content,
                         session_id: if pending_session_chunk {
@@ -270,6 +329,7 @@ impl ClaudeAgent {
 
                     if sender.send(chunk).await.is_err() {
                         session.status = SessionStatus::Idle;
+                        self.upsert_snapshot_from_session(&session);
                         return;
                     }
                 }
@@ -284,10 +344,12 @@ impl ClaudeAgent {
                             .await;
                     }
                     session.status = SessionStatus::Idle;
+                    self.upsert_snapshot_from_session(&session);
                     return;
                 }
                 Ok(None) => {
                     session.status = SessionStatus::Crashed;
+                    self.upsert_snapshot_from_session(&session);
                     let message = build_session_ended_error_message(&mut session);
                     drop(session);
                     self.cleanup_session(&session_id).await;
@@ -296,6 +358,7 @@ impl ClaudeAgent {
                 }
                 Err(error) => {
                     session.status = SessionStatus::Crashed;
+                    self.upsert_snapshot_from_session(&session);
                     drop(session);
                     self.cleanup_session(&session_id).await;
                     emit_error_chunk(&sender, format!("Claude 输出读取失败: {error}")).await;
@@ -307,6 +370,7 @@ impl ClaudeAgent {
 
     async fn cleanup_session(&self, session_id: &str) {
         let removed = self.lock_sessions().remove(session_id);
+        self.remove_snapshot(session_id);
         if let Some(handle) = removed {
             let mut session = handle.lock().await;
             session.status = SessionStatus::Crashed;
@@ -343,6 +407,7 @@ impl ClaudeAgent {
         let mut sessions = self.lock_sessions();
         for id in stale_ids {
             sessions.remove(&id);
+            self.remove_snapshot(&id);
         }
     }
 }
@@ -376,18 +441,10 @@ impl Agent for ClaudeAgent {
 
     fn list_sessions(&self) -> Vec<SessionInfo> {
         self.evict_dead_sessions();
-
-        let session_handles = {
-            let sessions = self.lock_sessions();
-            sessions
-                .iter()
-                .map(|(id, handle)| (id.clone(), handle.clone()))
-                .collect::<Vec<_>>()
-        };
-
-        let mut sessions = session_handles
-            .into_iter()
-            .map(|(session_id, handle)| build_session_info_from_handle(&session_id, &handle))
+        let mut sessions = self
+            .lock_session_snapshots()
+            .values()
+            .map(SessionSnapshot::to_session_info)
             .collect::<Vec<_>>();
         sessions.sort_by(|left, right| left.session_id.cmp(&right.session_id));
         sessions
@@ -395,8 +452,9 @@ impl Agent for ClaudeAgent {
 
     fn get_session(&self, session_id: &str) -> Option<SessionInfo> {
         self.evict_dead_sessions();
-        let handle = self.lock_sessions().get(session_id).cloned()?;
-        Some(build_session_info_from_handle(session_id, &handle))
+        self.lock_session_snapshots()
+            .get(session_id)
+            .map(SessionSnapshot::to_session_info)
     }
 
     fn close_session(&self, session_id: &str) -> bool {
@@ -404,6 +462,7 @@ impl Agent for ClaudeAgent {
         let Some(handle) = removed else {
             return false;
         };
+        self.remove_snapshot(session_id);
 
         if let Ok(mut session) = handle.try_lock() {
             session.status = SessionStatus::Crashed;
@@ -419,37 +478,6 @@ impl Agent for ClaudeAgent {
         }
 
         true
-    }
-}
-
-fn build_session_info_from_handle(session_id: &str, handle: &SharedClaudeSession) -> SessionInfo {
-    match handle.try_lock() {
-        Ok(session) => build_session_info(&session),
-        Err(_) => build_locked_session_fallback_info(session_id),
-    }
-}
-
-fn build_session_info(session: &ClaudeSession) -> SessionInfo {
-    SessionInfo {
-        session_id: session.session_id.clone(),
-        status: session.status.as_str().to_string(),
-        created_at: format_utc_iso8601(session.created_wall),
-        last_active: format_utc_iso8601(compute_last_active_wall(session)),
-        message_count: session.message_count,
-        uptime_secs: session.created_at.elapsed().as_secs(),
-    }
-}
-
-fn build_locked_session_fallback_info(session_id: &str) -> SessionInfo {
-    let now = Utc::now();
-    let now_iso = format_utc_iso8601(now);
-    SessionInfo {
-        session_id: session_id.to_string(),
-        status: SessionStatus::Processing.as_str().to_string(),
-        created_at: now_iso.clone(),
-        last_active: now_iso,
-        message_count: 0,
-        uptime_secs: 0,
     }
 }
 

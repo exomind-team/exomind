@@ -35,7 +35,13 @@ fn reply_for(message: &str, remembered_name: &mut Option<String>) -> String {
 }
 
 fn main() {
-    let exit_after_one_turn = std::env::args().any(|arg| arg == "--exit-after-one");
+    let args = std::env::args().collect::<Vec<_>>();
+    let exit_after_one_turn = args.iter().any(|arg| arg == "--exit-after-one");
+    let delay_ms = args
+        .iter()
+        .find_map(|arg| arg.strip_prefix("--delay-ms="))
+        .and_then(|value| value.parse::<u64>().ok())
+        .unwrap_or(0);
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut remembered_name: Option<String> = None;
@@ -77,6 +83,9 @@ fn main() {
 
         let _ = writeln!(stdout, "{system_event}");
         let _ = writeln!(stdout, "{assistant_event}");
+        if delay_ms > 0 {
+            std::thread::sleep(std::time::Duration::from_millis(delay_ms));
+        }
         let _ = writeln!(stdout, "{result_event}");
         let _ = stdout.flush();
 
