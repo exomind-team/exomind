@@ -8,7 +8,7 @@
 // 使用默认导入
 import PouchDB from 'pouchdb';
 
-const TEST_POUCHDB_PREFIX_ENV = 'EXOMIND_EVENT_STORAGE_PREFIX';
+const POUCHDB_PREFIX_ENV = 'EXOMIND_EVENT_STORAGE_PREFIX';
 const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-event-storage/';
 
 /**
@@ -71,7 +71,8 @@ function normalizePouchDbPrefix(prefix: string): string {
   if (trimmed.length === 0) {
     return DEFAULT_TEST_POUCHDB_PREFIX;
   }
-  return trimmed.endsWith('/') || trimmed.endsWith('\\') ? trimmed : `${trimmed}/`;
+  const normalized = trimmed.replace(/\\/g, '/');
+  return normalized.endsWith('/') ? normalized : `${normalized}/`;
 }
 
 function readNodeEnv(name: string): string | undefined {
@@ -86,13 +87,13 @@ function resolvePouchDbPrefix(explicitPrefix?: string): string | undefined {
     return normalizePouchDbPrefix(explicitPrefix);
   }
 
-  const envPrefix = readNodeEnv(TEST_POUCHDB_PREFIX_ENV);
+  const envPrefix = readNodeEnv(POUCHDB_PREFIX_ENV);
   if (typeof envPrefix === 'string' && envPrefix.trim().length > 0) {
     return normalizePouchDbPrefix(envPrefix);
   }
 
   // Vitest in Node runtime writes LevelDB files; isolate under .tmp to avoid root pollution.
-  if (readNodeEnv('VITEST')) {
+  if (readNodeEnv('VITEST') || readNodeEnv('VITEST_WORKER_ID') || readNodeEnv('NODE_ENV') === 'test') {
     return DEFAULT_TEST_POUCHDB_PREFIX;
   }
 
@@ -101,6 +102,10 @@ function resolvePouchDbPrefix(explicitPrefix?: string): string | undefined {
 
 // 单例缓存
 const storageInstances: Map<string, EventStorage> = new Map();
+
+function buildStorageCacheKey(userId: string, prefix?: string): string {
+  return `${prefix ?? ''}::${userId}`;
+}
 
 /**
  * 获取当前用户 ID（与 ChatPage 保持一致）
@@ -136,12 +141,14 @@ export function getCurrentUserId(): string {
  */
 export function getEventStorage(userId?: string): EventStorage {
   const id = userId || getCurrentUserId();
+  const prefix = resolvePouchDbPrefix();
+  const cacheKey = buildStorageCacheKey(id, prefix);
 
-  if (!storageInstances.has(id)) {
-    storageInstances.set(id, new EventStorage(id));
+  if (!storageInstances.has(cacheKey)) {
+    storageInstances.set(cacheKey, new EventStorage(id, { pouchDbPrefix: prefix }));
   }
 
-  return storageInstances.get(id)!;
+  return storageInstances.get(cacheKey)!;
 }
 
 /**

@@ -75,7 +75,7 @@ htmlcov/
 *.tmp
 *.temp
 .cache/
-.tmp/
+.tmp/pouchdb-event-storage/
 .turbo/
 pnpm-store/
 
