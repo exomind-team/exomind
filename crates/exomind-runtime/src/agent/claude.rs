@@ -60,12 +60,9 @@ impl Agent for ClaudeAgent {
 }
 
 async fn stream_claude_stdout(command: String, message: String, sender: mpsc::Sender<ChatChunk>) {
+    let args = build_claude_args(&message);
     let mut child = match Command::new(&command)
-        .arg("-p")
-        .arg("--output-format")
-        .arg("stream-json")
-        .arg("--dangerously-skip-permissions")
-        .arg(message)
+        .args(&args)
         .stdout(Stdio::piped())
         .stderr(Stdio::null())
         .spawn()
@@ -108,6 +105,17 @@ async fn stream_claude_stdout(command: String, message: String, sender: mpsc::Se
 
 async fn emit_error_chunk(sender: &mpsc::Sender<ChatChunk>, message: String) {
     let _ = sender.send(ChatChunk { content: message }).await;
+}
+
+fn build_claude_args(message: &str) -> Vec<String> {
+    vec![
+        "-p".to_string(),
+        "--output-format".to_string(),
+        "stream-json".to_string(),
+        "--verbose".to_string(),
+        "--dangerously-skip-permissions".to_string(),
+        message.to_string(),
+    ]
 }
 
 fn parse_stream_json_line(line: &str) -> Option<ChatChunk> {
@@ -166,6 +174,22 @@ mod tests {
             .lines()
             .filter_map(parse_stream_json_line)
             .collect()
+    }
+
+    #[test]
+    fn build_claude_args_includes_verbose_for_print_stream_json() {
+        let args = build_claude_args("你好");
+        assert_eq!(
+            args,
+            vec![
+                "-p".to_string(),
+                "--output-format".to_string(),
+                "stream-json".to_string(),
+                "--verbose".to_string(),
+                "--dangerously-skip-permissions".to_string(),
+                "你好".to_string(),
+            ]
+        );
     }
 
     #[test]
