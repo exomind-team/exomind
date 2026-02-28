@@ -197,15 +197,26 @@ jobs:
           }
 
           function Invoke-InstallCommandWithTimeout([string]$Command, [int]$TimeoutSeconds) {
-            $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $Command) -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "cmd.exe"
+            $psi.Arguments = "/c $Command"
+            $psi.WorkingDirectory = (Get-Location).Path
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $false
+            $psi.RedirectStandardError = $false
+            $psi.CreateNoWindow = $true
+
+            $proc = [System.Diagnostics.Process]::Start($psi)
             if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
               Stop-ProcessTree -RootPid $proc.Id
               return $null
             }
-            return $proc.ExitCode
+
+            $proc.WaitForExit()
+            return [int]$proc.ExitCode
           }
 
-          function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 900, [int]$MaxAttempts = 2) {
+          function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 600, [int]$MaxAttempts = 1) {
             for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
               Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
               Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
@@ -962,15 +973,26 @@ jobs:
           }
 
           function Invoke-InstallCommandWithTimeout([string]$Command, [int]$TimeoutSeconds) {
-            $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", $Command) -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
+            $psi = New-Object System.Diagnostics.ProcessStartInfo
+            $psi.FileName = "cmd.exe"
+            $psi.Arguments = "/c $Command"
+            $psi.WorkingDirectory = (Get-Location).Path
+            $psi.UseShellExecute = $false
+            $psi.RedirectStandardOutput = $false
+            $psi.RedirectStandardError = $false
+            $psi.CreateNoWindow = $true
+
+            $proc = [System.Diagnostics.Process]::Start($psi)
             if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
               Stop-ProcessTree -RootPid $proc.Id
               return $null
             }
-            return $proc.ExitCode
+
+            $proc.WaitForExit()
+            return [int]$proc.ExitCode
           }
 
-          function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 900, [int]$MaxAttempts = 2) {
+          function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 600, [int]$MaxAttempts = 1) {
             for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
               Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
               Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
