@@ -1,6 +1,7 @@
 use exomind_runtime::agent::claude::ClaudeAgent;
 use exomind_runtime::agent::{Agent, ChatRequest};
 use futures_util::StreamExt;
+use std::time::Duration;
 
 fn fake_cli_command_path() -> String {
     env!("CARGO_BIN_EXE_fake-claude-cli").to_string()
@@ -103,4 +104,50 @@ async fn returns_error_after_reusing_session_with_exited_process() {
             .any(|chunk| chunk.content.contains("会话不存在")),
         "third_chunks={third_chunks:?}"
     );
+}
+
+#[tokio::test]
+async fn session_info_during_processing_keeps_real_message_count() {
+    let agent = ClaudeAgent::with_command_and_args(
+        fake_cli_command_path(),
+        vec!["--delay-ms=800".to_string()],
+    );
+
+    let mut stream = agent.chat_stream(ChatRequest {
+        message: "hello".to_string(),
+        session_id: None,
+    });
+
+    let first = stream
+        .next()
+        .await
+        .expect("first chunk should be available");
+    let session_id = first
+        .session_id
+        .clone()
+        .expect("first chunk should include session_id");
+
+    let during_processing = agent
+        .get_session(&session_id)
+        .expect("session should exist while processing");
+    assert_eq!(during_processing.status, "processing");
+    assert_eq!(
+        during_processing.message_count, 1,
+        "message_count should reflect current turn"
+    );
+
+    std::thread::sleep(Duration::from_millis(250));
+    let later_processing = agent
+        .get_session(&session_id)
+        .expect("session should still exist before result event");
+    assert_eq!(later_processing.status, "processing");
+    assert_eq!(later_processing.message_count, 1);
+    assert_eq!(later_processing.created_at, during_processing.created_at);
+
+    let _rest = stream.collect::<Vec<_>>().await;
+    let after = agent
+        .get_session(&session_id)
+        .expect("session should still exist after turn");
+    assert_eq!(after.status, "idle");
+    assert_eq!(after.message_count, 1);
 }
