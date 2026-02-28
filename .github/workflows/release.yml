@@ -400,19 +400,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob globstar
 
           version="${{ steps.r2meta.outputs.VERSION }}"
           output_dir="artifacts/r2-upload/macos"
           mkdir -p "$output_dir"
 
-          dmg_files=(src-tauri/target/release/bundle/dmg/**/*.dmg)
-          if (( ${#dmg_files[@]} == 0 )); then
+          dmg_src="$(find src-tauri/target/release/bundle/dmg -type f -name '*.dmg' | head -n 1)"
+          if [[ -z "$dmg_src" ]]; then
             echo "::error::Missing macOS DMG artifact."
             exit 1
           fi
 
-          dmg_src="${dmg_files[0]}"
           file_name="$(basename "$dmg_src" | tr '[:upper:]' '[:lower:]')"
           if [[ "$file_name" == *"x64"* || "$file_name" == *"x86_64"* ]]; then
             asset_key="macos-x64"
@@ -594,28 +592,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          shopt -s nullglob globstar
 
           version="${{ steps.r2meta.outputs.VERSION }}"
           output_dir="artifacts/r2-upload/linux"
           mkdir -p "$output_dir"
 
-          deb_files=(src-tauri/target/release/bundle/deb/**/*.deb)
-          appimage_files=(src-tauri/target/release/bundle/appimage/**/*.AppImage)
+          deb_src="$(find src-tauri/target/release/bundle/deb -type f -name '*.deb' | head -n 1)"
+          appimage_src="$(find src-tauri/target/release/bundle/appimage -type f -name '*.AppImage' | head -n 1)"
 
-          if (( ${#deb_files[@]} == 0 )); then
+          if [[ -z "$deb_src" ]]; then
             echo "::error::Missing Linux DEB artifact."
             exit 1
           fi
-          if (( ${#appimage_files[@]} == 0 )); then
+          if [[ -z "$appimage_src" ]]; then
             echo "::error::Missing Linux AppImage artifact."
             exit 1
           fi
 
           deb_out="$output_dir/ExoMind-${version}-linux-x64.deb"
           appimage_out="$output_dir/ExoMind-${version}-linux-x64.AppImage"
-          cp "${deb_files[0]}" "$deb_out"
-          cp "${appimage_files[0]}" "$appimage_out"
+          cp "$deb_src" "$deb_out"
+          cp "$appimage_src" "$appimage_out"
 
           echo "DEB_OUT=$deb_out" >> "$GITHUB_OUTPUT"
           echo "APPIMAGE_OUT=$appimage_out" >> "$GITHUB_OUTPUT"
