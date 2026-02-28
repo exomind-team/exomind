@@ -5,6 +5,7 @@ on:
     tags:
       - 'build/**'      # 构建触发：只构建，不发布
       - 'release/**'     # 发布触发：构建 + GitHub Release
+      - 'v*'             # 稳定版标签（例如 v0.3.3）
   workflow_dispatch:
     inputs:
       build_scope:
@@ -26,11 +27,53 @@ env:
   RUST_TOOLCHAIN: stable
 
 jobs:
+  release-gate:
+    name: Release Gate (稳定版测试门禁)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Detect stable release tag (识别稳定版标签)
+        id: gate
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "${GITHUB_REF}" == refs/tags/release/* || "${GITHUB_REF}" == refs/tags/v* ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+            echo "Release gate enabled for ${GITHUB_REF_NAME}"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "Release gate skipped for ${GITHUB_REF_NAME}"
+          fi
+
+      - name: Setup Bun (安装 Bun)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Setup Rust (安装 Rust)
+        if: steps.gate.outputs.enabled == 'true'
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install dependencies (安装依赖)
+        if: steps.gate.outputs.enabled == 'true'
+        run: bun install --frozen-lockfile
+
+      - name: Install Playwright Chromium (安装 Playwright Chromium)
+        if: steps.gate.outputs.enabled == 'true'
+        run: bun x playwright install chromium --with-deps
+
+      - name: Run stable release gate tests (执行稳定版门禁测试)
+        if: steps.gate.outputs.enabled == 'true'
+        run: bun run test:release:gate
+
   build-windows:
     # NOTE: build-android and build-windows both run on the same self-hosted Windows runner.
     # Serializing them (windows after android) prevents resource contention on the single runner.
     # If a dedicated second runner is added in future, this dependency can be removed.
-    needs: build-android
+    needs: [release-gate, build-android]
     if: |
       always() &&
       (
@@ -163,6 +206,8 @@ jobs:
             $appVersion = $refName.Substring("release/".Length)
           } elseif ($refName.StartsWith("build/")) {
             $appVersion = $refName.Substring("build/".Length)
+          } elseif ($refName.StartsWith("v")) {
+            $appVersion = $refName
           }
 
           if (-not $appVersion) {
@@ -238,6 +283,7 @@ jobs:
           if-no-files-found: ignore
 
   build-macos:
+    needs: release-gate
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'macos' }}
     runs-on: macos-latest
     steps:
@@ -266,6 +312,8 @@ jobs:
 
           if [[ "$ref_name" == release/* ]]; then
             app_version="${ref_name#release/}"
+          elif [[ "$ref_name" == v* ]]; then
+            app_version="$ref_name"
           elif [[ "$ref_name" == build/* ]]; then
             app_version="${ref_name#build/}"
           fi
@@ -319,6 +367,7 @@ jobs:
           if-no-files-found: ignore
 
   build-linux:
+    needs: release-gate
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'linux' }}
     runs-on: ubuntu-22.04
     steps:
@@ -359,6 +408,8 @@ jobs:
 
           if [[ "$ref_name" == release/* ]]; then
             app_version="${ref_name#release/}"
+          elif [[ "$ref_name" == v* ]]; then
+            app_version="$ref_name"
           elif [[ "$ref_name" == build/* ]]; then
             app_version="${ref_name#build/}"
           fi
@@ -419,6 +470,7 @@ jobs:
           if-no-files-found: ignore
 
   build-android:
+    needs: release-gate
     if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'android' }}
     runs-on: [self-hosted, Windows, X64]
     steps:
@@ -557,6 +609,8 @@ jobs:
             $appVersion = $refName.Substring("release/".Length)
           } elseif ($refName.StartsWith("build/")) {
             $appVersion = $refName.Substring("build/".Length)
+          } elseif ($refName.StartsWith("v")) {
+            $appVersion = $refName
           }
 
           if (-not $appVersion) {
@@ -730,15 +784,17 @@ jobs:
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
 
   create-release:
-    needs: [build-windows, build-macos, build-linux, build-android]
+    needs: [release-gate, build-windows, build-macos, build-linux, build-android]
     runs-on: ubuntu-latest
-    # 对 release/* 和 build/* tag 执行发布步骤
+    # 对 release/*、v*、build/* tag 执行发布步骤
     if: |
       always() &&
       (
         startsWith(github.ref, 'refs/tags/release/') ||
+        startsWith(github.ref, 'refs/tags/v') ||
         startsWith(github.ref, 'refs/tags/build/')
       ) &&
+      needs.release-gate.result == 'success' &&
       (
         needs.build-windows.result == 'success' ||
         needs.build-macos.result == 'success' ||
@@ -929,6 +985,9 @@ jobs:
           if [[ "$tag_name" == release/* ]]; then
             channel="release"
             version="${tag_name#release/}"
+          elif [[ "$tag_name" == v* ]]; then
+            channel="release"
+            version="$tag_name"
           elif [[ "$tag_name" == build/* ]]; then
             channel="preview"
             version="${tag_name#build/}"
