@@ -49,6 +49,9 @@ function parseHostAddress(hostAddress: string): { host: string; port: number } {
   if (!raw) {
     throw new Error('host:port is required（必须输入 host:port）');
   }
+  if (raw.includes('://') || raw.includes('/') || raw.includes('?') || raw.includes('#')) {
+    throw new Error('invalid host:port format（host:port 格式错误）');
+  }
 
   const splitIndex = raw.lastIndexOf(':');
   if (splitIndex <= 0 || splitIndex === raw.length - 1) {

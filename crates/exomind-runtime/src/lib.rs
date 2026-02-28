@@ -1,8 +1,10 @@
 use axum::{routing::get, Json, Router};
+use axum::http::Method;
 use serde::Serialize;
 use std::env;
 use std::sync::Arc;
 use thiserror::Error;
+use tower_http::cors::{Any, CorsLayer};
 
 pub mod agent;
 pub mod routes;
@@ -31,9 +33,16 @@ pub fn configured_port_from_env() -> Result<u16, PortConfigError> {
 
 /// Build HTTP router (HTTP 路由构建入口).
 pub fn app(runtime_port: u16) -> Router {
+    // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
+    let cors = CorsLayer::new()
+        .allow_origin(Any)
+        .allow_methods([Method::GET, Method::POST, Method::OPTIONS])
+        .allow_headers(Any);
+
     Router::new()
         .route("/health", get(health))
         .merge(routes::router())
+        .layer(cors)
         .with_state(AppState::new(runtime_port))
 }
 
@@ -178,6 +187,30 @@ mod tests {
                     "status": "available"
                 }
             ])
+        );
+    }
+
+    #[tokio::test]
+    async fn agents_endpoint_sets_cors_header_for_browser_fetch() {
+        const TEST_PORT: u16 = 3004;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents")
+                    .header("origin", "http://127.0.0.1:1420")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+        assert_eq!(
+            response
+                .headers()
+                .get("access-control-allow-origin")
+                .and_then(|value| value.to_str().ok()),
+            Some("*")
         );
     }
 

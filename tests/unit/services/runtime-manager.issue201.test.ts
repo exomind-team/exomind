@@ -115,4 +115,26 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
       port: 4077,
     });
   });
+
+  it('rejects full url input and requires plain host:port（拒绝完整 URL，仅接受 host:port）', async () => {
+    const addHost = vi.fn(async () => HOST_A);
+    const hostService = {
+      listHosts: vi.fn(async () => [HOST_A]),
+      addHost,
+      removeHost: vi.fn(),
+      probeHost: vi.fn(),
+      probeAllHosts: vi.fn(),
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(),
+      getTopology: vi.fn(),
+    };
+
+    const manager = new RuntimeManager({ hostService, runtimeClient });
+
+    await expect(manager.addHostFromAddress('http://127.0.0.1:19424/health', 'Bad Input')).rejects.toThrow(
+      'invalid host:port format',
+    );
+    expect(addHost).not.toHaveBeenCalled();
+  });
 });
