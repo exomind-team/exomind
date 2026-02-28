@@ -37,7 +37,7 @@ pub fn app(runtime_port: u16) -> Router {
         .with_state(AppState::new(runtime_port))
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub struct AppState {
     pub port: u16,
     pub registry: agent::AgentRegistry,
@@ -218,7 +218,8 @@ mod tests {
 
     #[tokio::test]
     async fn unknown_agent_chat_returns_not_found() {
-        let response = app()
+        const TEST_PORT: u16 = 3003;
+        let response = app(TEST_PORT)
             .oneshot(
                 Request::builder()
                     .method("POST")
@@ -239,6 +240,7 @@ mod tests {
         registry.register(Arc::new(TempRouteAgent));
 
         let router = routes::router().with_state(AppState {
+            port: 3003,
             registry: registry.clone(),
         });
 
