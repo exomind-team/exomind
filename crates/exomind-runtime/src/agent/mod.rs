@@ -1,5 +1,7 @@
+use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use serde::Serialize;
+use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
@@ -50,6 +52,10 @@ pub trait Agent: Send + Sync {
     }
 
     fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk>;
+
+    fn stats(&self, _session_id: Option<String>) -> BoxFuture<'_, Option<Value>> {
+        Box::pin(async { None })
+    }
 }
 
 #[derive(Clone, Default)]
