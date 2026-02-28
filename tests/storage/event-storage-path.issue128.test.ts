@@ -5,11 +5,13 @@ import path from 'node:path';
 import { EventStorage } from '@/lib/storage/event-storage';
 
 async function removeDirWithRetry(targetPath: string): Promise<void> {
+  let lastError: unknown = null;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       await fs.promises.rm(targetPath, { recursive: true, force: true });
       return;
     } catch (error) {
+      lastError = error;
       const code = (error as NodeJS.ErrnoException).code;
       if (code && !['EBUSY', 'ENOTEMPTY', 'EPERM', 'ENOENT'].includes(code)) {
         throw error;
@@ -17,6 +19,10 @@ async function removeDirWithRetry(targetPath: string): Promise<void> {
 
       await new Promise((resolve) => setTimeout(resolve, 50 * (attempt + 1)));
     }
+  }
+
+  if (lastError) {
+    throw lastError;
   }
 }
 
