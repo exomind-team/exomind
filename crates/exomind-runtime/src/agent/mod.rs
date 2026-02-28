@@ -41,6 +41,17 @@ pub struct ChatRequest {
     pub session_id: Option<String>,
 }
 
+/// Session metadata（会话元信息）.
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+pub struct SessionInfo {
+    pub session_id: String,
+    pub status: String,
+    pub created_at: String,
+    pub last_active: String,
+    pub message_count: u64,
+    pub uptime_secs: u64,
+}
+
 /// Agent behavior contract (Agent 行为契约).
 pub trait Agent: Send + Sync {
     fn id(&self) -> &'static str;
@@ -52,6 +63,18 @@ pub trait Agent: Send + Sync {
     }
 
     fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk>;
+
+    fn list_sessions(&self) -> Vec<SessionInfo> {
+        Vec::new()
+    }
+
+    fn get_session(&self, _session_id: &str) -> Option<SessionInfo> {
+        None
+    }
+
+    fn close_session(&self, _session_id: &str) -> bool {
+        false
+    }
 
     fn stats(&self, _session_id: Option<String>) -> BoxFuture<'_, Option<Value>> {
         Box::pin(async { None })
