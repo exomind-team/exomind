@@ -51,13 +51,22 @@ type SharedClaudeSession = Arc<Mutex<ClaudeSession>>;
 #[derive(Debug, Clone)]
 pub struct ClaudeAgent {
     command: String,
+    persistent_args: Vec<String>,
     sessions: Arc<Mutex<HashMap<String, SharedClaudeSession>>>,
 }
 
 impl ClaudeAgent {
     pub fn new() -> Self {
+        Self::with_command_and_args("claude", build_claude_persistent_args())
+    }
+
+    pub fn with_command_and_args(
+        command: impl Into<String>,
+        persistent_args: Vec<String>,
+    ) -> Self {
         Self {
-            command: "claude".to_string(),
+            command: command.into(),
+            persistent_args,
             sessions: Arc::new(Mutex::new(HashMap::new())),
         }
     }
@@ -121,7 +130,7 @@ impl ClaudeAgent {
     async fn create_session(&self) -> Result<(String, SharedClaudeSession), String> {
         let session_id = Uuid::new_v4().to_string();
         let mut child = Command::new(&self.command)
-            .args(build_claude_persistent_args())
+            .args(&self.persistent_args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::null())

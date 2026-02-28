@@ -7,6 +7,10 @@ edition = "2024"
 name = "exomind-rt"
 path = "src/main.rs"
 
+[[bin]]
+name = "fake-claude-cli"
+path = "tests/bin/fake-claude-cli.rs"
+
 [dependencies]
 axum = "0.7"
 futures-util = "0.3"
