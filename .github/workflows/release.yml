@@ -193,11 +193,7 @@ jobs:
               Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
               Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
 
-              $proc = Start-Process -FilePath "powershell.exe" `
-                -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "bun install --frozen-lockfile") `
-                -WorkingDirectory (Get-Location).Path `
-                -NoNewWindow `
-                -PassThru
+              $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "bun install --frozen-lockfile") -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
               if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                 Write-Warning "bun install timed out after $TimeoutSeconds seconds."
@@ -940,11 +936,7 @@ jobs:
               Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
               Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
 
-              $proc = Start-Process -FilePath "powershell.exe" `
-                -ArgumentList @("-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", "bun install --frozen-lockfile") `
-                -WorkingDirectory (Get-Location).Path `
-                -NoNewWindow `
-                -PassThru
+              $proc = Start-Process -FilePath "cmd.exe" -ArgumentList @("/c", "bun install --frozen-lockfile") -WorkingDirectory (Get-Location).Path -NoNewWindow -PassThru
               if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                 Write-Warning "bun install timed out after $TimeoutSeconds seconds."
