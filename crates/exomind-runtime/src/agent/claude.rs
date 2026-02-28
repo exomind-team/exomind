@@ -141,14 +141,14 @@ impl ClaudeAgent {
     }
 
     fn upsert_snapshot_from_session(&self, session: &ClaudeSession) {
-        let is_registered = self.lock_sessions().contains_key(&session.session_id);
-        if !is_registered {
-            self.remove_snapshot(&session.session_id);
-            return;
-        }
         let snapshot = SessionSnapshot::from_session(session);
-        self.lock_session_snapshots()
-            .insert(snapshot.session_id.clone(), snapshot);
+        let sessions = self.lock_sessions();
+        let mut snapshots = self.lock_session_snapshots();
+        if sessions.contains_key(&session.session_id) {
+            snapshots.insert(snapshot.session_id.clone(), snapshot);
+        } else {
+            snapshots.remove(&session.session_id);
+        }
     }
 
     fn remove_snapshot(&self, session_id: &str) {
