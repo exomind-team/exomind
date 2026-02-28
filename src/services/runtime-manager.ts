@@ -20,6 +20,7 @@ export interface RuntimeHostSnapshot {
   connectionState: RuntimeHostConnectionState;
   agents: RuntimeAggregatedAgent[];
   topology: RuntimeTopologyResponse | null;
+  latencyMs?: number;
   error?: string;
 }
 
@@ -121,10 +122,15 @@ export class RuntimeManager {
   }
 
   private async buildHostSnapshot(host: RuntimeHostRecord): Promise<RuntimeHostSnapshot> {
-    const [agentsResult, topologyResult] = await Promise.all([
+    const topologyStartedAtMs = Date.now();
+    const [agentsResult, topologyEnvelope] = await Promise.all([
       this.runtimeClient.getAgents(host),
-      this.runtimeClient.getTopology(host),
+      this.runtimeClient.getTopology(host).then((result) => ({
+        result,
+        latencyMs: Math.max(1, Date.now() - topologyStartedAtMs),
+      })),
     ]);
+    const topologyResult = topologyEnvelope.result;
 
     if (!agentsResult.ok) {
       return {
@@ -132,6 +138,7 @@ export class RuntimeManager {
         connectionState: mapErrorToConnectionState(agentsResult.error.code),
         agents: [],
         topology: topologyResult.ok ? topologyResult.data : null,
+        latencyMs: topologyEnvelope.latencyMs,
         error: agentsResult.error.message,
       };
     }
@@ -149,6 +156,7 @@ export class RuntimeManager {
         connectionState: mapErrorToConnectionState(topologyResult.error.code),
         agents: nextAgents,
         topology: null,
+        latencyMs: topologyEnvelope.latencyMs,
         error: topologyResult.error.message,
       };
     }
@@ -158,6 +166,7 @@ export class RuntimeManager {
       connectionState: 'online',
       agents: nextAgents,
       topology: topologyResult.data,
+      latencyMs: topologyEnvelope.latencyMs,
     };
   }
 }

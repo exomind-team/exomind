@@ -59,7 +59,20 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       host,
       connectionState: hostState[host.id] ?? 'offline',
       agents: [],
-      topology: null,
+      topology:
+        hostState[host.id] === 'online'
+          ? {
+              hostname: host.name,
+              os: 'Windows 11',
+              arch: 'x86_64',
+              uptime_secs: 3600,
+              version: '0.1.0',
+              port: host.port,
+              total_memory_mb: 16384,
+              used_memory_mb: 8192,
+            }
+          : null,
+      latencyMs: hostState[host.id] === 'online' ? 15 : undefined,
       error: hostState[host.id] === 'offline' ? 'ECONNREFUSED' : undefined,
     })),
   });
@@ -98,11 +111,26 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       hostState[added.id] = 'offline';
       return added;
     });
+    runtimeManagerMocks.addHostFromAddress.mockImplementation(async (address: string, name?: string) => {
+      const [host, portRaw] = address.split(':');
+      const port = Number.parseInt(portRaw ?? '0', 10);
+      const added: RuntimeHostRecord = {
+        id: 'runtime-host-2',
+        name: name || `${host}:${port}`,
+        host: host ?? '',
+        port,
+        status: 'unknown',
+        createdAt: '2026-02-27T10:01:00.000Z',
+        updatedAt: '2026-02-27T10:01:00.000Z',
+      };
+      hosts = [...hosts, added];
+      hostState[added.id] = 'offline';
+      return added;
+    });
     runtimeManagerMocks.retryHost.mockImplementation(async (hostId: string) => {
       hostState[hostId] = 'online';
       return buildSnapshot().hosts.find((item) => item.host.id === hostId) ?? null;
     });
-    runtimeManagerMocks.addHostFromAddress.mockResolvedValue(null);
     runtimeManagerMocks.removeHost.mockResolvedValue(undefined);
 
     runtimeControlMocks.getStatus.mockResolvedValue({
@@ -123,7 +151,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
   });
 
-  it('adds runtime host from device view form（设备页表单可新增 RuntimeHost）', async () => {
+  it('opens manager sheet from device view and adds runtime host（设备页可打开主机管理并新增 RuntimeHost）', async () => {
     render(<AgentsPage />);
     fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
 
@@ -132,18 +160,18 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       expect(screen.getByText('Hope Desktop')).toBeInTheDocument();
     });
 
+    fireEvent.click(screen.getByTestId('runtime-host-manage-button'));
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-host-manager-sheet')).toBeInTheDocument();
+    });
+
     fireEvent.change(screen.getByTestId('runtime-host-name-input'), { target: { value: 'LAN Runner' } });
-    fireEvent.change(screen.getByTestId('runtime-host-address-input'), { target: { value: '192.168.1.33' } });
-    fireEvent.change(screen.getByTestId('runtime-host-port-input'), { target: { value: '9001' } });
+    fireEvent.change(screen.getByTestId('runtime-host-address-input'), { target: { value: '192.168.1.33:9001' } });
     fireEvent.click(screen.getByTestId('runtime-host-add-button'));
 
     await waitFor(() => {
-      expect(runtimeManagerMocks.addHost).toHaveBeenCalledWith({
-        name: 'LAN Runner',
-        host: '192.168.1.33',
-        port: 9001,
-      });
-      expect(screen.getByText('LAN Runner')).toBeInTheDocument();
+      expect(runtimeManagerMocks.addHostFromAddress).toHaveBeenCalledWith('192.168.1.33:9001', 'LAN Runner');
+      expect(screen.getAllByText('LAN Runner').length).toBeGreaterThan(0);
     });
   });
 

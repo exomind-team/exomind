@@ -88,6 +88,8 @@ function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
   if (typeof value.uptime_secs !== 'number') return null;
   if (typeof value.version !== 'string') return null;
   if (typeof value.port !== 'number') return null;
+  if (value.total_memory_mb != null && typeof value.total_memory_mb !== 'number') return null;
+  if (value.used_memory_mb != null && typeof value.used_memory_mb !== 'number') return null;
 
   return {
     hostname: value.hostname,
@@ -96,6 +98,8 @@ function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
     uptime_secs: value.uptime_secs,
     version: value.version,
     port: value.port,
+    total_memory_mb: typeof value.total_memory_mb === 'number' ? value.total_memory_mb : undefined,
+    used_memory_mb: typeof value.used_memory_mb === 'number' ? value.used_memory_mb : undefined,
   };
 }
 

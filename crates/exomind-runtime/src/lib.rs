@@ -157,6 +157,8 @@ mod tests {
         assert!(payload["uptime_secs"].is_u64());
         assert_eq!(payload["version"], RUNTIME_VERSION);
         assert_eq!(payload["port"], serde_json::json!(TEST_PORT));
+        assert!(payload["total_memory_mb"].is_u64());
+        assert!(payload["used_memory_mb"].is_u64());
     }
 
     #[tokio::test]
