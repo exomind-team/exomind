@@ -1,5 +1,6 @@
 use super::{Agent, ChatChunk, ChatRequest};
 use futures_util::stream::{self, BoxStream, StreamExt};
+use serde::Serialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
 use std::process::Stdio;
@@ -11,6 +12,55 @@ use tokio::sync::{Mutex, mpsc};
 use uuid::Uuid;
 
 const MAX_CLAUDE_SESSIONS: usize = 64;
+
+/// Token usage snapshot（Token 用量快照）.
+#[derive(Debug, Clone, Default, Serialize, PartialEq, Eq)]
+struct TokenUsage {
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+}
+
+impl TokenUsage {
+    fn accumulate(&mut self, other: &TokenUsage) {
+        self.input_tokens = self.input_tokens.saturating_add(other.input_tokens);
+        self.output_tokens = self.output_tokens.saturating_add(other.output_tokens);
+        self.cache_read_tokens = self
+            .cache_read_tokens
+            .saturating_add(other.cache_read_tokens);
+        self.cache_write_tokens = self
+            .cache_write_tokens
+            .saturating_add(other.cache_write_tokens);
+    }
+
+    fn estimated_cost_usd(&self) -> f64 {
+        const PER_MILLION_INPUT_USD: f64 = 3.0;
+        const PER_MILLION_OUTPUT_USD: f64 = 15.0;
+        const PER_MILLION_CACHE_READ_USD: f64 = 0.30;
+        const PER_MILLION_CACHE_WRITE_USD: f64 = 3.75;
+
+        (self.input_tokens as f64 * PER_MILLION_INPUT_USD
+            + self.output_tokens as f64 * PER_MILLION_OUTPUT_USD
+            + self.cache_read_tokens as f64 * PER_MILLION_CACHE_READ_USD
+            + self.cache_write_tokens as f64 * PER_MILLION_CACHE_WRITE_USD)
+            / 1_000_000.0
+    }
+}
+
+/// Claude stats payload（Claude 统计响应载荷）.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+struct ClaudeAgentStats {
+    session_id: Option<String>,
+    session_count: u64,
+    input_tokens: u64,
+    output_tokens: u64,
+    cache_read_tokens: u64,
+    cache_write_tokens: u64,
+    message_count: u64,
+    uptime_secs: u64,
+    total_cost_usd: f64,
+}
 
 /// Session status（会话状态）.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -31,6 +81,8 @@ struct ClaudeSession {
     status: SessionStatus,
     created_at: Instant,
     message_count: u64,
+    token_usage: TokenUsage,
+    total_cost_usd: f64,
 }
 
 impl Drop for ClaudeSession {
@@ -47,11 +99,18 @@ enum SessionAction {
     Missing { session_id: String },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq)]
 enum ClaudeStreamEvent {
-    System { claude_session_id: Option<String> },
-    AssistantChunk { content: String },
-    Result,
+    System {
+        claude_session_id: Option<String>,
+    },
+    AssistantChunk {
+        content: String,
+    },
+    Result {
+        usage: Option<TokenUsage>,
+        total_cost_usd: Option<f64>,
+    },
 }
 
 type SharedClaudeSession = Arc<Mutex<ClaudeSession>>;
@@ -164,6 +223,8 @@ impl ClaudeAgent {
             status: SessionStatus::Idle,
             created_at: Instant::now(),
             message_count: 0,
+            token_usage: TokenUsage::default(),
+            total_cost_usd: 0.0,
         };
 
         let mut sessions = self.sessions.lock().await;
@@ -177,6 +238,45 @@ impl ClaudeAgent {
         let shared_session = Arc::new(Mutex::new(session));
         sessions.insert(session_id.clone(), shared_session.clone());
         Ok((session_id, shared_session))
+    }
+
+    async fn collect_stats(&self, session_id: Option<&str>) -> Option<ClaudeAgentStats> {
+        let target_sessions = {
+            let sessions = self.sessions.lock().await;
+            match session_id {
+                Some(id) => {
+                    let handle = sessions.get(id)?.clone();
+                    vec![handle]
+                }
+                None => sessions.values().cloned().collect::<Vec<_>>(),
+            }
+        };
+
+        let session_count = target_sessions.len() as u64;
+        let mut usage = TokenUsage::default();
+        let mut message_count = 0_u64;
+        let mut uptime_secs = 0_u64;
+        let mut total_cost_usd = 0.0_f64;
+
+        for handle in target_sessions {
+            let session = handle.lock().await;
+            usage.accumulate(&session.token_usage);
+            message_count = message_count.saturating_add(session.message_count);
+            uptime_secs = uptime_secs.saturating_add(session.created_at.elapsed().as_secs());
+            total_cost_usd += session.total_cost_usd;
+        }
+
+        Some(ClaudeAgentStats {
+            session_id: session_id.map(ToString::to_string),
+            session_count,
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_tokens: usage.cache_read_tokens,
+            cache_write_tokens: usage.cache_write_tokens,
+            message_count,
+            uptime_secs,
+            total_cost_usd,
+        })
     }
 
     async fn process_turn(
@@ -247,7 +347,17 @@ impl ClaudeAgent {
                         return;
                     }
                 }
-                Ok(Some(ClaudeStreamEvent::Result)) => {
+                Ok(Some(ClaudeStreamEvent::Result {
+                    usage,
+                    total_cost_usd,
+                })) => {
+                    let turn_cost_usd = resolve_turn_cost_usd(usage.as_ref(), total_cost_usd);
+
+                    if let Some(turn_usage) = usage {
+                        session.token_usage.accumulate(&turn_usage);
+                    }
+                    session.total_cost_usd += turn_cost_usd;
+
                     if pending_session_chunk {
                         let _ = sender
                             .send(ChatChunk {
@@ -344,6 +454,16 @@ impl Agent for ClaudeAgent {
             receiver.recv().await.map(|chunk| (chunk, receiver))
         })
         .boxed()
+    }
+
+    fn stats(
+        &self,
+        session_id: Option<String>,
+    ) -> futures_util::future::BoxFuture<'_, Option<Value>> {
+        Box::pin(async move {
+            let stats = self.collect_stats(session_id.as_deref()).await?;
+            serde_json::to_value(stats).ok()
+        })
     }
 }
 
@@ -460,7 +580,10 @@ fn parse_stream_event_line(line: &str) -> Option<ClaudeStreamEvent> {
         "system" => Some(ClaudeStreamEvent::System {
             claude_session_id: extract_claude_session_id(&event),
         }),
-        "result" => Some(ClaudeStreamEvent::Result),
+        "result" => Some(ClaudeStreamEvent::Result {
+            usage: extract_token_usage(&event),
+            total_cost_usd: extract_total_cost_usd(&event),
+        }),
         _ => None,
     }
 }
@@ -520,6 +643,35 @@ fn extract_text_content(event: &Value) -> Option<String> {
     }
 
     None
+}
+
+fn extract_total_cost_usd(event: &Value) -> Option<f64> {
+    event.get("total_cost_usd").and_then(Value::as_f64)
+}
+
+fn extract_token_usage(event: &Value) -> Option<TokenUsage> {
+    let usage = event.get("usage")?;
+    Some(TokenUsage {
+        input_tokens: read_u64_field(usage, &["input_tokens"]),
+        output_tokens: read_u64_field(usage, &["output_tokens"]),
+        cache_read_tokens: read_u64_field(usage, &["cache_read_input_tokens", "cache_read_tokens"]),
+        cache_write_tokens: read_u64_field(
+            usage,
+            &["cache_creation_input_tokens", "cache_write_tokens"],
+        ),
+    })
+}
+
+fn read_u64_field(value: &Value, keys: &[&str]) -> u64 {
+    keys.iter()
+        .find_map(|key| value.get(key).and_then(Value::as_u64))
+        .unwrap_or(0)
+}
+
+fn resolve_turn_cost_usd(usage: Option<&TokenUsage>, total_cost_usd: Option<f64>) -> f64 {
+    total_cost_usd
+        .or_else(|| usage.map(TokenUsage::estimated_cost_usd))
+        .unwrap_or(0.0)
 }
 
 #[cfg(test)]
@@ -635,7 +787,107 @@ mod tests {
     #[test]
     fn parse_stream_event_line_detects_result_event() {
         let event = parse_stream_event_line(r#"{"type":"result","stop_reason":"end_turn"}"#);
-        assert_eq!(event, Some(ClaudeStreamEvent::Result));
+        assert_eq!(
+            event,
+            Some(ClaudeStreamEvent::Result {
+                usage: None,
+                total_cost_usd: None,
+            })
+        );
+    }
+
+    #[test]
+    fn token_usage_accumulate_adds_all_fields() {
+        let mut total = TokenUsage {
+            input_tokens: 10,
+            output_tokens: 20,
+            cache_read_tokens: 30,
+            cache_write_tokens: 40,
+        };
+        let delta = TokenUsage {
+            input_tokens: 1,
+            output_tokens: 2,
+            cache_read_tokens: 3,
+            cache_write_tokens: 4,
+        };
+
+        total.accumulate(&delta);
+
+        assert_eq!(
+            total,
+            TokenUsage {
+                input_tokens: 11,
+                output_tokens: 22,
+                cache_read_tokens: 33,
+                cache_write_tokens: 44,
+            }
+        );
+    }
+
+    #[test]
+    fn token_usage_estimated_cost_usd_uses_claude_3_5_sonnet_pricing() {
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 1_000_000,
+            cache_read_tokens: 1_000_000,
+            cache_write_tokens: 1_000_000,
+        };
+
+        let cost = usage.estimated_cost_usd();
+        let expected = 3.0 + 15.0 + 0.30 + 3.75;
+        assert!((cost - expected).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn parse_stream_event_line_extracts_result_usage_and_cost() {
+        let line = r#"{
+            "type":"result",
+            "usage":{
+                "input_tokens":1250,
+                "output_tokens":340,
+                "cache_creation_input_tokens":200,
+                "cache_read_input_tokens":500
+            },
+            "total_cost_usd":0.042
+        }"#;
+        let event = parse_stream_event_line(line);
+
+        assert_eq!(
+            event,
+            Some(ClaudeStreamEvent::Result {
+                usage: Some(TokenUsage {
+                    input_tokens: 1250,
+                    output_tokens: 340,
+                    cache_read_tokens: 500,
+                    cache_write_tokens: 200,
+                }),
+                total_cost_usd: Some(0.042),
+            })
+        );
+    }
+
+    #[test]
+    fn resolve_turn_cost_usd_prioritizes_cli_reported_cost() {
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        };
+        let resolved = resolve_turn_cost_usd(Some(&usage), Some(0.5));
+        assert!((resolved - 0.5).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn resolve_turn_cost_usd_falls_back_to_estimation() {
+        let usage = TokenUsage {
+            input_tokens: 1_000_000,
+            output_tokens: 0,
+            cache_read_tokens: 0,
+            cache_write_tokens: 0,
+        };
+        let resolved = resolve_turn_cost_usd(Some(&usage), None);
+        assert!((resolved - 3.0).abs() < f64::EPSILON);
     }
 
     #[test]

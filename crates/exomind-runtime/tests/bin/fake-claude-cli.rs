@@ -72,7 +72,14 @@ fn main() {
         });
         let result_event = json!({
             "type": "result",
-            "subtype": "success"
+            "subtype": "success",
+            "usage": {
+                "input_tokens": 100,
+                "output_tokens": 50,
+                "cache_creation_input_tokens": 20,
+                "cache_read_input_tokens": 10
+            },
+            "total_cost_usd": 0.001
         });
 
         let _ = writeln!(stdout, "{system_event}");
