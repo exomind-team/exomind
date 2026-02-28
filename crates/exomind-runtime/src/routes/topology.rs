@@ -1,9 +1,9 @@
-use axum::{extract::State, Json};
+use axum::{Json, extract::State};
 use serde::Serialize;
 use std::sync::OnceLock;
 use sysinfo::System;
 
-use crate::{RuntimeState, RUNTIME_VERSION};
+use crate::{RUNTIME_VERSION, RuntimeState};
 
 #[derive(Debug, Clone)]
 struct TopologyStaticInfo {
@@ -58,7 +58,7 @@ fn read_hostname() -> String {
 
 fn read_os() -> String {
     System::long_os_version()
-        .or_else(|| System::name())
+        .or_else(System::name)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| std::env::consts::OS.to_string())
 }
