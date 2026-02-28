@@ -238,7 +238,16 @@ jobs:
           if-no-files-found: ignore
 
   build-macos:
-    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'macos' }}
+    # macOS runner costs 10x — only run on release tags or manual dispatch to save Actions minutes
+    # build/* tags skip macOS entirely (use self-hosted Windows/Android instead)
+    if: |
+      (
+        startsWith(github.ref, 'refs/tags/release/')
+      ) ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'macos')
+      )
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -319,7 +328,16 @@ jobs:
           if-no-files-found: ignore
 
   build-linux:
-    if: ${{ github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'linux' }}
+    # Linux runner costs 1x — only run on release tags or manual dispatch to save Actions minutes
+    # build/* tags skip Linux (use self-hosted Windows/Android instead)
+    if: |
+      (
+        startsWith(github.ref, 'refs/tags/release/')
+      ) ||
+      (
+        github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'linux')
+      )
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
