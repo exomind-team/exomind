@@ -501,17 +501,18 @@ dev (开发主干) ─────●──●──●──●──●──�
 
 #### CI/CD Tag 规范
 
-| Tag 模式 | 触发 | 产出 |
-|----------|------|------|
-| `build/**` | 构建 jobs | Artifact |
-| `release/**` | 构建 + Release jobs | GitHub Release |
+| Tag 模式 | 触发 | 产出 | Release 类型 |
+|----------|------|------|-------------|
+| `build/v0.3.2-build.20260222T1430` | 构建 + Release jobs | GitHub Release | Pre-release |
+| `release/v0.3.3` | 构建 + Release jobs | GitHub Release | 正式版 |
+| `release/v0.3.3-beta.1` | 构建 + Release jobs | GitHub Release | Pre-release |
 
 ```bash
-# 构建验证
-git tag build/v0.1.0 && git push origin build/v0.1.0
+# 日常构建测试（自动时间戳，Releases 页面直接下载）
+bun run build:tag
 
 # 正式发布
-git tag release/v0.1.0 && git push origin release/v0.1.0
+git tag release/v0.3.3 && git push origin release/v0.3.3
 ```
 
 ---
@@ -815,6 +816,24 @@ pm/
 | 产品路线图 | `pm/roadmap.md` |
 | 执行日志 | `pm/memory/logs.md` |
 | Git工作流知识点 | `pm/memory/知识点-Git工作流.md` |
+
+---
+
+## 工具使用经验
+
+### GitHub PR 描述更新
+
+使用 `--body-file` 而不是 `--body` 来避免 shell 转义导致的反斜杠问题：
+
+```bash
+# 1. 先用 Write 工具写入文件
+# 2. 用 --body-file 上传
+gh pr edit <number> --body-file pr-body.md
+# 3. 清理临时文件
+rm pr-body.md
+```
+
+直接在 `--body "..."` 里写 markdown 会导致 backtick、反斜杠等字符被 shell 转义，渲染出错。
 
 ---
 

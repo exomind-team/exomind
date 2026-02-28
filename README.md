@@ -2,6 +2,10 @@
 
 > 本地优先（Local-first / 本地优先）的个人 AI 助手，聚焦事件日志（Event Log / 事件日志）、时间块（TimeBlock / 时间块）与多端同步（Multi-device Sync / 多端同步）。
 
+## CI/CD
+
+- **Black Hat Critic**: PR 自动双关评审（Codex 5.3 + Claude Opus 4.6）
+
 ## 项目概览
 
 ExoMind 是一个基于 Tauri v2 的跨平台应用（Windows/macOS/Linux/Android），前端使用 React + TypeScript，数据层使用 PouchDB（IndexedDB）并支持局域网同步。
@@ -61,7 +65,7 @@ bun install --cwd server --omit optional
 ### 3) 本地开发（Development / 开发）
 
 ```powershell
-# Web 前端（默认端口 1420）
+# Web 前端（默认尝试 1420，被占用时自动选择空闲端口）
 bun run dev
 
 # PouchDB 同步服务（默认 127.0.0.1:6984）
@@ -69,7 +73,7 @@ bun run server
 ```
 
 ```powershell
-# Tauri 桌面开发
+# Tauri 桌面开发（自动探测空闲端口，无需手动配置）
 bun run tauri dev
 
 # Tauri Android 开发
@@ -134,8 +138,8 @@ Copy-Item .env.example .env
 
 | 变量                     | 默认值        | 说明                        |
 | ------------------------ | ------------- | --------------------------- |
-| `EXOMIND_WEB_PORT`     | `1420`      | Web 开发端口                |
-| `EXOMIND_HMR_PORT`     | `1421`      | HMR 端口                    |
+| `EXOMIND_WEB_PORT`     | 自动探测 | Web 开发端口（默认尝试 1420，被占用自动切换） |
+| `EXOMIND_HMR_PORT`     | WEB+1   | HMR 端口                    |
 | `EXOMIND_POUCHDB_PORT` | `6984`      | 同步服务端口                |
 | `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | 同步服务监听地址            |
 | `EXOMIND_ASR_PORT`     | `1949`      | ASR 服务端口                |
@@ -160,6 +164,13 @@ bun run test:sync
 
 # 端到端测试
 bun run test:e2e
+
+# Termux 端到端测试（系统 Chromium）
+pkg install x11-repo chromium
+export PLAYWRIGHT_TERMUX=1
+export PLAYWRIGHT_BROWSERS_PATH=0
+export CHROMIUM_PATH=/data/data/com.termux/files/usr/bin/chromium-browser
+bun run test:e2e:termux
 
 # Issue 专用 E2E 配置示例
 bun run test:e2e:issue27
@@ -190,27 +201,28 @@ bun run tauri android build --debug
 
 Tag 触发规则：
 
-- `build/**`：只构建，产出 Artifact（构建产物）
-- `release/**`：构建并创建 GitHub Release（发布）
+| Tag 格式 | 触发行为 | Release 类型 |
+|---------|---------|-------------|
+| `build/v0.3.2-build.20260222T1430` | 构建 + GitHub Release | Pre-release（可直接下载） |
+| `release/v0.3.3` | 构建 + GitHub Release | 正式版 |
+| `release/v0.3.3-beta.1` | 构建 + GitHub Release | Pre-release（由版本号判断） |
 
-示例：
+日常使用：
 
 ```bash
-# 构建（不发布）
-git tag build/v0.2.1-beta.1
-git push origin build/v0.2.1-beta.1
+# 日常构建测试（自动生成时间戳 tag，Releases 页面可直接下载）
+bun run build:tag
 
-# 发布（预发布或正式发布由版本号判断）
-git tag release/v0.2.1-beta.1
-git push origin release/v0.2.1-beta.1
+# 正式发版（先 bump 版本号，再打 tag）
+git tag release/v0.3.3 && git push origin release/v0.3.3
 ```
 
 发布产物命名（归一化后）：
 
-- `ExoMind-v0.2.1-beta.1-<hash>-windows-x64-setup.exe`
-- `ExoMind-v0.2.1-beta.1-<hash>-windows-x64-installer.msi`（可选）
-- `ExoMind-v0.2.1-beta.1-<hash>-android-arm64.apk`
-- `ExoMind-v0.2.1-beta.1-<hash>-android-x86.apk`
+- `ExoMind-v0.3.2-build.20260222T1430-<hash>-windows-x64-setup.exe`
+- `ExoMind-v0.3.2-build.20260222T1430-<hash>-windows-x64-installer.msi`（可选）
+- `ExoMind-v0.3.2-build.20260222T1430-<hash>-android-arm64.apk`
+- `ExoMind-v0.3.2-build.20260222T1430-<hash>-android-x86.apk`
 
 ## 项目结构（Repository Layout / 目录结构）
 
@@ -245,7 +257,7 @@ exomind/
 3. Android 构建失败
    先确认 `JAVA_HOME`、`ANDROID_SDK_ROOT` 与 `bun run tauri android init` 已完成。
 4. 多 worktree 端口冲突
-   为每个 worktree 设独立 `EXOMIND_WEB_PORT/EXOMIND_HMR_PORT/EXOMIND_POUCHDB_PORT/EXOMIND_ASR_PORT`。
+   dev 端口已支持自动探测空闲端口，通常无需手动配置。如需固定端口，可设置 `EXOMIND_WEB_PORT/EXOMIND_HMR_PORT/EXOMIND_POUCHDB_PORT/EXOMIND_ASR_PORT`。
 
 ## License
 

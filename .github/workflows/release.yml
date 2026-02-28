@@ -16,6 +16,8 @@ on:
           - all
           - android
           - windows
+          - macos
+          - linux
 
 permissions:
   contents: write
@@ -25,8 +27,21 @@ env:
 
 jobs:
   build-windows:
+    # NOTE: build-android and build-windows both run on the same self-hosted Windows runner.
+    # Serializing them (windows after android) prevents resource contention on the single runner.
+    # If a dedicated second runner is added in future, this dependency can be removed.
     needs: build-android
-    if: ${{ always() && (github.event_name != 'workflow_dispatch' || github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'windows') && (github.event.inputs.build_scope == 'windows' || needs.build-android.result == 'success') }}
+    if: |
+      always() &&
+      (
+        github.event_name != 'workflow_dispatch' ||
+        github.event.inputs.build_scope == 'all' ||
+        github.event.inputs.build_scope == 'windows'
+      ) &&
+      (
+        github.event.inputs.build_scope == 'windows' ||
+        needs.build-android.result == 'success'
+      )
     runs-on: [self-hosted, Windows, X64]
     steps:
       - uses: actions/checkout@v4
@@ -169,29 +184,47 @@ jobs:
       - name: Install dependencies
         run: bun install
 
-      - name: Build Windows NSIS installer (构建 Windows EXE/NSIS 安装包)
-        run: bun tauri build --bundles 'nsis'
+      - name: Build Windows NSIS installer (构建 NSIS 安装包)
+        run: bun tauri build --bundles nsis
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
-      - name: Build Windows MSI installer (可选 MSI，失败不阻断)
-        id: build_msi
+      - name: Build Windows MSI installer (构建 MSI 安装包，复用已编译的 Rust)
+        run: bun tauri build --bundles msi
         continue-on-error: true
-        run: bun tauri build --bundles 'msi'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
-      - name: Warn MSI optional failure (提示 MSI 可选失败)
-        if: ${{ steps.build_msi.outcome != 'success' }}
+      - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
+        shell: powershell
+        run: cargo build --release -p exomind-runtime
+
+      - name: Package exomind-rt runtime (打包 exomind-rt 运行时产物)
         shell: powershell
         run: |
-          Write-Warning "MSI bundling failed but job continues. Common cause: VBSCRIPT optional feature disabled on self-hosted Windows."
+          New-Item -ItemType Directory -Force -Path artifacts/runtime | Out-Null
+          Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
+
+      - name: Upload Windows runtime Artifact (上传 Windows runtime)
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-runtime-${{ steps.hash.outputs.HASH }}
+          path: artifacts/runtime/exomind-rt-windows-x64.exe
 
       - name: Upload Windows EXE Artifact (上传 EXE)
+        id: upload_exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-exe-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/nsis/
+        continue-on-error: true
+
+      - name: Retry Upload Windows EXE Artifact
+        if: steps.upload_exe.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
@@ -202,6 +235,197 @@ jobs:
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
           path: src-tauri/target/release/bundle/msi/
+          if-no-files-found: ignore
+
+  build-macos:
+    # PAUSED: macOS runner costs 10x, 额度不足暂停。手动 dispatch 可选择性恢复。
+    if: |
+      (
+        github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'macos')
+      )
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Bun
+        run: npm install -g bun
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Get short commit hash
+        id: hash
+        run: echo "HASH=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve app version
+        id: app_version
+        run: |
+          ref_name="${{ github.ref_name }}"
+          app_version=""
+
+          if [[ "$ref_name" == release/* ]]; then
+            app_version="${ref_name#release/}"
+          elif [[ "$ref_name" == build/* ]]; then
+            app_version="${ref_name#build/}"
+          fi
+
+          if [ -z "$app_version" ]; then
+            app_version="$(jq -r '.version' package.json)"
+          fi
+
+          app_version="${app_version#v}"
+
+          if [ -z "$app_version" ]; then
+            echo "Cannot resolve app version from tag or package.json." >&2
+            exit 1
+          fi
+
+          echo "APP_VERSION=$app_version" >> "$GITHUB_OUTPUT"
+          echo "Resolved app version: $app_version"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build macOS app (构建 macOS 应用)
+        run: npx tauri build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
+        run: cargo build --release -p exomind-runtime
+
+      - name: Package exomind-rt runtime (打包 exomind-rt 运行时产物)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/runtime
+          cp target/release/exomind-rt artifacts/runtime/exomind-rt-macos-aarch64
+          tar -czf artifacts/runtime/exomind-rt-macos-aarch64.tar.gz -C artifacts/runtime exomind-rt-macos-aarch64
+
+      - name: Upload macOS runtime Artifact (上传 macOS runtime)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-runtime-${{ steps.hash.outputs.HASH }}
+          path: artifacts/runtime/exomind-rt-macos-aarch64.tar.gz
+
+      - name: Upload macOS DMG Artifact (上传 DMG)
+        uses: actions/upload-artifact@v4
+        with:
+          name: macos-dmg-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/dmg/
+          if-no-files-found: ignore
+
+  build-linux:
+    # PAUSED: Linux runner costs 1x, 额度不足暂停。手动 dispatch 可选择性恢复。
+    if: |
+      (
+        github.event_name == 'workflow_dispatch' &&
+        (github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'linux')
+      )
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install Bun
+        run: npm install -g bun
+
+      - name: Install Linux system dependencies (安装 Linux 系统依赖)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev \
+            patchelf \
+            libssl-dev \
+            libsoup-3.0-dev
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Get short commit hash
+        id: hash
+        run: echo "HASH=${GITHUB_SHA::7}" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve app version
+        id: app_version
+        run: |
+          ref_name="${{ github.ref_name }}"
+          app_version=""
+
+          if [[ "$ref_name" == release/* ]]; then
+            app_version="${ref_name#release/}"
+          elif [[ "$ref_name" == build/* ]]; then
+            app_version="${ref_name#build/}"
+          fi
+
+          if [ -z "$app_version" ]; then
+            app_version="$(jq -r '.version' package.json)"
+          fi
+
+          app_version="${app_version#v}"
+
+          if [ -z "$app_version" ]; then
+            echo "Cannot resolve app version from tag or package.json." >&2
+            exit 1
+          fi
+
+          echo "APP_VERSION=$app_version" >> "$GITHUB_OUTPUT"
+          echo "Resolved app version: $app_version"
+
+      - name: Install dependencies
+        run: bun install
+
+      - name: Build Linux app (构建 Linux 应用)
+        run: npx tauri build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
+        run: cargo build --release -p exomind-runtime
+
+      - name: Package exomind-rt runtime (打包 exomind-rt 运行时产物)
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p artifacts/runtime
+          cp target/release/exomind-rt artifacts/runtime/exomind-rt-linux-x64
+          tar -czf artifacts/runtime/exomind-rt-linux-x64.tar.gz -C artifacts/runtime exomind-rt-linux-x64
+
+      - name: Upload Linux runtime Artifact (上传 Linux runtime)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-runtime-${{ steps.hash.outputs.HASH }}
+          path: artifacts/runtime/exomind-rt-linux-x64.tar.gz
+
+      - name: Upload Linux DEB Artifact (上传 DEB)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-deb-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/deb/
+          if-no-files-found: ignore
+
+      - name: Upload Linux AppImage Artifact (上传 AppImage)
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-appimage-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/target/release/bundle/appimage/
           if-no-files-found: ignore
 
   build-android:
@@ -501,16 +725,36 @@ jobs:
           }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
+        id: upload_apk
+        uses: actions/upload-artifact@v4
+        with:
+          name: android-apk-signed-${{ steps.hash.outputs.HASH }}
+          path: src-tauri/gen/android/app/build/outputs/apk-signed/
+        continue-on-error: true
+
+      - name: Retry Upload Android signed APK Artifact
+        if: steps.upload_apk.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
           path: src-tauri/gen/android/app/build/outputs/apk-signed/
 
   create-release:
-    needs: [build-windows, build-android]
+    needs: [build-windows, build-macos, build-linux, build-android]
     runs-on: ubuntu-latest
-    # 只对 release/* tag 执行发布步骤
-    if: startsWith(github.ref, 'refs/tags/release/')
+    # 对 release/* 和 build/* tag 执行发布步骤
+    if: |
+      always() &&
+      (
+        startsWith(github.ref, 'refs/tags/release/') ||
+        startsWith(github.ref, 'refs/tags/build/')
+      ) &&
+      (
+        needs.build-windows.result == 'success' ||
+        needs.build-macos.result == 'success' ||
+        needs.build-linux.result == 'success' ||
+        needs.build-android.result == 'success'
+      )
     steps:
       - name: Download Artifacts
         uses: actions/download-artifact@v4
@@ -526,26 +770,35 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          version="${GITHUB_REF_NAME#release/}"
           short_hash="${GITHUB_SHA::7}"
-          lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
-          channel=""
-          if [[ "$lower_version" == *"-alpha."* ]]; then
-            channel="Alpha"
-          elif [[ "$lower_version" == *"-beta."* ]]; then
-            channel="Beta"
-          elif [[ "$lower_version" == *"-rc."* ]]; then
-            channel="RC"
-          elif [[ "$lower_version" == *"-preview."* ]]; then
-            channel="Preview"
-          fi
 
-          if [[ -n "$channel" ]]; then
+          if [[ "$GITHUB_REF_NAME" == build/* ]]; then
+            # build/v0.3.3-build.20260222T1430 → version=v0.3.3-build.20260222T1430
+            version="${GITHUB_REF_NAME#build/}"
             echo "prerelease=true" >> "$GITHUB_OUTPUT"
-            echo "title=$channel $version" >> "$GITHUB_OUTPUT"
+            echo "title=Pre-release $version" >> "$GITHUB_OUTPUT"
           else
-            echo "prerelease=false" >> "$GITHUB_OUTPUT"
-            echo "title=Release $version" >> "$GITHUB_OUTPUT"
+            # release/v0.3.3 → version=v0.3.3
+            version="${GITHUB_REF_NAME#release/}"
+            lower_version="$(echo "$version" | tr '[:upper:]' '[:lower:]')"
+            channel=""
+            if [[ "$lower_version" == *"-alpha."* ]]; then
+              channel="Alpha"
+            elif [[ "$lower_version" == *"-beta."* ]]; then
+              channel="Beta"
+            elif [[ "$lower_version" == *"-rc."* ]]; then
+              channel="RC"
+            elif [[ "$lower_version" == *"-preview."* ]]; then
+              channel="Preview"
+            fi
+
+            if [[ -n "$channel" ]]; then
+              echo "prerelease=true" >> "$GITHUB_OUTPUT"
+              echo "title=$channel $version" >> "$GITHUB_OUTPUT"
+            else
+              echo "prerelease=false" >> "$GITHUB_OUTPUT"
+              echo "title=Release $version" >> "$GITHUB_OUTPUT"
+            fi
           fi
           echo "version=$version" >> "$GITHUB_OUTPUT"
           echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
@@ -604,6 +857,21 @@ jobs:
           cp "$arm64_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-arm64.apk"
           cp "$x86_apk" "$output_dir/ExoMind-${version}-${short_hash}-android-x86.apk"
 
+          runtime_win_files=("$source_dir"/**/exomind-rt-windows-x64.exe)
+          if (( ${#runtime_win_files[@]} > 0 )); then
+            cp "${runtime_win_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-windows-x64.exe"
+          fi
+
+          runtime_macos_files=("$source_dir"/**/exomind-rt-macos-aarch64.tar.gz)
+          if (( ${#runtime_macos_files[@]} > 0 )); then
+            cp "${runtime_macos_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-macos-aarch64.tar.gz"
+          fi
+
+          runtime_linux_files=("$source_dir"/**/exomind-rt-linux-x64.tar.gz)
+          if (( ${#runtime_linux_files[@]} > 0 )); then
+            cp "${runtime_linux_files[0]}" "$output_dir/ExoMind-RT-${version}-${short_hash}-linux-x64.tar.gz"
+          fi
+
       - name: List Normalized Files
         run: ls -la release-assets/
 
@@ -619,3 +887,386 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # ─────────────────────────────────────────────────────────────
+  # Job 4: Upload to Cloudflare R2 (构建产物上传 R2)
+  # ─────────────────────────────────────────────────────────────
+  upload-r2:
+    needs: create-release
+    if: always() && needs.create-release.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download Windows artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: windows-*
+          path: download-artifacts
+          merge-multiple: true
+
+      - name: Download macOS artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: macos-*
+          path: download-artifacts
+          merge-multiple: true
+
+      - name: Download Linux artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: linux-*
+          path: download-artifacts
+          merge-multiple: true
+
+      - name: Download Android artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: android-*
+          path: download-artifacts
+          merge-multiple: true
+
+      - name: List downloaded artifacts
+        run: ls -laR download-artifacts/
+
+      - name: Determine channel and version (确定通道与版本)
+        id: r2meta
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          tag_name="${GITHUB_REF_NAME}"
+          short_hash="${GITHUB_SHA::7}"
+
+          if [[ "$tag_name" == release/* ]]; then
+            channel="release"
+            version="${tag_name#release/}"
+          elif [[ "$tag_name" == build/* ]]; then
+            channel="preview"
+            version="${tag_name#build/}"
+          else
+            echo "::error::Unexpected tag format: $tag_name"
+            exit 1
+          fi
+
+          # version_dir: release → v0.3.3, preview → v0.3.4-build.20260227T1430
+          version_dir="$version"
+
+          echo "channel=$channel" >> "$GITHUB_OUTPUT"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "version_dir=$version_dir" >> "$GITHUB_OUTPUT"
+          echo "short_hash=$short_hash" >> "$GITHUB_OUTPUT"
+          echo "tag_name=$tag_name" >> "$GITHUB_OUTPUT"
+
+          echo "Channel: $channel"
+          echo "Version: $version"
+          echo "Version dir: $version_dir"
+
+      - name: Normalize filenames for R2 (去掉 hash 重命名)
+        shell: bash
+        run: |
+          set -euo pipefail
+          shopt -s nullglob globstar
+
+          version="${{ steps.r2meta.outputs.version }}"
+          short_hash="${{ steps.r2meta.outputs.short_hash }}"
+          src="download-artifacts"
+          dest="r2-upload"
+          mkdir -p "$dest"
+
+          # Find and copy Windows EXE
+          exe_files=("$src"/**/*.exe)
+          if (( ${#exe_files[@]} > 0 )); then
+            cp "${exe_files[0]}" "$dest/ExoMind-${version}-windows-x64-setup.exe"
+          fi
+
+          # Find and copy Windows MSI
+          msi_files=("$src"/**/*.msi)
+          if (( ${#msi_files[@]} > 0 )); then
+            cp "${msi_files[0]}" "$dest/ExoMind-${version}-windows-x64-installer.msi"
+          fi
+
+          # Find and copy Android APKs
+          apk_files=("$src"/**/*signed.apk)
+          if (( ${#apk_files[@]} == 0 )); then
+            apk_files=("$src"/**/*.apk)
+          fi
+
+          for apk in "${apk_files[@]}"; do
+            file_name="$(basename "$apk" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$file_name" == *"arm64"* || "$file_name" == *"aarch64"* || "$file_name" == *"arm64-v8a"* ]]; then
+              cp "$apk" "$dest/ExoMind-${version}-android-arm64.apk"
+            elif [[ "$file_name" == *"i686"* || "$file_name" == *"x86"* ]] && [[ "$file_name" != *"x86_64"* ]]; then
+              cp "$apk" "$dest/ExoMind-${version}-android-x86.apk"
+            fi
+          done
+
+          # Find and copy macOS DMG
+          dmg_files=("$src"/**/*.dmg)
+          for dmg in "${dmg_files[@]}"; do
+            file_name="$(basename "$dmg" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$file_name" == *"aarch64"* || "$file_name" == *"arm64"* ]]; then
+              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
+            elif [[ "$file_name" == *"x64"* || "$file_name" == *"x86_64"* ]]; then
+              cp "$dmg" "$dest/ExoMind-${version}-macos-x64.dmg"
+            else
+              # macos-latest is Apple Silicon (aarch64)
+              cp "$dmg" "$dest/ExoMind-${version}-macos-aarch64.dmg"
+            fi
+          done
+
+          # Find and copy Linux AppImage
+          appimage_files=("$src"/**/*.AppImage)
+          for ai in "${appimage_files[@]}"; do
+            cp "$ai" "$dest/ExoMind-${version}-linux-x64.AppImage"
+          done
+
+          # Find and copy Linux DEB
+          deb_files=("$src"/**/*.deb)
+          for deb in "${deb_files[@]}"; do
+            cp "$deb" "$dest/ExoMind-${version}-linux-x64.deb"
+          done
+
+          # Find and copy exomind-rt runtime binaries
+          runtime_win_files=("$src"/**/exomind-rt-windows-x64.exe)
+          if (( ${#runtime_win_files[@]} > 0 )); then
+            cp "${runtime_win_files[0]}" "$dest/ExoMind-RT-${version}-windows-x64.exe"
+          fi
+
+          runtime_macos_files=("$src"/**/exomind-rt-macos-aarch64.tar.gz)
+          if (( ${#runtime_macos_files[@]} > 0 )); then
+            cp "${runtime_macos_files[0]}" "$dest/ExoMind-RT-${version}-macos-aarch64.tar.gz"
+          fi
+
+          runtime_linux_files=("$src"/**/exomind-rt-linux-x64.tar.gz)
+          if (( ${#runtime_linux_files[@]} > 0 )); then
+            cp "${runtime_linux_files[0]}" "$dest/ExoMind-RT-${version}-linux-x64.tar.gz"
+          fi
+
+          echo "=== Files prepared for R2 upload ==="
+          ls -la "$dest/"
+
+      - name: Upload assets to R2 (上传构建产物到 R2)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          channel="${{ steps.r2meta.outputs.channel }}"
+          version_dir="${{ steps.r2meta.outputs.version_dir }}"
+          bucket="exomind-releases"
+          src="r2-upload"
+
+          content_type_for() {
+            case "$1" in
+              *.exe)      echo "application/octet-stream" ;;
+              *.msi)      echo "application/octet-stream" ;;
+              *.apk)      echo "application/vnd.android.package-archive" ;;
+              *.dmg)      echo "application/x-apple-diskimage" ;;
+              *.AppImage) echo "application/octet-stream" ;;
+              *.deb)      echo "application/vnd.debian.binary-package" ;;
+              *.tar.gz)   echo "application/gzip" ;;
+              *.json)     echo "application/json" ;;
+              *)          echo "application/octet-stream" ;;
+            esac
+          }
+
+          for file in "$src"/*; do
+            [ -f "$file" ] || continue
+            filename="$(basename "$file")"
+            r2_key="${channel}/${version_dir}/${filename}"
+            ct="$(content_type_for "$filename")"
+            echo "Uploading $filename → $r2_key (Content-Type: $ct)"
+            npx wrangler r2 object put "${bucket}/${r2_key}" \
+              --file "$file" \
+              --content-type "$ct" \
+              --remote
+          done
+
+      - name: Generate and upload latest.json (生成并上传 latest.json)
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          channel="${{ steps.r2meta.outputs.channel }}"
+          version="${{ steps.r2meta.outputs.version }}"
+          version_dir="${{ steps.r2meta.outputs.version_dir }}"
+          tag_name="${{ steps.r2meta.outputs.tag_name }}"
+          bucket="exomind-releases"
+          src="r2-upload"
+          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # Build assets JSON object
+          assets_json="{}"
+
+          add_asset() {
+            local key="$1" file="$2" url="$3"
+            if [ -f "$file" ]; then
+              local size sha256
+              size="$(stat --format=%s "$file")"
+              sha256="$(sha256sum "$file" | awk '{print $1}')"
+              assets_json="$(echo "$assets_json" | jq \
+                --arg k "$key" \
+                --arg url "$url" \
+                --argjson size "$size" \
+                --arg sha256 "$sha256" \
+                '. + {($k): {"url": $url, "size": $size, "sha256": $sha256}}')"
+            fi
+          }
+
+          add_asset "windows-x64-setup" \
+            "$src/ExoMind-${version}-windows-x64-setup.exe" \
+            "${channel}/${version_dir}/ExoMind-${version}-windows-x64-setup.exe"
+
+          add_asset "windows-x64-installer" \
+            "$src/ExoMind-${version}-windows-x64-installer.msi" \
+            "${channel}/${version_dir}/ExoMind-${version}-windows-x64-installer.msi"
+
+          add_asset "android-arm64" \
+            "$src/ExoMind-${version}-android-arm64.apk" \
+            "${channel}/${version_dir}/ExoMind-${version}-android-arm64.apk"
+
+          add_asset "android-x86" \
+            "$src/ExoMind-${version}-android-x86.apk" \
+            "${channel}/${version_dir}/ExoMind-${version}-android-x86.apk"
+
+          add_asset "macos-aarch64" \
+            "$src/ExoMind-${version}-macos-aarch64.dmg" \
+            "${channel}/${version_dir}/ExoMind-${version}-macos-aarch64.dmg"
+
+          add_asset "macos-x64" \
+            "$src/ExoMind-${version}-macos-x64.dmg" \
+            "${channel}/${version_dir}/ExoMind-${version}-macos-x64.dmg"
+
+          add_asset "linux-x64-appimage" \
+            "$src/ExoMind-${version}-linux-x64.AppImage" \
+            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.AppImage"
+
+          add_asset "linux-x64-deb" \
+            "$src/ExoMind-${version}-linux-x64.deb" \
+            "${channel}/${version_dir}/ExoMind-${version}-linux-x64.deb"
+
+          add_asset "runtime-windows-x64" \
+            "$src/ExoMind-RT-${version}-windows-x64.exe" \
+            "${channel}/${version_dir}/ExoMind-RT-${version}-windows-x64.exe"
+
+          add_asset "runtime-macos-aarch64" \
+            "$src/ExoMind-RT-${version}-macos-aarch64.tar.gz" \
+            "${channel}/${version_dir}/ExoMind-RT-${version}-macos-aarch64.tar.gz"
+
+          add_asset "runtime-linux-x64" \
+            "$src/ExoMind-RT-${version}-linux-x64.tar.gz" \
+            "${channel}/${version_dir}/ExoMind-RT-${version}-linux-x64.tar.gz"
+
+          # Compose latest.json
+          latest_json="$(jq -n \
+            --arg version "$version" \
+            --arg tag "$tag_name" \
+            --arg published_at "$published_at" \
+            --argjson assets "$assets_json" \
+            '{version: $version, tag: $tag, published_at: $published_at, assets: $assets}')"
+
+          echo "$latest_json" > latest.json
+          echo "=== latest.json ==="
+          cat latest.json
+
+          npx wrangler r2 object put "${bucket}/${channel}/latest.json" \
+            --file latest.json \
+            --content-type "application/json" \
+            --remote
+
+      - name: Update versions.json and cleanup old previews (更新版本列表 + 清理旧版本)
+        if: steps.r2meta.outputs.channel == 'preview'
+        shell: bash
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+
+          channel="${{ steps.r2meta.outputs.channel }}"
+          version="${{ steps.r2meta.outputs.version }}"
+          version_dir="${{ steps.r2meta.outputs.version_dir }}"
+          tag_name="${{ steps.r2meta.outputs.tag_name }}"
+          bucket="exomind-releases"
+          published_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          max_versions=15
+
+          # Try to fetch existing versions.json
+          existing_versions="[]"
+          if npx wrangler r2 object get "${bucket}/${channel}/versions.json" \
+               --file existing-versions.json --remote 2>/dev/null; then
+            existing_payload="$(cat existing-versions.json)"
+            if echo "$existing_payload" | jq -e 'type == "array"' >/dev/null 2>&1; then
+              # backward-compat: old format was a raw array
+              existing_versions="$existing_payload"
+            else
+              existing_versions="$(echo "$existing_payload" | jq '.versions // []')"
+              configured_retention="$(echo "$existing_payload" | jq -r '.retention // empty')"
+              if [[ "$configured_retention" =~ ^[0-9]+$ ]] && (( configured_retention > 0 )); then
+                max_versions="$configured_retention"
+              fi
+            fi
+          fi
+
+          # Prepend new version entry
+          new_entry="$(jq -n \
+            --arg version "$version" \
+            --arg tag "$tag_name" \
+            --arg published_at "$published_at" \
+            --arg version_dir "$version_dir" \
+            '{version: $version, tag: $tag, published_at: $published_at, version_dir: $version_dir}')"
+
+          updated_versions="$(echo "$existing_versions" | jq \
+            --argjson entry "$new_entry" \
+            '[$entry] + . | unique_by(.version)')"
+
+          # Identify versions to delete (beyond max_versions)
+          total="$(echo "$updated_versions" | jq 'length')"
+          if (( total > max_versions )); then
+            # Extract old version dirs to delete
+            old_versions="$(echo "$updated_versions" | jq -r ".[$max_versions:][].version_dir")"
+
+            # Trim the list
+            updated_versions="$(echo "$updated_versions" | jq ".[:$max_versions]")"
+
+            # Delete old version directories from R2
+            for old_dir in $old_versions; do
+              echo "Cleaning up old preview: ${channel}/${old_dir}/"
+              # List and delete all objects under this prefix
+              # wrangler r2 object delete requires exact keys, so we list first
+              list_output="$(npx wrangler r2 object list "${bucket}" \
+                --prefix "${channel}/${old_dir}/" --remote 2>&1)" || true
+              objects="$(echo "$list_output" | jq -r '.[].key' 2>/dev/null)" || objects=""
+              count=$(echo "$objects" | grep -c . || true)
+              echo "  Found $count object(s) to delete"
+              deleted=0
+              for obj in $objects; do
+                if npx wrangler r2 object delete "${bucket}/${obj}" --remote 2>/dev/null; then
+                  deleted=$((deleted + 1))
+                else
+                  echo "  WARNING: Failed to delete $obj"
+                fi
+              done
+              echo "  Cleanup complete: $deleted/$count deleted"
+            done
+          fi
+
+          kept_total="$(echo "$updated_versions" | jq 'length')"
+          updated_json="$(jq -n \
+            --argjson versions "$updated_versions" \
+            --argjson retention "$max_versions" \
+            '{versions: $versions, retention: $retention}')"
+
+          # Upload updated versions.json
+          echo "$updated_json" | jq '.' > versions.json
+          echo "=== versions.json (input=${total}, kept=${kept_total}, retention=${max_versions}) ==="
+          cat versions.json
+
+          npx wrangler r2 object put "${bucket}/${channel}/versions.json" \
+            --file versions.json \
+            --content-type "application/json" \
+            --remote

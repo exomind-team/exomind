@@ -1,0 +1,70 @@
+name: "Feature Request"
+description: "提出新功能需求"
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ## Feature 完成流程 v2
+        请按以下结构描述需求，帮助拆解和评审。
+
+  - type: textarea
+    id: description
+    attributes:
+      label: "功能描述"
+      description: "这个功能要解决什么问题？用户视角描述。"
+      placeholder: "作为用户，我希望..."
+    validations:
+      required: true
+
+  - type: textarea
+    id: design
+    attributes:
+      label: "设计方案"
+      description: "技术方案、架构决策、Pencil 设计截图（如有）。"
+      placeholder: |
+        方案 A：...
+        方案 B：...
+        选择：方案 A，因为...
+
+  - type: textarea
+    id: acceptance
+    attributes:
+      label: "验收标准"
+      description: "做到什么算完？列出可验证的条件。"
+      placeholder: |
+        - [ ] 条件 1：...
+        - [ ] 条件 2：...
+        - [ ] 条件 3：...
+    validations:
+      required: true
+
+  - type: textarea
+    id: pomodoro
+    attributes:
+      label: "番茄钟拆解"
+      description: "拆成 ≤25min 的执行块（可后续补充）。"
+      placeholder: |
+        - [ ] 🍅 P1: ...（25min）
+        - [ ] 🍅 P2: ...（25min）
+
+  - type: textarea
+    id: risks
+    attributes:
+      label: "风险与知识短板"
+      description: "黑帽 Critic 视角：什么会出错？需要先学什么？"
+      placeholder: |
+        - 风险：...
+        - 知识短板：...
+
+  - type: dropdown
+    id: priority
+    attributes:
+      label: "优先级"
+      options:
+        - "P0 - 紧急"
+        - "P1 - 重要"
+        - "P2 - 一般"
+        - "P3 - 低优先级"
+    validations:
+      required: true

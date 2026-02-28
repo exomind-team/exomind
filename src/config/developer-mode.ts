@@ -5,14 +5,27 @@ function normalizeBoolean(rawValue: string | null | undefined): boolean {
   return rawValue === 'true';
 }
 
+function getStorage():
+  | Pick<Storage, 'getItem' | 'setItem'>
+  | null {
+  if (typeof window === 'undefined') return null;
+  const localStorageLike = window.localStorage as Partial<Storage> | undefined;
+  if (!localStorageLike) return null;
+  if (typeof localStorageLike.getItem !== 'function') return null;
+  if (typeof localStorageLike.setItem !== 'function') return null;
+  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
+}
+
 export function getDeveloperModeEnabled(): boolean {
-  if (typeof window === 'undefined') return false;
-  return normalizeBoolean(window.localStorage.getItem(DEVELOPER_MODE_STORAGE_KEY));
+  const storage = getStorage();
+  if (!storage) return false;
+  return normalizeBoolean(storage.getItem(DEVELOPER_MODE_STORAGE_KEY));
 }
 
 export function setDeveloperModeEnabled(enabled: boolean): void {
-  if (typeof window === 'undefined') return;
-  window.localStorage.setItem(DEVELOPER_MODE_STORAGE_KEY, String(enabled));
+  const storage = getStorage();
+  if (!storage) return;
+  storage.setItem(DEVELOPER_MODE_STORAGE_KEY, String(enabled));
   window.dispatchEvent(new CustomEvent<boolean>(DEVELOPER_MODE_CHANGED_EVENT, { detail: enabled }));
 }
 
@@ -39,4 +52,3 @@ export function subscribeDeveloperModeChanges(listener: (enabled: boolean) => vo
     window.removeEventListener(DEVELOPER_MODE_CHANGED_EVENT, handleCustomEvent);
   };
 }
-

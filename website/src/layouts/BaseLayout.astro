@@ -1,0 +1,57 @@
+---
+import '../styles/global.css';
+import Header from '../components/Header.astro';
+import Footer from '../components/Footer.astro';
+import { getLangFromUrl, useTranslations } from '../i18n';
+
+interface Props {
+  title: string;
+  description?: string;
+}
+
+const lang = getLangFromUrl(Astro.url);
+const defaultDescription = lang === 'zh' ? 'ExoMind - 你的生命成长助手' : 'ExoMind - Your Life Growth Companion';
+const { title, description = defaultDescription } = Astro.props;
+const themeBootScript = String.raw`
+(() => {
+  const THEME_STORAGE_KEY = 'exomind-theme';
+  const root = document.documentElement;
+
+  let storedTheme = null;
+  try {
+    storedTheme = window.localStorage.getItem(THEME_STORAGE_KEY);
+  } catch {
+    storedTheme = null;
+  }
+
+  const isStoredThemeValid = storedTheme === 'dark' || storedTheme === 'light';
+  const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+  const theme = isStoredThemeValid ? storedTheme : prefersDark ? 'dark' : 'light';
+  const isDark = theme === 'dark';
+
+  root.classList.toggle('dark', isDark);
+  root.dataset.theme = theme;
+  root.style.colorScheme = theme;
+})();
+`;
+---
+
+<!doctype html>
+<html lang={lang} class="scroll-smooth">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content={description} />
+    <meta name="color-scheme" content="light dark" />
+    <script is:inline set:html={themeBootScript}></script>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <title>{title} | ExoMind</title>
+  </head>
+  <body class="min-h-screen font-body antialiased">
+    <Header />
+    <main>
+      <slot />
+    </main>
+    <Footer />
+  </body>
+</html>

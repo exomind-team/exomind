@@ -56,7 +56,7 @@ describe('SyncTestPage 路由注册', () => {
   });
 
   it('应该注册 /sync-test 路由（兼容旧入口）', () => {
-    expect(routesContent).toContain("path: 'sync-test'");
+    expect(routesContent).toContain("path: '/sync-test'");
   });
 });
 

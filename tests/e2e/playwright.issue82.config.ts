@@ -1,4 +1,9 @@
-import { defineConfig, devices } from '@playwright/test';
+import { defineConfig } from '@playwright/test';
+import {
+  getBaseUse,
+  getChromiumProject,
+  withPlaywrightEnv,
+} from './playwright.termux';
 
 const WEB_PORT = 1520;
 const HMR_PORT = 1521;
@@ -12,26 +17,15 @@ export default defineConfig({
   retries: 0,
   workers: 1,
   reporter: 'list',
-  use: {
-    baseURL: BASE_URL,
-    trace: 'retain-on-failure',
-    launchOptions: {
-      channel: 'chrome',
-    },
-  },
-  projects: [
-    {
-      name: 'chromium',
-      use: { ...devices['Desktop Chrome'], channel: 'chrome' },
-    },
-  ],
+  use: getBaseUse(BASE_URL),
+  projects: [getChromiumProject()],
   webServer: {
-    command: 'bun run dev',
+    command: 'node Scripts/test/runtime-dispatch.cjs vite-dev',
     cwd: '../..',
     url: BASE_URL,
     reuseExistingServer: false,
     timeout: 180000,
-    env: {
+    env: withPlaywrightEnv({
       ...process.env,
       EXOMIND_WEB_PORT: String(WEB_PORT),
       EXOMIND_HMR_PORT: String(HMR_PORT),
@@ -39,6 +33,6 @@ export default defineConfig({
       EXOMIND_ASR_PORT: String(ASR_PORT),
       VITE_SYNC_SERVER_URL: `http://localhost:${POUCHDB_PORT}`,
       VITE_ASR_SERVER_URL: `http://localhost:${ASR_PORT}`,
-    },
+    }),
   },
 });

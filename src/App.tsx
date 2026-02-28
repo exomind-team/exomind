@@ -1,26 +1,27 @@
+import { useEffect } from "react";
 import { RouterProvider } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { router } from "@/routes";
-import { newUiRouter } from "@/routes-new";
+import { appRouter } from "@/routes";
 import { ThemeController } from "@/components/ThemeController";
-import { getUIMode, subscribeUIModeChanges, type UIMode } from "@/config/ui-mode";
+import { Toaster } from "@/components/ui/toaster";
+import { UpdateToast } from "@/ui/components/UpdateToast";
+import {
+  initUpdateChecker,
+  destroyUpdateChecker,
+} from "@/ui/stores/update-store";
 import "./App.css";
 
 function App() {
-  const [uiMode, setUiMode] = useState<UIMode>(() => getUIMode());
-
   useEffect(() => {
-    return subscribeUIModeChanges((mode) => {
-      setUiMode(mode);
-    });
+    initUpdateChecker();
+    return () => destroyUpdateChecker();
   }, []);
-
-  const activeRouter = uiMode === 'new' ? newUiRouter : router;
 
   return (
     <>
       <ThemeController />
-      <RouterProvider key={uiMode} router={activeRouter} />
+      <RouterProvider router={appRouter} />
+      <Toaster />
+      <UpdateToast />
     </>
   );
 }
