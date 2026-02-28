@@ -21,6 +21,8 @@ export { CommandRegistryServiceImpl, getCommandRegistryService } from './command
 export type { CommandRegistryService } from './command-registry.service';
 export { CommandPaletteServiceImpl, getCommandPaletteService } from './command-palette.service';
 export type { CommandPaletteService, CommandPaletteState } from './command-palette.service';
+export { RuntimeAggregatorServiceImpl, getRuntimeAggregatorService } from './runtime-aggregator.service';
+export type { RuntimeAggregatorService, RuntimeAgentInfo, AggregatedRuntimeData } from './runtime-aggregator.service';
 
 // 重新导出类型（这些类型在 types/event 中定义）
 export type { TimerMode, TimerConfig } from '../types/event';
