@@ -1,24 +1,25 @@
 name: Runtime CI
 
 on:
-  pull_request:
-    branches: [dev]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/exomind-runtime/**"
-      - "Scripts/test/exomind-runtime-smoke.ps1"
-      - ".github/workflows/runtime-ci.yml"
-      - ".github/workflows/release.yml"
-  push:
-    branches: [dev]
-    paths:
-      - "Cargo.toml"
-      - "Cargo.lock"
-      - "crates/exomind-runtime/**"
-      - "Scripts/test/exomind-runtime-smoke.ps1"
-      - ".github/workflows/runtime-ci.yml"
-      - ".github/workflows/release.yml"
+  # PAUSED: 额度不足，暂停自动触发。手动触发仍可用。
+  # pull_request:
+  #   branches: [dev]
+  #   paths:
+  #     - "Cargo.toml"
+  #     - "Cargo.lock"
+  #     - "crates/exomind-runtime/**"
+  #     - "Scripts/test/exomind-runtime-smoke.ps1"
+  #     - ".github/workflows/runtime-ci.yml"
+  #     - ".github/workflows/release.yml"
+  # push:
+  #   branches: [dev]
+  #   paths:
+  #     - "Cargo.toml"
+  #     - "Cargo.lock"
+  #     - "crates/exomind-runtime/**"
+  #     - "Scripts/test/exomind-runtime-smoke.ps1"
+  #     - ".github/workflows/runtime-ci.yml"
+  #     - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
