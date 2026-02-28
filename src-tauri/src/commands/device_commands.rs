@@ -37,3 +37,4 @@ pub fn get_device_id(app: AppHandle) -> Result<String, String> {
     fs::write(&path, &generated).map_err(|err| format!("failed to persist device id: {err}"))?;
     Ok(generated)
 }
+

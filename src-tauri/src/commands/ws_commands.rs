@@ -1,15 +1,15 @@
 //! WebSocket 客户端命令
 //! 用于连接远程 WebSocket 服务器（手机端连接电脑端）
 
-use futures::{SinkExt, StreamExt};
-use std::collections::HashSet;
-use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Runtime, State};
 use tokio::sync::Mutex;
-use tokio_tungstenite::MaybeTlsStream;
+use std::sync::Arc;
+use std::collections::HashSet;
+use tungstenite::{Message};
 use tokio_tungstenite::{connect_async, WebSocketStream};
-use tungstenite::Message;
+use futures::{SinkExt, StreamExt};
 use url::Url;
+use tokio_tungstenite::MaybeTlsStream;
 
 /// WebSocket 连接状态
 #[derive(Debug, Clone)]
@@ -115,8 +115,7 @@ pub async fn ws_send<R: Runtime>(
         ConnectionState::Connected(_) => {
             let mut stream_guard = client_state.stream.lock().await;
             if let Some(ref mut ws_stream) = *stream_guard {
-                ws_stream
-                    .send(Message::Text(message))
+                ws_stream.send(Message::Text(message))
                     .await
                     .map_err(|e| format!("Send failed: {}", e))?;
                 return Ok(());
