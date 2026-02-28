@@ -52,6 +52,7 @@ impl TokenUsage {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 struct ClaudeAgentStats {
     session_id: Option<String>,
+    session_count: u64,
     input_tokens: u64,
     output_tokens: u64,
     cache_read_tokens: u64,
@@ -251,6 +252,7 @@ impl ClaudeAgent {
             }
         };
 
+        let session_count = target_sessions.len() as u64;
         let mut usage = TokenUsage::default();
         let mut message_count = 0_u64;
         let mut uptime_secs = 0_u64;
@@ -266,6 +268,7 @@ impl ClaudeAgent {
 
         Some(ClaudeAgentStats {
             session_id: session_id.map(ToString::to_string),
+            session_count,
             input_tokens: usage.input_tokens,
             output_tokens: usage.output_tokens,
             cache_read_tokens: usage.cache_read_tokens,

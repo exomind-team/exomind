@@ -297,6 +297,7 @@ mod tests {
             payload,
             serde_json::json!({
                 "session_id": null,
+                "session_count": 0,
                 "input_tokens": 0,
                 "output_tokens": 0,
                 "cache_read_tokens": 0,

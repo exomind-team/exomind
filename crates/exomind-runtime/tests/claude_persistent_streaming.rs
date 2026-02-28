@@ -141,6 +141,10 @@ async fn accumulates_usage_stats_from_result_events() {
         .unwrap_or_default();
     assert!(!session_id_value.is_empty());
     assert_eq!(
+        stats_value.get("session_count").and_then(Value::as_u64),
+        Some(1)
+    );
+    assert_eq!(
         stats_value.get("input_tokens").and_then(Value::as_u64),
         Some(200)
     );
@@ -167,4 +171,43 @@ async fn accumulates_usage_stats_from_result_events() {
         .and_then(Value::as_f64)
         .unwrap_or_default();
     assert!((total_cost_usd - 0.002).abs() < 1e-12);
+}
+
+#[tokio::test]
+async fn returns_aggregated_stats_with_session_count_for_all_sessions() {
+    let agent = ClaudeAgent::with_command_and_args(fake_cli_command_path(), vec![]);
+
+    let _first_chunks = agent
+        .chat_stream(ChatRequest {
+            message: "hello my name is xiaoming".to_string(),
+            session_id: None,
+        })
+        .collect::<Vec<_>>()
+        .await;
+
+    let _second_chunks = agent
+        .chat_stream(ChatRequest {
+            message: "hello my name is xiaohong".to_string(),
+            session_id: None,
+        })
+        .collect::<Vec<_>>()
+        .await;
+
+    let summary_stats = agent
+        .stats(None)
+        .await
+        .expect("summary stats should be available");
+
+    assert_eq!(
+        summary_stats.get("session_id").and_then(Value::as_str),
+        None
+    );
+    assert_eq!(
+        summary_stats.get("session_count").and_then(Value::as_u64),
+        Some(2)
+    );
+    assert_eq!(
+        summary_stats.get("message_count").and_then(Value::as_u64),
+        Some(2)
+    );
 }
