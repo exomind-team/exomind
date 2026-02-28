@@ -16,6 +16,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-uti
 thiserror = "1"
 sysinfo = { version = "0.30", default-features = false }
 tower-http = { version = "0.6", features = ["cors"] }
+uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
