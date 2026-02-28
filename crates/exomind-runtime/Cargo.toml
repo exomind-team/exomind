@@ -12,6 +12,7 @@ axum = "0.7"
 serde = { version = "1", features = ["derive"] }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net"] }
 thiserror = "1"
+sysinfo = { version = "0.30", default-features = false }
 
 [dev-dependencies]
 http-body-util = "0.1"
