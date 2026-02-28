@@ -226,7 +226,14 @@ jobs:
           $outputDir = "artifacts/r2-upload/windows"
           New-Item -Path $outputDir -ItemType Directory -Force | Out-Null
 
-          $exe = Get-ChildItem -Path "src-tauri/target/release/bundle/nsis" -Recurse -File -Filter *.exe | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $exeSearchRoots = @(
+            "src-tauri/target/release/bundle/nsis",
+            "target/release/bundle/nsis"
+          ) | Where-Object { Test-Path $_ }
+          $exe = $exeSearchRoots `
+            | ForEach-Object { Get-ChildItem -Path $_ -Recurse -File -Filter *.exe -ErrorAction SilentlyContinue } `
+            | Sort-Object LastWriteTime -Descending `
+            | Select-Object -First 1
           if (-not $exe) {
             throw "Missing Windows EXE artifact under nsis bundle path."
           }
@@ -234,7 +241,14 @@ jobs:
           Copy-Item -Path $exe.FullName -Destination $exeOut -Force
           "EXE_OUT=$exeOut" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
 
-          $msi = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue | Sort-Object LastWriteTime -Descending | Select-Object -First 1
+          $msiSearchRoots = @(
+            "src-tauri/target/release/bundle/msi",
+            "target/release/bundle/msi"
+          ) | Where-Object { Test-Path $_ }
+          $msi = $msiSearchRoots `
+            | ForEach-Object { Get-ChildItem -Path $_ -Recurse -File -Filter *.msi -ErrorAction SilentlyContinue } `
+            | Sort-Object LastWriteTime -Descending `
+            | Select-Object -First 1
           if ($msi) {
             $msiOut = Join-Path $outputDir "ExoMind-$version-windows-x64-installer.msi"
             Copy-Item -Path $msi.FullName -Destination $msiOut -Force
@@ -405,7 +419,18 @@ jobs:
           output_dir="artifacts/r2-upload/macos"
           mkdir -p "$output_dir"
 
-          dmg_src="$(find src-tauri/target/release/bundle/dmg -type f -name '*.dmg' | head -n 1)"
+          dmg_src=""
+          for candidate in \
+            "src-tauri/target/release/bundle/dmg" \
+            "target/release/bundle/dmg"; do
+            if [[ -d "$candidate" ]]; then
+              found="$(find "$candidate" -type f -name '*.dmg' | head -n 1)"
+              if [[ -n "$found" ]]; then
+                dmg_src="$found"
+                break
+              fi
+            fi
+          done
           if [[ -z "$dmg_src" ]]; then
             echo "::error::Missing macOS DMG artifact."
             exit 1
@@ -597,8 +622,31 @@ jobs:
           output_dir="artifacts/r2-upload/linux"
           mkdir -p "$output_dir"
 
-          deb_src="$(find src-tauri/target/release/bundle/deb -type f -name '*.deb' | head -n 1)"
-          appimage_src="$(find src-tauri/target/release/bundle/appimage -type f -name '*.AppImage' | head -n 1)"
+          deb_src=""
+          for candidate in \
+            "src-tauri/target/release/bundle/deb" \
+            "target/release/bundle/deb"; do
+            if [[ -d "$candidate" ]]; then
+              found="$(find "$candidate" -type f -name '*.deb' | head -n 1)"
+              if [[ -n "$found" ]]; then
+                deb_src="$found"
+                break
+              fi
+            fi
+          done
+
+          appimage_src=""
+          for candidate in \
+            "src-tauri/target/release/bundle/appimage" \
+            "target/release/bundle/appimage"; do
+            if [[ -d "$candidate" ]]; then
+              found="$(find "$candidate" -type f -name '*.AppImage' | head -n 1)"
+              if [[ -n "$found" ]]; then
+                appimage_src="$found"
+                break
+              fi
+            fi
+          done
 
           if [[ -z "$deb_src" ]]; then
             echo "::error::Missing Linux DEB artifact."
