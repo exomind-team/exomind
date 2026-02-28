@@ -3,6 +3,7 @@ use serde::Serialize;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+pub mod claude;
 pub mod echo;
 
 /// Agent summary info (Agent 列表摘要信息).
