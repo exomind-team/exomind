@@ -277,6 +277,54 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn claude_stats_endpoint_returns_default_zero_snapshot() {
+        const TEST_PORT: u16 = 3005;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/claude/stats")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::OK, response.status());
+
+        let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body_bytes).unwrap();
+        assert_eq!(
+            payload,
+            serde_json::json!({
+                "session_id": null,
+                "input_tokens": 0,
+                "output_tokens": 0,
+                "cache_read_tokens": 0,
+                "cache_write_tokens": 0,
+                "message_count": 0,
+                "uptime_secs": 0,
+                "total_cost_usd": 0.0
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn claude_stats_endpoint_returns_not_found_for_unknown_session_id() {
+        const TEST_PORT: u16 = 3006;
+        let response = app(TEST_PORT)
+            .oneshot(
+                Request::builder()
+                    .uri("/agents/claude/stats?session_id=session-404")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(StatusCode::NOT_FOUND, response.status());
+    }
+
+    #[tokio::test]
     async fn agents_endpoint_reflects_runtime_register_and_unregister() {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(TempRouteAgent));
