@@ -189,11 +189,15 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 900, [int]$MaxAttempts = 2) {
+            $bunCommand = Get-Command bun -ErrorAction Stop
+            $bunExe = $bunCommand.Source
+            Write-Host "Resolved Bun executable (解析 Bun 可执行路径): $bunExe"
+
             for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
               Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
               Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
 
-              $proc = Start-Process -FilePath "bun" -ArgumentList @("install", "--frozen-lockfile") -NoNewWindow -PassThru
+              $proc = Start-Process -FilePath $bunExe -ArgumentList @("install", "--frozen-lockfile") -NoNewWindow -PassThru
               if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                 Write-Warning "bun install timed out after $TimeoutSeconds seconds."
@@ -932,11 +936,15 @@ jobs:
           $ErrorActionPreference = "Stop"
 
           function Invoke-BunInstallWithRetry([int]$TimeoutSeconds = 900, [int]$MaxAttempts = 2) {
+            $bunCommand = Get-Command bun -ErrorAction Stop
+            $bunExe = $bunCommand.Source
+            Write-Host "Resolved Bun executable (解析 Bun 可执行路径): $bunExe"
+
             for ($attempt = 1; $attempt -le $MaxAttempts; $attempt++) {
               Write-Host "bun install attempt $attempt/$MaxAttempts (安装依赖尝试 $attempt/$MaxAttempts)"
               Remove-Item -LiteralPath "node_modules/.bun-install.lock" -Force -ErrorAction SilentlyContinue
 
-              $proc = Start-Process -FilePath "bun" -ArgumentList @("install", "--frozen-lockfile") -NoNewWindow -PassThru
+              $proc = Start-Process -FilePath $bunExe -ArgumentList @("install", "--frozen-lockfile") -NoNewWindow -PassThru
               if (-not $proc.WaitForExit($TimeoutSeconds * 1000)) {
                 Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue
                 Write-Warning "bun install timed out after $TimeoutSeconds seconds."
