@@ -25,6 +25,10 @@ import {
 } from '@/config/timer-preferences';
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
 import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
+import type { ActiveBlockData } from '@/lib/types/event';
+import { useSyncStore } from '@/ui/stores/sync-store';
+import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
+import { resolveSyncServerUrl } from '@/config/port-env';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
@@ -94,6 +98,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
+  const currentUser = useSyncStore((state) => state.currentUser);
 
   const isRunningUi = uiState === 'running';
   const isPaused = isRunningUi && runningSubState === 'paused';
@@ -148,29 +154,76 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     }
   }, [timerPreferences.countdownEndSoundEnabled, timerPreferences.countdownEndSoundPresetId]);
 
+  const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
+    if (!block) {
+      setUiState('idle');
+      setRunningSubState('running');
+      setTaskName('');
+      setTaskNameDraft('');
+      setFeedbackOpen(false);
+      countdownEndedRef.current = false;
+      countdownOverrunRef.current = false;
+      hardEndTriggeredRef.current = false;
+      setCountdownOvertimeMs(0);
+      syncIdleElapsedFromMode(timerMode, countdownMinutes);
+      return;
+    }
+
+    setTaskName(block.name);
+    setTaskNameDraft(block.name);
+    setTimerMode(block.mode);
+    if (block.mode === 'countdown' && block.targetMinutes) {
+      setCountdownMinutes(block.targetMinutes);
+    }
+    setElapsedMs(Math.max(0, block.elapsed));
+    setUiState('running');
+    setRunningSubState(block.actionEndedAt || block.paused ? 'paused' : 'running');
+    hardEndTriggeredRef.current = Boolean(block.actionEndedAt);
+    countdownEndedRef.current = false;
+    countdownOverrunRef.current = false;
+    setCountdownOvertimeMs(0);
+  }, [countdownMinutes, syncIdleElapsedFromMode, timerMode]);
+
   useEffect(() => {
     let cancelled = false;
+    const unsubscribe = timeBlockServiceRef.current.onBlockChange((block) => {
+      if (cancelled) return;
+      applyActiveBlock(block);
+    });
 
-    const loadActiveBlock = async () => {
+    const load = async () => {
       const block = await timeBlockServiceRef.current.loadActiveBlock();
-      if (!block || cancelled) return;
-
-      setTaskName(block.name);
-      setTaskNameDraft(block.name);
-      setTimerMode(block.mode);
-      if (block.mode === 'countdown' && block.targetMinutes) {
-        setCountdownMinutes(block.targetMinutes);
+      if (cancelled) return;
+      if (block) {
+        applyActiveBlock(block);
       }
-      setElapsedMs(Math.max(0, block.elapsed));
-      setUiState('running');
-      setRunningSubState(block.paused ? 'paused' : 'running');
     };
 
-    void loadActiveBlock();
+    void load();
     return () => {
       cancelled = true;
+      unsubscribe();
     };
-  }, []);
+  }, [applyActiveBlock]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !currentUser) {
+      void timeBlockServiceRef.current.stopSync();
+      return;
+    }
+
+    let cancelled = false;
+    const remoteUrl = buildRemoteDbUrl(resolveSyncServerUrl(import.meta.env), currentUser);
+
+    void timeBlockServiceRef.current.startSync(remoteUrl).catch(() => {
+      if (cancelled) return;
+    });
+
+    return () => {
+      cancelled = true;
+      void timeBlockServiceRef.current.stopSync();
+    };
+  }, [currentUser, isLoggedIn]);
 
   useEffect(() => {
     if (!isRunningUi || isPaused) {

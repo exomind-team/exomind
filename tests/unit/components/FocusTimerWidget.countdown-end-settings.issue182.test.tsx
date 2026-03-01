@@ -31,6 +31,9 @@ const {
   endBlockMock,
   markEndingMock,
   updateElapsedMock,
+  onBlockChangeMock,
+  startSyncMock,
+  stopSyncMock,
 } = vi.hoisted(() => ({
   loadActiveBlockMock: vi.fn(),
   startBlockMock: vi.fn(),
@@ -39,6 +42,9 @@ const {
   endBlockMock: vi.fn(),
   markEndingMock: vi.fn(),
   updateElapsedMock: vi.fn(),
+  onBlockChangeMock: vi.fn(() => () => {}),
+  startSyncMock: vi.fn().mockResolvedValue(undefined),
+  stopSyncMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -50,6 +56,9 @@ vi.mock('@/lib/services', () => ({
     endBlock: endBlockMock,
     markEnding: markEndingMock,
     updateElapsed: updateElapsedMock,
+    onBlockChange: onBlockChangeMock,
+    startSync: startSyncMock,
+    stopSync: stopSyncMock,
   }),
 }));
 
@@ -104,6 +113,12 @@ describe('FocusTimerWidget countdown end behavior（新计时器结束分支）'
     endBlockMock.mockResolvedValue(null);
     markEndingMock.mockResolvedValue(undefined);
     updateElapsedMock.mockResolvedValue(undefined);
+    onBlockChangeMock.mockReset();
+    onBlockChangeMock.mockReturnValue(() => {});
+    startSyncMock.mockReset();
+    stopSyncMock.mockReset();
+    startSyncMock.mockResolvedValue(undefined);
+    stopSyncMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {

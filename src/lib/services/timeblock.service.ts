@@ -12,6 +12,7 @@
 
 import { ExoMindEnvironment } from '../environment/environment';
 import { getEventStorage } from '../storage/event-storage';
+import { getActiveBlockStorage, type ActiveBlockStorage } from '../storage/active-block-storage';
 import type { TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
 import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
 
@@ -46,16 +47,32 @@ export interface TimeBlockService {
 
   /** 监听时间块变化 */
   onBlockChange(callback: (block: ActiveBlockData | null) => void): () => void;
+
+  /** 启动进行中时间块同步 */
+  startSync(remoteUrl: string): Promise<void>;
+
+  /** 停止进行中时间块同步 */
+  stopSync(): Promise<void>;
 }
 
 export class TimeBlockServiceImpl implements TimeBlockService {
   private env: ExoMindEnvironment;
+  private activeBlockStorage: ActiveBlockStorage | null = null;
+  private useLegacyEnvStorage: boolean;
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
   private lastWriteTime = 0;
+  private syncSubscriberCount = 0;
+  private activeSyncRemoteUrl: string | null = null;
+  private unsubscribeStorageListener: (() => void) | null = null;
   private readonly WRITE_THROTTLE_MS = 1000; // 节流：每秒最多写入一次
 
   constructor(env?: ExoMindEnvironment) {
     this.env = env || ExoMindEnvironment.getInstance();
+    this.useLegacyEnvStorage = typeof env !== 'undefined';
+    if (!this.useLegacyEnvStorage) {
+      this.activeBlockStorage = getActiveBlockStorage();
+    }
+    this.attachStorageListener();
   }
 
   async loadTimeBlocks(): Promise<TimeBlock[]> {
@@ -69,12 +86,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async loadActiveBlock(): Promise<ActiveBlockData | null> {
-    const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    const data = await this.readActiveBlock();
     if (!data) return null;
 
     const normalized = this.normalizeActiveBlock(data);
     if (this.shouldPersistNormalized(data, normalized)) {
-      await this.env.storage.write(ACTIVE_BLOCK_KEY, normalized);
+      await this.saveActiveBlock(normalized);
     }
 
     return normalized;
@@ -82,11 +99,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async startBlock(name: string, config: TimerConfig, description?: string): Promise<ActiveBlockData> {
     // 不允许在已有活跃块（运行中/已暂停）时开启新块
-    const existing = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    const existing = await this.readActiveBlock();
     if (existing) {
       const normalized = this.normalizeActiveBlock(existing);
       if (this.shouldPersistNormalized(existing, normalized)) {
-        await this.env.storage.write(ACTIVE_BLOCK_KEY, normalized);
+        await this.saveActiveBlock(normalized);
       }
       return normalized;
     }
@@ -114,7 +131,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pauseAccumulatedMs: 0,
     };
 
-    await this.env.storage.write(ACTIVE_BLOCK_KEY, activeBlock);
+    await this.saveActiveBlock(activeBlock);
 
     // 通知变化
     this.notifyChange(activeBlock);
@@ -123,7 +140,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async pauseBlock(): Promise<void> {
-    const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    const data = await this.readActiveBlock();
     if (!data || data.paused) return;
 
     const now = Date.now();
@@ -136,7 +153,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pauseAccumulatedMs: normalized.pauseAccumulatedMs ?? 0,
     };
 
-    await this.env.storage.write(ACTIVE_BLOCK_KEY, pausedBlock);
+    await this.saveActiveBlock(pausedBlock);
 
     // 记录暂停事件
     await this.addBlockEvent(`${normalized.name} 暂停`, 'block_pause', new Date(now).toISOString());
@@ -144,7 +161,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async resumeBlock(): Promise<void> {
-    const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    const data = await this.readActiveBlock();
     if (!data || !data.paused) return;
 
     const now = Date.now();
@@ -158,7 +175,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pauseAccumulatedMs,
     };
 
-    await this.env.storage.write(ACTIVE_BLOCK_KEY, resumedBlock);
+    await this.saveActiveBlock(resumedBlock);
 
     // 记录继续事件
     await this.addBlockEvent(`${data.name} 继续`, 'block_resume', new Date(now).toISOString());
@@ -166,7 +183,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async markEnding(): Promise<void> {
-    const raw = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    const raw = await this.readActiveBlock();
     if (!raw) return;
 
     const now = Date.now();
@@ -179,7 +196,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
     await this.addBlockEvent(`${normalized.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
 
-    await this.env.storage.write(ACTIVE_BLOCK_KEY, {
+    await this.saveActiveBlock({
       ...normalized,
       actionEndedAt,
       feedbackStartedAt,
@@ -197,7 +214,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async endBlock(feedback?: string): Promise<TimeBlock | null> {
-    const rawActiveData = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    const rawActiveData = await this.readActiveBlock();
     if (!rawActiveData) return null;
     const activeData = this.normalizeActiveBlock(rawActiveData);
 
@@ -283,7 +300,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     await this.env.storage.write(TIME_BLOCKS_KEY, completed);
 
     // 清除进行中的时间块
-    await this.env.storage.delete(ACTIVE_BLOCK_KEY);
+    await this.deleteActiveBlock();
 
     // 通知变化
     this.notifyChange(null);
@@ -295,7 +312,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async updateElapsed(elapsed: number): Promise<void> {
-    const data = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    const data = await this.readActiveBlock();
     if (!data || data.paused || data.actionEndedAt) return;
 
     const now = Date.now();
@@ -305,7 +322,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
     this.lastWriteTime = now;
 
-    await this.env.storage.write(ACTIVE_BLOCK_KEY, {
+    await this.saveActiveBlock({
       ...data,
       elapsed,
       updatedAt: now,
@@ -315,6 +332,35 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   onBlockChange(callback: (block: ActiveBlockData | null) => void): () => void {
     this.listeners.add(callback);
     return () => this.listeners.delete(callback);
+  }
+
+  async startSync(remoteUrl: string): Promise<void> {
+    if (this.useLegacyEnvStorage) {
+      return;
+    }
+
+    this.syncSubscriberCount += 1;
+
+    if (this.syncSubscriberCount > 1 && this.activeSyncRemoteUrl === remoteUrl) {
+      return;
+    }
+
+    this.activeSyncRemoteUrl = remoteUrl;
+    await this.getActiveStorage().syncToRemote(remoteUrl);
+  }
+
+  async stopSync(): Promise<void> {
+    if (this.useLegacyEnvStorage) {
+      return;
+    }
+
+    this.syncSubscriberCount = Math.max(0, this.syncSubscriberCount - 1);
+    if (this.syncSubscriberCount > 0) {
+      return;
+    }
+
+    this.activeSyncRemoteUrl = null;
+    await this.getActiveStorage().stopSync();
   }
 
   /** 添加时间块事件（通过 EventStorage，与 ChatPage 保持一致） */
@@ -334,6 +380,73 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private notifyChange(block: ActiveBlockData | null): void {
     this.listeners.forEach(cb => cb(block));
+  }
+
+  private attachStorageListener(): void {
+    if (this.useLegacyEnvStorage || this.unsubscribeStorageListener) {
+      return;
+    }
+
+    this.unsubscribeStorageListener = this.getActiveStorage().onBlockChange((block) => {
+      if (!block) {
+        this.notifyChange(null);
+        return;
+      }
+
+      const normalized = this.normalizeActiveBlock(block);
+      if (this.shouldPersistNormalized(block, normalized)) {
+        void this.saveActiveBlock(normalized);
+        return;
+      }
+
+      this.notifyChange(normalized);
+    });
+  }
+
+  private async readActiveBlock(): Promise<ActiveBlockData | null> {
+    if (this.useLegacyEnvStorage) {
+      return await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    }
+
+    const activeStorage = this.getActiveStorage();
+    const fromActiveStorage = await activeStorage.loadActiveBlock();
+    if (fromActiveStorage) {
+      return fromActiveStorage;
+    }
+
+    const legacyData = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+    if (!legacyData) {
+      return null;
+    }
+
+    await activeStorage.saveActiveBlock(legacyData);
+    await this.env.storage.delete(ACTIVE_BLOCK_KEY);
+    return legacyData;
+  }
+
+  private async saveActiveBlock(block: ActiveBlockData): Promise<void> {
+    if (this.useLegacyEnvStorage) {
+      await this.env.storage.write(ACTIVE_BLOCK_KEY, block);
+      return;
+    }
+
+    await this.getActiveStorage().saveActiveBlock(block);
+  }
+
+  private async deleteActiveBlock(): Promise<void> {
+    if (this.useLegacyEnvStorage) {
+      await this.env.storage.delete(ACTIVE_BLOCK_KEY);
+      return;
+    }
+
+    await this.getActiveStorage().deleteActiveBlock();
+  }
+
+  private getActiveStorage(): ActiveBlockStorage {
+    if (!this.activeBlockStorage) {
+      throw new Error('ActiveBlockStorage is not available in legacy mode');
+    }
+    return this.activeBlockStorage;
   }
 
   private normalizeActiveBlock(data: ActiveBlockData, now: number = Date.now()): ActiveBlockData {
