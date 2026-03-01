@@ -28,12 +28,16 @@ import {
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast-hook';
 import { getTimeBlockService, TimerMode, TimerConfig } from '@/lib/services';
+import type { ActiveBlockData } from '@/lib/types/event';
 import {
   DEFAULT_TIMER_END_SOUND_PRESET_ID,
   getTimerEndSoundPresetById,
   TIMER_END_SOUND_PRESETS,
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
+import { useSyncStore } from '@/ui/stores/sync-store';
+import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
+import { resolveSyncServerUrl } from '@/config/port-env';
 
 interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
@@ -95,6 +99,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   // Service
   const timeBlockService = getTimeBlockService();
+  const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
+  const currentUser = useSyncStore((state) => state.currentUser);
 
   const playCountdownEndSound = useCallback(async () => {
     if (!countdownEndSoundEnabled) return;
@@ -136,20 +142,80 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // 加载进行中的时间块
+  const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
+    if (!block) {
+      if (timerState === 'idle') {
+        return;
+      }
+      setTimerState('idle');
+      setElapsed(timerMode === 'countdown' ? countdownMinutes * 60 * 1000 : 0);
+      setTaskName('');
+      startTimeRef.current = null;
+      countdownEndedRef.current = false;
+      countdownOverrunRef.current = false;
+      setCountdownOvertimeMs(0);
+      return;
+    }
+
+    setTaskName(block.name);
+    setTimerMode(block.mode);
+    if (block.mode === 'countdown' && block.targetMinutes) {
+      setCountdownMinutes(block.targetMinutes);
+    }
+    setElapsed(Math.max(0, block.elapsed));
+    setTimerState(block.actionEndedAt ? 'paused' : (block.paused ? 'paused' : 'running'));
+    startTimeRef.current = block.startTime;
+    countdownEndedRef.current = false;
+    countdownOverrunRef.current = false;
+    setCountdownOvertimeMs(0);
+  }, [countdownMinutes, timerMode, timerState]);
+
+  // 加载进行中的时间块并订阅变化
   useEffect(() => {
+    let cancelled = false;
+    const unsubscribe = timeBlockService.onBlockChange((block) => {
+      if (cancelled) return;
+      applyActiveBlock(block);
+    });
+
     const loadActiveBlock = async () => {
       const block = await timeBlockService.loadActiveBlock();
+      if (cancelled) return;
       if (block) {
-        setTaskName(block.name);
-        setTimerMode(block.mode);
-        setElapsed(block.elapsed);
-        setTimerState(block.paused ? 'paused' : 'running');
-        startTimeRef.current = block.startTime;
+        applyActiveBlock(block);
       }
     };
-    loadActiveBlock();
-  }, []);
+
+    void loadActiveBlock();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [applyActiveBlock, timeBlockService]);
+
+  useEffect(() => {
+    if (!isLoggedIn || !currentUser) {
+      void timeBlockService.stopSync();
+      return;
+    }
+
+    let cancelled = false;
+    const remoteUrl = buildRemoteDbUrl(resolveSyncServerUrl(import.meta.env), currentUser);
+
+    void timeBlockService.startSync(remoteUrl).catch((error) => {
+      if (cancelled) return;
+      toast({
+        title: '时间块同步启动失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    });
+
+    return () => {
+      cancelled = true;
+      void timeBlockService.stopSync();
+    };
+  }, [currentUser, isLoggedIn, timeBlockService, toast]);
 
   // 启动定时器
   const startTimer = useCallback(() => {

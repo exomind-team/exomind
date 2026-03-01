@@ -102,6 +102,16 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
     mocks.exportEventsAsJson.mockResolvedValue(JSON.stringify({ events: [{ id: 'evt-1' }] }));
     mocks.importEventsFromJson.mockResolvedValue({ imported: 0, skipped: 0, total: 0 });
     mocks.isTauri.mockResolvedValue(false);

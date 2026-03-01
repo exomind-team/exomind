@@ -10,6 +10,9 @@ const resumeBlockMock = vi.fn();
 const endBlockMock = vi.fn();
 const markEndingMock = vi.fn();
 const updateElapsedMock = vi.fn();
+const onBlockChangeMock = vi.fn(() => () => {});
+const startSyncMock = vi.fn().mockResolvedValue(undefined);
+const stopSyncMock = vi.fn().mockResolvedValue(undefined);
 let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | undefined;
 let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
 
@@ -22,6 +25,9 @@ vi.mock('@/lib/services', () => ({
     endBlock: endBlockMock,
     markEnding: markEndingMock,
     updateElapsed: updateElapsedMock,
+    onBlockChange: onBlockChangeMock,
+    startSync: startSyncMock,
+    stopSync: stopSyncMock,
   }),
 }));
 
@@ -47,6 +53,12 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     endBlockMock.mockResolvedValue(null);
     markEndingMock.mockResolvedValue(undefined);
     updateElapsedMock.mockResolvedValue(undefined);
+    onBlockChangeMock.mockReset();
+    onBlockChangeMock.mockReturnValue(() => {});
+    startSyncMock.mockReset();
+    stopSyncMock.mockReset();
+    startSyncMock.mockResolvedValue(undefined);
+    stopSyncMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {

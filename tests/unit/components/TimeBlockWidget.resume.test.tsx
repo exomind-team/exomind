@@ -10,6 +10,9 @@ const {
   resumeBlockMock,
   endBlockMock,
   updateElapsedMock,
+  onBlockChangeMock,
+  startSyncMock,
+  stopSyncMock,
 } = vi.hoisted(() => ({
   loadActiveBlockMock: vi.fn(),
   startBlockMock: vi.fn(),
@@ -18,6 +21,9 @@ const {
   resumeBlockMock: vi.fn(),
   endBlockMock: vi.fn(),
   updateElapsedMock: vi.fn(),
+  onBlockChangeMock: vi.fn(() => () => {}),
+  startSyncMock: vi.fn().mockResolvedValue(undefined),
+  stopSyncMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -29,6 +35,9 @@ vi.mock('@/lib/services', () => ({
     resumeBlock: resumeBlockMock,
     endBlock: endBlockMock,
     updateElapsed: updateElapsedMock,
+    onBlockChange: onBlockChangeMock,
+    startSync: startSyncMock,
+    stopSync: stopSyncMock,
   }),
 }));
 
@@ -52,6 +61,12 @@ describe('TimeBlockWidget resume behavior', () => {
     resumeBlockMock.mockReset();
     endBlockMock.mockReset();
     updateElapsedMock.mockReset();
+    onBlockChangeMock.mockReset();
+    onBlockChangeMock.mockReturnValue(() => {});
+    startSyncMock.mockReset();
+    stopSyncMock.mockReset();
+    startSyncMock.mockResolvedValue(undefined);
+    stopSyncMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
