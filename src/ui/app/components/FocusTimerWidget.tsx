@@ -28,7 +28,7 @@ import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/ser
 import type { ActiveBlockData } from '@/lib/types/event';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
-import { resolveSyncServerUrl } from '@/config/port-env';
+import { resolveSyncServerUrl, SYNC_SERVER_URL_CHANGED_EVENT } from '@/config/port-env';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
@@ -100,6 +100,9 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const [feedback, setFeedback] = useState('');
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
   const currentUser = useSyncStore((state) => state.currentUser);
+  const [syncServerUrl, setSyncServerUrl] = useState(() =>
+    resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
+  );
 
   const isRunningUi = uiState === 'running';
   const isPaused = isRunningUi && runningSubState === 'paused';
@@ -207,13 +210,25 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   }, [applyActiveBlock]);
 
   useEffect(() => {
+    const refreshSyncServerUrl = () => {
+      setSyncServerUrl(resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>));
+    };
+
+    refreshSyncServerUrl();
+    window.addEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
+    return () => {
+      window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isLoggedIn || !currentUser) {
       void timeBlockServiceRef.current.stopSync();
       return;
     }
 
     let cancelled = false;
-    const remoteUrl = buildRemoteDbUrl(resolveSyncServerUrl(import.meta.env), currentUser);
+    const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
 
     void timeBlockServiceRef.current.startSync(remoteUrl).catch(() => {
       if (cancelled) return;
@@ -223,7 +238,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       cancelled = true;
       void timeBlockServiceRef.current.stopSync();
     };
-  }, [currentUser, isLoggedIn]);
+  }, [currentUser, isLoggedIn, syncServerUrl]);
 
   useEffect(() => {
     if (!isRunningUi || isPaused) {

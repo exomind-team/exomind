@@ -73,6 +73,8 @@ export interface ActiveBlockData {
   actionEndedAt?: Timestamp;
   /** 反馈弹窗打开的时刻（通常与 actionEndedAt 一致） */
   feedbackStartedAt?: Timestamp;
+  /** 反馈提交完成时刻（终态标记，防止并发回退） */
+  feedbackSubmittedAt?: Timestamp;
   /** 累计暂停时长（毫秒） */
   pauseAccumulatedMs?: number;
   /** 最近一次计时基准更新时间（毫秒时间戳） */

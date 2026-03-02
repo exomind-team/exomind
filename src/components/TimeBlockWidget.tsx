@@ -37,7 +37,7 @@ import {
 } from '@/lib/media/timer-end-sounds';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
-import { resolveSyncServerUrl } from '@/config/port-env';
+import { resolveSyncServerUrl, SYNC_SERVER_URL_CHANGED_EVENT } from '@/config/port-env';
 
 interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
@@ -101,6 +101,9 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const timeBlockService = getTimeBlockService();
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
   const currentUser = useSyncStore((state) => state.currentUser);
+  const [syncServerUrl, setSyncServerUrl] = useState(() =>
+    resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
+  );
 
   const playCountdownEndSound = useCallback(async () => {
     if (!countdownEndSoundEnabled) return;
@@ -194,13 +197,25 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   }, [applyActiveBlock, timeBlockService]);
 
   useEffect(() => {
+    const refreshSyncServerUrl = () => {
+      setSyncServerUrl(resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>));
+    };
+
+    refreshSyncServerUrl();
+    window.addEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
+    return () => {
+      window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
+    };
+  }, []);
+
+  useEffect(() => {
     if (!isLoggedIn || !currentUser) {
       void timeBlockService.stopSync();
       return;
     }
 
     let cancelled = false;
-    const remoteUrl = buildRemoteDbUrl(resolveSyncServerUrl(import.meta.env), currentUser);
+    const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
 
     void timeBlockService.startSync(remoteUrl).catch((error) => {
       if (cancelled) return;
@@ -215,7 +230,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       cancelled = true;
       void timeBlockService.stopSync();
     };
-  }, [currentUser, isLoggedIn, timeBlockService, toast]);
+  }, [currentUser, isLoggedIn, syncServerUrl, timeBlockService, toast]);
 
   // 启动定时器
   const startTimer = useCallback(() => {

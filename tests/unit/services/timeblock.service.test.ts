@@ -371,4 +371,36 @@ describe('TimeBlockServiceImpl', () => {
     const startCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_start');
     expect(startCalls).toHaveLength(1);
   });
+
+  it('does not write duplicate block_end event when markEnding is called repeatedly', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('idempotent-ending', { mode: 'countup' });
+    await service.markEnding();
+    await service.markEnding();
+
+    const endCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_end');
+    expect(endCalls).toHaveLength(1);
+  });
+
+  it('keeps terminal marker for sync but exposes no active block after feedback submitted', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    const first = await service.startBlock('terminal-marker', { mode: 'countup' });
+    await service.markEnding();
+    const completed = await service.endBlock('done once');
+    const repeated = await service.endBlock('done twice');
+
+    const feedbackCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_feedback');
+
+    expect(completed?.startId).toBe(first.startId);
+    expect(repeated).toBeNull();
+    expect(feedbackCalls).toHaveLength(1);
+    expect(await service.loadActiveBlock()).toBeNull();
+
+    const restarted = await service.startBlock('after-terminal', { mode: 'countup' });
+    expect(restarted.startId).not.toBe(first.startId);
+  });
 });
