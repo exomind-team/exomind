@@ -1,5 +1,6 @@
 import PouchDB from 'pouchdb';
 import type { ActiveBlockData } from '../types/event';
+import { buildSyncErrorLog } from './sync-error';
 
 const ACTIVE_BLOCK_DOC_ID = 'current';
 const ACTIVE_BLOCK_PREFIX_ENV = 'EXOMIND_ACTIVE_BLOCK_STORAGE_PREFIX';
@@ -134,6 +135,7 @@ export class ActiveBlockStorage {
   private syncReplication: PouchDB.Replication.Sync<ActiveBlockDoc> | null = null;
   private listeners: Set<ActiveBlockChangeListener> = new Set();
   private lastSyncError: unknown = null;
+  private lastSyncErrorSignature: string | null = null;
   private pruneQueue: Promise<void> = Promise.resolve();
   private pendingPruneRevs: Set<string> = new Set();
 
@@ -218,6 +220,10 @@ export class ActiveBlockStorage {
       retry: true,
     });
 
+    this.syncReplication.on('active', () => {
+      this.lastSyncErrorSignature = null;
+    });
+
     this.syncReplication.on('change', (info: unknown) => {
       const direction = this.extractSyncDirection(info);
       // Ignore local push echo; local writes already notify via save/delete paths.
@@ -229,7 +235,7 @@ export class ActiveBlockStorage {
 
     this.syncReplication.on('error', (error: unknown) => {
       this.lastSyncError = error;
-      console.error('[ActiveBlockStorage] sync error:', error);
+      this.logSyncError(remoteUrl, error);
     });
 
     return this.syncReplication;
@@ -288,6 +294,23 @@ export class ActiveBlockStorage {
 
     const direction = (info as { direction?: unknown }).direction;
     return typeof direction === 'string' && direction.trim().length > 0 ? direction : null;
+  }
+
+  private logSyncError(remoteUrl: string, error: unknown): void {
+    const [message, payload] = buildSyncErrorLog('ActiveBlockStorage', remoteUrl, error);
+    const signature = JSON.stringify({
+      message,
+      remoteUrl,
+      code: payload.code,
+      status: payload.status,
+      errorMessage: payload.message,
+    });
+
+    if (signature === this.lastSyncErrorSignature) {
+      return;
+    }
+    this.lastSyncErrorSignature = signature;
+    console.error(message, payload);
   }
 
   private async getResolvedDoc(): Promise<ActiveBlockDoc | null> {

@@ -24,6 +24,7 @@ import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
+import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { useSyncStore } from '@/ui/stores/sync-store';
@@ -298,7 +299,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         setSyncStatus('connected');
         console.log('[ChatPage] 远程同步已启动');
       }).catch((err) => {
-        console.error('[ChatPage] 同步启动失败:', err);
+        const [message, payload] = buildSyncErrorLog('ChatPage', remoteUrl, err);
+        console.error(message, payload);
         setSyncStatus('disconnected');
       });
     }

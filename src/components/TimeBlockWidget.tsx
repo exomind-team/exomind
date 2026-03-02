@@ -29,6 +29,7 @@ import {
 import { useToast } from '@/components/ui/toast-hook';
 import { getTimeBlockService, TimerMode, TimerConfig } from '@/lib/services';
 import type { ActiveBlockData } from '@/lib/types/event';
+import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import {
   DEFAULT_TIMER_END_SOUND_PRESET_ID,
   getTimerEndSoundPresetById,
@@ -239,6 +240,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
     void timeBlockService.startSync(remoteUrl).catch((error) => {
       if (cancelled) return;
+      const [logMessage, payload] = buildSyncErrorLog('TimeBlockWidget', remoteUrl, error);
+      console.error(logMessage, payload);
       toast({
         title: '时间块同步启动失败',
         description: error instanceof Error ? error.message : String(error),

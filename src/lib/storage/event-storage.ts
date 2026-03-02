@@ -7,6 +7,7 @@
 
 // 使用默认导入
 import PouchDB from 'pouchdb';
+import { buildSyncErrorLog } from './sync-error';
 
 const POUCHDB_PREFIX_ENV = 'EXOMIND_EVENT_STORAGE_PREFIX';
 const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-event-storage/';
@@ -169,6 +170,7 @@ export class EventStorage {
   private initialized: boolean = false;
   private syncReplication: PouchDB.Replication.Sync<Event> | null = null;
   private changeListeners: Array<(change: unknown) => void> = [];
+  private lastSyncErrorSignature: string | null = null;
 
   /**
    * 创建事件存储实例
@@ -435,6 +437,10 @@ export class EventStorage {
       retry: true,
     });
 
+    this.syncReplication.on('active', () => {
+      this.lastSyncErrorSignature = null;
+    });
+
     // 监听变更事件
     this.syncReplication.on('change', (change: unknown) => {
       const direction = this.extractSyncDirection(change);
@@ -446,7 +452,7 @@ export class EventStorage {
     });
 
     this.syncReplication.on('error', (error: unknown) => {
-      console.error('同步错误:', error);
+      this.logSyncError(remoteUrl, error);
     });
 
     return this.syncReplication;
@@ -500,6 +506,23 @@ export class EventStorage {
 
     const direction = (change as { direction?: unknown }).direction;
     return typeof direction === 'string' && direction.trim().length > 0 ? direction : null;
+  }
+
+  private logSyncError(remoteUrl: string, error: unknown): void {
+    const [message, payload] = buildSyncErrorLog('EventStorage', remoteUrl, error);
+    const signature = JSON.stringify({
+      message,
+      remoteUrl,
+      code: payload.code,
+      status: payload.status,
+      errorMessage: payload.message,
+    });
+
+    if (signature === this.lastSyncErrorSignature) {
+      return;
+    }
+    this.lastSyncErrorSignature = signature;
+    console.error(message, payload);
   }
 
   /**
