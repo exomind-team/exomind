@@ -63,6 +63,15 @@ export interface TimeBlockWidgetHandle {
   endDialog: () => void;
 }
 
+function isFeedbackStage(block: ActiveBlockData): boolean {
+  if (block.feedbackSubmittedAt) {
+    return false;
+  }
+  return block.phase === 'feedback_in_progress'
+    || block.phase === 'action_ended'
+    || Boolean(block.actionEndedAt || block.feedbackStartedAt);
+}
+
 export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidgetProps>(function TimeBlockWidget({
   expanded: controlledExpanded,
   onExpandedChange,
@@ -79,6 +88,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const [internalExpanded, setInternalExpanded] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [feedbackInProgress, setFeedbackInProgress] = useState(false);
 
   // 倒计时结束动作（纯前端配置，不持久化）
   const [countdownEndSoundEnabled, setCountdownEndSoundEnabled] = useState(true);
@@ -153,6 +163,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
         return;
       }
       setTimerState('idle');
+      setFeedbackInProgress(false);
+      setFeedbackOpen(false);
       setElapsed(timerMode === 'countdown' ? countdownMinutes * 60 * 1000 : 0);
       setTaskName('');
       startTimeRef.current = null;
@@ -168,7 +180,9 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       setCountdownMinutes(block.targetMinutes);
     }
     setElapsed(Math.max(0, block.elapsed));
-    setTimerState(block.actionEndedAt ? 'paused' : (block.paused ? 'paused' : 'running'));
+    const nextFeedbackInProgress = isFeedbackStage(block);
+    setFeedbackInProgress(nextFeedbackInProgress);
+    setTimerState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
     startTimeRef.current = block.startTime;
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
@@ -365,6 +379,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   // 暂停计时
   const handlePause = async () => {
+    if (feedbackInProgress) return;
     setTimerState('paused');
     isRunningRef.current = false;
     if (timerRef.current) {
@@ -377,6 +392,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   // 继续计时
   const handleResume = async () => {
+    if (feedbackInProgress) return;
     setTimerState('running');
     enqueueServiceMutation('resumeBlock', async () => {
       await timeBlockService.resumeBlock();
@@ -385,8 +401,10 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   // 点击按钮结束计时（显示反馈对话框）
   const handleEndDialog = async () => {
+    if (feedbackInProgress) return;
     // 📌【2026-02-14 00:53:03】【人写】需要标记反馈
     setTimerState('ended'); // * 📌【2026-02-14 01:43:50】【人写】其中就包含了「时间块结束」的动作，会添加「时间块结束」事件
+    setFeedbackInProgress(true);
     setFeedbackOpen(true);
   };
 
@@ -398,6 +416,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     }
 
     // 重置状态
+    setFeedbackInProgress(false);
     setTimerState('idle');
     setElapsed(0);
     setTaskName('');
@@ -413,6 +432,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   // 暂停/继续切换
   const pauseOrResume = async () => {
+    if (feedbackInProgress) return;
     if (timerState === 'running') {
       await handlePause();
     } else if (timerState === 'paused') {
@@ -451,6 +471,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     const block = await timeBlockService.startBlock(name, config, description || undefined);
     setTaskName(name);
     setElapsed(block.elapsed);
+    setFeedbackInProgress(false);
     setTimerState('running');
     startTimeRef.current = block.startTime;
   };
@@ -524,6 +545,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                     size="sm"
                     variant="outline"
                     onClick={handlePause}
+                    disabled={feedbackInProgress}
                     className="h-10 gap-2 rounded-[24px] border-0 bg-[#EDECE9] px-6 text-sm font-medium text-[#1C1917]"
                   >
                     <Pause size={16} />
@@ -534,6 +556,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   <Button
                     size="sm"
                     onClick={handleResume}
+                    disabled={feedbackInProgress}
                     className="h-10 gap-2 rounded-[24px] bg-[#16A34A] px-6 text-sm font-medium text-white hover:bg-[#15803D]"
                   >
                     <Play size={16} />
@@ -544,6 +567,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   size="sm"
                   variant="outline"
                   onClick={handleEndDialog}
+                  disabled={feedbackInProgress}
                   className="h-10 gap-2 rounded-[24px] border-0 bg-[#FDECEB] px-6 text-sm font-medium text-[#C75B3A]"
                 >
                   <Square size={16} />
@@ -586,6 +610,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   size="sm"
                   variant="outline"
                   onClick={handlePause}
+                  disabled={feedbackInProgress}
                   className="gap-1"
                 >
                   <Pause size={16} />
@@ -595,6 +620,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   size="sm"
                   variant="destructive"
                   onClick={handleEndDialog}
+                  disabled={feedbackInProgress}
                   className="gap-1"
                 >
                   <Square size={16} />
@@ -608,6 +634,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                 <Button
                   size="sm"
                   onClick={handleResume}
+                  disabled={feedbackInProgress}
                   className="gap-1 bg-green-600 hover:bg-green-700"
                 >
                   <Play size={16} />
@@ -617,6 +644,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   size="sm"
                   variant="destructive"
                   onClick={handleEndDialog}
+                  disabled={feedbackInProgress}
                   className="gap-1"
                 >
                   <Square size={16} />

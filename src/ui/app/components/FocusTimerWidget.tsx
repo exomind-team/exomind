@@ -42,6 +42,15 @@ export interface FocusTimerWidgetHandle {
   endDialog: () => void;
 }
 
+function isFeedbackStage(block: ActiveBlockData): boolean {
+  if (block.feedbackSubmittedAt) {
+    return false;
+  }
+  return block.phase === 'feedback_in_progress'
+    || block.phase === 'action_ended'
+    || Boolean(block.actionEndedAt || block.feedbackStartedAt);
+}
+
 function formatClock(ms: number): string {
   const safe = Math.max(0, Math.floor(ms));
   const totalSeconds = Math.floor(safe / 1000);
@@ -104,6 +113,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
   const currentUser = useSyncStore((state) => state.currentUser);
   const [syncServerUrl, setSyncServerUrl] = useState(() =>
@@ -170,6 +180,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       setTaskName('');
       setTaskNameDraft('');
       setFeedbackOpen(false);
+      setFeedbackInProgress(false);
       countdownEndedRef.current = false;
       countdownOverrunRef.current = false;
       hardEndTriggeredRef.current = false;
@@ -185,9 +196,11 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       setCountdownMinutes(block.targetMinutes);
     }
     setElapsedMs(Math.max(0, block.elapsed));
+    const nextFeedbackInProgress = isFeedbackStage(block);
+    setFeedbackInProgress(nextFeedbackInProgress);
     setUiState('running');
-    setRunningSubState(block.actionEndedAt || block.paused ? 'paused' : 'running');
-    hardEndTriggeredRef.current = Boolean(block.actionEndedAt);
+    setRunningSubState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
+    hardEndTriggeredRef.current = nextFeedbackInProgress;
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     setCountdownOvertimeMs(0);
@@ -354,6 +367,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setTaskName(name);
     setTaskNameDraft(name);
     setElapsedMs(Math.max(0, block.elapsed));
+    setFeedbackInProgress(false);
     setRunningSubState('running');
     setUiState('running');
   }, [countdownMinutes, focusTaskInput, taskNameDraft, timerMode]);
@@ -416,6 +430,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
 
   const handlePauseOrResume = useCallback(async () => {
     if (!isRunningUi) return;
+    if (feedbackInProgress) return;
 
     if (runningSubState === 'running') {
       const t0 = perfNow();
@@ -435,19 +450,21 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       await timeBlockServiceRef.current.resumeBlock();
       console.log('[TB-UI] click resume -> resumeBlock done', { elapsedMs: Math.round(perfNow() - t0) });
     });
-  }, [enqueueServiceMutation, isRunningUi, runningSubState]);
+  }, [enqueueServiceMutation, feedbackInProgress, isRunningUi, runningSubState]);
 
   const handleOpenEndDialog = useCallback(() => {
     if (!isRunningUi) return;
+    if (feedbackInProgress) return;
     const t0 = perfNow();
     console.log('[TB-UI] click end -> markEnding start');
     setRunningSubState('paused');
+    setFeedbackInProgress(true);
     enqueueServiceMutation('markEnding', async () => {
       await timeBlockServiceRef.current.markEnding();
       console.log('[TB-UI] click end -> markEnding done', { elapsedMs: Math.round(perfNow() - t0) });
     });
     setFeedbackOpen(true);
-  }, [enqueueServiceMutation, isRunningUi]);
+  }, [enqueueServiceMutation, feedbackInProgress, isRunningUi]);
 
   const handleConfirmEnd = useCallback(async () => {
     const feedbackText = feedback.trim() || undefined;
@@ -455,6 +472,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     console.log('[TB-UI] click confirm-end -> endBlock start');
     setFeedback('');
     setFeedbackOpen(false);
+    setFeedbackInProgress(false);
     setUiState('idle');
     setRunningSubState('running');
     setTaskName('');
@@ -697,6 +715,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
                   type="button"
                   data-testid="new-focus-pause-resume-button"
                   aria-label={isPaused ? '继续（Resume）' : '暂停（Pause）'}
+                  disabled={feedbackInProgress}
                   onClick={() => {
                     void handlePauseOrResume();
                   }}
@@ -722,6 +741,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
                   type="button"
                   data-testid="new-focus-end-button"
                   aria-label="结束（End）"
+                  disabled={feedbackInProgress}
                   onClick={handleOpenEndDialog}
                   className="h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#C75B3A] p-0 text-[#C75B3A] dark:text-[#FAFAF9] hover:bg-[#F8DED9] dark:hover:bg-[#B24D2F]"
                 >

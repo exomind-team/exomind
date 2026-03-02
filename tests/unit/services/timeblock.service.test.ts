@@ -356,6 +356,26 @@ describe('TimeBlockServiceImpl', () => {
     expect(pauseCalls).toHaveLength(1);
   });
 
+  it('blocks pause/resume once block is in feedback stage and does not emit extra events', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('no-rewind', { mode: 'countup' });
+    await service.markEnding();
+    await service.pauseBlock();
+    await service.resumeBlock();
+
+    const types = addEventMock.mock.calls.map(([event]) => (event as { type?: string }).type);
+    expect(types).toEqual(expect.arrayContaining(['block_start', 'block_end']));
+    expect(types).not.toContain('block_pause');
+    expect(types).not.toContain('block_resume');
+
+    const active = await service.loadActiveBlock();
+    expect(active?.phase).toBe('feedback_in_progress');
+    expect(active?.actionEndedAt).toBeTypeOf('number');
+    expect(active?.paused).toBe(false);
+  });
+
   it('does not start a new block when an active block exists', async () => {
     const env = createMemoryEnv();
     const service = new TimeBlockServiceImpl(env as never);

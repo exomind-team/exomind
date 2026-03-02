@@ -61,7 +61,12 @@ export interface TimeBlock {
 }
 
 // 活跃时间块（进行中）
-export type ActiveBlockPhase = 'running' | 'paused' | 'action_ended' | 'feedback_submitted';
+export type ActiveBlockPhase =
+  | 'running'
+  | 'paused'
+  | 'feedback_in_progress'
+  | 'action_ended' // legacy phase value（兼容旧数据）
+  | 'feedback_submitted';
 
 export interface ActiveBlockData {
   startId: UUID;
