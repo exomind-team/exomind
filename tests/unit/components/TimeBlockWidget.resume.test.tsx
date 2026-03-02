@@ -138,4 +138,32 @@ describe('TimeBlockWidget resume behavior', () => {
       expect(markEndingMock).toHaveBeenCalledTimes(1);
     });
   });
+
+  it('disables resume/end actions when block is in feedback stage', async () => {
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-feedback-stage',
+      name: 'Feedback stage',
+      startTime: now - 5000,
+      elapsed: 1000,
+      mode: 'countup',
+      paused: false,
+      phase: 'feedback_in_progress',
+      actionEndedAt: now - 1000,
+      feedbackStartedAt: now - 1000,
+    });
+
+    render(<TimeBlockWidget />);
+
+    const resumeButton = await screen.findByRole('button', { name: '继续' });
+    const endButton = await screen.findByRole('button', { name: '结束' });
+
+    expect(resumeButton).toBeDisabled();
+    expect(endButton).toBeDisabled();
+
+    fireEvent.click(resumeButton);
+    fireEvent.click(endButton);
+
+    expect(resumeBlockMock).not.toHaveBeenCalled();
+    expect(markEndingMock).not.toHaveBeenCalled();
+  });
 });

@@ -412,17 +412,24 @@ export class ActiveBlockStorage {
   }
 
   private getBlockPhase(block: ActiveBlockData): number {
-    const phase = block.phase
-      ?? (block.feedbackSubmittedAt
-        ? 'feedback_submitted'
-        : (block.actionEndedAt ? 'action_ended' : (block.paused ? 'paused' : 'running')));
+    const phase = this.resolvePhase(block);
     if (phase === 'feedback_submitted') {
       return 2;
     }
-    if (phase === 'action_ended') {
+    if (phase === 'feedback_in_progress') {
       return 1;
     }
     return 0;
+  }
+
+  private resolvePhase(block: ActiveBlockData): 'running' | 'paused' | 'feedback_in_progress' | 'feedback_submitted' {
+    if (block.feedbackSubmittedAt || block.phase === 'feedback_submitted') {
+      return 'feedback_submitted';
+    }
+    if (block.actionEndedAt || block.phase === 'feedback_in_progress' || block.phase === 'action_ended') {
+      return 'feedback_in_progress';
+    }
+    return block.paused ? 'paused' : 'running';
   }
 
   private getBlockOrderTime(block: ActiveBlockData): number {

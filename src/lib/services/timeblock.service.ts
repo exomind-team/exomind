@@ -176,11 +176,14 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async pauseBlock(): Promise<void> {
     const opStart = perfNow();
-    const data = await this.readActiveBlock();
-    if (!data || data.paused || this.isCompletedBlock(data)) return;
-
     const now = Date.now();
-    const normalized = this.normalizeActiveBlock(data, now);
+    const raw = await this.readActiveBlock();
+    if (!raw) return;
+    const normalized = this.normalizeActiveBlock(raw, now);
+    if (normalized.paused || this.isCompletedBlock(normalized) || this.isFeedbackInProgress(normalized)) {
+      this.rememberAcceptedBlock(normalized);
+      return;
+    }
     const pausedBlock: ActiveBlockData = this.normalizeActiveBlock({
       ...normalized,
       phase: 'paused',
@@ -215,11 +218,14 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async resumeBlock(): Promise<void> {
     const opStart = perfNow();
-    const data = await this.readActiveBlock();
-    if (!data || !data.paused || this.isCompletedBlock(data)) return;
-
     const now = Date.now();
-    const normalized = this.normalizeActiveBlock(data, now);
+    const raw = await this.readActiveBlock();
+    if (!raw) return;
+    const normalized = this.normalizeActiveBlock(raw, now);
+    if (!normalized.paused || this.isCompletedBlock(normalized) || this.isFeedbackInProgress(normalized)) {
+      this.rememberAcceptedBlock(normalized);
+      return;
+    }
     const pausedAt = normalized.pausedAt ?? now;
     const pauseAccumulatedMs = (normalized.pauseAccumulatedMs ?? 0) + Math.max(0, now - pausedAt);
     const resumedBlock: ActiveBlockData = this.normalizeActiveBlock({
@@ -243,7 +249,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 记录继续事件
     const eventStart = perfNow();
-    await this.addBlockEvent(`${data.name} 继续`, 'block_resume', new Date(now).toISOString());
+    await this.addBlockEvent(`${normalized.name} 继续`, 'block_resume', new Date(now).toISOString());
     const eventMs = Math.round(perfNow() - eventStart);
     this.notifyChange(resumedBlock);
     console.log('[TB-SVC] resumeBlock done', {
@@ -281,7 +287,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     const endedBlock: ActiveBlockData = this.normalizeActiveBlock({
       ...normalized,
-      phase: 'action_ended',
+      phase: 'feedback_in_progress',
       version: this.nextVersion(normalized),
       actorId: this.actorId,
       actionEndedAt,
@@ -672,7 +678,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (phase === 'feedback_submitted') {
       return 2;
     }
-    if (phase === 'action_ended') {
+    if (phase === 'feedback_in_progress') {
       return 1;
     }
     return 0;
@@ -748,14 +754,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private resolvePhase(block: ActiveBlockData): ActiveBlockPhase {
-    if (block.phase) {
-      return block.phase;
-    }
     if (block.feedbackSubmittedAt) {
       return 'feedback_submitted';
     }
-    if (block.actionEndedAt) {
-      return 'action_ended';
+    if (block.phase === 'feedback_submitted') {
+      return 'feedback_submitted';
+    }
+    if (block.actionEndedAt || block.phase === 'feedback_in_progress' || block.phase === 'action_ended') {
+      return 'feedback_in_progress';
+    }
+    if (block.phase === 'paused' || block.phase === 'running') {
+      return block.phase;
     }
     return block.paused ? 'paused' : 'running';
   }
@@ -764,7 +773,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (phase === 'feedback_submitted') {
       return 4;
     }
-    if (phase === 'action_ended') {
+    if (phase === 'feedback_in_progress' || phase === 'action_ended') {
       return 3;
     }
     if (phase === 'paused') {
@@ -788,7 +797,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (phase === 'feedback_submitted' && block.feedbackSubmittedAt) {
       return block.feedbackSubmittedAt;
     }
-    if (phase === 'action_ended' && block.actionEndedAt) {
+    if ((phase === 'feedback_in_progress' || phase === 'action_ended') && block.actionEndedAt) {
       return block.actionEndedAt;
     }
     if (phase === 'paused' && block.pausedAt) {
@@ -808,7 +817,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (phase === 'feedback_submitted') {
       return block.feedbackSubmittedAt ?? now;
     }
-    if (phase === 'action_ended') {
+    if (phase === 'feedback_in_progress' || phase === 'action_ended') {
       return block.actionEndedAt ?? now;
     }
     if (phase === 'paused') {
@@ -854,6 +863,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return Math.max(0, this.getExpectedDurationMs(normalized) - Math.max(0, normalized.elapsed));
     }
     return Math.max(0, normalized.elapsed);
+  }
+
+  private isFeedbackInProgress(block: ActiveBlockData): boolean {
+    return this.resolvePhase(block) === 'feedback_in_progress' && !Boolean(block.feedbackSubmittedAt);
   }
 
   private rememberAcceptedBlock(block: ActiveBlockData): void {
