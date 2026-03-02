@@ -62,4 +62,39 @@ describe('Issue #104 ActiveBlockStorage', () => {
     expect(calls.some((item) => item?.startId === 'issue-104-start')).toBe(true);
     expect(calls[calls.length - 1]).toBeNull();
   });
+
+  it('keeps higher phase state when stale running payload is saved later', async () => {
+    const storage = new ActiveBlockStorage('issue104-non-regression-user');
+    const now = Date.now();
+    const terminal: ActiveBlockData = {
+      startId: 'issue-104-same-start',
+      name: 'terminal-state',
+      startTime: now - 60_000,
+      elapsed: 10_000,
+      mode: 'countup',
+      paused: false,
+      actionEndedAt: now - 20_000,
+      feedbackStartedAt: now - 18_000,
+      feedbackSubmittedAt: now - 15_000,
+      updatedAt: now - 15_000,
+      pauseAccumulatedMs: 0,
+    };
+
+    await storage.saveActiveBlock(terminal);
+    await storage.saveActiveBlock({
+      startId: terminal.startId,
+      name: 'stale-running',
+      startTime: terminal.startTime,
+      elapsed: 1_000,
+      mode: 'countup',
+      paused: false,
+      updatedAt: now - 30_000,
+      pauseAccumulatedMs: 0,
+    });
+
+    const loaded = await storage.loadActiveBlock();
+    expect(loaded?.startId).toBe(terminal.startId);
+    expect(loaded?.feedbackSubmittedAt).toBe(terminal.feedbackSubmittedAt);
+    expect(loaded?.actionEndedAt).toBe(terminal.actionEndedAt);
+  });
 });

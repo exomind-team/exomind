@@ -9,11 +9,15 @@ const MAX_SAVE_RETRY = 3;
 interface ActiveBlockDoc extends ActiveBlockData {
   _id: string;
   _rev?: string;
+  _conflicts?: string[];
 }
 
 interface ActiveBlockStorageOptions {
   pouchDbPrefix?: string;
 }
+
+export type ActiveBlockChangeSource = 'local' | 'sync';
+type ActiveBlockChangeListener = (block: ActiveBlockData | null, source: ActiveBlockChangeSource) => void;
 
 const storageInstances: Map<string, ActiveBlockStorage> = new Map();
 
@@ -128,7 +132,7 @@ export async function clearAllActiveBlockStorageInstances(): Promise<void> {
 export class ActiveBlockStorage {
   private readonly db: PouchDB.Database<ActiveBlockDoc>;
   private syncReplication: PouchDB.Replication.Sync<ActiveBlockDoc> | null = null;
-  private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
+  private listeners: Set<ActiveBlockChangeListener> = new Set();
   private lastSyncError: unknown = null;
 
   constructor(userId: string, options: ActiveBlockStorageOptions = {}) {
@@ -145,14 +149,20 @@ export class ActiveBlockStorage {
 
     while (attempt < MAX_SAVE_RETRY) {
       attempt += 1;
+      let nextBlock = block;
       const doc: ActiveBlockDoc = {
         ...block,
         _id: ACTIVE_BLOCK_DOC_ID,
       };
 
       try {
-        const existing = await this.db.get(ACTIVE_BLOCK_DOC_ID);
-        doc._rev = existing._rev;
+        const existing = await this.getResolvedDoc();
+        if (existing && existing._rev) {
+          doc._rev = existing._rev;
+          const existingBlock = this.toActiveBlockData(existing);
+          nextBlock = this.pickPreferredBlock(existingBlock, block);
+          Object.assign(doc, nextBlock);
+        }
       } catch (error: unknown) {
         if (!this.isNotFoundError(error)) {
           throw error;
@@ -161,7 +171,7 @@ export class ActiveBlockStorage {
 
       try {
         await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
-        this.emitChange(block);
+        this.emitChange(nextBlock, 'local');
         return;
       } catch (error: unknown) {
         if (!this.isConflictError(error) || attempt >= MAX_SAVE_RETRY) {
@@ -172,23 +182,15 @@ export class ActiveBlockStorage {
   }
 
   async loadActiveBlock(): Promise<ActiveBlockData | null> {
-    try {
-      const doc = await this.db.get(ACTIVE_BLOCK_DOC_ID);
-      const { _id, _rev, ...block } = doc;
-      return block as ActiveBlockData;
-    } catch (error: unknown) {
-      if (this.isNotFoundError(error)) {
-        return null;
-      }
-      throw error;
-    }
+    const doc = await this.getResolvedDoc();
+    return doc ? this.toActiveBlockData(doc) : null;
   }
 
   async deleteActiveBlock(): Promise<void> {
     try {
       const doc = await this.db.get(ACTIVE_BLOCK_DOC_ID);
       await (this.db as unknown as { remove(doc: unknown): Promise<unknown> }).remove(doc);
-      this.emitChange(null);
+      this.emitChange(null, 'local');
     } catch (error: unknown) {
       if (!this.isNotFoundError(error)) {
         throw error;
@@ -196,7 +198,7 @@ export class ActiveBlockStorage {
     }
   }
 
-  onBlockChange(callback: (block: ActiveBlockData | null) => void): () => void {
+  onBlockChange(callback: ActiveBlockChangeListener): () => void {
     this.listeners.add(callback);
     return () => {
       this.listeners.delete(callback);
@@ -209,11 +211,17 @@ export class ActiveBlockStorage {
     }
 
     this.syncReplication = this.db.sync(remoteUrl, {
+      doc_ids: [ACTIVE_BLOCK_DOC_ID],
       live: true,
       retry: true,
     });
 
-    this.syncReplication.on('change', () => {
+    this.syncReplication.on('change', (info: unknown) => {
+      const direction = this.extractSyncDirection(info);
+      // Ignore local push echo; local writes already notify via save/delete paths.
+      if (direction && direction !== 'pull') {
+        return;
+      }
       void this.publishCurrentBlock();
     });
 
@@ -255,20 +263,143 @@ export class ActiveBlockStorage {
   private async publishCurrentBlock(): Promise<void> {
     try {
       const block = await this.loadActiveBlock();
-      this.emitChange(block);
+      this.emitChange(block, 'sync');
     } catch (error) {
       console.error('[ActiveBlockStorage] publish current block error:', error);
     }
   }
 
-  private emitChange(block: ActiveBlockData | null): void {
+  private emitChange(block: ActiveBlockData | null, source: ActiveBlockChangeSource): void {
     for (const listener of this.listeners) {
       try {
-        listener(block);
+        listener(block, source);
       } catch (error) {
         console.error('[ActiveBlockStorage] listener error:', error);
       }
     }
+  }
+
+  private extractSyncDirection(info: unknown): string | null {
+    if (!info || typeof info !== 'object' || !('direction' in info)) {
+      return null;
+    }
+
+    const direction = (info as { direction?: unknown }).direction;
+    return typeof direction === 'string' && direction.trim().length > 0 ? direction : null;
+  }
+
+  private async getResolvedDoc(): Promise<ActiveBlockDoc | null> {
+    let doc: ActiveBlockDoc;
+    try {
+      doc = await (
+        this.db.get(ACTIVE_BLOCK_DOC_ID, { conflicts: true }) as Promise<ActiveBlockDoc>
+      );
+    } catch (error: unknown) {
+      if (this.isNotFoundError(error)) {
+        return null;
+      }
+      throw error;
+    }
+
+    const conflicts = Array.isArray(doc._conflicts) ? doc._conflicts : [];
+    if (conflicts.length === 0) {
+      return doc;
+    }
+
+    const candidates: ActiveBlockDoc[] = [doc];
+    for (const rev of conflicts) {
+      try {
+        const conflictDoc = await (
+          this.db.get(ACTIVE_BLOCK_DOC_ID, { rev }) as Promise<ActiveBlockDoc>
+        );
+        candidates.push(conflictDoc);
+      } catch (error: unknown) {
+        if (!this.isNotFoundError(error)) {
+          throw error;
+        }
+      }
+    }
+
+    let preferred = candidates[0];
+    for (let i = 1; i < candidates.length; i += 1) {
+      const candidate = candidates[i];
+      const preferredData = this.toActiveBlockData(preferred);
+      const candidateData = this.toActiveBlockData(candidate);
+      const picked = this.pickPreferredBlock(preferredData, candidateData);
+      if (this.isSameBlockData(picked, candidateData)) {
+        preferred = candidate;
+      }
+    }
+
+    const preferredData = this.toActiveBlockData(preferred);
+    const currentData = this.toActiveBlockData(doc);
+    if (this.isSameBlockData(preferredData, currentData)) {
+      return doc;
+    }
+
+    const rewritten: ActiveBlockDoc = {
+      ...preferredData,
+      _id: ACTIVE_BLOCK_DOC_ID,
+      _rev: doc._rev,
+    };
+    const response = await this.db.put(rewritten as unknown as Parameters<typeof this.db.put>[0]);
+    rewritten._rev = response.rev;
+    return rewritten;
+  }
+
+  private toActiveBlockData(doc: ActiveBlockDoc): ActiveBlockData {
+    const { _id, _rev, _conflicts, ...block } = doc;
+    return block as ActiveBlockData;
+  }
+
+  private getBlockPhase(block: ActiveBlockData): number {
+    if (block.feedbackSubmittedAt) {
+      return 2;
+    }
+    if (block.actionEndedAt) {
+      return 1;
+    }
+    return 0;
+  }
+
+  private getBlockOrderTime(block: ActiveBlockData): number {
+    return block.feedbackSubmittedAt
+      ?? block.actionEndedAt
+      ?? block.updatedAt
+      ?? block.startTime;
+  }
+
+  private pickPreferredBlock(a: ActiveBlockData, b: ActiveBlockData): ActiveBlockData {
+    if (a.startId !== b.startId) {
+      if (a.startTime !== b.startTime) {
+        return b.startTime > a.startTime ? b : a;
+      }
+      return this.getBlockOrderTime(b) >= this.getBlockOrderTime(a) ? b : a;
+    }
+
+    const phaseA = this.getBlockPhase(a);
+    const phaseB = this.getBlockPhase(b);
+    if (phaseA !== phaseB) {
+      return phaseB > phaseA ? b : a;
+    }
+
+    return this.getBlockOrderTime(b) >= this.getBlockOrderTime(a) ? b : a;
+  }
+
+  private isSameBlockData(a: ActiveBlockData, b: ActiveBlockData): boolean {
+    return a.startId === b.startId
+      && a.name === b.name
+      && a.mode === b.mode
+      && a.targetMinutes === b.targetMinutes
+      && a.elapsed === b.elapsed
+      && a.startTime === b.startTime
+      && a.actionEndedAt === b.actionEndedAt
+      && a.feedbackStartedAt === b.feedbackStartedAt
+      && a.feedbackSubmittedAt === b.feedbackSubmittedAt
+      && a.pauseAccumulatedMs === b.pauseAccumulatedMs
+      && a.updatedAt === b.updatedAt
+      && a.paused === b.paused
+      && a.pausedAt === b.pausedAt;
   }
 
   private isNotFoundError(error: unknown): boolean {

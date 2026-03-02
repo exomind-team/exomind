@@ -69,6 +69,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private syncSubscriberCount = 0;
   private activeSyncRemoteUrl: string | null = null;
   private unsubscribeStorageListener: (() => void) | null = null;
+  private lastAcceptedBlock: ActiveBlockData | null = null;
   private readonly WRITE_THROTTLE_MS = 1000; // 节流：每秒最多写入一次
 
   constructor(env?: ExoMindEnvironment) {
@@ -99,6 +100,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       await this.saveActiveBlock(normalized);
     }
 
+    this.rememberAcceptedBlock(normalized);
+    if (this.isCompletedBlock(normalized)) {
+      return null;
+    }
+
     return normalized;
   }
 
@@ -110,7 +116,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       if (this.shouldPersistNormalized(existing, normalized)) {
         await this.saveActiveBlock(normalized);
       }
-      return normalized;
+      this.rememberAcceptedBlock(normalized);
+      if (!this.isCompletedBlock(normalized)) {
+        return normalized;
+      }
     }
     const startId = crypto.randomUUID();
     const now = Date.now();
@@ -137,6 +146,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
 
     await this.saveActiveBlock(activeBlock);
+    this.rememberAcceptedBlock(activeBlock);
 
     // 通知变化
     this.notifyChange(activeBlock);
@@ -146,7 +156,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async pauseBlock(): Promise<void> {
     const data = await this.readActiveBlock();
-    if (!data || data.paused) return;
+    if (!data || data.paused || this.isCompletedBlock(data)) return;
 
     const now = Date.now();
     const normalized = this.normalizeActiveBlock(data, now);
@@ -159,6 +169,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
 
     await this.saveActiveBlock(pausedBlock);
+    this.rememberAcceptedBlock(pausedBlock);
 
     // 记录暂停事件
     await this.addBlockEvent(`${normalized.name} 暂停`, 'block_pause', new Date(now).toISOString());
@@ -167,7 +178,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async resumeBlock(): Promise<void> {
     const data = await this.readActiveBlock();
-    if (!data || !data.paused) return;
+    if (!data || !data.paused || this.isCompletedBlock(data)) return;
 
     const now = Date.now();
     const pausedAt = data.pausedAt ?? now;
@@ -181,6 +192,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
 
     await this.saveActiveBlock(resumedBlock);
+    this.rememberAcceptedBlock(resumedBlock);
 
     // 记录继续事件
     await this.addBlockEvent(`${data.name} 继续`, 'block_resume', new Date(now).toISOString());
@@ -193,6 +205,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     const now = Date.now();
     const normalized = this.normalizeActiveBlock(raw, now);
+    if (normalized.actionEndedAt || this.isCompletedBlock(normalized)) {
+      this.rememberAcceptedBlock(normalized);
+      return;
+    }
 
     const actionEndedAt = normalized.actionEndedAt ?? now;
     const feedbackStartedAt = normalized.feedbackStartedAt ?? actionEndedAt;
@@ -201,27 +217,27 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
     await this.addBlockEvent(`${normalized.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
 
-    await this.saveActiveBlock({
+    const endedBlock: ActiveBlockData = {
       ...normalized,
       actionEndedAt,
       feedbackStartedAt,
       pauseAccumulatedMs,
       updatedAt: now,
-    });
+    };
 
-    this.notifyChange({
-      ...normalized,
-      actionEndedAt,
-      feedbackStartedAt,
-      pauseAccumulatedMs,
-      updatedAt: now,
-    });
+    await this.saveActiveBlock(endedBlock);
+    this.rememberAcceptedBlock(endedBlock);
+    this.notifyChange(endedBlock);
   }
 
   async endBlock(feedback?: string): Promise<TimeBlock | null> {
     const rawActiveData = await this.readActiveBlock();
     if (!rawActiveData) return null;
     const activeData = this.normalizeActiveBlock(rawActiveData);
+    if (this.isCompletedBlock(activeData)) {
+      this.rememberAcceptedBlock(activeData);
+      return null;
+    }
 
     const actionStartAt = activeData.startTime;
     const submittedAt = Date.now();
@@ -304,8 +320,19 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     completed.push(timeBlock);
     await this.env.storage.write(TIME_BLOCKS_KEY, completed);
 
-    // 清除进行中的时间块
-    await this.deleteActiveBlock();
+    // 保留终态标记，防止多端并发把状态回退到进行中
+    const terminalBlock: ActiveBlockData = {
+      ...activeData,
+      actionEndedAt,
+      feedbackStartedAt,
+      feedbackSubmittedAt: submittedAt,
+      paused: false,
+      pausedAt: undefined,
+      updatedAt: submittedAt,
+      pauseAccumulatedMs: pausedDurationMs,
+    };
+    await this.saveActiveBlock(terminalBlock);
+    this.rememberAcceptedBlock(terminalBlock);
 
     // 通知变化
     this.notifyChange(null);
@@ -318,7 +345,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   async updateElapsed(elapsed: number): Promise<void> {
     const data = await this.readActiveBlock();
-    if (!data || data.paused || data.actionEndedAt) return;
+    if (!data || data.paused || data.actionEndedAt || this.isCompletedBlock(data)) return;
 
     const now = Date.now();
     // 节流：每秒最多写入一次
@@ -327,11 +354,13 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
     this.lastWriteTime = now;
 
-    await this.saveActiveBlock({
+    const nextBlock: ActiveBlockData = {
       ...data,
       elapsed,
       updatedAt: now,
-    });
+    };
+    await this.saveActiveBlock(nextBlock);
+    this.rememberAcceptedBlock(nextBlock);
   }
 
   onBlockChange(callback: (block: ActiveBlockData | null) => void): () => void {
@@ -395,13 +424,30 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return;
     }
 
-    this.unsubscribeStorageListener = this.getActiveStorage().onBlockChange((block) => {
+    this.unsubscribeStorageListener = this.getActiveStorage().onBlockChange((block, source) => {
+      if (source !== 'sync') {
+        return;
+      }
+
       if (!block) {
         this.notifyChange(null);
         return;
       }
 
       const normalized = this.normalizeActiveBlock(block);
+      const preferred = this.pickPreferredBlock(this.lastAcceptedBlock, normalized);
+      if (!this.isSameBlock(preferred, normalized)) {
+        if (this.lastAcceptedBlock && this.lastAcceptedBlock.startId === normalized.startId) {
+          void this.saveActiveBlock(this.lastAcceptedBlock);
+        }
+        return;
+      }
+
+      this.rememberAcceptedBlock(normalized);
+      if (this.isCompletedBlock(normalized)) {
+        this.notifyChange(null);
+        return;
+      }
       this.notifyChange(normalized);
     });
   }
@@ -434,15 +480,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
 
     await this.getActiveStorage().saveActiveBlock(block);
-  }
-
-  private async deleteActiveBlock(): Promise<void> {
-    if (this.useLegacyEnvStorage) {
-      await this.env.storage.delete(ACTIVE_BLOCK_KEY);
-      return;
-    }
-
-    await this.getActiveStorage().deleteActiveBlock();
   }
 
   private getActiveStorage(): ActiveBlockStorage {
@@ -479,6 +516,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     this.activeBlockStorage = getActiveBlockStorage(nextUserId);
     this.activeStorageUserId = nextUserId;
+    this.lastAcceptedBlock = null;
     this.attachStorageListener();
 
     if (previousStorage && previousStorage !== this.activeBlockStorage) {
@@ -500,7 +538,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private normalizeActiveBlock(data: ActiveBlockData, now: number = Date.now()): ActiveBlockData {
-    const effectiveNow = data.actionEndedAt ? Math.min(now, data.actionEndedAt) : now;
+    const effectiveNow = data.feedbackSubmittedAt
+      ? Math.min(now, data.feedbackSubmittedAt)
+      : (data.actionEndedAt ? Math.min(now, data.actionEndedAt) : now);
     // 兼容旧数据：无 updatedAt 时先以当前时间建立基准，避免一次性错误跳变
     const baseTime = data.updatedAt ?? effectiveNow;
     if (data.paused) {
@@ -524,6 +564,71 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private shouldPersistNormalized(prev: ActiveBlockData, next: ActiveBlockData): boolean {
     return prev.elapsed !== next.elapsed || prev.updatedAt !== next.updatedAt;
+  }
+
+  private getBlockPhase(block: ActiveBlockData): number {
+    if (block.feedbackSubmittedAt) {
+      return 2;
+    }
+    if (block.actionEndedAt) {
+      return 1;
+    }
+    return 0;
+  }
+
+  private isCompletedBlock(block: ActiveBlockData): boolean {
+    return Boolean(block.feedbackSubmittedAt);
+  }
+
+  private pickPreferredBlock(
+    current: ActiveBlockData | null,
+    incoming: ActiveBlockData,
+  ): ActiveBlockData {
+    if (!current) {
+      return incoming;
+    }
+
+    if (current.startId !== incoming.startId) {
+      if (incoming.startTime !== current.startTime) {
+        return incoming.startTime > current.startTime ? incoming : current;
+      }
+      return this.getBlockOrderTime(incoming) >= this.getBlockOrderTime(current) ? incoming : current;
+    }
+
+    const currentPhase = this.getBlockPhase(current);
+    const incomingPhase = this.getBlockPhase(incoming);
+    if (incomingPhase !== currentPhase) {
+      return incomingPhase > currentPhase ? incoming : current;
+    }
+
+    return this.getBlockOrderTime(incoming) >= this.getBlockOrderTime(current) ? incoming : current;
+  }
+
+  private getBlockOrderTime(block: ActiveBlockData): number {
+    return block.feedbackSubmittedAt
+      ?? block.actionEndedAt
+      ?? block.updatedAt
+      ?? block.startTime;
+  }
+
+  private isSameBlock(a: ActiveBlockData, b: ActiveBlockData): boolean {
+    return a.startId === b.startId
+      && a.name === b.name
+      && a.mode === b.mode
+      && a.targetMinutes === b.targetMinutes
+      && a.elapsed === b.elapsed
+      && a.startTime === b.startTime
+      && a.actionEndedAt === b.actionEndedAt
+      && a.feedbackStartedAt === b.feedbackStartedAt
+      && a.feedbackSubmittedAt === b.feedbackSubmittedAt
+      && a.pauseAccumulatedMs === b.pauseAccumulatedMs
+      && a.updatedAt === b.updatedAt
+      && a.paused === b.paused
+      && a.pausedAt === b.pausedAt;
+  }
+
+  private rememberAcceptedBlock(block: ActiveBlockData): void {
+    this.lastAcceptedBlock = this.pickPreferredBlock(this.lastAcceptedBlock, block);
   }
 
   private formatDuration(ms: number): string {
