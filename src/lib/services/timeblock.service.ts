@@ -30,6 +30,10 @@ import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/f
 const TIME_BLOCKS_KEY = 'time_blocks';
 const ACTIVE_BLOCK_KEY = 'active_block';
 
+function perfNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
 export interface TimeBlockService {
   /** 加载已完成的时间块 */
   loadTimeBlocks(): Promise<TimeBlock[]>;
@@ -171,6 +175,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async pauseBlock(): Promise<void> {
+    const opStart = perfNow();
     const data = await this.readActiveBlock();
     if (!data || data.paused || this.isCompletedBlock(data)) return;
 
@@ -190,15 +195,26 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pauseAccumulatedMs: normalized.pauseAccumulatedMs ?? 0,
     }, now);
 
+    const saveStart = perfNow();
     await this.saveActiveBlock(pausedBlock);
+    const saveMs = Math.round(perfNow() - saveStart);
     this.rememberAcceptedBlock(pausedBlock);
 
     // 记录暂停事件
+    const eventStart = perfNow();
     await this.addBlockEvent(`${normalized.name} 暂停`, 'block_pause', new Date(now).toISOString());
+    const eventMs = Math.round(perfNow() - eventStart);
     this.notifyChange(pausedBlock);
+    console.log('[TB-SVC] pauseBlock done', {
+      startId: pausedBlock.startId,
+      saveMs,
+      eventMs,
+      totalMs: Math.round(perfNow() - opStart),
+    });
   }
 
   async resumeBlock(): Promise<void> {
+    const opStart = perfNow();
     const data = await this.readActiveBlock();
     if (!data || !data.paused || this.isCompletedBlock(data)) return;
 
@@ -220,15 +236,26 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       accumulatedRunMs: normalized.accumulatedRunMs ?? this.calculateRunDurationMs(normalized, now),
     }, now);
 
+    const saveStart = perfNow();
     await this.saveActiveBlock(resumedBlock);
+    const saveMs = Math.round(perfNow() - saveStart);
     this.rememberAcceptedBlock(resumedBlock);
 
     // 记录继续事件
+    const eventStart = perfNow();
     await this.addBlockEvent(`${data.name} 继续`, 'block_resume', new Date(now).toISOString());
+    const eventMs = Math.round(perfNow() - eventStart);
     this.notifyChange(resumedBlock);
+    console.log('[TB-SVC] resumeBlock done', {
+      startId: resumedBlock.startId,
+      saveMs,
+      eventMs,
+      totalMs: Math.round(perfNow() - opStart),
+    });
   }
 
   async markEnding(): Promise<void> {
+    const opStart = perfNow();
     const raw = await this.readActiveBlock();
     if (!raw) return;
 
@@ -248,7 +275,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     );
 
     // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
+    const eventStart = perfNow();
     await this.addBlockEvent(`${normalized.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
+    const eventMs = Math.round(perfNow() - eventStart);
 
     const endedBlock: ActiveBlockData = this.normalizeActiveBlock({
       ...normalized,
@@ -266,12 +295,21 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       updatedAt: actionEndedAt,
     }, actionEndedAt);
 
+    const saveStart = perfNow();
     await this.saveActiveBlock(endedBlock);
+    const saveMs = Math.round(perfNow() - saveStart);
     this.rememberAcceptedBlock(endedBlock);
     this.notifyChange(endedBlock);
+    console.log('[TB-SVC] markEnding done', {
+      startId: endedBlock.startId,
+      saveMs,
+      eventMs,
+      totalMs: Math.round(perfNow() - opStart),
+    });
   }
 
   async endBlock(feedback?: string): Promise<TimeBlock | null> {
+    const opStart = perfNow();
     const rawActiveData = await this.readActiveBlock();
     if (!rawActiveData) return null;
     const activeData = this.normalizeActiveBlock(rawActiveData);
@@ -325,6 +363,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     });
 
     const storage = getEventStorage();
+    const feedbackEventStart = perfNow();
     await storage.addEvent({
       id: crypto.randomUUID(),
       content: report,
@@ -343,6 +382,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         expectedDurationMs,
       },
     });
+    const feedbackEventMs = Math.round(perfNow() - feedbackEventStart);
 
     // 保存已完成的时间块
     const timeBlock: TimeBlockData = {
@@ -357,9 +397,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
 
     // 追加到已完成列表
+    const completedWriteStart = perfNow();
     const completed = await this.env.storage.read<TimeBlockData[]>(TIME_BLOCKS_KEY) || [];
     completed.push(timeBlock);
     await this.env.storage.write(TIME_BLOCKS_KEY, completed);
+    const completedWriteMs = Math.round(perfNow() - completedWriteStart);
 
     // 保留终态标记，防止多端并发把状态回退到进行中
     const terminalBlock: ActiveBlockData = this.normalizeActiveBlock({
@@ -378,11 +420,20 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       pauseAccumulatedMs: pausedDurationMs,
       updatedAt: submittedAt,
     }, submittedAt);
+    const saveTerminalStart = perfNow();
     await this.saveActiveBlock(terminalBlock);
+    const saveTerminalMs = Math.round(perfNow() - saveTerminalStart);
     this.rememberAcceptedBlock(terminalBlock);
 
     // 通知变化
     this.notifyChange(null);
+    console.log('[TB-SVC] endBlock done', {
+      startId: terminalBlock.startId,
+      feedbackEventMs,
+      completedWriteMs,
+      saveTerminalMs,
+      totalMs: Math.round(perfNow() - opStart),
+    });
 
     return {
       ...timeBlock,
