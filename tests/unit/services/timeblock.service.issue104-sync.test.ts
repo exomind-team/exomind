@@ -133,4 +133,33 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
 
     unsubscribe();
   });
+
+  it('notifies UI subscribers even when remote block requires normalization write-back', async () => {
+    const service = new TimeBlockServiceImpl();
+    const onChange = vi.fn();
+    const unsubscribe = service.onBlockChange(onChange);
+
+    await service.startSync('http://127.0.0.1:6984/test-user');
+    expect(listener).toBeTypeOf('function');
+
+    const remoteBlock = {
+      startId: 'remote-old-timestamp',
+      name: 'normalized from remote',
+      startTime: Date.now() - 30_000,
+      mode: 'countup',
+      elapsed: 1_000,
+      paused: false,
+      updatedAt: Date.now() - 5_000,
+      pauseAccumulatedMs: 0,
+    };
+
+    listener?.(remoteBlock);
+
+    expect(onChange).toHaveBeenCalledWith(
+      expect.objectContaining({ startId: 'remote-old-timestamp' })
+    );
+    expect(saveActiveBlockMock).not.toHaveBeenCalled();
+
+    unsubscribe();
+  });
 });

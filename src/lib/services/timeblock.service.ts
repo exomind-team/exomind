@@ -402,11 +402,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       }
 
       const normalized = this.normalizeActiveBlock(block);
-      if (this.shouldPersistNormalized(block, normalized)) {
-        void this.saveActiveBlock(normalized);
-        return;
-      }
-
       this.notifyChange(normalized);
     });
   }
