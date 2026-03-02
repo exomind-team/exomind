@@ -64,6 +64,10 @@ function expectedOptionClass(active: boolean): string {
 const PRESET_COUNTDOWN_MINUTES = [15, 25, 45] as const;
 const MAX_CUSTOM_COUNTDOWN_MINUTES = 720;
 
+function perfNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
 function isPresetCountdownMinutes(minutes: number): boolean {
   return PRESET_COUNTDOWN_MINUTES.includes(minutes as (typeof PRESET_COUNTDOWN_MINUTES)[number]);
 }
@@ -76,6 +80,7 @@ function resolveExpectedOptionIndex(mode: TimerMode, minutes: number): number {
 
 export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function FocusTimerWidget(_, ref) {
   const timeBlockServiceRef = useRef(getTimeBlockService());
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const frameRef = useRef<number | null>(null);
   const taskInputRef = useRef<HTMLTextAreaElement | null>(null);
   const customDurationInputRef = useRef<HTMLInputElement | null>(null);
@@ -387,27 +392,64 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setIsCustomDurationEditing(false);
   }, [countdownMinutes]);
 
+  const enqueueServiceMutation = useCallback((
+    label: string,
+    execute: () => Promise<void>,
+  ): void => {
+    mutationQueueRef.current = mutationQueueRef.current.then(async () => {
+      try {
+        await execute();
+      } catch (error) {
+        console.error(`[TB-UI] ${label} failed`, error);
+        try {
+          const block = await timeBlockServiceRef.current.loadActiveBlock();
+          applyActiveBlock(block);
+        } catch (reloadError) {
+          console.error(`[TB-UI] ${label} recover failed`, reloadError);
+        }
+      }
+    });
+  }, [applyActiveBlock]);
+
   const handlePauseOrResume = useCallback(async () => {
     if (!isRunningUi) return;
 
     if (runningSubState === 'running') {
-      await timeBlockServiceRef.current.pauseBlock();
+      const t0 = perfNow();
+      console.log('[TB-UI] click pause -> pauseBlock start');
       setRunningSubState('paused');
+      enqueueServiceMutation('pauseBlock', async () => {
+        await timeBlockServiceRef.current.pauseBlock();
+        console.log('[TB-UI] click pause -> pauseBlock done', { elapsedMs: Math.round(perfNow() - t0) });
+      });
       return;
     }
 
-    await timeBlockServiceRef.current.resumeBlock();
+    const t0 = perfNow();
+    console.log('[TB-UI] click resume -> resumeBlock start');
     setRunningSubState('running');
-  }, [isRunningUi, runningSubState]);
+    enqueueServiceMutation('resumeBlock', async () => {
+      await timeBlockServiceRef.current.resumeBlock();
+      console.log('[TB-UI] click resume -> resumeBlock done', { elapsedMs: Math.round(perfNow() - t0) });
+    });
+  }, [enqueueServiceMutation, isRunningUi, runningSubState]);
 
   const handleOpenEndDialog = useCallback(() => {
     if (!isRunningUi) return;
-    void timeBlockServiceRef.current.markEnding();
+    const t0 = perfNow();
+    console.log('[TB-UI] click end -> markEnding start');
+    setRunningSubState('paused');
+    enqueueServiceMutation('markEnding', async () => {
+      await timeBlockServiceRef.current.markEnding();
+      console.log('[TB-UI] click end -> markEnding done', { elapsedMs: Math.round(perfNow() - t0) });
+    });
     setFeedbackOpen(true);
-  }, [isRunningUi]);
+  }, [enqueueServiceMutation, isRunningUi]);
 
   const handleConfirmEnd = useCallback(async () => {
-    await timeBlockServiceRef.current.endBlock(feedback.trim() || undefined);
+    const feedbackText = feedback.trim() || undefined;
+    const t0 = perfNow();
+    console.log('[TB-UI] click confirm-end -> endBlock start');
     setFeedback('');
     setFeedbackOpen(false);
     setUiState('idle');
@@ -419,7 +461,11 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     hardEndTriggeredRef.current = false;
     setCountdownOvertimeMs(0);
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
-  }, [countdownMinutes, feedback, syncIdleElapsedFromMode, timerMode]);
+    enqueueServiceMutation('endBlock', async () => {
+      await timeBlockServiceRef.current.endBlock(feedbackText);
+      console.log('[TB-UI] click confirm-end -> endBlock done', { elapsedMs: Math.round(perfNow() - t0) });
+    });
+  }, [countdownMinutes, enqueueServiceMutation, feedback, syncIdleElapsedFromMode, timerMode]);
 
   const handleFeedbackKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;

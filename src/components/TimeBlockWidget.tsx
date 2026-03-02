@@ -92,6 +92,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   // 定时器引用
   const timerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isRunningRef = useRef(false);  // 使用 ref 跟踪运行状态，避免闭包问题
   const taskNameRef = useRef<HTMLTextAreaElement | null>(null);
   const countdownEndedRef = useRef(false);
@@ -172,6 +173,25 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     countdownOverrunRef.current = false;
     setCountdownOvertimeMs(0);
   }, [countdownMinutes, timerMode, timerState]);
+
+  const enqueueServiceMutation = useCallback((
+    label: string,
+    execute: () => Promise<void>,
+  ): void => {
+    mutationQueueRef.current = mutationQueueRef.current.then(async () => {
+      try {
+        await execute();
+      } catch (error) {
+        console.error(`[TB-UI] ${label} failed`, error);
+        try {
+          const block = await timeBlockService.loadActiveBlock();
+          applyActiveBlock(block);
+        } catch (reloadError) {
+          console.error(`[TB-UI] ${label} recover failed`, reloadError);
+        }
+      }
+    });
+  }, [applyActiveBlock, timeBlockService]);
 
   // 加载进行中的时间块并订阅变化
   useEffect(() => {
@@ -347,13 +367,17 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
-    await timeBlockService.pauseBlock();
+    enqueueServiceMutation('pauseBlock', async () => {
+      await timeBlockService.pauseBlock();
+    });
   };
 
   // 继续计时
   const handleResume = async () => {
     setTimerState('running');
-    await timeBlockService.resumeBlock();
+    enqueueServiceMutation('resumeBlock', async () => {
+      await timeBlockService.resumeBlock();
+    });
   };
 
   // 点击按钮结束计时（显示反馈对话框）
@@ -370,8 +394,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       cancelAnimationFrame(timerRef.current);
     }
 
-    await timeBlockService.endBlock(feedbackText || undefined);
-
     // 重置状态
     setTimerState('idle');
     setElapsed(0);
@@ -380,6 +402,10 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     setCountdownOvertimeMs(0);
+
+    enqueueServiceMutation('endBlock', async () => {
+      await timeBlockService.endBlock(feedbackText || undefined);
+    });
   };
 
   // 暂停/继续切换

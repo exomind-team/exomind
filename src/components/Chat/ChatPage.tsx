@@ -41,6 +41,10 @@ const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 
+function perfNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
 interface ChatPageProps {
   variant?: 'default' | 'new-mobile'; // new-mobile（新移动端外观）用于 v0.3.0 UI 重构
   hideHeader?: boolean;
@@ -126,10 +130,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   }, [scrollToBottom]);
 
   const refreshLatestEvents = useCallback(async (storage: EventStorage) => {
+    const t0 = perfNow();
     const page = await storage.getEventsPage({ limit: PAGE_SIZE });
+    const queryMs = Math.round(perfNow() - t0);
     const latestAsc = normalizeStorageEventsAscending(page.events);
 
+    const mergeStart = perfNow();
     setEvents((prev) => mergeLatestEventsAscending(prev, latestAsc));
+    const mergeMs = Math.round(perfNow() - mergeStart);
     setHasMore((prev) => prev || page.hasMore);
 
     if (!nextCursorRef.current) {
@@ -140,6 +148,12 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       if (shouldStickToBottomRef.current) {
         scrollToBottom('smooth');
       }
+    });
+    console.log('[ChatPage] refreshLatestEvents', {
+      fetched: page.events.length,
+      queryMs,
+      mergeMs,
+      totalMs: Math.round(perfNow() - t0),
     });
   }, [scrollToBottom]);
 
@@ -208,7 +222,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     storageRef.current = storage;
     void loadInitialEvents(storage);
 
-    const unsubscribe = storage.onRemoteChange(() => {
+    const unsubscribe = storage.onRemoteChange((change: unknown) => {
+      const direction = (
+        change &&
+        typeof change === 'object' &&
+        'direction' in change &&
+        typeof (change as { direction?: unknown }).direction === 'string'
+      ) ? (change as { direction: string }).direction : 'unknown';
+      console.log('[ChatPage] onRemoteChange', { direction });
       shouldStickToBottomRef.current = isNearBottom();
       void refreshLatestEvents(storage);
     });
@@ -237,9 +258,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     if (!trimmed) return;
 
     if (storageRef.current) {
+      const t0 = perfNow();
       shouldStickToBottomRef.current = true;
       await eventLogService.current.addEvent(trimmed);
       await refreshLatestEvents(storageRef.current);
+      console.log('[ChatPage] handleSend done', { totalMs: Math.round(perfNow() - t0) });
     }
   }, [refreshLatestEvents]);
 
