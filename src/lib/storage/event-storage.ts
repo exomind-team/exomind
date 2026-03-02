@@ -437,6 +437,11 @@ export class EventStorage {
 
     // 监听变更事件
     this.syncReplication.on('change', (change: unknown) => {
+      const direction = this.extractSyncDirection(change);
+      // Ignore local push echo; local writes already notify listeners in addEvent/update paths.
+      if (direction && direction !== 'pull') {
+        return;
+      }
       this.notifyChangeListeners(change);
     });
 
@@ -486,6 +491,15 @@ export class EventStorage {
         console.error('变更监听器执行错误');
       }
     }
+  }
+
+  private extractSyncDirection(change: unknown): string | null {
+    if (!change || typeof change !== 'object' || !('direction' in change)) {
+      return null;
+    }
+
+    const direction = (change as { direction?: unknown }).direction;
+    return typeof direction === 'string' && direction.trim().length > 0 ? direction : null;
   }
 
   /**

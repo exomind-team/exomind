@@ -84,6 +84,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const nextCursorRef = useRef<EventPageCursor | null>(null);
   const loadingOlderRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn, credentials } = useSyncStore();
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
@@ -156,6 +158,58 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       totalMs: Math.round(perfNow() - t0),
     });
   }, [scrollToBottom]);
+
+  const shouldSkipSyncRefresh = useCallback((change: unknown): boolean => {
+    if (!change || typeof change !== 'object') {
+      return false;
+    }
+
+    const payload = change as {
+      type?: unknown;
+      direction?: unknown;
+      change?: { docs?: Array<{ _id?: unknown }> };
+      docs?: Array<{ _id?: unknown }>;
+    };
+
+    if (payload.type === 'local') {
+      return true;
+    }
+
+    if (typeof payload.direction === 'string' && payload.direction === 'push') {
+      return true;
+    }
+
+    const docs = Array.isArray(payload.change?.docs)
+      ? payload.change?.docs
+      : (Array.isArray(payload.docs) ? payload.docs : []);
+    if (docs.length > 0) {
+      const checkpointOnly = docs.every((doc) => typeof doc?._id === 'string' && doc._id.startsWith('_local/'));
+      if (checkpointOnly) {
+        return true;
+      }
+    }
+
+    return false;
+  }, []);
+
+  const scheduleLatestRefresh = useCallback((storage: EventStorage): void => {
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    void (async () => {
+      try {
+        do {
+          refreshQueuedRef.current = false;
+          await refreshLatestEvents(storage);
+        } while (refreshQueuedRef.current);
+      } finally {
+        refreshInFlightRef.current = false;
+      }
+    })();
+  }, [refreshLatestEvents]);
 
   const loadOlderEvents = useCallback(async () => {
     const storage = storageRef.current;
@@ -230,8 +284,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         typeof (change as { direction?: unknown }).direction === 'string'
       ) ? (change as { direction: string }).direction : 'unknown';
       console.log('[ChatPage] onRemoteChange', { direction });
+      if (shouldSkipSyncRefresh(change)) {
+        return;
+      }
       shouldStickToBottomRef.current = isNearBottom();
-      void refreshLatestEvents(storage);
+      scheduleLatestRefresh(storage);
     });
 
     if (isLoggedIn && currentUser) {
@@ -250,7 +307,16 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       unsubscribe();
       storage.stopSync();
     };
-  }, [currentUser, isLoggedIn, isNearBottom, loadInitialEvents, refreshLatestEvents, syncServerUrl]);
+  }, [
+    currentUser,
+    isLoggedIn,
+    isNearBottom,
+    loadInitialEvents,
+    refreshLatestEvents,
+    scheduleLatestRefresh,
+    shouldSkipSyncRefresh,
+    syncServerUrl,
+  ]);
 
   // 处理发送消息
   const handleSend = useCallback(async (content: string) => {

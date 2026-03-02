@@ -134,6 +134,8 @@ export class ActiveBlockStorage {
   private syncReplication: PouchDB.Replication.Sync<ActiveBlockDoc> | null = null;
   private listeners: Set<ActiveBlockChangeListener> = new Set();
   private lastSyncError: unknown = null;
+  private pruneQueue: Promise<void> = Promise.resolve();
+  private pendingPruneRevs: Set<string> = new Set();
 
   constructor(userId: string, options: ActiveBlockStorageOptions = {}) {
     const dbName = normalizeActiveBlockDbName(userId);
@@ -334,6 +336,7 @@ export class ActiveBlockStorage {
     const preferredData = this.toActiveBlockData(preferred);
     const currentData = this.toActiveBlockData(doc);
     if (this.isSameBlockData(preferredData, currentData)) {
+      this.scheduleConflictPrune(conflicts);
       return doc;
     }
 
@@ -344,7 +347,40 @@ export class ActiveBlockStorage {
     };
     const response = await this.db.put(rewritten as unknown as Parameters<typeof this.db.put>[0]);
     rewritten._rev = response.rev;
+    this.scheduleConflictPrune(conflicts);
     return rewritten;
+  }
+
+  private scheduleConflictPrune(revs: string[]): void {
+    for (const rev of revs) {
+      if (typeof rev === 'string' && rev.trim().length > 0) {
+        this.pendingPruneRevs.add(rev);
+      }
+    }
+
+    if (this.pendingPruneRevs.size === 0) {
+      return;
+    }
+
+    this.pruneQueue = this.pruneQueue
+      .then(async () => {
+        const pending = Array.from(this.pendingPruneRevs);
+        this.pendingPruneRevs.clear();
+        if (pending.length === 0) {
+          return;
+        }
+
+        const tombstones = pending.map((rev) => ({
+          _id: ACTIVE_BLOCK_DOC_ID,
+          _rev: rev,
+          _deleted: true,
+        }));
+
+        await this.db.bulkDocs(tombstones as unknown as Parameters<typeof this.db.bulkDocs>[0]);
+      })
+      .catch((error: unknown) => {
+        console.warn('[ActiveBlockStorage] prune conflict revisions failed:', error);
+      });
   }
 
   private toActiveBlockData(doc: ActiveBlockDoc): ActiveBlockData {
