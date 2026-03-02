@@ -61,12 +61,29 @@ export interface TimeBlock {
 }
 
 // 活跃时间块（进行中）
+export type ActiveBlockPhase = 'running' | 'paused' | 'action_ended' | 'feedback_submitted';
+
 export interface ActiveBlockData {
   startId: UUID;
   name: string;
   mode: 'countup' | 'countdown';
   targetMinutes?: number;
+  /** 兼容旧结构：逐步迁移中，优先由锚点字段推导 */
   elapsed: number;
+  /** 兼容旧结构：逐步迁移中 */
+  updatedAt?: Timestamp;
+  /** 状态机阶段（单调前进） */
+  phase?: ActiveBlockPhase;
+  /** 状态版本号（每次状态迁移递增） */
+  version?: number;
+  /** 写入来源端标识（用于并发可观测性与裁决） */
+  actorId?: string;
+  /** 最近一次状态迁移时刻 */
+  lastTransitionAt?: Timestamp;
+  /** 最近一次进入 running 的时刻 */
+  lastResumedAt?: Timestamp;
+  /** 已累计有效专注时长（不含当前 running 切片） */
+  accumulatedRunMs?: number;
   /** 点击“开始”的时刻（行动结束） */
   startTime: Timestamp;
   /** 点击“结束”的时刻（行动结束） */
@@ -77,8 +94,6 @@ export interface ActiveBlockData {
   feedbackSubmittedAt?: Timestamp;
   /** 累计暂停时长（毫秒） */
   pauseAccumulatedMs?: number;
-  /** 最近一次计时基准更新时间（毫秒时间戳） */
-  updatedAt?: Timestamp;
   paused: boolean;
   pausedAt?: Timestamp;
 }

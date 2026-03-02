@@ -280,8 +280,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           if (continueAfterCountdownEnd) {
             countdownOverrunRef.current = true;
             setCountdownOvertimeMs(overshoot);
-            // 持久化层仍保持倒计时归零（不扩展存储结构）
-            void timeBlockService.updateElapsed(0);
             return 0;
           } else {
             // 硬结束：停止计时并进入反馈流程
@@ -295,9 +293,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
             return 0;
           }
         }
-
-        // 同步到 Service
-        timeBlockService.updateElapsed(Math.max(0, newElapsed));
 
         return Math.max(0, newElapsed);
       });
