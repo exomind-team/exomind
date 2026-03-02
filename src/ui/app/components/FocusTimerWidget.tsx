@@ -277,7 +277,6 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
           if (timerPreferences.countdownEndMode === 'soft') {
             countdownOverrunRef.current = true;
             setCountdownOvertimeMs(overshoot);
-            void timeBlockServiceRef.current.updateElapsed(0);
             return 0;
           }
 
@@ -290,9 +289,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
           return 0;
         }
 
-        const safeNext = timerMode === 'countdown' ? Math.max(0, next) : next;
-        void timeBlockServiceRef.current.updateElapsed(safeNext);
-        return safeNext;
+        return timerMode === 'countdown' ? Math.max(0, next) : next;
       });
 
       if (!hardEndTriggeredRef.current) {

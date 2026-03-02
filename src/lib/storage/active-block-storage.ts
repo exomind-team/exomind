@@ -353,19 +353,25 @@ export class ActiveBlockStorage {
   }
 
   private getBlockPhase(block: ActiveBlockData): number {
-    if (block.feedbackSubmittedAt) {
+    const phase = block.phase
+      ?? (block.feedbackSubmittedAt
+        ? 'feedback_submitted'
+        : (block.actionEndedAt ? 'action_ended' : (block.paused ? 'paused' : 'running')));
+    if (phase === 'feedback_submitted') {
       return 2;
     }
-    if (block.actionEndedAt) {
+    if (phase === 'action_ended') {
       return 1;
     }
     return 0;
   }
 
   private getBlockOrderTime(block: ActiveBlockData): number {
-    return block.feedbackSubmittedAt
+    return block.lastTransitionAt
+      ?? block.feedbackSubmittedAt
       ?? block.actionEndedAt
-      ?? block.updatedAt
+      ?? block.pausedAt
+      ?? block.lastResumedAt
       ?? block.startTime;
   }
 
@@ -383,6 +389,18 @@ export class ActiveBlockStorage {
       return phaseB > phaseA ? b : a;
     }
 
+    const versionA = a.version ?? 0;
+    const versionB = b.version ?? 0;
+    if (versionA !== versionB) {
+      return versionB > versionA ? b : a;
+    }
+
+    const actorA = a.actorId ?? '';
+    const actorB = b.actorId ?? '';
+    if (actorA !== actorB) {
+      return actorB > actorA ? b : a;
+    }
+
     return this.getBlockOrderTime(b) >= this.getBlockOrderTime(a) ? b : a;
   }
 
@@ -391,13 +409,17 @@ export class ActiveBlockStorage {
       && a.name === b.name
       && a.mode === b.mode
       && a.targetMinutes === b.targetMinutes
-      && a.elapsed === b.elapsed
       && a.startTime === b.startTime
+      && a.phase === b.phase
+      && a.version === b.version
+      && a.actorId === b.actorId
+      && a.lastTransitionAt === b.lastTransitionAt
+      && a.lastResumedAt === b.lastResumedAt
+      && a.accumulatedRunMs === b.accumulatedRunMs
       && a.actionEndedAt === b.actionEndedAt
       && a.feedbackStartedAt === b.feedbackStartedAt
       && a.feedbackSubmittedAt === b.feedbackSubmittedAt
       && a.pauseAccumulatedMs === b.pauseAccumulatedMs
-      && a.updatedAt === b.updatedAt
       && a.paused === b.paused
       && a.pausedAt === b.pausedAt;
   }

@@ -17,7 +17,13 @@ import {
   getCurrentSyncUserId,
   type ActiveBlockStorage,
 } from '../storage/active-block-storage';
-import type { TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
+import type {
+  TimeBlock,
+  TimeBlockData,
+  ActiveBlockData,
+  ActiveBlockPhase,
+  TimerConfig,
+} from '../types/event';
 import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
 
 // 存储键
@@ -65,12 +71,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private activeStorageUserId: string | null = null;
   private useLegacyEnvStorage: boolean;
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
-  private lastWriteTime = 0;
   private syncSubscriberCount = 0;
   private activeSyncRemoteUrl: string | null = null;
   private unsubscribeStorageListener: (() => void) | null = null;
   private lastAcceptedBlock: ActiveBlockData | null = null;
-  private readonly WRITE_THROTTLE_MS = 1000; // 节流：每秒最多写入一次
+  private readonly actorId = crypto.randomUUID();
 
   constructor(env?: ExoMindEnvironment) {
     this.env = env || ExoMindEnvironment.getInstance();
@@ -96,7 +101,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (!data) return null;
 
     const normalized = this.normalizeActiveBlock(data);
-    if (this.shouldPersistNormalized(data, normalized)) {
+    if (this.shouldPersistCanonicalization(data, normalized)) {
       await this.saveActiveBlock(normalized);
     }
 
@@ -113,7 +118,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const existing = await this.readActiveBlock();
     if (existing) {
       const normalized = this.normalizeActiveBlock(existing);
-      if (this.shouldPersistNormalized(existing, normalized)) {
+      if (this.shouldPersistCanonicalization(existing, normalized)) {
         await this.saveActiveBlock(normalized);
       }
       this.rememberAcceptedBlock(normalized);
@@ -140,18 +145,29 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       elapsed: initialElapsed,
       mode: config.mode,
       targetMinutes: config.mode === 'countdown' ? (config.minutes ?? 25) : undefined,
-      updatedAt: now,
-      paused: false,
+      phase: 'running',
+      version: 1,
+      actorId: this.actorId,
+      lastTransitionAt: now,
+      lastResumedAt: now,
+      accumulatedRunMs: 0,
       pauseAccumulatedMs: 0,
+      paused: false,
+      pausedAt: undefined,
+      updatedAt: now,
+      actionEndedAt: undefined,
+      feedbackStartedAt: undefined,
+      feedbackSubmittedAt: undefined,
     };
+    const normalizedActiveBlock = this.normalizeActiveBlock(activeBlock, now);
 
-    await this.saveActiveBlock(activeBlock);
-    this.rememberAcceptedBlock(activeBlock);
+    await this.saveActiveBlock(normalizedActiveBlock);
+    this.rememberAcceptedBlock(normalizedActiveBlock);
 
     // 通知变化
-    this.notifyChange(activeBlock);
+    this.notifyChange(normalizedActiveBlock);
 
-    return activeBlock;
+    return normalizedActiveBlock;
   }
 
   async pauseBlock(): Promise<void> {
@@ -160,13 +176,19 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     const now = Date.now();
     const normalized = this.normalizeActiveBlock(data, now);
-    const pausedBlock: ActiveBlockData = {
+    const pausedBlock: ActiveBlockData = this.normalizeActiveBlock({
       ...normalized,
+      phase: 'paused',
+      version: this.nextVersion(normalized),
+      actorId: this.actorId,
       paused: true,
       pausedAt: now,
+      lastTransitionAt: now,
+      lastResumedAt: undefined,
+      accumulatedRunMs: this.calculateRunDurationMs(normalized, now),
       updatedAt: now,
       pauseAccumulatedMs: normalized.pauseAccumulatedMs ?? 0,
-    };
+    }, now);
 
     await this.saveActiveBlock(pausedBlock);
     this.rememberAcceptedBlock(pausedBlock);
@@ -181,15 +203,22 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     if (!data || !data.paused || this.isCompletedBlock(data)) return;
 
     const now = Date.now();
-    const pausedAt = data.pausedAt ?? now;
-    const pauseAccumulatedMs = (data.pauseAccumulatedMs ?? 0) + Math.max(0, now - pausedAt);
-    const resumedBlock: ActiveBlockData = {
-      ...data,
+    const normalized = this.normalizeActiveBlock(data, now);
+    const pausedAt = normalized.pausedAt ?? now;
+    const pauseAccumulatedMs = (normalized.pauseAccumulatedMs ?? 0) + Math.max(0, now - pausedAt);
+    const resumedBlock: ActiveBlockData = this.normalizeActiveBlock({
+      ...normalized,
+      phase: 'running',
+      version: this.nextVersion(normalized),
+      actorId: this.actorId,
       paused: false,
       pausedAt: undefined,
-      updatedAt: now,
+      lastTransitionAt: now,
+      lastResumedAt: now,
       pauseAccumulatedMs,
-    };
+      updatedAt: now,
+      accumulatedRunMs: normalized.accumulatedRunMs ?? this.calculateRunDurationMs(normalized, now),
+    }, now);
 
     await this.saveActiveBlock(resumedBlock);
     this.rememberAcceptedBlock(resumedBlock);
@@ -212,18 +241,30 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     const actionEndedAt = normalized.actionEndedAt ?? now;
     const feedbackStartedAt = normalized.feedbackStartedAt ?? actionEndedAt;
-    const pauseAccumulatedMs = normalized.pauseAccumulatedMs ?? 0;
+    const pauseAccumulatedMs = (normalized.pauseAccumulatedMs ?? 0) + (
+      normalized.paused && normalized.pausedAt
+        ? Math.max(0, actionEndedAt - normalized.pausedAt)
+        : 0
+    );
 
     // 创建结束事件（通过 EventStorage，与 ChatPage 保持一致）
     await this.addBlockEvent(`${normalized.name} 完成`, 'block_end', new Date(actionEndedAt).toISOString());
 
-    const endedBlock: ActiveBlockData = {
+    const endedBlock: ActiveBlockData = this.normalizeActiveBlock({
       ...normalized,
+      phase: 'action_ended',
+      version: this.nextVersion(normalized),
+      actorId: this.actorId,
       actionEndedAt,
       feedbackStartedAt,
+      accumulatedRunMs: this.calculateRunDurationMs(normalized, actionEndedAt),
+      lastTransitionAt: actionEndedAt,
+      lastResumedAt: undefined,
+      paused: false,
+      pausedAt: undefined,
       pauseAccumulatedMs,
-      updatedAt: now,
-    };
+      updatedAt: actionEndedAt,
+    }, actionEndedAt);
 
     await this.saveActiveBlock(endedBlock);
     this.rememberAcceptedBlock(endedBlock);
@@ -321,16 +362,22 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     await this.env.storage.write(TIME_BLOCKS_KEY, completed);
 
     // 保留终态标记，防止多端并发把状态回退到进行中
-    const terminalBlock: ActiveBlockData = {
+    const terminalBlock: ActiveBlockData = this.normalizeActiveBlock({
       ...activeData,
+      phase: 'feedback_submitted',
+      version: this.nextVersion(activeData),
+      actorId: this.actorId,
       actionEndedAt,
       feedbackStartedAt,
       feedbackSubmittedAt: submittedAt,
       paused: false,
       pausedAt: undefined,
-      updatedAt: submittedAt,
+      lastResumedAt: undefined,
+      lastTransitionAt: submittedAt,
+      accumulatedRunMs: workDurationMs,
       pauseAccumulatedMs: pausedDurationMs,
-    };
+      updatedAt: submittedAt,
+    }, submittedAt);
     await this.saveActiveBlock(terminalBlock);
     this.rememberAcceptedBlock(terminalBlock);
 
@@ -343,24 +390,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
   }
 
-  async updateElapsed(elapsed: number): Promise<void> {
-    const data = await this.readActiveBlock();
-    if (!data || data.paused || data.actionEndedAt || this.isCompletedBlock(data)) return;
-
-    const now = Date.now();
-    // 节流：每秒最多写入一次
-    if (now - this.lastWriteTime < this.WRITE_THROTTLE_MS) {
-      return;
-    }
-    this.lastWriteTime = now;
-
-    const nextBlock: ActiveBlockData = {
-      ...data,
-      elapsed,
-      updatedAt: now,
-    };
-    await this.saveActiveBlock(nextBlock);
-    this.rememberAcceptedBlock(nextBlock);
+  async updateElapsed(_elapsed: number): Promise<void> {
+    // 高频 elapsed 仅用于本地 UI 展示，不再写入同步存储。
+    return;
   }
 
   onBlockChange(callback: (block: ActiveBlockData | null) => void): () => void {
@@ -538,39 +570,58 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private normalizeActiveBlock(data: ActiveBlockData, now: number = Date.now()): ActiveBlockData {
-    const effectiveNow = data.feedbackSubmittedAt
-      ? Math.min(now, data.feedbackSubmittedAt)
-      : (data.actionEndedAt ? Math.min(now, data.actionEndedAt) : now);
-    // 兼容旧数据：无 updatedAt 时先以当前时间建立基准，避免一次性错误跳变
-    const baseTime = data.updatedAt ?? effectiveNow;
-    if (data.paused) {
-      return {
-        ...data,
-        updatedAt: baseTime,
-      };
-    }
-
-    const delta = Math.max(0, effectiveNow - baseTime);
-    const nextElapsed = data.mode === 'countdown'
-      ? Math.max(0, data.elapsed - delta)
-      : data.elapsed + delta;
+    const phase = this.resolvePhase(data);
+    const effectiveNow = this.getPhaseEffectiveNow(data, phase, now);
+    const accumulatedRunMs = this.resolveAccumulatedRunMs(data);
+    const runningStartedAt = phase === 'running'
+      ? (data.lastResumedAt ?? this.resolveLegacyRunningStart(data, accumulatedRunMs, effectiveNow))
+      : undefined;
+    const runningSliceMs = phase === 'running' && runningStartedAt
+      ? Math.max(0, effectiveNow - runningStartedAt)
+      : 0;
+    const runDurationMs = Math.max(0, accumulatedRunMs + runningSliceMs);
+    const elapsed = data.mode === 'countdown'
+      ? Math.max(0, this.getExpectedDurationMs(data) - runDurationMs)
+      : runDurationMs;
+    const paused = phase === 'paused';
+    const lastTransitionAt = this.resolveLastTransitionAt(data, phase, effectiveNow);
 
     return {
       ...data,
-      elapsed: nextElapsed,
-      updatedAt: effectiveNow,
+      phase,
+      version: data.version ?? this.defaultVersionByPhase(phase),
+      lastTransitionAt,
+      lastResumedAt: phase === 'running' ? (runningStartedAt ?? effectiveNow) : undefined,
+      accumulatedRunMs,
+      paused,
+      pausedAt: paused ? (data.pausedAt ?? lastTransitionAt) : undefined,
+      pauseAccumulatedMs: data.pauseAccumulatedMs ?? 0,
+      elapsed,
+      updatedAt: lastTransitionAt,
     };
   }
 
-  private shouldPersistNormalized(prev: ActiveBlockData, next: ActiveBlockData): boolean {
-    return prev.elapsed !== next.elapsed || prev.updatedAt !== next.updatedAt;
+  private shouldPersistCanonicalization(prev: ActiveBlockData, next: ActiveBlockData): boolean {
+    return prev.phase !== next.phase
+      || prev.version !== next.version
+      || prev.actorId !== next.actorId
+      || prev.lastTransitionAt !== next.lastTransitionAt
+      || prev.lastResumedAt !== next.lastResumedAt
+      || prev.accumulatedRunMs !== next.accumulatedRunMs
+      || prev.paused !== next.paused
+      || prev.pausedAt !== next.pausedAt
+      || prev.actionEndedAt !== next.actionEndedAt
+      || prev.feedbackStartedAt !== next.feedbackStartedAt
+      || prev.feedbackSubmittedAt !== next.feedbackSubmittedAt
+      || prev.pauseAccumulatedMs !== next.pauseAccumulatedMs;
   }
 
   private getBlockPhase(block: ActiveBlockData): number {
-    if (block.feedbackSubmittedAt) {
+    const phase = this.resolvePhase(block);
+    if (phase === 'feedback_submitted') {
       return 2;
     }
-    if (block.actionEndedAt) {
+    if (phase === 'action_ended') {
       return 1;
     }
     return 0;
@@ -601,13 +652,27 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return incomingPhase > currentPhase ? incoming : current;
     }
 
+    const currentVersion = current.version ?? 0;
+    const incomingVersion = incoming.version ?? 0;
+    if (currentVersion !== incomingVersion) {
+      return incomingVersion > currentVersion ? incoming : current;
+    }
+
+    const currentActor = current.actorId ?? '';
+    const incomingActor = incoming.actorId ?? '';
+    if (currentActor !== incomingActor) {
+      return incomingActor > currentActor ? incoming : current;
+    }
+
     return this.getBlockOrderTime(incoming) >= this.getBlockOrderTime(current) ? incoming : current;
   }
 
   private getBlockOrderTime(block: ActiveBlockData): number {
-    return block.feedbackSubmittedAt
+    return block.lastTransitionAt
+      ?? block.feedbackSubmittedAt
       ?? block.actionEndedAt
-      ?? block.updatedAt
+      ?? block.pausedAt
+      ?? block.lastResumedAt
       ?? block.startTime;
   }
 
@@ -616,15 +681,128 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       && a.name === b.name
       && a.mode === b.mode
       && a.targetMinutes === b.targetMinutes
-      && a.elapsed === b.elapsed
       && a.startTime === b.startTime
+      && a.phase === b.phase
+      && a.version === b.version
+      && a.actorId === b.actorId
+      && a.lastTransitionAt === b.lastTransitionAt
+      && a.lastResumedAt === b.lastResumedAt
+      && a.accumulatedRunMs === b.accumulatedRunMs
       && a.actionEndedAt === b.actionEndedAt
       && a.feedbackStartedAt === b.feedbackStartedAt
       && a.feedbackSubmittedAt === b.feedbackSubmittedAt
       && a.pauseAccumulatedMs === b.pauseAccumulatedMs
-      && a.updatedAt === b.updatedAt
       && a.paused === b.paused
       && a.pausedAt === b.pausedAt;
+  }
+
+  private resolvePhase(block: ActiveBlockData): ActiveBlockPhase {
+    if (block.phase) {
+      return block.phase;
+    }
+    if (block.feedbackSubmittedAt) {
+      return 'feedback_submitted';
+    }
+    if (block.actionEndedAt) {
+      return 'action_ended';
+    }
+    return block.paused ? 'paused' : 'running';
+  }
+
+  private defaultVersionByPhase(phase: ActiveBlockPhase): number {
+    if (phase === 'feedback_submitted') {
+      return 4;
+    }
+    if (phase === 'action_ended') {
+      return 3;
+    }
+    if (phase === 'paused') {
+      return 2;
+    }
+    return 1;
+  }
+
+  private nextVersion(block: ActiveBlockData): number {
+    return (block.version ?? this.defaultVersionByPhase(this.resolvePhase(block))) + 1;
+  }
+
+  private resolveLastTransitionAt(
+    block: ActiveBlockData,
+    phase: ActiveBlockPhase,
+    fallback: number,
+  ): number {
+    if (typeof block.lastTransitionAt === 'number') {
+      return block.lastTransitionAt;
+    }
+    if (phase === 'feedback_submitted' && block.feedbackSubmittedAt) {
+      return block.feedbackSubmittedAt;
+    }
+    if (phase === 'action_ended' && block.actionEndedAt) {
+      return block.actionEndedAt;
+    }
+    if (phase === 'paused' && block.pausedAt) {
+      return block.pausedAt;
+    }
+    if (phase === 'running' && block.lastResumedAt) {
+      return block.lastResumedAt;
+    }
+    return block.updatedAt ?? block.startTime ?? fallback;
+  }
+
+  private getPhaseEffectiveNow(
+    block: ActiveBlockData,
+    phase: ActiveBlockPhase,
+    now: number,
+  ): number {
+    if (phase === 'feedback_submitted') {
+      return block.feedbackSubmittedAt ?? now;
+    }
+    if (phase === 'action_ended') {
+      return block.actionEndedAt ?? now;
+    }
+    if (phase === 'paused') {
+      return block.pausedAt ?? now;
+    }
+    return now;
+  }
+
+  private getExpectedDurationMs(block: Pick<ActiveBlockData, 'mode' | 'targetMinutes'>): number {
+    if (block.mode !== 'countdown') {
+      return 0;
+    }
+    return (block.targetMinutes ?? 25) * 60 * 1000;
+  }
+
+  private resolveAccumulatedRunMs(block: ActiveBlockData): number {
+    if (typeof block.accumulatedRunMs === 'number') {
+      return Math.max(0, block.accumulatedRunMs);
+    }
+
+    if (block.mode === 'countdown') {
+      const expectedDurationMs = this.getExpectedDurationMs(block);
+      return Math.max(0, expectedDurationMs - Math.max(0, block.elapsed));
+    }
+    return Math.max(0, block.elapsed);
+  }
+
+  private resolveLegacyRunningStart(block: ActiveBlockData, accumulatedRunMs: number, now: number): number {
+    if (typeof block.updatedAt === 'number') {
+      return block.updatedAt;
+    }
+
+    const elapsedRunMs = block.mode === 'countdown'
+      ? Math.max(0, this.getExpectedDurationMs(block) - Math.max(0, block.elapsed))
+      : Math.max(0, block.elapsed);
+    const runningSliceMs = Math.max(0, elapsedRunMs - accumulatedRunMs);
+    return Math.max(block.startTime, now - runningSliceMs);
+  }
+
+  private calculateRunDurationMs(block: ActiveBlockData, at: number): number {
+    const normalized = this.normalizeActiveBlock(block, at);
+    if (normalized.mode === 'countdown') {
+      return Math.max(0, this.getExpectedDurationMs(normalized) - Math.max(0, normalized.elapsed));
+    }
+    return Math.max(0, normalized.elapsed);
   }
 
   private rememberAcceptedBlock(block: ActiveBlockData): void {
