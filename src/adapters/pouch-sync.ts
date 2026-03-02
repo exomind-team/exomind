@@ -19,6 +19,7 @@ import type {
   Conflict,
 } from '@/environment/interfaces/sync.port';
 import { buildRemoteDbUrl, normalizeBaseUrl } from '@/lib/sync/remote-db-url';
+import { createUuidV4 } from '@/lib/utils/uuid';
 
 // PouchDB 插件
 import pouchdbAdapterIdb from 'pouchdb-adapter-idb';
@@ -58,17 +59,13 @@ function resolveSyncAuthMode(): SyncAuthMode {
 export function getDeviceId(): string {
   if (typeof window === 'undefined') {
     // SSR/Node 环境
-    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
-      const r = (crypto.getRandomValues(new Uint8Array(1))[0] * 16) | 0;
-      const v = c === 'x' ? r : (r & 0x3) | 0x8;
-      return v.toString(16);
-    });
+    return createUuidV4();
   }
 
   const stored = localStorage.getItem(DEVICE_ID_KEY);
   if (stored) return stored;
 
-  const newId = crypto.randomUUID();
+  const newId = createUuidV4();
   localStorage.setItem(DEVICE_ID_KEY, newId);
   return newId;
 }

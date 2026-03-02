@@ -10,6 +10,7 @@ import type {
   AgentMarketCategory,
   AgentMarketItem,
 } from '@/lib/types/agent-hub';
+import { createUuidV4 } from '@/lib/utils/uuid';
 import { WebStorageAdapter } from './web-storage';
 
 // Storage keys（存储键）
@@ -122,13 +123,13 @@ export class AgentWebAdapter implements IAgentPort {
     const history = await this.getConversation(input.agentId);
 
     history.push({
-      id: `msg-user-${crypto.randomUUID()}`,
+      id: `msg-user-${createUuidV4()}`,
       role: 'user',
       content: input.prompt,
       createdAt: nowIso(),
     });
 
-    const assistantMessageId = `msg-agent-${crypto.randomUUID()}`;
+    const assistantMessageId = `msg-agent-${createUuidV4()}`;
     history.push({
       id: assistantMessageId,
       role: 'agent',
@@ -152,4 +153,3 @@ export class AgentWebAdapter implements IAgentPort {
     await this.storage.write(key, history);
   }
 }
-
