@@ -25,6 +25,7 @@ import type {
   TimerConfig,
 } from '../types/event';
 import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
+import { createUuidV4 } from '../utils/uuid';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -79,7 +80,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private activeSyncRemoteUrl: string | null = null;
   private unsubscribeStorageListener: (() => void) | null = null;
   private lastAcceptedBlock: ActiveBlockData | null = null;
-  private readonly actorId = crypto.randomUUID();
+  private readonly actorId = createUuidV4();
 
   constructor(env?: ExoMindEnvironment) {
     this.env = env || ExoMindEnvironment.getInstance();
@@ -130,7 +131,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         return normalized;
       }
     }
-    const startId = crypto.randomUUID();
+    const startId = createUuidV4();
     const now = Date.now();
     const initialElapsed = config.mode === 'countdown'
       ? (config.minutes ?? 25) * 60 * 1000
@@ -346,7 +347,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       ? null
       : actionStartAt + expectedDurationMs;
 
-    const endId = crypto.randomUUID();
+    const endId = createUuidV4();
 
     const timeBlockName = activeData.name;
     const feedbackText = feedback?.trim() ?? '';
@@ -371,7 +372,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const storage = getEventStorage();
     const feedbackEventStart = perfNow();
     await storage.addEvent({
-      id: crypto.randomUUID(),
+      id: createUuidV4(),
       content: report,
       createdAt: new Date(submittedAt).toISOString(),
       type: 'block_feedback',
@@ -497,7 +498,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   ): Promise<void> {
     const storage = getEventStorage();
     await storage.addEvent({
-      id: crypto.randomUUID(),
+      id: createUuidV4(),
       content,
       createdAt,
       type: tag,

@@ -15,6 +15,7 @@
  */
 
 import { resolveBffCorsPolicy, type BffCorsPolicy } from '../config/port-env';
+import { createUuidV4 } from '../lib/utils/uuid';
 
 // 加载 .env 文件
 const envFile = Bun.file('.env');
@@ -325,7 +326,7 @@ function writeString(view: DataView, offset: number, string: string) {
  */
 async function recognizeWithVolcano(audioData: Uint8Array): Promise<ASRResponse> {
   const wsUrl = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel';
-  const connectId = crypto.randomUUID();
+  const connectId = createUuidV4();
 
   // 构建认证 HTTP 请求头（根据火山引擎文档）
   const headers = {

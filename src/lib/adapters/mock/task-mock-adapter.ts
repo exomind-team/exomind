@@ -5,6 +5,7 @@ import type {
   TaskItem,
   TaskTimerMode,
 } from '@/lib/types/task';
+import { createUuidV4 } from '@/lib/utils/uuid';
 import {
   MOCK_TASK_GOAL_GROUPS_FIXTURE,
   MOCK_TASKS_FIXTURE,
@@ -40,7 +41,7 @@ export class TaskMockAdapter implements ITaskPort {
     const mode = input.mode ?? 'countdown';
     const createdAt = nowIso();
     const task: TaskItem = {
-      id: `task-${crypto.randomUUID()}`,
+      id: `task-${createUuidV4()}`,
       title: input.title.trim(),
       note: input.note?.trim() || undefined,
       status: 'todo',
@@ -132,4 +133,3 @@ export class TaskMockAdapter implements ITaskPort {
     }
   }
 }
-
