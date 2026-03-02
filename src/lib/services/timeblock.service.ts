@@ -12,7 +12,11 @@
 
 import { ExoMindEnvironment } from '../environment/environment';
 import { getEventStorage } from '../storage/event-storage';
-import { getActiveBlockStorage, type ActiveBlockStorage } from '../storage/active-block-storage';
+import {
+  getActiveBlockStorage,
+  getCurrentSyncUserId,
+  type ActiveBlockStorage,
+} from '../storage/active-block-storage';
 import type { TimeBlock, TimeBlockData, ActiveBlockData, TimerConfig } from '../types/event';
 import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
 
@@ -58,6 +62,7 @@ export interface TimeBlockService {
 export class TimeBlockServiceImpl implements TimeBlockService {
   private env: ExoMindEnvironment;
   private activeBlockStorage: ActiveBlockStorage | null = null;
+  private activeStorageUserId: string | null = null;
   private useLegacyEnvStorage: boolean;
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
   private lastWriteTime = 0;
@@ -70,7 +75,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.env = env || ExoMindEnvironment.getInstance();
     this.useLegacyEnvStorage = typeof env !== 'undefined';
     if (!this.useLegacyEnvStorage) {
-      this.activeBlockStorage = getActiveBlockStorage();
+      this.switchActiveStorage();
     }
     this.attachStorageListener();
   }
@@ -339,6 +344,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return;
     }
 
+    const syncUser = this.extractUserFromRemoteUrl(remoteUrl);
+    this.switchActiveStorage(syncUser ?? undefined);
+
     this.syncSubscriberCount += 1;
 
     if (this.syncSubscriberCount > 1 && this.activeSyncRemoteUrl === remoteUrl) {
@@ -383,7 +391,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private attachStorageListener(): void {
-    if (this.useLegacyEnvStorage || this.unsubscribeStorageListener) {
+    if (this.useLegacyEnvStorage || this.unsubscribeStorageListener || !this.activeBlockStorage) {
       return;
     }
 
@@ -443,10 +451,57 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private getActiveStorage(): ActiveBlockStorage {
+    if (!this.useLegacyEnvStorage && !this.activeBlockStorage) {
+      this.switchActiveStorage();
+    }
+
     if (!this.activeBlockStorage) {
       throw new Error('ActiveBlockStorage is not available in legacy mode');
     }
     return this.activeBlockStorage;
+  }
+
+  private switchActiveStorage(userId?: string): void {
+    if (this.useLegacyEnvStorage) {
+      return;
+    }
+
+    const nextUserId = userId?.trim() || getCurrentSyncUserId();
+    if (
+      this.activeBlockStorage &&
+      this.activeStorageUserId === nextUserId
+    ) {
+      return;
+    }
+
+    const previousStorage = this.activeBlockStorage;
+    const previousUnsubscribe = this.unsubscribeStorageListener;
+
+    this.unsubscribeStorageListener = null;
+    if (previousUnsubscribe) {
+      previousUnsubscribe();
+    }
+
+    this.activeBlockStorage = getActiveBlockStorage(nextUserId);
+    this.activeStorageUserId = nextUserId;
+    this.attachStorageListener();
+
+    if (previousStorage && previousStorage !== this.activeBlockStorage) {
+      void previousStorage.stopSync();
+    }
+  }
+
+  private extractUserFromRemoteUrl(remoteUrl: string): string | null {
+    try {
+      const path = new URL(remoteUrl).pathname;
+      const segments = path.split('/').filter(Boolean);
+      if (segments.length === 0) {
+        return null;
+      }
+      return decodeURIComponent(segments[segments.length - 1]).trim() || null;
+    } catch {
+      return null;
+    }
   }
 
   private normalizeActiveBlock(data: ActiveBlockData, now: number = Date.now()): ActiveBlockData {
