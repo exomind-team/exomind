@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const {
+  getActiveBlockStorageMock,
+  getCurrentSyncUserIdMock,
   syncToRemoteMock,
   stopSyncMock,
   loadActiveBlockMock,
@@ -8,6 +10,8 @@ const {
   deleteActiveBlockMock,
   getEventStorageMock,
 } = vi.hoisted(() => ({
+  getActiveBlockStorageMock: vi.fn(),
+  getCurrentSyncUserIdMock: vi.fn(() => 'local-user'),
   syncToRemoteMock: vi.fn(),
   stopSyncMock: vi.fn(),
   loadActiveBlockMock: vi.fn(),
@@ -17,23 +21,18 @@ const {
 }));
 
 let listener: ((block: unknown) => void) | null = null;
+let storageForUser: Record<string, {
+  loadActiveBlock: typeof loadActiveBlockMock;
+  saveActiveBlock: typeof saveActiveBlockMock;
+  deleteActiveBlock: typeof deleteActiveBlockMock;
+  syncToRemote: typeof syncToRemoteMock;
+  stopSync: typeof stopSyncMock;
+  onBlockChange: (callback: (block: unknown) => void) => () => void;
+}> = {};
 
 vi.mock('@/lib/storage/active-block-storage', () => ({
-  getActiveBlockStorage: vi.fn(() => ({
-    loadActiveBlock: loadActiveBlockMock,
-    saveActiveBlock: saveActiveBlockMock,
-    deleteActiveBlock: deleteActiveBlockMock,
-    syncToRemote: syncToRemoteMock,
-    stopSync: stopSyncMock,
-    onBlockChange: (callback: (block: unknown) => void) => {
-      listener = callback;
-      return () => {
-        if (listener === callback) {
-          listener = null;
-        }
-      };
-    },
-  })),
+  getActiveBlockStorage: getActiveBlockStorageMock,
+  getCurrentSyncUserId: getCurrentSyncUserIdMock,
 }));
 
 vi.mock('@/lib/storage/event-storage', () => ({
@@ -52,6 +51,33 @@ import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
 
 describe('Issue #104 TimeBlockService sync lifecycle', () => {
   beforeEach(() => {
+    storageForUser = {};
+    getActiveBlockStorageMock.mockReset();
+    getCurrentSyncUserIdMock.mockReset();
+    getCurrentSyncUserIdMock.mockReturnValue('local-user');
+
+    getActiveBlockStorageMock.mockImplementation((userId?: string) => {
+      const id = userId ?? getCurrentSyncUserIdMock();
+      if (!storageForUser[id]) {
+        storageForUser[id] = {
+          loadActiveBlock: loadActiveBlockMock,
+          saveActiveBlock: saveActiveBlockMock,
+          deleteActiveBlock: deleteActiveBlockMock,
+          syncToRemote: syncToRemoteMock,
+          stopSync: stopSyncMock,
+          onBlockChange: (callback: (block: unknown) => void) => {
+            listener = callback;
+            return () => {
+              if (listener === callback) {
+                listener = null;
+              }
+            };
+          },
+        };
+      }
+      return storageForUser[id];
+    });
+
     syncToRemoteMock.mockReset();
     stopSyncMock.mockReset();
     loadActiveBlockMock.mockReset();
@@ -70,6 +96,17 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
 
     expect(syncToRemoteMock).toHaveBeenCalledWith(remoteUrl);
     expect(stopSyncMock).toHaveBeenCalled();
+  });
+
+  it('switches active storage when remote user changes', async () => {
+    const service = new TimeBlockServiceImpl();
+
+    await service.startSync('http://127.0.0.1:6984/user-a');
+    await service.startSync('http://127.0.0.1:6984/user-b');
+
+    expect(getActiveBlockStorageMock).toHaveBeenCalledWith('local-user');
+    expect(getActiveBlockStorageMock).toHaveBeenCalledWith('user-a');
+    expect(getActiveBlockStorageMock).toHaveBeenCalledWith('user-b');
   });
 
   it('forwards remote block changes to onBlockChange subscribers', async () => {
