@@ -26,6 +26,7 @@ import {
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
 import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 import type { ActiveBlockData } from '@/lib/types/event';
+import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { resolveSyncServerUrl, SYNC_SERVER_URL_CHANGED_EVENT } from '@/config/port-env';
@@ -235,8 +236,10 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     let cancelled = false;
     const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
 
-    void timeBlockServiceRef.current.startSync(remoteUrl).catch(() => {
+    void timeBlockServiceRef.current.startSync(remoteUrl).catch((error) => {
       if (cancelled) return;
+      const [message, payload] = buildSyncErrorLog('FocusTimerWidget', remoteUrl, error);
+      console.error(message, payload);
     });
 
     return () => {
