@@ -12,7 +12,7 @@
  *   REVIEWER_AGENT_ID   - Agent ID (default reviewer)
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { SignalClient } from "../../src/sse/signal-client.js";
 import type { SignalEvent } from "../../src/sse/signal-types.js";
 import { REVIEWER_SYSTEM_PROMPT, REVIEWER_USER_PROMPT } from "./prompt.js";
@@ -48,8 +48,9 @@ function reviewWithClaude(events: EventEntry[]): ReviewResult | null {
   const userPrompt = REVIEWER_USER_PROMPT(eventsText);
 
   try {
-    const result = execSync(
-      `claude --print --system-prompt "${REVIEWER_SYSTEM_PROMPT.replace(/"/g, '\\"')}" "${userPrompt.replace(/"/g, '\\"')}"`,
+    const result = execFileSync(
+      "claude",
+      ["--print", "--system-prompt", REVIEWER_SYSTEM_PROMPT, userPrompt],
       {
         encoding: "utf-8",
         timeout: 120_000,
