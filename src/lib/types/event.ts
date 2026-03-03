@@ -17,6 +17,7 @@ export const SYSTEM_TAGS = {
   BLOCK_PAUSE: 'block_pause' as Tag,
   BLOCK_RESUME: 'block_resume' as Tag,
   BLOCK_FEEDBACK: 'block_feedback' as Tag,
+  AGENT_FEEDBACK: 'agent_feedback' as Tag,
   NOTE: 'note' as Tag,
 } as const;
 

@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Play, Pause, Square, FileText, NotepadText } from 'lucide-react';
+import { Play, Pause, Square, FileText, NotepadText, Bot } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
@@ -324,6 +324,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件图标
   const getEventIcon = (event: Event) => {
+    if (event.tags.has('agent_feedback')) return <Bot size={14} />;
     if (event.tags.has('block_start')) return <Play size={14} />;
     if (event.tags.has('block_pause')) return <Pause size={14} />;
     if (event.tags.has('block_resume')) return <Play size={14} />;
@@ -334,6 +335,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件头像背景色
   const getEventAvatarColor = (event: Event) => {
+    if (event.tags.has('agent_feedback')) return 'bg-violet-500';
     if (event.tags.has('block_start')) return 'bg-success';
     if (event.tags.has('block_pause')) return 'bg-warning';
     if (event.tags.has('block_resume')) return 'bg-success';
@@ -344,6 +346,9 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件背景色
   const getEventBgColor = (event: Event) => {
+    if (event.tags.has('agent_feedback')) {
+      return 'bg-violet-50 text-violet-900 dark:bg-violet-950 dark:text-violet-100 rounded-br-md';
+    }
     if (event.tags.has('block_start')) {
       return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 rounded-br-md';
     }
@@ -379,6 +384,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     || event.tags.has('block_resume')
     || event.tags.has('block_end')
     || event.tags.has('block_feedback')
+    || event.tags.has('agent_feedback')
   );
 
   // 按日期分组
