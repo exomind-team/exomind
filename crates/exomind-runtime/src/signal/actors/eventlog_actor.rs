@@ -49,18 +49,20 @@ fn handle_user_input(pool: &SignalPool, event: &SignalEvent) {
         }
     };
 
+    let now_ms = chrono::Utc::now().timestamp_millis() as u64;
+
     let new_event = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
         topic: "eventlog.appended".to_string(),
-        ts: chrono::Utc::now().timestamp_millis() as u64,
+        ts: now_ms,
         source: "actor:eventlog".to_string(),
         origin_host_id: event.origin_host_id.clone(),
         hop: event.hop + 1,
         trace_id: event.trace_id.clone(),
         payload: serde_json::json!({
             "text": text,
-            "ts": chrono::Utc::now().timestamp_millis(),
+            "ts": now_ms,
         }),
     };
 

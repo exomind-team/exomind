@@ -12,7 +12,7 @@
  *   CLASSIFIER_AGENT_ID - Agent ID (default classifier)
  */
 
-import { execSync } from "node:child_process";
+import { execFileSync } from "node:child_process";
 import { SignalClient } from "../../src/sse/signal-client.js";
 import type { SignalEvent } from "../../src/sse/signal-types.js";
 import { CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_PROMPT } from "./prompt.js";
@@ -39,8 +39,9 @@ function classifyWithClaude(text: string): {
   const userPrompt = CLASSIFIER_USER_PROMPT(text);
 
   try {
-    const result = execSync(
-      `claude --print --system-prompt "${CLASSIFIER_SYSTEM_PROMPT.replace(/"/g, '\\"')}" "${userPrompt.replace(/"/g, '\\"')}"`,
+    const result = execFileSync(
+      "claude",
+      ["--print", "--system-prompt", CLASSIFIER_SYSTEM_PROMPT, userPrompt],
       {
         encoding: "utf-8",
         timeout: 60_000,
@@ -86,7 +87,7 @@ async function handleSignal(event: SignalEvent): Promise<void> {
       ? (payload.text as string | undefined)
       : undefined;
 
-  if (!text) {
+  if (!text || !text.trim()) {
     console.warn(
       `[Classifier] no text in payload for event ${event.id}, skipping`,
     );
