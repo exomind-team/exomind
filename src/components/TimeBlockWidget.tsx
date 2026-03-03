@@ -89,6 +89,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
 
   // 倒计时结束动作（纯前端配置，不持久化）
   const [countdownEndSoundEnabled, setCountdownEndSoundEnabled] = useState(true);
@@ -164,6 +165,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       }
       setTimerState('idle');
       setFeedbackInProgress(false);
+      setFeedbackSubmitting(false);
       setFeedbackOpen(false);
       setElapsed(timerMode === 'countdown' ? countdownMinutes * 60 * 1000 : 0);
       setTaskName('');
@@ -182,6 +184,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     setElapsed(Math.max(0, block.elapsed));
     const nextFeedbackInProgress = isFeedbackStage(block);
     setFeedbackInProgress(nextFeedbackInProgress);
+    setFeedbackSubmitting(false);
     setTimerState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
     startTimeRef.current = block.startTime;
     countdownEndedRef.current = false;
@@ -410,13 +413,33 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   // 对话框后，带反馈结束时间块
   const handleEndBlock = async (feedbackText?: string) => {
+    if (feedbackSubmitting) return;
+    setFeedbackSubmitting(true);
+
+    const normalizedFeedback = feedbackText?.trim() || undefined;
+    try {
+      await timeBlockService.endBlock(normalizedFeedback);
+    } catch (error) {
+      console.error('[TB-UI] endBlock failed', error);
+      try {
+        const block = await timeBlockService.loadActiveBlock();
+        applyActiveBlock(block);
+      } catch (reloadError) {
+        console.error('[TB-UI] endBlock recover failed', reloadError);
+      }
+      setFeedbackSubmitting(false);
+      return;
+    }
+
     isRunningRef.current = false;
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
 
     // 重置状态
+    setFeedbackOpen(false);
     setFeedbackInProgress(false);
+    setFeedbackSubmitting(false);
     setTimerState('idle');
     setElapsed(0);
     setTaskName('');
@@ -424,11 +447,14 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     setCountdownOvertimeMs(0);
-
-    enqueueServiceMutation('endBlock', async () => {
-      await timeBlockService.endBlock(feedbackText || undefined);
-    });
   };
+
+  const handleFeedbackDialogOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen && feedbackInProgress) {
+      return;
+    }
+    setFeedbackOpen(nextOpen);
+  }, [feedbackInProgress]);
 
   // 暂停/继续切换
   const pauseOrResume = async () => {
@@ -814,8 +840,9 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       )}
 
       {/* 身心反馈对话框 */}
-      <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
+      <Dialog open={feedbackOpen} onOpenChange={handleFeedbackDialogOpenChange}>
         <DialogContent
+          hideCloseButton
           onEscapeKeyDown={(e) => e.preventDefault()}
           onInteractOutside={(e) => e.preventDefault()}
         >
@@ -833,8 +860,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
               if (e.key !== 'Enter') return;
               if (e.shiftKey || e.ctrlKey) return;
               e.preventDefault();
-              setFeedbackOpen(false);
-              handleEndBlock(feedback);
+              void handleEndBlock(feedback);
             }}
             autoFocus
             className="min-h-[88px] resize-none"
@@ -843,13 +869,25 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           />
           <DialogFooter>
             <Button
+              variant="ghost"
               size="sm"
+              data-testid="timeblock-feedback-skip"
+              disabled={feedbackSubmitting}
               onClick={() => {
-                setFeedbackOpen(false);
-                handleEndBlock(feedback);
+                void handleEndBlock(undefined);
               }}
             >
-              确认结束
+              跳过反馈并结束
+            </Button>
+            <Button
+              size="sm"
+              data-testid="timeblock-feedback-confirm"
+              disabled={feedbackSubmitting}
+              onClick={() => {
+                void handleEndBlock(feedback);
+              }}
+            >
+              {feedbackSubmitting ? '提交中...' : '确认结束'}
             </Button>
           </DialogFooter>
         </DialogContent>

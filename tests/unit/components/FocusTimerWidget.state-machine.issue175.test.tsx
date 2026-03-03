@@ -350,4 +350,72 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     });
     await waitFor(() => expect(screen.queryByTestId('new-focus-feedback-textarea')).toBeNull());
   });
+
+  it('keeps feedback dialog open on Escape and hides close button（反馈中禁止关闭弹窗）', async () => {
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '反馈不可关闭任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    await screen.findByTestId('new-focus-feedback-textarea');
+
+    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+
+    expect(screen.getByTestId('new-focus-feedback-textarea')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+  });
+
+  it('supports skip-feedback path and ends block without note（支持跳过反馈）', async () => {
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '跳过反馈任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    await screen.findByTestId('new-focus-feedback-textarea');
+    fireEvent.click(screen.getByTestId('new-focus-feedback-skip'));
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith(undefined);
+    });
+  });
+
+  it('prevents duplicate feedback submit while pending（反馈提交中防重复提交）', async () => {
+    endBlockMock.mockImplementation(() => new Promise(() => {}));
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '提交防重任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    await screen.findByTestId('new-focus-feedback-textarea');
+    fireEvent.click(screen.getByTestId('new-focus-feedback-confirm'));
+    fireEvent.click(screen.getByTestId('new-focus-feedback-confirm'));
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledTimes(1);
+    });
+  });
 });

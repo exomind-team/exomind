@@ -229,4 +229,51 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
 
     unsubscribe();
   });
+
+  it('writes back canonical local block when stale sync packet has older startId', async () => {
+    const service = new TimeBlockServiceImpl();
+    const base = Date.now();
+
+    const localBaseline = {
+      startId: 'local-newer',
+      name: 'local newer block',
+      startTime: base - 10_000,
+      mode: 'countup',
+      elapsed: 8_000,
+      paused: false,
+      version: 3,
+      actorId: 'actor-local',
+      lastTransitionAt: base - 2_000,
+      lastResumedAt: base - 2_000,
+      accumulatedRunMs: 8_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 2_000,
+    };
+
+    loadActiveBlockMock.mockResolvedValue(localBaseline);
+    await service.startSync('http://127.0.0.1:6984/test-user');
+    saveActiveBlockMock.mockClear();
+
+    listener?.({
+      startId: 'remote-older',
+      name: 'remote stale block',
+      startTime: base - 60_000,
+      mode: 'countup',
+      elapsed: 5_000,
+      paused: false,
+      version: 1,
+      actorId: 'actor-remote',
+      lastTransitionAt: base - 30_000,
+      lastResumedAt: base - 30_000,
+      accumulatedRunMs: 5_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 30_000,
+    }, 'sync');
+
+    await vi.waitFor(() => {
+      expect(saveActiveBlockMock).toHaveBeenCalledWith(
+        expect.objectContaining({ startId: 'local-newer' })
+      );
+    });
+  });
 });
