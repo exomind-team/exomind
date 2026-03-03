@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { createMcpEnvironment } from '../src/utils/mcp-environment';
 import { RemoteEventLogPort } from '../src/ports/remote-eventlog-port';
 import { WebEventLogStorageAdapter } from '../../../src/lib/adapters/web-eventlog-storage';
@@ -63,4 +63,3 @@ function restoreEnv(snapshot: Record<string, string | undefined>): void {
     }
   }
 }
-

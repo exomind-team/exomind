@@ -18,7 +18,10 @@ export default defineConfig({
     environment: 'happy-dom',
     maxWorkers: isTermuxRuntime ? 1 : undefined,
     minWorkers: isTermuxRuntime ? 1 : undefined,
-    include: ['tests/**/*.{test,spec}.{ts,tsx}'],
+    include: [
+      'tests/**/*.{test,spec}.{ts,tsx}',
+      'packages/mcp/test/**/*.{test,spec}.{ts,tsx}',
+    ],
     exclude: [...configDefaults.exclude, 'tests/e2e/**'],
     setupFiles: ['tests/setup.ts'],
     globals: true,

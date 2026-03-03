@@ -4,8 +4,26 @@ import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 
+vi.mock('@/config/desktop-adaptive', () => ({
+  getDesktopAdaptiveEnabled: () => false,
+  setDesktopAdaptiveEnabled: vi.fn(),
+}));
+
 describe('SettingsPage input section（输入分组语音配置）', () => {
   beforeEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
     const storage = window.localStorage as Partial<Storage>;
     if (typeof storage.removeItem === 'function') {
       storage.removeItem('moss_api_key');

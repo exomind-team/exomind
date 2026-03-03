@@ -38,6 +38,11 @@ vi.mock('@/config/developer-mode', () => ({
   setDeveloperModeEnabled: vi.fn(),
 }));
 
+vi.mock('@/config/desktop-adaptive', () => ({
+  getDesktopAdaptiveEnabled: () => false,
+  setDesktopAdaptiveEnabled: vi.fn(),
+}));
+
 vi.mock('@/ui/pages/UserManagePage', () => ({
   UserManagePage: () => <div data-testid="user-manage-page-mock">UserManagePage</div>,
 }));

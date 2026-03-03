@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test';
+import { describe, expect, test } from 'vitest';
 import { createToolRegistryWithDependencies } from '../src/tools/tool-registry';
 import type { EventLogService } from '../../../src/lib/services/eventlog.service';
 import type { TimeBlockService } from '../../../src/lib/services/timeblock.service';
@@ -84,6 +84,76 @@ describe('MCP tool registry', () => {
     expect(blocksParsed.count).toBe(1);
     expect(blocksParsed.blocks[0].name).toBe('Focus');
   });
+
+  test('exomind_get_blocks date filter uses local calendar date', async () => {
+    const previousTz = process.env.TZ;
+    process.env.TZ = 'America/Los_Angeles';
+    try {
+      const startTime = new Date('2026-02-13T10:00:00-08:00').getTime();
+      const midnightStart = new Date('2026-02-13T00:00:00-08:00').getTime();
+      const previousDayLate = new Date('2026-02-12T23:59:59.999-08:00').getTime();
+      const nextDayStart = new Date('2026-02-14T00:00:00-08:00').getTime();
+      const timeBlockService = createFakeTimeBlockServiceWithBlocks([
+        {
+          id: 'b1',
+          name: 'LA Focus',
+          startId: 's1',
+          endId: 'e1',
+          note: undefined,
+          tags: new Set(),
+          startTime,
+          endTime: startTime + 30 * 60 * 1000,
+        },
+        {
+          id: 'b2',
+          name: 'LA Midnight Start',
+          startId: 's2',
+          endId: 'e2',
+          note: undefined,
+          tags: new Set(),
+          startTime: midnightStart,
+          endTime: midnightStart + 15 * 60 * 1000,
+        },
+        {
+          id: 'b3',
+          name: 'LA Previous Day',
+          startId: 's3',
+          endId: 'e3',
+          note: undefined,
+          tags: new Set(),
+          startTime: previousDayLate,
+          endTime: previousDayLate + 5 * 60 * 1000,
+        },
+        {
+          id: 'b4',
+          name: 'LA Next Day',
+          startId: 's4',
+          endId: 'e4',
+          note: undefined,
+          tags: new Set(),
+          startTime: nextDayStart,
+          endTime: nextDayStart + 10 * 60 * 1000,
+        },
+      ]);
+      const registry = createToolRegistryWithDependencies({
+        eventLogService: createFakeEventLogService(),
+        timeBlockService,
+      });
+
+      const blocks = await registry.callTool('exomind_get_blocks', { date: '2026-02-13' });
+      const parsed = parseToolText(blocks);
+
+      expect(parsed.success).toBe(true);
+      expect(parsed.count).toBe(2);
+      expect(parsed.blocks.map((block: { id: string }) => block.id).sort()).toEqual(['b1', 'b2']);
+    } finally {
+      if (previousTz === undefined) {
+        delete process.env.TZ;
+      } else {
+        process.env.TZ = previousTz;
+      }
+    }
+  });
 });
 
 function createFakeEventLogService(): EventLogService {
@@ -168,3 +238,26 @@ function createFakeTimeBlockService(): TimeBlockService {
   };
 }
 
+function createFakeTimeBlockServiceWithBlocks(source: TimeBlock[]): TimeBlockService {
+  const blocks = [...source];
+  return {
+    async loadTimeBlocks() {
+      return [...blocks];
+    },
+    async loadActiveBlock() {
+      return null;
+    },
+    async startBlock() {
+      throw new Error('not implemented for this test');
+    },
+    async pauseBlock() {},
+    async resumeBlock() {},
+    async endBlock() {
+      return null;
+    },
+    async updateElapsed() {},
+    onBlockChange() {
+      return () => undefined;
+    },
+  };
+}
