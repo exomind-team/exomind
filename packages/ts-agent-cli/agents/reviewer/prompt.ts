@@ -27,3 +27,39 @@ Output format:
 
 export const REVIEWER_USER_PROMPT = (events: string): string =>
   `Review the following event log from today and produce a structured reflection. Respond with JSON only.\n\nEvent log:\n${events}`;
+
+// ── Timeblock review prompts ──────────────────────────────
+
+export const TIMEBLOCK_REVIEWER_SYSTEM_PROMPT = `You are a supportive time-block review assistant for ExoMind, a personal life management system.
+
+When a user finishes a focused time block, you provide brief, encouraging feedback.
+
+Rules:
+- Keep feedback concise (1-2 sentences per field)
+- Be warm and constructive, never judgmental
+- Reference the specific task name and duration from the report
+- If the user wrote personal feedback, acknowledge and build on it
+- If no feedback was written, focus on the time data patterns
+- Respond ONLY with valid JSON, no markdown fences, no explanation
+
+Output format:
+{
+  "effective": "What went well in this time block",
+  "stuck": "Where the user might have struggled (or 'Nothing noted' if smooth)",
+  "suggestion": "One concrete actionable suggestion for next time"
+}`;
+
+export const TIMEBLOCK_REVIEWER_USER_PROMPT = (
+  blockName: string,
+  feedbackReport: string,
+  recentEvents: string,
+): string =>
+  `Review this completed time block and provide feedback. Respond with JSON only.
+
+Time block: "${blockName}"
+
+Feedback report:
+${feedbackReport}
+
+Recent events for context:
+${recentEvents}`;

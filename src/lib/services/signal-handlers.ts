@@ -28,8 +28,11 @@ export interface EventLogAppendedPayload {
 export interface ReviewCompletedPayload {
   effective: string;
   stuck: string;
-  improve: string;
-  avoid: string;
+  improve?: string;
+  avoid?: string;
+  suggestion?: string;
+  review_type?: 'session' | 'timeblock';
+  block_name?: string;
 }
 
 /** Options for creating a signal handler dispatcher. */
