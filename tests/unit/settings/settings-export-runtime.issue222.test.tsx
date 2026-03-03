@@ -45,6 +45,11 @@ vi.mock('@/config/agent-page-enabled', () => ({
   setAgentPageEnabled: vi.fn(),
 }));
 
+vi.mock('@/config/desktop-adaptive', () => ({
+  getDesktopAdaptiveEnabled: () => false,
+  setDesktopAdaptiveEnabled: vi.fn(),
+}));
+
 vi.mock('@/config/mock-data', () => ({
   getUseMockDataEnabled: () => false,
   setUseMockDataEnabled: vi.fn(),
