@@ -22,6 +22,7 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-uti
 thiserror = "1"
 sysinfo = { version = "0.30", default-features = false }
 tower-http = { version = "0.6", features = ["cors"] }
+tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
 [dev-dependencies]
