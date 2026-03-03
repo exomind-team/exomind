@@ -26,10 +26,6 @@ import {
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
 import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 import type { ActiveBlockData } from '@/lib/types/event';
-import { buildSyncErrorLog } from '@/lib/storage/sync-error';
-import { useSyncStore } from '@/ui/stores/sync-store';
-import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
-import { resolveSyncServerUrl, SYNC_SERVER_URL_CHANGED_EVENT } from '@/config/port-env';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
@@ -120,11 +116,6 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<SkipFeedbackConfirmState>('idle');
   const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(SKIP_FEEDBACK_CONFIRM_SECONDS);
-  const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
-  const currentUser = useSyncStore((state) => state.currentUser);
-  const [syncServerUrl, setSyncServerUrl] = useState(() =>
-    resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
-  );
   const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isRunningUi = uiState === 'running';
@@ -269,39 +260,6 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       unsubscribe();
     };
   }, [applyActiveBlock]);
-
-  useEffect(() => {
-    const refreshSyncServerUrl = () => {
-      setSyncServerUrl(resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>));
-    };
-
-    refreshSyncServerUrl();
-    window.addEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
-    return () => {
-      window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (!isLoggedIn || !currentUser) {
-      void timeBlockServiceRef.current.stopSync();
-      return;
-    }
-
-    let cancelled = false;
-    const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
-
-    void timeBlockServiceRef.current.startSync(remoteUrl).catch((error) => {
-      if (cancelled) return;
-      const [message, payload] = buildSyncErrorLog('FocusTimerWidget', remoteUrl, error);
-      console.error(message, payload);
-    });
-
-    return () => {
-      cancelled = true;
-      void timeBlockServiceRef.current.stopSync();
-    };
-  }, [currentUser, isLoggedIn, syncServerUrl]);
 
   useEffect(() => {
     if (!isRunningUi || isPaused) {
