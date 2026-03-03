@@ -78,6 +78,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
   private syncSubscriberCount = 0;
   private activeSyncRemoteUrl: string | null = null;
+  private pendingStorageStop: Promise<void> = Promise.resolve();
   private unsubscribeStorageListener: (() => void) | null = null;
   private lastAcceptedBlock: ActiveBlockData | null = null;
   private lastCanonicalWriteBackSignature: string | null = null;
@@ -476,6 +477,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const previousRemoteUrl = this.activeSyncRemoteUrl;
     this.activeSyncRemoteUrl = remoteUrl;
     try {
+      await this.pendingStorageStop;
       const seededBlock = await this.seedAcceptedBlockFromStorage();
       this.notifyChange(
         seededBlock && !this.isCompletedBlock(seededBlock)
@@ -501,6 +503,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
 
     this.activeSyncRemoteUrl = null;
+    await this.pendingStorageStop;
     await this.getActiveStorage().stopSync();
   }
 
@@ -624,7 +627,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.attachStorageListener();
 
     if (previousStorage && previousStorage !== this.activeBlockStorage) {
-      void previousStorage.stopSync();
+      this.pendingStorageStop = this.pendingStorageStop
+        .then(() => previousStorage.stopSync())
+        .catch((error) => {
+          console.error('[TB-SVC] previous storage stopSync failed', error);
+        });
     }
   }
 
