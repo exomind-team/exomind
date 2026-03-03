@@ -13,11 +13,9 @@ struct TaskItem {
     note: Option<String>,
 }
 
-/// The expected payload shape on "input.classified" signals.
+/// The expected payload shape on "input.classified" signals (task type only).
 #[derive(Debug, Deserialize)]
 struct ClassifiedPayload {
-    #[serde(rename = "type")]
-    kind: String,
     items: Vec<TaskItem>,
 }
 
@@ -51,21 +49,31 @@ pub fn spawn_task_actor(pool: Arc<SignalPool>) -> tokio::task::JoinHandle<()> {
 }
 
 fn handle_classified_event(pool: &SignalPool, event: &SignalEvent) {
+    // Check type first to avoid spurious parse warnings for non-task classifications.
+    let kind = match event.payload.get("type").and_then(|v| v.as_str()) {
+        Some(k) => k,
+        None => {
+            warn!(event_id = %event.id, "task_actor: missing 'type' field in payload");
+            return;
+        }
+    };
+
+    if kind != "task" {
+        return;
+    }
+
+    // Now safe to parse — we know type == "task" and items should be Vec<TaskItem>.
     let parsed: ClassifiedPayload = match serde_json::from_value(event.payload.clone()) {
         Ok(p) => p,
         Err(e) => {
             warn!(
                 event_id = %event.id,
                 error = %e,
-                "task_actor: failed to parse input.classified payload"
+                "task_actor: failed to parse task payload items"
             );
             return;
         }
     };
-
-    if parsed.kind != "task" {
-        return;
-    }
 
     // Extract the original source text for provenance, if available.
     let source_text = event
