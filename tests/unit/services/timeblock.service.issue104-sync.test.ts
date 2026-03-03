@@ -98,6 +98,25 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     expect(stopSyncMock).toHaveBeenCalled();
   });
 
+  it('rolls back subscriber count when startSync fails so retry can re-attempt', async () => {
+    const service = new TimeBlockServiceImpl();
+    const remoteUrl = 'http://127.0.0.1:6984/test-user';
+
+    syncToRemoteMock
+      .mockRejectedValueOnce(new Error('sync failed once'))
+      .mockResolvedValueOnce(undefined);
+
+    await expect(service.startSync(remoteUrl)).rejects.toThrow('sync failed once');
+    await service.startSync(remoteUrl);
+    const stopSyncCallsBeforeStop = stopSyncMock.mock.calls.length;
+    await service.stopSync();
+
+    expect(syncToRemoteMock).toHaveBeenCalledTimes(2);
+    expect(syncToRemoteMock).toHaveBeenNthCalledWith(1, remoteUrl);
+    expect(syncToRemoteMock).toHaveBeenNthCalledWith(2, remoteUrl);
+    expect(stopSyncMock.mock.calls.length).toBe(stopSyncCallsBeforeStop + 1);
+  });
+
   it('switches active storage when remote user changes', async () => {
     const service = new TimeBlockServiceImpl();
 
@@ -109,6 +128,37 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     expect(getActiveBlockStorageMock).toHaveBeenCalledWith('user-b');
   });
 
+  it('notifies current snapshot when switching sync user to prevent stale UI state', async () => {
+    const service = new TimeBlockServiceImpl();
+    const onChange = vi.fn();
+    const unsubscribe = service.onBlockChange(onChange);
+    const base = Date.now();
+
+    loadActiveBlockMock
+      .mockResolvedValueOnce({
+        startId: 'user-a-block',
+        name: 'user-a running',
+        startTime: base - 8_000,
+        mode: 'countup',
+        elapsed: 6_000,
+        paused: false,
+        updatedAt: base - 2_000,
+        pauseAccumulatedMs: 0,
+      })
+      .mockResolvedValueOnce(null);
+
+    await service.startSync('http://127.0.0.1:6984/user-a');
+    await service.startSync('http://127.0.0.1:6984/user-b');
+
+    expect(onChange).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ startId: 'user-a-block' })
+    );
+    expect(onChange).toHaveBeenNthCalledWith(2, null);
+
+    unsubscribe();
+  });
+
   it('forwards remote block changes to onBlockChange subscribers', async () => {
     const service = new TimeBlockServiceImpl();
     const onChange = vi.fn();
@@ -116,6 +166,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
 
     await service.startSync('http://127.0.0.1:6984/test-user');
     expect(listener).toBeTypeOf('function');
+    onChange.mockClear();
 
     const remoteBlock = {
       startId: 'remote-1',
@@ -141,6 +192,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
 
     await service.startSync('http://127.0.0.1:6984/test-user');
     expect(listener).toBeTypeOf('function');
+    onChange.mockClear();
 
     listener?.({
       startId: 'local-echo',
@@ -164,6 +216,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
 
     await service.startSync('http://127.0.0.1:6984/test-user');
     expect(listener).toBeTypeOf('function');
+    onChange.mockClear();
 
     const remoteBlock = {
       startId: 'remote-old-timestamp',
@@ -193,6 +246,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
 
     await service.startSync('http://127.0.0.1:6984/test-user');
     expect(listener).toBeTypeOf('function');
+    onChange.mockClear();
 
     const base = Date.now();
     listener?.({
