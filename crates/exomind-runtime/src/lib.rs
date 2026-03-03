@@ -6,8 +6,11 @@ use std::sync::Arc;
 use thiserror::Error;
 use tower_http::cors::{Any, CorsLayer};
 
+use signal::SignalPool;
+
 pub mod agent;
 pub mod routes;
+pub mod signal;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -33,31 +36,44 @@ pub fn configured_port_from_env() -> Result<u16, PortConfigError> {
 
 /// Build HTTP router (HTTP 路由构建入口).
 pub fn app(runtime_port: u16) -> Router {
+    app_with_state(AppState::new(runtime_port))
+}
+
+/// Build HTTP router from an existing AppState.
+pub fn app_with_state(state: AppState) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
         .allow_headers(Any);
 
     Router::new()
         .route("/health", get(health))
         .merge(routes::router())
         .layer(cors)
-        .with_state(AppState::new(runtime_port))
+        .with_state(state)
 }
 
 #[derive(Clone)]
 pub struct AppState {
     pub port: u16,
     pub registry: agent::AgentRegistry,
+    pub signal_pool: Arc<SignalPool>,
 }
 
 impl AppState {
-    fn new(port: u16) -> Self {
+    pub fn new(port: u16) -> Self {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
         registry.register(Arc::new(agent::echo::EchoAgent::new()));
-        Self { port, registry }
+
+        let signal_pool = Arc::new(SignalPool::new(Some("config/signal-routes.default.json")));
+
+        Self {
+            port,
+            registry,
+            signal_pool,
+        }
     }
 }
 
@@ -466,6 +482,7 @@ mod tests {
         let router = routes::router().with_state(AppState {
             port: 3009,
             registry: registry.clone(),
+            signal_pool: Arc::new(signal::SignalPool::new(None)),
         });
 
         let list_response = router
@@ -572,6 +589,7 @@ mod tests {
         let router = routes::router().with_state(AppState {
             port: 3010,
             registry,
+            signal_pool: Arc::new(signal::SignalPool::new(None)),
         });
 
         let get_response = router
@@ -607,6 +625,7 @@ mod tests {
         let router = routes::router().with_state(AppState {
             port: 3003,
             registry: registry.clone(),
+            signal_pool: Arc::new(signal::SignalPool::new(None)),
         });
 
         let first_response = router

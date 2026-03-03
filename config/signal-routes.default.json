@@ -1,0 +1,7 @@
+[
+  { "topic": "user.input.text", "target_type": "agent", "target_ref": "classifier" },
+  { "topic": "user.input.text", "target_type": "actor", "target_ref": "eventlog" },
+  { "topic": "input.classified", "target_type": "actor", "target_ref": "task" },
+  { "topic": "session.end", "target_type": "agent", "target_ref": "reviewer" },
+  { "topic": "*", "target_type": "frontend", "target_ref": "ui" }
+]
