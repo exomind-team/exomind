@@ -15,7 +15,12 @@
 import { execFileSync } from "node:child_process";
 import { SignalClient } from "../../src/sse/signal-client.js";
 import type { SignalEvent } from "../../src/sse/signal-types.js";
-import { REVIEWER_SYSTEM_PROMPT, REVIEWER_USER_PROMPT } from "./prompt.js";
+import {
+  REVIEWER_SYSTEM_PROMPT,
+  REVIEWER_USER_PROMPT,
+  TIMEBLOCK_REVIEWER_SYSTEM_PROMPT,
+  TIMEBLOCK_REVIEWER_USER_PROMPT,
+} from "./prompt.js";
 
 const RT_URL = process.env["EXOMIND_RT_URL"] ?? "http://localhost:1949";
 const AGENT_ID = process.env["REVIEWER_AGENT_ID"] ?? "reviewer";
@@ -35,9 +40,26 @@ export interface ReviewResult {
   avoid: string;
 }
 
+export interface TimeblockReviewResult {
+  effective: string;
+  stuck: string;
+  suggestion: string;
+}
+
 export interface EventEntry {
   text: string;
   ts: number;
+}
+
+export interface TimeblockPayload {
+  block: {
+    id: string;
+    name: string;
+    startTime: number;
+    endTime: number;
+  };
+  feedbackReport: string;
+  recentEvents: EventEntry[];
 }
 
 /**
@@ -89,7 +111,101 @@ function reviewWithClaude(events: EventEntry[]): ReviewResult | null {
   }
 }
 
+/**
+ * Call Claude CLI to produce timeblock-specific feedback.
+ */
+function reviewTimeblock(payload: TimeblockPayload): TimeblockReviewResult | null {
+  const eventsText = JSON.stringify(payload.recentEvents, null, 2);
+  const userPrompt = TIMEBLOCK_REVIEWER_USER_PROMPT(
+    payload.block.name,
+    payload.feedbackReport,
+    eventsText,
+  );
+
+  try {
+    const result = execFileSync(
+      "claude",
+      ["--print", "--system-prompt", TIMEBLOCK_REVIEWER_SYSTEM_PROMPT, userPrompt],
+      {
+        encoding: "utf-8",
+        timeout: 120_000,
+        stdio: ["pipe", "pipe", "pipe"],
+      },
+    );
+
+    const trimmed = result.trim();
+    const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
+    if (!jsonMatch) {
+      console.error(
+        `[Reviewer] no JSON found in timeblock review: ${trimmed.slice(0, 200)}`,
+      );
+      return null;
+    }
+
+    const parsed = JSON.parse(jsonMatch[0]);
+    if (
+      typeof parsed.effective !== "string" ||
+      typeof parsed.stuck !== "string" ||
+      typeof parsed.suggestion !== "string"
+    ) {
+      console.error(
+        `[Reviewer] invalid timeblock review structure: ${JSON.stringify(parsed).slice(0, 200)}`,
+      );
+      return null;
+    }
+
+    return parsed as TimeblockReviewResult;
+  } catch (error) {
+    const msg = error instanceof Error ? error.message : String(error);
+    console.error(`[Reviewer] Claude CLI call failed (timeblock): ${msg}`);
+    return null;
+  }
+}
+
 async function handleSignal(event: SignalEvent): Promise<void> {
+  // ── timeblock.completed handler ──
+  if (event.topic === "timeblock.completed") {
+    console.log(`[Reviewer] received timeblock.completed: id=${event.id}`);
+
+    const payload = event.payload as TimeblockPayload | null;
+    if (!payload?.block?.name || !payload?.feedbackReport) {
+      console.warn(`[Reviewer] invalid timeblock.completed payload, skipping`);
+      return;
+    }
+
+    console.log(`[Reviewer] reviewing timeblock "${payload.block.name}"...`);
+
+    const review = reviewTimeblock(payload);
+    if (!review) {
+      console.error(`[Reviewer] timeblock review generation failed for event ${event.id}`);
+      return;
+    }
+
+    console.log(`[Reviewer] timeblock review completed`);
+
+    try {
+      const response = await client.publish({
+        topic: "review.completed",
+        payload: {
+          ...review,
+          review_type: "timeblock",
+          block_name: payload.block.name,
+        },
+        trace_id: event.trace_id,
+        source: "agent:reviewer",
+      });
+
+      console.log(
+        `[Reviewer] published review.completed (timeblock): event_id=${response.event_id}`,
+      );
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      console.error(`[Reviewer] publish failed (timeblock): ${msg}`);
+    }
+    return;
+  }
+
+  // ── session.end handler ──
   if (event.topic !== "session.end") {
     return;
   }
