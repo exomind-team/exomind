@@ -24,5 +24,10 @@ export type { CommandPaletteService, CommandPaletteState } from './command-palet
 export { RuntimeAggregatorServiceImpl, getRuntimeAggregatorService } from './runtime-aggregator.service';
 export type { RuntimeAggregatorService, RuntimeAgentInfo, AggregatedRuntimeData } from './runtime-aggregator.service';
 
+export { SignalStreamService, getSignalStreamService } from './signal-stream.service';
+export type { SignalStreamServiceOptions, SignalCallback } from './signal-stream.service';
+export { SignalRouteService, getSignalRouteService } from './signal-route.service';
+export type { SignalRouteServiceOptions } from './signal-route.service';
+
 // 重新导出类型（这些类型在 types/event 中定义）
 export type { TimerMode, TimerConfig } from '../types/event';
