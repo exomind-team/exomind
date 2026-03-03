@@ -473,9 +473,21 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       return;
     }
 
+    const previousRemoteUrl = this.activeSyncRemoteUrl;
     this.activeSyncRemoteUrl = remoteUrl;
-    await this.seedAcceptedBlockFromStorage();
-    await this.getActiveStorage().syncToRemote(remoteUrl);
+    try {
+      const seededBlock = await this.seedAcceptedBlockFromStorage();
+      this.notifyChange(
+        seededBlock && !this.isCompletedBlock(seededBlock)
+          ? seededBlock
+          : null
+      );
+      await this.getActiveStorage().syncToRemote(remoteUrl);
+    } catch (error) {
+      this.syncSubscriberCount = Math.max(0, this.syncSubscriberCount - 1);
+      this.activeSyncRemoteUrl = this.syncSubscriberCount > 0 ? previousRemoteUrl : null;
+      throw error;
+    }
   }
 
   async stopSync(): Promise<void> {
@@ -872,15 +884,15 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return this.resolvePhase(block) === 'feedback_in_progress' && !Boolean(block.feedbackSubmittedAt);
   }
 
-  private async seedAcceptedBlockFromStorage(): Promise<void> {
+  private async seedAcceptedBlockFromStorage(): Promise<ActiveBlockData | null> {
     if (this.useLegacyEnvStorage) {
-      return;
+      return null;
     }
 
     const storage = this.getActiveStorage();
     const raw = await storage.loadActiveBlock();
     if (!raw) {
-      return;
+      return null;
     }
 
     const normalized = this.normalizeActiveBlock(raw);
@@ -888,6 +900,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       await this.saveActiveBlock(normalized);
     }
     this.rememberAcceptedBlock(normalized);
+    return normalized;
   }
 
   private async persistCanonicalWriteBack(block: ActiveBlockData): Promise<void> {
