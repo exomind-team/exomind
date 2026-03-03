@@ -36,6 +36,11 @@ pub fn configured_port_from_env() -> Result<u16, PortConfigError> {
 
 /// Build HTTP router (HTTP 路由构建入口).
 pub fn app(runtime_port: u16) -> Router {
+    app_with_state(AppState::new(runtime_port))
+}
+
+/// Build HTTP router from an existing AppState.
+pub fn app_with_state(state: AppState) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
     let cors = CorsLayer::new()
         .allow_origin(Any)
@@ -46,7 +51,7 @@ pub fn app(runtime_port: u16) -> Router {
         .route("/health", get(health))
         .merge(routes::router())
         .layer(cors)
-        .with_state(AppState::new(runtime_port))
+        .with_state(state)
 }
 
 #[derive(Clone)]
@@ -57,7 +62,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    fn new(port: u16) -> Self {
+    pub fn new(port: u16) -> Self {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
         registry.register(Arc::new(agent::echo::EchoAgent::new()));
