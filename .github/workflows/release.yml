@@ -208,20 +208,10 @@ jobs:
           restore-keys: |
             bun-windows-
 
-      - name: Install dependencies (安装依赖，使用国内镜像)
+      - name: Install dependencies (安装依赖)
         shell: powershell
         timeout-minutes: 5
-        env:
-          BUN_CONFIG_REGISTRY: https://registry.npmmirror.com
         run: |
-          # 清理可能损坏的 bun 缓存
-          Get-Process bun -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          $bunCache = Join-Path $HOME ".bun/install/cache"
-          if (Test-Path $bunCache) {
-            Write-Host "Clearing bun global cache..."
-            bun pm cache rm 2>$null
-          }
-          Write-Host "Registry: $env:BUN_CONFIG_REGISTRY"
           bun install --frozen-lockfile --verbose
 
       - name: Build Windows NSIS installer (构建 NSIS 安装包)
@@ -651,20 +641,10 @@ jobs:
           restore-keys: |
             bun-windows-
 
-      - name: Install dependencies (安装依赖，使用国内镜像)
+      - name: Install dependencies (安装依赖)
         shell: powershell
         timeout-minutes: 5
-        env:
-          BUN_CONFIG_REGISTRY: https://registry.npmmirror.com
         run: |
-          # 清理可能损坏的 bun 缓存
-          Get-Process bun -ErrorAction SilentlyContinue | Stop-Process -Force -ErrorAction SilentlyContinue
-          $bunCache = Join-Path $HOME ".bun/install/cache"
-          if (Test-Path $bunCache) {
-            Write-Host "Clearing bun global cache..."
-            bun pm cache rm 2>$null
-          }
-          Write-Host "Registry: $env:BUN_CONFIG_REGISTRY"
           bun install --frozen-lockfile --verbose
 
       - name: Init Android
