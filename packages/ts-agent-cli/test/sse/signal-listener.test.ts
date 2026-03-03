@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { SignalListener } from "@sse/signal-listener.js";
+import { SignalListener } from "../../src/sse/signal-listener.js";
 
 describe("SignalListener", () => {
   beforeEach(() => {
