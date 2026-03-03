@@ -34,6 +34,9 @@ import { resolveSyncServerUrl, SYNC_SERVER_URL_CHANGED_EVENT } from '@/config/po
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
 export type FocusTimerState = 'idle' | 'running' | 'paused';
+type SkipFeedbackConfirmState = 'idle' | 'cooldown' | 'armed';
+
+const SKIP_FEEDBACK_CONFIRM_SECONDS = 5;
 
 export interface FocusTimerWidgetHandle {
   expandAndFocusTaskName: () => void;
@@ -115,11 +118,14 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const [feedback, setFeedback] = useState('');
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<SkipFeedbackConfirmState>('idle');
+  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(SKIP_FEEDBACK_CONFIRM_SECONDS);
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
   const currentUser = useSyncStore((state) => state.currentUser);
   const [syncServerUrl, setSyncServerUrl] = useState(() =>
     resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
   );
+  const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isRunningUi = uiState === 'running';
   const isPaused = isRunningUi && runningSubState === 'paused';
@@ -131,6 +137,37 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const isCountdownWarning =
     timerMode === 'countdown'
     && (isCountdownOvertime || (elapsedMs <= 60000 && elapsedMs > 0));
+
+  const clearSkipFeedbackConfirmInterval = useCallback(() => {
+    if (!skipFeedbackConfirmIntervalRef.current) {
+      return;
+    }
+    clearInterval(skipFeedbackConfirmIntervalRef.current);
+    skipFeedbackConfirmIntervalRef.current = null;
+  }, []);
+
+  const resetSkipFeedbackConfirm = useCallback(() => {
+    clearSkipFeedbackConfirmInterval();
+    setSkipFeedbackConfirmState('idle');
+    setSkipFeedbackCountdownSec(SKIP_FEEDBACK_CONFIRM_SECONDS);
+  }, [clearSkipFeedbackConfirmInterval]);
+
+  const startSkipFeedbackConfirmCooldown = useCallback(() => {
+    clearSkipFeedbackConfirmInterval();
+    setSkipFeedbackConfirmState('cooldown');
+    setSkipFeedbackCountdownSec(SKIP_FEEDBACK_CONFIRM_SECONDS);
+
+    skipFeedbackConfirmIntervalRef.current = setInterval(() => {
+      setSkipFeedbackCountdownSec((previousSeconds) => {
+        if (previousSeconds <= 1) {
+          clearSkipFeedbackConfirmInterval();
+          setSkipFeedbackConfirmState('armed');
+          return 0;
+        }
+        return previousSeconds - 1;
+      });
+    }, 1000);
+  }, [clearSkipFeedbackConfirmInterval]);
 
   const syncIdleElapsedFromMode = useCallback((mode: TimerMode, minutes: number) => {
     setElapsedMs(mode === 'countdown' ? minutes * 60 * 1000 : 0);
@@ -183,6 +220,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       setFeedbackOpen(false);
       setFeedbackInProgress(false);
       setFeedbackSubmitting(false);
+      resetSkipFeedbackConfirm();
       countdownEndedRef.current = false;
       countdownOverrunRef.current = false;
       hardEndTriggeredRef.current = false;
@@ -201,13 +239,14 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     const nextFeedbackInProgress = isFeedbackStage(block);
     setFeedbackInProgress(nextFeedbackInProgress);
     setFeedbackSubmitting(false);
+    resetSkipFeedbackConfirm();
     setUiState('running');
     setRunningSubState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
     hardEndTriggeredRef.current = nextFeedbackInProgress;
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     setCountdownOvertimeMs(0);
-  }, [countdownMinutes, syncIdleElapsedFromMode, timerMode]);
+  }, [countdownMinutes, resetSkipFeedbackConfirm, syncIdleElapsedFromMode, timerMode]);
 
   useEffect(() => {
     let cancelled = false;
@@ -457,7 +496,10 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
 
   const handleOpenEndDialog = useCallback(() => {
     if (!isRunningUi) return;
-    if (feedbackInProgress) return;
+    if (feedbackInProgress) {
+      setFeedbackOpen(true);
+      return;
+    }
     const t0 = perfNow();
     console.log('[TB-UI] click end -> markEnding start');
     setRunningSubState('paused');
@@ -471,6 +513,18 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
 
   const handleSubmitEnd = useCallback(async (feedbackText?: string) => {
     if (feedbackSubmitting) return;
+    const trimmedFeedback = feedbackText?.trim() ?? '';
+    if (trimmedFeedback.length === 0) {
+      if (skipFeedbackConfirmState === 'idle') {
+        startSkipFeedbackConfirmCooldown();
+        return;
+      }
+      if (skipFeedbackConfirmState === 'cooldown') {
+        return;
+      }
+    }
+
+    resetSkipFeedbackConfirm();
     setFeedbackSubmitting(true);
 
     const t0 = perfNow();
@@ -478,7 +532,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
 
     try {
       await mutationQueueRef.current;
-      await timeBlockServiceRef.current.endBlock(feedbackText);
+      await timeBlockServiceRef.current.endBlock(trimmedFeedback || undefined);
     } catch (error) {
       console.error('[TB-UI] endBlock failed', error);
       try {
@@ -505,16 +559,21 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     hardEndTriggeredRef.current = false;
     setCountdownOvertimeMs(0);
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
-  }, [applyActiveBlock, countdownMinutes, feedbackSubmitting, syncIdleElapsedFromMode, timerMode]);
+  }, [
+    applyActiveBlock,
+    countdownMinutes,
+    feedbackSubmitting,
+    resetSkipFeedbackConfirm,
+    skipFeedbackConfirmState,
+    startSkipFeedbackConfirmCooldown,
+    syncIdleElapsedFromMode,
+    timerMode,
+  ]);
 
   const handleConfirmEnd = useCallback(async () => {
     const feedbackText = feedback.trim() || undefined;
     await handleSubmitEnd(feedbackText);
   }, [feedback, handleSubmitEnd]);
-
-  const handleSkipEnd = useCallback(async () => {
-    await handleSubmitEnd(undefined);
-  }, [handleSubmitEnd]);
 
   const handleFeedbackDialogOpenChange = useCallback((nextOpen: boolean) => {
     if (!nextOpen && feedbackInProgress) {
@@ -532,6 +591,23 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     event.preventDefault();
     void handleConfirmEnd();
   }, [handleConfirmEnd]);
+
+  useEffect(() => {
+    return () => {
+      clearSkipFeedbackConfirmInterval();
+    };
+  }, [clearSkipFeedbackConfirmInterval]);
+
+  const isEmptyFeedback = feedback.trim().length === 0;
+  const isSkipFeedbackCoolingDown = isEmptyFeedback && skipFeedbackConfirmState === 'cooldown';
+  const isEndActionDisabled = feedbackInProgress && feedbackOpen;
+  const feedbackConfirmLabel = feedbackSubmitting
+    ? '提交中...'
+    : (isEmptyFeedback && skipFeedbackConfirmState === 'cooldown')
+      ? `确认跳过反馈(${skipFeedbackCountdownSec}s)`
+      : (isEmptyFeedback && skipFeedbackConfirmState === 'armed')
+        ? '确认跳过反馈'
+        : '确认结束';
 
   useImperativeHandle(
     ref,
@@ -776,7 +852,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
                   type="button"
                   data-testid="new-focus-end-button"
                   aria-label="结束（End）"
-                  disabled={feedbackInProgress}
+                  disabled={isEndActionDisabled}
                   onClick={handleOpenEndDialog}
                   className="h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#C75B3A] p-0 text-[#C75B3A] dark:text-[#FAFAF9] hover:bg-[#F8DED9] dark:hover:bg-[#B24D2F]"
                 >
@@ -801,7 +877,10 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
           <Textarea
             data-testid="new-focus-feedback-textarea"
             value={feedback}
-            onChange={(event) => setFeedback(event.target.value)}
+            onChange={(event) => {
+              resetSkipFeedbackConfirm();
+              setFeedback(event.target.value);
+            }}
             onKeyDown={handleFeedbackKeyDown}
             placeholder="记录本次专注的反馈..."
             className="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
@@ -809,26 +888,14 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
           <DialogFooter>
             <Button
               type="button"
-              variant="ghost"
-              data-testid="new-focus-feedback-skip"
-              disabled={feedbackSubmitting}
-              onClick={() => {
-                void handleSkipEnd();
-              }}
-              className="dark:text-[#D6D3D1] dark:hover:bg-[#3D3835]"
-            >
-              跳过反馈并结束
-            </Button>
-            <Button
-              type="button"
               data-testid="new-focus-feedback-confirm"
-              disabled={feedbackSubmitting}
+              disabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
               onClick={() => {
                 void handleConfirmEnd();
               }}
               className="dark:rounded-[10px] dark:bg-[#C75B3A] dark:text-white dark:hover:bg-[#B24D2F]"
             >
-              {feedbackSubmitting ? '提交中...' : '确认结束'}
+              {feedbackConfirmLabel}
             </Button>
           </DialogFooter>
         </DialogContent>

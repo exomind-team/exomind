@@ -1,6 +1,6 @@
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 
 const {
@@ -77,6 +77,7 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
   afterEach(() => {
     cleanup();
+    vi.useRealTimers();
     vi.unstubAllGlobals();
   });
 
@@ -139,7 +140,7 @@ describe('TimeBlockWidget feedback shortcuts', () => {
     expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
   });
 
-  it('supports skip-feedback path and ends block without note', async () => {
+  it('requires 5s calm-down confirmation before skipping empty feedback', async () => {
     render(<TimeBlockWidget />);
 
     await waitFor(() => {
@@ -149,11 +150,81 @@ describe('TimeBlockWidget feedback shortcuts', () => {
     fireEvent.click(screen.getByRole('button', { name: '结束' }));
     await screen.findByTestId('timeblock-feedback-textarea');
 
-    fireEvent.click(screen.getByTestId('timeblock-feedback-skip'));
+    const confirmButton = screen.getByTestId('timeblock-feedback-confirm');
+    vi.useFakeTimers();
+    fireEvent.click(confirmButton);
 
+    expect(endBlockMock).not.toHaveBeenCalled();
+    expect(confirmButton).toBeDisabled();
+    expect(confirmButton).toHaveTextContent('确认跳过反馈(5s)');
+
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(confirmButton).toHaveTextContent('确认跳过反馈(4s)');
+
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
+    expect(confirmButton).not.toBeDisabled();
+    expect(confirmButton).toHaveTextContent('确认跳过反馈');
+
+    fireEvent.click(confirmButton);
+
+    vi.useRealTimers();
     await waitFor(() => {
       expect(endBlockMock).toHaveBeenCalledWith(undefined);
     });
+  });
+
+  it('resets skip-confirm state when feedback content changes', async () => {
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '结束' }));
+    const feedback = await screen.findByTestId('timeblock-feedback-textarea');
+    const confirmButton = screen.getByTestId('timeblock-feedback-confirm');
+
+    vi.useFakeTimers();
+    fireEvent.click(confirmButton);
+    expect(confirmButton).toHaveTextContent('确认跳过反馈(5s)');
+    expect(confirmButton).toBeDisabled();
+
+    fireEvent.change(feedback, { target: { value: '补一条反馈' } });
+    expect(confirmButton).toHaveTextContent('确认结束');
+    expect(confirmButton).not.toBeDisabled();
+    vi.useRealTimers();
+  });
+
+  it('reopens feedback dialog when block is already in feedback stage', async () => {
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'block-feedback',
+      name: 'Focus work',
+      startTime: now - 5000,
+      elapsed: 1000,
+      mode: 'countup',
+      paused: true,
+      phase: 'feedback_in_progress',
+      actionEndedAt: now - 1000,
+      feedbackStartedAt: now - 1000,
+    });
+
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    const endButton = screen.getByRole('button', { name: '结束' });
+    expect(endButton).not.toBeDisabled();
+
+    fireEvent.click(endButton);
+
+    await screen.findByTestId('timeblock-feedback-textarea');
+    expect(markEndingMock).not.toHaveBeenCalled();
   });
 
   it('prevents duplicate submit while feedback is being submitted', async () => {
@@ -166,6 +237,9 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '结束' }));
     await screen.findByTestId('timeblock-feedback-textarea');
+    fireEvent.change(screen.getByTestId('timeblock-feedback-textarea'), {
+      target: { value: '提交中测试' },
+    });
 
     fireEvent.click(screen.getByTestId('timeblock-feedback-confirm'));
     fireEvent.click(screen.getByTestId('timeblock-feedback-confirm'));
