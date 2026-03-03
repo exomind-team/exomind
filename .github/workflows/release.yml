@@ -216,7 +216,7 @@ jobs:
 
       - name: Install dependencies (安装依赖)
         shell: powershell
-        timeout-minutes: 5
+        timeout-minutes: 10
         run: |
           bun install --frozen-lockfile --verbose
 
