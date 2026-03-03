@@ -204,11 +204,19 @@ jobs:
           "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Resolved app version: $appVersion"
 
+      - name: Clean stale node_modules (清理残留依赖，避免 bun 校验卡死)
+        shell: powershell
+        run: |
+          if (Test-Path node_modules) {
+            Write-Host "Removing stale node_modules from previous run..."
+            Remove-Item -Recurse -Force node_modules
+          }
+
       - name: Install dependencies (安装依赖)
         shell: powershell
         timeout-minutes: 10
         run: |
-          bun install --frozen-lockfile --verbose
+          bun install --frozen-lockfile
 
       # ─── Android build ──────────────────────────────────────
 
