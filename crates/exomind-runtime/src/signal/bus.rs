@@ -38,23 +38,26 @@ impl SignalBus {
         let matched = route_table.match_routes(&event.topic);
         let now = chrono::Utc::now().to_rfc3339();
 
+        // Broadcast once to all SSE subscribers (not per-route).
+        let (broadcast_status, broadcast_reason) = match self.sender.send(event.clone()) {
+            Ok(_) => (DeliveryStatus::Sent, None),
+            Err(_) => (
+                DeliveryStatus::Failed,
+                Some("no active receivers".to_string()),
+            ),
+        };
+
+        // Record a DeliveryRecord for each matched route (routing is logical,
+        // actual delivery filtering happens at the SSE stream handler).
         let mut records = Vec::with_capacity(matched.len());
 
         for route in &matched {
-            let (status, reason) = match self.sender.send(event.clone()) {
-                Ok(_) => (DeliveryStatus::Sent, None),
-                Err(_) => (
-                    DeliveryStatus::Failed,
-                    Some("no active receivers".to_string()),
-                ),
-            };
-
             let record = DeliveryRecord {
                 event_id: event.id.clone(),
                 route_id: route.id.clone(),
                 target_ref: route.target_ref.clone(),
-                status,
-                reason,
+                status: broadcast_status.clone(),
+                reason: broadcast_reason.clone(),
                 started_at: now.clone(),
                 finished_at: chrono::Utc::now().to_rfc3339(),
             };

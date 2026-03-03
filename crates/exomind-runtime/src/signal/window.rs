@@ -43,7 +43,8 @@ impl WindowCache {
 
     /// Return all events after the given event_id (exclusive).
     /// Used for SSE Last-Event-ID replay.
-    /// Returns empty vec if event_id not found in buffer.
+    /// If event_id was evicted from the buffer, returns all cached events
+    /// as a best-effort fallback (client may have missed some).
     pub fn since(&self, event_id: &str) -> Vec<SignalEvent> {
         let events = match self.events.read() {
             Ok(e) => e,
@@ -54,7 +55,8 @@ impl WindowCache {
         let pos = events.iter().position(|e| e.id == event_id);
         match pos {
             Some(idx) => events.iter().skip(idx + 1).cloned().collect(),
-            None => Vec::new(),
+            // ID not found (evicted or unknown): return all cached events as fallback.
+            None => events.iter().cloned().collect(),
         }
     }
 
@@ -136,12 +138,16 @@ mod tests {
     }
 
     #[test]
-    fn since_returns_empty_for_unknown_id() {
+    fn since_returns_all_for_unknown_id() {
         let cache = WindowCache::new();
         cache.push(make_event("e1", "a"));
+        cache.push(make_event("e2", "b"));
 
+        // Unknown ID → fallback to all cached events.
         let after = cache.since("unknown");
-        assert!(after.is_empty());
+        assert_eq!(after.len(), 2);
+        assert_eq!(after[0].id, "e1");
+        assert_eq!(after[1].id, "e2");
     }
 
     #[test]

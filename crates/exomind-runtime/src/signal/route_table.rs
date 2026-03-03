@@ -68,10 +68,12 @@ impl RouteTable {
     /// Add a new route and persist.
     pub fn add(&self, route: SignalRoute) {
         let topic = route.topic.clone();
-        if let Ok(mut map) = self.routes.write() {
-            map.entry(topic).or_default().push(route);
-            self.persist_locked(&map);
-        }
+        let mut map = match self.routes.write() {
+            Ok(m) => m,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        map.entry(topic).or_default().push(route);
+        self.persist_locked(&map);
     }
 
     /// Get all routes across all topics.
