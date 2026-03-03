@@ -24,6 +24,11 @@ permissions:
 
 env:
   RUST_TOOLCHAIN: stable
+  # Self-hosted runner 国内网络代理（bun install / cargo fetch 等）
+  HTTP_PROXY: http://127.0.0.1:7890
+  HTTPS_PROXY: http://127.0.0.1:7890
+  ALL_PROXY: http://127.0.0.1:7890
+  NO_PROXY: localhost,127.0.0.1
 
 jobs:
   build-windows:
@@ -54,20 +59,26 @@ jobs:
       - name: Ensure local Bun is available (确保本机 Bun 可用)
         shell: powershell
         run: |
-          Write-Host "Install Bun via npm to enforce native Windows binary (通过 npm 强制使用 Windows 原生 Bun)..."
-          npm install -g bun
-          $npmPrefix = (npm config get prefix).Trim()
-          if (-not $npmPrefix) {
-            throw "npm prefix is empty; cannot locate global bun install path."
-          }
-          $env:Path = "$npmPrefix;$env:Path"
-          "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # 优先检测本机已安装的 bun（避免每次 npm install -g）
           $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
-          if (-not $bunCmd) {
-            throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
-          }
-          if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
-            throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+          if ($bunCmd -and ($bunCmd.Source -notmatch '(?i)wsl|\\ubuntu\\')) {
+            Write-Host "Found existing Bun: $($bunCmd.Source)"
+          } else {
+            Write-Host "Bun not found or is WSL version, installing via npm..."
+            npm install -g bun
+            $npmPrefix = (npm config get prefix).Trim()
+            if (-not $npmPrefix) {
+              throw "npm prefix is empty; cannot locate global bun install path."
+            }
+            $env:Path = "$npmPrefix;$env:Path"
+            "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+            if (-not $bunCmd) {
+              throw "Bun is unavailable after npm installation."
+            }
+            if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+              throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+            }
           }
           Write-Host "Using Bun from: $($bunCmd.Source)"
           bun --version
@@ -181,8 +192,19 @@ jobs:
           "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Resolved app version: $appVersion"
 
+      - name: Cache bun dependencies (缓存 bun 依赖)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: bun-windows-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-windows-
+
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
+        timeout-minutes: 5
 
       - name: Build Windows NSIS installer (构建 NSIS 安装包)
         run: bun tauri build --bundles nsis
@@ -442,20 +464,26 @@ jobs:
       - name: Ensure local Bun is available (确保本机 Bun 可用)
         shell: powershell
         run: |
-          Write-Host "Install Bun via npm to enforce native Windows binary (通过 npm 强制使用 Windows 原生 Bun)..."
-          npm install -g bun
-          $npmPrefix = (npm config get prefix).Trim()
-          if (-not $npmPrefix) {
-            throw "npm prefix is empty; cannot locate global bun install path."
-          }
-          $env:Path = "$npmPrefix;$env:Path"
-          "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+          # 优先检测本机已安装的 bun（避免每次 npm install -g）
           $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
-          if (-not $bunCmd) {
-            throw "Bun is unavailable after npm installation. Please ensure bun is installed and on PATH."
-          }
-          if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
-            throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+          if ($bunCmd -and ($bunCmd.Source -notmatch '(?i)wsl|\\ubuntu\\')) {
+            Write-Host "Found existing Bun: $($bunCmd.Source)"
+          } else {
+            Write-Host "Bun not found or is WSL version, installing via npm..."
+            npm install -g bun
+            $npmPrefix = (npm config get prefix).Trim()
+            if (-not $npmPrefix) {
+              throw "npm prefix is empty; cannot locate global bun install path."
+            }
+            $env:Path = "$npmPrefix;$env:Path"
+            "$npmPrefix" | Out-File -FilePath $env:GITHUB_PATH -Encoding utf8 -Append
+            $bunCmd = Get-Command bun -ErrorAction SilentlyContinue
+            if (-not $bunCmd) {
+              throw "Bun is unavailable after npm installation."
+            }
+            if ($bunCmd.Source -match '(?i)wsl|\\ubuntu\\') {
+              throw "Detected WSL bun path: $($bunCmd.Source). Please use native Windows Bun."
+            }
           }
           Write-Host "Using Bun from: $($bunCmd.Source)"
           bun --version
@@ -585,8 +613,19 @@ jobs:
           "APP_VERSION=$appVersion" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
           Write-Host "Resolved app version: $appVersion"
 
+      - name: Cache bun dependencies (缓存 bun 依赖)
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+          key: bun-windows-${{ hashFiles('bun.lock') }}
+          restore-keys: |
+            bun-windows-
+
       - name: Install dependencies
-        run: bun install
+        run: bun install --frozen-lockfile
+        timeout-minutes: 5
 
       - name: Init Android
         run: bun tauri android init
@@ -629,10 +668,6 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
-          HTTP_PROXY: http://127.0.0.1:7890
-          HTTPS_PROXY: http://127.0.0.1:7890
-          ALL_PROXY: http://127.0.0.1:7890
-          NO_PROXY: localhost,127.0.0.1
           # Stabilize Kotlin/Gradle on Windows runners (稳定 Windows 上 Kotlin/Gradle 构建)
           GRADLE_OPTS: -Dorg.gradle.daemon=false -Dkotlin.compiler.execution.strategy=in-process -Dkotlin.incremental=false -Dhttp.proxyHost=127.0.0.1 -Dhttp.proxyPort=7890 -Dhttps.proxyHost=127.0.0.1 -Dhttps.proxyPort=7890
 
