@@ -4,6 +4,7 @@ import { appRouter } from "@/routes";
 import { ThemeController } from "@/components/ThemeController";
 import { Toaster } from "@/components/ui/toaster";
 import { UpdateToast } from "@/ui/components/UpdateToast";
+import { TimeBlockSyncCoordinator } from "@/ui/app/components/TimeBlockSyncCoordinator";
 import {
   initUpdateChecker,
   destroyUpdateChecker,
@@ -19,6 +20,7 @@ function App() {
   return (
     <>
       <ThemeController />
+      <TimeBlockSyncCoordinator />
       <RouterProvider router={appRouter} />
       <Toaster />
       <UpdateToast />
