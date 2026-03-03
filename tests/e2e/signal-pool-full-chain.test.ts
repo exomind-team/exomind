@@ -20,7 +20,7 @@ const RT_BASE_URL = process.env.EXOMIND_RT_URL ?? 'http://127.0.0.1:1949';
 
 test.describe('Signal Pool Full Chain', () => {
   test.skip(
-    !process.env.EXOMIND_RT_URL && !process.env.CI,
+    !process.env.EXOMIND_RT_URL,
     'Skipped: requires running exomind-rt (set EXOMIND_RT_URL)',
   );
 
@@ -104,7 +104,7 @@ test.describe('Signal Pool Full Chain', () => {
   });
 
   test('route table contains innate routes', async ({ request }) => {
-    const res = await request.get(`${RT_BASE_URL}/signals/routes`);
+    const res = await request.get(`${RT_BASE_URL}/signal-routes`);
     expect(res.ok()).toBeTruthy();
 
     const routes = await res.json();

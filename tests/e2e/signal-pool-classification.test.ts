@@ -19,7 +19,7 @@ const RT_BASE_URL = process.env.EXOMIND_RT_URL ?? 'http://127.0.0.1:1949';
 
 test.describe('Signal Pool Classification', () => {
   test.skip(
-    !process.env.EXOMIND_RT_URL && !process.env.CI,
+    !process.env.EXOMIND_RT_URL,
     'Skipped: requires running exomind-rt (set EXOMIND_RT_URL)',
   );
 
