@@ -1,3 +1,4 @@
+pub mod actors;
 pub mod bus;
 pub mod journal;
 pub mod route_table;
