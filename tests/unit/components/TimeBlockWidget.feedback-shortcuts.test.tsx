@@ -122,4 +122,54 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
     expect(endBlockMock).not.toHaveBeenCalled();
   });
+
+  it('keeps feedback dialog open on Escape and hides close button', async () => {
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '结束' }));
+    await screen.findByTestId('timeblock-feedback-textarea');
+
+    fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+
+    expect(screen.getByTestId('timeblock-feedback-textarea')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+  });
+
+  it('supports skip-feedback path and ends block without note', async () => {
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '结束' }));
+    await screen.findByTestId('timeblock-feedback-textarea');
+
+    fireEvent.click(screen.getByTestId('timeblock-feedback-skip'));
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith(undefined);
+    });
+  });
+
+  it('prevents duplicate submit while feedback is being submitted', async () => {
+    endBlockMock.mockImplementation(() => new Promise(() => {}));
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '结束' }));
+    await screen.findByTestId('timeblock-feedback-textarea');
+
+    fireEvent.click(screen.getByTestId('timeblock-feedback-confirm'));
+    fireEvent.click(screen.getByTestId('timeblock-feedback-confirm'));
+
+    expect(endBlockMock).toHaveBeenCalledTimes(1);
+  });
 });

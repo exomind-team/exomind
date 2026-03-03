@@ -80,6 +80,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private activeSyncRemoteUrl: string | null = null;
   private unsubscribeStorageListener: (() => void) | null = null;
   private lastAcceptedBlock: ActiveBlockData | null = null;
+  private lastCanonicalWriteBackSignature: string | null = null;
   private readonly actorId = createUuidV4();
 
   constructor(env?: ExoMindEnvironment) {
@@ -473,6 +474,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
 
     this.activeSyncRemoteUrl = remoteUrl;
+    await this.seedAcceptedBlockFromStorage();
     await this.getActiveStorage().syncToRemote(remoteUrl);
   }
 
@@ -527,9 +529,8 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       const normalized = this.normalizeActiveBlock(block);
       const preferred = this.pickPreferredBlock(this.lastAcceptedBlock, normalized);
       if (!this.isSameBlock(preferred, normalized)) {
-        if (this.lastAcceptedBlock && this.lastAcceptedBlock.startId === normalized.startId) {
-          void this.saveActiveBlock(this.lastAcceptedBlock);
-        }
+        this.rememberAcceptedBlock(preferred);
+        void this.persistCanonicalWriteBack(preferred);
         return;
       }
 
@@ -607,6 +608,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.activeBlockStorage = getActiveBlockStorage(nextUserId);
     this.activeStorageUserId = nextUserId;
     this.lastAcceptedBlock = null;
+    this.lastCanonicalWriteBackSignature = null;
     this.attachStorageListener();
 
     if (previousStorage && previousStorage !== this.activeBlockStorage) {
@@ -868,6 +870,61 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private isFeedbackInProgress(block: ActiveBlockData): boolean {
     return this.resolvePhase(block) === 'feedback_in_progress' && !Boolean(block.feedbackSubmittedAt);
+  }
+
+  private async seedAcceptedBlockFromStorage(): Promise<void> {
+    if (this.useLegacyEnvStorage) {
+      return;
+    }
+
+    const storage = this.getActiveStorage();
+    const raw = await storage.loadActiveBlock();
+    if (!raw) {
+      return;
+    }
+
+    const normalized = this.normalizeActiveBlock(raw);
+    if (this.shouldPersistCanonicalization(raw, normalized)) {
+      await this.saveActiveBlock(normalized);
+    }
+    this.rememberAcceptedBlock(normalized);
+  }
+
+  private async persistCanonicalWriteBack(block: ActiveBlockData): Promise<void> {
+    const signature = this.getBlockSignature(block);
+    if (signature === this.lastCanonicalWriteBackSignature) {
+      return;
+    }
+
+    this.lastCanonicalWriteBackSignature = signature;
+    try {
+      await this.saveActiveBlock(block);
+    } catch (error) {
+      this.lastCanonicalWriteBackSignature = null;
+      console.error('[TB-SVC] canonical write-back failed', error);
+    }
+  }
+
+  private getBlockSignature(block: ActiveBlockData): string {
+    return JSON.stringify({
+      startId: block.startId,
+      name: block.name,
+      mode: block.mode,
+      targetMinutes: block.targetMinutes,
+      startTime: block.startTime,
+      phase: block.phase,
+      version: block.version,
+      actorId: block.actorId,
+      lastTransitionAt: block.lastTransitionAt,
+      lastResumedAt: block.lastResumedAt,
+      accumulatedRunMs: block.accumulatedRunMs,
+      actionEndedAt: block.actionEndedAt,
+      feedbackStartedAt: block.feedbackStartedAt,
+      feedbackSubmittedAt: block.feedbackSubmittedAt,
+      pauseAccumulatedMs: block.pauseAccumulatedMs,
+      paused: block.paused,
+      pausedAt: block.pausedAt,
+    });
   }
 
   private rememberAcceptedBlock(block: ActiveBlockData): void {

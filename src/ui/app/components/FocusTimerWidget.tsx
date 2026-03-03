@@ -114,6 +114,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
   const currentUser = useSyncStore((state) => state.currentUser);
   const [syncServerUrl, setSyncServerUrl] = useState(() =>
@@ -181,6 +182,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       setTaskNameDraft('');
       setFeedbackOpen(false);
       setFeedbackInProgress(false);
+      setFeedbackSubmitting(false);
       countdownEndedRef.current = false;
       countdownOverrunRef.current = false;
       hardEndTriggeredRef.current = false;
@@ -198,6 +200,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setElapsedMs(Math.max(0, block.elapsed));
     const nextFeedbackInProgress = isFeedbackStage(block);
     setFeedbackInProgress(nextFeedbackInProgress);
+    setFeedbackSubmitting(false);
     setUiState('running');
     setRunningSubState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
     hardEndTriggeredRef.current = nextFeedbackInProgress;
@@ -466,13 +469,33 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setFeedbackOpen(true);
   }, [enqueueServiceMutation, feedbackInProgress, isRunningUi]);
 
-  const handleConfirmEnd = useCallback(async () => {
-    const feedbackText = feedback.trim() || undefined;
+  const handleSubmitEnd = useCallback(async (feedbackText?: string) => {
+    if (feedbackSubmitting) return;
+    setFeedbackSubmitting(true);
+
     const t0 = perfNow();
-    console.log('[TB-UI] click confirm-end -> endBlock start');
+    console.log('[TB-UI] click submit-end -> endBlock start');
+
+    try {
+      await mutationQueueRef.current;
+      await timeBlockServiceRef.current.endBlock(feedbackText);
+    } catch (error) {
+      console.error('[TB-UI] endBlock failed', error);
+      try {
+        const block = await timeBlockServiceRef.current.loadActiveBlock();
+        applyActiveBlock(block);
+      } catch (reloadError) {
+        console.error('[TB-UI] endBlock recover failed', reloadError);
+      }
+      setFeedbackSubmitting(false);
+      return;
+    }
+
+    console.log('[TB-UI] click submit-end -> endBlock done', { elapsedMs: Math.round(perfNow() - t0) });
     setFeedback('');
     setFeedbackOpen(false);
     setFeedbackInProgress(false);
+    setFeedbackSubmitting(false);
     setUiState('idle');
     setRunningSubState('running');
     setTaskName('');
@@ -482,11 +505,23 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     hardEndTriggeredRef.current = false;
     setCountdownOvertimeMs(0);
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
-    enqueueServiceMutation('endBlock', async () => {
-      await timeBlockServiceRef.current.endBlock(feedbackText);
-      console.log('[TB-UI] click confirm-end -> endBlock done', { elapsedMs: Math.round(perfNow() - t0) });
-    });
-  }, [countdownMinutes, enqueueServiceMutation, feedback, syncIdleElapsedFromMode, timerMode]);
+  }, [applyActiveBlock, countdownMinutes, feedbackSubmitting, syncIdleElapsedFromMode, timerMode]);
+
+  const handleConfirmEnd = useCallback(async () => {
+    const feedbackText = feedback.trim() || undefined;
+    await handleSubmitEnd(feedbackText);
+  }, [feedback, handleSubmitEnd]);
+
+  const handleSkipEnd = useCallback(async () => {
+    await handleSubmitEnd(undefined);
+  }, [handleSubmitEnd]);
+
+  const handleFeedbackDialogOpenChange = useCallback((nextOpen: boolean) => {
+    if (!nextOpen && feedbackInProgress) {
+      return;
+    }
+    setFeedbackOpen(nextOpen);
+  }, [feedbackInProgress]);
 
   const handleFeedbackKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -753,8 +788,12 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
         </section>
       )}
 
-      <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
-        <DialogContent>
+      <Dialog open={feedbackOpen} onOpenChange={handleFeedbackDialogOpenChange}>
+        <DialogContent
+          hideCloseButton
+          onEscapeKeyDown={(event) => event.preventDefault()}
+          onInteractOutside={(event) => event.preventDefault()}
+        >
           <DialogHeader>
             <DialogTitle>结束专注并记录反馈</DialogTitle>
             <DialogDescription>记录本次专注反馈后将结束当前时间块</DialogDescription>
@@ -770,13 +809,26 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
           <DialogFooter>
             <Button
               type="button"
+              variant="ghost"
+              data-testid="new-focus-feedback-skip"
+              disabled={feedbackSubmitting}
+              onClick={() => {
+                void handleSkipEnd();
+              }}
+              className="dark:text-[#D6D3D1] dark:hover:bg-[#3D3835]"
+            >
+              跳过反馈并结束
+            </Button>
+            <Button
+              type="button"
               data-testid="new-focus-feedback-confirm"
+              disabled={feedbackSubmitting}
               onClick={() => {
                 void handleConfirmEnd();
               }}
               className="dark:rounded-[10px] dark:bg-[#C75B3A] dark:text-white dark:hover:bg-[#B24D2F]"
             >
-              确认结束
+              {feedbackSubmitting ? '提交中...' : '确认结束'}
             </Button>
           </DialogFooter>
         </DialogContent>
