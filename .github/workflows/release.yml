@@ -24,11 +24,6 @@ permissions:
 
 env:
   RUST_TOOLCHAIN: stable
-  # Self-hosted runner 国内网络代理（bun install / cargo fetch 等）
-  HTTP_PROXY: http://127.0.0.1:7890
-  HTTPS_PROXY: http://127.0.0.1:7890
-  ALL_PROXY: http://127.0.0.1:7890
-  NO_PROXY: localhost,127.0.0.1
 
 jobs:
   build-windows:
