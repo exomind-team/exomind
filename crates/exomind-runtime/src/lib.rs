@@ -39,7 +39,7 @@ pub fn app(runtime_port: u16) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::DELETE, Method::OPTIONS])
+        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
         .allow_headers(Any);
 
     Router::new()
