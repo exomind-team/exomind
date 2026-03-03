@@ -25,8 +25,8 @@ let storageForUser: Record<string, {
   loadActiveBlock: typeof loadActiveBlockMock;
   saveActiveBlock: typeof saveActiveBlockMock;
   deleteActiveBlock: typeof deleteActiveBlockMock;
-  syncToRemote: typeof syncToRemoteMock;
-  stopSync: typeof stopSyncMock;
+  syncToRemote: (remoteUrl: string) => Promise<void> | void;
+  stopSync: () => Promise<void> | void;
   onBlockChange: (callback: (block: unknown, source: 'local' | 'sync') => void) => () => void;
 }> = {};
 
@@ -63,8 +63,8 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
           loadActiveBlock: loadActiveBlockMock,
           saveActiveBlock: saveActiveBlockMock,
           deleteActiveBlock: deleteActiveBlockMock,
-          syncToRemote: syncToRemoteMock,
-          stopSync: stopSyncMock,
+          syncToRemote: (remoteUrl: string) => syncToRemoteMock(id, remoteUrl),
+          stopSync: () => stopSyncMock(id),
           onBlockChange: (callback: (block: unknown, source: 'local' | 'sync') => void) => {
             listener = callback;
             return () => {
@@ -94,8 +94,8 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     await service.startSync(remoteUrl);
     await service.stopSync();
 
-    expect(syncToRemoteMock).toHaveBeenCalledWith(remoteUrl);
-    expect(stopSyncMock).toHaveBeenCalled();
+    expect(syncToRemoteMock).toHaveBeenCalledWith('test-user', remoteUrl);
+    expect(stopSyncMock).toHaveBeenCalledWith('test-user');
   });
 
   it('rolls back subscriber count when startSync fails so retry can re-attempt', async () => {
@@ -112,8 +112,8 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     await service.stopSync();
 
     expect(syncToRemoteMock).toHaveBeenCalledTimes(2);
-    expect(syncToRemoteMock).toHaveBeenNthCalledWith(1, remoteUrl);
-    expect(syncToRemoteMock).toHaveBeenNthCalledWith(2, remoteUrl);
+    expect(syncToRemoteMock).toHaveBeenNthCalledWith(1, 'test-user', remoteUrl);
+    expect(syncToRemoteMock).toHaveBeenNthCalledWith(2, 'test-user', remoteUrl);
     expect(stopSyncMock.mock.calls.length).toBe(stopSyncCallsBeforeStop + 1);
   });
 
@@ -126,6 +126,35 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     expect(getActiveBlockStorageMock).toHaveBeenCalledWith('local-user');
     expect(getActiveBlockStorageMock).toHaveBeenCalledWith('user-a');
     expect(getActiveBlockStorageMock).toHaveBeenCalledWith('user-b');
+  });
+
+  it('serializes old stopSync before starting new user sync to avoid dual-channel window', async () => {
+    const service = new TimeBlockServiceImpl();
+    const userAUrl = 'http://127.0.0.1:6984/user-a';
+    const userBUrl = 'http://127.0.0.1:6984/user-b';
+    let releaseUserAStop: (() => void) | null = null;
+
+    stopSyncMock.mockImplementation((userId: string) => {
+      if (userId !== 'user-a') {
+        return Promise.resolve();
+      }
+      return new Promise<void>((resolve) => {
+        releaseUserAStop = resolve;
+      });
+    });
+
+    await service.startSync(userAUrl);
+    syncToRemoteMock.mockClear();
+
+    const switchPromise = service.startSync(userBUrl);
+    await vi.waitFor(() => {
+      expect(stopSyncMock).toHaveBeenCalledWith('user-a');
+    });
+    expect(syncToRemoteMock).not.toHaveBeenCalledWith('user-b', userBUrl);
+
+    releaseUserAStop?.();
+    await switchPromise;
+    expect(syncToRemoteMock).toHaveBeenCalledWith('user-b', userBUrl);
   });
 
   it('notifies current snapshot when switching sync user to prevent stale UI state', async () => {
