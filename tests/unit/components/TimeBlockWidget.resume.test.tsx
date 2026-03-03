@@ -139,7 +139,7 @@ describe('TimeBlockWidget resume behavior', () => {
     });
   });
 
-  it('disables resume/end actions when block is in feedback stage', async () => {
+  it('keeps resume disabled but allows reopening feedback dialog in feedback stage', async () => {
     loadActiveBlockMock.mockResolvedValue({
       startId: 'block-feedback-stage',
       name: 'Feedback stage',
@@ -158,12 +158,13 @@ describe('TimeBlockWidget resume behavior', () => {
     const endButton = await screen.findByRole('button', { name: '结束' });
 
     expect(resumeButton).toBeDisabled();
-    expect(endButton).toBeDisabled();
+    expect(endButton).not.toBeDisabled();
 
     fireEvent.click(resumeButton);
     fireEvent.click(endButton);
 
     expect(resumeBlockMock).not.toHaveBeenCalled();
     expect(markEndingMock).not.toHaveBeenCalled();
+    await screen.findByTestId('timeblock-feedback-textarea');
   });
 });

@@ -63,6 +63,10 @@ export interface TimeBlockWidgetHandle {
   endDialog: () => void;
 }
 
+const SKIP_FEEDBACK_CONFIRM_SECONDS = 5;
+
+type SkipFeedbackConfirmState = 'idle' | 'cooldown' | 'armed';
+
 function isFeedbackStage(block: ActiveBlockData): boolean {
   if (block.feedbackSubmittedAt) {
     return false;
@@ -90,6 +94,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const [feedback, setFeedback] = useState('');
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<SkipFeedbackConfirmState>('idle');
+  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(SKIP_FEEDBACK_CONFIRM_SECONDS);
 
   // 倒计时结束动作（纯前端配置，不持久化）
   const [countdownEndSoundEnabled, setCountdownEndSoundEnabled] = useState(true);
@@ -109,6 +115,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const taskNameRef = useRef<HTMLTextAreaElement | null>(null);
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
+  const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Service
   const timeBlockService = getTimeBlockService();
@@ -117,6 +124,37 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const [syncServerUrl, setSyncServerUrl] = useState(() =>
     resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
   );
+
+  const clearSkipFeedbackConfirmInterval = useCallback(() => {
+    if (!skipFeedbackConfirmIntervalRef.current) {
+      return;
+    }
+    clearInterval(skipFeedbackConfirmIntervalRef.current);
+    skipFeedbackConfirmIntervalRef.current = null;
+  }, []);
+
+  const resetSkipFeedbackConfirm = useCallback(() => {
+    clearSkipFeedbackConfirmInterval();
+    setSkipFeedbackConfirmState('idle');
+    setSkipFeedbackCountdownSec(SKIP_FEEDBACK_CONFIRM_SECONDS);
+  }, [clearSkipFeedbackConfirmInterval]);
+
+  const startSkipFeedbackConfirmCooldown = useCallback(() => {
+    clearSkipFeedbackConfirmInterval();
+    setSkipFeedbackConfirmState('cooldown');
+    setSkipFeedbackCountdownSec(SKIP_FEEDBACK_CONFIRM_SECONDS);
+
+    skipFeedbackConfirmIntervalRef.current = setInterval(() => {
+      setSkipFeedbackCountdownSec((previousSeconds) => {
+        if (previousSeconds <= 1) {
+          clearSkipFeedbackConfirmInterval();
+          setSkipFeedbackConfirmState('armed');
+          return 0;
+        }
+        return previousSeconds - 1;
+      });
+    }, 1000);
+  }, [clearSkipFeedbackConfirmInterval]);
 
   const playCountdownEndSound = useCallback(async () => {
     if (!countdownEndSoundEnabled) return;
@@ -166,6 +204,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       setTimerState('idle');
       setFeedbackInProgress(false);
       setFeedbackSubmitting(false);
+      resetSkipFeedbackConfirm();
       setFeedbackOpen(false);
       setElapsed(timerMode === 'countdown' ? countdownMinutes * 60 * 1000 : 0);
       setTaskName('');
@@ -185,12 +224,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     const nextFeedbackInProgress = isFeedbackStage(block);
     setFeedbackInProgress(nextFeedbackInProgress);
     setFeedbackSubmitting(false);
+    resetSkipFeedbackConfirm();
     setTimerState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
     startTimeRef.current = block.startTime;
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     setCountdownOvertimeMs(0);
-  }, [countdownMinutes, timerMode, timerState]);
+  }, [countdownMinutes, resetSkipFeedbackConfirm, timerMode, timerState]);
 
   const enqueueServiceMutation = useCallback((
     label: string,
@@ -404,7 +444,10 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   // 点击按钮结束计时（显示反馈对话框）
   const handleEndDialog = async () => {
-    if (feedbackInProgress) return;
+    if (feedbackInProgress) {
+      setFeedbackOpen(true);
+      return;
+    }
     // 📌【2026-02-14 00:53:03】【人写】需要标记反馈
     setTimerState('ended'); // * 📌【2026-02-14 01:43:50】【人写】其中就包含了「时间块结束」的动作，会添加「时间块结束」事件
     setFeedbackInProgress(true);
@@ -414,9 +457,22 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   // 对话框后，带反馈结束时间块
   const handleEndBlock = async (feedbackText?: string) => {
     if (feedbackSubmitting) return;
+
+    const trimmedFeedback = feedbackText?.trim() ?? '';
+    if (trimmedFeedback.length === 0) {
+      if (skipFeedbackConfirmState === 'idle') {
+        startSkipFeedbackConfirmCooldown();
+        return;
+      }
+      if (skipFeedbackConfirmState === 'cooldown') {
+        return;
+      }
+    }
+
+    resetSkipFeedbackConfirm();
     setFeedbackSubmitting(true);
 
-    const normalizedFeedback = feedbackText?.trim() || undefined;
+    const normalizedFeedback = trimmedFeedback || undefined;
     try {
       await timeBlockService.endBlock(normalizedFeedback);
     } catch (error) {
@@ -505,11 +561,12 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   // 清理定时器
   useEffect(() => {
     return () => {
+      clearSkipFeedbackConfirmInterval();
       if (timerRef.current) {
         cancelAnimationFrame(timerRef.current);
       }
     };
-  }, []);
+  }, [clearSkipFeedbackConfirmInterval]);
 
   // 按钮状态
   const isIdle = timerState === 'idle';
@@ -522,6 +579,16 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const isCountdownWarning =
     timerMode === 'countdown'
     && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0));
+  const isEmptyFeedback = feedback.trim().length === 0;
+  const isSkipFeedbackCoolingDown = isEmptyFeedback && skipFeedbackConfirmState === 'cooldown';
+  const isEndActionDisabled = feedbackInProgress && feedbackOpen;
+  const feedbackConfirmLabel = feedbackSubmitting
+    ? '提交中...'
+    : (isEmptyFeedback && skipFeedbackConfirmState === 'cooldown')
+      ? `确认跳过反馈(${skipFeedbackCountdownSec}s)`
+      : (isEmptyFeedback && skipFeedbackConfirmState === 'armed')
+        ? '确认跳过反馈'
+        : '确认结束';
   const rootClassName = variant === 'new-mobile' ? 'border-y border-[#E8E3DE] bg-white/80' : 'border-b bg-muted/30';
 
   return (
@@ -593,7 +660,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   size="sm"
                   variant="outline"
                   onClick={handleEndDialog}
-                  disabled={feedbackInProgress}
+                  disabled={isEndActionDisabled}
                   className="h-10 gap-2 rounded-[24px] border-0 bg-[#FDECEB] px-6 text-sm font-medium text-[#C75B3A]"
                 >
                   <Square size={16} />
@@ -646,7 +713,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   size="sm"
                   variant="destructive"
                   onClick={handleEndDialog}
-                  disabled={feedbackInProgress}
+                  disabled={isEndActionDisabled}
                   className="gap-1"
                 >
                   <Square size={16} />
@@ -670,7 +737,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   size="sm"
                   variant="destructive"
                   onClick={handleEndDialog}
-                  disabled={feedbackInProgress}
+                  disabled={isEndActionDisabled}
                   className="gap-1"
                 >
                   <Square size={16} />
@@ -855,7 +922,10 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           <Textarea
             placeholder="身心状态如何？"
             value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
+            onChange={(e) => {
+              resetSkipFeedbackConfirm();
+              setFeedback(e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key !== 'Enter') return;
               if (e.shiftKey || e.ctrlKey) return;
@@ -869,25 +939,14 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           />
           <DialogFooter>
             <Button
-              variant="ghost"
-              size="sm"
-              data-testid="timeblock-feedback-skip"
-              disabled={feedbackSubmitting}
-              onClick={() => {
-                void handleEndBlock(undefined);
-              }}
-            >
-              跳过反馈并结束
-            </Button>
-            <Button
               size="sm"
               data-testid="timeblock-feedback-confirm"
-              disabled={feedbackSubmitting}
+              disabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
               onClick={() => {
                 void handleEndBlock(feedback);
               }}
             >
-              {feedbackSubmitting ? '提交中...' : '确认结束'}
+              {feedbackConfirmLabel}
             </Button>
           </DialogFooter>
         </DialogContent>
