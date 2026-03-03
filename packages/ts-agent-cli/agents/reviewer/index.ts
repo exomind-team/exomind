@@ -62,6 +62,14 @@ export interface TimeblockPayload {
   recentEvents: EventEntry[];
 }
 
+/** Build a clean env that allows nested Claude CLI invocations. */
+function cleanEnv(): NodeJS.ProcessEnv {
+  const env = { ...process.env };
+  // Remove markers that prevent nested Claude sessions
+  delete env.CLAUDECODE;
+  return env;
+}
+
 /**
  * Call Claude CLI to produce a structured review from the event log.
  */
@@ -77,6 +85,7 @@ function reviewWithClaude(events: EventEntry[]): ReviewResult | null {
         encoding: "utf-8",
         timeout: 120_000,
         stdio: ["pipe", "pipe", "pipe"],
+        env: cleanEnv(),
       },
     );
 
@@ -130,6 +139,7 @@ function reviewTimeblock(payload: TimeblockPayload): TimeblockReviewResult | nul
         encoding: "utf-8",
         timeout: 120_000,
         stdio: ["pipe", "pipe", "pipe"],
+        env: cleanEnv(),
       },
     );
 
