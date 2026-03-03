@@ -3,7 +3,7 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { SignalSender } from "@sse/signal-sender.js";
+import { SignalSender } from "../../src/sse/signal-sender.js";
 
 describe("SignalSender", () => {
   let sender: SignalSender;

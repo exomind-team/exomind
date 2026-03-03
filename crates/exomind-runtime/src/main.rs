@@ -1,4 +1,5 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
@@ -12,8 +13,18 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let listener = tokio::net::TcpListener::bind(bind_addr).await?;
     let local_addr = listener.local_addr()?;
 
+    let state = exomind_runtime::AppState::new(local_addr.port());
+
+    // Spawn in-process actors
+    let _task_actor = exomind_runtime::signal::actors::task_actor::spawn_task_actor(
+        Arc::clone(&state.signal_pool),
+    );
+    let _eventlog_actor = exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(
+        Arc::clone(&state.signal_pool),
+    );
+
     println!("exomind-rt listening on http://{local_addr}");
 
-    axum::serve(listener, exomind_runtime::app(local_addr.port())).await?;
+    axum::serve(listener, exomind_runtime::app_with_state(state)).await?;
     Ok(())
 }
