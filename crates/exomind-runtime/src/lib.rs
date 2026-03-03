@@ -6,8 +6,11 @@ use std::sync::Arc;
 use thiserror::Error;
 use tower_http::cors::{Any, CorsLayer};
 
+use signal::SignalPool;
+
 pub mod agent;
 pub mod routes;
+pub mod signal;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 
@@ -50,6 +53,7 @@ pub fn app(runtime_port: u16) -> Router {
 pub struct AppState {
     pub port: u16,
     pub registry: agent::AgentRegistry,
+    pub signal_pool: Arc<SignalPool>,
 }
 
 impl AppState {
@@ -57,7 +61,14 @@ impl AppState {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
         registry.register(Arc::new(agent::echo::EchoAgent::new()));
-        Self { port, registry }
+
+        let signal_pool = Arc::new(SignalPool::new(Some("config/signal-routes.default.json")));
+
+        Self {
+            port,
+            registry,
+            signal_pool,
+        }
     }
 }
 
@@ -466,6 +477,7 @@ mod tests {
         let router = routes::router().with_state(AppState {
             port: 3009,
             registry: registry.clone(),
+            signal_pool: Arc::new(signal::SignalPool::new(None)),
         });
 
         let list_response = router
@@ -572,6 +584,7 @@ mod tests {
         let router = routes::router().with_state(AppState {
             port: 3010,
             registry,
+            signal_pool: Arc::new(signal::SignalPool::new(None)),
         });
 
         let get_response = router
@@ -607,6 +620,7 @@ mod tests {
         let router = routes::router().with_state(AppState {
             port: 3003,
             registry: registry.clone(),
+            signal_pool: Arc::new(signal::SignalPool::new(None)),
         });
 
         let first_response = router
