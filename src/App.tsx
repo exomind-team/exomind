@@ -9,6 +9,7 @@ import {
   initUpdateChecker,
   destroyUpdateChecker,
 } from "@/ui/stores/update-store";
+import { useSignalStream } from "@/ui/hooks/useSignalStream";
 import "./App.css";
 
 function App() {
@@ -16,6 +17,9 @@ function App() {
     initUpdateChecker();
     return () => destroyUpdateChecker();
   }, []);
+
+  // 连接 RT SSE 信号流，接收 Agent 反馈
+  useSignalStream();
 
   return (
     <>
