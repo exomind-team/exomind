@@ -83,7 +83,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
         id: 'runtime-host-1',
         name: 'Hope Desktop',
         host: '127.0.0.1',
-        port: 1949,
+        port: 4077,
         status: 'unknown',
         createdAt: '2026-02-27T10:00:00.000Z',
         updatedAt: '2026-02-27T10:00:00.000Z',
@@ -136,18 +136,18 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: false,
       host: '127.0.0.1',
-      port: 1949,
+      port: 4077,
     });
     runtimeControlMocks.startRuntime.mockResolvedValue({
       running: true,
       host: '127.0.0.1',
-      port: 1949,
+      port: 4077,
       pid: 9527,
     });
     runtimeControlMocks.stopRuntime.mockResolvedValue({
       running: false,
       host: '127.0.0.1',
-      port: 1949,
+      port: 4077,
     });
   });
 
@@ -203,7 +203,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     await waitFor(() => {
       expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
         host: '127.0.0.1',
-        port: 1949,
+        port: 4077,
       });
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
     });
