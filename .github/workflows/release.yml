@@ -498,15 +498,7 @@ jobs:
 
       # ─── Windows build ──────────────────────────────────────
 
-      - name: Build Windows NSIS installer (构建 NSIS 安装包)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        run: bun tauri build --bundles nsis
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
-          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
-
-      - name: Build Windows MSI installer (构建 MSI 安装包，复用已编译的 Rust)
+      - name: Build Windows MSI installer + EXE binary (构建 Windows MSI + EXE)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         run: bun tauri build --bundles msi
         continue-on-error: true
@@ -536,19 +528,11 @@ jobs:
 
       - name: Upload Windows EXE Artifact (上传 EXE)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        id: upload_exe
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/nsis/
-        continue-on-error: true
-
-      - name: Retry Upload Windows EXE Artifact
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.upload_exe.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-exe-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/nsis/
+          path: src-tauri/target/release/exomind.exe
+          if-no-files-found: error
 
       - name: Upload Windows MSI Artifact (上传 MSI)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
@@ -559,12 +543,9 @@ jobs:
           if-no-files-found: ignore
 
   build-macos:
-    # PAUSED: macOS runner costs 10x, 额度不足暂停。手动 dispatch 可选择性恢复。
+    # release only: 非 release 不运行 macOS job（发布专用）
     if: |
-      (
-        github.event_name == 'workflow_dispatch' &&
-        (github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'macos')
-      )
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -645,12 +626,9 @@ jobs:
           if-no-files-found: ignore
 
   build-linux:
-    # PAUSED: Linux runner costs 1x, 额度不足暂停。手动 dispatch 可选择性恢复。
+    # release only: 非 release 不运行 Linux job（发布专用）
     if: |
-      (
-        github.event_name == 'workflow_dispatch' &&
-        (github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'linux')
-      )
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -829,7 +807,22 @@ jobs:
             echo "::error::Missing Windows EXE artifact."
             exit 1
           fi
-          cp "${exe_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
+          app_exe=""
+          for exe in "${exe_files[@]}"; do
+            lower_name="$(basename "$exe" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$lower_name" == *"exomind-rt"* ]]; then
+              continue
+            fi
+            app_exe="$exe"
+            if [[ "$lower_name" == "exomind.exe" || "$lower_name" == *"setup"* || "$lower_name" == *"installer"* ]]; then
+              break
+            fi
+          done
+          if [[ -z "$app_exe" ]]; then
+            echo "::error::Cannot find non-runtime Windows EXE artifact."
+            exit 1
+          fi
+          cp "$app_exe" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
 
           msi_files=("$source_dir"/**/*.msi)
           if (( ${#msi_files[@]} > 0 )); then
@@ -983,8 +976,19 @@ jobs:
 
           # Find and copy Windows EXE
           exe_files=("$src"/**/*.exe)
-          if (( ${#exe_files[@]} > 0 )); then
-            cp "${exe_files[0]}" "$dest/ExoMind-${version}-windows-x64-setup.exe"
+          app_exe=""
+          for exe in "${exe_files[@]}"; do
+            file_name="$(basename "$exe" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$file_name" == *"exomind-rt"* ]]; then
+              continue
+            fi
+            app_exe="$exe"
+            if [[ "$file_name" == "exomind.exe" || "$file_name" == *"setup"* || "$file_name" == *"installer"* ]]; then
+              break
+            fi
+          done
+          if [[ -n "$app_exe" ]]; then
+            cp "$app_exe" "$dest/ExoMind-${version}-windows-x64-setup.exe"
           fi
 
           # Find and copy Windows MSI
