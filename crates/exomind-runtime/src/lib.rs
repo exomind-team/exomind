@@ -80,7 +80,7 @@ impl Default for RuntimeStartOptions {
             spawn_ts_agents,
             ts_agent_command: env::var("EXOMIND_RT_AGENT_CMD")
                 .unwrap_or_else(|_| "bun".to_string()),
-            ts_agent_workdir: None,
+            ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
         }
     }
 }
@@ -163,8 +163,16 @@ impl RuntimeHandle {
             .unwrap_or(false)
     }
 
-    /// Publish a signal directly via in-process SignalPool（进程内直发）.
-    pub fn publish_signal(&self, request: RuntimePublishRequest) -> String {
+    /// Clone underlying SignalPool Arc（克隆底层 SignalPool 引用）.
+    pub fn clone_signal_pool(&self) -> Arc<SignalPool> {
+        Arc::clone(&self.signal_pool)
+    }
+
+    /// Publish via a provided SignalPool（在指定 SignalPool 上发布）.
+    pub fn publish_signal_to_pool(
+        signal_pool: &SignalPool,
+        request: RuntimePublishRequest,
+    ) -> String {
         let event_id = uuid::Uuid::new_v4().to_string();
         let event = signal::types::SignalEvent {
             schema_version: 1,
@@ -179,8 +187,13 @@ impl RuntimeHandle {
             trace_id: request.trace_id,
             payload: request.payload,
         };
-        self.signal_pool.publish(event);
+        signal_pool.publish(event);
         event_id
+    }
+
+    /// Publish a signal directly via in-process SignalPool（进程内直发）.
+    pub fn publish_signal(&self, request: RuntimePublishRequest) -> String {
+        Self::publish_signal_to_pool(&self.signal_pool, request)
     }
 
     /// Graceful shutdown（优雅停止）.
@@ -285,13 +298,13 @@ pub async fn start_with_options(
         actor_tasks.push(signal::actors::task_actor::spawn_task_actor(Arc::clone(
             &state.signal_pool,
         )));
-        actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(Arc::clone(
-            &state.signal_pool,
-        )));
+        actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(
+            Arc::clone(&state.signal_pool),
+        ));
     }
 
     let ts_agents = if options.spawn_ts_agents {
-        spawn_default_ts_agents(local_addr.port(), &options).await
+        spawn_default_ts_agents(local_addr.port(), &options)
     } else {
         Vec::new()
     };
@@ -316,7 +329,7 @@ pub async fn start_with_options(
     })
 }
 
-async fn spawn_default_ts_agents(port: u16, options: &RuntimeStartOptions) -> Vec<TsAgentProcess> {
+fn spawn_default_ts_agents(port: u16, options: &RuntimeStartOptions) -> Vec<TsAgentProcess> {
     const REVIEWER_ENTRY: &str = "packages/ts-agent-cli/agents/reviewer/index.ts";
     const CLASSIFIER_ENTRY: &str = "packages/ts-agent-cli/agents/classifier/index.ts";
     let project_root = resolve_project_root(options);
@@ -349,6 +362,10 @@ fn resolve_project_root(options: &RuntimeStartOptions) -> PathBuf {
         return path.clone();
     }
 
+    if let Ok(cwd) = env::current_dir() {
+        return cwd;
+    }
+
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
         .parent()
@@ -372,7 +389,7 @@ fn try_spawn_ts_agent(
         .env("EXOMIND_RT_URL", rt_url)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null());
+        .stderr(Stdio::inherit());
 
     match command.spawn() {
         Ok(child) => Some(TsAgentProcess {
@@ -396,7 +413,13 @@ pub fn app_with_state(state: AppState) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers(Any);
 
     Router::new()

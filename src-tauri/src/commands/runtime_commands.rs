@@ -8,6 +8,7 @@ use exomind_runtime::{
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::State;
+use tokio::time::{sleep, Duration};
 
 struct RuntimeInner {
     handle: Option<RuntimeHandle>,
@@ -148,10 +149,13 @@ pub async fn ensure_runtime_started(
         Ok(handle) => handle,
         Err(error) => {
             // Handle startup race gracefully（处理并发启动竞争）.
-            if let Ok(status) = runtime_status_snapshot(state.clone()) {
-                if status.running {
-                    return Ok(status);
+            for _ in 0..10 {
+                if let Ok(status) = runtime_status_snapshot(state.clone()) {
+                    if status.running {
+                        return Ok(status);
+                    }
                 }
+                sleep(Duration::from_millis(25)).await;
             }
 
             let message = format!("failed to start embedded runtime: {error}");
@@ -175,11 +179,7 @@ pub async fn ensure_runtime_started(
 pub async fn ensure_runtime_stopped(
     state: Arc<RuntimeProcessState>,
 ) -> Result<RuntimeServiceStatus, String> {
-    let mut handle = {
-        let mut inner = lock_or_error(&state)?;
-        inner.started_at = None;
-        inner.handle.take()
-    };
+    let mut handle = { lock_or_error(&state)?.handle.take() };
 
     if let Some(runtime) = handle.as_mut() {
         runtime
@@ -243,22 +243,28 @@ pub fn signal_publish_fast(
     state: State<'_, Arc<RuntimeProcessState>>,
     request: SignalPublishFastRequest,
 ) -> Result<SignalPublishFastResponse, String> {
-    let inner = lock_or_error(state.inner())?;
-    let handle = inner
-        .handle
-        .as_ref()
-        .ok_or_else(|| "embedded runtime not running".to_string())?;
-    if !handle.is_running() {
-        return Err("embedded runtime is not running".to_string());
-    }
+    let signal_pool = {
+        let inner = lock_or_error(state.inner())?;
+        let handle = inner
+            .handle
+            .as_ref()
+            .ok_or_else(|| "embedded runtime not running".to_string())?;
+        if !handle.is_running() {
+            return Err("embedded runtime is not running".to_string());
+        }
+        handle.clone_signal_pool()
+    };
 
-    let event_id = handle.publish_signal(RuntimePublishRequest {
-        topic: request.topic,
-        source: request.source,
-        payload: request.payload,
-        trace_id: request.trace_id,
-        origin_host_id: request.origin_host_id,
-    });
+    let event_id = RuntimeHandle::publish_signal_to_pool(
+        &signal_pool,
+        RuntimePublishRequest {
+            topic: request.topic,
+            source: request.source,
+            payload: request.payload,
+            trace_id: request.trace_id,
+            origin_host_id: request.origin_host_id,
+        },
+    );
 
     Ok(SignalPublishFastResponse {
         accepted: true,
