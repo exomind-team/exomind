@@ -1,24 +1,47 @@
-# [GH#245f] Follow-up 修复评审结果（人工 Review）
+# [GH#245f] M2 Sub-Agent 评审结果（Superpowers Code Review）
 
-评审范围：`origin/vk/245f-m2-agent-hub-rea..HEAD`  
-重点：暗色模式拓扑可见性、MiniMap 关闭、无 host 回退链路、1950 端口可用性
+评审方式：
+- 子代理（Sub-agent）: Claude Sonnet（superpowers code-reviewer）
+- 评审范围（Review range）: `4008cafaa99f1dea079ae805105eafe6672aaef4..5c9e0c6c09a56304aa427a6a911a932c08ef9c41`
+- 评审重点：Signal routes 列表、React Flow 拓扑、暗色适配、runtime/mock fallback、测试覆盖
 
-## Findings（按严重度）
+## Strengths（优点）
 
-### 1. Minor: 直连回退会增加一次轮询期探测流量
-- severity: Minor
-- files:
-  - `src/ui/app/pages/AgentsPage.tsx`
-- detail:
-  - 当没有已保存 runtime host 且未开启 mock 时，会按候选端口探测 `/signal-routes`；
-  - 当前轮询周期 8s，探测请求会重复发生（直到用户配置 host 或端口可达）。
-- risk:
-  - 开发环境网络日志噪音增加，但不影响功能正确性。
-- recommendation:
-  - 后续可增加“探测冷却窗口（cooldown）”或“成功后持久化 host”减少重复探测。
+1. 图构建逻辑纯函数化清晰：`buildSignalGraph` / `buildSignalRouteRows` 与 UI 解耦，便于测试与复用。  
+2. 回退链路完整：`useMockData -> configured host -> direct runtime candidates`，无 runtime 时仍有可视化结果。  
+3. 测试覆盖全面：单测覆盖聚合逻辑边界，E2E 覆盖桌面/移动/暗色/mock fallback/直连 fallback。  
+4. 旧拓扑硬编码清理干净：静态布局常量与废弃节点绘制逻辑已移除。  
+5. 异步安全处理到位：关键异步刷新流程包含 `isDisposed` 守卫，避免卸载后 setState。  
 
-## 结论
+## Issues（问题）
 
-- Blocking issues: 无
-- Functional result: 满足本轮反馈项（暗色适配、MiniMap 关闭、空白回退修复）
-- Merge readiness: 代码可用，但按需求保持 Draft，待人工复测通过后再转 Ready
+### Important
+
+1. 暗色模式切换响应性不足（Theme switching not reactive）
+- 文件：`src/ui/app/pages/AgentsPage.tsx`
+- 问题：`isDarkMode` 通过 `documentElement.classList.contains('dark')` 快照读取，主题切换后颜色可能不立即更新。
+- 建议：接入现有主题状态（theme store/context）或监听 class 变化触发重渲染。
+
+2. `RuntimeClient` 生命周期管理可加强（Client lifecycle）
+- 文件：`src/ui/app/pages/AgentsPage.tsx`
+- 问题：`tryLoadRoutesFromHost` 每次都创建 `new RuntimeClient()`；若内部有长连接/计时器，存在资源浪费风险。
+- 建议：确认 `RuntimeClient` 是否无状态；若非无状态，改为组件级单例并在卸载时清理。
+
+3. 直连端口探测串行执行（Sequential probing latency）
+- 文件：`src/ui/app/pages/AgentsPage.tsx`
+- 问题：候选 host 串行探测在超时场景下会拉长首屏等待。
+- 建议：并行探测（`Promise.allSettled` / `Promise.race`）并加短超时（如 1~1.5s）。
+
+### Minor
+
+1. 测试路由样例在多个文件重复，建议提取到共享 fixture。  
+2. `@xyflow/react` mock 在两个单测文件中重复，建议统一 mock 模块。  
+3. 个别测试缩进风格不一致，可顺手格式化。  
+4. `proOptions={{ hideAttribution: true }}` 需确认许可合规（License compliance）。  
+5. 节点色值常量有分散定义，可集中到统一常量表。  
+
+## Assessment（结论）
+
+- Blocking issues: 无（None）
+- Merge readiness: **Yes, with follow-up fixes（可合并，建议跟进修复）**
+- 评审结论：本次 M2 目标已满足，建议保留后续 follow-up issue 跟进上述 Important 项（优先 I-1、I-3）。
