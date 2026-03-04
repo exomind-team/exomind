@@ -27,7 +27,6 @@ import {
   Controls,
   Handle,
   MarkerType,
-  MiniMap,
   Position,
   type Edge as FlowEdge,
   type Node as FlowNode,
@@ -35,6 +34,7 @@ import {
   useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { getUseMockDataEnabled } from '@/config/mock-data';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import type { SignalRoute } from '@/lib/types/signal-pool';
@@ -43,6 +43,7 @@ import type {
   AgentHubListItem,
   AgentHubListSection,
   AgentHubNodeStatus,
+  RuntimeHostRecord,
   AgentHubViewMode,
   RuntimeServiceStatus,
 } from '@/lib/types/agent-hub';
@@ -51,6 +52,7 @@ import {
   type RuntimeAggregatedAgent,
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
+import { RuntimeClient } from '@/services/runtime-client';
 import {
   buildSignalGraph,
   buildSignalRouteRows,
@@ -86,6 +88,87 @@ const ADD_NODE_OPTIONS: AddNodeOption[] = [
     title: '添加设备',
     description: '连接 exomind-rt 主机并聚合 Agent 列表',
     tintColor: '#0D9488',
+  },
+];
+
+const DIRECT_RUNTIME_PORT_CANDIDATES = [1950, 1949] as const;
+const DIRECT_RUNTIME_PORT_STORAGE_KEY = 'exomind:agentHubRuntimePorts';
+
+const MOCK_SIGNAL_ROUTES_FALLBACK: SignalRoute[] = [
+  {
+    id: 'mock-route-001',
+    enabled: true,
+    topic: 'user.input.text',
+    target_type: 'agent',
+    target_ref: 'classifier',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-002',
+    enabled: true,
+    topic: 'user.input.text',
+    target_type: 'actor',
+    target_ref: 'eventlog',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-003',
+    enabled: true,
+    topic: 'session.end',
+    target_type: 'agent',
+    target_ref: 'reviewer',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-004',
+    enabled: true,
+    topic: 'timeblock.completed',
+    target_type: 'agent',
+    target_ref: 'reviewer',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-005',
+    enabled: true,
+    topic: 'input.classified',
+    target_type: 'actor',
+    target_ref: 'task',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-006',
+    enabled: true,
+    topic: '*',
+    target_type: 'frontend',
+    target_ref: 'ui',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+];
+
+const MOCK_RUNTIME_AGENTS_FALLBACK: RuntimeAggregatedAgent[] = [
+  {
+    id: 'classifier',
+    name: 'Classifier Agent',
+    description: 'mock route classifier',
+    status: 'available',
+    sourceHostId: 'mock-runtime',
+    sourceHostName: 'mock-runtime',
+    sourceHostAddress: 'mock',
+  },
+  {
+    id: 'reviewer',
+    name: 'Reviewer Agent',
+    description: 'mock route reviewer',
+    status: 'available',
+    sourceHostId: 'mock-runtime',
+    sourceHostName: 'mock-runtime',
+    sourceHostAddress: 'mock',
   },
 ];
 
@@ -167,9 +250,79 @@ function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): A
   });
 }
 
-function pickPreferredRouteHost(hosts: RuntimeHostSnapshot[]): RuntimeHostSnapshot | null {
-  if (hosts.length === 0) return null;
-  return hosts.find((item) => item.connectionState === 'online') ?? hosts[0] ?? null;
+function sortRouteHostsByPriority(hosts: RuntimeHostSnapshot[]): RuntimeHostSnapshot[] {
+  return [...hosts].sort((left, right) => {
+    const leftScore = left.connectionState === 'online' ? 0 : left.connectionState === 'error' ? 1 : 2;
+    const rightScore = right.connectionState === 'online' ? 0 : right.connectionState === 'error' ? 1 : 2;
+    return leftScore - rightScore;
+  });
+}
+
+function createDirectRuntimeHost(host: string, port: number): RuntimeHostRecord {
+  const nowIso = new Date().toISOString();
+  return {
+    id: `runtime-direct-${host}-${port}`.replace(/[^\w-]/g, '-'),
+    name: `${host}:${port}`,
+    host,
+    port,
+    status: 'unknown',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    isLocal: true,
+  };
+}
+
+function getDirectRuntimePortCandidates(): number[] {
+  if (typeof window === 'undefined') {
+    return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(DIRECT_RUNTIME_PORT_STORAGE_KEY);
+    if (!raw) return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+
+    const ports = parsed
+      .map((item) => Number(item))
+      .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
+    if (ports.length === 0) return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+
+    return Array.from(new Set(ports));
+  } catch {
+    return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+  }
+}
+
+function buildDirectRuntimeCandidates(hosts: RuntimeHostSnapshot[]): RuntimeHostRecord[] {
+  const existing = new Set(hosts.map((item) => `${item.host.host}:${item.host.port}`));
+  const hostCandidates = new Set<string>(['127.0.0.1']);
+  const portCandidates = getDirectRuntimePortCandidates();
+
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    hostCandidates.add(window.location.hostname);
+  }
+  hostCandidates.add('localhost');
+
+  const candidates: RuntimeHostRecord[] = [];
+  for (const host of hostCandidates) {
+    for (const port of portCandidates) {
+      const key = `${host}:${port}`;
+      if (existing.has(key)) continue;
+      candidates.push(createDirectRuntimeHost(host, port));
+    }
+  }
+  return candidates;
+}
+
+function mapRuntimeAgentsForHost(host: RuntimeHostRecord, agents: Array<{ id: string; name: string; description: string; status: string }>): RuntimeAggregatedAgent[] {
+  return agents.map((agent) => ({
+    ...agent,
+    sourceHostId: host.id,
+    sourceHostName: host.name,
+    sourceHostAddress: `${host.host}:${host.port}`,
+  }));
 }
 
 type SignalFlowNodeData = {
@@ -291,6 +444,13 @@ function TopologyView({
   onSelectNode: (nodeId: string) => void;
   onClearSelection: () => void;
 }) {
+  const isDarkMode = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const activeEdgeColor = isDarkMode ? '#FB923C' : '#C75B3A';
+  const inactiveEdgeColor = isDarkMode ? '#57534E' : '#A8A29E';
+  const edgeLabelColor = isDarkMode ? '#D6D3D1' : '#78716C';
+  const edgeLabelBgColor = isDarkMode ? '#1C1917' : '#FAF7F5';
+  const backgroundDotColor = isDarkMode ? '#44403C' : '#E7E5E4';
+
   const selectedNode = graph.nodes.find((item) => item.id === selectedNodeId) ?? null;
 
   const nextFlowNodes = useMemo<SignalFlowNodeType[]>(() => {
@@ -324,23 +484,23 @@ function TopologyView({
         height: 18,
       },
       style: edge.active
-        ? { stroke: '#C75B3A', strokeWidth: 1.6 }
-        : { stroke: '#A8A29E', strokeWidth: 1.2, strokeDasharray: '5 4' },
+        ? { stroke: activeEdgeColor, strokeWidth: 1.7 }
+        : { stroke: inactiveEdgeColor, strokeWidth: 1.2, strokeDasharray: '5 4' },
       label: `${edge.topic} → ${edge.targetRef}`,
       labelStyle: {
-        fill: '#78716C',
+        fill: edgeLabelColor,
         fontSize: 10,
         fontWeight: 500,
       },
       labelBgStyle: {
-        fill: '#FAF7F5',
+        fill: edgeLabelBgColor,
         fillOpacity: 0.95,
       },
       data: {
         active: edge.active,
       },
     }));
-  }, [graph.edges]);
+  }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, graph.edges, inactiveEdgeColor]);
 
   return (
     <section data-testid="agent-topology-view" className="space-y-3" onClick={onClearSelection}>
@@ -363,13 +523,7 @@ function TopologyView({
           }}
           proOptions={{ hideAttribution: true }}
         >
-          <MiniMap
-            pannable
-            zoomable
-            className="!bg-[#FAF7F5] dark:!bg-[#1C1917]"
-            nodeColor={(node: SignalFlowNodeType) => nodeTypeTint(node.type)}
-          />
-          <Background gap={20} color="#E7E5E4" />
+          <Background gap={20} color={backgroundDotColor} />
           <Controls showInteractive />
         </ReactFlow>
       </div>
@@ -1070,6 +1224,7 @@ export function AgentsPage() {
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
+  const [fallbackRuntimeAgents, setFallbackRuntimeAgents] = useState<RuntimeAggregatedAgent[]>([]);
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
   const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
@@ -1086,32 +1241,72 @@ export function AgentsPage() {
     setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
   };
 
+  const tryLoadRoutesFromHost = async (
+    host: RuntimeHostRecord
+  ): Promise<{ hostLabel: string; routes: SignalRoute[]; agents: RuntimeAggregatedAgent[] } | null> => {
+    try {
+      const routeService = new SignalRouteService({ host });
+      const routes = await routeService.listRoutes();
+      const runtimeClient = new RuntimeClient();
+      const agentsResult = await runtimeClient.getAgents(host);
+      const agents = agentsResult.ok ? mapRuntimeAgentsForHost(host, agentsResult.data) : [];
+      return {
+        hostLabel: `${host.host}:${host.port}`,
+        routes,
+        agents,
+      };
+    } catch {
+      return null;
+    }
+  };
+
   const refreshSignalRoutesFromSnapshot = async (
     snapshot: { hosts: RuntimeHostSnapshot[] },
     isDisposed: () => boolean = () => false
   ) => {
-    const preferredHost = pickPreferredRouteHost(snapshot.hosts);
-    if (!preferredHost) {
+    const useMockData = getUseMockDataEnabled();
+    if (useMockData) {
       if (isDisposed()) return;
-      setSignalRouteHostLabel('');
-      setSignalRoutes([]);
+      setSignalRouteHostLabel('mock（测试数据）');
+      setSignalRoutes(MOCK_SIGNAL_ROUTES_FALLBACK);
+      setFallbackRuntimeAgents(MOCK_RUNTIME_AGENTS_FALLBACK);
+      setListSections(buildListSectionsFromRuntimeAgents(MOCK_RUNTIME_AGENTS_FALLBACK));
+      return;
+    }
+
+    const snapshotAgents = snapshot.hosts.flatMap((item) => item.agents);
+    const configuredHosts = sortRouteHostsByPriority(snapshot.hosts).map((item) => item.host);
+    for (const host of configuredHosts) {
+      const result = await tryLoadRoutesFromHost(host);
+      if (!result) continue;
+      if (isDisposed()) return;
+      setSignalRouteHostLabel(result.hostLabel);
+      setSignalRoutes(result.routes);
+      setFallbackRuntimeAgents(result.agents);
+      if (snapshotAgents.length === 0 && result.agents.length > 0) {
+        setListSections(buildListSectionsFromRuntimeAgents(result.agents));
+      }
+      return;
+    }
+
+    const directCandidates = buildDirectRuntimeCandidates(snapshot.hosts);
+    for (const host of directCandidates) {
+      const result = await tryLoadRoutesFromHost(host);
+      if (!result) continue;
+      if (isDisposed()) return;
+      setSignalRouteHostLabel(`${result.hostLabel}（auto）`);
+      setSignalRoutes(result.routes);
+      setFallbackRuntimeAgents(result.agents);
+      if (snapshotAgents.length === 0 && result.agents.length > 0) {
+        setListSections(buildListSectionsFromRuntimeAgents(result.agents));
+      }
       return;
     }
 
     if (isDisposed()) return;
-    setSignalRouteHostLabel(`${preferredHost.host.host}:${preferredHost.host.port}`);
-
-    try {
-      const routeService = new SignalRouteService({
-        host: preferredHost.host,
-      });
-      const routes = await routeService.listRoutes();
-      if (isDisposed()) return;
-      setSignalRoutes(routes);
-    } catch {
-      if (isDisposed()) return;
-      setSignalRoutes([]);
-    }
+    setSignalRouteHostLabel('');
+    setSignalRoutes([]);
+    setFallbackRuntimeAgents([]);
   };
 
   const refreshRuntimeSnapshot = async () => {
@@ -1243,9 +1438,15 @@ export function AgentsPage() {
     [signalRouteHostLabel, signalRoutes]
   );
 
+  const graphAgents = useMemo(() => {
+    const runtimeAgents = runtimeHostSnapshots.flatMap((item) => item.agents);
+    if (runtimeAgents.length > 0) return runtimeAgents;
+    return fallbackRuntimeAgents;
+  }, [fallbackRuntimeAgents, runtimeHostSnapshots]);
+
   const signalGraph = useMemo(
-    () => buildSignalGraph(signalRoutes, runtimeHostSnapshots.flatMap((item) => item.agents)),
-    [runtimeHostSnapshots, signalRoutes]
+    () => buildSignalGraph(signalRoutes, graphAgents),
+    [graphAgents, signalRoutes]
   );
 
   useEffect(() => {

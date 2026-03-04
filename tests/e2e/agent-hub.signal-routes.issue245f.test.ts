@@ -150,6 +150,16 @@ async function seedRuntimeHost(page: Page, port: number): Promise<void> {
   }, port);
 }
 
+async function seedDirectRuntimeFallback(page: Page, port: number): Promise<void> {
+  await page.addInitScript((runtimePort: number) => {
+    localStorage.setItem('exomind:uiMode', 'new');
+    localStorage.setItem('exomind:agentPageEnabled', 'true');
+    localStorage.setItem('exomind:useMockData', 'false');
+    localStorage.removeItem('exomind_agent_runtime_hosts_v1');
+    localStorage.setItem('exomind:agentHubRuntimePorts', JSON.stringify([runtimePort]));
+  }, port);
+}
+
 test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图）', () => {
   let runtimeServer: ReturnType<typeof createServer>;
   let runtimePort = 0;
@@ -181,6 +191,7 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
 
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await expect(page.getByTestId('agent-topology-view')).toBeVisible();
+    await expect(page.locator('.react-flow__minimap')).toHaveCount(0);
     await expect(page.locator('.react-flow__edge')).toHaveCount(6);
 
     const viewportTransformBefore = await page.locator('.react-flow__viewport').evaluate((el) => {
@@ -227,6 +238,53 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
 
     await page.getByTestId('agent-view-toggle-topology').click();
     await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
+    await expect(page.locator('.react-flow__minimap')).toHaveCount(0);
     await expect(page.locator('.react-flow__edge')).toHaveCount(6);
+  });
+
+  test('dark mode: topology canvas keeps nodes visible（暗色模式可见性）', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('exomind:themePreference', 'dark');
+    });
+    await page.goto('/agents');
+    await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
+    await expect(page.locator('.react-flow__edge')).toHaveCount(6);
+    const darkNodeCount = await page.locator('.react-flow__node').count();
+    expect(darkNodeCount).toBeGreaterThan(0);
+    await expect(page.locator('.react-flow__minimap')).toHaveCount(0);
+
+    const canvasBackground = await page.getByTestId('agent-topology-canvas').evaluate((node) => {
+      return window.getComputedStyle(node).backgroundColor;
+    });
+    expect(canvasBackground).toBe('rgb(28, 25, 23)');
+  });
+
+  test('mock fallback: topology still renders nodes when runtime host is missing（mock 回退场景）', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('exomind:uiMode', 'new');
+      localStorage.setItem('exomind:agentPageEnabled', 'true');
+      localStorage.setItem('exomind:useMockData', 'true');
+      localStorage.removeItem('exomind_agent_runtime_hosts_v1');
+    });
+
+    await page.goto('/agents');
+    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
+    await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
+
+    const nodeCount = await page.locator('.react-flow__node').count();
+    expect(nodeCount).toBeGreaterThan(0);
+  });
+
+  test('direct runtime fallback: no saved host still shows live routes（直连回退场景）', async ({ page }) => {
+    await seedDirectRuntimeFallback(page, runtimePort);
+
+    await page.goto('/agents');
+    await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
+    await expect(page.locator('.react-flow__edge')).toHaveCount(6);
+
+    await page.getByTestId('agent-view-toggle-list').click();
+    await expect(page.getByTestId('agent-signal-route-section')).toBeVisible();
+    await expect(page.getByText(/auto/)).toBeVisible();
+    await expect(page.locator('[data-testid^="agent-signal-route-row-"]')).toHaveCount(6);
   });
 });
