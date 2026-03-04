@@ -3,7 +3,7 @@
 > **Status**: v1.0 (Confirmed)
 > **Date**: 2026-03-04
 > **Author**: Architect Agent (Claude Opus 4.6)
-> **Origin**: Starlin + 吴震宇 架构讨论 → 软总线 vs Pub/Sub 辩证分析 → 协议栈设计
+> **Origin**: @HailayLin + @ARCJ137442 架构讨论 → 软总线 vs Pub/Sub 辩证分析 → 协议栈设计
 > **命名**: ECS (正式) / Axon (代号)
 
 ---
@@ -416,7 +416,7 @@ RT-A → RT-B: POST /mesh/handshake
     "host_id": "a-uuid",
     "version": "0.1.0",
     "supported_transports": ["tcp", "ws"],
-    "topology": { "hostname": "starlin-pc", "os": "Windows 11", ... },
+    "topology": { "hostname": "node-alpha", "os": "Windows 11", ... },
     "challenge": "<random-nonce>"    // 用于认证
   }
 
