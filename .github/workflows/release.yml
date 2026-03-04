@@ -500,7 +500,12 @@ jobs:
 
       - name: Build Windows EXE binary (构建 Windows EXE 可执行文件)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        run: bun tauri build --no-bundle
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Build EXE via cargo to avoid a second tauri beforeBuild bun install in CI.
+          #（使用 cargo 构建 EXE，避免 CI 中 tauri beforeBuild 再次触发 bun install 卡死）
+          cargo build --manifest-path src-tauri/Cargo.toml --release -p exomind
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
