@@ -1,29 +1,38 @@
-## M4 进展更新（阶段 1）
+## M4 进展更新（阶段 2：整合完成）
 
-已完成：
+本轮新增完成项：
 
-1. **RT 固定端口启动**
-   - `src-tauri/src/lib.rs`：`setup()` 中 `ensure_runtime_started(runtime_state, None, Some(4077))`
-   - 通过单测：`runtime-embedded.m1`（新增 4077 断言）
+1. **修复 Tauri 内嵌 Runtime 默认路径问题**
+   - 修复 `signal-routes.default.json` 在 Tauri 启动场景下路径解析
+   - 修复 TS Agent 启动工作目录解析（避免 `Module not found packages/ts-agent-cli/...`）
+   - 结果：`/signal-routes` 从空列表恢复为默认 6 条路由
 
-2. **默认端口统一到 4077（信号链路）**
-   - `src/ui/hooks/useSignalStream.ts` 默认 SSE 端口改为 `4077`
-   - `src/lib/services/timeblock.service.ts` 发布 `timeblock.completed` 目标改为 `4077`
-   - `src/ui/app/pages/AgentsPage.tsx` 的 runtime 启停、默认地址、展示端口改为 `4077`
+2. **真实链路验证（RT + Agent + Claude）**
+   - `cargo tauri dev --no-watch` 下验证：
+     - `GET /health` => `{"status":"ok"}`
+     - `GET /signal-routes` => `ROUTES_COUNT=6`
+   - 发布 `timeblock.completed` 后，实测收到 `review.completed`
+   - Playwright 真实链路测试已落地并通过：`signal-timeblock-feedback` 新增真实链路断言
 
-3. **测试（TDD）**
-   - RED 阶段先新增/修改失败测试，再改实现转绿
-   - 已通过命令：
-     - `npx vitest run tests/unit/tauri/runtime-embedded.m1.test.ts tests/unit/services/runtime-control.service.issue205.test.ts`
-     - `npx vitest run tests/unit/ui/use-signal-stream.m4.test.ts tests/unit/services/timeblock.service.test.ts tests/unit/ui/agent-hub/agent-device-runtime-host.issue205.test.tsx tests/unit/ui/agent-hub/agents-page.issue204.test.tsx tests/unit/ui/agent-hub/agents-page.runtime.issue201.test.tsx`
+3. **Agent Hub E2E 稳定性修复**
+   - 修复 `page.goto('/agents')` 首测冷启动超时（改 `domcontentloaded`）
+   - `playwright.issue245f.config.ts` 全量通过（桌面+移动+暗色+回退）
 
-提交记录：
+4. **UI 精调：ChatPage 紫色 AI 反馈气泡**
+   - `new-mobile` 视图下 `agent_feedback` 消息改为紫色视觉语义
+   - 新增单测锁定样式 token，防回归
 
-- `c0ba41a` feat(m4): pin embedded runtime startup and defaults to port 4077
-- `51e8b24` feat(m4): align signal chain defaults to embedded runtime port 4077
+本轮提交：
 
-下一步：
+- `debce89` fix(runtime): resolve project root for ts agents and default routes in tauri
+- `4d7fbc9` test(e2e): stabilize agent hub navigation and verify timeblock review chain
+- `7112921` feat(chat): style new-mobile agent feedback bubble with violet tokens
 
-- 验证 `http://127.0.0.1:4077/health` 与 `/signal-routes`
-- 验证 Agent 自动启动（classifier/reviewer）与 SSE 链路
-- Playwright 端到端验收（含 Agent Hub 与信号链路）
+测试结果摘要：
+
+- Rust/runtime 关键测试通过
+- Vitest（Agent Hub / 4077 链路 / ChatPage）通过
+- Playwright：
+  - `playwright.signal-pool.config.ts` 通过
+  - `playwright.issue245f.config.ts` 通过
+  - `signal-timeblock-feedback.test.ts`（真实链路）通过
