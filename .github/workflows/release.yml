@@ -506,6 +506,32 @@ jobs:
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
+      - name: Prepare MSI prerequisites (准备 MSI 前置检查)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+
+          $wshKey = "HKCU:\Software\Microsoft\Windows Script Host\Settings"
+          try {
+            New-Item -Path $wshKey -Force | Out-Null
+            New-ItemProperty -Path $wshKey -Name Enabled -PropertyType DWord -Value 1 -Force | Out-Null
+            $enabled = (Get-ItemProperty -Path $wshKey -Name Enabled -ErrorAction SilentlyContinue).Enabled
+            Write-Host "Windows Script Host (WSH) Enabled=$enabled"
+          } catch {
+            Write-Warning "Unable to set WSH registry key: $($_.Exception.Message)"
+          }
+
+          $probePath = Join-Path $env:RUNNER_TEMP "wix-vbscript-probe.vbs"
+          Set-Content -Path $probePath -Value 'WScript.Echo "VBSCRIPT_OK"' -Encoding ASCII
+
+          try {
+            & cscript.exe //NoLogo $probePath
+            Write-Host "cscript probe exit code=$LASTEXITCODE"
+          } catch {
+            Write-Warning "cscript probe failed: $($_.Exception.Message)"
+          }
+
       - name: Build Windows MSI installer (构建 Windows MSI 安装包)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         run: bun tauri build --bundles msi
@@ -514,6 +540,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+          RUST_LOG: tauri_bundler=debug
 
       - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'

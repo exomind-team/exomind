@@ -35,4 +35,14 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     const tauriConfig = readTauriConfig();
     expect(tauriConfig).toContain('"useLocalToolsDir": true');
   });
+
+  it('checks MSI prerequisites before running light.exe / MSI 前执行前置检查', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toContain('Prepare MSI prerequisites');
+  });
+
+  it('enables tauri bundler debug logs for MSI failures / MSI 失败时开启 tauri bundler 调试日志', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toContain('tauri_bundler=debug');
+  });
 });
