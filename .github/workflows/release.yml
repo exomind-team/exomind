@@ -258,7 +258,7 @@ jobs:
             Write-Host "[$AttemptLabel] Running: bun $($arguments -join ' ')"
 
             $commandText = "bun $($arguments -join ' ')"
-            $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $commandText -PassThru -NoNewWindow
+            $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $commandText -PassThru
             $finished = $process.WaitForExit($TimeoutSeconds * 1000)
 
             if (-not $finished) {
