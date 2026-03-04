@@ -6,6 +6,10 @@ function readReleaseWorkflow(): string {
   return readFileSync(resolve(process.cwd(), '.github/workflows/release.yml'), 'utf8');
 }
 
+function readTauriConfig(): string {
+  return readFileSync(resolve(process.cwd(), 'src-tauri/tauri.conf.json'), 'utf8');
+}
+
 describe('release workflow / 发布流程: self-hosted bun install hardening', () => {
   it('contains global bun cache cleanup step / 包含 bun 全局缓存清理步骤', () => {
     const workflowContent = readReleaseWorkflow();
@@ -25,5 +29,10 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
   it('does not build NSIS bundle / 不再构建 NSIS 安装包', () => {
     const workflowContent = readReleaseWorkflow();
     expect(workflowContent).not.toContain('bun tauri build --bundles nsis');
+  });
+
+  it('uses local tools dir for Windows system users / Windows 服务账号使用本地工具目录', () => {
+    const tauriConfig = readTauriConfig();
+    expect(tauriConfig).toContain('"useLocalToolsDir": true');
   });
 });
