@@ -9,31 +9,37 @@ import {
   Mail,
   MessageCircle,
   Monitor,
-  Newspaper,
   Plus,
   Rocket,
   Rss,
   Send,
   Settings,
   Sparkles,
-  TimerReset,
   Waypoints,
   Webhook,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  MarkerType,
+  MiniMap,
+  type Edge as FlowEdge,
+  type Node as FlowNode,
+  type NodeProps as FlowNodeProps,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import type { SignalRoute } from '@/lib/types/signal-pool';
 import type {
   AgentDeviceGroup,
-  AgentHubEdge,
   AgentHubListItem,
   AgentHubListSection,
   AgentHubNodeStatus,
-  AgentHubNode,
-  AgentHubTopologyData,
   AgentHubViewMode,
   RuntimeServiceStatus,
 } from '@/lib/types/agent-hub';
@@ -42,7 +48,13 @@ import {
   type RuntimeAggregatedAgent,
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
-import { buildSignalRouteRows, type SignalRouteRow } from './agents-signal-topology';
+import {
+  buildSignalGraph,
+  buildSignalRouteRows,
+  type SignalGraph,
+  type SignalGraphNodeType,
+  type SignalRouteRow,
+} from './agents-signal-topology';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Bot, label: '拓扑' },
@@ -73,49 +85,6 @@ const ADD_NODE_OPTIONS: AddNodeOption[] = [
     tintColor: '#0D9488',
   },
 ];
-
-type TopologyLayoutItem = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  shape: 'bubble' | 'card' | 'chip';
-};
-
-// Topology layout（拓扑布局）使用设计稿坐标近似值，保持移动端视觉比例。
-const TOPOLOGY_LAYOUT: Record<string, TopologyLayoutItem> = {
-  'output-telegram': { x: 16, y: 42, width: 58, height: 58, shape: 'bubble' },
-  'output-wechat': { x: 104, y: 42, width: 58, height: 58, shape: 'bubble' },
-  'output-email': { x: 192, y: 42, width: 58, height: 58, shape: 'bubble' },
-  'output-feishu': { x: 280, y: 42, width: 58, height: 58, shape: 'bubble' },
-  'agent-daily': { x: 24, y: 230, width: 156, height: 86, shape: 'card' },
-  'agent-summary': { x: 196, y: 246, width: 144, height: 80, shape: 'card' },
-  'actor-timer': { x: 112, y: 338, width: 120, height: 50, shape: 'chip' },
-  'actor-cleaner': { x: 244, y: 338, width: 112, height: 50, shape: 'chip' },
-  'input-rss': { x: 20, y: 490, width: 56, height: 56, shape: 'bubble' },
-  'input-wechat': { x: 108, y: 490, width: 56, height: 56, shape: 'bubble' },
-  'input-api': { x: 196, y: 490, width: 56, height: 56, shape: 'bubble' },
-  'input-cron': { x: 284, y: 490, width: 56, height: 56, shape: 'bubble' },
-};
-
-function normalizeHexColor(color: string): string {
-  return color.length === 9 ? color.slice(0, 7) : color;
-}
-
-function getNodeIcon(node: AgentHubNode): LucideIcon {
-  if (node.id === 'output-telegram') return Send;
-  if (node.id === 'output-wechat') return MessageCircle;
-  if (node.id === 'output-email') return Mail;
-  if (node.id === 'output-feishu') return Rocket;
-  if (node.id === 'agent-daily') return Newspaper;
-  if (node.id === 'agent-summary') return Sparkles;
-  if (node.id === 'actor-timer') return AlarmClock;
-  if (node.id === 'actor-cleaner') return Filter;
-  if (node.id === 'input-rss') return Rss;
-  if (node.id === 'input-wechat') return MessageCircle;
-  if (node.id === 'input-api') return Webhook;
-  return TimerReset;
-}
 
 function getListItemIcon(item: AgentHubListItem): LucideIcon {
   if (item.id.includes('rss')) return Rss;
@@ -200,44 +169,66 @@ function pickPreferredRouteHost(hosts: RuntimeHostSnapshot[]): RuntimeHostSnapsh
   return hosts.find((item) => item.connectionState === 'online') ?? hosts[0] ?? null;
 }
 
+type SignalFlowNodeData = {
+  label: string;
+  subtitle: string;
+  nodeType: SignalGraphNodeType;
+};
+
+type SignalFlowNodeType = FlowNode<SignalFlowNodeData, SignalGraphNodeType>;
+
+function nodeTypeTint(nodeType: SignalGraphNodeType): string {
+  if (nodeType === 'topic') return '#C75B3A';
+  if (nodeType === 'agent') return '#0D9488';
+  if (nodeType === 'actor') return '#F59E0B';
+  return '#6366F1';
+}
+
+function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
+  const tint = nodeTypeTint(data.nodeType);
+  if (data.nodeType === 'frontend') {
+    return (
+      <div className="relative h-[70px] w-[130px]">
+        <div
+          className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-white dark:bg-[#1C1917]"
+          style={{ borderColor: `${tint}80` }}
+        />
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <p className="max-w-[120px] truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{data.label}</p>
+          <p className="mt-1 max-w-[120px] truncate text-[10px] text-[#78716C] dark:text-[#A8A29E]">{data.subtitle}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const shapeClass =
+    data.nodeType === 'topic'
+      ? 'rounded-full px-5 py-3'
+      : data.nodeType === 'actor'
+        ? 'rounded-xl px-4 py-3'
+        : 'rounded-md px-4 py-3';
+
+  return (
+    <div
+      className={`min-w-[120px] border bg-white text-center shadow-sm dark:bg-[#1C1917] ${shapeClass}`}
+      style={{ borderColor: `${tint}80` }}
+    >
+      <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{data.label}</p>
+      <p className="mt-1 truncate text-[10px] text-[#78716C] dark:text-[#A8A29E]">{data.subtitle}</p>
+    </div>
+  );
+}
+
+const SIGNAL_NODE_TYPES = {
+  topic: SignalFlowNode,
+  agent: SignalFlowNode,
+  actor: SignalFlowNode,
+  frontend: SignalFlowNode,
+} as const;
+
 function getDeviceTypeIcon(groupId: string): LucideIcon {
   if (groupId.includes('cloud')) return Waypoints;
   return Monitor;
-}
-
-function getNodeCenter(layout: TopologyLayoutItem): { x: number; y: number } {
-  return {
-    x: layout.x + layout.width / 2,
-    y: layout.y + layout.height / 2,
-  };
-}
-
-function getEdgeEndpoints(edge: AgentHubEdge): { from: { x: number; y: number }; to: { x: number; y: number } } | null {
-  const fromLayout = TOPOLOGY_LAYOUT[edge.fromNodeId];
-  const toLayout = TOPOLOGY_LAYOUT[edge.toNodeId];
-  if (!fromLayout || !toLayout) return null;
-
-  const fromCenter = getNodeCenter(fromLayout);
-  const toCenter = getNodeCenter(toLayout);
-
-  const from = {
-    x: fromCenter.x,
-    y: fromCenter.y > toCenter.y ? fromLayout.y : fromLayout.y + fromLayout.height,
-  };
-  const to = {
-    x: toCenter.x,
-    y: toCenter.y > fromCenter.y ? toLayout.y : toLayout.y + toLayout.height,
-  };
-
-  return { from, to };
-}
-
-function buildEdgePath(edge: AgentHubEdge): string | null {
-  const endpoints = getEdgeEndpoints(edge);
-  if (!endpoints) return null;
-  const { from, to } = endpoints;
-  const controlY = (from.y + to.y) / 2;
-  return `M ${from.x} ${from.y} C ${from.x} ${controlY}, ${to.x} ${controlY}, ${to.x} ${to.y}`;
 }
 
 function ViewToggle({
@@ -274,175 +265,62 @@ function ViewToggle({
   );
 }
 
-function TopologyNode({
-  node,
-  selected,
-  muted,
-  onSelect,
-}: {
-  node: AgentHubNode;
-  selected: boolean;
-  muted: boolean;
-  onSelect: (nodeId: string) => void;
-}) {
-  const layout = TOPOLOGY_LAYOUT[node.id];
-  if (!layout) return null;
-
-  const Icon = getNodeIcon(node);
-  const baseColor = normalizeHexColor(node.brandColor);
-
-  if (layout.shape === 'bubble') {
-    return (
-      <button
-        type="button"
-        data-testid={`agent-topology-node-${node.id}`}
-        data-muted={muted ? 'true' : 'false'}
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect(node.id);
-        }}
-        className="absolute flex flex-col items-center"
-        style={{
-          left: layout.x,
-          top: layout.y,
-          width: layout.width,
-          opacity: muted ? 0.32 : 1,
-          transition: 'opacity 160ms ease, transform 160ms ease',
-        }}
-      >
-        <div
-          className={`flex h-10 w-10 items-center justify-center rounded-full border ${
-            selected ? 'ring-2 ring-offset-1 ring-offset-[#FAF7F5] dark:ring-offset-[#1C1917]' : ''
-          }`}
-          style={{
-            borderColor: `${baseColor}50`,
-            color: baseColor,
-            backgroundColor: `${baseColor}1A`,
-          }}
-        >
-          <Icon size={15} />
-        </div>
-        <span className="mt-1 text-[10px] font-medium text-[#57534E] dark:text-[#D6D3D1]">{node.name}</span>
-      </button>
-    );
-  }
-
-  if (layout.shape === 'chip') {
-    return (
-      <button
-        type="button"
-        data-testid={`agent-topology-node-${node.id}`}
-        data-muted={muted ? 'true' : 'false'}
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect(node.id);
-        }}
-        className={`absolute flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition ${
-          selected
-            ? 'border-[#C75B3A] bg-white shadow-[0_8px_20px_-14px_rgba(199,91,58,0.9)] dark:border-[#E8734E] dark:bg-[#2A2522]'
-            : 'border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]'
-        }`}
-        style={{
-          left: layout.x,
-          top: layout.y,
-          width: layout.width,
-          minHeight: layout.height,
-          opacity: muted ? 0.35 : 1,
-        }}
-      >
-        <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-          style={{ backgroundColor: `${baseColor}18`, color: baseColor }}
-        >
-          <Icon size={13} />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-[12px] font-semibold text-[#44403C] dark:text-[#F5F5F4]">{node.name}</p>
-          <p className="truncate text-[10px] text-[#A8A29E] dark:text-[#78716C]">{node.subtitle ?? node.status}</p>
-        </div>
-      </button>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      data-testid={`agent-topology-node-${node.id}`}
-      data-muted={muted ? 'true' : 'false'}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect(node.id);
-      }}
-      className={`absolute rounded-2xl border bg-white px-3 py-3 text-left transition dark:bg-[#1C1917] ${
-        selected
-          ? 'border-[#C75B3A] shadow-[0_12px_24px_-16px_rgba(199,91,58,0.9)] dark:border-[#E8734E]'
-          : 'border-[#E7E5E4] dark:border-[#292524]'
-      }`}
-      style={{
-        left: layout.x,
-        top: layout.y,
-        width: layout.width,
-        minHeight: layout.height,
-        opacity: muted ? 0.35 : 1,
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
-          style={{ backgroundColor: `${baseColor}1F`, color: baseColor }}
-        >
-          <Icon size={15} />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{node.name}</p>
-          <p className="truncate text-[10px] text-[#A8A29E] dark:text-[#78716C]">{node.subtitle ?? node.status}</p>
-        </div>
-      </div>
-      <div className="mt-2 flex items-center gap-1 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
-        <span
-          className="inline-block h-1.5 w-1.5 rounded-full"
-          style={{ backgroundColor: node.status === 'running' ? '#22C55E' : '#A8A29E' }}
-        />
-        {node.status === 'running' ? '运行中' : '待机中'}
-      </div>
-    </button>
-  );
-}
-
 function TopologyView({
-  topology,
+  graph,
   selectedNodeId,
   onSelectNode,
   onClearSelection,
 }: {
-  topology: AgentHubTopologyData;
+  graph: SignalGraph;
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
   onClearSelection: () => void;
 }) {
-  const selectedNode = topology.nodes.find((item) => item.id === selectedNodeId) ?? null;
+  const selectedNode = graph.nodes.find((item) => item.id === selectedNodeId) ?? null;
 
-  const selectionState = useMemo(() => {
-    if (!selectedNodeId) {
-      return {
-        highlightedEdgeIds: new Set<string>(),
-        connectedNodeIds: new Set<string>(),
-      };
-    }
+  const flowNodes = useMemo<SignalFlowNodeType[]>(() => {
+    return graph.nodes.map((node) => ({
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      draggable: true,
+      data: {
+        label: node.label,
+        subtitle: node.status,
+        nodeType: node.type,
+      },
+    }));
+  }, [graph.nodes]);
 
-    const connectedNodeIds = new Set<string>([selectedNodeId]);
-    const highlightedEdgeIds = new Set<string>();
-
-    topology.edges.forEach((edge) => {
-      if (edge.fromNodeId === selectedNodeId || edge.toNodeId === selectedNodeId) {
-        highlightedEdgeIds.add(edge.id);
-        connectedNodeIds.add(edge.fromNodeId);
-        connectedNodeIds.add(edge.toNodeId);
-      }
-    });
-
-    return { highlightedEdgeIds, connectedNodeIds };
-  }, [selectedNodeId, topology.edges]);
+  const flowEdges = useMemo<FlowEdge[]>(() => {
+    return graph.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      animated: edge.active,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 18,
+        height: 18,
+      },
+      style: edge.active
+        ? { stroke: '#C75B3A', strokeWidth: 1.6 }
+        : { stroke: '#A8A29E', strokeWidth: 1.2, strokeDasharray: '5 4' },
+      label: `${edge.topic} → ${edge.targetRef}`,
+      labelStyle: {
+        fill: '#78716C',
+        fontSize: 10,
+        fontWeight: 500,
+      },
+      labelBgStyle: {
+        fill: '#FAF7F5',
+        fillOpacity: 0.95,
+      },
+      data: {
+        active: edge.active,
+      },
+    }));
+  }, [graph.edges]);
 
   return (
     <section data-testid="agent-topology-view" className="space-y-3" onClick={onClearSelection}>
@@ -450,47 +328,29 @@ function TopologyView({
         data-testid="agent-topology-canvas"
         className="relative h-[568px] overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
       >
-        <div className="absolute left-3 top-2 rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">输出节点</div>
-        <div className="absolute left-3 top-[205px] rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">Agent / Actor</div>
-        <div className="absolute left-3 top-[462px] rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">信号输入</div>
-
-        <svg className="absolute inset-0 h-full w-full" viewBox="0 0 356 568" fill="none" aria-hidden="true">
-          {topology.edges.map((edge) => {
-            const path = buildEdgePath(edge);
-            if (!path) return null;
-
-            const highlighted = selectionState.highlightedEdgeIds.has(edge.id);
-            const hasSelection = Boolean(selectedNodeId);
-            const baseColor = normalizeHexColor(edge.color);
-            const opacity = hasSelection ? (highlighted ? 1 : 0.18) : 0.45;
-            const strokeWidth = hasSelection ? (highlighted ? 2.5 : 1.1) : 1.5;
-
-            return (
-              <path
-                key={edge.id}
-                data-testid={`agent-topology-edge-${edge.id}`}
-                d={path}
-                stroke={baseColor}
-                strokeWidth={strokeWidth}
-                strokeLinecap="round"
-                opacity={opacity}
-              />
-            );
-          })}
-        </svg>
-
-        {topology.nodes.map((node) => {
-          const muted = Boolean(selectedNodeId) && !selectionState.connectedNodeIds.has(node.id);
-          return (
-            <TopologyNode
-              key={node.id}
-              node={node}
-              selected={selectedNodeId === node.id}
-              muted={muted}
-              onSelect={onSelectNode}
-            />
-          );
-        })}
+        <ReactFlow
+          data-testid="agent-signal-flow"
+          nodes={flowNodes}
+          edges={flowEdges}
+          nodeTypes={SIGNAL_NODE_TYPES}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          minZoom={0.3}
+          maxZoom={1.8}
+          onNodeClick={(_, node: SignalFlowNodeType) => {
+            onSelectNode(node.id);
+          }}
+          proOptions={{ hideAttribution: true }}
+        >
+          <MiniMap
+            pannable
+            zoomable
+            className="!bg-[#FAF7F5] dark:!bg-[#1C1917]"
+            nodeColor={(node: SignalFlowNodeType) => nodeTypeTint(node.type)}
+          />
+          <Background gap={20} color="#E7E5E4" />
+          <Controls showInteractive />
+        </ReactFlow>
       </div>
 
       {selectedNode && (
@@ -499,7 +359,7 @@ function TopologyView({
           className="rounded-2xl border border-[#E7E5E4] bg-[#1C1917] px-4 py-3 text-white dark:border-[#44403C] dark:bg-[#0C0A09]"
           onClick={(event) => event.stopPropagation()}
         >
-          <p className="text-sm font-semibold">{selectedNode.name}</p>
+          <p className="text-sm font-semibold">{selectedNode.label}</p>
           <p className="mt-1 text-xs text-white/80">状态：{selectedNode.status}</p>
           <p className="mt-1 text-xs text-white/60">类型：{selectedNode.type}</p>
         </div>
@@ -1187,7 +1047,6 @@ function RuntimeHostManagerSheet({
 
 export function AgentsPage() {
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
-  const [topology, setTopology] = useState<AgentHubTopologyData>({ nodes: [], edges: [], selectedNodeId: null });
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
@@ -1246,15 +1105,12 @@ export function AgentsPage() {
     const runtimeControlService = getRuntimeControlService();
 
     const load = async () => {
-      const [nextTopology, nextDevice, nextRuntimeStatus, nextRuntimeSnapshot] = await Promise.all([
-        service.getTopology(),
+      const [nextDevice, nextRuntimeStatus, nextRuntimeSnapshot] = await Promise.all([
         service.getDeviceView(),
         runtimeControlService.getStatus(),
         getRuntimeManager().refreshSnapshot(),
       ]);
       if (disposed) return;
-      setTopology(nextTopology);
-      setSelectedNodeId(nextTopology.selectedNodeId ?? null);
       setDeviceGroups(nextDevice);
       setRuntimeServiceStatus(nextRuntimeStatus);
       applyRuntimeSnapshot(nextRuntimeSnapshot);
@@ -1366,6 +1222,17 @@ export function AgentsPage() {
     [signalRouteHostLabel, signalRoutes]
   );
 
+  const signalGraph = useMemo(
+    () => buildSignalGraph(signalRoutes, runtimeHostSnapshots.flatMap((item) => item.agents)),
+    [runtimeHostSnapshots, signalRoutes]
+  );
+
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    if (signalGraph.nodes.some((node) => node.id === selectedNodeId)) return;
+    setSelectedNodeId(null);
+  }, [selectedNodeId, signalGraph.nodes]);
+
   const content = useMemo(() => {
     if (viewMode === 'list') {
       return (
@@ -1395,7 +1262,7 @@ export function AgentsPage() {
     }
     return (
       <TopologyView
-        topology={topology}
+        graph={signalGraph}
         selectedNodeId={selectedNodeId}
         onSelectNode={setSelectedNodeId}
         onClearSelection={() => setSelectedNodeId(null)}
@@ -1405,12 +1272,12 @@ export function AgentsPage() {
     deviceGroups,
     listSections,
     runtimeHostSnapshots,
+    signalGraph,
     signalRouteHostLabel,
     signalRouteRows,
     runtimeHostError,
     runtimeServiceStatus,
     selectedNodeId,
-    topology,
     viewMode,
   ]);
 

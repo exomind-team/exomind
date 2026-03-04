@@ -16,6 +16,43 @@ const runtimeControlMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
 }));
 
+vi.mock('@xyflow/react', () => ({
+  ReactFlow: ({
+    nodes,
+    edges,
+    children,
+    onNodeClick,
+  }: {
+    nodes?: Array<{ id: string; data?: { label?: string } }>;
+    edges?: Array<{ id: string; label?: string; source?: string; target?: string }>;
+    children?: unknown;
+    onNodeClick?: (event: unknown, node: { id: string }) => void;
+  }) => (
+    <div data-testid="mock-react-flow">
+      {(nodes ?? []).map((node) => (
+        <button
+          key={node.id}
+          type="button"
+          data-testid={`mock-react-flow-node-${node.id}`}
+          onClick={() => onNodeClick?.({}, node)}
+        >
+          {node.data?.label ?? node.id}
+        </button>
+      ))}
+      {(edges ?? []).map((edge) => (
+        <div key={edge.id} data-testid={`mock-react-flow-edge-${edge.id}`}>
+          {edge.label ?? `${edge.source} -> ${edge.target}`}
+        </div>
+      ))}
+      {children}
+    </div>
+  ),
+  Background: () => <div data-testid="mock-react-flow-background" />,
+  Controls: () => <div data-testid="mock-react-flow-controls" />,
+  MiniMap: () => <div data-testid="mock-react-flow-minimap" />,
+  MarkerType: { ArrowClosed: 'arrowclosed' },
+}));
+
 const signalRouteFetchMock = vi.hoisted(() => vi.fn());
 
 const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [

@@ -23,6 +23,43 @@ const runtimeControlMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
 }));
 
+vi.mock('@xyflow/react', () => ({
+  ReactFlow: ({
+    nodes,
+    edges,
+    children,
+    onNodeClick,
+  }: {
+    nodes?: Array<{ id: string; data?: { label?: string } }>;
+    edges?: Array<{ id: string; label?: string; source?: string; target?: string }>;
+    children?: unknown;
+    onNodeClick?: (event: unknown, node: { id: string }) => void;
+  }) => (
+    <div data-testid="mock-react-flow">
+      {(nodes ?? []).map((node) => (
+        <button
+          key={node.id}
+          type="button"
+          data-testid={`mock-react-flow-node-${node.id}`}
+          onClick={() => onNodeClick?.({}, node)}
+        >
+          {node.data?.label ?? node.id}
+        </button>
+      ))}
+      {(edges ?? []).map((edge) => (
+        <div key={edge.id} data-testid={`mock-react-flow-edge-${edge.id}`}>
+          {edge.label ?? `${edge.source} -> ${edge.target}`}
+        </div>
+      ))}
+      {children}
+    </div>
+  ),
+  Background: () => <div data-testid="mock-react-flow-background" />,
+  Controls: () => <div data-testid="mock-react-flow-controls" />,
+  MiniMap: () => <div data-testid="mock-react-flow-minimap" />,
+  MarkerType: { ArrowClosed: 'arrowclosed' },
+}));
+
 const signalRouteFetchMock = vi.hoisted(() => vi.fn());
 
 const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [
@@ -82,12 +119,16 @@ const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [
   },
 ];
 
-vi.mock('@/lib/services', () => ({
-  getAgentHubService: () => ({
-    getTopology: serviceMocks.getTopology,
-    getDeviceView: serviceMocks.getDeviceView,
-  }),
-}));
+vi.mock('@/lib/services', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/lib/services')>();
+  return {
+    ...actual,
+    getAgentHubService: () => ({
+      getTopology: serviceMocks.getTopology,
+      getDeviceView: serviceMocks.getDeviceView,
+    }),
+  };
+});
 
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
@@ -150,12 +191,17 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     render(<AgentsPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('agent-hub-page')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-hub-page')).toBeInTheDocument();
     });
 
     expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
     expect(screen.getByTestId('agent-topology-canvas')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-topology-edge-e-rss-daily')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('user.input.text')).toBeInTheDocument();
+      expect(screen.getByText('session.end')).toBeInTheDocument();
+      expect(screen.getByText('user.input.text → classifier')).toBeInTheDocument();
+      expect(screen.getByText('session.end → reviewer')).toBeInTheDocument();
+    });
     fireEvent.click(screen.getByTestId('agent-view-toggle-list'));
     expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
     expect(screen.getByTestId('agent-list-filter-all')).toBeInTheDocument();
@@ -166,16 +212,12 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     expect(screen.getByTestId('agent-device-overview-card')).toBeInTheDocument();
   });
 
-  it('supports selecting topology node and opening add node sheet（支持节点选中与添加节点弹窗）', async () => {
+  it('supports opening add node sheet from topology（支持从拓扑页打开添加节点弹窗）', async () => {
     render(<AgentsPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
     });
-
-    fireEvent.click(screen.getByTestId('agent-topology-node-agent-daily'));
-    expect(screen.getByTestId('agent-topology-node-detail-card')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-topology-node-agent-summary')).toHaveAttribute('data-muted', 'true');
 
     fireEvent.click(screen.getByTestId('agent-add-node-button'));
     expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
