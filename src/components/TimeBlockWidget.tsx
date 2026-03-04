@@ -36,6 +36,7 @@ import {
   TIMER_END_SOUND_PRESETS,
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
+import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 
 interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
@@ -211,17 +212,21 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     if (block.mode === 'countdown' && block.targetMinutes) {
       setCountdownMinutes(block.targetMinutes);
     }
-    setElapsed(Math.max(0, block.elapsed));
+    const restoredOverrunMs = block.mode === 'countdown' && continueAfterCountdownEnd
+      ? resolveCountdownOverrunMs(block)
+      : 0;
+    const hasRestoredOverrun = restoredOverrunMs > 0;
+    setElapsed(block.mode === 'countdown' && hasRestoredOverrun ? 0 : Math.max(0, block.elapsed));
     const nextFeedbackInProgress = isFeedbackStage(block);
     setFeedbackInProgress(nextFeedbackInProgress);
     setFeedbackSubmitting(false);
     resetSkipFeedbackConfirm();
     setTimerState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
     startTimeRef.current = block.startTime;
-    countdownEndedRef.current = false;
-    countdownOverrunRef.current = false;
-    setCountdownOvertimeMs(0);
-  }, [countdownMinutes, resetSkipFeedbackConfirm, timerMode, timerState]);
+    countdownEndedRef.current = hasRestoredOverrun;
+    countdownOverrunRef.current = hasRestoredOverrun;
+    setCountdownOvertimeMs(hasRestoredOverrun ? restoredOverrunMs : 0);
+  }, [continueAfterCountdownEnd, countdownMinutes, resetSkipFeedbackConfirm, timerMode, timerState]);
 
   const enqueueServiceMutation = useCallback((
     label: string,

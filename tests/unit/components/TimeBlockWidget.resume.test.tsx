@@ -115,6 +115,31 @@ describe('TimeBlockWidget resume behavior', () => {
     expect(rafMock).not.toHaveBeenCalled();
   });
 
+  it('restores countdown overtime after remounting a running countdown block', async () => {
+    const resumeAt = Date.now();
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-overrun',
+      name: 'Countdown overtime',
+      startTime: resumeAt - 90_000,
+      elapsed: 0,
+      mode: 'countdown',
+      targetMinutes: 1,
+      paused: false,
+      phase: 'running',
+      accumulatedRunMs: 90_000,
+      lastResumedAt: resumeAt,
+      pauseAccumulatedMs: 0,
+    });
+
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    await screen.findByText(/^\+0:3\d$/);
+  });
+
   it('marks ending before opening feedback dialog when clicking end', async () => {
     markEndingMock.mockResolvedValue(undefined);
     loadActiveBlockMock.mockResolvedValue({

@@ -26,6 +26,7 @@ import {
 } from '@/config/timer-preferences';
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
 import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
+import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 import type { ActiveBlockData } from '@/lib/types/event';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
@@ -225,7 +226,11 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     if (block.mode === 'countdown' && block.targetMinutes) {
       setCountdownMinutes(block.targetMinutes);
     }
-    setElapsedMs(Math.max(0, block.elapsed));
+    const restoredOverrunMs = block.mode === 'countdown' && timerPreferences.countdownEndMode === 'soft'
+      ? resolveCountdownOverrunMs(block)
+      : 0;
+    const hasRestoredOverrun = restoredOverrunMs > 0;
+    setElapsedMs(block.mode === 'countdown' && hasRestoredOverrun ? 0 : Math.max(0, block.elapsed));
     const nextFeedbackInProgress = isFeedbackStage(block);
     setFeedbackInProgress(nextFeedbackInProgress);
     setFeedbackSubmitting(false);
@@ -233,10 +238,10 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setUiState('running');
     setRunningSubState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
     hardEndTriggeredRef.current = nextFeedbackInProgress;
-    countdownEndedRef.current = false;
-    countdownOverrunRef.current = false;
-    setCountdownOvertimeMs(0);
-  }, [countdownMinutes, resetSkipFeedbackConfirm, syncIdleElapsedFromMode, timerMode]);
+    countdownEndedRef.current = hasRestoredOverrun;
+    countdownOverrunRef.current = hasRestoredOverrun;
+    setCountdownOvertimeMs(hasRestoredOverrun ? restoredOverrunMs : 0);
+  }, [countdownMinutes, resetSkipFeedbackConfirm, syncIdleElapsedFromMode, timerMode, timerPreferences.countdownEndMode]);
 
   useEffect(() => {
     let cancelled = false;
