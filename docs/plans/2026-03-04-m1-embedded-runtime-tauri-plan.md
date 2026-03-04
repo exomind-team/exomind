@@ -4,7 +4,7 @@
 
 **Goal:** 把 `exomind-runtime` 从外部进程模式改成 Tauri 进程内嵌运行（in-process runtime，进程内运行时），并交付 `invoke 高频桥接 + HTTP fallback（降级）`。
 
-**Architecture:** `crates/exomind-runtime` 提供可复用 `lib` 启动入口（start API，启动接口）与句柄（handle，运行句柄）；`src-tauri` 在 `setup()` 内 `tokio::spawn` 启动 RT；前端保持现有 HTTP 调用链不破坏，同时新增 `invoke` 快速通道用于高频 publish。RT 默认端口统一为 `1947`，并允许 `port=0` 随机分配。
+**Architecture:** `crates/exomind-runtime` 提供可复用 `lib` 启动入口（start API，启动接口）与句柄（handle，运行句柄）；`src-tauri` 在 `setup()` 内 `tokio::spawn` 启动 RT；前端保持现有 HTTP 调用链不破坏，同时新增 `invoke` 快速通道用于高频 publish。RT 默认端口统一为 `1949`，并允许 `port=0` 随机分配。
 
 **Tech Stack:** Rust (axum/tokio/tauri), TypeScript (React/Vitest/Playwright), Bun (TS Agent 子进程), GitHub CLI (`gh`)
 
@@ -17,7 +17,7 @@
   - M1.2 Tauri `setup()` 内嵌 RT 启动
   - M1.3 `invoke` 高频桥接 + HTTP fallback
   - M1.4 TS `reviewer + classifier` 随 RT 启动与退出
-  - 端口默认改为 `1947`（并支持随机端口）
+  - 端口默认改为 `1949`（并支持随机端口）
 - Non-Scope（本轮不包含）
   - 全面替换前端所有 HTTP 调用为 invoke（只改高频 publish）
   - Web-only WASM 正式交付（仅保留兼容路径与后续接口）
@@ -35,7 +35,7 @@
 
 ```md
 ## M1 方案与验收链路
-- 默认端口: 1947（可设置 0 随机）
+- 默认端口: 1949（可设置 0 随机）
 - 内嵌模式: Tauri setup() 启动 RT
 - 高频 publish: invoke 优先，HTTP 降级
 ```
@@ -73,7 +73,7 @@ git commit -m "docs: add M1 embedded runtime implementation plan and PR comment 
 
 Test targets:
 - `start_with_options()` 返回可观察句柄（startup handle，启动句柄）
-- 默认端口为 `1947`
+- 默认端口为 `1949`
 - `port=0` 时可随机端口，且可通过 `local_addr` 读取实际端口
 - actor（`task_actor` / `eventlog_actor`）随 runtime 启动
 
@@ -146,7 +146,7 @@ Expected:
 
 **Step 3: Implement setup embedding（实现 setup 内嵌）**
 - `src-tauri/Cargo.toml` 引入 `exomind-runtime`（workspace dependency，工作区依赖）
-- `setup()` 中 `tokio::spawn` 启动 runtime，默认 `127.0.0.1:1947`
+- `setup()` 中 `tokio::spawn` 启动 runtime，默认 `127.0.0.1:1949`
 - 支持 `EXOMIND_RT_PORT=0` 随机端口，并把实际端口写入共享状态
 
 **Step 4: Verify GREEN**
@@ -185,7 +185,7 @@ Targets:
 - `runtime_service_start` 在内嵌模式下幂等（idempotent，重复调用不重复启动）
 - `runtime_service_status` 返回 setup 已启动状态
 - `runtime_service_stop` 可控关闭（仅桌面端）
-- 默认端口改为 `1947`
+- 默认端口改为 `1949`
 
 **Step 2: Verify RED**
 
@@ -331,8 +331,8 @@ Expected:
 Run:
 ```powershell
 cargo tauri dev
-curl http://127.0.0.1:1947/health
-curl http://127.0.0.1:1947/signals/history?limit=1
+curl http://127.0.0.1:1949/health
+curl http://127.0.0.1:1949/signals/history?limit=1
 ```
 
 Expected:
@@ -375,14 +375,14 @@ git commit -m "docs: add M1 verification evidence and review summary"
 
 ```powershell
 # Runtime (RT) default port（默认端口）
-$env:EXOMIND_RT_PORT='1947'
+$env:EXOMIND_RT_PORT='1949'
 $env:EXOMIND_RT_BIND='127.0.0.1'
 
 # Optional random port（随机端口，可选）
 # $env:EXOMIND_RT_PORT='0'
 
 # TS agent runtime URL（供 reviewer/classifier 使用）
-$env:EXOMIND_RT_URL='http://127.0.0.1:1947'
+$env:EXOMIND_RT_URL='http://127.0.0.1:1949'
 
 # Start desktop app
 cargo tauri dev
@@ -412,4 +412,5 @@ Two execution options:
 2. **Parallel Session (separate)** - Open new session with executing-plans, batch execution with checkpoints.
 
 Which approach?
+
 
