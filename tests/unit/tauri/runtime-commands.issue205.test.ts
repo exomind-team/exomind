@@ -10,14 +10,16 @@ describe('tauri runtime commands issue-205（Tauri Runtime 命令注册）', () 
     expect(tauriLib).toContain('runtime_service_start');
     expect(tauriLib).toContain('runtime_service_stop');
     expect(tauriLib).toContain('runtime_service_status');
+    expect(tauriLib).toContain('signal_publish_fast');
   });
 
   it('defines runtime service commands in rust source（Rust 源码定义 runtime 命令）', () => {
     const runtimeCommands = readFileSync('src-tauri/src/commands/runtime_commands.rs', 'utf-8');
 
     expect(runtimeCommands).toContain('#[tauri::command]');
-    expect(runtimeCommands).toContain('pub fn runtime_service_start');
-    expect(runtimeCommands).toContain('pub fn runtime_service_stop');
+    expect(runtimeCommands).toContain('pub async fn runtime_service_start');
+    expect(runtimeCommands).toContain('pub async fn runtime_service_stop');
     expect(runtimeCommands).toContain('pub fn runtime_service_status');
+    expect(runtimeCommands).toContain('pub fn signal_publish_fast');
   });
 });
