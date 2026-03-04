@@ -632,6 +632,8 @@ jobs:
 
           if ($buildWindows) {
             $exeCandidates = @(
+              "target/release/exomind.exe",
+              "target/release/ExoMind.exe",
               "src-tauri/target/release/exomind.exe",
               "src-tauri/target/release/ExoMind.exe"
             )
@@ -646,7 +648,17 @@ jobs:
               Copy-Item -Path $runtimePath -Destination (Join-Path $stagingDir "ExoMind-RT-$version-windows-x64.exe") -Force
             }
 
-            $msiFile = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            $msiCandidates = @(
+              "target/release/bundle/msi",
+              "src-tauri/target/release/bundle/msi"
+            )
+            $msiFile = $null
+            foreach ($msiDir in $msiCandidates) {
+              if (Test-Path $msiDir) {
+                $msiFile = Get-ChildItem -Path $msiDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($msiFile) { break }
+              }
+            }
             if ($msiFile) {
               Copy-Item -Path $msiFile.FullName -Destination (Join-Path $stagingDir "ExoMind-$version-windows-x64-installer.msi") -Force
             } else {
@@ -735,6 +747,8 @@ jobs:
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
           path: |
+            target/release/exomind.exe
+            target/release/ExoMind.exe
             src-tauri/target/release/exomind.exe
             src-tauri/target/release/ExoMind.exe
           if-no-files-found: warn
@@ -744,7 +758,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/msi/
+          path: |
+            target/release/bundle/msi/
+            src-tauri/target/release/bundle/msi/
           if-no-files-found: ignore
 
   build-macos:
