@@ -264,12 +264,16 @@ if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android" -and
 }
 
 # Run tauri CLI (执行 tauri 命令)
+$exitCode = 0
+$tempConfigPath = $null
 if ($TauriArgs -and $TauriArgs.Count -gt 0) {
   # Inject --config to override devUrl when port differs from default
   # (端口非默认值时，通过 --config 覆盖 devUrl)
   if ($isTauriDev -and $env:EXOMIND_WEB_PORT -and $env:EXOMIND_WEB_PORT -ne "1420") {
+    $tempConfigPath = Join-Path $env:TEMP ("exomind-tauri-dev-config-{0}.json" -f [Guid]::NewGuid().ToString("N"))
     $devUrlOverride = '{"build":{"devUrl":"http://localhost:' + $env:EXOMIND_WEB_PORT + '"}}'
-    & tauri @TauriArgs --config $devUrlOverride
+    Write-TextUtf8NoBom -Path $tempConfigPath -Content $devUrlOverride
+    & tauri @TauriArgs --config $tempConfigPath
   } else {
     & tauri @TauriArgs
   }
@@ -277,6 +281,10 @@ if ($TauriArgs -and $TauriArgs.Count -gt 0) {
   & tauri
 }
 $exitCode = $LASTEXITCODE
+
+if ($tempConfigPath -and (Test-Path -LiteralPath $tempConfigPath)) {
+  Remove-Item -LiteralPath $tempConfigPath -Force -ErrorAction SilentlyContinue
+}
 
 # Patch again for `tauri android init`-like flows (初始化后再次补权限与 cleartext 配置)
 if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android") {
