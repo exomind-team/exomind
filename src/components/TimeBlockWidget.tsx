@@ -27,6 +27,7 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast-hook';
+import { FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS } from '@/config/feedback-preferences';
 import { getTimeBlockService, TimerMode, TimerConfig } from '@/lib/services';
 import type { ActiveBlockData } from '@/lib/types/event';
 import {
@@ -59,8 +60,6 @@ export interface TimeBlockWidgetHandle {
   endDialog: () => void;
 }
 
-const SKIP_FEEDBACK_CONFIRM_SECONDS = 5;
-
 type SkipFeedbackConfirmState = 'idle' | 'cooldown' | 'armed';
 
 function isFeedbackStage(block: ActiveBlockData): boolean {
@@ -91,7 +90,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<SkipFeedbackConfirmState>('idle');
-  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(SKIP_FEEDBACK_CONFIRM_SECONDS);
+  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
 
   // 倒计时结束动作（纯前端配置，不持久化）
   const [countdownEndSoundEnabled, setCountdownEndSoundEnabled] = useState(true);
@@ -127,13 +126,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const resetSkipFeedbackConfirm = useCallback(() => {
     clearSkipFeedbackConfirmInterval();
     setSkipFeedbackConfirmState('idle');
-    setSkipFeedbackCountdownSec(SKIP_FEEDBACK_CONFIRM_SECONDS);
+    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
   }, [clearSkipFeedbackConfirmInterval]);
 
   const startSkipFeedbackConfirmCooldown = useCallback(() => {
     clearSkipFeedbackConfirmInterval();
     setSkipFeedbackConfirmState('cooldown');
-    setSkipFeedbackCountdownSec(SKIP_FEEDBACK_CONFIRM_SECONDS);
+    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
 
     skipFeedbackConfirmIntervalRef.current = setInterval(() => {
       setSkipFeedbackCountdownSec((previousSeconds) => {

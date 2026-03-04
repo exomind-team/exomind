@@ -19,6 +19,7 @@ import {
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
+import { FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS } from '@/config/feedback-preferences';
 import {
   getTimerPreferences,
   subscribeTimerPreferencesChanges,
@@ -31,8 +32,6 @@ type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面�
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
 export type FocusTimerState = 'idle' | 'running' | 'paused';
 type SkipFeedbackConfirmState = 'idle' | 'cooldown' | 'armed';
-
-const SKIP_FEEDBACK_CONFIRM_SECONDS = 5;
 
 export interface FocusTimerWidgetHandle {
   expandAndFocusTaskName: () => void;
@@ -115,7 +114,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
   const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<SkipFeedbackConfirmState>('idle');
-  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(SKIP_FEEDBACK_CONFIRM_SECONDS);
+  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
   const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   const isRunningUi = uiState === 'running';
@@ -140,13 +139,13 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const resetSkipFeedbackConfirm = useCallback(() => {
     clearSkipFeedbackConfirmInterval();
     setSkipFeedbackConfirmState('idle');
-    setSkipFeedbackCountdownSec(SKIP_FEEDBACK_CONFIRM_SECONDS);
+    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
   }, [clearSkipFeedbackConfirmInterval]);
 
   const startSkipFeedbackConfirmCooldown = useCallback(() => {
     clearSkipFeedbackConfirmInterval();
     setSkipFeedbackConfirmState('cooldown');
-    setSkipFeedbackCountdownSec(SKIP_FEEDBACK_CONFIRM_SECONDS);
+    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
 
     skipFeedbackConfirmIntervalRef.current = setInterval(() => {
       setSkipFeedbackCountdownSec((previousSeconds) => {

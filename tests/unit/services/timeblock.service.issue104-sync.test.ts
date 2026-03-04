@@ -27,8 +27,19 @@ let storageForUser: Record<string, {
   deleteActiveBlock: typeof deleteActiveBlockMock;
   syncToRemote: (remoteUrl: string) => Promise<void> | void;
   stopSync: () => Promise<void> | void;
+  listeners: Set<(block: unknown, source: 'local' | 'sync') => void>;
   onBlockChange: (callback: (block: unknown, source: 'local' | 'sync') => void) => () => void;
 }> = {};
+
+function emitStorageChange(userId: string, block: unknown, source: 'local' | 'sync'): void {
+  const storage = storageForUser[userId];
+  if (!storage) {
+    return;
+  }
+  for (const callback of Array.from(storage.listeners)) {
+    callback(block, source);
+  }
+}
 
 vi.mock('@/lib/storage/active-block-storage', () => ({
   getActiveBlockStorage: getActiveBlockStorageMock,
@@ -65,12 +76,11 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
           deleteActiveBlock: deleteActiveBlockMock,
           syncToRemote: (remoteUrl: string) => syncToRemoteMock(id, remoteUrl),
           stopSync: () => stopSyncMock(id),
+          listeners: new Set(),
           onBlockChange: (callback: (block: unknown, source: 'local' | 'sync') => void) => {
-            listener = callback;
+            storageForUser[id].listeners.add(callback);
             return () => {
-              if (listener === callback) {
-                listener = null;
-              }
+              storageForUser[id].listeners.delete(callback);
             };
           },
         };
@@ -84,7 +94,6 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     saveActiveBlockMock.mockReset();
     deleteActiveBlockMock.mockReset();
     getEventStorageMock.mockClear();
-    listener = null;
   });
 
   it('starts and stops storage sync by service API', async () => {
@@ -194,7 +203,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     const unsubscribe = service.onBlockChange(onChange);
 
     await service.startSync('http://127.0.0.1:6984/test-user');
-    expect(listener).toBeTypeOf('function');
+    expect(storageForUser['test-user'].listeners.size).toBeGreaterThan(0);
     onChange.mockClear();
 
     const remoteBlock = {
@@ -208,7 +217,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
       pauseAccumulatedMs: 0,
     };
 
-    listener?.(remoteBlock, 'sync');
+    emitStorageChange('test-user', remoteBlock, 'sync');
     expect(onChange).toHaveBeenCalledWith(expect.objectContaining({ startId: 'remote-1' }));
 
     unsubscribe();
@@ -220,10 +229,10 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     const unsubscribe = service.onBlockChange(onChange);
 
     await service.startSync('http://127.0.0.1:6984/test-user');
-    expect(listener).toBeTypeOf('function');
+    expect(storageForUser['test-user'].listeners.size).toBeGreaterThan(0);
     onChange.mockClear();
 
-    listener?.({
+    emitStorageChange('test-user', {
       startId: 'local-echo',
       name: 'from local',
       startTime: Date.now(),
@@ -244,7 +253,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     const unsubscribe = service.onBlockChange(onChange);
 
     await service.startSync('http://127.0.0.1:6984/test-user');
-    expect(listener).toBeTypeOf('function');
+    expect(storageForUser['test-user'].listeners.size).toBeGreaterThan(0);
     onChange.mockClear();
 
     const remoteBlock = {
@@ -258,7 +267,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
       pauseAccumulatedMs: 0,
     };
 
-    listener?.(remoteBlock, 'sync');
+    emitStorageChange('test-user', remoteBlock, 'sync');
 
     expect(onChange).toHaveBeenCalledWith(
       expect.objectContaining({ startId: 'remote-old-timestamp' })
@@ -274,11 +283,11 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     const unsubscribe = service.onBlockChange(onChange);
 
     await service.startSync('http://127.0.0.1:6984/test-user');
-    expect(listener).toBeTypeOf('function');
+    expect(storageForUser['test-user'].listeners.size).toBeGreaterThan(0);
     onChange.mockClear();
 
     const base = Date.now();
-    listener?.({
+    emitStorageChange('test-user', {
       startId: 'same-start',
       name: 'terminal',
       startTime: base - 60_000,
@@ -292,7 +301,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
       pauseAccumulatedMs: 0,
     }, 'sync');
 
-    listener?.({
+    emitStorageChange('test-user', {
       startId: 'same-start',
       name: 'stale-running',
       startTime: base - 60_000,
@@ -337,7 +346,7 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     await service.startSync('http://127.0.0.1:6984/test-user');
     saveActiveBlockMock.mockClear();
 
-    listener?.({
+    emitStorageChange('test-user', {
       startId: 'remote-older',
       name: 'remote stale block',
       startTime: base - 60_000,
@@ -358,5 +367,257 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
         expect.objectContaining({ startId: 'local-newer' })
       );
     });
+  });
+
+  it('prefers newer transition time over actorId when phase and version tie', async () => {
+    const service = new TimeBlockServiceImpl();
+    const onChange = vi.fn();
+    const unsubscribe = service.onBlockChange(onChange);
+    const base = Date.now();
+
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'same-start',
+      name: 'local-older',
+      startTime: base - 60_000,
+      mode: 'countup',
+      elapsed: 10_000,
+      paused: false,
+      version: 7,
+      actorId: 'zz-local',
+      lastTransitionAt: base - 5_000,
+      lastResumedAt: base - 5_000,
+      accumulatedRunMs: 10_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 5_000,
+    });
+
+    await service.startSync('http://127.0.0.1:6984/test-user');
+    onChange.mockClear();
+    saveActiveBlockMock.mockClear();
+
+    emitStorageChange('test-user', {
+      startId: 'same-start',
+      name: 'remote-newer',
+      startTime: base - 60_000,
+      mode: 'countup',
+      elapsed: 20_000,
+      paused: false,
+      version: 7,
+      actorId: 'aa-remote',
+      lastTransitionAt: base - 1_000,
+      lastResumedAt: base - 1_000,
+      accumulatedRunMs: 20_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 1_000,
+    }, 'sync');
+
+    expect(onChange).toHaveBeenCalledWith(expect.objectContaining({
+      startId: 'same-start',
+      name: 'remote-newer',
+      actorId: 'aa-remote',
+    }));
+    expect(saveActiveBlockMock).not.toHaveBeenCalled();
+
+    unsubscribe();
+  });
+
+  it('keeps remaining subscriber active after another subscriber unsubscribes', async () => {
+    const service = new TimeBlockServiceImpl();
+    const onChangeA = vi.fn();
+    const onChangeB = vi.fn();
+    const unsubscribeA = service.onBlockChange(onChangeA);
+    const unsubscribeB = service.onBlockChange(onChangeB);
+    const base = Date.now();
+
+    await service.startSync('http://127.0.0.1:6984/test-user');
+    onChangeA.mockClear();
+    onChangeB.mockClear();
+
+    unsubscribeA();
+    emitStorageChange('test-user', {
+      startId: 'multi-subscriber',
+      name: 'remote-sync',
+      startTime: base - 10_000,
+      mode: 'countup',
+      elapsed: 4_000,
+      paused: false,
+      updatedAt: base - 100,
+      pauseAccumulatedMs: 0,
+    }, 'sync');
+
+    expect(onChangeA).not.toHaveBeenCalled();
+    expect(onChangeB).toHaveBeenCalledWith(expect.objectContaining({ startId: 'multi-subscriber' }));
+
+    unsubscribeB();
+  });
+
+  it('ignores stale sync packets from previous user storage after user switch', async () => {
+    const service = new TimeBlockServiceImpl();
+    const onChange = vi.fn();
+    const unsubscribe = service.onBlockChange(onChange);
+    const base = Date.now();
+
+    loadActiveBlockMock
+      .mockResolvedValueOnce({
+        startId: 'user-a-block',
+        name: 'user-a running',
+        startTime: base - 20_000,
+        mode: 'countup',
+        elapsed: 5_000,
+        paused: false,
+        updatedAt: base - 5_000,
+        pauseAccumulatedMs: 0,
+      })
+      .mockResolvedValueOnce({
+        startId: 'user-b-block',
+        name: 'user-b running',
+        startTime: base - 10_000,
+        mode: 'countup',
+        elapsed: 3_000,
+        paused: false,
+        updatedAt: base - 2_000,
+        pauseAccumulatedMs: 0,
+      });
+
+    await service.startSync('http://127.0.0.1:6984/user-a');
+    await service.startSync('http://127.0.0.1:6984/user-b');
+    onChange.mockClear();
+
+    emitStorageChange('user-a', {
+      startId: 'user-a-stale',
+      name: 'stale from old user',
+      startTime: base - 30_000,
+      mode: 'countup',
+      elapsed: 1_000,
+      paused: false,
+      updatedAt: base - 15_000,
+      pauseAccumulatedMs: 0,
+    }, 'sync');
+
+    expect(onChange).not.toHaveBeenCalled();
+    expect(storageForUser['user-a'].listeners.size).toBe(0);
+    expect(storageForUser['user-b'].listeners.size).toBeGreaterThan(0);
+
+    unsubscribe();
+  });
+
+  it('includes remote context in canonical write-back dedupe signature', async () => {
+    const service = new TimeBlockServiceImpl();
+    const base = Date.now();
+
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'local-newer',
+      name: 'local newer block',
+      startTime: base - 10_000,
+      mode: 'countup',
+      elapsed: 8_000,
+      paused: false,
+      version: 3,
+      actorId: 'actor-local',
+      lastTransitionAt: base - 2_000,
+      lastResumedAt: base - 2_000,
+      accumulatedRunMs: 8_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 2_000,
+    });
+
+    await service.startSync('http://127.0.0.1:6984/test-user');
+    saveActiveBlockMock.mockClear();
+
+    const stalePacket = {
+      startId: 'remote-older',
+      name: 'remote stale block',
+      startTime: base - 60_000,
+      mode: 'countup',
+      elapsed: 5_000,
+      paused: false,
+      version: 1,
+      actorId: 'actor-remote',
+      lastTransitionAt: base - 30_000,
+      lastResumedAt: base - 30_000,
+      accumulatedRunMs: 5_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 30_000,
+    };
+
+    emitStorageChange('test-user', stalePacket, 'sync');
+    await vi.waitFor(() => {
+      expect(saveActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    await service.startSync('http://127.0.0.1:6999/test-user');
+    const writesBeforeSecondPacket = saveActiveBlockMock.mock.calls.length;
+    emitStorageChange('test-user', stalePacket, 'sync');
+    await vi.waitFor(() => {
+      expect(saveActiveBlockMock.mock.calls.length).toBe(writesBeforeSecondPacket + 1);
+    });
+  });
+
+  it('emits structured diagnostics when rejecting stale sync packets', async () => {
+    const service = new TimeBlockServiceImpl();
+    const base = Date.now();
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'same-start',
+      name: 'local-accepted',
+      startTime: base - 30_000,
+      mode: 'countup',
+      elapsed: 12_000,
+      paused: false,
+      version: 6,
+      actorId: 'actor-local',
+      lastTransitionAt: base - 2_000,
+      lastResumedAt: base - 2_000,
+      accumulatedRunMs: 12_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 2_000,
+    });
+
+    await service.startSync('http://127.0.0.1:6984/test-user');
+    saveActiveBlockMock.mockClear();
+
+    emitStorageChange('test-user', {
+      startId: 'same-start',
+      name: 'remote-stale',
+      startTime: base - 30_000,
+      mode: 'countup',
+      elapsed: 2_000,
+      paused: false,
+      version: 6,
+      actorId: 'actor-remote',
+      lastTransitionAt: base - 20_000,
+      lastResumedAt: base - 20_000,
+      accumulatedRunMs: 2_000,
+      pauseAccumulatedMs: 0,
+      updatedAt: base - 20_000,
+    }, 'sync');
+
+    await vi.waitFor(() => {
+      expect(saveActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[TB-SVC] rejected non-preferred sync block',
+      expect.objectContaining({
+        reason: 'current_newer_transition',
+        compared: 'transition_time',
+        storageUserId: 'test-user',
+      }),
+    );
+    await vi.waitFor(() => {
+      expect(infoSpy).toHaveBeenCalledWith(
+        '[TB-SVC] canonical write-back applied',
+        expect.objectContaining({
+          trigger: 'reject_non_preferred_sync',
+          reason: 'current_newer_transition',
+          compared: 'transition_time',
+          storageUserId: 'test-user',
+        }),
+      );
+    });
+
+    warnSpy.mockRestore();
+    infoSpy.mockRestore();
   });
 });
