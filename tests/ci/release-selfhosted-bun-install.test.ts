@@ -69,10 +69,10 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
   it('skips GitHub artifact upload on workflow_dispatch in self-hosted job / 手动触发时跳过 GitHub artifact 中转', () => {
     const workflowContent = readReleaseWorkflow();
     expect(workflowContent).toMatch(
-      /name:\s*Upload Android signed APK Artifact[\s\S]*?if:\s*steps\.targets\.outputs\.BUILD_ANDROID == 'true' && github\.event_name != 'workflow_dispatch'/,
+      /name:\s*Upload Android signed APK Artifact[\s\S]*?if:\s*steps\.targets\.outputs\.BUILD_ANDROID == 'true' && github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/release\/'\)/,
     );
     expect(workflowContent).toMatch(
-      /name:\s*Upload Windows EXE Artifact[\s\S]*?if:\s*steps\.targets\.outputs\.BUILD_WINDOWS == 'true' && github\.event_name != 'workflow_dispatch'/,
+      /name:\s*Upload Windows EXE Artifact[\s\S]*?if:\s*steps\.targets\.outputs\.BUILD_WINDOWS == 'true' && github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/release\/'\)/,
     );
   });
 });
