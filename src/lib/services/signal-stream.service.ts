@@ -7,6 +7,7 @@
 
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { SignalEvent, PublishRequest, PublishResponse } from '@/lib/types/signal-pool';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 
 // ── 配置 ─────────────────────────────────────────────────────
 
@@ -80,6 +81,16 @@ export class SignalStreamService {
 
   /** Publish a signal to the RT. */
   async publish(request: PublishRequest): Promise<PublishResponse> {
+    // Prefer Tauri invoke fast-path（优先走 Tauri invoke 快速通道）
+    if (await isTauri()) {
+      try {
+        return await invoke<PublishResponse>('signal_publish_fast', { request });
+      } catch (error) {
+        console.warn('[SignalStream] invoke publish failed, fallback to HTTP:', error);
+      }
+    }
+
+    // HTTP fallback（HTTP 降级路径）
     const url = `${this.baseUrl}/signals/publish`;
     const response = await fetch(url, {
       method: 'POST',

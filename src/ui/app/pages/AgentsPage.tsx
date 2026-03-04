@@ -695,7 +695,7 @@ function DeviceView({
             </span>
           </div>
           <p className="mt-1 text-[10px] text-[#A8A29E]">
-            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 4077}
+            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 1949}
           </p>
           {runtimeServiceStatus?.pid && (
             <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
@@ -1228,7 +1228,7 @@ export function AgentsPage() {
     try {
       const status = await getRuntimeControlService().startRuntime({
         host: '127.0.0.1',
-        port: 4077,
+        port: 1949,
       });
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
@@ -1237,7 +1237,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 4077,
+        port: 1949,
         error: message,
       });
     }
@@ -1253,7 +1253,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 4077,
+        port: 1949,
         error: message,
       });
     }
