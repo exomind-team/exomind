@@ -38,13 +38,7 @@ pub fn run() {
         .setup(move |_app| {
             let runtime_state = runtime_process_state_for_setup.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(error) = ensure_runtime_started(
-                    runtime_state,
-                    Some("127.0.0.1".to_string()),
-                    Some(exomind_runtime::DEFAULT_RT_PORT),
-                )
-                .await
-                {
+                if let Err(error) = ensure_runtime_started(runtime_state, None, None).await {
                     eprintln!("[tauri/setup] failed to auto-start embedded runtime: {error}");
                 }
             });
