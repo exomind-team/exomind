@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Play, Pause, Square, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Pause, Square, ChevronDown, ChevronUp, NotepadText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -534,6 +534,18 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const isEmptyFeedback = feedback.trim().length === 0;
   const isSkipFeedbackCoolingDown = isEmptyFeedback && skipFeedbackConfirmState === 'cooldown';
   const isEndActionDisabled = feedbackInProgress && feedbackOpen;
+  const endActionTitle = feedbackInProgress ? '反馈中' : '结束';
+  const endActionButtonVariant = feedbackInProgress ? 'brand' : 'destructive';
+  const mobileEndActionButtonVariant = feedbackInProgress ? 'brand' : 'outline';
+  const mobileEndActionButtonClass = feedbackInProgress
+    ? 'h-10 gap-2 rounded-[24px] border-0 bg-brand px-6 text-sm font-medium text-white hover:bg-brand/90 hover:text-white'
+    : 'h-10 gap-2 rounded-[24px] border-0 bg-[#FDECEB] px-6 text-sm font-medium text-[#C75B3A]';
+  const endActionButtonClass = feedbackInProgress
+    ? 'gap-1 bg-brand text-white hover:bg-brand/90 hover:text-white'
+    : 'gap-1';
+  const endActionIcon = feedbackInProgress
+    ? <NotepadText size={16} className="text-white" />
+    : <Square size={16} />;
   const feedbackConfirmLabel = feedbackSubmitting
     ? '提交中...'
     : (isEmptyFeedback && skipFeedbackConfirmState === 'cooldown')
@@ -591,7 +603,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                     variant="outline"
                     onClick={handlePause}
                     disabled={feedbackInProgress}
-                    className="h-10 gap-2 rounded-[24px] border-0 bg-[#EDECE9] px-6 text-sm font-medium text-[#1C1917]"
+                    className="h-10 gap-2 rounded-[24px] border-0 bg-warning px-6 text-sm font-medium text-white hover:bg-warning/90 hover:text-white"
                   >
                     <Pause size={16} />
                     <span>暂停</span>
@@ -610,12 +622,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                 )}
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant={mobileEndActionButtonVariant}
                   onClick={handleEndDialog}
                   disabled={isEndActionDisabled}
-                  className="h-10 gap-2 rounded-[24px] border-0 bg-[#FDECEB] px-6 text-sm font-medium text-[#C75B3A]"
+                  title={endActionTitle}
+                  className={mobileEndActionButtonClass}
                 >
-                  <Square size={16} />
+                  {endActionIcon}
                   <span>结束</span>
                 </Button>
               </div>
@@ -656,19 +669,20 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   variant="outline"
                   onClick={handlePause}
                   disabled={feedbackInProgress}
-                  className="gap-1"
+                  className="gap-1 border-0 bg-warning text-white hover:bg-warning/90 hover:text-white"
                 >
                   <Pause size={16} />
                   <span>暂停</span>
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant={endActionButtonVariant}
                   onClick={handleEndDialog}
                   disabled={isEndActionDisabled}
-                  className="gap-1"
+                  title={endActionTitle}
+                  className={endActionButtonClass}
                 >
-                  <Square size={16} />
+                  {endActionIcon}
                   <span>结束</span>
                 </Button>
               </>
@@ -687,12 +701,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant={endActionButtonVariant}
                   onClick={handleEndDialog}
                   disabled={isEndActionDisabled}
-                  className="gap-1"
+                  title={endActionTitle}
+                  className={endActionButtonClass}
                 >
-                  <Square size={16} />
+                  {endActionIcon}
                   <span>结束</span>
                 </Button>
               </>
