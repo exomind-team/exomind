@@ -44,7 +44,7 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: false,
       host: '127.0.0.1',
-      port: 4077,
+      port: 1949,
     });
     runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
       updatedAt: '2026-02-28T10:00:00.000Z',

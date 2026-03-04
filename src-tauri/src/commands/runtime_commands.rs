@@ -1,28 +1,36 @@
-//! Runtime 服务命令
-//! 提供桌面端 Agent Runtime 的启动、停止与状态查询
+//! Runtime 服务命令（embedded mode，内嵌模式）
+//! 提供桌面端 Runtime 的启动、停止与状态查询。
 
 use chrono::Utc;
-use serde::Serialize;
-use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use exomind_runtime::{
+    DEFAULT_RT_PORT, RuntimeHandle, RuntimePublishRequest, RuntimeStartOptions, start_with_options,
+};
+use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
-use tauri::{AppHandle, State};
+use tauri::State;
 
-#[derive(Default)]
+struct RuntimeInner {
+    handle: Option<RuntimeHandle>,
+    host: String,
+    port: u16,
+    started_at: Option<String>,
+    last_error: Option<String>,
+}
+
 pub struct RuntimeProcessState {
-    pub child: Mutex<Option<Child>>,
-    pub host: Mutex<String>,
-    pub port: Mutex<u16>,
-    pub started_at: Mutex<Option<String>>,
+    inner: Mutex<RuntimeInner>,
 }
 
 impl RuntimeProcessState {
     pub fn new() -> Self {
         Self {
-            child: Mutex::new(None),
-            host: Mutex::new("127.0.0.1".to_string()),
-            port: Mutex::new(4077),
-            started_at: Mutex::new(None),
+            inner: Mutex::new(RuntimeInner {
+                handle: None,
+                host: "127.0.0.1".to_string(),
+                port: DEFAULT_RT_PORT,
+                started_at: None,
+                last_error: None,
+            }),
         }
     }
 }
@@ -38,103 +46,38 @@ pub struct RuntimeServiceStatus {
     pub error: Option<String>,
 }
 
-fn lock_or_error<'a, T>(
-    mutex: &'a Mutex<T>,
-    label: &str,
-) -> Result<std::sync::MutexGuard<'a, T>, String> {
-    mutex
+#[derive(Debug, Deserialize)]
+pub struct SignalPublishFastRequest {
+    pub topic: String,
+    pub source: Option<String>,
+    pub payload: serde_json::Value,
+    pub trace_id: Option<String>,
+    pub origin_host_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+pub struct SignalPublishFastResponse {
+    pub accepted: bool,
+    pub event_id: String,
+}
+
+fn lock_or_error<'a>(
+    state: &'a Arc<RuntimeProcessState>,
+) -> Result<std::sync::MutexGuard<'a, RuntimeInner>, String> {
+    state
+        .inner
         .lock()
-        .map_err(|_| format!("failed to lock runtime state: {label}"))
+        .map_err(|_| "failed to lock runtime state".to_string())
 }
 
-fn current_status(
-    state: &Arc<RuntimeProcessState>,
-    running: bool,
-    pid: Option<u32>,
-    error: Option<String>,
-) -> Result<RuntimeServiceStatus, String> {
-    let host = lock_or_error(&state.host, "host")?.clone();
-    let port = *lock_or_error(&state.port, "port")?;
-    let started_at = lock_or_error(&state.started_at, "started_at")?.clone();
-
-    Ok(RuntimeServiceStatus {
+fn compose_status(inner: &RuntimeInner, running: bool, error: Option<String>) -> RuntimeServiceStatus {
+    RuntimeServiceStatus {
         running,
-        host,
-        port,
-        pid,
-        started_at,
-        error,
-    })
-}
-
-fn refresh_child_running_state(child: &mut Option<Child>) -> Result<(bool, Option<u32>), String> {
-    if let Some(process) = child.as_mut() {
-        match process.try_wait() {
-            Ok(Some(_)) => {
-                *child = None;
-                Ok((false, None))
-            }
-            Ok(None) => Ok((true, Some(process.id()))),
-            Err(error) => Err(format!("runtime process status check failed: {error}")),
-        }
-    } else {
-        Ok((false, None))
-    }
-}
-
-fn runtime_entry_candidates(base_dir: &Path) -> Vec<PathBuf> {
-    let mut candidates = Vec::new();
-    let mut push_candidate = |path: PathBuf| {
-        if !candidates.iter().any(|item| item == &path) {
-            candidates.push(path);
-        }
-    };
-
-    push_candidate(base_dir.join("server").join("agent-runtime-server.js"));
-
-    if let Some(parent) = base_dir.parent() {
-        push_candidate(parent.join("server").join("agent-runtime-server.js"));
-    }
-
-    let manifest_parent = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-        .parent()
-        .map(|path| path.to_path_buf());
-    if let Some(root) = manifest_parent {
-        push_candidate(root.join("server").join("agent-runtime-server.js"));
-    }
-
-    candidates
-}
-
-fn resolve_runtime_entry_path_from_base(base_dir: &Path) -> Result<PathBuf, String> {
-    // Canonicalize base_dir to prevent path traversal
-    let canonical_base = base_dir
-        .canonicalize()
-        .map_err(|e| format!("failed to canonicalize base directory: {e}"))?;
-
-    let candidates = runtime_entry_candidates(&canonical_base);
-    for path in &candidates {
-        if path.exists() {
-            // Canonicalize resolved path to eliminate any remaining .. components
-            let canonical = path
-                .canonicalize()
-                .map_err(|e| format!("failed to canonicalize runtime entry path: {e}"))?;
-            return Ok(canonical);
-        }
-    }
-
-    #[cfg(debug_assertions)]
-    {
-        let searched = candidates
-            .iter()
-            .map(|item| item.to_string_lossy().to_string())
-            .collect::<Vec<String>>()
-            .join(" | ");
-        Err(format!("runtime entry not found: {searched}"))
-    }
-    #[cfg(not(debug_assertions))]
-    {
-        Err("runtime entry not found".to_string())
+        host: inner.host.clone(),
+        port: inner.port,
+        pid: running.then_some(std::process::id()),
+        started_at: inner.started_at.clone(),
+        error: error.or_else(|| inner.last_error.clone()),
     }
 }
 
@@ -160,24 +103,8 @@ fn is_valid_host(host: &str) -> bool {
     })
 }
 
-fn resolve_runtime_entry_path() -> Result<PathBuf, String> {
-    let base_dir = std::env::current_dir().map_err(|_error| {
-        #[cfg(debug_assertions)]
-        {
-            format!("failed to resolve current directory: {_error}")
-        }
-        #[cfg(not(debug_assertions))]
-        {
-            "failed to resolve current directory".to_string()
-        }
-    })?;
-    resolve_runtime_entry_path_from_base(&base_dir)
-}
-
-#[tauri::command]
-pub fn runtime_service_start(
-    _app: AppHandle,
-    state: State<'_, Arc<RuntimeProcessState>>,
+pub async fn ensure_runtime_started(
+    state: Arc<RuntimeProcessState>,
     host: Option<String>,
     port: Option<u16>,
 ) -> Result<RuntimeServiceStatus, String> {
@@ -188,128 +115,139 @@ pub fn runtime_service_start(
     if runtime_host.is_empty() {
         return Err("runtime host is required".to_string());
     }
-
     if !is_valid_host(&runtime_host) {
         return Err("invalid host format: must be a valid IP address or hostname".to_string());
     }
+    let runtime_port = port.unwrap_or(DEFAULT_RT_PORT);
 
-    let runtime_port = port.unwrap_or(4077);
-    if runtime_port == 0 {
-        return Err("runtime port must be greater than 0".to_string());
+    // Fast path: already running（快速路径：已在运行）
+    {
+        let mut inner = lock_or_error(&state)?;
+        let running_snapshot = inner
+            .handle
+            .as_ref()
+            .and_then(|handle| handle.is_running().then(|| (handle.host(), handle.port())));
+        if let Some((host, port)) = running_snapshot {
+            inner.host = host;
+            inner.port = port;
+            return Ok(compose_status(&inner, true, None));
+        }
     }
 
-    let mut child_guard = lock_or_error(&state.child, "child")?;
-    let (running, pid) = refresh_child_running_state(&mut child_guard)?;
-    if running {
-        return current_status(&state.inner().clone(), true, pid, None);
+    let mut options = RuntimeStartOptions::default();
+    options.bind_host = runtime_host;
+    options.port = runtime_port;
+
+    let handle = start_with_options(options)
+        .await
+        .map_err(|error| format!("failed to start embedded runtime: {error}"))?;
+    let started_host = handle.host();
+    let started_port = handle.port();
+
+    let mut inner = lock_or_error(&state)?;
+    inner.host = started_host;
+    inner.port = started_port;
+    inner.started_at = Some(Utc::now().to_rfc3339());
+    inner.last_error = None;
+    inner.handle = Some(handle);
+    Ok(compose_status(&inner, true, None))
+}
+
+pub async fn ensure_runtime_stopped(
+    state: Arc<RuntimeProcessState>,
+) -> Result<RuntimeServiceStatus, String> {
+    let mut handle = {
+        let mut inner = lock_or_error(&state)?;
+        inner.started_at = None;
+        inner.handle.take()
+    };
+
+    if let Some(runtime) = handle.as_mut() {
+        runtime
+            .stop()
+            .await
+            .map_err(|error| format!("failed to stop embedded runtime: {error}"))?;
     }
 
-    let script_path = resolve_runtime_entry_path()?;
+    let mut inner = lock_or_error(&state)?;
+    inner.started_at = None;
+    Ok(compose_status(&inner, false, None))
+}
 
-    let child = Command::new("bun")
-        .arg(script_path.to_string_lossy().to_string())
-        .arg("--host")
-        .arg(runtime_host.clone())
-        .arg("--port")
-        .arg(runtime_port.to_string())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .stdin(Stdio::null())
-        .spawn()
-        .map_err(|error| format!("failed to start runtime process: {error}"))?;
+pub fn runtime_status_snapshot(
+    state: Arc<RuntimeProcessState>,
+) -> Result<RuntimeServiceStatus, String> {
+    let mut inner = lock_or_error(&state)?;
+    let running_snapshot = inner
+        .handle
+        .as_ref()
+        .and_then(|handle| handle.is_running().then(|| (handle.host(), handle.port())));
 
-    let pid = Some(child.id());
-    *child_guard = Some(child);
+    let running = if let Some((host, port)) = running_snapshot {
+        inner.host = host;
+        inner.port = port;
+        true
+    } else {
+        inner.started_at = None;
+        false
+    };
 
-    *lock_or_error(&state.host, "host")? = runtime_host.clone();
-    *lock_or_error(&state.port, "port")? = runtime_port;
-    *lock_or_error(&state.started_at, "started_at")? = Some(Utc::now().to_rfc3339());
-
-    current_status(&state.inner().clone(), true, pid, None)
+    Ok(compose_status(&inner, running, None))
 }
 
 #[tauri::command]
-pub fn runtime_service_stop(
+pub async fn runtime_service_start(
+    state: State<'_, Arc<RuntimeProcessState>>,
+    host: Option<String>,
+    port: Option<u16>,
+) -> Result<RuntimeServiceStatus, String> {
+    ensure_runtime_started(state.inner().clone(), host, port).await
+}
+
+#[tauri::command]
+pub async fn runtime_service_stop(
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<RuntimeServiceStatus, String> {
-    let mut child_guard = lock_or_error(&state.child, "child")?;
-
-    if let Some(process) = child_guard.as_mut() {
-        process
-            .kill()
-            .map_err(|error| format!("failed to stop runtime process: {error}"))?;
-        let _ = process.wait();
-    }
-    *child_guard = None;
-    *lock_or_error(&state.started_at, "started_at")? = None;
-
-    current_status(&state.inner().clone(), false, None, None)
+    ensure_runtime_stopped(state.inner().clone()).await
 }
 
 #[tauri::command]
 pub fn runtime_service_status(
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<RuntimeServiceStatus, String> {
-    let mut child_guard = lock_or_error(&state.child, "child")?;
-    let (running, pid) = refresh_child_running_state(&mut child_guard)?;
+    runtime_status_snapshot(state.inner().clone())
+}
 
-    if !running {
-        *lock_or_error(&state.started_at, "started_at")? = None;
+#[tauri::command]
+pub fn signal_publish_fast(
+    state: State<'_, Arc<RuntimeProcessState>>,
+    request: SignalPublishFastRequest,
+) -> Result<SignalPublishFastResponse, String> {
+    let inner = lock_or_error(state.inner())?;
+    let handle = inner
+        .handle
+        .as_ref()
+        .ok_or_else(|| "embedded runtime not running".to_string())?;
+    if !handle.is_running() {
+        return Err("embedded runtime is not running".to_string());
     }
 
-    current_status(&state.inner().clone(), running, pid, None)
+    let event_id = handle.publish_signal(RuntimePublishRequest {
+        topic: request.topic,
+        source: request.source,
+        payload: request.payload,
+        trace_id: request.trace_id,
+        origin_host_id: request.origin_host_id,
+    });
+
+    Ok(SignalPublishFastResponse {
+        accepted: true,
+        event_id,
+    })
 }
 
 #[cfg(test)]
 mod tests {
-    use super::resolve_runtime_entry_path_from_base;
-    use std::fs;
-    use std::path::PathBuf;
-    use std::time::{SystemTime, UNIX_EPOCH};
-
-    fn make_temp_root(prefix: &str) -> PathBuf {
-        let now = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time should be after unix epoch")
-            .as_nanos();
-        std::env::temp_dir().join(format!("{prefix}-{now}-{}", std::process::id()))
-    }
-
-    #[test]
-    fn resolve_runtime_entry_uses_project_root_server_when_cwd_is_src_tauri() {
-        let root = make_temp_root("runtime-entry-success");
-        let src_tauri = root.join("src-tauri");
-        let server_dir = root.join("server");
-        let entry = server_dir.join("agent-runtime-server.js");
-
-        fs::create_dir_all(&src_tauri).expect("should create src-tauri directory");
-        fs::create_dir_all(&server_dir).expect("should create server directory");
-        fs::write(&entry, "// runtime server").expect("should create runtime entry");
-
-        let resolved =
-            resolve_runtime_entry_path_from_base(&src_tauri).expect("should resolve runtime entry");
-        let expected = entry
-            .canonicalize()
-            .expect("should canonicalize expected entry");
-        assert_eq!(resolved, expected);
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
-    #[test]
-    fn resolve_runtime_entry_falls_back_to_manifest_root() {
-        let root = make_temp_root("runtime-entry-missing");
-        let src_tauri = root.join("src-tauri");
-        fs::create_dir_all(&src_tauri).expect("should create src-tauri directory");
-
-        let resolved = resolve_runtime_entry_path_from_base(&src_tauri)
-            .expect("should fallback to manifest root server path");
-        assert!(resolved.ends_with(PathBuf::from("server").join("agent-runtime-server.js")));
-        assert!(resolved.exists());
-
-        let _ = fs::remove_dir_all(&root);
-    }
-
     #[test]
     fn is_valid_host_accepts_ipv4() {
         assert!(super::is_valid_host("127.0.0.1"));

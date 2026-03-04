@@ -126,10 +126,21 @@ struct TsAgentProcess {
 /// Runtime handle（运行句柄）.
 pub struct RuntimeHandle {
     local_addr: SocketAddr,
+    signal_pool: Arc<SignalPool>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
     ts_agents: Vec<TsAgentProcess>,
+}
+
+/// Publish request for in-process fast path（进程内快速发布请求）.
+#[derive(Debug, Clone)]
+pub struct RuntimePublishRequest {
+    pub topic: String,
+    pub source: Option<String>,
+    pub payload: serde_json::Value,
+    pub trace_id: Option<String>,
+    pub origin_host_id: Option<String>,
 }
 
 impl RuntimeHandle {
@@ -143,6 +154,33 @@ impl RuntimeHandle {
 
     pub fn port(&self) -> u16 {
         self.local_addr.port()
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.server_task
+            .as_ref()
+            .map(|task| !task.is_finished())
+            .unwrap_or(false)
+    }
+
+    /// Publish a signal directly via in-process SignalPool（进程内直发）.
+    pub fn publish_signal(&self, request: RuntimePublishRequest) -> String {
+        let event_id = uuid::Uuid::new_v4().to_string();
+        let event = signal::types::SignalEvent {
+            schema_version: 1,
+            id: event_id.clone(),
+            topic: request.topic,
+            ts: chrono::Utc::now().timestamp_millis() as u64,
+            source: request.source.unwrap_or_else(|| "tauri:invoke".to_string()),
+            origin_host_id: request
+                .origin_host_id
+                .unwrap_or_else(|| "local".to_string()),
+            hop: 0,
+            trace_id: request.trace_id,
+            payload: request.payload,
+        };
+        self.signal_pool.publish(event);
+        event_id
     }
 
     /// Graceful shutdown（优雅停止）.
@@ -240,6 +278,7 @@ pub async fn start_with_options(
         .map_err(RuntimeStartError::ReadLocalAddr)?;
 
     let state = AppState::new(local_addr.port());
+    let signal_pool = Arc::clone(&state.signal_pool);
 
     let mut actor_tasks = Vec::new();
     if options.spawn_builtin_actors {
@@ -269,6 +308,7 @@ pub async fn start_with_options(
 
     Ok(RuntimeHandle {
         local_addr,
+        signal_pool,
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
         actor_tasks,
