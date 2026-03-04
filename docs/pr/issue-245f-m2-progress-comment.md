@@ -29,10 +29,11 @@
 ### A. 运行 Runtime（1950）
 
 ```powershell
-cd D:\project\.vibe-kanban-workspaces\245f-m2-agent-hub-rea\exomind
+# 在仓库根目录执行（Run from repo root 在仓库根目录执行）
+# e.g. .\exomind
 $env:EXOMIND_RT_PORT="1950"
 $env:EXOMIND_RT_BIND="127.0.0.1"
-cargo run --manifest-path crates/exomind-runtime/Cargo.toml --bin exomind-rt
+cargo run --manifest-path .\crates\exomind-runtime\Cargo.toml --bin exomind-rt
 ```
 
 ### B. 验证 Runtime API
@@ -78,4 +79,4 @@ bun run build
 
 ## 当前状态
 
-- PR 保持 Draft（按要求不合并，等待人工复测确认）
+- PR 已 Ready for review（已转为可评审状态）
