@@ -199,6 +199,24 @@ describe('TimeBlockWidget feedback shortcuts', () => {
     vi.useRealTimers();
   });
 
+  it('keeps end button square icon during normal running state', async () => {
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    const endButton = screen.getByRole('button', { name: '结束' });
+    expect(endButton.querySelector('.lucide-square')).not.toBeNull();
+    expect(endButton.querySelector('.lucide-notepad-text')).toBeNull();
+    expect(endButton).toHaveAttribute('title', '结束');
+    expect(endButton.className).not.toContain('bg-brand');
+
+    const pauseButton = screen.getByRole('button', { name: '暂停' });
+    expect(pauseButton.className).toContain('bg-warning');
+    expect(pauseButton.className).toContain('text-white');
+  });
+
   it('reopens feedback dialog when block is already in feedback stage', async () => {
     loadActiveBlockMock.mockResolvedValueOnce({
       startId: 'block-feedback',
@@ -220,6 +238,12 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
     const endButton = screen.getByRole('button', { name: '结束' });
     expect(endButton).not.toBeDisabled();
+    const feedbackIcon = endButton.querySelector('.lucide-notepad-text');
+    expect(feedbackIcon).not.toBeNull();
+    expect(endButton.querySelector('.lucide-square')).toBeNull();
+    expect(endButton).toHaveAttribute('title', '反馈中');
+    expect(endButton.className).toContain('bg-brand');
+    expect(feedbackIcon).toHaveClass('text-white');
 
     fireEvent.click(endButton);
 

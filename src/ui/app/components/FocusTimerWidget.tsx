@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { ChevronDown, ChevronRight, Pause, Play, Square, Target } from 'lucide-react';
+import { ChevronDown, ChevronRight, NotepadText, Pause, Play, Square, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -558,6 +558,14 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const isEmptyFeedback = feedback.trim().length === 0;
   const isSkipFeedbackCoolingDown = isEmptyFeedback && skipFeedbackConfirmState === 'cooldown';
   const isEndActionDisabled = feedbackInProgress && feedbackOpen;
+  const endActionAriaLabel = feedbackInProgress ? '反馈中（Feedback in progress）' : '结束（End）';
+  const endActionTitle = feedbackInProgress ? '反馈中' : '结束';
+  const endActionButtonClass = feedbackInProgress
+    ? 'h-11 w-11 rounded-[12px] bg-brand p-0 text-white hover:bg-brand/90 hover:text-white'
+    : 'h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#C75B3A] p-0 text-[#C75B3A] dark:text-[#FAFAF9] hover:bg-[#F8DED9] dark:hover:bg-[#B24D2F]';
+  const endActionIcon = feedbackInProgress
+    ? <NotepadText size={18} className="text-white" />
+    : <Square size={18} />;
   const feedbackConfirmLabel = feedbackSubmitting
     ? '提交中...'
     : (isEmptyFeedback && skipFeedbackConfirmState === 'cooldown')
@@ -613,7 +621,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
                 </div>
                 <div className="min-w-0">
                   <p className="truncate text-[16px] font-semibold leading-[1.4] text-[#1C1917] dark:text-[#FAFAF9]">点击开启时间块</p>
-                  <p className="truncate text-[12px] leading-[1.4] text-[#78716C]">配置时间块、开始倒计时</p>
+                  <p className="truncate text-[12px] leading-[1.4] text-[#78716C]">配置时间块，开启新计时</p>
                 </div>
               </div>
               <ChevronRight size={20} className="shrink-0 text-[#C75B3A] dark:text-[#E8734E]" />
@@ -790,7 +798,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
                   className={
                     isPaused
                       ? 'h-11 w-11 rounded-[12px] bg-[#16A34A] p-0 text-white hover:bg-[#15803D]'
-                      : 'h-11 w-11 rounded-[12px] bg-[#EDECE9] dark:bg-[#292524] p-0 text-[#1C1917] dark:text-[#FAFAF9] hover:bg-[#E5E3DF] dark:hover:bg-[#3D3835]'
+                      : 'h-11 w-11 rounded-[12px] bg-warning p-0 text-white hover:bg-warning/90 hover:text-white'
                   }
                 >
                   {isPaused ? <Play size={18} /> : <Pause size={18} />}
@@ -808,12 +816,13 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
                 <Button
                   type="button"
                   data-testid="new-focus-end-button"
-                  aria-label="结束（End）"
+                  aria-label={endActionAriaLabel}
+                  title={endActionTitle}
                   disabled={isEndActionDisabled}
                   onClick={handleOpenEndDialog}
-                  className="h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#C75B3A] p-0 text-[#C75B3A] dark:text-[#FAFAF9] hover:bg-[#F8DED9] dark:hover:bg-[#B24D2F]"
+                  className={endActionButtonClass}
                 >
-                  <Square size={18} />
+                  {endActionIcon}
                 </Button>
               </div>
             </div>

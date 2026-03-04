@@ -445,6 +445,31 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     vi.useRealTimers();
   });
 
+  it('keeps end button square icon during normal running state（普通运行态结束按钮保持停止图标）', async () => {
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '普通运行态图标校验任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    const endButton = screen.getByTestId('new-focus-end-button');
+    expect(endButton.querySelector('.lucide-square')).not.toBeNull();
+    expect(endButton.querySelector('.lucide-notepad-text')).toBeNull();
+    expect(endButton).toHaveAttribute('aria-label', '结束（End）');
+    expect(endButton).toHaveAttribute('title', '结束');
+    expect(endButton.className).not.toContain('bg-brand');
+
+    const pauseButton = screen.getByTestId('new-focus-pause-resume-button');
+    expect(pauseButton.className).toContain('bg-warning');
+    expect(pauseButton.className).toContain('text-white');
+  });
+
   it('reopens feedback dialog when block is already in feedback stage（反馈中可重新拉起弹窗）', async () => {
     loadActiveBlockMock.mockResolvedValueOnce({
       startId: 'block-feedback',
@@ -466,6 +491,13 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
 
     const endButton = screen.getByTestId('new-focus-end-button');
     expect(endButton).not.toBeDisabled();
+    const feedbackIcon = endButton.querySelector('.lucide-notepad-text');
+    expect(feedbackIcon).not.toBeNull();
+    expect(endButton.querySelector('.lucide-square')).toBeNull();
+    expect(endButton).toHaveAttribute('aria-label', '反馈中（Feedback in progress）');
+    expect(endButton).toHaveAttribute('title', '反馈中');
+    expect(endButton.className).toContain('bg-brand');
+    expect(feedbackIcon).toHaveClass('text-white');
 
     fireEvent.click(endButton);
 
