@@ -23,8 +23,9 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { getAgentHubService } from '@/lib/services';
+import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+import type { SignalRoute } from '@/lib/types/signal-pool';
 import type {
   AgentDeviceGroup,
   AgentHubEdge,
@@ -41,6 +42,7 @@ import {
   type RuntimeAggregatedAgent,
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
+import { buildSignalRouteRows, type SignalRouteRow } from './agents-signal-topology';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Bot, label: '拓扑' },
@@ -191,6 +193,11 @@ function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): A
       })),
     };
   });
+}
+
+function pickPreferredRouteHost(hosts: RuntimeHostSnapshot[]): RuntimeHostSnapshot | null {
+  if (hosts.length === 0) return null;
+  return hosts.find((item) => item.connectionState === 'online') ?? hosts[0] ?? null;
 }
 
 function getDeviceTypeIcon(groupId: string): LucideIcon {
@@ -504,11 +511,15 @@ function TopologyView({
 function ListView({
   sections,
   hostSnapshots,
+  routeRows,
+  routeHostLabel,
   onRetryHost,
   onItemNavigate,
 }: {
   sections: AgentHubListSection[];
   hostSnapshots: RuntimeHostSnapshot[];
+  routeRows: SignalRouteRow[];
+  routeHostLabel?: string;
   onRetryHost: (hostId: string) => Promise<void>;
   onItemNavigate: (path: string) => void;
 }) {
@@ -533,6 +544,59 @@ function ListView({
           );
         })}
       </div>
+
+      <article
+        data-testid="agent-signal-route-section"
+        className="space-y-2 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信号路由</p>
+            <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
+              {routeHostLabel ? `来源 ${routeHostLabel}` : '未连接 runtime'}
+            </p>
+          </div>
+          <span className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+            {routeRows.length} 条
+          </span>
+        </div>
+
+        {routeRows.length === 0 && (
+          <p className="rounded-lg bg-[#FAF7F5] px-3 py-2 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+            暂无路由数据（No signal routes）
+          </p>
+        )}
+
+        {routeRows.length > 0 && (
+          <div className="space-y-1.5">
+            {routeRows.map((row) => (
+              <div
+                key={row.id}
+                data-testid={`agent-signal-route-row-${row.id}`}
+                className="flex items-center justify-between gap-2 rounded-lg bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-[#1C1917] dark:text-[#FAFAF9]">{row.topic}</p>
+                  <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{`${row.targetType} ${row.targetRef}`}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#A8A29E] dark:text-[#78716C]">→</span>
+                  <span
+                    data-testid={`agent-signal-route-status-${row.id}`}
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      row.status === 'active'
+                        ? 'bg-[#22C55E20] text-[#16A34A]'
+                        : 'bg-[#A8A29E30] text-[#57534E] dark:text-[#D6D3D1]'
+                    }`}
+                  >
+                    {row.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </article>
 
       {problemHosts.length > 0 && (
         <article className="space-y-2 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-3 dark:border-[#7F1D1D] dark:bg-[#2B1111]">
@@ -1124,6 +1188,8 @@ function RuntimeHostManagerSheet({
 export function AgentsPage() {
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [topology, setTopology] = useState<AgentHubTopologyData>({ nodes: [], edges: [], selectedNodeId: null });
+  const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
+  const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
   const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
@@ -1140,9 +1206,38 @@ export function AgentsPage() {
     setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
   };
 
+  const refreshSignalRoutesFromSnapshot = async (
+    snapshot: { hosts: RuntimeHostSnapshot[] },
+    isDisposed: () => boolean = () => false
+  ) => {
+    const preferredHost = pickPreferredRouteHost(snapshot.hosts);
+    if (!preferredHost) {
+      if (isDisposed()) return;
+      setSignalRouteHostLabel('');
+      setSignalRoutes([]);
+      return;
+    }
+
+    if (isDisposed()) return;
+    setSignalRouteHostLabel(`${preferredHost.host.host}:${preferredHost.host.port}`);
+
+    try {
+      const routeService = new SignalRouteService({
+        host: preferredHost.host,
+      });
+      const routes = await routeService.listRoutes();
+      if (isDisposed()) return;
+      setSignalRoutes(routes);
+    } catch {
+      if (isDisposed()) return;
+      setSignalRoutes([]);
+    }
+  };
+
   const refreshRuntimeSnapshot = async () => {
     const snapshot = await getRuntimeManager().refreshSnapshot();
     applyRuntimeSnapshot(snapshot);
+    await refreshSignalRoutesFromSnapshot(snapshot);
   };
 
   useEffect(() => {
@@ -1163,6 +1258,7 @@ export function AgentsPage() {
       setDeviceGroups(nextDevice);
       setRuntimeServiceStatus(nextRuntimeStatus);
       applyRuntimeSnapshot(nextRuntimeSnapshot);
+      await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
     };
 
     const refreshInterval = setInterval(() => {
@@ -1171,6 +1267,7 @@ export function AgentsPage() {
           const nextRuntimeSnapshot = await getRuntimeManager().refreshSnapshot();
           if (disposed) return;
           applyRuntimeSnapshot(nextRuntimeSnapshot);
+          await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
         } catch {
           // Ignore polling errors（轮询错误不打断页面渲染）
         }
@@ -1188,6 +1285,7 @@ export function AgentsPage() {
   const refreshRuntimeHosts = async () => {
     const nextSnapshot = await getRuntimeManager().refreshSnapshot();
     applyRuntimeSnapshot(nextSnapshot);
+    await refreshSignalRoutesFromSnapshot(nextSnapshot);
   };
 
   const handleAddRuntimeHostFromManagerSheet = async () => {
@@ -1263,12 +1361,19 @@ export function AgentsPage() {
     window.location.href = path;
   };
 
+  const signalRouteRows = useMemo(
+    () => buildSignalRouteRows(signalRoutes, signalRouteHostLabel || undefined),
+    [signalRouteHostLabel, signalRoutes]
+  );
+
   const content = useMemo(() => {
     if (viewMode === 'list') {
       return (
         <ListView
           sections={listSections}
           hostSnapshots={runtimeHostSnapshots}
+          routeRows={signalRouteRows}
+          routeHostLabel={signalRouteHostLabel || undefined}
           onRetryHost={handleProbeRuntimeHost}
           onItemNavigate={navigateByPath}
         />
@@ -1300,6 +1405,8 @@ export function AgentsPage() {
     deviceGroups,
     listSections,
     runtimeHostSnapshots,
+    signalRouteHostLabel,
+    signalRouteRows,
     runtimeHostError,
     runtimeServiceStatus,
     selectedNodeId,

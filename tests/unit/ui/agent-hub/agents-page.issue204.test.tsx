@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
+import type { SignalRoute } from '@/lib/types/signal-pool';
 
 const serviceMocks = vi.hoisted(() => ({
   getTopology: vi.fn(),
@@ -21,6 +22,65 @@ const runtimeControlMocks = vi.hoisted(() => ({
   stopRuntime: vi.fn(),
   getStatus: vi.fn(),
 }));
+
+const signalRouteFetchMock = vi.hoisted(() => vi.fn());
+
+const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [
+  {
+    id: 'route-001',
+    enabled: true,
+    topic: 'user.input.text',
+    target_type: 'agent',
+    target_ref: 'classifier',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-002',
+    enabled: true,
+    topic: 'user.input.text',
+    target_type: 'actor',
+    target_ref: 'eventlog',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-003',
+    enabled: true,
+    topic: 'session.end',
+    target_type: 'agent',
+    target_ref: 'reviewer',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-004',
+    enabled: true,
+    topic: 'timeblock.completed',
+    target_type: 'agent',
+    target_ref: 'reviewer',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-005',
+    enabled: false,
+    topic: 'input.classified',
+    target_type: 'actor',
+    target_ref: 'task',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-006',
+    enabled: true,
+    topic: '*',
+    target_type: 'frontend',
+    target_ref: 'ui',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+];
 
 vi.mock('@/lib/services', () => ({
   getAgentHubService: () => ({
@@ -76,6 +136,14 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
         },
       ],
     });
+
+    signalRouteFetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => SAMPLE_SIGNAL_ROUTES,
+    } as Response);
+
+    vi.stubGlobal('fetch', signalRouteFetchMock);
   });
 
   it('switches topology/list/device views（支持拓扑/列表/设备切换）', async () => {
@@ -91,6 +159,7 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     fireEvent.click(screen.getByTestId('agent-view-toggle-list'));
     expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
     expect(screen.getByTestId('agent-list-filter-all')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-signal-route-section')).toBeInTheDocument();
     expect(screen.getByText('Echo Agent')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('agent-view-toggle-device'));
     expect(screen.getByTestId('agent-device-view')).toBeInTheDocument();
