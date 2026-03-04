@@ -498,7 +498,15 @@ jobs:
 
       # ─── Windows build ──────────────────────────────────────
 
-      - name: Build Windows MSI installer + EXE binary (构建 Windows MSI + EXE)
+      - name: Build Windows EXE binary (构建 Windows EXE 可执行文件)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        run: bun tauri build --no-bundle
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
+          VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+
+      - name: Build Windows MSI installer (构建 Windows MSI 安装包)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
         run: bun tauri build --bundles msi
         continue-on-error: true
@@ -531,8 +539,10 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/exomind.exe
-          if-no-files-found: error
+          path: |
+            src-tauri/target/release/exomind.exe
+            src-tauri/target/release/ExoMind.exe
+          if-no-files-found: warn
 
       - name: Upload Windows MSI Artifact (上传 MSI)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
