@@ -440,6 +440,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const saveTerminalMs = Math.round(perfNow() - saveTerminalStart);
     this.rememberAcceptedBlock(terminalBlock);
 
+    // 发布 timeblock.completed 信号（fire-and-forget，失败不阻塞）
+    this.publishTimeblockCompleted(timeBlock, report, storage).catch((err) => {
+      console.warn('[TimeBlockService] failed to publish timeblock.completed signal:', err);
+    });
+
     // 通知变化
     this.notifyChange(null);
     console.log('[TB-SVC] endBlock done', {
@@ -530,6 +535,61 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private notifyChange(block: ActiveBlockData | null): void {
     this.listeners.forEach(cb => cb(block));
+  }
+
+  /**
+   * 发布 timeblock.completed 信号到 RT，触发 Reviewer Agent 反馈。
+   * Fire-and-forget：失败不影响 endBlock 主流程。
+   */
+  private async publishTimeblockCompleted(
+    block: TimeBlockData,
+    feedbackReport: string,
+    storage: { getEvents(): Promise<Array<{ id: string; content: string; createdAt: string }>> },
+  ): Promise<void> {
+    const rtBaseUrl = this.resolveRtBaseUrl();
+    if (!rtBaseUrl) return;
+
+    // 获取最近事件作为上下文
+    const allEvents = await storage.getEvents();
+    const recentEvents = allEvents.slice(0, 20).map((e) => ({
+      text: e.content,
+      ts: new Date(e.createdAt).getTime(),
+    }));
+
+    const response = await fetch(`${rtBaseUrl}/signals/publish`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        topic: 'timeblock.completed',
+        source: 'frontend:timeblock-service',
+        payload: {
+          block: {
+            id: block.id,
+            name: block.name,
+            startTime: block.startTime,
+            endTime: block.endTime,
+          },
+          feedbackReport,
+          recentEvents,
+        },
+      }),
+    });
+
+    if (!response.ok) {
+      console.warn(`[TimeBlockService] RT publish returned HTTP ${response.status}`);
+    }
+  }
+
+  private resolveRtBaseUrl(): string | null {
+    try {
+      // 优先使用 window.location 同源 RT（开发环境通常是 localhost:1949）
+      const host = typeof window !== 'undefined' && window.location?.hostname
+        ? window.location.hostname
+        : 'localhost';
+      return `http://${host}:1949`;
+    } catch {
+      return null;
+    }
   }
 
   private attachStorageListener(): void {
