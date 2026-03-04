@@ -257,7 +257,8 @@ jobs:
             $arguments = @("install", "--frozen-lockfile", "--cache-dir", $CacheDir)
             Write-Host "[$AttemptLabel] Running: bun $($arguments -join ' ')"
 
-            $process = Start-Process -FilePath "bun" -ArgumentList $arguments -PassThru -NoNewWindow
+            $commandText = "bun $($arguments -join ' ')"
+            $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $commandText -PassThru -NoNewWindow
             $finished = $process.WaitForExit($TimeoutSeconds * 1000)
 
             if (-not $finished) {
