@@ -51,4 +51,9 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     expect(workflowContent).toContain('MSI_READY');
     expect(workflowContent).toContain("steps.msi_prereq.outputs.MSI_READY == 'true'");
   });
+
+  it('skips MSI on NetworkService runner account / 在 NetworkService 账号下跳过 MSI', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toContain('nt authority\\network service');
+  });
 });

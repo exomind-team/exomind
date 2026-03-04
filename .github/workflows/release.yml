@@ -513,53 +513,60 @@ jobs:
         run: |
           $ErrorActionPreference = "Continue"
           $msiReady = $true
+          $runnerIdentity = (whoami).Trim().ToLowerInvariant()
+          Write-Host "Runner identity / 运行账号: $runnerIdentity"
 
-          $wshKey = "HKCU:\Software\Microsoft\Windows Script Host\Settings"
-          try {
-            New-Item -Path $wshKey -Force | Out-Null
-            New-ItemProperty -Path $wshKey -Name Enabled -PropertyType DWord -Value 1 -Force | Out-Null
-            $enabled = (Get-ItemProperty -Path $wshKey -Name Enabled -ErrorAction SilentlyContinue).Enabled
-            Write-Host "Windows Script Host (WSH) Enabled=$enabled"
-          } catch {
-            Write-Warning "Unable to set WSH registry key: $($_.Exception.Message)"
+          if ($runnerIdentity -eq "nt authority\network service") {
+            Write-Warning "NetworkService account is detected. MSI build is disabled because WiX ICE validation often fails in service context."
             $msiReady = $false
-          }
-
-          $probePath = Join-Path $env:RUNNER_TEMP "wix-vbscript-probe.vbs"
-          Set-Content -Path $probePath -Value 'WScript.Echo "VBSCRIPT_OK"' -Encoding ASCII
-
-          try {
-            & cscript.exe //NoLogo $probePath
-            Write-Host "cscript probe exit code=$LASTEXITCODE"
-            if ($LASTEXITCODE -ne 0) {
-              Write-Warning "cscript probe returned non-zero exit code: $LASTEXITCODE"
+          } else {
+            $wshKey = "HKCU:\Software\Microsoft\Windows Script Host\Settings"
+            try {
+              New-Item -Path $wshKey -Force | Out-Null
+              New-ItemProperty -Path $wshKey -Name Enabled -PropertyType DWord -Value 1 -Force | Out-Null
+              $enabled = (Get-ItemProperty -Path $wshKey -Name Enabled -ErrorAction SilentlyContinue).Enabled
+              Write-Host "Windows Script Host (WSH) Enabled=$enabled"
+            } catch {
+              Write-Warning "Unable to set WSH registry key: $($_.Exception.Message)"
               $msiReady = $false
             }
-          } catch {
-            Write-Warning "cscript probe failed: $($_.Exception.Message)"
-            $msiReady = $false
-          }
 
-          try {
-            $service = Get-Service -Name msiserver -ErrorAction Stop
-            Write-Host "Windows Installer service status=$($service.Status) startType=$($service.StartType)"
-            if ($service.Status -ne "Running") {
-              Start-Service -Name msiserver -ErrorAction Stop
-              Start-Sleep -Seconds 1
-              $service = Get-Service -Name msiserver -ErrorAction Stop
-              Write-Host "Windows Installer service status after start=$($service.Status)"
+            $probePath = Join-Path $env:RUNNER_TEMP "wix-vbscript-probe.vbs"
+            Set-Content -Path $probePath -Value 'WScript.Echo "VBSCRIPT_OK"' -Encoding ASCII
+
+            try {
+              & cscript.exe //NoLogo $probePath
+              Write-Host "cscript probe exit code=$LASTEXITCODE"
+              if ($LASTEXITCODE -ne 0) {
+                Write-Warning "cscript probe returned non-zero exit code: $LASTEXITCODE"
+                $msiReady = $false
+              }
+            } catch {
+              Write-Warning "cscript probe failed: $($_.Exception.Message)"
+              $msiReady = $false
             }
-          } catch {
-            Write-Warning "Windows Installer service probe failed: $($_.Exception.Message)"
-            $msiReady = $false
-          }
 
-          try {
-            $null = New-Object -ComObject WindowsInstaller.Installer
-            Write-Host "WindowsInstaller COM probe: OK"
-          } catch {
-            Write-Warning "WindowsInstaller COM probe failed: $($_.Exception.Message)"
-            $msiReady = $false
+            try {
+              $service = Get-Service -Name msiserver -ErrorAction Stop
+              Write-Host "Windows Installer service status=$($service.Status) startType=$($service.StartType)"
+              if ($service.Status -ne "Running") {
+                Start-Service -Name msiserver -ErrorAction Stop
+                Start-Sleep -Seconds 1
+                $service = Get-Service -Name msiserver -ErrorAction Stop
+                Write-Host "Windows Installer service status after start=$($service.Status)"
+              }
+            } catch {
+              Write-Warning "Windows Installer service probe failed: $($_.Exception.Message)"
+              $msiReady = $false
+            }
+
+            try {
+              $null = New-Object -ComObject WindowsInstaller.Installer
+              Write-Host "WindowsInstaller COM probe: OK"
+            } catch {
+              Write-Warning "WindowsInstaller COM probe failed: $($_.Exception.Message)"
+              $msiReady = $false
+            }
           }
 
           "MSI_READY=$($msiReady.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
