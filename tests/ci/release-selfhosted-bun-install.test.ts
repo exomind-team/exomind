@@ -56,4 +56,21 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     const workflowContent = readReleaseWorkflow();
     expect(workflowContent).toContain('nt authority\\network service');
   });
+
+  it('uploads self-hosted artifacts directly to Cloudflare R2 on workflow_dispatch / 手动触发时由 self-hosted 直接上传到 R2', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toContain('Upload self-hosted artifacts to Cloudflare R2');
+    expect(workflowContent).toContain("github.event_name == 'workflow_dispatch'");
+    expect(workflowContent).toContain('wrangler r2 object put');
+  });
+
+  it('skips GitHub artifact upload on workflow_dispatch in self-hosted job / 手动触发时跳过 GitHub artifact 中转', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toMatch(
+      /name:\s*Upload Android signed APK Artifact[\s\S]*?if:\s*steps\.targets\.outputs\.BUILD_ANDROID == 'true' && github\.event_name != 'workflow_dispatch'/,
+    );
+    expect(workflowContent).toMatch(
+      /name:\s*Upload Windows EXE Artifact[\s\S]*?if:\s*steps\.targets\.outputs\.BUILD_WINDOWS == 'true' && github\.event_name != 'workflow_dispatch'/,
+    );
+  });
 });
