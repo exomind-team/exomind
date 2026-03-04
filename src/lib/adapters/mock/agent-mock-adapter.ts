@@ -10,6 +10,7 @@ import type {
   AgentMarketCategory,
   AgentMarketItem,
 } from '@/lib/types/agent-hub';
+import { createUuidV4 } from '@/lib/utils/uuid';
 import { AGENT_HUB_MOCK_FIXTURE, type AgentHubMockFixture } from './fixtures/agent-hub';
 
 function clone<T>(value: T): T {
@@ -95,13 +96,13 @@ export class AgentMockAdapter implements IAgentPort {
     }
 
     history.push({
-      id: `msg-user-${crypto.randomUUID()}`,
+      id: `msg-user-${createUuidV4()}`,
       role: 'user',
       content: input.prompt,
       createdAt: nowIso(),
     });
 
-    const assistantMessageId = `msg-agent-${crypto.randomUUID()}`;
+    const assistantMessageId = `msg-agent-${createUuidV4()}`;
     history.push({
       id: assistantMessageId,
       role: 'agent',
@@ -126,4 +127,3 @@ export class AgentMockAdapter implements IAgentPort {
     }
   }
 }
-

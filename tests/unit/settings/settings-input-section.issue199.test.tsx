@@ -6,6 +6,17 @@ import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode'
 
 describe('SettingsPage input section（输入分组语音配置）', () => {
   beforeEach(() => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: false,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
     const storage = window.localStorage as Partial<Storage>;
     if (typeof storage.removeItem === 'function') {
       storage.removeItem('moss_api_key');

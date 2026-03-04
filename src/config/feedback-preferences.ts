@@ -1,5 +1,6 @@
 export const FEEDBACK_PREFERENCES_STORAGE_KEY = 'exomind:feedbackPreferences';
 export const FEEDBACK_PREFERENCES_CHANGED_EVENT = 'exomind:feedback-preferences-changed';
+export const FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS = 5;
 
 export type FeedbackPreferences = {
   timingInfoEnabled: boolean;
