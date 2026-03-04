@@ -45,4 +45,10 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     const workflowContent = readReleaseWorkflow();
     expect(workflowContent).toContain('tauri_bundler=debug');
   });
+
+  it('gates MSI build by prerequisite probe result / 仅在前置探针通过时执行 MSI 构建', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toContain('MSI_READY');
+    expect(workflowContent).toContain("steps.msi_prereq.outputs.MSI_READY == 'true'");
+  });
 });
