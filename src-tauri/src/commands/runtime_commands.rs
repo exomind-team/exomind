@@ -3,7 +3,7 @@
 
 use chrono::Utc;
 use exomind_runtime::{
-    DEFAULT_RT_PORT, RuntimeHandle, RuntimePublishRequest, RuntimeStartOptions, start_with_options,
+    start_with_options, RuntimeHandle, RuntimePublishRequest, RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
@@ -70,7 +70,11 @@ fn lock_or_error<'a>(
         .map_err(|_| "failed to lock runtime state".to_string())
 }
 
-fn compose_status(inner: &RuntimeInner, running: bool, error: Option<String>) -> RuntimeServiceStatus {
+fn compose_status(
+    inner: &RuntimeInner,
+    running: bool,
+    error: Option<String>,
+) -> RuntimeServiceStatus {
     RuntimeServiceStatus {
         running,
         host: inner.host.clone(),
@@ -108,17 +112,22 @@ pub async fn ensure_runtime_started(
     host: Option<String>,
     port: Option<u16>,
 ) -> Result<RuntimeServiceStatus, String> {
+    let mut options = RuntimeStartOptions::default();
     let runtime_host = host
-        .unwrap_or_else(|| "127.0.0.1".to_string())
-        .trim()
-        .to_string();
+        .map(|value| value.trim().to_string())
+        .unwrap_or_else(|| options.bind_host.clone());
+
     if runtime_host.is_empty() {
         return Err("runtime host is required".to_string());
     }
     if !is_valid_host(&runtime_host) {
         return Err("invalid host format: must be a valid IP address or hostname".to_string());
     }
-    let runtime_port = port.unwrap_or(DEFAULT_RT_PORT);
+
+    options.bind_host = runtime_host;
+    if let Some(runtime_port) = port {
+        options.port = runtime_port;
+    }
 
     // Fast path: already running（快速路径：已在运行）
     {
@@ -130,17 +139,27 @@ pub async fn ensure_runtime_started(
         if let Some((host, port)) = running_snapshot {
             inner.host = host;
             inner.port = port;
+            inner.last_error = None;
             return Ok(compose_status(&inner, true, None));
         }
     }
 
-    let mut options = RuntimeStartOptions::default();
-    options.bind_host = runtime_host;
-    options.port = runtime_port;
+    let handle = match start_with_options(options).await {
+        Ok(handle) => handle,
+        Err(error) => {
+            // Handle startup race gracefully（处理并发启动竞争）.
+            if let Ok(status) = runtime_status_snapshot(state.clone()) {
+                if status.running {
+                    return Ok(status);
+                }
+            }
 
-    let handle = start_with_options(options)
-        .await
-        .map_err(|error| format!("failed to start embedded runtime: {error}"))?;
+            let message = format!("failed to start embedded runtime: {error}");
+            let mut inner = lock_or_error(&state)?;
+            inner.last_error = Some(message.clone());
+            return Err(message);
+        }
+    };
     let started_host = handle.host();
     let started_port = handle.port();
 
@@ -171,6 +190,7 @@ pub async fn ensure_runtime_stopped(
 
     let mut inner = lock_or_error(&state)?;
     inner.started_at = None;
+    inner.last_error = None;
     Ok(compose_status(&inner, false, None))
 }
 
