@@ -328,6 +328,31 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     expect(runningCard).toContainElement(screen.getByTestId('new-focus-end-button'));
   });
 
+  it('restores countdown overtime after remount（倒计时超时在重载后可恢复）', async () => {
+    const now = Date.now();
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'block-overrun',
+      name: '超时任务',
+      startTime: now - 90_000,
+      elapsed: 0,
+      mode: 'countdown',
+      targetMinutes: 1,
+      paused: false,
+      phase: 'running',
+      accumulatedRunMs: 90_000,
+      lastResumedAt: now,
+      pauseAccumulatedMs: 0,
+    });
+
+    render(<FocusTimerWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('new-focus-running-clock').textContent).toMatch(/^\+00:3\d$/);
+  });
+
   it('confirms feedback end with Ctrl+Enter（反馈弹窗 Ctrl+Enter 确认结束）', async () => {
     render(<FocusTimerWidget />);
 
