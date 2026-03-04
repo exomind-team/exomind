@@ -212,11 +212,76 @@ jobs:
             Remove-Item -Recurse -Force node_modules
           }
 
-      - name: Install dependencies (安装依赖)
+      - name: Clear bun global cache (清理 bun 全局缓存)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          try {
+            Write-Host "Running bun pm cache rm (best effort)..."
+            bun pm cache rm
+          } catch {
+            Write-Warning "bun pm cache rm failed: $($_.Exception.Message)"
+          }
+
+          $bunCacheDir = Join-Path $env:USERPROFILE ".bun\install\cache"
+          if (Test-Path $bunCacheDir) {
+            try {
+              Write-Host "Removing bun global cache directory: $bunCacheDir"
+              Remove-Item -Recurse -Force $bunCacheDir -ErrorAction Stop
+            } catch {
+              Write-Warning "Failed to remove bun global cache directory: $($_.Exception.Message)"
+            }
+          } else {
+            Write-Host "Bun global cache directory not found, skip cleanup."
+          }
+
+      - name: Install dependencies with isolated cache and retry (安装依赖：隔离缓存 + 重试)
         shell: powershell
         timeout-minutes: 10
         run: |
-          bun install --frozen-lockfile
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-BunInstallWithCache {
+            param(
+              [Parameter(Mandatory = $true)][string]$CacheDir,
+              [Parameter(Mandatory = $true)][string]$AttemptLabel,
+              [int]$TimeoutSeconds = 180
+            )
+
+            if (Test-Path $CacheDir) {
+              Remove-Item -Recurse -Force $CacheDir -ErrorAction SilentlyContinue
+            }
+            New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
+
+            $env:BUN_INSTALL_CACHE_DIR = $CacheDir
+            $arguments = @("install", "--frozen-lockfile", "--cache-dir", $CacheDir)
+            Write-Host "[$AttemptLabel] Running: bun $($arguments -join ' ')"
+
+            $process = Start-Process -FilePath "bun" -ArgumentList $arguments -PassThru -NoNewWindow
+            $finished = $process.WaitForExit($TimeoutSeconds * 1000)
+
+            if (-not $finished) {
+              Write-Warning "[$AttemptLabel] bun install timed out after $TimeoutSeconds seconds."
+              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              throw "bun install timeout in $AttemptLabel"
+            }
+
+            if ($process.ExitCode -ne 0) {
+              throw "bun install failed in $AttemptLabel with exit code $($process.ExitCode)"
+            }
+          }
+
+          $baseCacheDir = Join-Path $env:RUNNER_TEMP "bun-install-cache"
+          $firstAttemptCacheDir = Join-Path $baseCacheDir "attempt-1"
+          $secondAttemptCacheDir = Join-Path $baseCacheDir "attempt-2"
+
+          try {
+            Invoke-BunInstallWithCache -CacheDir $firstAttemptCacheDir -AttemptLabel "attempt 1 / 第一次"
+          } catch {
+            Write-Warning "First install attempt failed: $($_.Exception.Message)"
+            Write-Host "Retry bun install / 重试 bun install with fresh isolated cache."
+            Invoke-BunInstallWithCache -CacheDir $secondAttemptCacheDir -AttemptLabel "attempt 2 / 第二次"
+          }
 
       # ─── Android build ──────────────────────────────────────
 
