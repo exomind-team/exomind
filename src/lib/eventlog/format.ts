@@ -2,6 +2,7 @@
  * EventLog 格式定义
  * 最小实现使测试通过
  */
+import { createUuidV4 } from '../utils/uuid';
 
 // 事件类型
 export type EventType = 
@@ -29,7 +30,7 @@ export function createEventLog(
   device_id: string
 ): EventLog {
   return {
-    id: crypto.randomUUID(),
+    id: createUuidV4(),
     type,
     content,
     device_id,
