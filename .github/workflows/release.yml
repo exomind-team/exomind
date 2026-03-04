@@ -481,7 +481,7 @@ jobs:
           }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name != 'workflow_dispatch'
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
         id: upload_apk
         uses: actions/upload-artifact@v4
         with:
@@ -490,7 +490,7 @@ jobs:
         continue-on-error: true
 
       - name: Retry Upload Android signed APK Artifact
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name != 'workflow_dispatch' && steps.upload_apk.outcome == 'failure'
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/') && steps.upload_apk.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
@@ -601,7 +601,12 @@ jobs:
           Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
 
       - name: Upload self-hosted artifacts to Cloudflare R2 (self-hosted 直传 Cloudflare R2)
-        if: github.event_name == 'workflow_dispatch' && (steps.targets.outputs.BUILD_WINDOWS == 'true' || steps.targets.outputs.BUILD_ANDROID == 'true')
+        if: |
+          (
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/build/'))
+          ) &&
+          (steps.targets.outputs.BUILD_WINDOWS == 'true' || steps.targets.outputs.BUILD_ANDROID == 'true')
         shell: powershell
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
@@ -619,10 +624,18 @@ jobs:
           $shortHash = "${{ steps.hash.outputs.HASH }}"
           $runNumber = "${{ github.run_number }}"
           $scope = "${{ github.event.inputs.build_scope }}"
+          if ([string]::IsNullOrWhiteSpace($scope)) {
+            $scope = "tag-build"
+          }
+          $isBuildTagPush = "${{ github.event_name }}" -eq "push" -and "${{ github.ref }}".StartsWith("refs/tags/build/")
 
           $bucket = "exomind-releases"
           $channel = "preview"
-          $versionDir = "v$version-manual.$runNumber.$shortHash"
+          if ($isBuildTagPush) {
+            $versionDir = "${{ github.ref_name }}" -replace '^build/', ''
+          } else {
+            $versionDir = "v$version-manual.$runNumber.$shortHash"
+          }
 
           $stagingDir = Join-Path $env:RUNNER_TEMP "r2-direct-upload"
           if (Test-Path $stagingDir) {
@@ -735,14 +748,14 @@ jobs:
           }
 
       - name: Upload Windows runtime Artifact (上传 Windows runtime)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name != 'workflow_dispatch'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
         uses: actions/upload-artifact@v4
         with:
           name: windows-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-windows-x64.exe
 
       - name: Upload Windows EXE Artifact (上传 EXE)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name != 'workflow_dispatch'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
@@ -754,7 +767,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Windows MSI Artifact (上传 MSI)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name != 'workflow_dispatch'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
@@ -951,13 +964,10 @@ jobs:
   create-release:
     needs: [build-apk-exe-selfhosted, build-macos, build-linux]
     runs-on: ubuntu-latest
-    # 对 release/* 和 build/* tag 执行发布步骤
+    # 仅 release/* tag 执行发布步骤（build/* 仅做构建与 R2 直传）
     if: |
       always() &&
-      (
-        startsWith(github.ref, 'refs/tags/release/') ||
-        startsWith(github.ref, 'refs/tags/build/')
-      ) &&
+      startsWith(github.ref, 'refs/tags/release/') &&
       (
         needs.build-apk-exe-selfhosted.result == 'success' ||
         needs.build-macos.result == 'success' ||
