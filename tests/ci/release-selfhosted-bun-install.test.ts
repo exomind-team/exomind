@@ -21,4 +21,9 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     const workflowContent = readReleaseWorkflow();
     expect(workflowContent).toMatch(/Retry bun install|retry bun install|bun install attempt 2/i);
   });
+
+  it('does not build NSIS bundle / 不再构建 NSIS 安装包', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).not.toContain('bun tauri build --bundles nsis');
+  });
 });
