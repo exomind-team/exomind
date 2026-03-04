@@ -540,6 +540,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
             {events.map((event) => {
               const systemEvent = isSystemEvent(event);
               if (systemEvent) {
+                const isAgentFeedback = event.tags.has('agent_feedback');
                 return (
                   <div
                     key={event.id}
@@ -560,7 +561,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                         <span className="text-muted">{assistantDeviceLabel}</span>
                         <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       </div>
-                      <div className="rounded-2xl border border-card bg-card px-[14px] py-3 text-[13px] leading-[1.6] text-strong">
+                      <div
+                        className={`rounded-2xl border px-[14px] py-3 text-[13px] leading-[1.6] ${
+                          isAgentFeedback
+                            ? 'border-violet-200 bg-violet-50 text-violet-950 dark:border-violet-800 dark:bg-violet-950/35 dark:text-violet-100'
+                            : 'border-card bg-card text-strong'
+                        }`}
+                        data-testid={isAgentFeedback ? 'new-mobile-agent-feedback-bubble' : undefined}
+                      >
                         <EventMarkdown content={event.content} />
                       </div>
                       <MessageActions content={event.content} align="start" />
