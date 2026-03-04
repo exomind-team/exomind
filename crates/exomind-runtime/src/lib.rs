@@ -2,8 +2,14 @@ use axum::http::Method;
 use axum::{Json, Router, routing::get};
 use serde::Serialize;
 use std::env;
+use std::net::SocketAddr;
+use std::path::PathBuf;
+use std::process::Stdio;
 use std::sync::Arc;
 use thiserror::Error;
+use tokio::process::{Child, Command};
+use tokio::sync::oneshot;
+use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
 
 use signal::SignalPool;
@@ -13,6 +19,7 @@ pub mod routes;
 pub mod signal;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
+pub const DEFAULT_RT_PORT: u16 = 1949;
 
 #[derive(Debug, Error)]
 pub enum PortConfigError {
@@ -21,16 +28,378 @@ pub enum PortConfigError {
 }
 
 /// Read EXOMIND_RT_PORT from env (从环境变量读取运行端口).
-/// Missing value means `0` (缺省时用 0，让系统分配随机可用端口).
+/// Missing value means `1949`（缺省时用 1949）.
+/// `0` means random available port（0 表示随机可用端口）.
 pub fn configured_port_from_env() -> Result<u16, PortConfigError> {
     match env::var("EXOMIND_RT_PORT") {
         Ok(raw) => raw
             .parse::<u16>()
             .map_err(|_| PortConfigError::InvalidPort { raw }),
-        Err(env::VarError::NotPresent) => Ok(0),
+        Err(env::VarError::NotPresent) => Ok(DEFAULT_RT_PORT),
         Err(env::VarError::NotUnicode(_)) => Err(PortConfigError::InvalidPort {
             raw: "<non-unicode>".to_string(),
         }),
+    }
+}
+
+/// Read EXOMIND_RT_BIND from env（读取绑定地址，默认 127.0.0.1）.
+pub fn configured_bind_host_from_env() -> String {
+    env::var("EXOMIND_RT_BIND").unwrap_or_else(|_| "127.0.0.1".to_string())
+}
+
+/// Runtime startup options（运行时启动选项）.
+#[derive(Debug, Clone)]
+pub struct RuntimeStartOptions {
+    /// bind host（绑定地址）.
+    pub bind_host: String,
+    /// bind port（绑定端口）. `0` means random available port.
+    pub port: u16,
+    /// spawn built-in rust actors（是否拉起内置 Rust Actor）.
+    pub spawn_builtin_actors: bool,
+    /// spawn ts agents (reviewer/classifier)（是否拉起 TS Agent）.
+    pub spawn_ts_agents: bool,
+    /// command to run TS agents（启动 TS Agent 的命令）.
+    pub ts_agent_command: String,
+    /// project root used for spawning TS agents（TS Agent 工作目录）.
+    pub ts_agent_workdir: Option<PathBuf>,
+}
+
+impl Default for RuntimeStartOptions {
+    fn default() -> Self {
+        let spawn_ts_agents = env::var("EXOMIND_RT_DISABLE_TS_AGENTS")
+            .map(|value| {
+                let value = value.to_ascii_lowercase();
+                !(value == "1" || value == "true" || value == "yes")
+            })
+            .unwrap_or(true);
+
+        Self {
+            bind_host: configured_bind_host_from_env(),
+            port: configured_port_from_env().unwrap_or(DEFAULT_RT_PORT),
+            spawn_builtin_actors: true,
+            spawn_ts_agents,
+            ts_agent_command: env::var("EXOMIND_RT_AGENT_CMD")
+                .unwrap_or_else(|_| "bun".to_string()),
+            ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
+        }
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum RuntimeStartError {
+    #[error("invalid bind address: {raw}")]
+    InvalidBindAddress {
+        raw: String,
+        #[source]
+        source: std::net::AddrParseError,
+    },
+    #[error("failed to bind runtime listener on {bind_addr}: {source}")]
+    BindListener {
+        bind_addr: String,
+        #[source]
+        source: std::io::Error,
+    },
+    #[error("failed to read listener local address: {0}")]
+    ReadLocalAddr(#[source] std::io::Error),
+}
+
+#[derive(Debug, Error)]
+pub enum RuntimeStopError {
+    #[error("runtime server task join failed: {0}")]
+    JoinServerTask(#[source] tokio::task::JoinError),
+    #[error("runtime server returned IO error: {0}")]
+    ServerIo(#[source] std::io::Error),
+    #[error("failed to stop ts agent `{agent}`: {source}")]
+    KillTsAgent {
+        agent: String,
+        #[source]
+        source: std::io::Error,
+    },
+}
+
+#[derive(Debug)]
+struct TsAgentProcess {
+    name: String,
+    child: Child,
+}
+
+/// Runtime handle（运行句柄）.
+pub struct RuntimeHandle {
+    local_addr: SocketAddr,
+    signal_pool: Arc<SignalPool>,
+    shutdown_tx: Option<oneshot::Sender<()>>,
+    server_task: Option<JoinHandle<std::io::Result<()>>>,
+    actor_tasks: Vec<JoinHandle<()>>,
+    ts_agents: Vec<TsAgentProcess>,
+}
+
+/// Publish request for in-process fast path（进程内快速发布请求）.
+#[derive(Debug, Clone)]
+pub struct RuntimePublishRequest {
+    pub topic: String,
+    pub source: Option<String>,
+    pub payload: serde_json::Value,
+    pub trace_id: Option<String>,
+    pub origin_host_id: Option<String>,
+}
+
+impl RuntimeHandle {
+    pub fn local_addr(&self) -> SocketAddr {
+        self.local_addr
+    }
+
+    pub fn host(&self) -> String {
+        self.local_addr.ip().to_string()
+    }
+
+    pub fn port(&self) -> u16 {
+        self.local_addr.port()
+    }
+
+    pub fn is_running(&self) -> bool {
+        self.server_task
+            .as_ref()
+            .map(|task| !task.is_finished())
+            .unwrap_or(false)
+    }
+
+    /// Clone underlying SignalPool Arc（克隆底层 SignalPool 引用）.
+    pub fn clone_signal_pool(&self) -> Arc<SignalPool> {
+        Arc::clone(&self.signal_pool)
+    }
+
+    /// Publish via a provided SignalPool（在指定 SignalPool 上发布）.
+    pub fn publish_signal_to_pool(
+        signal_pool: &SignalPool,
+        request: RuntimePublishRequest,
+    ) -> String {
+        let event_id = uuid::Uuid::new_v4().to_string();
+        let event = signal::types::SignalEvent {
+            schema_version: 1,
+            id: event_id.clone(),
+            topic: request.topic,
+            ts: chrono::Utc::now().timestamp_millis() as u64,
+            source: request.source.unwrap_or_else(|| "tauri:invoke".to_string()),
+            origin_host_id: request
+                .origin_host_id
+                .unwrap_or_else(|| "local".to_string()),
+            hop: 0,
+            trace_id: request.trace_id,
+            payload: request.payload,
+        };
+        signal_pool.publish(event);
+        event_id
+    }
+
+    /// Publish a signal directly via in-process SignalPool（进程内直发）.
+    pub fn publish_signal(&self, request: RuntimePublishRequest) -> String {
+        Self::publish_signal_to_pool(&self.signal_pool, request)
+    }
+
+    /// Graceful shutdown（优雅停止）.
+    pub async fn stop(&mut self) -> Result<(), RuntimeStopError> {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+
+        for task in &self.actor_tasks {
+            task.abort();
+        }
+        while let Some(task) = self.actor_tasks.pop() {
+            let _ = task.await;
+        }
+
+        for agent in &mut self.ts_agents {
+            match agent.child.try_wait() {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    agent
+                        .child
+                        .kill()
+                        .await
+                        .map_err(|source| RuntimeStopError::KillTsAgent {
+                            agent: agent.name.clone(),
+                            source,
+                        })?;
+                    let _ = agent.child.wait().await;
+                }
+                Err(source) => {
+                    return Err(RuntimeStopError::KillTsAgent {
+                        agent: agent.name.clone(),
+                        source,
+                    });
+                }
+            }
+        }
+        self.ts_agents.clear();
+
+        if let Some(server_task) = self.server_task.take() {
+            match server_task.await {
+                Ok(Ok(())) => {}
+                Ok(Err(error)) => return Err(RuntimeStopError::ServerIo(error)),
+                Err(error) => return Err(RuntimeStopError::JoinServerTask(error)),
+            }
+        }
+
+        Ok(())
+    }
+}
+
+impl Drop for RuntimeHandle {
+    fn drop(&mut self) {
+        if let Some(tx) = self.shutdown_tx.take() {
+            let _ = tx.send(());
+        }
+        for task in self.actor_tasks.drain(..) {
+            task.abort();
+        }
+        for agent in &mut self.ts_agents {
+            let _ = agent.child.start_kill();
+        }
+        if let Some(server_task) = self.server_task.take() {
+            server_task.abort();
+        }
+    }
+}
+
+/// Start runtime with env defaults（按环境变量默认值启动）.
+pub async fn start() -> Result<RuntimeHandle, RuntimeStartError> {
+    start_with_options(RuntimeStartOptions::default()).await
+}
+
+/// Start runtime with explicit options（按显式参数启动）.
+pub async fn start_with_options(
+    options: RuntimeStartOptions,
+) -> Result<RuntimeHandle, RuntimeStartError> {
+    let bind_addr_raw = format!("{}:{}", options.bind_host, options.port);
+    let bind_addr: SocketAddr =
+        bind_addr_raw
+            .parse()
+            .map_err(|source| RuntimeStartError::InvalidBindAddress {
+                raw: bind_addr_raw.clone(),
+                source,
+            })?;
+
+    let listener = tokio::net::TcpListener::bind(bind_addr)
+        .await
+        .map_err(|source| RuntimeStartError::BindListener {
+            bind_addr: bind_addr_raw.clone(),
+            source,
+        })?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(RuntimeStartError::ReadLocalAddr)?;
+
+    let state = AppState::new(local_addr.port());
+    let signal_pool = Arc::clone(&state.signal_pool);
+
+    let mut actor_tasks = Vec::new();
+    if options.spawn_builtin_actors {
+        actor_tasks.push(signal::actors::task_actor::spawn_task_actor(Arc::clone(
+            &state.signal_pool,
+        )));
+        actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(
+            Arc::clone(&state.signal_pool),
+        ));
+    }
+
+    let ts_agents = if options.spawn_ts_agents {
+        spawn_default_ts_agents(local_addr.port(), &options)
+    } else {
+        Vec::new()
+    };
+
+    let app = app_with_state(state);
+    let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
+    let server_task = tokio::spawn(async move {
+        axum::serve(listener, app)
+            .with_graceful_shutdown(async move {
+                let _ = shutdown_rx.await;
+            })
+            .await
+    });
+
+    Ok(RuntimeHandle {
+        local_addr,
+        signal_pool,
+        shutdown_tx: Some(shutdown_tx),
+        server_task: Some(server_task),
+        actor_tasks,
+        ts_agents,
+    })
+}
+
+fn spawn_default_ts_agents(port: u16, options: &RuntimeStartOptions) -> Vec<TsAgentProcess> {
+    const REVIEWER_ENTRY: &str = "packages/ts-agent-cli/agents/reviewer/index.ts";
+    const CLASSIFIER_ENTRY: &str = "packages/ts-agent-cli/agents/classifier/index.ts";
+    let project_root = resolve_project_root(options);
+    let rt_url = format!("http://127.0.0.1:{port}");
+
+    let mut out = Vec::new();
+    if let Some(proc) = try_spawn_ts_agent(
+        "reviewer",
+        REVIEWER_ENTRY,
+        &project_root,
+        &options.ts_agent_command,
+        &rt_url,
+    ) {
+        out.push(proc);
+    }
+    if let Some(proc) = try_spawn_ts_agent(
+        "classifier",
+        CLASSIFIER_ENTRY,
+        &project_root,
+        &options.ts_agent_command,
+        &rt_url,
+    ) {
+        out.push(proc);
+    }
+    out
+}
+
+fn resolve_project_root(options: &RuntimeStartOptions) -> PathBuf {
+    if let Some(path) = &options.ts_agent_workdir {
+        return path.clone();
+    }
+
+    if let Ok(cwd) = env::current_dir() {
+        return cwd;
+    }
+
+    let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+    manifest_dir
+        .parent()
+        .and_then(|path| path.parent())
+        .map(|path| path.to_path_buf())
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn try_spawn_ts_agent(
+    name: &str,
+    entry: &str,
+    project_root: &PathBuf,
+    cmd: &str,
+    rt_url: &str,
+) -> Option<TsAgentProcess> {
+    let mut command = Command::new(cmd);
+    command
+        .arg("run")
+        .arg(entry)
+        .current_dir(project_root)
+        .env("EXOMIND_RT_URL", rt_url)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::inherit());
+
+    match command.spawn() {
+        Ok(child) => Some(TsAgentProcess {
+            name: name.to_string(),
+            child,
+        }),
+        Err(error) => {
+            eprintln!("exomind-rt: failed to spawn ts agent `{name}`: {error}");
+            None
+        }
     }
 }
 
@@ -44,7 +413,13 @@ pub fn app_with_state(state: AppState) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
     let cors = CorsLayer::new()
         .allow_origin(Any)
-        .allow_methods([Method::GET, Method::POST, Method::PUT, Method::DELETE, Method::OPTIONS])
+        .allow_methods([
+            Method::GET,
+            Method::POST,
+            Method::PUT,
+            Method::DELETE,
+            Method::OPTIONS,
+        ])
         .allow_headers(Any);
 
     Router::new()
