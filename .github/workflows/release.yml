@@ -508,9 +508,11 @@ jobs:
 
       - name: Prepare MSI prerequisites (准备 MSI 前置检查)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        id: msi_prereq
         shell: powershell
         run: |
           $ErrorActionPreference = "Continue"
+          $msiReady = $true
 
           $wshKey = "HKCU:\Software\Microsoft\Windows Script Host\Settings"
           try {
@@ -520,6 +522,7 @@ jobs:
             Write-Host "Windows Script Host (WSH) Enabled=$enabled"
           } catch {
             Write-Warning "Unable to set WSH registry key: $($_.Exception.Message)"
+            $msiReady = $false
           }
 
           $probePath = Join-Path $env:RUNNER_TEMP "wix-vbscript-probe.vbs"
@@ -528,12 +531,42 @@ jobs:
           try {
             & cscript.exe //NoLogo $probePath
             Write-Host "cscript probe exit code=$LASTEXITCODE"
+            if ($LASTEXITCODE -ne 0) {
+              Write-Warning "cscript probe returned non-zero exit code: $LASTEXITCODE"
+              $msiReady = $false
+            }
           } catch {
             Write-Warning "cscript probe failed: $($_.Exception.Message)"
+            $msiReady = $false
           }
 
+          try {
+            $service = Get-Service -Name msiserver -ErrorAction Stop
+            Write-Host "Windows Installer service status=$($service.Status) startType=$($service.StartType)"
+            if ($service.Status -ne "Running") {
+              Start-Service -Name msiserver -ErrorAction Stop
+              Start-Sleep -Seconds 1
+              $service = Get-Service -Name msiserver -ErrorAction Stop
+              Write-Host "Windows Installer service status after start=$($service.Status)"
+            }
+          } catch {
+            Write-Warning "Windows Installer service probe failed: $($_.Exception.Message)"
+            $msiReady = $false
+          }
+
+          try {
+            $null = New-Object -ComObject WindowsInstaller.Installer
+            Write-Host "WindowsInstaller COM probe: OK"
+          } catch {
+            Write-Warning "WindowsInstaller COM probe failed: $($_.Exception.Message)"
+            $msiReady = $false
+          }
+
+          "MSI_READY=$($msiReady.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "MSI_READY=$($msiReady.ToString().ToLower())"
+
       - name: Build Windows MSI installer (构建 Windows MSI 安装包)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY == 'true'
         run: bun tauri build --bundles msi
         continue-on-error: true
         env:
@@ -541,6 +574,12 @@ jobs:
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
           RUST_LOG: tauri_bundler=debug
+
+      - name: Skip MSI build when prerequisites are unavailable (前置检查失败时跳过 MSI)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY != 'true'
+        shell: powershell
+        run: |
+          Write-Warning "MSI prerequisites are unavailable on this runner. Skipping MSI build to keep EXE/APK pipeline stable."
 
       - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
