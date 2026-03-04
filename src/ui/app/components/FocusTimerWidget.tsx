@@ -533,11 +533,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   }, [feedback, handleSubmitEnd]);
 
   const handleFeedbackDialogOpenChange = useCallback((nextOpen: boolean) => {
-    if (!nextOpen && feedbackInProgress) {
-      return;
-    }
     setFeedbackOpen(nextOpen);
-  }, [feedbackInProgress]);
+  }, []);
 
   const handleFeedbackKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
     if (event.nativeEvent.isComposing) return;
@@ -831,11 +828,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       )}
 
       <Dialog open={feedbackOpen} onOpenChange={handleFeedbackDialogOpenChange}>
-        <DialogContent
-          hideCloseButton
-          onEscapeKeyDown={(event) => event.preventDefault()}
-          onInteractOutside={(event) => event.preventDefault()}
-        >
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>结束专注并记录反馈</DialogTitle>
             <DialogDescription>记录本次专注反馈后将结束当前时间块</DialogDescription>

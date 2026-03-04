@@ -352,7 +352,7 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     await waitFor(() => expect(screen.queryByTestId('new-focus-feedback-textarea')).toBeNull());
   });
 
-  it('keeps feedback dialog open on Escape and hides close button（反馈中禁止关闭弹窗）', async () => {
+  it('allows closing feedback dialog on Escape and reopening via end button（反馈弹窗可关闭且可再次拉起）', async () => {
     render(<FocusTimerWidget />);
 
     fireEvent.click(screen.getByTestId('new-focus-idle-card'));
@@ -367,11 +367,16 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
 
     fireEvent.click(screen.getByTestId('new-focus-end-button'));
     await screen.findByTestId('new-focus-feedback-textarea');
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByTestId('new-focus-feedback-textarea')).toBeNull();
+    });
 
-    expect(screen.getByTestId('new-focus-feedback-textarea')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    await screen.findByTestId('new-focus-feedback-textarea');
+    expect(markEndingMock).toHaveBeenCalledTimes(1);
   });
 
   it('requires 5s calm-down confirmation before skipping empty feedback（空反馈需5秒冷静确认）', async () => {
