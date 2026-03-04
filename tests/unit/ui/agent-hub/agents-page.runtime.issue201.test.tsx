@@ -50,6 +50,9 @@ vi.mock('@xyflow/react', () => ({
   Background: () => <div data-testid="mock-react-flow-background" />,
   Controls: () => <div data-testid="mock-react-flow-controls" />,
   MiniMap: () => <div data-testid="mock-react-flow-minimap" />,
+  Handle: () => null,
+  Position: { Left: 'left', Right: 'right' },
+  useNodesState: <T,>(initialNodes: T[]) => [initialNodes, vi.fn(), vi.fn()] as const,
   MarkerType: { ArrowClosed: 'arrowclosed' },
 }));
 

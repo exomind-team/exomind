@@ -25,11 +25,14 @@ import {
   ReactFlow,
   Background,
   Controls,
+  Handle,
   MarkerType,
   MiniMap,
+  Position,
   type Edge as FlowEdge,
   type Node as FlowNode,
   type NodeProps as FlowNodeProps,
+  useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
@@ -186,9 +189,19 @@ function nodeTypeTint(nodeType: SignalGraphNodeType): string {
 
 function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
   const tint = nodeTypeTint(data.nodeType);
+  const handleBaseStyle = {
+    width: 8,
+    height: 8,
+    border: 0,
+    background: tint,
+    opacity: 0,
+    pointerEvents: 'none' as const,
+  };
   if (data.nodeType === 'frontend') {
     return (
       <div className="relative h-[70px] w-[130px]">
+        <Handle type="target" position={Position.Left} style={handleBaseStyle} />
+        <Handle type="source" position={Position.Right} style={handleBaseStyle} />
         <div
           className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-white dark:bg-[#1C1917]"
           style={{ borderColor: `${tint}80` }}
@@ -213,6 +226,8 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
       className={`min-w-[120px] border bg-white text-center shadow-sm dark:bg-[#1C1917] ${shapeClass}`}
       style={{ borderColor: `${tint}80` }}
     >
+      <Handle type="target" position={Position.Left} style={handleBaseStyle} />
+      <Handle type="source" position={Position.Right} style={handleBaseStyle} />
       <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{data.label}</p>
       <p className="mt-1 truncate text-[10px] text-[#78716C] dark:text-[#A8A29E]">{data.subtitle}</p>
     </div>
@@ -278,7 +293,7 @@ function TopologyView({
 }) {
   const selectedNode = graph.nodes.find((item) => item.id === selectedNodeId) ?? null;
 
-  const flowNodes = useMemo<SignalFlowNodeType[]>(() => {
+  const nextFlowNodes = useMemo<SignalFlowNodeType[]>(() => {
     return graph.nodes.map((node) => ({
       id: node.id,
       type: node.type,
@@ -291,6 +306,11 @@ function TopologyView({
       },
     }));
   }, [graph.nodes]);
+  const [flowNodes, setFlowNodes, onFlowNodesChange] = useNodesState<SignalFlowNodeType>(nextFlowNodes);
+
+  useEffect(() => {
+    setFlowNodes(nextFlowNodes);
+  }, [nextFlowNodes, setFlowNodes]);
 
   const flowEdges = useMemo<FlowEdge[]>(() => {
     return graph.edges.map((edge) => ({
@@ -337,6 +357,7 @@ function TopologyView({
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}
           maxZoom={1.8}
+          onNodesChange={onFlowNodesChange}
           onNodeClick={(_, node: SignalFlowNodeType) => {
             onSelectNode(node.id);
           }}
