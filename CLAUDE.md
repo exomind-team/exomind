@@ -216,6 +216,24 @@ src/
 2. 长期保留分支仅限：`dev`、`main`。
 3. 如需临时保留分支，必须在 PR 或 Issue 中写明保留原因和截止时间。
 
+#### Issue 修复标准链路（2026-03）
+
+1. 开工前先在对应 Issue/PR 评论中给出：问题判断、拟定方案、验收链路。
+2. 执行中使用任务清单持续跟踪，确保每轮都有明确的进行中/完成状态。
+3. 先改代码，再做编译与测试验证（默认 Node 链路）：
+   - `npx tsc --noEmit`
+   - `npx vitest run <相关测试>`
+4. 功能联调时固定启动并验证两个服务：
+   - Web：`npx vite --host 0.0.0.0 --port 5173`
+   - Sync：`EXOMIND_POUCHDB_HOST=0.0.0.0 EXOMIND_POUCHDB_PORT=6984 node server/pouchdb-server.js`
+5. 使用 `curl` 验证服务可用性（至少返回 `HTTP 200`）：
+   - `curl -sS -D - -o /dev/null http://127.0.0.1:5173 | head -n 8`
+   - `curl -sS -D - -o /dev/null http://127.0.0.1:6984 | head -n 8`
+6. 验证通过后再提交与推送；禁止提交调试产物、临时日志、报告缓存。
+7. 推送后必须在 PR 评论同步：改动摘要、测试命令、结果证据。
+8. 允许一个 PR 同时解决两个相关 Issue；此时必须同步更新 PR 描述，明确覆盖范围与验收状态。
+9. 合并前再次检查是否存在新的 blocking review；若无阻塞且关键回归通过，合并到 `dev`，并切回 `dev` 继续后续工作。
+
 ### Ralph Loop 流程 ⭐
 
 
