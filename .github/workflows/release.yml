@@ -641,6 +641,9 @@ jobs:
           } else {
             $versionDir = "v$version-manual.$runNumber.$shortHash"
           }
+          # artifactVersion (产物版本号): build tag uses "v..." for website API compatibility.
+          # （build tag 使用带 v 前缀，确保官网下载 API 与文件名一致）
+          $artifactVersion = if ($isBuildTagPush) { $versionDir } else { $version }
 
           $stagingDir = Join-Path $env:RUNNER_TEMP "r2-direct-upload"
           if (Test-Path $stagingDir) {
@@ -659,11 +662,11 @@ jobs:
             if (-not $exePath) {
               throw "Missing Windows EXE output in src-tauri/target/release/."
             }
-            Copy-Item -Path $exePath -Destination (Join-Path $stagingDir "ExoMind-$version-windows-x64-setup.exe") -Force
+            Copy-Item -Path $exePath -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-windows-x64-setup.exe") -Force
 
             $runtimePath = "artifacts/runtime/exomind-rt-windows-x64.exe"
             if (Test-Path $runtimePath) {
-              Copy-Item -Path $runtimePath -Destination (Join-Path $stagingDir "ExoMind-RT-$version-windows-x64.exe") -Force
+              Copy-Item -Path $runtimePath -Destination (Join-Path $stagingDir "ExoMind-RT-$artifactVersion-windows-x64.exe") -Force
             }
 
             $msiCandidates = @(
@@ -678,7 +681,7 @@ jobs:
               }
             }
             if ($msiFile) {
-              Copy-Item -Path $msiFile.FullName -Destination (Join-Path $stagingDir "ExoMind-$version-windows-x64-installer.msi") -Force
+              Copy-Item -Path $msiFile.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-windows-x64-installer.msi") -Force
             } else {
               Write-Warning "MSI artifact not found. Continue with EXE upload only."
             }
@@ -699,11 +702,11 @@ jobs:
             if (-not $arm64Apk) {
               throw "Missing Android arm64 signed APK."
             }
-            Copy-Item -Path $arm64Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$version-android-arm64.apk") -Force
+            Copy-Item -Path $arm64Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-android-arm64.apk") -Force
 
             $x86Apk = $apkFiles | Where-Object { $_.Name -match "(?i)i686|x86" -and $_.Name -notmatch "(?i)x86_64" } | Select-Object -First 1
             if ($x86Apk) {
-              Copy-Item -Path $x86Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$version-android-x86.apk") -Force
+              Copy-Item -Path $x86Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-android-x86.apk") -Force
             } else {
               Write-Warning "Android x86 signed APK not found. Uploading arm64 only."
             }
@@ -739,7 +742,7 @@ jobs:
           $manifestPath = Join-Path $stagingDir "selfhosted-upload-manifest.json"
           $manifest = @{
             channel = $channel
-            version = $version
+            version = $artifactVersion
             versionDir = $versionDir
             hash = $shortHash
             runNumber = $runNumber
@@ -750,6 +753,112 @@ jobs:
           & npx wrangler r2 object put "$bucket/$channel/$versionDir/selfhosted-upload-manifest.json" --file "$manifestPath" --content-type "application/json" --remote
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to upload self-hosted manifest to R2."
+          }
+
+          if ($isBuildTagPush) {
+            Write-Host "Build tag detected. Generate preview metadata (检测到 build tag，生成预览元数据)."
+            $publishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+            function Get-AssetKey([string]$fileName) {
+              $name = $fileName.ToLowerInvariant()
+              if ($name -match '^exomind-.*-windows-x64-setup\.exe$') { return "windows-x64-setup" }
+              if ($name -match '^exomind-.*-windows-x64-installer\.msi$') { return "windows-x64-installer" }
+              if ($name -match '^exomind-.*-android-arm64\.apk$') { return "android-arm64" }
+              if ($name -match '^exomind-.*-android-x86\.apk$') { return "android-x86" }
+              if ($name -match '^exomind-rt-.*-windows-x64\.exe$') { return "runtime-windows-x64" }
+              if ($name -match '^exomind-rt-.*-macos-aarch64\.tar\.gz$') { return "runtime-macos-aarch64" }
+              if ($name -match '^exomind-rt-.*-linux-x64\.tar\.gz$') { return "runtime-linux-x64" }
+              return $null
+            }
+
+            $assets = [ordered]@{}
+            foreach ($file in $preparedFiles) {
+              $assetKey = Get-AssetKey $file.Name
+              if (-not $assetKey) { continue }
+              $sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              $assets[$assetKey] = @{
+                url = "$channel/$versionDir/$($file.Name)"
+                size = [int64]$file.Length
+                sha256 = $sha256
+              }
+            }
+
+            $latestPath = Join-Path $stagingDir "latest.json"
+            $latestPayload = @{
+              version = $artifactVersion
+              tag = "${{ github.ref_name }}"
+              published_at = $publishedAt
+              assets = $assets
+            } | ConvertTo-Json -Depth 20
+            Set-Content -Path $latestPath -Value $latestPayload -Encoding UTF8
+            & npx wrangler r2 object put "$bucket/$channel/latest.json" --file "$latestPath" --content-type "application/json" --remote
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload preview latest.json."
+            }
+
+            $retention = 15
+            $existingVersionsPath = Join-Path $stagingDir "existing-versions.json"
+            $existingVersions = @()
+
+            & npx wrangler r2 object get "$bucket/$channel/versions.json" --file "$existingVersionsPath" --remote *> $null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $existingVersionsPath)) {
+              try {
+                $rawVersions = Get-Content -Path $existingVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json -Depth 20
+                if ($rawVersions -is [System.Array]) {
+                  $existingVersions = @($rawVersions)
+                } elseif ($rawVersions -and $rawVersions.PSObject.Properties.Name -contains "versions") {
+                  $existingVersions = @($rawVersions.versions)
+                  if ($rawVersions.PSObject.Properties.Name -contains "retention") {
+                    $parsedRetention = 0
+                    if ([int]::TryParse([string]$rawVersions.retention, [ref]$parsedRetention) -and $parsedRetention -gt 0) {
+                      $retention = $parsedRetention
+                    }
+                  }
+                }
+              } catch {
+                Write-Warning "Failed to parse preview versions.json, fallback to empty list."
+              }
+            }
+
+            $newEntry = [ordered]@{
+              version = $artifactVersion
+              tag = "${{ github.ref_name }}"
+              published_at = $publishedAt
+              version_dir = $versionDir
+            }
+
+            $mergedVersions = @($newEntry)
+            foreach ($entry in $existingVersions) {
+              if (-not $entry) { continue }
+              $versionValue = ""
+              if ($entry.PSObject.Properties.Name -contains "version") {
+                $versionValue = [string]$entry.version
+              }
+              if ([string]::IsNullOrWhiteSpace($versionValue)) { continue }
+              $alreadyExists = $mergedVersions | Where-Object { $_.version -eq $versionValue } | Select-Object -First 1
+              if ($alreadyExists) { continue }
+              $mergedVersions += [ordered]@{
+                version = $versionValue
+                tag = [string]$entry.tag
+                published_at = [string]$entry.published_at
+                version_dir = if ($entry.PSObject.Properties.Name -contains "version_dir") { [string]$entry.version_dir } else { $versionValue }
+              }
+            }
+
+            if ($mergedVersions.Count -gt $retention) {
+              $mergedVersions = @($mergedVersions | Select-Object -First $retention)
+            }
+
+            $versionsPath = Join-Path $stagingDir "versions.json"
+            $versionsPayload = @{
+              versions = $mergedVersions
+              retention = $retention
+            } | ConvertTo-Json -Depth 20
+            Set-Content -Path $versionsPath -Value $versionsPayload -Encoding UTF8
+            & npx wrangler r2 object put "$bucket/$channel/versions.json" --file "$versionsPath" --content-type "application/json" --remote
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload preview versions.json."
+            }
           }
 
       - name: Upload Windows runtime Artifact (上传 Windows runtime)
