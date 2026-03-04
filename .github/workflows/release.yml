@@ -712,6 +712,11 @@ jobs:
             }
           }
 
+          function Write-Utf8NoBom([string]$Path, [string]$Content) {
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+          }
+
           $preparedFiles = Get-ChildItem -Path $stagingDir -File
           if (-not $preparedFiles -or $preparedFiles.Count -eq 0) {
             throw "No artifacts prepared for direct R2 upload."
@@ -749,7 +754,7 @@ jobs:
             scope = $scope
             files = @($preparedFiles.Name)
           } | ConvertTo-Json -Depth 5
-          Set-Content -Path $manifestPath -Value $manifest -Encoding UTF8
+          Write-Utf8NoBom -Path $manifestPath -Content $manifest
           & npx wrangler r2 object put "$bucket/$channel/$versionDir/selfhosted-upload-manifest.json" --file "$manifestPath" --content-type "application/json" --remote
           if ($LASTEXITCODE -ne 0) {
             throw "Failed to upload self-hosted manifest to R2."
@@ -790,7 +795,7 @@ jobs:
               published_at = $publishedAt
               assets = $assets
             } | ConvertTo-Json -Depth 20
-            Set-Content -Path $latestPath -Value $latestPayload -Encoding UTF8
+            Write-Utf8NoBom -Path $latestPath -Content $latestPayload
             & npx wrangler r2 object put "$bucket/$channel/latest.json" --file "$latestPath" --content-type "application/json" --remote
             if ($LASTEXITCODE -ne 0) {
               throw "Failed to upload preview latest.json."
@@ -803,7 +808,7 @@ jobs:
             & npx wrangler r2 object get "$bucket/$channel/versions.json" --file "$existingVersionsPath" --remote *> $null
             if ($LASTEXITCODE -eq 0 -and (Test-Path $existingVersionsPath)) {
               try {
-                $rawVersions = Get-Content -Path $existingVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json -Depth 20
+                $rawVersions = Get-Content -Path $existingVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
                 if ($rawVersions -is [System.Array]) {
                   $existingVersions = @($rawVersions)
                 } elseif ($rawVersions -and $rawVersions.PSObject.Properties.Name -contains "versions") {
@@ -854,7 +859,7 @@ jobs:
               versions = $mergedVersions
               retention = $retention
             } | ConvertTo-Json -Depth 20
-            Set-Content -Path $versionsPath -Value $versionsPayload -Encoding UTF8
+            Write-Utf8NoBom -Path $versionsPath -Content $versionsPayload
             & npx wrangler r2 object put "$bucket/$channel/versions.json" --file "$versionsPath" --content-type "application/json" --remote
             if ($LASTEXITCODE -ne 0) {
               throw "Failed to upload preview versions.json."
