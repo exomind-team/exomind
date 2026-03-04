@@ -481,7 +481,7 @@ jobs:
           }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
-        if: steps.targets.outputs.BUILD_ANDROID == 'true'
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name != 'workflow_dispatch'
         id: upload_apk
         uses: actions/upload-artifact@v4
         with:
@@ -490,7 +490,7 @@ jobs:
         continue-on-error: true
 
       - name: Retry Upload Android signed APK Artifact
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && steps.upload_apk.outcome == 'failure'
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name != 'workflow_dispatch' && steps.upload_apk.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
@@ -600,15 +600,137 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/runtime | Out-Null
           Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
 
+      - name: Upload self-hosted artifacts to Cloudflare R2 (self-hosted 直传 Cloudflare R2)
+        if: github.event_name == 'workflow_dispatch' && (steps.targets.outputs.BUILD_WINDOWS == 'true' || steps.targets.outputs.BUILD_ANDROID == 'true')
+        shell: powershell
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not $env:CLOUDFLARE_API_TOKEN -or -not $env:CLOUDFLARE_ACCOUNT_ID) {
+            throw "Missing Cloudflare credentials (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)."
+          }
+
+          $buildWindows = "${{ steps.targets.outputs.BUILD_WINDOWS }}" -eq "true"
+          $buildAndroid = "${{ steps.targets.outputs.BUILD_ANDROID }}" -eq "true"
+          $version = "${{ steps.app_version.outputs.APP_VERSION }}"
+          $shortHash = "${{ steps.hash.outputs.HASH }}"
+          $runNumber = "${{ github.run_number }}"
+          $scope = "${{ github.event.inputs.build_scope }}"
+
+          $bucket = "exomind-releases"
+          $channel = "preview"
+          $versionDir = "v$version-manual.$runNumber.$shortHash"
+
+          $stagingDir = Join-Path $env:RUNNER_TEMP "r2-direct-upload"
+          if (Test-Path $stagingDir) {
+            Remove-Item -Path $stagingDir -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+
+          if ($buildWindows) {
+            $exeCandidates = @(
+              "src-tauri/target/release/exomind.exe",
+              "src-tauri/target/release/ExoMind.exe"
+            )
+            $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $exePath) {
+              throw "Missing Windows EXE output in src-tauri/target/release/."
+            }
+            Copy-Item -Path $exePath -Destination (Join-Path $stagingDir "ExoMind-$version-windows-x64-setup.exe") -Force
+
+            $runtimePath = "artifacts/runtime/exomind-rt-windows-x64.exe"
+            if (Test-Path $runtimePath) {
+              Copy-Item -Path $runtimePath -Destination (Join-Path $stagingDir "ExoMind-RT-$version-windows-x64.exe") -Force
+            }
+
+            $msiFile = Get-ChildItem -Path "src-tauri/target/release/bundle/msi" -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($msiFile) {
+              Copy-Item -Path $msiFile.FullName -Destination (Join-Path $stagingDir "ExoMind-$version-windows-x64-installer.msi") -Force
+            } else {
+              Write-Warning "MSI artifact not found. Continue with EXE upload only."
+            }
+          }
+
+          if ($buildAndroid) {
+            $apkDir = "src-tauri/gen/android/app/build/outputs/apk-signed"
+            if (-not (Test-Path $apkDir)) {
+              throw "Missing Android signed APK directory: $apkDir"
+            }
+
+            $apkFiles = Get-ChildItem -Path $apkDir -Filter "*-signed.apk" -Recurse
+            if (-not $apkFiles -or $apkFiles.Count -eq 0) {
+              throw "No signed APK files found under $apkDir"
+            }
+
+            $arm64Apk = $apkFiles | Where-Object { $_.Name -match "(?i)arm64|aarch64|arm64-v8a" } | Select-Object -First 1
+            if (-not $arm64Apk) {
+              throw "Missing Android arm64 signed APK."
+            }
+            Copy-Item -Path $arm64Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$version-android-arm64.apk") -Force
+
+            $x86Apk = $apkFiles | Where-Object { $_.Name -match "(?i)i686|x86" -and $_.Name -notmatch "(?i)x86_64" } | Select-Object -First 1
+            if ($x86Apk) {
+              Copy-Item -Path $x86Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$version-android-x86.apk") -Force
+            } else {
+              Write-Warning "Android x86 signed APK not found. Uploading arm64 only."
+            }
+          }
+
+          $preparedFiles = Get-ChildItem -Path $stagingDir -File
+          if (-not $preparedFiles -or $preparedFiles.Count -eq 0) {
+            throw "No artifacts prepared for direct R2 upload."
+          }
+
+          Write-Host "Prepared files for R2 direct upload (R2 直传文件):"
+          foreach ($file in $preparedFiles) {
+            Write-Host " - $($file.FullName)"
+          }
+
+          function Get-ContentType([string]$fileName) {
+            $name = $fileName.ToLowerInvariant()
+            if ($name.EndsWith(".apk")) { return "application/vnd.android.package-archive" }
+            if ($name.EndsWith(".json")) { return "application/json" }
+            return "application/octet-stream"
+          }
+
+          foreach ($file in $preparedFiles) {
+            $contentType = Get-ContentType $file.Name
+            $r2Key = "$channel/$versionDir/$($file.Name)"
+            Write-Host "Uploading (上传) $($file.Name) => $r2Key (Content-Type=$contentType)"
+            & npx wrangler r2 object put "$bucket/$r2Key" --file "$($file.FullName)" --content-type "$contentType" --remote
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload file to R2: $($file.Name)"
+            }
+          }
+
+          $manifestPath = Join-Path $stagingDir "selfhosted-upload-manifest.json"
+          $manifest = @{
+            channel = $channel
+            version = $version
+            versionDir = $versionDir
+            hash = $shortHash
+            runNumber = $runNumber
+            scope = $scope
+            files = @($preparedFiles.Name)
+          } | ConvertTo-Json -Depth 5
+          Set-Content -Path $manifestPath -Value $manifest -Encoding UTF8
+          & npx wrangler r2 object put "$bucket/$channel/$versionDir/selfhosted-upload-manifest.json" --file "$manifestPath" --content-type "application/json" --remote
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to upload self-hosted manifest to R2."
+          }
+
       - name: Upload Windows runtime Artifact (上传 Windows runtime)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name != 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: windows-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-windows-x64.exe
 
       - name: Upload Windows EXE Artifact (上传 EXE)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name != 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
@@ -618,7 +740,7 @@ jobs:
           if-no-files-found: warn
 
       - name: Upload Windows MSI Artifact (上传 MSI)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name != 'workflow_dispatch'
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
