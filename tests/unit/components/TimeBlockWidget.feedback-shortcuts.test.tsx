@@ -124,7 +124,7 @@ describe('TimeBlockWidget feedback shortcuts', () => {
     expect(endBlockMock).not.toHaveBeenCalled();
   });
 
-  it('keeps feedback dialog open on Escape and hides close button', async () => {
+  it('allows closing feedback dialog on Escape and reopening it via end button', async () => {
     render(<TimeBlockWidget />);
 
     await waitFor(() => {
@@ -133,11 +133,16 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
     fireEvent.click(screen.getByRole('button', { name: '结束' }));
     await screen.findByTestId('timeblock-feedback-textarea');
+    expect(screen.getByRole('button', { name: 'Close' })).toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: 'Escape', code: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByTestId('timeblock-feedback-textarea')).toBeNull();
+    });
 
-    expect(screen.getByTestId('timeblock-feedback-textarea')).toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: 'Close' })).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: '结束' }));
+    await screen.findByTestId('timeblock-feedback-textarea');
+    expect(markEndingMock).toHaveBeenCalledTimes(1);
   });
 
   it('requires 5s calm-down confirmation before skipping empty feedback', async () => {

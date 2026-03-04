@@ -37,6 +37,7 @@ import {
   normalizeStorageEventsAscending,
   prependOlderEventsAscending,
 } from './chat-event-pagination';
+import { shouldSkipSyncRefresh } from './chat-sync-change-filter';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
@@ -159,39 +160,6 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       totalMs: Math.round(perfNow() - t0),
     });
   }, [scrollToBottom]);
-
-  const shouldSkipSyncRefresh = useCallback((change: unknown): boolean => {
-    if (!change || typeof change !== 'object') {
-      return false;
-    }
-
-    const payload = change as {
-      type?: unknown;
-      direction?: unknown;
-      change?: { docs?: Array<{ _id?: unknown }> };
-      docs?: Array<{ _id?: unknown }>;
-    };
-
-    if (payload.type === 'local') {
-      return true;
-    }
-
-    if (typeof payload.direction === 'string' && payload.direction === 'push') {
-      return true;
-    }
-
-    const docs = Array.isArray(payload.change?.docs)
-      ? payload.change?.docs
-      : (Array.isArray(payload.docs) ? payload.docs : []);
-    if (docs.length > 0) {
-      const checkpointOnly = docs.every((doc) => typeof doc?._id === 'string' && doc._id.startsWith('_local/'));
-      if (checkpointOnly) {
-        return true;
-      }
-    }
-
-    return false;
-  }, []);
 
   const scheduleLatestRefresh = useCallback((storage: EventStorage): void => {
     if (refreshInFlightRef.current) {
@@ -316,7 +284,6 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     loadInitialEvents,
     refreshLatestEvents,
     scheduleLatestRefresh,
-    shouldSkipSyncRefresh,
     syncServerUrl,
   ]);
 

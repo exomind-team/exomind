@@ -110,6 +110,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const taskNameRef = useRef<HTMLTextAreaElement | null>(null);
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
+  const endingMarkedRef = useRef(false);
   const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Service
@@ -342,8 +343,11 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     if (timerState !== 'running') {
 
       // 📌【2026-02-14 01:11:53】人改：硬结束时调用 markEnding，标记时间块的结束状态
-      if (timerState === 'ended') {
+      if (timerState === 'ended' && !endingMarkedRef.current) {
+        endingMarkedRef.current = true;
         void timeBlockService.markEnding();
+      } else if (timerState !== 'ended') {
+        endingMarkedRef.current = false;
       }
 
       isRunningRef.current = false;
@@ -458,11 +462,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   };
 
   const handleFeedbackDialogOpenChange = useCallback((nextOpen: boolean) => {
-    if (!nextOpen && feedbackInProgress) {
-      return;
-    }
     setFeedbackOpen(nextOpen);
-  }, [feedbackInProgress]);
+  }, []);
 
   // 暂停/继续切换
   const pauseOrResume = async () => {
@@ -875,11 +876,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
       {/* 身心反馈对话框 */}
       <Dialog open={feedbackOpen} onOpenChange={handleFeedbackDialogOpenChange}>
-        <DialogContent
-          hideCloseButton
-          onEscapeKeyDown={(e) => e.preventDefault()}
-          onInteractOutside={(e) => e.preventDefault()}
-        >
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>时间块结束</DialogTitle>
             <DialogDescription>
