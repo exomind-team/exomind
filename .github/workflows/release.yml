@@ -262,7 +262,11 @@ jobs:
 
             if (-not $finished) {
               Write-Warning "[$AttemptLabel] bun install timed out after $TimeoutSeconds seconds."
-              Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              try {
+                & taskkill /PID $process.Id /T /F | Out-Null
+              } catch {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              }
               throw "bun install timeout in $AttemptLabel"
             }
 
