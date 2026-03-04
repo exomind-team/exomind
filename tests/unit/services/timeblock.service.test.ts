@@ -423,4 +423,37 @@ describe('TimeBlockServiceImpl', () => {
     const restarted = await service.startBlock('after-terminal', { mode: 'countup' });
     expect(restarted.startId).not.toBe(first.startId);
   });
+
+  it('publishes timeblock.completed to embedded RT on port 4077（发布到内嵌 RT 4077）', async () => {
+    const env = createMemoryEnv();
+    const addEvent = vi.fn();
+    const getEvents = vi.fn().mockResolvedValue([]);
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accepted: true, event_id: 'evt-1' }),
+    });
+
+    getEventStorageMock.mockReset();
+    getEventStorageMock.mockReturnValue({
+      addEvent,
+      getEvents,
+    });
+    vi.stubGlobal('fetch', fetchSpy as unknown as typeof fetch);
+
+    const service = new TimeBlockServiceImpl(env as never);
+    await service.startBlock('publish-rt', { mode: 'countup' });
+    await service.markEnding();
+    await service.endBlock('done');
+
+    for (let i = 0; i < 20 && fetchSpy.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://localhost:4077/signals/publish',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
 });

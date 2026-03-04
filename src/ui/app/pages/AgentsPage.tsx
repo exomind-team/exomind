@@ -91,7 +91,7 @@ const ADD_NODE_OPTIONS: AddNodeOption[] = [
   },
 ];
 
-const DIRECT_RUNTIME_PORT_CANDIDATES = [1950, 1949] as const;
+const DIRECT_RUNTIME_PORT_CANDIDATES = [4077, 1950, 1949] as const;
 const DIRECT_RUNTIME_PORT_STORAGE_KEY = 'exomind:agentHubRuntimePorts';
 
 const MOCK_SIGNAL_ROUTES_FALLBACK: SignalRoute[] = [
@@ -794,7 +794,7 @@ function DeviceView({
             </span>
           </div>
           <p className="mt-1 text-[10px] text-[#A8A29E]">
-            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 1949}
+            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 4077}
           </p>
           {runtimeServiceStatus?.pid && (
             <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
@@ -1146,7 +1146,7 @@ function RuntimeHostManagerSheet({
             data-testid="runtime-host-address-input"
             value={runtimeHostAddress}
             onChange={(event) => onRuntimeHostAddressChange(event.target.value)}
-            placeholder="host:port（例如 127.0.0.1:1919）"
+            placeholder="host:port（例如 127.0.0.1:4077）"
             className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
           />
           <button
@@ -1230,7 +1230,7 @@ export function AgentsPage() {
   const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
   const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
   const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
-  const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState('127.0.0.1:1919');
+  const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState('127.0.0.1:4077');
   const [runtimeHostError, setRuntimeHostError] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
@@ -1398,7 +1398,7 @@ export function AgentsPage() {
     try {
       const status = await getRuntimeControlService().startRuntime({
         host: '127.0.0.1',
-        port: 1949,
+        port: 4077,
       });
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
@@ -1407,7 +1407,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 1949,
+        port: 4077,
         error: message,
       });
     }
@@ -1423,7 +1423,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 1949,
+        port: 4077,
         error: message,
       });
     }

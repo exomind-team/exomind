@@ -582,11 +582,11 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private resolveRtBaseUrl(): string | null {
     try {
-      // 优先使用 window.location 同源 RT（开发环境通常是 localhost:1949）
+      // 优先使用 window.location 同源 RT（开发环境通常是 localhost:4077）
       const host = typeof window !== 'undefined' && window.location?.hostname
         ? window.location.hostname
         : 'localhost';
-      return `http://${host}:1949`;
+      return `http://${host}:4077`;
     } catch {
       return null;
     }

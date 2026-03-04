@@ -16,7 +16,7 @@ import {
 import { getEventStorage } from '@/lib/storage/event-storage';
 
 const RT_HOST = 'localhost';
-const RT_PORT = 1949;
+const RT_PORT = 4077;
 
 function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
   const isTimeblock = payload.review_type === 'timeblock';
