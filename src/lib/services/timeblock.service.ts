@@ -35,6 +35,12 @@ function perfNow(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
 }
 
+interface BlockPreferenceDecision {
+  preferred: ActiveBlockData;
+  reason: string;
+  compared: 'start_time' | 'phase' | 'version' | 'transition_time' | 'actor_id' | 'fallback';
+}
+
 export interface TimeBlockService {
   /** 加载已完成的时间块 */
   loadTimeBlocks(): Promise<TimeBlock[]>;
@@ -542,10 +548,16 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       }
 
       const normalized = this.normalizeActiveBlock(block);
-      const preferred = this.pickPreferredBlock(this.lastAcceptedBlock, normalized);
+      const decision = this.decidePreferredBlock(this.lastAcceptedBlock, normalized);
+      const preferred = decision.preferred;
       if (!this.isSameBlock(preferred, normalized)) {
         this.rememberAcceptedBlock(preferred);
-        void this.persistCanonicalWriteBack(preferred);
+        this.logRejectedSyncPacket(normalized, preferred, decision);
+        void this.persistCanonicalWriteBack(preferred, {
+          trigger: 'reject_non_preferred_sync',
+          decision,
+          incoming: normalized,
+        });
         return;
       }
 
@@ -714,36 +726,71 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     current: ActiveBlockData | null,
     incoming: ActiveBlockData,
   ): ActiveBlockData {
+    return this.decidePreferredBlock(current, incoming).preferred;
+  }
+
+  private decidePreferredBlock(
+    current: ActiveBlockData | null,
+    incoming: ActiveBlockData,
+  ): BlockPreferenceDecision {
     if (!current) {
-      return incoming;
+      return {
+        preferred: incoming,
+        reason: 'no_current_baseline',
+        compared: 'fallback',
+      };
     }
 
     if (current.startId !== incoming.startId) {
       if (incoming.startTime !== current.startTime) {
-        return incoming.startTime > current.startTime ? incoming : current;
+        return incoming.startTime > current.startTime
+          ? { preferred: incoming, reason: 'incoming_newer_start_time', compared: 'start_time' }
+          : { preferred: current, reason: 'current_newer_start_time', compared: 'start_time' };
       }
-      return this.getBlockOrderTime(incoming) >= this.getBlockOrderTime(current) ? incoming : current;
+      const currentOrderTime = this.getBlockOrderTime(current);
+      const incomingOrderTime = this.getBlockOrderTime(incoming);
+      return incomingOrderTime >= currentOrderTime
+        ? { preferred: incoming, reason: 'incoming_newer_transition_different_start', compared: 'transition_time' }
+        : { preferred: current, reason: 'current_newer_transition_different_start', compared: 'transition_time' };
     }
 
     const currentPhase = this.getBlockPhase(current);
     const incomingPhase = this.getBlockPhase(incoming);
     if (incomingPhase !== currentPhase) {
-      return incomingPhase > currentPhase ? incoming : current;
+      return incomingPhase > currentPhase
+        ? { preferred: incoming, reason: 'incoming_higher_phase', compared: 'phase' }
+        : { preferred: current, reason: 'current_higher_phase', compared: 'phase' };
     }
 
     const currentVersion = current.version ?? 0;
     const incomingVersion = incoming.version ?? 0;
     if (currentVersion !== incomingVersion) {
-      return incomingVersion > currentVersion ? incoming : current;
+      return incomingVersion > currentVersion
+        ? { preferred: incoming, reason: 'incoming_higher_version', compared: 'version' }
+        : { preferred: current, reason: 'current_higher_version', compared: 'version' };
+    }
+
+    const currentOrderTime = this.getBlockOrderTime(current);
+    const incomingOrderTime = this.getBlockOrderTime(incoming);
+    if (incomingOrderTime !== currentOrderTime) {
+      return incomingOrderTime > currentOrderTime
+        ? { preferred: incoming, reason: 'incoming_newer_transition', compared: 'transition_time' }
+        : { preferred: current, reason: 'current_newer_transition', compared: 'transition_time' };
     }
 
     const currentActor = current.actorId ?? '';
     const incomingActor = incoming.actorId ?? '';
     if (currentActor !== incomingActor) {
-      return incomingActor > currentActor ? incoming : current;
+      return incomingActor > currentActor
+        ? { preferred: incoming, reason: 'incoming_actor_tie_break', compared: 'actor_id' }
+        : { preferred: current, reason: 'current_actor_tie_break', compared: 'actor_id' };
     }
 
-    return this.getBlockOrderTime(incoming) >= this.getBlockOrderTime(current) ? incoming : current;
+    return {
+      preferred: incoming,
+      reason: 'incoming_fallback',
+      compared: 'fallback',
+    };
   }
 
   private getBlockOrderTime(block: ActiveBlockData): number {
@@ -910,40 +957,107 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return normalized;
   }
 
-  private async persistCanonicalWriteBack(block: ActiveBlockData): Promise<void> {
-    const signature = this.getBlockSignature(block);
+  private async persistCanonicalWriteBack(
+    block: ActiveBlockData,
+    context: {
+      trigger: string;
+      decision?: BlockPreferenceDecision;
+      incoming?: ActiveBlockData;
+    } = {
+      trigger: 'manual',
+    }
+  ): Promise<void> {
+    const signature = this.getCanonicalWriteBackSignature(block);
     if (signature === this.lastCanonicalWriteBackSignature) {
       return;
     }
 
+    const startedAt = perfNow();
     this.lastCanonicalWriteBackSignature = signature;
     try {
       await this.saveActiveBlock(block);
+      console.info('[TB-SVC] canonical write-back applied', {
+        trigger: context.trigger,
+        reason: context.decision?.reason ?? null,
+        compared: context.decision?.compared ?? null,
+        storageUserId: this.activeStorageUserId,
+        remoteUrl: this.activeSyncRemoteUrl,
+        incomingStartId: context.incoming?.startId ?? null,
+        targetStartId: block.startId,
+        targetPhase: block.phase ?? this.resolvePhase(block),
+        targetVersion: block.version ?? null,
+        elapsedMs: Math.round(perfNow() - startedAt),
+      });
     } catch (error) {
       this.lastCanonicalWriteBackSignature = null;
-      console.error('[TB-SVC] canonical write-back failed', error);
+      console.error('[TB-SVC] canonical write-back failed', {
+        trigger: context.trigger,
+        reason: context.decision?.reason ?? null,
+        compared: context.decision?.compared ?? null,
+        storageUserId: this.activeStorageUserId,
+        remoteUrl: this.activeSyncRemoteUrl,
+        incomingStartId: context.incoming?.startId ?? null,
+        targetStartId: block.startId,
+        targetPhase: block.phase ?? this.resolvePhase(block),
+        targetVersion: block.version ?? null,
+        elapsedMs: Math.round(perfNow() - startedAt),
+        error,
+      });
     }
   }
 
-  private getBlockSignature(block: ActiveBlockData): string {
+  private getCanonicalWriteBackSignature(block: ActiveBlockData): string {
     return JSON.stringify({
-      startId: block.startId,
-      name: block.name,
-      mode: block.mode,
-      targetMinutes: block.targetMinutes,
-      startTime: block.startTime,
-      phase: block.phase,
-      version: block.version,
-      actorId: block.actorId,
-      lastTransitionAt: block.lastTransitionAt,
-      lastResumedAt: block.lastResumedAt,
-      accumulatedRunMs: block.accumulatedRunMs,
-      actionEndedAt: block.actionEndedAt,
-      feedbackStartedAt: block.feedbackStartedAt,
-      feedbackSubmittedAt: block.feedbackSubmittedAt,
-      pauseAccumulatedMs: block.pauseAccumulatedMs,
-      paused: block.paused,
-      pausedAt: block.pausedAt,
+      context: {
+        storageUserId: this.activeStorageUserId,
+        remoteUrl: this.activeSyncRemoteUrl,
+      },
+      block: {
+        startId: block.startId,
+        name: block.name,
+        mode: block.mode,
+        targetMinutes: block.targetMinutes,
+        startTime: block.startTime,
+        phase: block.phase,
+        version: block.version,
+        actorId: block.actorId,
+        lastTransitionAt: block.lastTransitionAt,
+        lastResumedAt: block.lastResumedAt,
+        accumulatedRunMs: block.accumulatedRunMs,
+        actionEndedAt: block.actionEndedAt,
+        feedbackStartedAt: block.feedbackStartedAt,
+        feedbackSubmittedAt: block.feedbackSubmittedAt,
+        pauseAccumulatedMs: block.pauseAccumulatedMs,
+        paused: block.paused,
+        pausedAt: block.pausedAt,
+      },
+    });
+  }
+
+  private logRejectedSyncPacket(
+    incoming: ActiveBlockData,
+    preferred: ActiveBlockData,
+    decision: BlockPreferenceDecision,
+  ): void {
+    console.warn('[TB-SVC] rejected non-preferred sync block', {
+      reason: decision.reason,
+      compared: decision.compared,
+      storageUserId: this.activeStorageUserId,
+      remoteUrl: this.activeSyncRemoteUrl,
+      incoming: {
+        startId: incoming.startId,
+        phase: this.resolvePhase(incoming),
+        version: incoming.version ?? null,
+        actorId: incoming.actorId ?? null,
+        transitionTime: this.getBlockOrderTime(incoming),
+      },
+      preferred: {
+        startId: preferred.startId,
+        phase: this.resolvePhase(preferred),
+        version: preferred.version ?? null,
+        actorId: preferred.actorId ?? null,
+        transitionTime: this.getBlockOrderTime(preferred),
+      },
     });
   }
 

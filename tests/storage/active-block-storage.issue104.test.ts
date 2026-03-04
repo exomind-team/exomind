@@ -97,4 +97,46 @@ describe('Issue #104 ActiveBlockStorage', () => {
     expect(loaded?.feedbackSubmittedAt).toBe(terminal.feedbackSubmittedAt);
     expect(loaded?.actionEndedAt).toBe(terminal.actionEndedAt);
   });
+
+  it('prefers newer transition time over actorId when phase and version tie', async () => {
+    const storage = new ActiveBlockStorage('issue104-ordering-user');
+    const now = Date.now();
+
+    await storage.saveActiveBlock({
+      startId: 'issue104-same-start',
+      name: 'older-actor-higher',
+      startTime: now - 60_000,
+      elapsed: 8_000,
+      mode: 'countup',
+      paused: false,
+      version: 5,
+      actorId: 'zz-local',
+      lastTransitionAt: now - 5_000,
+      lastResumedAt: now - 5_000,
+      accumulatedRunMs: 8_000,
+      updatedAt: now - 5_000,
+      pauseAccumulatedMs: 0,
+    });
+
+    await storage.saveActiveBlock({
+      startId: 'issue104-same-start',
+      name: 'newer-actor-lower',
+      startTime: now - 60_000,
+      elapsed: 12_000,
+      mode: 'countup',
+      paused: false,
+      version: 5,
+      actorId: 'aa-remote',
+      lastTransitionAt: now - 1_000,
+      lastResumedAt: now - 1_000,
+      accumulatedRunMs: 12_000,
+      updatedAt: now - 1_000,
+      pauseAccumulatedMs: 0,
+    });
+
+    const loaded = await storage.loadActiveBlock();
+    expect(loaded?.name).toBe('newer-actor-lower');
+    expect(loaded?.actorId).toBe('aa-remote');
+    expect(loaded?.lastTransitionAt).toBe(now - 1_000);
+  });
 });

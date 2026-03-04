@@ -461,13 +461,19 @@ export class ActiveBlockStorage {
       return versionB > versionA ? b : a;
     }
 
+    const orderA = this.getBlockOrderTime(a);
+    const orderB = this.getBlockOrderTime(b);
+    if (orderA !== orderB) {
+      return orderB > orderA ? b : a;
+    }
+
     const actorA = a.actorId ?? '';
     const actorB = b.actorId ?? '';
     if (actorA !== actorB) {
       return actorB > actorA ? b : a;
     }
 
-    return this.getBlockOrderTime(b) >= this.getBlockOrderTime(a) ? b : a;
+    return b;
   }
 
   private isSameBlockData(a: ActiveBlockData, b: ActiveBlockData): boolean {
