@@ -7,6 +7,7 @@ import {
   List,
   Mail,
   MessageCircle,
+  MessageSquare,
   Monitor,
   Plus,
   Rocket,
@@ -1858,6 +1859,8 @@ export function AgentsPage() {
           const node = signalGraph.nodes.find((n) => n.id === nodeId);
           if (node?.type === 'agent') openAgentDetail(nodeId);
           else if (node?.type === 'actor') openActorDetail(nodeId);
+          else openSignalDetail(nodeId);
+          // TODO(issue-354-mobile-sheet): <lg 视口点击节点后改为底部详情 Sheet。
         }}
         onClearSelection={() => {
           setSelectedNodeId(null);
@@ -1986,13 +1989,13 @@ export function AgentsPage() {
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
-        <div className="flex-1 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2">
+        <div className="flex-1 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2 lg:pb-6">
           {content}
         </div>
 
         {/* 右侧栏：桌面端固定 380px，CLOSED 时不渲染 */}
         {rightPanel.state !== 'CLOSED' && (
-          <aside className="hidden w-[380px] shrink-0 border-l border-[#292524] bg-[#1C1917] md:flex md:flex-col">
+          <aside className="hidden w-[380px] shrink-0 border-l border-[#292524] bg-[#1C1917] lg:flex lg:flex-col">
             <div className="flex items-center justify-between border-b border-[#292524] px-4 py-3">
               <span className="flex items-center gap-2 text-sm font-medium text-[#FAFAF9]">
                 {(rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') && (() => {
@@ -2178,51 +2181,106 @@ export function AgentsPage() {
               )}
               {rightPanel.state === 'SIGNAL_DETAIL' && (
                 <div className="flex flex-col gap-3 p-4">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-xs font-medium text-[#A8A29E]">节点 ID</p>
-                    <p className="font-mono text-sm text-[#FAFAF9]">
-                      {rightPanel.signalId ?? '—'}
-                    </p>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <p className="text-xs font-medium text-[#A8A29E]">最近信号路由</p>
-                    {signalRoutes
-                      .filter((r) =>
-                        r.target_ref === rightPanel.signalId ||
-                        r.topic.includes(rightPanel.signalId ?? '')
-                      )
-                      .slice(0, 5)
-                      .map((r) => (
-                        <div
-                          key={r.id}
-                          className="flex items-center gap-2 rounded-[6px] bg-[#292524] px-3 py-2"
-                        >
-                          <span
-                            className={`h-1.5 w-1.5 rounded-full ${r.enabled ? 'bg-[#22C55E]' : 'bg-[#57534E]'}`}
-                          />
-                          <span className="flex-1 truncate font-mono text-xs text-[#D6D3D1]">
-                            {r.topic}
-                          </span>
-                          <span className="shrink-0 text-[10px] text-[#78716C]">
-                            → {r.target_type}
-                          </span>
+                  {(() => {
+                    const nodeId = rightPanel.signalId;
+                    const normalizedNodeId = nodeId?.includes(':')
+                      ? nodeId.split(':').slice(1).join(':')
+                      : nodeId;
+                    const routeMatchKey = normalizedNodeId ?? nodeId ?? '';
+                    const node =
+                      (nodeId ? signalGraph.nodes.find((n) => n.id === nodeId) : null) ??
+                      (normalizedNodeId
+                        ? signalGraph.nodes.find(
+                            (n) => n.label === normalizedNodeId || n.id.endsWith(`:${normalizedNodeId}`)
+                          )
+                        : null);
+                    const relatedRoutes = routeMatchKey
+                      ? signalRoutes.filter(
+                          (r) =>
+                            r.target_ref === routeMatchKey || r.topic.includes(routeMatchKey)
+                        )
+                      : [];
+                    const incomingCount = routeMatchKey
+                      ? signalRoutes.filter((r) => r.target_ref === routeMatchKey).length
+                      : 0;
+                    const outgoingCount = routeMatchKey
+                      ? signalRoutes.filter((r) => r.topic.includes(routeMatchKey)).length
+                      : 0;
+
+                    return (
+                      <>
+                        <div className="flex flex-col gap-1">
+                          <p className="text-xs font-medium text-[#A8A29E]">节点 ID</p>
+                          <p className="font-mono text-sm text-[#FAFAF9]">{nodeId ?? '—'}</p>
                         </div>
-                      ))}
-                    {signalRoutes.filter((r) =>
-                      r.target_ref === rightPanel.signalId ||
-                      r.topic.includes(rightPanel.signalId ?? '')
-                    ).length === 0 && (
-                      <p className="text-xs text-[#57534E]">无关联路由</p>
-                    )}
-                  </div>
-                  <p className="text-[10px] text-[#57534E]">
-                    完整 Signal History 面板将在后续版本实现
-                  </p>
+
+                        {node && (
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                  node.type === 'agent'
+                                    ? 'bg-[#CCFBF1] text-[#0D9488]'
+                                    : node.type === 'actor'
+                                      ? 'bg-[#FEF3C7] text-[#B45309]'
+                                      : node.type === 'topic'
+                                        ? 'bg-[#FFEDD5] text-[#EA580C]'
+                                        : 'bg-[#DBEAFE] text-[#1D4ED8]'
+                                }`}
+                              >
+                                {node.type}
+                              </span>
+                              <span className="text-xs text-[#78716C]">状态：{node.status}</span>
+                            </div>
+                            <div className="flex gap-4">
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-[#78716C]">接收路由</p>
+                                <p className="text-sm font-medium text-[#FAFAF9]">{incomingCount}</p>
+                              </div>
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-[#78716C]">发送路由</p>
+                                <p className="text-sm font-medium text-[#FAFAF9]">{outgoingCount}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex flex-col gap-1">
+                          <p className="text-xs font-medium text-[#A8A29E]">最近信号路由</p>
+                          {relatedRoutes.slice(0, 5).map((r) => (
+                            <div
+                              key={r.id}
+                              className="flex items-center gap-2 rounded-[6px] bg-[#292524] px-3 py-2"
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${r.enabled ? 'bg-[#22C55E]' : 'bg-[#57534E]'}`}
+                              />
+                              <span className="flex-1 truncate font-mono text-xs text-[#D6D3D1]">
+                                {r.topic}
+                              </span>
+                              <span className="shrink-0 text-[10px] text-[#78716C]">
+                                → {r.target_type}
+                              </span>
+                            </div>
+                          ))}
+                          {relatedRoutes.length === 0 && (
+                            <p className="text-xs text-[#57534E]">无关联路由</p>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
                 </div>
               )}
               {rightPanel.state === 'AGENT_CHAT' && (
-                <div className="p-4">
-                  <p className="text-xs text-[#78716C]">Agent 对话 — T8 阶段实现</p>
+                <div className="flex flex-col items-center gap-3 p-6 text-center">
+                  <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-[#0D9488]/20">
+                    <MessageSquare size={20} className="text-[#0D9488]" />
+                  </div>
+                  <p className="text-sm font-medium text-[#FAFAF9]">Agent 对话</p>
+                  <p className="text-xs text-[#78716C]">
+                    此功能计划在 v0.3.6 实现，需要 RT 会话管理接口支持。
+                  </p>
                 </div>
               )}
             </div>
