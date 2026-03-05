@@ -13,6 +13,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
 import { Mic, LoaderCircle, Check, AlertCircle } from "lucide-react";
 
 // --- Types ---
@@ -44,16 +45,24 @@ export function VoiceOverlayPage() {
     errorMessage: "",
   });
 
-  // Phase 2: 这里将监听 Tauri event `voice-overlay-state`
-  // 目前用 window message 做开发时的状态注入
+  // Listen to Tauri event from VoiceShortcutService
   useEffect(() => {
-    const handler = (e: MessageEvent) => {
-      if (e.data?.type === "voice-overlay-state") {
-        setData((prev) => ({ ...prev, ...e.data.payload }));
+    let cancelled = false;
+    let unlisten: (() => void) | null = null;
+
+    listen<Partial<OverlayData>>("voice-overlay-state", (event) => {
+      if (!cancelled) {
+        setData((prev) => ({ ...prev, ...event.payload }));
       }
+    }).then((fn) => {
+      if (cancelled) fn();
+      else unlisten = fn;
+    });
+
+    return () => {
+      cancelled = true;
+      unlisten?.();
     };
-    window.addEventListener("message", handler);
-    return () => window.removeEventListener("message", handler);
   }, []);
 
   // 录音计时器

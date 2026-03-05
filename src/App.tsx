@@ -10,12 +10,20 @@ import {
   destroyUpdateChecker,
 } from "@/ui/stores/update-store";
 import { useSignalStream } from "@/ui/hooks/useSignalStream";
+import {
+  initVoiceShortcutService,
+  getVoiceShortcutService,
+} from "@/services/voice-shortcut.service";
 import "./App.css";
 
 function App() {
   useEffect(() => {
     initUpdateChecker();
-    return () => destroyUpdateChecker();
+    initVoiceShortcutService();
+    return () => {
+      destroyUpdateChecker();
+      getVoiceShortcutService().destroy();
+    };
   }, []);
 
   // 连接 RT SSE 信号流，接收 Agent 反馈
