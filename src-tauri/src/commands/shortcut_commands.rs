@@ -1,6 +1,6 @@
-use std::sync::Mutex;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
 use tauri::{AppHandle, State};
 
@@ -53,9 +53,7 @@ impl VoiceShortcutState {
 pub fn register_voice_shortcut(app: &AppHandle, state: &VoiceShortcutState) {
     let shortcut = state.get();
     if let Err(error) = register_shortcut_listener(app, &shortcut) {
-        eprintln!(
-            "[shortcut] failed to register voice shortcut {shortcut}: {error}"
-        );
+        eprintln!("[shortcut] failed to register voice shortcut {shortcut}: {error}");
     }
 }
 
@@ -76,7 +74,9 @@ pub fn apply_voice_shortcut(
         return Ok(current_shortcut);
     }
 
-    let was_registered = app.global_shortcut().is_registered(current_shortcut.as_str());
+    let was_registered = app
+        .global_shortcut()
+        .is_registered(current_shortcut.as_str());
     if was_registered {
         app.global_shortcut()
             .unregister(current_shortcut.as_str())
@@ -112,7 +112,7 @@ pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         VOICE_OVERLAY_WINDOW_LABEL,
         WebviewUrl::App("voice-overlay.html".into()),
@@ -121,12 +121,14 @@ pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     .inner_size(VOICE_OVERLAY_WIDTH, VOICE_OVERLAY_HEIGHT)
     .always_on_top(true)
     .decorations(false)
-    .transparent(true)
     .skip_taskbar(true)
     .resizable(false)
-    .visible(false)
-    .build()
-    .map_err(|error| error.to_string())?;
+    .visible(false);
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    let window = builder.build().map_err(|error| error.to_string())?;
 
     position_voice_overlay(app, &window)
 }
@@ -305,9 +307,7 @@ pub async fn voice_shortcut_set(
 
 /// Read current voice shortcut（读取当前快捷键）.
 #[tauri::command]
-pub async fn voice_shortcut_get(
-    state: State<'_, VoiceShortcutState>,
-) -> Result<String, String> {
+pub async fn voice_shortcut_get(state: State<'_, VoiceShortcutState>) -> Result<String, String> {
     Ok(state.get())
 }
 
