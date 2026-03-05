@@ -1,16 +1,24 @@
-use std::sync::{
-    atomic::{AtomicBool, Ordering},
-    Mutex,
-};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Mutex;
 
-use tauri::{AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+use tauri::{AppHandle, State};
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutEvent, ShortcutState};
 
 const DEFAULT_VOICE_SHORTCUT: &str = "Alt+Q";
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_WINDOW_LABEL: &str = "voice-overlay";
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_WIDTH: f64 = 220.0;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_HEIGHT: f64 = 52.0;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_BOTTOM_MARGIN: i32 = 32;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 static VOICE_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// Voice shortcut runtime state（运行时快捷键状态）.
@@ -41,6 +49,7 @@ impl VoiceShortcutState {
 }
 
 /// Register global voice shortcut at startup（全局语音快捷键）.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn register_voice_shortcut(app: &AppHandle, state: &VoiceShortcutState) {
     let shortcut = state.get();
     if let Err(error) = register_shortcut_listener(app, &shortcut) {
@@ -48,7 +57,11 @@ pub fn register_voice_shortcut(app: &AppHandle, state: &VoiceShortcutState) {
     }
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn register_voice_shortcut(_app: &AppHandle, _state: &VoiceShortcutState) {}
+
 /// Apply hotkey change at runtime（运行时热更新快捷键）.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn apply_voice_shortcut(
     app: &AppHandle,
     state: &VoiceShortcutState,
@@ -61,7 +74,9 @@ pub fn apply_voice_shortcut(
         return Ok(current_shortcut);
     }
 
-    let was_registered = app.global_shortcut().is_registered(current_shortcut.as_str());
+    let was_registered = app
+        .global_shortcut()
+        .is_registered(current_shortcut.as_str());
     if was_registered {
         app.global_shortcut()
             .unregister(current_shortcut.as_str())
@@ -79,13 +94,25 @@ pub fn apply_voice_shortcut(
     Ok(next_shortcut)
 }
 
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn apply_voice_shortcut(
+    _app: &AppHandle,
+    state: &VoiceShortcutState,
+    raw_shortcut: &str,
+) -> Result<String, String> {
+    let next_shortcut = normalize_shortcut(raw_shortcut)?;
+    state.set(next_shortcut.clone());
+    Ok(next_shortcut)
+}
+
 /// Pre-create overlay window hidden（预热悬浮窗）to avoid first-open white flash（首开白屏）.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     if app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL).is_some() {
         return Ok(());
     }
 
-    let window = WebviewWindowBuilder::new(
+    let builder = WebviewWindowBuilder::new(
         app,
         VOICE_OVERLAY_WINDOW_LABEL,
         WebviewUrl::App("voice-overlay.html".into()),
@@ -94,14 +121,21 @@ pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     .inner_size(VOICE_OVERLAY_WIDTH, VOICE_OVERLAY_HEIGHT)
     .always_on_top(true)
     .decorations(false)
-    .transparent(true)
     .skip_taskbar(true)
     .resizable(false)
-    .visible(false)
-    .build()
-    .map_err(|error| error.to_string())?;
+    .visible(false);
+
+    #[cfg(not(target_os = "macos"))]
+    let builder = builder.transparent(true);
+
+    let window = builder.build().map_err(|error| error.to_string())?;
 
     position_voice_overlay(app, &window)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn ensure_voice_overlay_window(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
 }
 
 fn normalize_shortcut(raw_shortcut: &str) -> Result<String, String> {
@@ -112,6 +146,7 @@ fn normalize_shortcut(raw_shortcut: &str) -> Result<String, String> {
     Ok(normalized.to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn register_shortcut_listener(app: &AppHandle, shortcut: &str) -> Result<(), String> {
     // Make registration idempotent（幂等）for hot-reload / duplicate init paths.
     let _ = app.global_shortcut().unregister(shortcut);
@@ -122,6 +157,7 @@ fn register_shortcut_listener(app: &AppHandle, shortcut: &str) -> Result<(), Str
         .map_err(|error| error.to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn handle_shortcut_event(app: &AppHandle, event: ShortcutEvent) {
     match event.state {
         ShortcutState::Pressed => {
@@ -138,6 +174,7 @@ fn handle_shortcut_event(app: &AppHandle, event: ShortcutEvent) {
     }
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn resolve_overlay_monitor(app: &AppHandle) -> Result<Option<tauri::Monitor>, String> {
     if let Some(main_window) = app.get_webview_window("main") {
         let current_monitor = main_window
@@ -151,6 +188,7 @@ fn resolve_overlay_monitor(app: &AppHandle) -> Result<Option<tauri::Monitor>, St
     app.primary_monitor().map_err(|error| error.to_string())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn calculate_overlay_position(
     work_area_x: i32,
     work_area_y: i32,
@@ -168,6 +206,7 @@ fn calculate_overlay_position(
     )
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn position_voice_overlay(app: &AppHandle, window: &WebviewWindow) -> Result<(), String> {
     let Some(monitor) = resolve_overlay_monitor(app)? else {
         return Ok(());
@@ -188,6 +227,7 @@ fn position_voice_overlay(app: &AppHandle, window: &WebviewWindow) -> Result<(),
 
 /// Simulate Ctrl+V paste via enigo.
 #[tauri::command]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn simulate_paste() -> Result<(), String> {
     // Run in blocking thread since enigo is not Send on all platforms
     tokio::task::spawn_blocking(|| {
@@ -208,7 +248,15 @@ pub async fn simulate_paste() -> Result<(), String> {
     .map_err(|e| e.to_string())?
 }
 
+/// Simulate Ctrl+V paste via enigo（移动端不支持）.
+#[tauri::command]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn simulate_paste() -> Result<(), String> {
+    Err("simulate_paste is not supported on mobile targets".to_string())
+}
+
 /// 内部函数：显示悬浮窗（供 register_voice_shortcut 调用）
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn voice_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
     ensure_voice_overlay_window(app)?;
     if let Some(window) = app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL) {
@@ -220,16 +268,30 @@ fn voice_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
 
 /// 显示语音悬浮窗（Tauri command，供前端调用）
 #[tauri::command]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn voice_overlay_show(app: AppHandle) -> Result<(), String> {
     voice_overlay_show_internal(&app)
 }
 
+#[tauri::command]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn voice_overlay_show(_app: AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
 /// 隐藏语音悬浮窗（不销毁，下次复用）
 #[tauri::command]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn voice_overlay_hide(app: AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL) {
         window.hide().map_err(|error| error.to_string())?;
     }
+    Ok(())
+}
+
+#[tauri::command]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn voice_overlay_hide(_app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
@@ -245,9 +307,7 @@ pub async fn voice_shortcut_set(
 
 /// Read current voice shortcut（读取当前快捷键）.
 #[tauri::command]
-pub async fn voice_shortcut_get(
-    state: State<'_, VoiceShortcutState>,
-) -> Result<String, String> {
+pub async fn voice_shortcut_get(state: State<'_, VoiceShortcutState>) -> Result<String, String> {
     Ok(state.get())
 }
 

@@ -3,7 +3,7 @@ export type { RuntimeHostStatus, RuntimeHostRecord, RuntimeServiceStatus } from 
 export type { AgentMarketCategory, AgentMarketItem } from './agent-hub-market';
 
 // Agent Hub view modes（视图模式）
-export const AGENT_HUB_VIEW_MODES = ['topology', 'nodes', 'routes', 'device'] as const;
+export const AGENT_HUB_VIEW_MODES = ['topology', 'list', 'history', 'routes', 'device'] as const;
 export type AgentHubViewMode = (typeof AGENT_HUB_VIEW_MODES)[number];
 
 // 右侧栏状态机
