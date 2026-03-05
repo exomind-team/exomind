@@ -43,6 +43,7 @@ import {
   subscribeRuntimeTargetChanges,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
+import { RouteEditPanel } from '@/components/RouteEditPanel';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import type { SignalRoute } from '@/lib/types/signal-pool';
@@ -1457,6 +1458,30 @@ export function AgentsPage() {
   // T5/T8 阶段使用
   void openSignalDetail;
 
+  const [isRouteSaving, setIsRouteSaving] = useState(false);
+
+  const handleRouteSave = async (
+    data: Omit<SignalRoute, 'id' | 'created_at' | 'updated_at'>
+  ) => {
+    setIsRouteSaving(true);
+    try {
+      const host = sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+      if (!host) return;
+      const routeService = new SignalRouteService({ host });
+      if (rightPanel.state === 'ROUTE_EDIT' && rightPanel.routeId) {
+        await routeService.updateRoute(rightPanel.routeId, data);
+      } else {
+        await routeService.createRoute(data);
+      }
+      await refreshSignalRoutesFromSnapshot({ hosts: runtimeHostSnapshots });
+      closeRightPanel();
+    } catch (err) {
+      console.error('Failed to save route:', err);
+    } finally {
+      setIsRouteSaving(false);
+    }
+  };
+
   const handleRouteToggle = async (routeId: string, enabled: boolean) => {
     try {
       const host = sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
@@ -1723,6 +1748,11 @@ export function AgentsPage() {
     [signalRouteHostLabel, signalRoutes]
   );
 
+  const availableTopics = useMemo(
+    () => [...new Set(signalRoutes.map((r) => r.topic))],
+    [signalRoutes]
+  );
+
   const graphAgents = useMemo(() => {
     const runtimeAgents = runtimeHostSnapshots.flatMap((item) => item.agents);
     if (runtimeAgents.length > 0) return runtimeAgents;
@@ -1879,11 +1909,85 @@ export function AgentsPage() {
                 <X size={16} />
               </button>
             </div>
-            {/* 右侧栏内容占位（T5/T8 阶段填充） */}
-            <div className="flex-1 p-4">
-              <p className="text-xs text-[#78716C]">
-                {rightPanel.state} — 待实现（T5/T8）
-              </p>
+            {/* 右侧栏内容 */}
+            <div className="flex-1 overflow-auto">
+              {rightPanel.state === 'ROUTE_EDIT' && (
+                <RouteEditPanel
+                  route={
+                    rightPanel.routeId
+                      ? (signalRoutes.find((r) => r.id === rightPanel.routeId) ?? null)
+                      : null
+                  }
+                  availableTopics={availableTopics}
+                  availableAgents={graphAgents.filter((a) => a.id).map((a) => ({
+                    id: a.id,
+                    name: a.name,
+                  }))}
+                  availableActors={[]}
+                  onSave={handleRouteSave}
+                  onDelete={
+                    rightPanel.routeId
+                      ? () => handleRouteDelete(rightPanel.routeId!)
+                      : undefined
+                  }
+                  onCancel={closeRightPanel}
+                  isSaving={isRouteSaving}
+                />
+              )}
+              {(rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') && (
+                <div className="p-4">
+                  {(() => {
+                    const nodeId = rightPanel.nodeId;
+                    const node = nodeId
+                      ? signalGraph.nodes.find((n) => n.id === nodeId)
+                      : null;
+                    if (!node) {
+                      return (
+                        <p className="text-xs text-[#78716C]">节点不存在或已离线</p>
+                      );
+                    }
+                    return (
+                      <div className="flex flex-col gap-3">
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
+                              node.type === 'agent'
+                                ? 'bg-[#CCFBF1] dark:bg-[#0D9488]/20'
+                                : 'bg-[#FEF3C7] dark:bg-[#F59E0B]/20'
+                            }`}
+                          >
+                            <Bot
+                              size={18}
+                              className={
+                                node.type === 'agent'
+                                  ? 'text-[#0D9488]'
+                                  : 'text-[#B45309] dark:text-[#F59E0B]'
+                              }
+                            />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-[#FAFAF9]">{node.label}</p>
+                            <p className="text-xs text-[#A8A29E]">
+                              {node.type === 'agent' ? 'Agent' : 'Actor'} · {node.id}
+                            </p>
+                          </div>
+                        </div>
+                        <p className="text-xs text-[#78716C]">详情面板 — T8 阶段实现</p>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              {rightPanel.state === 'SIGNAL_DETAIL' && (
+                <div className="p-4">
+                  <p className="text-xs text-[#78716C]">信号详情 — T7 阶段实现</p>
+                </div>
+              )}
+              {rightPanel.state === 'AGENT_CHAT' && (
+                <div className="p-4">
+                  <p className="text-xs text-[#78716C]">Agent 对话 — T8 阶段实现</p>
+                </div>
+              )}
             </div>
           </aside>
         )}
