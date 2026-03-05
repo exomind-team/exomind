@@ -38,7 +38,7 @@ export default defineConfig(({ mode }) => {
         port: devPorts.hmr,
       },
       watch: {
-        ignored: ["**/src-tauri/**"],
+        ignored: ["**/src-tauri/**", "**/target/**"],
       },
     },
   };
