@@ -1338,12 +1338,6 @@ function NodesTabView({
         <div className="flex flex-col divide-y divide-[#E7E3E0] overflow-hidden rounded-[10px] border border-[#E7E3E0] dark:divide-[#292524] dark:border-[#292524]">
           {filteredItems.map((item) => {
             const Icon = getListItemIcon(item);
-            const statusColor: Record<AgentHubNodeStatus, string> = {
-              running: 'bg-[#22C55E]',
-              idle: 'bg-[#D6D3D1] dark:bg-[#57534E]',
-              warning: 'bg-[#F59E0B]',
-              offline: 'bg-[#EF4444]',
-            };
             const statusLabel: Record<AgentHubNodeStatus, string> = {
               running: '运行中',
               idle: '空闲',
@@ -1400,12 +1394,19 @@ function NodesTabView({
                   )}
                 </div>
                 {/* 状态 badge */}
-                <div className="flex shrink-0 items-center gap-1.5">
-                  <span className={`h-2 w-2 rounded-full ${statusColor[item.status]}`} />
-                  <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">
-                    {statusLabel[item.status]}
-                  </span>
-                </div>
+                <span
+                  className={`ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium ${
+                    item.status === 'running'
+                      ? 'bg-[#22C55E]/15 text-[#22C55E]'
+                      : item.status === 'warning'
+                        ? 'bg-[#F59E0B]/15 text-[#F59E0B]'
+                        : item.status === 'offline'
+                          ? 'bg-[#EF4444]/15 text-[#EF4444]'
+                          : 'bg-[#57534E]/30 text-[#78716C]'
+                  }`}
+                >
+                  {statusLabel[item.status]}
+                </span>
                 <ChevronRight size={14} className="shrink-0 text-[#A8A29E]" />
               </div>
             );
@@ -1988,7 +1989,21 @@ export function AgentsPage() {
         {rightPanel.state !== 'CLOSED' && (
           <aside className="hidden w-[380px] shrink-0 border-l border-[#292524] bg-[#1C1917] md:flex md:flex-col">
             <div className="flex items-center justify-between border-b border-[#292524] px-4 py-3">
-              <span className="text-sm font-medium text-[#FAFAF9]">
+              <span className="flex items-center gap-2 text-sm font-medium text-[#FAFAF9]">
+                {(rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') && (() => {
+                  const nodeId = rightPanel.nodeId;
+                  const node = nodeId ? signalGraph.nodes.find((n) => n.id === nodeId) : null;
+                  if (!node) return null;
+                  const dotColor =
+                    node.status === 'online' || node.status === 'running'
+                      ? 'bg-[#22C55E]'
+                      : node.status === 'error' || node.status === 'offline'
+                        ? 'bg-[#EF4444]'
+                        : node.status === 'busy' || node.status === 'warning'
+                          ? 'bg-[#F59E0B]'
+                          : 'bg-[#57534E]';
+                  return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotColor}`} />;
+                })()}
                 {rightPanel.state === 'ROUTE_EDIT' && (rightPanel.routeId ? '编辑路由' : '新建路由')}
                 {rightPanel.state === 'AGENT_DETAIL' && (agentDetail?.title ?? 'Agent 详情')}
                 {rightPanel.state === 'ACTOR_DETAIL' && (agentDetail?.title ?? 'Actor 详情')}
