@@ -14,7 +14,7 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
 
   test('desktop shows sidebar and VC settings content（桌面显示侧栏和VC设置内容）', async ({ page }) => {
     await page.goto('/settings');
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('new-settings-desktop-vc-root')).toBeVisible();
 
     await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
     await expect(page.getByTestId('desktop-settings-content')).toBeVisible();
@@ -40,19 +40,34 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByText('开源软件使用声明')).toHaveCount(0);
     await expect(page.getByText('工作模式')).toHaveCount(0);
     await expect(page.getByText('更新日志')).toHaveCount(0);
-    await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-now')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-tasks')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-agents')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-settings')).toBeVisible();
-    await expect(page.locator('[data-testid^="desktop-sidebar-item-"]')).toHaveCount(5);
+    await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toHaveCount(0);
+    await expect(page.locator('[data-testid^="desktop-sidebar-item-"]')).toHaveCount(4);
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
+  });
+
+  test('desktop agents route uses desktop shell（桌面端 Agent 页面走桌面壳层）', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('exomind:agentPageEnabled', 'true');
+      localStorage.setItem('exomind:desktopAdaptiveEnabled', 'true');
+    });
+
+    await page.goto('/agents');
+    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
+
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+    await expect(page.getByTestId('desktop-settings-content')).toBeVisible();
+    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
   });
 
   test('mobile keeps bottom tab nav on settings（移动端保留底部导航）', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/settings');
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('link', { name: '设置' })).toBeVisible();
 
     await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
     await expect(page.getByRole('link', { name: '设置' })).toBeVisible();
@@ -61,7 +76,7 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
 
   test('legal-support page contains only legal three items（法律与支持页仅法务三项）', async ({ page }) => {
     await page.goto('/settings');
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByRole('button', { name: '关于' })).toBeVisible();
 
     const aboutTab = page.getByRole('button', { name: '关于' });
     await aboutTab.click();
@@ -79,7 +94,7 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
 
   test('desktop adaptive switch can fallback to mobile shell（桌面适配开关可回退移动壳层）', async ({ page }) => {
     await page.goto('/settings');
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
 
     await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
 
@@ -93,15 +108,34 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
   });
 
-  test('desktop sidebar nav leaves settings desktop shell on non-settings route（桌面侧栏跳转非设置后回到移动壳层）', async ({ page }) => {
+  test('desktop sidebar nav keeps desktop shell on non-settings route（桌面侧栏跳转非设置后保持桌面壳层）', async ({ page }) => {
     await page.goto('/settings');
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
 
     await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
-    await page.getByTestId('desktop-sidebar-item-dashboard').click();
+    await page.getByTestId('desktop-sidebar-item-now').click();
 
-    await expect(page).toHaveURL(/\/dashboard$/);
-    await expect(page.getByTestId('desktop-sidebar')).toBeHidden();
-    await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
+    await expect(page).toHaveURL(/\/eventlog$/);
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
+  });
+
+  test('desktop tasks and me routes use desktop shell（桌面端任务与Me页面走桌面壳层）', async ({ page }) => {
+    await page.goto('/tasks');
+    await expect(page.getByTestId('new-tasks-page')).toBeVisible();
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
+
+    await page.goto('/me');
+    await expect(page.getByTestId('new-me-page')).toBeVisible();
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
+  });
+
+  test('desktop update route uses desktop shell（桌面端更新页走桌面壳层）', async ({ page }) => {
+    await page.goto('/update');
+    await expect(page.getByRole('heading', { name: '更新', exact: true })).toBeVisible();
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
   });
 });

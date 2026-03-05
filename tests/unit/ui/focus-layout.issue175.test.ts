@@ -12,7 +12,7 @@ describe('new focus layout issue-175 structure', () => {
     expect(source).not.toContain('设计系统重构');
   });
 
-  it('uses full-width chat section with new-mobile variant（保留新移动端聊天主体）', () => {
+  it('uses new-mobile chat variant consistently（当下页统一使用新移动端聊天样式）', () => {
     expect(source).toContain('data-testid="new-now-chat-section"');
     expect(source).toContain('<ChatPage variant="new-mobile" hideHeader />');
   });

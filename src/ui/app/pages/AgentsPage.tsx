@@ -1887,9 +1887,12 @@ export function AgentsPage() {
   ]);
 
   return (
-    <div data-testid="agent-hub-page" className="relative flex min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]">
+    <div
+      data-testid="agent-hub-page"
+      className="relative flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]"
+    >
       {/* Header */}
-      <header className="flex flex-col gap-2 px-5 py-3">
+      <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
         <div className="flex items-center justify-between">
           <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent Hub</h1>
           <div className="flex items-center gap-2">
@@ -1989,7 +1992,7 @@ export function AgentsPage() {
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
-        <div className="flex-1 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2 lg:pb-6">
+        <div className="flex-1 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10">
           {content}
         </div>
 

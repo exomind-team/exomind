@@ -2,6 +2,7 @@ import { ArrowDownToLine, ArrowLeft, Search, Sparkles, Store, Users } from 'luci
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentMarketCategory, AgentMarketItem } from '@/lib/types/agent-hub';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
 function getMarketCardIcon(item: AgentMarketItem) {
   if (item.id.includes('calendar')) return Store;
@@ -10,6 +11,7 @@ function getMarketCardIcon(item: AgentMarketItem) {
 }
 
 export function AgentMarketPage() {
+  const isDesktop = useIsDesktop();
   const [categories, setCategories] = useState<AgentMarketCategory[]>([]);
   const [activeCategoryId, setActiveCategoryId] = useState('all');
   const [items, setItems] = useState<AgentMarketItem[]>([]);
@@ -39,8 +41,8 @@ export function AgentMarketPage() {
   };
 
   return (
-    <div data-testid="agent-market-page" className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
-      <header className="grid grid-cols-[auto,1fr,auto] items-center px-5 py-3">
+    <div data-testid="agent-market-page" className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09] md:px-8 lg:px-10">
+      <header className="grid grid-cols-[auto,1fr,auto] items-center border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-0">
         <button
           type="button"
           onClick={() => window.history.back()}
@@ -53,7 +55,7 @@ export function AgentMarketPage() {
         <span />
       </header>
 
-      <div className="px-5">
+      <div className="px-5 pt-3 md:px-0">
         <label
           data-testid="agent-market-search"
           className="flex items-center gap-2 rounded-xl bg-[#F5F0ED] px-3 py-2 text-sm text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]"
@@ -63,7 +65,7 @@ export function AgentMarketPage() {
         </label>
       </div>
 
-      <div className="mt-3 flex gap-2 overflow-x-auto px-5 pb-1">
+      <div className="mt-3 flex gap-2 overflow-x-auto px-5 pb-1 md:px-0">
         {categories.map((category) => {
           const active = category.id === activeCategoryId;
           return (
@@ -83,13 +85,13 @@ export function AgentMarketPage() {
         })}
       </div>
 
-      <div className="mt-3 px-5">
+      <div className="mt-3 px-5 md:px-0">
         <div className="flex items-center justify-between">
           <h2 className="text-[16px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">热门推荐</h2>
           <span className="text-[13px] text-[#C75B3A]">查看全部</span>
         </div>
 
-        <div className="mt-2 space-y-3 pb-[calc(env(safe-area-inset-bottom,0px)+108px)]">
+        <div className={`mt-2 space-y-3 ${isDesktop ? 'pb-8' : 'pb-[calc(env(safe-area-inset-bottom,0px)+108px)]'}`}>
           {items.map((item) => {
             const Icon = getMarketCardIcon(item);
             return (

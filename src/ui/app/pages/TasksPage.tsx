@@ -4,6 +4,7 @@ import { getTaskService } from '@/lib/services';
 import type { TaskGoalCard, TaskGoalGroup, TaskGoalStatusTone, TaskItem } from '@/lib/types/task';
 import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
 type TaskTab = 'now' | 'today' | 'week' | 'month' | 'goals';
 
@@ -149,6 +150,7 @@ function resolveInitialTaskTab(): TaskTab {
 }
 
 export function TasksPage() {
+  const isDesktop = useIsDesktop();
   const [activeTab, setActiveTab] = useState<TaskTab>(() => resolveInitialTaskTab());
   const [tasks, setTasks] = useState<TaskItem[]>([]);
   const [goalGroups, setGoalGroups] = useState<TaskGoalGroup[]>([]);
@@ -196,8 +198,8 @@ export function TasksPage() {
   };
 
   return (
-    <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-tasks-page">
-      <header className="flex items-center justify-between px-6 py-3">
+    <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-tasks-page">
+      <header className="flex items-center justify-between border-b border-[#F0ECE8] px-6 py-3 dark:border-[#292524] md:px-8 lg:px-10">
         <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
         <div className="flex items-center gap-2">
           <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
@@ -207,7 +209,7 @@ export function TasksPage() {
         </div>
       </header>
 
-      <div className="px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)]">
+      <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-24 lg:px-10">
         <div className="mb-4 flex gap-1 overflow-x-auto pb-1">
           {TAB_ITEMS.map((tab) => {
             const active = tab.id === activeTab;
@@ -254,7 +256,7 @@ export function TasksPage() {
         )}
       </div>
 
-      <div className="sticky bottom-[calc(env(safe-area-inset-bottom,0px)+62px)] px-4 pb-2">
+      <div className={`sticky px-4 pb-2 md:px-8 lg:px-10 ${isDesktop ? 'bottom-4' : 'bottom-[calc(env(safe-area-inset-bottom,0px)+62px)]'}`}>
         <div className="flex items-center gap-2 rounded-[24px] border border-[#E7E5E4] bg-white px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
           <input
             value={quickInput}

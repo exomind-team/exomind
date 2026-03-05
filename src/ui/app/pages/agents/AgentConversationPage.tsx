@@ -2,6 +2,7 @@ import { ArrowLeft, Bot, MoreHorizontal, SendHorizontal, UserRound } from 'lucid
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentConversationMessage } from '@/lib/types/agent-hub';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { createUuidV4 } from '@/lib/utils/uuid';
 
 function createMessage(id: string, role: 'agent' | 'user', content: string): AgentConversationMessage {
@@ -14,6 +15,7 @@ function createMessage(id: string, role: 'agent' | 'user', content: string): Age
 }
 
 export function AgentConversationPage({ agentId }: { agentId?: string }) {
+  const isDesktop = useIsDesktop();
   const [messages, setMessages] = useState<AgentConversationMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
@@ -76,8 +78,8 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
   };
 
   return (
-    <div data-testid="agent-conversation-page" className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
-      <header data-testid="agent-conversation-header" className="flex items-center justify-between px-4 py-3">
+    <div data-testid="agent-conversation-page" className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]">
+      <header data-testid="agent-conversation-header" className="flex items-center justify-between border-b border-[#F0ECE8] px-4 py-3 dark:border-[#292524] md:px-8 lg:px-10">
         <button
           type="button"
           onClick={() => window.history.back()}
@@ -96,7 +98,7 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
         </button>
       </header>
 
-      <div className="space-y-3 px-4 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2">
+      <div className={`min-h-0 flex-1 overflow-y-auto space-y-3 px-4 pt-3 md:px-8 lg:px-10 ${isDesktop ? 'pb-4' : 'pb-[calc(env(safe-area-inset-bottom,0px)+108px)]'}`}>
         {messages.map((message) => {
           const isUser = message.role === 'user';
           return (
@@ -127,7 +129,10 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
 
       <div
         data-testid="agent-chat-input-bar"
-        className="fixed bottom-[calc(env(safe-area-inset-bottom,0px)+64px)] left-0 right-0 mx-auto flex w-full max-w-[393px] items-center gap-2 border-t border-[#E7E5E4] bg-[#FAF7F5] px-4 py-3 dark:border-[#292524] dark:bg-[#0C0A09]"
+        className={isDesktop
+          ? 'flex items-center gap-2 border-t border-[#E7E5E4] bg-[#FAF7F5] px-4 py-3 dark:border-[#292524] dark:bg-[#0C0A09] md:px-8 lg:px-10'
+          : 'fixed bottom-[calc(env(safe-area-inset-bottom,0px)+64px)] left-0 right-0 mx-auto flex w-full max-w-[393px] items-center gap-2 border-t border-[#E7E5E4] bg-[#FAF7F5] px-4 py-3 dark:border-[#292524] dark:bg-[#0C0A09]'
+        }
       >
         <input
           value={inputValue}

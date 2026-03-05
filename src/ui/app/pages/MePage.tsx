@@ -9,6 +9,7 @@ import {
 } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getMeService } from '@/lib/services';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import type {
   MeBehaviorPattern,
   MeDashboardData,
@@ -58,6 +59,7 @@ function habitLoopToneClass(loop: MeHabitLoop): string {
 }
 
 export function MePage() {
+  const isDesktop = useIsDesktop();
   const [activeTab, setActiveTab] = useState<MeViewType>('status');
   const [data, setData] = useState<MeDashboardData | null>(null);
 
@@ -77,19 +79,19 @@ export function MePage() {
 
   if (!data) {
     return (
-      <div className="min-h-full bg-[#FAF7F5] px-6 py-6 text-sm text-[#A8A29E] dark:bg-[#0C0A09]" data-testid="new-me-page">
+      <div className="min-h-full bg-[#FAF7F5] px-6 py-6 text-sm text-[#A8A29E] dark:bg-[#0C0A09] md:px-8 lg:px-10" data-testid="new-me-page">
         Me 数据加载中...
       </div>
     );
   }
 
   return (
-    <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-me-page">
-      <header className="flex items-center justify-between px-6 py-3">
+    <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-me-page">
+      <header className="flex items-center justify-between border-b border-[#F0ECE8] px-6 py-3 dark:border-[#292524] md:px-8 lg:px-10">
         <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Me</h1>
       </header>
 
-      <div className="px-5 pb-1">
+      <div className="px-5 pb-1 pt-3 md:px-8 lg:px-10">
         <div className="flex justify-center gap-1">
           <button
             type="button"
@@ -118,7 +120,7 @@ export function MePage() {
         </div>
       </div>
 
-      <div className="space-y-4 px-5 pb-[calc(env(safe-area-inset-bottom,0px)+92px)] pt-4">
+      <div className={`min-h-0 flex-1 overflow-y-auto space-y-4 px-5 pt-4 md:px-8 lg:px-10 ${isDesktop ? 'pb-8' : 'pb-[calc(env(safe-area-inset-bottom,0px)+92px)]'}`}>
         {activeTab === 'status' ? (
           <>
             <section

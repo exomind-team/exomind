@@ -24,7 +24,7 @@ export function TaskDetailPage() {
 
   if (!task) {
     return (
-      <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
+      <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09] md:px-8 lg:px-10">
         <Link to="/tasks" className="mb-4 inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
           <ArrowLeft size={16} />
           返回任务
@@ -36,7 +36,7 @@ export function TaskDetailPage() {
 
   return (
     <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
-      <header className="flex items-center gap-2 px-5 py-3">
+      <header className="flex items-center gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
         <Link to="/tasks" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
           <ArrowLeft size={16} />
         </Link>

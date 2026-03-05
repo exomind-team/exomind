@@ -1,6 +1,6 @@
 ﻿import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, Brain, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Bot, SquareCheckBig, UserRound, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
@@ -202,7 +202,6 @@ function MobileShell({
 
 function DesktopSidebar({ activePath }: { activePath: string }) {
   const desktopNavItems = [
-    { key: 'dashboard', title: '总览', path: '/dashboard', icon: LayoutDashboard, match: (path: string) => path === '/dashboard' },
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
     { key: 'agents', title: 'Agent', path: '/agents', icon: Bot, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
@@ -358,9 +357,21 @@ function NewLayout() {
     ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
-  const isDesktopSettingsRoute = location.pathname === '/settings' || location.pathname.startsWith('/settings/');
+  const isDesktopAdaptiveRoute =
+    // primary app routes（主应用路由）：desktop shell（桌面壳层）启用范围
+    location.pathname === '/'
+    || location.pathname === '/eventlog'
+    || location.pathname === '/dashboard'
+    || location.pathname === '/tasks'
+    || location.pathname.startsWith('/tasks/')
+    || location.pathname === '/me'
+    || location.pathname === '/update'
+    || location.pathname === '/settings'
+    || location.pathname.startsWith('/settings/')
+    || location.pathname === '/agents'
+    || location.pathname.startsWith('/agents/');
 
-  if (isDesktop && desktopAdaptiveEnabled && isDesktopSettingsRoute) {
+  if (isDesktop && desktopAdaptiveEnabled && isDesktopAdaptiveRoute) {
     return (
       <>
         <DesktopLayout activePath={location.pathname} />
