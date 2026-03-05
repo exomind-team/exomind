@@ -187,7 +187,7 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
   });
 
   test('desktop: list shows real routes and topology shows key flows（桌面端验收）', async ({ page }) => {
-    await page.goto('/agents');
+    await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await expect(page.getByTestId('agent-topology-view')).toBeVisible();
@@ -226,7 +226,7 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
 
   test('mobile: can view list and topology（移动端可查看列表和拓扑）', async ({ page }) => {
     await page.setViewportSize({ width: 390, height: 844 });
-    await page.goto('/agents');
+    await page.goto('/agents', { waitUntil: 'domcontentloaded' });
 
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await page.getByTestId('agent-view-toggle-list').click();
@@ -246,7 +246,7 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
     await page.addInitScript(() => {
       localStorage.setItem('exomind:themePreference', 'dark');
     });
-    await page.goto('/agents');
+    await page.goto('/agents', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
     await expect(page.locator('.react-flow__edge')).toHaveCount(6);
     const darkNodeCount = await page.locator('.react-flow__node').count();
@@ -267,7 +267,7 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
       localStorage.removeItem('exomind_agent_runtime_hosts_v1');
     });
 
-    await page.goto('/agents');
+    await page.goto('/agents', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
 
@@ -278,7 +278,7 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
   test('direct runtime fallback: no saved host still shows live routes（直连回退场景）', async ({ page }) => {
     await seedDirectRuntimeFallback(page, runtimePort);
 
-    await page.goto('/agents');
+    await page.goto('/agents', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
     await expect(page.locator('.react-flow__edge')).toHaveCount(6);
 

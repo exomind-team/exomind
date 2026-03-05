@@ -6,6 +6,7 @@ describe('runtime embedded startup m1（Runtime 内嵌启动约束）', () => {
     const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf-8');
     expect(tauriLib).toContain('.setup(');
     expect(tauriLib).toMatch(/runtime.*start/i);
+    expect(tauriLib).toContain('ensure_runtime_started(runtime_state, None, Some(4077))');
   });
 
   it('runtime commands no longer spawn bun server script（不再通过 bun 脚本拉起 runtime）', () => {

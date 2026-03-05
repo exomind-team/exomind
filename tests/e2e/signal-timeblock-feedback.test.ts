@@ -9,9 +9,43 @@
 // Prerequisites:
 //   - exomind-rt running on localhost (set EXOMIND_RT_URL)
 
-import { test, expect } from '@playwright/test';
+import { test, expect, type APIRequestContext } from '@playwright/test';
 
+// Standalone exomind-rt default is 1949（外部独立 Runtime 默认 1949）.
+// Note: Embedded Tauri runtime is pinned to 4077（内嵌 Runtime 固定 4077）.
 const RT_BASE_URL = process.env.EXOMIND_RT_URL ?? 'http://127.0.0.1:1949';
+
+async function waitForReviewCompleted(
+  request: APIRequestContext,
+  traceId: string,
+  maxAttempts = 90,
+  intervalMs = 2000,
+) {
+  for (let i = 0; i < maxAttempts; i++) {
+    const response = await request.get(`${RT_BASE_URL}/signals/history?limit=200`);
+    if (!response.ok()) {
+      await new Promise((resolve) => setTimeout(resolve, intervalMs));
+      continue;
+    }
+
+    const events = await response.json();
+    const match = (events as Array<{ topic: string; trace_id?: string }>).find(
+      (event) => event.topic === 'review.completed' && event.trace_id === traceId,
+    );
+
+    if (match) {
+      return match as {
+        topic: string;
+        trace_id?: string;
+        payload?: Record<string, unknown>;
+      };
+    }
+
+    await new Promise((resolve) => setTimeout(resolve, intervalMs));
+  }
+
+  return null;
+}
 
 test.describe('Signal Pool: Timeblock Feedback', () => {
   test.skip(
@@ -120,5 +154,46 @@ test.describe('Signal Pool: Timeblock Feedback', () => {
       (e) => e.topic === 'timeblock.completed' && e.trace_id === 'e2e-trace-history',
     );
     expect(timeblockEvent).toBeTruthy();
+  });
+
+  test('timeblock.completed triggers reviewer and emits review.completed（真实链路）', async ({ request }) => {
+    test.setTimeout(180_000);
+
+    const traceId = `e2e-trace-timeblock-live-${Date.now()}`;
+    const publishResponse = await request.post(`${RT_BASE_URL}/signals/publish`, {
+      data: {
+        topic: 'timeblock.completed',
+        source: 'e2e-test',
+        trace_id: traceId,
+        payload: {
+          block: {
+            id: 'e2e-block-live',
+            name: 'M4 信号链路自动验证',
+            startTime: Date.now() - 25 * 60 * 1000,
+            endTime: Date.now(),
+          },
+          feedbackReport: '完成 RT 内嵌 + Agent Hub + Signal 链路联调。',
+          recentEvents: [
+            { text: 'RT 健康检查通过', ts: Date.now() - 20 * 60 * 1000 },
+            { text: 'Agent Hub 路由拓扑展示正确', ts: Date.now() - 10 * 60 * 1000 },
+            { text: '准备触发 reviewer 生成反馈', ts: Date.now() - 2 * 60 * 1000 },
+          ],
+        },
+      },
+    });
+
+    expect(publishResponse.ok()).toBeTruthy();
+    const publishBody = await publishResponse.json();
+    expect(publishBody.accepted).toBe(true);
+
+    const reviewEvent = await waitForReviewCompleted(request, traceId);
+    expect(reviewEvent).toBeTruthy();
+    expect(reviewEvent?.trace_id).toBe(traceId);
+    expect(reviewEvent?.payload).toBeTruthy();
+    expect(reviewEvent?.payload?.review_type).toBe('timeblock');
+    expect(reviewEvent?.payload?.block_name).toBe('M4 信号链路自动验证');
+    expect(typeof reviewEvent?.payload?.effective).toBe('string');
+    expect(typeof reviewEvent?.payload?.stuck).toBe('string');
+    expect(typeof reviewEvent?.payload?.suggestion).toBe('string');
   });
 });

@@ -78,12 +78,14 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
   });
 
   beforeEach(() => {
+    window.localStorage.clear();
+
     hosts = [
       {
         id: 'runtime-host-1',
         name: 'Hope Desktop',
         host: '127.0.0.1',
-        port: 1949,
+        port: 4077,
         status: 'unknown',
         createdAt: '2026-02-27T10:00:00.000Z',
         updatedAt: '2026-02-27T10:00:00.000Z',
@@ -136,18 +138,18 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: false,
       host: '127.0.0.1',
-      port: 1949,
+      port: 4077,
     });
     runtimeControlMocks.startRuntime.mockResolvedValue({
       running: true,
       host: '127.0.0.1',
-      port: 1949,
+      port: 4077,
       pid: 9527,
     });
     runtimeControlMocks.stopRuntime.mockResolvedValue({
       running: false,
       host: '127.0.0.1',
-      port: 1949,
+      port: 4077,
     });
   });
 
@@ -203,7 +205,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     await waitFor(() => {
       expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
         host: '127.0.0.1',
-        port: 1949,
+        port: 4077,
       });
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
     });
@@ -212,6 +214,32 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     await waitFor(() => {
       expect(runtimeControlMocks.stopRuntime).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
+    });
+  });
+
+  it('switches runtime target to external and saves host address（可切换外部 Runtime 并保存地址）', async () => {
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-target-mode-embedded')).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    fireEvent.click(screen.getByTestId('runtime-target-mode-external'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-target-mode-external')).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('runtime-local-start-button')).toBeDisabled();
+    });
+
+    fireEvent.change(screen.getByTestId('runtime-target-external-address-input'), {
+      target: { value: '10.9.0.8:2999' },
+    });
+    fireEvent.click(screen.getByTestId('runtime-target-external-apply-button'));
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('exomind:runtimeExternalAddress')).toBe('10.9.0.8:2999');
+      expect(window.localStorage.getItem('exomind:runtimeTargetMode')).toBe('external');
     });
   });
 });

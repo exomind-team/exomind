@@ -38,7 +38,8 @@ pub fn run() {
         .setup(move |_app| {
             let runtime_state = runtime_process_state_for_setup.clone();
             tauri::async_runtime::spawn(async move {
-                if let Err(error) = ensure_runtime_started(runtime_state, None, None).await {
+                // Fixed RT port for M4 integration（M4 固定端口 4077）.
+                if let Err(error) = ensure_runtime_started(runtime_state, None, Some(4077)).await {
                     eprintln!("[tauri/setup] failed to auto-start embedded runtime: {error}");
                 }
             });

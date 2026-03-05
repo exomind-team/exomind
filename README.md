@@ -136,22 +136,28 @@ Copy-Item .env.example .env
 
 核心变量：
 
-| 变量                     | 默认值        | 说明                        |
-| ------------------------ | ------------- | --------------------------- |
-| `EXOMIND_WEB_PORT`     | 自动探测 | Web 开发端口（默认尝试 1420，被占用自动切换） |
-| `EXOMIND_HMR_PORT`     | WEB+1   | HMR 端口                    |
-| `EXOMIND_POUCHDB_PORT` | `6984`      | 同步服务端口                |
-| `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | 同步服务监听地址            |
-| `EXOMIND_ASR_PORT`     | `1949`      | ASR 服务端口                |
-| `VITE_SYNC_SERVER_URL` | 空            | 前端强制覆盖同步地址        |
-| `VITE_ASR_SERVER_URL`  | 空            | 前端强制覆盖 ASR 地址       |
-| `VITE_APP_VERSION`     | 自动解析      | 应用显示版本（CI 可注入）   |
-| `VITE_BUILD_HASH`      | `local`     | 应用显示构建哈希（CI 注入） |
+| 变量                     | 默认值        | 说明                                          |
+| ------------------------ | ------------- | --------------------------------------------- |
+| `EXOMIND_WEB_PORT`     | 自动探测      | Web 开发端口（默认尝试 1420，被占用自动切换） |
+| `EXOMIND_HMR_PORT`     | WEB+1         | HMR 端口                                      |
+| `EXOMIND_POUCHDB_PORT` | `6984`      | 同步服务端口                                  |
+| `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | 同步服务监听地址                              |
+| `EXOMIND_ASR_PORT`     | `1949`      | ASR 服务端口                                  |
+| `VITE_SYNC_SERVER_URL` | 空            | 前端强制覆盖同步地址                          |
+| `VITE_ASR_SERVER_URL`  | 空            | 前端强制覆盖 ASR 地址                         |
+| `VITE_APP_VERSION`     | 自动解析      | 应用显示版本（CI 可注入）                     |
+| `VITE_BUILD_HASH`      | `local`     | 应用显示构建哈希（CI 注入）                   |
 
 说明：
 
 - 未设置 `VITE_SYNC_SERVER_URL` 时，前端会按 `当前 hostname + EXOMIND_POUCHDB_PORT` 自动拼接同步地址。
 - 局域网联调时，显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，并在客户端填写可达 IP。
+
+windows powershell指定端口启动桌面端的例子：
+
+```powershell
+$env:EXOMIND_WEB_PORT='1520'; $env:EXOMIND_HMR_PORT='1521'; bun run tauri dev
+```
 
 ## 测试与验收（Testing / 测试）
 
@@ -201,11 +207,11 @@ bun run tauri android build --debug
 
 Tag 触发规则：
 
-| Tag 格式 | 触发行为 | Release 类型 |
-|---------|---------|-------------|
-| `build/v0.3.2-build.20260222T1430` | 构建 + GitHub Release | Pre-release（可直接下载） |
-| `release/v0.3.3` | 构建 + GitHub Release | 正式版 |
-| `release/v0.3.3-beta.1` | 构建 + GitHub Release | Pre-release（由版本号判断） |
+| Tag 格式                             | 触发行为              | Release 类型                |
+| ------------------------------------ | --------------------- | --------------------------- |
+| `build/v0.3.2-build.20260222T1430` | 构建 + GitHub Release | Pre-release（可直接下载）   |
+| `release/v0.3.3`                   | 构建 + GitHub Release | 正式版                      |
+| `release/v0.3.3-beta.1`            | 构建 + GitHub Release | Pre-release（由版本号判断） |
 
 日常使用：
 
