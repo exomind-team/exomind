@@ -1,9 +1,11 @@
-import { ArrowLeft, ChevronRight, Lock } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Lock, Play, Square } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
-import { getTaskService } from '@/lib/services';
+import { getTaskService, getTimeBlockService, getTaskTimerService } from '@/lib/services';
 import type { DependencyCheckResult } from '@/lib/services/task.service';
+import type { TaskTimerFeedbackAction } from '@/lib/services/task-timer.service';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
+import type { ActiveBlockData } from '@/lib/types/event';
 
 const STATUS_LABEL: Record<string, string> = {
   not_started: '未开始',
@@ -47,6 +49,8 @@ export function TaskDetailPage() {
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
+  const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
+  const [showFeedback, setShowFeedback] = useState(false);
 
   useEffect(() => {
     let disposed = false;
@@ -56,14 +60,18 @@ export function TaskDetailPage() {
         return;
       }
       const svc = getTaskService();
-      const [nextTask, transitions] = await Promise.all([
+      const tbSvc = getTimeBlockService();
+      const [nextTask, transitions, currentBlock] = await Promise.all([
         svc.getTask(taskId),
         svc.getAvailableTransitions(taskId),
+        tbSvc.loadActiveBlock(),
       ]);
       if (disposed) return;
 
       setTask(nextTask as TaskNode | null);
       setAvailableTransitions(transitions);
+      // Show active block only if it belongs to this task
+      setActiveBlock(currentBlock?.taskId === taskId ? currentBlock : null);
 
       if (nextTask) {
         // Load parent task
@@ -147,6 +155,36 @@ export function TaskDetailPage() {
     if (!taskId) return;
     await getTaskService().abandonTask(taskId);
     void navigate({ to: '/tasks' });
+  };
+
+  const handleStartTimer = async () => {
+    if (!taskId) return;
+    const block = await getTaskTimerService().startTimerForTask(taskId, { mode: 'countup' });
+    if (block) {
+      setActiveBlock(block);
+      // Refresh task state (may have transitioned to in_progress)
+      const refreshed = await getTaskService().getTask(taskId);
+      if (refreshed) {
+        setTask(refreshed);
+        const transitions = await getTaskService().getAvailableTransitions(taskId);
+        setAvailableTransitions(transitions);
+      }
+    }
+  };
+
+  const handleStopTimer = () => {
+    setShowFeedback(true);
+  };
+
+  const handleFeedbackAction = async (action: TaskTimerFeedbackAction) => {
+    const updated = await getTaskTimerService().endTimerForTask(undefined, action);
+    setShowFeedback(false);
+    setActiveBlock(null);
+    if (updated && taskId) {
+      setTask(updated);
+      const transitions = await getTaskService().getAvailableTransitions(taskId);
+      setAvailableTransitions(transitions);
+    }
   };
 
   if (isLoading) {
@@ -334,6 +372,73 @@ export function TaskDetailPage() {
                 </li>
               ))}
             </ul>
+          </div>
+        )}
+
+        {/* Timer card */}
+        {!isTerminal && (
+          <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+            <p className="mb-3 text-xs font-medium text-[#A8A29E]">计时</p>
+            {activeBlock ? (
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">计时中...</span>
+                  <button
+                    type="button"
+                    onClick={() => { void handleStopTimer(); }}
+                    className="inline-flex items-center gap-1 rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white"
+                  >
+                    <Square size={14} />
+                    停止
+                  </button>
+                </div>
+                {showFeedback && (
+                  <div className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] p-3 dark:border-[#292524] dark:bg-[#0C0A09]">
+                    <p className="mb-2 text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">任务进展如何？</p>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        onClick={() => { void handleFeedbackAction('continue'); }}
+                        className="rounded-lg bg-[#C75B3A] px-3 py-1.5 text-xs font-medium text-white"
+                      >
+                        继续
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void handleFeedbackAction('suspend'); }}
+                        className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white"
+                      >
+                        挂起
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => { void handleFeedbackAction('complete'); }}
+                        className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white"
+                      >
+                        完成
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <button
+                type="button"
+                disabled={isHardBlocked}
+                onClick={() => { void handleStartTimer(); }}
+                className={`inline-flex items-center gap-1 rounded-xl px-4 py-2 text-sm font-medium ${
+                  isHardBlocked
+                    ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-800 dark:text-gray-600'
+                    : 'bg-[#C75B3A] text-white'
+                }`}
+              >
+                <Play size={14} />
+                开始计时
+              </button>
+            )}
+            {task.spentMinutes ? (
+              <p className="mt-2 text-xs text-[#A8A29E]">已投入 {task.spentMinutes} 分钟</p>
+            ) : null}
           </div>
         )}
 

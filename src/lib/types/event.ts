@@ -47,6 +47,7 @@ export interface TimeBlockData {
   tags: string[];
   startTime: Timestamp;
   endTime: Timestamp;
+  taskId?: string;  // Phase4: 关联任务 ID
 }
 
 // 时间块类型（UI 使用）
@@ -102,6 +103,7 @@ export interface ActiveBlockData {
   pauseAccumulatedMs?: number;
   paused: boolean;
   pausedAt?: Timestamp;
+  taskId?: string;  // Phase4: 关联任务 ID
 }
 
 // 计时器配置
