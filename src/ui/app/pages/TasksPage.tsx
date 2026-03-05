@@ -1,5 +1,6 @@
 import { Github, Plus, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { getTaskService } from '@/lib/services';
 import type { TaskGoalCard, TaskGoalGroup, TaskGoalStatusTone, TaskNode } from '@/lib/types/task';
 import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
@@ -238,13 +239,12 @@ export function TasksPage() {
         ) : (
           <div className="space-y-3">
             {visibleTasks.map((task) => (
-              <article
-                key={task.id}
-                className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
-              >
-                <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
-                <p className="mt-1 text-xs text-[#A8A29E]">{formatTaskMeta(task)}</p>
-              </article>
+              <Link key={task.id} to="/tasks/$taskId" params={{ taskId: task.id }} className="block">
+                <article className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]">
+                  <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+                  <p className="mt-1 text-xs text-[#A8A29E]">{formatTaskMeta(task)}</p>
+                </article>
+              </Link>
             ))}
           </div>
         )}
