@@ -46,6 +46,7 @@ function classifyWithClaude(text: string): {
         encoding: "utf-8",
         timeout: 60_000,
         stdio: ["pipe", "pipe", "pipe"],
+        windowsHide: true,
       },
     );
 

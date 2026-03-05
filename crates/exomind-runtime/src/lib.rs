@@ -415,7 +415,14 @@ fn try_spawn_ts_agent(
         .env("EXOMIND_RT_URL", rt_url)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 
     match command.spawn() {
         Ok(child) => Some(TsAgentProcess {

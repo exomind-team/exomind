@@ -86,6 +86,7 @@ function reviewWithClaude(events: EventEntry[]): ReviewResult | null {
         timeout: 120_000,
         stdio: ["pipe", "pipe", "pipe"],
         env: cleanEnv(),
+        windowsHide: true,
       },
     );
 
@@ -140,6 +141,7 @@ function reviewTimeblock(payload: TimeblockPayload): TimeblockReviewResult | nul
         timeout: 120_000,
         stdio: ["pipe", "pipe", "pipe"],
         env: cleanEnv(),
+        windowsHide: true,
       },
     );
 
