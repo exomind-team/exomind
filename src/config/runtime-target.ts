@@ -10,7 +10,7 @@ export interface RuntimeTarget {
   port: number;
 }
 
-const EMBEDDED_RUNTIME_PORT = 4077;
+const EMBEDDED_RUNTIME_PORT = 9124;
 const DEFAULT_EXTERNAL_RUNTIME_HOST = '127.0.0.1';
 const DEFAULT_EXTERNAL_RUNTIME_PORT = 1949;
 const DEFAULT_RUNTIME_TARGET_MODE: RuntimeTargetMode = 'embedded';

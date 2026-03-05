@@ -5,7 +5,7 @@ import type { RuntimeServiceStatus } from '@/lib/types/agent-hub';
 const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
   running: false,
   host: '127.0.0.1',
-  port: 4077,
+  port: 9124,
   error: 'tauri runtime control only',
 };
 
