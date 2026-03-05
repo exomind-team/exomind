@@ -1,9 +1,8 @@
-import { ArrowLeft, ChevronRight, Lock, Play, Square } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Lock, Play } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { getTaskService, getTimeBlockService, getTaskTimerService } from '@/lib/services';
 import type { DependencyCheckResult } from '@/lib/services/task.service';
-import type { TaskTimerFeedbackAction } from '@/lib/services/task-timer.service';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import type { ActiveBlockData } from '@/lib/types/event';
 
@@ -51,7 +50,7 @@ export function TaskDetailPage() {
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [hasOtherActiveBlock, setHasOtherActiveBlock] = useState(false);
-  const [showFeedback, setShowFeedback] = useState(false);
+  const [spentMinutes, setSpentMinutes] = useState<number>(0);
 
   useEffect(() => {
     let disposed = false;
@@ -77,6 +76,10 @@ export function TaskDetailPage() {
       setHasOtherActiveBlock(currentBlock != null && currentBlock.taskId !== taskId);
 
       if (nextTask) {
+        // Calculate spent minutes dynamically from associated time blocks
+        const spent = await getTaskTimerService().calculateSpentMinutes(taskId);
+        if (!disposed) setSpentMinutes(spent);
+
         // Load parent task
         if (nextTask.parentId) {
           const parent = await svc.getTask(nextTask.parentId);
@@ -176,41 +179,6 @@ export function TaskDetailPage() {
     }
   };
 
-  const handleStopTimer = () => {
-    setShowFeedback(true);
-  };
-
-  const handleFeedbackAction = async (action: TaskTimerFeedbackAction) => {
-    if (!taskId || !activeBlock) return;
-    // End the time block
-    const tbSvc = getTimeBlockService();
-    await tbSvc.markEnding();
-    await tbSvc.endBlock();
-
-    // Calculate duration and record association
-    const durationMs = Math.max(0, Date.now() - activeBlock.startTime);
-    const durationMinutes = Math.round(durationMs / 60_000);
-    await getTaskTimerService().onBlockEndForTask(taskId, activeBlock.startId, durationMinutes);
-
-    // Apply feedback action to task status
-    const svc = getTaskService();
-    if (task?.status === 'in_progress') {
-      if (action === 'complete') await svc.transitionTask(taskId, 'completed');
-      else if (action === 'suspend') await svc.transitionTask(taskId, 'suspended');
-    }
-
-    setShowFeedback(false);
-    setActiveBlock(null);
-    setHasOtherActiveBlock(false);
-
-    // Refresh task state
-    const refreshed = await svc.getTask(taskId);
-    if (refreshed) {
-      setTask(refreshed);
-      const transitions = await svc.getAvailableTransitions(taskId);
-      setAvailableTransitions(transitions);
-    }
-  };
 
   if (isLoading) {
     return (
@@ -405,46 +373,11 @@ export function TaskDetailPage() {
           <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
             <p className="mb-3 text-xs font-medium text-[#A8A29E]">计时</p>
             {activeBlock ? (
-              <div className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">计时中...</span>
-                  <button
-                    type="button"
-                    onClick={() => { void handleStopTimer(); }}
-                    className="inline-flex items-center gap-1 rounded-xl bg-red-500 px-4 py-2 text-sm font-medium text-white"
-                  >
-                    <Square size={14} />
-                    停止
-                  </button>
-                </div>
-                {showFeedback && (
-                  <div className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] p-3 dark:border-[#292524] dark:bg-[#0C0A09]">
-                    <p className="mb-2 text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">任务进展如何？</p>
-                    <div className="flex flex-wrap gap-2">
-                      <button
-                        type="button"
-                        onClick={() => { void handleFeedbackAction('continue'); }}
-                        className="rounded-lg bg-[#C75B3A] px-3 py-1.5 text-xs font-medium text-white"
-                      >
-                        继续
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { void handleFeedbackAction('suspend'); }}
-                        className="rounded-lg bg-blue-500 px-3 py-1.5 text-xs font-medium text-white"
-                      >
-                        挂起
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => { void handleFeedbackAction('complete'); }}
-                        className="rounded-lg bg-emerald-500 px-3 py-1.5 text-xs font-medium text-white"
-                      >
-                        完成
-                      </button>
-                    </div>
-                  </div>
-                )}
+              <div className="space-y-2">
+                <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">计时中...</p>
+                <Link to="/eventlog" className="text-xs text-[#C75B3A] underline-offset-2 hover:underline">
+                  前往「当下」页面操作
+                </Link>
               </div>
             ) : (
               <>
@@ -466,9 +399,9 @@ export function TaskDetailPage() {
                 )}
               </>
             )}
-            {task.spentMinutes ? (
-              <p className="mt-2 text-xs text-[#A8A29E]">已投入 {task.spentMinutes} 分钟</p>
-            ) : null}
+            {spentMinutes > 0 && (
+              <p className="mt-2 text-xs text-[#A8A29E]">已投入 {spentMinutes} 分钟</p>
+            )}
           </div>
         )}
 

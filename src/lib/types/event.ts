@@ -47,7 +47,6 @@ export interface TimeBlockData {
   tags: string[];
   startTime: Timestamp;
   endTime: Timestamp;
-  taskId?: string;  // Phase4: 关联任务 ID
 }
 
 // 时间块类型（UI 使用）

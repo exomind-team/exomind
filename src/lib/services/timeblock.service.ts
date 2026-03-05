@@ -50,7 +50,7 @@ export interface TimeBlockService {
   loadActiveBlock(): Promise<ActiveBlockData | null>;
 
   /** 开始时间块 */
-  startBlock(name: string, config: TimerConfig, description?: string): Promise<ActiveBlockData>;
+  startBlock(name: string, config: TimerConfig, description?: string, taskId?: string): Promise<ActiveBlockData>;
 
   /** 标记“行动结束/开始填写反馈”（点击结束时刻） */
   markEnding(): Promise<void>;
@@ -127,7 +127,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return normalized;
   }
 
-  async startBlock(name: string, config: TimerConfig, description?: string): Promise<ActiveBlockData> {
+  async startBlock(name: string, config: TimerConfig, description?: string, taskId?: string): Promise<ActiveBlockData> {
     // 不允许在已有活跃块（运行中/已暂停）时开启新块
     const existing = await this.readActiveBlock();
     if (existing) {
@@ -172,6 +172,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       actionEndedAt: undefined,
       feedbackStartedAt: undefined,
       feedbackSubmittedAt: undefined,
+      taskId,
     };
     const normalizedActiveBlock = this.normalizeActiveBlock(activeBlock, now);
 

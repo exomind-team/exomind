@@ -4,7 +4,6 @@
  * 覆盖 TaskTimerServiceImpl：
  * - startBlockForTask 创建时间块并关联到任务
  * - startBlockForTask 自动将 not_started 转为 in_progress
- * - onBlockEndForTask 累计 spentMinutes
  * - onBlockEndForTask 追加 blockId 到 timeBlockIds
  * - getBlockIdsForTask 返回已关联的时间块列表
  * - calculateSpentMinutes 正确累计
@@ -103,7 +102,7 @@ function createMockTBService(
   return {
     loadTimeBlocks: vi.fn(async () => completedBlocks),
     loadActiveBlock: vi.fn(async () => activeBlock),
-    startBlock: vi.fn(async (name: string) => makeActiveBlock({ name, startId: `block-${Date.now()}` })),
+    startBlock: vi.fn(async (name: string, _config?: unknown, _desc?: string, taskId?: string) => makeActiveBlock({ name, startId: `block-${Date.now()}`, taskId })),
     markEnding: vi.fn(async () => {}),
     endBlock: vi.fn(async () => null),
     pauseBlock: vi.fn(async () => {}),
@@ -127,7 +126,8 @@ describe('TaskTimerService: startBlockForTask', () => {
     const block = await svc.startBlockForTask('t1', { mode: 'countup' })
 
     expect(block).not.toBeNull()
-    expect(tbSvc.startBlock).toHaveBeenCalledWith('Test Task', { mode: 'countup' })
+    expect(tbSvc.startBlock).toHaveBeenCalledWith('Test Task', { mode: 'countup' }, undefined, 't1')
+    expect(block!.taskId).toBe('t1')
     // Should update task with new blockId in timeBlockIds
     expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', {
       timeBlockIds: [block!.startId],
@@ -215,17 +215,16 @@ describe('TaskTimerService: startBlockForTask', () => {
 })
 
 describe('TaskTimerService: onBlockEndForTask', () => {
-  it('appends blockId and accumulates spentMinutes', async () => {
-    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress', spentMinutes: 10 })]])
+  it('appends blockId to task timeBlockIds', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress' })]])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    await svc.onBlockEndForTask('t1', 'block-new', 25)
+    await svc.onBlockEndForTask('t1', 'block-new')
 
     expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', {
       timeBlockIds: ['block-new'],
-      spentMinutes: 35, // 10 + 25
     })
   })
 
@@ -234,32 +233,15 @@ describe('TaskTimerService: onBlockEndForTask', () => {
       id: 't1',
       status: 'in_progress',
       timeBlockIds: ['block-1'],
-      spentMinutes: 20,
     })]])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    await svc.onBlockEndForTask('t1', 'block-1', 15)
+    await svc.onBlockEndForTask('t1', 'block-1')
 
-    expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', {
-      timeBlockIds: ['block-1'], // not duplicated
-      spentMinutes: 35, // 20 + 15
-    })
-  })
-
-  it('handles task with no prior spentMinutes', async () => {
-    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress' })]])
-    const taskSvc = createMockTaskService(tasks)
-    const tbSvc = createMockTBService()
-    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
-
-    await svc.onBlockEndForTask('t1', 'block-1', 30)
-
-    expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', {
-      timeBlockIds: ['block-1'],
-      spentMinutes: 30,
-    })
+    // Should NOT call updateTask since blockId already exists
+    expect(taskSvc.updateTask).not.toHaveBeenCalled()
   })
 
   it('does nothing for missing task', async () => {
@@ -267,7 +249,7 @@ describe('TaskTimerService: onBlockEndForTask', () => {
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    await svc.onBlockEndForTask('nope', 'block-1', 10)
+    await svc.onBlockEndForTask('nope', 'block-1')
 
     expect(taskSvc.updateTask).not.toHaveBeenCalled()
   })

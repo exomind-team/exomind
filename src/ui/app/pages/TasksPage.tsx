@@ -40,9 +40,7 @@ const TAB_EMPTY_TEXT: Record<TaskTab, string> = {
 };
 
 function formatTaskMeta(task: TaskNode): string {
-  const estimated = task.estimatedMinutes ? `预计 ${task.estimatedMinutes}min` : '未估时';
-  const spent = task.spentMinutes ? `已用 ${task.spentMinutes}min` : '未计时';
-  return `${estimated} · ${spent}`;
+  return task.estimatedMinutes ? `预计 ${task.estimatedMinutes}min` : '未估时';
 }
 
 function resolveInitialTaskTab(): TaskTab {

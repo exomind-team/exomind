@@ -12,7 +12,7 @@ export { TaskServiceImpl, getTaskService } from './task.service';
 export type { TaskService } from './task.service';
 
 export { TaskTimerServiceImpl, getTaskTimerService } from './task-timer.service';
-export type { TaskTimerService, TaskTimerFeedbackAction } from './task-timer.service';
+export type { TaskTimerService } from './task-timer.service';
 
 export { MeServiceImpl, getMeService } from './me.service';
 export type { MeService } from './me.service';

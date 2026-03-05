@@ -23,7 +23,6 @@ export interface UpdateTaskInput {
   dependsOn?: Dependency[]
   tags?: string[]
   estimatedMinutes?: number
-  spentMinutes?: number
   timeBlockIds?: string[]
 }
 

@@ -21,7 +21,6 @@ export interface TaskNode {
   dependsOn: Dependency[]         // 依赖关系列表
   tags: string[]
   estimatedMinutes?: number
-  spentMinutes?: number
   timeBlockIds?: string[]         // Phase4: 关联时间块 ID 列表（1:N）
   createdAt: number               // UTC timestamp，毫秒
   updatedAt: number

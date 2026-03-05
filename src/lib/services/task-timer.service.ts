@@ -6,22 +6,20 @@
  *
  * 职责：
  * - 从任务快速启动时间块（自动关联 blockId 到 task.timeBlockIds）
- * - 时间块结束时更新 spentMinutes + 记录关联
- * - 关联查询与累计计算
+ * - 时间块结束时记录关联
+ * - 关联查询与动态时长计算（spentMinutes 不持久化）
  */
 
 import type { ActiveBlockData, TimerConfig } from '@/lib/types/event'
 import { getTaskService, type TaskService } from './task.service'
 import { getTimeBlockService, type TimeBlockService } from './timeblock.service'
 
-export type TaskTimerFeedbackAction = 'continue' | 'suspend' | 'complete'
-
 export interface TaskTimerService {
   /** 从任务快速启动一个时间块，自动关联 */
   startBlockForTask(taskId: string, config?: TimerConfig): Promise<ActiveBlockData | null>
 
-  /** 时间块结束时回调：更新任务 spentMinutes + 记录关联 */
-  onBlockEndForTask(taskId: string, blockId: string, durationMinutes: number): Promise<void>
+  /** 时间块结束时回调：记录 blockId 关联（spentMinutes 动态计算，不持久化） */
+  onBlockEndForTask(taskId: string, blockId: string): Promise<void>
 
   /** 获取任务关联的所有时间块 ID */
   getBlockIdsForTask(taskId: string): Promise<string[]>
@@ -56,8 +54,8 @@ export class TaskTimerServiceImpl implements TaskTimerService {
       await this.taskSvc.transitionTask(taskId, 'in_progress')
     }
 
-    // 启动时间块，使用任务标题作为名称
-    const block = await this.tbSvc.startBlock(task.title, config)
+    // 启动时间块，使用任务标题作为名称，传入 taskId 标记关联
+    const block = await this.tbSvc.startBlock(task.title, config, undefined, taskId)
 
     // 将 blockId 追加到 task.timeBlockIds
     const existingIds = task.timeBlockIds ?? []
@@ -73,24 +71,17 @@ export class TaskTimerServiceImpl implements TaskTimerService {
   async onBlockEndForTask(
     taskId: string,
     blockId: string,
-    durationMinutes: number,
   ): Promise<void> {
     const task = await this.taskSvc.getTask(taskId)
     if (!task) return
 
     // 追加 blockId（避免重复）
     const existingIds = task.timeBlockIds ?? []
-    const newIds = existingIds.includes(blockId)
-      ? existingIds
-      : [...existingIds, blockId]
-
-    // 累计 spentMinutes
-    const newSpent = (task.spentMinutes ?? 0) + durationMinutes
-
-    await this.taskSvc.updateTask(taskId, {
-      timeBlockIds: newIds,
-      spentMinutes: newSpent,
-    })
+    if (!existingIds.includes(blockId)) {
+      await this.taskSvc.updateTask(taskId, {
+        timeBlockIds: [...existingIds, blockId],
+      })
+    }
   }
 
   async getBlockIdsForTask(taskId: string): Promise<string[]> {

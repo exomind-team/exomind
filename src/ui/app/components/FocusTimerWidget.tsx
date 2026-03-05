@@ -25,9 +25,12 @@ import {
   subscribeTimerPreferencesChanges,
 } from '@/config/timer-preferences';
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
-import { getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
+import { getTaskService, getTaskTimerService, getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 import type { ActiveBlockData } from '@/lib/types/event';
+import type { TaskNode, TaskStatus } from '@/lib/types/task';
+
+type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'abandoned';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
@@ -118,6 +121,11 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
   const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Task status selector in feedback dialog
+  const activeBlockDataRef = useRef<ActiveBlockData | null>(null);
+  const [linkedTask, setLinkedTask] = useState<TaskNode | null>(null);
+  const [taskStatusChoice, setTaskStatusChoice] = useState<TaskStatusChoice>('continue');
+
   const isRunningUi = uiState === 'running';
   const isPaused = isRunningUi && runningSubState === 'paused';
   const isCustomDurationSelected = timerMode === 'countdown' && !isPresetCountdownMinutes(countdownMinutes);
@@ -203,6 +211,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   }, [timerPreferences.countdownEndSoundEnabled, timerPreferences.countdownEndSoundPresetId]);
 
   const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
+    activeBlockDataRef.current = block;
     if (!block) {
       setUiState('idle');
       setRunningSubState('running');
@@ -217,8 +226,20 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
       hardEndTriggeredRef.current = false;
       setCountdownOvertimeMs(0);
       syncIdleElapsedFromMode(timerMode, countdownMinutes);
+      setLinkedTask(null);
+      setTaskStatusChoice('continue');
       return;
     }
+
+    // Fetch linked task if taskId exists
+    if (block.taskId) {
+      void getTaskService().getTask(block.taskId).then((task) => {
+        setLinkedTask(task);
+      });
+    } else {
+      setLinkedTask(null);
+    }
+    setTaskStatusChoice('continue');
 
     setTaskName(block.name);
     setTaskNameDraft(block.name);
@@ -508,6 +529,20 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     }
 
     console.log('[TB-UI] click submit-end -> endBlock done', { elapsedMs: Math.round(perfNow() - t0) });
+
+    // Record block association and apply task status transition
+    const blockData = activeBlockDataRef.current;
+    if (blockData?.taskId) {
+      try {
+        await getTaskTimerService().onBlockEndForTask(blockData.taskId, blockData.startId);
+        if (taskStatusChoice !== 'continue') {
+          await getTaskService().transitionTask(blockData.taskId, taskStatusChoice as TaskStatus);
+        }
+      } catch (error) {
+        console.error('[TB-UI] task status update failed', error);
+      }
+    }
+
     setFeedback('');
     setFeedbackOpen(false);
     setFeedbackInProgress(false);
@@ -516,6 +551,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setRunningSubState('running');
     setTaskName('');
     setTaskNameDraft('');
+    setLinkedTask(null);
+    setTaskStatusChoice('continue');
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     hardEndTriggeredRef.current = false;
@@ -529,6 +566,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     skipFeedbackConfirmState,
     startSkipFeedbackConfirmCooldown,
     syncIdleElapsedFromMode,
+    taskStatusChoice,
     timerMode,
   ]);
 
@@ -849,6 +887,41 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
             placeholder="记录本次专注的反馈..."
             className="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
           />
+          {linkedTask && (
+            <div data-testid="feedback-task-status-section" className="flex flex-col gap-1.5">
+              <div className="flex items-center gap-2">
+                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">关联任务</span>
+                <span className="truncate text-[12px] text-[#1C1917] dark:text-[#FAFAF9]">{linkedTask.title}</span>
+              </div>
+              <div
+                className="relative overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
+                data-testid="feedback-task-status-selector"
+              >
+                <div className="relative z-10 grid grid-cols-4 gap-0">
+                  {([
+                    { key: 'suspended' as TaskStatusChoice, label: '挂起' },
+                    { key: 'continue' as TaskStatusChoice, label: '继续' },
+                    { key: 'completed' as TaskStatusChoice, label: '完成' },
+                    { key: 'abandoned' as TaskStatusChoice, label: '放弃' },
+                  ] as const).map(({ key, label }) => (
+                    <button
+                      key={key}
+                      type="button"
+                      data-testid={`feedback-task-status-${key}`}
+                      onClick={() => setTaskStatusChoice(key)}
+                      className={`relative z-10 h-8 w-full whitespace-nowrap rounded-[8px] px-[8px] text-center text-[12px] transition-colors duration-200 ${
+                        taskStatusChoice === key
+                          ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9] bg-white/55 dark:bg-[#FFFFFF14] border border-[#FFFFFFCC] dark:border-[#FFFFFF66] shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
+                          : 'text-[#78716C] hover:text-[#57534E] dark:hover:text-[#D6D3D1]'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
           <DialogFooter>
             <Button
               type="button"
