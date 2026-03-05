@@ -1514,6 +1514,7 @@ export function AgentsPage() {
 
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [addDropdownOpen, setAddDropdownOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
@@ -1866,16 +1867,86 @@ export function AgentsPage() {
             >
               <Settings size={18} />
             </button>
-            <button
-              type="button"
-              data-testid="agent-add-node-button"
-              onClick={() => setSheetOpen(true)}
-              className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
-              aria-label="添加节点"
-            >
-              <Plus size={16} />
-              添加
-            </button>
+            <div className="relative">
+              <button
+                type="button"
+                data-testid="agent-add-node-button"
+                onClick={() => setAddDropdownOpen((v) => !v)}
+                className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
+                aria-label="添加节点"
+              >
+                <Plus size={16} />
+                添加
+                <ChevronRight
+                  size={12}
+                  className={`transition-transform ${addDropdownOpen ? 'rotate-90' : ''}`}
+                />
+              </button>
+
+              {addDropdownOpen && (
+                <>
+                  {/* 点击外部关闭 */}
+                  <div
+                    className="fixed inset-0 z-10"
+                    onClick={() => setAddDropdownOpen(false)}
+                  />
+                  {/* Dropdown 面板 */}
+                  <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-[10px] border border-[#292524] bg-[#1C1917] shadow-lg">
+                    {/* 节点类型选项 */}
+                    {[
+                      { label: '添加信号输入', color: '#F97316' },
+                      { label: '添加 Agent', color: '#0D9488' },
+                      { label: '添加 Actor', color: '#F59E0B' },
+                      { label: '添加输出节点', color: '#2AABEE' },
+                    ].map((opt) => (
+                      <button
+                        key={opt.label}
+                        type="button"
+                        onClick={() => {
+                          setAddDropdownOpen(false);
+                          setSheetOpen(true);
+                        }}
+                        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-[#FAFAF9] hover:bg-[#292524]"
+                      >
+                        <span
+                          className="h-3 w-3 rounded-sm"
+                          style={{ backgroundColor: opt.color }}
+                        />
+                        {opt.label}
+                      </button>
+                    ))}
+                    {/* 分隔线 */}
+                    <div className="my-1 border-t border-[#292524]" />
+                    {/* 添加路由 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddDropdownOpen(false);
+                        openRouteEdit(null);
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-[#FAFAF9] hover:bg-[#292524]"
+                    >
+                      <Plus size={12} className="text-[#C75B3A]" />
+                      添加信号路由
+                    </button>
+                    {/* 分隔线 */}
+                    <div className="my-1 border-t border-[#292524]" />
+                    {/* 市场 */}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAddDropdownOpen(false);
+                        setSheetOpen(true);
+                      }}
+                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-[#A8A29E] hover:bg-[#292524]"
+                    >
+                      <Rocket size={12} className="text-[#A8A29E]" />
+                      从市场安装
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
           </div>
         </div>
         {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
