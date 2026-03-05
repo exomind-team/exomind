@@ -71,15 +71,23 @@ export function TasksPage() {
 
   useEffect(() => {
     let disposed = false;
+    const svc = getTaskService();
     const load = async () => {
-      const list = await getTaskService().listTasks();
+      const list = await svc.listTasks();
       if (!disposed) {
         setTasks(list);
       }
     };
     void load();
+
+    // Refresh list when remote sync delivers changes
+    const unsubscribe = svc.onTaskChange(() => {
+      void load();
+    });
+
     return () => {
       disposed = true;
+      unsubscribe();
     };
   }, []);
 

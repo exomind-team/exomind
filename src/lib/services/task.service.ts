@@ -1,6 +1,8 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment'
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
+import { getTaskStorage } from '@/lib/storage/task-storage'
+import { getCurrentUserId } from '@/lib/storage/event-storage'
 
 type TaskEnvironmentLike = {
   task: ITaskPort
@@ -26,13 +28,23 @@ export interface TaskService {
   addDependency(taskId: string, depTaskId: string, type: 'soft' | 'hard'): Promise<TaskNode | null>
   removeDependency(taskId: string, depTaskId: string): Promise<TaskNode | null>
   checkDependenciesMet(taskId: string): Promise<DependencyCheckResult>
+  // Sync: live PouchDB replication
+  startSync(remoteUrl: string): Promise<void>
+  stopSync(): Promise<void>
+  onTaskChange(callback: () => void): () => void
 }
 
 export class TaskServiceImpl implements TaskService {
   private readonly env: TaskEnvironmentLike
+  private syncUnsubscribe: (() => void) | null = null
+  private changeListeners = new Set<() => void>()
 
   constructor(env?: TaskEnvironmentLike) {
     this.env = env ?? ExoMindEnvironment.getInstance()
+  }
+
+  private getStorage() {
+    return getTaskStorage(getCurrentUserId())
   }
 
   listTasks(includeAbandoned = false) {
@@ -135,6 +147,38 @@ export class TaskServiceImpl implements TaskService {
     }
 
     return { met: blocking.length === 0, blocking }
+  }
+
+  /* ── Sync ── */
+
+  async startSync(remoteUrl: string): Promise<void> {
+    const storage = this.getStorage()
+    // Subscribe to remote changes to notify UI
+    if (!this.syncUnsubscribe) {
+      this.syncUnsubscribe = storage.onRemoteChange(() => {
+        this.notifyChangeListeners()
+      })
+    }
+    await storage.syncToRemote(remoteUrl)
+  }
+
+  async stopSync(): Promise<void> {
+    if (this.syncUnsubscribe) {
+      this.syncUnsubscribe()
+      this.syncUnsubscribe = null
+    }
+    await this.getStorage().stopSync()
+  }
+
+  onTaskChange(callback: () => void): () => void {
+    this.changeListeners.add(callback)
+    return () => { this.changeListeners.delete(callback) }
+  }
+
+  private notifyChangeListeners(): void {
+    for (const listener of this.changeListeners) {
+      try { listener() } catch { /* ignore */ }
+    }
   }
 
   /**

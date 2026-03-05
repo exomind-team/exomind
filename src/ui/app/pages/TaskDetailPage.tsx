@@ -106,8 +106,15 @@ export function TaskDetailPage() {
       if (!disposed) setIsLoading(false);
     };
     void load();
+
+    // Refresh when remote sync delivers changes
+    const unsubscribe = getTaskService().onTaskChange(() => {
+      void load();
+    });
+
     return () => {
       disposed = true;
+      unsubscribe();
     };
   }, [taskId]);
 

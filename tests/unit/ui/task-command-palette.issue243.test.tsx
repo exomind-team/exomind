@@ -23,6 +23,9 @@ vi.mock('@/lib/services', () => ({
     addDependency: vi.fn(),
     removeDependency: vi.fn(),
     checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
+    startSync: vi.fn(async () => {}),
+    stopSync: vi.fn(async () => {}),
+    onTaskChange: vi.fn(() => () => {}),
   }),
 }));
 
