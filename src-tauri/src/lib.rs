@@ -11,6 +11,7 @@ use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
     list_files, pick_json_file, read_file, read_file_binary, save_json_file, write_file,
 };
+use commands::shortcut_commands::{register_voice_shortcut, simulate_paste};
 use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_start, runtime_service_status, runtime_service_stop,
     signal_publish_fast, RuntimeProcessState,
@@ -33,9 +34,13 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_global_shortcut::init())
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
-        .setup(move |_app| {
+        .setup(move |app| {
+            // Register global voice shortcut (Alt+Q PTT)
+            register_voice_shortcut(app.handle());
+
             let runtime_state = runtime_process_state_for_setup.clone();
             tauri::async_runtime::spawn(async move {
                 // Fixed RT port for M4 integration（M4 固定端口 4077）.
@@ -76,6 +81,8 @@ pub fn run() {
             runtime_service_stop,
             runtime_service_status,
             signal_publish_fast,
+            // Voice shortcut commands
+            simulate_paste,
         ]);
 
     #[cfg(debug_assertions)]
