@@ -3,8 +3,30 @@ export type { RuntimeHostStatus, RuntimeHostRecord, RuntimeServiceStatus } from 
 export type { AgentMarketCategory, AgentMarketItem } from './agent-hub-market';
 
 // Agent Hub view modes（视图模式）
-export const AGENT_HUB_VIEW_MODES = ['topology', 'list', 'device'] as const;
+export const AGENT_HUB_VIEW_MODES = ['topology', 'nodes', 'routes', 'device'] as const;
 export type AgentHubViewMode = (typeof AGENT_HUB_VIEW_MODES)[number];
+
+// 右侧栏状态机
+export const AGENT_HUB_RIGHT_PANEL_STATES = [
+  'CLOSED',
+  'ROUTE_EDIT',
+  'SIGNAL_DETAIL',
+  'AGENT_DETAIL',
+  'ACTOR_DETAIL',
+  'AGENT_CHAT',
+] as const;
+export type AgentHubRightPanelState = (typeof AGENT_HUB_RIGHT_PANEL_STATES)[number];
+
+// 右侧栏上下文（携带所选实体 ID 等）
+export interface AgentHubRightPanelContext {
+  state: AgentHubRightPanelState;
+  // ROUTE_EDIT: routeId（null = 新建模式）
+  routeId?: string | null;
+  // AGENT_DETAIL / ACTOR_DETAIL / AGENT_CHAT: nodeId
+  nodeId?: string | null;
+  // SIGNAL_DETAIL: signalId
+  signalId?: string | null;
+}
 
 // Node type（节点类型）and status（运行状态）
 export type AgentHubNodeType = 'input' | 'agent' | 'actor' | 'output';
