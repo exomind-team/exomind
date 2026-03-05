@@ -1,18 +1,37 @@
-import type {
-  CreateTaskInput,
-  TaskGoalGroup,
-  TaskItem,
-  TaskTimerMode,
-} from '@/lib/types/task';
+import type { TaskNode, TaskStatus } from '@/lib/types/task'
 
-export interface ITaskPort {
-  listTasks(): Promise<TaskItem[]>;
-  getLongTermGoals(): Promise<TaskGoalGroup[]>;
-  getTaskById(taskId: string): Promise<TaskItem | null>;
-  createTask(input: CreateTaskInput): Promise<TaskItem>;
-  setTaskTimerMode(taskId: string, mode: TaskTimerMode): Promise<TaskItem | null>;
-  pauseTask(taskId: string): Promise<TaskItem | null>;
-  resumeTask(taskId: string): Promise<TaskItem | null>;
-  upsertTask(task: TaskItem): Promise<void>;
+export interface CreateTaskInput {
+  title: string
+  description?: string
+  doneCondition?: string
+  priority?: 'low' | 'medium' | 'high'
+  dueAt?: number
+  source?: string
+  parentId?: string
+  tags?: string[]
+  estimatedMinutes?: number
 }
 
+export interface UpdateTaskInput {
+  title?: string
+  description?: string
+  doneCondition?: string
+  priority?: 'low' | 'medium' | 'high'
+  dueAt?: number
+  source?: string
+  parentId?: string
+  tags?: string[]
+  estimatedMinutes?: number
+  spentMinutes?: number
+}
+
+export interface ITaskPort {
+  listTasks(includeAbandoned?: boolean): Promise<TaskNode[]>
+  getTaskById(id: string): Promise<TaskNode | null>
+  createTask(input: CreateTaskInput): Promise<TaskNode>
+  updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null>
+  // 行为语义：删除=放弃 / 不变量：不可删除原则
+  abandonTask(id: string): Promise<TaskNode | null>
+  transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null>
+  getAvailableTransitions(id: string): Promise<TaskStatus[]>
+}
