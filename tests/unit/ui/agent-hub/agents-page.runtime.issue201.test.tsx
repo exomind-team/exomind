@@ -188,13 +188,18 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
 
   it('shows aggregated runtime agents with source host badge（聚合显示并标注来源主机）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByTestId('agent-view-toggle-list'));
+    fireEvent.click(await screen.findByRole('button', { name: '节点' }));
 
     await waitFor(() => {
       expect(screen.getByText('Echo Agent')).toBeInTheDocument();
       expect(screen.getAllByText(/来源 127\.0\.0\.1:1919/).length).toBeGreaterThanOrEqual(1);
-      expect(screen.getByTestId('agent-signal-route-section')).toBeInTheDocument();
-      expect(screen.getAllByTestId(/agent-signal-route-row-/).length).toBeGreaterThanOrEqual(5);
+    });
+
+    fireEvent.click(await screen.findByRole('button', { name: '路由' }));
+
+    await waitFor(() => {
+      expect(screen.getByText('信号路由')).toBeInTheDocument();
+      expect(screen.getAllByText(/user\.input\.text|session\.end|timeblock\.completed/).length).toBeGreaterThanOrEqual(3);
     });
   });
 
@@ -202,6 +207,7 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
     render(<AgentsPage />);
 
     fireEvent.click(await screen.findByTestId('agent-add-node-button'));
+    fireEvent.click(await screen.findByRole('button', { name: '添加信号输入' }));
     expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('agent-add-node-option-device'));
@@ -213,6 +219,7 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
     runtimeManagerMocks.removeHost.mockResolvedValue(undefined);
     render(<AgentsPage />);
     fireEvent.click(await screen.findByTestId('agent-add-node-button'));
+    fireEvent.click(await screen.findByRole('button', { name: '添加信号输入' }));
     fireEvent.click(screen.getByTestId('agent-add-node-option-device'));
 
     fireEvent.click(await screen.findByTestId('runtime-host-probe-host-b'));

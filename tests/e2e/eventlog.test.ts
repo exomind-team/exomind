@@ -14,7 +14,7 @@ test.describe('EventLog Page', () => {
       }
     });
     await page.goto('/eventlog');
-    await page.waitForLoadState('networkidle');
+    await expect(eventInput(page)).toBeVisible();
   });
 
   test('loads eventlog shell and input area', async ({ page }) => {

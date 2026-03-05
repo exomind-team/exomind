@@ -19,6 +19,7 @@ vi.mock('@/config/feedback-preferences', () => ({
 }));
 
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
+import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
 
 type MemoryEnv = {
   storage: {
@@ -81,6 +82,20 @@ describe('TimeBlockServiceImpl', () => {
     expect(stored?.elapsed).toBeLessThanOrEqual(25 * 60 * 1000);
     expect(stored?.elapsed).toBeGreaterThanOrEqual(25 * 60 * 1000 - 2000);
     expect(addEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_start' }));
+
+    const blockStartCall = addEventMock.mock.calls
+      .map(([event]) => event)
+      .find((event) => event.type === 'block_start');
+    expect(blockStartCall).toEqual(expect.objectContaining({
+      metadata: expect.objectContaining({
+        source: expect.objectContaining({
+          app: 'ExoMind',
+          deviceId: expect.any(String),
+          deviceName: expect.any(String),
+          platform: expect.any(String),
+        }),
+      }),
+    }));
   });
 
   it('writes block_feedback event when ending with feedback', async () => {
@@ -425,7 +440,7 @@ describe('TimeBlockServiceImpl', () => {
     expect(restarted.startId).not.toBe(first.startId);
   });
 
-  it('publishes timeblock.completed to embedded RT on port 4077（发布到内嵌 RT 4077）', async () => {
+  it('publishes timeblock.completed to embedded RT default port（发布到内嵌 RT 默认端口）', async () => {
     const env = createMemoryEnv();
     const addEvent = vi.fn();
     const getEvents = vi.fn().mockResolvedValue([]);
@@ -453,7 +468,7 @@ describe('TimeBlockServiceImpl', () => {
 
     expect(fetchSpy).toHaveBeenCalled();
     expect(fetchSpy).toHaveBeenCalledWith(
-      'http://localhost:4077/signals/publish',
+      `http://${window.location.hostname || 'localhost'}:${DEFAULT_EMBEDDED_RUNTIME_PORT}/signals/publish`,
       expect.objectContaining({ method: 'POST' }),
     );
   });

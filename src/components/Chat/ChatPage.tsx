@@ -52,6 +52,9 @@ interface ChatPageProps {
   hideHeader?: boolean;
 }
 
+const UNKNOWN_DEVICE_LABEL = '未知设备';
+const UNKNOWN_PLATFORM_LABEL = '未知平台';
+
 function resolvePlatformLabel(platform?: string): string {
   if (!platform) {
     return 'Web';
@@ -72,6 +75,40 @@ function resolveAvatarInitial(name: string): string {
   return trimmed.charAt(0).toUpperCase();
 }
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+function readNonEmptyString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed : null;
+}
+
+function formatEventSourceLabel(event: Event): string {
+  if (!isRecord(event.metadata)) {
+    return UNKNOWN_DEVICE_LABEL;
+  }
+
+  const sourceRaw = event.metadata.source;
+  if (!isRecord(sourceRaw)) {
+    return UNKNOWN_DEVICE_LABEL;
+  }
+
+  const platform = readNonEmptyString(sourceRaw.platform);
+  const deviceName = readNonEmptyString(sourceRaw.deviceName);
+  const platformLabel = platform ? resolvePlatformLabel(platform) : UNKNOWN_PLATFORM_LABEL;
+
+  if (!platform && !deviceName) {
+    return UNKNOWN_DEVICE_LABEL;
+  }
+
+  const resolvedDeviceName = deviceName ?? (platform ? `${platformLabel} Device` : UNKNOWN_DEVICE_LABEL);
+  return `${resolvedDeviceName} · ${platformLabel}`;
+}
+
 export function ChatPage({ variant = 'default', hideHeader = false }: ChatPageProps = {}) {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const [events, setEvents] = useState<Event[]>([]);
@@ -89,21 +126,12 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const refreshInFlightRef = useRef(false);
   const refreshQueuedRef = useRef(false);
   const eventLogService = useRef(getEventLogService());
-  const { currentUser, isLoggedIn, credentials } = useSyncStore();
+  const { currentUser, isLoggedIn } = useSyncStore();
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
   const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
   const userDisplayName = currentUser || 'Hailay';
-  const userMeta = useMemo(() => {
-    const deviceName = credentials?.deviceName?.trim() || '本机设备';
-    const platformLabel = resolvePlatformLabel(credentials?.platform);
-    return {
-      deviceName,
-      platformLabel,
-      avatarInitial: resolveAvatarInitial(userDisplayName),
-    };
-  }, [credentials?.deviceName, credentials?.platform, userDisplayName]);
-  const assistantDeviceLabel = `· ExoMind · ${userMeta.platformLabel}`;
+  const userAvatarInitial = useMemo(() => resolveAvatarInitial(userDisplayName), [userDisplayName]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     listEndRef.current?.scrollIntoView({ behavior, block: 'end' });
@@ -539,6 +567,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
             )}
             {events.map((event) => {
               const systemEvent = isSystemEvent(event);
+              const eventSourceLabel = formatEventSourceLabel(event);
               if (systemEvent) {
                 const isAgentFeedback = event.tags.has('agent_feedback');
                 return (
@@ -558,7 +587,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                         data-testid="new-mobile-message-meta"
                       >
                         <span className="text-xs font-semibold text-strong">AI 助理</span>
-                        <span className="text-muted">{assistantDeviceLabel}</span>
+                        <span className="text-muted">{eventSourceLabel}</span>
                         <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       </div>
                       <div
@@ -588,8 +617,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                       className="mb-1 flex items-center justify-end gap-1 text-[11px] leading-[1.4]"
                       data-testid="new-mobile-message-meta"
                     >
-                      <span className="text-muted">{userMeta.deviceName}</span>
-                      <span className="text-muted">· App ·</span>
+                      <span className="text-muted">{eventSourceLabel}</span>
                       <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       <span className="text-xs font-semibold text-strong">{userDisplayName}</span>
                     </div>
@@ -600,7 +628,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                   </div>
                   <Avatar className="h-8 w-8 shrink-0">
                     <AvatarFallback className="rounded-full bg-orange-100 text-[11px] font-semibold text-orange-800 dark:bg-orange-950 dark:text-orange-100">
-                      {userMeta.avatarInitial}
+                      {userAvatarInitial}
                     </AvatarFallback>
                   </Avatar>
                 </div>

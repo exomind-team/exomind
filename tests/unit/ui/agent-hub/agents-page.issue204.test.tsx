@@ -205,12 +205,12 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
       expect(screen.getByText('user.input.text → classifier')).toBeInTheDocument();
       expect(screen.getByText('session.end → reviewer')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByTestId('agent-view-toggle-list'));
-    expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-list-filter-all')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-signal-route-section')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '节点' }));
+    expect(screen.getByText('全部')).toBeInTheDocument();
     expect(screen.getByText('Echo Agent')).toBeInTheDocument();
-    fireEvent.click(screen.getByTestId('agent-view-toggle-device'));
+
+    fireEvent.click(screen.getByRole('button', { name: '设备' }));
     expect(screen.getByTestId('agent-device-view')).toBeInTheDocument();
     expect(screen.getByTestId('agent-device-overview-card')).toBeInTheDocument();
   });
@@ -223,6 +223,10 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     });
 
     fireEvent.click(screen.getByTestId('agent-add-node-button'));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '添加信号输入' })).toBeInTheDocument();
+    });
+    fireEvent.click(screen.getByRole('button', { name: '添加信号输入' }));
     expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
     expect(screen.getByText('添加设备')).toBeInTheDocument();
 
@@ -245,10 +249,10 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     render(<AgentsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Agent 网络' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: 'Agent Hub' })).toBeInTheDocument();
     });
 
-    const heading = screen.getByRole('heading', { name: 'Agent 网络' });
+    const heading = screen.getByRole('heading', { name: 'Agent Hub' });
     expect(heading.className).toContain('text-lg');
     expect(heading.className).toContain('font-semibold');
     expect(heading.className).not.toContain('text-[30px]');
