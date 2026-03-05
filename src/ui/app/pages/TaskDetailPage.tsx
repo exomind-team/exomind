@@ -171,14 +171,8 @@ export function TaskDetailPage() {
     if (!taskId) return;
     const block = await getTaskTimerService().startBlockForTask(taskId, { mode: 'countup' });
     if (block) {
-      setActiveBlock(block);
-      // Refresh task state (may have transitioned to in_progress)
-      const refreshed = await getTaskService().getTask(taskId);
-      if (refreshed) {
-        setTask(refreshed);
-        const transitions = await getTaskService().getAvailableTransitions(taskId);
-        setAvailableTransitions(transitions);
-      }
+      // Navigate to eventlog ("当下") page after successful timer start
+      void navigate({ to: '/eventlog' });
     }
   };
 
