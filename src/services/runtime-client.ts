@@ -26,6 +26,18 @@ export interface RuntimeAgentSummary {
   status: string;
 }
 
+export interface RuntimeCreateAgentRequest {
+  kind: 'echo' | 'claude';
+  id?: string;
+  name?: string;
+  description?: string;
+}
+
+export interface RuntimeDeleteAgentResponse {
+  status: string;
+  id: string;
+}
+
 type RuntimeFetch = typeof fetch;
 
 export interface RuntimeClientOptions {
@@ -172,13 +184,89 @@ export class RuntimeClient {
     };
   }
 
+  async createAgent(
+    host: RuntimeHostRecord,
+    request: RuntimeCreateAgentRequest,
+  ): Promise<RuntimeClientResult<RuntimeAgentSummary>> {
+    const response = await this.sendJson(`${buildBaseUrl(host)}/agents`, 'POST', request);
+    if (!response.ok) {
+      return response;
+    }
+
+    const parsed = parseRuntimeAgentSummary(response.data);
+    if (!parsed) {
+      return {
+        ok: false,
+        error: {
+          code: 'invalid_payload',
+          message: 'invalid create agent payload（创建 Agent 响应格式无效）',
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      data: parsed,
+    };
+  }
+
+  async deleteAgent(
+    host: RuntimeHostRecord,
+    agentId: string,
+  ): Promise<RuntimeClientResult<RuntimeDeleteAgentResponse>> {
+    const response = await this.sendJson(
+      `${buildBaseUrl(host)}/agents/${encodeURIComponent(agentId)}`,
+      'DELETE',
+    );
+    if (!response.ok) {
+      return response;
+    }
+
+    if (!isObjectRecord(response.data)) {
+      return {
+        ok: false,
+        error: {
+          code: 'invalid_payload',
+          message: 'invalid delete agent payload（删除 Agent 响应格式无效）',
+        },
+      };
+    }
+
+    const status = typeof response.data.status === 'string' ? response.data.status : '';
+    const id = typeof response.data.id === 'string' ? response.data.id : '';
+    if (!status || !id) {
+      return {
+        ok: false,
+        error: {
+          code: 'invalid_payload',
+          message: 'invalid delete agent payload（删除 Agent 响应格式无效）',
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      data: { status, id },
+    };
+  }
+
   private async getJson(url: string): Promise<RuntimeClientResult<unknown>> {
+    return this.sendJson(url, 'GET');
+  }
+
+  private async sendJson(
+    url: string,
+    method: 'GET' | 'POST' | 'DELETE',
+    payload?: unknown,
+  ): Promise<RuntimeClientResult<unknown>> {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
     const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
 
     try {
       const response = await this.fetchImpl(url, {
-        method: 'GET',
+        method,
+        headers: payload != null ? { 'Content-Type': 'application/json' } : undefined,
+        body: payload != null ? JSON.stringify(payload) : undefined,
         signal: controller?.signal,
       });
 

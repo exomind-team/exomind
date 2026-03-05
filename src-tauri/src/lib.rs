@@ -47,7 +47,6 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
         .manage(voice_shortcut_state)
@@ -110,6 +109,11 @@ pub fn run() {
             voice_shortcut_set,
             voice_shortcut_get,
         ]);
+
+    #[cfg(not(any(target_os = "android", target_os = "ios")))]
+    {
+        builder = builder.plugin(tauri_plugin_global_shortcut::Builder::new().build());
+    }
 
     #[cfg(debug_assertions)]
     {

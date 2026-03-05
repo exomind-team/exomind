@@ -7,7 +7,6 @@ import {
   List,
   Mail,
   MessageCircle,
-  MessageSquare,
   Monitor,
   Plus,
   Rocket,
@@ -48,8 +47,10 @@ import {
 import { RouteEditPanel } from '@/components/RouteEditPanel';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
-import type { SignalRoute } from '@/lib/types/signal-pool';
+import type { SignalEvent, SignalRoute } from '@/lib/types/signal-pool';
 import type {
+  AgentConversationChunk,
+  AgentConversationMessage,
   AgentDetailData,
   AgentDeviceGroup,
   AgentHubListItem,
@@ -72,23 +73,31 @@ import {
   buildSignalRouteRows,
   type SignalGraph,
   type SignalGraphNodeType,
+  type SignalRouteRow,
 } from './agents-signal-topology';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
-  { id: 'nodes', icon: Bot, label: '节点' },
+  { id: 'list', icon: Bot, label: '节点' },
+  { id: 'history', icon: AlarmClock, label: '信号历史' },
   { id: 'routes', icon: List, label: '路由' },
   { id: 'device', icon: Monitor, label: '设备' },
 ];
 
 type AddNodeOption = {
-  id: 'device';
+  id: 'agent' | 'device';
   title: string;
   description: string;
   tintColor: string;
 };
 
 const ADD_NODE_OPTIONS: AddNodeOption[] = [
+  {
+    id: 'agent',
+    title: '添加 Agent',
+    description: '在当前 Runtime 中手动创建 Echo Agent',
+    tintColor: '#0D9488',
+  },
   {
     id: 'device',
     title: '添加设备',
@@ -196,6 +205,7 @@ function getListItemIcon(item: AgentHubListItem): LucideIcon {
 }
 
 function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
+  if (optionId === 'agent') return Bot;
   if (optionId === 'device') return Monitor;
   return Plus;
 }
@@ -333,6 +343,71 @@ function mapRuntimeAgentsForHost(host: RuntimeHostRecord, agents: Array<{ id: st
   }));
 }
 
+function resolveRuntimeEntityId(rawId: string): string {
+  if (rawId.includes('__')) {
+    return rawId.split('__').slice(1).join('__') || rawId;
+  }
+  if (rawId.includes(':')) {
+    return rawId.split(':').slice(1).join(':') || rawId;
+  }
+  return rawId;
+}
+
+function formatSignalPayload(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  if (payload && typeof payload === 'object' && 'text' in payload) {
+    const payloadRecord = payload as Record<string, unknown>;
+    if (typeof payloadRecord.text === 'string') {
+      return payloadRecord.text;
+    }
+  }
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+function formatSignalTime(timestampMs: number): string {
+  if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
+    return '--';
+  }
+  const date = new Date(timestampMs);
+  return date.toLocaleTimeString('zh-CN', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function appendConversationChunk(
+  messages: AgentConversationMessage[],
+  chunk: AgentConversationChunk,
+): AgentConversationMessage[] {
+  const index = messages.findIndex((item) => item.id === chunk.messageId);
+  if (index === -1) {
+    return [
+      ...messages,
+      {
+        id: chunk.messageId,
+        role: 'agent',
+        content: chunk.delta,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+
+  const next = [...messages];
+  const current = next[index];
+  if (!current) return messages;
+  next[index] = {
+    ...current,
+    content: `${current.content}${chunk.delta}`,
+  };
+  return next;
+}
+
 type SignalFlowNodeData = {
   label: string;
   subtitle: string;
@@ -423,6 +498,7 @@ function TabBar({
           <button
             key={item.id}
             type="button"
+            data-testid={`agent-view-toggle-${item.id}`}
             onClick={() => onChange(item.id)}
             className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
               active
@@ -510,7 +586,15 @@ function TopologyView({
   }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, graph.edges, inactiveEdgeColor]);
 
   return (
-    <section data-testid="agent-topology-view" className="space-y-3" onClick={onClearSelection}>
+    <section
+      data-testid="agent-topology-view"
+      className="space-y-3"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClearSelection();
+        }
+      }}
+    >
       <div
         data-testid="agent-topology-canvas"
         className="relative h-[568px] overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
@@ -913,10 +997,12 @@ function DeviceView({
 function AddNodeSheet({
   options,
   onClose,
+  onAddAgent,
   onAddDevice,
 }: {
   options: AddNodeOption[];
   onClose: () => void;
+  onAddAgent: () => void;
   onAddDevice: () => void;
 }) {
   return (
@@ -955,10 +1041,9 @@ function AddNodeSheet({
                 type="button"
                 data-testid={`agent-add-node-option-${option.id}`}
                 onClick={() => {
-                  if (option.id === 'device') {
-                    onClose();
-                    onAddDevice();
-                  }
+                  onClose();
+                  if (option.id === 'agent') onAddAgent();
+                  if (option.id === 'device') onAddDevice();
                 }}
                 className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left dark:bg-[#292524]"
               >
@@ -1315,6 +1400,7 @@ function NodesTabView({
           <button
             key={f.id}
             type="button"
+            data-testid={`agent-list-filter-${f.id}`}
             onClick={() => onFilterChange(f.id)}
             className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
               filter === f.id
@@ -1421,12 +1507,145 @@ function NodesTabView({
   );
 }
 
+function ListTabView({
+  sections,
+  filter,
+  onFilterChange,
+  onNodeClick,
+  signalRouteRows,
+  onOpenRoute,
+}: {
+  sections: AgentHubListSection[];
+  filter: NodeFilterType;
+  onFilterChange: (f: NodeFilterType) => void;
+  onNodeClick: (item: AgentHubListItem) => void;
+  signalRouteRows: SignalRouteRow[];
+  onOpenRoute: (routeId: string) => void;
+}) {
+  const routeHostLabel = signalRouteRows[0]?.hostLabel;
+
+  return (
+    <div data-testid="agent-list-view" className="flex flex-col gap-4">
+      <NodesTabView
+        sections={sections}
+        filter={filter}
+        onFilterChange={onFilterChange}
+        onNodeClick={onNodeClick}
+      />
+
+      <section
+        data-testid="agent-signal-route-section"
+        className="rounded-[10px] border border-[#E7E3E0] bg-white dark:border-[#292524] dark:bg-[#0C0A09]"
+      >
+        <div className="flex items-center justify-between border-b border-[#E7E3E0] px-4 py-2.5 dark:border-[#292524]">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">信号路由</p>
+            {routeHostLabel && (
+              <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 font-mono text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                {routeHostLabel}
+              </span>
+            )}
+          </div>
+          <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">{signalRouteRows.length} 条</span>
+        </div>
+
+        {signalRouteRows.length === 0 ? (
+          <p className="px-4 py-6 text-xs text-[#78716C] dark:text-[#A8A29E]">暂无信号路由</p>
+        ) : (
+          <div className="divide-y divide-[#E7E3E0] dark:divide-[#292524]">
+            {signalRouteRows.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                data-testid={`agent-signal-route-row-${row.id}`}
+                onClick={() => onOpenRoute(row.id)}
+                className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-[#FAF7F5] dark:hover:bg-[#1C1917]"
+              >
+                <span
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    row.status === 'active' ? 'bg-[#22C55E]' : 'bg-[#57534E]'
+                  }`}
+                />
+                <span className="flex-1 truncate font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">
+                  {row.topic} → {row.targetRef}
+                </span>
+                <span className="shrink-0 rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                  {row.targetType}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SignalHistoryTabView({
+  events,
+  hostLabel,
+  onSelectSignal,
+}: {
+  events: SignalEvent[];
+  hostLabel?: string;
+  onSelectSignal: (signalId: string) => void;
+}) {
+  return (
+    <section data-testid="agent-signal-history-view" className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">Signal History</p>
+          {hostLabel && (
+            <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 font-mono text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+              {hostLabel}
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">{events.length} 条</span>
+      </div>
+
+      {events.length === 0 ? (
+        <div className="rounded-[10px] border border-[#E7E3E0] bg-white px-4 py-8 text-center text-xs text-[#78716C] dark:border-[#292524] dark:bg-[#0C0A09] dark:text-[#A8A29E]">
+          暂无信号历史
+        </div>
+      ) : (
+        <div className="divide-y divide-[#E7E3E0] overflow-hidden rounded-[10px] border border-[#E7E3E0] bg-white dark:divide-[#292524] dark:border-[#292524] dark:bg-[#0C0A09]">
+          {events.map((eventItem) => (
+            <button
+              key={eventItem.id}
+              type="button"
+              onClick={() => onSelectSignal(`topic:${eventItem.topic}`)}
+              className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[#FAF7F5] dark:hover:bg-[#1C1917]"
+            >
+              <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#C75B3A]" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">{eventItem.topic}</p>
+                <p className="mt-1 line-clamp-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                  {formatSignalPayload(eventItem.payload)}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+                  {formatSignalTime(eventItem.ts)}
+                </p>
+                <p className="mt-0.5 text-[10px] text-[#A8A29E] dark:text-[#78716C]">{eventItem.source}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function AgentsPage() {
   const initialRuntimeTarget = getSelectedRuntimeTarget();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
+  const [signalHistory, setSignalHistory] = useState<SignalEvent[]>([]);
+  const [signalHistoryHostLabel, setSignalHistoryHostLabel] = useState<string>('');
   const [fallbackRuntimeAgents, setFallbackRuntimeAgents] = useState<RuntimeAggregatedAgent[]>([]);
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
@@ -1446,6 +1665,13 @@ export function AgentsPage() {
   );
   const [runtimeTargetError, setRuntimeTargetError] = useState('');
   const [rightPanel, setRightPanel] = useState<AgentHubRightPanelContext>({ state: 'CLOSED' });
+  const [chatAgentId, setChatAgentId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<AgentConversationMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatError, setChatError] = useState('');
+  const [isChatSending, setIsChatSending] = useState(false);
+  const [isAgentCreating, setIsAgentCreating] = useState(false);
+  const [isAgentStopping, setIsAgentStopping] = useState(false);
 
   const openRouteEdit = (routeId: string | null = null) => {
     setRightPanel({ state: 'ROUTE_EDIT', routeId });
@@ -1463,6 +1689,13 @@ export function AgentsPage() {
     setRightPanel({ state: 'CLOSED' });
   };
 
+  const resolveActiveRuntimeHost = (): RuntimeHostRecord | null => {
+    const prioritized = sortRouteHostsByPriority(runtimeHostSnapshots);
+    return prioritized.find((item) => item.connectionState === 'online')?.host
+      ?? prioritized.find((item) => item.host)?.host
+      ?? null;
+  };
+
   // T8: AgentDetail / ActorDetail 右侧栏
   const [agentDetail, setAgentDetail] = useState<AgentDetailData | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
@@ -1471,12 +1704,13 @@ export function AgentsPage() {
     if (rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') {
       const nodeId = rightPanel.nodeId;
       if (!nodeId) return;
+      const runtimeEntityId = resolveRuntimeEntityId(nodeId);
       setIsDetailLoading(true);
       setAgentDetail(null);
       const service = getAgentHubService();
       const loader = rightPanel.state === 'AGENT_DETAIL'
-        ? service.getAgentDetail(nodeId)
-        : service.getActorDetail(nodeId);
+        ? service.getAgentDetail(runtimeEntityId)
+        : service.getActorDetail(runtimeEntityId);
       loader.then((data) => {
         setAgentDetail(data);
         setIsDetailLoading(false);
@@ -1537,14 +1771,120 @@ export function AgentsPage() {
     }
   };
 
+  const handleOpenAgentChat = async (nodeId: string) => {
+    const agentId = resolveRuntimeEntityId(nodeId);
+    setChatAgentId(agentId);
+    setChatInput('');
+    setChatError('');
+    setRightPanel({ state: 'AGENT_CHAT', nodeId });
+
+    try {
+      const history = await getAgentHubService().getConversation(agentId);
+      setChatMessages(history);
+    } catch (error) {
+      setChatMessages([]);
+      const message = error instanceof Error ? error.message : String(error);
+      setChatError(`加载会话失败: ${message}`);
+    }
+  };
+
+  const handleChatSend = async () => {
+    const prompt = chatInput.trim();
+    if (!chatAgentId || !prompt || isChatSending) return;
+
+    const userMessage: AgentConversationMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: prompt,
+      createdAt: new Date().toISOString(),
+    };
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatInput('');
+    setChatError('');
+    setIsChatSending(true);
+
+    try {
+      const stream = getAgentHubService().streamConversation({ agentId: chatAgentId, prompt });
+      for await (const chunk of stream) {
+        setChatMessages((prev) => appendConversationChunk(prev, chunk));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setChatError(`发送失败: ${message}`);
+    } finally {
+      setIsChatSending(false);
+    }
+  };
+
+  const handleCreateManualAgent = async () => {
+    const host = resolveActiveRuntimeHost();
+    if (!host) {
+      setRuntimeHostError('未找到可用 Runtime 主机，无法创建 Agent');
+      return;
+    }
+
+    setIsAgentCreating(true);
+    setRuntimeHostError('');
+    try {
+      const runtimeClient = new RuntimeClient();
+      const result = await runtimeClient.createAgent(host, { kind: 'echo' });
+      if (!result.ok) {
+        setRuntimeHostError(`创建 Agent 失败: ${result.error.message}`);
+        return;
+      }
+      await refreshRuntimeSnapshot();
+      setViewMode('list');
+    } finally {
+      setIsAgentCreating(false);
+    }
+  };
+
+  const handleStopAgent = async (nodeId: string) => {
+    const agentId = resolveRuntimeEntityId(nodeId);
+    const hostCandidates = sortRouteHostsByPriority(runtimeHostSnapshots).map((item) => item.host);
+    if (hostCandidates.length === 0) {
+      setRuntimeHostError('未找到可用 Runtime 主机，无法停止 Agent');
+      return;
+    }
+
+    setIsAgentStopping(true);
+    setRuntimeHostError('');
+    try {
+      const runtimeClient = new RuntimeClient();
+      let lastErrorMessage = 'agent not found';
+      for (const host of hostCandidates) {
+        const result = await runtimeClient.deleteAgent(host, agentId);
+        if (result.ok) {
+          await refreshRuntimeSnapshot();
+          closeRightPanel();
+          return;
+        }
+        lastErrorMessage = result.error.message;
+        if (result.error.status !== 404) {
+          break;
+        }
+      }
+      setRuntimeHostError(`停止 Agent 失败: ${lastErrorMessage}`);
+    } finally {
+      setIsAgentStopping(false);
+    }
+  };
+
   const handleTabChange = (tab: AgentHubViewMode) => {
     setViewMode(tab);
     closeRightPanel(); // 切换 Tab 时关闭右侧栏（保守策略）
   };
 
+  useEffect(() => {
+    if (rightPanel.state === 'AGENT_CHAT') return;
+    setChatAgentId(null);
+    setChatInput('');
+    setChatError('');
+    setIsChatSending(false);
+  }, [rightPanel.state]);
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
-  const [addDropdownOpen, setAddDropdownOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
@@ -1560,17 +1900,29 @@ export function AgentsPage() {
 
   const tryLoadRoutesFromHost = async (
     host: RuntimeHostRecord
-  ): Promise<{ hostLabel: string; routes: SignalRoute[]; agents: RuntimeAggregatedAgent[] } | null> => {
+  ): Promise<{
+    hostLabel: string;
+    routes: SignalRoute[];
+    agents: RuntimeAggregatedAgent[];
+    history: SignalEvent[];
+  } | null> => {
     try {
       const routeService = new SignalRouteService({ host });
-      const routes = await routeService.listRoutes();
       const runtimeClient = new RuntimeClient();
-      const agentsResult = await runtimeClient.getAgents(host);
+      const [routes, agentsResult, historyResponse] = await Promise.all([
+        routeService.listRoutes(),
+        runtimeClient.getAgents(host),
+        fetch(`http://${host.host}:${host.port}/signals/history?limit=120`),
+      ]);
       const agents = agentsResult.ok ? mapRuntimeAgentsForHost(host, agentsResult.data) : [];
+      const history = historyResponse.ok
+        ? ((await historyResponse.json()) as SignalEvent[])
+        : [];
       return {
         hostLabel: `${host.host}:${host.port}`,
         routes,
         agents,
+        history,
       };
     } catch {
       return null;
@@ -1585,7 +1937,9 @@ export function AgentsPage() {
     if (useMockData) {
       if (isDisposed()) return;
       setSignalRouteHostLabel('mock（测试数据）');
+      setSignalHistoryHostLabel('mock（测试数据）');
       setSignalRoutes(MOCK_SIGNAL_ROUTES_FALLBACK);
+      setSignalHistory([]);
       setFallbackRuntimeAgents(MOCK_RUNTIME_AGENTS_FALLBACK);
       setListSections(buildListSectionsFromRuntimeAgents(MOCK_RUNTIME_AGENTS_FALLBACK));
       return;
@@ -1598,7 +1952,9 @@ export function AgentsPage() {
       if (!result) continue;
       if (isDisposed()) return;
       setSignalRouteHostLabel(result.hostLabel);
+      setSignalHistoryHostLabel(result.hostLabel);
       setSignalRoutes(result.routes);
+      setSignalHistory(result.history);
       setFallbackRuntimeAgents(result.agents);
       if (snapshotAgents.length === 0 && result.agents.length > 0) {
         setListSections(buildListSectionsFromRuntimeAgents(result.agents));
@@ -1612,7 +1968,9 @@ export function AgentsPage() {
       if (!result) continue;
       if (isDisposed()) return;
       setSignalRouteHostLabel(`${result.hostLabel}（auto）`);
+      setSignalHistoryHostLabel(`${result.hostLabel}（auto）`);
       setSignalRoutes(result.routes);
+      setSignalHistory(result.history);
       setFallbackRuntimeAgents(result.agents);
       if (snapshotAgents.length === 0 && result.agents.length > 0) {
         setListSections(buildListSectionsFromRuntimeAgents(result.agents));
@@ -1622,7 +1980,9 @@ export function AgentsPage() {
 
     if (isDisposed()) return;
     setSignalRouteHostLabel('');
+    setSignalHistoryHostLabel('');
     setSignalRoutes([]);
+    setSignalHistory([]);
     setFallbackRuntimeAgents([]);
   };
 
@@ -1802,6 +2162,31 @@ export function AgentsPage() {
   }, [selectedNodeId, signalGraph.nodes]);
 
   const content = useMemo(() => {
+    if (viewMode === 'list') {
+      return (
+        <ListTabView
+          sections={listSections}
+          filter={nodesFilter}
+          onFilterChange={setNodesFilter}
+          onNodeClick={(item) => {
+            if (item.type === 'agent') openAgentDetail(item.id);
+            else if (item.type === 'actor') openActorDetail(item.id);
+            else openSignalDetail(item.id);
+          }}
+          signalRouteRows={signalRouteRows}
+          onOpenRoute={openRouteEdit}
+        />
+      );
+    }
+    if (viewMode === 'history') {
+      return (
+        <SignalHistoryTabView
+          events={signalHistory}
+          hostLabel={signalHistoryHostLabel || undefined}
+          onSelectSignal={openSignalDetail}
+        />
+      );
+    }
     if (viewMode === 'routes') {
       return (
         <RoutesTabView
@@ -1811,20 +2196,6 @@ export function AgentsPage() {
           onDelete={handleRouteDelete}
           onEdit={(routeId) => openRouteEdit(routeId)}
           onAdd={() => openRouteEdit(null)}
-        />
-      );
-    }
-    if (viewMode === 'nodes') {
-      return (
-        <NodesTabView
-          sections={listSections}
-          filter={nodesFilter}
-          onFilterChange={setNodesFilter}
-          onNodeClick={(item) => {
-            if (item.type === 'agent') openAgentDetail(item.id);
-            else if (item.type === 'actor') openActorDetail(item.id);
-            else openSignalDetail(item.id);
-          }}
         />
       );
     }
@@ -1873,6 +2244,8 @@ export function AgentsPage() {
     listSections,
     runtimeHostSnapshots,
     signalGraph,
+    signalHistory,
+    signalHistoryHostLabel,
     signalRouteHostLabel,
     signalRouteRows,
     runtimeHostError,
@@ -1894,7 +2267,7 @@ export function AgentsPage() {
       {/* Header */}
       <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent Hub</h1>
+          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent 网络</h1>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -1903,86 +2276,17 @@ export function AgentsPage() {
             >
               <Settings size={18} />
             </button>
-            <div className="relative">
-              <button
-                type="button"
-                data-testid="agent-add-node-button"
-                onClick={() => setAddDropdownOpen((v) => !v)}
-                className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
-                aria-label="添加节点"
-              >
-                <Plus size={16} />
-                添加
-                <ChevronRight
-                  size={12}
-                  className={`transition-transform ${addDropdownOpen ? 'rotate-90' : ''}`}
-                />
-              </button>
-
-              {addDropdownOpen && (
-                <>
-                  {/* 点击外部关闭 */}
-                  <div
-                    className="fixed inset-0 z-10"
-                    onClick={() => setAddDropdownOpen(false)}
-                  />
-                  {/* Dropdown 面板 */}
-                  <div className="absolute right-0 top-full z-20 mt-1 w-48 overflow-hidden rounded-[10px] border border-[#292524] bg-[#1C1917] shadow-lg">
-                    {/* 节点类型选项 */}
-                    {[
-                      { label: '添加信号输入', color: '#F97316' },
-                      { label: '添加 Agent', color: '#0D9488' },
-                      { label: '添加 Actor', color: '#F59E0B' },
-                      { label: '添加输出节点', color: '#2AABEE' },
-                    ].map((opt) => (
-                      <button
-                        key={opt.label}
-                        type="button"
-                        onClick={() => {
-                          setAddDropdownOpen(false);
-                          setSheetOpen(true);
-                        }}
-                        className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-[#FAFAF9] hover:bg-[#292524]"
-                      >
-                        <span
-                          className="h-3 w-3 rounded-sm"
-                          style={{ backgroundColor: opt.color }}
-                        />
-                        {opt.label}
-                      </button>
-                    ))}
-                    {/* 分隔线 */}
-                    <div className="my-1 border-t border-[#292524]" />
-                    {/* 添加路由 */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAddDropdownOpen(false);
-                        openRouteEdit(null);
-                      }}
-                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-[#FAFAF9] hover:bg-[#292524]"
-                    >
-                      <Plus size={12} className="text-[#C75B3A]" />
-                      添加信号路由
-                    </button>
-                    {/* 分隔线 */}
-                    <div className="my-1 border-t border-[#292524]" />
-                    {/* 市场 */}
-                    <button
-                      type="button"
-                      onClick={() => {
-                        setAddDropdownOpen(false);
-                        setSheetOpen(true);
-                      }}
-                      className="flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm text-[#A8A29E] hover:bg-[#292524]"
-                    >
-                      <Rocket size={12} className="text-[#A8A29E]" />
-                      从市场安装
-                    </button>
-                  </div>
-                </>
-              )}
-            </div>
+            <button
+              type="button"
+              data-testid="agent-add-node-button"
+              onClick={() => setSheetOpen(true)}
+              disabled={isAgentCreating}
+              className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
+              aria-label="添加节点"
+            >
+              <Plus size={16} />
+              {isAgentCreating ? '创建中...' : '添加'}
+            </button>
           </div>
         </div>
         {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
@@ -2062,11 +2366,9 @@ export function AgentsPage() {
                     const node = nodeId
                       ? signalGraph.nodes.find((n) => n.id === nodeId)
                       : null;
-                    if (!node) {
-                      return (
-                        <p className="text-xs text-[#78716C]">节点不存在或已离线</p>
-                      );
-                    }
+                    const runtimeNodeId = nodeId ? resolveRuntimeEntityId(nodeId) : null;
+                    const nodeType = node?.type ?? (rightPanel.state === 'AGENT_DETAIL' ? 'agent' : 'actor');
+                    const nodeLabel = node?.label ?? agentDetail?.title ?? runtimeNodeId ?? '未知节点';
 
                     const statusColors: Record<string, string> = {
                       online: 'bg-[#22C55E]/15 text-[#22C55E]',
@@ -2089,7 +2391,7 @@ export function AgentsPage() {
                         <div className="flex items-center gap-3">
                           <div
                             className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
-                              node.type === 'agent'
+                              nodeType === 'agent'
                                 ? 'bg-[#CCFBF1] dark:bg-[#0D9488]/20'
                                 : 'bg-[#FEF3C7] dark:bg-[#F59E0B]/20'
                             }`}
@@ -2097,19 +2399,45 @@ export function AgentsPage() {
                             <Bot
                               size={18}
                               className={
-                                node.type === 'agent'
+                                nodeType === 'agent'
                                   ? 'text-[#0D9488]'
                                   : 'text-[#B45309] dark:text-[#F59E0B]'
                               }
                             />
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-[#FAFAF9]">{node.label}</p>
+                            <p className="text-sm font-medium text-[#FAFAF9]">{nodeLabel}</p>
                             <p className="text-xs text-[#A8A29E]">
-                              {node.type === 'agent' ? 'Agent' : 'Actor'} · {node.id}
+                              {nodeType === 'agent' ? 'Agent' : 'Actor'} · {runtimeNodeId ?? nodeId ?? '--'}
                             </p>
                           </div>
                         </div>
+
+                        {rightPanel.state === 'AGENT_DETAIL' && nodeId && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              data-testid="agent-rightpanel-open-chat"
+                              onClick={() => {
+                                void handleOpenAgentChat(nodeId);
+                              }}
+                              className="rounded-lg bg-[#0D9488] px-3 py-1.5 text-xs font-medium text-white"
+                            >
+                              开始聊天
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="agent-rightpanel-stop-agent"
+                              onClick={() => {
+                                void handleStopAgent(nodeId);
+                              }}
+                              disabled={isAgentStopping}
+                              className="rounded-lg bg-[#7F1D1D] px-3 py-1.5 text-xs font-medium text-[#FECACA] disabled:opacity-50"
+                            >
+                              {isAgentStopping ? '停止中...' : '停止 Agent'}
+                            </button>
+                          </div>
+                        )}
 
                         {/* 加载态：骨架屏 */}
                         {isDetailLoading && (
@@ -2276,14 +2604,51 @@ export function AgentsPage() {
                 </div>
               )}
               {rightPanel.state === 'AGENT_CHAT' && (
-                <div className="flex flex-col items-center gap-3 p-6 text-center">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-[#0D9488]/20">
-                    <MessageSquare size={20} className="text-[#0D9488]" />
+                <div data-testid="agent-rightpanel-chat-panel" className="flex h-full flex-col gap-3 p-4">
+                  <div className="flex-1 space-y-2 overflow-auto rounded-[10px] border border-[#292524] bg-[#0C0A09] p-3">
+                    {chatMessages.length === 0 && (
+                      <p className="text-xs text-[#78716C]">暂无会话内容，发送第一条消息开始对话。</p>
+                    )}
+                    {chatMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`rounded-lg px-3 py-2 text-xs ${
+                          message.role === 'user'
+                            ? 'ml-8 bg-[#1F2937] text-[#E5E7EB]'
+                            : 'mr-8 bg-[#0D9488]/20 text-[#D1FAE5]'
+                        }`}
+                      >
+                        <p>{message.content}</p>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-sm font-medium text-[#FAFAF9]">Agent 对话</p>
-                  <p className="text-xs text-[#78716C]">
-                    此功能计划在 v0.3.6 实现，需要 RT 会话管理接口支持。
-                  </p>
+                  {chatError && <p className="text-xs text-[#FCA5A5]">{chatError}</p>}
+                  <div className="flex items-center gap-2">
+                    <input
+                      data-testid="agent-rightpanel-chat-input"
+                      value={chatInput}
+                      onChange={(event) => setChatInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          void handleChatSend();
+                        }
+                      }}
+                      placeholder="输入消息..."
+                      className="h-9 flex-1 rounded-lg border border-[#44403C] bg-[#1C1917] px-3 text-xs text-[#FAFAF9] outline-none placeholder:text-[#78716C] focus:border-[#0D9488]"
+                    />
+                    <button
+                      type="button"
+                      data-testid="agent-rightpanel-chat-send"
+                      onClick={() => {
+                        void handleChatSend();
+                      }}
+                      disabled={!chatInput.trim() || isChatSending}
+                      className="h-9 rounded-lg bg-[#0D9488] px-3 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {isChatSending ? '发送中...' : '发送'}
+                    </button>
+                  </div>
                 </div>
               )}
             </div>
@@ -2296,6 +2661,9 @@ export function AgentsPage() {
         <AddNodeSheet
           options={ADD_NODE_OPTIONS}
           onClose={() => setSheetOpen(false)}
+          onAddAgent={() => {
+            void handleCreateManualAgent();
+          }}
           onAddDevice={() => setHostManagerOpen(true)}
         />
       )}
