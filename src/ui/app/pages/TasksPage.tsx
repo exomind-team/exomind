@@ -1,7 +1,7 @@
 import { Github, Plus, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
 import { getTaskService } from '@/lib/services';
-import type { TaskGoalCard, TaskGoalGroup, TaskGoalStatusTone, TaskItem } from '@/lib/types/task';
+import type { TaskGoalCard, TaskGoalGroup, TaskGoalStatusTone, TaskNode } from '@/lib/types/task';
 import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 
@@ -51,7 +51,7 @@ const TONE_FILL_CLASS: Record<TaskGoalStatusTone, string> = {
   neutral: 'bg-[#A8A29E]',
 };
 
-function formatTaskMeta(task: TaskItem): string {
+function formatTaskMeta(task: TaskNode): string {
   const estimated = task.estimatedMinutes ? `预计 ${task.estimatedMinutes}min` : '未估时';
   const spent = task.spentMinutes ? `已用 ${task.spentMinutes}min` : '未计时';
   return `${estimated} · ${spent}`;
@@ -150,20 +150,17 @@ function resolveInitialTaskTab(): TaskTab {
 
 export function TasksPage() {
   const [activeTab, setActiveTab] = useState<TaskTab>(() => resolveInitialTaskTab());
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
+  const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [goalGroups, setGoalGroups] = useState<TaskGoalGroup[]>([]);
   const [quickInput, setQuickInput] = useState('');
 
   useEffect(() => {
     let disposed = false;
     const load = async () => {
-      const [list, goals] = await Promise.all([
-        getTaskService().listTasks(),
-        getTaskService().getLongTermGoals(),
-      ]);
+      const list = await getTaskService().listTasks();
       if (!disposed) {
         setTasks(list);
-        setGoalGroups(goals);
+        setGoalGroups([]);
       }
     };
     void load();
@@ -188,8 +185,7 @@ export function TasksPage() {
     if (!title) return;
     const created = await getTaskService().createTask({
       title,
-      mode: 'countdown',
-      targetMinutes: 25,
+      estimatedMinutes: 25,
     });
     setTasks((prev) => [created, ...prev]);
     setQuickInput('');
