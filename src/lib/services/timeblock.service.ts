@@ -27,6 +27,7 @@ import type {
 import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
 import { getSelectedRuntimeTarget, toRuntimeBaseUrl } from '@/config/runtime-target';
 import { createUuidV4 } from '../utils/uuid';
+import { getEventSourceMetadata } from '../eventlog/source-metadata';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -386,6 +387,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       createdAt: new Date(submittedAt).toISOString(),
       type: 'block_feedback',
       metadata: {
+        source: getEventSourceMetadata(),
         startTime: activeData.startTime,
         actionEndedAt,
         feedbackStartedAt,
@@ -531,6 +533,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       content,
       createdAt,
       type: tag,
+      metadata: {
+        source: getEventSourceMetadata(),
+      },
     });
   }
 

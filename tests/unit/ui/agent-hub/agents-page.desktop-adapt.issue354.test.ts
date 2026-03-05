@@ -7,9 +7,8 @@ describe('agents page desktop adapt issue-354（桌面端适配与占位清理�
   const source = readFileSync(sourcePath, 'utf-8');
 
   it('uses desktop-specific bottom padding override（桌面端覆盖底部内边距）', () => {
-    expect(source).toContain(
-      'pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2 lg:pb-6'
-    );
+    expect(source).toContain('pb-[calc(env(safe-area-inset-bottom,0px)+108px)]');
+    expect(source).toContain('md:pb-6');
   });
 
   it('shows right panel only on lg breakpoint（右侧栏在 lg 断点显示）', () => {

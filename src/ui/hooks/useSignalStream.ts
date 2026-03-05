@@ -14,6 +14,8 @@ import {
   type ReviewCompletedPayload,
 } from '@/lib/services/signal-handlers';
 import { getEventStorage } from '@/lib/storage/event-storage';
+import { getEventSourceMetadata } from '@/lib/eventlog/source-metadata';
+import { createUuidV4 } from '@/lib/utils/uuid';
 import {
   getSelectedRuntimeTarget,
   subscribeRuntimeTargetChanges,
@@ -91,10 +93,13 @@ export function useSignalStream(): void {
         const content = formatReviewAsMarkdown(payload);
         const storage = getEventStorage();
         await storage.addEvent({
-          id: crypto.randomUUID(),
+          id: createUuidV4(),
           content,
           createdAt: new Date().toISOString(),
           type: 'agent_feedback',
+          metadata: {
+            source: getEventSourceMetadata(),
+          },
         });
         console.log('[SignalStream] review.completed → EventStorage (agent_feedback)');
       },

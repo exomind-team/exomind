@@ -32,6 +32,13 @@ describe('EventLogService port contract', () => {
 
     expect(port.listEvents).toHaveBeenCalled();
     expect(port.appendEvent).toHaveBeenCalledTimes(1);
+    const [event] = port.appendEvent.mock.calls[0] as [EventData];
+    expect(event.metadata?.source).toEqual(expect.objectContaining({
+      app: 'ExoMind',
+      deviceId: expect.any(String),
+      deviceName: expect.any(String),
+      platform: expect.any(String),
+    }));
   });
 
   it('keeps addEvent working when crypto.randomUUID is unavailable', async () => {
@@ -55,6 +62,9 @@ describe('EventLogService port contract', () => {
     expect(port.appendEvent).toHaveBeenCalledTimes(1);
     const [event] = port.appendEvent.mock.calls[0] as [EventData];
     expect(event.id).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+    expect(event.metadata?.source).toEqual(expect.objectContaining({
+      app: 'ExoMind',
+    }));
     expect(getRandomValues).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,6 +10,10 @@ export interface EventLogTransferPayloadV1 {
 
 const TRANSFER_VERSION = 1;
 
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 function isEventData(value: unknown): value is EventData {
   if (!value || typeof value !== 'object') {
     return false;
@@ -22,7 +26,8 @@ function isEventData(value: unknown): value is EventData {
     Number.isFinite(item.timestamp) &&
     typeof item.content === 'string' &&
     Array.isArray(item.tags) &&
-    item.tags.every((tag) => typeof tag === 'string')
+    item.tags.every((tag) => typeof tag === 'string') &&
+    (item.metadata === undefined || isRecord(item.metadata))
   );
 }
 
