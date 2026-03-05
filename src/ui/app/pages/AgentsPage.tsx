@@ -1456,7 +1456,6 @@ export function AgentsPage() {
   };
 
   // T5/T8 阶段使用
-  void openSignalDetail;
 
   const [isRouteSaving, setIsRouteSaving] = useState(false);
 
@@ -1793,6 +1792,7 @@ export function AgentsPage() {
           onNodeClick={(item) => {
             if (item.type === 'agent') openAgentDetail(item.id);
             else if (item.type === 'actor') openActorDetail(item.id);
+            else openSignalDetail(item.id);
           }}
         />
       );
@@ -2050,8 +2050,47 @@ export function AgentsPage() {
                 </div>
               )}
               {rightPanel.state === 'SIGNAL_DETAIL' && (
-                <div className="p-4">
-                  <p className="text-xs text-[#78716C]">信号详情 — T7 阶段实现</p>
+                <div className="flex flex-col gap-3 p-4">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-xs font-medium text-[#A8A29E]">节点 ID</p>
+                    <p className="font-mono text-sm text-[#FAFAF9]">
+                      {rightPanel.signalId ?? '—'}
+                    </p>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-xs font-medium text-[#A8A29E]">最近信号路由</p>
+                    {signalRoutes
+                      .filter((r) =>
+                        r.target_ref === rightPanel.signalId ||
+                        r.topic.includes(rightPanel.signalId ?? '')
+                      )
+                      .slice(0, 5)
+                      .map((r) => (
+                        <div
+                          key={r.id}
+                          className="flex items-center gap-2 rounded-[6px] bg-[#292524] px-3 py-2"
+                        >
+                          <span
+                            className={`h-1.5 w-1.5 rounded-full ${r.enabled ? 'bg-[#22C55E]' : 'bg-[#57534E]'}`}
+                          />
+                          <span className="flex-1 truncate font-mono text-xs text-[#D6D3D1]">
+                            {r.topic}
+                          </span>
+                          <span className="shrink-0 text-[10px] text-[#78716C]">
+                            → {r.target_type}
+                          </span>
+                        </div>
+                      ))}
+                    {signalRoutes.filter((r) =>
+                      r.target_ref === rightPanel.signalId ||
+                      r.topic.includes(rightPanel.signalId ?? '')
+                    ).length === 0 && (
+                      <p className="text-xs text-[#57534E]">无关联路由</p>
+                    )}
+                  </div>
+                  <p className="text-[10px] text-[#57534E]">
+                    完整 Signal History 面板将在后续版本实现
+                  </p>
                 </div>
               )}
               {rightPanel.state === 'AGENT_CHAT' && (
