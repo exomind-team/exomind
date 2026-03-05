@@ -11,7 +11,8 @@
 
 import { test, expect, type APIRequestContext } from '@playwright/test';
 
-const RT_BASE_URL = process.env.EXOMIND_RT_URL ?? 'http://127.0.0.1:1949';
+// Default to embedded runtime port 4077（默认对齐内嵌 Runtime 4077 端口）.
+const RT_BASE_URL = process.env.EXOMIND_RT_URL ?? 'http://127.0.0.1:4077';
 
 async function waitForReviewCompleted(
   request: APIRequestContext,
