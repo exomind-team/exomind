@@ -53,6 +53,7 @@ function createStorage(addEventImpl = addEventMock) {
 
 describe('TimeBlockServiceImpl', () => {
   beforeEach(() => {
+    window.localStorage.clear();
     addEventMock.mockReset();
     getEventStorageMock.mockReset();
     getEventStorageMock.mockReturnValue(createStorage());
@@ -453,6 +454,42 @@ describe('TimeBlockServiceImpl', () => {
     expect(fetchSpy).toHaveBeenCalled();
     expect(fetchSpy).toHaveBeenCalledWith(
       'http://localhost:4077/signals/publish',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('publishes to external runtime after target switch（切到外部后发布到外部 RT）', async () => {
+    window.localStorage.setItem('exomind:runtimeTargetMode', 'external');
+    window.localStorage.setItem('exomind:runtimeExternalAddress', '127.0.0.1:1949');
+
+    const env = createMemoryEnv();
+    const addEvent = vi.fn();
+    const getEvents = vi.fn().mockResolvedValue([]);
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accepted: true, event_id: 'evt-2' }),
+    });
+
+    getEventStorageMock.mockReset();
+    getEventStorageMock.mockReturnValue({
+      addEvent,
+      getEvents,
+    });
+    vi.stubGlobal('fetch', fetchSpy as unknown as typeof fetch);
+
+    const service = new TimeBlockServiceImpl(env as never);
+    await service.startBlock('publish-external-rt', { mode: 'countup' });
+    await service.markEnding();
+    await service.endBlock('done');
+
+    for (let i = 0; i < 20 && fetchSpy.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/signals/publish',
       expect.objectContaining({ method: 'POST' }),
     );
   });

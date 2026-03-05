@@ -35,6 +35,15 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getUseMockDataEnabled } from '@/config/mock-data';
+import {
+  formatRuntimeTargetAddress,
+  getRuntimeExternalAddress,
+  getSelectedRuntimeTarget,
+  setRuntimeExternalAddress,
+  setRuntimeTargetMode,
+  subscribeRuntimeTargetChanges,
+  type RuntimeTargetMode,
+} from '@/config/runtime-target';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import type { SignalRoute } from '@/lib/types/signal-pool';
@@ -740,21 +749,36 @@ function DeviceView({
   runtimeHostSnapshots,
   runtimeServiceStatus,
   runtimeHostError,
+  runtimeTargetMode,
+  runtimeTargetAddress,
+  runtimeTargetError,
+  runtimeExternalAddressDraft,
   onRuntimeHostProbe,
   onRuntimeStart,
   onRuntimeStop,
+  onRuntimeTargetModeChange,
+  onRuntimeExternalAddressDraftChange,
+  onApplyRuntimeExternalAddress,
   onOpenHostManager,
 }: {
   groups: AgentDeviceGroup[];
   runtimeHostSnapshots: RuntimeHostSnapshot[];
   runtimeServiceStatus: RuntimeServiceStatus | null;
   runtimeHostError: string;
+  runtimeTargetMode: RuntimeTargetMode;
+  runtimeTargetAddress: string;
+  runtimeTargetError: string;
+  runtimeExternalAddressDraft: string;
   onRuntimeHostProbe: (hostId: string) => Promise<void>;
   onRuntimeStart: () => Promise<void>;
   onRuntimeStop: () => Promise<void>;
+  onRuntimeTargetModeChange: (mode: RuntimeTargetMode) => void;
+  onRuntimeExternalAddressDraftChange: (value: string) => void;
+  onApplyRuntimeExternalAddress: () => void;
   onOpenHostManager: () => void;
 }) {
   const hostCard = groups.flatMap((group) => group.cards).find((card) => card.isHost) ?? groups[0]?.cards[0];
+  const isEmbeddedTarget = runtimeTargetMode === 'embedded';
 
   return (
     <section data-testid="agent-device-view" className="space-y-4">
@@ -780,6 +804,70 @@ function DeviceView({
         </div>
 
         <div className="rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#292524]">
+          <div className="mb-2 rounded-lg bg-white p-1 dark:bg-[#1C1917]">
+            <div className="grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                data-testid="runtime-target-mode-embedded"
+                aria-pressed={runtimeTargetMode === 'embedded'}
+                onClick={() => onRuntimeTargetModeChange('embedded')}
+                className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                  runtimeTargetMode === 'embedded'
+                    ? 'bg-[#0D948820] text-[#0D9488]'
+                    : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
+                }`}
+              >
+                内嵌 RT（4077）
+              </button>
+              <button
+                type="button"
+                data-testid="runtime-target-mode-external"
+                aria-pressed={runtimeTargetMode === 'external'}
+                onClick={() => onRuntimeTargetModeChange('external')}
+                className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                  runtimeTargetMode === 'external'
+                    ? 'bg-[#C75B3A20] text-[#C75B3A]'
+                    : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
+                }`}
+              >
+                外部 RT
+              </button>
+            </div>
+          </div>
+
+          <p className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+            当前链路（Active target）：<span data-testid="runtime-target-active-address">{runtimeTargetAddress}</span>
+          </p>
+
+          {!isEmbeddedTarget && (
+            <div className="mt-2 space-y-2">
+              <div className="flex items-center gap-2">
+                <input
+                  data-testid="runtime-target-external-address-input"
+                  value={runtimeExternalAddressDraft}
+                  onChange={(event) => onRuntimeExternalAddressDraftChange(event.target.value)}
+                  placeholder="host:port（例如 127.0.0.1:1949）"
+                  className="h-7 flex-1 rounded border border-[#E7E5E4] bg-white px-2 text-[11px] text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+                />
+                <button
+                  type="button"
+                  data-testid="runtime-target-external-apply-button"
+                  onClick={onApplyRuntimeExternalAddress}
+                  className="rounded bg-[#C75B3A] px-2 py-1 text-[10px] text-white"
+                >
+                  应用
+                </button>
+              </div>
+              <p className="text-[10px] text-[#A8A29E]">外部模式下，SSE 与 timeblock 发布会走该地址。</p>
+            </div>
+          )}
+
+          {runtimeTargetError && (
+            <p className="mt-2 rounded-md bg-[#EF444410] px-2 py-1 text-[10px] text-[#DC2626]">
+              {runtimeTargetError}
+            </p>
+          )}
+
           <div className="flex items-center justify-between">
             <p className="text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">Local Runtime</p>
             <span
@@ -809,7 +897,8 @@ function DeviceView({
               onClick={() => {
                 void onRuntimeStart();
               }}
-              className="rounded bg-[#C75B3A] px-2 py-1 text-[10px] text-white"
+              disabled={!isEmbeddedTarget}
+              className="rounded bg-[#C75B3A] px-2 py-1 text-[10px] text-white disabled:cursor-not-allowed disabled:opacity-50"
             >
               Start
             </button>
@@ -819,11 +908,17 @@ function DeviceView({
               onClick={() => {
                 void onRuntimeStop();
               }}
-              className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]"
+              disabled={!isEmbeddedTarget}
+              className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] disabled:cursor-not-allowed disabled:opacity-50 dark:bg-[#1C1917] dark:text-[#D6D3D1]"
             >
               Stop
             </button>
           </div>
+          {!isEmbeddedTarget && (
+            <p className="mt-2 text-[10px] text-[#A8A29E]">
+              当前为外部模式，Start/Stop 仅控制内嵌 Runtime。
+            </p>
+          )}
         </div>
 
         {runtimeHostError && (
@@ -1221,6 +1316,7 @@ function RuntimeHostManagerSheet({
 }
 
 export function AgentsPage() {
+  const initialRuntimeTarget = getSelectedRuntimeTarget();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
@@ -1232,6 +1328,14 @@ export function AgentsPage() {
   const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
   const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState('127.0.0.1:4077');
   const [runtimeHostError, setRuntimeHostError] = useState('');
+  const [runtimeTargetModeValue, setRuntimeTargetModeValue] = useState<RuntimeTargetMode>(initialRuntimeTarget.mode);
+  const [runtimeTargetAddress, setRuntimeTargetAddress] = useState(
+    formatRuntimeTargetAddress(initialRuntimeTarget),
+  );
+  const [runtimeExternalAddressDraft, setRuntimeExternalAddressDraft] = useState(
+    getRuntimeExternalAddress(),
+  );
+  const [runtimeTargetError, setRuntimeTargetError] = useState('');
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
@@ -1239,6 +1343,12 @@ export function AgentsPage() {
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
     setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
+  };
+
+  const syncRuntimeTargetState = (target = getSelectedRuntimeTarget()) => {
+    setRuntimeTargetModeValue(target.mode);
+    setRuntimeTargetAddress(formatRuntimeTargetAddress(target));
+    setRuntimeExternalAddressDraft(getRuntimeExternalAddress());
   };
 
   const tryLoadRoutesFromHost = async (
@@ -1354,6 +1464,16 @@ export function AgentsPage() {
     };
   }, []);
 
+  useEffect(() => {
+    syncRuntimeTargetState();
+    const unsubscribe = subscribeRuntimeTargetChanges((target) => {
+      syncRuntimeTargetState(target);
+    });
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
   const refreshRuntimeHosts = async () => {
     const nextSnapshot = await getRuntimeManager().refreshSnapshot();
     applyRuntimeSnapshot(nextSnapshot);
@@ -1391,6 +1511,24 @@ export function AgentsPage() {
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       setRuntimeHostError(message);
+    }
+  };
+
+  const handleRuntimeTargetModeChange = (mode: RuntimeTargetMode) => {
+    setRuntimeTargetError('');
+    setRuntimeTargetMode(mode);
+    syncRuntimeTargetState();
+  };
+
+  const handleApplyRuntimeExternalAddress = () => {
+    try {
+      setRuntimeTargetError('');
+      setRuntimeExternalAddress(runtimeExternalAddressDraft);
+      setRuntimeTargetMode('external');
+      syncRuntimeTargetState();
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setRuntimeTargetError(message);
     }
   };
 
@@ -1475,9 +1613,16 @@ export function AgentsPage() {
           runtimeHostSnapshots={runtimeHostSnapshots}
           runtimeServiceStatus={runtimeServiceStatus}
           runtimeHostError={runtimeHostError}
+          runtimeTargetMode={runtimeTargetModeValue}
+          runtimeTargetAddress={runtimeTargetAddress}
+          runtimeTargetError={runtimeTargetError}
+          runtimeExternalAddressDraft={runtimeExternalAddressDraft}
           onRuntimeHostProbe={handleProbeRuntimeHost}
           onRuntimeStart={handleRuntimeStart}
           onRuntimeStop={handleRuntimeStop}
+          onRuntimeTargetModeChange={handleRuntimeTargetModeChange}
+          onRuntimeExternalAddressDraftChange={setRuntimeExternalAddressDraft}
+          onApplyRuntimeExternalAddress={handleApplyRuntimeExternalAddress}
           onOpenHostManager={() => setHostManagerOpen(true)}
         />
       );
@@ -1498,6 +1643,10 @@ export function AgentsPage() {
     signalRouteHostLabel,
     signalRouteRows,
     runtimeHostError,
+    runtimeTargetAddress,
+    runtimeTargetError,
+    runtimeTargetModeValue,
+    runtimeExternalAddressDraft,
     runtimeServiceStatus,
     selectedNodeId,
     viewMode,
