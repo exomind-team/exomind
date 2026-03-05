@@ -12,13 +12,15 @@ use commands::file_commands::{
     list_files, pick_json_file, read_file, read_file_binary, save_json_file, write_file,
 };
 use commands::shortcut_commands::{
-    register_voice_shortcut, simulate_paste, voice_overlay_hide, voice_overlay_show,
+    ensure_voice_overlay_window, register_voice_shortcut, simulate_paste, voice_overlay_hide, voice_overlay_show,
+    voice_shortcut_get, voice_shortcut_set, VoiceShortcutState,
 };
 use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_start, runtime_service_status, runtime_service_stop,
     signal_publish_fast, RuntimeProcessState,
 };
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
+use tauri::Manager;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -38,6 +40,7 @@ pub fn run() {
     let ws_client_state = std::sync::Arc::new(WsClientState::default());
     let runtime_process_state = std::sync::Arc::new(RuntimeProcessState::new());
     let runtime_process_state_for_setup = runtime_process_state.clone();
+    let voice_shortcut_state = VoiceShortcutState::new();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
@@ -47,9 +50,14 @@ pub fn run() {
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
+        .manage(voice_shortcut_state)
         .setup(move |app| {
-            // Register global voice shortcut (Alt+Q PTT)
-            register_voice_shortcut(app.handle());
+            // Register global voice shortcut (toggle, 按一次开始再按一次结束) and prewarm overlay window（预热悬浮窗）.
+            let voice_shortcut_state = app.state::<VoiceShortcutState>();
+            register_voice_shortcut(app.handle(), &voice_shortcut_state);
+            if let Err(error) = ensure_voice_overlay_window(app.handle()) {
+                eprintln!("[tauri/setup] failed to prewarm voice overlay window: {error}");
+            }
 
             let runtime_state = runtime_process_state_for_setup.clone();
             let runtime_port = resolve_embedded_runtime_port();
@@ -99,6 +107,8 @@ pub fn run() {
             simulate_paste,
             voice_overlay_show,
             voice_overlay_hide,
+            voice_shortcut_set,
+            voice_shortcut_get,
         ]);
 
     #[cfg(debug_assertions)]

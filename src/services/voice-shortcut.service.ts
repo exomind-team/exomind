@@ -4,8 +4,9 @@
  * T3: 监听 Tauri event → 录音 → ASR → 双路输出
  *
  * 流程:
- *   Alt+Q pressed  → Rust emits "voice-shortcut" "start" → startRecording
- *   Alt+Q released → Rust emits "voice-shortcut" "stop"  → stopRecording → ASR
+ *   Alt+Q pressed(first)  → Rust emits "voice-shortcut" "start" → startRecording
+ *   Alt+Q pressed(second) → Rust emits "voice-shortcut" "start" → stopRecording → ASR
+ *   （保留兼容）Alt+Q released(old flow) → Rust may emit "voice-shortcut" "stop"
  *     → Path A: clipboard.writeText + simulate_paste (光标位置输出)
  *     → Path B: EventLog.addEvent (voice 标签)
  *
@@ -18,10 +19,16 @@ import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 import { getClipboardService } from '../lib/services/clipboard.service';
 import { getEventLogService } from '../lib/services/eventlog.service';
 import {
+  getVoiceShortcutHotkey,
+  subscribeVoiceShortcutHotkeyChanges,
+  type VoiceShortcutHotkey,
+} from '../config/voice-shortcut-hotkey';
+import {
   createCompatibleMediaRecorder,
   getUserMediaWithConstraintFallback,
   DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
 } from '../lib/media/microphone-capture';
+import { convertWebmBlobToWav } from '../lib/media/wav-audio';
 import type { ASRResult } from '../lib/ports/asr-port';
 
 export type VoiceShortcutState = 'idle' | 'recording' | 'recognizing' | 'done' | 'error';
@@ -29,54 +36,6 @@ export type VoiceShortcutState = 'idle' | 'recording' | 'recognizing' | 'done' |
 const LOG_TAG = '[VoiceShortcut]';
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
-
-// --- WAV encoding (same as useVoiceCapture) ---
-
-function encodeWAV(samples: Uint8Array, sampleRate: number): Uint8Array {
-  const numChannels = 1;
-  const bytesPerSample = 2;
-  const blockAlign = numChannels * bytesPerSample;
-  const byteRate = sampleRate * blockAlign;
-  const dataSize = samples.length;
-  const buffer = new ArrayBuffer(44 + dataSize);
-  const view = new DataView(buffer);
-
-  view.setUint32(0, 0x52494646, false); // "RIFF"
-  view.setUint32(4, 36 + dataSize, true);
-  view.setUint32(8, 0x57415645, false); // "WAVE"
-  view.setUint32(12, 0x666d7420, false); // "fmt "
-  view.setUint32(16, 16, true);
-  view.setUint16(20, 1, true);
-  view.setUint16(22, numChannels, true);
-  view.setUint32(24, sampleRate, true);
-  view.setUint32(28, byteRate, true);
-  view.setUint16(32, blockAlign, true);
-  view.setUint16(34, bytesPerSample * 8, true);
-  view.setUint32(36, 0x64617461, false); // "data"
-  view.setUint32(40, dataSize, true);
-
-  new Uint8Array(buffer).set(samples, 44);
-  return new Uint8Array(buffer);
-}
-
-async function webmToWav(webmBlob: Blob): Promise<Uint8Array> {
-  const arrayBuffer = await webmBlob.arrayBuffer();
-  const audioContext = new AudioContext();
-  const audioBuffer = await audioContext.decodeAudioData(arrayBuffer);
-
-  const rawData = audioBuffer.getChannelData(0);
-  const sampleRate = audioBuffer.sampleRate;
-
-  const pcmData = new Int16Array(rawData.length);
-  for (let i = 0; i < rawData.length; i++) {
-    const s = Math.max(-1, Math.min(1, rawData[i]));
-    pcmData[i] = s < 0 ? s * 0x8000 : s * 0x7fff;
-  }
-
-  const wavData = encodeWAV(new Uint8Array(pcmData.buffer), sampleRate);
-  await audioContext.close();
-  return wavData;
-}
 
 // --- Service ---
 
@@ -88,29 +47,49 @@ export class VoiceShortcutService {
   private mimeType: string | null = null;
   private adapter: MOSSASRAdapter;
   private unlisten: (() => void) | null = null;
+  private unlistenHotkey: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+  private initializing = false;
 
   constructor() {
     this.adapter = new MOSSASRAdapter();
   }
 
   async init(): Promise<void> {
+    if (this.unlisten || this.initializing) {
+      return;
+    }
     if (!isTauri()) {
       console.warn(LOG_TAG, 'not in Tauri environment, service disabled');
       return;
     }
+    this.initializing = true;
 
-    this.unlisten = await listen<string>('voice-shortcut', (event) => {
-      if (event.payload === 'start') this.handleStart();
-      if (event.payload === 'stop') this.handleStop();
-    });
+    try {
+      await this.applyShortcut(getVoiceShortcutHotkey());
 
-    console.log(LOG_TAG, 'initialized, listening for Alt+Q');
+      this.unlistenHotkey = subscribeVoiceShortcutHotkeyChanges((hotkey) => {
+        this.applyShortcut(hotkey).catch((error) => {
+          console.error(LOG_TAG, 'failed to apply updated voice shortcut:', error);
+        });
+      });
+
+      this.unlisten = await listen<string>('voice-shortcut', (event) => {
+        if (event.payload === 'start') this.handleStart();
+        if (event.payload === 'stop') this.handleStop();
+      });
+
+      console.log(LOG_TAG, 'initialized');
+    } finally {
+      this.initializing = false;
+    }
   }
 
   destroy(): void {
     this.unlisten?.();
     this.unlisten = null;
+    this.unlistenHotkey?.();
+    this.unlistenHotkey = null;
     this.releaseResources();
     this.clearAutoHide();
   }
@@ -122,7 +101,24 @@ export class VoiceShortcutService {
   // --- Event handlers ---
 
   private async handleStart(): Promise<void> {
-    if (this.state !== 'idle') return;
+    // Toggle behavior（切换模式）:
+    // - idle/error/done: start recording
+    // - recording: stop and recognize
+    if (this.state === 'recognizing') {
+      return;
+    }
+    if (this.state === 'recording') {
+      await this.handleStop();
+      return;
+    }
+
+    if (this.state === 'done' || this.state === 'error') {
+      this.releaseResources();
+      this.clearAutoHide();
+      this.state = 'idle';
+      invoke('voice_overlay_hide').catch(() => {});
+    }
+
     this.clearAutoHide();
 
     try {
@@ -149,6 +145,7 @@ export class VoiceShortcutService {
 
   private async handleStop(): Promise<void> {
     if (this.state !== 'recording') return;
+    this.setState('recognizing');
 
     // Stop MediaRecorder
     const recorder = this.mediaRecorder;
@@ -158,6 +155,7 @@ export class VoiceShortcutService {
         recorder.stop();
       });
     }
+    this.mediaRecorder = null;
 
     // Release mic immediately
     if (this.stream) {
@@ -173,10 +171,11 @@ export class VoiceShortcutService {
     const blob = new Blob(this.chunks, { type: this.mimeType || 'audio/webm' });
     this.chunks = [];
 
-    this.setState('recognizing');
-
     try {
-      const wavData = await webmToWav(blob);
+      const wavData = await convertWebmBlobToWav(blob, {
+        targetSampleRate: 16000,
+        gain: 4,
+      });
       const result = await this.adapter.transcribe({
         lang: 'zh-CN',
         preRecordedAudio: wavData,
@@ -238,12 +237,16 @@ export class VoiceShortcutService {
 
   private setState(newState: VoiceShortcutState): void {
     this.state = newState;
+    if (newState === 'recording') {
+      this.emitOverlayState(newState, { duration: 0 });
+      return;
+    }
     this.emitOverlayState(newState);
   }
 
   private emitOverlayState(
     state: string,
-    extra?: Record<string, string>,
+    extra?: Record<string, string | number>,
   ): void {
     emit('voice-overlay-state', { state, ...extra }).catch(() => {});
   }
@@ -263,6 +266,21 @@ export class VoiceShortcutService {
     if (this.autoHideTimer !== null) {
       clearTimeout(this.autoHideTimer);
       this.autoHideTimer = null;
+    }
+  }
+
+  private async applyShortcut(hotkey: VoiceShortcutHotkey): Promise<void> {
+    try {
+      const appliedShortcut = await invoke<string>('voice_shortcut_set', { shortcut: hotkey });
+      console.log(LOG_TAG, `voice shortcut applied: ${appliedShortcut}`);
+    } catch (error) {
+      const message = String(error);
+      if (message.toLowerCase().includes('already registered')) {
+        // Ignore duplicate registration races from dev reload / strict-mode re-init paths.
+        console.warn(LOG_TAG, `voice shortcut "${hotkey}" already registered, skip re-register`);
+        return;
+      }
+      console.error(LOG_TAG, `failed to apply voice shortcut "${hotkey}":`, error);
     }
   }
 }

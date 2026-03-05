@@ -150,7 +150,7 @@ function StatusText({
 }) {
   switch (state) {
     case "recording":
-      return <span className="overlay-text">{formatDuration(duration)}</span>;
+      return <span className="overlay-text">{formatDuration(duration)} · 再按结束</span>;
     case "recognizing":
       return <span className="overlay-text overlay-text--secondary">识别中...</span>;
     case "done": {

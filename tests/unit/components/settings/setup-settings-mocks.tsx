@@ -86,6 +86,13 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/voice-shortcut-hotkey', () => ({
+  VOICE_SHORTCUT_HOTKEY_VALUES: ['Alt+Q', 'Alt+W', 'Ctrl+Space'],
+  getVoiceShortcutHotkey: vi.fn(() => 'Alt+Q'),
+  setVoiceShortcutHotkey: vi.fn((value: string) => value),
+  subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/feedback-preferences', () => ({
   getFeedbackPreferences: vi.fn(() => ({
     timingInfoEnabled: false,
