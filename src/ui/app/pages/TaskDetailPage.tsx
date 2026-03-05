@@ -1,7 +1,8 @@
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, ChevronRight, Lock } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useEffect, useRef, useState } from 'react';
 import { getTaskService } from '@/lib/services';
+import type { DependencyCheckResult } from '@/lib/services/task.service';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 
 const STATUS_LABEL: Record<string, string> = {
@@ -10,6 +11,14 @@ const STATUS_LABEL: Record<string, string> = {
   suspended: '已挂起',
   completed: '已完成',
   abandoned: '已放弃',
+};
+
+const STATUS_DOT: Record<string, string> = {
+  not_started: 'bg-gray-400',
+  in_progress: 'bg-amber-500',
+  suspended: 'bg-blue-400',
+  completed: 'bg-emerald-500',
+  abandoned: 'bg-red-400',
 };
 
 const STATUS_ACTION: Record<string, string> = {
@@ -30,6 +39,10 @@ export function TaskDetailPage() {
   const navigate = useNavigate();
   const [task, setTask] = useState<TaskNode | null>(null);
   const [availableTransitions, setAvailableTransitions] = useState<TaskStatus[]>([]);
+  const [parentTask, setParentTask] = useState<TaskNode | null>(null);
+  const [childTasks, setChildTasks] = useState<TaskNode[]>([]);
+  const [depCheck, setDepCheck] = useState<DependencyCheckResult>({ met: true, blocking: [] });
+  const [depTasks, setDepTasks] = useState<Map<string, TaskNode>>(new Map());
   const [isLoading, setIsLoading] = useState(true);
   const [isEditingTitle, setIsEditingTitle] = useState(false);
   const [editTitle, setEditTitle] = useState('');
@@ -42,15 +55,47 @@ export function TaskDetailPage() {
         setIsLoading(false);
         return;
       }
+      const svc = getTaskService();
       const [nextTask, transitions] = await Promise.all([
-        getTaskService().getTask(taskId),
-        getTaskService().getAvailableTransitions(taskId),
+        svc.getTask(taskId),
+        svc.getAvailableTransitions(taskId),
       ]);
-      if (!disposed) {
-        setTask(nextTask as TaskNode | null);
-        setAvailableTransitions(transitions);
-        setIsLoading(false);
+      if (disposed) return;
+
+      setTask(nextTask as TaskNode | null);
+      setAvailableTransitions(transitions);
+
+      if (nextTask) {
+        // Load parent task
+        if (nextTask.parentId) {
+          const parent = await svc.getTask(nextTask.parentId);
+          if (!disposed) setParentTask(parent);
+        } else {
+          setParentTask(null);
+        }
+
+        // Load child tasks
+        const children = await svc.getChildTasks(nextTask.id);
+        if (!disposed) setChildTasks(children);
+
+        // Check dependencies
+        const check = await svc.checkDependenciesMet(nextTask.id);
+        if (!disposed) setDepCheck(check);
+
+        // Resolve dependency task names
+        if (nextTask.dependsOn.length > 0) {
+          const depMap = new Map<string, TaskNode>();
+          for (const dep of nextTask.dependsOn) {
+            const dt = await svc.getTask(dep.taskId);
+            if (dt) depMap.set(dep.taskId, dt);
+          }
+          if (!disposed) setDepTasks(depMap);
+        } else {
+          if (!disposed) setDepTasks(new Map());
+        }
       }
+
+      if (!disposed) setIsLoading(false);
     };
     void load();
     return () => {
@@ -83,11 +128,18 @@ export function TaskDetailPage() {
 
   const handleTransition = async (to: TaskStatus) => {
     if (!taskId) return;
-    const updated = await getTaskService().transitionTask(taskId, to);
-    if (updated) {
-      const transitions = await getTaskService().getAvailableTransitions(taskId);
-      setTask(updated);
-      setAvailableTransitions(transitions);
+    try {
+      const updated = await getTaskService().transitionTask(taskId, to);
+      if (updated) {
+        const transitions = await getTaskService().getAvailableTransitions(taskId);
+        setTask(updated);
+        setAvailableTransitions(transitions);
+        // Refresh dep check after transition
+        const check = await getTaskService().checkDependenciesMet(taskId);
+        setDepCheck(check);
+      }
+    } catch {
+      // transitionTask may throw on hard dep block — UI already shows disabled state
     }
   };
 
@@ -122,6 +174,8 @@ export function TaskDetailPage() {
   }
 
   const isTerminal = task.status === 'completed' || task.status === 'abandoned';
+  const hardBlocking = depCheck.blocking.filter((b) => b.type === 'hard');
+  const isHardBlocked = hardBlocking.length > 0;
 
   return (
     <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
@@ -136,6 +190,20 @@ export function TaskDetailPage() {
       </header>
 
       <div className="space-y-3 px-5 pb-10">
+        {/* Parent task breadcrumb */}
+        {parentTask && (
+          <Link
+            to="/tasks/$taskId"
+            params={{ taskId: parentTask.id }}
+            className="inline-flex items-center gap-1 text-xs text-[#78716C] dark:text-[#A8A29E]"
+          >
+            <span className="max-w-[200px] truncate">{parentTask.title}</span>
+            <ChevronRight size={12} />
+            <span className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</span>
+          </Link>
+        )}
+
+        {/* Title + description card */}
         <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
           {isEditingTitle ? (
             <input
@@ -168,6 +236,7 @@ export function TaskDetailPage() {
           {task.description && <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>}
         </div>
 
+        {/* Properties card */}
         <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
           <dl className="space-y-2 text-sm">
             <div className="flex justify-between">
@@ -193,6 +262,7 @@ export function TaskDetailPage() {
           </dl>
         </div>
 
+        {/* Tags */}
         {task.tags.length > 0 && (
           <div className="flex flex-wrap gap-1.5">
             {task.tags.map((tag) => (
@@ -203,24 +273,98 @@ export function TaskDetailPage() {
           </div>
         )}
 
+        {/* Dependencies card */}
+        {task.dependsOn.length > 0 && (
+          <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+            <p className="mb-3 text-xs font-medium text-[#A8A29E]">依赖</p>
+            <ul className="space-y-2">
+              {task.dependsOn.map((dep) => {
+                const depTask = depTasks.get(dep.taskId);
+                const isBlocking = depCheck.blocking.some((b) => b.taskId === dep.taskId);
+                return (
+                  <li key={dep.taskId} className="flex items-center justify-between text-sm">
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block h-2 w-2 rounded-full ${depTask ? (STATUS_DOT[depTask.status] ?? 'bg-gray-400') : 'bg-gray-300'}`} />
+                      <Link
+                        to="/tasks/$taskId"
+                        params={{ taskId: dep.taskId }}
+                        className="text-[#1C1917] underline-offset-2 hover:underline dark:text-[#FAFAF9]"
+                      >
+                        {depTask?.title ?? dep.taskId}
+                      </Link>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className={`rounded-full px-2 py-0.5 text-xs ${dep.type === 'hard' ? 'bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400' : 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400'}`}>
+                        {dep.type === 'hard' ? '硬依赖' : '软依赖'}
+                      </span>
+                      {isBlocking && (
+                        <Lock size={12} className="text-red-500" />
+                      )}
+                    </div>
+                  </li>
+                );
+              })}
+            </ul>
+            {isHardBlocked && (
+              <p className="mt-3 text-xs text-red-500">
+                硬依赖未完成，无法启动此任务
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* Child tasks card */}
+        {childTasks.length > 0 && (
+          <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+            <p className="mb-3 text-xs font-medium text-[#A8A29E]">子任务</p>
+            <ul className="space-y-2">
+              {childTasks.map((child) => (
+                <li key={child.id}>
+                  <Link
+                    to="/tasks/$taskId"
+                    params={{ taskId: child.id }}
+                    className="flex items-center justify-between text-sm"
+                  >
+                    <div className="flex items-center gap-2">
+                      <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[child.status] ?? 'bg-gray-400'}`} />
+                      <span className="text-[#1C1917] dark:text-[#FAFAF9]">{child.title}</span>
+                    </div>
+                    <span className="text-xs text-[#A8A29E]">{STATUS_LABEL[child.status] ?? child.status}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+
+        {/* Actions card */}
         {!isTerminal && (
           <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
             <p className="mb-3 text-xs font-medium text-[#A8A29E]">操作</p>
             <div className="flex flex-wrap gap-2">
               {availableTransitions
                 .filter((s) => s !== 'abandoned')
-                .map((to) => (
-                  <button
-                    key={to}
-                    type="button"
-                    onClick={() => {
-                      void handleTransition(to);
-                    }}
-                    className="rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
-                  >
-                    {STATUS_ACTION[to] ?? to}
-                  </button>
-                ))}
+                .map((to) => {
+                  const disabled = to === 'in_progress' && isHardBlocked;
+                  return (
+                    <button
+                      key={to}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => {
+                        void handleTransition(to);
+                      }}
+                      className={`rounded-xl px-4 py-2 text-sm font-medium ${
+                        disabled
+                          ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-800 dark:text-gray-600'
+                          : 'bg-[#C75B3A] text-white'
+                      }`}
+                    >
+                      {disabled && <Lock size={12} className="mr-1 inline-block" />}
+                      {STATUS_ACTION[to] ?? to}
+                    </button>
+                  );
+                })}
               <button
                 type="button"
                 onClick={() => {

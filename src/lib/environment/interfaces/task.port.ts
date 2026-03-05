@@ -1,4 +1,4 @@
-import type { TaskNode, TaskStatus } from '@/lib/types/task'
+import type { Dependency, TaskNode, TaskStatus } from '@/lib/types/task'
 
 export interface CreateTaskInput {
   title: string
@@ -20,6 +20,7 @@ export interface UpdateTaskInput {
   dueAt?: number
   source?: string
   parentId?: string
+  dependsOn?: Dependency[]
   tags?: string[]
   estimatedMinutes?: number
   spentMinutes?: number
