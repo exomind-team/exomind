@@ -2,7 +2,6 @@ import {
   AlarmClock,
   Bot,
   Brain,
-  CircleAlert,
   ChevronRight,
   Filter,
   List,
@@ -52,6 +51,7 @@ import type {
   AgentHubListItem,
   AgentHubListSection,
   AgentHubNodeStatus,
+  AgentHubNodeType,
   RuntimeHostRecord,
   AgentHubViewMode,
   AgentHubRightPanelContext,
@@ -68,7 +68,6 @@ import {
   buildSignalRouteRows,
   type SignalGraph,
   type SignalGraphNodeType,
-  type SignalRouteRow,
 } from './agents-signal-topology';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
@@ -77,14 +76,6 @@ const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string 
   { id: 'routes', icon: List, label: '路由' },
   { id: 'device', icon: Monitor, label: '设备' },
 ];
-
-const LIST_FILTERS = [
-  { id: 'all', label: '全部' },
-  { id: 'input', label: '信号输入' },
-  { id: 'agent', label: 'Agent' },
-  { id: 'actor', label: 'Actor' },
-  { id: 'output', label: '输出' },
-] as const;
 
 type AddNodeOption = {
   id: 'device';
@@ -549,198 +540,6 @@ function TopologyView({
           <p className="mt-1 text-xs text-white/60">类型：{selectedNode.type}</p>
         </div>
       )}
-    </section>
-  );
-}
-
-function ListView({
-  sections,
-  hostSnapshots,
-  routeRows,
-  routeHostLabel,
-  onRetryHost,
-  onItemNavigate,
-}: {
-  sections: AgentHubListSection[];
-  hostSnapshots: RuntimeHostSnapshot[];
-  routeRows: SignalRouteRow[];
-  routeHostLabel?: string;
-  onRetryHost: (hostId: string) => Promise<void>;
-  onItemNavigate: (path: string) => void;
-}) {
-  const problemHosts = hostSnapshots.filter((item) => item.connectionState !== 'online');
-
-  return (
-    <section data-testid="agent-list-view" className="space-y-4">
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {LIST_FILTERS.map((filterItem, index) => {
-          const active = index === 0;
-          return (
-            <button
-              key={filterItem.id}
-              type="button"
-              data-testid={`agent-list-filter-${filterItem.id}`}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] ${
-                active ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'
-              }`}
-            >
-              {filterItem.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <article
-        data-testid="agent-signal-route-section"
-        className="space-y-2 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
-      >
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信号路由</p>
-            <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
-              {routeHostLabel ? `来源 ${routeHostLabel}` : '未连接 runtime'}
-            </p>
-          </div>
-          <span className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-            {routeRows.length} 条
-          </span>
-        </div>
-
-        {routeRows.length === 0 && (
-          <p className="rounded-lg bg-[#FAF7F5] px-3 py-2 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-            暂无路由数据（No signal routes）
-          </p>
-        )}
-
-        {routeRows.length > 0 && (
-          <div className="space-y-1.5">
-            {routeRows.map((row) => (
-              <div
-                key={row.id}
-                data-testid={`agent-signal-route-row-${row.id}`}
-                className="flex items-center justify-between gap-2 rounded-lg bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-[#1C1917] dark:text-[#FAFAF9]">{row.topic}</p>
-                  <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{`${row.targetType} ${row.targetRef}`}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[#A8A29E] dark:text-[#78716C]">→</span>
-                  <span
-                    data-testid={`agent-signal-route-status-${row.id}`}
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      row.status === 'active'
-                        ? 'bg-[#22C55E20] text-[#16A34A]'
-                        : 'bg-[#A8A29E30] text-[#57534E] dark:text-[#D6D3D1]'
-                    }`}
-                  >
-                    {row.status}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </article>
-
-      {problemHosts.length > 0 && (
-        <article className="space-y-2 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-3 dark:border-[#7F1D1D] dark:bg-[#2B1111]">
-          <div className="flex items-center gap-2 text-[#B91C1C] dark:text-[#FCA5A5]">
-            <CircleAlert size={14} />
-            <p className="text-xs font-semibold">连接异常主机</p>
-          </div>
-          <div className="space-y-2">
-            {problemHosts.map((item) => (
-              <div key={item.host.id} className="rounded-xl border border-[#FECACA] bg-white px-3 py-2 dark:border-[#7F1D1D] dark:bg-[#1C1917]">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.host.name}</p>
-                    <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{item.host.host}:{item.host.port}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      data-testid={`runtime-host-status-${item.host.id}`}
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                        item.connectionState === 'offline'
-                          ? 'bg-[#EF444420] text-[#DC2626]'
-                          : 'bg-[#F59E0B20] text-[#D97706]'
-                      }`}
-                    >
-                      {item.connectionState}
-                    </span>
-                    <button
-                      type="button"
-                      data-testid={`runtime-host-probe-${item.host.id}`}
-                      onClick={() => {
-                        void onRetryHost(item.host.id);
-                      }}
-                      className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]"
-                    >
-                      重试
-                    </button>
-                  </div>
-                </div>
-                {item.error && <p className="mt-1 text-[10px] text-[#DC2626]">{item.error}</p>}
-              </div>
-            ))}
-          </div>
-        </article>
-      )}
-
-      {sections.length === 0 && (
-        <article className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-6 text-center dark:border-[#292524] dark:bg-[#1C1917]">
-          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">暂无可用 Agent</p>
-          <p className="mt-1 text-xs text-[#A8A29E]">请先添加 exomind-rt 主机并确认连接状态</p>
-        </article>
-      )}
-
-      {sections.map((section) => (
-        <article key={section.id} className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">{section.title}</h3>
-            <span className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">{section.count} 个节点</span>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-            {section.items.map((item, index) => {
-              const Icon = getListItemIcon(item);
-              return (
-                <div key={item.id}>
-                  <button
-                    type="button"
-                    data-testid={`agent-list-item-${item.id}`}
-                    onClick={() => {
-                      const runtimeAgentId = item.id.includes('__') ? item.id.split('__')[1] ?? item.id : item.id;
-                      if (item.type === 'agent') {
-                        onItemNavigate(`/agents/agent/${runtimeAgentId}`);
-                      }
-                      if (item.type === 'actor') {
-                        onItemNavigate(`/agents/actor/${runtimeAgentId}`);
-                      }
-                    }}
-                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-                        <Icon size={16} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</p>
-                        <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{item.description}</p>
-                      </div>
-                    </div>
-                    <ChevronRight
-                      data-testid={`agent-list-item-${item.id}-chevron`}
-                      size={14}
-                      className="shrink-0 text-[#D6D3D1] dark:text-[#57534E]"
-                    />
-                  </button>
-                  {index !== section.items.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
-                </div>
-              );
-            })}
-          </div>
-        </article>
-      ))}
     </section>
   );
 }
@@ -1467,9 +1266,158 @@ function RoutesTabView({
   );
 }
 
+type NodeFilterType = 'all' | 'input' | 'agent' | 'actor' | 'output';
+
+const NODE_FILTER_ITEMS: Array<{ id: NodeFilterType; label: string }> = [
+  { id: 'all', label: '全部' },
+  { id: 'input', label: '信号输入' },
+  { id: 'agent', label: 'Agent' },
+  { id: 'actor', label: 'Actor' },
+  { id: 'output', label: '输出' },
+];
+
+function NodesTabView({
+  sections,
+  filter,
+  onFilterChange,
+  onNodeClick,
+}: {
+  sections: AgentHubListSection[];
+  filter: NodeFilterType;
+  onFilterChange: (f: NodeFilterType) => void;
+  onNodeClick: (item: AgentHubListItem) => void;
+}) {
+  const filteredItems = useMemo(() => {
+    const allItems = sections.flatMap((s) => s.items);
+    if (filter === 'all') return allItems;
+    const typeMap: Record<NodeFilterType, AgentHubNodeType | null> = {
+      all: null,
+      input: 'input',
+      agent: 'agent',
+      actor: 'actor',
+      output: 'output',
+    };
+    const targetType = typeMap[filter];
+    return targetType ? allItems.filter((item) => item.type === targetType) : allItems;
+  }, [sections, filter]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Filter 栏 */}
+      <div className="flex items-center gap-1 overflow-x-auto pb-1">
+        {NODE_FILTER_ITEMS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            onClick={() => onFilterChange(f.id)}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              filter === f.id
+                ? 'bg-[#C75B3A] text-white'
+                : 'bg-[#F5F0ED] text-[#78716C] hover:bg-[#E7E3E0] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#3C3836]'
+            }`}
+          >
+            {f.label}
+            {filter === f.id && f.id !== 'all' && (
+              <span className="ml-1 opacity-80">({filteredItems.length})</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* 节点列表 */}
+      {filteredItems.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-12 text-center">
+          <Bot size={32} className="text-[#A8A29E]" />
+          <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">
+            {filter === 'all' ? '暂无节点' : `暂无${NODE_FILTER_ITEMS.find(f => f.id === filter)?.label}节点`}
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col divide-y divide-[#E7E3E0] overflow-hidden rounded-[10px] border border-[#E7E3E0] dark:divide-[#292524] dark:border-[#292524]">
+          {filteredItems.map((item) => {
+            const Icon = getListItemIcon(item);
+            const statusColor: Record<AgentHubNodeStatus, string> = {
+              running: 'bg-[#22C55E]',
+              idle: 'bg-[#D6D3D1] dark:bg-[#57534E]',
+              warning: 'bg-[#F59E0B]',
+              offline: 'bg-[#EF4444]',
+            };
+            const statusLabel: Record<AgentHubNodeStatus, string> = {
+              running: '运行中',
+              idle: '空闲',
+              warning: '警告',
+              offline: '离线',
+            };
+            return (
+              <div
+                key={item.id}
+                className="flex cursor-pointer items-center gap-3 bg-white px-4 py-3 transition-colors hover:bg-[#FAF7F5] dark:bg-[#0C0A09] dark:hover:bg-[#1C1917]"
+                onClick={() => onNodeClick(item)}
+              >
+                {/* Icon */}
+                <div
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] ${
+                    item.type === 'agent'
+                      ? 'bg-[#CCFBF1] dark:bg-[#0D9488]/20'
+                      : item.type === 'actor'
+                      ? 'bg-[#FEF3C7] dark:bg-[#F59E0B]/20'
+                      : item.type === 'input'
+                      ? 'bg-[#FFEDD5] dark:bg-[#F97316]/20'
+                      : 'bg-[#DBEAFE] dark:bg-[#3B82F6]/20'
+                  }`}
+                >
+                  <Icon
+                    size={16}
+                    className={
+                      item.type === 'agent'
+                        ? 'text-[#0D9488]'
+                        : item.type === 'actor'
+                        ? 'text-[#B45309] dark:text-[#F59E0B]'
+                        : item.type === 'input'
+                        ? 'text-[#EA580C]'
+                        : 'text-[#1D4ED8] dark:text-[#60A5FA]'
+                    }
+                  />
+                </div>
+                {/* 内容 */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                      {item.name}
+                    </span>
+                    {item.badgeText && (
+                      <span className="shrink-0 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                        {item.badgeText}
+                      </span>
+                    )}
+                  </div>
+                  {item.description && (
+                    <p className="mt-0.5 truncate text-xs text-[#78716C] dark:text-[#A8A29E]">
+                      {item.description}
+                    </p>
+                  )}
+                </div>
+                {/* 状态 badge */}
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <span className={`h-2 w-2 rounded-full ${statusColor[item.status]}`} />
+                  <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+                    {statusLabel[item.status]}
+                  </span>
+                </div>
+                <ChevronRight size={14} className="shrink-0 text-[#A8A29E]" />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
 export function AgentsPage() {
   const initialRuntimeTarget = getSelectedRuntimeTarget();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
+  const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [fallbackRuntimeAgents, setFallbackRuntimeAgents] = useState<RuntimeAggregatedAgent[]>([]);
@@ -1770,10 +1718,6 @@ export function AgentsPage() {
     }
   };
 
-  const navigateByPath = (path: string) => {
-    window.location.href = path;
-  };
-
   const signalRouteRows = useMemo(
     () => buildSignalRouteRows(signalRoutes, signalRouteHostLabel || undefined),
     [signalRouteHostLabel, signalRoutes]
@@ -1811,13 +1755,14 @@ export function AgentsPage() {
     }
     if (viewMode === 'nodes') {
       return (
-        <ListView
+        <NodesTabView
           sections={listSections}
-          hostSnapshots={runtimeHostSnapshots}
-          routeRows={signalRouteRows}
-          routeHostLabel={signalRouteHostLabel || undefined}
-          onRetryHost={handleProbeRuntimeHost}
-          onItemNavigate={navigateByPath}
+          filter={nodesFilter}
+          onFilterChange={setNodesFilter}
+          onNodeClick={(item) => {
+            if (item.type === 'agent') openAgentDetail(item.id);
+            else if (item.type === 'actor') openActorDetail(item.id);
+          }}
         />
       );
     }
@@ -1872,6 +1817,7 @@ export function AgentsPage() {
     runtimeTargetModeValue,
     runtimeExternalAddressDraft,
     runtimeServiceStatus,
+    nodesFilter,
     selectedNodeId,
     viewMode,
   ]);
