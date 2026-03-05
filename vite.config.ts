@@ -27,6 +27,15 @@ export default defineConfig(({ mode }) => {
       },
     },
 
+    build: {
+      rollupOptions: {
+        input: {
+          main: path.resolve(__dirname, "index.html"),
+          "voice-overlay": path.resolve(__dirname, "voice-overlay.html"),
+        },
+      },
+    },
+
     clearScreen: false,
     server: {
       port: devPorts.web,

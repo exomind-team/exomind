@@ -40,4 +40,6 @@ uuid = { version = "1", features = ["v4", "serde"] }
 tauri-plugin-mcp-bridge= "0.8"
 thiserror = "1"
 exomind-runtime = { path = "../crates/exomind-runtime" }
+tauri-plugin-global-shortcut = "2"
+enigo = { version = "0.3", features = ["serde"] }
 
