@@ -48,6 +48,7 @@ import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import type { SignalRoute } from '@/lib/types/signal-pool';
 import type {
+  AgentDetailData,
   AgentDeviceGroup,
   AgentHubListItem,
   AgentHubListSection,
@@ -1455,7 +1456,30 @@ export function AgentsPage() {
     setRightPanel({ state: 'CLOSED' });
   };
 
-  // T5/T8 阶段使用
+  // T8: AgentDetail / ActorDetail 右侧栏
+  const [agentDetail, setAgentDetail] = useState<AgentDetailData | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+
+  useEffect(() => {
+    if (rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') {
+      const nodeId = rightPanel.nodeId;
+      if (!nodeId) return;
+      setIsDetailLoading(true);
+      setAgentDetail(null);
+      const service = getAgentHubService();
+      const loader = rightPanel.state === 'AGENT_DETAIL'
+        ? service.getAgentDetail(nodeId)
+        : service.getActorDetail(nodeId);
+      loader.then((data) => {
+        setAgentDetail(data);
+        setIsDetailLoading(false);
+      }).catch(() => {
+        setIsDetailLoading(false);
+      });
+    } else {
+      setAgentDetail(null);
+    }
+  }, [rightPanel.state, rightPanel.nodeId]);
 
   const [isRouteSaving, setIsRouteSaving] = useState(false);
 
@@ -1966,8 +1990,8 @@ export function AgentsPage() {
             <div className="flex items-center justify-between border-b border-[#292524] px-4 py-3">
               <span className="text-sm font-medium text-[#FAFAF9]">
                 {rightPanel.state === 'ROUTE_EDIT' && (rightPanel.routeId ? '编辑路由' : '新建路由')}
-                {rightPanel.state === 'AGENT_DETAIL' && 'Agent 详情'}
-                {rightPanel.state === 'ACTOR_DETAIL' && 'Actor 详情'}
+                {rightPanel.state === 'AGENT_DETAIL' && (agentDetail?.title ?? 'Agent 详情')}
+                {rightPanel.state === 'ACTOR_DETAIL' && (agentDetail?.title ?? 'Actor 详情')}
                 {rightPanel.state === 'SIGNAL_DETAIL' && '信号详情'}
                 {rightPanel.state === 'AGENT_CHAT' && 'Agent 对话'}
               </span>
@@ -2017,8 +2041,25 @@ export function AgentsPage() {
                         <p className="text-xs text-[#78716C]">节点不存在或已离线</p>
                       );
                     }
+
+                    const statusColors: Record<string, string> = {
+                      online: 'bg-[#22C55E]/15 text-[#22C55E]',
+                      offline: 'bg-[#57534E]/30 text-[#78716C]',
+                      error: 'bg-[#EF4444]/15 text-[#EF4444]',
+                      busy: 'bg-[#F59E0B]/15 text-[#F59E0B]',
+                      warning: 'bg-[#F59E0B]/15 text-[#F59E0B]',
+                    };
+                    const logStatusColors: Record<string, string> = {
+                      online: 'text-[#D6D3D1]',
+                      offline: 'text-[#78716C]',
+                      warning: 'text-[#F59E0B]',
+                      error: 'text-[#EF4444]',
+                      busy: 'text-[#F59E0B]',
+                    };
+
                     return (
-                      <div className="flex flex-col gap-3">
+                      <div className="flex flex-col gap-4">
+                        {/* 头部：始终从 signalGraph 快速显示 */}
                         <div className="flex items-center gap-3">
                           <div
                             className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
@@ -2043,7 +2084,73 @@ export function AgentsPage() {
                             </p>
                           </div>
                         </div>
-                        <p className="text-xs text-[#78716C]">详情面板 — T8 阶段实现</p>
+
+                        {/* 加载态：骨架屏 */}
+                        {isDetailLoading && (
+                          <div className="flex flex-col gap-3">
+                            <div className="h-4 w-20 rounded bg-[#292524] animate-pulse" />
+                            <div className="h-3 w-full rounded bg-[#292524] animate-pulse" />
+                            <div className="h-3 w-3/4 rounded bg-[#292524] animate-pulse" />
+                          </div>
+                        )}
+
+                        {/* 数据加载完成 */}
+                        {!isDetailLoading && agentDetail && (
+                          <>
+                            {/* 状态 badge */}
+                            <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColors[agentDetail.status] ?? statusColors.offline}`}>
+                              {agentDetail.status}
+                            </span>
+
+                            {/* 描述 */}
+                            {agentDetail.description && (
+                              <p className="text-xs text-[#A8A29E] line-clamp-3">{agentDetail.description}</p>
+                            )}
+
+                            {/* 统计指标 2x2 grid */}
+                            {agentDetail.stats.length > 0 && (
+                              <div className="grid grid-cols-2 gap-2">
+                                {agentDetail.stats.slice(0, 4).map((s) => (
+                                  <div key={s.label} className="rounded-lg bg-[#292524] px-3 py-2">
+                                    <p className="text-[10px] text-[#78716C]">{s.label}</p>
+                                    <p className="text-sm font-medium text-[#D6D3D1]">{s.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* 触发规则 */}
+                            {agentDetail.triggerRules.length > 0 && (
+                              <div className="flex flex-col gap-1.5">
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-[#78716C]">触发规则</p>
+                                {agentDetail.triggerRules.slice(0, 3).map((r) => (
+                                  <div key={r.key} className="flex items-baseline gap-2">
+                                    <span className="font-mono text-[10px] text-[#A8A29E]">{r.key}:</span>
+                                    <span className="text-xs text-[#D6D3D1]">{r.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* 最近日志 */}
+                            {agentDetail.recentLogs.length > 0 && (
+                              <div className="flex flex-col gap-1.5">
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-[#78716C]">最近日志</p>
+                                {agentDetail.recentLogs.slice(0, 5).map((log, i) => (
+                                  <div key={i} className="flex items-baseline gap-2">
+                                    <span className="shrink-0 text-[10px] text-[#78716C]">{log.time}</span>
+                                    <span className={`text-xs truncate ${logStatusColors[log.status] ?? logStatusColors.online}`}>{log.title}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* API 返回 null */}
+                        {!isDetailLoading && !agentDetail && (
+                          <p className="text-xs text-[#78716C]">暂无详细数据</p>
+                        )}
                       </div>
                     );
                   })()}
