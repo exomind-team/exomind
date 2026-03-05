@@ -50,6 +50,7 @@ export function TaskDetailPage() {
   const [editTitle, setEditTitle] = useState('');
   const titleInputRef = useRef<HTMLInputElement>(null);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
+  const [hasOtherActiveBlock, setHasOtherActiveBlock] = useState(false);
   const [showFeedback, setShowFeedback] = useState(false);
 
   useEffect(() => {
@@ -72,6 +73,8 @@ export function TaskDetailPage() {
       setAvailableTransitions(transitions);
       // Show active block only if it belongs to this task
       setActiveBlock(currentBlock?.taskId === taskId ? currentBlock : null);
+      // Track if another task has an active block (prevents starting a new one)
+      setHasOtherActiveBlock(currentBlock != null && currentBlock.taskId !== taskId);
 
       if (nextTask) {
         // Load parent task
@@ -204,6 +207,7 @@ export function TaskDetailPage() {
 
     setShowFeedback(false);
     setActiveBlock(null);
+    setHasOtherActiveBlock(false);
 
     // Refresh task state
     const refreshed = await svc.getTask(taskId);
@@ -449,19 +453,24 @@ export function TaskDetailPage() {
                 )}
               </div>
             ) : (
-              <button
-                type="button"
-                disabled={isHardBlocked}
-                onClick={() => { void handleStartTimer(); }}
-                className={`inline-flex items-center gap-1 rounded-xl px-4 py-2 text-sm font-medium ${
-                  isHardBlocked
-                    ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-800 dark:text-gray-600'
-                    : 'bg-[#C75B3A] text-white'
-                }`}
-              >
-                <Play size={14} />
-                开始计时
-              </button>
+              <>
+                <button
+                  type="button"
+                  disabled={isHardBlocked || hasOtherActiveBlock}
+                  onClick={() => { void handleStartTimer(); }}
+                  className={`inline-flex items-center gap-1 rounded-xl px-4 py-2 text-sm font-medium ${
+                    isHardBlocked || hasOtherActiveBlock
+                      ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-800 dark:text-gray-600'
+                      : 'bg-[#C75B3A] text-white'
+                  }`}
+                >
+                  <Play size={14} />
+                  开始计时
+                </button>
+                {hasOtherActiveBlock && (
+                  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">已有进行中的时间块</p>
+                )}
+              </>
             )}
             {task.spentMinutes ? (
               <p className="mt-2 text-xs text-[#A8A29E]">已投入 {task.spentMinutes} 分钟</p>
