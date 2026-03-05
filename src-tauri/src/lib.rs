@@ -36,7 +36,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_clipboard_manager::init())
-        .plugin(tauri_plugin_global_shortcut::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
         .setup(move |app| {
@@ -45,8 +45,8 @@ pub fn run() {
 
             let runtime_state = runtime_process_state_for_setup.clone();
             tauri::async_runtime::spawn(async move {
-                // Fixed RT port for M4 integration（M4 固定端口 4077）.
-                if let Err(error) = ensure_runtime_started(runtime_state, None, Some(4077)).await {
+                // Fixed RT port for M4 integration（固定端口 9124）.
+                if let Err(error) = ensure_runtime_started(runtime_state, None, Some(9124)).await {
                     eprintln!("[tauri/setup] failed to auto-start embedded runtime: {error}");
                 }
             });
