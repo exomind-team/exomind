@@ -53,6 +53,7 @@ function createStorage(addEventImpl = addEventMock) {
 
 describe('TimeBlockServiceImpl', () => {
   beforeEach(() => {
+    window.localStorage.clear();
     addEventMock.mockReset();
     getEventStorageMock.mockReset();
     getEventStorageMock.mockReturnValue(createStorage());
@@ -356,6 +357,26 @@ describe('TimeBlockServiceImpl', () => {
     expect(pauseCalls).toHaveLength(1);
   });
 
+  it('blocks pause/resume once block is in feedback stage and does not emit extra events', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('no-rewind', { mode: 'countup' });
+    await service.markEnding();
+    await service.pauseBlock();
+    await service.resumeBlock();
+
+    const types = addEventMock.mock.calls.map(([event]) => (event as { type?: string }).type);
+    expect(types).toEqual(expect.arrayContaining(['block_start', 'block_end']));
+    expect(types).not.toContain('block_pause');
+    expect(types).not.toContain('block_resume');
+
+    const active = await service.loadActiveBlock();
+    expect(active?.phase).toBe('feedback_in_progress');
+    expect(active?.actionEndedAt).toBeTypeOf('number');
+    expect(active?.paused).toBe(false);
+  });
+
   it('does not start a new block when an active block exists', async () => {
     const env = createMemoryEnv();
     const service = new TimeBlockServiceImpl(env as never);
@@ -370,5 +391,106 @@ describe('TimeBlockServiceImpl', () => {
 
     const startCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_start');
     expect(startCalls).toHaveLength(1);
+  });
+
+  it('does not write duplicate block_end event when markEnding is called repeatedly', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    await service.startBlock('idempotent-ending', { mode: 'countup' });
+    await service.markEnding();
+    await service.markEnding();
+
+    const endCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_end');
+    expect(endCalls).toHaveLength(1);
+  });
+
+  it('keeps terminal marker for sync but exposes no active block after feedback submitted', async () => {
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+
+    const first = await service.startBlock('terminal-marker', { mode: 'countup' });
+    await service.markEnding();
+    const completed = await service.endBlock('done once');
+    const repeated = await service.endBlock('done twice');
+
+    const feedbackCalls = addEventMock.mock.calls.filter(([event]) => (event as { type?: string }).type === 'block_feedback');
+
+    expect(completed?.startId).toBe(first.startId);
+    expect(repeated).toBeNull();
+    expect(feedbackCalls).toHaveLength(1);
+    expect(await service.loadActiveBlock()).toBeNull();
+
+    const restarted = await service.startBlock('after-terminal', { mode: 'countup' });
+    expect(restarted.startId).not.toBe(first.startId);
+  });
+
+  it('publishes timeblock.completed to embedded RT on port 4077（发布到内嵌 RT 4077）', async () => {
+    const env = createMemoryEnv();
+    const addEvent = vi.fn();
+    const getEvents = vi.fn().mockResolvedValue([]);
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accepted: true, event_id: 'evt-1' }),
+    });
+
+    getEventStorageMock.mockReset();
+    getEventStorageMock.mockReturnValue({
+      addEvent,
+      getEvents,
+    });
+    vi.stubGlobal('fetch', fetchSpy as unknown as typeof fetch);
+
+    const service = new TimeBlockServiceImpl(env as never);
+    await service.startBlock('publish-rt', { mode: 'countup' });
+    await service.markEnding();
+    await service.endBlock('done');
+
+    for (let i = 0; i < 20 && fetchSpy.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://localhost:4077/signals/publish',
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
+  it('publishes to external runtime after target switch（切到外部后发布到外部 RT）', async () => {
+    window.localStorage.setItem('exomind:runtimeTargetMode', 'external');
+    window.localStorage.setItem('exomind:runtimeExternalAddress', '127.0.0.1:1949');
+
+    const env = createMemoryEnv();
+    const addEvent = vi.fn();
+    const getEvents = vi.fn().mockResolvedValue([]);
+    const fetchSpy = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accepted: true, event_id: 'evt-2' }),
+    });
+
+    getEventStorageMock.mockReset();
+    getEventStorageMock.mockReturnValue({
+      addEvent,
+      getEvents,
+    });
+    vi.stubGlobal('fetch', fetchSpy as unknown as typeof fetch);
+
+    const service = new TimeBlockServiceImpl(env as never);
+    await service.startBlock('publish-external-rt', { mode: 'countup' });
+    await service.markEnding();
+    await service.endBlock('done');
+
+    for (let i = 0; i < 20 && fetchSpy.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(fetchSpy).toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/signals/publish',
+      expect.objectContaining({ method: 'POST' }),
+    );
   });
 });

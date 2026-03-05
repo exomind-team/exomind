@@ -12,7 +12,7 @@
  */
 
 import { useState, useEffect, useRef, useCallback, forwardRef, useImperativeHandle } from 'react';
-import { Play, Pause, Square, ChevronDown, ChevronUp } from 'lucide-react';
+import { Play, Pause, Square, ChevronDown, ChevronUp, NotepadText } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
@@ -27,13 +27,16 @@ import {
   DialogFooter,
 } from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast-hook';
+import { FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS } from '@/config/feedback-preferences';
 import { getTimeBlockService, TimerMode, TimerConfig } from '@/lib/services';
+import type { ActiveBlockData } from '@/lib/types/event';
 import {
   DEFAULT_TIMER_END_SOUND_PRESET_ID,
   getTimerEndSoundPresetById,
   TIMER_END_SOUND_PRESETS,
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
+import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 
 interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
@@ -58,6 +61,17 @@ export interface TimeBlockWidgetHandle {
   endDialog: () => void;
 }
 
+type SkipFeedbackConfirmState = 'idle' | 'cooldown' | 'armed';
+
+function isFeedbackStage(block: ActiveBlockData): boolean {
+  if (block.feedbackSubmittedAt) {
+    return false;
+  }
+  return block.phase === 'feedback_in_progress'
+    || block.phase === 'action_ended'
+    || Boolean(block.actionEndedAt || block.feedbackStartedAt);
+}
+
 export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidgetProps>(function TimeBlockWidget({
   expanded: controlledExpanded,
   onExpandedChange,
@@ -74,6 +88,10 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const [internalExpanded, setInternalExpanded] = useState(false);
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
+  const [feedbackInProgress, setFeedbackInProgress] = useState(false);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<SkipFeedbackConfirmState>('idle');
+  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
 
   // 倒计时结束动作（纯前端配置，不持久化）
   const [countdownEndSoundEnabled, setCountdownEndSoundEnabled] = useState(true);
@@ -88,13 +106,47 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   // 定时器引用
   const timerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
+  const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isRunningRef = useRef(false);  // 使用 ref 跟踪运行状态，避免闭包问题
   const taskNameRef = useRef<HTMLTextAreaElement | null>(null);
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
+  const endingMarkedRef = useRef(false);
+  const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Service
   const timeBlockService = getTimeBlockService();
+
+  const clearSkipFeedbackConfirmInterval = useCallback(() => {
+    if (!skipFeedbackConfirmIntervalRef.current) {
+      return;
+    }
+    clearInterval(skipFeedbackConfirmIntervalRef.current);
+    skipFeedbackConfirmIntervalRef.current = null;
+  }, []);
+
+  const resetSkipFeedbackConfirm = useCallback(() => {
+    clearSkipFeedbackConfirmInterval();
+    setSkipFeedbackConfirmState('idle');
+    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
+  }, [clearSkipFeedbackConfirmInterval]);
+
+  const startSkipFeedbackConfirmCooldown = useCallback(() => {
+    clearSkipFeedbackConfirmInterval();
+    setSkipFeedbackConfirmState('cooldown');
+    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
+
+    skipFeedbackConfirmIntervalRef.current = setInterval(() => {
+      setSkipFeedbackCountdownSec((previousSeconds) => {
+        if (previousSeconds <= 1) {
+          clearSkipFeedbackConfirmInterval();
+          setSkipFeedbackConfirmState('armed');
+          return 0;
+        }
+        return previousSeconds - 1;
+      });
+    }, 1000);
+  }, [clearSkipFeedbackConfirmInterval]);
 
   const playCountdownEndSound = useCallback(async () => {
     if (!countdownEndSoundEnabled) return;
@@ -136,20 +188,87 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     return `${minutes}:${seconds.toString().padStart(2, '0')}`;
   };
 
-  // 加载进行中的时间块
+  const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
+    if (!block) {
+      if (timerState === 'idle') {
+        return;
+      }
+      setTimerState('idle');
+      setFeedbackInProgress(false);
+      setFeedbackSubmitting(false);
+      resetSkipFeedbackConfirm();
+      setFeedbackOpen(false);
+      setElapsed(timerMode === 'countdown' ? countdownMinutes * 60 * 1000 : 0);
+      setTaskName('');
+      startTimeRef.current = null;
+      countdownEndedRef.current = false;
+      countdownOverrunRef.current = false;
+      setCountdownOvertimeMs(0);
+      return;
+    }
+
+    setTaskName(block.name);
+    setTimerMode(block.mode);
+    if (block.mode === 'countdown' && block.targetMinutes) {
+      setCountdownMinutes(block.targetMinutes);
+    }
+    const restoredOverrunMs = block.mode === 'countdown' && continueAfterCountdownEnd
+      ? resolveCountdownOverrunMs(block)
+      : 0;
+    const hasRestoredOverrun = restoredOverrunMs > 0;
+    setElapsed(block.mode === 'countdown' && hasRestoredOverrun ? 0 : Math.max(0, block.elapsed));
+    const nextFeedbackInProgress = isFeedbackStage(block);
+    setFeedbackInProgress(nextFeedbackInProgress);
+    setFeedbackSubmitting(false);
+    resetSkipFeedbackConfirm();
+    setTimerState(nextFeedbackInProgress || block.paused ? 'paused' : 'running');
+    startTimeRef.current = block.startTime;
+    countdownEndedRef.current = hasRestoredOverrun;
+    countdownOverrunRef.current = hasRestoredOverrun;
+    setCountdownOvertimeMs(hasRestoredOverrun ? restoredOverrunMs : 0);
+  }, [continueAfterCountdownEnd, countdownMinutes, resetSkipFeedbackConfirm, timerMode, timerState]);
+
+  const enqueueServiceMutation = useCallback((
+    label: string,
+    execute: () => Promise<void>,
+  ): void => {
+    mutationQueueRef.current = mutationQueueRef.current.then(async () => {
+      try {
+        await execute();
+      } catch (error) {
+        console.error(`[TB-UI] ${label} failed`, error);
+        try {
+          const block = await timeBlockService.loadActiveBlock();
+          applyActiveBlock(block);
+        } catch (reloadError) {
+          console.error(`[TB-UI] ${label} recover failed`, reloadError);
+        }
+      }
+    });
+  }, [applyActiveBlock, timeBlockService]);
+
+  // 加载进行中的时间块并订阅变化
   useEffect(() => {
+    let cancelled = false;
+    const unsubscribe = timeBlockService.onBlockChange((block) => {
+      if (cancelled) return;
+      applyActiveBlock(block);
+    });
+
     const loadActiveBlock = async () => {
       const block = await timeBlockService.loadActiveBlock();
+      if (cancelled) return;
       if (block) {
-        setTaskName(block.name);
-        setTimerMode(block.mode);
-        setElapsed(block.elapsed);
-        setTimerState(block.paused ? 'paused' : 'running');
-        startTimeRef.current = block.startTime;
+        applyActiveBlock(block);
       }
     };
-    loadActiveBlock();
-  }, []);
+
+    void loadActiveBlock();
+    return () => {
+      cancelled = true;
+      unsubscribe();
+    };
+  }, [applyActiveBlock, timeBlockService]);
 
   // 启动定时器
   const startTimer = useCallback(() => {
@@ -199,8 +318,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           if (continueAfterCountdownEnd) {
             countdownOverrunRef.current = true;
             setCountdownOvertimeMs(overshoot);
-            // 持久化层仍保持倒计时归零（不扩展存储结构）
-            void timeBlockService.updateElapsed(0);
             return 0;
           } else {
             // 硬结束：停止计时并进入反馈流程
@@ -214,9 +331,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
             return 0;
           }
         }
-
-        // 同步到 Service
-        timeBlockService.updateElapsed(Math.max(0, newElapsed));
 
         return Math.max(0, newElapsed);
       });
@@ -234,8 +348,11 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     if (timerState !== 'running') {
 
       // 📌【2026-02-14 01:11:53】人改：硬结束时调用 markEnding，标记时间块的结束状态
-      if (timerState === 'ended') {
+      if (timerState === 'ended' && !endingMarkedRef.current) {
+        endingMarkedRef.current = true;
         void timeBlockService.markEnding();
+      } else if (timerState !== 'ended') {
+        endingMarkedRef.current = false;
       }
 
       isRunningRef.current = false;
@@ -266,37 +383,80 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
 
   // 暂停计时
   const handlePause = async () => {
+    if (feedbackInProgress) return;
     setTimerState('paused');
     isRunningRef.current = false;
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
-    await timeBlockService.pauseBlock();
+    enqueueServiceMutation('pauseBlock', async () => {
+      await timeBlockService.pauseBlock();
+    });
   };
 
   // 继续计时
   const handleResume = async () => {
+    if (feedbackInProgress) return;
     setTimerState('running');
-    await timeBlockService.resumeBlock();
+    enqueueServiceMutation('resumeBlock', async () => {
+      await timeBlockService.resumeBlock();
+    });
   };
 
   // 点击按钮结束计时（显示反馈对话框）
   const handleEndDialog = async () => {
+    if (feedbackInProgress) {
+      setFeedbackOpen(true);
+      return;
+    }
     // 📌【2026-02-14 00:53:03】【人写】需要标记反馈
     setTimerState('ended'); // * 📌【2026-02-14 01:43:50】【人写】其中就包含了「时间块结束」的动作，会添加「时间块结束」事件
+    setFeedbackInProgress(true);
     setFeedbackOpen(true);
   };
 
   // 对话框后，带反馈结束时间块
   const handleEndBlock = async (feedbackText?: string) => {
+    if (feedbackSubmitting) return;
+
+    const trimmedFeedback = feedbackText?.trim() ?? '';
+    if (trimmedFeedback.length === 0) {
+      if (skipFeedbackConfirmState === 'idle') {
+        startSkipFeedbackConfirmCooldown();
+        return;
+      }
+      if (skipFeedbackConfirmState === 'cooldown') {
+        return;
+      }
+    }
+
+    resetSkipFeedbackConfirm();
+    setFeedbackSubmitting(true);
+
+    const normalizedFeedback = trimmedFeedback || undefined;
+    try {
+      await timeBlockService.endBlock(normalizedFeedback);
+    } catch (error) {
+      console.error('[TB-UI] endBlock failed', error);
+      try {
+        const block = await timeBlockService.loadActiveBlock();
+        applyActiveBlock(block);
+      } catch (reloadError) {
+        console.error('[TB-UI] endBlock recover failed', reloadError);
+      }
+      setFeedbackSubmitting(false);
+      return;
+    }
+
     isRunningRef.current = false;
     if (timerRef.current) {
       cancelAnimationFrame(timerRef.current);
     }
 
-    await timeBlockService.endBlock(feedbackText || undefined);
-
     // 重置状态
+    setFeedbackOpen(false);
+    setFeedbackInProgress(false);
+    setFeedbackSubmitting(false);
     setTimerState('idle');
     setElapsed(0);
     setTaskName('');
@@ -306,8 +466,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     setCountdownOvertimeMs(0);
   };
 
+  const handleFeedbackDialogOpenChange = useCallback((nextOpen: boolean) => {
+    setFeedbackOpen(nextOpen);
+  }, []);
+
   // 暂停/继续切换
   const pauseOrResume = async () => {
+    if (feedbackInProgress) return;
     if (timerState === 'running') {
       await handlePause();
     } else if (timerState === 'paused') {
@@ -346,6 +511,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     const block = await timeBlockService.startBlock(name, config, description || undefined);
     setTaskName(name);
     setElapsed(block.elapsed);
+    setFeedbackInProgress(false);
     setTimerState('running');
     startTimeRef.current = block.startTime;
   };
@@ -353,11 +519,12 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   // 清理定时器
   useEffect(() => {
     return () => {
+      clearSkipFeedbackConfirmInterval();
       if (timerRef.current) {
         cancelAnimationFrame(timerRef.current);
       }
     };
-  }, []);
+  }, [clearSkipFeedbackConfirmInterval]);
 
   // 按钮状态
   const isIdle = timerState === 'idle';
@@ -370,6 +537,28 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const isCountdownWarning =
     timerMode === 'countdown'
     && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0));
+  const isEmptyFeedback = feedback.trim().length === 0;
+  const isSkipFeedbackCoolingDown = isEmptyFeedback && skipFeedbackConfirmState === 'cooldown';
+  const isEndActionDisabled = feedbackInProgress && feedbackOpen;
+  const endActionTitle = feedbackInProgress ? '反馈中' : '结束';
+  const endActionButtonVariant = feedbackInProgress ? 'brand' : 'destructive';
+  const mobileEndActionButtonVariant = feedbackInProgress ? 'brand' : 'outline';
+  const mobileEndActionButtonClass = feedbackInProgress
+    ? 'h-10 gap-2 rounded-[24px] border-0 bg-brand px-6 text-sm font-medium text-white hover:bg-brand/90 hover:text-white'
+    : 'h-10 gap-2 rounded-[24px] border-0 bg-[#FDECEB] px-6 text-sm font-medium text-[#C75B3A]';
+  const endActionButtonClass = feedbackInProgress
+    ? 'gap-1 bg-brand text-white hover:bg-brand/90 hover:text-white'
+    : 'gap-1';
+  const endActionIcon = feedbackInProgress
+    ? <NotepadText size={16} className="text-white" />
+    : <Square size={16} />;
+  const feedbackConfirmLabel = feedbackSubmitting
+    ? '提交中...'
+    : (isEmptyFeedback && skipFeedbackConfirmState === 'cooldown')
+      ? `确认跳过反馈(${skipFeedbackCountdownSec}s)`
+      : (isEmptyFeedback && skipFeedbackConfirmState === 'armed')
+        ? '确认跳过反馈'
+        : '确认结束';
   const rootClassName = variant === 'new-mobile' ? 'border-y border-[#E8E3DE] bg-white/80' : 'border-b bg-muted/30';
 
   return (
@@ -419,7 +608,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                     size="sm"
                     variant="outline"
                     onClick={handlePause}
-                    className="h-10 gap-2 rounded-[24px] border-0 bg-[#EDECE9] px-6 text-sm font-medium text-[#1C1917]"
+                    disabled={feedbackInProgress}
+                    className="h-10 gap-2 rounded-[24px] border-0 bg-warning px-6 text-sm font-medium text-white hover:bg-warning/90 hover:text-white"
                   >
                     <Pause size={16} />
                     <span>暂停</span>
@@ -429,6 +619,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   <Button
                     size="sm"
                     onClick={handleResume}
+                    disabled={feedbackInProgress}
                     className="h-10 gap-2 rounded-[24px] bg-[#16A34A] px-6 text-sm font-medium text-white hover:bg-[#15803D]"
                   >
                     <Play size={16} />
@@ -437,11 +628,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                 )}
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant={mobileEndActionButtonVariant}
                   onClick={handleEndDialog}
-                  className="h-10 gap-2 rounded-[24px] border-0 bg-[#FDECEB] px-6 text-sm font-medium text-[#C75B3A]"
+                  disabled={isEndActionDisabled}
+                  title={endActionTitle}
+                  className={mobileEndActionButtonClass}
                 >
-                  <Square size={16} />
+                  {endActionIcon}
                   <span>结束</span>
                 </Button>
               </div>
@@ -481,18 +674,21 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   size="sm"
                   variant="outline"
                   onClick={handlePause}
-                  className="gap-1"
+                  disabled={feedbackInProgress}
+                  className="gap-1 border-0 bg-warning text-white hover:bg-warning/90 hover:text-white"
                 >
                   <Pause size={16} />
                   <span>暂停</span>
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant={endActionButtonVariant}
                   onClick={handleEndDialog}
-                  className="gap-1"
+                  disabled={isEndActionDisabled}
+                  title={endActionTitle}
+                  className={endActionButtonClass}
                 >
-                  <Square size={16} />
+                  {endActionIcon}
                   <span>结束</span>
                 </Button>
               </>
@@ -503,6 +699,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                 <Button
                   size="sm"
                   onClick={handleResume}
+                  disabled={feedbackInProgress}
                   className="gap-1 bg-green-600 hover:bg-green-700"
                 >
                   <Play size={16} />
@@ -510,11 +707,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                 </Button>
                 <Button
                   size="sm"
-                  variant="destructive"
+                  variant={endActionButtonVariant}
                   onClick={handleEndDialog}
-                  className="gap-1"
+                  disabled={isEndActionDisabled}
+                  title={endActionTitle}
+                  className={endActionButtonClass}
                 >
-                  <Square size={16} />
+                  {endActionIcon}
                   <span>结束</span>
                 </Button>
               </>
@@ -681,11 +880,8 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       )}
 
       {/* 身心反馈对话框 */}
-      <Dialog open={feedbackOpen} onOpenChange={setFeedbackOpen}>
-        <DialogContent
-          onEscapeKeyDown={(e) => e.preventDefault()}
-          onInteractOutside={(e) => e.preventDefault()}
-        >
+      <Dialog open={feedbackOpen} onOpenChange={handleFeedbackDialogOpenChange}>
+        <DialogContent>
           <DialogHeader>
             <DialogTitle>时间块结束</DialogTitle>
             <DialogDescription>
@@ -695,13 +891,15 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           <Textarea
             placeholder="身心状态如何？"
             value={feedback}
-            onChange={(e) => setFeedback(e.target.value)}
+            onChange={(e) => {
+              resetSkipFeedbackConfirm();
+              setFeedback(e.target.value);
+            }}
             onKeyDown={(e) => {
               if (e.key !== 'Enter') return;
               if (e.shiftKey || e.ctrlKey) return;
               e.preventDefault();
-              setFeedbackOpen(false);
-              handleEndBlock(feedback);
+              void handleEndBlock(feedback);
             }}
             autoFocus
             className="min-h-[88px] resize-none"
@@ -711,12 +909,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           <DialogFooter>
             <Button
               size="sm"
+              data-testid="timeblock-feedback-confirm"
+              disabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
               onClick={() => {
-                setFeedbackOpen(false);
-                handleEndBlock(feedback);
+                void handleEndBlock(feedback);
               }}
             >
-              确认结束
+              {feedbackConfirmLabel}
             </Button>
           </DialogFooter>
         </DialogContent>

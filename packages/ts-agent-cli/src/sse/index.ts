@@ -98,6 +98,29 @@ export const DEFAULT_CONFIG = {
     TIMEOUT: 30000,
 } as const;
 
+// ==================== SignalPool 导出 ====================
+
+// SignalPool 类型
+export type {
+    SignalEvent,
+    SignalRoute,
+    TargetType,
+    PublishRequest,
+    PublishResponse,
+} from "./signal-types.js";
+
+// SignalPool 监听器
+export { SignalListener } from "./signal-listener.js";
+export type { SignalListenerConfig } from "./signal-listener.js";
+
+// SignalPool 发送器
+export { SignalSender } from "./signal-sender.js";
+export type { SignalSenderConfig } from "./signal-sender.js";
+
+// SignalPool 客户端
+export { SignalClient, createSignalClient } from "./signal-client.js";
+export type { SignalClientConfig } from "./signal-client.js";
+
 // ==================== 版本信息 ====================
 
 /**

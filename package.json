@@ -1,7 +1,7 @@
 {
   "name": "exomind",
   "private": true,
-  "version": "0.3.3",
+  "version": "0.3.4",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -32,6 +32,7 @@
     "test:e2e:issue204": "node Scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.issue204.test.ts --config tests/e2e/playwright.issue204.config.ts",
     "test:e2e:issue205": "node Scripts/test/playwright-runner.cjs test tests/e2e/agent-runtime-host.issue205.test.ts --config tests/e2e/playwright.issue205.config.ts",
     "test:e2e:issue201": "node Scripts/test/playwright-runner.cjs test tests/e2e/agents-page.issue201.test.ts --config tests/e2e/playwright.issue201.config.ts",
+    "test:e2e:issue245f": "node Scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.signal-routes.issue245f.test.ts --config tests/e2e/playwright.issue245f.config.ts",
     "test:e2e:issue243": "node Scripts/test/playwright-runner.cjs test tests/e2e/command-palette.issue243.test.ts --config tests/e2e/playwright.issue243.config.ts",
     "test:e2e:report": "node Scripts/test/playwright-runner.cjs test --reporter=html",
     "test:e2e:website": "node Scripts/test/playwright-runner.cjs test tests/e2e/website.dark-mode.test.ts tests/e2e/website.smoke.test.ts --config tests/e2e/playwright.website.config.ts",
@@ -53,6 +54,7 @@
     "@tanstack/react-router": "^1.158.0",
     "@tauri-apps/api": "^2",
     "@tauri-apps/plugin-opener": "^2",
+    "@xyflow/react": "^12.10.1",
     "agentation-mcp": "^1.2.0",
     "baseline-browser-mapping": "^2.10.0",
     "caniuse-lite": "^1.0.30001772",
@@ -102,6 +104,7 @@
     "typescript": "~5.6.2",
     "uuid": "^13.0.0",
     "vite": "^6.0.3",
+    "vite-tsconfig-paths": "^6.1.1",
     "vitest": "^4.0.18"
   }
 }

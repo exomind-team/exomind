@@ -2,6 +2,7 @@ import { ArrowLeft, Bot, MoreHorizontal, SendHorizontal, UserRound } from 'lucid
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentConversationMessage } from '@/lib/types/agent-hub';
+import { createUuidV4 } from '@/lib/utils/uuid';
 
 function createMessage(id: string, role: 'agent' | 'user', content: string): AgentConversationMessage {
   return {
@@ -40,8 +41,8 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
     setSending(true);
     setInputValue('');
 
-    const userMessage = createMessage(`msg-user-${crypto.randomUUID()}`, 'user', prompt);
-    const pendingMessageId = `msg-agent-pending-${crypto.randomUUID()}`;
+    const userMessage = createMessage(`msg-user-${createUuidV4()}`, 'user', prompt);
+    const pendingMessageId = `msg-agent-pending-${createUuidV4()}`;
     const streamMessage = createMessage(pendingMessageId, 'agent', '');
     setMessages((prev) => [...prev, userMessage, streamMessage]);
 

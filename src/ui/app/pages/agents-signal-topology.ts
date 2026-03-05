@@ -1,0 +1,158 @@
+import type { TargetType, SignalRoute } from '@/lib/types/signal-pool';
+import type { RuntimeAggregatedAgent } from '@/services/runtime-manager';
+
+export type SignalGraphNodeType = 'topic' | 'agent' | 'actor' | 'frontend';
+
+export interface SignalRouteRow {
+  id: string;
+  topic: string;
+  targetType: TargetType;
+  targetRef: string;
+  status: 'active' | 'inactive';
+  hostLabel?: string;
+}
+
+export interface SignalGraphNode {
+  id: string;
+  type: SignalGraphNodeType;
+  label: string;
+  status: string;
+  position: {
+    x: number;
+    y: number;
+  };
+}
+
+export interface SignalGraphEdge {
+  id: string;
+  source: string;
+  target: string;
+  label: string;
+  topic: string;
+  targetType: TargetType;
+  targetRef: string;
+  active: boolean;
+}
+
+export interface SignalGraph {
+  nodes: SignalGraphNode[];
+  edges: SignalGraphEdge[];
+}
+
+function asRouteStatus(enabled: boolean): SignalRouteRow['status'] {
+  return enabled ? 'active' : 'inactive';
+}
+
+function topicNodeId(topic: string): string {
+  return `topic:${topic}`;
+}
+
+function targetNodeId(targetType: TargetType, targetRef: string): string {
+  return `${targetType}:${targetRef}`;
+}
+
+function sortByRouteKey(left: SignalRoute, right: SignalRoute): number {
+  return `${left.topic}:${left.target_type}:${left.target_ref}`.localeCompare(
+    `${right.topic}:${right.target_type}:${right.target_ref}`
+  );
+}
+
+export function buildSignalRouteRows(routes: SignalRoute[], hostLabel?: string): SignalRouteRow[] {
+  return [...routes].sort(sortByRouteKey).map((route) => ({
+    id: route.id,
+    topic: route.topic,
+    targetType: route.target_type,
+    targetRef: route.target_ref,
+    status: asRouteStatus(route.enabled),
+    hostLabel,
+  }));
+}
+
+function getAgentStatusMap(agents: RuntimeAggregatedAgent[]): Map<string, string> {
+  const map = new Map<string, string>();
+  for (const agent of agents) {
+    if (!map.has(agent.id)) {
+      map.set(agent.id, agent.status);
+    }
+  }
+  return map;
+}
+
+function nodeTypeToColumn(type: SignalGraphNodeType): number {
+  if (type === 'topic') return 0;
+  if (type === 'agent') return 1;
+  if (type === 'actor') return 2;
+  return 3;
+}
+
+function nodeTypeLabel(type: SignalGraphNodeType): string {
+  if (type === 'topic') return 'signal topic（信号主题）';
+  if (type === 'agent') return 'agent';
+  if (type === 'actor') return 'actor';
+  return 'frontend';
+}
+
+export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregatedAgent[]): SignalGraph {
+  const nextNodes = new Map<string, SignalGraphNode>();
+  const nextEdges = new Map<string, SignalGraphEdge>();
+  const statusByAgentId = getAgentStatusMap(agents);
+  const rowByType = new Map<SignalGraphNodeType, number>([
+    ['topic', 0],
+    ['agent', 0],
+    ['actor', 0],
+    ['frontend', 0],
+  ]);
+
+  for (const route of routes) {
+    const fromNodeId = topicNodeId(route.topic);
+    if (!nextNodes.has(fromNodeId)) {
+      const row = rowByType.get('topic') ?? 0;
+      nextNodes.set(fromNodeId, {
+        id: fromNodeId,
+        type: 'topic',
+        label: route.topic,
+        status: nodeTypeLabel('topic'),
+        position: {
+          x: 120 + nodeTypeToColumn('topic') * 240,
+          y: 80 + row * 110,
+        },
+      });
+      rowByType.set('topic', row + 1);
+    }
+
+    const toNodeId = targetNodeId(route.target_type, route.target_ref);
+    if (!nextNodes.has(toNodeId)) {
+      const kind = route.target_type as SignalGraphNodeType;
+      const row = rowByType.get(kind) ?? 0;
+      const status = kind === 'agent' ? (statusByAgentId.get(route.target_ref) ?? 'unknown') : nodeTypeLabel(kind);
+      nextNodes.set(toNodeId, {
+        id: toNodeId,
+        type: kind,
+        label: route.target_ref,
+        status,
+        position: {
+          x: 120 + nodeTypeToColumn(kind) * 240,
+          y: 80 + row * 110,
+        },
+      });
+      rowByType.set(kind, row + 1);
+    }
+
+    const edgeId = `route:${route.id}`;
+    nextEdges.set(edgeId, {
+      id: edgeId,
+      source: fromNodeId,
+      target: toNodeId,
+      label: `${route.topic} → ${route.target_ref}`,
+      topic: route.topic,
+      targetType: route.target_type,
+      targetRef: route.target_ref,
+      active: route.enabled,
+    });
+  }
+
+  return {
+    nodes: Array.from(nextNodes.values()),
+    edges: Array.from(nextEdges.values()),
+  };
+}

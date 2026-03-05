@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
+import type { SignalRoute } from '@/lib/types/signal-pool';
 
 const runtimeManagerMocks = vi.hoisted(() => ({
   refreshSnapshot: vi.fn(),
@@ -14,6 +15,96 @@ const runtimeControlMocks = vi.hoisted(() => ({
   stopRuntime: vi.fn(),
   getStatus: vi.fn(),
 }));
+
+vi.mock('@xyflow/react', () => ({
+  ReactFlow: ({
+    nodes,
+    edges,
+    children,
+    onNodeClick,
+  }: {
+    nodes?: Array<{ id: string; data?: { label?: string } }>;
+    edges?: Array<{ id: string; label?: string; source?: string; target?: string }>;
+    children?: unknown;
+    onNodeClick?: (event: unknown, node: { id: string }) => void;
+  }) => (
+    <div data-testid="mock-react-flow">
+      {(nodes ?? []).map((node) => (
+        <button
+          key={node.id}
+          type="button"
+          data-testid={`mock-react-flow-node-${node.id}`}
+          onClick={() => onNodeClick?.({}, node)}
+        >
+          {node.data?.label ?? node.id}
+        </button>
+      ))}
+      {(edges ?? []).map((edge) => (
+        <div key={edge.id} data-testid={`mock-react-flow-edge-${edge.id}`}>
+          {edge.label ?? `${edge.source} -> ${edge.target}`}
+        </div>
+      ))}
+      {children}
+    </div>
+  ),
+  Background: () => <div data-testid="mock-react-flow-background" />,
+  Controls: () => <div data-testid="mock-react-flow-controls" />,
+  MiniMap: () => <div data-testid="mock-react-flow-minimap" />,
+  Handle: () => null,
+  Position: { Left: 'left', Right: 'right' },
+  useNodesState: <T,>(initialNodes: T[]) => [initialNodes, vi.fn(), vi.fn()] as const,
+  MarkerType: { ArrowClosed: 'arrowclosed' },
+}));
+
+const signalRouteFetchMock = vi.hoisted(() => vi.fn());
+
+const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [
+  {
+    id: 'route-001',
+    enabled: true,
+    topic: 'user.input.text',
+    target_type: 'agent',
+    target_ref: 'classifier',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-002',
+    enabled: true,
+    topic: 'user.input.text',
+    target_type: 'actor',
+    target_ref: 'eventlog',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-003',
+    enabled: true,
+    topic: 'session.end',
+    target_type: 'agent',
+    target_ref: 'reviewer',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-004',
+    enabled: true,
+    topic: 'timeblock.completed',
+    target_type: 'agent',
+    target_ref: 'reviewer',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
+    id: 'route-005',
+    enabled: false,
+    topic: 'input.classified',
+    target_type: 'actor',
+    target_ref: 'task',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+];
 
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
@@ -86,6 +177,13 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
         },
       ],
     });
+
+    signalRouteFetchMock.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => SAMPLE_SIGNAL_ROUTES,
+    } as Response);
+    vi.stubGlobal('fetch', signalRouteFetchMock);
   });
 
   it('shows aggregated runtime agents with source host badge（聚合显示并标注来源主机）', async () => {
@@ -94,7 +192,9 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
 
     await waitFor(() => {
       expect(screen.getByText('Echo Agent')).toBeInTheDocument();
-      expect(screen.getByText(/来源 127\.0\.0\.1:1919/)).toBeInTheDocument();
+      expect(screen.getAllByText(/来源 127\.0\.0\.1:1919/).length).toBeGreaterThanOrEqual(1);
+      expect(screen.getByTestId('agent-signal-route-section')).toBeInTheDocument();
+      expect(screen.getAllByTestId(/agent-signal-route-row-/).length).toBeGreaterThanOrEqual(5);
     });
   });
 

@@ -22,6 +22,7 @@
  */
 
 import type { IASRPort, ASRInput, ASRResult, ASRPartialResult } from '../../environment/interfaces/asr.port';
+import { createUuidV4 } from '../../utils/uuid';
 
 // ========== 配置 ==========
 
@@ -207,7 +208,7 @@ export class VolcanoEngineASRAdapter implements IASRPort {
    * 连接并开始识别
    */
   private async connectAndRecognize(stream: MediaStream, lang?: string): Promise<void> {
-    this.connectId = crypto.randomUUID();
+    this.connectId = createUuidV4();
 
     console.log('[ASR-Volcano] 准备连接 WebSocket...');
 

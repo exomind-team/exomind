@@ -13,7 +13,7 @@
 
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { Avatar, AvatarFallback } from '@/components/ui/avatar';
-import { Play, Pause, Square, FileText, NotepadText } from 'lucide-react';
+import { Play, Pause, Square, FileText, NotepadText, Bot } from 'lucide-react';
 import { Badge } from '@/components/ui/badge';
 import { VoiceMessageInput, type VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { TimeBlockWidget, type TimeBlockWidgetHandle } from '@/components/TimeBlockWidget';
@@ -24,6 +24,7 @@ import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
+import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { useSyncStore } from '@/ui/stores/sync-store';
@@ -36,10 +37,15 @@ import {
   normalizeStorageEventsAscending,
   prependOlderEventsAscending,
 } from './chat-event-pagination';
+import { shouldSkipSyncRefresh } from './chat-sync-change-filter';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
+
+function perfNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
 
 interface ChatPageProps {
   variant?: 'default' | 'new-mobile'; // new-mobile（新移动端外观）用于 v0.3.0 UI 重构
@@ -80,6 +86,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const nextCursorRef = useRef<EventPageCursor | null>(null);
   const loadingOlderRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn, credentials } = useSyncStore();
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
@@ -126,10 +134,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   }, [scrollToBottom]);
 
   const refreshLatestEvents = useCallback(async (storage: EventStorage) => {
+    const t0 = perfNow();
     const page = await storage.getEventsPage({ limit: PAGE_SIZE });
+    const queryMs = Math.round(perfNow() - t0);
     const latestAsc = normalizeStorageEventsAscending(page.events);
 
+    const mergeStart = perfNow();
     setEvents((prev) => mergeLatestEventsAscending(prev, latestAsc));
+    const mergeMs = Math.round(perfNow() - mergeStart);
     setHasMore((prev) => prev || page.hasMore);
 
     if (!nextCursorRef.current) {
@@ -141,7 +153,32 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         scrollToBottom('smooth');
       }
     });
+    console.log('[ChatPage] refreshLatestEvents', {
+      fetched: page.events.length,
+      queryMs,
+      mergeMs,
+      totalMs: Math.round(perfNow() - t0),
+    });
   }, [scrollToBottom]);
+
+  const scheduleLatestRefresh = useCallback((storage: EventStorage): void => {
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    void (async () => {
+      try {
+        do {
+          refreshQueuedRef.current = false;
+          await refreshLatestEvents(storage);
+        } while (refreshQueuedRef.current);
+      } finally {
+        refreshInFlightRef.current = false;
+      }
+    })();
+  }, [refreshLatestEvents]);
 
   const loadOlderEvents = useCallback(async () => {
     const storage = storageRef.current;
@@ -208,9 +245,19 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     storageRef.current = storage;
     void loadInitialEvents(storage);
 
-    const unsubscribe = storage.onRemoteChange(() => {
+    const unsubscribe = storage.onRemoteChange((change: unknown) => {
+      const direction = (
+        change &&
+        typeof change === 'object' &&
+        'direction' in change &&
+        typeof (change as { direction?: unknown }).direction === 'string'
+      ) ? (change as { direction: string }).direction : 'unknown';
+      console.log('[ChatPage] onRemoteChange', { direction });
+      if (shouldSkipSyncRefresh(change)) {
+        return;
+      }
       shouldStickToBottomRef.current = isNearBottom();
-      void refreshLatestEvents(storage);
+      scheduleLatestRefresh(storage);
     });
 
     if (isLoggedIn && currentUser) {
@@ -220,7 +267,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         setSyncStatus('connected');
         console.log('[ChatPage] 远程同步已启动');
       }).catch((err) => {
-        console.error('[ChatPage] 同步启动失败:', err);
+        const [message, payload] = buildSyncErrorLog('ChatPage', remoteUrl, err);
+        console.error(message, payload);
         setSyncStatus('disconnected');
       });
     }
@@ -229,7 +277,15 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       unsubscribe();
       storage.stopSync();
     };
-  }, [currentUser, isLoggedIn, isNearBottom, loadInitialEvents, refreshLatestEvents, syncServerUrl]);
+  }, [
+    currentUser,
+    isLoggedIn,
+    isNearBottom,
+    loadInitialEvents,
+    refreshLatestEvents,
+    scheduleLatestRefresh,
+    syncServerUrl,
+  ]);
 
   // 处理发送消息
   const handleSend = useCallback(async (content: string) => {
@@ -237,9 +293,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     if (!trimmed) return;
 
     if (storageRef.current) {
+      const t0 = perfNow();
       shouldStickToBottomRef.current = true;
       await eventLogService.current.addEvent(trimmed);
       await refreshLatestEvents(storageRef.current);
+      console.log('[ChatPage] handleSend done', { totalMs: Math.round(perfNow() - t0) });
     }
   }, [refreshLatestEvents]);
 
@@ -324,6 +382,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件图标
   const getEventIcon = (event: Event) => {
+    if (event.tags.has('agent_feedback')) return <Bot size={14} />;
     if (event.tags.has('block_start')) return <Play size={14} />;
     if (event.tags.has('block_pause')) return <Pause size={14} />;
     if (event.tags.has('block_resume')) return <Play size={14} />;
@@ -334,6 +393,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件头像背景色
   const getEventAvatarColor = (event: Event) => {
+    if (event.tags.has('agent_feedback')) return 'bg-violet-500';
     if (event.tags.has('block_start')) return 'bg-success';
     if (event.tags.has('block_pause')) return 'bg-warning';
     if (event.tags.has('block_resume')) return 'bg-success';
@@ -344,6 +404,9 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
   // 获取事件背景色
   const getEventBgColor = (event: Event) => {
+    if (event.tags.has('agent_feedback')) {
+      return 'bg-violet-50 text-violet-900 dark:bg-violet-950 dark:text-violet-100 rounded-br-md';
+    }
     if (event.tags.has('block_start')) {
       return 'bg-blue-100 text-blue-800 dark:bg-blue-950 dark:text-blue-100 rounded-br-md';
     }
@@ -379,6 +442,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     || event.tags.has('block_resume')
     || event.tags.has('block_end')
     || event.tags.has('block_feedback')
+    || event.tags.has('agent_feedback')
   );
 
   // 按日期分组
@@ -476,6 +540,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
             {events.map((event) => {
               const systemEvent = isSystemEvent(event);
               if (systemEvent) {
+                const isAgentFeedback = event.tags.has('agent_feedback');
                 return (
                   <div
                     key={event.id}
@@ -496,7 +561,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
                         <span className="text-muted">{assistantDeviceLabel}</span>
                         <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       </div>
-                      <div className="rounded-2xl border border-card bg-card px-[14px] py-3 text-[13px] leading-[1.6] text-strong">
+                      <div
+                        className={`rounded-2xl border px-[14px] py-3 text-[13px] leading-[1.6] ${
+                          isAgentFeedback
+                            ? 'border-violet-200 bg-violet-50 text-violet-950 dark:border-violet-800 dark:bg-violet-950/35 dark:text-violet-100'
+                            : 'border-card bg-card text-strong'
+                        }`}
+                        data-testid={isAgentFeedback ? 'new-mobile-agent-feedback-bubble' : undefined}
+                      >
                         <EventMarkdown content={event.content} />
                       </div>
                       <MessageActions content={event.content} align="start" />

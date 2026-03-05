@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS,
   getFeedbackPreferences,
   setFeedbackPreferences,
   subscribeFeedbackPreferencesChanges,
@@ -27,6 +28,10 @@ describe('feedback preferences（反馈内容开关）', () => {
       statisticsEnabled: false,
       quickFeedbackEnabled: true,
     });
+  });
+
+  it('freezes empty-feedback confirm cool-down policy at 5 seconds', () => {
+    expect(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS).toBe(5);
   });
 
   it('persists and emits custom event（持久化并广播）', () => {

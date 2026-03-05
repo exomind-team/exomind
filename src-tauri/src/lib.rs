@@ -12,7 +12,8 @@ use commands::file_commands::{
     list_files, pick_json_file, read_file, read_file_binary, save_json_file, write_file,
 };
 use commands::runtime_commands::{
-    runtime_service_start, runtime_service_status, runtime_service_stop, RuntimeProcessState,
+    ensure_runtime_started, runtime_service_start, runtime_service_status, runtime_service_stop,
+    signal_publish_fast, RuntimeProcessState,
 };
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 
@@ -25,6 +26,7 @@ fn greet(name: &str) -> String {
 pub fn run() {
     let ws_client_state = std::sync::Arc::new(WsClientState::default());
     let runtime_process_state = std::sync::Arc::new(RuntimeProcessState::new());
+    let runtime_process_state_for_setup = runtime_process_state.clone();
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
@@ -33,6 +35,16 @@ pub fn run() {
         .plugin(tauri_plugin_clipboard_manager::init())
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
+        .setup(move |_app| {
+            let runtime_state = runtime_process_state_for_setup.clone();
+            tauri::async_runtime::spawn(async move {
+                // Fixed RT port for M4 integration（M4 固定端口 4077）.
+                if let Err(error) = ensure_runtime_started(runtime_state, None, Some(4077)).await {
+                    eprintln!("[tauri/setup] failed to auto-start embedded runtime: {error}");
+                }
+            });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             greet,
             // WebSocket 客户端命令
@@ -63,6 +75,7 @@ pub fn run() {
             runtime_service_start,
             runtime_service_stop,
             runtime_service_status,
+            signal_publish_fast,
         ]);
 
     #[cfg(debug_assertions)]
