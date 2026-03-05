@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import {
   canTransition,
   transition,
@@ -99,6 +99,14 @@ describe('canTransition - invalid transitions', () => {
   it('abandoned → completed 非法（终态不可转换）', () => {
     expect(canTransition('abandoned', 'completed')).toBe(false)
   })
+
+  it('in_progress → in_progress 自转换非法', () => {
+    expect(canTransition('in_progress', 'in_progress')).toBe(false)
+  })
+
+  it('suspended → suspended 自转换非法', () => {
+    expect(canTransition('suspended', 'suspended')).toBe(false)
+  })
 })
 
 // ────────────────────────────────────────────────────────────
@@ -114,14 +122,15 @@ describe('transition - immutability', () => {
     expect(next.status).toBe('in_progress')
   })
 
-  it('合法转换更新 updatedAt', () => {
+  it('合法转换更新 updatedAt（严格大于，而非等于）', () => {
+    vi.useFakeTimers()
     const original = makeTask('in_progress')
-    const before = original.updatedAt
+    vi.advanceTimersByTime(10) // 推进 10ms，确保 Date.now() 返回更大值
 
-    // 模拟时间推移（至少 1ms 区别）
     const next = transition(original, 'suspended')
 
-    expect(next.updatedAt).toBeGreaterThanOrEqual(before)
+    expect(next.updatedAt).toBeGreaterThan(original.updatedAt)
+    vi.useRealTimers()
   })
 })
 
