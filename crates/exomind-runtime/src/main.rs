@@ -1,30 +1,9 @@
-use std::net::SocketAddr;
-use std::sync::Arc;
-
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    let port = exomind_runtime::configured_port_from_env()?;
+    let mut handle = exomind_runtime::start().await?;
+    println!("exomind-rt listening on http://{}", handle.local_addr());
 
-    // 支持环境变量 EXOMIND_RT_BIND 指定绑定地址，默认 127.0.0.1
-    // 例如：EXOMIND_RT_BIND=0.0.0.0 允许局域网访问
-    let bind_host = std::env::var("EXOMIND_RT_BIND").unwrap_or_else(|_| "127.0.0.1".to_string());
-    let bind_addr: SocketAddr = format!("{bind_host}:{port}").parse()?;
-
-    let listener = tokio::net::TcpListener::bind(bind_addr).await?;
-    let local_addr = listener.local_addr()?;
-
-    let state = exomind_runtime::AppState::new(local_addr.port());
-
-    // Spawn in-process actors
-    let _task_actor = exomind_runtime::signal::actors::task_actor::spawn_task_actor(
-        Arc::clone(&state.signal_pool),
-    );
-    let _eventlog_actor = exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(
-        Arc::clone(&state.signal_pool),
-    );
-
-    println!("exomind-rt listening on http://{local_addr}");
-
-    axum::serve(listener, exomind_runtime::app_with_state(state)).await?;
+    tokio::signal::ctrl_c().await?;
+    handle.stop().await?;
     Ok(())
 }

@@ -1000,6 +1000,7 @@ version = "0.3.3"
 dependencies = [
  "async-trait",
  "chrono",
+ "exomind-runtime",
  "futures",
  "futures-util",
  "parking_lot",

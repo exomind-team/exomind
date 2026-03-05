@@ -2,6 +2,13 @@
 
 本文件给项目内自动化 Agent 使用，执行规范以 `CLAUDE.md` 为准。
 
+## 开发环境定位（Termux / Web-first）
+
+1. 默认开发环境是 **Termux**，默认执行链路是 **Web-first**（先保证 Web 端功能正确）。
+2. 日常开发与联调优先使用 Node 工具链（`node` / `npx`），先完成 Web + 同步服务验证。
+3. Tauri / Android 构建验证属于后置环节，在 Web 链路通过后再执行。
+4. 默认联调端口：Web `5173`，同步服务 `6984`（多 worktree 并行时按约定分配独立端口）。
+
 ## 目标
 
 1. `dev` 是开发主线。
@@ -47,6 +54,19 @@
 3. 新建 worktree 开发后，先执行依赖安装；`server/` 子项目使用 `bun install --omit optional`。
 4. 端到端测试优先使用 `tests/e2e/playwright.issue*.config.ts` 的独立端口配置，避免污染主开发端口。
 5. 完成后给出测试证据（命令 + 通过结果）并同步到 PR/Issue 评论。
+6. 执行中必须维护任务清单，持续更新进行中/完成状态。
+7. 默认执行顺序：先改代码，再编译/测试，再启动服务联调，再提交推送。
+8. 编译与测试（默认 Node 链路）：
+   - `npx tsc --noEmit`
+   - `npx vitest run <相关测试>`
+9. 联调服务启动（Web-first）：
+   - Web：`npx vite --host 0.0.0.0 --port 5173`
+   - Sync：`EXOMIND_POUCHDB_HOST=0.0.0.0 EXOMIND_POUCHDB_PORT=6984 node server/pouchdb-server.js`
+10. 服务启动后用 `curl` 验证可用性（至少 `HTTP 200`）：
+   - `curl -sS -D - -o /dev/null http://127.0.0.1:5173 | head -n 8`
+   - `curl -sS -D - -o /dev/null http://127.0.0.1:6984 | head -n 8`
+11. 推送后必须在 PR 评论同步变更摘要、测试命令、结果证据；若一个 PR 覆盖两个相关 issue，需同步更新 PR 描述。
+12. 合并前先检查是否有新的 blocking review；无阻塞且关键回归通过后再合并到 `dev`。
 
 ## 图标刷新命令
 

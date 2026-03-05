@@ -24,6 +24,7 @@ import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
+import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { useSyncStore } from '@/ui/stores/sync-store';
@@ -36,10 +37,15 @@ import {
   normalizeStorageEventsAscending,
   prependOlderEventsAscending,
 } from './chat-event-pagination';
+import { shouldSkipSyncRefresh } from './chat-sync-change-filter';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
+
+function perfNow(): number {
+  return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
 
 interface ChatPageProps {
   variant?: 'default' | 'new-mobile'; // new-mobile（新移动端外观）用于 v0.3.0 UI 重构
@@ -80,6 +86,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const nextCursorRef = useRef<EventPageCursor | null>(null);
   const loadingOlderRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
+  const refreshInFlightRef = useRef(false);
+  const refreshQueuedRef = useRef(false);
   const eventLogService = useRef(getEventLogService());
   const { currentUser, isLoggedIn, credentials } = useSyncStore();
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
@@ -126,10 +134,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   }, [scrollToBottom]);
 
   const refreshLatestEvents = useCallback(async (storage: EventStorage) => {
+    const t0 = perfNow();
     const page = await storage.getEventsPage({ limit: PAGE_SIZE });
+    const queryMs = Math.round(perfNow() - t0);
     const latestAsc = normalizeStorageEventsAscending(page.events);
 
+    const mergeStart = perfNow();
     setEvents((prev) => mergeLatestEventsAscending(prev, latestAsc));
+    const mergeMs = Math.round(perfNow() - mergeStart);
     setHasMore((prev) => prev || page.hasMore);
 
     if (!nextCursorRef.current) {
@@ -141,7 +153,32 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         scrollToBottom('smooth');
       }
     });
+    console.log('[ChatPage] refreshLatestEvents', {
+      fetched: page.events.length,
+      queryMs,
+      mergeMs,
+      totalMs: Math.round(perfNow() - t0),
+    });
   }, [scrollToBottom]);
+
+  const scheduleLatestRefresh = useCallback((storage: EventStorage): void => {
+    if (refreshInFlightRef.current) {
+      refreshQueuedRef.current = true;
+      return;
+    }
+
+    refreshInFlightRef.current = true;
+    void (async () => {
+      try {
+        do {
+          refreshQueuedRef.current = false;
+          await refreshLatestEvents(storage);
+        } while (refreshQueuedRef.current);
+      } finally {
+        refreshInFlightRef.current = false;
+      }
+    })();
+  }, [refreshLatestEvents]);
 
   const loadOlderEvents = useCallback(async () => {
     const storage = storageRef.current;
@@ -208,9 +245,19 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     storageRef.current = storage;
     void loadInitialEvents(storage);
 
-    const unsubscribe = storage.onRemoteChange(() => {
+    const unsubscribe = storage.onRemoteChange((change: unknown) => {
+      const direction = (
+        change &&
+        typeof change === 'object' &&
+        'direction' in change &&
+        typeof (change as { direction?: unknown }).direction === 'string'
+      ) ? (change as { direction: string }).direction : 'unknown';
+      console.log('[ChatPage] onRemoteChange', { direction });
+      if (shouldSkipSyncRefresh(change)) {
+        return;
+      }
       shouldStickToBottomRef.current = isNearBottom();
-      void refreshLatestEvents(storage);
+      scheduleLatestRefresh(storage);
     });
 
     if (isLoggedIn && currentUser) {
@@ -220,7 +267,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         setSyncStatus('connected');
         console.log('[ChatPage] 远程同步已启动');
       }).catch((err) => {
-        console.error('[ChatPage] 同步启动失败:', err);
+        const [message, payload] = buildSyncErrorLog('ChatPage', remoteUrl, err);
+        console.error(message, payload);
         setSyncStatus('disconnected');
       });
     }
@@ -229,7 +277,15 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       unsubscribe();
       storage.stopSync();
     };
-  }, [currentUser, isLoggedIn, isNearBottom, loadInitialEvents, refreshLatestEvents, syncServerUrl]);
+  }, [
+    currentUser,
+    isLoggedIn,
+    isNearBottom,
+    loadInitialEvents,
+    refreshLatestEvents,
+    scheduleLatestRefresh,
+    syncServerUrl,
+  ]);
 
   // 处理发送消息
   const handleSend = useCallback(async (content: string) => {
@@ -237,9 +293,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     if (!trimmed) return;
 
     if (storageRef.current) {
+      const t0 = perfNow();
       shouldStickToBottomRef.current = true;
       await eventLogService.current.addEvent(trimmed);
       await refreshLatestEvents(storageRef.current);
+      console.log('[ChatPage] handleSend done', { totalMs: Math.round(perfNow() - t0) });
     }
   }, [refreshLatestEvents]);
 

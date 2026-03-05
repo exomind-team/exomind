@@ -1,5 +1,6 @@
 import { vi } from 'vitest';
 import '@testing-library/jest-dom';
+import { mkdirSync } from 'node:fs';
 
 // Mock scrollIntoView (jsdom 不支持)
 Element.prototype.scrollIntoView = vi.fn();
@@ -44,3 +45,18 @@ function ensureLocalStorage() {
 }
 
 ensureLocalStorage();
+
+function ensurePouchDbTestDirs() {
+  const dirs = [
+    '.tmp/pouchdb-event-storage/',
+    '.tmp/pouchdb-event-storage/a/',
+    '.tmp/pouchdb-event-storage/b/',
+    '.tmp/pouchdb-active-block/',
+  ];
+
+  dirs.forEach((dir) => {
+    mkdirSync(dir, { recursive: true });
+  });
+}
+
+ensurePouchDbTestDirs();

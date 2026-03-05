@@ -10,6 +10,9 @@ const {
   resumeBlockMock,
   endBlockMock,
   updateElapsedMock,
+  onBlockChangeMock,
+  startSyncMock,
+  stopSyncMock,
 } = vi.hoisted(() => ({
   loadActiveBlockMock: vi.fn(),
   startBlockMock: vi.fn(),
@@ -18,6 +21,9 @@ const {
   resumeBlockMock: vi.fn(),
   endBlockMock: vi.fn(),
   updateElapsedMock: vi.fn(),
+  onBlockChangeMock: vi.fn(() => () => {}),
+  startSyncMock: vi.fn().mockResolvedValue(undefined),
+  stopSyncMock: vi.fn().mockResolvedValue(undefined),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -29,6 +35,9 @@ vi.mock('@/lib/services', () => ({
     resumeBlock: resumeBlockMock,
     endBlock: endBlockMock,
     updateElapsed: updateElapsedMock,
+    onBlockChange: onBlockChangeMock,
+    startSync: startSyncMock,
+    stopSync: stopSyncMock,
   }),
 }));
 
@@ -52,6 +61,12 @@ describe('TimeBlockWidget resume behavior', () => {
     resumeBlockMock.mockReset();
     endBlockMock.mockReset();
     updateElapsedMock.mockReset();
+    onBlockChangeMock.mockReset();
+    onBlockChangeMock.mockReturnValue(() => {});
+    startSyncMock.mockReset();
+    stopSyncMock.mockReset();
+    startSyncMock.mockResolvedValue(undefined);
+    stopSyncMock.mockResolvedValue(undefined);
   });
 
   afterEach(() => {
@@ -100,6 +115,31 @@ describe('TimeBlockWidget resume behavior', () => {
     expect(rafMock).not.toHaveBeenCalled();
   });
 
+  it('restores countdown overtime after remounting a running countdown block', async () => {
+    const resumeAt = Date.now();
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-overrun',
+      name: 'Countdown overtime',
+      startTime: resumeAt - 90_000,
+      elapsed: 0,
+      mode: 'countdown',
+      targetMinutes: 1,
+      paused: false,
+      phase: 'running',
+      accumulatedRunMs: 90_000,
+      lastResumedAt: resumeAt,
+      pauseAccumulatedMs: 0,
+    });
+
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    await screen.findByText(/^\+0:3\d$/);
+  });
+
   it('marks ending before opening feedback dialog when clicking end', async () => {
     markEndingMock.mockResolvedValue(undefined);
     loadActiveBlockMock.mockResolvedValue({
@@ -122,5 +162,34 @@ describe('TimeBlockWidget resume behavior', () => {
     await waitFor(() => {
       expect(markEndingMock).toHaveBeenCalledTimes(1);
     });
+  });
+
+  it('keeps resume disabled but allows reopening feedback dialog in feedback stage', async () => {
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-feedback-stage',
+      name: 'Feedback stage',
+      startTime: now - 5000,
+      elapsed: 1000,
+      mode: 'countup',
+      paused: false,
+      phase: 'feedback_in_progress',
+      actionEndedAt: now - 1000,
+      feedbackStartedAt: now - 1000,
+    });
+
+    render(<TimeBlockWidget />);
+
+    const resumeButton = await screen.findByRole('button', { name: '继续' });
+    const endButton = await screen.findByRole('button', { name: '结束' });
+
+    expect(resumeButton).toBeDisabled();
+    expect(endButton).not.toBeDisabled();
+
+    fireEvent.click(resumeButton);
+    fireEvent.click(endButton);
+
+    expect(resumeBlockMock).not.toHaveBeenCalled();
+    expect(markEndingMock).not.toHaveBeenCalled();
+    await screen.findByTestId('timeblock-feedback-textarea');
   });
 });

@@ -5,6 +5,8 @@
  * @module timeblock/types
  */
 
+import { createUuidV4 } from '../utils/uuid';
+
 // ============================================================================
 // 基础类型
 // ============================================================================
@@ -52,7 +54,7 @@ export class EventImpl implements Event {
   private _meta?: JSONObject;
 
   constructor(content: NoteContent, tags?: Tag[], meta?: JSONObject) {
-    this.id = crypto.randomUUID();
+    this.id = createUuidV4();
     this.timestamp = Date.now();
     this._content = content;
     this._tags = new Set(tags || []);
@@ -135,7 +137,7 @@ export class TimeBlockImpl implements TimeBlock {
   private _meta?: JSONObject;
 
   constructor(name: string, startId: UUID, tags?: Tag[], note?: string) {
-    this.id = crypto.randomUUID();
+    this.id = createUuidV4();
     this.name = name;
     this.startId = startId;
     this._tags = new Set(tags || []);

@@ -6,6 +6,7 @@ import type {
   TaskItem,
   TaskTimerMode,
 } from '@/lib/types/task';
+import { createUuidV4 } from '@/lib/utils/uuid';
 
 const TASK_STORAGE_KEY = 'task_items';
 const TASK_GOAL_STORAGE_KEY = 'task_goal_groups';
@@ -55,7 +56,7 @@ export class TaskWebAdapter implements ITaskPort {
     const tasks = await this.readTasks();
     const createdAt = nowIso();
     const nextTask: TaskItem = {
-      id: crypto.randomUUID(),
+      id: createUuidV4(),
       title: input.title.trim(),
       note: input.note?.trim() || undefined,
       status: 'todo',
@@ -155,4 +156,3 @@ export class TaskWebAdapter implements ITaskPort {
     await this.writeTasks(tasks);
   }
 }
-

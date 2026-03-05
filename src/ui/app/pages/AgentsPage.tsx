@@ -9,30 +9,41 @@ import {
   Mail,
   MessageCircle,
   Monitor,
-  Newspaper,
   Plus,
   Rocket,
   Rss,
   Send,
   Settings,
   Sparkles,
-  TimerReset,
   Waypoints,
   Webhook,
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useEffect, useMemo, useState } from 'react';
-import { getAgentHubService } from '@/lib/services';
+import {
+  ReactFlow,
+  Background,
+  Controls,
+  Handle,
+  MarkerType,
+  Position,
+  type Edge as FlowEdge,
+  type Node as FlowNode,
+  type NodeProps as FlowNodeProps,
+  useNodesState,
+} from '@xyflow/react';
+import '@xyflow/react/dist/style.css';
+import { getUseMockDataEnabled } from '@/config/mock-data';
+import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+import type { SignalRoute } from '@/lib/types/signal-pool';
 import type {
   AgentDeviceGroup,
-  AgentHubEdge,
   AgentHubListItem,
   AgentHubListSection,
   AgentHubNodeStatus,
-  AgentHubNode,
-  AgentHubTopologyData,
+  RuntimeHostRecord,
   AgentHubViewMode,
   RuntimeServiceStatus,
 } from '@/lib/types/agent-hub';
@@ -41,6 +52,14 @@ import {
   type RuntimeAggregatedAgent,
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
+import { RuntimeClient } from '@/services/runtime-client';
+import {
+  buildSignalGraph,
+  buildSignalRouteRows,
+  type SignalGraph,
+  type SignalGraphNodeType,
+  type SignalRouteRow,
+} from './agents-signal-topology';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Bot, label: '拓扑' },
@@ -72,48 +91,86 @@ const ADD_NODE_OPTIONS: AddNodeOption[] = [
   },
 ];
 
-type TopologyLayoutItem = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-  shape: 'bubble' | 'card' | 'chip';
-};
+const DIRECT_RUNTIME_PORT_CANDIDATES = [1950, 1949] as const;
+const DIRECT_RUNTIME_PORT_STORAGE_KEY = 'exomind:agentHubRuntimePorts';
 
-// Topology layout（拓扑布局）使用设计稿坐标近似值，保持移动端视觉比例。
-const TOPOLOGY_LAYOUT: Record<string, TopologyLayoutItem> = {
-  'output-telegram': { x: 16, y: 42, width: 58, height: 58, shape: 'bubble' },
-  'output-wechat': { x: 104, y: 42, width: 58, height: 58, shape: 'bubble' },
-  'output-email': { x: 192, y: 42, width: 58, height: 58, shape: 'bubble' },
-  'output-feishu': { x: 280, y: 42, width: 58, height: 58, shape: 'bubble' },
-  'agent-daily': { x: 24, y: 230, width: 156, height: 86, shape: 'card' },
-  'agent-summary': { x: 196, y: 246, width: 144, height: 80, shape: 'card' },
-  'actor-timer': { x: 112, y: 338, width: 120, height: 50, shape: 'chip' },
-  'actor-cleaner': { x: 244, y: 338, width: 112, height: 50, shape: 'chip' },
-  'input-rss': { x: 20, y: 490, width: 56, height: 56, shape: 'bubble' },
-  'input-wechat': { x: 108, y: 490, width: 56, height: 56, shape: 'bubble' },
-  'input-api': { x: 196, y: 490, width: 56, height: 56, shape: 'bubble' },
-  'input-cron': { x: 284, y: 490, width: 56, height: 56, shape: 'bubble' },
-};
+const MOCK_SIGNAL_ROUTES_FALLBACK: SignalRoute[] = [
+  {
+    id: 'mock-route-001',
+    enabled: true,
+    topic: 'user.input.text',
+    target_type: 'agent',
+    target_ref: 'classifier',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-002',
+    enabled: true,
+    topic: 'user.input.text',
+    target_type: 'actor',
+    target_ref: 'eventlog',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-003',
+    enabled: true,
+    topic: 'session.end',
+    target_type: 'agent',
+    target_ref: 'reviewer',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-004',
+    enabled: true,
+    topic: 'timeblock.completed',
+    target_type: 'agent',
+    target_ref: 'reviewer',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-005',
+    enabled: true,
+    topic: 'input.classified',
+    target_type: 'actor',
+    target_ref: 'task',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+  {
+    id: 'mock-route-006',
+    enabled: true,
+    topic: '*',
+    target_type: 'frontend',
+    target_ref: 'ui',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
+];
 
-function normalizeHexColor(color: string): string {
-  return color.length === 9 ? color.slice(0, 7) : color;
-}
-
-function getNodeIcon(node: AgentHubNode): LucideIcon {
-  if (node.id === 'output-telegram') return Send;
-  if (node.id === 'output-wechat') return MessageCircle;
-  if (node.id === 'output-email') return Mail;
-  if (node.id === 'output-feishu') return Rocket;
-  if (node.id === 'agent-daily') return Newspaper;
-  if (node.id === 'agent-summary') return Sparkles;
-  if (node.id === 'actor-timer') return AlarmClock;
-  if (node.id === 'actor-cleaner') return Filter;
-  if (node.id === 'input-rss') return Rss;
-  if (node.id === 'input-wechat') return MessageCircle;
-  if (node.id === 'input-api') return Webhook;
-  return TimerReset;
-}
+const MOCK_RUNTIME_AGENTS_FALLBACK: RuntimeAggregatedAgent[] = [
+  {
+    id: 'classifier',
+    name: 'Classifier Agent',
+    description: 'mock route classifier',
+    status: 'available',
+    sourceHostId: 'mock-runtime',
+    sourceHostName: 'mock-runtime',
+    sourceHostAddress: 'mock',
+  },
+  {
+    id: 'reviewer',
+    name: 'Reviewer Agent',
+    description: 'mock route reviewer',
+    status: 'available',
+    sourceHostId: 'mock-runtime',
+    sourceHostName: 'mock-runtime',
+    sourceHostAddress: 'mock',
+  },
+];
 
 function getListItemIcon(item: AgentHubListItem): LucideIcon {
   if (item.id.includes('rss')) return Rss;
@@ -193,44 +250,153 @@ function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): A
   });
 }
 
+function sortRouteHostsByPriority(hosts: RuntimeHostSnapshot[]): RuntimeHostSnapshot[] {
+  return [...hosts].sort((left, right) => {
+    const leftScore = left.connectionState === 'online' ? 0 : left.connectionState === 'error' ? 1 : 2;
+    const rightScore = right.connectionState === 'online' ? 0 : right.connectionState === 'error' ? 1 : 2;
+    return leftScore - rightScore;
+  });
+}
+
+function createDirectRuntimeHost(host: string, port: number): RuntimeHostRecord {
+  const nowIso = new Date().toISOString();
+  return {
+    id: `runtime-direct-${host}-${port}`.replace(/[^\w-]/g, '-'),
+    name: `${host}:${port}`,
+    host,
+    port,
+    status: 'unknown',
+    createdAt: nowIso,
+    updatedAt: nowIso,
+    isLocal: true,
+  };
+}
+
+function getDirectRuntimePortCandidates(): number[] {
+  if (typeof window === 'undefined') {
+    return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+  }
+
+  try {
+    const raw = window.localStorage.getItem(DIRECT_RUNTIME_PORT_STORAGE_KEY);
+    if (!raw) return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+
+    const ports = parsed
+      .map((item) => Number(item))
+      .filter((port) => Number.isInteger(port) && port > 0 && port <= 65535);
+    if (ports.length === 0) return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+
+    return Array.from(new Set(ports));
+  } catch {
+    return [...DIRECT_RUNTIME_PORT_CANDIDATES];
+  }
+}
+
+function buildDirectRuntimeCandidates(hosts: RuntimeHostSnapshot[]): RuntimeHostRecord[] {
+  const existing = new Set(hosts.map((item) => `${item.host.host}:${item.host.port}`));
+  const hostCandidates = new Set<string>(['127.0.0.1']);
+  const portCandidates = getDirectRuntimePortCandidates();
+
+  if (typeof window !== 'undefined' && window.location?.hostname) {
+    hostCandidates.add(window.location.hostname);
+  }
+  hostCandidates.add('localhost');
+
+  const candidates: RuntimeHostRecord[] = [];
+  for (const host of hostCandidates) {
+    for (const port of portCandidates) {
+      const key = `${host}:${port}`;
+      if (existing.has(key)) continue;
+      candidates.push(createDirectRuntimeHost(host, port));
+    }
+  }
+  return candidates;
+}
+
+function mapRuntimeAgentsForHost(host: RuntimeHostRecord, agents: Array<{ id: string; name: string; description: string; status: string }>): RuntimeAggregatedAgent[] {
+  return agents.map((agent) => ({
+    ...agent,
+    sourceHostId: host.id,
+    sourceHostName: host.name,
+    sourceHostAddress: `${host.host}:${host.port}`,
+  }));
+}
+
+type SignalFlowNodeData = {
+  label: string;
+  subtitle: string;
+  nodeType: SignalGraphNodeType;
+};
+
+type SignalFlowNodeType = FlowNode<SignalFlowNodeData, SignalGraphNodeType>;
+
+function nodeTypeTint(nodeType: SignalGraphNodeType): string {
+  if (nodeType === 'topic') return '#C75B3A';
+  if (nodeType === 'agent') return '#0D9488';
+  if (nodeType === 'actor') return '#F59E0B';
+  return '#6366F1';
+}
+
+function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
+  const tint = nodeTypeTint(data.nodeType);
+  const handleBaseStyle = {
+    width: 8,
+    height: 8,
+    border: 0,
+    background: tint,
+    opacity: 0,
+    pointerEvents: 'none' as const,
+  };
+  if (data.nodeType === 'frontend') {
+    return (
+      <div className="relative h-[70px] w-[130px]">
+        <Handle type="target" position={Position.Left} style={handleBaseStyle} />
+        <Handle type="source" position={Position.Right} style={handleBaseStyle} />
+        <div
+          className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-white dark:bg-[#1C1917]"
+          style={{ borderColor: `${tint}80` }}
+        />
+        <div className="absolute inset-0 flex flex-col items-center justify-center">
+          <p className="max-w-[120px] truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{data.label}</p>
+          <p className="mt-1 max-w-[120px] truncate text-[10px] text-[#78716C] dark:text-[#A8A29E]">{data.subtitle}</p>
+        </div>
+      </div>
+    );
+  }
+
+  const shapeClass =
+    data.nodeType === 'topic'
+      ? 'rounded-full px-5 py-3'
+      : data.nodeType === 'actor'
+        ? 'rounded-xl px-4 py-3'
+        : 'rounded-md px-4 py-3';
+
+  return (
+    <div
+      className={`min-w-[120px] border bg-white text-center shadow-sm dark:bg-[#1C1917] ${shapeClass}`}
+      style={{ borderColor: `${tint}80` }}
+    >
+      <Handle type="target" position={Position.Left} style={handleBaseStyle} />
+      <Handle type="source" position={Position.Right} style={handleBaseStyle} />
+      <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{data.label}</p>
+      <p className="mt-1 truncate text-[10px] text-[#78716C] dark:text-[#A8A29E]">{data.subtitle}</p>
+    </div>
+  );
+}
+
+const SIGNAL_NODE_TYPES = {
+  topic: SignalFlowNode,
+  agent: SignalFlowNode,
+  actor: SignalFlowNode,
+  frontend: SignalFlowNode,
+} as const;
+
 function getDeviceTypeIcon(groupId: string): LucideIcon {
   if (groupId.includes('cloud')) return Waypoints;
   return Monitor;
-}
-
-function getNodeCenter(layout: TopologyLayoutItem): { x: number; y: number } {
-  return {
-    x: layout.x + layout.width / 2,
-    y: layout.y + layout.height / 2,
-  };
-}
-
-function getEdgeEndpoints(edge: AgentHubEdge): { from: { x: number; y: number }; to: { x: number; y: number } } | null {
-  const fromLayout = TOPOLOGY_LAYOUT[edge.fromNodeId];
-  const toLayout = TOPOLOGY_LAYOUT[edge.toNodeId];
-  if (!fromLayout || !toLayout) return null;
-
-  const fromCenter = getNodeCenter(fromLayout);
-  const toCenter = getNodeCenter(toLayout);
-
-  const from = {
-    x: fromCenter.x,
-    y: fromCenter.y > toCenter.y ? fromLayout.y : fromLayout.y + fromLayout.height,
-  };
-  const to = {
-    x: toCenter.x,
-    y: toCenter.y > fromCenter.y ? toLayout.y : toLayout.y + toLayout.height,
-  };
-
-  return { from, to };
-}
-
-function buildEdgePath(edge: AgentHubEdge): string | null {
-  const endpoints = getEdgeEndpoints(edge);
-  if (!endpoints) return null;
-  const { from, to } = endpoints;
-  const controlY = (from.y + to.y) / 2;
-  return `M ${from.x} ${from.y} C ${from.x} ${controlY}, ${to.x} ${controlY}, ${to.x} ${to.y}`;
 }
 
 function ViewToggle({
@@ -267,175 +433,74 @@ function ViewToggle({
   );
 }
 
-function TopologyNode({
-  node,
-  selected,
-  muted,
-  onSelect,
-}: {
-  node: AgentHubNode;
-  selected: boolean;
-  muted: boolean;
-  onSelect: (nodeId: string) => void;
-}) {
-  const layout = TOPOLOGY_LAYOUT[node.id];
-  if (!layout) return null;
-
-  const Icon = getNodeIcon(node);
-  const baseColor = normalizeHexColor(node.brandColor);
-
-  if (layout.shape === 'bubble') {
-    return (
-      <button
-        type="button"
-        data-testid={`agent-topology-node-${node.id}`}
-        data-muted={muted ? 'true' : 'false'}
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect(node.id);
-        }}
-        className="absolute flex flex-col items-center"
-        style={{
-          left: layout.x,
-          top: layout.y,
-          width: layout.width,
-          opacity: muted ? 0.32 : 1,
-          transition: 'opacity 160ms ease, transform 160ms ease',
-        }}
-      >
-        <div
-          className={`flex h-10 w-10 items-center justify-center rounded-full border ${
-            selected ? 'ring-2 ring-offset-1 ring-offset-[#FAF7F5] dark:ring-offset-[#1C1917]' : ''
-          }`}
-          style={{
-            borderColor: `${baseColor}50`,
-            color: baseColor,
-            backgroundColor: `${baseColor}1A`,
-          }}
-        >
-          <Icon size={15} />
-        </div>
-        <span className="mt-1 text-[10px] font-medium text-[#57534E] dark:text-[#D6D3D1]">{node.name}</span>
-      </button>
-    );
-  }
-
-  if (layout.shape === 'chip') {
-    return (
-      <button
-        type="button"
-        data-testid={`agent-topology-node-${node.id}`}
-        data-muted={muted ? 'true' : 'false'}
-        onClick={(event) => {
-          event.stopPropagation();
-          onSelect(node.id);
-        }}
-        className={`absolute flex items-center gap-2 rounded-xl border px-3 py-2 text-left transition ${
-          selected
-            ? 'border-[#C75B3A] bg-white shadow-[0_8px_20px_-14px_rgba(199,91,58,0.9)] dark:border-[#E8734E] dark:bg-[#2A2522]'
-            : 'border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]'
-        }`}
-        style={{
-          left: layout.x,
-          top: layout.y,
-          width: layout.width,
-          minHeight: layout.height,
-          opacity: muted ? 0.35 : 1,
-        }}
-      >
-        <div
-          className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg"
-          style={{ backgroundColor: `${baseColor}18`, color: baseColor }}
-        >
-          <Icon size={13} />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-[12px] font-semibold text-[#44403C] dark:text-[#F5F5F4]">{node.name}</p>
-          <p className="truncate text-[10px] text-[#A8A29E] dark:text-[#78716C]">{node.subtitle ?? node.status}</p>
-        </div>
-      </button>
-    );
-  }
-
-  return (
-    <button
-      type="button"
-      data-testid={`agent-topology-node-${node.id}`}
-      data-muted={muted ? 'true' : 'false'}
-      onClick={(event) => {
-        event.stopPropagation();
-        onSelect(node.id);
-      }}
-      className={`absolute rounded-2xl border bg-white px-3 py-3 text-left transition dark:bg-[#1C1917] ${
-        selected
-          ? 'border-[#C75B3A] shadow-[0_12px_24px_-16px_rgba(199,91,58,0.9)] dark:border-[#E8734E]'
-          : 'border-[#E7E5E4] dark:border-[#292524]'
-      }`}
-      style={{
-        left: layout.x,
-        top: layout.y,
-        width: layout.width,
-        minHeight: layout.height,
-        opacity: muted ? 0.35 : 1,
-      }}
-    >
-      <div className="flex items-center gap-2">
-        <div
-          className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl"
-          style={{ backgroundColor: `${baseColor}1F`, color: baseColor }}
-        >
-          <Icon size={15} />
-        </div>
-        <div className="min-w-0">
-          <p className="truncate text-[13px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{node.name}</p>
-          <p className="truncate text-[10px] text-[#A8A29E] dark:text-[#78716C]">{node.subtitle ?? node.status}</p>
-        </div>
-      </div>
-      <div className="mt-2 flex items-center gap-1 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
-        <span
-          className="inline-block h-1.5 w-1.5 rounded-full"
-          style={{ backgroundColor: node.status === 'running' ? '#22C55E' : '#A8A29E' }}
-        />
-        {node.status === 'running' ? '运行中' : '待机中'}
-      </div>
-    </button>
-  );
-}
-
 function TopologyView({
-  topology,
+  graph,
   selectedNodeId,
   onSelectNode,
   onClearSelection,
 }: {
-  topology: AgentHubTopologyData;
+  graph: SignalGraph;
   selectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
   onClearSelection: () => void;
 }) {
-  const selectedNode = topology.nodes.find((item) => item.id === selectedNodeId) ?? null;
+  const isDarkMode = typeof document !== 'undefined' && document.documentElement.classList.contains('dark');
+  const activeEdgeColor = isDarkMode ? '#FB923C' : '#C75B3A';
+  const inactiveEdgeColor = isDarkMode ? '#57534E' : '#A8A29E';
+  const edgeLabelColor = isDarkMode ? '#D6D3D1' : '#78716C';
+  const edgeLabelBgColor = isDarkMode ? '#1C1917' : '#FAF7F5';
+  const backgroundDotColor = isDarkMode ? '#44403C' : '#E7E5E4';
 
-  const selectionState = useMemo(() => {
-    if (!selectedNodeId) {
-      return {
-        highlightedEdgeIds: new Set<string>(),
-        connectedNodeIds: new Set<string>(),
-      };
-    }
+  const selectedNode = graph.nodes.find((item) => item.id === selectedNodeId) ?? null;
 
-    const connectedNodeIds = new Set<string>([selectedNodeId]);
-    const highlightedEdgeIds = new Set<string>();
+  const nextFlowNodes = useMemo<SignalFlowNodeType[]>(() => {
+    return graph.nodes.map((node) => ({
+      id: node.id,
+      type: node.type,
+      position: node.position,
+      draggable: true,
+      data: {
+        label: node.label,
+        subtitle: node.status,
+        nodeType: node.type,
+      },
+    }));
+  }, [graph.nodes]);
+  const [flowNodes, setFlowNodes, onFlowNodesChange] = useNodesState<SignalFlowNodeType>(nextFlowNodes);
 
-    topology.edges.forEach((edge) => {
-      if (edge.fromNodeId === selectedNodeId || edge.toNodeId === selectedNodeId) {
-        highlightedEdgeIds.add(edge.id);
-        connectedNodeIds.add(edge.fromNodeId);
-        connectedNodeIds.add(edge.toNodeId);
-      }
-    });
+  useEffect(() => {
+    setFlowNodes(nextFlowNodes);
+  }, [nextFlowNodes, setFlowNodes]);
 
-    return { highlightedEdgeIds, connectedNodeIds };
-  }, [selectedNodeId, topology.edges]);
+  const flowEdges = useMemo<FlowEdge[]>(() => {
+    return graph.edges.map((edge) => ({
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      animated: edge.active,
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        width: 18,
+        height: 18,
+      },
+      style: edge.active
+        ? { stroke: activeEdgeColor, strokeWidth: 1.7 }
+        : { stroke: inactiveEdgeColor, strokeWidth: 1.2, strokeDasharray: '5 4' },
+      label: `${edge.topic} → ${edge.targetRef}`,
+      labelStyle: {
+        fill: edgeLabelColor,
+        fontSize: 10,
+        fontWeight: 500,
+      },
+      labelBgStyle: {
+        fill: edgeLabelBgColor,
+        fillOpacity: 0.95,
+      },
+      data: {
+        active: edge.active,
+      },
+    }));
+  }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, graph.edges, inactiveEdgeColor]);
 
   return (
     <section data-testid="agent-topology-view" className="space-y-3" onClick={onClearSelection}>
@@ -443,47 +508,24 @@ function TopologyView({
         data-testid="agent-topology-canvas"
         className="relative h-[568px] overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
       >
-        <div className="absolute left-3 top-2 rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">输出节点</div>
-        <div className="absolute left-3 top-[205px] rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">Agent / Actor</div>
-        <div className="absolute left-3 top-[462px] rounded-md bg-[#F5F0ED] px-2 py-1 text-[10px] font-semibold text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]">信号输入</div>
-
-        <svg className="absolute inset-0 h-full w-full" viewBox="0 0 356 568" fill="none" aria-hidden="true">
-          {topology.edges.map((edge) => {
-            const path = buildEdgePath(edge);
-            if (!path) return null;
-
-            const highlighted = selectionState.highlightedEdgeIds.has(edge.id);
-            const hasSelection = Boolean(selectedNodeId);
-            const baseColor = normalizeHexColor(edge.color);
-            const opacity = hasSelection ? (highlighted ? 1 : 0.18) : 0.45;
-            const strokeWidth = hasSelection ? (highlighted ? 2.5 : 1.1) : 1.5;
-
-            return (
-              <path
-                key={edge.id}
-                data-testid={`agent-topology-edge-${edge.id}`}
-                d={path}
-                stroke={baseColor}
-                strokeWidth={strokeWidth}
-                strokeLinecap="round"
-                opacity={opacity}
-              />
-            );
-          })}
-        </svg>
-
-        {topology.nodes.map((node) => {
-          const muted = Boolean(selectedNodeId) && !selectionState.connectedNodeIds.has(node.id);
-          return (
-            <TopologyNode
-              key={node.id}
-              node={node}
-              selected={selectedNodeId === node.id}
-              muted={muted}
-              onSelect={onSelectNode}
-            />
-          );
-        })}
+        <ReactFlow
+          data-testid="agent-signal-flow"
+          nodes={flowNodes}
+          edges={flowEdges}
+          nodeTypes={SIGNAL_NODE_TYPES}
+          fitView
+          fitViewOptions={{ padding: 0.2 }}
+          minZoom={0.3}
+          maxZoom={1.8}
+          onNodesChange={onFlowNodesChange}
+          onNodeClick={(_, node: SignalFlowNodeType) => {
+            onSelectNode(node.id);
+          }}
+          proOptions={{ hideAttribution: true }}
+        >
+          <Background gap={20} color={backgroundDotColor} />
+          <Controls showInteractive />
+        </ReactFlow>
       </div>
 
       {selectedNode && (
@@ -492,7 +534,7 @@ function TopologyView({
           className="rounded-2xl border border-[#E7E5E4] bg-[#1C1917] px-4 py-3 text-white dark:border-[#44403C] dark:bg-[#0C0A09]"
           onClick={(event) => event.stopPropagation()}
         >
-          <p className="text-sm font-semibold">{selectedNode.name}</p>
+          <p className="text-sm font-semibold">{selectedNode.label}</p>
           <p className="mt-1 text-xs text-white/80">状态：{selectedNode.status}</p>
           <p className="mt-1 text-xs text-white/60">类型：{selectedNode.type}</p>
         </div>
@@ -504,11 +546,15 @@ function TopologyView({
 function ListView({
   sections,
   hostSnapshots,
+  routeRows,
+  routeHostLabel,
   onRetryHost,
   onItemNavigate,
 }: {
   sections: AgentHubListSection[];
   hostSnapshots: RuntimeHostSnapshot[];
+  routeRows: SignalRouteRow[];
+  routeHostLabel?: string;
   onRetryHost: (hostId: string) => Promise<void>;
   onItemNavigate: (path: string) => void;
 }) {
@@ -533,6 +579,59 @@ function ListView({
           );
         })}
       </div>
+
+      <article
+        data-testid="agent-signal-route-section"
+        className="space-y-2 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
+      >
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信号路由</p>
+            <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
+              {routeHostLabel ? `来源 ${routeHostLabel}` : '未连接 runtime'}
+            </p>
+          </div>
+          <span className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+            {routeRows.length} 条
+          </span>
+        </div>
+
+        {routeRows.length === 0 && (
+          <p className="rounded-lg bg-[#FAF7F5] px-3 py-2 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+            暂无路由数据（No signal routes）
+          </p>
+        )}
+
+        {routeRows.length > 0 && (
+          <div className="space-y-1.5">
+            {routeRows.map((row) => (
+              <div
+                key={row.id}
+                data-testid={`agent-signal-route-row-${row.id}`}
+                className="flex items-center justify-between gap-2 rounded-lg bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]"
+              >
+                <div className="min-w-0">
+                  <p className="truncate text-xs font-medium text-[#1C1917] dark:text-[#FAFAF9]">{row.topic}</p>
+                  <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{`${row.targetType} ${row.targetRef}`}</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-[#A8A29E] dark:text-[#78716C]">→</span>
+                  <span
+                    data-testid={`agent-signal-route-status-${row.id}`}
+                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
+                      row.status === 'active'
+                        ? 'bg-[#22C55E20] text-[#16A34A]'
+                        : 'bg-[#A8A29E30] text-[#57534E] dark:text-[#D6D3D1]'
+                    }`}
+                  >
+                    {row.status}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </article>
 
       {problemHosts.length > 0 && (
         <article className="space-y-2 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-3 dark:border-[#7F1D1D] dark:bg-[#2B1111]">
@@ -695,7 +794,7 @@ function DeviceView({
             </span>
           </div>
           <p className="mt-1 text-[10px] text-[#A8A29E]">
-            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 4077}
+            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 1949}
           </p>
           {runtimeServiceStatus?.pid && (
             <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
@@ -1123,7 +1222,9 @@ function RuntimeHostManagerSheet({
 
 export function AgentsPage() {
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
-  const [topology, setTopology] = useState<AgentHubTopologyData>({ nodes: [], edges: [], selectedNodeId: null });
+  const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
+  const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
+  const [fallbackRuntimeAgents, setFallbackRuntimeAgents] = useState<RuntimeAggregatedAgent[]>([]);
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
   const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
@@ -1140,9 +1241,78 @@ export function AgentsPage() {
     setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
   };
 
+  const tryLoadRoutesFromHost = async (
+    host: RuntimeHostRecord
+  ): Promise<{ hostLabel: string; routes: SignalRoute[]; agents: RuntimeAggregatedAgent[] } | null> => {
+    try {
+      const routeService = new SignalRouteService({ host });
+      const routes = await routeService.listRoutes();
+      const runtimeClient = new RuntimeClient();
+      const agentsResult = await runtimeClient.getAgents(host);
+      const agents = agentsResult.ok ? mapRuntimeAgentsForHost(host, agentsResult.data) : [];
+      return {
+        hostLabel: `${host.host}:${host.port}`,
+        routes,
+        agents,
+      };
+    } catch {
+      return null;
+    }
+  };
+
+  const refreshSignalRoutesFromSnapshot = async (
+    snapshot: { hosts: RuntimeHostSnapshot[] },
+    isDisposed: () => boolean = () => false
+  ) => {
+    const useMockData = getUseMockDataEnabled();
+    if (useMockData) {
+      if (isDisposed()) return;
+      setSignalRouteHostLabel('mock（测试数据）');
+      setSignalRoutes(MOCK_SIGNAL_ROUTES_FALLBACK);
+      setFallbackRuntimeAgents(MOCK_RUNTIME_AGENTS_FALLBACK);
+      setListSections(buildListSectionsFromRuntimeAgents(MOCK_RUNTIME_AGENTS_FALLBACK));
+      return;
+    }
+
+    const snapshotAgents = snapshot.hosts.flatMap((item) => item.agents);
+    const configuredHosts = sortRouteHostsByPriority(snapshot.hosts).map((item) => item.host);
+    for (const host of configuredHosts) {
+      const result = await tryLoadRoutesFromHost(host);
+      if (!result) continue;
+      if (isDisposed()) return;
+      setSignalRouteHostLabel(result.hostLabel);
+      setSignalRoutes(result.routes);
+      setFallbackRuntimeAgents(result.agents);
+      if (snapshotAgents.length === 0 && result.agents.length > 0) {
+        setListSections(buildListSectionsFromRuntimeAgents(result.agents));
+      }
+      return;
+    }
+
+    const directCandidates = buildDirectRuntimeCandidates(snapshot.hosts);
+    for (const host of directCandidates) {
+      const result = await tryLoadRoutesFromHost(host);
+      if (!result) continue;
+      if (isDisposed()) return;
+      setSignalRouteHostLabel(`${result.hostLabel}（auto）`);
+      setSignalRoutes(result.routes);
+      setFallbackRuntimeAgents(result.agents);
+      if (snapshotAgents.length === 0 && result.agents.length > 0) {
+        setListSections(buildListSectionsFromRuntimeAgents(result.agents));
+      }
+      return;
+    }
+
+    if (isDisposed()) return;
+    setSignalRouteHostLabel('');
+    setSignalRoutes([]);
+    setFallbackRuntimeAgents([]);
+  };
+
   const refreshRuntimeSnapshot = async () => {
     const snapshot = await getRuntimeManager().refreshSnapshot();
     applyRuntimeSnapshot(snapshot);
+    await refreshSignalRoutesFromSnapshot(snapshot);
   };
 
   useEffect(() => {
@@ -1151,18 +1321,16 @@ export function AgentsPage() {
     const runtimeControlService = getRuntimeControlService();
 
     const load = async () => {
-      const [nextTopology, nextDevice, nextRuntimeStatus, nextRuntimeSnapshot] = await Promise.all([
-        service.getTopology(),
+      const [nextDevice, nextRuntimeStatus, nextRuntimeSnapshot] = await Promise.all([
         service.getDeviceView(),
         runtimeControlService.getStatus(),
         getRuntimeManager().refreshSnapshot(),
       ]);
       if (disposed) return;
-      setTopology(nextTopology);
-      setSelectedNodeId(nextTopology.selectedNodeId ?? null);
       setDeviceGroups(nextDevice);
       setRuntimeServiceStatus(nextRuntimeStatus);
       applyRuntimeSnapshot(nextRuntimeSnapshot);
+      await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
     };
 
     const refreshInterval = setInterval(() => {
@@ -1171,6 +1339,7 @@ export function AgentsPage() {
           const nextRuntimeSnapshot = await getRuntimeManager().refreshSnapshot();
           if (disposed) return;
           applyRuntimeSnapshot(nextRuntimeSnapshot);
+          await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
         } catch {
           // Ignore polling errors（轮询错误不打断页面渲染）
         }
@@ -1188,6 +1357,7 @@ export function AgentsPage() {
   const refreshRuntimeHosts = async () => {
     const nextSnapshot = await getRuntimeManager().refreshSnapshot();
     applyRuntimeSnapshot(nextSnapshot);
+    await refreshSignalRoutesFromSnapshot(nextSnapshot);
   };
 
   const handleAddRuntimeHostFromManagerSheet = async () => {
@@ -1228,7 +1398,7 @@ export function AgentsPage() {
     try {
       const status = await getRuntimeControlService().startRuntime({
         host: '127.0.0.1',
-        port: 4077,
+        port: 1949,
       });
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
@@ -1237,7 +1407,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 4077,
+        port: 1949,
         error: message,
       });
     }
@@ -1253,7 +1423,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 4077,
+        port: 1949,
         error: message,
       });
     }
@@ -1263,12 +1433,36 @@ export function AgentsPage() {
     window.location.href = path;
   };
 
+  const signalRouteRows = useMemo(
+    () => buildSignalRouteRows(signalRoutes, signalRouteHostLabel || undefined),
+    [signalRouteHostLabel, signalRoutes]
+  );
+
+  const graphAgents = useMemo(() => {
+    const runtimeAgents = runtimeHostSnapshots.flatMap((item) => item.agents);
+    if (runtimeAgents.length > 0) return runtimeAgents;
+    return fallbackRuntimeAgents;
+  }, [fallbackRuntimeAgents, runtimeHostSnapshots]);
+
+  const signalGraph = useMemo(
+    () => buildSignalGraph(signalRoutes, graphAgents),
+    [graphAgents, signalRoutes]
+  );
+
+  useEffect(() => {
+    if (!selectedNodeId) return;
+    if (signalGraph.nodes.some((node) => node.id === selectedNodeId)) return;
+    setSelectedNodeId(null);
+  }, [selectedNodeId, signalGraph.nodes]);
+
   const content = useMemo(() => {
     if (viewMode === 'list') {
       return (
         <ListView
           sections={listSections}
           hostSnapshots={runtimeHostSnapshots}
+          routeRows={signalRouteRows}
+          routeHostLabel={signalRouteHostLabel || undefined}
           onRetryHost={handleProbeRuntimeHost}
           onItemNavigate={navigateByPath}
         />
@@ -1290,7 +1484,7 @@ export function AgentsPage() {
     }
     return (
       <TopologyView
-        topology={topology}
+        graph={signalGraph}
         selectedNodeId={selectedNodeId}
         onSelectNode={setSelectedNodeId}
         onClearSelection={() => setSelectedNodeId(null)}
@@ -1300,10 +1494,12 @@ export function AgentsPage() {
     deviceGroups,
     listSections,
     runtimeHostSnapshots,
+    signalGraph,
+    signalRouteHostLabel,
+    signalRouteRows,
     runtimeHostError,
     runtimeServiceStatus,
     selectedNodeId,
-    topology,
     viewMode,
   ]);
 
