@@ -1,4 +1,4 @@
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager, WebviewUrl, WebviewWindowBuilder};
 use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
 
 /// Register the Alt+Q PTT (Push-To-Talk) global shortcut.
@@ -10,6 +10,7 @@ pub fn register_voice_shortcut(app: &AppHandle) {
         match event.state {
             ShortcutState::Pressed => {
                 app.emit("voice-shortcut", "start").ok();
+                let _ = voice_overlay_show_internal(app);
             }
             ShortcutState::Released => {
                 app.emit("voice-shortcut", "stop").ok();
@@ -40,4 +41,45 @@ pub async fn simulate_paste() -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// 内部函数：显示悬浮窗（供 register_voice_shortcut 调用）
+fn voice_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("voice-overlay") {
+        window.show().map_err(|e| e.to_string())?;
+        window.set_focus().map_err(|e| e.to_string())?;
+        return Ok(());
+    }
+
+    let _voice_window = WebviewWindowBuilder::new(
+        app,
+        "voice-overlay",
+        WebviewUrl::App("voice-overlay.html".into()),
+    )
+    .title("ExoMind Voice")
+    .inner_size(220.0, 52.0)
+    .always_on_top(true)
+    .decorations(false)
+    .transparent(true)
+    .skip_taskbar(true)
+    .resizable(false)
+    .build()
+    .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
+/// 显示语音悬浮窗（Tauri command，供前端调用）
+#[tauri::command]
+pub async fn voice_overlay_show(app: AppHandle) -> Result<(), String> {
+    voice_overlay_show_internal(&app)
+}
+
+/// 隐藏语音悬浮窗（不销毁，下次复用）
+#[tauri::command]
+pub async fn voice_overlay_hide(app: AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window("voice-overlay") {
+        window.hide().map_err(|e| e.to_string())?;
+    }
+    Ok(())
 }

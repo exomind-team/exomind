@@ -11,7 +11,9 @@ use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
     list_files, pick_json_file, read_file, read_file_binary, save_json_file, write_file,
 };
-use commands::shortcut_commands::{register_voice_shortcut, simulate_paste};
+use commands::shortcut_commands::{
+    register_voice_shortcut, simulate_paste, voice_overlay_hide, voice_overlay_show,
+};
 use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_start, runtime_service_status, runtime_service_stop,
     signal_publish_fast, RuntimeProcessState,
@@ -81,8 +83,10 @@ pub fn run() {
             runtime_service_stop,
             runtime_service_status,
             signal_publish_fast,
-            // Voice shortcut commands
+            // 语音快捷键 + 悬浮窗命令
             simulate_paste,
+            voice_overlay_show,
+            voice_overlay_hide,
         ]);
 
     #[cfg(debug_assertions)]
