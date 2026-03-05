@@ -71,6 +71,7 @@ htmlcov/
 
 # === Vite Entry (required) ===
 !index.html
+!voice-overlay.html
 
 # === Temporary ===
 *.tmp
