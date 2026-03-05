@@ -15,6 +15,7 @@ use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_start, runtime_service_status, runtime_service_stop,
     signal_publish_fast, RuntimeProcessState,
 };
+use commands::shortcut_commands::{voice_overlay_hide, voice_overlay_show};
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 
 #[tauri::command]
@@ -76,6 +77,9 @@ pub fn run() {
             runtime_service_stop,
             runtime_service_status,
             signal_publish_fast,
+            // 语音悬浮窗命令
+            voice_overlay_show,
+            voice_overlay_hide,
         ]);
 
     #[cfg(debug_assertions)]
