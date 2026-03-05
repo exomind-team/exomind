@@ -3,7 +3,7 @@ use axum::{Json, Router, routing::get};
 use serde::Serialize;
 use std::env;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
 use thiserror::Error;
@@ -358,20 +358,46 @@ fn spawn_default_ts_agents(port: u16, options: &RuntimeStartOptions) -> Vec<TsAg
 }
 
 fn resolve_project_root(options: &RuntimeStartOptions) -> PathBuf {
-    if let Some(path) = &options.ts_agent_workdir {
-        return path.clone();
+    let current_dir = env::current_dir().ok();
+    resolve_project_root_from(options.ts_agent_workdir.as_deref(), current_dir.as_deref())
+}
+
+fn resolve_project_root_from(ts_agent_workdir: Option<&Path>, current_dir: Option<&Path>) -> PathBuf {
+    const REVIEWER_ENTRY: &str = "packages/ts-agent-cli/agents/reviewer/index.ts";
+    const CLASSIFIER_ENTRY: &str = "packages/ts-agent-cli/agents/classifier/index.ts";
+
+    fn has_default_ts_agent_entries(root: &Path) -> bool {
+        root.join(REVIEWER_ENTRY).is_file() && root.join(CLASSIFIER_ENTRY).is_file()
     }
 
-    if let Ok(cwd) = env::current_dir() {
-        return cwd;
+    if let Some(path) = ts_agent_workdir {
+        return path.to_path_buf();
     }
 
+    if let Some(cwd) = current_dir
+        && has_default_ts_agent_entries(cwd)
+    {
+        return cwd.to_path_buf();
+    }
+
+    if let Some(workspace_root) = workspace_root_from_manifest()
+        && has_default_ts_agent_entries(&workspace_root)
+    {
+        return workspace_root;
+    }
+
+    current_dir
+        .map(Path::to_path_buf)
+        .or_else(workspace_root_from_manifest)
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn workspace_root_from_manifest() -> Option<PathBuf> {
     let manifest_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
     manifest_dir
         .parent()
         .and_then(|path| path.parent())
         .map(|path| path.to_path_buf())
-        .unwrap_or_else(|| PathBuf::from("."))
 }
 
 fn try_spawn_ts_agent(
@@ -389,7 +415,14 @@ fn try_spawn_ts_agent(
         .env("EXOMIND_RT_URL", rt_url)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::inherit());
+        .stderr(Stdio::null());
+
+    #[cfg(target_os = "windows")]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x08000000;
+        command.creation_flags(CREATE_NO_WINDOW);
+    }
 
     match command.spawn() {
         Ok(child) => Some(TsAgentProcess {
@@ -442,7 +475,9 @@ impl AppState {
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
         registry.register(Arc::new(agent::echo::EchoAgent::new()));
 
-        let signal_pool = Arc::new(SignalPool::new(Some("config/signal-routes.default.json")));
+        let default_routes_path =
+            resolve_default_signal_routes_path().map(|path| path.to_string_lossy().to_string());
+        let signal_pool = Arc::new(SignalPool::new(default_routes_path.as_deref()));
 
         Self {
             port,
@@ -450,6 +485,39 @@ impl AppState {
             signal_pool,
         }
     }
+}
+
+fn resolve_default_signal_routes_path() -> Option<PathBuf> {
+    let current_dir = env::current_dir().ok();
+    resolve_default_signal_routes_path_from(current_dir.as_deref())
+}
+
+fn resolve_default_signal_routes_path_from(current_dir: Option<&Path>) -> Option<PathBuf> {
+    const DEFAULT_ROUTES_RELATIVE_PATH: &str = "config/signal-routes.default.json";
+
+    if let Ok(override_path) = env::var("EXOMIND_RT_SIGNAL_ROUTES_DEFAULT") {
+        let candidate = PathBuf::from(override_path);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    if let Some(cwd) = current_dir {
+        let candidate = cwd.join(DEFAULT_ROUTES_RELATIVE_PATH);
+        if candidate.is_file() {
+            return Some(candidate);
+        }
+    }
+
+    let workspace_candidate =
+        workspace_root_from_manifest().map(|root| root.join(DEFAULT_ROUTES_RELATIVE_PATH));
+    if let Some(candidate) = workspace_candidate
+        && candidate.is_file()
+    {
+        return Some(candidate);
+    }
+
+    None
 }
 
 pub type RuntimeState = AppState;
@@ -1053,5 +1121,39 @@ mod tests {
             .to_bytes();
         let second_payload: Value = serde_json::from_slice(&second_body).unwrap();
         assert_eq!(second_payload, serde_json::json!([]));
+    }
+
+    #[test]
+    fn resolve_default_signal_routes_path_falls_back_to_workspace_config() {
+        let fake_cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/non-existent-cwd");
+        let resolved = resolve_default_signal_routes_path_from(Some(fake_cwd.as_path()));
+
+        assert!(resolved.is_some(), "should resolve default routes from workspace root");
+        let resolved_path = resolved.expect("resolved path should exist");
+        assert!(resolved_path.exists(), "resolved path must exist: {}", resolved_path.display());
+        assert!(resolved_path.to_string_lossy().contains("config/signal-routes.default.json"));
+    }
+
+    #[test]
+    fn resolve_project_root_falls_back_to_workspace_when_cwd_has_no_agent_entries() {
+        let fake_cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/non-existent-cwd");
+        let resolved = resolve_project_root_from(None, Some(fake_cwd.as_path()));
+
+        let workspace_root = workspace_root_from_manifest().expect("workspace root should resolve");
+        assert_eq!(resolved, workspace_root);
+        assert!(
+            resolved
+                .join("packages/ts-agent-cli/agents/reviewer/index.ts")
+                .is_file(),
+            "resolved project root must contain reviewer agent entry: {}",
+            resolved.display()
+        );
+        assert!(
+            resolved
+                .join("packages/ts-agent-cli/agents/classifier/index.ts")
+                .is_file(),
+            "resolved project root must contain classifier agent entry: {}",
+            resolved.display()
+        );
     }
 }

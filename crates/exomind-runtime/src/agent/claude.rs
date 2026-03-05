@@ -275,11 +275,21 @@ impl ClaudeAgent {
         self.evict_dead_sessions();
 
         let session_id = Uuid::new_v4().to_string();
-        let mut child = Command::new(&self.command)
+        let mut command = Command::new(&self.command);
+        command
             .args(&self.persistent_args)
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
-            .stderr(Stdio::null())
+            .stderr(Stdio::null());
+
+        #[cfg(target_os = "windows")]
+        {
+            use std::os::windows::process::CommandExt;
+            const CREATE_NO_WINDOW: u32 = 0x08000000;
+            command.creation_flags(CREATE_NO_WINDOW);
+        }
+
+        let mut child = command
             .spawn()
             .map_err(|error| format!("Claude 启动失败: {error}"))?;
 

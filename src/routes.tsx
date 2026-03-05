@@ -1,4 +1,4 @@
-﻿import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams } from '@tanstack/react-router';
+﻿import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Target, Settings, Bot, SquareCheckBig, UserRound, LayoutDashboard, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -380,8 +380,45 @@ function NewLayout() {
   );
 }
 
+function RootRouteError({ error, reset }: ErrorComponentProps) {
+  const message = error instanceof Error ? error.message : String(error);
+  const dynamicImportFailed = message.includes('Failed to fetch dynamically imported module');
+
+  return (
+    <div className="flex min-h-[100dvh] items-center justify-center bg-[#FAF7F5] px-6 py-8 dark:bg-[#0C0A09]">
+      <div className="w-full max-w-md rounded-2xl border border-[#E7E5E4] bg-white p-5 shadow-sm dark:border-[#292524] dark:bg-[#1C1917]">
+        <h2 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+          页面加载失败（Page Load Failed）
+        </h2>
+        <p className="mt-2 text-sm text-[#78716C] dark:text-[#A8A29E]">
+          {dynamicImportFailed
+            ? '动态模块加载失败，请刷新页面或重启开发服务器。'
+            : message}
+        </p>
+        <div className="mt-4 flex gap-2">
+          <button
+            type="button"
+            onClick={() => reset()}
+            className="rounded-md bg-[#C75B3A] px-3 py-1.5 text-sm font-medium text-white"
+          >
+            重试（Retry）
+          </button>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            className="rounded-md bg-[#F5F0ED] px-3 py-1.5 text-sm font-medium text-[#44403C] dark:bg-[#292524] dark:text-[#D6D3D1]"
+          >
+            刷新（Reload）
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 const newRootRoute = createRootRoute({
   component: NewLayout,
+  errorComponent: RootRouteError,
 });
 
 const newHomeRoute = createRoute({
@@ -614,3 +651,5 @@ const newRouteTree = newRootRoute.addChildren([
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
+
+

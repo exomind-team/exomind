@@ -49,6 +49,7 @@ export class SignalStreamService {
   private retryDelay = INITIAL_RETRY_DELAY_MS;
   private listeners: SignalCallback[] = [];
   private running = false;
+  private lastConnectionErrorLog: string | null = null;
 
   constructor(options: SignalStreamServiceOptions) {
     this.baseUrl = buildBaseUrl(options.host);
@@ -130,11 +131,21 @@ export class SignalStreamService {
         await this.connectAndConsume();
         // Connection ended cleanly (e.g. server closed) — reset retry delay.
         this.retryDelay = INITIAL_RETRY_DELAY_MS;
+        this.lastConnectionErrorLog = null;
       } catch (error) {
         if (!this.running) break;
 
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          continue;
+        }
+
         const msg = error instanceof Error ? error.message : String(error);
-        console.error(`[SignalStream] connection error: ${msg}`);
+        const logKey = `${this.baseUrl}::${msg}`;
+        if (this.lastConnectionErrorLog !== logKey) {
+          // RT 未启动时属于预期重试场景，避免持续 error 污染控制台
+          console.warn(`[SignalStream] connection retry: ${msg} (target: ${this.baseUrl})`);
+          this.lastConnectionErrorLog = logKey;
+        }
 
         await this.sleep(this.retryDelay);
         this.retryDelay = Math.min(this.retryDelay * BACKOFF_MULTIPLIER, MAX_RETRY_DELAY_MS);

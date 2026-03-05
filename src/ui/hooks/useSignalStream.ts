@@ -7,16 +7,18 @@
  * 在 App.tsx 中调用一次即可，整个应用生命周期内保持 SSE 连接。
  */
 
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import {
   startSignalHandlers,
   type ReviewCompletedPayload,
 } from '@/lib/services/signal-handlers';
 import { getEventStorage } from '@/lib/storage/event-storage';
-
-const RT_HOST = 'localhost';
-const RT_PORT = 1949;
+import {
+  getSelectedRuntimeTarget,
+  subscribeRuntimeTargetChanges,
+  type RuntimeTarget,
+} from '@/config/runtime-target';
 
 function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
   const isTimeblock = payload.review_type === 'timeblock';
@@ -47,18 +49,39 @@ function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
 
 export function useSignalStream(): void {
   const serviceRef = useRef<SignalStreamService | null>(null);
+  const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>(() => getSelectedRuntimeTarget());
 
   useEffect(() => {
+    const unsubscribe = subscribeRuntimeTargetChanges((nextTarget) => {
+      setRuntimeTarget((currentTarget) => {
+        if (
+          currentTarget.mode === nextTarget.mode
+          && currentTarget.host === nextTarget.host
+          && currentTarget.port === nextTarget.port
+        ) {
+          return currentTarget;
+        }
+        return nextTarget;
+      });
+    });
+
+    return () => {
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    const targetLabel = `${runtimeTarget.mode}:${runtimeTarget.host}:${runtimeTarget.port}`;
     const service = new SignalStreamService({
       host: {
-        id: 'default-rt',
-        name: 'Local RT',
-        host: RT_HOST,
-        port: RT_PORT,
+        id: `rt-target-${targetLabel}`.replace(/[^\w-]/g, '-'),
+        name: runtimeTarget.mode === 'embedded' ? 'Embedded RT' : 'External RT',
+        host: runtimeTarget.host,
+        port: runtimeTarget.port,
         status: 'unknown',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
-        isLocal: true,
+        isLocal: runtimeTarget.mode === 'embedded',
       },
       agentId: 'ui',
     });
@@ -85,12 +108,12 @@ export function useSignalStream(): void {
 
     service.start();
     serviceRef.current = service;
-    console.log('[SignalStream] SSE connection started');
+    console.log(`[SignalStream] SSE connection started (${targetLabel})`);
 
     return () => {
       service.stop();
       serviceRef.current = null;
-      console.log('[SignalStream] SSE connection stopped');
+      console.log(`[SignalStream] SSE connection stopped (${targetLabel})`);
     };
-  }, []);
+  }, [runtimeTarget]);
 }

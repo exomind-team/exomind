@@ -25,6 +25,7 @@ import type {
   TimerConfig,
 } from '../types/event';
 import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
+import { getSelectedRuntimeTarget, toRuntimeBaseUrl } from '@/config/runtime-target';
 import { createUuidV4 } from '../utils/uuid';
 
 // 存储键
@@ -582,11 +583,8 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private resolveRtBaseUrl(): string | null {
     try {
-      // 优先使用 window.location 同源 RT（开发环境通常是 localhost:1949）
-      const host = typeof window !== 'undefined' && window.location?.hostname
-        ? window.location.hostname
-        : 'localhost';
-      return `http://${host}:1949`;
+      const target = getSelectedRuntimeTarget();
+      return toRuntimeBaseUrl(target);
     } catch {
       return null;
     }
