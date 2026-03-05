@@ -159,7 +159,7 @@ export function TaskDetailPage() {
 
   const handleStartTimer = async () => {
     if (!taskId) return;
-    const block = await getTaskTimerService().startTimerForTask(taskId, { mode: 'countup' });
+    const block = await getTaskTimerService().startBlockForTask(taskId, { mode: 'countup' });
     if (block) {
       setActiveBlock(block);
       // Refresh task state (may have transitioned to in_progress)
@@ -177,12 +177,32 @@ export function TaskDetailPage() {
   };
 
   const handleFeedbackAction = async (action: TaskTimerFeedbackAction) => {
-    const updated = await getTaskTimerService().endTimerForTask(undefined, action);
+    if (!taskId || !activeBlock) return;
+    // End the time block
+    const tbSvc = getTimeBlockService();
+    await tbSvc.markEnding();
+    await tbSvc.endBlock();
+
+    // Calculate duration and record association
+    const durationMs = Math.max(0, Date.now() - activeBlock.startTime);
+    const durationMinutes = Math.round(durationMs / 60_000);
+    await getTaskTimerService().onBlockEndForTask(taskId, activeBlock.startId, durationMinutes);
+
+    // Apply feedback action to task status
+    const svc = getTaskService();
+    if (task?.status === 'in_progress') {
+      if (action === 'complete') await svc.transitionTask(taskId, 'completed');
+      else if (action === 'suspend') await svc.transitionTask(taskId, 'suspended');
+    }
+
     setShowFeedback(false);
     setActiveBlock(null);
-    if (updated && taskId) {
-      setTask(updated);
-      const transitions = await getTaskService().getAvailableTransitions(taskId);
+
+    // Refresh task state
+    const refreshed = await svc.getTask(taskId);
+    if (refreshed) {
+      setTask(refreshed);
+      const transitions = await svc.getAvailableTransitions(taskId);
       setAvailableTransitions(transitions);
     }
   };

@@ -1,8 +1,14 @@
 /**
  * Phase4 (#337) 任务↔时间块 1:N 计时关联 单元测试
  *
- * 覆盖 TaskTimerServiceImpl 的关联 CRUD、状态联动、spentMinutes 累计。
- * 使用 mock TaskService + TimeBlockService 隔离测试。
+ * 覆盖 TaskTimerServiceImpl：
+ * - startBlockForTask 创建时间块并关联到任务
+ * - startBlockForTask 自动将 not_started 转为 in_progress
+ * - onBlockEndForTask 累计 spentMinutes
+ * - onBlockEndForTask 追加 blockId 到 timeBlockIds
+ * - getBlockIdsForTask 返回已关联的时间块列表
+ * - calculateSpentMinutes 正确累计
+ * - 重复 blockId 不重复添加
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
@@ -97,7 +103,7 @@ function createMockTBService(
   return {
     loadTimeBlocks: vi.fn(async () => completedBlocks),
     loadActiveBlock: vi.fn(async () => activeBlock),
-    startBlock: vi.fn(async (name: string) => makeActiveBlock({ name })),
+    startBlock: vi.fn(async (name: string) => makeActiveBlock({ name, startId: `block-${Date.now()}` })),
     markEnding: vi.fn(async () => {}),
     endBlock: vi.fn(async () => null),
     pauseBlock: vi.fn(async () => {}),
@@ -111,43 +117,54 @@ function createMockTBService(
 
 /* ── tests ── */
 
-describe('TaskTimerService: startTimerForTask', () => {
-  it('starts timer for not_started task and transitions to in_progress', async () => {
-    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'not_started' })]])
-    const taskSvc = createMockTaskService(tasks)
-    const tbSvc = createMockTBService()
-    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
-
-    const block = await svc.startTimerForTask('t1', { mode: 'countup' })
-
-    expect(block).not.toBeNull()
-    expect(block!.taskId).toBe('t1')
-    expect(taskSvc.transitionTask).toHaveBeenCalledWith('t1', 'in_progress')
-    expect(tbSvc.startBlock).toHaveBeenCalledWith('Test Task', { mode: 'countup' })
-  })
-
-  it('starts timer for in_progress task without extra transition', async () => {
+describe('TaskTimerService: startBlockForTask', () => {
+  it('creates time block and associates blockId to task', async () => {
     const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress' })]])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const block = await svc.startTimerForTask('t1', { mode: 'countup' })
+    const block = await svc.startBlockForTask('t1', { mode: 'countup' })
 
     expect(block).not.toBeNull()
-    expect(taskSvc.transitionTask).not.toHaveBeenCalled()
+    expect(tbSvc.startBlock).toHaveBeenCalledWith('Test Task', { mode: 'countup' })
+    // Should update task with new blockId in timeBlockIds
+    expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', {
+      timeBlockIds: [block!.startId],
+    })
   })
 
-  it('starts timer for suspended task and transitions to in_progress', async () => {
+  it('auto-transitions not_started to in_progress', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'not_started' })]])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await svc.startBlockForTask('t1')
+
+    expect(taskSvc.transitionTask).toHaveBeenCalledWith('t1', 'in_progress')
+  })
+
+  it('auto-transitions suspended to in_progress', async () => {
     const tasks = new Map([['t1', makeTask({ id: 't1', status: 'suspended' })]])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const block = await svc.startTimerForTask('t1', { mode: 'countup' })
+    await svc.startBlockForTask('t1')
 
-    expect(block).not.toBeNull()
     expect(taskSvc.transitionTask).toHaveBeenCalledWith('t1', 'in_progress')
+  })
+
+  it('does not transition already in_progress task', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress' })]])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await svc.startBlockForTask('t1')
+
+    expect(taskSvc.transitionTask).not.toHaveBeenCalled()
   })
 
   it('returns null for completed task', async () => {
@@ -156,8 +173,8 @@ describe('TaskTimerService: startTimerForTask', () => {
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const block = await svc.startTimerForTask('t1', { mode: 'countup' })
-    expect(block).toBeNull()
+    expect(await svc.startBlockForTask('t1')).toBeNull()
+    expect(tbSvc.startBlock).not.toHaveBeenCalled()
   })
 
   it('returns null for abandoned task', async () => {
@@ -166,8 +183,7 @@ describe('TaskTimerService: startTimerForTask', () => {
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const block = await svc.startTimerForTask('t1', { mode: 'countup' })
-    expect(block).toBeNull()
+    expect(await svc.startBlockForTask('t1')).toBeNull()
   })
 
   it('returns null for missing task', async () => {
@@ -175,137 +191,158 @@ describe('TaskTimerService: startTimerForTask', () => {
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const block = await svc.startTimerForTask('nope', { mode: 'countup' })
-    expect(block).toBeNull()
+    expect(await svc.startBlockForTask('nope')).toBeNull()
+  })
+
+  it('does not duplicate blockId in existing timeBlockIds', async () => {
+    const tbSvc = createMockTBService()
+    // Pre-set startBlock to return a known startId
+    ;(tbSvc.startBlock as ReturnType<typeof vi.fn>).mockResolvedValue(makeActiveBlock({ startId: 'existing-block' }))
+
+    const tasks = new Map([['t1', makeTask({
+      id: 't1',
+      status: 'in_progress',
+      timeBlockIds: ['existing-block'],
+    })]])
+    const taskSvc = createMockTaskService(tasks)
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await svc.startBlockForTask('t1')
+
+    // Should NOT call updateTask since blockId already exists
+    expect(taskSvc.updateTask).not.toHaveBeenCalled()
   })
 })
 
-describe('TaskTimerService: endTimerForTask', () => {
-  it('ends timer with "continue" keeps task in_progress', async () => {
-    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress' })]])
+describe('TaskTimerService: onBlockEndForTask', () => {
+  it('appends blockId and accumulates spentMinutes', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress', spentMinutes: 10 })]])
     const taskSvc = createMockTaskService(tasks)
-    const active = makeActiveBlock({ taskId: 't1' })
-    const tbSvc = createMockTBService(active)
+    const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const result = await svc.endTimerForTask(undefined, 'continue')
+    await svc.onBlockEndForTask('t1', 'block-new', 25)
 
-    expect(tbSvc.markEnding).toHaveBeenCalled()
-    expect(tbSvc.endBlock).toHaveBeenCalled()
-    expect(result).not.toBeNull()
-    // "continue" should NOT call transitionTask
-    expect(taskSvc.transitionTask).not.toHaveBeenCalled()
+    expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', {
+      timeBlockIds: ['block-new'],
+      spentMinutes: 35, // 10 + 25
+    })
   })
 
-  it('ends timer with "suspend" transitions to suspended', async () => {
-    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress' })]])
+  it('does not duplicate existing blockId', async () => {
+    const tasks = new Map([['t1', makeTask({
+      id: 't1',
+      status: 'in_progress',
+      timeBlockIds: ['block-1'],
+      spentMinutes: 20,
+    })]])
     const taskSvc = createMockTaskService(tasks)
-    const active = makeActiveBlock({ taskId: 't1' })
-    const tbSvc = createMockTBService(active)
+    const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    await svc.endTimerForTask(undefined, 'suspend')
+    await svc.onBlockEndForTask('t1', 'block-1', 15)
 
-    expect(taskSvc.transitionTask).toHaveBeenCalledWith('t1', 'suspended')
+    expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', {
+      timeBlockIds: ['block-1'], // not duplicated
+      spentMinutes: 35, // 20 + 15
+    })
   })
 
-  it('ends timer with "complete" transitions to completed', async () => {
+  it('handles task with no prior spentMinutes', async () => {
     const tasks = new Map([['t1', makeTask({ id: 't1', status: 'in_progress' })]])
     const taskSvc = createMockTaskService(tasks)
-    const active = makeActiveBlock({ taskId: 't1' })
-    const tbSvc = createMockTBService(active)
+    const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    await svc.endTimerForTask(undefined, 'complete')
+    await svc.onBlockEndForTask('t1', 'block-1', 30)
 
-    expect(taskSvc.transitionTask).toHaveBeenCalledWith('t1', 'completed')
+    expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', {
+      timeBlockIds: ['block-1'],
+      spentMinutes: 30,
+    })
   })
 
-  it('returns null when no active block', async () => {
+  it('does nothing for missing task', async () => {
     const taskSvc = createMockTaskService(new Map())
-    const tbSvc = createMockTBService(null)
+    const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const result = await svc.endTimerForTask(undefined, 'continue')
-    expect(result).toBeNull()
-  })
+    await svc.onBlockEndForTask('nope', 'block-1', 10)
 
-  it('ends block without taskId (no task association)', async () => {
-    const taskSvc = createMockTaskService(new Map())
-    const active = makeActiveBlock() // no taskId
-    const tbSvc = createMockTBService(active)
-    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
-
-    const result = await svc.endTimerForTask('good', 'continue')
-
-    expect(result).toBeNull()
-    expect(tbSvc.markEnding).toHaveBeenCalled()
-    expect(tbSvc.endBlock).toHaveBeenCalledWith('good')
+    expect(taskSvc.updateTask).not.toHaveBeenCalled()
   })
 })
 
-describe('TaskTimerService: getTimeBlocksForTask', () => {
-  it('returns only blocks matching taskId', async () => {
-    const blocks: TimeBlock[] = [
-      makeTimeBlock({ id: 'b1', startId: 'b1' }),
-      makeTimeBlock({ id: 'b2', startId: 'b2' }),
-    ]
-    // Inject taskId onto the blocks (simulating stored data)
-    ;(blocks[0] as unknown as { taskId: string }).taskId = 't1'
-    ;(blocks[1] as unknown as { taskId: string }).taskId = 't2'
-
-    const taskSvc = createMockTaskService(new Map())
-    const tbSvc = createMockTBService(null, blocks)
+describe('TaskTimerService: getBlockIdsForTask', () => {
+  it('returns timeBlockIds from task', async () => {
+    const tasks = new Map([['t1', makeTask({
+      id: 't1',
+      timeBlockIds: ['b1', 'b2', 'b3'],
+    })]])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const result = await svc.getTimeBlocksForTask('t1')
-    expect(result).toHaveLength(1)
-    expect(result[0].id).toBe('b1')
-    expect(result[0].taskId).toBe('t1')
+    const ids = await svc.getBlockIdsForTask('t1')
+    expect(ids).toEqual(['b1', 'b2', 'b3'])
   })
 
-  it('returns empty array when no blocks match', async () => {
-    const blocks: TimeBlock[] = [makeTimeBlock({ id: 'b1' })]
-    ;(blocks[0] as unknown as { taskId: string }).taskId = 't2'
-
-    const taskSvc = createMockTaskService(new Map())
-    const tbSvc = createMockTBService(null, blocks)
+  it('returns empty array for task without timeBlockIds', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1' })]])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const result = await svc.getTimeBlocksForTask('t1')
-    expect(result).toHaveLength(0)
+    const ids = await svc.getBlockIdsForTask('t1')
+    expect(ids).toEqual([])
+  })
+
+  it('returns empty array for missing task', async () => {
+    const taskSvc = createMockTaskService(new Map())
+    const tbSvc = createMockTBService()
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    const ids = await svc.getBlockIdsForTask('nope')
+    expect(ids).toEqual([])
   })
 })
 
-describe('TaskTimerService: updateSpentMinutes', () => {
-  it('calculates total minutes from linked blocks', async () => {
+describe('TaskTimerService: calculateSpentMinutes', () => {
+  it('calculates total from matching completed blocks', async () => {
     const now = Date.now()
     const blocks: TimeBlock[] = [
-      makeTimeBlock({ id: 'b1', startTime: now - 60 * 60_000, endTime: now - 30 * 60_000 }), // 30 min
-      makeTimeBlock({ id: 'b2', startTime: now - 25 * 60_000, endTime: now }),                // 25 min
+      makeTimeBlock({ startId: 'b1', startTime: now - 60 * 60_000, endTime: now - 30 * 60_000 }), // 30 min
+      makeTimeBlock({ startId: 'b2', startTime: now - 25 * 60_000, endTime: now }),                // 25 min
+      makeTimeBlock({ startId: 'b3', startTime: now - 10 * 60_000, endTime: now }),                // 10 min (not linked)
     ]
-    ;(blocks[0] as unknown as { taskId: string }).taskId = 't1'
-    ;(blocks[1] as unknown as { taskId: string }).taskId = 't1'
-
-    const tasks = new Map([['t1', makeTask({ id: 't1' })]])
+    const tasks = new Map([['t1', makeTask({
+      id: 't1',
+      timeBlockIds: ['b1', 'b2'], // b3 not linked
+    })]])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService(null, blocks)
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    const result = await svc.updateSpentMinutes('t1')
-
-    expect(result).not.toBeNull()
-    expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', { spentMinutes: 55 })
+    const result = await svc.calculateSpentMinutes('t1')
+    expect(result).toBe(55) // 30 + 25
   })
 
-  it('returns 0 minutes when no blocks linked', async () => {
-    const tasks = new Map([['t1', makeTask({ id: 't1' })]])
+  it('returns 0 when no blocks linked', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', timeBlockIds: [] })]])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService(null, [])
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
 
-    await svc.updateSpentMinutes('t1')
+    const result = await svc.calculateSpentMinutes('t1')
+    expect(result).toBe(0)
+  })
 
-    expect(taskSvc.updateTask).toHaveBeenCalledWith('t1', { spentMinutes: 0 })
+  it('returns 0 for missing task', async () => {
+    const taskSvc = createMockTaskService(new Map())
+    const tbSvc = createMockTBService()
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    const result = await svc.calculateSpentMinutes('nope')
+    expect(result).toBe(0)
   })
 })

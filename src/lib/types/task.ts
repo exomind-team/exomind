@@ -104,6 +104,7 @@ export interface TaskNode {
   tags: string[]
   estimatedMinutes?: number
   spentMinutes?: number
+  timeBlockIds?: string[]         // Phase4: 关联时间块 ID 列表（1:N）
   createdAt: number               // UTC timestamp，毫秒
   updatedAt: number
   completedAt?: number

@@ -24,6 +24,7 @@ export interface UpdateTaskInput {
   tags?: string[]
   estimatedMinutes?: number
   spentMinutes?: number
+  timeBlockIds?: string[]
 }
 
 export interface ITaskPort {
