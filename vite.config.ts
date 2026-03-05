@@ -47,7 +47,9 @@ export default defineConfig(({ mode }) => {
         port: devPorts.hmr,
       },
       watch: {
-        ignored: ["**/src-tauri/**"],
+        // Ignore Rust/Cargo outputs to avoid FS event storms during `tauri dev`.
+        //（忽略 Rust/Cargo 产物，避免 tauri dev 时文件监听风暴拖慢首屏）
+        ignored: ["**/src-tauri/**", "**/target/**", "**/.tmp/**", "**/*.log"],
       },
     },
   };

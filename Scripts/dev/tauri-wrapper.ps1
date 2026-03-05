@@ -236,6 +236,54 @@ function Resolve-FreeDevPort {
   }
 }
 
+function Test-PortAvailable {
+  param(
+    [Parameter(Mandatory = $true)]
+    [int]$Port
+  )
+
+  $listener = $null
+  try {
+    $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, $Port)
+    $listener.Server.ExclusiveAddressUse = $true
+    $listener.Start()
+    return $true
+  } catch {
+    return $false
+  } finally {
+    if ($listener) {
+      $listener.Stop()
+    }
+  }
+}
+
+function Resolve-EmbeddedRuntimePort {
+  if ($env:EXOMIND_RT_PORT) {
+    return
+  }
+
+  # Keep deterministic candidates first, then fallback to random port.
+  #（优先固定候选端口，失败再回退到随机端口）
+  $candidates = @(9124, 1950, 1949)
+  foreach ($candidate in $candidates) {
+    if (Test-PortAvailable -Port $candidate) {
+      $env:EXOMIND_RT_PORT = "$candidate"
+      Write-Host "[tauri-wrapper] Embedded runtime port resolved: $candidate"
+      return
+    }
+  }
+
+  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
+  try {
+    $listener.Start()
+    $randomPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
+    $env:EXOMIND_RT_PORT = "$randomPort"
+    Write-Host "[tauri-wrapper] Embedded runtime port resolved (random): $randomPort"
+  } finally {
+    $listener.Stop()
+  }
+}
+
 $projectRoot = Join-Path $PSScriptRoot "..\..\"
 $projectRoot = [System.IO.Path]::GetFullPath($projectRoot)
 $manifestPath = Join-Path $PSScriptRoot "..\..\src-tauri\gen\android\app\src\main\AndroidManifest.xml"
@@ -255,6 +303,7 @@ Ensure-CargoFromRustup
 $isTauriDev = $TauriArgs -and $TauriArgs.Count -ge 1 -and $TauriArgs[0] -eq "dev"
 if ($isTauriDev) {
   Resolve-FreeDevPort
+  Resolve-EmbeddedRuntimePort
 }
 
 # Sync launcher icons before android build/dev/run/init (构建前同步 Android 图标)

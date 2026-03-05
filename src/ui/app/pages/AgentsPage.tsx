@@ -35,6 +35,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { getUseMockDataEnabled } from '@/config/mock-data';
 import {
+  DEFAULT_EMBEDDED_RUNTIME_PORT,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
@@ -95,7 +96,9 @@ const ADD_NODE_OPTIONS: AddNodeOption[] = [
   },
 ];
 
-const DIRECT_RUNTIME_PORT_CANDIDATES = [9124, 1950, 1949] as const;
+const DIRECT_RUNTIME_PORT_CANDIDATES = Array.from(
+  new Set([DEFAULT_EMBEDDED_RUNTIME_PORT, 1950, 1949]),
+);
 const DIRECT_RUNTIME_PORT_STORAGE_KEY = 'exomind:agentHubRuntimePorts';
 
 const MOCK_SIGNAL_ROUTES_FALLBACK: SignalRoute[] = [
@@ -619,7 +622,7 @@ function DeviceView({
                     : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
                 }`}
               >
-                内嵌 RT（9124）
+                内嵌 RT（{DEFAULT_EMBEDDED_RUNTIME_PORT}）
               </button>
               <button
                 type="button"
@@ -684,7 +687,7 @@ function DeviceView({
             </span>
           </div>
           <p className="mt-1 text-[10px] text-[#A8A29E]">
-            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 9124}
+            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT}
           </p>
           {runtimeServiceStatus?.pid && (
             <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
@@ -1043,7 +1046,7 @@ function RuntimeHostManagerSheet({
             data-testid="runtime-host-address-input"
             value={runtimeHostAddress}
             onChange={(event) => onRuntimeHostAddressChange(event.target.value)}
-            placeholder="host:port（例如 127.0.0.1:9124）"
+            placeholder={`host:port（例如 127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}）`}
             className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
           />
           <button
@@ -1429,7 +1432,9 @@ export function AgentsPage() {
   const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
   const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
   const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
-  const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState('127.0.0.1:9124');
+  const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState(
+    `127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+  );
   const [runtimeHostError, setRuntimeHostError] = useState('');
   const [runtimeTargetModeValue, setRuntimeTargetModeValue] = useState<RuntimeTargetMode>(initialRuntimeTarget.mode);
   const [runtimeTargetAddress, setRuntimeTargetAddress] = useState(
@@ -1737,7 +1742,7 @@ export function AgentsPage() {
     try {
       const status = await getRuntimeControlService().startRuntime({
         host: '127.0.0.1',
-        port: 9124,
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
       });
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
@@ -1746,7 +1751,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 9124,
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
         error: message,
       });
     }
@@ -1762,7 +1767,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 9124,
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
         error: message,
       });
     }

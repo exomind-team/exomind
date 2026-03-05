@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  DEFAULT_EMBEDDED_RUNTIME_PORT,
   getRuntimeExternalAddress,
   getRuntimeTargetMode,
   getSelectedRuntimeTarget,
@@ -13,11 +14,11 @@ describe('runtime target config（Runtime 目标配置）', () => {
     window.localStorage.clear();
   });
 
-  it('defaults to embedded runtime 4077（默认内嵌 4077）', () => {
+  it('defaults to embedded runtime port（默认内嵌 runtime 端口）', () => {
     expect(getRuntimeTargetMode()).toBe('embedded');
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
-      port: 4077,
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
   });
 

@@ -25,6 +25,14 @@ fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
 }
 
+fn resolve_embedded_runtime_port() -> u16 {
+    std::env::var("EXOMIND_RT_PORT")
+        .ok()
+        .and_then(|raw| raw.trim().parse::<u16>().ok())
+        .filter(|port| *port > 0)
+        .unwrap_or(9124)
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let ws_client_state = std::sync::Arc::new(WsClientState::default());
@@ -44,10 +52,14 @@ pub fn run() {
             register_voice_shortcut(app.handle());
 
             let runtime_state = runtime_process_state_for_setup.clone();
+            let runtime_port = resolve_embedded_runtime_port();
             tauri::async_runtime::spawn(async move {
-                // Fixed RT port for M4 integration（固定端口 9124）.
-                if let Err(error) = ensure_runtime_started(runtime_state, None, Some(9124)).await {
-                    eprintln!("[tauri/setup] failed to auto-start embedded runtime: {error}");
+                // Keep embedded runtime port aligned with EXOMIND_RT_PORT（与前端端口配置保持一致）.
+                if let Err(error) = ensure_runtime_started(runtime_state, None, Some(runtime_port)).await {
+                    eprintln!(
+                        "[tauri/setup] failed to auto-start embedded runtime on {}: {error}",
+                        runtime_port
+                    );
                 }
             });
             Ok(())

@@ -1,11 +1,12 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import type { IRuntimePort, StartRuntimeInput } from '@/lib/environment/interfaces/runtime.port';
 import type { RuntimeServiceStatus } from '@/lib/types/agent-hub';
+import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
 
 const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
   running: false,
   host: '127.0.0.1',
-  port: 9124,
+  port: DEFAULT_EMBEDDED_RUNTIME_PORT,
   error: 'tauri runtime control only',
 };
 
