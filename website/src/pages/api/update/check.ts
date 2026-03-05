@@ -1,4 +1,5 @@
 import type { APIRoute } from 'astro';
+import { resolveLatestAssetForPlatform } from '../../../lib/update-api-utils';
 
 export const prerender = false;
 
@@ -103,13 +104,14 @@ export const GET: APIRoute = async ({ url, locals }) => {
       });
     }
 
-    const asset = latest.assets[platform];
-    if (!asset) {
+    const resolvedAsset = resolveLatestAssetForPlatform(latest.assets, platform);
+    if (!resolvedAsset) {
       return errorResponse(
         `No asset available for platform "${platform}" in version ${latestVersion}`,
         404,
       );
     }
+    const { asset } = resolvedAsset;
 
     // Extract version tag segment for download URL (e.g. "v0.3.3")
     const versionTag = latest.tag.split('/').pop() ?? `v${latestVersion}`;

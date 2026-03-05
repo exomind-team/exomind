@@ -5,12 +5,47 @@ export interface VersionEntry {
   version_dir?: string;
 }
 
+export interface LatestAssetEntry {
+  url: string;
+  size: number;
+  sha256: string;
+}
+
 const VERSION_PARAM_RE = /^v\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?$/;
 const DEFAULT_PREVIEW_RETENTION = 15;
+const PLATFORM_ASSET_CANDIDATES: Record<string, string[]> = {
+  'windows-x64': ['windows-x64', 'windows-x64-setup'],
+  'android-arm64': ['android-arm64'],
+};
 
 export function isValidVersionParam(version: string): boolean {
   if (!version || version.length > 80) return false;
   return VERSION_PARAM_RE.test(version);
+}
+
+export function resolveLatestAssetForPlatform(
+  assets: Record<string, LatestAssetEntry> | null | undefined,
+  platform: string,
+): { assetKey: string; asset: LatestAssetEntry } | null {
+  if (!assets || typeof assets !== 'object' || !platform) {
+    return null;
+  }
+
+  const candidates = PLATFORM_ASSET_CANDIDATES[platform] ?? [platform];
+  for (const key of candidates) {
+    const asset = assets[key];
+    if (!asset) continue;
+    if (
+      typeof asset.url !== 'string' ||
+      typeof asset.size !== 'number' ||
+      typeof asset.sha256 !== 'string'
+    ) {
+      continue;
+    }
+    return { assetKey: key, asset };
+  }
+
+  return null;
 }
 
 function toVersionEntry(value: unknown): VersionEntry | null {

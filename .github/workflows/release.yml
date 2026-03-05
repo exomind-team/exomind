@@ -212,11 +212,81 @@ jobs:
             Remove-Item -Recurse -Force node_modules
           }
 
-      - name: Install dependencies (安装依赖)
+      - name: Clear bun global cache (清理 bun 全局缓存)
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          try {
+            Write-Host "Running bun pm cache rm (best effort)..."
+            bun pm cache rm
+          } catch {
+            Write-Warning "bun pm cache rm failed: $($_.Exception.Message)"
+          }
+
+          $bunCacheDir = Join-Path $env:USERPROFILE ".bun\install\cache"
+          if (Test-Path $bunCacheDir) {
+            try {
+              Write-Host "Removing bun global cache directory: $bunCacheDir"
+              Remove-Item -Recurse -Force $bunCacheDir -ErrorAction Stop
+            } catch {
+              Write-Warning "Failed to remove bun global cache directory: $($_.Exception.Message)"
+            }
+          } else {
+            Write-Host "Bun global cache directory not found, skip cleanup."
+          }
+
+      - name: Install dependencies with isolated cache and retry (安装依赖：隔离缓存 + 重试)
         shell: powershell
         timeout-minutes: 10
         run: |
-          bun install --frozen-lockfile
+          $ErrorActionPreference = "Stop"
+
+          function Invoke-BunInstallWithCache {
+            param(
+              [Parameter(Mandatory = $true)][string]$CacheDir,
+              [Parameter(Mandatory = $true)][string]$AttemptLabel,
+              [int]$TimeoutSeconds = 180
+            )
+
+            if (Test-Path $CacheDir) {
+              Remove-Item -Recurse -Force $CacheDir -ErrorAction SilentlyContinue
+            }
+            New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
+
+            $env:BUN_INSTALL_CACHE_DIR = $CacheDir
+            $arguments = @("install", "--frozen-lockfile", "--cache-dir", $CacheDir)
+            Write-Host "[$AttemptLabel] Running: bun $($arguments -join ' ')"
+
+            $commandText = "bun $($arguments -join ' ')"
+            $process = Start-Process -FilePath "cmd.exe" -ArgumentList "/c", $commandText -PassThru
+            $finished = $process.WaitForExit($TimeoutSeconds * 1000)
+
+            if (-not $finished) {
+              Write-Warning "[$AttemptLabel] bun install timed out after $TimeoutSeconds seconds."
+              try {
+                & taskkill /PID $process.Id /T /F | Out-Null
+              } catch {
+                Stop-Process -Id $process.Id -Force -ErrorAction SilentlyContinue
+              }
+              throw "bun install timeout in $AttemptLabel"
+            }
+
+            if ($process.ExitCode -ne 0) {
+              throw "bun install failed in $AttemptLabel with exit code $($process.ExitCode)"
+            }
+          }
+
+          $baseCacheDir = Join-Path $env:RUNNER_TEMP "bun-install-cache"
+          $firstAttemptCacheDir = Join-Path $baseCacheDir "attempt-1"
+          $secondAttemptCacheDir = Join-Path $baseCacheDir "attempt-2"
+
+          try {
+            Invoke-BunInstallWithCache -CacheDir $firstAttemptCacheDir -AttemptLabel "attempt 1 / 第一次"
+          } catch {
+            Write-Warning "First install attempt failed: $($_.Exception.Message)"
+            Write-Host "Retry bun install / 重试 bun install with fresh isolated cache."
+            Invoke-BunInstallWithCache -CacheDir $secondAttemptCacheDir -AttemptLabel "attempt 2 / 第二次"
+          }
 
       # ─── Android build ──────────────────────────────────────
 
@@ -411,7 +481,7 @@ jobs:
           }
 
       - name: Upload Android signed APK Artifact (上传已签名 APK)
-        if: steps.targets.outputs.BUILD_ANDROID == 'true'
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
         id: upload_apk
         uses: actions/upload-artifact@v4
         with:
@@ -420,7 +490,7 @@ jobs:
         continue-on-error: true
 
       - name: Retry Upload Android signed APK Artifact
-        if: steps.targets.outputs.BUILD_ANDROID == 'true' && steps.upload_apk.outcome == 'failure'
+        if: steps.targets.outputs.BUILD_ANDROID == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/') && steps.upload_apk.outcome == 'failure'
         uses: actions/upload-artifact@v4
         with:
           name: android-apk-signed-${{ steps.hash.outputs.HASH }}
@@ -428,22 +498,100 @@ jobs:
 
       # ─── Windows build ──────────────────────────────────────
 
-      - name: Build Windows NSIS installer (构建 NSIS 安装包)
+      - name: Build Windows EXE binary (构建 Windows EXE 可执行文件)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        run: bun tauri build --bundles nsis
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+          # Build EXE via cargo to avoid a second tauri beforeBuild bun install in CI.
+          #（使用 cargo 构建 EXE，避免 CI 中 tauri beforeBuild 再次触发 bun install 卡死）
+          cargo build --manifest-path src-tauri/Cargo.toml --release -p exomind
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
 
-      - name: Build Windows MSI installer (构建 MSI 安装包，复用已编译的 Rust)
+      - name: Prepare MSI prerequisites (准备 MSI 前置检查)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        id: msi_prereq
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Continue"
+          $msiReady = $true
+          $runnerIdentity = (whoami).Trim().ToLowerInvariant()
+          Write-Host "Runner identity / 运行账号: $runnerIdentity"
+
+          if ($runnerIdentity -eq "nt authority\network service") {
+            Write-Warning "NetworkService account is detected. MSI build is disabled because WiX ICE validation often fails in service context."
+            $msiReady = $false
+          } else {
+            $wshKey = "HKCU:\Software\Microsoft\Windows Script Host\Settings"
+            try {
+              New-Item -Path $wshKey -Force | Out-Null
+              New-ItemProperty -Path $wshKey -Name Enabled -PropertyType DWord -Value 1 -Force | Out-Null
+              $enabled = (Get-ItemProperty -Path $wshKey -Name Enabled -ErrorAction SilentlyContinue).Enabled
+              Write-Host "Windows Script Host (WSH) Enabled=$enabled"
+            } catch {
+              Write-Warning "Unable to set WSH registry key: $($_.Exception.Message)"
+              $msiReady = $false
+            }
+
+            $probePath = Join-Path $env:RUNNER_TEMP "wix-vbscript-probe.vbs"
+            Set-Content -Path $probePath -Value 'WScript.Echo "VBSCRIPT_OK"' -Encoding ASCII
+
+            try {
+              & cscript.exe //NoLogo $probePath
+              Write-Host "cscript probe exit code=$LASTEXITCODE"
+              if ($LASTEXITCODE -ne 0) {
+                Write-Warning "cscript probe returned non-zero exit code: $LASTEXITCODE"
+                $msiReady = $false
+              }
+            } catch {
+              Write-Warning "cscript probe failed: $($_.Exception.Message)"
+              $msiReady = $false
+            }
+
+            try {
+              $service = Get-Service -Name msiserver -ErrorAction Stop
+              Write-Host "Windows Installer service status=$($service.Status) startType=$($service.StartType)"
+              if ($service.Status -ne "Running") {
+                Start-Service -Name msiserver -ErrorAction Stop
+                Start-Sleep -Seconds 1
+                $service = Get-Service -Name msiserver -ErrorAction Stop
+                Write-Host "Windows Installer service status after start=$($service.Status)"
+              }
+            } catch {
+              Write-Warning "Windows Installer service probe failed: $($_.Exception.Message)"
+              $msiReady = $false
+            }
+
+            try {
+              $null = New-Object -ComObject WindowsInstaller.Installer
+              Write-Host "WindowsInstaller COM probe: OK"
+            } catch {
+              Write-Warning "WindowsInstaller COM probe failed: $($_.Exception.Message)"
+              $msiReady = $false
+            }
+          }
+
+          "MSI_READY=$($msiReady.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Write-Host "MSI_READY=$($msiReady.ToString().ToLower())"
+
+      - name: Build Windows MSI installer (构建 Windows MSI 安装包)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY == 'true'
         run: bun tauri build --bundles msi
         continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           VITE_APP_VERSION: ${{ steps.app_version.outputs.APP_VERSION }}
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
+          RUST_LOG: tauri_bundler=debug
+
+      - name: Skip MSI build when prerequisites are unavailable (前置检查失败时跳过 MSI)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY != 'true'
+        shell: powershell
+        run: |
+          Write-Warning "MSI prerequisites are unavailable on this runner. Skipping MSI build to keep EXE/APK pipeline stable."
 
       - name: Build exomind-rt runtime (构建 exomind-rt 运行时二进制)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true'
@@ -457,44 +605,300 @@ jobs:
           New-Item -ItemType Directory -Force -Path artifacts/runtime | Out-Null
           Copy-Item -Path target/release/exomind-rt.exe -Destination artifacts/runtime/exomind-rt-windows-x64.exe -Force
 
+      - name: Upload self-hosted artifacts to Cloudflare R2 (self-hosted 直传 Cloudflare R2)
+        if: |
+          (
+            github.event_name == 'workflow_dispatch' ||
+            (github.event_name == 'push' && startsWith(github.ref, 'refs/tags/build/'))
+          ) &&
+          (steps.targets.outputs.BUILD_WINDOWS == 'true' || steps.targets.outputs.BUILD_ANDROID == 'true')
+        shell: powershell
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          if (-not $env:CLOUDFLARE_API_TOKEN -or -not $env:CLOUDFLARE_ACCOUNT_ID) {
+            throw "Missing Cloudflare credentials (CLOUDFLARE_API_TOKEN / CLOUDFLARE_ACCOUNT_ID)."
+          }
+
+          $buildWindows = "${{ steps.targets.outputs.BUILD_WINDOWS }}" -eq "true"
+          $buildAndroid = "${{ steps.targets.outputs.BUILD_ANDROID }}" -eq "true"
+          $version = "${{ steps.app_version.outputs.APP_VERSION }}"
+          $shortHash = "${{ steps.hash.outputs.HASH }}"
+          $runNumber = "${{ github.run_number }}"
+          $scope = "${{ github.event.inputs.build_scope }}"
+          if ([string]::IsNullOrWhiteSpace($scope)) {
+            $scope = "tag-build"
+          }
+          $isBuildTagPush = "${{ github.event_name }}" -eq "push" -and "${{ github.ref }}".StartsWith("refs/tags/build/")
+
+          $bucket = "exomind-releases"
+          $channel = "preview"
+          if ($isBuildTagPush) {
+            $versionDir = "${{ github.ref_name }}" -replace '^build/', ''
+          } else {
+            $versionDir = "v$version-manual.$runNumber.$shortHash"
+          }
+          # artifactVersion (产物版本号): build tag uses "v..." for website API compatibility.
+          # （build tag 使用带 v 前缀，确保官网下载 API 与文件名一致）
+          $artifactVersion = if ($isBuildTagPush) { $versionDir } else { $version }
+
+          $stagingDir = Join-Path $env:RUNNER_TEMP "r2-direct-upload"
+          if (Test-Path $stagingDir) {
+            Remove-Item -Path $stagingDir -Recurse -Force
+          }
+          New-Item -ItemType Directory -Path $stagingDir -Force | Out-Null
+
+          if ($buildWindows) {
+            $exeCandidates = @(
+              "target/release/exomind.exe",
+              "target/release/ExoMind.exe",
+              "src-tauri/target/release/exomind.exe",
+              "src-tauri/target/release/ExoMind.exe"
+            )
+            $exePath = $exeCandidates | Where-Object { Test-Path $_ } | Select-Object -First 1
+            if (-not $exePath) {
+              throw "Missing Windows EXE output in src-tauri/target/release/."
+            }
+            Copy-Item -Path $exePath -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-windows-x64-setup.exe") -Force
+
+            $runtimePath = "artifacts/runtime/exomind-rt-windows-x64.exe"
+            if (Test-Path $runtimePath) {
+              Copy-Item -Path $runtimePath -Destination (Join-Path $stagingDir "ExoMind-RT-$artifactVersion-windows-x64.exe") -Force
+            }
+
+            $msiCandidates = @(
+              "target/release/bundle/msi",
+              "src-tauri/target/release/bundle/msi"
+            )
+            $msiFile = $null
+            foreach ($msiDir in $msiCandidates) {
+              if (Test-Path $msiDir) {
+                $msiFile = Get-ChildItem -Path $msiDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+                if ($msiFile) { break }
+              }
+            }
+            if ($msiFile) {
+              Copy-Item -Path $msiFile.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-windows-x64-installer.msi") -Force
+            } else {
+              Write-Warning "MSI artifact not found. Continue with EXE upload only."
+            }
+          }
+
+          if ($buildAndroid) {
+            $apkDir = "src-tauri/gen/android/app/build/outputs/apk-signed"
+            if (-not (Test-Path $apkDir)) {
+              throw "Missing Android signed APK directory: $apkDir"
+            }
+
+            $apkFiles = Get-ChildItem -Path $apkDir -Filter "*-signed.apk" -Recurse
+            if (-not $apkFiles -or $apkFiles.Count -eq 0) {
+              throw "No signed APK files found under $apkDir"
+            }
+
+            $arm64Apk = $apkFiles | Where-Object { $_.Name -match "(?i)arm64|aarch64|arm64-v8a" } | Select-Object -First 1
+            if (-not $arm64Apk) {
+              throw "Missing Android arm64 signed APK."
+            }
+            Copy-Item -Path $arm64Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-android-arm64.apk") -Force
+
+            $x86Apk = $apkFiles | Where-Object { $_.Name -match "(?i)i686|x86" -and $_.Name -notmatch "(?i)x86_64" } | Select-Object -First 1
+            if ($x86Apk) {
+              Copy-Item -Path $x86Apk.FullName -Destination (Join-Path $stagingDir "ExoMind-$artifactVersion-android-x86.apk") -Force
+            } else {
+              Write-Warning "Android x86 signed APK not found. Uploading arm64 only."
+            }
+          }
+
+          function Write-Utf8NoBom([string]$Path, [string]$Content) {
+            $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
+            [System.IO.File]::WriteAllText($Path, $Content, $utf8NoBom)
+          }
+
+          $preparedFiles = Get-ChildItem -Path $stagingDir -File
+          if (-not $preparedFiles -or $preparedFiles.Count -eq 0) {
+            throw "No artifacts prepared for direct R2 upload."
+          }
+
+          Write-Host "Prepared files for R2 direct upload (R2 直传文件):"
+          foreach ($file in $preparedFiles) {
+            Write-Host " - $($file.FullName)"
+          }
+
+          function Get-ContentType([string]$fileName) {
+            $name = $fileName.ToLowerInvariant()
+            if ($name.EndsWith(".apk")) { return "application/vnd.android.package-archive" }
+            if ($name.EndsWith(".json")) { return "application/json" }
+            return "application/octet-stream"
+          }
+
+          foreach ($file in $preparedFiles) {
+            $contentType = Get-ContentType $file.Name
+            $r2Key = "$channel/$versionDir/$($file.Name)"
+            Write-Host "Uploading (上传) $($file.Name) => $r2Key (Content-Type=$contentType)"
+            & npx wrangler r2 object put "$bucket/$r2Key" --file "$($file.FullName)" --content-type "$contentType" --remote
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload file to R2: $($file.Name)"
+            }
+          }
+
+          $manifestPath = Join-Path $stagingDir "selfhosted-upload-manifest.json"
+          $manifest = @{
+            channel = $channel
+            version = $artifactVersion
+            versionDir = $versionDir
+            hash = $shortHash
+            runNumber = $runNumber
+            scope = $scope
+            files = @($preparedFiles.Name)
+          } | ConvertTo-Json -Depth 5
+          Write-Utf8NoBom -Path $manifestPath -Content $manifest
+          & npx wrangler r2 object put "$bucket/$channel/$versionDir/selfhosted-upload-manifest.json" --file "$manifestPath" --content-type "application/json" --remote
+          if ($LASTEXITCODE -ne 0) {
+            throw "Failed to upload self-hosted manifest to R2."
+          }
+
+          if ($isBuildTagPush) {
+            Write-Host "Build tag detected. Generate preview metadata (检测到 build tag，生成预览元数据)."
+            $publishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
+
+            function Get-AssetKey([string]$fileName) {
+              $name = $fileName.ToLowerInvariant()
+              if ($name -match '^exomind-.*-windows-x64-setup\.exe$') { return "windows-x64-setup" }
+              if ($name -match '^exomind-.*-windows-x64-installer\.msi$') { return "windows-x64-installer" }
+              if ($name -match '^exomind-.*-android-arm64\.apk$') { return "android-arm64" }
+              if ($name -match '^exomind-.*-android-x86\.apk$') { return "android-x86" }
+              if ($name -match '^exomind-rt-.*-windows-x64\.exe$') { return "runtime-windows-x64" }
+              if ($name -match '^exomind-rt-.*-macos-aarch64\.tar\.gz$') { return "runtime-macos-aarch64" }
+              if ($name -match '^exomind-rt-.*-linux-x64\.tar\.gz$') { return "runtime-linux-x64" }
+              return $null
+            }
+
+            $assets = [ordered]@{}
+            foreach ($file in $preparedFiles) {
+              $assetKey = Get-AssetKey $file.Name
+              if (-not $assetKey) { continue }
+              $sha256 = (Get-FileHash -LiteralPath $file.FullName -Algorithm SHA256).Hash.ToLowerInvariant()
+              $assets[$assetKey] = @{
+                url = "$channel/$versionDir/$($file.Name)"
+                size = [int64]$file.Length
+                sha256 = $sha256
+              }
+            }
+
+            $latestPath = Join-Path $stagingDir "latest.json"
+            $latestPayload = @{
+              version = $artifactVersion
+              tag = "${{ github.ref_name }}"
+              published_at = $publishedAt
+              assets = $assets
+            } | ConvertTo-Json -Depth 20
+            Write-Utf8NoBom -Path $latestPath -Content $latestPayload
+            & npx wrangler r2 object put "$bucket/$channel/latest.json" --file "$latestPath" --content-type "application/json" --remote
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload preview latest.json."
+            }
+
+            $retention = 15
+            $existingVersionsPath = Join-Path $stagingDir "existing-versions.json"
+            $existingVersions = @()
+
+            & npx wrangler r2 object get "$bucket/$channel/versions.json" --file "$existingVersionsPath" --remote *> $null
+            if ($LASTEXITCODE -eq 0 -and (Test-Path $existingVersionsPath)) {
+              try {
+                $rawVersions = Get-Content -Path $existingVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                if ($rawVersions -is [System.Array]) {
+                  $existingVersions = @($rawVersions)
+                } elseif ($rawVersions -and $rawVersions.PSObject.Properties.Name -contains "versions") {
+                  $existingVersions = @($rawVersions.versions)
+                  if ($rawVersions.PSObject.Properties.Name -contains "retention") {
+                    $parsedRetention = 0
+                    if ([int]::TryParse([string]$rawVersions.retention, [ref]$parsedRetention) -and $parsedRetention -gt 0) {
+                      $retention = $parsedRetention
+                    }
+                  }
+                }
+              } catch {
+                Write-Warning "Failed to parse preview versions.json, fallback to empty list."
+              }
+            }
+
+            $newEntry = [ordered]@{
+              version = $artifactVersion
+              tag = "${{ github.ref_name }}"
+              published_at = $publishedAt
+              version_dir = $versionDir
+            }
+
+            $mergedVersions = @($newEntry)
+            foreach ($entry in $existingVersions) {
+              if (-not $entry) { continue }
+              $versionValue = ""
+              if ($entry.PSObject.Properties.Name -contains "version") {
+                $versionValue = [string]$entry.version
+              }
+              if ([string]::IsNullOrWhiteSpace($versionValue)) { continue }
+              $alreadyExists = $mergedVersions | Where-Object { $_.version -eq $versionValue } | Select-Object -First 1
+              if ($alreadyExists) { continue }
+              $mergedVersions += [ordered]@{
+                version = $versionValue
+                tag = [string]$entry.tag
+                published_at = [string]$entry.published_at
+                version_dir = if ($entry.PSObject.Properties.Name -contains "version_dir") { [string]$entry.version_dir } else { $versionValue }
+              }
+            }
+
+            if ($mergedVersions.Count -gt $retention) {
+              $mergedVersions = @($mergedVersions | Select-Object -First $retention)
+            }
+
+            $versionsPath = Join-Path $stagingDir "versions.json"
+            $versionsPayload = @{
+              versions = $mergedVersions
+              retention = $retention
+            } | ConvertTo-Json -Depth 20
+            Write-Utf8NoBom -Path $versionsPath -Content $versionsPayload
+            & npx wrangler r2 object put "$bucket/$channel/versions.json" --file "$versionsPath" --content-type "application/json" --remote
+            if ($LASTEXITCODE -ne 0) {
+              throw "Failed to upload preview versions.json."
+            }
+          }
+
       - name: Upload Windows runtime Artifact (上传 Windows runtime)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
         uses: actions/upload-artifact@v4
         with:
           name: windows-runtime-${{ steps.hash.outputs.HASH }}
           path: artifacts/runtime/exomind-rt-windows-x64.exe
 
       - name: Upload Windows EXE Artifact (上传 EXE)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
-        id: upload_exe
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
         uses: actions/upload-artifact@v4
         with:
           name: windows-exe-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/nsis/
-        continue-on-error: true
-
-      - name: Retry Upload Windows EXE Artifact
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.upload_exe.outcome == 'failure'
-        uses: actions/upload-artifact@v4
-        with:
-          name: windows-exe-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/nsis/
+          path: |
+            target/release/exomind.exe
+            target/release/ExoMind.exe
+            src-tauri/target/release/exomind.exe
+            src-tauri/target/release/ExoMind.exe
+          if-no-files-found: warn
 
       - name: Upload Windows MSI Artifact (上传 MSI)
-        if: steps.targets.outputs.BUILD_WINDOWS == 'true'
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
         uses: actions/upload-artifact@v4
         with:
           name: windows-msi-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/msi/
+          path: |
+            target/release/bundle/msi/
+            src-tauri/target/release/bundle/msi/
           if-no-files-found: ignore
 
   build-macos:
-    # PAUSED: macOS runner costs 10x, 额度不足暂停。手动 dispatch 可选择性恢复。
+    # release only: 非 release 不运行 macOS job（发布专用）
     if: |
-      (
-        github.event_name == 'workflow_dispatch' &&
-        (github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'macos')
-      )
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
     runs-on: macos-latest
     steps:
       - uses: actions/checkout@v4
@@ -575,12 +979,9 @@ jobs:
           if-no-files-found: ignore
 
   build-linux:
-    # PAUSED: Linux runner costs 1x, 额度不足暂停。手动 dispatch 可选择性恢复。
+    # release only: 非 release 不运行 Linux job（发布专用）
     if: |
-      (
-        github.event_name == 'workflow_dispatch' &&
-        (github.event.inputs.build_scope == 'all' || github.event.inputs.build_scope == 'linux')
-      )
+      github.event_name == 'push' && startsWith(github.ref, 'refs/tags/release/')
     runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
@@ -682,13 +1083,10 @@ jobs:
   create-release:
     needs: [build-apk-exe-selfhosted, build-macos, build-linux]
     runs-on: ubuntu-latest
-    # 对 release/* 和 build/* tag 执行发布步骤
+    # 仅 release/* tag 执行发布步骤（build/* 仅做构建与 R2 直传）
     if: |
       always() &&
-      (
-        startsWith(github.ref, 'refs/tags/release/') ||
-        startsWith(github.ref, 'refs/tags/build/')
-      ) &&
+      startsWith(github.ref, 'refs/tags/release/') &&
       (
         needs.build-apk-exe-selfhosted.result == 'success' ||
         needs.build-macos.result == 'success' ||
@@ -759,7 +1157,22 @@ jobs:
             echo "::error::Missing Windows EXE artifact."
             exit 1
           fi
-          cp "${exe_files[0]}" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
+          app_exe=""
+          for exe in "${exe_files[@]}"; do
+            lower_name="$(basename "$exe" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$lower_name" == *"exomind-rt"* ]]; then
+              continue
+            fi
+            app_exe="$exe"
+            if [[ "$lower_name" == "exomind.exe" || "$lower_name" == *"setup"* || "$lower_name" == *"installer"* ]]; then
+              break
+            fi
+          done
+          if [[ -z "$app_exe" ]]; then
+            echo "::error::Cannot find non-runtime Windows EXE artifact."
+            exit 1
+          fi
+          cp "$app_exe" "$output_dir/ExoMind-${version}-${short_hash}-windows-x64-setup.exe"
 
           msi_files=("$source_dir"/**/*.msi)
           if (( ${#msi_files[@]} > 0 )); then
@@ -913,8 +1326,19 @@ jobs:
 
           # Find and copy Windows EXE
           exe_files=("$src"/**/*.exe)
-          if (( ${#exe_files[@]} > 0 )); then
-            cp "${exe_files[0]}" "$dest/ExoMind-${version}-windows-x64-setup.exe"
+          app_exe=""
+          for exe in "${exe_files[@]}"; do
+            file_name="$(basename "$exe" | tr '[:upper:]' '[:lower:]')"
+            if [[ "$file_name" == *"exomind-rt"* ]]; then
+              continue
+            fi
+            app_exe="$exe"
+            if [[ "$file_name" == "exomind.exe" || "$file_name" == *"setup"* || "$file_name" == *"installer"* ]]; then
+              break
+            fi
+          done
+          if [[ -n "$app_exe" ]]; then
+            cp "$app_exe" "$dest/ExoMind-${version}-windows-x64-setup.exe"
           fi
 
           # Find and copy Windows MSI
