@@ -54,6 +54,7 @@ import type {
   AgentHubNodeStatus,
   RuntimeHostRecord,
   AgentHubViewMode,
+  AgentHubRightPanelContext,
   RuntimeServiceStatus,
 } from '@/lib/types/agent-hub';
 import {
@@ -71,8 +72,9 @@ import {
 } from './agents-signal-topology';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
-  { id: 'topology', icon: Bot, label: '拓扑' },
-  { id: 'list', icon: List, label: '列表' },
+  { id: 'topology', icon: Waypoints, label: '拓扑图' },
+  { id: 'nodes', icon: Bot, label: '节点' },
+  { id: 'routes', icon: List, label: '路由' },
   { id: 'device', icon: Monitor, label: '设备' },
 ];
 
@@ -408,7 +410,7 @@ function getDeviceTypeIcon(groupId: string): LucideIcon {
   return Monitor;
 }
 
-function ViewToggle({
+function TabBar({
   value,
   onChange,
 }: {
@@ -416,7 +418,7 @@ function ViewToggle({
   onChange: (value: AgentHubViewMode) => void;
 }) {
   return (
-    <div className="flex items-center rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
+    <div className="flex items-center gap-1 rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
       {VIEW_ITEMS.map((item) => {
         const Icon = item.icon;
         const active = value === item.id;
@@ -424,17 +426,16 @@ function ViewToggle({
           <button
             key={item.id}
             type="button"
-            data-testid={`agent-view-toggle-${item.id}`}
             onClick={() => onChange(item.id)}
-            aria-pressed={active}
-            className={`flex h-7 w-8 items-center justify-center rounded-[8px] transition ${
+            className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
               active
-                ? 'bg-white text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
-                : 'text-[#78716C] dark:text-[#A8A29E]'
+                ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
+                : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
             }`}
-            title={item.label}
+            aria-selected={active}
           >
-            <Icon size={16} />
+            <Icon size={14} />
+            {item.label}
           </button>
         );
       })}
@@ -1336,6 +1337,33 @@ export function AgentsPage() {
     getRuntimeExternalAddress(),
   );
   const [runtimeTargetError, setRuntimeTargetError] = useState('');
+  const [rightPanel, setRightPanel] = useState<AgentHubRightPanelContext>({ state: 'CLOSED' });
+
+  const openRouteEdit = (routeId: string | null = null) => {
+    setRightPanel({ state: 'ROUTE_EDIT', routeId });
+  };
+  const openAgentDetail = (nodeId: string) => {
+    setRightPanel({ state: 'AGENT_DETAIL', nodeId });
+  };
+  const openActorDetail = (nodeId: string) => {
+    setRightPanel({ state: 'ACTOR_DETAIL', nodeId });
+  };
+  const openSignalDetail = (signalId: string) => {
+    setRightPanel({ state: 'SIGNAL_DETAIL', signalId });
+  };
+  const closeRightPanel = () => {
+    setRightPanel({ state: 'CLOSED' });
+  };
+
+  // T5/T8 阶段使用
+  void openRouteEdit;
+  void openSignalDetail;
+
+  const handleTabChange = (tab: AgentHubViewMode) => {
+    setViewMode(tab);
+    closeRightPanel(); // 切换 Tab 时关闭右侧栏（保守策略）
+  };
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
@@ -1594,7 +1622,7 @@ export function AgentsPage() {
   }, [selectedNodeId, signalGraph.nodes]);
 
   const content = useMemo(() => {
-    if (viewMode === 'list') {
+    if (viewMode === 'nodes') {
       return (
         <ListView
           sections={listSections}
@@ -1631,8 +1659,17 @@ export function AgentsPage() {
       <TopologyView
         graph={signalGraph}
         selectedNodeId={selectedNodeId}
-        onSelectNode={setSelectedNodeId}
-        onClearSelection={() => setSelectedNodeId(null)}
+        onSelectNode={(nodeId) => {
+          setSelectedNodeId(nodeId);
+          // 判断节点类型
+          const node = signalGraph.nodes.find((n) => n.id === nodeId);
+          if (node?.type === 'agent') openAgentDetail(nodeId);
+          else if (node?.type === 'actor') openActorDetail(nodeId);
+        }}
+        onClearSelection={() => {
+          setSelectedNodeId(null);
+          closeRightPanel();
+        }}
       />
     );
   }, [
@@ -1653,34 +1690,73 @@ export function AgentsPage() {
   ]);
 
   return (
-    <div data-testid="agent-hub-page" className="relative min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
-      <header className="flex items-center justify-between px-5 py-3">
-        <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent 网络</h1>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-            aria-label="拓扑设置（Topology Settings）"
-          >
-            <Settings size={18} />
-          </button>
-          <ViewToggle value={viewMode} onChange={setViewMode} />
-          <button
-            type="button"
-            data-testid="agent-add-node-button"
-            onClick={() => setSheetOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-[#C75B3A] text-white"
-            aria-label="添加节点（Add Node）"
-          >
-            <Plus size={18} />
-          </button>
+    <div data-testid="agent-hub-page" className="relative flex min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]">
+      {/* Header */}
+      <header className="flex flex-col gap-2 px-5 py-3">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent Hub</h1>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+              aria-label="设置"
+            >
+              <Settings size={18} />
+            </button>
+            <button
+              type="button"
+              data-testid="agent-add-node-button"
+              onClick={() => setSheetOpen(true)}
+              className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
+              aria-label="添加节点"
+            >
+              <Plus size={16} />
+              添加
+            </button>
+          </div>
         </div>
+        {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
+        <TabBar value={viewMode} onChange={handleTabChange} />
       </header>
 
-      <div className="px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2">
-        {content}
+      {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* 内容区 */}
+        <div className="flex-1 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2">
+          {content}
+        </div>
+
+        {/* 右侧栏：桌面端固定 380px，CLOSED 时不渲染 */}
+        {rightPanel.state !== 'CLOSED' && (
+          <aside className="hidden w-[380px] shrink-0 border-l border-[#292524] bg-[#1C1917] md:flex md:flex-col">
+            <div className="flex items-center justify-between border-b border-[#292524] px-4 py-3">
+              <span className="text-sm font-medium text-[#FAFAF9]">
+                {rightPanel.state === 'ROUTE_EDIT' && (rightPanel.routeId ? '编辑路由' : '新建路由')}
+                {rightPanel.state === 'AGENT_DETAIL' && 'Agent 详情'}
+                {rightPanel.state === 'ACTOR_DETAIL' && 'Actor 详情'}
+                {rightPanel.state === 'SIGNAL_DETAIL' && '信号详情'}
+                {rightPanel.state === 'AGENT_CHAT' && 'Agent 对话'}
+              </span>
+              <button
+                type="button"
+                onClick={closeRightPanel}
+                className="flex h-7 w-7 items-center justify-center rounded text-[#A8A29E] hover:text-[#FAFAF9]"
+                aria-label="关闭"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {/* 右侧栏内容占位（T5/T8 阶段填充） */}
+            <div className="flex-1 p-4">
+              <p className="text-xs text-[#78716C]">
+                {rightPanel.state} — 待实现（T5/T8）
+              </p>
+            </div>
+          </aside>
+        )}
       </div>
 
+      {/* Sheets（移动端） */}
       {sheetOpen && (
         <AddNodeSheet
           options={ADD_NODE_OPTIONS}
@@ -1688,7 +1764,6 @@ export function AgentsPage() {
           onAddDevice={() => setHostManagerOpen(true)}
         />
       )}
-
       {hostManagerOpen && (
         <RuntimeHostManagerSheet
           hostSnapshots={runtimeHostSnapshots}
