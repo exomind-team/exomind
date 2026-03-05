@@ -869,7 +869,7 @@ jobs:
               Write-Utf8NoBom -Path $versionsPath -Content $versionsPayload
               & npx wrangler r2 object put "$bucket/$channel/versions.json" --file "$versionsPath" --content-type "application/json" --remote
               if ($LASTEXITCODE -ne 0) {
-                throw "Failed to upload preview versions.json."
+                throw "Failed to upload $channel versions.json."
               }
             }
           }
