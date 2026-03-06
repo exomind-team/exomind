@@ -5,7 +5,9 @@ import {
   buildAutoFlowLayout,
   buildTopologyDatasetKey,
   buildTopologyFilterKey,
+  clearTopologyScopeLayouts,
   readTopologyLayoutStore,
+  removeTopologyLayoutSnapshot,
   setTopologyLayoutSnapshot,
   writeTopologyLayoutStore,
   type TopologyLayoutSnapshot,
@@ -200,6 +202,77 @@ describe('topology layout helpers issue-382（拓扑布局持久化纯函数）'
       [datasetKey]: {
         global: {
           'nodesFilter=all': snapshot,
+        },
+      },
+    });
+  });
+
+  it('removes only the current workspace snapshot（仅删除当前工作区快照）', () => {
+    const datasetKey = buildTopologyDatasetKey(SAMPLE_GRAPH);
+    const store = {
+      [datasetKey]: {
+        global: {
+          a: {
+            manualPositions: { 'agent:classifier': { x: 1, y: 2 } },
+            updatedAt: '2026-03-06T00:00:00.000Z',
+          },
+          b: {
+            manualPositions: { 'actor:eventlog': { x: 3, y: 4 } },
+            updatedAt: '2026-03-06T00:00:00.000Z',
+          },
+        },
+      },
+    };
+
+    expect(removeTopologyLayoutSnapshot(store, {
+      datasetKey,
+      scopeKey: 'global',
+      filterKey: 'a',
+    })).toEqual({
+      [datasetKey]: {
+        global: {
+          b: {
+            manualPositions: { 'actor:eventlog': { x: 3, y: 4 } },
+            updatedAt: '2026-03-06T00:00:00.000Z',
+          },
+        },
+      },
+    });
+  });
+
+  it('clears all saved layouts under a scope（清空同一 scope 下全部布局）', () => {
+    const datasetKey = buildTopologyDatasetKey(SAMPLE_GRAPH);
+    const store = {
+      [datasetKey]: {
+        global: {
+          a: {
+            manualPositions: { 'agent:classifier': { x: 1, y: 2 } },
+            updatedAt: '2026-03-06T00:00:00.000Z',
+          },
+          b: {
+            manualPositions: { 'actor:eventlog': { x: 3, y: 4 } },
+            updatedAt: '2026-03-06T00:00:00.000Z',
+          },
+        },
+        'host:1': {
+          c: {
+            manualPositions: { 'topic:user.input.text': { x: 5, y: 6 } },
+            updatedAt: '2026-03-06T00:00:00.000Z',
+          },
+        },
+      },
+    };
+
+    expect(clearTopologyScopeLayouts(store, {
+      datasetKey,
+      scopeKey: 'global',
+    })).toEqual({
+      [datasetKey]: {
+        'host:1': {
+          c: {
+            manualPositions: { 'topic:user.input.text': { x: 5, y: 6 } },
+            updatedAt: '2026-03-06T00:00:00.000Z',
+          },
         },
       },
     });

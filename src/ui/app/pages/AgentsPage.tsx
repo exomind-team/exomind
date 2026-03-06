@@ -579,7 +579,11 @@ function TopologyView({
   layoutMode: TopologyLayoutMode;
   manualViewport?: TopologyViewport;
   onLayoutModeChange: (mode: TopologyLayoutMode) => void;
-  onCommitNodePosition: (nodeId: string, position: TopologyNodePosition) => void;
+  onCommitNodePosition: (
+    nodeId: string,
+    position: TopologyNodePosition,
+    viewport?: TopologyViewport,
+  ) => void;
   onCommitViewport: (viewport: TopologyViewport) => void;
   onResetCurrentLayout: () => void;
   onClearSavedLayouts: () => void;
@@ -643,12 +647,29 @@ function TopologyView({
     }));
   }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, graph.edges, inactiveEdgeColor]);
 
-  const reactFlowKey = useMemo(() => {
-    const viewportKey = manualViewport
-      ? `${manualViewport.x}:${manualViewport.y}:${manualViewport.zoom}`
-      : 'fit-view';
-    return `${layoutMode}:${viewportKey}:${graph.nodes.map((node) => `${node.id}:${node.position.x}:${node.position.y}`).join('|')}`;
-  }, [graph.nodes, layoutMode, manualViewport]);
+  useEffect(() => {
+    const instance = flowInstanceRef.current;
+    if (!instance) return;
+
+    if (layoutMode === 'auto:flow') {
+      void instance.fitView({ padding: 0.2 });
+      return;
+    }
+
+    if (manualViewport) {
+      const currentViewport = instance.getViewport();
+      const matchesCurrentViewport =
+        Math.abs(currentViewport.x - manualViewport.x) < 0.5
+        && Math.abs(currentViewport.y - manualViewport.y) < 0.5
+        && Math.abs(currentViewport.zoom - manualViewport.zoom) < 0.001;
+      if (!matchesCurrentViewport) {
+        void instance.setViewport(manualViewport, { duration: 0 });
+      }
+      return;
+    }
+
+    void instance.fitView({ padding: 0.2 });
+  }, [layoutMode, manualViewport]);
 
   return (
     <section
@@ -695,7 +716,7 @@ function TopologyView({
             type="button"
             data-testid="agent-topology-fit-view"
             onClick={() => {
-              flowInstanceRef.current?.fitView();
+              void flowInstanceRef.current?.fitView({ padding: 0.2 });
             }}
             className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-1 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
           >
@@ -720,7 +741,6 @@ function TopologyView({
           </button>
         </div>
         <ReactFlow
-          key={reactFlowKey}
           data-testid="agent-signal-flow"
           nodes={flowNodes}
           edges={flowEdges}
@@ -733,10 +753,15 @@ function TopologyView({
           onNodesChange={onFlowNodesChange}
           onInit={(instance) => {
             flowInstanceRef.current = instance;
+            if (layoutMode === 'manual' && manualViewport) {
+              void instance.setViewport(manualViewport, { duration: 0 });
+              return;
+            }
+            void instance.fitView({ padding: 0.2 });
           }}
           onNodeDragStop={(_, node) => {
             if (layoutMode !== 'manual') return;
-            onCommitNodePosition(node.id, node.position);
+            onCommitNodePosition(node.id, node.position, flowInstanceRef.current?.getViewport());
           }}
           onMoveEnd={(_, viewport) => {
             if (layoutMode !== 'manual') return;
@@ -1760,6 +1785,8 @@ export function AgentsPage() {
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [topologyLayoutMode, setTopologyLayoutMode] = useState<TopologyLayoutMode>('manual');
   const [topologyLayoutStore, setTopologyLayoutStore] = useState<TopologyLayoutStore>(() => readTopologyLayoutStore());
+  const topologyPendingStoreRef = useRef<TopologyLayoutStore | null>(null);
+  const topologyWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [activeSignalRouteHost, setActiveSignalRouteHost] = useState<RuntimeHostRecord | null>(null);
@@ -2340,8 +2367,8 @@ export function AgentsPage() {
     [baseSignalGraph]
   );
   const topologyFilterKey = useMemo(
-    () => buildTopologyFilterKey({ nodesFilter }),
-    [nodesFilter]
+    () => buildTopologyFilterKey(),
+    []
   );
   const topologyManualSnapshot = useMemo(
     () => getTopologyLayoutSnapshot(topologyLayoutStore, {
@@ -2372,10 +2399,32 @@ export function AgentsPage() {
   }, [baseSignalGraph.edges, baseSignalGraph.nodes, topologyLayoutMode, topologyManualResult.nodes]);
   const manualViewport = topologyManualSnapshot?.viewport;
 
+  const flushTopologyStoreWrite = () => {
+    if (topologyWriteTimerRef.current) {
+      clearTimeout(topologyWriteTimerRef.current);
+      topologyWriteTimerRef.current = null;
+    }
+    if (!topologyPendingStoreRef.current) return;
+    writeTopologyLayoutStore(topologyPendingStoreRef.current);
+    topologyPendingStoreRef.current = null;
+  };
+
+  useEffect(() => {
+    return () => {
+      flushTopologyStoreWrite();
+    };
+  }, []);
+
   const persistTopologyStore = (updater: (current: TopologyLayoutStore) => TopologyLayoutStore) => {
     setTopologyLayoutStore((current) => {
       const nextStore = updater(current);
-      writeTopologyLayoutStore(nextStore);
+      topologyPendingStoreRef.current = nextStore;
+      if (topologyWriteTimerRef.current) {
+        clearTimeout(topologyWriteTimerRef.current);
+      }
+      topologyWriteTimerRef.current = setTimeout(() => {
+        flushTopologyStoreWrite();
+      }, 120);
       return nextStore;
     });
   };
@@ -2398,8 +2447,13 @@ export function AgentsPage() {
     }));
   };
 
-  const commitManualNodePosition = (nodeId: string, position: TopologyNodePosition) => {
+  const commitManualNodePosition = (
+    nodeId: string,
+    position: TopologyNodePosition,
+    flowViewport?: TopologyViewport,
+  ) => {
     if (topologyLayoutMode !== 'manual') return;
+    const currentViewport = flowViewport ?? manualViewport;
     const nextNodes = topologyManualResult.nodes.map((node) => (
       node.id === nodeId
         ? { ...node, position }
@@ -2407,7 +2461,7 @@ export function AgentsPage() {
     ));
     saveManualTopologySnapshot({
       nodes: nextNodes,
-      viewport: manualViewport,
+      viewport: currentViewport,
     });
   };
 

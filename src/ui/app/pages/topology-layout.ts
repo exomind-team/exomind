@@ -72,6 +72,15 @@ function normalizeEdgeFingerprint(edge: SignalGraphEdge): string {
   return `${edge.id}|${edge.source}|${edge.target}|${edge.topic}|${edge.targetType}|${edge.targetRef}`;
 }
 
+function hashStableString(value: string): string {
+  let hash = 2166136261;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(16).padStart(8, '0');
+}
+
 export function buildTopologyDatasetKey({
   nodes,
   edges,
@@ -87,7 +96,7 @@ export function buildTopologyDatasetKey({
     .map(normalizeEdgeFingerprint)
     .sort()
     .join('||');
-  return `nodes=${nodeFingerprint}::edges=${edgeFingerprint}`;
+  return `dataset:${nodes.length}:${edges.length}:${hashStableString(nodeFingerprint)}:${hashStableString(edgeFingerprint)}`;
 }
 
 export function buildTopologyFilterKey(input: TopologyFilterInput = {}): string {

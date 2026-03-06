@@ -19,9 +19,23 @@ const runtimeControlMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
 }));
 
-const reactFlowRuntime = vi.hoisted(() => ({
-  fitView: vi.fn(),
-}));
+const reactFlowRuntime = vi.hoisted(() => {
+  let currentViewport = { x: 48, y: 64, zoom: 1.18 };
+  return {
+    fitView: vi.fn((_options?: unknown) => {
+      currentViewport = { x: 0, y: 0, zoom: 1 };
+      return Promise.resolve(true);
+    }),
+    setViewport: vi.fn((viewport: { x: number; y: number; zoom: number }) => {
+      currentViewport = viewport;
+      return Promise.resolve(true);
+    }),
+    getViewport: vi.fn(() => currentViewport),
+    reset: () => {
+      currentViewport = { x: 48, y: 64, zoom: 1.18 };
+    },
+  };
+});
 
 vi.mock('@xyflow/react', () => ({
   ReactFlow: ({
@@ -46,9 +60,17 @@ vi.mock('@xyflow/react', () => ({
     onNodeDragStop?: (_event: unknown, node: { id: string; position: { x: number; y: number } }) => void;
     onMoveEnd?: (_event: unknown, viewport: { x: number; y: number; zoom: number }) => void;
     defaultViewport?: { x: number; y: number; zoom: number };
-    onInit?: (instance: { fitView: () => void }) => void;
+    onInit?: (instance: {
+      fitView: (_options?: unknown) => Promise<boolean>;
+      setViewport: (viewport: { x: number; y: number; zoom: number }, _options?: unknown) => Promise<boolean>;
+      getViewport: () => { x: number; y: number; zoom: number };
+    }) => void;
   }) => {
-    onInit?.({ fitView: reactFlowRuntime.fitView });
+    onInit?.({
+      fitView: reactFlowRuntime.fitView,
+      setViewport: reactFlowRuntime.setViewport,
+      getViewport: reactFlowRuntime.getViewport,
+    });
     return (
       <div data-testid="mock-react-flow">
         <div data-testid="mock-react-flow-nodes-json">
@@ -210,6 +232,9 @@ describe('agents page topology layout issue-382（拓扑布局持久化）', () 
   beforeEach(() => {
     window.localStorage.clear();
     reactFlowRuntime.fitView.mockReset();
+    reactFlowRuntime.setViewport.mockReset();
+    reactFlowRuntime.getViewport.mockClear();
+    reactFlowRuntime.reset();
     serviceMocks.getTopology.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.topology);
     serviceMocks.getDeviceView.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.deviceGroups);
     serviceMocks.getAgentDetail.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.agentDetails['agent-daily']);
@@ -247,15 +272,37 @@ describe('agents page topology layout issue-382（拓扑布局持久化）', () 
     });
 
     firstRender.unmount();
+    reactFlowRuntime.setViewport.mockClear();
     render(<AgentsPage />);
 
     await waitFor(() => {
       expect(readClassifierPosition()).toEqual({ x: 711, y: 157 });
       expect(readViewport()).toEqual({ x: 21, y: 34, zoom: 0.91 });
+      expect(reactFlowRuntime.setViewport).toHaveBeenCalledWith(
+        { x: 21, y: 34, zoom: 0.91 },
+        { duration: 0 },
+      );
     });
   });
 
-  it('keeps separate manual layouts for different filter combinations（不同筛选组合分别记住布局）', async () => {
+  it('captures current viewport on first manual drag before any viewport save（首次拖拽也应一并保存当前视口）', async () => {
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(readClassifierPosition()).toEqual({ x: 600, y: 80 });
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-drag-agent:classifier'));
+
+    await waitFor(() => {
+      const raw = window.localStorage.getItem(TOPOLOGY_LAYOUT_STORAGE_KEY);
+      expect(raw).toContain('"x":0');
+      expect(raw).toContain('"y":0');
+      expect(raw).toContain('"zoom":1');
+    });
+  });
+
+  it('does not split topology layout by list-only filters（列表筛选不应拆分拓扑布局工作区）', async () => {
     render(<AgentsPage />);
 
     await waitFor(() => {
@@ -271,20 +318,6 @@ describe('agents page topology layout issue-382（拓扑布局持久化）', () 
 
     fireEvent.click(screen.getByRole('button', { name: '节点' }));
     fireEvent.click(screen.getByTestId('agent-list-filter-agent'));
-    fireEvent.click(screen.getByRole('button', { name: '拓扑图' }));
-
-    await waitFor(() => {
-      expect(readClassifierPosition()).toEqual({ x: 600, y: 80 });
-    });
-
-    fireEvent.click(screen.getByTestId('mock-react-flow-drag-agent:classifier'));
-
-    await waitFor(() => {
-      expect(readClassifierPosition()).toEqual({ x: 711, y: 157 });
-    });
-
-    fireEvent.click(screen.getByRole('button', { name: '节点' }));
-    fireEvent.click(screen.getByTestId('agent-list-filter-all'));
     fireEvent.click(screen.getByRole('button', { name: '拓扑图' }));
 
     await waitFor(() => {
@@ -310,12 +343,15 @@ describe('agents page topology layout issue-382（拓扑布局持久化）', () 
 
     await waitFor(() => {
       expect(readClassifierPosition()).toEqual({ x: 600, y: 80 });
+      expect(reactFlowRuntime.fitView).toHaveBeenCalled();
     });
 
+    reactFlowRuntime.setViewport.mockClear();
     fireEvent.click(screen.getByTestId('agent-topology-layout-mode-manual'));
 
     await waitFor(() => {
       expect(readClassifierPosition()).toEqual({ x: 822, y: 234 });
+      expect(reactFlowRuntime.setViewport).toHaveBeenCalled();
     });
 
     firstRender.unmount();
@@ -324,6 +360,48 @@ describe('agents page topology layout issue-382（拓扑布局持久化）', () 
 
     await waitFor(() => {
       expect(readClassifierPosition()).toEqual({ x: 822, y: 234 });
+    });
+  });
+
+  it('supports fit view, reset current layout, and clear saved layouts actions（支持适配视口/重置布局/清空布局动作）', async () => {
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(readClassifierPosition()).toEqual({ x: 600, y: 80 });
+    });
+
+    reactFlowRuntime.fitView.mockClear();
+    fireEvent.click(screen.getByTestId('agent-topology-fit-view'));
+
+    await waitFor(() => {
+      expect(reactFlowRuntime.fitView).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-drag-agent:classifier'));
+
+    await waitFor(() => {
+      expect(readClassifierPosition()).toEqual({ x: 711, y: 157 });
+      expect(window.localStorage.getItem(TOPOLOGY_LAYOUT_STORAGE_KEY)).toContain('agent:classifier');
+    });
+
+    fireEvent.click(screen.getByTestId('agent-topology-reset-layout'));
+
+    await waitFor(() => {
+      expect(readClassifierPosition()).toEqual({ x: 600, y: 80 });
+      expect(window.localStorage.getItem(TOPOLOGY_LAYOUT_STORAGE_KEY)).toBeNull();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-drag-agent:classifier'));
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem(TOPOLOGY_LAYOUT_STORAGE_KEY)).toContain('agent:classifier');
+    });
+
+    fireEvent.click(screen.getByTestId('agent-topology-clear-layouts'));
+
+    await waitFor(() => {
+      expect(readClassifierPosition()).toEqual({ x: 600, y: 80 });
+      expect(window.localStorage.getItem(TOPOLOGY_LAYOUT_STORAGE_KEY)).toBeNull();
     });
   });
 });
