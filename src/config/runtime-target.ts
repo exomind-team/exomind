@@ -10,7 +10,19 @@ export interface RuntimeTarget {
   port: number;
 }
 
-const EMBEDDED_RUNTIME_PORT = 4077;
+function resolveEmbeddedRuntimePort(rawValue: string | undefined): number {
+  if (!rawValue) return 9124;
+  const parsed = Number.parseInt(rawValue, 10);
+  if (!Number.isInteger(parsed) || parsed <= 0 || parsed > 65535) {
+    return 9124;
+  }
+  return parsed;
+}
+
+// Keep frontend/runtime port in sync via EXOMIND_RT_PORT (保持前后端 runtime 端口一致).
+export const DEFAULT_EMBEDDED_RUNTIME_PORT = resolveEmbeddedRuntimePort(
+  import.meta.env.EXOMIND_RT_PORT,
+);
 const DEFAULT_EXTERNAL_RUNTIME_HOST = '127.0.0.1';
 const DEFAULT_EXTERNAL_RUNTIME_PORT = 1949;
 const DEFAULT_RUNTIME_TARGET_MODE: RuntimeTargetMode = 'embedded';
@@ -164,7 +176,7 @@ export function getSelectedRuntimeTarget(): RuntimeTarget {
   return {
     mode,
     host: resolveEmbeddedHost(),
-    port: EMBEDDED_RUNTIME_PORT,
+    port: DEFAULT_EMBEDDED_RUNTIME_PORT,
   };
 }
 

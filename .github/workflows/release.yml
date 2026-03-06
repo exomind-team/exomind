@@ -633,17 +633,22 @@ jobs:
             $scope = "tag-build"
           }
           $isBuildTagPush = "${{ github.event_name }}" -eq "push" -and "${{ github.ref }}".StartsWith("refs/tags/build/")
+          $isReleaseTagPush = "${{ github.event_name }}" -eq "push" -and "${{ github.ref }}".StartsWith("refs/tags/release/")
 
           $bucket = "exomind-releases"
-          $channel = "preview"
-          if ($isBuildTagPush) {
+          if ($isReleaseTagPush) {
+            $channel = "release"
+            $versionDir = "${{ github.ref_name }}" -replace '^release/', ''
+          } elseif ($isBuildTagPush) {
+            $channel = "preview"
             $versionDir = "${{ github.ref_name }}" -replace '^build/', ''
           } else {
+            $channel = "preview"
             $versionDir = "v$version-manual.$runNumber.$shortHash"
           }
-          # artifactVersion (产物版本号): build tag uses "v..." for website API compatibility.
-          # （build tag 使用带 v 前缀，确保官网下载 API 与文件名一致）
-          $artifactVersion = if ($isBuildTagPush) { $versionDir } else { $version }
+          # artifactVersion (产物版本号): tag push uses "v..." for website API compatibility.
+          # （tag push 使用带 v 前缀，确保官网下载 API 与文件名一致）
+          $artifactVersion = if ($isBuildTagPush -or $isReleaseTagPush) { $versionDir } else { $version }
 
           $stagingDir = Join-Path $env:RUNNER_TEMP "r2-direct-upload"
           if (Test-Path $stagingDir) {
@@ -760,8 +765,8 @@ jobs:
             throw "Failed to upload self-hosted manifest to R2."
           }
 
-          if ($isBuildTagPush) {
-            Write-Host "Build tag detected. Generate preview metadata (检测到 build tag，生成预览元数据)."
+          if ($isBuildTagPush -or $isReleaseTagPush) {
+            Write-Host "Tag push detected (channel=$channel). Generate R2 metadata (检测到 tag push，生成 R2 元数据)."
             $publishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
             function Get-AssetKey([string]$fileName) {
@@ -798,71 +803,74 @@ jobs:
             Write-Utf8NoBom -Path $latestPath -Content $latestPayload
             & npx wrangler r2 object put "$bucket/$channel/latest.json" --file "$latestPath" --content-type "application/json" --remote
             if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload preview latest.json."
+              throw "Failed to upload $channel latest.json."
             }
 
-            $retention = 15
-            $existingVersionsPath = Join-Path $stagingDir "existing-versions.json"
-            $existingVersions = @()
+            # versions.json: only for preview channel (release channel doesn't need rotation/cleanup)
+            if ($channel -eq "preview") {
+              $retention = 15
+              $existingVersionsPath = Join-Path $stagingDir "existing-versions.json"
+              $existingVersions = @()
 
-            & npx wrangler r2 object get "$bucket/$channel/versions.json" --file "$existingVersionsPath" --remote *> $null
-            if ($LASTEXITCODE -eq 0 -and (Test-Path $existingVersionsPath)) {
-              try {
-                $rawVersions = Get-Content -Path $existingVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
-                if ($rawVersions -is [System.Array]) {
-                  $existingVersions = @($rawVersions)
-                } elseif ($rawVersions -and $rawVersions.PSObject.Properties.Name -contains "versions") {
-                  $existingVersions = @($rawVersions.versions)
-                  if ($rawVersions.PSObject.Properties.Name -contains "retention") {
-                    $parsedRetention = 0
-                    if ([int]::TryParse([string]$rawVersions.retention, [ref]$parsedRetention) -and $parsedRetention -gt 0) {
-                      $retention = $parsedRetention
+              & npx wrangler r2 object get "$bucket/$channel/versions.json" --file "$existingVersionsPath" --remote *> $null
+              if ($LASTEXITCODE -eq 0 -and (Test-Path $existingVersionsPath)) {
+                try {
+                  $rawVersions = Get-Content -Path $existingVersionsPath -Raw -Encoding UTF8 | ConvertFrom-Json
+                  if ($rawVersions -is [System.Array]) {
+                    $existingVersions = @($rawVersions)
+                  } elseif ($rawVersions -and $rawVersions.PSObject.Properties.Name -contains "versions") {
+                    $existingVersions = @($rawVersions.versions)
+                    if ($rawVersions.PSObject.Properties.Name -contains "retention") {
+                      $parsedRetention = 0
+                      if ([int]::TryParse([string]$rawVersions.retention, [ref]$parsedRetention) -and $parsedRetention -gt 0) {
+                        $retention = $parsedRetention
+                      }
                     }
                   }
+                } catch {
+                  Write-Warning "Failed to parse preview versions.json, fallback to empty list."
                 }
-              } catch {
-                Write-Warning "Failed to parse preview versions.json, fallback to empty list."
               }
-            }
 
-            $newEntry = [ordered]@{
-              version = $artifactVersion
-              tag = "${{ github.ref_name }}"
-              published_at = $publishedAt
-              version_dir = $versionDir
-            }
-
-            $mergedVersions = @($newEntry)
-            foreach ($entry in $existingVersions) {
-              if (-not $entry) { continue }
-              $versionValue = ""
-              if ($entry.PSObject.Properties.Name -contains "version") {
-                $versionValue = [string]$entry.version
+              $newEntry = [ordered]@{
+                version = $artifactVersion
+                tag = "${{ github.ref_name }}"
+                published_at = $publishedAt
+                version_dir = $versionDir
               }
-              if ([string]::IsNullOrWhiteSpace($versionValue)) { continue }
-              $alreadyExists = $mergedVersions | Where-Object { $_.version -eq $versionValue } | Select-Object -First 1
-              if ($alreadyExists) { continue }
-              $mergedVersions += [ordered]@{
-                version = $versionValue
-                tag = [string]$entry.tag
-                published_at = [string]$entry.published_at
-                version_dir = if ($entry.PSObject.Properties.Name -contains "version_dir") { [string]$entry.version_dir } else { $versionValue }
+
+              $mergedVersions = @($newEntry)
+              foreach ($entry in $existingVersions) {
+                if (-not $entry) { continue }
+                $versionValue = ""
+                if ($entry.PSObject.Properties.Name -contains "version") {
+                  $versionValue = [string]$entry.version
+                }
+                if ([string]::IsNullOrWhiteSpace($versionValue)) { continue }
+                $alreadyExists = $mergedVersions | Where-Object { $_.version -eq $versionValue } | Select-Object -First 1
+                if ($alreadyExists) { continue }
+                $mergedVersions += [ordered]@{
+                  version = $versionValue
+                  tag = [string]$entry.tag
+                  published_at = [string]$entry.published_at
+                  version_dir = if ($entry.PSObject.Properties.Name -contains "version_dir") { [string]$entry.version_dir } else { $versionValue }
+                }
               }
-            }
 
-            if ($mergedVersions.Count -gt $retention) {
-              $mergedVersions = @($mergedVersions | Select-Object -First $retention)
-            }
+              if ($mergedVersions.Count -gt $retention) {
+                $mergedVersions = @($mergedVersions | Select-Object -First $retention)
+              }
 
-            $versionsPath = Join-Path $stagingDir "versions.json"
-            $versionsPayload = @{
-              versions = $mergedVersions
-              retention = $retention
-            } | ConvertTo-Json -Depth 20
-            Write-Utf8NoBom -Path $versionsPath -Content $versionsPayload
-            & npx wrangler r2 object put "$bucket/$channel/versions.json" --file "$versionsPath" --content-type "application/json" --remote
-            if ($LASTEXITCODE -ne 0) {
-              throw "Failed to upload preview versions.json."
+              $versionsPath = Join-Path $stagingDir "versions.json"
+              $versionsPayload = @{
+                versions = $mergedVersions
+                retention = $retention
+              } | ConvertTo-Json -Depth 20
+              Write-Utf8NoBom -Path $versionsPath -Content $versionsPayload
+              & npx wrangler r2 object put "$bucket/$channel/versions.json" --file "$versionsPath" --content-type "application/json" --remote
+              if ($LASTEXITCODE -ne 0) {
+                throw "Failed to upload $channel versions.json."
+              }
             }
           }
 
@@ -1001,6 +1009,7 @@ jobs:
             libwebkit2gtk-4.1-dev \
             libgtk-3-dev \
             libayatana-appindicator3-dev \
+            libxdo-dev \
             librsvg2-dev \
             patchelf \
             libssl-dev \

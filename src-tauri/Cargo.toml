@@ -1,6 +1,6 @@
 [package]
 name = "exomind"
-version = "0.3.4"
+version = "0.3.5"
 description = "ExoMind - Your Life Update Assistant"
 authors = ["exo-mind.ai"]
 edition = "2021"
@@ -37,7 +37,8 @@ tokio-tungstenite = "0.21"
 url = "2"
 rand = "0.8"
 uuid = { version = "1", features = ["v4", "serde"] }
-tauri-plugin-mcp-bridge= "0.8"
+tauri-plugin-mcp-bridge = "0.9"
 thiserror = "1"
 exomind-runtime = { path = "../crates/exomind-runtime" }
-
+tauri-plugin-global-shortcut = "2"
+enigo = { version = "0.3", features = ["serde"] }

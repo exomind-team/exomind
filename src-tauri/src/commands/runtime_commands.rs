@@ -145,6 +145,21 @@ pub async fn ensure_runtime_started(
         }
     }
 
+    // 等待端口可用（处理热重载时旧端口 TIME_WAIT 延迟，最多等 2s）
+    {
+        use std::net::TcpListener as StdTcpListener;
+        let addr = format!("{}:{}", options.bind_host, options.port);
+        for i in 0..20u8 {
+            if StdTcpListener::bind(&addr).is_ok() {
+                break;
+            }
+            if i == 0 {
+                eprintln!("[tauri/setup] port {} busy, waiting for release...", options.port);
+            }
+            sleep(Duration::from_millis(100)).await;
+        }
+    }
+
     let handle = match start_with_options(options).await {
         Ok(handle) => handle,
         Err(error) => {

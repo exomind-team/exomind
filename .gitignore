@@ -71,6 +71,14 @@ htmlcov/
 
 # === Vite Entry (required) ===
 !index.html
+!voice-overlay.html
+
+# === Obsidian editor config ===
+.obsidian/
+
+# === Website build artifacts ===
+website/preview/
+website/package-lock.json
 
 # === Temporary ===
 *.tmp

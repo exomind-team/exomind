@@ -14,7 +14,8 @@ describe('new now message meta issue-175 structure', () => {
 
   it('contains device and time text format for message meta', () => {
     expect(source).toContain('AI 助理');
-    expect(source).toContain('· App ·');
+    expect(source).toContain('formatEventSourceLabel(event)');
+    expect(source).toContain('未知设备');
     expect(source).toContain('formatMessageTime(event.timestamp)');
   });
 });

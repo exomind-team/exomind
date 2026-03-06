@@ -10,6 +10,18 @@ export type Timestamp = number;
 export type NoteContent = string;
 export type Tag = string;
 
+export interface EventSourceMetadata {
+  deviceId: string;
+  deviceName: string;
+  platform: string;
+  app: 'ExoMind';
+}
+
+export interface EventMetadata {
+  source?: EventSourceMetadata;
+  [key: string]: unknown;
+}
+
 // 标签常量
 export const SYSTEM_TAGS = {
   BLOCK_START: 'block_start' as Tag,
@@ -27,6 +39,7 @@ export interface EventData {
   timestamp: Timestamp;
   content: string;
   tags: string[];
+  metadata?: EventMetadata;
 }
 
 // 事件类型（UI 使用）
@@ -35,6 +48,7 @@ export interface Event {
   timestamp: Timestamp;
   content: string;
   tags: Set<Tag>;
+  metadata?: EventMetadata;
 }
 
 // 时间块数据类型（存储用）

@@ -2,8 +2,10 @@ import { AlarmClock, ArrowLeft, Clock3, MoreHorizontal, TriangleAlert } from 'lu
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentDetailData } from '@/lib/types/agent-hub';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
 export function ActorDetailPage({ actorId }: { actorId?: string }) {
+  const isDesktop = useIsDesktop();
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const targetId = actorId ?? '';
@@ -43,7 +45,7 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
 
   if (loading) {
     return (
-      <div data-testid="actor-detail-page" className="min-h-full px-5 py-4 text-sm text-[#A8A29E] dark:text-[#78716C]">
+      <div data-testid="actor-detail-page" className="min-h-full px-5 py-4 text-sm text-[#A8A29E] dark:text-[#78716C] md:px-8 lg:px-10">
         Actor 详情加载中...
       </div>
     );
@@ -51,7 +53,7 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
 
   if (!detail) {
     return (
-      <div data-testid="actor-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09]">
+      <div data-testid="actor-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09] md:px-8 lg:px-10">
         <section
           data-testid="actor-detail-empty-state"
           className="mt-6 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-6 text-center dark:border-[#292524] dark:bg-[#1C1917]"
@@ -71,8 +73,8 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
   }
 
   return (
-    <div data-testid="actor-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09]">
-      <header data-testid="actor-detail-header" className="mb-3 flex items-center justify-between">
+    <div data-testid="actor-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09] md:px-8 lg:px-10">
+      <header data-testid="actor-detail-header" className="mb-3 flex items-center justify-between border-b border-[#F0ECE8] pb-3 dark:border-[#292524]">
         <button
           type="button"
           onClick={() => window.history.back()}
@@ -149,6 +151,7 @@ export function ActorDetailPage({ actorId }: { actorId?: string }) {
           })}
         </div>
       </section>
+      <div className={isDesktop ? 'pb-6' : 'pb-[calc(env(safe-area-inset-bottom,0px)+20px)]'} />
     </div>
   );
 }

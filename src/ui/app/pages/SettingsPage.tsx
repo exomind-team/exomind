@@ -56,6 +56,13 @@ import {
   type VoiceTranscriptSendMode,
 } from '@/config/voice-transcript-send-mode';
 import {
+  getVoiceShortcutHotkey,
+  setVoiceShortcutHotkey,
+  subscribeVoiceShortcutHotkeyChanges,
+  VOICE_SHORTCUT_HOTKEY_VALUES,
+  type VoiceShortcutHotkey,
+} from '@/config/voice-shortcut-hotkey';
+import {
   getFeedbackPreferences,
   setFeedbackPreferences,
   subscribeFeedbackPreferencesChanges,
@@ -186,7 +193,7 @@ function useIsDesktop(minWidth = 768): boolean {
 
 export function SettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
-  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.3');
+  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.5');
   const autoSyncServerUrl = resolveSyncServerUrl(envMap, {
     syncServerOverride: null,
   });
@@ -205,6 +212,9 @@ export function SettingsPage() {
   const [commandPaletteEnabled, setCommandPaletteEnabledState] = useState<boolean>(() => getCommandPaletteEnabled());
   const [voiceTranscriptSendMode, setVoiceTranscriptSendModeState] = useState<VoiceTranscriptSendMode>(
     () => getVoiceTranscriptSendMode()
+  );
+  const [voiceShortcutHotkey, setVoiceShortcutHotkeyState] = useState<VoiceShortcutHotkey>(
+    () => getVoiceShortcutHotkey()
   );
   const [feedbackPreferences, setFeedbackPreferencesState] = useState<FeedbackPreferences>(
     () => getFeedbackPreferences()
@@ -437,6 +447,10 @@ export function SettingsPage() {
     setVoiceTranscriptSendMode(mode);
     setVoiceTranscriptSendModeState(mode);
   };
+  const handleVoiceShortcutHotkeyChange = (hotkey: VoiceShortcutHotkey) => {
+    const normalizedHotkey = setVoiceShortcutHotkey(hotkey);
+    setVoiceShortcutHotkeyState(normalizedHotkey);
+  };
   const handleFeedbackPreferenceToggle = (key: keyof FeedbackPreferences) => {
     const next = {
       ...feedbackPreferences,
@@ -512,6 +526,12 @@ export function SettingsPage() {
   useEffect(() => {
     return subscribeVoiceTranscriptSendModeChanges((mode) => {
       setVoiceTranscriptSendModeState(mode);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeVoiceShortcutHotkeyChanges((hotkey) => {
+      setVoiceShortcutHotkeyState(hotkey);
     });
   }, []);
 
@@ -709,6 +729,48 @@ export function SettingsPage() {
                 }
               />
               <div data-testid="new-settings-input-section">
+                <Divider />
+                <div data-testid="new-settings-voice-shortcut-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="全局语音快捷键"
+                    right={(
+                      <div
+                        role="group"
+                        aria-label="全局语音快捷键"
+                        className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                      >
+                        {VOICE_SHORTCUT_HOTKEY_VALUES.map((hotkey) => {
+                          const testId = hotkey === 'Alt+Q'
+                            ? 'new-settings-voice-shortcut-alt-q'
+                            : hotkey === 'Alt+W'
+                              ? 'new-settings-voice-shortcut-alt-w'
+                              : 'new-settings-voice-shortcut-ctrl-space';
+                          return (
+                            <button
+                              key={hotkey}
+                              type="button"
+                              data-testid={testId}
+                              aria-pressed={voiceShortcutHotkey === hotkey}
+                              onClick={() => handleVoiceShortcutHotkeyChange(hotkey)}
+                              disabled={loading}
+                              className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                                voiceShortcutHotkey === hotkey
+                                  ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                                  : 'text-[#A8A29E]'
+                              }`}
+                            >
+                              {hotkey}
+                            </button>
+                          );
+                        })}
+                      </div>
+                    )}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束</span>
+                </div>
                 <Divider />
                 <div data-testid="new-settings-voice-token-row">
                   <SettingRow
@@ -1022,6 +1084,48 @@ export function SettingsPage() {
             </div>
             <div className="pb-[14px] pl-[46px] pr-4">
               <span className="text-xs text-[#A8A29E]">仅作用于「当下」页面输入框，默认插入输入框</span>
+            </div>
+            <Divider />
+            <div data-testid="new-settings-voice-shortcut-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="全局语音快捷键"
+                right={(
+                  <div
+                    role="group"
+                    aria-label="全局语音快捷键"
+                    className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                  >
+                    {VOICE_SHORTCUT_HOTKEY_VALUES.map((hotkey) => {
+                      const testId = hotkey === 'Alt+Q'
+                        ? 'new-settings-voice-shortcut-alt-q'
+                        : hotkey === 'Alt+W'
+                          ? 'new-settings-voice-shortcut-alt-w'
+                          : 'new-settings-voice-shortcut-ctrl-space';
+                      return (
+                        <button
+                          key={hotkey}
+                          type="button"
+                          data-testid={testId}
+                          aria-pressed={voiceShortcutHotkey === hotkey}
+                          onClick={() => handleVoiceShortcutHotkeyChange(hotkey)}
+                          disabled={loading}
+                          className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                            voiceShortcutHotkey === hotkey
+                              ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                              : 'text-[#A8A29E]'
+                          }`}
+                        >
+                          {hotkey}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束</span>
             </div>
             <Divider />
             <div data-testid="new-settings-voice-token-row">

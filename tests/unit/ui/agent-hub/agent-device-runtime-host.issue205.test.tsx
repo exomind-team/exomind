@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
+import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
 
 const agentHubMocks = vi.hoisted(() => ({
   getTopology: vi.fn(),
@@ -138,24 +139,24 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: false,
       host: '127.0.0.1',
-      port: 4077,
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
     runtimeControlMocks.startRuntime.mockResolvedValue({
       running: true,
       host: '127.0.0.1',
-      port: 4077,
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
       pid: 9527,
     });
     runtimeControlMocks.stopRuntime.mockResolvedValue({
       running: false,
       host: '127.0.0.1',
-      port: 4077,
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
   });
 
   it('opens manager sheet from device view and adds runtime host（设备页可打开主机管理并新增 RuntimeHost）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-host-panel')).toBeInTheDocument();
@@ -179,7 +180,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   it('probes runtime host and updates status badge（探测后更新状态徽标）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-host-status-runtime-host-1')).toHaveTextContent('offline');
@@ -195,7 +196,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   it('starts and stops local runtime from device panel（设备页可启停本地 Runtime）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
@@ -205,7 +206,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     await waitFor(() => {
       expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
         host: '127.0.0.1',
-        port: 4077,
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
       });
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
     });
@@ -219,7 +220,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   it('switches runtime target to external and saves host address（可切换外部 Runtime 并保存地址）', async () => {
     render(<AgentsPage />);
-    fireEvent.click(await screen.findByTestId('agent-view-toggle-device'));
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-target-mode-embedded')).toHaveAttribute('aria-pressed', 'true');

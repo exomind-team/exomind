@@ -14,17 +14,25 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).toContain('function DesktopLayout');
   });
 
-  it('switches desktop layout only for settings route（仅设置页切桌面布局）', () => {
-    expect(source).toContain('const isDesktopSettingsRoute');
+  it('switches desktop layout for primary app routes（主应用路由切桌面布局）', () => {
+    expect(source).toContain('const isDesktopAdaptiveRoute');
+    expect(source).toContain("location.pathname === '/'");
+    expect(source).toContain("location.pathname === '/eventlog'");
+    expect(source).toContain("location.pathname === '/dashboard'");
+    expect(source).toContain("location.pathname === '/tasks'");
+    expect(source).toContain("location.pathname.startsWith('/tasks/')");
+    expect(source).toContain("location.pathname === '/me'");
+    expect(source).toContain("location.pathname === '/update'");
     expect(source).toContain("location.pathname === '/settings'");
+    expect(source).toContain("location.pathname === '/agents'");
   });
 
-  it('uses five desktop nav items with dashboard entry（桌面导航使用5项并包含总览dashboard）', () => {
-    expect(desktopNavBlock).toContain("title: '总览', path: '/dashboard'");
+  it('uses four desktop nav items without dashboard entry（桌面导航4项且移除总览）', () => {
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
     expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
     expect(desktopNavBlock).toContain("title: 'Agent', path: '/agents'");
     expect(desktopNavBlock).toContain("title: '设置', path: '/settings'");
+    expect(desktopNavBlock).not.toContain("title: '总览', path: '/dashboard'");
     expect(desktopNavBlock).not.toContain('事件日志');
     expect(desktopNavBlock).not.toContain('专注计时');
     expect(desktopNavBlock).not.toContain('available');

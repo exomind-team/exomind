@@ -3,6 +3,7 @@ import { fireEvent, render, screen } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
+import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 
 describe('SettingsPage input section（输入分组语音配置）', () => {
   beforeEach(() => {
@@ -28,6 +29,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
+    expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
   });
@@ -41,6 +43,17 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     fireEvent.click(screen.getByTestId('new-settings-voice-transcript-mode-insert'));
     expect(setModeMock).toHaveBeenCalledWith('insert');
+  });
+
+  it('updates global voice shortcut from input section', () => {
+    const setHotkeyMock = vi.mocked(setVoiceShortcutHotkey);
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-ctrl-space'));
+    expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-alt-w'));
+    expect(setHotkeyMock).toHaveBeenCalledWith('Alt+W');
   });
 
   it('saves MOSS token from input settings dialog', () => {

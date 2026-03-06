@@ -14,6 +14,7 @@ import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { createUuidV4 } from '../utils/uuid';
+import { getEventSourceMetadata } from '../eventlog/source-metadata';
 import {
   createTransferPayload,
   parseTransferPayload,
@@ -70,6 +71,9 @@ export class EventLogServiceImpl implements EventLogService {
       timestamp: Date.now(),
       content,
       tags: tags ? Array.from(tags) : [NOTE_TAG],
+      metadata: {
+        source: getEventSourceMetadata(),
+      },
     };
 
     await this.port.appendEvent(eventData);
@@ -128,6 +132,7 @@ export class EventLogServiceImpl implements EventLogService {
       timestamp: data.timestamp,
       content: data.content,
       tags: new Set(data.tags),
+      metadata: data.metadata,
     };
   }
 

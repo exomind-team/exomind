@@ -2,7 +2,6 @@ import {
   AlarmClock,
   Bot,
   Brain,
-  CircleAlert,
   ChevronRight,
   Filter,
   List,
@@ -36,6 +35,7 @@ import {
 import '@xyflow/react/dist/style.css';
 import { getUseMockDataEnabled } from '@/config/mock-data';
 import {
+  DEFAULT_EMBEDDED_RUNTIME_PORT,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
@@ -44,16 +44,22 @@ import {
   subscribeRuntimeTargetChanges,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
+import { RouteEditPanel } from '@/components/RouteEditPanel';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
-import type { SignalRoute } from '@/lib/types/signal-pool';
+import type { SignalEvent, SignalRoute } from '@/lib/types/signal-pool';
 import type {
+  AgentConversationChunk,
+  AgentConversationMessage,
+  AgentDetailData,
   AgentDeviceGroup,
   AgentHubListItem,
   AgentHubListSection,
   AgentHubNodeStatus,
+  AgentHubNodeType,
   RuntimeHostRecord,
   AgentHubViewMode,
+  AgentHubRightPanelContext,
   RuntimeServiceStatus,
 } from '@/lib/types/agent-hub';
 import {
@@ -71,27 +77,27 @@ import {
 } from './agents-signal-topology';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
-  { id: 'topology', icon: Bot, label: '拓扑' },
-  { id: 'list', icon: List, label: '列表' },
+  { id: 'topology', icon: Waypoints, label: '拓扑图' },
+  { id: 'list', icon: Bot, label: '节点' },
+  { id: 'history', icon: AlarmClock, label: '信号历史' },
+  { id: 'routes', icon: List, label: '路由' },
   { id: 'device', icon: Monitor, label: '设备' },
 ];
 
-const LIST_FILTERS = [
-  { id: 'all', label: '全部' },
-  { id: 'input', label: '信号输入' },
-  { id: 'agent', label: 'Agent' },
-  { id: 'actor', label: 'Actor' },
-  { id: 'output', label: '输出' },
-] as const;
-
 type AddNodeOption = {
-  id: 'device';
+  id: 'agent' | 'device';
   title: string;
   description: string;
   tintColor: string;
 };
 
 const ADD_NODE_OPTIONS: AddNodeOption[] = [
+  {
+    id: 'agent',
+    title: '添加 Agent',
+    description: '在当前 Runtime 中手动创建 Echo Agent',
+    tintColor: '#0D9488',
+  },
   {
     id: 'device',
     title: '添加设备',
@@ -100,7 +106,9 @@ const ADD_NODE_OPTIONS: AddNodeOption[] = [
   },
 ];
 
-const DIRECT_RUNTIME_PORT_CANDIDATES = [4077, 1950, 1949] as const;
+const DIRECT_RUNTIME_PORT_CANDIDATES = Array.from(
+  new Set([DEFAULT_EMBEDDED_RUNTIME_PORT, 1950, 1949]),
+);
 const DIRECT_RUNTIME_PORT_STORAGE_KEY = 'exomind:agentHubRuntimePorts';
 
 const MOCK_SIGNAL_ROUTES_FALLBACK: SignalRoute[] = [
@@ -197,6 +205,7 @@ function getListItemIcon(item: AgentHubListItem): LucideIcon {
 }
 
 function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
+  if (optionId === 'agent') return Bot;
   if (optionId === 'device') return Monitor;
   return Plus;
 }
@@ -334,6 +343,71 @@ function mapRuntimeAgentsForHost(host: RuntimeHostRecord, agents: Array<{ id: st
   }));
 }
 
+function resolveRuntimeEntityId(rawId: string): string {
+  if (rawId.includes('__')) {
+    return rawId.split('__').slice(1).join('__') || rawId;
+  }
+  if (rawId.includes(':')) {
+    return rawId.split(':').slice(1).join(':') || rawId;
+  }
+  return rawId;
+}
+
+function formatSignalPayload(payload: unknown): string {
+  if (typeof payload === 'string') return payload;
+  if (payload && typeof payload === 'object' && 'text' in payload) {
+    const payloadRecord = payload as Record<string, unknown>;
+    if (typeof payloadRecord.text === 'string') {
+      return payloadRecord.text;
+    }
+  }
+  try {
+    return JSON.stringify(payload);
+  } catch {
+    return String(payload);
+  }
+}
+
+function formatSignalTime(timestampMs: number): string {
+  if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
+    return '--';
+  }
+  const date = new Date(timestampMs);
+  return date.toLocaleTimeString('zh-CN', {
+    hour12: false,
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+  });
+}
+
+function appendConversationChunk(
+  messages: AgentConversationMessage[],
+  chunk: AgentConversationChunk,
+): AgentConversationMessage[] {
+  const index = messages.findIndex((item) => item.id === chunk.messageId);
+  if (index === -1) {
+    return [
+      ...messages,
+      {
+        id: chunk.messageId,
+        role: 'agent',
+        content: chunk.delta,
+        createdAt: new Date().toISOString(),
+      },
+    ];
+  }
+
+  const next = [...messages];
+  const current = next[index];
+  if (!current) return messages;
+  next[index] = {
+    ...current,
+    content: `${current.content}${chunk.delta}`,
+  };
+  return next;
+}
+
 type SignalFlowNodeData = {
   label: string;
   subtitle: string;
@@ -408,7 +482,7 @@ function getDeviceTypeIcon(groupId: string): LucideIcon {
   return Monitor;
 }
 
-function ViewToggle({
+function TabBar({
   value,
   onChange,
 }: {
@@ -416,7 +490,7 @@ function ViewToggle({
   onChange: (value: AgentHubViewMode) => void;
 }) {
   return (
-    <div className="flex items-center rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
+    <div className="flex items-center gap-1 rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
       {VIEW_ITEMS.map((item) => {
         const Icon = item.icon;
         const active = value === item.id;
@@ -426,15 +500,15 @@ function ViewToggle({
             type="button"
             data-testid={`agent-view-toggle-${item.id}`}
             onClick={() => onChange(item.id)}
-            aria-pressed={active}
-            className={`flex h-7 w-8 items-center justify-center rounded-[8px] transition ${
+            className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
               active
-                ? 'bg-white text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
-                : 'text-[#78716C] dark:text-[#A8A29E]'
+                ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
+                : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
             }`}
-            title={item.label}
+            aria-selected={active}
           >
-            <Icon size={16} />
+            <Icon size={14} />
+            {item.label}
           </button>
         );
       })}
@@ -512,7 +586,15 @@ function TopologyView({
   }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, graph.edges, inactiveEdgeColor]);
 
   return (
-    <section data-testid="agent-topology-view" className="space-y-3" onClick={onClearSelection}>
+    <section
+      data-testid="agent-topology-view"
+      className="space-y-3"
+      onClick={(event) => {
+        if (event.target === event.currentTarget) {
+          onClearSelection();
+        }
+      }}
+    >
       <div
         data-testid="agent-topology-canvas"
         className="relative h-[568px] overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
@@ -548,198 +630,6 @@ function TopologyView({
           <p className="mt-1 text-xs text-white/60">类型：{selectedNode.type}</p>
         </div>
       )}
-    </section>
-  );
-}
-
-function ListView({
-  sections,
-  hostSnapshots,
-  routeRows,
-  routeHostLabel,
-  onRetryHost,
-  onItemNavigate,
-}: {
-  sections: AgentHubListSection[];
-  hostSnapshots: RuntimeHostSnapshot[];
-  routeRows: SignalRouteRow[];
-  routeHostLabel?: string;
-  onRetryHost: (hostId: string) => Promise<void>;
-  onItemNavigate: (path: string) => void;
-}) {
-  const problemHosts = hostSnapshots.filter((item) => item.connectionState !== 'online');
-
-  return (
-    <section data-testid="agent-list-view" className="space-y-4">
-      <div className="flex gap-2 overflow-x-auto pb-1">
-        {LIST_FILTERS.map((filterItem, index) => {
-          const active = index === 0;
-          return (
-            <button
-              key={filterItem.id}
-              type="button"
-              data-testid={`agent-list-filter-${filterItem.id}`}
-              className={`shrink-0 rounded-full px-3 py-1.5 text-[12px] ${
-                active ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'
-              }`}
-            >
-              {filterItem.label}
-            </button>
-          );
-        })}
-      </div>
-
-      <article
-        data-testid="agent-signal-route-section"
-        className="space-y-2 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
-      >
-        <div className="flex items-center justify-between gap-2">
-          <div>
-            <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信号路由</p>
-            <p className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
-              {routeHostLabel ? `来源 ${routeHostLabel}` : '未连接 runtime'}
-            </p>
-          </div>
-          <span className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-            {routeRows.length} 条
-          </span>
-        </div>
-
-        {routeRows.length === 0 && (
-          <p className="rounded-lg bg-[#FAF7F5] px-3 py-2 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-            暂无路由数据（No signal routes）
-          </p>
-        )}
-
-        {routeRows.length > 0 && (
-          <div className="space-y-1.5">
-            {routeRows.map((row) => (
-              <div
-                key={row.id}
-                data-testid={`agent-signal-route-row-${row.id}`}
-                className="flex items-center justify-between gap-2 rounded-lg bg-[#FAF7F5] px-3 py-2 dark:bg-[#292524]"
-              >
-                <div className="min-w-0">
-                  <p className="truncate text-xs font-medium text-[#1C1917] dark:text-[#FAFAF9]">{row.topic}</p>
-                  <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{`${row.targetType} ${row.targetRef}`}</p>
-                </div>
-                <div className="flex items-center gap-2">
-                  <span className="text-xs text-[#A8A29E] dark:text-[#78716C]">→</span>
-                  <span
-                    data-testid={`agent-signal-route-status-${row.id}`}
-                    className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                      row.status === 'active'
-                        ? 'bg-[#22C55E20] text-[#16A34A]'
-                        : 'bg-[#A8A29E30] text-[#57534E] dark:text-[#D6D3D1]'
-                    }`}
-                  >
-                    {row.status}
-                  </span>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-      </article>
-
-      {problemHosts.length > 0 && (
-        <article className="space-y-2 rounded-2xl border border-[#FECACA] bg-[#FEF2F2] p-3 dark:border-[#7F1D1D] dark:bg-[#2B1111]">
-          <div className="flex items-center gap-2 text-[#B91C1C] dark:text-[#FCA5A5]">
-            <CircleAlert size={14} />
-            <p className="text-xs font-semibold">连接异常主机</p>
-          </div>
-          <div className="space-y-2">
-            {problemHosts.map((item) => (
-              <div key={item.host.id} className="rounded-xl border border-[#FECACA] bg-white px-3 py-2 dark:border-[#7F1D1D] dark:bg-[#1C1917]">
-                <div className="flex items-center justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{item.host.name}</p>
-                    <p className="truncate text-[11px] text-[#78716C] dark:text-[#A8A29E]">{item.host.host}:{item.host.port}</p>
-                  </div>
-                  <div className="flex items-center gap-2">
-                    <span
-                      data-testid={`runtime-host-status-${item.host.id}`}
-                      className={`rounded px-1.5 py-0.5 text-[10px] font-medium ${
-                        item.connectionState === 'offline'
-                          ? 'bg-[#EF444420] text-[#DC2626]'
-                          : 'bg-[#F59E0B20] text-[#D97706]'
-                      }`}
-                    >
-                      {item.connectionState}
-                    </span>
-                    <button
-                      type="button"
-                      data-testid={`runtime-host-probe-${item.host.id}`}
-                      onClick={() => {
-                        void onRetryHost(item.host.id);
-                      }}
-                      className="rounded bg-[#F5F0ED] px-2 py-1 text-[10px] text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]"
-                    >
-                      重试
-                    </button>
-                  </div>
-                </div>
-                {item.error && <p className="mt-1 text-[10px] text-[#DC2626]">{item.error}</p>}
-              </div>
-            ))}
-          </div>
-        </article>
-      )}
-
-      {sections.length === 0 && (
-        <article className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-6 text-center dark:border-[#292524] dark:bg-[#1C1917]">
-          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">暂无可用 Agent</p>
-          <p className="mt-1 text-xs text-[#A8A29E]">请先添加 exomind-rt 主机并确认连接状态</p>
-        </article>
-      )}
-
-      {sections.map((section) => (
-        <article key={section.id} className="space-y-2">
-          <div className="flex items-center justify-between">
-            <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">{section.title}</h3>
-            <span className="rounded-md bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">{section.count} 个节点</span>
-          </div>
-          <div className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-            {section.items.map((item, index) => {
-              const Icon = getListItemIcon(item);
-              return (
-                <div key={item.id}>
-                  <button
-                    type="button"
-                    data-testid={`agent-list-item-${item.id}`}
-                    onClick={() => {
-                      const runtimeAgentId = item.id.includes('__') ? item.id.split('__')[1] ?? item.id : item.id;
-                      if (item.type === 'agent') {
-                        onItemNavigate(`/agents/agent/${runtimeAgentId}`);
-                      }
-                      if (item.type === 'actor') {
-                        onItemNavigate(`/agents/actor/${runtimeAgentId}`);
-                      }
-                    }}
-                    className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left"
-                  >
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-                        <Icon size={16} />
-                      </div>
-                      <div>
-                        <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</p>
-                        <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{item.description}</p>
-                      </div>
-                    </div>
-                    <ChevronRight
-                      data-testid={`agent-list-item-${item.id}-chevron`}
-                      size={14}
-                      className="shrink-0 text-[#D6D3D1] dark:text-[#57534E]"
-                    />
-                  </button>
-                  {index !== section.items.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
-                </div>
-              );
-            })}
-          </div>
-        </article>
-      ))}
     </section>
   );
 }
@@ -817,7 +707,7 @@ function DeviceView({
                     : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
                 }`}
               >
-                内嵌 RT（4077）
+                内嵌 RT（{DEFAULT_EMBEDDED_RUNTIME_PORT}）
               </button>
               <button
                 type="button"
@@ -882,7 +772,7 @@ function DeviceView({
             </span>
           </div>
           <p className="mt-1 text-[10px] text-[#A8A29E]">
-            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? 4077}
+            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT}
           </p>
           {runtimeServiceStatus?.pid && (
             <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
@@ -1107,10 +997,12 @@ function DeviceView({
 function AddNodeSheet({
   options,
   onClose,
+  onAddAgent,
   onAddDevice,
 }: {
   options: AddNodeOption[];
   onClose: () => void;
+  onAddAgent: () => void;
   onAddDevice: () => void;
 }) {
   return (
@@ -1149,10 +1041,9 @@ function AddNodeSheet({
                 type="button"
                 data-testid={`agent-add-node-option-${option.id}`}
                 onClick={() => {
-                  if (option.id === 'device') {
-                    onClose();
-                    onAddDevice();
-                  }
+                  onClose();
+                  if (option.id === 'agent') onAddAgent();
+                  if (option.id === 'device') onAddDevice();
                 }}
                 className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left dark:bg-[#292524]"
               >
@@ -1241,7 +1132,7 @@ function RuntimeHostManagerSheet({
             data-testid="runtime-host-address-input"
             value={runtimeHostAddress}
             onChange={(event) => onRuntimeHostAddressChange(event.target.value)}
-            placeholder="host:port（例如 127.0.0.1:4077）"
+            placeholder={`host:port（例如 127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}）`}
             className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
           />
           <button
@@ -1315,18 +1206,455 @@ function RuntimeHostManagerSheet({
   );
 }
 
+function RoutesTabView({
+  routes,
+  hostLabel,
+  onToggle,
+  onDelete,
+  onEdit,
+  onAdd,
+}: {
+  routes: SignalRoute[];
+  hostLabel?: string;
+  onToggle: (routeId: string, enabled: boolean) => Promise<void>;
+  onDelete: (routeId: string) => Promise<void>;
+  onEdit: (routeId: string) => void;
+  onAdd: () => void;
+}) {
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+            信号路由
+          </span>
+          {hostLabel && (
+            <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 font-mono text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+              {hostLabel}
+            </span>
+          )}
+          <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">{routes.length} 条</span>
+        </div>
+        <button
+          type="button"
+          onClick={onAdd}
+          className="flex items-center gap-1 rounded-[8px] bg-[#C75B3A] px-3 py-1.5 text-xs text-white"
+        >
+          <Plus size={12} />
+          添加路由
+        </button>
+      </div>
+
+      {/* Table */}
+      {routes.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-12 text-center">
+          <Waypoints size={32} className="text-[#A8A29E]" />
+          <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">暂无信号路由</p>
+          <p className="text-xs text-[#A8A29E]">点击「添加路由」创建第一条路由</p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-[10px] border border-[#E7E3E0] dark:border-[#292524]">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-[#E7E3E0] bg-[#F5F0ED] dark:border-[#292524] dark:bg-[#1C1917]">
+                <th className="w-12 px-4 py-2.5 text-left text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">
+                  启用
+                </th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">
+                  Topic
+                </th>
+                <th className="w-6 py-2.5 text-center text-xs text-[#A8A29E]">→</th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">
+                  类型
+                </th>
+                <th className="px-4 py-2.5 text-left text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">
+                  目标
+                </th>
+                <th className="w-24 px-4 py-2.5 text-right text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">
+                  操作
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-[#E7E3E0] dark:divide-[#292524]">
+              {routes.map((route) => (
+                <tr
+                  key={route.id}
+                  className="cursor-pointer bg-white transition-colors hover:bg-[#FAF7F5] dark:bg-[#0C0A09] dark:hover:bg-[#1C1917]"
+                  onClick={() => onEdit(route.id)}
+                >
+                  {/* 启用开关 */}
+                  <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
+                    <button
+                      type="button"
+                      onClick={() => void onToggle(route.id, !route.enabled)}
+                      className={`relative h-5 w-9 rounded-full transition-colors ${
+                        route.enabled ? 'bg-[#22C55E]' : 'bg-[#D6D3D1] dark:bg-[#57534E]'
+                      }`}
+                      aria-label={route.enabled ? '禁用' : '启用'}
+                    >
+                      <span
+                        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
+                          route.enabled ? 'translate-x-4' : 'translate-x-0.5'
+                        }`}
+                      />
+                    </button>
+                  </td>
+                  {/* Topic */}
+                  <td className="px-4 py-3">
+                    <span className="font-mono text-xs text-[#1C1917] dark:text-[#FAFAF9]">
+                      {route.topic}
+                    </span>
+                  </td>
+                  {/* 箭头 */}
+                  <td className="py-3 text-center text-[#A8A29E]">→</td>
+                  {/* target_type */}
+                  <td className="px-4 py-3">
+                    <span
+                      className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                        route.target_type === 'agent'
+                          ? 'bg-[#CCFBF1] text-[#0D9488] dark:bg-[#0D9488]/20 dark:text-[#2DD4BF]'
+                          : route.target_type === 'actor'
+                          ? 'bg-[#FEF3C7] text-[#B45309] dark:bg-[#F59E0B]/20 dark:text-[#FCD34D]'
+                          : 'bg-[#DBEAFE] text-[#1D4ED8] dark:bg-[#3B82F6]/20 dark:text-[#93C5FD]'
+                      }`}
+                    >
+                      {route.target_type}
+                    </span>
+                  </td>
+                  {/* target_ref */}
+                  <td className="px-4 py-3">
+                    <span className="font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">
+                      {route.target_ref}
+                    </span>
+                  </td>
+                  {/* 操作 */}
+                  <td className="px-4 py-3 text-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-1">
+                      <button
+                        type="button"
+                        onClick={() => onEdit(route.id)}
+                        className="rounded px-2 py-1 text-[10px] text-[#78716C] hover:bg-[#F5F0ED] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#292524] dark:hover:text-[#FAFAF9]"
+                      >
+                        编辑
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => void onDelete(route.id)}
+                        className="rounded px-2 py-1 text-[10px] text-[#DC2626] hover:bg-[#FEE2E2] dark:text-[#FCA5A5] dark:hover:bg-[#451A1A]"
+                      >
+                        删除
+                      </button>
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+type NodeFilterType = 'all' | 'input' | 'agent' | 'actor' | 'output';
+
+const NODE_FILTER_ITEMS: Array<{ id: NodeFilterType; label: string }> = [
+  { id: 'all', label: '全部' },
+  { id: 'input', label: '信号输入' },
+  { id: 'agent', label: 'Agent' },
+  { id: 'actor', label: 'Actor' },
+  { id: 'output', label: '输出' },
+];
+
+function NodesTabView({
+  sections,
+  filter,
+  onFilterChange,
+  onNodeClick,
+}: {
+  sections: AgentHubListSection[];
+  filter: NodeFilterType;
+  onFilterChange: (f: NodeFilterType) => void;
+  onNodeClick: (item: AgentHubListItem) => void;
+}) {
+  const filteredItems = useMemo(() => {
+    const allItems = sections.flatMap((s) => s.items);
+    if (filter === 'all') return allItems;
+    const typeMap: Record<NodeFilterType, AgentHubNodeType | null> = {
+      all: null,
+      input: 'input',
+      agent: 'agent',
+      actor: 'actor',
+      output: 'output',
+    };
+    const targetType = typeMap[filter];
+    return targetType ? allItems.filter((item) => item.type === targetType) : allItems;
+  }, [sections, filter]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      {/* Filter 栏 */}
+      <div className="flex items-center gap-1 overflow-x-auto pb-1">
+        {NODE_FILTER_ITEMS.map((f) => (
+          <button
+            key={f.id}
+            type="button"
+            data-testid={`agent-list-filter-${f.id}`}
+            onClick={() => onFilterChange(f.id)}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-xs font-medium transition-colors ${
+              filter === f.id
+                ? 'bg-[#C75B3A] text-white'
+                : 'bg-[#F5F0ED] text-[#78716C] hover:bg-[#E7E3E0] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#3C3836]'
+            }`}
+          >
+            {f.label}
+            {filter === f.id && f.id !== 'all' && (
+              <span className="ml-1 opacity-80">({filteredItems.length})</span>
+            )}
+          </button>
+        ))}
+      </div>
+
+      {/* 节点列表 */}
+      {filteredItems.length === 0 ? (
+        <div className="flex flex-col items-center gap-2 py-12 text-center">
+          <Bot size={32} className="text-[#A8A29E]" />
+          <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">
+            {filter === 'all' ? '暂无节点' : `暂无${NODE_FILTER_ITEMS.find(f => f.id === filter)?.label}节点`}
+          </p>
+        </div>
+      ) : (
+        <div className="flex flex-col divide-y divide-[#E7E3E0] overflow-hidden rounded-[10px] border border-[#E7E3E0] dark:divide-[#292524] dark:border-[#292524]">
+          {filteredItems.map((item) => {
+            const Icon = getListItemIcon(item);
+            const statusLabel: Record<AgentHubNodeStatus, string> = {
+              running: '运行中',
+              idle: '空闲',
+              warning: '警告',
+              offline: '离线',
+            };
+            return (
+              <div
+                key={item.id}
+                className="flex cursor-pointer items-center gap-3 bg-white px-4 py-3 transition-colors hover:bg-[#FAF7F5] dark:bg-[#0C0A09] dark:hover:bg-[#1C1917]"
+                onClick={() => onNodeClick(item)}
+              >
+                {/* Icon */}
+                <div
+                  className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-[10px] ${
+                    item.type === 'agent'
+                      ? 'bg-[#CCFBF1] dark:bg-[#0D9488]/20'
+                      : item.type === 'actor'
+                      ? 'bg-[#FEF3C7] dark:bg-[#F59E0B]/20'
+                      : item.type === 'input'
+                      ? 'bg-[#FFEDD5] dark:bg-[#F97316]/20'
+                      : 'bg-[#DBEAFE] dark:bg-[#3B82F6]/20'
+                  }`}
+                >
+                  <Icon
+                    size={16}
+                    className={
+                      item.type === 'agent'
+                        ? 'text-[#0D9488]'
+                        : item.type === 'actor'
+                        ? 'text-[#B45309] dark:text-[#F59E0B]'
+                        : item.type === 'input'
+                        ? 'text-[#EA580C]'
+                        : 'text-[#1D4ED8] dark:text-[#60A5FA]'
+                    }
+                  />
+                </div>
+                {/* 内容 */}
+                <div className="min-w-0 flex-1">
+                  <div className="flex items-center gap-2">
+                    <span className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                      {item.name}
+                    </span>
+                    {item.badgeText && (
+                      <span className="shrink-0 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                        {item.badgeText}
+                      </span>
+                    )}
+                  </div>
+                  {item.description && (
+                    <p className="mt-0.5 truncate text-xs text-[#78716C] dark:text-[#A8A29E]">
+                      {item.description}
+                    </p>
+                  )}
+                </div>
+                {/* 状态 badge */}
+                <span
+                  className={`ml-auto shrink-0 rounded-full px-1.5 py-0.5 text-[9px] font-medium ${
+                    item.status === 'running'
+                      ? 'bg-[#22C55E]/15 text-[#22C55E]'
+                      : item.status === 'warning'
+                        ? 'bg-[#F59E0B]/15 text-[#F59E0B]'
+                        : item.status === 'offline'
+                          ? 'bg-[#EF4444]/15 text-[#EF4444]'
+                          : 'bg-[#57534E]/30 text-[#78716C]'
+                  }`}
+                >
+                  {statusLabel[item.status]}
+                </span>
+                <ChevronRight size={14} className="shrink-0 text-[#A8A29E]" />
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function ListTabView({
+  sections,
+  filter,
+  onFilterChange,
+  onNodeClick,
+  signalRouteRows,
+  onOpenRoute,
+}: {
+  sections: AgentHubListSection[];
+  filter: NodeFilterType;
+  onFilterChange: (f: NodeFilterType) => void;
+  onNodeClick: (item: AgentHubListItem) => void;
+  signalRouteRows: SignalRouteRow[];
+  onOpenRoute: (routeId: string) => void;
+}) {
+  const routeHostLabel = signalRouteRows[0]?.hostLabel;
+
+  return (
+    <div data-testid="agent-list-view" className="flex flex-col gap-4">
+      <NodesTabView
+        sections={sections}
+        filter={filter}
+        onFilterChange={onFilterChange}
+        onNodeClick={onNodeClick}
+      />
+
+      <section
+        data-testid="agent-signal-route-section"
+        className="rounded-[10px] border border-[#E7E3E0] bg-white dark:border-[#292524] dark:bg-[#0C0A09]"
+      >
+        <div className="flex items-center justify-between border-b border-[#E7E3E0] px-4 py-2.5 dark:border-[#292524]">
+          <div className="flex items-center gap-2">
+            <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">信号路由</p>
+            {routeHostLabel && (
+              <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 font-mono text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                {routeHostLabel}
+              </span>
+            )}
+          </div>
+          <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">{signalRouteRows.length} 条</span>
+        </div>
+
+        {signalRouteRows.length === 0 ? (
+          <p className="px-4 py-6 text-xs text-[#78716C] dark:text-[#A8A29E]">暂无信号路由</p>
+        ) : (
+          <div className="divide-y divide-[#E7E3E0] dark:divide-[#292524]">
+            {signalRouteRows.map((row) => (
+              <button
+                key={row.id}
+                type="button"
+                data-testid={`agent-signal-route-row-${row.id}`}
+                onClick={() => onOpenRoute(row.id)}
+                className="flex w-full items-center gap-2 px-4 py-2 text-left hover:bg-[#FAF7F5] dark:hover:bg-[#1C1917]"
+              >
+                <span
+                  className={`h-1.5 w-1.5 shrink-0 rounded-full ${
+                    row.status === 'active' ? 'bg-[#22C55E]' : 'bg-[#57534E]'
+                  }`}
+                />
+                <span className="flex-1 truncate font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">
+                  {row.topic} → {row.targetRef}
+                </span>
+                <span className="shrink-0 rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                  {row.targetType}
+                </span>
+              </button>
+            ))}
+          </div>
+        )}
+      </section>
+    </div>
+  );
+}
+
+function SignalHistoryTabView({
+  events,
+  hostLabel,
+  onSelectSignal,
+}: {
+  events: SignalEvent[];
+  hostLabel?: string;
+  onSelectSignal: (signalId: string) => void;
+}) {
+  return (
+    <section data-testid="agent-signal-history-view" className="space-y-3">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">Signal History</p>
+          {hostLabel && (
+            <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 font-mono text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+              {hostLabel}
+            </span>
+          )}
+        </div>
+        <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">{events.length} 条</span>
+      </div>
+
+      {events.length === 0 ? (
+        <div className="rounded-[10px] border border-[#E7E3E0] bg-white px-4 py-8 text-center text-xs text-[#78716C] dark:border-[#292524] dark:bg-[#0C0A09] dark:text-[#A8A29E]">
+          暂无信号历史
+        </div>
+      ) : (
+        <div className="divide-y divide-[#E7E3E0] overflow-hidden rounded-[10px] border border-[#E7E3E0] bg-white dark:divide-[#292524] dark:border-[#292524] dark:bg-[#0C0A09]">
+          {events.map((eventItem) => (
+            <button
+              key={eventItem.id}
+              type="button"
+              onClick={() => onSelectSignal(`topic:${eventItem.topic}`)}
+              className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[#FAF7F5] dark:hover:bg-[#1C1917]"
+            >
+              <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#C75B3A]" />
+              <div className="min-w-0 flex-1">
+                <p className="truncate font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">{eventItem.topic}</p>
+                <p className="mt-1 line-clamp-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                  {formatSignalPayload(eventItem.payload)}
+                </p>
+              </div>
+              <div className="shrink-0 text-right">
+                <p className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+                  {formatSignalTime(eventItem.ts)}
+                </p>
+                <p className="mt-0.5 text-[10px] text-[#A8A29E] dark:text-[#78716C]">{eventItem.source}</p>
+              </div>
+            </button>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 export function AgentsPage() {
   const initialRuntimeTarget = getSelectedRuntimeTarget();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
+  const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
+  const [signalHistory, setSignalHistory] = useState<SignalEvent[]>([]);
+  const [signalHistoryHostLabel, setSignalHistoryHostLabel] = useState<string>('');
   const [fallbackRuntimeAgents, setFallbackRuntimeAgents] = useState<RuntimeAggregatedAgent[]>([]);
   const [listSections, setListSections] = useState<AgentHubListSection[]>([]);
   const [deviceGroups, setDeviceGroups] = useState<AgentDeviceGroup[]>([]);
   const [runtimeHostSnapshots, setRuntimeHostSnapshots] = useState<RuntimeHostSnapshot[]>([]);
   const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
   const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
-  const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState('127.0.0.1:4077');
+  const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState(
+    `127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+  );
   const [runtimeHostError, setRuntimeHostError] = useState('');
   const [runtimeTargetModeValue, setRuntimeTargetModeValue] = useState<RuntimeTargetMode>(initialRuntimeTarget.mode);
   const [runtimeTargetAddress, setRuntimeTargetAddress] = useState(
@@ -1336,6 +1664,225 @@ export function AgentsPage() {
     getRuntimeExternalAddress(),
   );
   const [runtimeTargetError, setRuntimeTargetError] = useState('');
+  const [rightPanel, setRightPanel] = useState<AgentHubRightPanelContext>({ state: 'CLOSED' });
+  const [chatAgentId, setChatAgentId] = useState<string | null>(null);
+  const [chatMessages, setChatMessages] = useState<AgentConversationMessage[]>([]);
+  const [chatInput, setChatInput] = useState('');
+  const [chatError, setChatError] = useState('');
+  const [isChatSending, setIsChatSending] = useState(false);
+  const [isAgentCreating, setIsAgentCreating] = useState(false);
+  const [isAgentStopping, setIsAgentStopping] = useState(false);
+
+  const openRouteEdit = (routeId: string | null = null) => {
+    setRightPanel({ state: 'ROUTE_EDIT', routeId });
+  };
+  const openAgentDetail = (nodeId: string) => {
+    setRightPanel({ state: 'AGENT_DETAIL', nodeId });
+  };
+  const openActorDetail = (nodeId: string) => {
+    setRightPanel({ state: 'ACTOR_DETAIL', nodeId });
+  };
+  const openSignalDetail = (signalId: string) => {
+    setRightPanel({ state: 'SIGNAL_DETAIL', signalId });
+  };
+  const closeRightPanel = () => {
+    setRightPanel({ state: 'CLOSED' });
+  };
+
+  const resolveActiveRuntimeHost = (): RuntimeHostRecord | null => {
+    const prioritized = sortRouteHostsByPriority(runtimeHostSnapshots);
+    return prioritized.find((item) => item.connectionState === 'online')?.host
+      ?? prioritized.find((item) => item.host)?.host
+      ?? null;
+  };
+
+  // T8: AgentDetail / ActorDetail 右侧栏
+  const [agentDetail, setAgentDetail] = useState<AgentDetailData | null>(null);
+  const [isDetailLoading, setIsDetailLoading] = useState(false);
+
+  useEffect(() => {
+    if (rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') {
+      const nodeId = rightPanel.nodeId;
+      if (!nodeId) return;
+      const runtimeEntityId = resolveRuntimeEntityId(nodeId);
+      setIsDetailLoading(true);
+      setAgentDetail(null);
+      const service = getAgentHubService();
+      const loader = rightPanel.state === 'AGENT_DETAIL'
+        ? service.getAgentDetail(runtimeEntityId)
+        : service.getActorDetail(runtimeEntityId);
+      loader.then((data) => {
+        setAgentDetail(data);
+        setIsDetailLoading(false);
+      }).catch(() => {
+        setIsDetailLoading(false);
+      });
+    } else {
+      setAgentDetail(null);
+    }
+  }, [rightPanel.state, rightPanel.nodeId]);
+
+  const [isRouteSaving, setIsRouteSaving] = useState(false);
+
+  const handleRouteSave = async (
+    data: Omit<SignalRoute, 'id' | 'created_at' | 'updated_at'>
+  ) => {
+    setIsRouteSaving(true);
+    try {
+      const host = sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+      if (!host) return;
+      const routeService = new SignalRouteService({ host });
+      if (rightPanel.state === 'ROUTE_EDIT' && rightPanel.routeId) {
+        await routeService.updateRoute(rightPanel.routeId, data);
+      } else {
+        await routeService.createRoute(data);
+      }
+      await refreshSignalRoutesFromSnapshot({ hosts: runtimeHostSnapshots });
+      closeRightPanel();
+    } catch (err) {
+      console.error('Failed to save route:', err);
+    } finally {
+      setIsRouteSaving(false);
+    }
+  };
+
+  const handleRouteToggle = async (routeId: string, enabled: boolean) => {
+    try {
+      const host = sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+      if (!host) return;
+      const routeService = new SignalRouteService({ host });
+      await routeService.updateRoute(routeId, { enabled });
+      await refreshSignalRoutesFromSnapshot({ hosts: runtimeHostSnapshots });
+    } catch (err) {
+      console.error('Failed to toggle route:', err);
+    }
+  };
+
+  const handleRouteDelete = async (routeId: string) => {
+    try {
+      const host = sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+      if (!host) return;
+      const routeService = new SignalRouteService({ host });
+      await routeService.deleteRoute(routeId);
+      await refreshSignalRoutesFromSnapshot({ hosts: runtimeHostSnapshots });
+      closeRightPanel();
+    } catch (err) {
+      console.error('Failed to delete route:', err);
+    }
+  };
+
+  const handleOpenAgentChat = async (nodeId: string) => {
+    const agentId = resolveRuntimeEntityId(nodeId);
+    setChatAgentId(agentId);
+    setChatInput('');
+    setChatError('');
+    setRightPanel({ state: 'AGENT_CHAT', nodeId });
+
+    try {
+      const history = await getAgentHubService().getConversation(agentId);
+      setChatMessages(history);
+    } catch (error) {
+      setChatMessages([]);
+      const message = error instanceof Error ? error.message : String(error);
+      setChatError(`加载会话失败: ${message}`);
+    }
+  };
+
+  const handleChatSend = async () => {
+    const prompt = chatInput.trim();
+    if (!chatAgentId || !prompt || isChatSending) return;
+
+    const userMessage: AgentConversationMessage = {
+      id: `user-${Date.now()}`,
+      role: 'user',
+      content: prompt,
+      createdAt: new Date().toISOString(),
+    };
+    setChatMessages((prev) => [...prev, userMessage]);
+    setChatInput('');
+    setChatError('');
+    setIsChatSending(true);
+
+    try {
+      const stream = getAgentHubService().streamConversation({ agentId: chatAgentId, prompt });
+      for await (const chunk of stream) {
+        setChatMessages((prev) => appendConversationChunk(prev, chunk));
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setChatError(`发送失败: ${message}`);
+    } finally {
+      setIsChatSending(false);
+    }
+  };
+
+  const handleCreateManualAgent = async () => {
+    const host = resolveActiveRuntimeHost();
+    if (!host) {
+      setRuntimeHostError('未找到可用 Runtime 主机，无法创建 Agent');
+      return;
+    }
+
+    setIsAgentCreating(true);
+    setRuntimeHostError('');
+    try {
+      const runtimeClient = new RuntimeClient();
+      const result = await runtimeClient.createAgent(host, { kind: 'echo' });
+      if (!result.ok) {
+        setRuntimeHostError(`创建 Agent 失败: ${result.error.message}`);
+        return;
+      }
+      await refreshRuntimeSnapshot();
+      setViewMode('list');
+    } finally {
+      setIsAgentCreating(false);
+    }
+  };
+
+  const handleStopAgent = async (nodeId: string) => {
+    const agentId = resolveRuntimeEntityId(nodeId);
+    const hostCandidates = sortRouteHostsByPriority(runtimeHostSnapshots).map((item) => item.host);
+    if (hostCandidates.length === 0) {
+      setRuntimeHostError('未找到可用 Runtime 主机，无法停止 Agent');
+      return;
+    }
+
+    setIsAgentStopping(true);
+    setRuntimeHostError('');
+    try {
+      const runtimeClient = new RuntimeClient();
+      let lastErrorMessage = 'agent not found';
+      for (const host of hostCandidates) {
+        const result = await runtimeClient.deleteAgent(host, agentId);
+        if (result.ok) {
+          await refreshRuntimeSnapshot();
+          closeRightPanel();
+          return;
+        }
+        lastErrorMessage = result.error.message;
+        if (result.error.status !== 404) {
+          break;
+        }
+      }
+      setRuntimeHostError(`停止 Agent 失败: ${lastErrorMessage}`);
+    } finally {
+      setIsAgentStopping(false);
+    }
+  };
+
+  const handleTabChange = (tab: AgentHubViewMode) => {
+    setViewMode(tab);
+    closeRightPanel(); // 切换 Tab 时关闭右侧栏（保守策略）
+  };
+
+  useEffect(() => {
+    if (rightPanel.state === 'AGENT_CHAT') return;
+    setChatAgentId(null);
+    setChatInput('');
+    setChatError('');
+    setIsChatSending(false);
+  }, [rightPanel.state]);
+
   const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
@@ -1353,17 +1900,29 @@ export function AgentsPage() {
 
   const tryLoadRoutesFromHost = async (
     host: RuntimeHostRecord
-  ): Promise<{ hostLabel: string; routes: SignalRoute[]; agents: RuntimeAggregatedAgent[] } | null> => {
+  ): Promise<{
+    hostLabel: string;
+    routes: SignalRoute[];
+    agents: RuntimeAggregatedAgent[];
+    history: SignalEvent[];
+  } | null> => {
     try {
       const routeService = new SignalRouteService({ host });
-      const routes = await routeService.listRoutes();
       const runtimeClient = new RuntimeClient();
-      const agentsResult = await runtimeClient.getAgents(host);
+      const [routes, agentsResult, historyResponse] = await Promise.all([
+        routeService.listRoutes(),
+        runtimeClient.getAgents(host),
+        fetch(`http://${host.host}:${host.port}/signals/history?limit=120`),
+      ]);
       const agents = agentsResult.ok ? mapRuntimeAgentsForHost(host, agentsResult.data) : [];
+      const history = historyResponse.ok
+        ? ((await historyResponse.json()) as SignalEvent[])
+        : [];
       return {
         hostLabel: `${host.host}:${host.port}`,
         routes,
         agents,
+        history,
       };
     } catch {
       return null;
@@ -1378,7 +1937,9 @@ export function AgentsPage() {
     if (useMockData) {
       if (isDisposed()) return;
       setSignalRouteHostLabel('mock（测试数据）');
+      setSignalHistoryHostLabel('mock（测试数据）');
       setSignalRoutes(MOCK_SIGNAL_ROUTES_FALLBACK);
+      setSignalHistory([]);
       setFallbackRuntimeAgents(MOCK_RUNTIME_AGENTS_FALLBACK);
       setListSections(buildListSectionsFromRuntimeAgents(MOCK_RUNTIME_AGENTS_FALLBACK));
       return;
@@ -1391,7 +1952,9 @@ export function AgentsPage() {
       if (!result) continue;
       if (isDisposed()) return;
       setSignalRouteHostLabel(result.hostLabel);
+      setSignalHistoryHostLabel(result.hostLabel);
       setSignalRoutes(result.routes);
+      setSignalHistory(result.history);
       setFallbackRuntimeAgents(result.agents);
       if (snapshotAgents.length === 0 && result.agents.length > 0) {
         setListSections(buildListSectionsFromRuntimeAgents(result.agents));
@@ -1405,7 +1968,9 @@ export function AgentsPage() {
       if (!result) continue;
       if (isDisposed()) return;
       setSignalRouteHostLabel(`${result.hostLabel}（auto）`);
+      setSignalHistoryHostLabel(`${result.hostLabel}（auto）`);
       setSignalRoutes(result.routes);
+      setSignalHistory(result.history);
       setFallbackRuntimeAgents(result.agents);
       if (snapshotAgents.length === 0 && result.agents.length > 0) {
         setListSections(buildListSectionsFromRuntimeAgents(result.agents));
@@ -1415,7 +1980,9 @@ export function AgentsPage() {
 
     if (isDisposed()) return;
     setSignalRouteHostLabel('');
+    setSignalHistoryHostLabel('');
     setSignalRoutes([]);
+    setSignalHistory([]);
     setFallbackRuntimeAgents([]);
   };
 
@@ -1536,7 +2103,7 @@ export function AgentsPage() {
     try {
       const status = await getRuntimeControlService().startRuntime({
         host: '127.0.0.1',
-        port: 4077,
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
       });
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
@@ -1545,7 +2112,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 4077,
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
         error: message,
       });
     }
@@ -1561,19 +2128,20 @@ export function AgentsPage() {
       setRuntimeServiceStatus({
         running: false,
         host: '127.0.0.1',
-        port: 4077,
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
         error: message,
       });
     }
   };
 
-  const navigateByPath = (path: string) => {
-    window.location.href = path;
-  };
-
   const signalRouteRows = useMemo(
     () => buildSignalRouteRows(signalRoutes, signalRouteHostLabel || undefined),
     [signalRouteHostLabel, signalRoutes]
+  );
+
+  const availableTopics = useMemo(
+    () => [...new Set(signalRoutes.map((r) => r.topic))],
+    [signalRoutes]
   );
 
   const graphAgents = useMemo(() => {
@@ -1596,13 +2164,38 @@ export function AgentsPage() {
   const content = useMemo(() => {
     if (viewMode === 'list') {
       return (
-        <ListView
+        <ListTabView
           sections={listSections}
-          hostSnapshots={runtimeHostSnapshots}
-          routeRows={signalRouteRows}
-          routeHostLabel={signalRouteHostLabel || undefined}
-          onRetryHost={handleProbeRuntimeHost}
-          onItemNavigate={navigateByPath}
+          filter={nodesFilter}
+          onFilterChange={setNodesFilter}
+          onNodeClick={(item) => {
+            if (item.type === 'agent') openAgentDetail(item.id);
+            else if (item.type === 'actor') openActorDetail(item.id);
+            else openSignalDetail(item.id);
+          }}
+          signalRouteRows={signalRouteRows}
+          onOpenRoute={openRouteEdit}
+        />
+      );
+    }
+    if (viewMode === 'history') {
+      return (
+        <SignalHistoryTabView
+          events={signalHistory}
+          hostLabel={signalHistoryHostLabel || undefined}
+          onSelectSignal={openSignalDetail}
+        />
+      );
+    }
+    if (viewMode === 'routes') {
+      return (
+        <RoutesTabView
+          routes={signalRoutes}
+          hostLabel={signalRouteHostLabel || undefined}
+          onToggle={handleRouteToggle}
+          onDelete={handleRouteDelete}
+          onEdit={(routeId) => openRouteEdit(routeId)}
+          onAdd={() => openRouteEdit(null)}
         />
       );
     }
@@ -1631,8 +2224,19 @@ export function AgentsPage() {
       <TopologyView
         graph={signalGraph}
         selectedNodeId={selectedNodeId}
-        onSelectNode={setSelectedNodeId}
-        onClearSelection={() => setSelectedNodeId(null)}
+        onSelectNode={(nodeId) => {
+          setSelectedNodeId(nodeId);
+          // 判断节点类型
+          const node = signalGraph.nodes.find((n) => n.id === nodeId);
+          if (node?.type === 'agent') openAgentDetail(nodeId);
+          else if (node?.type === 'actor') openActorDetail(nodeId);
+          else openSignalDetail(nodeId);
+          // TODO(issue-354-mobile-sheet): <lg 视口点击节点后改为底部详情 Sheet。
+        }}
+        onClearSelection={() => {
+          setSelectedNodeId(null);
+          closeRightPanel();
+        }}
       />
     );
   }, [
@@ -1640,6 +2244,8 @@ export function AgentsPage() {
     listSections,
     runtimeHostSnapshots,
     signalGraph,
+    signalHistory,
+    signalHistoryHostLabel,
     signalRouteHostLabel,
     signalRouteRows,
     runtimeHostError,
@@ -1648,47 +2254,419 @@ export function AgentsPage() {
     runtimeTargetModeValue,
     runtimeExternalAddressDraft,
     runtimeServiceStatus,
+    nodesFilter,
     selectedNodeId,
     viewMode,
   ]);
 
   return (
-    <div data-testid="agent-hub-page" className="relative min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]">
-      <header className="flex items-center justify-between px-5 py-3">
-        <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent 网络</h1>
-        <div className="flex items-center gap-2">
-          <button
-            type="button"
-            className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-            aria-label="拓扑设置（Topology Settings）"
-          >
-            <Settings size={18} />
-          </button>
-          <ViewToggle value={viewMode} onChange={setViewMode} />
-          <button
-            type="button"
-            data-testid="agent-add-node-button"
-            onClick={() => setSheetOpen(true)}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-[#C75B3A] text-white"
-            aria-label="添加节点（Add Node）"
-          >
-            <Plus size={18} />
-          </button>
+    <div
+      data-testid="agent-hub-page"
+      className="relative flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]"
+    >
+      {/* Header */}
+      <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent 网络</h1>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+              aria-label="设置"
+            >
+              <Settings size={18} />
+            </button>
+            <button
+              type="button"
+              data-testid="agent-add-node-button"
+              onClick={() => setSheetOpen(true)}
+              disabled={isAgentCreating}
+              className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
+              aria-label="添加节点"
+            >
+              <Plus size={16} />
+              {isAgentCreating ? '创建中...' : '添加'}
+            </button>
+          </div>
         </div>
+        {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
+        <TabBar value={viewMode} onChange={handleTabChange} />
       </header>
 
-      <div className="px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-2">
-        {content}
+      {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
+      <div className="flex flex-1 overflow-hidden">
+        {/* 内容区 */}
+        <div className="flex-1 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10">
+          {content}
+        </div>
+
+        {/* 右侧栏：桌面端固定 380px，CLOSED 时不渲染 */}
+        {rightPanel.state !== 'CLOSED' && (
+          <aside className="hidden w-[380px] shrink-0 border-l border-[#292524] bg-[#1C1917] lg:flex lg:flex-col">
+            <div className="flex items-center justify-between border-b border-[#292524] px-4 py-3">
+              <span className="flex items-center gap-2 text-sm font-medium text-[#FAFAF9]">
+                {(rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') && (() => {
+                  const nodeId = rightPanel.nodeId;
+                  const node = nodeId ? signalGraph.nodes.find((n) => n.id === nodeId) : null;
+                  if (!node) return null;
+                  const dotColor =
+                    node.status === 'online' || node.status === 'running'
+                      ? 'bg-[#22C55E]'
+                      : node.status === 'error' || node.status === 'offline'
+                        ? 'bg-[#EF4444]'
+                        : node.status === 'busy' || node.status === 'warning'
+                          ? 'bg-[#F59E0B]'
+                          : 'bg-[#57534E]';
+                  return <span className={`inline-block h-2 w-2 shrink-0 rounded-full ${dotColor}`} />;
+                })()}
+                {rightPanel.state === 'ROUTE_EDIT' && (rightPanel.routeId ? '编辑路由' : '新建路由')}
+                {rightPanel.state === 'AGENT_DETAIL' && (agentDetail?.title ?? 'Agent 详情')}
+                {rightPanel.state === 'ACTOR_DETAIL' && (agentDetail?.title ?? 'Actor 详情')}
+                {rightPanel.state === 'SIGNAL_DETAIL' && '信号详情'}
+                {rightPanel.state === 'AGENT_CHAT' && 'Agent 对话'}
+              </span>
+              <button
+                type="button"
+                onClick={closeRightPanel}
+                className="flex h-7 w-7 items-center justify-center rounded text-[#A8A29E] hover:text-[#FAFAF9]"
+                aria-label="关闭"
+              >
+                <X size={16} />
+              </button>
+            </div>
+            {/* 右侧栏内容 */}
+            <div className="flex-1 overflow-auto">
+              {rightPanel.state === 'ROUTE_EDIT' && (
+                <RouteEditPanel
+                  route={
+                    rightPanel.routeId
+                      ? (signalRoutes.find((r) => r.id === rightPanel.routeId) ?? null)
+                      : null
+                  }
+                  availableTopics={availableTopics}
+                  availableAgents={graphAgents.filter((a) => a.id).map((a) => ({
+                    id: a.id,
+                    name: a.name,
+                  }))}
+                  availableActors={[]}
+                  onSave={handleRouteSave}
+                  onDelete={
+                    rightPanel.routeId
+                      ? () => handleRouteDelete(rightPanel.routeId!)
+                      : undefined
+                  }
+                  onCancel={closeRightPanel}
+                  isSaving={isRouteSaving}
+                />
+              )}
+              {(rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') && (
+                <div className="p-4">
+                  {(() => {
+                    const nodeId = rightPanel.nodeId;
+                    const node = nodeId
+                      ? signalGraph.nodes.find((n) => n.id === nodeId)
+                      : null;
+                    const runtimeNodeId = nodeId ? resolveRuntimeEntityId(nodeId) : null;
+                    const nodeType = node?.type ?? (rightPanel.state === 'AGENT_DETAIL' ? 'agent' : 'actor');
+                    const nodeLabel = node?.label ?? agentDetail?.title ?? runtimeNodeId ?? '未知节点';
+
+                    const statusColors: Record<string, string> = {
+                      online: 'bg-[#22C55E]/15 text-[#22C55E]',
+                      offline: 'bg-[#57534E]/30 text-[#78716C]',
+                      error: 'bg-[#EF4444]/15 text-[#EF4444]',
+                      busy: 'bg-[#F59E0B]/15 text-[#F59E0B]',
+                      warning: 'bg-[#F59E0B]/15 text-[#F59E0B]',
+                    };
+                    const logStatusColors: Record<string, string> = {
+                      online: 'text-[#D6D3D1]',
+                      offline: 'text-[#78716C]',
+                      warning: 'text-[#F59E0B]',
+                      error: 'text-[#EF4444]',
+                      busy: 'text-[#F59E0B]',
+                    };
+
+                    return (
+                      <div className="flex flex-col gap-4">
+                        {/* 头部：始终从 signalGraph 快速显示 */}
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
+                              nodeType === 'agent'
+                                ? 'bg-[#CCFBF1] dark:bg-[#0D9488]/20'
+                                : 'bg-[#FEF3C7] dark:bg-[#F59E0B]/20'
+                            }`}
+                          >
+                            <Bot
+                              size={18}
+                              className={
+                                nodeType === 'agent'
+                                  ? 'text-[#0D9488]'
+                                  : 'text-[#B45309] dark:text-[#F59E0B]'
+                              }
+                            />
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-[#FAFAF9]">{nodeLabel}</p>
+                            <p className="text-xs text-[#A8A29E]">
+                              {nodeType === 'agent' ? 'Agent' : 'Actor'} · {runtimeNodeId ?? nodeId ?? '--'}
+                            </p>
+                          </div>
+                        </div>
+
+                        {rightPanel.state === 'AGENT_DETAIL' && nodeId && (
+                          <div className="flex items-center gap-2">
+                            <button
+                              type="button"
+                              data-testid="agent-rightpanel-open-chat"
+                              onClick={() => {
+                                void handleOpenAgentChat(nodeId);
+                              }}
+                              className="rounded-lg bg-[#0D9488] px-3 py-1.5 text-xs font-medium text-white"
+                            >
+                              开始聊天
+                            </button>
+                            <button
+                              type="button"
+                              data-testid="agent-rightpanel-stop-agent"
+                              onClick={() => {
+                                void handleStopAgent(nodeId);
+                              }}
+                              disabled={isAgentStopping}
+                              className="rounded-lg bg-[#7F1D1D] px-3 py-1.5 text-xs font-medium text-[#FECACA] disabled:opacity-50"
+                            >
+                              {isAgentStopping ? '停止中...' : '停止 Agent'}
+                            </button>
+                          </div>
+                        )}
+
+                        {/* 加载态：骨架屏 */}
+                        {isDetailLoading && (
+                          <div className="flex flex-col gap-3">
+                            <div className="h-4 w-20 rounded bg-[#292524] animate-pulse" />
+                            <div className="h-3 w-full rounded bg-[#292524] animate-pulse" />
+                            <div className="h-3 w-3/4 rounded bg-[#292524] animate-pulse" />
+                          </div>
+                        )}
+
+                        {/* 数据加载完成 */}
+                        {!isDetailLoading && agentDetail && (
+                          <>
+                            {/* 状态 badge */}
+                            <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColors[agentDetail.status] ?? statusColors.offline}`}>
+                              {agentDetail.status}
+                            </span>
+
+                            {/* 描述 */}
+                            {agentDetail.description && (
+                              <p className="text-xs text-[#A8A29E] line-clamp-3">{agentDetail.description}</p>
+                            )}
+
+                            {/* 统计指标 2x2 grid */}
+                            {agentDetail.stats.length > 0 && (
+                              <div className="grid grid-cols-2 gap-2">
+                                {agentDetail.stats.slice(0, 4).map((s) => (
+                                  <div key={s.label} className="rounded-lg bg-[#292524] px-3 py-2">
+                                    <p className="text-[10px] text-[#78716C]">{s.label}</p>
+                                    <p className="text-sm font-medium text-[#D6D3D1]">{s.value}</p>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* 触发规则 */}
+                            {agentDetail.triggerRules.length > 0 && (
+                              <div className="flex flex-col gap-1.5">
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-[#78716C]">触发规则</p>
+                                {agentDetail.triggerRules.slice(0, 3).map((r) => (
+                                  <div key={r.key} className="flex items-baseline gap-2">
+                                    <span className="font-mono text-[10px] text-[#A8A29E]">{r.key}:</span>
+                                    <span className="text-xs text-[#D6D3D1]">{r.value}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+
+                            {/* 最近日志 */}
+                            {agentDetail.recentLogs.length > 0 && (
+                              <div className="flex flex-col gap-1.5">
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-[#78716C]">最近日志</p>
+                                {agentDetail.recentLogs.slice(0, 5).map((log, i) => (
+                                  <div key={i} className="flex items-baseline gap-2">
+                                    <span className="shrink-0 text-[10px] text-[#78716C]">{log.time}</span>
+                                    <span className={`text-xs truncate ${logStatusColors[log.status] ?? logStatusColors.online}`}>{log.title}</span>
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </>
+                        )}
+
+                        {/* API 返回 null */}
+                        {!isDetailLoading && !agentDetail && (
+                          <p className="text-xs text-[#78716C]">暂无详细数据</p>
+                        )}
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+              {rightPanel.state === 'SIGNAL_DETAIL' && (
+                <div className="flex flex-col gap-3 p-4">
+                  {(() => {
+                    const nodeId = rightPanel.signalId;
+                    const normalizedNodeId = nodeId?.includes(':')
+                      ? nodeId.split(':').slice(1).join(':')
+                      : nodeId;
+                    const routeMatchKey = normalizedNodeId ?? nodeId ?? '';
+                    const node =
+                      (nodeId ? signalGraph.nodes.find((n) => n.id === nodeId) : null) ??
+                      (normalizedNodeId
+                        ? signalGraph.nodes.find(
+                            (n) => n.label === normalizedNodeId || n.id.endsWith(`:${normalizedNodeId}`)
+                          )
+                        : null);
+                    const relatedRoutes = routeMatchKey
+                      ? signalRoutes.filter(
+                          (r) =>
+                            r.target_ref === routeMatchKey || r.topic.includes(routeMatchKey)
+                        )
+                      : [];
+                    const incomingCount = routeMatchKey
+                      ? signalRoutes.filter((r) => r.target_ref === routeMatchKey).length
+                      : 0;
+                    const outgoingCount = routeMatchKey
+                      ? signalRoutes.filter((r) => r.topic.includes(routeMatchKey)).length
+                      : 0;
+
+                    return (
+                      <>
+                        <div className="flex flex-col gap-1">
+                          <p className="text-xs font-medium text-[#A8A29E]">节点 ID</p>
+                          <p className="font-mono text-sm text-[#FAFAF9]">{nodeId ?? '—'}</p>
+                        </div>
+
+                        {node && (
+                          <div className="flex flex-col gap-3">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
+                                  node.type === 'agent'
+                                    ? 'bg-[#CCFBF1] text-[#0D9488]'
+                                    : node.type === 'actor'
+                                      ? 'bg-[#FEF3C7] text-[#B45309]'
+                                      : node.type === 'topic'
+                                        ? 'bg-[#FFEDD5] text-[#EA580C]'
+                                        : 'bg-[#DBEAFE] text-[#1D4ED8]'
+                                }`}
+                              >
+                                {node.type}
+                              </span>
+                              <span className="text-xs text-[#78716C]">状态：{node.status}</span>
+                            </div>
+                            <div className="flex gap-4">
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-[#78716C]">接收路由</p>
+                                <p className="text-sm font-medium text-[#FAFAF9]">{incomingCount}</p>
+                              </div>
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-[#78716C]">发送路由</p>
+                                <p className="text-sm font-medium text-[#FAFAF9]">{outgoingCount}</p>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="flex flex-col gap-1">
+                          <p className="text-xs font-medium text-[#A8A29E]">最近信号路由</p>
+                          {relatedRoutes.slice(0, 5).map((r) => (
+                            <div
+                              key={r.id}
+                              className="flex items-center gap-2 rounded-[6px] bg-[#292524] px-3 py-2"
+                            >
+                              <span
+                                className={`h-1.5 w-1.5 rounded-full ${r.enabled ? 'bg-[#22C55E]' : 'bg-[#57534E]'}`}
+                              />
+                              <span className="flex-1 truncate font-mono text-xs text-[#D6D3D1]">
+                                {r.topic}
+                              </span>
+                              <span className="shrink-0 text-[10px] text-[#78716C]">
+                                → {r.target_type}
+                              </span>
+                            </div>
+                          ))}
+                          {relatedRoutes.length === 0 && (
+                            <p className="text-xs text-[#57534E]">无关联路由</p>
+                          )}
+                        </div>
+                      </>
+                    );
+                  })()}
+                </div>
+              )}
+              {rightPanel.state === 'AGENT_CHAT' && (
+                <div data-testid="agent-rightpanel-chat-panel" className="flex h-full flex-col gap-3 p-4">
+                  <div className="flex-1 space-y-2 overflow-auto rounded-[10px] border border-[#292524] bg-[#0C0A09] p-3">
+                    {chatMessages.length === 0 && (
+                      <p className="text-xs text-[#78716C]">暂无会话内容，发送第一条消息开始对话。</p>
+                    )}
+                    {chatMessages.map((message) => (
+                      <div
+                        key={message.id}
+                        className={`rounded-lg px-3 py-2 text-xs ${
+                          message.role === 'user'
+                            ? 'ml-8 bg-[#1F2937] text-[#E5E7EB]'
+                            : 'mr-8 bg-[#0D9488]/20 text-[#D1FAE5]'
+                        }`}
+                      >
+                        <p>{message.content}</p>
+                      </div>
+                    ))}
+                  </div>
+                  {chatError && <p className="text-xs text-[#FCA5A5]">{chatError}</p>}
+                  <div className="flex items-center gap-2">
+                    <input
+                      data-testid="agent-rightpanel-chat-input"
+                      value={chatInput}
+                      onChange={(event) => setChatInput(event.target.value)}
+                      onKeyDown={(event) => {
+                        if (event.key === 'Enter' && !event.shiftKey) {
+                          event.preventDefault();
+                          void handleChatSend();
+                        }
+                      }}
+                      placeholder="输入消息..."
+                      className="h-9 flex-1 rounded-lg border border-[#44403C] bg-[#1C1917] px-3 text-xs text-[#FAFAF9] outline-none placeholder:text-[#78716C] focus:border-[#0D9488]"
+                    />
+                    <button
+                      type="button"
+                      data-testid="agent-rightpanel-chat-send"
+                      onClick={() => {
+                        void handleChatSend();
+                      }}
+                      disabled={!chatInput.trim() || isChatSending}
+                      className="h-9 rounded-lg bg-[#0D9488] px-3 text-xs font-medium text-white disabled:opacity-50"
+                    >
+                      {isChatSending ? '发送中...' : '发送'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          </aside>
+        )}
       </div>
 
+      {/* Sheets（移动端） */}
       {sheetOpen && (
         <AddNodeSheet
           options={ADD_NODE_OPTIONS}
           onClose={() => setSheetOpen(false)}
+          onAddAgent={() => {
+            void handleCreateManualAgent();
+          }}
           onAddDevice={() => setHostManagerOpen(true)}
         />
       )}
-
       {hostManagerOpen && (
         <RuntimeHostManagerSheet
           hostSnapshots={runtimeHostSnapshots}
