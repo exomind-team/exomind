@@ -12,7 +12,71 @@ async function setupIssue354Flags(page: Page) {
 
 test.describe('Issue #354 desktop route regression（桌面路由回归）', () => {
   test.beforeEach(async ({ page }) => {
+    await page.setViewportSize({ width: 1680, height: 1050 });
     await setupIssue354Flags(page);
+  });
+
+  test('desktop /eventlog shell is flush to viewport（桌面当下页壳层贴边窗口）', async ({ page }) => {
+    await page.goto('/eventlog');
+
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+
+    const metrics = await page.evaluate(() => {
+      const sidebar = document.querySelector('[data-testid="desktop-sidebar"]');
+      const shell = sidebar?.parentElement;
+      const shellRect = shell?.getBoundingClientRect();
+
+      return {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        shell: shellRect
+          ? {
+              x: shellRect.x,
+              y: shellRect.y,
+              width: shellRect.width,
+              height: shellRect.height,
+            }
+          : null,
+      };
+    });
+
+    expect(metrics.shell).not.toBeNull();
+    expect(Math.abs((metrics.shell?.x ?? 0) - 0)).toBeLessThanOrEqual(1);
+    expect(Math.abs((metrics.shell?.y ?? 0) - 0)).toBeLessThanOrEqual(1);
+    expect(Math.abs((metrics.shell?.width ?? 0) - metrics.innerWidth)).toBeLessThanOrEqual(1);
+    expect(Math.abs((metrics.shell?.height ?? 0) - metrics.innerHeight)).toBeLessThanOrEqual(1);
+  });
+
+  test('mobile /eventlog shell fits viewport (mobile shell flushes to viewport)', async ({ page }) => {
+    await page.setViewportSize({ width: 430, height: 932 });
+    await page.goto('/eventlog');
+
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
+
+    const metrics = await page.evaluate(() => {
+      const bottomTab = document.querySelector('[data-testid="mobile-bottom-tab"]');
+      const shell = bottomTab?.parentElement;
+      const shellRect = shell?.getBoundingClientRect();
+
+      return {
+        innerWidth: window.innerWidth,
+        innerHeight: window.innerHeight,
+        shell: shellRect
+          ? {
+              x: shellRect.x,
+              y: shellRect.y,
+              width: shellRect.width,
+              height: shellRect.height,
+            }
+          : null,
+      };
+    });
+
+    expect(metrics.shell).not.toBeNull();
+    expect(Math.abs((metrics.shell?.x ?? 0) - 0)).toBeLessThanOrEqual(1);
+    expect(Math.abs((metrics.shell?.y ?? 0) - 0)).toBeLessThanOrEqual(1);
+    expect(Math.abs((metrics.shell?.width ?? 0) - metrics.innerWidth)).toBeLessThanOrEqual(1);
+    expect(Math.abs((metrics.shell?.height ?? 0) - metrics.innerHeight)).toBeLessThanOrEqual(1);
   });
 
   test('desktop /agents/chat keeps shell and can send message（桌面对话页壳层与发送交互）', async ({ page }) => {

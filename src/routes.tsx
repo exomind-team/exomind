@@ -151,15 +151,17 @@ function MobileShell({
   commandPaletteActive?: boolean;
   commandContext?: CommandContext;
 }) {
+  const previewFrame = desktopFrame && resolveRuntimePlatform() !== 'tauri';
+
   return (
-    <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', desktopFrame && 'p-6')}>
+    <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', previewFrame && 'p-6')}>
       <div
         className={cn(
-          'relative mx-auto h-[100dvh] w-full max-w-[393px] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]',
-          desktopFrame && 'h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
+          'relative h-[100dvh] w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]',
+          previewFrame && 'mx-auto max-w-[393px] h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
         )}
       >
-        <main className={cn("absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto", desktopFrame ? "top-0" : "top-[env(safe-area-inset-top,0px)]")}>
+        <main className={cn("absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto", previewFrame ? "top-0" : "top-[env(safe-area-inset-top,0px)]")}>
           <Outlet />
         </main>
 
@@ -266,8 +268,8 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
 
 function DesktopLayout({ activePath }: { activePath: string }) {
   return (
-    <div className="min-h-[100dvh] bg-[#ECE6E1] p-6 dark:bg-[#0C0A09]">
-      <div className="mx-auto flex h-[calc(100dvh-48px)] max-w-[1400px] overflow-hidden rounded-2xl border border-[hsl(var(--sidebar-border))] bg-[#FAF7F5] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)] dark:bg-[#0C0A09]">
+    <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
+      <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
         <DesktopSidebar activePath={activePath} />
         <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
           <Outlet />
