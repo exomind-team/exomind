@@ -3,12 +3,14 @@
 
 use chrono::Utc;
 use exomind_runtime::{
-    start_with_options, RuntimeHandle, RuntimePublishRequest, RuntimeStartOptions, DEFAULT_RT_PORT,
+    start_with_options, RuntimeHandle, RuntimePublishRequest, RuntimeStartError,
+    RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use serde::{Deserialize, Serialize};
 use std::sync::{Arc, Mutex};
 use tauri::State;
-use tokio::time::{sleep, Duration};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::{sleep, timeout, Duration};
 
 struct RuntimeInner {
     handle: Option<RuntimeHandle>,
@@ -16,6 +18,7 @@ struct RuntimeInner {
     port: u16,
     started_at: Option<String>,
     last_error: Option<String>,
+    external_runtime: bool,
 }
 
 pub struct RuntimeProcessState {
@@ -31,6 +34,7 @@ impl RuntimeProcessState {
                 port: DEFAULT_RT_PORT,
                 started_at: None,
                 last_error: None,
+                external_runtime: false,
             }),
         }
     }
@@ -80,7 +84,7 @@ fn compose_status(
         running,
         host: inner.host.clone(),
         port: inner.port,
-        pid: running.then_some(std::process::id()),
+        pid: (running && inner.handle.is_some()).then_some(std::process::id()),
         started_at: inner.started_at.clone(),
         error: error.or_else(|| inner.last_error.clone()),
     }
@@ -108,6 +112,53 @@ fn is_valid_host(host: &str) -> bool {
     })
 }
 
+async fn probe_runtime_health(host: &str, port: u16) -> bool {
+    let address = format!("{host}:{port}");
+    let mut stream = match timeout(
+        Duration::from_millis(250),
+        tokio::net::TcpStream::connect(&address),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => stream,
+        _ => return false,
+    };
+
+    let request = format!("GET /health HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    if timeout(
+        Duration::from_millis(250),
+        stream.write_all(request.as_bytes()),
+    )
+    .await
+    .is_err()
+    {
+        return false;
+    }
+
+    let mut response = [0u8; 128];
+    match timeout(Duration::from_millis(250), stream.read(&mut response)).await {
+        Ok(Ok(size)) if size > 0 => {
+            let head = String::from_utf8_lossy(&response[..size]);
+            head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200")
+        }
+        _ => false,
+    }
+}
+
+fn mark_external_runtime_running(
+    state: &Arc<RuntimeProcessState>,
+    host: &str,
+    port: u16,
+) -> Result<RuntimeServiceStatus, String> {
+    let mut inner = lock_or_error(state)?;
+    inner.host = host.to_string();
+    inner.port = port;
+    inner.started_at = None;
+    inner.last_error = None;
+    inner.external_runtime = true;
+    Ok(compose_status(&inner, true, None))
+}
+
 pub async fn ensure_runtime_started(
     state: Arc<RuntimeProcessState>,
     host: Option<String>,
@@ -129,6 +180,8 @@ pub async fn ensure_runtime_started(
     if let Some(runtime_port) = port {
         options.port = runtime_port;
     }
+    let requested_host = options.bind_host.clone();
+    let requested_port = options.port;
 
     // Fast path: already running（快速路径：已在运行）
     {
@@ -141,6 +194,7 @@ pub async fn ensure_runtime_started(
             inner.host = host;
             inner.port = port;
             inner.last_error = None;
+            inner.external_runtime = false;
             return Ok(compose_status(&inner, true, None));
         }
     }
@@ -153,8 +207,14 @@ pub async fn ensure_runtime_started(
             if StdTcpListener::bind(&addr).is_ok() {
                 break;
             }
+            if probe_runtime_health(&options.bind_host, options.port).await {
+                return mark_external_runtime_running(&state, &options.bind_host, options.port);
+            }
             if i == 0 {
-                eprintln!("[tauri/setup] port {} busy, waiting for release...", options.port);
+                eprintln!(
+                    "[tauri/setup] port {} busy, waiting for release...",
+                    options.port
+                );
             }
             sleep(Duration::from_millis(100)).await;
         }
@@ -163,6 +223,14 @@ pub async fn ensure_runtime_started(
     let handle = match start_with_options(options).await {
         Ok(handle) => handle,
         Err(error) => {
+            if let RuntimeStartError::BindListener { source, .. } = &error {
+                if source.kind() == std::io::ErrorKind::AddrInUse
+                    && probe_runtime_health(&requested_host, requested_port).await
+                {
+                    return mark_external_runtime_running(&state, &requested_host, requested_port);
+                }
+            }
+
             // Handle startup race gracefully（处理并发启动竞争）.
             for _ in 0..10 {
                 if let Ok(status) = runtime_status_snapshot(state.clone()) {
@@ -176,6 +244,7 @@ pub async fn ensure_runtime_started(
             let message = format!("failed to start embedded runtime: {error}");
             let mut inner = lock_or_error(&state)?;
             inner.last_error = Some(message.clone());
+            inner.external_runtime = false;
             return Err(message);
         }
     };
@@ -187,6 +256,7 @@ pub async fn ensure_runtime_started(
     inner.port = started_port;
     inner.started_at = Some(Utc::now().to_rfc3339());
     inner.last_error = None;
+    inner.external_runtime = false;
     inner.handle = Some(handle);
     Ok(compose_status(&inner, true, None))
 }
@@ -194,7 +264,13 @@ pub async fn ensure_runtime_started(
 pub async fn ensure_runtime_stopped(
     state: Arc<RuntimeProcessState>,
 ) -> Result<RuntimeServiceStatus, String> {
-    let mut handle = { lock_or_error(&state)?.handle.take() };
+    let (mut handle, external_snapshot) = {
+        let mut inner = lock_or_error(&state)?;
+        (
+            inner.handle.take(),
+            (inner.external_runtime, inner.host.clone(), inner.port),
+        )
+    };
 
     if let Some(runtime) = handle.as_mut() {
         runtime
@@ -203,9 +279,25 @@ pub async fn ensure_runtime_stopped(
             .map_err(|error| format!("failed to stop embedded runtime: {error}"))?;
     }
 
+    if handle.is_none()
+        && external_snapshot.0
+        && probe_runtime_health(&external_snapshot.1, external_snapshot.2).await
+    {
+        let message = format!(
+            "embedded runtime is managed by another process at {}:{}; stop request skipped",
+            external_snapshot.1, external_snapshot.2
+        );
+        let mut inner = lock_or_error(&state)?;
+        inner.started_at = None;
+        inner.last_error = Some(message.clone());
+        inner.external_runtime = true;
+        return Ok(compose_status(&inner, true, Some(message)));
+    }
+
     let mut inner = lock_or_error(&state)?;
     inner.started_at = None;
     inner.last_error = None;
+    inner.external_runtime = false;
     Ok(compose_status(&inner, false, None))
 }
 
@@ -221,6 +313,9 @@ pub fn runtime_status_snapshot(
     let running = if let Some((host, port)) = running_snapshot {
         inner.host = host;
         inner.port = port;
+        inner.external_runtime = false;
+        true
+    } else if inner.external_runtime {
         true
     } else {
         inner.started_at = None;
@@ -260,13 +355,17 @@ pub fn signal_publish_fast(
 ) -> Result<SignalPublishFastResponse, String> {
     let (signal_pool, host_id) = {
         let inner = lock_or_error(state.inner())?;
-        let handle = inner
-            .handle
-            .as_ref()
-            .ok_or_else(|| "embedded runtime not running".to_string())?;
-        if !handle.is_running() {
-            return Err("embedded runtime is not running".to_string());
-        }
+        let handle = match inner.handle.as_ref() {
+            Some(handle) if handle.is_running() => handle,
+            Some(_) => return Err("embedded runtime is not running".to_string()),
+            None if inner.external_runtime => {
+                return Err(format!(
+                    "embedded runtime is managed by another process at {}:{}; fast publish is unavailable",
+                    inner.host, inner.port
+                ));
+            }
+            None => return Err("embedded runtime not running".to_string()),
+        };
         (handle.clone_signal_pool(), handle.host_id().to_string())
     };
 
@@ -290,6 +389,8 @@ pub fn signal_publish_fast(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     #[test]
     fn is_valid_host_accepts_ipv4() {
         assert!(super::is_valid_host("127.0.0.1"));
@@ -311,5 +412,36 @@ mod tests {
         assert!(!super::is_valid_host("../etc/passwd"));
         assert!(!super::is_valid_host("-invalid"));
         assert!(!super::is_valid_host("invalid-"));
+    }
+
+    #[test]
+    fn compose_status_hides_pid_for_external_runtime() {
+        let inner = super::RuntimeInner {
+            handle: None,
+            host: "127.0.0.1".to_string(),
+            port: 9124,
+            started_at: None,
+            last_error: None,
+            external_runtime: true,
+        };
+        let status = super::compose_status(&inner, true, None);
+
+        assert!(status.running);
+        assert_eq!(status.pid, None);
+    }
+
+    #[test]
+    fn runtime_status_snapshot_reports_external_runtime_running() {
+        let state = Arc::new(super::RuntimeProcessState::new());
+        {
+            let mut inner = super::lock_or_error(&state).expect("runtime state lock");
+            inner.host = "127.0.0.1".to_string();
+            inner.port = 9124;
+            inner.external_runtime = true;
+        }
+
+        let status = super::runtime_status_snapshot(state).expect("status snapshot");
+        assert!(status.running);
+        assert_eq!(status.pid, None);
     }
 }

@@ -219,6 +219,29 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
   });
 
+  it('uses current runtime status port when starting（启动时沿用当前状态端口）', async () => {
+    runtimeControlMocks.getStatus.mockResolvedValueOnce({
+      running: false,
+      host: '127.0.0.1',
+      port: 1950,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
+    });
+
+    fireEvent.click(screen.getByTestId('runtime-local-start-button'));
+    await waitFor(() => {
+      expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
+        host: '127.0.0.1',
+        port: 1950,
+      });
+    });
+  });
+
   it('switches runtime target to external and saves host address（可切换外部 Runtime 并保存地址）', async () => {
     render(<AgentsPage />);
     fireEvent.click(await screen.findByRole('button', { name: '设备' }));

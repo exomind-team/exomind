@@ -2307,37 +2307,59 @@ export function AgentsPage() {
   };
 
   const handleRuntimeStart = async () => {
+    const runtimeControlService = getRuntimeControlService();
+    const targetHost = runtimeServiceStatus?.host ?? '127.0.0.1';
+    const targetPort = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
     try {
-      const status = await getRuntimeControlService().startRuntime({
-        host: '127.0.0.1',
-        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      const status = await runtimeControlService.startRuntime({
+        host: targetHost,
+        port: targetPort,
       });
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRuntimeServiceStatus({
-        running: false,
-        host: '127.0.0.1',
-        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
-        error: message,
-      });
+      try {
+        const latestStatus = await runtimeControlService.getStatus();
+        setRuntimeServiceStatus({
+          ...latestStatus,
+          error: latestStatus.error ?? message,
+        });
+      } catch {
+        setRuntimeServiceStatus({
+          running: false,
+          host: targetHost,
+          port: targetPort,
+          error: message,
+        });
+      }
     }
   };
 
   const handleRuntimeStop = async () => {
+    const runtimeControlService = getRuntimeControlService();
+    const fallbackHost = runtimeServiceStatus?.host ?? '127.0.0.1';
+    const fallbackPort = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
     try {
-      const status = await getRuntimeControlService().stopRuntime();
+      const status = await runtimeControlService.stopRuntime();
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRuntimeServiceStatus({
-        running: false,
-        host: '127.0.0.1',
-        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
-        error: message,
-      });
+      try {
+        const latestStatus = await runtimeControlService.getStatus();
+        setRuntimeServiceStatus({
+          ...latestStatus,
+          error: latestStatus.error ?? message,
+        });
+      } catch {
+        setRuntimeServiceStatus({
+          running: false,
+          host: fallbackHost,
+          port: fallbackPort,
+          error: message,
+        });
+      }
     }
   };
 
