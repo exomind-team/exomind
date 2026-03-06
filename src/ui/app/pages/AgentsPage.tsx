@@ -3,6 +3,7 @@ import {
   Bot,
   Brain,
   ChevronRight,
+  Crosshair,
   Filter,
   List,
   Mail,
@@ -19,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -30,6 +31,7 @@ import {
   type Edge as FlowEdge,
   type Node as FlowNode,
   type NodeProps as FlowNodeProps,
+  type ReactFlowInstance,
   useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -77,6 +79,23 @@ import {
   type SignalGraphNodeType,
   type SignalRouteRow,
 } from './agents-signal-topology';
+import {
+  applyManualLayoutSnapshot,
+  buildAutoFlowLayout,
+  buildManualLayoutSnapshot,
+  buildTopologyDatasetKey,
+  buildTopologyFilterKey,
+  clearTopologyScopeLayouts,
+  getTopologyLayoutSnapshot,
+  readTopologyLayoutStore,
+  removeTopologyLayoutSnapshot,
+  setTopologyLayoutSnapshot,
+  writeTopologyLayoutStore,
+  type TopologyLayoutMode,
+  type TopologyLayoutStore,
+  type TopologyNodePosition,
+  type TopologyViewport,
+} from './topology-layout';
 import { Switch } from '@/components/ui/switch';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
@@ -433,6 +452,7 @@ type SignalFlowNodeData = {
 };
 
 type SignalFlowNodeType = FlowNode<SignalFlowNodeData, SignalGraphNodeType>;
+const TOPOLOGY_SCOPE_KEY = 'global';
 
 function nodeTypeTint(nodeType: SignalGraphNodeType): string {
   if (nodeType === 'signal-input') return '#8B5CF6';
@@ -545,10 +565,24 @@ function TabBar({
 
 function TopologyView({
   graph,
+  layoutMode,
+  manualViewport,
+  onLayoutModeChange,
+  onCommitNodePosition,
+  onCommitViewport,
+  onResetCurrentLayout,
+  onClearSavedLayouts,
   onSelectNode,
   onClearSelection,
 }: {
   graph: SignalGraph;
+  layoutMode: TopologyLayoutMode;
+  manualViewport?: TopologyViewport;
+  onLayoutModeChange: (mode: TopologyLayoutMode) => void;
+  onCommitNodePosition: (nodeId: string, position: TopologyNodePosition) => void;
+  onCommitViewport: (viewport: TopologyViewport) => void;
+  onResetCurrentLayout: () => void;
+  onClearSavedLayouts: () => void;
   onSelectNode: (nodeId: string) => void;
   onClearSelection: () => void;
 }) {
@@ -558,20 +592,21 @@ function TopologyView({
   const edgeLabelColor = isDarkMode ? '#D6D3D1' : '#78716C';
   const edgeLabelBgColor = isDarkMode ? '#1C1917' : '#FAF7F5';
   const backgroundDotColor = isDarkMode ? '#44403C' : '#E7E5E4';
+  const flowInstanceRef = useRef<ReactFlowInstance<SignalFlowNodeType> | null>(null);
 
   const nextFlowNodes = useMemo<SignalFlowNodeType[]>(() => {
     return graph.nodes.map((node) => ({
       id: node.id,
       type: node.type,
       position: node.position,
-      draggable: true,
+      draggable: layoutMode === 'manual',
       data: {
         label: node.label,
         subtitle: node.status,
         nodeType: node.type,
       },
     }));
-  }, [graph.nodes]);
+  }, [graph.nodes, layoutMode]);
   const [flowNodes, setFlowNodes, onFlowNodesChange] = useNodesState<SignalFlowNodeType>(nextFlowNodes);
 
   useEffect(() => {
@@ -608,6 +643,13 @@ function TopologyView({
     }));
   }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, graph.edges, inactiveEdgeColor]);
 
+  const reactFlowKey = useMemo(() => {
+    const viewportKey = manualViewport
+      ? `${manualViewport.x}:${manualViewport.y}:${manualViewport.zoom}`
+      : 'fit-view';
+    return `${layoutMode}:${viewportKey}:${graph.nodes.map((node) => `${node.id}:${node.position.x}:${node.position.y}`).join('|')}`;
+  }, [graph.nodes, layoutMode, manualViewport]);
+
   return (
     <section
       data-testid="agent-topology-view"
@@ -622,16 +664,84 @@ function TopologyView({
         data-testid="agent-topology-canvas"
         className="relative h-full min-h-0 w-full overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
       >
+        <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center justify-end gap-2">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 p-1 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
+            <button
+              type="button"
+              data-testid="agent-topology-layout-mode-manual"
+              onClick={() => onLayoutModeChange('manual')}
+              className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                layoutMode === 'manual'
+                  ? 'bg-[#C75B3A] text-white'
+                  : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
+              }`}
+            >
+              手动布局
+            </button>
+            <button
+              type="button"
+              data-testid="agent-topology-layout-mode-auto-flow"
+              onClick={() => onLayoutModeChange('auto:flow')}
+              className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                layoutMode === 'auto:flow'
+                  ? 'bg-[#1D4ED8] text-white'
+                  : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
+              }`}
+            >
+              自动布局
+            </button>
+          </div>
+          <button
+            type="button"
+            data-testid="agent-topology-fit-view"
+            onClick={() => {
+              flowInstanceRef.current?.fitView();
+            }}
+            className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-1 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+          >
+            <Crosshair size={12} />
+            适配视口
+          </button>
+          <button
+            type="button"
+            data-testid="agent-topology-reset-layout"
+            onClick={onResetCurrentLayout}
+            className="pointer-events-auto rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-1 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+          >
+            重置当前布局
+          </button>
+          <button
+            type="button"
+            data-testid="agent-topology-clear-layouts"
+            onClick={onClearSavedLayouts}
+            className="pointer-events-auto rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-1 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+          >
+            清空已保存布局
+          </button>
+        </div>
         <ReactFlow
+          key={reactFlowKey}
           data-testid="agent-signal-flow"
           nodes={flowNodes}
           edges={flowEdges}
           nodeTypes={SIGNAL_NODE_TYPES}
-          fitView
+          defaultViewport={layoutMode === 'manual' ? manualViewport : undefined}
+          fitView={layoutMode === 'auto:flow' || !manualViewport}
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}
           maxZoom={1.8}
           onNodesChange={onFlowNodesChange}
+          onInit={(instance) => {
+            flowInstanceRef.current = instance;
+          }}
+          onNodeDragStop={(_, node) => {
+            if (layoutMode !== 'manual') return;
+            onCommitNodePosition(node.id, node.position);
+          }}
+          onMoveEnd={(_, viewport) => {
+            if (layoutMode !== 'manual') return;
+            onCommitViewport(viewport);
+          }}
           onNodeClick={(_, node: SignalFlowNodeType) => {
             onSelectNode(node.id);
           }}
@@ -1648,6 +1758,8 @@ export function AgentsPage() {
   const initialRuntimeTarget = getSelectedRuntimeTarget();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
+  const [topologyLayoutMode, setTopologyLayoutMode] = useState<TopologyLayoutMode>('manual');
+  const [topologyLayoutStore, setTopologyLayoutStore] = useState<TopologyLayoutStore>(() => readTopologyLayoutStore());
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [activeSignalRouteHost, setActiveSignalRouteHost] = useState<RuntimeHostRecord | null>(null);
@@ -2218,10 +2330,111 @@ export function AgentsPage() {
     return fallbackRuntimeAgents;
   }, [fallbackRuntimeAgents, runtimeHostSnapshots]);
 
-  const signalGraph = useMemo(
+  const baseSignalGraph = useMemo(
     () => buildSignalGraph(signalRoutes, graphAgents),
     [graphAgents, signalRoutes]
   );
+
+  const topologyDatasetKey = useMemo(
+    () => buildTopologyDatasetKey(baseSignalGraph),
+    [baseSignalGraph]
+  );
+  const topologyFilterKey = useMemo(
+    () => buildTopologyFilterKey({ nodesFilter }),
+    [nodesFilter]
+  );
+  const topologyManualSnapshot = useMemo(
+    () => getTopologyLayoutSnapshot(topologyLayoutStore, {
+      datasetKey: topologyDatasetKey,
+      scopeKey: TOPOLOGY_SCOPE_KEY,
+      filterKey: topologyFilterKey,
+    }),
+    [topologyDatasetKey, topologyFilterKey, topologyLayoutStore]
+  );
+  const topologyManualResult = useMemo(
+    () => applyManualLayoutSnapshot({
+      nodes: baseSignalGraph.nodes,
+      snapshot: topologyManualSnapshot,
+    }),
+    [baseSignalGraph.nodes, topologyManualSnapshot]
+  );
+  const signalGraph = useMemo(() => {
+    if (topologyLayoutMode === 'manual') {
+      return {
+        nodes: topologyManualResult.nodes,
+        edges: baseSignalGraph.edges,
+      };
+    }
+    return {
+      nodes: buildAutoFlowLayout(baseSignalGraph.nodes),
+      edges: baseSignalGraph.edges,
+    };
+  }, [baseSignalGraph.edges, baseSignalGraph.nodes, topologyLayoutMode, topologyManualResult.nodes]);
+  const manualViewport = topologyManualSnapshot?.viewport;
+
+  const persistTopologyStore = (updater: (current: TopologyLayoutStore) => TopologyLayoutStore) => {
+    setTopologyLayoutStore((current) => {
+      const nextStore = updater(current);
+      writeTopologyLayoutStore(nextStore);
+      return nextStore;
+    });
+  };
+
+  const saveManualTopologySnapshot = ({
+    nodes,
+    viewport,
+  }: {
+    nodes: Array<{ id: string; position: TopologyNodePosition }>;
+    viewport?: TopologyViewport;
+  }) => {
+    persistTopologyStore((current) => setTopologyLayoutSnapshot(current, {
+      datasetKey: topologyDatasetKey,
+      scopeKey: TOPOLOGY_SCOPE_KEY,
+      filterKey: topologyFilterKey,
+      snapshot: buildManualLayoutSnapshot({
+        nodes,
+        viewport,
+      }),
+    }));
+  };
+
+  const commitManualNodePosition = (nodeId: string, position: TopologyNodePosition) => {
+    if (topologyLayoutMode !== 'manual') return;
+    const nextNodes = topologyManualResult.nodes.map((node) => (
+      node.id === nodeId
+        ? { ...node, position }
+        : node
+    ));
+    saveManualTopologySnapshot({
+      nodes: nextNodes,
+      viewport: manualViewport,
+    });
+  };
+
+  const commitManualViewport = (viewport: TopologyViewport) => {
+    if (topologyLayoutMode !== 'manual') return;
+    saveManualTopologySnapshot({
+      nodes: topologyManualResult.nodes,
+      viewport,
+    });
+  };
+
+  const handleResetCurrentTopologyLayout = () => {
+    setTopologyLayoutMode('manual');
+    persistTopologyStore((current) => removeTopologyLayoutSnapshot(current, {
+      datasetKey: topologyDatasetKey,
+      scopeKey: TOPOLOGY_SCOPE_KEY,
+      filterKey: topologyFilterKey,
+    }));
+  };
+
+  const handleClearSavedTopologyLayouts = () => {
+    setTopologyLayoutMode('manual');
+    persistTopologyStore((current) => clearTopologyScopeLayouts(current, {
+      datasetKey: topologyDatasetKey,
+      scopeKey: TOPOLOGY_SCOPE_KEY,
+    }));
+  };
 
   const content = useMemo(() => {
     if (viewMode === 'list') {
@@ -2285,6 +2498,13 @@ export function AgentsPage() {
     return (
       <TopologyView
         graph={signalGraph}
+        layoutMode={topologyLayoutMode}
+        manualViewport={manualViewport}
+        onLayoutModeChange={setTopologyLayoutMode}
+        onCommitNodePosition={commitManualNodePosition}
+        onCommitViewport={commitManualViewport}
+        onResetCurrentLayout={handleResetCurrentTopologyLayout}
+        onClearSavedLayouts={handleClearSavedTopologyLayouts}
         onSelectNode={(nodeId) => {
           // 判断节点类型
           const node = signalGraph.nodes.find((n) => n.id === nodeId);
@@ -2299,8 +2519,15 @@ export function AgentsPage() {
       />
     );
   }, [
+    commitManualNodePosition,
+    commitManualViewport,
     deviceGroups,
+    handleClearSavedTopologyLayouts,
+    handleResetCurrentTopologyLayout,
     listSections,
+    manualViewport,
+    setTopologyLayoutMode,
+    topologyLayoutMode,
     runtimeHostSnapshots,
     signalGraph,
     signalHistory,
