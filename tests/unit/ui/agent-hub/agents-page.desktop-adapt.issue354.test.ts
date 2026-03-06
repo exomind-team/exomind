@@ -22,9 +22,10 @@ describe('agents page desktop adapt issue-354（桌面端适配与占位清理�
     expect(source).not.toContain('完整 Signal History 面板将在后续版本实现');
   });
 
-  it('replaces agent-chat placeholder with roadmap hint（Agent 对话占位改为规划提示）', () => {
-    expect(source).toContain('此功能计划在 v0.3.6 实现，需要 RT 会话管理接口支持。');
-    expect(source).toContain('<MessageSquare size={20} className="text-[#0D9488]" />');
+  it('replaces chat placeholder with real conversation panel（Agent 对话占位替换为真实会话区）', () => {
+    expect(source).toContain('data-testid="agent-rightpanel-chat-panel"');
+    expect(source).toContain('暂无会话内容，发送第一条消息开始对话。');
+    expect(source).toContain('placeholder="输入消息..."');
     expect(source).not.toContain('Agent 对话 — T8 阶段实现');
   });
 });

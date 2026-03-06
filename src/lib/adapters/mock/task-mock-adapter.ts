@@ -48,7 +48,10 @@ export class TaskMockAdapter implements ITaskPort {
   async updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null> {
     const idx = this.tasks.findIndex(t => t.id === id)
     if (idx === -1) return null
-    const updated: TaskNode = { ...this.tasks[idx], ...input, updatedAt: Date.now() }
+    const current = this.tasks[idx]
+    const now = Date.now()
+    const nextUpdatedAt = now > current.updatedAt ? now : current.updatedAt + 1
+    const updated: TaskNode = { ...current, ...input, updatedAt: nextUpdatedAt }
     this.tasks[idx] = updated
     return deepClone(updated)
   }
