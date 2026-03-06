@@ -31,6 +31,17 @@ PouchDB.plugin(pouchdbAdapterIdb);
 const DEVICE_ID_KEY = 'exomind:deviceId';
 type SyncAuthMode = 'enabled' | 'disabled';
 
+export interface ResolvedRemoteSyncTarget {
+  remoteDbKey: string;
+  remoteUrl: string;
+  remoteConfig?: {
+    auth: {
+      username: string;
+      password: string;
+    };
+  };
+}
+
 function normalizeSyncAuthMode(rawValue: string | undefined): SyncAuthMode {
   const value = rawValue?.trim().toLowerCase();
   if (value === 'enabled' || value === 'on' || value === 'true' || value === 'required') {
@@ -70,6 +81,61 @@ export function getDeviceId(): string {
   return newId;
 }
 
+export function resolveRemoteSyncTarget(
+  baseUrl: string,
+  credentials: SyncCredentials,
+  authMode: SyncAuthMode = 'enabled'
+): ResolvedRemoteSyncTarget {
+  const remoteDbKey = (credentials.remoteIdentityKey || credentials.username).trim();
+  const remoteUrl = buildRemoteDbUrl(normalizeBaseUrl(baseUrl), remoteDbKey);
+
+  const explicitAuthUsername = credentials.authUsername?.trim();
+  const explicitAuthSecret = credentials.authSecret;
+  const hasExplicitRemoteAuth = Boolean(explicitAuthUsername) || Boolean(explicitAuthSecret)
+    || credentials.authType === 'basic'
+    || credentials.authType === 'token';
+
+  if (credentials.authType === 'none') {
+    return {
+      remoteDbKey,
+      remoteUrl,
+      remoteConfig: undefined,
+    };
+  }
+
+  if (hasExplicitRemoteAuth) {
+    return {
+      remoteDbKey,
+      remoteUrl,
+      remoteConfig: {
+        auth: {
+          username: explicitAuthUsername || credentials.username,
+          password: explicitAuthSecret || credentials.passwordHash,
+        },
+      },
+    };
+  }
+
+  if (authMode === 'enabled') {
+    return {
+      remoteDbKey,
+      remoteUrl,
+      remoteConfig: {
+        auth: {
+          username: credentials.username,
+          password: credentials.passwordHash,
+        },
+      },
+    };
+  }
+
+  return {
+    remoteDbKey,
+    remoteUrl,
+    remoteConfig: undefined,
+  };
+}
+
 /**
  * PouchDB 同步适配器核心实现
  */
@@ -107,7 +173,6 @@ export class PouchSyncAdapter implements ISyncPort {
 
     const { username } = credentials;
     const authMode = resolveSyncAuthMode();
-    const normalizedUrl = normalizeBaseUrl(url);
 
     // 创建本地数据库（使用 IndexedDB）
     const dbName = `local_${username}`;
@@ -116,10 +181,7 @@ export class PouchSyncAdapter implements ISyncPort {
     // 创建远程数据库连接
     // 注意：当前 server/pouchdb-server.js 启动的是官方 pouchdb-server。
     // 可通过 EXOMIND_SYNC_AUTH_MODE / VITE_SYNC_AUTH_MODE=enabled 开启 basic auth。
-    const remoteUrl = buildRemoteDbUrl(normalizedUrl, username);
-    const remoteConfig = authMode === 'enabled'
-      ? { auth: { username, password: credentials.passwordHash } }
-      : undefined;
+    const { remoteUrl, remoteConfig } = resolveRemoteSyncTarget(url, credentials, authMode);
     this.remoteDB = remoteConfig
       ? new PouchDB(remoteUrl, remoteConfig)
       : new PouchDB(remoteUrl);
