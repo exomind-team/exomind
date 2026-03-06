@@ -74,7 +74,6 @@ import {
   buildSignalGraph,
   buildSignalRouteRows,
   type SignalGraph,
-  type SignalGraphNode,
   type SignalGraphNodeType,
   type SignalRouteRow,
 } from './agents-signal-topology';
@@ -87,53 +86,6 @@ const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string 
   { id: 'routes', icon: List, label: '路由' },
   { id: 'device', icon: Monitor, label: '设备' },
 ];
-
-type TopologySettingsTab = 'layout' | 'style' | 'filter';
-type TopologyLayoutMode = 'force' | 'tree' | 'ring' | 'grid';
-type TopologyNodeSize = 'sm' | 'md' | 'lg';
-type TopologyEdgeStyle = 'straight' | 'smooth' | 'step';
-type TopologyColorScheme = 'type' | 'status' | 'mixed';
-
-type TopologyNodeFilter = {
-  signalInput: boolean;
-  topic: boolean;
-  agent: boolean;
-  actor: boolean;
-  frontend: boolean;
-};
-
-type TopologySettingsState = {
-  layoutMode: TopologyLayoutMode;
-  nodeSpacing: number;
-  autoLayout: boolean;
-  nodeSize: TopologyNodeSize;
-  edgeStyle: TopologyEdgeStyle;
-  showLabels: boolean;
-  colorScheme: TopologyColorScheme;
-  filters: TopologyNodeFilter;
-  groupByLayer: boolean;
-  hideDisconnected: boolean;
-};
-
-const TOPOLOGY_SETTINGS_STORAGE_KEY = 'exomind:agentHubTopologySettings';
-const DEFAULT_TOPOLOGY_SETTINGS: TopologySettingsState = {
-  layoutMode: 'force',
-  nodeSpacing: 56,
-  autoLayout: true,
-  nodeSize: 'md',
-  edgeStyle: 'smooth',
-  showLabels: true,
-  colorScheme: 'type',
-  filters: {
-    signalInput: true,
-    topic: true,
-    agent: true,
-    actor: true,
-    frontend: true,
-  },
-  groupByLayer: false,
-  hideDisconnected: false,
-};
 
 type AddNodeOption = {
   id: 'agent' | 'device';
@@ -478,9 +430,6 @@ type SignalFlowNodeData = {
   label: string;
   subtitle: string;
   nodeType: SignalGraphNodeType;
-  nodeSize: TopologyNodeSize;
-  showLabels: boolean;
-  colorScheme: TopologyColorScheme;
 };
 
 type SignalFlowNodeType = FlowNode<SignalFlowNodeData, SignalGraphNodeType>;
@@ -493,55 +442,13 @@ function nodeTypeTint(nodeType: SignalGraphNodeType): string {
   return '#6366F1';
 }
 
-function nodeStatusTint(status: string): string {
-  if (status === 'running' || status === 'online' || status === 'available') return '#0D9488';
-  if (status === 'busy' || status === 'warning') return '#D97706';
-  if (status === 'error' || status === 'offline') return '#DC2626';
-  return '#78716C';
-}
-
-function resolveNodeTint(nodeType: SignalGraphNodeType, status: string, colorScheme: TopologyColorScheme): string {
-  if (colorScheme === 'status') return nodeStatusTint(status);
-  if (colorScheme === 'mixed' && (nodeType === 'agent' || nodeType === 'actor')) {
-    return nodeStatusTint(status);
-  }
-  return nodeTypeTint(nodeType);
-}
-
-function nodeSizeMinWidth(nodeSize: TopologyNodeSize): string {
-  if (nodeSize === 'sm') return 'min-w-[98px]';
-  if (nodeSize === 'lg') return 'min-w-[150px]';
-  return 'min-w-[120px]';
-}
-
-function nodeSizePadding(nodeType: SignalGraphNodeType, nodeSize: TopologyNodeSize): string {
-  if (nodeType === 'topic') {
-    if (nodeSize === 'sm') return 'px-4 py-2';
-    if (nodeSize === 'lg') return 'px-6 py-4';
-    return 'px-5 py-3';
-  }
-  if (nodeType === 'signal-input') {
-    if (nodeSize === 'sm') return 'px-3 py-2.5';
-    if (nodeSize === 'lg') return 'px-5 py-4';
-    return 'px-4 py-3';
-  }
-  if (nodeType === 'actor') {
-    if (nodeSize === 'sm') return 'px-3 py-2.5';
-    if (nodeSize === 'lg') return 'px-5 py-4';
-    return 'px-4 py-3';
-  }
-  if (nodeSize === 'sm') return 'px-3 py-2.5';
-  if (nodeSize === 'lg') return 'px-5 py-4';
-  return 'px-4 py-3';
-}
-
 function signalNodeTypeBadgeLabel(nodeType: SignalGraphNodeType): string {
   if (nodeType === 'signal-input') return 'input';
   return nodeType;
 }
 
 function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
-  const tint = resolveNodeTint(data.nodeType, data.subtitle, data.colorScheme);
+  const tint = nodeTypeTint(data.nodeType);
   const handleBaseStyle = {
     width: 8,
     height: 8,
@@ -551,29 +458,17 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
     pointerEvents: 'none' as const,
   };
   if (data.nodeType === 'frontend') {
-    const frontendSizeClass = data.nodeSize === 'sm'
-      ? 'h-[62px] w-[118px]'
-      : data.nodeSize === 'lg'
-        ? 'h-[78px] w-[148px]'
-        : 'h-[70px] w-[130px]';
-    const frontendDiamondClass = data.nodeSize === 'sm'
-      ? 'h-[56px] w-[56px]'
-      : data.nodeSize === 'lg'
-        ? 'h-[70px] w-[70px]'
-        : 'h-[64px] w-[64px]';
     return (
-      <div className={`relative ${frontendSizeClass}`}>
+      <div className="relative h-[70px] w-[130px]">
         <Handle type="target" position={Position.Left} style={handleBaseStyle} />
         <Handle type="source" position={Position.Right} style={handleBaseStyle} />
         <div
-          className={`absolute left-1/2 top-1/2 ${frontendDiamondClass} -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-card`}
+          className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-card"
           style={{ borderColor: `${tint}80` }}
         />
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <p className="max-w-[120px] truncate text-xs font-semibold text-foreground">{data.label}</p>
-          {data.showLabels && (
-            <p className="mt-1 max-w-[120px] truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
-          )}
+          <p className="mt-1 max-w-[120px] truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
         </div>
       </div>
     );
@@ -581,24 +476,22 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
 
   const shapeClass =
     data.nodeType === 'topic'
-      ? `rounded-full ${nodeSizePadding(data.nodeType, data.nodeSize)}`
+      ? 'rounded-full px-5 py-3'
       : data.nodeType === 'signal-input'
-        ? `rounded-2xl ${nodeSizePadding(data.nodeType, data.nodeSize)}`
+        ? 'rounded-2xl px-4 py-3'
       : data.nodeType === 'actor'
-        ? `rounded-xl ${nodeSizePadding(data.nodeType, data.nodeSize)}`
-        : `rounded-md ${nodeSizePadding(data.nodeType, data.nodeSize)}`;
+        ? 'rounded-xl px-4 py-3'
+        : 'rounded-md px-4 py-3';
 
   return (
     <div
-      className={`${nodeSizeMinWidth(data.nodeSize)} border bg-card text-center shadow-sm ${shapeClass}`}
+      className={`min-w-[120px] border bg-card text-center shadow-sm ${shapeClass}`}
       style={{ borderColor: `${tint}80` }}
     >
       <Handle type="target" position={Position.Left} style={handleBaseStyle} />
       <Handle type="source" position={Position.Right} style={handleBaseStyle} />
       <p className="truncate text-xs font-semibold text-foreground">{data.label}</p>
-      {data.showLabels && (
-        <p className="mt-1 truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
-      )}
+      <p className="mt-1 truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
     </div>
   );
 }
@@ -624,7 +517,7 @@ function TabBar({
   onChange: (value: AgentHubViewMode) => void;
 }) {
   return (
-    <div className="flex items-center gap-1 rounded-[14px] border border-[#E7DED7] bg-[#F7F1EC] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] dark:border-[#3A3431] dark:bg-[#221F1D]">
+    <div className="flex items-center gap-1 rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
       {VIEW_ITEMS.map((item) => {
         const Icon = item.icon;
         const active = value === item.id;
@@ -634,10 +527,10 @@ function TabBar({
             type="button"
             data-testid={`agent-view-toggle-${item.id}`}
             onClick={() => onChange(item.id)}
-            className={`flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
               active
-                ? 'bg-white text-[#1C1917] shadow-sm ring-1 ring-[#E8DDD5] dark:bg-[#141110] dark:text-[#FAFAF9] dark:ring-[#3A3431]'
-                : 'text-[#78716C] hover:bg-white/70 hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#2B2624] dark:hover:text-[#FAFAF9]'
+                ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
+                : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
             }`}
             aria-selected={active}
           >
@@ -650,506 +543,12 @@ function TabBar({
   );
 }
 
-function topologyFilterKey(nodeType: SignalGraphNodeType): keyof TopologyNodeFilter | null {
-  if (nodeType === 'signal-input') return 'signalInput';
-  if (nodeType === 'topic') return 'topic';
-  if (nodeType === 'agent') return 'agent';
-  if (nodeType === 'actor') return 'actor';
-  if (nodeType === 'frontend') return 'frontend';
-  return null;
-}
-
-function isDesktopViewport(): boolean {
-  if (typeof window === 'undefined') return true;
-  if (typeof window.matchMedia === 'function') {
-    return window.matchMedia('(min-width: 1024px)').matches;
-  }
-  return window.innerWidth >= 1024;
-}
-
-function nodeTypeLayoutOrder(nodeType: SignalGraphNodeType): number {
-  if (nodeType === 'signal-input') return 0;
-  if (nodeType === 'topic') return 1;
-  if (nodeType === 'agent') return 2;
-  if (nodeType === 'actor') return 3;
-  if (nodeType === 'frontend') return 4;
-  return 5;
-}
-
-function stableNodeSeed(nodeId: string): number {
-  let hash = 0;
-  for (let index = 0; index < nodeId.length; index += 1) {
-    hash = ((hash << 5) - hash) + nodeId.charCodeAt(index);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function applyTopologyLayout(nodes: SignalGraphNode[], settings: TopologySettingsState): SignalGraphNode[] {
-  if (!settings.autoLayout) return nodes;
-
-  const spacing = Math.max(32, settings.nodeSpacing);
-  const grouped = new Map<string, SignalGraphNode[]>();
-  for (const node of nodes) {
-    const key = settings.groupByLayer ? node.type : 'all';
-    const current = grouped.get(key) ?? [];
-    current.push(node);
-    grouped.set(key, current);
-  }
-
-  const groupKeys = Array.from(grouped.keys()).sort((left, right) => {
-    if (!settings.groupByLayer) return left.localeCompare(right);
-    return nodeTypeLayoutOrder(left as SignalGraphNodeType) - nodeTypeLayoutOrder(right as SignalGraphNodeType);
-  });
-
-  const positions = new Map<string, { x: number; y: number }>();
-  const allNodes = groupKeys.flatMap((key) => {
-    const items = grouped.get(key) ?? [];
-    return [...items].sort((left, right) => left.label.localeCompare(right.label));
-  });
-
-  if (settings.layoutMode === 'ring') {
-    const centerX = 520;
-    const centerY = 320;
-    if (settings.groupByLayer) {
-      groupKeys.forEach((key, groupIndex) => {
-        const items = [...(grouped.get(key) ?? [])].sort((left, right) => left.label.localeCompare(right.label));
-        const radius = 110 + (groupIndex * (spacing * 0.7));
-        items.forEach((node, index) => {
-          const angle = ((Math.PI * 2) / Math.max(items.length, 1)) * index;
-          positions.set(node.id, {
-            x: centerX + Math.cos(angle) * radius,
-            y: centerY + Math.sin(angle) * radius,
-          });
-        });
-      });
-    } else {
-      allNodes.forEach((node, index) => {
-        const angle = ((Math.PI * 2) / Math.max(allNodes.length, 1)) * index;
-        positions.set(node.id, {
-          x: centerX + Math.cos(angle) * Math.max(180, spacing * 2.2),
-          y: centerY + Math.sin(angle) * Math.max(180, spacing * 2.2),
-        });
-      });
-    }
-  } else if (settings.layoutMode === 'grid') {
-    const columns = Math.max(2, Math.ceil(Math.sqrt(allNodes.length)));
-    allNodes.forEach((node, index) => {
-      const col = index % columns;
-      const row = Math.floor(index / columns);
-      positions.set(node.id, {
-        x: 120 + col * Math.max(170, spacing * 2),
-        y: 80 + row * (spacing + 28),
-      });
-    });
-  } else {
-    groupKeys.forEach((key, groupIndex) => {
-      const items = [...(grouped.get(key) ?? [])].sort((left, right) => left.label.localeCompare(right.label));
-      items.forEach((node, index) => {
-        const baseX = settings.groupByLayer
-          ? 120 + groupIndex * Math.max(190, spacing * 2.8)
-          : 120 + (index % 4) * Math.max(180, spacing * 2.1);
-        const baseY = settings.groupByLayer
-          ? 80 + index * (spacing + 28)
-          : 80 + Math.floor(index / 4) * (spacing + 28);
-        const seed = stableNodeSeed(node.id);
-        const offsetX = settings.layoutMode === 'force' ? ((seed % 9) - 4) * 4 : 0;
-        const offsetY = settings.layoutMode === 'force' ? (((seed >> 3) % 9) - 4) * 4 : 0;
-        positions.set(node.id, {
-          x: baseX + offsetX,
-          y: baseY + offsetY,
-        });
-      });
-    });
-  }
-
-  return nodes.map((node) => ({
-    ...node,
-    position: positions.get(node.id) ?? node.position,
-  }));
-}
-
-const TOPOLOGY_SETTINGS_TABS: Array<{ id: TopologySettingsTab; label: string }> = [
-  { id: 'layout', label: '布局' },
-  { id: 'style', label: '样式' },
-  { id: 'filter', label: '过滤' },
-];
-
-const TOPOLOGY_FILTER_ITEMS: Array<{ key: keyof TopologyNodeFilter; label: string }> = [
-  { key: 'signalInput', label: '信号输入' },
-  { key: 'topic', label: '主题' },
-  { key: 'agent', label: 'Agent' },
-  { key: 'actor', label: 'Actor' },
-  { key: 'frontend', label: '输出' },
-];
-
-function TopologySettingsContent({
-  activeTab,
-  settings,
-  visibleNodeCount,
-  totalNodeCount,
-  onTabChange,
-  onUpdate,
-  className,
-}: {
-  activeTab: TopologySettingsTab;
-  settings: TopologySettingsState;
-  visibleNodeCount: number;
-  totalNodeCount: number;
-  onTabChange: (tab: TopologySettingsTab) => void;
-  onUpdate: (updater: (previous: TopologySettingsState) => TopologySettingsState) => void;
-  className?: string;
-}) {
-  const layoutOptions: Array<{ id: TopologyLayoutMode; label: string }> = [
-    { id: 'force', label: '力导向' },
-    { id: 'tree', label: '树布局' },
-    { id: 'ring', label: '环形' },
-    { id: 'grid', label: '网格' },
-  ];
-  const nodeSizeOptions: Array<{ id: TopologyNodeSize; label: string }> = [
-    { id: 'sm', label: '小' },
-    { id: 'md', label: '中' },
-    { id: 'lg', label: '大' },
-  ];
-  const edgeStyleOptions: Array<{ id: TopologyEdgeStyle; label: string }> = [
-    { id: 'straight', label: '直线' },
-    { id: 'smooth', label: '曲线' },
-    { id: 'step', label: '折线' },
-  ];
-  const colorOptions: Array<{ id: TopologyColorScheme; label: string }> = [
-    { id: 'type', label: '类型' },
-    { id: 'status', label: '状态' },
-    { id: 'mixed', label: '混合' },
-  ];
-
-  const rootClassName = className
-    ? `flex min-h-0 flex-1 flex-col gap-3 ${className}`
-    : 'flex min-h-0 flex-1 flex-col gap-3';
-
-  return (
-    <div className={rootClassName}>
-      <div className="rounded-[20px] border border-[#E7DED7] bg-[linear-gradient(180deg,#FFFDFB_0%,#F8F2ED_100%)] px-4 py-3 shadow-sm dark:border-[#3A3431] dark:bg-[linear-gradient(180deg,#1F1B19_0%,#171412_100%)]">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#A8A29E]">Topology Console</p>
-            <h3 className="mt-1 text-sm font-semibold text-foreground">拓扑布局</h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">节点密度、连线表现和过滤器会实时作用到当前画布。</p>
-          </div>
-          <div className="rounded-2xl border border-[#E7DED7] bg-white/90 px-3 py-2 text-right dark:border-[#3A3431] dark:bg-[#120F0E]/90">
-            <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Visible</p>
-            <p className="mt-1 text-lg font-semibold leading-none text-foreground">
-              {visibleNodeCount}
-              <span className="ml-1 text-xs font-medium text-muted-foreground">/ {totalNodeCount}</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 rounded-[14px] border border-[#E7DED7] bg-[#F7F1EC] p-1 dark:border-[#3A3431] dark:bg-[#221F1D]">
-        {TOPOLOGY_SETTINGS_TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            data-testid={`agent-topology-settings-tab-${item.id}`}
-            aria-pressed={activeTab === item.id}
-            onClick={() => onTabChange(item.id)}
-            className={`rounded-[10px] px-2 py-2 text-xs transition-all ${
-              activeTab === item.id
-                ? 'bg-white font-semibold text-foreground shadow-sm dark:bg-[#141110]'
-                : 'text-muted-foreground hover:bg-white/70 hover:text-foreground dark:hover:bg-[#2B2624]'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-2">
-        {activeTab === 'layout' && (
-          <div data-testid="agent-topology-settings-section-layout" className="space-y-3">
-            <section className="space-y-2 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">拓扑布局</h3>
-              <div className="grid grid-cols-4 gap-2">
-                {layoutOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={settings.layoutMode === option.id}
-                    onClick={() => {
-                      onUpdate((previous) => ({ ...previous, layoutMode: option.id }));
-                    }}
-                    className={`rounded-md border px-2 py-1.5 text-[11px] ${
-                      settings.layoutMode === option.id
-                        ? 'border-[#C75B3A] bg-[#C75B3A]/10 text-[#C75B3A]'
-                        : 'border-border-card text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="space-y-2 rounded-xl border border-border-card bg-card p-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-foreground">节点密度</h3>
-                <span className="rounded bg-surface px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {settings.nodeSpacing}
-                </span>
-              </div>
-              <input
-                data-testid="agent-topology-settings-spacing-slider"
-                type="range"
-                min={32}
-                max={96}
-                step={4}
-                value={settings.nodeSpacing}
-                onChange={(event) => {
-                  const nextValue = Number(event.target.value);
-                  onUpdate((previous) => ({
-                    ...previous,
-                    nodeSpacing: Number.isFinite(nextValue) ? nextValue : previous.nodeSpacing,
-                  }));
-                }}
-                className="h-2 w-full cursor-pointer accent-[#C75B3A]"
-              />
-              <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>紧凑</span>
-                <span>宽松</span>
-              </div>
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card px-3 py-2.5">
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">自动排列</h3>
-                <p className="text-[11px] text-muted-foreground">拖拽后按当前布局自动整理</p>
-              </div>
-              <Switch
-                checked={settings.autoLayout}
-                onCheckedChange={(checked) => {
-                  onUpdate((previous) => ({ ...previous, autoLayout: checked }));
-                }}
-              />
-            </section>
-          </div>
-        )}
-
-        {activeTab === 'style' && (
-          <div data-testid="agent-topology-settings-section-style" className="space-y-3">
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">节点大小</h3>
-              <div className="inline-flex rounded-md border border-border-card bg-surface p-0.5">
-                {nodeSizeOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={settings.nodeSize === option.id}
-                    onClick={() => {
-                      onUpdate((previous) => ({ ...previous, nodeSize: option.id }));
-                    }}
-                    className={`rounded px-2.5 py-1 text-[11px] ${
-                      settings.nodeSize === option.id
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">连线样式</h3>
-              <div className="inline-flex rounded-md border border-border-card bg-surface p-0.5">
-                {edgeStyleOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={settings.edgeStyle === option.id}
-                    onClick={() => {
-                      onUpdate((previous) => ({ ...previous, edgeStyle: option.id }));
-                    }}
-                    className={`rounded px-2.5 py-1 text-[11px] ${
-                      settings.edgeStyle === option.id
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card px-3 py-2.5">
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">显示标签</h3>
-                <p className="text-[11px] text-muted-foreground">显示节点状态与连线文字</p>
-              </div>
-              <Switch
-                checked={settings.showLabels}
-                onCheckedChange={(checked) => {
-                  onUpdate((previous) => ({ ...previous, showLabels: checked }));
-                }}
-              />
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">颜色方案</h3>
-              <div className="inline-flex rounded-md border border-border-card bg-surface p-0.5">
-                {colorOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={settings.colorScheme === option.id}
-                    onClick={() => {
-                      onUpdate((previous) => ({ ...previous, colorScheme: option.id }));
-                    }}
-                    className={`rounded px-2.5 py-1 text-[11px] ${
-                      settings.colorScheme === option.id
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-          </div>
-        )}
-
-        {activeTab === 'filter' && (
-          <div data-testid="agent-topology-settings-section-filter" className="space-y-3">
-            <section className="space-y-2 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">节点类型</h3>
-              <div className="flex flex-wrap gap-1.5">
-                {TOPOLOGY_FILTER_ITEMS.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    aria-pressed={settings.filters[item.key]}
-                    onClick={() => {
-                      onUpdate((previous) => ({
-                        ...previous,
-                        filters: {
-                          ...previous.filters,
-                          [item.key]: !previous.filters[item.key],
-                        },
-                      }));
-                    }}
-                    className={`rounded-full border px-2.5 py-1 text-[11px] ${
-                      settings.filters[item.key]
-                        ? 'border-[#C75B3A] bg-[#C75B3A]/10 text-[#C75B3A]'
-                        : 'border-border-card text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card px-3 py-2.5">
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">按层级分组</h3>
-                <p className="text-[11px] text-muted-foreground">按输入/主题/Agent/Actor 分层展示</p>
-              </div>
-              <Switch
-                checked={settings.groupByLayer}
-                onCheckedChange={(checked) => {
-                  onUpdate((previous) => ({ ...previous, groupByLayer: checked }));
-                }}
-              />
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card px-3 py-2.5">
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">隐藏无连接节点</h3>
-                <p className="text-[11px] text-muted-foreground">只显示当前有路由关系的节点</p>
-              </div>
-              <Switch
-                checked={settings.hideDisconnected}
-                onCheckedChange={(checked) => {
-                  onUpdate((previous) => ({ ...previous, hideDisconnected: checked }));
-                }}
-              />
-            </section>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TopologySettingsSheet({
-  activeTab,
-  settings,
-  visibleNodeCount,
-  totalNodeCount,
-  onTabChange,
-  onUpdate,
-  onClose,
-}: {
-  activeTab: TopologySettingsTab;
-  settings: TopologySettingsState;
-  visibleNodeCount: number;
-  totalNodeCount: number;
-  onTabChange: (tab: TopologySettingsTab) => void;
-  onUpdate: (updater: (previous: TopologySettingsState) => TopologySettingsState) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-40 lg:hidden">
-      <button
-        type="button"
-        data-testid="agent-topology-settings-overlay"
-        className="absolute inset-0 bg-black/35"
-        aria-label="关闭拓扑设置（Close Topology Settings）"
-        onClick={onClose}
-      />
-      <section
-        data-testid="agent-topology-settings-panel"
-        className="absolute inset-x-0 bottom-0 z-10 flex h-[min(84vh,620px)] flex-col rounded-t-[24px] border-t border-border-card bg-surface pb-4 shadow-[0_-8px_28px_rgba(0,0,0,0.2)]"
-      >
-        <div className="flex justify-center pt-2">
-          <div className="h-1 w-10 rounded bg-[#D6D3D1] dark:bg-[#57534E]" />
-        </div>
-        <div className="flex items-center justify-between px-5 py-3">
-          <h2 className="text-[18px] font-semibold text-foreground">拓扑设置</h2>
-          <button
-            type="button"
-            data-testid="agent-topology-settings-close"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border-card bg-card text-muted-foreground"
-            aria-label="关闭拓扑设置（Close Topology Settings）"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <TopologySettingsContent
-          activeTab={activeTab}
-          settings={settings}
-          visibleNodeCount={visibleNodeCount}
-          totalNodeCount={totalNodeCount}
-          onTabChange={onTabChange}
-          onUpdate={onUpdate}
-          className="px-5"
-        />
-      </section>
-    </div>
-  );
-}
-
 function TopologyView({
   graph,
-  settings,
   onSelectNode,
   onClearSelection,
 }: {
   graph: SignalGraph;
-  settings: TopologySettingsState;
   onSelectNode: (nodeId: string) => void;
   onClearSelection: () => void;
 }) {
@@ -1160,40 +559,8 @@ function TopologyView({
   const edgeLabelBgColor = isDarkMode ? '#1C1917' : '#FAF7F5';
   const backgroundDotColor = isDarkMode ? '#44403C' : '#E7E5E4';
 
-  const visibleGraph = useMemo(() => {
-    const nodesByFilter = graph.nodes.filter((node) => {
-      const key = topologyFilterKey(node.type);
-      if (!key) return true;
-      return settings.filters[key];
-    });
-    const visibleNodeIds = new Set(nodesByFilter.map((node) => node.id));
-    let edgesByFilter = graph.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
-
-    if (settings.hideDisconnected) {
-      const connectedNodeIds = new Set<string>();
-      for (const edge of edgesByFilter) {
-        connectedNodeIds.add(edge.source);
-        connectedNodeIds.add(edge.target);
-      }
-      const nodesConnected = nodesByFilter.filter((node) => connectedNodeIds.has(node.id));
-      const connectedSet = new Set(nodesConnected.map((node) => node.id));
-      edgesByFilter = edgesByFilter.filter((edge) => connectedSet.has(edge.source) && connectedSet.has(edge.target));
-      return {
-        totalNodes: graph.nodes.length,
-        nodes: applyTopologyLayout(nodesConnected, settings),
-        edges: edgesByFilter,
-      };
-    }
-
-    return {
-      totalNodes: graph.nodes.length,
-      nodes: applyTopologyLayout(nodesByFilter, settings),
-      edges: edgesByFilter,
-    };
-  }, [graph.edges, graph.nodes, settings]);
-
   const nextFlowNodes = useMemo<SignalFlowNodeType[]>(() => {
-    return visibleGraph.nodes.map((node) => ({
+    return graph.nodes.map((node) => ({
       id: node.id,
       type: node.type,
       position: node.position,
@@ -1202,30 +569,20 @@ function TopologyView({
         label: node.label,
         subtitle: node.status,
         nodeType: node.type,
-        nodeSize: settings.nodeSize,
-        showLabels: settings.showLabels,
-        colorScheme: settings.colorScheme,
       },
     }));
-  }, [settings.colorScheme, settings.nodeSize, settings.showLabels, visibleGraph.nodes]);
+  }, [graph.nodes]);
   const [flowNodes, setFlowNodes, onFlowNodesChange] = useNodesState<SignalFlowNodeType>(nextFlowNodes);
 
   useEffect(() => {
     setFlowNodes(nextFlowNodes);
   }, [nextFlowNodes, setFlowNodes]);
 
-  const edgeType = settings.edgeStyle === 'straight'
-    ? 'straight'
-    : settings.edgeStyle === 'step'
-      ? 'step'
-      : 'smoothstep';
-
   const flowEdges = useMemo<FlowEdge[]>(() => {
-    return visibleGraph.edges.map((edge) => ({
+    return graph.edges.map((edge) => ({
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      type: edgeType,
       animated: edge.active,
       markerEnd: {
         type: MarkerType.ArrowClosed,
@@ -1235,7 +592,7 @@ function TopologyView({
       style: edge.active
         ? { stroke: activeEdgeColor, strokeWidth: 1.7 }
         : { stroke: inactiveEdgeColor, strokeWidth: 1.2, strokeDasharray: '5 4' },
-      label: settings.showLabels ? edge.label : '',
+      label: edge.label,
       labelStyle: {
         fill: edgeLabelColor,
         fontSize: 10,
@@ -1249,7 +606,7 @@ function TopologyView({
         active: edge.active,
       },
     }));
-  }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, edgeType, inactiveEdgeColor, settings.showLabels, visibleGraph.edges]);
+  }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, graph.edges, inactiveEdgeColor]);
 
   return (
     <section
@@ -1283,9 +640,6 @@ function TopologyView({
           <Background gap={20} color={backgroundDotColor} />
           <Controls showInteractive className="agent-topology-controls" />
         </ReactFlow>
-      </div>
-      <div className="sr-only" data-testid="agent-topology-visible-count">
-        {visibleGraph.nodes.length}/{visibleGraph.totalNodes}
       </div>
     </section>
   );
@@ -2293,9 +1647,6 @@ function SignalHistoryTabView({
 export function AgentsPage() {
   const initialRuntimeTarget = getSelectedRuntimeTarget();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
-  const [topologySettingsOpen, setTopologySettingsOpen] = useState(false);
-  const [topologySettingsTab, setTopologySettingsTab] = useState<TopologySettingsTab>('layout');
-  const [topologySettings, setTopologySettings] = useState<TopologySettingsState>(DEFAULT_TOPOLOGY_SETTINGS);
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
@@ -2597,53 +1948,6 @@ export function AgentsPage() {
     setIsChatSending(false);
   }, [rightPanel.state]);
 
-  // Topology settings（拓扑设置）: mount 时读取本地缓存
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem(TOPOLOGY_SETTINGS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<TopologySettingsState>;
-      setTopologySettings((previous) => ({
-        ...previous,
-        ...parsed,
-        filters: {
-          ...previous.filters,
-          ...parsed.filters,
-        },
-      }));
-    } catch {
-      // ignore parse errors（忽略拓扑设置缓存损坏）
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(TOPOLOGY_SETTINGS_STORAGE_KEY, JSON.stringify(topologySettings));
-  }, [topologySettings]);
-
-  useEffect(() => {
-    if (viewMode !== 'topology' && topologySettingsOpen) {
-      setTopologySettingsOpen(false);
-    }
-  }, [topologySettingsOpen, viewMode]);
-
-  const updateTopologySettings = (updater: (previous: TopologySettingsState) => TopologySettingsState) => {
-    setTopologySettings((previous) => updater(previous));
-  };
-
-  const handleOpenTopologySettings = () => {
-    if (viewMode !== 'topology') return;
-    setTopologySettingsTab('layout');
-    if (isDesktopViewport()) {
-      setTopologySettingsOpen(false);
-      setRightPanel({ state: 'TOPOLOGY_SETTINGS' });
-      return;
-    }
-    setRightPanel({ state: 'CLOSED' });
-    setTopologySettingsOpen(true);
-  };
-
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
 
@@ -2919,32 +2223,6 @@ export function AgentsPage() {
     [graphAgents, signalRoutes]
   );
 
-  const topologyVisibleCounts = useMemo(() => {
-    const nodesByFilter = signalGraph.nodes.filter((node) => {
-      const key = topologyFilterKey(node.type);
-      if (!key) return true;
-      return topologySettings.filters[key];
-    });
-    if (!topologySettings.hideDisconnected) {
-      return {
-        visible: nodesByFilter.length,
-        total: signalGraph.nodes.length,
-      };
-    }
-
-    const visibleNodeIds = new Set(nodesByFilter.map((node) => node.id));
-    const edges = signalGraph.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
-    const connected = new Set<string>();
-    for (const edge of edges) {
-      connected.add(edge.source);
-      connected.add(edge.target);
-    }
-    return {
-      visible: nodesByFilter.filter((node) => connected.has(node.id)).length,
-      total: signalGraph.nodes.length,
-    };
-  }, [signalGraph.edges, signalGraph.nodes, topologySettings.filters, topologySettings.hideDisconnected]);
-
   const content = useMemo(() => {
     if (viewMode === 'list') {
       return (
@@ -3007,7 +2285,6 @@ export function AgentsPage() {
     return (
       <TopologyView
         graph={signalGraph}
-        settings={topologySettings}
         onSelectNode={(nodeId) => {
           // 判断节点类型
           const node = signalGraph.nodes.find((n) => n.id === nodeId);
@@ -3037,7 +2314,6 @@ export function AgentsPage() {
     runtimeExternalAddressDraft,
     runtimeServiceStatus,
     nodesFilter,
-    topologySettings,
     viewMode,
   ]);
 
@@ -3048,41 +2324,31 @@ export function AgentsPage() {
     >
       {/* Header */}
       <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#A8A29E]">Agent Hub / Signal Network</p>
-              <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">信号网络</h1>
-            </div>
-            <div className="flex items-center gap-2 rounded-[16px] border border-[#E7DED7] bg-[#F7F1EC] p-1.5 dark:border-[#3A3431] dark:bg-[#221F1D]">
-              <button
-                type="button"
-                data-testid="agent-topology-settings-button"
-                onClick={handleOpenTopologySettings}
-                disabled={viewMode !== 'topology'}
-                className="flex h-10 min-w-[112px] items-center justify-center gap-2 rounded-[12px] border border-[#E7DED7] bg-white px-3 text-sm font-medium text-[#44403C] shadow-sm transition-colors hover:bg-[#FCFAF8] disabled:cursor-not-allowed disabled:opacity-40 dark:border-[#3A3431] dark:bg-[#141110] dark:text-[#D6D3D1] dark:hover:bg-[#1C1917]"
-                aria-label="拓扑设置"
-              >
-                <Settings size={16} />
-                <span>拓扑设置</span>
-              </button>
-              <button
-                type="button"
-                data-testid="agent-add-node-button"
-                onClick={() => setSheetOpen(true)}
-                disabled={isAgentCreating}
-                className="flex h-10 items-center gap-2 rounded-[12px] bg-[#C75B3A] px-3.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#B74E30] disabled:opacity-70"
-                aria-label="添加节点"
-              >
-                <Plus size={16} />
-                {isAgentCreating ? '创建中...' : '添加节点'}
-              </button>
-            </div>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <TabBar value={viewMode} onChange={handleTabChange} />
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">信号网络</h1>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+              aria-label="设置"
+            >
+              <Settings size={18} />
+            </button>
+            <button
+              type="button"
+              data-testid="agent-add-node-button"
+              onClick={() => setSheetOpen(true)}
+              disabled={isAgentCreating}
+              className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
+              aria-label="添加节点"
+            >
+              <Plus size={16} />
+              {isAgentCreating ? '创建中...' : '添加'}
+            </button>
           </div>
         </div>
+        {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
+        <TabBar value={viewMode} onChange={handleTabChange} />
       </header>
 
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
@@ -3119,7 +2385,6 @@ export function AgentsPage() {
                 {rightPanel.state === 'ACTOR_DETAIL' && (agentDetail?.title ?? 'Actor 详情')}
                 {rightPanel.state === 'SIGNAL_DETAIL' && '信号详情'}
                 {rightPanel.state === 'AGENT_CHAT' && 'Agent 对话'}
-                {rightPanel.state === 'TOPOLOGY_SETTINGS' && '拓扑设置'}
               </span>
               <button
                 type="button"
@@ -3132,18 +2397,6 @@ export function AgentsPage() {
             </div>
             {/* 右侧栏内容 */}
             <div className="flex-1 overflow-auto">
-              {rightPanel.state === 'TOPOLOGY_SETTINGS' && (
-                <div data-testid="agent-rightpanel-topology-settings" className="flex h-full flex-col gap-4 bg-surface px-5 py-4">
-                  <TopologySettingsContent
-                    activeTab={topologySettingsTab}
-                    settings={topologySettings}
-                    visibleNodeCount={topologyVisibleCounts.visible}
-                    totalNodeCount={topologyVisibleCounts.total}
-                    onTabChange={setTopologySettingsTab}
-                    onUpdate={updateTopologySettings}
-                  />
-                </div>
-              )}
               {rightPanel.state === 'ROUTE_EDIT' && (
                 <RouteEditPanel
                   route={
@@ -3465,18 +2718,6 @@ export function AgentsPage() {
           </aside>
         )}
       </div>
-
-      {topologySettingsOpen && (
-        <TopologySettingsSheet
-          activeTab={topologySettingsTab}
-          settings={topologySettings}
-          visibleNodeCount={topologyVisibleCounts.visible}
-          totalNodeCount={topologyVisibleCounts.total}
-          onTabChange={setTopologySettingsTab}
-          onUpdate={updateTopologySettings}
-          onClose={() => setTopologySettingsOpen(false)}
-        />
-      )}
 
       {/* Sheets（移动端） */}
       {sheetOpen && (

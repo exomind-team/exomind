@@ -14,7 +14,6 @@ export const AGENT_HUB_RIGHT_PANEL_STATES = [
   'AGENT_DETAIL',
   'ACTOR_DETAIL',
   'AGENT_CHAT',
-  'TOPOLOGY_SETTINGS',
 ] as const;
 export type AgentHubRightPanelState = (typeof AGENT_HUB_RIGHT_PANEL_STATES)[number];
 

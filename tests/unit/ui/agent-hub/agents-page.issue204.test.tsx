@@ -235,60 +235,6 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     expect(screen.queryByTestId('agent-host-manager-sheet')).not.toBeInTheDocument();
   });
 
-  it('opens topology settings in desktop right panel and supports tab switch（桌面端拓扑设置走右侧栏并支持切换）', async () => {
-    render(<AgentsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
-    });
-
-    expect(screen.queryByTestId('agent-rightpanel-topology-settings')).not.toBeInTheDocument();
-
-    fireEvent.click(screen.getByTestId('agent-topology-settings-button'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-rightpanel-topology-settings')).toBeInTheDocument();
-      expect(screen.getByTestId('agent-topology-settings-tab-layout')).toBeInTheDocument();
-      expect(screen.getByTestId('agent-topology-settings-tab-style')).toBeInTheDocument();
-      expect(screen.getByTestId('agent-topology-settings-tab-filter')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-topology-settings-tab-style'));
-    expect(screen.getByTestId('agent-topology-settings-section-style')).toBeInTheDocument();
-
-    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
-    expect(screen.queryByTestId('agent-rightpanel-topology-settings')).not.toBeInTheDocument();
-  });
-
-  it('uses grouped toolbar actions and structured topology settings panel（工具栏按钮与拓扑设置面板应有清晰分组）', async () => {
-    render(<AgentsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
-    });
-
-    const settingsButton = screen.getByTestId('agent-topology-settings-button');
-    const addNodeButton = screen.getByTestId('agent-add-node-button');
-
-    expect(settingsButton.className).toContain('border');
-    expect(settingsButton.className).toContain('min-w-[112px]');
-    expect(settingsButton.textContent).toContain('拓扑设置');
-    expect(addNodeButton.className).toContain('rounded-[12px]');
-    expect(addNodeButton.className).toContain('shadow-sm');
-
-    fireEvent.click(settingsButton);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-rightpanel-topology-settings')).toBeInTheDocument();
-    });
-
-    const topologyPanel = screen.getByTestId('agent-rightpanel-topology-settings');
-    expect(topologyPanel.className).toContain('gap-4');
-    expect(topologyPanel.className).toContain('px-5');
-    expect(topologyPanel.textContent).toContain('拓扑布局');
-    expect(topologyPanel.textContent).toContain('节点密度');
-  });
-
   it('keeps dark-mode classes on key surfaces（关键区域包含暗色样式类）', async () => {
     render(<AgentsPage />);
 
