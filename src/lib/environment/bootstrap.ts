@@ -4,7 +4,7 @@ import { MeMockAdapter } from '@/lib/adapters/mock/me-mock-adapter';
 import { AgentWebAdapter } from '@/lib/adapters/agent-web-adapter';
 import { AgentMockAdapter } from '@/lib/adapters/mock/agent-mock-adapter';
 import { TaskMockAdapter } from '@/lib/adapters/mock/task-mock-adapter';
-import { TaskWebAdapter } from '@/lib/adapters/task-web-adapter';
+import { TaskPouchAdapter } from '@/lib/adapters/task-pouch-adapter';
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
 import { TauriClipboardAdapter } from '../adapters/clipboard-tauri-adapter';
 import { WebClipboardAdapter } from '../adapters/clipboard-web-adapter';
@@ -66,7 +66,7 @@ export function createRuntimeBootstrap(options: RuntimeBootstrapOptions = {}): R
   const asr = new VolcanoEngineASRAdapter();
   const clipboard: IClipboardPort = runtime === 'tauri' ? new TauriClipboardAdapter() : new WebClipboardAdapter();
   const useMockData = options.useMockData ?? getUseMockDataEnabled();
-  const task: ITaskPort = useMockData ? new TaskMockAdapter() : new TaskWebAdapter();
+  const task: ITaskPort = useMockData ? new TaskMockAdapter() : new TaskPouchAdapter();
   const me: IMePort = useMockData ? new MeMockAdapter() : new MeWebAdapter();
   const agent: IAgentPort = useMockData ? new AgentMockAdapter() : new AgentWebAdapter();
 

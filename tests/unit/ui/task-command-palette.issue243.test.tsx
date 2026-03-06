@@ -4,7 +4,6 @@ import { TasksPage } from '@/ui/app/pages/TasksPage';
 
 const openPaletteMock = vi.fn();
 const listTasksMock = vi.fn();
-const longTermGoalsMock = vi.fn();
 
 const runtimeFlags = vi.hoisted(() => ({
   developerModeEnabled: true,
@@ -14,13 +13,19 @@ const runtimeFlags = vi.hoisted(() => ({
 vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     listTasks: listTasksMock,
-    getLongTermGoals: longTermGoalsMock,
     createTask: vi.fn(),
     getTask: vi.fn(),
-    setTimerMode: vi.fn(),
-    pauseTask: vi.fn(),
-    resumeTask: vi.fn(),
-    upsertTask: vi.fn(),
+    updateTask: vi.fn(),
+    abandonTask: vi.fn(),
+    transitionTask: vi.fn(),
+    getAvailableTransitions: vi.fn(async () => []),
+    getChildTasks: vi.fn(async () => []),
+    addDependency: vi.fn(),
+    removeDependency: vi.fn(),
+    checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
+    startSync: vi.fn(async () => {}),
+    stopSync: vi.fn(async () => {}),
+    onTaskChange: vi.fn(() => () => {}),
   }),
 }));
 
@@ -51,7 +56,6 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
   beforeEach(() => {
     openPaletteMock.mockReset();
     listTasksMock.mockResolvedValue([]);
-    longTermGoalsMock.mockResolvedValue([]);
     runtimeFlags.developerModeEnabled = true;
     runtimeFlags.commandPaletteEnabled = true;
   });
@@ -60,7 +64,6 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
     render(<TasksPage />);
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
-      expect(longTermGoalsMock).toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getByRole('button', { name: '更多菜单' }));
@@ -76,7 +79,6 @@ describe('new tasks page command palette entry issue-243（任务页命令面板
     render(<TasksPage />);
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
-      expect(longTermGoalsMock).toHaveBeenCalled();
     });
 
     fireEvent.click(screen.getByRole('button', { name: '更多菜单' }));

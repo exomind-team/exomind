@@ -1,140 +1,53 @@
-import { Github, Plus, SlidersHorizontal } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { Plus, SlidersHorizontal } from 'lucide-react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { getTaskService } from '@/lib/services';
-import type { TaskGoalCard, TaskGoalGroup, TaskGoalStatusTone, TaskItem } from '@/lib/types/task';
+import type { TaskNode } from '@/lib/types/task';
 import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
+import { filterMonth, filterNow, filterToday, filterWeek } from './task-tab-filters';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
-type TaskTab = 'now' | 'today' | 'week' | 'month' | 'goals';
+type TaskTab = 'now' | 'today' | 'week' | 'month';
 
 const TAB_ITEMS: Array<{ id: TaskTab; label: string }> = [
   { id: 'now', label: '当下' },
   { id: 'today', label: '今日' },
   { id: 'week', label: '一周' },
   { id: 'month', label: '月' },
-  { id: 'goals', label: '长期' },
 ];
 
-const TONE_TEXT_CLASS: Record<TaskGoalStatusTone, string> = {
-  success: 'text-[#16A34A] dark:text-[#86EFAC]',
-  warning: 'text-[#C75B3A] dark:text-[#FDBA74]',
-  danger: 'text-[#DC2626] dark:text-[#FCA5A5]',
-  brand: 'text-[#C75B3A] dark:text-[#FDBA74]',
-  info: 'text-[#3B82F6] dark:text-[#93C5FD]',
-  indigo: 'text-[#6366F1] dark:text-[#A5B4FC]',
-  lime: 'text-[#84CC16] dark:text-[#BEF264]',
-  pink: 'text-[#EC4899] dark:text-[#F9A8D4]',
-  neutral: 'text-[#A8A29E] dark:text-[#D6D3D1]',
+const STATUS_DOT: Record<string, string> = {
+  not_started: 'bg-[#A8A29E]',
+  in_progress: 'bg-[#16A34A]',
+  suspended: 'bg-[#EAB308]',
+  completed: 'bg-[#3B82F6]',
+  abandoned: 'bg-[#EF4444]',
 };
 
-const TONE_BG_CLASS: Record<TaskGoalStatusTone, string> = {
-  success: 'bg-[#F0FDF4] dark:bg-[#1E2B22]',
-  warning: 'bg-[#FFF7ED] dark:bg-[#3A2A22]',
-  danger: 'bg-[#FEF2F2] dark:bg-[#3A2323]',
-  brand: 'bg-[#FFF7ED] dark:bg-[#3A2A22]',
-  info: 'bg-[#EFF6FF] dark:bg-[#1D2837]',
-  indigo: 'bg-[#EEF2FF] dark:bg-[#2A2E45]',
-  lime: 'bg-[#F7FEE7] dark:bg-[#2A321D]',
-  pink: 'bg-[#FDF2F8] dark:bg-[#3A2431]',
-  neutral: 'bg-[#F5F0ED] dark:bg-[#2A2523]',
+const STATUS_LABEL: Record<string, string> = {
+  not_started: '未开始',
+  in_progress: '进行中',
+  suspended: '已挂起',
+  completed: '已完成',
+  abandoned: '已放弃',
 };
 
-const TONE_FILL_CLASS: Record<TaskGoalStatusTone, string> = {
-  success: 'bg-[#16A34A]',
-  warning: 'bg-[#C75B3A]',
-  danger: 'bg-[#DC2626]',
-  brand: 'bg-[#C75B3A]',
-  info: 'bg-[#3B82F6]',
-  indigo: 'bg-[#6366F1]',
-  lime: 'bg-[#84CC16]',
-  pink: 'bg-[#EC4899]',
-  neutral: 'bg-[#A8A29E]',
+const TAB_EMPTY_TEXT: Record<TaskTab, string> = {
+  now: '当前没有进行中的任务，开始一个吧。',
+  today: '今天没有待处理的任务。',
+  week: '本周没有截止的任务。',
+  month: '本月没有截止的任务。',
 };
 
-function formatTaskMeta(task: TaskItem): string {
-  const estimated = task.estimatedMinutes ? `预计 ${task.estimatedMinutes}min` : '未估时';
-  const spent = task.spentMinutes ? `已用 ${task.spentMinutes}min` : '未计时';
-  return `${estimated} · ${spent}`;
-}
-
-function GoalCard({ goal }: { goal: TaskGoalCard }) {
-  return (
-    <article
-      data-testid={`tasks-goal-card-${goal.id}`}
-      className="overflow-hidden rounded-xl border border-[#E7E5E4] bg-white dark:border-[#3A3432] dark:bg-[#1C1917]"
-    >
-      <div className="flex">
-        <div className={`w-1 shrink-0 self-stretch ${TONE_FILL_CLASS[goal.accentTone]}`} />
-        <div className="w-full space-y-1 px-3 py-2.5">
-          <div className="flex items-center justify-between gap-2">
-            <div className="flex items-center gap-1.5">
-              <p className="text-[13px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{goal.title}</p>
-              {goal.showGithubIcon ? <Github size={14} className="text-[#78716C] dark:text-[#A8A29E]" /> : null}
-            </div>
-            <div className={`inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 ${TONE_BG_CLASS[goal.status.tone]}`}>
-              <span className="text-[9px] leading-none">{goal.status.icon}</span>
-              <span className={`text-[10px] font-semibold leading-none ${TONE_TEXT_CLASS[goal.status.tone]}`}>{goal.status.text}</span>
-            </div>
-          </div>
-
-          <p className="text-[11px] text-[#78716C] dark:text-[#CFC5BE]">{goal.focus}</p>
-          <p className="text-[10px] text-[#A8A29E] dark:text-[#B8B1AC]">{goal.acceptance}</p>
-
-          <div className="inline-flex items-center gap-1">
-            <span className={`h-1.5 w-1.5 rounded-full ${TONE_FILL_CLASS[goal.stageTone]}`} />
-            <span className={`text-[10px] font-semibold ${TONE_TEXT_CLASS[goal.stageTone]}`}>{goal.stage}</span>
-          </div>
-
-          {goal.progress ? (
-            <div className="flex items-center gap-2">
-              <div className="h-1 w-full rounded bg-[#F5F0ED] dark:bg-[#2A2523]">
-                <div
-                  className={`h-full rounded ${TONE_FILL_CLASS[goal.progress.tone]}`}
-                  style={{
-                    width: `${Math.max(0, Math.min(100, goal.progress.value))}%`,
-                  }}
-                />
-              </div>
-              <span className={`shrink-0 text-[11px] font-semibold ${TONE_TEXT_CLASS[goal.progress.tone]}`}>
-                {goal.progress.label ?? `${goal.progress.value}%`}
-              </span>
-            </div>
-          ) : null}
-
-          {goal.timeline ? <p className="text-[11px] text-[#A8A29E] dark:text-[#B8B1AC]">{goal.timeline}</p> : null}
-        </div>
-      </div>
-    </article>
-  );
-}
-
-function GoalGroupSection({ group }: { group: TaskGoalGroup }) {
-  return (
-    <section data-testid={`tasks-goals-group-${group.id}`} className="space-y-2 text-[#1C1917] dark:text-[#FAFAF9]">
-      <div className="flex items-center gap-2">
-        <span className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">▼</span>
-        <span className="text-sm">{group.icon}</span>
-        <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{group.title}</p>
-        <div className="h-px flex-1 bg-[#E7E5E4] dark:bg-[#3A3432]" />
-        <span className={`inline-flex items-center justify-center rounded-[10px] px-2 py-0.5 text-[11px] font-semibold ${TONE_BG_CLASS[group.badgeTone]} ${TONE_TEXT_CLASS[group.badgeTone]}`}>
-          {group.badgeText}
-        </span>
-      </div>
-
-      <div className="space-y-2">
-        {group.goals.map((goal) => (
-          <GoalCard key={goal.id} goal={goal} />
-        ))}
-      </div>
-    </section>
-  );
+function formatTaskMeta(task: TaskNode): string {
+  return task.estimatedMinutes ? `预计 ${task.estimatedMinutes}min` : '未估时';
 }
 
 function resolveInitialTaskTab(): TaskTab {
   const preferredTab = consumeTasksDefaultTab();
-  if (preferredTab) {
-    return preferredTab;
+  if (preferredTab && TAB_ITEMS.some((tab) => tab.id === preferredTab)) {
+    return preferredTab as TaskTab;
   }
 
   if (typeof window === 'undefined') {
@@ -152,46 +65,50 @@ function resolveInitialTaskTab(): TaskTab {
 export function TasksPage() {
   const isDesktop = useIsDesktop();
   const [activeTab, setActiveTab] = useState<TaskTab>(() => resolveInitialTaskTab());
-  const [tasks, setTasks] = useState<TaskItem[]>([]);
-  const [goalGroups, setGoalGroups] = useState<TaskGoalGroup[]>([]);
+  const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [quickInput, setQuickInput] = useState('');
+  const quickInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let disposed = false;
+    const svc = getTaskService();
     const load = async () => {
-      const [list, goals] = await Promise.all([
-        getTaskService().listTasks(),
-        getTaskService().getLongTermGoals(),
-      ]);
+      const list = await svc.listTasks();
       if (!disposed) {
         setTasks(list);
-        setGoalGroups(goals);
       }
     };
     void load();
+
+    // Refresh list when remote sync delivers changes
+    const unsubscribe = svc.onTaskChange(() => {
+      void load();
+    });
+
     return () => {
       disposed = true;
+      unsubscribe();
     };
   }, []);
 
   const visibleTasks = useMemo(() => {
-    if (activeTab === 'now') {
-      const active = tasks.filter((item) => item.status === 'in_progress');
-      return active.length > 0 ? active : tasks.slice(0, 3);
-    }
-    if (activeTab === 'today') {
-      return tasks.slice(0, 5);
-    }
+    const now = new Date();
+    if (activeTab === 'now') return filterNow(tasks);
+    if (activeTab === 'today') return filterToday(tasks, now);
+    if (activeTab === 'week') return filterWeek(tasks, now);
+    if (activeTab === 'month') return filterMonth(tasks, now);
     return tasks;
   }, [activeTab, tasks]);
 
   const handleQuickAdd = async () => {
     const title = quickInput.trim();
-    if (!title) return;
+    if (!title) {
+      quickInputRef.current?.focus();
+      return;
+    }
     const created = await getTaskService().createTask({
       title,
-      mode: 'countdown',
-      targetMinutes: 25,
+      estimatedMinutes: 25,
     });
     setTasks((prev) => [created, ...prev]);
     setQuickInput('');
@@ -228,37 +145,42 @@ export function TasksPage() {
           })}
         </div>
 
-        {activeTab === 'goals' ? (
-          <div className="space-y-3" data-testid="tasks-goals-content">
-            {goalGroups.length > 0 ? (
-              goalGroups.map((group) => <GoalGroupSection key={group.id} group={group} />)
-            ) : (
-              <p
-                data-testid="tasks-goals-empty"
-                className="rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-4 py-5 text-sm text-[#A8A29E] dark:border-[#3A3432] dark:bg-[#1C1917] dark:text-[#B8B1AC]"
-              >
-                暂无长期目标数据，请在开发者设置中开启测试数据（Mock Data）。
-              </p>
-            )}
-          </div>
-        ) : (
-          <div className="space-y-3">
-            {visibleTasks.map((task) => (
-              <article
-                key={task.id}
-                className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]"
-              >
-                <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
-                <p className="mt-1 text-xs text-[#A8A29E]">{formatTaskMeta(task)}</p>
-              </article>
-            ))}
-          </div>
-        )}
+        <div className="space-y-3">
+          {visibleTasks.length > 0 ? (
+            visibleTasks.map((task) => (
+              <Link key={task.id} to="/tasks/$taskId" params={{ taskId: task.id }} className="block">
+                <article className="flex overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
+                  <div className={`w-[3px] shrink-0 self-stretch ${STATUS_DOT[task.status] ?? 'bg-[#A8A29E]'}`} />
+                  <div className="flex-1 px-4 py-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+                      <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#F5F0ED] px-2 py-0.5 dark:bg-[#292524]">
+                        <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[task.status] ?? 'bg-[#A8A29E]'}`} />
+                        <span className="text-[10px] font-medium text-[#78716C] dark:text-[#A8A29E]">
+                          {STATUS_LABEL[task.status] ?? task.status}
+                        </span>
+                      </span>
+                    </div>
+                    <p className="mt-1 text-xs text-[#A8A29E]">{formatTaskMeta(task)}</p>
+                  </div>
+                </article>
+              </Link>
+            ))
+          ) : (
+            <p
+              data-testid="tasks-tab-empty"
+              className="rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-4 py-5 text-center text-sm text-[#A8A29E] dark:border-[#3A3432] dark:bg-[#1C1917] dark:text-[#B8B1AC]"
+            >
+              {TAB_EMPTY_TEXT[activeTab]}
+            </p>
+          )}
+        </div>
       </div>
 
       <div className={`sticky px-4 pb-2 md:px-8 lg:px-10 ${isDesktop ? 'bottom-4' : 'bottom-[calc(env(safe-area-inset-bottom,0px)+62px)]'}`}>
         <div className="flex items-center gap-2 rounded-[24px] border border-[#E7E5E4] bg-white px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
           <input
+            ref={quickInputRef}
             value={quickInput}
             onChange={(event) => setQuickInput(event.target.value)}
             onKeyDown={(event) => {

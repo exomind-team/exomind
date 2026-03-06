@@ -101,13 +101,13 @@ export function createCoreNavigationCommands(
     {
       id: 'navigate:goals-legacy',
       title: '打开目标（长期任务）',
-      description: '跳转到任务页中的长期目标视图',
+      description: '已移至任务页，跳转到当下视图',
       category: 'navigation',
       permissionTier: 'safe',
       aliases: ['目标', 'goals', '长期'],
       keywords: ['长期任务', 'strategy'],
       async execute() {
-        setTasksDefaultTab('goals');
+        setTasksDefaultTab('now');
         await options.navigate('/tasks');
         return { ok: true };
       },

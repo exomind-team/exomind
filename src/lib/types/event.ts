@@ -116,6 +116,7 @@ export interface ActiveBlockData {
   pauseAccumulatedMs?: number;
   paused: boolean;
   pausedAt?: Timestamp;
+  taskId?: string;  // Phase4: 关联任务 ID
 }
 
 // 计时器配置

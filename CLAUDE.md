@@ -871,5 +871,91 @@ rm pr-body.md
 
 ---
 
-*文档版本: v4.0*
-*更新: 2026-02-03*
+## 多 Agent 团队调度经验（Team Scheduling）⭐
+
+### 团队结构模式
+
+使用 `TeamCreate` 创建持久团队，配合专职 teammate 分工：
+
+```
+team-lead（Claude Code 主会话）
+├── dev-server   — 管理开发服务器生命周期（Vite + PouchDB）
+├── coder        — 监督 Codex 编码任务（启动/监控/验证/汇报）
+└── （按需扩展）
+```
+
+**核心原则**：team-lead 只做任务分配与结果汇总，不自己执行耗时任务。
+
+---
+
+### dev-server teammate
+
+**职责**：后台启动并保活开发服务器，响应重启/状态查询指令。
+
+**Termux 注意事项**：
+- `/tmp` 无写权限，日志必须写到 `$TMPDIR`（如 `$TMPDIR/exomind-vite-5173.log`）
+- 后台进程用 `run_in_background: true` 启动，避免阻塞会话
+
+**启动命令**：
+```bash
+# Vite 开发服务器
+npx vite --host 0.0.0.0 --port 5173 > $TMPDIR/exomind-vite-5173.log 2>&1
+
+# PouchDB Sync 服务器
+EXOMIND_POUCHDB_HOST=0.0.0.0 EXOMIND_POUCHDB_PORT=6984 node server/pouchdb-server.js > $TMPDIR/exomind-pouchdb-6984.log 2>&1
+```
+
+**验证可用性**：
+```bash
+curl -sS -D - -o /dev/null http://127.0.0.1:5173 | head -n 3
+curl -sS -D - -o /dev/null http://127.0.0.1:6984 | head -n 3
+```
+
+---
+
+### coder teammate（Codex 监督员）
+
+**职责**：接收编码任务 → 启动 Codex → 监控进度 → 验证结果 → 汇报 team-lead。
+
+**标准工作流**：
+1. 用 `mcp__ai-cli-mcp__run` 启动 Codex（model: `sonnet`）
+2. 用 `mcp__ai-cli-mcp__wait` 阻塞等待（timeout 300s）
+3. 超时则用 `get_result block=false` 检查是否仍在运行
+4. 完成后执行验证：`npx tsc --noEmit` + `npx vitest run`
+5. 向 team-lead 汇报：输出摘要 + 编译结果 + 测试通过数
+
+**Termux 并发上限**：同时运行 Codex 不超过 3 个，超出会因内存不足全部崩溃。
+
+---
+
+### Codex 任务 Prompt 写作规范
+
+| 要素 | 说明 |
+|------|------|
+| **工作目录** | 明确 `workFolder` 绝对路径 |
+| **当前分支** | 告知分支名，避免在错误分支提交 |
+| **背景上下文** | 已完成的接口/类型定义，避免 Codex 猜测 |
+| **文件级指令** | 明确「完全替换」vs「末尾追加」vs「局部修改」 |
+| **路径别名** | 注明 `@/lib/...` 映射到 `src/lib/...` |
+| **验证步骤** | 要求 Codex 自己运行 tsc + vitest，不通过不提交 |
+| **忽略范围** | 明确哪些文件的错误可以忽略（如旧 UI 文件） |
+| **完成报告** | 要求输出：编译结果、测试数、具体报错 |
+
+**反模式（避免）**：
+- ❌ 一次让 Codex 改超过 6 个文件（容易超时、丢失上下文）
+- ❌ 不给验证步骤（Codex 可能提交有编译错误的代码）
+- ❌ 20 个并行 Codex（Termux 内存不足，全部崩溃）
+
+---
+
+### 团队通信规范
+
+- teammate 用 `SendMessage type=message` 向 team-lead 汇报，**不能只在文本中说话**
+- idle 通知（`{"type":"idle_notification",...}`）是正常现象，无需响应
+- team-lead 用 `SendMessage type=shutdown_request` 关闭 teammate
+- 调试产物（`/tmp/*.log`）不提交 git
+
+---
+
+*文档版本: v4.1*
+*更新: 2026-03-05*

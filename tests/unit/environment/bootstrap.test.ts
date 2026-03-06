@@ -14,7 +14,7 @@ describe('environment bootstrap', () => {
     expect(result.clipboard.constructor.name).toBe('WebClipboardAdapter');
     expect(result.storage.constructor.name).toBe('WebStorageAdapter');
     expect(result.eventlog.constructor.name).toBe('WebEventLogStorageAdapter');
-    expect(result.task.constructor.name).toBe('TaskWebAdapter');
+    expect(result.task.constructor.name).toBe('TaskPouchAdapter');
     expect(result.me.constructor.name).toBe('MeWebAdapter');
     expect(result.agent.constructor.name).toBe('AgentWebAdapter');
   });
@@ -30,7 +30,7 @@ describe('environment bootstrap', () => {
     expect(tauriResult.storage.constructor.name).not.toBe(webResult.storage.constructor.name);
     expect(tauriResult.eventlog.constructor.name).toBe('WebEventLogStorageAdapter');
     expect(tauriResult.eventlog.constructor.name).toBe(webResult.eventlog.constructor.name);
-    expect(tauriResult.task.constructor.name).toBe('TaskWebAdapter');
+    expect(tauriResult.task.constructor.name).toBe('TaskPouchAdapter');
     expect(tauriResult.me.constructor.name).toBe('MeWebAdapter');
     expect(tauriResult.agent.constructor.name).toBe('AgentWebAdapter');
   });
