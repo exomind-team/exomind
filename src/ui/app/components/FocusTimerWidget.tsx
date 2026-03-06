@@ -123,6 +123,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
 
   // Task status selector in feedback dialog
   const activeBlockDataRef = useRef<ActiveBlockData | null>(null);
+  const taskStatusChoiceBlockRef = useRef<string | null>(null);
   const [linkedTask, setLinkedTask] = useState<TaskNode | null>(null);
   const [taskStatusChoice, setTaskStatusChoice] = useState<TaskStatusChoice>('continue');
 
@@ -213,6 +214,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
     activeBlockDataRef.current = block;
     if (!block) {
+      taskStatusChoiceBlockRef.current = null;
       setUiState('idle');
       setRunningSubState('running');
       setTaskName('');
@@ -239,7 +241,10 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     } else {
       setLinkedTask(null);
     }
-    setTaskStatusChoice('continue');
+    if (taskStatusChoiceBlockRef.current !== block.startId) {
+      taskStatusChoiceBlockRef.current = block.startId;
+      setTaskStatusChoice('continue');
+    }
 
     setTaskName(block.name);
     setTaskNameDraft(block.name);
@@ -553,6 +558,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setTaskName('');
     setTaskNameDraft('');
     setLinkedTask(null);
+    taskStatusChoiceBlockRef.current = null;
     setTaskStatusChoice('continue');
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;

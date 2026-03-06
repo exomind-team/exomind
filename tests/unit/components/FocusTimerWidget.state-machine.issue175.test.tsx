@@ -454,6 +454,75 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     });
   });
 
+  it('preserves selected task status when markEnding callback arrives late（issue-374 异步回调不应覆盖已选状态）', async () => {
+    const now = Date.now();
+    const runningBlock = {
+      startId: 'block-task-async',
+      name: '关联任务异步回调',
+      startTime: now - 10_000,
+      elapsed: 10_000,
+      mode: 'countup' as const,
+      paused: false,
+      phase: 'running' as const,
+      taskId: 'task-async',
+    };
+
+    loadActiveBlockMock.mockResolvedValueOnce(runningBlock);
+    getTaskMock.mockResolvedValue({
+      id: 'task-async',
+      title: '关联任务',
+      status: 'in_progress',
+      priority: 'medium',
+      dependsOn: [],
+      tags: [],
+      createdAt: now - 20_000,
+      updatedAt: now - 5_000,
+    });
+
+    let resolveMarkEnding: (() => void) | null = null;
+    markEndingMock.mockImplementation(() => new Promise<void>((resolve) => {
+      resolveMarkEnding = () => {
+        onBlockChangeHandler?.({
+          ...runningBlock,
+          phase: 'feedback_in_progress',
+          actionEndedAt: now,
+          feedbackStartedAt: now,
+        });
+        resolve();
+      };
+    }));
+
+    render(<FocusTimerWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+      expect(getTaskMock).toHaveBeenCalledWith('task-async');
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    await screen.findByTestId('new-focus-feedback-textarea');
+    await waitFor(() => {
+      expect(screen.getByTestId('feedback-task-status-section')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('feedback-task-status-completed'));
+
+    await act(async () => {
+      resolveMarkEnding?.();
+      await Promise.resolve();
+    });
+
+    fireEvent.change(screen.getByTestId('new-focus-feedback-textarea'), {
+      target: { value: '异步回调后仍完成任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-feedback-confirm'));
+
+    await waitFor(() => {
+      expect(onBlockEndForTaskMock).toHaveBeenCalledWith('task-async', 'block-task-async');
+      expect(transitionTaskMock).toHaveBeenCalledWith('task-async', 'completed');
+    });
+  });
+
   it('allows closing feedback dialog on Escape and reopening via end button（反馈弹窗可关闭且可再次拉起）', async () => {
     render(<FocusTimerWidget />);
 
