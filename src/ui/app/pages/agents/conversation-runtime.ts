@@ -67,6 +67,35 @@ export function appendConversationDelta(
   return next;
 }
 
+export function appendAdjacentConversationDelta(
+  messages: AgentConversationMessage[],
+  newMessageId: string,
+  delta: string,
+  options: CreateConversationMessageOptions = {},
+): AgentConversationMessage[] {
+  const current = messages[messages.length - 1];
+  if (
+    current
+    && current.role === 'agent'
+    && current.source === options.source
+    && current.runtimeEventType === options.runtimeEventType
+    && current.title === options.title
+  ) {
+    const next = [...messages];
+    next[next.length - 1] = {
+      ...current,
+      ...options,
+      content: `${current.content}${delta}`,
+    };
+    return next;
+  }
+
+  return [
+    ...messages,
+    createConversationMessage(newMessageId, 'agent', delta, options),
+  ];
+}
+
 export function appendConversationMessage(
   messages: AgentConversationMessage[],
   message: AgentConversationMessage,

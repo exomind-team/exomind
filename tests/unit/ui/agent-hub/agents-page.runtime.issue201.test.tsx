@@ -143,25 +143,27 @@ vi.mock('@/services/runtime-client', async (importOriginal) => {
 
 describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () => {
   beforeEach(() => {
+    let runtimeAgentsState = [
+      {
+        id: 'echo',
+        name: 'Echo Agent',
+        description: '回显输入内容',
+        status: 'available',
+        sourceHostId: 'host-a',
+        sourceHostName: '127.0.0.1:1919',
+        sourceHostAddress: '127.0.0.1:1919',
+      },
+    ];
+
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: false,
       host: '127.0.0.1',
       port: 1919,
     });
 
-    runtimeManagerMocks.refreshSnapshot.mockResolvedValue({
+    runtimeManagerMocks.refreshSnapshot.mockImplementation(async () => ({
       updatedAt: '2026-02-28T10:00:00.000Z',
-      agents: [
-        {
-          id: 'echo',
-          name: 'Echo Agent',
-          description: '回显输入内容',
-          status: 'available',
-          sourceHostId: 'host-a',
-          sourceHostName: '127.0.0.1:1919',
-          sourceHostAddress: '127.0.0.1:1919',
-        },
-      ],
+      agents: runtimeAgentsState,
       hosts: [
         {
           host: {
@@ -174,17 +176,7 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
             updatedAt: '2026-02-28T00:00:00.000Z',
           },
           connectionState: 'online',
-          agents: [
-            {
-              id: 'echo',
-              name: 'Echo Agent',
-              description: '回显输入内容',
-              status: 'available',
-              sourceHostId: 'host-a',
-              sourceHostName: '127.0.0.1:1919',
-              sourceHostAddress: '127.0.0.1:1919',
-            },
-          ],
+          agents: runtimeAgentsState,
           topology: null,
         },
         {
@@ -203,7 +195,7 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
           error: 'ECONNREFUSED',
         },
       ],
-    });
+    }));
 
     runtimeClientMocks.getAgents.mockResolvedValue({
       ok: true,
@@ -216,14 +208,30 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
         },
       ],
     });
-    runtimeClientMocks.createAgent.mockResolvedValue({
-      ok: true,
-      data: {
-        id: 'runtime-created-agent',
-        name: 'Runtime Created Agent',
-        description: 'created in test',
+    runtimeClientMocks.createAgent.mockImplementation(async (_host, request) => {
+      const createdAgent = {
+        id: `${request.kind}-created-agent`,
+        name: request.kind === 'claude'
+          ? 'Claude CLI Agent'
+          : request.kind === 'codex'
+            ? 'Codex Agent'
+            : 'Echo Agent Created',
+        description: `${request.kind} runtime agent`,
         status: 'available',
-      },
+      };
+      runtimeAgentsState = [
+        ...runtimeAgentsState,
+        {
+          ...createdAgent,
+          sourceHostId: 'host-a',
+          sourceHostName: '127.0.0.1:1919',
+          sourceHostAddress: '127.0.0.1:1919',
+        },
+      ];
+      return {
+        ok: true,
+        data: createdAgent,
+      };
     });
     runtimeClientMocks.deleteAgent.mockResolvedValue({
       ok: true,
@@ -271,10 +279,10 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
   });
 
   it.each([
-    ['claude', 'Claude CLI'],
-    ['codex', 'Codex'],
-    ['echo', 'Echo'],
-  ] as const)('creates runtime agent with %s kind（按 provider 类型创建 Runtime Agent）', async (kind, label) => {
+    ['claude', 'Claude CLI Agent'],
+    ['codex', 'Codex Agent'],
+    ['echo', 'Echo Agent Created'],
+  ] as const)('creates runtime agent with %s kind（按 provider 类型创建 Runtime Agent）', async (kind, createdName) => {
     render(<AgentsPage />);
 
     await waitFor(() => {
@@ -301,8 +309,11 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
       );
     });
 
-    expect(screen.queryByTestId('agent-add-node-sheet')).not.toBeInTheDocument();
-    expect(screen.queryByText(label)).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-add-node-sheet')).not.toBeInTheDocument();
+      expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
+      expect(screen.getByText(createdName)).toBeInTheDocument();
+    });
   });
 
   it('shows aggregated runtime agents with source host badge（聚合显示并标注来源主机）', async () => {

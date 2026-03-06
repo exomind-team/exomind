@@ -9,7 +9,7 @@ use std::sync::{Arc, Mutex as StdMutex, MutexGuard as StdMutexGuard};
 use std::time::Instant;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::process::{Child, ChildStdin, ChildStdout, Command};
-use tokio::sync::{Mutex as AsyncMutex, mpsc};
+use tokio::sync::{Mutex as AsyncMutex, mpsc, watch};
 
 const DEFAULT_CODEX_NOTIFICATION_OPTOUTS: &[&str] = &[
     "turn/diff/updated",
@@ -18,8 +18,10 @@ const DEFAULT_CODEX_NOTIFICATION_OPTOUTS: &[&str] = &[
     "item/reasoning/summaryPartAdded",
     "item/reasoning/summaryTextDelta",
 ];
+const CODEX_SESSION_BUSY_MESSAGE: &str = "Codex 会话正在处理中，请稍后重试";
 
 type SharedCodexProcess = Arc<AsyncMutex<CodexProcess>>;
+type SessionCancelMap = Arc<StdMutex<HashMap<String, watch::Sender<bool>>>>;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum CodexSessionStatus {
@@ -94,14 +96,15 @@ impl Drop for CodexProcess {
 /// Built-in Codex agent（内置 Codex Agent，通过 codex app-server 输出流式事件）.
 #[derive(Debug, Clone)]
 pub struct CodexAgent {
-    id: &'static str,
-    name: &'static str,
-    description: &'static str,
+    id: String,
+    name: String,
+    description: String,
     command: String,
     process_args: Vec<String>,
     process_slot: Arc<StdMutex<Option<SharedCodexProcess>>>,
     process_init_lock: Arc<AsyncMutex<()>>,
     session_snapshots: Arc<StdMutex<HashMap<String, CodexSessionSnapshot>>>,
+    session_cancellations: SessionCancelMap,
 }
 
 impl CodexAgent {
@@ -140,15 +143,10 @@ impl CodexAgent {
         command: String,
         process_args: Vec<String>,
     ) -> Self {
-        fn leak_owned(value: String) -> &'static str {
-            Box::leak(value.into_boxed_str())
-        }
-
-        let id = leak_owned(id);
         let default_name = format!("Codex Agent ({id})");
         let default_description = format!("通过 Codex CLI 提供流式对话（{id}）");
-        let name = leak_owned(name.unwrap_or(default_name));
-        let description = leak_owned(description.unwrap_or(default_description));
+        let name = name.unwrap_or(default_name);
+        let description = description.unwrap_or(default_description);
 
         Self {
             id,
@@ -159,6 +157,7 @@ impl CodexAgent {
             process_slot: Arc::new(StdMutex::new(None)),
             process_init_lock: Arc::new(AsyncMutex::new(())),
             session_snapshots: Arc::new(StdMutex::new(HashMap::new())),
+            session_cancellations: Arc::new(StdMutex::new(HashMap::new())),
         }
     }
 
@@ -171,6 +170,13 @@ impl CodexAgent {
 
     fn lock_session_snapshots(&self) -> StdMutexGuard<'_, HashMap<String, CodexSessionSnapshot>> {
         match self.session_snapshots.lock() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        }
+    }
+
+    fn lock_session_cancellations(&self) -> StdMutexGuard<'_, HashMap<String, watch::Sender<bool>>> {
+        match self.session_cancellations.lock() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         }
@@ -207,10 +213,41 @@ impl CodexAgent {
             snapshot.current_turn_id = None;
             snapshot.last_active_wall = now;
         }
+        self.lock_session_cancellations().clear();
     }
 
     fn clear_process_slot(&self) {
         self.lock_process_slot().take();
+    }
+
+    fn reserve_session_for_turn(&self, session_id: &str) -> Result<watch::Receiver<bool>, String> {
+        {
+            let mut snapshots = self.lock_session_snapshots();
+            let Some(snapshot) = snapshots.get_mut(session_id) else {
+                return Err(format!("Codex 会话不存在: {session_id}"));
+            };
+            if matches!(snapshot.status, CodexSessionStatus::Processing) {
+                return Err(CODEX_SESSION_BUSY_MESSAGE.to_string());
+            }
+            snapshot.status = CodexSessionStatus::Processing;
+            snapshot.current_turn_id = None;
+            snapshot.last_active_wall = Utc::now();
+        }
+
+        let (cancel_tx, cancel_rx) = watch::channel(false);
+        self.lock_session_cancellations()
+            .insert(session_id.to_string(), cancel_tx);
+        Ok(cancel_rx)
+    }
+
+    fn remove_session_cancellation(&self, session_id: &str) {
+        self.lock_session_cancellations().remove(session_id);
+    }
+
+    fn signal_session_cancellation(&self, session_id: &str) {
+        if let Some(cancel_tx) = self.lock_session_cancellations().get(session_id).cloned() {
+            let _ = cancel_tx.send(true);
+        }
     }
 
     async fn spawn_streaming_task(&self, request: ChatRequest) -> mpsc::Receiver<RuntimeAgentEvent> {
@@ -230,7 +267,6 @@ impl CodexAgent {
         sender: mpsc::Sender<RuntimeAgentEvent>,
     ) {
         let normalized_session_id = normalize_session_id(request.session_id.as_deref());
-        let is_new_session = normalized_session_id.is_none();
 
         if let Some(session_id) = normalized_session_id.as_deref()
             && self.session_snapshot(session_id).is_none()
@@ -249,51 +285,81 @@ impl CodexAgent {
             }
         };
 
-        let mut process = shared_process.lock().await;
-        let session_id = match normalized_session_id {
-            Some(session_id) => session_id,
-            None => match self.start_thread(&mut process).await {
-                Ok(session_id) => {
-                    self.upsert_session_snapshot(CodexSessionSnapshot::new(session_id.clone()));
-                    if sender
-                        .send(RuntimeAgentEvent::session_started(session_id.clone()))
-                        .await
-                        .is_err()
-                    {
+        let (session_id, mut cancel_rx, is_new_session, mut process) = match normalized_session_id {
+            Some(session_id) => {
+                let cancel_rx = match self.reserve_session_for_turn(&session_id) {
+                    Ok(cancel_rx) => cancel_rx,
+                    Err(message) => {
+                        let _ = sender.send(RuntimeAgentEvent::error(message)).await;
                         return;
                     }
-                    session_id
-                }
-                Err(message) => {
-                    let _ = sender.send(RuntimeAgentEvent::error(message)).await;
+                };
+
+                let process = shared_process.lock().await;
+                (session_id, cancel_rx, false, process)
+            }
+            None => {
+                let mut process = shared_process.lock().await;
+                let session_id = match self.start_thread(&mut process).await {
+                    Ok(session_id) => session_id,
+                    Err(message) => {
+                        let _ = sender.send(RuntimeAgentEvent::error(message)).await;
+                        return;
+                    }
+                };
+
+                self.upsert_session_snapshot(CodexSessionSnapshot::new(session_id.clone()));
+                let cancel_rx = match self.reserve_session_for_turn(&session_id) {
+                    Ok(cancel_rx) => cancel_rx,
+                    Err(message) => {
+                        self.remove_session_snapshot(&session_id);
+                        let _ = Self::close_thread(&mut process, &session_id).await;
+                        let _ = sender.send(RuntimeAgentEvent::error(message)).await;
+                        return;
+                    }
+                };
+
+                if sender
+                    .send(RuntimeAgentEvent::session_started(session_id.clone()))
+                    .await
+                    .is_err()
+                {
+                    self.remove_session_cancellation(&session_id);
+                    self.remove_session_snapshot(&session_id);
+                    let _ = Self::close_thread(&mut process, &session_id).await;
                     return;
                 }
-            },
+
+                (session_id, cancel_rx, true, process)
+            }
         };
 
-        if let Some(snapshot) = self.session_snapshot(&session_id) {
-            if matches!(snapshot.status, CodexSessionStatus::Processing) {
-                let _ = sender
-                    .send(RuntimeAgentEvent::error(
-                        "Codex 会话正在处理中，请稍后重试".to_string(),
-                    ))
-                    .await;
-                return;
+        if *cancel_rx.borrow() || sender.is_closed() {
+            let should_close_thread = self.session_snapshot(&session_id).is_none();
+            self.remove_session_cancellation(&session_id);
+            if should_close_thread {
+                let _ = Self::close_thread(&mut process, &session_id).await;
+            } else {
+                self.update_session_snapshot(&session_id, |snapshot| {
+                    snapshot.status = CodexSessionStatus::Idle;
+                    snapshot.current_turn_id = None;
+                });
             }
+            return;
         }
 
         let turn_id = match self.start_turn(&mut process, &session_id, &request.message).await {
             Ok(turn_id) => {
                 self.update_session_snapshot(&session_id, |snapshot| {
-                    snapshot.status = CodexSessionStatus::Processing;
                     snapshot.current_turn_id = Some(turn_id.clone());
                     snapshot.message_count = snapshot.message_count.saturating_add(1);
                 });
                 turn_id
             }
             Err(message) => {
+                self.reset_reserved_session(&session_id, is_new_session);
                 if is_new_session {
-                    self.remove_session_snapshot(&session_id);
+                    let _ = Self::close_thread(&mut process, &session_id).await;
                 }
                 let _ = sender.send(RuntimeAgentEvent::error(message)).await;
                 return;
@@ -301,9 +367,10 @@ impl CodexAgent {
         };
 
         if let Err(message) = self
-            .stream_turn_events(&mut process, &session_id, &turn_id, &sender)
+            .stream_turn_events(&mut process, &session_id, &turn_id, &sender, &mut cancel_rx)
             .await
         {
+            self.remove_session_cancellation(&session_id);
             self.update_session_snapshot(&session_id, |snapshot| {
                 snapshot.status = CodexSessionStatus::Crashed;
                 snapshot.current_turn_id = None;
@@ -320,15 +387,20 @@ impl CodexAgent {
 
         let existing = { self.lock_process_slot().as_ref().cloned() };
         if let Some(existing) = existing {
-            let mut process = existing.lock().await;
-            match process.child.try_wait() {
-                Ok(None) => {
-                    drop(process);
-                    return Ok(existing);
-                }
-                Ok(Some(_)) | Err(_) => {
-                    drop(process);
-                    self.clear_process_slot();
+            let existing_process = existing.clone();
+            match existing.try_lock() {
+                Ok(mut process) => match process.child.try_wait() {
+                    Ok(None) => {
+                        drop(process);
+                        return Ok(existing_process);
+                    }
+                    Ok(Some(_)) | Err(_) => {
+                        drop(process);
+                        self.clear_process_slot();
+                    }
+                },
+                Err(_) => {
+                    return Ok(existing_process);
                 }
             }
         }
@@ -426,15 +498,116 @@ impl CodexAgent {
             .ok_or_else(|| "Codex turn/start 响应缺少 turn.id".to_string())
     }
 
+    fn reset_reserved_session(&self, session_id: &str, remove_snapshot: bool) {
+        self.remove_session_cancellation(session_id);
+        if remove_snapshot {
+            self.remove_session_snapshot(session_id);
+            return;
+        }
+
+        self.update_session_snapshot(session_id, |snapshot| {
+            snapshot.status = CodexSessionStatus::Idle;
+            snapshot.current_turn_id = None;
+        });
+    }
+
+    async fn interrupt_turn(
+        process: &mut CodexProcess,
+        session_id: &str,
+        turn_id: &str,
+    ) -> Result<(), String> {
+        send_request(
+            process,
+            "turn/interrupt",
+            json!({
+                "threadId": session_id,
+                "turnId": turn_id
+            }),
+        )
+        .await
+        .map(|_| ())
+    }
+
+    async fn close_thread(process: &mut CodexProcess, session_id: &str) -> Result<(), String> {
+        send_request(
+            process,
+            "thread/unsubscribe",
+            json!({
+                "threadId": session_id
+            }),
+        )
+        .await?;
+        send_request(
+            process,
+            "thread/archive",
+            json!({
+                "threadId": session_id
+            }),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn abort_active_turn(
+        &self,
+        process: &mut CodexProcess,
+        session_id: &str,
+        turn_id: &str,
+        close_thread: bool,
+    ) -> Result<(), String> {
+        Self::interrupt_turn(process, session_id, turn_id).await?;
+        self.remove_session_cancellation(session_id);
+        if close_thread {
+            let _ = Self::close_thread(process, session_id).await;
+        } else {
+            self.update_session_snapshot(session_id, |snapshot| {
+                snapshot.status = CodexSessionStatus::Idle;
+                snapshot.current_turn_id = None;
+            });
+        }
+        Ok(())
+    }
+
     async fn stream_turn_events(
         &self,
         process: &mut CodexProcess,
         session_id: &str,
         turn_id: &str,
         sender: &mpsc::Sender<RuntimeAgentEvent>,
+        cancel_rx: &mut watch::Receiver<bool>,
     ) -> Result<(), String> {
         loop {
-            let Some(message) = next_notification(process).await? else {
+            if *cancel_rx.borrow() {
+                let should_close_thread = self.session_snapshot(session_id).is_none();
+                self.abort_active_turn(process, session_id, turn_id, should_close_thread)
+                    .await?;
+                return Ok(());
+            }
+
+            let sender_closed = sender.closed();
+            tokio::pin!(sender_closed);
+
+            let next_message = tokio::select! {
+                biased;
+                changed = cancel_rx.changed() => {
+                    if changed.is_ok() && *cancel_rx.borrow() {
+                        let should_close_thread = self.session_snapshot(session_id).is_none();
+                        self.abort_active_turn(process, session_id, turn_id, should_close_thread)
+                            .await?;
+                        return Ok(());
+                    }
+                    continue;
+                }
+                _ = &mut sender_closed => {
+                    let should_close_thread = self.session_snapshot(session_id).is_none();
+                    self.abort_active_turn(process, session_id, turn_id, should_close_thread)
+                        .await?;
+                    return Ok(());
+                }
+                result = next_notification(process) => result?,
+            };
+
+            let Some(message) = next_message else {
                 return Err("Codex 输出流提前结束".to_string());
             };
 
@@ -462,42 +635,68 @@ impl CodexAgent {
                     if notification_thread_id(&params) == Some(session_id)
                         && params.get("turnId").and_then(Value::as_str) == Some(turn_id)
                         && let Some(delta) = params.get("delta").and_then(Value::as_str)
+                        && sender.send(RuntimeAgentEvent::output_delta(delta)).await.is_err()
                     {
-                        let _ = sender.send(RuntimeAgentEvent::output_delta(delta)).await;
+                        let should_close_thread = self.session_snapshot(session_id).is_none();
+                        self.abort_active_turn(process, session_id, turn_id, should_close_thread)
+                            .await?;
+                        return Ok(());
                     }
                 }
                 "item/reasoning/textDelta" => {
                     if notification_thread_id(&params) == Some(session_id)
                         && params.get("turnId").and_then(Value::as_str) == Some(turn_id)
                         && let Some(delta) = params.get("delta").and_then(Value::as_str)
-                    {
-                        let _ = sender
+                        && sender
                             .send(RuntimeAgentEvent::ThinkingDelta {
                                 content: delta.to_string(),
                                 session_id: None,
                             })
-                            .await;
+                            .await
+                            .is_err()
+                    {
+                        let should_close_thread = self.session_snapshot(session_id).is_none();
+                        self.abort_active_turn(process, session_id, turn_id, should_close_thread)
+                            .await?;
+                        return Ok(());
                     }
                 }
                 "item/started" => {
                     if notification_thread_id(&params) == Some(session_id)
                         && params.get("turnId").and_then(Value::as_str) == Some(turn_id)
                         && let Some(event) = build_tool_call_event(&params)
+                        && sender.send(event).await.is_err()
                     {
-                        let _ = sender.send(event).await;
+                        let should_close_thread = self.session_snapshot(session_id).is_none();
+                        self.abort_active_turn(process, session_id, turn_id, should_close_thread)
+                            .await?;
+                        return Ok(());
                     }
                 }
                 "item/completed" => {
                     if notification_thread_id(&params) == Some(session_id)
                         && params.get("turnId").and_then(Value::as_str) == Some(turn_id)
                         && let Some(event) = build_tool_result_event(&params)
+                        && sender.send(event).await.is_err()
                     {
-                        let _ = sender.send(event).await;
+                        let should_close_thread = self.session_snapshot(session_id).is_none();
+                        self.abort_active_turn(process, session_id, turn_id, should_close_thread)
+                            .await?;
+                        return Ok(());
                     }
                 }
                 "error" => {
                     if let Some(message_text) = params.get("message").and_then(Value::as_str) {
-                        let _ = sender.send(RuntimeAgentEvent::error(message_text)).await;
+                        if sender
+                            .send(RuntimeAgentEvent::error(message_text))
+                            .await
+                            .is_err()
+                        {
+                            let should_close_thread = self.session_snapshot(session_id).is_none();
+                            self.abort_active_turn(process, session_id, turn_id, should_close_thread)
+                                .await?;
+                            return Ok(());
+                        }
                     }
                 }
                 "turn/completed" => {
@@ -527,6 +726,7 @@ impl CodexAgent {
                         let _ = sender.send(RuntimeAgentEvent::error(message_text)).await;
                     }
 
+                    self.remove_session_cancellation(session_id);
                     self.update_session_snapshot(session_id, |snapshot| {
                         snapshot.status = CodexSessionStatus::Idle;
                         snapshot.current_turn_id = None;
@@ -539,40 +739,9 @@ impl CodexAgent {
         }
     }
 
-    async fn interrupt_and_unsubscribe(
-        process: SharedCodexProcess,
-        session_id: String,
-        turn_id: Option<String>,
-    ) {
+    async fn close_session_process(process: SharedCodexProcess, session_id: String) {
         let mut process = process.lock().await;
-        if let Some(turn_id) = turn_id {
-            let _ = send_request(
-                &mut process,
-                "turn/interrupt",
-                json!({
-                    "threadId": session_id,
-                    "turnId": turn_id
-                }),
-            )
-            .await;
-        }
-
-        let _ = send_request(
-            &mut process,
-            "thread/unsubscribe",
-            json!({
-                "threadId": session_id
-            }),
-        )
-        .await;
-        let _ = send_request(
-            &mut process,
-            "thread/archive",
-            json!({
-                "threadId": session_id
-            }),
-        )
-        .await;
+        let _ = Self::close_thread(&mut process, &session_id).await;
     }
 }
 
@@ -616,14 +785,16 @@ impl AgentProvider for CodexAgent {
             return false;
         };
 
+        if matches!(snapshot.status, CodexSessionStatus::Processing) {
+            self.signal_session_cancellation(session_id);
+            return true;
+        }
+
+        self.remove_session_cancellation(session_id);
         if let Some(process) = self.lock_process_slot().as_ref().cloned()
             && let Ok(runtime) = tokio::runtime::Handle::try_current()
         {
-            runtime.spawn(Self::interrupt_and_unsubscribe(
-                process,
-                snapshot.session_id,
-                snapshot.current_turn_id,
-            ));
+            runtime.spawn(Self::close_session_process(process, snapshot.session_id));
         }
 
         true
@@ -631,16 +802,16 @@ impl AgentProvider for CodexAgent {
 }
 
 impl Agent for CodexAgent {
-    fn id(&self) -> &'static str {
-        self.id
+    fn id(&self) -> &str {
+        &self.id
     }
 
-    fn name(&self) -> &'static str {
-        self.name
+    fn name(&self) -> &str {
+        &self.name
     }
 
-    fn description(&self) -> &'static str {
-        self.description
+    fn description(&self) -> &str {
+        &self.description
     }
 }
 

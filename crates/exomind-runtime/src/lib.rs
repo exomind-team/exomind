@@ -674,15 +674,15 @@ mod tests {
     }
 
     impl agent::Agent for TempRouteAgent {
-        fn id(&self) -> &'static str {
+        fn id(&self) -> &str {
             "temp-route"
         }
 
-        fn name(&self) -> &'static str {
+        fn name(&self) -> &str {
             "Temp Route Agent"
         }
 
-        fn description(&self) -> &'static str {
+        fn description(&self) -> &str {
             "用于路由注册/注销可见性测试"
         }
     }
@@ -746,15 +746,15 @@ mod tests {
     }
 
     impl agent::Agent for TempSessionAgent {
-        fn id(&self) -> &'static str {
+        fn id(&self) -> &str {
             "temp-session"
         }
 
-        fn name(&self) -> &'static str {
+        fn name(&self) -> &str {
             "Temp Session Agent"
         }
 
-        fn description(&self) -> &'static str {
+        fn description(&self) -> &str {
             "用于会话端点 JSON 结构测试"
         }
     }

@@ -57,9 +57,9 @@ pub struct SessionInfo {
 
 /// Agent behavior contract (Agent 行为契约).
 pub trait Agent: AgentProvider + Send + Sync {
-    fn id(&self) -> &'static str;
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
+    fn id(&self) -> &str;
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
 
     fn status(&self) -> &'static str {
         "available"
@@ -141,15 +141,15 @@ mod tests {
     }
 
     impl Agent for TempAgent {
-        fn id(&self) -> &'static str {
+        fn id(&self) -> &str {
             "temp"
         }
 
-        fn name(&self) -> &'static str {
+        fn name(&self) -> &str {
             "Temp Agent"
         }
 
-        fn description(&self) -> &'static str {
+        fn description(&self) -> &str {
             "Temporary testing agent"
         }
     }

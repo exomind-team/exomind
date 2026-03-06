@@ -101,7 +101,9 @@ describe('agent conversation runtime issue-385（运行时对话页 typed event 
         yield { type: 'thinking.delta', content: '正在分析 issue-385' };
         yield { type: 'tool.call', name: 'searchDocs', payload: { query: 'codex app-server' } };
         yield { type: 'tool.result', name: 'searchDocs', payload: { hits: 2 } };
-        yield { type: 'output.delta', content: '你好，我是 Codex' };
+        yield { type: 'output.delta', content: '你好，我是 ' };
+        yield { type: 'tool.call', name: 'runTask', payload: { task: 'issue-385' } };
+        yield { type: 'output.delta', content: 'Codex' };
         yield { type: 'done' };
         return;
       }
@@ -125,10 +127,15 @@ describe('agent conversation runtime issue-385（运行时对话页 typed event 
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-runtime-event-thinking')).toHaveTextContent('正在分析 issue-385');
-      expect(screen.getByTestId('agent-runtime-event-tool-call')).toHaveTextContent('searchDocs');
       expect(screen.getByTestId('agent-runtime-event-tool-result')).toHaveTextContent('"hits":2');
+      const toolCalls = screen.getAllByTestId('agent-runtime-event-tool-call');
+      expect(toolCalls).toHaveLength(2);
+      expect(toolCalls[0]).toHaveTextContent('searchDocs');
+      expect(toolCalls[1]).toHaveTextContent('runTask');
       const outputs = screen.getAllByTestId('agent-runtime-event-output');
-      expect(outputs[0]).toHaveTextContent('你好，我是 Codex');
+      expect(outputs).toHaveLength(2);
+      expect(outputs[0]).toHaveTextContent('你好，我是');
+      expect(outputs[1]).toHaveTextContent('Codex');
     });
 
     fireEvent.change(screen.getByTestId('agent-chat-input'), {

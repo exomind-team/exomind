@@ -99,7 +99,7 @@ import {
 import { Switch } from '@/components/ui/switch';
 import {
   appendConversationChunk,
-  appendConversationDelta,
+  appendAdjacentConversationDelta,
   appendConversationMessage,
   createConversationMessage,
   formatRuntimeEventPayload,
@@ -1976,9 +1976,6 @@ export function AgentsPage() {
 
       if (runtimeHost) {
         const runtimeClient = new RuntimeClient();
-        const assistantMessageId = `runtime-agent-output-${createUuidV4()}`;
-        const thinkingMessageId = `runtime-agent-thinking-${createUuidV4()}`;
-        const errorMessageId = `runtime-agent-error-${createUuidV4()}`;
         for await (const chunk of runtimeClient.streamAgentConversation(runtimeHost, {
           agentId: chatAgentId,
           message: prompt,
@@ -1993,18 +1990,28 @@ export function AgentsPage() {
               break;
             case 'output.delta':
               receivedVisibleContent = true;
-              setChatMessages((prev) => appendConversationDelta(prev, assistantMessageId, chunk.content, {
-                source: 'runtime',
-                runtimeEventType: 'output.delta',
-              }));
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-output-${createUuidV4()}`,
+                chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'output.delta',
+                },
+              ));
               break;
             case 'thinking.delta':
               receivedVisibleContent = true;
-              setChatMessages((prev) => appendConversationDelta(prev, thinkingMessageId, chunk.content, {
-                source: 'runtime',
-                runtimeEventType: 'thinking.delta',
-                title: 'Thinking',
-              }));
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-thinking-${createUuidV4()}`,
+                chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'thinking.delta',
+                  title: 'Thinking',
+                },
+              ));
               break;
             case 'tool.call':
               receivedVisibleContent = true;
@@ -2034,11 +2041,16 @@ export function AgentsPage() {
               break;
             case 'error':
               receivedVisibleContent = true;
-              setChatMessages((prev) => appendConversationDelta(prev, errorMessageId, chunk.message, {
-                source: 'runtime',
-                runtimeEventType: 'error',
-                title: 'Runtime Error',
-              }));
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-error-${createUuidV4()}`,
+                chunk.message,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'error',
+                  title: 'Runtime Error',
+                },
+              ));
               break;
             case 'done':
               break;

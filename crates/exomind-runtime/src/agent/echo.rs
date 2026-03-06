@@ -23,30 +23,24 @@ impl AgentProvider for EchoAgent {
 }
 
 impl Agent for EchoAgent {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "echo"
     }
 
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "Echo Agent"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "回显输入内容"
     }
 }
 
-/// Runtime-managed echo agent（运行时动态管理的 Echo Agent）.
-///
-/// NOTE（说明）:
-/// The `Agent` trait currently requires `&'static str` metadata. To support
-/// runtime-created agent IDs/names, we intentionally leak the boxed strings.
-/// This is acceptable for a bounded number of manually created agents.
 #[derive(Debug)]
 pub struct ManagedEchoAgent {
-    id: &'static str,
-    name: &'static str,
-    description: &'static str,
+    id: String,
+    name: String,
+    description: String,
 }
 
 impl ManagedEchoAgent {
@@ -55,15 +49,11 @@ impl ManagedEchoAgent {
         name: Option<String>,
         description: Option<String>,
     ) -> Self {
-        fn leak_owned(value: String) -> &'static str {
-            Box::leak(value.into_boxed_str())
-        }
-
-        let id = leak_owned(id.into());
+        let id = id.into();
         let default_name = format!("Echo Agent ({id})");
         let default_description = format!("回显输入内容（{id}）");
-        let name = leak_owned(name.unwrap_or(default_name));
-        let description = leak_owned(description.unwrap_or(default_description));
+        let name = name.unwrap_or(default_name);
+        let description = description.unwrap_or(default_description);
         Self {
             id,
             name,
@@ -83,15 +73,15 @@ impl AgentProvider for ManagedEchoAgent {
 }
 
 impl Agent for ManagedEchoAgent {
-    fn id(&self) -> &'static str {
-        self.id
+    fn id(&self) -> &str {
+        &self.id
     }
 
-    fn name(&self) -> &'static str {
-        self.name
+    fn name(&self) -> &str {
+        &self.name
     }
 
-    fn description(&self) -> &'static str {
-        self.description
+    fn description(&self) -> &str {
+        &self.description
     }
 }

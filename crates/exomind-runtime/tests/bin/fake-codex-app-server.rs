@@ -7,6 +7,11 @@ struct ThreadState {
     remembered_name: Option<String>,
 }
 
+struct PendingSlowTurn {
+    thread_id: String,
+    turn_id: String,
+}
+
 fn request_id(message: &Value) -> Value {
     message.get("id").cloned().unwrap_or(Value::Null)
 }
@@ -76,10 +81,15 @@ fn build_turn(turn_id: &str, status: &str) -> Value {
     })
 }
 
+fn is_slow_turn(message: &str) -> bool {
+    message.to_lowercase().contains("slow turn")
+}
+
 fn main() {
     let stdin = io::stdin();
     let mut stdout = io::stdout();
     let mut threads: HashMap<String, ThreadState> = HashMap::new();
+    let mut pending_slow_turns: HashMap<String, PendingSlowTurn> = HashMap::new();
     let mut next_thread = 1usize;
     let mut next_turn = 1usize;
 
@@ -203,16 +213,42 @@ fn main() {
                 let _ = writeln!(stdout, "{start_response}");
                 let _ = writeln!(stdout, "{turn_started}");
                 let _ = writeln!(stdout, "{item_started}");
-                let _ = writeln!(stdout, "{delta}");
-                let _ = writeln!(stdout, "{item_completed}");
-                let _ = writeln!(stdout, "{turn_completed}");
+                if is_slow_turn(&user_text) {
+                    pending_slow_turns.insert(
+                        turn_id.clone(),
+                        PendingSlowTurn {
+                            thread_id,
+                            turn_id,
+                        },
+                    );
+                } else {
+                    let _ = writeln!(stdout, "{delta}");
+                    let _ = writeln!(stdout, "{item_completed}");
+                    let _ = writeln!(stdout, "{turn_completed}");
+                }
             }
             "turn/interrupt" => {
+                let turn_id = message
+                    .get("params")
+                    .and_then(|params| params.get("turnId"))
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
                 let response = json!({
                     "id": request_id(&message),
                     "result": {}
                 });
                 let _ = writeln!(stdout, "{response}");
+                if let Some(pending_turn) = pending_slow_turns.remove(&turn_id) {
+                    let turn_completed = json!({
+                        "method": "turn/completed",
+                        "params": {
+                            "threadId": pending_turn.thread_id,
+                            "turn": build_turn(&pending_turn.turn_id, "cancelled")
+                        }
+                    });
+                    let _ = writeln!(stdout, "{turn_completed}");
+                }
             }
             "thread/unsubscribe" => {
                 let response = json!({

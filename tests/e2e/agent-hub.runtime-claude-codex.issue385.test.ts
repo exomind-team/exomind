@@ -90,6 +90,9 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
   let runtimePort = 0;
   let runtimeAgents = buildInitialAgents();
   let createdSequence = 0;
+  let createRequests: Array<{ kind?: string }> = [];
+  let deleteRequests: string[] = [];
+  let chatRequests: Array<{ agentId: string; message?: string; sessionId?: string }> = [];
 
   test.beforeAll(async () => {
     runtimeServer = createServer(async (request, response) => {
@@ -142,6 +145,7 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
 
       if (url.pathname === '/agents' && request.method === 'POST') {
         const body = (await readJsonBody(request)) as { kind?: string };
+        createRequests.push({ kind: body.kind });
         createdSequence += 1;
         const kind = body.kind ?? 'echo';
         const createdAgent: RuntimeAgent = {
@@ -158,6 +162,7 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
       const deleteMatch = url.pathname.match(/^\/agents\/([^/]+)$/);
       if (deleteMatch && request.method === 'DELETE') {
         const agentId = decodeURIComponent(deleteMatch[1] ?? '');
+        deleteRequests.push(agentId);
         runtimeAgents = runtimeAgents.filter((agent) => agent.id !== agentId);
         json(response, 200, { status: 'deleted', id: agentId });
         return;
@@ -166,7 +171,17 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
       const chatMatch = url.pathname.match(/^\/agents\/([^/]+)\/chat$/);
       if (chatMatch && request.method === 'POST') {
         const agentId = decodeURIComponent(chatMatch[1] ?? '');
-        const body = (await readJsonBody(request)) as { session_id?: string };
+        const body = (await readJsonBody(request)) as { session_id?: string; message?: string };
+        chatRequests.push({
+          agentId,
+          message: body.message,
+          sessionId: body.session_id,
+        });
+
+        if (!body.message?.trim()) {
+          json(response, 400, { error: 'message is required' });
+          return;
+        }
 
         response.writeHead(200, {
           'Content-Type': 'text/event-stream',
@@ -189,7 +204,7 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
         if (agentId.includes('codex')) {
           writeSse(response, { type: 'session.started', session_id: body.session_id ?? 'codex-session-1' });
           writeSse(response, { type: 'thinking.delta', content: 'Codex 正在分析任务' });
-          writeSse(response, { type: 'tool.call', name: 'searchDocs', payload: { query: 'agent hub runtime' } });
+          writeSse(response, { type: 'tool.call', name: 'searchDocs', payload: { query: body.message } });
           writeSse(response, { type: 'tool.result', name: 'searchDocs', payload: { hits: 2 } });
           writeSse(response, { type: 'output.delta', content: 'Codex runtime 已连接' });
           writeSse(response, { type: 'done' });
@@ -197,7 +212,7 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
           return;
         }
 
-        writeSse(response, { type: 'output.delta', content: 'Echo runtime 在线' });
+        writeSse(response, { type: 'output.delta', content: `Echo runtime 在线: ${body.message}` });
         writeSse(response, { type: 'done' });
         response.end();
         return;
@@ -225,6 +240,9 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
   test.beforeEach(async ({ page }) => {
     runtimeAgents = buildInitialAgents();
     createdSequence = 0;
+    createRequests = [];
+    deleteRequests = [];
+    chatRequests = [];
     await seedRuntimeHost(page, runtimePort);
   });
 
@@ -238,12 +256,24 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
 
     await expect(page.getByTestId('agent-list-view')).toBeVisible();
     await expect(page.getByText('Codex Agent 1')).toBeVisible();
+    await expect.poll(() => createRequests.at(-1)?.kind ?? null).toBe('codex');
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByTestId('agent-view-toggle-list').click();
+    await expect(page.getByTestId('agent-list-view')).toBeVisible();
+    await expect(page.getByText('Codex Agent 1')).toBeVisible();
 
     await page.getByText('Codex Agent 1').click();
     await expect(page.getByTestId('agent-rightpanel-stop-agent')).toBeVisible();
     await page.getByTestId('agent-rightpanel-stop-agent').click();
 
     await expect(page.getByTestId('agent-rightpanel-stop-agent')).toHaveCount(0);
+    await expect(page.getByText('Codex Agent 1')).toHaveCount(0);
+    await expect.poll(() => deleteRequests.at(-1) ?? null).toBe('codex-created-1');
+
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await page.getByTestId('agent-view-toggle-list').click();
+    await expect(page.getByTestId('agent-list-view')).toBeVisible();
     await expect(page.getByText('Codex Agent 1')).toHaveCount(0);
   });
 
@@ -255,6 +285,8 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
     await page.getByTestId('agent-chat-send-button').click();
 
     await expect(page.getByTestId('agent-runtime-event-output')).toContainText('Claude runtime 已连接');
+    await expect.poll(() => chatRequests.at(-1)?.message ?? null).toBe('连接 Claude CLI');
+    await expect.poll(() => chatRequests.at(-1)?.agentId ?? null).toBe('runtime-claude');
   });
 
   test('renders Codex typed runtime events in conversation page（Codex 对话页渲染 typed runtime 事件）', async ({ page }) => {
@@ -268,5 +300,7 @@ test.describe('Issue #385 Agent Hub runtime Claude/Codex（流式会话 + 动态
     await expect(page.getByTestId('agent-runtime-event-tool-call')).toContainText('searchDocs');
     await expect(page.getByTestId('agent-runtime-event-tool-result')).toContainText('"hits":2');
     await expect(page.getByTestId('agent-runtime-event-output')).toContainText('Codex runtime 已连接');
+    await expect.poll(() => chatRequests.at(-1)?.message ?? null).toBe('连接 Codex');
+    await expect.poll(() => chatRequests.at(-1)?.agentId ?? null).toBe('runtime-codex');
   });
 });

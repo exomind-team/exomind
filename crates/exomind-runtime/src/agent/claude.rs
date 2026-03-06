@@ -599,15 +599,15 @@ impl AgentProvider for ClaudeAgent {
 }
 
 impl Agent for ClaudeAgent {
-    fn id(&self) -> &'static str {
+    fn id(&self) -> &str {
         "claude"
     }
 
-    fn name(&self) -> &'static str {
+    fn name(&self) -> &str {
         "Claude Agent"
     }
 
-    fn description(&self) -> &'static str {
+    fn description(&self) -> &str {
         "通过 Claude Code CLI 提供流式对话"
     }
 }
