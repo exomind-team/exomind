@@ -17,11 +17,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { listLocalProfiles } from '@/lib/profile/profile-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 
 interface UserInfo {
-  username: string;
-  passwordHash: string;
+  profileId: string;
+  loginName: string;
+  displayName: string;
   createdAt: string;
   lastLogin?: string;
 }
@@ -49,13 +51,20 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
     register,
   } = useSyncStore();
 
-  // 模拟从服务器获取用户列表
+  const reloadUsers = () => {
+    setUsers(
+      listLocalProfiles().map((profile) => ({
+        profileId: profile.profileId,
+        loginName: profile.slug,
+        displayName: profile.displayName,
+        createdAt: profile.createdAt,
+      }))
+    );
+  };
+
+  // 从本地档案索引加载列表（local-first，本地优先）
   useEffect(() => {
-    // 实际项目中，这里应该从服务器获取用户列表
-    const storedUsers = localStorage.getItem('exomind:users');
-    if (storedUsers) {
-      setUsers(JSON.parse(storedUsers));
-    }
+    reloadUsers();
   }, []);
 
   // 显示消息并自动清除
@@ -87,12 +96,7 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
     try {
       await register(newUsername, newPassword);
 
-      // sync-store 已保存用户到 localStorage（包含 passwordHash）
-      // 重新加载用户列表以获取最新数据
-      const storedUsers = localStorage.getItem('exomind:users');
-      if (storedUsers) {
-        setUsers(JSON.parse(storedUsers));
-      }
+      reloadUsers();
 
       setMessage({ type: 'success', text: `用户 ${newUsername} 注册成功` });
       setNewUsername('');
@@ -229,17 +233,18 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
             <div className="space-y-2">
               {users.map((user) => (
                 <div
-                  key={user.username}
+                  key={user.profileId}
                   className="flex items-center justify-between p-3 border rounded-lg"
                 >
                   <div>
-                    <div className="font-medium">{user.username}</div>
+                    <div className="font-medium">{user.displayName}</div>
                     <div className="text-sm text-muted-foreground">
-                      注册时间: {new Date(user.createdAt).toLocaleString()}
+                      档案标识: {user.loginName}
+                      {' | '}注册时间: {new Date(user.createdAt).toLocaleString()}
                       {user.lastLogin && ` | 最后登录: ${new Date(user.lastLogin).toLocaleString()}`}
                     </div>
                   </div>
-                  {showLoginForm && loginUsername === user.username && (
+                  {showLoginForm && loginUsername === user.loginName && (
                     <div className="flex items-center gap-2 ml-4" style={{ width: '140px' }}>
                       <Input
                         type="password"
@@ -257,13 +262,13 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            setLoginUsername(user.username);
+                            setLoginUsername(user.loginName);
                             setShowLoginForm(true);
                           }}
                         >
                           登录
                         </Button>
-                      ) : loginUsername === user.username ? (
+                      ) : loginUsername === user.loginName ? (
                         <>
                           <Button
                             variant="ghost"
@@ -278,7 +283,7 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => handleQuickLogin(user.username, loginPassword)}
+                            onClick={() => handleQuickLogin(user.loginName, loginPassword)}
                             disabled={isLoading || !loginPassword}
                           >
                             确定

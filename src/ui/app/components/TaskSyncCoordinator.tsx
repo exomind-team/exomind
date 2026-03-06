@@ -3,13 +3,14 @@ import { resolveSyncServerUrl, SYNC_SERVER_URL_CHANGED_EVENT } from '@/config/po
 import { getTaskService } from '@/lib/services';
 import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
-import { useSyncStore } from '@/ui/stores/sync-store';
+import { resolveRemoteSyncKey, useSyncStore } from '@/ui/stores/sync-store';
 import { useState } from 'react';
 
 export function TaskSyncCoordinator(): null {
   const taskServiceRef = useRef(getTaskService());
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
-  const currentUser = useSyncStore((state) => state.currentUser);
+  const remoteDbKey = useSyncStore((state) => resolveRemoteSyncKey(state.credentials));
+  const legacySyncState = useSyncStore((state) => state.status.state);
   const [syncServerUrl, setSyncServerUrl] = useState(() =>
     resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
   );
@@ -27,13 +28,13 @@ export function TaskSyncCoordinator(): null {
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn || !currentUser) {
+    if (!isLoggedIn || !remoteDbKey || legacySyncState !== 'connected') {
       void taskServiceRef.current.stopSync();
       return;
     }
 
     let cancelled = false;
-    const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
+    const remoteUrl = buildRemoteDbUrl(syncServerUrl, remoteDbKey);
 
     void taskServiceRef.current.startSync(remoteUrl).catch((error) => {
       if (cancelled) return;
@@ -45,7 +46,7 @@ export function TaskSyncCoordinator(): null {
       cancelled = true;
       void taskServiceRef.current.stopSync();
     };
-  }, [currentUser, isLoggedIn, syncServerUrl]);
+  }, [isLoggedIn, legacySyncState, remoteDbKey, syncServerUrl]);
 
   return null;
 }

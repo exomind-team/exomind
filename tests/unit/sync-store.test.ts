@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { hashPasswordWithSalt } from '@/adapters/crypto-adapter';
 
 // Mock localStorage
 const mockLocalStorageData: Record<string, string> = {};
@@ -42,6 +43,7 @@ describe('SyncStore', () => {
     // 清空 mock 数据
     Object.keys(mockLocalStorageData).forEach(key => delete mockLocalStorageData[key]);
     vi.clearAllMocks();
+    vi.resetModules();
 
     // 重置 mock 数据
     mockLocalStorageData['exomind:users'] = JSON.stringify([]);
@@ -64,6 +66,7 @@ describe('SyncStore', () => {
       expect(store.credentials).toBeNull();
       expect(store.isLoggedIn).toBe(false);
       expect(store.currentUser).toBeNull();
+      expect((store as typeof store & { activeProfileId?: string | null }).activeProfileId).toBeNull();
       expect(store.conflicts).toEqual([]);
     });
   });
@@ -131,11 +134,17 @@ describe('SyncStore', () => {
 
       await register('newuser', 'password123');
 
-      // 验证用户已保存到 localStorage
+      // 验证 legacy users mirror（旧 users 镜像）仍写入 localStorage
       const storedUsers = JSON.parse(mockLocalStorageData['exomind:users']);
       expect(storedUsers.length).toBe(1);
       expect(storedUsers[0].username).toBe('newuser');
       expect(storedUsers[0].passwordHash).toBeTruthy();
+
+      // 验证 canonical profile storage（规范档案存储）也已创建
+      const profileModule = await import('@/lib/profile/profile-storage');
+      const profiles = profileModule.listLocalProfiles();
+      expect(profiles).toHaveLength(1);
+      expect(profiles[0].slug).toBe('newuser');
     });
 
     it('应该拒绝空用户名', async () => {
@@ -201,14 +210,12 @@ describe('SyncStore', () => {
   });
 
   describe('login', () => {
-    // 这些测试需要 CryptoAdapter mock，跳过
-    const originalCryptoAdapter = globalThis.crypto;
-
-    it.skip('应该登录成功', async () => {
+    it('应该登录成功并激活本地档案', async () => {
+      const passwordHash = await hashPasswordWithSalt('password123');
       mockLocalStorageData['exomind:users'] = JSON.stringify([
         {
           username: 'testuser',
-          passwordHash: '$pbkdf2$salt123$hash456',
+          passwordHash,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -217,16 +224,23 @@ describe('SyncStore', () => {
 
       await login('testuser', 'password123');
 
-      const { isLoggedIn, currentUser } = useSyncStore.getState();
+      const state = useSyncStore.getState() as typeof useSyncStore.getState extends () => infer T ? T & { activeProfileId?: string | null } : never;
+      const profileModule = await import('@/lib/profile/profile-storage');
+      const activeProfile = profileModule.getActiveProfile();
+
+      const { isLoggedIn, currentUser } = state;
       expect(isLoggedIn).toBe(true);
       expect(currentUser).toBe('testuser');
+      expect(state.activeProfileId).toBeTruthy();
+      expect(activeProfile?.slug).toBe('testuser');
     });
 
-    it.skip('应该登录后设置凭据', async () => {
+    it('纯本地登录后不应该自动设置远端同步凭据', async () => {
+      const passwordHash = await hashPasswordWithSalt('password123');
       mockLocalStorageData['exomind:users'] = JSON.stringify([
         {
           username: 'testuser',
-          passwordHash: '$pbkdf2$salt123$hash456',
+          passwordHash,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -236,8 +250,7 @@ describe('SyncStore', () => {
       await login('testuser', 'password123');
 
       const { credentials } = useSyncStore.getState();
-      expect(credentials).toBeDefined();
-      expect(credentials?.username).toBe('testuser');
+      expect(credentials).toBeNull();
     });
 
     it('应该拒绝不存在的用户', async () => {
@@ -246,11 +259,12 @@ describe('SyncStore', () => {
       await expect(login('nonexistent', 'password123')).rejects.toThrow('用户不存在');
     });
 
-    it.skip('应该拒绝错误的密码', async () => {
+    it('应该拒绝错误的密码', async () => {
+      const passwordHash = await hashPasswordWithSalt('password123');
       mockLocalStorageData['exomind:users'] = JSON.stringify([
         {
           username: 'testuser',
-          passwordHash: '$pbkdf2$salt123$hash456',
+          passwordHash,
           createdAt: new Date().toISOString(),
         },
       ]);

@@ -203,6 +203,22 @@ describe('ChatPage 架构边界', () => {
     expect(source).not.toContain('storageRef.current.getEvents(');
     expect(source).not.toContain('storage.getEvents(');
   });
+
+  it('ECS 模式下不应再直连 syncToRemote / 6984（不再依赖旧同步服务器）', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).not.toContain('syncToRemote(');
+    expect(source).not.toContain('buildRemoteDbUrl(');
+    expect(source).not.toContain('resolveSyncServerUrl(');
+    expect(source).not.toContain('6984');
+  });
+
+  it('不应把 currentUser 显示名直接作为 EventStorage 分区键', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).not.toContain('getEventStorage(currentUser || undefined)');
+    expect(source).toContain('activeProfileId');
+  });
 });
 
 describe('ChatPage 消息发送逻辑', () => {

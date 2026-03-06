@@ -49,6 +49,11 @@ describe('UserManagePage 依赖检查', () => {
   it('应该导入 useSyncStore', () => {
     expect(content).toContain("from '@/ui/stores/sync-store'");
   });
+
+  it('应该导入 listLocalProfiles', () => {
+    expect(content).toContain("from '@/lib/profile/profile-storage'");
+    expect(content).toContain('listLocalProfiles');
+  });
 });
 
 describe('UserManagePage 路由注册', () => {
@@ -106,9 +111,10 @@ describe('UserManagePage 功能完整性', () => {
     expect(content).toContain('confirmPassword');
   });
 
-  it('应该使用 useEffect 获取用户列表', () => {
+  it('应该使用 useEffect 获取本地档案列表', () => {
     expect(content).toContain('useEffect');
-    expect(content).toContain('localStorage');
+    expect(content).toContain('reloadUsers');
+    expect(content).toContain('listLocalProfiles');
   });
 });
 

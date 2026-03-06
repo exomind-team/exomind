@@ -15,13 +15,61 @@ async function resetClientStorage(page: Page) {
 
 async function seedLoggedInUser(page: Page, username: string) {
   await page.addInitScript((user) => {
+    const normalized = user.trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '-');
+    const profileId = `profile-${normalized || 'e2e'}`;
+    const linkId = `link-${normalized || 'e2e'}`;
+    const now = new Date().toISOString();
+
+    localStorage.setItem('exomind:profiles:index', JSON.stringify([profileId]));
+    localStorage.setItem(`exomind:profiles:${profileId}:meta`, JSON.stringify({
+      profileId,
+      slug: user,
+      displayName: user,
+      createdAt: now,
+      updatedAt: now,
+      authMode: 'password',
+      state: 'active',
+      defaultSyncPolicy: 'remote-sync',
+    }));
+    localStorage.setItem('exomind:profile-session', JSON.stringify({
+      version: 1,
+      activeProfileId: profileId,
+      unlockedProfileIds: [profileId],
+    }));
+    localStorage.setItem('exomind:identity-links:index', JSON.stringify([linkId]));
+    localStorage.setItem(`exomind:identity-links:meta:${linkId}`, JSON.stringify({
+      linkId,
+      profileId,
+      providerId: 'e2e',
+      remoteIdentityId: user,
+      remoteIdentityKey: user,
+      authMode: 'basic',
+      status: 'linked',
+      syncMode: 'realtime',
+      linkedAt: now,
+    }));
+    localStorage.setItem(`exomind:identity-links:secret:${linkId}`, JSON.stringify({
+      linkId,
+      authType: 'basic',
+      authUsername: user,
+      authSecret: 'e2e-password-hash',
+      updatedAt: now,
+    }));
+
     const syncStoreState = {
       state: {
         isLoggedIn: true,
         currentUser: user,
+        activeProfileId: profileId,
         credentials: {
           username: user,
           passwordHash: 'e2e-password-hash',
+          providerId: 'e2e',
+          remoteIdentityId: user,
+          remoteIdentityKey: user,
+          authType: 'basic',
+          authUsername: user,
+          authSecret: 'e2e-password-hash',
           deviceName: 'E2E Device',
           deviceType: 'desktop',
           platform: 'Windows',

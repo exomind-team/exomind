@@ -101,6 +101,12 @@ export interface SyncConfig {
 export interface SyncCredentials {
   username: string;
   passwordHash: string;
+  providerId?: string;
+  remoteIdentityId?: string;
+  remoteIdentityKey?: string;
+  authType?: 'none' | 'basic' | 'token';
+  authUsername?: string;
+  authSecret?: string;
   deviceName: string;
   deviceType: DeviceType;
   platform: string;

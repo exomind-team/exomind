@@ -4,11 +4,13 @@ import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { listLocalProfiles } from '@/lib/profile/profile-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 
 interface UserInfo {
-  username: string;
-  passwordHash: string;
+  profileId: string;
+  loginName: string;
+  displayName: string;
   createdAt: string;
   lastLogin?: string;
 }
@@ -20,7 +22,7 @@ interface SwitchAccountSheetProps {
 }
 
 export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAccountSheetProps) {
-  const { login, register, currentUser } = useSyncStore();
+  const { login, register, activeProfileId } = useSyncStore();
 
   const [mode, setMode] = useState<'switch' | 'login' | 'register'>(initialMode);
   const [previousMode, setPreviousMode] = useState<'switch' | 'login'>(initialMode === 'register' ? 'login' : initialMode as 'switch' | 'login');
@@ -50,12 +52,13 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
   }, [open, initialMode]);
 
   function loadUsers() {
-    try {
-      const stored = localStorage.getItem('exomind:users');
-      setUsers(stored ? JSON.parse(stored) : []);
-    } catch {
-      setUsers([]);
-    }
+    const profiles = listLocalProfiles().map((profile) => ({
+      profileId: profile.profileId,
+      loginName: profile.slug,
+      displayName: profile.displayName,
+      createdAt: profile.createdAt,
+    }));
+    setUsers(profiles);
   }
 
   async function handleSwitchLogin() {
@@ -130,6 +133,8 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
     setError('');
   }
 
+  const selectedProfile = users.find((user) => user.loginName === selectedUser) || null;
+
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent>
@@ -143,11 +148,11 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
 
               <div className="space-y-2">
                 {users.map((user) => {
-                  const isCurrent = user.username === currentUser;
-                  const isSelected = user.username === selectedUser;
+                  const isCurrent = user.profileId === activeProfileId;
+                  const isSelected = user.loginName === selectedUser;
                   return (
                     <button
-                      key={user.username}
+                      key={user.profileId}
                       className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
                         isCurrent
                           ? 'border-[#C75B3A]/30 bg-[#C75B3A]/5'
@@ -157,7 +162,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                       }`}
                       onClick={() => {
                         if (!isCurrent) {
-                          setSelectedUser(user.username);
+                          setSelectedUser(user.loginName);
                           setPassword('');
                           setError('');
                         }
@@ -165,9 +170,10 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                     >
                       <div>
                         <div className="text-sm font-medium text-stone-800">
-                          {user.username}
+                          {user.displayName}
                         </div>
-                        <div className="text-xs text-stone-400">
+                        <div className="text-xs text-stone-400 space-y-0.5">
+                          <div>档案标识：{user.loginName}</div>
                           注册于 {new Date(user.createdAt).toLocaleDateString()}
                         </div>
                       </div>
@@ -182,7 +188,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
               </div>
 
               {/* Password input for selected user */}
-              {selectedUser && selectedUser !== currentUser && (
+              {selectedUser && selectedProfile?.profileId !== activeProfileId && (
                 <div className="space-y-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs text-stone-500">密码</Label>
@@ -211,7 +217,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 className="w-full rounded-xl"
                 onClick={goToRegister}
               >
-                注册新账户
+                注册新档案
               </Button>
             </div>
           )}
