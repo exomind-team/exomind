@@ -545,12 +545,10 @@ function TabBar({
 
 function TopologyView({
   graph,
-  selectedNodeId,
   onSelectNode,
   onClearSelection,
 }: {
   graph: SignalGraph;
-  selectedNodeId: string | null;
   onSelectNode: (nodeId: string) => void;
   onClearSelection: () => void;
 }) {
@@ -560,8 +558,6 @@ function TopologyView({
   const edgeLabelColor = isDarkMode ? '#D6D3D1' : '#78716C';
   const edgeLabelBgColor = isDarkMode ? '#1C1917' : '#FAF7F5';
   const backgroundDotColor = isDarkMode ? '#44403C' : '#E7E5E4';
-
-  const selectedNode = graph.nodes.find((item) => item.id === selectedNodeId) ?? null;
 
   const nextFlowNodes = useMemo<SignalFlowNodeType[]>(() => {
     return graph.nodes.map((node) => ({
@@ -615,7 +611,7 @@ function TopologyView({
   return (
     <section
       data-testid="agent-topology-view"
-      className="space-y-3"
+      className="h-full min-h-0"
       onClick={(event) => {
         if (event.target === event.currentTarget) {
           onClearSelection();
@@ -624,7 +620,7 @@ function TopologyView({
     >
       <div
         data-testid="agent-topology-canvas"
-        className="relative h-[568px] overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
+        className="relative h-full min-h-0 w-full overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
       >
         <ReactFlow
           data-testid="agent-signal-flow"
@@ -645,18 +641,6 @@ function TopologyView({
           <Controls showInteractive className="agent-topology-controls" />
         </ReactFlow>
       </div>
-
-      {selectedNode && (
-        <div
-          data-testid="agent-topology-node-detail-card"
-          className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 text-[#1C1917] shadow-sm dark:border-[#44403C] dark:bg-[#0C0A09] dark:text-[#FAFAF9]"
-          onClick={(event) => event.stopPropagation()}
-        >
-          <p className="text-sm font-semibold">{selectedNode.label}</p>
-          <p className="mt-1 text-xs text-[#57534E] dark:text-white/80">状态：{selectedNode.status}</p>
-          <p className="mt-1 text-xs text-[#78716C] dark:text-white/60">类型：{signalNodeTypeBadgeLabel(selectedNode.type)}</p>
-        </div>
-      )}
     </section>
   );
 }
@@ -1964,7 +1948,6 @@ export function AgentsPage() {
     setIsChatSending(false);
   }, [rightPanel.state]);
 
-  const [selectedNodeId, setSelectedNodeId] = useState<string | null>(null);
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
 
@@ -2240,12 +2223,6 @@ export function AgentsPage() {
     [graphAgents, signalRoutes]
   );
 
-  useEffect(() => {
-    if (!selectedNodeId) return;
-    if (signalGraph.nodes.some((node) => node.id === selectedNodeId)) return;
-    setSelectedNodeId(null);
-  }, [selectedNodeId, signalGraph.nodes]);
-
   const content = useMemo(() => {
     if (viewMode === 'list') {
       return (
@@ -2308,9 +2285,7 @@ export function AgentsPage() {
     return (
       <TopologyView
         graph={signalGraph}
-        selectedNodeId={selectedNodeId}
         onSelectNode={(nodeId) => {
-          setSelectedNodeId(nodeId);
           // 判断节点类型
           const node = signalGraph.nodes.find((n) => n.id === nodeId);
           if (node?.type === 'agent') openAgentDetail(nodeId);
@@ -2319,7 +2294,6 @@ export function AgentsPage() {
           // TODO(issue-354-mobile-sheet): <lg 视口点击节点后改为底部详情 Sheet。
         }}
         onClearSelection={() => {
-          setSelectedNodeId(null);
           closeRightPanel();
         }}
       />
@@ -2340,7 +2314,6 @@ export function AgentsPage() {
     runtimeExternalAddressDraft,
     runtimeServiceStatus,
     nodesFilter,
-    selectedNodeId,
     viewMode,
   ]);
 
@@ -2381,7 +2354,7 @@ export function AgentsPage() {
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
-        <div className="flex-1 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10">
+        <div className="flex-1 min-h-0 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10">
           {content}
         </div>
 

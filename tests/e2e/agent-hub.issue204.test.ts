@@ -13,6 +13,34 @@ test.describe('Issue #204 Agent Hub（Agent Hub 全视图）', () => {
     await setupIssue204Flags(page);
   });
 
+  test('topology canvas fills topology container（桌面端拓扑画布应贴满拓扑容器）', async ({ page }) => {
+    await page.setViewportSize({ width: 1920, height: 1080 });
+    await page.goto('/agents');
+
+    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
+    await expect(page.getByTestId('agent-topology-view')).toBeVisible();
+    await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
+
+    const layoutMetrics = await page.evaluate(() => {
+      const topologyViewNode = document.querySelector('[data-testid="agent-topology-view"]');
+      const canvasNode = document.querySelector('[data-testid="agent-topology-canvas"]');
+      if (!topologyViewNode || !canvasNode) return null;
+
+      const topologyRect = topologyViewNode.getBoundingClientRect();
+      const canvasRect = canvasNode.getBoundingClientRect();
+      const fillRatio = topologyRect.height > 0 ? canvasRect.height / topologyRect.height : 0;
+
+      return {
+        topologyHeight: topologyRect.height,
+        canvasHeight: canvasRect.height,
+        fillRatio,
+      };
+    });
+
+    expect(layoutMetrics).not.toBeNull();
+    expect(layoutMetrics!.fillRatio).toBeGreaterThan(0.98);
+  });
+
   test('main views + add node sheet + list-to-detail navigation（主视图和详情跳转）', async ({ page }) => {
     await page.goto('/agents');
     await page.waitForLoadState('networkidle');

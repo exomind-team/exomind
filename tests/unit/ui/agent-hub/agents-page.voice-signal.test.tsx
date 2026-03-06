@@ -175,17 +175,17 @@ describe('agents page voice signal topology（语音信号拓扑）', () => {
     });
   });
 
-  it('uses light detail surface for voice input node in light mode（浅色模式下语音节点详情卡片不应为黑底）', async () => {
+  it('removes topology status card after node click（点击节点后不再显示拓扑底部状态卡片）', async () => {
     render(<AgentsPage />);
 
     const voiceNode = await screen.findByTestId('mock-react-flow-node-input:voice');
     fireEvent.click(voiceNode);
 
-    const detailCard = await screen.findByTestId('agent-topology-node-detail-card');
-    expect(detailCard.className).toContain('bg-white');
-    expect(detailCard.className).toContain('text-[#1C1917]');
-    expect(detailCard.className).toContain('dark:bg-[#0C0A09]');
-    expect(detailCard).toHaveTextContent('Voice Input（语音输入）');
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-topology-node-detail-card')).not.toBeInTheDocument();
+    });
+
+    expect(await screen.findByTestId('agent-rightpanel-shell')).toBeInTheDocument();
   });
 
   it('uses semantic theme tokens for voice input node in dark mode（暗色模式下语音输入节点应接入全局主题 token）', async () => {
