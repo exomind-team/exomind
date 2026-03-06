@@ -983,7 +983,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-dmg-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/dmg/
+          path: |
+            target/release/bundle/dmg/
+            src-tauri/target/release/bundle/dmg/
           if-no-files-found: ignore
 
   build-linux:
@@ -1079,14 +1081,18 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: linux-deb-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/deb/
+          path: |
+            target/release/bundle/deb/
+            src-tauri/target/release/bundle/deb/
           if-no-files-found: ignore
 
       - name: Upload Linux AppImage Artifact (上传 AppImage)
         uses: actions/upload-artifact@v4
         with:
           name: linux-appimage-${{ steps.hash.outputs.HASH }}
-          path: src-tauri/target/release/bundle/appimage/
+          path: |
+            target/release/bundle/appimage/
+            src-tauri/target/release/bundle/appimage/
           if-no-files-found: ignore
 
   create-release:
