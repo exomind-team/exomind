@@ -35,7 +35,8 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('输出目标')).toBeInTheDocument();
     expect(screen.getByTestId('agent-detail-chat-button')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-detail-page').className).toContain('dark:bg-[#0C0A09]');
+    expect(screen.getByTestId('agent-detail-page').className).toContain('bg-surface');
+    expect(screen.getByTestId('agent-detail-page').className).toContain('text-foreground');
   });
 
   it('renders actor detail sections（Actor 详情区块）', async () => {
@@ -49,7 +50,8 @@ describe('agent/actor detail pages issue-204（详情页）', () => {
     expect(screen.getByTestId('actor-detail-header')).toBeInTheDocument();
     expect(screen.getByText('触发规则')).toBeInTheDocument();
     expect(screen.getByText('最近执行')).toBeInTheDocument();
-    expect(screen.getByTestId('actor-detail-page').className).toContain('dark:bg-[#0C0A09]');
+    expect(screen.getByTestId('actor-detail-page').className).toContain('bg-surface');
+    expect(screen.getByTestId('actor-detail-page').className).toContain('text-foreground');
   });
 
   it('renders agent empty state when detail is missing（Agent 空详情应展示空态）', async () => {

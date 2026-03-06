@@ -434,11 +434,16 @@ type SignalFlowNodeData = {
 type SignalFlowNodeType = FlowNode<SignalFlowNodeData, SignalGraphNodeType>;
 
 function nodeTypeTint(nodeType: SignalGraphNodeType): string {
-  if (nodeType === 'input') return '#8B5CF6';
+  if (nodeType === 'signal-input') return '#8B5CF6';
   if (nodeType === 'topic') return '#C75B3A';
   if (nodeType === 'agent') return '#0D9488';
   if (nodeType === 'actor') return '#F59E0B';
   return '#6366F1';
+}
+
+function signalNodeTypeBadgeLabel(nodeType: SignalGraphNodeType): string {
+  if (nodeType === 'signal-input') return 'input';
+  return nodeType;
 }
 
 function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
@@ -457,12 +462,12 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
         <Handle type="target" position={Position.Left} style={handleBaseStyle} />
         <Handle type="source" position={Position.Right} style={handleBaseStyle} />
         <div
-          className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-white dark:bg-[#1C1917]"
+          className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-card"
           style={{ borderColor: `${tint}80` }}
         />
         <div className="absolute inset-0 flex flex-col items-center justify-center">
-          <p className="max-w-[120px] truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{data.label}</p>
-          <p className="mt-1 max-w-[120px] truncate text-[10px] text-[#78716C] dark:text-[#A8A29E]">{data.subtitle}</p>
+          <p className="max-w-[120px] truncate text-xs font-semibold text-foreground">{data.label}</p>
+          <p className="mt-1 max-w-[120px] truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
         </div>
       </div>
     );
@@ -471,7 +476,7 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
   const shapeClass =
     data.nodeType === 'topic'
       ? 'rounded-full px-5 py-3'
-      : data.nodeType === 'input'
+      : data.nodeType === 'signal-input'
         ? 'rounded-2xl px-4 py-3'
       : data.nodeType === 'actor'
         ? 'rounded-xl px-4 py-3'
@@ -479,19 +484,19 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
 
   return (
     <div
-      className={`min-w-[120px] border bg-white text-center shadow-sm dark:bg-[#1C1917] ${shapeClass}`}
+      className={`min-w-[120px] border bg-card text-center shadow-sm ${shapeClass}`}
       style={{ borderColor: `${tint}80` }}
     >
       <Handle type="target" position={Position.Left} style={handleBaseStyle} />
       <Handle type="source" position={Position.Right} style={handleBaseStyle} />
-      <p className="truncate text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{data.label}</p>
-      <p className="mt-1 truncate text-[10px] text-[#78716C] dark:text-[#A8A29E]">{data.subtitle}</p>
+      <p className="truncate text-xs font-semibold text-foreground">{data.label}</p>
+      <p className="mt-1 truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
     </div>
   );
 }
 
 const SIGNAL_NODE_TYPES = {
-  input: SignalFlowNode,
+  'signal-input': SignalFlowNode,
   topic: SignalFlowNode,
   agent: SignalFlowNode,
   actor: SignalFlowNode,
@@ -636,7 +641,7 @@ function TopologyView({
           proOptions={{ hideAttribution: true }}
         >
           <Background gap={20} color={backgroundDotColor} />
-          <Controls showInteractive />
+          <Controls showInteractive className="agent-topology-controls" />
         </ReactFlow>
       </div>
 
@@ -648,7 +653,7 @@ function TopologyView({
         >
           <p className="text-sm font-semibold">{selectedNode.label}</p>
           <p className="mt-1 text-xs text-[#57534E] dark:text-white/80">状态：{selectedNode.status}</p>
-          <p className="mt-1 text-xs text-[#78716C] dark:text-white/60">类型：{selectedNode.type}</p>
+          <p className="mt-1 text-xs text-[#78716C] dark:text-white/60">类型：{signalNodeTypeBadgeLabel(selectedNode.type)}</p>
         </div>
       )}
     </section>
@@ -2374,9 +2379,12 @@ export function AgentsPage() {
 
         {/* 右侧栏：桌面端固定 380px，CLOSED 时不渲染 */}
         {rightPanel.state !== 'CLOSED' && (
-          <aside className="hidden w-[380px] shrink-0 border-l border-[#292524] bg-[#1C1917] lg:flex lg:flex-col">
-            <div className="flex items-center justify-between border-b border-[#292524] px-4 py-3">
-              <span className="flex items-center gap-2 text-sm font-medium text-[#FAFAF9]">
+          <aside
+            data-testid="agent-rightpanel-shell"
+            className="hidden w-[380px] shrink-0 border-l border-border-card bg-surface text-foreground lg:flex lg:flex-col"
+          >
+            <div className="flex items-center justify-between border-b border-border-card px-4 py-3">
+              <span className="flex items-center gap-2 text-sm font-medium text-foreground">
                 {(rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') && (() => {
                   const nodeId = rightPanel.nodeId;
                   const node = nodeId ? signalGraph.nodes.find((n) => n.id === nodeId) : null;
@@ -2400,7 +2408,7 @@ export function AgentsPage() {
               <button
                 type="button"
                 onClick={closeRightPanel}
-                className="flex h-7 w-7 items-center justify-center rounded text-[#A8A29E] hover:text-[#FAFAF9]"
+                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
                 aria-label="关闭"
               >
                 <X size={16} />
@@ -2432,7 +2440,7 @@ export function AgentsPage() {
                 />
               )}
               {(rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') && (
-                <div className="p-4">
+                <div data-testid="agent-rightpanel-agent-detail" className="p-4 text-foreground">
                   {(() => {
                     const nodeId = rightPanel.nodeId;
                     const node = nodeId
@@ -2450,8 +2458,8 @@ export function AgentsPage() {
                       warning: 'bg-[#F59E0B]/15 text-[#F59E0B]',
                     };
                     const logStatusColors: Record<string, string> = {
-                      online: 'text-[#D6D3D1]',
-                      offline: 'text-[#78716C]',
+                      online: 'text-foreground',
+                      offline: 'text-muted-foreground',
                       warning: 'text-[#F59E0B]',
                       error: 'text-[#EF4444]',
                       busy: 'text-[#F59E0B]',
@@ -2478,8 +2486,8 @@ export function AgentsPage() {
                             />
                           </div>
                           <div>
-                            <p className="text-sm font-medium text-[#FAFAF9]">{nodeLabel}</p>
-                            <p className="text-xs text-[#A8A29E]">
+                            <p className="text-sm font-medium text-foreground">{nodeLabel}</p>
+                            <p className="text-xs text-muted-foreground">
                               {nodeType === 'agent' ? 'Agent' : 'Actor'} · {runtimeNodeId ?? nodeId ?? '--'}
                             </p>
                           </div>
@@ -2514,9 +2522,9 @@ export function AgentsPage() {
                         {/* 加载态：骨架屏 */}
                         {isDetailLoading && (
                           <div className="flex flex-col gap-3">
-                            <div className="h-4 w-20 rounded bg-[#292524] animate-pulse" />
-                            <div className="h-3 w-full rounded bg-[#292524] animate-pulse" />
-                            <div className="h-3 w-3/4 rounded bg-[#292524] animate-pulse" />
+                            <div className="h-4 w-20 rounded bg-muted animate-pulse" />
+                            <div className="h-3 w-full rounded bg-muted animate-pulse" />
+                            <div className="h-3 w-3/4 rounded bg-muted animate-pulse" />
                           </div>
                         )}
 
@@ -2530,16 +2538,16 @@ export function AgentsPage() {
 
                             {/* 描述 */}
                             {agentDetail.description && (
-                              <p className="text-xs text-[#A8A29E] line-clamp-3">{agentDetail.description}</p>
+                              <p className="text-xs text-muted-foreground line-clamp-3">{agentDetail.description}</p>
                             )}
 
                             {/* 统计指标 2x2 grid */}
                             {agentDetail.stats.length > 0 && (
                               <div className="grid grid-cols-2 gap-2">
                                 {agentDetail.stats.slice(0, 4).map((s) => (
-                                  <div key={s.label} className="rounded-lg bg-[#292524] px-3 py-2">
-                                    <p className="text-[10px] text-[#78716C]">{s.label}</p>
-                                    <p className="text-sm font-medium text-[#D6D3D1]">{s.value}</p>
+                                  <div key={s.label} className="rounded-lg border border-border-card bg-card px-3 py-2">
+                                    <p className="text-[10px] text-muted-foreground">{s.label}</p>
+                                    <p className="text-sm font-medium text-foreground">{s.value}</p>
                                   </div>
                                 ))}
                               </div>
@@ -2548,11 +2556,11 @@ export function AgentsPage() {
                             {/* 触发规则 */}
                             {agentDetail.triggerRules.length > 0 && (
                               <div className="flex flex-col gap-1.5">
-                                <p className="text-[10px] font-medium uppercase tracking-wide text-[#78716C]">触发规则</p>
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">触发规则</p>
                                 {agentDetail.triggerRules.slice(0, 3).map((r) => (
                                   <div key={r.key} className="flex items-baseline gap-2">
-                                    <span className="font-mono text-[10px] text-[#A8A29E]">{r.key}:</span>
-                                    <span className="text-xs text-[#D6D3D1]">{r.value}</span>
+                                    <span className="font-mono text-[10px] text-muted-foreground">{r.key}:</span>
+                                    <span className="text-xs text-foreground">{r.value}</span>
                                   </div>
                                 ))}
                               </div>
@@ -2561,10 +2569,10 @@ export function AgentsPage() {
                             {/* 最近日志 */}
                             {agentDetail.recentLogs.length > 0 && (
                               <div className="flex flex-col gap-1.5">
-                                <p className="text-[10px] font-medium uppercase tracking-wide text-[#78716C]">最近日志</p>
+                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">最近日志</p>
                                 {agentDetail.recentLogs.slice(0, 5).map((log, i) => (
                                   <div key={i} className="flex items-baseline gap-2">
-                                    <span className="shrink-0 text-[10px] text-[#78716C]">{log.time}</span>
+                                    <span className="shrink-0 text-[10px] text-muted-foreground">{log.time}</span>
                                     <span className={`text-xs truncate ${logStatusColors[log.status] ?? logStatusColors.online}`}>{log.title}</span>
                                   </div>
                                 ))}
@@ -2575,7 +2583,7 @@ export function AgentsPage() {
 
                         {/* API 返回 null */}
                         {!isDetailLoading && !agentDetail && (
-                          <p className="text-xs text-[#78716C]">暂无详细数据</p>
+                          <p className="text-xs text-muted-foreground">暂无详细数据</p>
                         )}
                       </div>
                     );
@@ -2583,7 +2591,7 @@ export function AgentsPage() {
                 </div>
               )}
               {rightPanel.state === 'SIGNAL_DETAIL' && (
-                <div className="flex flex-col gap-3 p-4">
+                <div data-testid="agent-rightpanel-signal-detail" className="flex flex-col gap-3 p-4 text-foreground">
                   {(() => {
                     const nodeId = rightPanel.signalId;
                     const normalizedNodeId = nodeId?.includes(':')
@@ -2613,8 +2621,8 @@ export function AgentsPage() {
                     return (
                       <>
                         <div className="flex flex-col gap-1">
-                          <p className="text-xs font-medium text-[#A8A29E]">节点 ID</p>
-                          <p className="font-mono text-sm text-[#FAFAF9]">{nodeId ?? '—'}</p>
+                          <p className="text-xs font-medium text-muted-foreground">节点 ID</p>
+                          <p className="font-mono text-sm text-foreground">{nodeId ?? '—'}</p>
                         </div>
 
                         {node && (
@@ -2622,7 +2630,7 @@ export function AgentsPage() {
                             <div className="flex items-center gap-2">
                               <span
                                 className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                                  node.type === 'input'
+                                  node.type === 'signal-input'
                                     ? 'bg-[#EDE9FE] text-[#7C3AED]'
                                     : node.type === 'agent'
                                       ? 'bg-[#CCFBF1] text-[#0D9488]'
@@ -2633,43 +2641,43 @@ export function AgentsPage() {
                                           : 'bg-[#DBEAFE] text-[#1D4ED8]'
                                 }`}
                               >
-                                {node.type}
+                                {signalNodeTypeBadgeLabel(node.type)}
                               </span>
-                              <span className="text-xs text-[#78716C]">状态：{node.status}</span>
+                              <span className="text-xs text-muted-foreground">状态：{node.status}</span>
                             </div>
                             <div className="flex gap-4">
                               <div className="flex flex-col gap-0.5">
-                                <p className="text-[10px] text-[#78716C]">接收路由</p>
-                                <p className="text-sm font-medium text-[#FAFAF9]">{incomingCount}</p>
+                                <p className="text-[10px] text-muted-foreground">接收路由</p>
+                                <p className="text-sm font-medium text-foreground">{incomingCount}</p>
                               </div>
                               <div className="flex flex-col gap-0.5">
-                                <p className="text-[10px] text-[#78716C]">发送路由</p>
-                                <p className="text-sm font-medium text-[#FAFAF9]">{outgoingCount}</p>
+                                <p className="text-[10px] text-muted-foreground">发送路由</p>
+                                <p className="text-sm font-medium text-foreground">{outgoingCount}</p>
                               </div>
                             </div>
                           </div>
                         )}
 
                         <div className="flex flex-col gap-1">
-                          <p className="text-xs font-medium text-[#A8A29E]">最近信号路由</p>
+                          <p className="text-xs font-medium text-muted-foreground">最近信号路由</p>
                           {relatedRoutes.slice(0, 5).map((r) => (
                             <div
                               key={r.id}
-                              className="flex items-center gap-2 rounded-[6px] bg-[#292524] px-3 py-2"
+                              className="flex items-center gap-2 rounded-[6px] border border-border-card bg-card px-3 py-2"
                             >
                               <span
                                 className={`h-1.5 w-1.5 rounded-full ${r.enabled ? 'bg-[#22C55E]' : 'bg-[#57534E]'}`}
                               />
-                              <span className="flex-1 truncate font-mono text-xs text-[#D6D3D1]">
+                              <span className="flex-1 truncate font-mono text-xs text-foreground">
                                 {r.topic}
                               </span>
-                              <span className="shrink-0 text-[10px] text-[#78716C]">
+                              <span className="shrink-0 text-[10px] text-muted-foreground">
                                 → {r.target_type}
                               </span>
                             </div>
                           ))}
                           {relatedRoutes.length === 0 && (
-                            <p className="text-xs text-[#57534E]">无关联路由</p>
+                            <p className="text-xs text-muted-foreground">无关联路由</p>
                           )}
                         </div>
                       </>

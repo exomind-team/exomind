@@ -7,7 +7,7 @@ import {
   isVoiceTranscriptTopic,
 } from '@/lib/constants/signal-topics';
 
-export type SignalGraphNodeType = 'input' | 'topic' | 'agent' | 'actor' | 'frontend' | 'remote';
+export type SignalGraphNodeType = 'signal-input' | 'topic' | 'agent' | 'actor' | 'frontend' | 'remote';
 
 export interface SignalRouteRow {
   id: string;
@@ -85,7 +85,7 @@ function getAgentStatusMap(agents: RuntimeAggregatedAgent[]): Map<string, string
 }
 
 function nodeTypeToColumn(type: SignalGraphNodeType): number {
-  if (type === 'input') return 0;
+  if (type === 'signal-input') return 0;
   if (type === 'topic') return 1;
   if (type === 'agent') return 2;
   if (type === 'actor') return 3;
@@ -94,7 +94,7 @@ function nodeTypeToColumn(type: SignalGraphNodeType): number {
 }
 
 function nodeTypeLabel(type: SignalGraphNodeType): string {
-  if (type === 'input') return 'signal input（信号输入）';
+  if (type === 'signal-input') return 'signal input（信号输入）';
   if (type === 'topic') return 'signal topic（信号主题）';
   if (type === 'agent') return 'agent';
   if (type === 'actor') return 'actor';
@@ -106,7 +106,7 @@ function getInputNodeForTopic(topic: string): Pick<SignalGraphNode, 'id' | 'type
   if (isVoiceTranscriptTopic(topic)) {
     return {
       id: VOICE_INPUT_NODE_ID,
-      type: 'input',
+      type: 'signal-input',
       label: VOICE_INPUT_NODE_LABEL,
       status: VOICE_INPUT_NODE_SUBTITLE,
     };
@@ -120,7 +120,7 @@ export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregate
   const nextEdges = new Map<string, SignalGraphEdge>();
   const statusByAgentId = getAgentStatusMap(agents);
   const rowByType = new Map<SignalGraphNodeType, number>([
-    ['input', 0],
+    ['signal-input', 0],
     ['topic', 0],
     ['agent', 0],
     ['actor', 0],
@@ -131,15 +131,15 @@ export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregate
   for (const route of routes) {
     const inputNode = getInputNodeForTopic(route.topic);
     if (inputNode && !nextNodes.has(inputNode.id)) {
-      const row = rowByType.get('input') ?? 0;
+      const row = rowByType.get('signal-input') ?? 0;
       nextNodes.set(inputNode.id, {
         ...inputNode,
         position: {
-          x: 120 + nodeTypeToColumn('input') * 240,
+          x: 120 + nodeTypeToColumn('signal-input') * 240,
           y: 80 + row * 110,
         },
       });
-      rowByType.set('input', row + 1);
+      rowByType.set('signal-input', row + 1);
     }
 
     const fromNodeId = topicNodeId(route.topic);

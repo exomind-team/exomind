@@ -51,7 +51,7 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
 
   if (loading) {
     return (
-      <div data-testid="agent-detail-page" className="min-h-full px-5 py-4 text-sm text-[#A8A29E] dark:text-[#78716C] md:px-8 lg:px-10">
+      <div data-testid="agent-detail-page" className="min-h-full bg-surface px-5 py-4 text-sm text-muted-foreground md:px-8 lg:px-10">
         Agent 详情加载中...
       </div>
     );
@@ -59,17 +59,17 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
 
   if (!detail) {
     return (
-      <div data-testid="agent-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09] md:px-8 lg:px-10">
+      <div data-testid="agent-detail-page" className="min-h-full bg-surface px-5 py-3 text-foreground md:px-8 lg:px-10">
         <section
           data-testid="agent-detail-empty-state"
-          className="mt-6 rounded-2xl border border-[#E7E5E4] bg-white px-4 py-6 text-center dark:border-[#292524] dark:bg-[#1C1917]"
+          className="mt-6 rounded-2xl border border-border-card bg-card px-4 py-6 text-center"
         >
-          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">未找到 Agent 详情</p>
-          <p className="mt-1 text-xs text-[#A8A29E] dark:text-[#78716C]">该节点可能已删除或尚未配置详情数据。</p>
+          <p className="text-sm font-semibold text-foreground">未找到 Agent 详情</p>
+          <p className="mt-1 text-xs text-muted-foreground">该节点可能已删除或尚未配置详情数据。</p>
           <button
             type="button"
             onClick={() => window.history.back()}
-            className="mt-4 rounded-lg bg-[#F5F0ED] px-3 py-2 text-xs font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+            className="mt-4 rounded-lg bg-muted px-3 py-2 text-xs font-medium text-muted-foreground"
           >
             返回上一页
           </button>
@@ -79,82 +79,82 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
   }
 
   return (
-    <div data-testid="agent-detail-page" className="min-h-full bg-[#FAF7F5] px-5 py-3 dark:bg-[#0C0A09] md:px-8 lg:px-10">
-      <header data-testid="agent-detail-header" className="mb-3 flex items-center justify-between border-b border-[#F0ECE8] pb-3 dark:border-[#292524]">
+    <div data-testid="agent-detail-page" className="min-h-full bg-surface px-5 py-3 text-foreground md:px-8 lg:px-10">
+      <header data-testid="agent-detail-header" className="mb-3 flex items-center justify-between border-b border-border-card pb-3">
         <button
           type="button"
           data-testid="agent-detail-back-button"
           onClick={() => window.history.back()}
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
           aria-label="返回（Back）"
         >
           <ArrowLeft size={16} />
         </button>
-        <h1 className="text-[17px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">{detail.title}</h1>
+        <h1 className="text-[17px] font-bold text-foreground">{detail.title}</h1>
         <button
           type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
           aria-label="更多（More）"
         >
           <MoreHorizontal size={16} />
         </button>
       </header>
 
-      <section className="rounded-[18px] border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+      <section className="rounded-[18px] border border-border-card bg-card p-4">
         <div className="flex items-center gap-3">
           <div className="flex h-10 w-10 items-center justify-center rounded-xl bg-[#C75B3A20] text-[#C75B3A]">
             <Sparkles size={18} />
           </div>
           <div>
-            <p className="text-[16px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">{detail.title}</p>
+            <p className="text-[16px] font-bold text-foreground">{detail.title}</p>
             <p className="text-xs text-[#22C55E]">● 运行中</p>
           </div>
         </div>
-        <p className="mt-2 text-sm text-[#78716C] dark:text-[#A8A29E]">{detail.description}</p>
+        <p className="mt-2 text-sm text-muted-foreground">{detail.description}</p>
         <div className="mt-3 grid grid-cols-3 gap-2">
           {detail.stats.map((stat) => (
-            <div key={stat.label} className="rounded-lg bg-[#FAF7F5] py-2 text-center dark:bg-[#292524]">
-              <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">{stat.label}</span>
-              <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{stat.value}</p>
+            <div key={stat.label} className="rounded-lg bg-background py-2 text-center">
+              <span className="text-[11px] text-muted-foreground">{stat.label}</span>
+              <p className="text-sm font-semibold text-foreground">{stat.value}</p>
             </div>
           ))}
         </div>
       </section>
 
       <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">触发规则</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
+        <h3 className="text-[13px] font-semibold text-muted-foreground">触发规则</h3>
+        <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
           {detail.triggerRules.map((item, index) => (
             <div key={`${item.key}-${item.value}`}>
               <div className="flex items-center justify-between px-4 py-3">
-                <span className="text-sm text-[#78716C] dark:text-[#A8A29E]">{item.key}</span>
-                <span className={`text-sm ${item.highlight ? 'font-semibold text-[#C75B3A]' : 'text-[#1C1917] dark:text-[#FAFAF9]'}`}>
+                <span className="text-sm text-muted-foreground">{item.key}</span>
+                <span className={`text-sm ${item.highlight ? 'font-semibold text-[#C75B3A]' : 'text-foreground'}`}>
                   {item.value}
                 </span>
               </div>
-              {index !== detail.triggerRules.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
+              {index !== detail.triggerRules.length - 1 && <div className="h-px bg-border" />}
             </div>
           ))}
         </div>
       </section>
 
       <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">输出目标</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
+        <h3 className="text-[13px] font-semibold text-muted-foreground">输出目标</h3>
+        <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
           {detail.targets.map((item, index) => {
             const Icon = getTargetIcon(item);
             return (
               <div key={item.id}>
                 <div className="flex items-center gap-3 px-4 py-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-muted text-muted-foreground">
                     <Icon size={14} />
                   </div>
                   <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</p>
-                    <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{item.description}</p>
+                    <p className="text-sm font-medium text-foreground">{item.name}</p>
+                    <p className="text-xs text-muted-foreground">{item.description}</p>
                   </div>
                 </div>
-                {index !== detail.targets.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
+                {index !== detail.targets.length - 1 && <div className="h-px bg-border" />}
               </div>
             );
           })}
@@ -162,8 +162,8 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
       </section>
 
       <section className="mt-4">
-        <h3 className="text-[13px] font-semibold text-[#78716C] dark:text-[#A8A29E]">最近执行</h3>
-        <div className="mt-2 overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
+        <h3 className="text-[13px] font-semibold text-muted-foreground">最近执行</h3>
+        <div className="mt-2 overflow-hidden rounded-2xl border border-border-card bg-card">
           {detail.recentLogs.map((item, index) => (
             <div key={item.id}>
               <div className="flex items-center justify-between px-4 py-3">
@@ -172,16 +172,16 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
                     <CheckCheck size={12} />
                   </div>
                   <div>
-                    <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                    <p className="text-xs text-[#A8A29E] dark:text-[#78716C]">{item.time}</p>
+                    <p className="text-sm font-medium text-foreground">{item.title}</p>
+                    <p className="text-xs text-muted-foreground">{item.time}</p>
                   </div>
                 </div>
-                <div className="flex items-center gap-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                <div className="flex items-center gap-1 text-xs text-muted-foreground">
                   <Clock3 size={11} />
                   {item.duration ?? '--'}
                 </div>
               </div>
-              {index !== detail.recentLogs.length - 1 && <div className="h-px bg-[#F5F0ED] dark:bg-[#292524]" />}
+              {index !== detail.recentLogs.length - 1 && <div className="h-px bg-border" />}
             </div>
           ))}
         </div>

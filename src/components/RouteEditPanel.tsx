@@ -47,17 +47,17 @@ export function RouteEditPanel({
         : [];
 
   return (
-    <div className="flex flex-col gap-4 p-4">
+    <div className="flex flex-col gap-4 p-4 text-foreground">
       {/* Topic */}
       <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-[#A8A29E]">Topic</span>
+        <span className="text-xs font-medium text-muted-foreground">Topic</span>
         <input
           type="text"
           list="route-edit-topics"
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
           placeholder="e.g. voice.input.transcript / user.input.text"
-          className="rounded-lg border border-[#292524] bg-[#1C1917] px-3 py-2 text-sm text-[#FAFAF9] placeholder:text-[#57534E] focus:border-[#C75B3A] focus:outline-none"
+          className="rounded-lg border border-border-card bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-[#C75B3A] focus:outline-none"
         />
         <datalist id="route-edit-topics">
           {availableTopics.map((t) => (
@@ -68,14 +68,14 @@ export function RouteEditPanel({
 
       {/* Target Type */}
       <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-[#A8A29E]">Target Type</span>
+        <span className="text-xs font-medium text-muted-foreground">Target Type</span>
         <select
           value={targetType}
           onChange={(e) => {
             setTargetType(e.target.value as TargetType);
             setTargetRef('');
           }}
-          className="rounded-lg border border-[#292524] bg-[#1C1917] px-3 py-2 text-sm text-[#FAFAF9] focus:border-[#C75B3A] focus:outline-none"
+          className="rounded-lg border border-border-card bg-card px-3 py-2 text-sm text-foreground focus:border-[#C75B3A] focus:outline-none"
         >
           <option value="agent">Agent</option>
           <option value="actor">Actor</option>
@@ -86,12 +86,12 @@ export function RouteEditPanel({
 
       {/* Target Ref */}
       <label className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-[#A8A29E]">Target Ref</span>
+        <span className="text-xs font-medium text-muted-foreground">Target Ref</span>
         {targetOptions.length > 0 ? (
           <select
             value={targetRef}
             onChange={(e) => setTargetRef(e.target.value)}
-            className="rounded-lg border border-[#292524] bg-[#1C1917] px-3 py-2 text-sm text-[#FAFAF9] focus:border-[#C75B3A] focus:outline-none"
+            className="rounded-lg border border-border-card bg-card px-3 py-2 text-sm text-foreground focus:border-[#C75B3A] focus:outline-none"
           >
             <option value="">选择目标…</option>
             {targetOptions.map((opt) => (
@@ -106,7 +106,7 @@ export function RouteEditPanel({
             value={targetRef}
             onChange={(e) => setTargetRef(e.target.value)}
             placeholder="e.g. ui"
-            className="rounded-lg border border-[#292524] bg-[#1C1917] px-3 py-2 text-sm text-[#FAFAF9] placeholder:text-[#57534E] focus:border-[#C75B3A] focus:outline-none"
+            className="rounded-lg border border-border-card bg-card px-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:border-[#C75B3A] focus:outline-none"
           />
         )}
       </label>
@@ -117,9 +117,9 @@ export function RouteEditPanel({
           type="checkbox"
           checked={enabled}
           onChange={(e) => setEnabled(e.target.checked)}
-          className="h-4 w-4 rounded border-[#292524] bg-[#1C1917] accent-[#C75B3A]"
+          className="h-4 w-4 rounded border-border-card bg-card accent-[#C75B3A]"
         />
-        <span className="text-sm text-[#FAFAF9]">启用</span>
+        <span className="text-sm text-foreground">启用</span>
       </label>
 
       {/* Actions */}
@@ -135,7 +135,7 @@ export function RouteEditPanel({
         <button
           type="button"
           onClick={onCancel}
-          className="rounded-lg border border-[#292524] px-4 py-2 text-sm text-[#A8A29E] hover:text-[#FAFAF9]"
+          className="rounded-lg border border-border-card px-4 py-2 text-sm text-muted-foreground hover:bg-muted hover:text-foreground"
         >
           取消
         </button>

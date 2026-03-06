@@ -136,11 +136,11 @@ describe('agents signal topology builder issue-245f（信号拓扑构建）', ()
     expect(inactiveEdge?.active).toBe(false);
   });
 
-  it('injects a voice input node before transcript topic（语音转写主题前显示语音输入节点）', () => {
+  it('injects a dedicated voice input node type before transcript topic（语音转写主题前显示专用输入节点类型，避免命中 React Flow 内建 input 样式）', () => {
     const graph = buildSignalGraph(SAMPLE_ROUTES, SAMPLE_AGENTS);
 
     expect(graph.nodes.find((node) => node.id === 'input:voice')).toMatchObject({
-      type: 'input',
+      type: 'signal-input',
       label: 'Voice Input（语音输入）',
     });
     expect(graph.nodes.find((node) => node.id === 'topic:voice.input.transcript')).toMatchObject({

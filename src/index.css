@@ -117,6 +117,22 @@
 }
 
 @layer utilities {
+  .agent-topology-controls {
+    @apply rounded-xl border border-border-card bg-card p-1 shadow-sm;
+  }
+
+  .agent-topology-controls button {
+    @apply flex h-8 w-8 items-center justify-center rounded-lg border border-transparent bg-card text-foreground transition-colors;
+  }
+
+  .agent-topology-controls button:hover {
+    @apply bg-muted text-foreground;
+  }
+
+  .dark .agent-topology-controls {
+    box-shadow: 0 12px 32px -20px rgba(0, 0, 0, 0.55);
+  }
+
   /* Safe area utilities / 安全区工具类（底部） */
   .safe-area-pb {
     padding-bottom: constant(safe-area-inset-bottom);
