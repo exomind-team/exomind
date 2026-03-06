@@ -14,6 +14,14 @@ export type { TaskService } from './task.service';
 export { TaskTimerServiceImpl, getTaskTimerService } from './task-timer.service';
 export type { TaskTimerService } from './task-timer.service';
 
+export { ReminderServiceImpl, getReminderService } from './reminder.service';
+export type { ReminderService } from './reminder.service';
+export {
+  ReminderSchedulerServiceImpl,
+  getReminderSchedulerService,
+} from './reminder-scheduler.service';
+export type { ReminderSchedulerService } from './reminder-scheduler.service';
+
 export { MeServiceImpl, getMeService } from './me.service';
 export type { MeService } from './me.service';
 export { AgentHubServiceImpl, getAgentHubService } from './agent-hub.service';

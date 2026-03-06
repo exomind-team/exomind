@@ -1,10 +1,11 @@
 import { setTasksDefaultTab } from '@/config/tasks-default-tab';
 import type { CommandDefinition } from '@/lib/types/command-palette';
 
-export type CoreNavigationPath = '/eventlog' | '/tasks' | '/settings' | '/me' | '/agents';
+export type CoreNavigationPath = '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/me' | '/agents';
 
 interface CreateCoreNavigationCommandsOptions {
   navigate: (path: CoreNavigationPath) => Promise<void> | void;
+  openReminderComposer?: () => void;
 }
 
 export function createCoreNavigationCommands(
@@ -73,6 +74,33 @@ export function createCoreNavigationCommands(
       keywords: ['账户', 'profile'],
       async execute() {
         await options.navigate('/me');
+        return { ok: true };
+      },
+    },
+    {
+      id: 'navigate:reminders',
+      title: '打开提醒',
+      description: '跳转到提醒页面',
+      category: 'navigation',
+      permissionTier: 'safe',
+      aliases: ['提醒', 'reminder', 'reminders'],
+      keywords: ['定时提醒', '通知', '日程'],
+      async execute() {
+        await options.navigate('/reminders');
+        return { ok: true };
+      },
+    },
+    {
+      id: 'action:create-reminder',
+      title: '新建提醒',
+      description: '在提醒页打开新建提醒表单',
+      category: 'action',
+      permissionTier: 'safe',
+      aliases: ['创建提醒', '添加提醒', 'new reminder'],
+      keywords: ['提醒', '创建', 'deadline'],
+      async execute() {
+        options.openReminderComposer?.();
+        await options.navigate('/reminders');
         return { ok: true };
       },
     },

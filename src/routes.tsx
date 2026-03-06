@@ -10,6 +10,8 @@ import { getCommandRegistryService } from '@/lib/services/command-registry.servi
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
+import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
+import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
 
 const FocusPage = lazy(async () => {
@@ -30,6 +32,11 @@ const LegalSupportPage = lazy(async () => {
 const TasksPage = lazy(async () => {
   const module = await import('@/ui/app/pages/TasksPage');
   return { default: module.TasksPage };
+});
+
+const RemindersPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/RemindersPage');
+  return { default: module.RemindersPage };
 });
 
 const TaskDetailPage = lazy(async () => {
@@ -312,6 +319,7 @@ function NewLayout() {
 
     registryService.setCommands('core-navigation', createCoreNavigationCommands({
       navigate: navigateTo,
+      openReminderComposer: requestReminderCompose,
     }));
 
     return () => {
@@ -366,6 +374,7 @@ function NewLayout() {
     || location.pathname === '/dashboard'
     || location.pathname === '/tasks'
     || location.pathname.startsWith('/tasks/')
+    || location.pathname === '/reminders'
     || location.pathname === '/me'
     || location.pathname === '/update'
     || location.pathname === '/settings'
@@ -378,18 +387,22 @@ function NewLayout() {
       <>
         <DesktopLayout activePath={location.pathname} />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
+        <ReminderNotifier />
       </>
     );
   }
 
   return (
-    <MobileShell
-      locationPath={location.pathname}
-      navItems={navItems}
-      desktopFrame={isDesktop}
-      commandPaletteActive={commandPaletteActive}
-      commandContext={commandContext}
-    />
+    <>
+      <MobileShell
+        locationPath={location.pathname}
+        navItems={navItems}
+        desktopFrame={isDesktop}
+        commandPaletteActive={commandPaletteActive}
+        commandContext={commandContext}
+      />
+      <ReminderNotifier />
+    </>
   );
 }
 
@@ -477,6 +490,18 @@ const newTasksRoute = createRoute({
     return (
       <LazyPage>
         <TasksPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newRemindersRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/reminders',
+  component: function NewReminders() {
+    return (
+      <LazyPage>
+        <RemindersPage />
       </LazyPage>
     );
   },
@@ -646,6 +671,7 @@ const newRouteTree = newRootRoute.addChildren([
   newDashboardRoute,
   newEventlogRoute,
   newTasksRoute,
+  newRemindersRoute,
   newTaskDetailRoute,
   newMeRoute,
   newSettingsRoute,
