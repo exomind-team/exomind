@@ -1,448 +1,621 @@
-import { ArrowLeft, ChevronRight, Lock, Play } from 'lucide-react';
+import { ArrowLeft, Ellipsis, Pause, Play } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { useEffect, useRef, useState } from 'react';
-import { getTaskService, getTimeBlockService, getTaskTimerService } from '@/lib/services';
-import type { DependencyCheckResult } from '@/lib/services/task.service';
-import type { TaskNode, TaskStatus } from '@/lib/types/task';
-import type { ActiveBlockData } from '@/lib/types/event';
+import { useEffect, useMemo, useState } from 'react';
+import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
+import type { TaskNode } from '@/lib/types/task';
+import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
+import { getEventStorage } from '@/lib/storage/event-storage';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { getUseMockDataEnabled } from '@/config/mock-data';
+import {
+  buildTaskTimeblockDetailViewModel,
+  type TimeblockEventLog,
+  type TaskTimeblockDetailViewModel,
+  type TimeblockBadge,
+} from './task-timeblock-detail-view';
 
-const STATUS_LABEL: Record<string, string> = {
-  not_started: '未开始',
-  in_progress: '进行中',
-  suspended: '已挂起',
-  completed: '已完成',
-  abandoned: '已放弃',
-};
+type TimerMode = 'countup' | 'countdown';
 
-const STATUS_DOT: Record<string, string> = {
-  not_started: 'bg-gray-400',
-  in_progress: 'bg-amber-500',
-  suspended: 'bg-blue-400',
-  completed: 'bg-emerald-500',
-  abandoned: 'bg-red-400',
-};
+function badgeClassName(badge: TimeblockBadge): string {
+  if (badge.tone === 'success') return 'bg-[#DCFCE7] text-[#15803D]';
+  if (badge.tone === 'warning') return 'bg-[#FFF7ED] text-[#C75B3A]';
+  if (badge.tone === 'danger') return 'bg-[#FEE2E2] text-[#B91C1C]';
+  return 'bg-[#F5F0ED] text-[#78716C]';
+}
 
-const STATUS_ACTION: Record<string, string> = {
-  in_progress: '开始',
-  suspended: '挂起',
-  completed: '完成',
-  not_started: '回退',
-};
+function toneDotClassName(tone: 'neutral' | 'success' | 'warning' | 'danger'): string {
+  if (tone === 'success') return 'bg-[#16A34A]';
+  if (tone === 'warning') return 'bg-[#C75B3A]';
+  if (tone === 'danger') return 'bg-[#E7000B]';
+  return 'bg-[#78716C]';
+}
 
-const PRIORITY_LABEL: Record<string, string> = {
-  low: '低',
-  medium: '中',
-  high: '高',
-};
+function buildSummaryText(model: TaskTimeblockDetailViewModel): string {
+  return [
+    `时间块：${model.summary.blockName}`,
+    `计划：${model.planActual.planContent}`,
+    `实际：${model.planActual.actualContent}`,
+    `差异：${model.planActual.diffReason}`,
+    `AI 产出：${model.aiSummary.keyOutput}`,
+    `阻塞：${model.aiSummary.blocker}`,
+    `建议：${model.aiSummary.suggestion}`,
+  ].join('\n');
+}
+
+function selectReviewMarkdown(task: TaskNode, blockName: string, events: Array<{ type?: string; content: string }>): string {
+  const feedbackEvents = events.filter((event) => event.type === 'agent_feedback');
+  if (feedbackEvents.length === 0) return '';
+
+  const preferred = feedbackEvents.find((event) => event.content.includes(task.title) || event.content.includes(blockName));
+  return preferred?.content ?? feedbackEvents[0].content;
+}
+
+function resolvePreferredBlockId(): string | undefined {
+  if (typeof window === 'undefined') return undefined;
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const fromSearch = searchParams.get('blockId')?.trim();
+  if (fromSearch) return fromSearch;
+
+  const hash = window.location.hash.replace(/^#/, '');
+  const hashParams = new URLSearchParams(hash);
+  const fromHash = hashParams.get('block')?.trim();
+  return fromHash || undefined;
+}
+
+function buildVirtualTaskFromBlock(block: TimeBlock): TaskNode {
+  const estimatedMinutes = Math.max(1, Math.round((block.endTime - block.startTime) / 60_000));
+  return {
+    id: `timeblock-${block.startId}`,
+    title: block.name,
+    description: block.note,
+    status: 'completed',
+    priority: 'medium',
+    dependsOn: [],
+    tags: [],
+    estimatedMinutes,
+    timeBlockIds: [block.startId],
+    createdAt: block.startTime,
+    updatedAt: block.endTime,
+    completedAt: block.endTime,
+  };
+}
+
+function DetailActionsCard({
+  model,
+  onRestart,
+  onCopySummary,
+}: {
+  model: TaskTimeblockDetailViewModel;
+  onRestart: () => void;
+  onCopySummary: () => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+      <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">操作</h3>
+      <div className="mt-3 space-y-2">
+        {model.actions.map((action) => {
+          if (action.id === 'open-task' || action.id === 'open-eventlog') {
+            return (
+              <Link
+                key={action.id}
+                to={action.to!}
+                className="flex w-full items-center justify-between rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#44403C] transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#E7E5E4] dark:hover:bg-[#292524]"
+              >
+                <span>{action.label}</span>
+                <span className="text-xs text-[#A8A29E]">打开</span>
+              </Link>
+            );
+          }
+
+          return (
+            <button
+              key={action.id}
+              type="button"
+              onClick={action.id === 'restart' ? onRestart : onCopySummary}
+              className="flex w-full items-center justify-between rounded-xl border border-[#E7E5E4] px-3 py-2 text-left text-sm text-[#44403C] transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#E7E5E4] dark:hover:bg-[#292524]"
+            >
+              <span>{action.label}</span>
+              <span className="text-xs text-[#A8A29E]">{action.id === 'restart' ? '执行' : '复制'}</span>
+            </button>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function MobileTimeblockDetail({
+  task,
+  model,
+  timerMode,
+  setTimerMode,
+  hasOtherActiveBlock,
+  hasActiveBlockOnTask,
+  onStartTimer,
+  onPauseAndGoEventlog,
+  onCopySummary,
+}: {
+  task: TaskNode;
+  model: TaskTimeblockDetailViewModel;
+  timerMode: TimerMode;
+  setTimerMode: (mode: TimerMode) => void;
+  hasOtherActiveBlock: boolean;
+  hasActiveBlockOnTask: boolean;
+  onStartTimer: () => void;
+  onPauseAndGoEventlog: () => void;
+  onCopySummary: () => void;
+}) {
+  return (
+    <div className="min-h-full bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
+      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-4 py-3 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95">
+        <Link
+          to="/tasks"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+          aria-label="返回任务列表（Back to tasks）"
+        >
+          <ArrowLeft size={16} />
+        </Link>
+        <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">时间块详情</h1>
+        <button
+          type="button"
+          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+          aria-label="更多操作（More actions）"
+        >
+          <Ellipsis size={16} />
+        </button>
+      </header>
+
+      <div className="space-y-3 px-4 pt-3">
+        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+          <div className="flex flex-wrap items-center gap-2">
+            {model.summary.badges.map((badge) => (
+              <span key={badge.label} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClassName(badge)}`}>
+                {badge.label}
+              </span>
+            ))}
+          </div>
+          <h2 className="mt-3 text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h2>
+          <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联任务：{task.title}</p>
+          <div className="mt-3 grid grid-cols-2 gap-2">
+            {model.summary.metrics.map((metric) => (
+              <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
+                <p className="text-[11px] text-[#A8A29E]">{metric.label}</p>
+                <p className="mt-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-2 dark:border-[#292524] dark:bg-[#1C1917]">
+          <div className="flex gap-1 overflow-x-auto">
+            {model.anchors.map((anchor) => (
+              <button
+                key={anchor.id}
+                type="button"
+                className={`shrink-0 rounded-xl px-3 py-1.5 text-xs ${anchor.active ? 'bg-[#C75B3A] font-semibold text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
+              >
+                {anchor.label}
+              </button>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计划 vs 实际</h3>
+          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.planContent}</p>
+          <p className="mt-1 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.actualContent}</p>
+          <p className="mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">{model.planActual.diffReason}</p>
+        </section>
+
+        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h3>
+          <div className="mt-3 space-y-3">
+            {model.timeline.items.map((item) => (
+              <article key={item.id} className="flex gap-3">
+                <div className="mt-1 flex flex-col items-center">
+                  <span className={`h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
+                  <span className="mt-1 h-full w-px bg-[#E7E5E4] dark:bg-[#292524]" />
+                </div>
+                <div className="min-w-0 flex-1 pb-2">
+                  <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
+                  <p className="mt-1 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                  <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.description}</p>
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+
+        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">AI 总结</h3>
+          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.aiSummary.summaryText}</p>
+          <div className="mt-3 space-y-2 rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">关键产出：{model.aiSummary.keyOutput}</p>
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">阻塞点：{model.aiSummary.blocker}</p>
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">建议：{model.aiSummary.suggestion}</p>
+          </div>
+        </section>
+
+        <DetailActionsCard
+          model={model}
+          onRestart={onStartTimer}
+          onCopySummary={onCopySummary}
+        />
+
+        <section
+          data-testid="task-timer-card"
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              data-testid="task-mode-countdown"
+              aria-pressed={timerMode === 'countdown'}
+              onClick={() => setTimerMode('countdown')}
+              className={`rounded-xl px-3 py-1.5 text-xs ${timerMode === 'countdown' ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
+            >
+              倒计时
+            </button>
+            <button
+              type="button"
+              data-testid="task-mode-countup"
+              aria-pressed={timerMode === 'countup'}
+              onClick={() => setTimerMode('countup')}
+              className={`rounded-xl px-3 py-1.5 text-xs ${timerMode === 'countup' ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
+            >
+              正计时
+            </button>
+          </div>
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={onStartTimer}
+              disabled={hasOtherActiveBlock}
+              className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+            >
+              <Play size={14} />
+              开始计时
+            </button>
+            <button
+              type="button"
+              data-testid="task-pause-button"
+              onClick={onPauseAndGoEventlog}
+              className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+            >
+              <Pause size={14} />
+              {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
+            </button>
+          </div>
+        </section>
+      </div>
+    </div>
+  );
+}
+
+function DesktopTimeblockDetail({
+  task,
+  model,
+  timerMode,
+  setTimerMode,
+  hasOtherActiveBlock,
+  hasActiveBlockOnTask,
+  onStartTimer,
+  onPauseAndGoEventlog,
+  onCopySummary,
+}: {
+  task: TaskNode;
+  model: TaskTimeblockDetailViewModel;
+  timerMode: TimerMode;
+  setTimerMode: (mode: TimerMode) => void;
+  hasOtherActiveBlock: boolean;
+  hasActiveBlockOnTask: boolean;
+  onStartTimer: () => void;
+  onPauseAndGoEventlog: () => void;
+  onCopySummary: () => void;
+}) {
+  return (
+    <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
+      <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <p className="text-xs text-[#A8A29E]">任务 &gt; 今日 &gt; 时间块详情</p>
+        <div className="mt-2 flex items-center justify-between gap-3">
+          <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
+          <div className="flex flex-wrap items-center gap-2">
+            {model.summary.badges.map((badge) => (
+              <span key={badge.label} className={`rounded-full px-3 py-1 text-xs font-semibold ${badgeClassName(badge)}`}>
+                {badge.label}
+              </span>
+            ))}
+          </div>
+        </div>
+      </header>
+
+      <section className="mt-4 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <div className="grid grid-cols-5 gap-3">
+          {model.summary.metrics.map((metric) => (
+            <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
+              <p className="text-xs text-[#A8A29E]">{metric.label}</p>
+              <p className="mt-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="mt-4 grid grid-cols-[minmax(0,1fr)_340px] gap-4">
+        <div className="space-y-3">
+          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">
+            <h2 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h2>
+            <div className="mt-4 space-y-3">
+              {model.timeline.items.map((item) => (
+                <article key={item.id} className="flex gap-3">
+                  <span className={`mt-1 h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-center justify-between gap-3">
+                      <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                      <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
+                    </div>
+                    <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.description}</p>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
+
+        <aside className="space-y-3">
+          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">洞察</h3>
+            <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{task.title}</p>
+          </section>
+
+          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计划 vs 实际</h3>
+            <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">{model.planActual.planContent}</p>
+            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{model.planActual.actualContent}</p>
+            <p className="mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">{model.planActual.diffReason}</p>
+          </section>
+
+          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">AI 总结</h3>
+            <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">{model.aiSummary.summaryText}</p>
+            <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">关键产出：{model.aiSummary.keyOutput}</p>
+            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">阻塞点：{model.aiSummary.blocker}</p>
+            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">建议：{model.aiSummary.suggestion}</p>
+          </section>
+
+          <DetailActionsCard
+            model={model}
+            onRestart={onStartTimer}
+            onCopySummary={onCopySummary}
+          />
+
+          <section
+            data-testid="task-timer-card"
+            className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+          >
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                data-testid="task-mode-countdown"
+                aria-pressed={timerMode === 'countdown'}
+                onClick={() => setTimerMode('countdown')}
+                className={`rounded-xl px-3 py-1.5 text-xs ${timerMode === 'countdown' ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
+              >
+                倒计时
+              </button>
+              <button
+                type="button"
+                data-testid="task-mode-countup"
+                aria-pressed={timerMode === 'countup'}
+                onClick={() => setTimerMode('countup')}
+                className={`rounded-xl px-3 py-1.5 text-xs ${timerMode === 'countup' ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
+              >
+                正计时
+              </button>
+            </div>
+            <div className="mt-3 flex gap-2">
+              <button
+                type="button"
+                onClick={onStartTimer}
+                disabled={hasOtherActiveBlock}
+                className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+              >
+                <Play size={14} />
+                开始计时
+              </button>
+              <button
+                type="button"
+                data-testid="task-pause-button"
+                onClick={onPauseAndGoEventlog}
+                className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+              >
+                <Pause size={14} />
+                {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
+              </button>
+            </div>
+          </section>
+        </aside>
+      </section>
+    </div>
+  );
+}
 
 export function TaskDetailPage() {
-  const { taskId } = useParams({ strict: false }) as { taskId?: string };
+  const { taskId, blockId: blockIdParam } = useParams({ strict: false }) as { taskId?: string; blockId?: string };
   const navigate = useNavigate();
+  const isDesktop = useIsDesktop();
+  const preferredBlockId = blockIdParam || resolvePreferredBlockId();
+
   const [task, setTask] = useState<TaskNode | null>(null);
-  const [availableTransitions, setAvailableTransitions] = useState<TaskStatus[]>([]);
-  const [parentTask, setParentTask] = useState<TaskNode | null>(null);
-  const [childTasks, setChildTasks] = useState<TaskNode[]>([]);
-  const [depCheck, setDepCheck] = useState<DependencyCheckResult>({ met: true, blocking: [] });
-  const [depTasks, setDepTasks] = useState<Map<string, TaskNode>>(new Map());
-  const [isLoading, setIsLoading] = useState(true);
-  const [isEditingTitle, setIsEditingTitle] = useState(false);
-  const [editTitle, setEditTitle] = useState('');
-  const titleInputRef = useRef<HTMLInputElement>(null);
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [hasOtherActiveBlock, setHasOtherActiveBlock] = useState(false);
-  const [spentMinutes, setSpentMinutes] = useState<number>(0);
+  const [isLoading, setIsLoading] = useState(true);
+  const [reviewMarkdown, setReviewMarkdown] = useState('');
+  const [eventLogs, setEventLogs] = useState<TimeblockEventLog[]>([]);
+  const [timerMode, setTimerMode] = useState<TimerMode>('countdown');
 
   useEffect(() => {
     let disposed = false;
+    const taskService = getTaskService();
+    const timeBlockService = getTimeBlockService();
     const load = async () => {
-      if (!taskId) {
+      if (!taskId && !preferredBlockId) {
         setIsLoading(false);
         return;
       }
-      const svc = getTaskService();
-      const tbSvc = getTimeBlockService();
-      const [nextTask, transitions, currentBlock] = await Promise.all([
-        svc.getTask(taskId),
-        svc.getAvailableTransitions(taskId),
-        tbSvc.loadActiveBlock(),
+
+      const [loadedTask, blocks, currentBlock] = await Promise.all([
+        taskId ? taskService.getTask(taskId) : Promise.resolve(null),
+        timeBlockService.loadTimeBlocks(),
+        timeBlockService.loadActiveBlock(),
       ]);
-      if (disposed) return;
-
-      setTask(nextTask as TaskNode | null);
-      setAvailableTransitions(transitions);
-      // Show active block only if it belongs to this task
-      setActiveBlock(currentBlock?.taskId === taskId ? currentBlock : null);
-      // Track if another task has an active block (prevents starting a new one)
-      setHasOtherActiveBlock(currentBlock != null && currentBlock.taskId !== taskId);
-
-      if (nextTask) {
-        // Calculate spent minutes dynamically from associated time blocks
-        const spent = await getTaskTimerService().calculateSpentMinutes(taskId);
-        if (!disposed) setSpentMinutes(spent);
-
-        // Load parent task
-        if (nextTask.parentId) {
-          const parent = await svc.getTask(nextTask.parentId);
-          if (!disposed) setParentTask(parent);
-        } else {
-          setParentTask(null);
-        }
-
-        // Load child tasks
-        const children = await svc.getChildTasks(nextTask.id);
-        if (!disposed) setChildTasks(children);
-
-        // Check dependencies
-        const check = await svc.checkDependenciesMet(nextTask.id);
-        if (!disposed) setDepCheck(check);
-
-        // Resolve dependency task names
-        if (nextTask.dependsOn.length > 0) {
-          const depMap = new Map<string, TaskNode>();
-          for (const dep of nextTask.dependsOn) {
-            const dt = await svc.getTask(dep.taskId);
-            if (dt) depMap.set(dep.taskId, dt);
-          }
-          if (!disposed) setDepTasks(depMap);
-        } else {
-          if (!disposed) setDepTasks(new Map());
+      let nextTask = loadedTask;
+      if (!nextTask && preferredBlockId) {
+        const matchedBlock = blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId);
+        if (matchedBlock) {
+          const allTasks = await taskService.listTasks(true);
+          const linked = allTasks.find((candidate) => (candidate.timeBlockIds ?? []).includes(matchedBlock.startId));
+          nextTask = linked ?? buildVirtualTaskFromBlock(matchedBlock);
         }
       }
+      if (!nextTask) {
+        const fallbackTasks = await taskService.listTasks();
+        nextTask = fallbackTasks[0] ?? null;
+      }
 
+      if (disposed) return;
+      setTask(nextTask);
+      setTimeBlocks(blocks);
+      setActiveBlock(nextTask && currentBlock?.taskId === nextTask.id ? currentBlock : null);
+      setHasOtherActiveBlock(Boolean(currentBlock && nextTask && currentBlock.taskId !== nextTask.id));
+
+      if (nextTask) {
+        const events = await getEventStorage().getEvents();
+        const matchedBlockName = preferredBlockId
+          ? blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId)?.name
+          : undefined;
+        if (!disposed) {
+          setEventLogs(events.map((event) => ({
+            id: event.id,
+            createdAt: event.createdAt,
+            content: event.content,
+            type: event.type,
+          })));
+          setReviewMarkdown(selectReviewMarkdown(nextTask, matchedBlockName ?? nextTask.title, events));
+        }
+      } else {
+        setEventLogs([]);
+        setReviewMarkdown('');
+      }
       if (!disposed) setIsLoading(false);
     };
-    void load();
 
-    // Refresh when remote sync delivers changes
-    const unsubscribe = getTaskService().onTaskChange(() => {
+    void load();
+    const unsubscribeTasks = taskService.onTaskChange(() => {
+      void load();
+    });
+    const unsubscribeBlocks = timeBlockService.onBlockChange(() => {
       void load();
     });
 
     return () => {
       disposed = true;
-      unsubscribe();
+      unsubscribeTasks();
+      unsubscribeBlocks();
     };
-  }, [taskId]);
+  }, [preferredBlockId, taskId]);
 
-  useEffect(() => {
-    if (isEditingTitle && titleInputRef.current) {
-      titleInputRef.current.focus();
-      titleInputRef.current.select();
-    }
-  }, [isEditingTitle]);
+  const viewModel = useMemo(() => {
+    if (!task) return null;
+    return buildTaskTimeblockDetailViewModel({
+      task,
+      blocks: timeBlocks,
+      activeBlock,
+      preferredBlockId,
+      eventLogs,
+      reviewMarkdown,
+      useMockData: getUseMockDataEnabled(),
+    });
+  }, [activeBlock, eventLogs, preferredBlockId, reviewMarkdown, task, timeBlocks]);
 
-  const handleTitleClick = () => {
-    if (!task) return;
-    setEditTitle(task.title);
-    setIsEditingTitle(true);
-  };
-
-  const handleTitleSave = async () => {
-    if (!task || !taskId) return;
-    const trimmed = editTitle.trim();
-    if (trimmed && trimmed !== task.title) {
-      const updated = await getTaskService().updateTask(taskId, { title: trimmed });
-      if (updated) setTask(updated);
-    }
-    setIsEditingTitle(false);
-  };
-
-  const handleTransition = async (to: TaskStatus) => {
+  const handleStartTimer = () => {
     if (!taskId) return;
-    try {
-      const updated = await getTaskService().transitionTask(taskId, to);
-      if (updated) {
-        const transitions = await getTaskService().getAvailableTransitions(taskId);
-        setTask(updated);
-        setAvailableTransitions(transitions);
-        // Refresh dep check after transition
-        const check = await getTaskService().checkDependenciesMet(taskId);
-        setDepCheck(check);
-      }
-    } catch {
-      // transitionTask may throw on hard dep block — UI already shows disabled state
-    }
-  };
-
-  const handleAbandon = async () => {
-    if (!taskId) return;
-    await getTaskService().abandonTask(taskId);
-    void navigate({ to: '/tasks' });
-  };
-
-  const handleStartTimer = async () => {
-    if (!taskId) return;
-    const block = await getTaskTimerService().startBlockForTask(taskId, { mode: 'countup' });
-    if (block) {
-      // Navigate to eventlog ("当下") page after successful timer start
+    const config = timerMode === 'countdown'
+      ? { mode: 'countdown' as const, minutes: 25 }
+      : { mode: 'countup' as const };
+    void getTaskTimerService().startBlockForTask(taskId, config).then(() => {
       void navigate({ to: '/eventlog' });
-    }
+    });
   };
 
+  const handlePauseAndGoEventlog = () => {
+    if (!activeBlock) {
+      void navigate({ to: '/eventlog' });
+      return;
+    }
+    void getTimeBlockService().pauseBlock().finally(() => {
+      void navigate({ to: '/eventlog' });
+    });
+  };
+
+  const handleCopySummary = () => {
+    if (!viewModel) return;
+    const text = buildSummaryText(viewModel);
+    if (navigator?.clipboard?.writeText) {
+      void navigator.clipboard.writeText(text);
+    }
+  };
 
   if (isLoading) {
     return (
       <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
-        <Link to="/tasks" className="mb-4 inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
-          <ArrowLeft size={16} />
-          返回任务
-        </Link>
         <p className="text-sm text-[#A8A29E]">加载中...</p>
       </div>
     );
   }
 
-  if (!task) {
+  if (!task || !viewModel) {
     return (
-      <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09] md:px-8 lg:px-10">
-        <Link to="/tasks" className="mb-4 inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
+      <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
+        <Link to="/tasks" className="inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
           <ArrowLeft size={16} />
           返回任务
         </Link>
-        <p className="text-sm text-[#A8A29E]">任务不存在</p>
+        <p className="mt-3 text-sm text-[#A8A29E]">任务不存在</p>
       </div>
     );
   }
 
-  const isTerminal = task.status === 'completed' || task.status === 'abandoned';
-  const hardBlocking = depCheck.blocking.filter((b) => b.type === 'hard');
-  const isHardBlocked = hardBlocking.length > 0;
+  if (isDesktop) {
+    return (
+      <DesktopTimeblockDetail
+        task={task}
+        model={viewModel}
+        timerMode={timerMode}
+        setTimerMode={setTimerMode}
+        hasOtherActiveBlock={hasOtherActiveBlock}
+        hasActiveBlockOnTask={Boolean(activeBlock)}
+        onStartTimer={handleStartTimer}
+        onPauseAndGoEventlog={handlePauseAndGoEventlog}
+        onCopySummary={handleCopySummary}
+      />
+    );
+  }
 
   return (
-    <div className="min-h-full bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
-      <header className="flex items-center gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
-        <Link to="/tasks" className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-          <ArrowLeft size={16} />
-        </Link>
-        <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务详情</h1>
-      </header>
-
-      <div className="space-y-3 px-5 pb-10">
-        {/* Parent task breadcrumb */}
-        {parentTask && (
-          <Link
-            to="/tasks/$taskId"
-            params={{ taskId: parentTask.id }}
-            className="inline-flex items-center gap-1 text-xs text-[#78716C] dark:text-[#A8A29E]"
-          >
-            <span className="max-w-[200px] truncate">{parentTask.title}</span>
-            <ChevronRight size={12} />
-            <span className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</span>
-          </Link>
-        )}
-
-        {/* Title + description card */}
-        <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-          {isEditingTitle ? (
-            <input
-              ref={titleInputRef}
-              value={editTitle}
-              onChange={(e) => setEditTitle(e.target.value)}
-              onBlur={() => {
-                void handleTitleSave();
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') {
-                  e.preventDefault();
-                  void handleTitleSave();
-                }
-                if (e.key === 'Escape') {
-                  setIsEditingTitle(false);
-                }
-              }}
-              className="w-full border-none bg-transparent text-base font-semibold text-[#1C1917] outline-none dark:text-[#FAFAF9]"
-            />
-          ) : (
-            <button
-              type="button"
-              onClick={handleTitleClick}
-              className="w-full text-left text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
-            >
-              {task.title}
-            </button>
-          )}
-          {task.description && <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>}
-        </div>
-
-        {/* Properties card */}
-        <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-          <dl className="space-y-2 text-sm">
-            <div className="flex justify-between">
-              <dt className="text-[#A8A29E]">状态</dt>
-              <dd className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">{STATUS_LABEL[task.status] ?? task.status}</dd>
-            </div>
-            <div className="flex justify-between">
-              <dt className="text-[#A8A29E]">优先级</dt>
-              <dd className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">{PRIORITY_LABEL[task.priority] ?? task.priority}</dd>
-            </div>
-            {task.estimatedMinutes ? (
-              <div className="flex justify-between">
-                <dt className="text-[#A8A29E]">预计时长</dt>
-                <dd className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.estimatedMinutes} 分钟</dd>
-              </div>
-            ) : null}
-            {task.dueAt ? (
-              <div className="flex justify-between">
-                <dt className="text-[#A8A29E]">截止时间</dt>
-                <dd className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">{new Date(task.dueAt).toLocaleDateString('zh-CN')}</dd>
-              </div>
-            ) : null}
-          </dl>
-        </div>
-
-        {/* Tags */}
-        {task.tags.length > 0 && (
-          <div className="flex flex-wrap gap-1.5">
-            {task.tags.map((tag) => (
-              <span key={tag} className="rounded-full bg-[#F5F0ED] px-2.5 py-1 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-                {tag}
-              </span>
-            ))}
-          </div>
-        )}
-
-        {/* Dependencies card */}
-        {task.dependsOn.length > 0 && (
-          <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-            <p className="mb-3 text-xs font-medium text-[#A8A29E]">依赖</p>
-            <ul className="space-y-2">
-              {task.dependsOn.map((dep) => {
-                const depTask = depTasks.get(dep.taskId);
-                const isBlocking = depCheck.blocking.some((b) => b.taskId === dep.taskId);
-                return (
-                  <li key={dep.taskId} className="flex items-center justify-between text-sm">
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-block h-2 w-2 rounded-full ${depTask ? (STATUS_DOT[depTask.status] ?? 'bg-gray-400') : 'bg-gray-300'}`} />
-                      <Link
-                        to="/tasks/$taskId"
-                        params={{ taskId: dep.taskId }}
-                        className="text-[#1C1917] underline-offset-2 hover:underline dark:text-[#FAFAF9]"
-                      >
-                        {depTask?.title ?? dep.taskId}
-                      </Link>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className={`rounded-full px-2 py-0.5 text-xs ${dep.type === 'hard' ? 'bg-red-50 text-red-600 dark:bg-red-950 dark:text-red-400' : 'bg-blue-50 text-blue-600 dark:bg-blue-950 dark:text-blue-400'}`}>
-                        {dep.type === 'hard' ? '硬依赖' : '软依赖'}
-                      </span>
-                      {isBlocking && (
-                        <Lock size={12} className="text-red-500" />
-                      )}
-                    </div>
-                  </li>
-                );
-              })}
-            </ul>
-            {isHardBlocked && (
-              <p className="mt-3 text-xs text-red-500">
-                硬依赖未完成，无法启动此任务
-              </p>
-            )}
-          </div>
-        )}
-
-        {/* Child tasks card */}
-        {childTasks.length > 0 && (
-          <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-            <p className="mb-3 text-xs font-medium text-[#A8A29E]">子任务</p>
-            <ul className="space-y-2">
-              {childTasks.map((child) => (
-                <li key={child.id}>
-                  <Link
-                    to="/tasks/$taskId"
-                    params={{ taskId: child.id }}
-                    className="flex items-center justify-between text-sm"
-                  >
-                    <div className="flex items-center gap-2">
-                      <span className={`inline-block h-2 w-2 rounded-full ${STATUS_DOT[child.status] ?? 'bg-gray-400'}`} />
-                      <span className="text-[#1C1917] dark:text-[#FAFAF9]">{child.title}</span>
-                    </div>
-                    <span className="text-xs text-[#A8A29E]">{STATUS_LABEL[child.status] ?? child.status}</span>
-                  </Link>
-                </li>
-              ))}
-            </ul>
-          </div>
-        )}
-
-        {/* Timer card */}
-        {!isTerminal && (
-          <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-            <p className="mb-3 text-xs font-medium text-[#A8A29E]">计时</p>
-            {activeBlock ? (
-              <div className="space-y-2">
-                <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">计时中...</p>
-                <Link to="/eventlog" className="text-xs text-[#C75B3A] underline-offset-2 hover:underline">
-                  前往「当下」页面操作
-                </Link>
-              </div>
-            ) : (
-              <>
-                <button
-                  type="button"
-                  disabled={isHardBlocked || hasOtherActiveBlock}
-                  onClick={() => { void handleStartTimer(); }}
-                  className={`inline-flex items-center gap-1 rounded-xl px-4 py-2 text-sm font-medium ${
-                    isHardBlocked || hasOtherActiveBlock
-                      ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-800 dark:text-gray-600'
-                      : 'bg-[#C75B3A] text-white'
-                  }`}
-                >
-                  <Play size={14} />
-                  开始计时
-                </button>
-                {hasOtherActiveBlock && (
-                  <p className="mt-2 text-xs text-amber-600 dark:text-amber-400">已有进行中的时间块</p>
-                )}
-              </>
-            )}
-            {spentMinutes > 0 && (
-              <p className="mt-2 text-xs text-[#A8A29E]">已投入 {spentMinutes} 分钟</p>
-            )}
-          </div>
-        )}
-
-        {/* Actions card */}
-        {!isTerminal && (
-          <div className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-            <p className="mb-3 text-xs font-medium text-[#A8A29E]">操作</p>
-            <div className="flex flex-wrap gap-2">
-              {availableTransitions
-                .filter((s) => s !== 'abandoned')
-                .map((to) => {
-                  const disabled = to === 'in_progress' && isHardBlocked;
-                  return (
-                    <button
-                      key={to}
-                      type="button"
-                      disabled={disabled}
-                      onClick={() => {
-                        void handleTransition(to);
-                      }}
-                      className={`rounded-xl px-4 py-2 text-sm font-medium ${
-                        disabled
-                          ? 'cursor-not-allowed bg-gray-200 text-gray-400 dark:bg-gray-800 dark:text-gray-600'
-                          : 'bg-[#C75B3A] text-white'
-                      }`}
-                    >
-                      {disabled && <Lock size={12} className="mr-1 inline-block" />}
-                      {STATUS_ACTION[to] ?? to}
-                    </button>
-                  );
-                })}
-              <button
-                type="button"
-                onClick={() => {
-                  void handleAbandon();
-                }}
-                className="rounded-xl border border-red-200 px-4 py-2 text-sm font-medium text-red-500 dark:border-red-900"
-              >
-                放弃任务
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
+    <MobileTimeblockDetail
+      task={task}
+      model={viewModel}
+      timerMode={timerMode}
+      setTimerMode={setTimerMode}
+      hasOtherActiveBlock={hasOtherActiveBlock}
+      hasActiveBlockOnTask={Boolean(activeBlock)}
+      onStartTimer={handleStartTimer}
+      onPauseAndGoEventlog={handlePauseAndGoEventlog}
+      onCopySummary={handleCopySummary}
+    />
   );
 }

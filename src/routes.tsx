@@ -519,6 +519,18 @@ const newTaskDetailRoute = createRoute({
   },
 });
 
+const newTimeblockDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/block/$blockId',
+  component: function NewTimeblockDetail() {
+    return (
+      <LazyPage>
+        <TaskDetailPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newMeRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/me',
@@ -672,6 +684,7 @@ const newRouteTree = newRootRoute.addChildren([
   newEventlogRoute,
   newTasksRoute,
   newRemindersRoute,
+  newTimeblockDetailRoute,
   newTaskDetailRoute,
   newMeRoute,
   newSettingsRoute,

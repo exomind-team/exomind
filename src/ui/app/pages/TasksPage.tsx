@@ -276,34 +276,42 @@ export function TasksPage() {
                         {section.items.map((item) => {
                           const tone = resolveToneClasses(item.tone);
                           return (
-                            <article key={item.id} className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
-                              <div className="flex">
-                                <div className={`w-1 shrink-0 self-stretch ${tone.rail}`} />
-                                <div className="min-w-0 flex-1 px-4 py-3">
-                                  <p className="text-[11px] font-medium text-[#A8A29E]">{item.timeLabel}</p>
-                                  <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${tone.tag}`}>
-                                    {item.tagLabel}
-                                  </div>
-                                  {item.planText ? (
-                                    <div className="mt-2 flex items-center gap-2 text-xs text-[#A8A29E]">
-                                      <span className="h-1.5 w-1.5 rounded-full bg-[#D6D3D1]" />
-                                      <span>计划: {item.planText}</span>
+                            <Link
+                              key={item.id}
+                              to="/tasks/block/$blockId"
+                              params={{ blockId: item.blockId }}
+                              data-testid={`tasks-today-block-link-${item.blockId}`}
+                              className="block"
+                            >
+                              <article className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:bg-[#292524]">
+                                <div className="flex">
+                                  <div className={`w-1 shrink-0 self-stretch ${tone.rail}`} />
+                                  <div className="min-w-0 flex-1 px-4 py-3">
+                                    <p className="text-[11px] font-medium text-[#A8A29E]">{item.timeLabel}</p>
+                                    <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${tone.tag}`}>
+                                      {item.tagLabel}
                                     </div>
-                                  ) : null}
-                                  <div className={`mt-2 flex items-center gap-2 text-xs font-medium ${tone.actual}`}>
-                                    <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
-                                    <span>实际: {item.actualText}</span>
+                                    {item.planText ? (
+                                      <div className="mt-2 flex items-center gap-2 text-xs text-[#A8A29E]">
+                                        <span className="h-1.5 w-1.5 rounded-full bg-[#D6D3D1]" />
+                                        <span>计划: {item.planText}</span>
+                                      </div>
+                                    ) : null}
+                                    <div className={`mt-2 flex items-center gap-2 text-xs font-medium ${tone.actual}`}>
+                                      <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                                      <span>实际: {item.actualText}</span>
+                                    </div>
+                                    <p className="mt-1 text-sm text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                                    <p className="mt-1 text-[11px] text-[#78716C] dark:text-[#A8A29E]">{item.meta}</p>
+                                    {item.note ? (
+                                      <p className="mt-1 text-[11px] text-[#78716C] dark:text-[#A8A29E]">
+                                        {`💬 "${item.note}"`}
+                                      </p>
+                                    ) : null}
                                   </div>
-                                  <p className="mt-1 text-sm text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                                  <p className="mt-1 text-[11px] text-[#78716C] dark:text-[#A8A29E]">{item.meta}</p>
-                                  {item.note ? (
-                                    <p className="mt-1 text-[11px] text-[#78716C] dark:text-[#A8A29E]">
-                                      {`💬 "${item.note}"`}
-                                    </p>
-                                  ) : null}
                                 </div>
-                              </div>
-                            </article>
+                              </article>
+                            </Link>
                           );
                         })}
                       </div>

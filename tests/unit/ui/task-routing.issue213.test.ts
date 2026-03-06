@@ -18,5 +18,9 @@ describe('issue-213 task routing wiring（任务路由接线）', () => {
   it('defines /tasks/:id style detail route（定义任务详情路由）', () => {
     expect(source).toContain("path: '/tasks/$taskId'");
   });
+
+  it('defines /tasks/block/:blockId detail route（定义时间块详情路由）', () => {
+    expect(source).toContain("path: '/tasks/block/$blockId'");
+  });
 });
 

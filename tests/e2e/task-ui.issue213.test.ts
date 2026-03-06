@@ -40,14 +40,13 @@ test.describe('Issue #213 Task UI（任务界面）', () => {
 
   test('任务列表页展示与快速添加（list + quick add）', async ({ page }) => {
     await page.goto('/tasks');
-    await page.waitForLoadState('networkidle');
-
     await expect(page.getByTestId('new-tasks-page')).toBeVisible();
+
     await expect(page.getByRole('heading', { name: '任务' })).toBeVisible();
     await expect(page.getByRole('button', { name: '当下' })).toBeVisible();
     await expect(page.getByRole('button', { name: '今日' })).toBeVisible();
     await expect(page.getByPlaceholder('快速添加任务...')).toBeVisible();
-    await expect(page.getByText('实现 CRUD 服务层')).toBeVisible();
+    await expect(page.getByText('实现 CRUD 服务层', { exact: true })).toBeVisible();
 
     const createdTitle = `E2E issue-213 ${Date.now()}`;
     const quickInput = page.getByPlaceholder('快速添加任务...');
@@ -59,15 +58,18 @@ test.describe('Issue #213 Task UI（任务界面）', () => {
     await expect(page.getByText('上午')).toBeVisible();
     await expect(page.getByText('下午')).toBeVisible();
     await expect(page.getByText('深度工作', { exact: true })).toBeVisible();
+
+    await page.getByTestId('tasks-today-block-link-issue213-block-1').click();
+    await expect(page.getByTestId('new-task-detail-page')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '深度工作' })).toBeVisible();
   });
 
   test('任务详情卡片交互（模式切换/暂停/输入）', async ({ page }) => {
     await page.goto('/tasks/node-002');
-    await page.waitForLoadState('networkidle');
-
     await expect(page.getByTestId('new-task-detail-page')).toBeVisible();
-    await expect(page.getByText('实现 CRUD 服务层')).toBeVisible();
-    await expect(page.getByText('计时', { exact: true })).toBeVisible();
+
+    await expect(page.getByRole('heading', { name: '实现 CRUD 服务层' })).toBeVisible();
+    await expect(page.getByText('计时控制')).toBeVisible();
     await expect(page.getByRole('button', { name: '开始计时' })).toBeVisible();
   });
 });

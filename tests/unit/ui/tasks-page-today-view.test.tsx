@@ -137,4 +137,17 @@ describe('TasksPage today view（任务页今日时间块视图）', () => {
 
     expect(screen.getByPlaceholderText('快速添加任务...')).toBeInTheDocument();
   });
+
+  it('renders clickable links for each historical timeblock card', async () => {
+    render(<TasksPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalled();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '今日' }));
+
+    expect(await screen.findByTestId('tasks-today-block-link-block-1')).toBeInTheDocument();
+    expect(screen.getByTestId('tasks-today-block-link-block-2')).toBeInTheDocument();
+  });
 });
