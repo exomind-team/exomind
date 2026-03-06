@@ -10,6 +10,10 @@ function readTauriConfig(): string {
   return readFileSync(resolve(process.cwd(), 'src-tauri/tauri.conf.json'), 'utf8');
 }
 
+function readPackageJson(): Record<string, unknown> {
+  return JSON.parse(readFileSync(resolve(process.cwd(), 'package.json'), 'utf8')) as Record<string, unknown>;
+}
+
 describe('release workflow / 发布流程: self-hosted bun install hardening', () => {
   it('contains global bun cache cleanup step / 包含 bun 全局缓存清理步骤', () => {
     const workflowContent = readReleaseWorkflow();
@@ -24,6 +28,16 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
   it('contains retry install fallback / 包含重试安装兜底逻辑', () => {
     const workflowContent = readReleaseWorkflow();
     expect(workflowContent).toMatch(/Retry bun install|retry bun install|bun install attempt 2/i);
+  });
+
+  it('reuses bootstrapped bun dependencies for later tauri beforeBuild runs / 后续 tauri beforeBuild 复用前置 bun 依赖安装', () => {
+    const workflowContent = readReleaseWorkflow();
+    const packageJson = readPackageJson();
+    const scripts = (packageJson.scripts ?? {}) as Record<string, string>;
+
+    expect(workflowContent).toContain('EXOMIND_SKIP_BUN_INSTALL=1');
+    expect(scripts['build']).toContain('ensure:build-deps');
+    expect(scripts['build:web']).toBe('tsc && vite build');
   });
 
   it('does not build NSIS bundle / 不再构建 NSIS 安装包', () => {

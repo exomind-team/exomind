@@ -288,6 +288,9 @@ jobs:
             Invoke-BunInstallWithCache -CacheDir $secondAttemptCacheDir -AttemptLabel "attempt 2 / 第二次"
           }
 
+          "EXOMIND_SKIP_BUN_INSTALL=1" | Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
+          Write-Host "EXOMIND_SKIP_BUN_INSTALL=1 (reuse bootstrapped dependencies / 复用前置依赖安装)"
+
       # ─── Android build ──────────────────────────────────────
 
       - name: Configure local Android toolchain (配置本地 Android 工具链)
