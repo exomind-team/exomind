@@ -5,6 +5,7 @@
  */
 
 import type { PublishRequest, PublishResponse } from "./signal-types.js";
+import { HttpSseSignalTransport, type SignalTransport } from "./http-sse-signal-transport.js";
 
 // ── 默认配置 ──────────────────────────────────────────────────
 
@@ -20,6 +21,8 @@ export interface SignalSenderConfig {
   source: string;
   /** Request timeout in milliseconds */
   timeout: number;
+  /** Transport adapter（传输适配器） */
+  transport: SignalTransport;
 }
 
 // ── 发送器 ────────────────────────────────────────────────────
@@ -28,42 +31,26 @@ export class SignalSender {
   private readonly rtUrl: string;
   private readonly source: string;
   private readonly timeout: number;
+  private readonly transport: SignalTransport;
 
   constructor(config?: Partial<SignalSenderConfig>) {
     this.rtUrl = (config?.rtUrl ?? DEFAULT_RT_URL).replace(/\/$/, "");
     this.source = config?.source ?? "agent";
     this.timeout = config?.timeout ?? DEFAULT_TIMEOUT_MS;
+    this.transport =
+      config?.transport ??
+      new HttpSseSignalTransport({
+        rtUrl: this.rtUrl,
+        source: this.source,
+        timeout: this.timeout,
+      });
   }
 
   /**
    * Publish a signal to the RT.
    */
   async publish(request: PublishRequest): Promise<PublishResponse> {
-    const url = `${this.rtUrl}/signals/publish`;
-    const body: PublishRequest = {
-      ...request,
-      source: request.source ?? this.source,
-    };
-
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), this.timeout);
-
-    try {
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-        signal: controller.signal,
-      });
-
-      if (!response.ok) {
-        throw new Error(`publish failed: HTTP ${response.status}`);
-      }
-
-      return (await response.json()) as PublishResponse;
-    } finally {
-      clearTimeout(timer);
-    }
+    return this.transport.publish(request);
   }
 
   /**

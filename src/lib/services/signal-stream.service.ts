@@ -7,7 +7,11 @@
 
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { SignalEvent, PublishRequest, PublishResponse } from '@/lib/types/signal-pool';
-import { invoke, isTauri } from '@tauri-apps/api/core';
+import {
+  buildSignalBaseUrl,
+  HttpSseSignalTransport,
+  type SignalTransport,
+} from './signal-http-sse-transport';
 
 // ── 配置 ─────────────────────────────────────────────────────
 
@@ -25,16 +29,7 @@ export interface SignalStreamServiceOptions {
   host: RuntimeHostRecord;
   agentId?: string;
   heartbeatInterval?: number;
-}
-
-// ── 工具函数 ──────────────────────────────────────────────────
-
-function buildBaseUrl(host: RuntimeHostRecord): string {
-  return `http://${host.host}:${host.port}`;
-}
-
-function buildStreamUrl(baseUrl: string, agentId: string, heartbeatInterval: number): string {
-  return `${baseUrl}/signals/stream?agent_id=${encodeURIComponent(agentId)}&heartbeat_interval=${heartbeatInterval}`;
+  transport?: SignalTransport;
 }
 
 // ── Service ──────────────────────────────────────────────────
@@ -43,6 +38,7 @@ export class SignalStreamService {
   private readonly baseUrl: string;
   private readonly agentId: string;
   private readonly heartbeatInterval: number;
+  private readonly transport: SignalTransport;
 
   private abortController: AbortController | null = null;
   private lastEventId: string | null = null;
@@ -52,9 +48,10 @@ export class SignalStreamService {
   private lastConnectionErrorLog: string | null = null;
 
   constructor(options: SignalStreamServiceOptions) {
-    this.baseUrl = buildBaseUrl(options.host);
+    this.baseUrl = buildSignalBaseUrl(options.host);
     this.agentId = options.agentId ?? DEFAULT_AGENT_ID;
     this.heartbeatInterval = options.heartbeatInterval ?? DEFAULT_HEARTBEAT_INTERVAL;
+    this.transport = options.transport ?? new HttpSseSignalTransport({ host: options.host });
   }
 
   /** Register a callback for incoming signals. */
@@ -82,41 +79,12 @@ export class SignalStreamService {
 
   /** Publish a signal to the RT. */
   async publish(request: PublishRequest): Promise<PublishResponse> {
-    // Prefer Tauri invoke fast-path（优先走 Tauri invoke 快速通道）
-    if (await isTauri()) {
-      try {
-        return await invoke<PublishResponse>('signal_publish_fast', { request });
-      } catch (error) {
-        console.warn('[SignalStream] invoke publish failed, fallback to HTTP:', error);
-      }
-    }
-
-    // HTTP fallback（HTTP 降级路径）
-    const url = `${this.baseUrl}/signals/publish`;
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(request),
-    });
-
-    if (!response.ok) {
-      throw new Error(`publish failed: HTTP ${response.status}`);
-    }
-
-    return (await response.json()) as PublishResponse;
+    return this.transport.publish(request);
   }
 
   /** Fetch recent signal history from the RT. */
   async history(limit?: number): Promise<SignalEvent[]> {
-    const params = limit != null ? `?limit=${limit}` : '';
-    const url = `${this.baseUrl}/signals/history${params}`;
-    const response = await fetch(url);
-
-    if (!response.ok) {
-      throw new Error(`history failed: HTTP ${response.status}`);
-    }
-
-    return (await response.json()) as SignalEvent[];
+    return this.transport.history(limit);
   }
 
   get isConnected(): boolean {
@@ -156,29 +124,19 @@ export class SignalStreamService {
   private async connectAndConsume(): Promise<void> {
     this.abortController = new AbortController();
 
-    const url = buildStreamUrl(this.baseUrl, this.agentId, this.heartbeatInterval);
-    const headers: Record<string, string> = {
-      Accept: 'text/event-stream',
-      'Cache-Control': 'no-cache',
-    };
-    if (this.lastEventId) {
-      headers['Last-Event-ID'] = this.lastEventId;
-    }
-
-    const response = await fetch(url, {
-      headers,
+    const response = await this.transport.openStream({
+      agentId: this.agentId,
+      heartbeatInterval: this.heartbeatInterval,
+      lastEventId: this.lastEventId,
       signal: this.abortController.signal,
     });
 
-    if (!response.ok) {
-      throw new Error(`SSE HTTP ${response.status}`);
-    }
-
-    if (!response.body) {
+    const body = response.body;
+    if (!body) {
       throw new Error('SSE response has no body');
     }
 
-    const reader = response.body.getReader();
+    const reader = body.getReader();
     const decoder = new TextDecoder();
     let buffer = '';
 

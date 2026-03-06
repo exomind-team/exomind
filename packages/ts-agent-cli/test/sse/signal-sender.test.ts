@@ -8,6 +8,10 @@ import { SignalSender } from "../../src/sse/signal-sender.js";
 describe("SignalSender", () => {
   let sender: SignalSender;
 
+  function fetchCalls(): Array<[string, RequestInit | undefined]> {
+    return (globalThis.fetch as unknown as { mock: { calls: Array<[string, RequestInit | undefined]> } }).mock.calls;
+  }
+
   beforeEach(() => {
     vi.restoreAllMocks();
     sender = new SignalSender({
@@ -78,7 +82,7 @@ describe("SignalSender", () => {
 
       await sender.publish({ topic: "test", payload: {} });
 
-      const call = vi.mocked(globalThis.fetch).mock.calls[0];
+      const call = fetchCalls()[0];
       const body = JSON.parse(call![1]!.body as string);
       expect(body.source).toBe("test-agent");
     });
@@ -96,7 +100,7 @@ describe("SignalSender", () => {
         source: "custom-source",
       });
 
-      const call = vi.mocked(globalThis.fetch).mock.calls[0];
+      const call = fetchCalls()[0];
       const body = JSON.parse(call![1]!.body as string);
       expect(body.source).toBe("custom-source");
     });
@@ -114,7 +118,7 @@ describe("SignalSender", () => {
         trace_id: "trace-abc",
       });
 
-      const call = vi.mocked(globalThis.fetch).mock.calls[0];
+      const call = fetchCalls()[0];
       const body = JSON.parse(call![1]!.body as string);
       expect(body.trace_id).toBe("trace-abc");
     });
@@ -153,7 +157,7 @@ describe("SignalSender", () => {
 
       expect(result.accepted).toBe(true);
 
-      const call = vi.mocked(globalThis.fetch).mock.calls[0];
+      const call = fetchCalls()[0];
       const body = JSON.parse(call![1]!.body as string);
       expect(body.topic).toBe("echo.response");
       expect(body.payload).toEqual({ echo: true });
@@ -168,7 +172,7 @@ describe("SignalSender", () => {
 
       await sender.send("test", {}, "trace-xyz");
 
-      const call = vi.mocked(globalThis.fetch).mock.calls[0];
+      const call = fetchCalls()[0];
       const body = JSON.parse(call![1]!.body as string);
       expect(body.trace_id).toBe("trace-xyz");
     });

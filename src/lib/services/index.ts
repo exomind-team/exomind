@@ -29,6 +29,8 @@ export type { RuntimeAggregatorService, RuntimeAgentInfo, AggregatedRuntimeData 
 
 export { SignalStreamService, getSignalStreamService } from './signal-stream.service';
 export type { SignalStreamServiceOptions, SignalCallback } from './signal-stream.service';
+export { HttpSseSignalTransport, buildSignalBaseUrl, buildSignalStreamUrl } from './signal-http-sse-transport';
+export type { SignalTransport, SignalStreamOpenRequest } from './signal-http-sse-transport';
 export { SignalRouteService, getSignalRouteService } from './signal-route.service';
 export type { SignalRouteServiceOptions } from './signal-route.service';
 

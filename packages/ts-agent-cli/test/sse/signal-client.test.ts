@@ -6,6 +6,10 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import { SignalClient, createSignalClient } from "../../src/sse/signal-client.js";
 
 describe("SignalClient", () => {
+  function fetchCalls(): Array<[string, RequestInit | undefined]> {
+    return (globalThis.fetch as unknown as { mock: { calls: Array<[string, RequestInit | undefined]> } }).mock.calls;
+  }
+
   beforeEach(() => {
     vi.restoreAllMocks();
   });
@@ -69,7 +73,7 @@ describe("SignalClient", () => {
       const result = await client.send("echo.response", { foo: "bar" });
       expect(result.accepted).toBe(true);
 
-      const call = vi.mocked(globalThis.fetch).mock.calls[0];
+      const call = fetchCalls()[0];
       const body = JSON.parse(call![1]!.body as string);
       expect(body.topic).toBe("echo.response");
       expect(body.payload).toEqual({ foo: "bar" });
