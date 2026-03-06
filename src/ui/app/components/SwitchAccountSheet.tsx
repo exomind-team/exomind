@@ -69,7 +69,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
       await login(selectedUser, password);
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '登录失败');
+      setError(e instanceof Error ? e.message : '打开档案失败');
     } finally {
       setLoading(false);
     }
@@ -83,7 +83,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
       await login(username, password);
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '登录失败');
+      setError(e instanceof Error ? e.message : '打开档案失败');
     } finally {
       setLoading(false);
     }
@@ -106,7 +106,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
       await login(username, regPassword);
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '注册失败');
+      setError(e instanceof Error ? e.message : '创建档案失败');
     } finally {
       setLoading(false);
     }
@@ -143,7 +143,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
           {mode === 'switch' && (
             <div className="space-y-3">
               <DrawerTitle className="text-base font-semibold text-stone-800">
-                切换账户
+                切换本地档案
               </DrawerTitle>
 
               <div className="space-y-2">
@@ -187,7 +187,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 })}
               </div>
 
-              {/* Password input for selected user */}
+              {/* Password input for selected profile（已选档案的密码输入） */}
               {selectedUser && selectedProfile?.profileId !== activeProfileId && (
                 <div className="space-y-3">
                   <div className="space-y-1.5">
@@ -205,7 +205,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                     onClick={handleSwitchLogin}
                     disabled={loading || !password}
                   >
-                    {loading ? '登录中...' : '登录'}
+                    {loading ? '打开中...' : '打开档案'}
                   </Button>
                 </div>
               )}
@@ -217,7 +217,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 className="w-full rounded-xl"
                 onClick={goToRegister}
               >
-                注册新档案
+                创建档案
               </Button>
             </div>
           )}
@@ -226,14 +226,14 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
           {mode === 'login' && (
             <div className="space-y-3">
               <DrawerTitle className="text-base font-semibold text-stone-800">
-                登录
+                打开本地档案
               </DrawerTitle>
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-stone-500">用户名</Label>
+                <Label className="text-xs text-stone-500">档案标识</Label>
                 <Input
                   type="text"
-                  placeholder="请输入用户名"
+                  placeholder="请输入档案标识"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                 />
@@ -257,14 +257,14 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 onClick={handleLogin}
                 disabled={loading || !username || !password}
               >
-                {loading ? '登录中...' : '登录'}
+                {loading ? '打开中...' : '打开档案'}
               </Button>
 
               <button
                 className="w-full text-center text-xs text-stone-400 hover:text-stone-600"
                 onClick={goToRegister}
               >
-                没有账户？去注册
+                没有本地档案？去创建
               </button>
             </div>
           )}
@@ -280,15 +280,15 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                   <ChevronLeft className="h-5 w-5 text-stone-600" />
                 </button>
                 <DrawerTitle className="text-base font-semibold text-stone-800">
-                  注册新账户
+                  创建本地档案
                 </DrawerTitle>
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-stone-500">用户名</Label>
+                <Label className="text-xs text-stone-500">档案标识</Label>
                 <Input
                   type="text"
-                  placeholder="请输入用户名"
+                  placeholder="请输入档案标识"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                 />
@@ -322,14 +322,14 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 onClick={handleRegister}
                 disabled={loading || !username || !regPassword || !confirmPassword}
               >
-                {loading ? '注册中...' : '注册'}
+                {loading ? '创建中...' : '创建档案'}
               </Button>
 
               <button
                 className="w-full text-center text-xs text-stone-400 hover:text-stone-600"
                 onClick={goToLogin}
               >
-                已有账户？去登录
+                已有本地档案？去打开
               </button>
             </div>
           )}

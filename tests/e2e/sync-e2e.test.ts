@@ -134,12 +134,12 @@ test.describe('多设备同步 E2E', () => {
     await Promise.all([connectToServer(pageA), connectToServer(pageB)]);
 
     await pageA.getByRole('button', { name: '同步事件' }).click();
-    await expect(pageA.getByText(/事件同步(完成|失败)/)).toBeVisible({
+    await expect(pageA.getByText(/事件同步完成/)).toBeVisible({
       timeout: 15000,
     });
 
     await pageB.getByRole('button', { name: '同步配置' }).click();
-    await expect(pageB.getByText(/配置同步(完成|失败)/)).toBeVisible({
+    await expect(pageB.getByText(/配置同步完成/)).toBeVisible({
       timeout: 15000,
     });
 

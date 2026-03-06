@@ -78,23 +78,31 @@ describe('UserManagePage 功能完整性', () => {
   const content = fs.readFileSync(userManagePagePath, 'utf-8');
 
   it('应该包含用户管理标题', () => {
-    expect(content).toContain('用户管理');
+    expect(content).toContain('档案与同步身份');
   });
 
-  it('应该包含当前用户状态 UI', () => {
-    expect(content).toContain('当前用户');
+  it('应该包含当前本地档案状态 UI', () => {
+    expect(content).toContain('当前本地档案');
   });
 
-  it('应该包含用户注册 UI', () => {
-    expect(content).toContain('注册新用户');
+  it('应该包含本地档案创建 UI', () => {
+    expect(content).toContain('创建本地档案');
   });
 
-  it('应该包含已注册用户列表 UI', () => {
-    expect(content).toContain('已注册用户');
+  it('应该包含本地档案列表 UI', () => {
+    expect(content).toContain('本地档案列表');
+  });
+
+  it('应该包含档案打开 UI', () => {
+    expect(content).toContain('打开档案');
   });
 
   it('应该包含使用说明 UI', () => {
     expect(content).toContain('使用说明');
+  });
+
+  it('应该说明远端同步身份需要在同步设置中绑定', () => {
+    expect(content).toContain('远端同步身份请前往同步设置绑定');
   });
 
   it('应该使用 useSyncStore hooks', () => {
@@ -126,7 +134,7 @@ describe('UserManagePage 事件处理器', () => {
     expect(content).toContain('handleRegister');
   });
 
-  it('应该定义 handleQuickLogin 函数', () => {
+  it('应该定义 handleQuickLogin（快速打开档案）函数', () => {
     expect(content).toContain('handleQuickLogin');
   });
 
@@ -163,7 +171,7 @@ describe('UserManagePage UI 改进', () => {
     expect(content).not.toContain('prompt(');
   });
 
-  it('应该实现 showLoginForm 状态控制登录表单显示', () => {
+  it('应该实现 showLoginForm 状态控制打开表单显示', () => {
     expect(content).toContain('showLoginForm');
   });
 

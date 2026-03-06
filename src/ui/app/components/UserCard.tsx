@@ -53,10 +53,10 @@ export function UserCard() {
           {/* User Info */}
           <div className="min-w-0 flex-1">
             <div className="truncate text-xl font-bold text-white">
-              {isLoggedIn && currentUser ? currentUser : '未登录'}
+              {isLoggedIn && currentUser ? currentUser : '未打开档案'}
             </div>
             <div className="text-[13px] text-white/60">
-              {isLoggedIn ? '轻触头像更换' : '登录以启用多设备同步'}
+              {isLoggedIn ? '轻触查看或切换本地档案' : '打开本地档案后可绑定远端同步身份'}
             </div>
           </div>
         </div>
@@ -77,7 +77,7 @@ export function UserCard() {
                 onClick={() => openSheet('switch')}
               >
                 <Users className="h-[15px] w-[15px] text-white/75" />
-                <span className="text-[13px] font-medium text-white/80">切换账户</span>
+                <span className="text-[13px] font-medium text-white/80">切换档案</span>
               </button>
               <button
                 className="flex items-center gap-1.5 rounded-[10px] bg-white/20 px-3 py-2"
@@ -94,14 +94,14 @@ export function UserCard() {
                 onClick={() => openSheet('login')}
               >
                 <LogIn className="h-[15px] w-[15px] text-white/75" />
-                <span className="text-[13px] font-medium text-white/80">登录</span>
+                <span className="text-[13px] font-medium text-white/80">打开档案</span>
               </button>
               <button
                 className="flex items-center gap-1.5 rounded-[10px] bg-white/20 px-3 py-2"
                 onClick={() => openSheet('register')}
               >
                 <UserPlus className="h-[15px] w-[15px] text-white/75" />
-                <span className="text-[13px] font-medium text-white/80">注册</span>
+                <span className="text-[13px] font-medium text-white/80">创建档案</span>
               </button>
             </>
           )}
