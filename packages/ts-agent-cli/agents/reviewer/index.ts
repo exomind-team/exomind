@@ -21,6 +21,11 @@ import {
   TIMEBLOCK_REVIEWER_SYSTEM_PROMPT,
   TIMEBLOCK_REVIEWER_USER_PROMPT,
 } from "./prompt.js";
+import {
+  sanitizeReviewResult,
+  sanitizeTimeblockReviewResult,
+} from "./review-output.js";
+import { decideTimeblockReview } from "./timeblock-review-guard.js";
 
 const RT_URL = process.env["EXOMIND_RT_URL"] ?? "http://localhost:1949";
 const AGENT_ID = process.env["REVIEWER_AGENT_ID"] ?? "reviewer";
@@ -32,6 +37,8 @@ const client = new SignalClient({
   agentId: AGENT_ID,
   source: "agent:reviewer",
 });
+const AGENT_STARTED_AT = Date.now();
+const processedTimeblockReviewKeys = new Set<string>();
 
 export interface ReviewResult {
   effective: string;
@@ -113,7 +120,7 @@ function reviewWithClaude(events: EventEntry[]): ReviewResult | null {
       return null;
     }
 
-    return parsed as ReviewResult;
+    return sanitizeReviewResult(parsed as ReviewResult);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[Reviewer] Claude CLI call failed: ${msg}`);
@@ -166,7 +173,7 @@ function reviewTimeblock(payload: TimeblockPayload): TimeblockReviewResult | nul
       return null;
     }
 
-    return parsed as TimeblockReviewResult;
+    return sanitizeTimeblockReviewResult(parsed as TimeblockReviewResult);
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
     console.error(`[Reviewer] Claude CLI call failed (timeblock): ${msg}`);
@@ -182,6 +189,19 @@ async function handleSignal(event: SignalEvent): Promise<void> {
     const payload = event.payload as TimeblockPayload | null;
     if (!payload?.block?.name || !payload?.feedbackReport) {
       console.warn(`[Reviewer] invalid timeblock.completed payload, skipping`);
+      return;
+    }
+
+    const reviewDecision = decideTimeblockReview({
+      event,
+      payload,
+      processedKeys: processedTimeblockReviewKeys,
+      agentStartedAt: AGENT_STARTED_AT,
+    });
+    if (reviewDecision.skip) {
+      console.log(
+        `[Reviewer] skipped timeblock.completed: reason=${reviewDecision.reason} key=${reviewDecision.key}`,
+      );
       return;
     }
 
@@ -210,6 +230,7 @@ async function handleSignal(event: SignalEvent): Promise<void> {
       console.log(
         `[Reviewer] published review.completed (timeblock): event_id=${response.event_id}`,
       );
+      processedTimeblockReviewKeys.add(reviewDecision.key);
     } catch (error) {
       const msg = error instanceof Error ? error.message : String(error);
       console.error(`[Reviewer] publish failed (timeblock): ${msg}`);

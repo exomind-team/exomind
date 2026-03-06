@@ -25,9 +25,10 @@ import type {
   TimerConfig,
 } from '../types/event';
 import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/feedback-preferences';
-import { getSelectedRuntimeTarget, toRuntimeBaseUrl } from '@/config/runtime-target';
+import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
+import { SignalStreamService } from './signal-stream.service';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -552,44 +553,54 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     feedbackReport: string,
     storage: { getEvents(): Promise<Array<{ id: string; content: string; createdAt: string }>> },
   ): Promise<void> {
-    const rtBaseUrl = this.resolveRtBaseUrl();
-    if (!rtBaseUrl) return;
+    const runtimeTarget = this.resolveRuntimeTarget();
+    if (!runtimeTarget) return;
 
     // 获取最近事件作为上下文
-    const allEvents = await storage.getEvents();
+    const allEvents = typeof storage.getEvents === 'function' ? await storage.getEvents() : [];
     const recentEvents = allEvents.slice(0, 20).map((e) => ({
       text: e.content,
       ts: new Date(e.createdAt).getTime(),
     }));
 
-    const response = await fetch(`${rtBaseUrl}/signals/publish`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        topic: 'timeblock.completed',
-        source: 'frontend:timeblock-service',
-        payload: {
-          block: {
-            id: block.id,
-            name: block.name,
-            startTime: block.startTime,
-            endTime: block.endTime,
-          },
-          feedbackReport,
-          recentEvents,
-        },
-      }),
+    const publisher = new SignalStreamService({
+      host: {
+        id: `runtime-${runtimeTarget.mode}`,
+        name: runtimeTarget.mode === 'embedded' ? 'Embedded Runtime（内嵌运行时）' : 'External Runtime（外部运行时）',
+        host: runtimeTarget.host,
+        port: runtimeTarget.port,
+        status: 'online',
+        createdAt: new Date().toISOString(),
+        updatedAt: new Date().toISOString(),
+        isLocal: runtimeTarget.mode === 'embedded' || runtimeTarget.host === '127.0.0.1' || runtimeTarget.host === 'localhost',
+      },
+      agentId: 'timeblock-service',
     });
 
-    if (!response.ok) {
-      console.warn(`[TimeBlockService] RT publish returned HTTP ${response.status}`);
+    const response = await publisher.publish({
+      topic: 'timeblock.completed',
+      source: 'frontend:timeblock-service',
+      trace_id: `timeblock:${block.id}:${block.endTime}`,
+      payload: {
+        block: {
+          id: block.id,
+          name: block.name,
+          startTime: block.startTime,
+          endTime: block.endTime,
+        },
+        feedbackReport,
+        recentEvents,
+      },
+    });
+
+    if (!response.accepted) {
+      console.warn('[TimeBlockService] RT publish was not accepted');
     }
   }
 
-  private resolveRtBaseUrl(): string | null {
+  private resolveRuntimeTarget(): RuntimeTarget | null {
     try {
-      const target = getSelectedRuntimeTarget();
-      return toRuntimeBaseUrl(target);
+      return getSelectedRuntimeTarget();
     } catch {
       return null;
     }

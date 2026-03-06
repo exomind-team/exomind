@@ -10,12 +10,26 @@ const {
   getFeedbackPreferencesMock: vi.fn(),
 }));
 
+const tauriMocks = vi.hoisted(() => ({
+  isTauri: vi.fn(),
+  invoke: vi.fn(),
+}));
+
+const networkMocks = vi.hoisted(() => ({
+  fetch: vi.fn(),
+}));
+
 vi.mock('../../../src/lib/storage/event-storage', () => ({
   getEventStorage: getEventStorageMock,
 }));
 
 vi.mock('@/config/feedback-preferences', () => ({
   getFeedbackPreferences: getFeedbackPreferencesMock,
+}));
+
+vi.mock('@tauri-apps/api/core', () => ({
+  isTauri: tauriMocks.isTauri,
+  invoke: tauriMocks.invoke,
 }));
 
 import { TimeBlockServiceImpl } from '@/lib/services/timeblock.service';
@@ -49,6 +63,7 @@ function createMemoryEnv(): MemoryEnv {
 function createStorage(addEventImpl = addEventMock) {
   return {
     addEvent: addEventImpl,
+    getEvents: vi.fn().mockResolvedValue([]),
   };
 }
 
@@ -64,10 +79,22 @@ describe('TimeBlockServiceImpl', () => {
       statisticsEnabled: true,
       quickFeedbackEnabled: true,
     });
+    tauriMocks.isTauri.mockReset();
+    tauriMocks.invoke.mockReset();
+    tauriMocks.isTauri.mockResolvedValue(false);
+    networkMocks.fetch.mockReset();
+    networkMocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accepted: true, event_id: 'evt-default-mock' }),
+    });
+    vi.stubGlobal('fetch', networkMocks.fetch as unknown as typeof fetch);
   });
 
   afterEach(() => {
     vi.useRealTimers();
+    vi.restoreAllMocks();
+    vi.unstubAllGlobals();
   });
 
   it('initializes countdown blocks with remaining milliseconds from minutes', async () => {
@@ -440,11 +467,31 @@ describe('TimeBlockServiceImpl', () => {
     expect(restarted.startId).not.toBe(first.startId);
   });
 
+  it('stubs fetch by default so endBlock tests never hit live runtime（默认拦截网络避免污染真实 RT）', async () => {
+    expect(vi.isMockFunction(globalThis.fetch)).toBe(true);
+
+    const env = createMemoryEnv();
+    const service = new TimeBlockServiceImpl(env as never);
+    await service.startBlock('default-fetch-guard', { mode: 'countup' });
+    await service.markEnding();
+    await service.endBlock('done');
+
+    for (let i = 0; i < 20 && networkMocks.fetch.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(networkMocks.fetch).toHaveBeenCalledWith(
+      `http://${window.location.hostname || 'localhost'}:${DEFAULT_EMBEDDED_RUNTIME_PORT}/signals/publish`,
+      expect.objectContaining({ method: 'POST' }),
+    );
+  });
+
   it('publishes timeblock.completed to embedded RT default port（发布到内嵌 RT 默认端口）', async () => {
     const env = createMemoryEnv();
     const addEvent = vi.fn();
     const getEvents = vi.fn().mockResolvedValue([]);
-    const fetchSpy = vi.fn().mockResolvedValue({
+    networkMocks.fetch.mockReset();
+    networkMocks.fetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ accepted: true, event_id: 'evt-1' }),
@@ -455,22 +502,65 @@ describe('TimeBlockServiceImpl', () => {
       addEvent,
       getEvents,
     });
-    vi.stubGlobal('fetch', fetchSpy as unknown as typeof fetch);
 
     const service = new TimeBlockServiceImpl(env as never);
     await service.startBlock('publish-rt', { mode: 'countup' });
     await service.markEnding();
     await service.endBlock('done');
 
-    for (let i = 0; i < 20 && fetchSpy.mock.calls.length === 0; i += 1) {
+    for (let i = 0; i < 20 && networkMocks.fetch.mock.calls.length === 0; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
-    expect(fetchSpy).toHaveBeenCalled();
-    expect(fetchSpy).toHaveBeenCalledWith(
+    expect(networkMocks.fetch).toHaveBeenCalled();
+    expect(networkMocks.fetch).toHaveBeenCalledWith(
       `http://${window.location.hostname || 'localhost'}:${DEFAULT_EMBEDDED_RUNTIME_PORT}/signals/publish`,
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('uses signal_publish_fast in tauri when ending block（Tauri 环境走快速信号发布）', async () => {
+    tauriMocks.isTauri.mockResolvedValue(true);
+    tauriMocks.invoke.mockResolvedValue({
+      accepted: true,
+      event_id: 'evt-fast-timeblock-1',
+    });
+
+    const env = createMemoryEnv();
+    const addEvent = vi.fn();
+    const getEvents = vi.fn().mockResolvedValue([]);
+    networkMocks.fetch.mockReset();
+    networkMocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accepted: true, event_id: 'evt-http-should-not-run' }),
+    });
+
+    getEventStorageMock.mockReset();
+    getEventStorageMock.mockReturnValue({
+      addEvent,
+      getEvents,
+    });
+
+    const service = new TimeBlockServiceImpl(env as never);
+    await service.startBlock('publish-fast-tauri', { mode: 'countup' });
+    await service.markEnding();
+    await service.endBlock('done');
+
+    for (let i = 0; i < 20 && tauriMocks.invoke.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(tauriMocks.invoke).toHaveBeenCalledWith(
+      'signal_publish_fast',
+      {
+        request: expect.objectContaining({
+          topic: 'timeblock.completed',
+          source: 'frontend:timeblock-service',
+        }),
+      },
+    );
+    expect(networkMocks.fetch).not.toHaveBeenCalled();
   });
 
   it('publishes to external runtime after target switch（切到外部后发布到外部 RT）', async () => {
@@ -480,7 +570,8 @@ describe('TimeBlockServiceImpl', () => {
     const env = createMemoryEnv();
     const addEvent = vi.fn();
     const getEvents = vi.fn().mockResolvedValue([]);
-    const fetchSpy = vi.fn().mockResolvedValue({
+    networkMocks.fetch.mockReset();
+    networkMocks.fetch.mockResolvedValue({
       ok: true,
       status: 200,
       json: async () => ({ accepted: true, event_id: 'evt-2' }),
@@ -491,21 +582,55 @@ describe('TimeBlockServiceImpl', () => {
       addEvent,
       getEvents,
     });
-    vi.stubGlobal('fetch', fetchSpy as unknown as typeof fetch);
 
     const service = new TimeBlockServiceImpl(env as never);
     await service.startBlock('publish-external-rt', { mode: 'countup' });
     await service.markEnding();
     await service.endBlock('done');
 
-    for (let i = 0; i < 20 && fetchSpy.mock.calls.length === 0; i += 1) {
+    for (let i = 0; i < 20 && networkMocks.fetch.mock.calls.length === 0; i += 1) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
 
-    expect(fetchSpy).toHaveBeenCalled();
-    expect(fetchSpy).toHaveBeenCalledWith(
+    expect(networkMocks.fetch).toHaveBeenCalled();
+    expect(networkMocks.fetch).toHaveBeenCalledWith(
       'http://127.0.0.1:1949/signals/publish',
       expect.objectContaining({ method: 'POST' }),
     );
+  });
+
+  it('publishes stable trace_id for timeblock.completed（时间块信号带稳定 trace_id）', async () => {
+    window.localStorage.setItem('exomind:runtimeTargetMode', 'external');
+    window.localStorage.setItem('exomind:runtimeExternalAddress', '127.0.0.1:1949');
+
+    const env = createMemoryEnv();
+    const addEvent = vi.fn();
+    const getEvents = vi.fn().mockResolvedValue([]);
+    networkMocks.fetch.mockReset();
+    networkMocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accepted: true, event_id: 'evt-trace-1' }),
+    });
+
+    getEventStorageMock.mockReset();
+    getEventStorageMock.mockReturnValue({
+      addEvent,
+      getEvents,
+    });
+
+    const service = new TimeBlockServiceImpl(env as never);
+    const started = await service.startBlock('trace-block', { mode: 'countup' });
+    await service.markEnding();
+    const completed = await service.endBlock('done');
+
+    for (let i = 0; i < 20 && networkMocks.fetch.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    expect(completed).not.toBeNull();
+    const [, requestInit] = networkMocks.fetch.mock.calls.at(-1) ?? [];
+    const body = JSON.parse(String(requestInit?.body ?? '{}')) as { trace_id?: string };
+    expect(body.trace_id).toBe(`timeblock:${started.startId}:${completed?.endTime}`);
   });
 });
