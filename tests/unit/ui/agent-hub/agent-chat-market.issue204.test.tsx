@@ -40,8 +40,21 @@ describe('agent chat and market issue-204（对话与市场）', () => {
 
     expect(screen.getByTestId('agent-conversation-header')).toBeInTheDocument();
     expect(screen.getByTestId('agent-chat-input-bar')).toBeInTheDocument();
-    expect(screen.getByTestId('agent-conversation-page').className).toContain('dark:bg-[#0C0A09]');
+    expect(screen.getByTestId('agent-conversation-page').className).toContain('bg-surface');
+    expect(screen.getByTestId('agent-conversation-page').className).toContain('text-foreground');
+    expect(screen.getByTestId('agent-chat-input-bar').className).toContain('bg-surface');
     expect(screen.getByText('你好！我是日报 Agent。有什么需要我整理的吗？')).toBeInTheDocument();
+
+    const input = screen.getByPlaceholderText('输入消息...');
+    expect(input.className).toContain('bg-card');
+    expect(input.className).toContain('text-foreground');
+    expect(input.className).toContain('border-border-card');
+
+    const agentBubble = screen.getByTestId('agent-conversation-message-agent-history');
+    expect(agentBubble.className).toContain('bg-card');
+    expect(agentBubble.className).toContain('border-border-card');
+    expect(agentBubble.className).toContain('text-strong');
+
     fireEvent.change(screen.getByPlaceholderText('输入消息...'), { target: { value: '今天情况如何' } });
     fireEvent.click(screen.getByTestId('agent-chat-send-button'));
 

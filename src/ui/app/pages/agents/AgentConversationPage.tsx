@@ -133,20 +133,20 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
   };
 
   return (
-    <div data-testid="agent-conversation-page" className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]">
-      <header data-testid="agent-conversation-header" className="flex items-center justify-between border-b border-[#F0ECE8] px-4 py-3 dark:border-[#292524] md:px-8 lg:px-10">
+    <div data-testid="agent-conversation-page" className="flex h-full min-h-full flex-col bg-surface text-foreground">
+      <header data-testid="agent-conversation-header" className="flex items-center justify-between border-b border-border-card px-4 py-3 md:px-8 lg:px-10">
         <button
           type="button"
           onClick={() => window.history.back()}
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
           aria-label="返回（Back）"
         >
           <ArrowLeft size={16} />
         </button>
-        <h1 className="text-[17px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">日报 Agent</h1>
+        <h1 className="text-[17px] font-bold text-foreground">日报 Agent</h1>
         <button
           type="button"
-          className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+          className="flex h-8 w-8 items-center justify-center rounded-full bg-muted text-muted-foreground"
           aria-label="更多（More）"
         >
           <MoreHorizontal size={16} />
@@ -164,16 +164,17 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
                 </div>
               )}
               <div
+                data-testid={isUser ? 'agent-conversation-message-user' : 'agent-conversation-message-agent-history'}
                 className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
                   isUser
                     ? 'rounded-tr-[6px] bg-[#C75B3A] text-white'
-                    : 'rounded-tl-[6px] border border-[#E7E5E4] bg-white text-[#1C1917] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9]'
+                    : 'rounded-tl-[6px] border border-border-card bg-card text-strong'
                 }`}
               >
                 {message.content}
               </div>
               {isUser && (
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
                   <UserRound size={12} />
                 </div>
               )}
@@ -185,15 +186,16 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
       <div
         data-testid="agent-chat-input-bar"
         className={isDesktop
-          ? 'flex items-center gap-2 border-t border-[#E7E5E4] bg-[#FAF7F5] px-4 py-3 dark:border-[#292524] dark:bg-[#0C0A09] md:px-8 lg:px-10'
-          : 'fixed bottom-[calc(env(safe-area-inset-bottom,0px)+64px)] left-0 right-0 mx-auto flex w-full max-w-[393px] items-center gap-2 border-t border-[#E7E5E4] bg-[#FAF7F5] px-4 py-3 dark:border-[#292524] dark:bg-[#0C0A09]'
+          ? 'flex items-center gap-2 border-t border-border-card bg-surface px-4 py-3 md:px-8 lg:px-10'
+          : 'fixed bottom-[calc(env(safe-area-inset-bottom,0px)+64px)] left-0 right-0 mx-auto flex w-full max-w-[393px] items-center gap-2 border-t border-border-card bg-surface px-4 py-3'
         }
       >
         <input
+          data-testid="agent-chat-input"
           value={inputValue}
           onChange={(event) => setInputValue(event.target.value)}
           placeholder="输入消息..."
-          className="h-9 flex-1 rounded-full border border-[#E7E5E4] bg-white px-4 text-sm text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+          className="h-9 flex-1 rounded-full border border-border-card bg-card px-4 text-sm text-foreground outline-none placeholder:text-muted-foreground"
         />
         <button
           type="button"

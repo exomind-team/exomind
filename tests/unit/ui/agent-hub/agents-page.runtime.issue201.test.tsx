@@ -179,11 +179,40 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
       ],
     });
 
-    signalRouteFetchMock.mockResolvedValue({
-      ok: true,
-      status: 200,
-      json: async () => SAMPLE_SIGNAL_ROUTES,
-    } as Response);
+    let currentRoutes = SAMPLE_SIGNAL_ROUTES.map((route) => ({ ...route }));
+    signalRouteFetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url.endsWith('/signal-routes') && method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => currentRoutes,
+        } as Response;
+      }
+
+      const match = url.match(/\/signal-routes\/([^/]+)$/);
+      if (match && method === 'PUT') {
+        const routeId = decodeURIComponent(match[1] ?? '');
+        const updates = init?.body ? JSON.parse(String(init.body)) as { enabled?: boolean } : {};
+        currentRoutes = currentRoutes.map((route) => (
+          route.id === routeId ? { ...route, ...updates } : route
+        ));
+        const updated = currentRoutes.find((route) => route.id === routeId);
+        return {
+          ok: true,
+          status: 200,
+          json: async () => updated,
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
     vi.stubGlobal('fetch', signalRouteFetchMock);
   });
 
@@ -202,6 +231,102 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
       expect(screen.getByText('信号路由')).toBeInTheDocument();
       expect(screen.getAllByText(/user\.input\.text|session\.end|timeblock\.completed/).length).toBeGreaterThanOrEqual(3);
     });
+
+    const switches = screen.getAllByRole('switch');
+    expect(switches.length).toBe(SAMPLE_SIGNAL_ROUTES.length);
+    expect(switches[0]).toHaveAttribute('aria-checked', 'true');
+  });
+
+  it('toggles route switch with immediate UI feedback（点击路由开关后应立即切换且发起更新）', async () => {
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '路由' }));
+
+    const firstSwitch = await screen.findAllByRole('switch').then((items) => items[0]!);
+    expect(firstSwitch).toHaveAttribute('aria-checked', 'true');
+
+    fireEvent.click(firstSwitch);
+
+    await waitFor(() => {
+      expect(firstSwitch).toHaveAttribute('aria-checked', 'false');
+    });
+
+    expect(signalRouteFetchMock).toHaveBeenCalledWith(
+      expect.stringContaining('/signal-routes/route-001'),
+      expect.objectContaining({
+        method: 'PUT',
+      }),
+    );
+  });
+
+  it('toggles routes loaded from auto-discovered host（从 auto 发现主机加载的路由也应可切换）', async () => {
+    runtimeManagerMocks.refreshSnapshot.mockResolvedValueOnce({
+      updatedAt: '2026-02-28T10:00:00.000Z',
+      agents: [],
+      hosts: [],
+    });
+
+    let currentRoutes = SAMPLE_SIGNAL_ROUTES.map((route) => ({ ...route }));
+    signalRouteFetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
+      const url = String(input);
+      const method = init?.method ?? 'GET';
+
+      if (url === 'http://127.0.0.1:1949/signal-routes' && method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => currentRoutes,
+        } as Response;
+      }
+
+      if (url === 'http://127.0.0.1:1949/agents' && method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      if (url === 'http://127.0.0.1:1949/signals/history?limit=120' && method === 'GET') {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+
+      if (url === 'http://127.0.0.1:1949/signal-routes/route-001' && method === 'PUT') {
+        const updates = init?.body ? JSON.parse(String(init.body)) as { enabled?: boolean } : {};
+        currentRoutes = currentRoutes.map((route) => (
+          route.id === 'route-001' ? { ...route, ...updates } : route
+        ));
+        return {
+          ok: true,
+          status: 200,
+          json: async () => currentRoutes.find((route) => route.id === 'route-001'),
+        } as Response;
+      }
+
+      return {
+        ok: false,
+        status: 404,
+        json: async () => ({ error: 'not found' }),
+      } as Response;
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '路由' }));
+
+    const firstSwitch = await screen.findAllByRole('switch').then((items) => items[0]!);
+    fireEvent.click(firstSwitch);
+
+    await waitFor(() => {
+      expect(firstSwitch).toHaveAttribute('aria-checked', 'false');
+    });
+
+    expect(signalRouteFetchMock).toHaveBeenCalledWith(
+      'http://127.0.0.1:1949/signal-routes/route-001',
+      expect.objectContaining({ method: 'PUT' }),
+    );
   });
 
   it('opens add-device flow from header button（右上角按钮触发添加设备流程）', async () => {

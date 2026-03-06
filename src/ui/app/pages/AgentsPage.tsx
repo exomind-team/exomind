@@ -77,6 +77,7 @@ import {
   type SignalGraphNodeType,
   type SignalRouteRow,
 } from './agents-signal-topology';
+import { Switch } from '@/components/ui/switch';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -1311,20 +1312,13 @@ function RoutesTabView({
                 >
                   {/* 启用开关 */}
                   <td className="px-4 py-3" onClick={(e) => e.stopPropagation()}>
-                    <button
-                      type="button"
-                      onClick={() => void onToggle(route.id, !route.enabled)}
-                      className={`relative h-5 w-9 rounded-full transition-colors ${
-                        route.enabled ? 'bg-[#22C55E]' : 'bg-[#D6D3D1] dark:bg-[#57534E]'
-                      }`}
+                    <Switch
+                      checked={route.enabled}
+                      onCheckedChange={(checked) => void onToggle(route.id, checked)}
+                      onClick={(event) => event.stopPropagation()}
+                      onPointerDown={(event) => event.stopPropagation()}
                       aria-label={route.enabled ? '禁用' : '启用'}
-                    >
-                      <span
-                        className={`absolute top-0.5 h-4 w-4 rounded-full bg-white shadow transition-transform ${
-                          route.enabled ? 'translate-x-4' : 'translate-x-0.5'
-                        }`}
-                      />
-                    </button>
+                    />
                   </td>
                   {/* Topic */}
                   <td className="px-4 py-3">
@@ -1672,6 +1666,7 @@ export function AgentsPage() {
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
+  const [activeSignalRouteHost, setActiveSignalRouteHost] = useState<RuntimeHostRecord | null>(null);
   const [signalHistory, setSignalHistory] = useState<SignalEvent[]>([]);
   const [signalHistoryHostLabel, setSignalHistoryHostLabel] = useState<string>('');
   const [fallbackRuntimeAgents, setFallbackRuntimeAgents] = useState<RuntimeAggregatedAgent[]>([]);
@@ -1758,7 +1753,7 @@ export function AgentsPage() {
   ) => {
     setIsRouteSaving(true);
     try {
-      const host = sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+      const host = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
       if (!host) return;
       const routeService = new SignalRouteService({ host });
       if (rightPanel.state === 'ROUTE_EDIT' && rightPanel.routeId) {
@@ -1776,20 +1771,29 @@ export function AgentsPage() {
   };
 
   const handleRouteToggle = async (routeId: string, enabled: boolean) => {
+    const previousRoutes = signalRoutes;
+    setSignalRoutes((current) => current.map((route) => (
+      route.id === routeId ? { ...route, enabled } : route
+    )));
+
     try {
-      const host = sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
-      if (!host) return;
+      const host = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+      if (!host) {
+        setSignalRoutes(previousRoutes);
+        return;
+      }
       const routeService = new SignalRouteService({ host });
       await routeService.updateRoute(routeId, { enabled });
       await refreshSignalRoutesFromSnapshot({ hosts: runtimeHostSnapshots });
     } catch (err) {
+      setSignalRoutes(previousRoutes);
       console.error('Failed to toggle route:', err);
     }
   };
 
   const handleRouteDelete = async (routeId: string) => {
     try {
-      const host = sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+      const host = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
       if (!host) return;
       const routeService = new SignalRouteService({ host });
       await routeService.deleteRoute(routeId);
@@ -2014,6 +2018,7 @@ export function AgentsPage() {
     if (useMockData) {
       if (isDisposed()) return;
       setSignalRouteHostLabel('mock（测试数据）');
+      setActiveSignalRouteHost(null);
       setSignalHistoryHostLabel('mock（测试数据）');
       setSignalRoutes(MOCK_SIGNAL_ROUTES_FALLBACK);
       setSignalHistory([]);
@@ -2029,6 +2034,7 @@ export function AgentsPage() {
       if (!result) continue;
       if (isDisposed()) return;
       setSignalRouteHostLabel(result.hostLabel);
+      setActiveSignalRouteHost(host);
       setSignalHistoryHostLabel(result.hostLabel);
       setSignalRoutes(result.routes);
       setSignalHistory(result.history);
@@ -2045,6 +2051,7 @@ export function AgentsPage() {
       if (!result) continue;
       if (isDisposed()) return;
       setSignalRouteHostLabel(`${result.hostLabel}（auto）`);
+      setActiveSignalRouteHost(host);
       setSignalHistoryHostLabel(`${result.hostLabel}（auto）`);
       setSignalRoutes(result.routes);
       setSignalHistory(result.history);
@@ -2057,6 +2064,7 @@ export function AgentsPage() {
 
     if (isDisposed()) return;
     setSignalRouteHostLabel('');
+    setActiveSignalRouteHost(null);
     setSignalHistoryHostLabel('');
     setSignalRoutes([]);
     setSignalHistory([]);
