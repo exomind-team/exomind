@@ -99,6 +99,7 @@ export interface SyncConfig {
  * 同步凭据
  */
 export interface SyncCredentials {
+  localProfileId?: string;
   username: string;
   passwordHash: string;
   providerId?: string;

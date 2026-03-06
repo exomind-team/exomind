@@ -1,5 +1,10 @@
 // Re-export split types for backward compatibility
-export type { RuntimeHostStatus, RuntimeHostRecord, RuntimeServiceStatus } from './agent-hub-runtime';
+export type {
+  RuntimeHostStatus,
+  RuntimeHostRecord,
+  RuntimeHostTrustState,
+  RuntimeServiceStatus,
+} from './agent-hub-runtime';
 export type { AgentMarketCategory, AgentMarketItem } from './agent-hub-market';
 
 // Agent Hub view modes（视图模式）

@@ -42,6 +42,11 @@ export interface ResolvedRemoteSyncTarget {
   };
 }
 
+export function resolveLocalSyncDbName(credentials: SyncCredentials): string {
+  const localPartitionKey = (credentials.localProfileId || credentials.username).trim();
+  return `local_${localPartitionKey}`;
+}
+
 function normalizeSyncAuthMode(rawValue: string | undefined): SyncAuthMode {
   const value = rawValue?.trim().toLowerCase();
   if (value === 'enabled' || value === 'on' || value === 'true' || value === 'required') {
@@ -171,11 +176,10 @@ export class PouchSyncAdapter implements ISyncPort {
     this.credentials = credentials;
     this.status.state = 'connecting';
 
-    const { username } = credentials;
     const authMode = resolveSyncAuthMode();
 
     // 创建本地数据库（使用 IndexedDB）
-    const dbName = `local_${username}`;
+    const dbName = resolveLocalSyncDbName(credentials);
     this.localDB = new PouchDB(dbName, { adapter: 'idb' });
 
     // 创建远程数据库连接

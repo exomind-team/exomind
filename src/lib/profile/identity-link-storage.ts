@@ -34,6 +34,14 @@ function setIdentityLinkIndex(linkIds: string[]): void {
   writeJson(IDENTITY_LINK_INDEX_KEY, linkIds);
 }
 
+function getIdentityLinkFreshness(link: IdentityLink): number {
+  return Date.parse(link.lastVerifiedAt || link.linkedAt || '') || 0;
+}
+
+function sortIdentityLinksByFreshness(a: IdentityLink, b: IdentityLink): number {
+  return getIdentityLinkFreshness(b) - getIdentityLinkFreshness(a) || b.linkId.localeCompare(a.linkId);
+}
+
 export function getIdentityLink(linkId: string): IdentityLink | null {
   return readJson<IdentityLink | null>(getIdentityLinkMetaKey(linkId), null);
 }
@@ -50,6 +58,14 @@ export function listIdentityLinks(profileId?: string): IdentityLink[] {
   return profileId ? links.filter((link) => link.profileId === profileId) : links;
 }
 
+export function getPreferredIdentityLink(profileId: string): IdentityLink | null {
+  const linked = listIdentityLinks(profileId)
+    .filter((link) => link.status === 'linked')
+    .sort(sortIdentityLinksByFreshness);
+
+  return linked[0] || null;
+}
+
 export function createIdentityLink(input: {
   profileId: string;
   providerId: string;
@@ -62,7 +78,11 @@ export function createIdentityLink(input: {
   syncMode?: 'disabled' | 'manual' | 'realtime';
 }): IdentityLink {
   const now = new Date().toISOString();
-  const linkId = `link_${createUuidV4()}`;
+  const existingLinks = listIdentityLinks(input.profileId)
+    .filter((link) => link.providerId === input.providerId)
+    .sort(sortIdentityLinksByFreshness);
+  const activeLink = existingLinks.find((link) => link.status === 'linked') || null;
+  const linkId = activeLink?.linkId || `link_${createUuidV4()}`;
   const link: IdentityLink = {
     linkId,
     profileId: input.profileId,
@@ -76,8 +96,21 @@ export function createIdentityLink(input: {
     linkedAt: now,
   };
 
-  const index = getIdentityLinkIndex();
-  setIdentityLinkIndex([...index, linkId]);
+  if (!activeLink) {
+    const index = getIdentityLinkIndex();
+    setIdentityLinkIndex([...index, linkId]);
+  }
+
+  existingLinks
+    .filter((existing) => existing.linkId !== linkId && existing.status === 'linked')
+    .forEach((existing) => {
+      writeJson(getIdentityLinkMetaKey(existing.linkId), {
+        ...existing,
+        status: 'revoked',
+      } satisfies IdentityLink);
+      localStorage.removeItem(getIdentityLinkSecretKey(existing.linkId));
+    });
+
   writeJson(getIdentityLinkMetaKey(linkId), link);
 
   if (input.authType && input.authType !== 'none') {
@@ -89,6 +122,8 @@ export function createIdentityLink(input: {
       updatedAt: now,
     };
     writeJson(getIdentityLinkSecretKey(linkId), secret);
+  } else {
+    localStorage.removeItem(getIdentityLinkSecretKey(linkId));
   }
 
   return link;
@@ -106,4 +141,3 @@ export function revokeIdentityLink(linkId: string): void {
   } satisfies IdentityLink);
   localStorage.removeItem(getIdentityLinkSecretKey(linkId));
 }
-

@@ -38,6 +38,7 @@ import '@xyflow/react/dist/style.css';
 import { getUseMockDataEnabled } from '@/config/mock-data';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
+  DEFAULT_EXTERNAL_RUNTIME_PORT,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
@@ -1278,7 +1279,7 @@ function RuntimeHostManagerSheet({
             data-testid="runtime-host-address-input"
             value={runtimeHostAddress}
             onChange={(event) => onRuntimeHostAddressChange(event.target.value)}
-            placeholder={`host:port（例如 127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}）`}
+            placeholder={`host 或 host:port（例如 127.0.0.1 或 127.0.0.1:${DEFAULT_EXTERNAL_RUNTIME_PORT}）`}
             className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
           />
           <button
@@ -1799,7 +1800,7 @@ export function AgentsPage() {
   const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
   const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
   const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState(
-    `127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+    `127.0.0.1:${DEFAULT_EXTERNAL_RUNTIME_PORT}`,
   );
   const [runtimeHostError, setRuntimeHostError] = useState('');
   const [runtimeTargetModeValue, setRuntimeTargetModeValue] = useState<RuntimeTargetMode>(initialRuntimeTarget.mode);

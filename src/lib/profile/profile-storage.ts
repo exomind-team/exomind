@@ -113,11 +113,17 @@ export function getActiveProfile(): LocalProfile | null {
   return activeProfileId ? getLocalProfile(activeProfileId) : null;
 }
 
+export function findProfileBySlug(slug: string): LocalProfile | null {
+  const target = normalizeProfileSlug(slug);
+  if (!target) {
+    return null;
+  }
+
+  return listLocalProfiles().find((profile) => profile.slug.toLowerCase() === target) || null;
+}
+
 export function findProfileByLoginName(loginName: string): LocalProfile | null {
-  const target = loginName.trim().toLowerCase();
-  return listLocalProfiles().find((profile) => {
-    return profile.slug.toLowerCase() === target || profile.displayName.trim().toLowerCase() === target;
-  }) || null;
+  return findProfileBySlug(loginName);
 }
 
 export function createLocalProfile(input: CreateLocalProfileInput): LocalProfile {
@@ -125,7 +131,7 @@ export function createLocalProfile(input: CreateLocalProfileInput): LocalProfile
   if (!slug) {
     throw new Error('档案标识不能为空');
   }
-  if (findProfileByLoginName(slug)) {
+  if (findProfileBySlug(slug)) {
     throw new Error('档案标识已存在');
   }
 
@@ -178,7 +184,7 @@ export function migrateLegacyProfileStorage(): void {
   }
 
   for (const legacyUser of legacyUsers) {
-    const existing = findProfileByLoginName(legacyUser.username);
+    const existing = findProfileBySlug(legacyUser.username);
     if (existing) {
       if (legacyUser.passwordHash && !getProfileSecret(existing.profileId)?.localPasswordHash) {
         writeJson(getProfileSecretKey(existing.profileId), {
@@ -208,7 +214,7 @@ export function migrateLegacyProfileStorage(): void {
 
   const legacyActiveUser = getLegacyActiveUser();
   if (legacyActiveUser) {
-    const activeProfile = findProfileByLoginName(legacyActiveUser);
+    const activeProfile = findProfileBySlug(legacyActiveUser);
     if (activeProfile) {
       setActiveProfileId(activeProfile.profileId);
     }

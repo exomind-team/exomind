@@ -116,6 +116,30 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
     });
   });
 
+  it('defaults host-only input to port 1949（仅输入 host 时默认端口 1949）', async () => {
+    const addHost = vi.fn(async () => HOST_A);
+    const hostService = {
+      listHosts: vi.fn(async () => [HOST_A]),
+      addHost,
+      removeHost: vi.fn(),
+      probeHost: vi.fn(),
+      probeAllHosts: vi.fn(),
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(),
+      getTopology: vi.fn(),
+    };
+
+    const manager = new RuntimeManager({ hostService, runtimeClient });
+    await manager.addHostFromAddress('10.1.2.3', 'LAN Runtime');
+
+    expect(addHost).toHaveBeenCalledWith({
+      name: 'LAN Runtime',
+      host: '10.1.2.3',
+      port: 1949,
+    });
+  });
+
   it('rejects full url input and requires plain host:port（拒绝完整 URL，仅接受 host:port）', async () => {
     const addHost = vi.fn(async () => HOST_A);
     const hostService = {

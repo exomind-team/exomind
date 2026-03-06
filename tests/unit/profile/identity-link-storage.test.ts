@@ -80,4 +80,33 @@ describe('identity-link-storage（远端身份绑定存储）', () => {
     expect(revoked?.status).toBe('revoked');
     expect(module.getIdentityLinkSecret(link.linkId)).toBeNull();
   });
+
+  it('upserts same provider link and prefers latest linked identity（同 provider 重绑时应取最新绑定）', async () => {
+    const module = await import('@/lib/profile/identity-link-storage');
+
+    const first = module.createIdentityLink({
+      profileId: 'profile-hailay',
+      providerId: 'self-hosted-sync',
+      remoteIdentityId: 'rid-old',
+      remoteIdentityKey: 'space-old',
+      authType: 'basic',
+      authUsername: 'old-user',
+      authSecret: 'old-secret',
+    });
+
+    const second = module.createIdentityLink({
+      profileId: 'profile-hailay',
+      providerId: 'self-hosted-sync',
+      remoteIdentityId: 'rid-new',
+      remoteIdentityKey: 'space-new',
+      authType: 'basic',
+      authUsername: 'new-user',
+      authSecret: 'new-secret',
+    });
+
+    expect(second.linkId).toBe(first.linkId);
+    expect(module.listIdentityLinks('profile-hailay')).toHaveLength(1);
+    expect(module.getPreferredIdentityLink('profile-hailay')?.remoteIdentityKey).toBe('space-new');
+    expect(module.getIdentityLinkSecret(second.linkId)?.authSecret).toBe('new-secret');
+  });
 });

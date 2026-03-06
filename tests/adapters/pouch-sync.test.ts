@@ -383,6 +383,17 @@ describe('同步类型定义', () => {
         },
       });
     });
+
+    it('本地同步库名应优先使用 localProfileId（prefer local profile for local db name）', async () => {
+      const module = await import('@/adapters/pouch-sync');
+      const dbName = module.resolveLocalSyncDbName({
+        localProfileId: 'profile-hailay',
+        username: 'space-hailay',
+        passwordHash: 'remote-secret',
+      } as SyncCredentials);
+
+      expect(dbName).toBe('local_profile-hailay');
+    });
   });
 });
 

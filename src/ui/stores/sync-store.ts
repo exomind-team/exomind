@@ -30,9 +30,11 @@ import {
   getProfileSecret,
   setProfileSession,
 } from '@/lib/profile/profile-storage';
+import type { LocalProfile } from '@/lib/profile/types';
 import {
   createIdentityLink,
   getIdentityLinkSecret,
+  getPreferredIdentityLink,
   listIdentityLinks,
   revokeIdentityLink,
 } from '@/lib/profile/identity-link-storage';
@@ -43,10 +45,24 @@ import type { PouchSyncAdapter } from '@/adapters/pouch-sync';
 // 存储动态导入的适配器实例
 let syncAdapter: PouchSyncAdapter | null = null;
 const USERNAME_WHITESPACE_PATTERN = /\s/;
+const SYNC_STORE_KEY = 'exomind:sync-store';
 const DEFAULT_PROFILE_SESSION = {
   version: 1 as const,
   activeProfileId: null,
   unlockedProfileIds: [] as string[],
+};
+
+type PersistedSyncStorePayload = {
+  state?: {
+    isLoggedIn?: boolean;
+    currentUser?: string | null;
+    activeProfileId?: string | null;
+    credentials?: Partial<SyncCredentials> | null;
+  };
+  isLoggedIn?: boolean;
+  currentUser?: string | null;
+  activeProfileId?: string | null;
+  credentials?: Partial<SyncCredentials> | null;
 };
 
 function readLegacyUsersMirror(): Array<{ username: string; passwordHash: string; createdAt: string }> {
@@ -110,7 +126,7 @@ function getDeviceInfo(): { deviceName: string; deviceType: DeviceType; platform
 }
 
 function buildCredentialsFromLinkedIdentity(profileId: string, fallbackUsername: string): SyncCredentials | null {
-  const link = listIdentityLinks(profileId).find((item) => item.status === 'linked');
+  const link = getPreferredIdentityLink(profileId);
   if (!link) {
     return null;
   }
@@ -118,6 +134,7 @@ function buildCredentialsFromLinkedIdentity(profileId: string, fallbackUsername:
   const secret = getIdentityLinkSecret(link.linkId);
   const deviceInfo = getDeviceInfo();
   return {
+    localProfileId: profileId,
     username: link.remoteIdentityKey || fallbackUsername,
     passwordHash: secret?.authSecret || '',
     providerId: link.providerId,
@@ -130,6 +147,50 @@ function buildCredentialsFromLinkedIdentity(profileId: string, fallbackUsername:
     deviceType: deviceInfo.deviceType,
     platform: deviceInfo.platform,
   };
+}
+
+function readPersistedSyncStore(): PersistedSyncStorePayload | null {
+  try {
+    const raw = localStorage.getItem(SYNC_STORE_KEY);
+    return raw ? JSON.parse(raw) as PersistedSyncStorePayload : null;
+  } catch {
+    return null;
+  }
+}
+
+function migrateLegacySyncCredentialsToIdentityLink(activeProfile: LocalProfile | null): void {
+  if (!activeProfile) {
+    return;
+  }
+
+  const persisted = readPersistedSyncStore();
+  const legacyCredentials = persisted?.state?.credentials || persisted?.credentials;
+  if (!legacyCredentials || getPreferredIdentityLink(activeProfile.profileId)) {
+    return;
+  }
+
+  const remoteIdentityKey = legacyCredentials.remoteIdentityKey?.trim() || legacyCredentials.username?.trim();
+  if (!remoteIdentityKey) {
+    return;
+  }
+
+  createIdentityLink({
+    profileId: activeProfile.profileId,
+    providerId: legacyCredentials.providerId || 'legacy-sync-store',
+    remoteIdentityId: legacyCredentials.remoteIdentityId || remoteIdentityKey,
+    remoteIdentityKey,
+    authType: legacyCredentials.authType || (legacyCredentials.authSecret || legacyCredentials.passwordHash ? 'basic' : 'none'),
+    authUsername: legacyCredentials.authUsername || legacyCredentials.username,
+    authSecret: legacyCredentials.authSecret || legacyCredentials.passwordHash,
+  });
+}
+
+function clearLegacySyncStorePersist(): void {
+  try {
+    localStorage.removeItem(SYNC_STORE_KEY);
+  } catch {
+    // ignore storage cleanup failures
+  }
 }
 
 export function resolveRemoteSyncKey(credentials: SyncCredentials | null): string | null {
@@ -189,6 +250,11 @@ export const useSyncStore = create<SyncState>()(
       ensureProfileStorageMigrated();
       const initialSession = getProfileSession();
       const initialActiveProfile = getActiveProfile();
+      migrateLegacySyncCredentialsToIdentityLink(initialActiveProfile);
+      const initialCredentials = initialActiveProfile
+        ? buildCredentialsFromLinkedIdentity(initialActiveProfile.profileId, initialActiveProfile.slug)
+        : null;
+      clearLegacySyncStorePersist();
 
       return ({
       // 初始状态
@@ -200,7 +266,7 @@ export const useSyncStore = create<SyncState>()(
         syncMode: 'realtime',
         pollInterval: 5,
       },
-      credentials: null,
+      credentials: initialCredentials,
       isLoggedIn: Boolean(
         initialSession.activeProfileId
         && initialSession.unlockedProfileIds.includes(initialSession.activeProfileId)
@@ -290,6 +356,7 @@ export const useSyncStore = create<SyncState>()(
           throw new Error('请先打开本地档案');
         }
 
+        const activeProfile = getActiveProfile();
         createIdentityLink({
           profileId: activeProfileId,
           providerId: input.providerId,
@@ -300,21 +367,8 @@ export const useSyncStore = create<SyncState>()(
           authSecret: input.authSecret,
         });
 
-        const deviceInfo = getDeviceInfo();
         set({
-          credentials: {
-            username: input.remoteIdentityKey,
-            passwordHash: input.authSecret || '',
-            providerId: input.providerId,
-            remoteIdentityId: input.remoteIdentityId || input.remoteIdentityKey,
-            remoteIdentityKey: input.remoteIdentityKey,
-            authType: input.authType,
-            authUsername: input.authUsername,
-            authSecret: input.authSecret,
-            deviceName: deviceInfo.deviceName,
-            deviceType: deviceInfo.deviceType,
-            platform: deviceInfo.platform,
-          },
+          credentials: buildCredentialsFromLinkedIdentity(activeProfileId, activeProfile?.slug || input.remoteIdentityKey),
         });
       },
 
@@ -538,12 +592,7 @@ export const useSyncStore = create<SyncState>()(
     },
     {
       name: 'exomind:sync-store',
-      partialize: (state) => ({
-        isLoggedIn: state.isLoggedIn,
-        currentUser: state.currentUser,
-        activeProfileId: state.activeProfileId,
-        credentials: state.credentials,
-      }),
+      partialize: () => ({}),
     }
   )
 );

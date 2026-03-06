@@ -24,7 +24,7 @@ export const DEFAULT_EMBEDDED_RUNTIME_PORT = resolveEmbeddedRuntimePort(
   import.meta.env.EXOMIND_RT_PORT,
 );
 const DEFAULT_EXTERNAL_RUNTIME_HOST = '127.0.0.1';
-const DEFAULT_EXTERNAL_RUNTIME_PORT = 1949;
+export const DEFAULT_EXTERNAL_RUNTIME_PORT = 1949;
 const DEFAULT_RUNTIME_TARGET_MODE: RuntimeTargetMode = 'embedded';
 
 function normalizeRuntimeMode(rawValue: string | null | undefined): RuntimeTargetMode {

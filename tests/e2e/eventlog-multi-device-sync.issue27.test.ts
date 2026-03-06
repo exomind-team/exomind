@@ -29,7 +29,7 @@ async function seedLoggedInUser(page: Page, username: string) {
       updatedAt: now,
       authMode: 'password',
       state: 'active',
-      defaultSyncPolicy: 'remote-sync',
+      defaultSyncPolicy: 'auto-sync-when-linked',
     }));
     localStorage.setItem('exomind:profile-session', JSON.stringify({
       version: 1,
@@ -56,28 +56,6 @@ async function seedLoggedInUser(page: Page, username: string) {
       updatedAt: now,
     }));
 
-    const syncStoreState = {
-      state: {
-        isLoggedIn: true,
-        currentUser: user,
-        activeProfileId: profileId,
-        credentials: {
-          username: user,
-          passwordHash: 'e2e-password-hash',
-          providerId: 'e2e',
-          remoteIdentityId: user,
-          remoteIdentityKey: user,
-          authType: 'basic',
-          authUsername: user,
-          authSecret: 'e2e-password-hash',
-          deviceName: 'E2E Device',
-          deviceType: 'desktop',
-          platform: 'Windows',
-        },
-      },
-      version: 0,
-    };
-    localStorage.setItem('exomind:sync-store', JSON.stringify(syncStoreState));
   }, username);
 }
 

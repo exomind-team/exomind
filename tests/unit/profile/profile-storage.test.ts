@@ -96,6 +96,27 @@ describe('profile-storage（本地档案存储）', () => {
     expect(secret?.localPasswordHash).toBe('pbkdf2-hash');
   });
 
+  it('does not treat displayName as login identity（显示名不应作为登录标识）', async () => {
+    const module = await import('@/lib/profile/profile-storage');
+
+    module.createLocalProfile({
+      slug: 'alice',
+      displayName: 'bob',
+      localPasswordHash: 'hash-alice',
+    });
+
+    expect(module.findProfileByLoginName('bob')).toBeNull();
+
+    const profile = module.createLocalProfile({
+      slug: 'bob',
+      displayName: 'Bobby',
+      localPasswordHash: 'hash-bob',
+    });
+
+    expect(profile.slug).toBe('bob');
+    expect(module.findProfileByLoginName('bob')?.profileId).toBe(profile.profileId);
+  });
+
   it('falls back to legacy currentUser when session not migrated（未迁移时回退旧 currentUser）', async () => {
     mockLocalStorageData['exomind:sync-store'] = JSON.stringify({
       state: {

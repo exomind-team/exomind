@@ -66,6 +66,97 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     expect(hosts[0]?.name).toBe('Hope Desktop');
     expect(hosts[0]?.host).toBe('127.0.0.1');
     expect(hosts[0]?.port).toBe(4077);
+    expect(hosts[0]?.trustState).toBe('manual_seed');
+    expect(hosts[0]?.manualOverride).toBe('127.0.0.1:4077');
+  });
+
+  it('defaults trust metadata for manual host seeds（手工添加主机默认写入 trust 元数据）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-07T10:00:00.000Z'),
+    });
+
+    const created = await service.addHost({
+      name: 'Phone Peer',
+      host: '192.168.1.88',
+      port: 1949,
+    });
+
+    expect(created.trustState).toBe('manual_seed');
+    expect(created.manualOverride).toBe('192.168.1.88:1949');
+    expect(created.hostId).toBeUndefined();
+    expect(created.lastSuccessfulDialAddress).toBeUndefined();
+    expect(created.advertisedListenAddress).toBeUndefined();
+  });
+
+  it('normalizes legacy records without trust metadata（旧记录读取时补默认 trust 字段）', async () => {
+    await storage.write('agent_runtime_hosts_v1', [{
+      id: 'legacy-runtime-host',
+      name: 'Legacy',
+      host: '10.0.0.9',
+      port: 4077,
+      status: 'unknown',
+      createdAt: '2026-03-01T00:00:00.000Z',
+      updatedAt: '2026-03-01T00:00:00.000Z',
+    }]);
+
+    const service = new RuntimeHostServiceImpl({ storage, fetchImpl: vi.fn() });
+    const hosts = await service.listHosts();
+
+    expect(hosts[0]).toEqual(expect.objectContaining({
+      id: 'legacy-runtime-host',
+      trustState: 'manual_seed',
+      manualOverride: '10.0.0.9:4077',
+    }));
+  });
+
+  it('promotes manual seed to confirmed peer after successful dial with host id（成功拨号后手工种子升级 confirmed）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-07T11:00:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Desktop Peer',
+      host: '10.0.0.20',
+      port: 1949,
+    });
+
+    const updated = await service.mergeHostMetadata(created.id, {
+      hostId: 'host-desktop-1',
+      lastSuccessfulDialAddress: '10.0.0.20:1949',
+      advertisedListenAddress: '10.0.0.20:1949',
+    });
+
+    expect(updated.hostId).toBe('host-desktop-1');
+    expect(updated.lastSuccessfulDialAddress).toBe('10.0.0.20:1949');
+    expect(updated.advertisedListenAddress).toBe('10.0.0.20:1949');
+    expect(updated.trustState).toBe('confirmed_peer');
+  });
+
+  it('does not auto-promote discovered candidate without manual save（候选节点不会自动升级 confirmed）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-07T11:30:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Discovered Candidate',
+      host: '10.0.0.30',
+      port: 1949,
+      trustState: 'discovered_candidate',
+      manualOverride: undefined,
+    });
+
+    const updated = await service.mergeHostMetadata(created.id, {
+      hostId: 'host-candidate-1',
+      lastSuccessfulDialAddress: '10.0.0.30:1949',
+    });
+
+    expect(updated.trustState).toBe('discovered_candidate');
+    expect(updated.hostId).toBe('host-candidate-1');
+    expect(updated.lastSuccessfulDialAddress).toBe('10.0.0.30:1949');
   });
 
   it('marks host online when probe succeeds（探测成功后标记在线）', async () => {

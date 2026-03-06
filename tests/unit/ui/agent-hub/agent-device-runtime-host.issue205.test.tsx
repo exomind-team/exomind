@@ -117,7 +117,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
     runtimeManagerMocks.addHostFromAddress.mockImplementation(async (address: string, name?: string) => {
       const [host, portRaw] = address.split(':');
-      const port = Number.parseInt(portRaw ?? '0', 10);
+      const port = Number.parseInt(portRaw ?? String(DEFAULT_EMBEDDED_RUNTIME_PORT), 10);
       const added: RuntimeHostRecord = {
         id: 'runtime-host-2',
         name: name || `${host}:${port}`,
@@ -126,6 +126,8 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
         status: 'unknown',
         createdAt: '2026-02-27T10:01:00.000Z',
         updatedAt: '2026-02-27T10:01:00.000Z',
+        trustState: 'manual_seed',
+        manualOverride: `${host}:${port}`,
       };
       hosts = [...hosts, added];
       hostState[added.id] = 'offline';
@@ -155,7 +157,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
   });
 
-  it('opens manager sheet from device view and adds runtime host（设备页可打开主机管理并新增 RuntimeHost）', async () => {
+  it('opens manager sheet from device view and adds runtime host with host-only input（设备页支持 host-only 手工地址）', async () => {
     render(<AgentsPage />);
     fireEvent.click(await screen.findByRole('button', { name: '设备' }));
 
@@ -170,11 +172,11 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
 
     fireEvent.change(screen.getByTestId('runtime-host-name-input'), { target: { value: 'LAN Runner' } });
-    fireEvent.change(screen.getByTestId('runtime-host-address-input'), { target: { value: '192.168.1.33:9001' } });
+    fireEvent.change(screen.getByTestId('runtime-host-address-input'), { target: { value: '192.168.1.33' } });
     fireEvent.click(screen.getByTestId('runtime-host-add-button'));
 
     await waitFor(() => {
-      expect(runtimeManagerMocks.addHostFromAddress).toHaveBeenCalledWith('192.168.1.33:9001', 'LAN Runner');
+      expect(runtimeManagerMocks.addHostFromAddress).toHaveBeenCalledWith('192.168.1.33', 'LAN Runner');
       expect(screen.getAllByText('LAN Runner').length).toBeGreaterThan(0);
     });
   });

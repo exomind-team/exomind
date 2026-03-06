@@ -1,7 +1,9 @@
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { RuntimeTopologyResponse } from '@/lib/types/runtime-topology';
+import { DEFAULT_EXTERNAL_RUNTIME_PORT, formatRuntimeTargetAddress } from '@/config/runtime-target';
 import {
   type AddRuntimeHostInput,
+  type RuntimeHostMetadataPatch,
   type RuntimeHostService,
   getRuntimeHostService,
 } from '@/lib/services/runtime-host.service';
@@ -31,7 +33,8 @@ export interface RuntimeManagerSnapshot {
 }
 
 export interface RuntimeManagerOptions {
-  hostService?: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>;
+  hostService?: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>
+    & Partial<Pick<RuntimeHostService, 'mergeHostMetadata'>>;
   runtimeClient?: Pick<RuntimeClient, 'getAgents' | 'getTopology'>;
   now?: () => Date;
 }
@@ -84,6 +87,12 @@ function parseHostAddress(hostAddress: string): { host: string; port: number } {
 
   const splitIndex = raw.lastIndexOf(':');
   if (splitIndex <= 0 || splitIndex === raw.length - 1) {
+    if (!raw.includes(':')) {
+      return {
+        host: raw,
+        port: DEFAULT_EXTERNAL_RUNTIME_PORT,
+      };
+    }
     throw new Error('invalid host:port format（host:port 格式错误）');
   }
 
@@ -103,7 +112,8 @@ function parseHostAddress(hostAddress: string): { host: string; port: number } {
 }
 
 export class RuntimeManager {
-  private readonly hostService: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>;
+  private readonly hostService: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>
+    & Partial<Pick<RuntimeHostService, 'mergeHostMetadata'>>;
   private readonly runtimeClient: Pick<RuntimeClient, 'getAgents' | 'getTopology'>;
   private readonly now: () => Date;
 
@@ -189,13 +199,45 @@ export class RuntimeManager {
       };
     }
 
+    const resolvedHost = await this.persistSuccessfulDialMetadata(host, topologyResult.data);
+
     return {
-      host,
+      host: resolvedHost,
       connectionState: 'online',
       agents: nextAgents,
       topology: topologyResult.data,
       latencyMs: topologyEnvelope.latencyMs,
     };
+  }
+
+  private async persistSuccessfulDialMetadata(
+    host: RuntimeHostRecord,
+    topology: RuntimeTopologyResponse,
+  ): Promise<RuntimeHostRecord> {
+    if (!topology.host_id || !this.hostService.mergeHostMetadata) {
+      return host;
+    }
+
+    const patch: RuntimeHostMetadataPatch = {
+      hostId: topology.host_id,
+      lastSuccessfulDialAddress: formatRuntimeTargetAddress({
+        host: host.host,
+        port: host.port,
+      }),
+    };
+
+    if (
+      host.hostId === patch.hostId
+      && host.lastSuccessfulDialAddress === patch.lastSuccessfulDialAddress
+    ) {
+      return host;
+    }
+
+    try {
+      return await this.hostService.mergeHostMetadata(host.id, patch);
+    } catch {
+      return host;
+    }
   }
 }
 
