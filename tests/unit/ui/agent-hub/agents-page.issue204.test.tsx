@@ -135,6 +135,7 @@ vi.mock('@/lib/services', async (importOriginal) => {
 
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
+  findPreferredRuntimeHostForAgent: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
@@ -224,14 +225,14 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
 
     fireEvent.click(screen.getByTestId('agent-add-node-button'));
     await waitFor(() => {
-      expect(screen.getByRole('button', { name: '添加信号输入' })).toBeInTheDocument();
+      expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
     });
-    fireEvent.click(screen.getByRole('button', { name: '添加信号输入' }));
-    expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('agent-add-node-option-device'));
+    expect(screen.getByTestId('agent-host-manager-sheet')).toBeInTheDocument();
     expect(screen.getByText('添加设备')).toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('agent-add-node-close'));
-    expect(screen.queryByTestId('agent-add-node-sheet')).not.toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('agent-host-manager-close'));
+    expect(screen.queryByTestId('agent-host-manager-sheet')).not.toBeInTheDocument();
   });
 
   it('keeps dark-mode classes on key surfaces（关键区域包含暗色样式类）', async () => {
@@ -245,14 +246,14 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     expect(screen.getByTestId('agent-topology-canvas').className).toContain('dark:bg-[#1C1917]');
   });
 
-  it('uses task-page sized title（标题字号与任务页一致）', async () => {
+  it('uses signal-network page title with task-page sizing（标题改为信号网络且字号与任务页一致）', async () => {
     render(<AgentsPage />);
 
     await waitFor(() => {
-      expect(screen.getByRole('heading', { name: 'Agent Hub' })).toBeInTheDocument();
+      expect(screen.getByRole('heading', { name: '信号网络' })).toBeInTheDocument();
     });
 
-    const heading = screen.getByRole('heading', { name: 'Agent Hub' });
+    const heading = screen.getByRole('heading', { name: '信号网络' });
     expect(heading.className).toContain('text-lg');
     expect(heading.className).toContain('font-semibold');
     expect(heading.className).not.toContain('text-[30px]');

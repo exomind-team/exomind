@@ -8,6 +8,15 @@ import {
 
 const SAMPLE_ROUTES: SignalRoute[] = [
   {
+    id: 'route-000',
+    enabled: true,
+    topic: 'voice.input.transcript',
+    target_type: 'agent',
+    target_ref: 'classifier',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
     id: 'route-001',
     enabled: true,
     topic: 'user.input.text',
@@ -87,7 +96,7 @@ const SAMPLE_AGENTS: RuntimeAggregatedAgent[] = [
 describe('agents signal topology builder issue-245f（信号拓扑构建）', () => {
   it('builds route rows with active/inactive status（构建路由列表行并区分状态）', () => {
     const rows = buildSignalRouteRows(SAMPLE_ROUTES, '127.0.0.1:1919');
-    expect(rows.length).toBe(6);
+    expect(rows.length).toBe(7);
     expect(rows[0]).toMatchObject({
       topic: '*',
       targetType: 'frontend',
@@ -125,5 +134,23 @@ describe('agents signal topology builder issue-245f（信号拓扑构建）', ()
 
     const inactiveEdge = graph.edges.find((edge) => edge.id === 'route:route-004');
     expect(inactiveEdge?.active).toBe(false);
+  });
+
+  it('injects a voice input node before transcript topic（语音转写主题前显示语音输入节点）', () => {
+    const graph = buildSignalGraph(SAMPLE_ROUTES, SAMPLE_AGENTS);
+
+    expect(graph.nodes.find((node) => node.id === 'input:voice')).toMatchObject({
+      type: 'input',
+      label: 'Voice Input（语音输入）',
+    });
+    expect(graph.nodes.find((node) => node.id === 'topic:voice.input.transcript')).toMatchObject({
+      type: 'topic',
+      label: 'voice.input.transcript',
+    });
+    expect(graph.edges.find((edge) => edge.id === 'input-link:voice.input.transcript')).toMatchObject({
+      source: 'input:voice',
+      target: 'topic:voice.input.transcript',
+      topic: 'voice.input.transcript',
+    });
   });
 });

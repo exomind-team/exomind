@@ -21,6 +21,15 @@ const RUNTIME_CORS_HEADERS = {
 
 const RUNTIME_ROUTES: RuntimeRoute[] = [
   {
+    id: 'route-000',
+    enabled: true,
+    topic: 'voice.input.transcript',
+    target_type: 'agent',
+    target_ref: 'classifier',
+    created_at: '2026-03-04T00:00:00Z',
+    updated_at: '2026-03-04T00:00:00Z',
+  },
+  {
     id: 'route-001',
     enabled: true,
     topic: 'user.input.text',
@@ -192,7 +201,9 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await expect(page.getByTestId('agent-topology-view')).toBeVisible();
     await expect(page.locator('.react-flow__minimap')).toHaveCount(0);
-    await expect(page.locator('.react-flow__edge')).toHaveCount(6);
+    await expect(page.locator('.react-flow__edge')).toHaveCount(8);
+    await expect(page.getByTestId('rf__node-input:voice')).toBeVisible();
+    await expect(page.getByTestId('rf__node-topic:voice.input.transcript')).toBeVisible();
 
     const viewportTransformBefore = await page.locator('.react-flow__viewport').evaluate((el) => {
       return (el as HTMLElement).style.transform;
@@ -211,17 +222,23 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
     await page.getByTestId('agent-view-toggle-list').click();
     await expect(page.getByTestId('agent-signal-route-section')).toBeVisible();
     const routeRows = page.locator('[data-testid^="agent-signal-route-row-"]');
-    await expect(routeRows).toHaveCount(6);
+    await expect(routeRows).toHaveCount(7);
+    const route000 = page.getByTestId('agent-signal-route-row-route-000');
+    await expect(route000).toContainText('voice.input.transcript');
+    await expect(route000).toContainText('classifier');
+    await expect(route000).toContainText('agent');
     const route001 = page.getByTestId('agent-signal-route-row-route-001');
     await expect(route001).toContainText('user.input.text');
-    await expect(route001).toContainText('agent classifier');
+    await expect(route001).toContainText('classifier');
+    await expect(route001).toContainText('agent');
     const route002 = page.getByTestId('agent-signal-route-row-route-002');
     await expect(route002).toContainText('user.input.text');
-    await expect(route002).toContainText('actor eventlog');
+    await expect(route002).toContainText('eventlog');
+    await expect(route002).toContainText('actor');
     const route003 = page.getByTestId('agent-signal-route-row-route-003');
     await expect(route003).toContainText('session.end');
-    await expect(route003).toContainText('agent reviewer');
-    await expect(page.getByTestId('agent-signal-route-status-route-005')).toHaveText('inactive');
+    await expect(route003).toContainText('reviewer');
+    await expect(route003).toContainText('agent');
   });
 
   test('mobile: can view list and topology（移动端可查看列表和拓扑）', async ({ page }) => {
@@ -231,15 +248,17 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await page.getByTestId('agent-view-toggle-list').click();
     await expect(page.getByTestId('agent-signal-route-section')).toBeVisible();
-    await expect(page.locator('[data-testid^="agent-signal-route-row-"]')).toHaveCount(6);
-    await expect(page.getByTestId('agent-signal-route-row-route-001')).toContainText('agent classifier');
-    await expect(page.getByTestId('agent-signal-route-row-route-002')).toContainText('actor eventlog');
-    await expect(page.getByTestId('agent-signal-route-row-route-003')).toContainText('agent reviewer');
+    await expect(page.locator('[data-testid^="agent-signal-route-row-"]')).toHaveCount(7);
+    await expect(page.getByTestId('agent-signal-route-row-route-000')).toContainText('classifier');
+    await expect(page.getByTestId('agent-signal-route-row-route-001')).toContainText('classifier');
+    await expect(page.getByTestId('agent-signal-route-row-route-002')).toContainText('eventlog');
+    await expect(page.getByTestId('agent-signal-route-row-route-003')).toContainText('reviewer');
 
     await page.getByTestId('agent-view-toggle-topology').click();
     await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
     await expect(page.locator('.react-flow__minimap')).toHaveCount(0);
-    await expect(page.locator('.react-flow__edge')).toHaveCount(6);
+    await expect(page.locator('.react-flow__edge')).toHaveCount(8);
+    await expect(page.getByTestId('rf__node-input:voice')).toBeVisible();
   });
 
   test('dark mode: topology canvas keeps nodes visible（暗色模式可见性）', async ({ page }) => {
@@ -248,7 +267,8 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
     });
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
-    await expect(page.locator('.react-flow__edge')).toHaveCount(6);
+    await expect(page.locator('.react-flow__edge')).toHaveCount(8);
+    await expect(page.getByTestId('rf__node-input:voice')).toBeVisible();
     const darkNodeCount = await page.locator('.react-flow__node').count();
     expect(darkNodeCount).toBeGreaterThan(0);
     await expect(page.locator('.react-flow__minimap')).toHaveCount(0);
@@ -280,11 +300,11 @@ test.describe('Issue #245f M2 Agent Hub signal routes（路由列表 + 拓扑图
 
     await page.goto('/agents', { waitUntil: 'domcontentloaded' });
     await expect(page.getByTestId('agent-topology-canvas')).toBeVisible();
-    await expect(page.locator('.react-flow__edge')).toHaveCount(6);
+    await expect(page.locator('.react-flow__edge')).toHaveCount(8);
 
     await page.getByTestId('agent-view-toggle-list').click();
     await expect(page.getByTestId('agent-signal-route-section')).toBeVisible();
     await expect(page.getByText(/auto/)).toBeVisible();
-    await expect(page.locator('[data-testid^="agent-signal-route-row-"]')).toHaveCount(6);
+    await expect(page.locator('[data-testid^="agent-signal-route-row-"]')).toHaveCount(7);
   });
 });

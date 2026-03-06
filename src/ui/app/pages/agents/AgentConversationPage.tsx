@@ -4,6 +4,8 @@ import { getAgentHubService } from '@/lib/services';
 import type { AgentConversationMessage } from '@/lib/types/agent-hub';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { createUuidV4 } from '@/lib/utils/uuid';
+import { RuntimeClient } from '@/services/runtime-client';
+import { findPreferredRuntimeHostForAgent, getRuntimeManager } from '@/services/runtime-manager';
 
 function createMessage(id: string, role: 'agent' | 'user', content: string): AgentConversationMessage {
   return {
@@ -19,15 +21,27 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
   const [messages, setMessages] = useState<AgentConversationMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
+  const [runtimeSessionId, setRuntimeSessionId] = useState<string | null>(null);
   const targetId = agentId ?? '';
 
   useEffect(() => {
     let disposed = false;
     const load = async () => {
       if (!targetId) return;
+      const snapshot = await getRuntimeManager().refreshSnapshot();
+      const runtimeHost = findPreferredRuntimeHostForAgent(snapshot.hosts, targetId);
+      if (runtimeHost) {
+        if (!disposed) {
+          setMessages([]);
+          setRuntimeSessionId(null);
+        }
+        return;
+      }
+
       const history = await getAgentHubService().getConversation(targetId);
       if (!disposed) {
         setMessages(history);
+        setRuntimeSessionId(null);
       }
     };
     void load();
@@ -48,33 +62,74 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
     const streamMessage = createMessage(pendingMessageId, 'agent', '');
     setMessages((prev) => [...prev, userMessage, streamMessage]);
 
-    for await (const chunk of getAgentHubService().streamConversation({ agentId: targetId, prompt })) {
-      setMessages((prev) => {
-        const chunkMessageIndex = prev.findIndex((item) => item.id === chunk.messageId);
-        if (chunkMessageIndex >= 0) {
-          const next = [...prev];
-          next[chunkMessageIndex] = {
-            ...next[chunkMessageIndex],
-            content: `${next[chunkMessageIndex].content}${chunk.delta}`,
-          };
-          return next;
-        }
+    try {
+      const snapshot = await getRuntimeManager().refreshSnapshot();
+      const runtimeHost = findPreferredRuntimeHostForAgent(snapshot.hosts, targetId);
+      let receivedVisibleContent = false;
 
-        const pendingIndex = prev.findIndex((item) => item.id === pendingMessageId);
-        if (pendingIndex >= 0) {
-          const next = [...prev];
-          next[pendingIndex] = {
-            ...next[pendingIndex],
-            id: chunk.messageId,
-            content: `${next[pendingIndex].content}${chunk.delta}`,
-          };
-          return next;
+      if (runtimeHost) {
+        const runtimeClient = new RuntimeClient();
+        for await (const chunk of runtimeClient.streamAgentConversation(runtimeHost, {
+          agentId: targetId,
+          message: prompt,
+          sessionId: runtimeSessionId ?? undefined,
+        })) {
+          if (chunk.sessionId) {
+            setRuntimeSessionId(chunk.sessionId);
+          }
+          if (!chunk.content) continue;
+          receivedVisibleContent = true;
+          setMessages((prev) => {
+            const pendingIndex = prev.findIndex((item) => item.id === pendingMessageId);
+            if (pendingIndex >= 0) {
+              const next = [...prev];
+              next[pendingIndex] = {
+                ...next[pendingIndex],
+                id: `msg-agent-${createUuidV4()}`,
+                content: `${next[pendingIndex].content}${chunk.content}`,
+              };
+              return next;
+            }
+            return [...prev, createMessage(`msg-agent-${createUuidV4()}`, 'agent', chunk.content)];
+          });
         }
+      } else {
+        for await (const chunk of getAgentHubService().streamConversation({ agentId: targetId, prompt })) {
+          if (!chunk.delta) continue;
+          receivedVisibleContent = true;
+          setMessages((prev) => {
+            const chunkMessageIndex = prev.findIndex((item) => item.id === chunk.messageId);
+            if (chunkMessageIndex >= 0) {
+              const next = [...prev];
+              next[chunkMessageIndex] = {
+                ...next[chunkMessageIndex],
+                content: `${next[chunkMessageIndex].content}${chunk.delta}`,
+              };
+              return next;
+            }
 
-        return [...prev, createMessage(chunk.messageId, 'agent', chunk.delta)];
-      });
+            const pendingIndex = prev.findIndex((item) => item.id === pendingMessageId);
+            if (pendingIndex >= 0) {
+              const next = [...prev];
+              next[pendingIndex] = {
+                ...next[pendingIndex],
+                id: chunk.messageId,
+                content: `${next[pendingIndex].content}${chunk.delta}`,
+              };
+              return next;
+            }
+
+            return [...prev, createMessage(chunk.messageId, 'agent', chunk.delta)];
+          });
+        }
+      }
+
+      if (!receivedVisibleContent) {
+        setMessages((prev) => prev.filter((item) => item.id !== pendingMessageId));
+      }
+    } finally {
+      setSending(false);
     }
-    setSending(false);
   };
 
   return (

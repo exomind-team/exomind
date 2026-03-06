@@ -13,6 +13,7 @@ const {
   subscribeVoiceTranscriptSendModeChanges,
   resetVoiceTranscriptMode,
   emitVoiceTranscriptMode,
+  mockPublishVoiceTranscriptSignal,
 } = vi.hoisted(() => {
   let latestVoiceProps: any = null;
   let mode: 'insert' | 'direct-send' = 'insert';
@@ -32,6 +33,7 @@ const {
         listeners = listeners.filter((item) => item !== listener);
       };
     }),
+    mockPublishVoiceTranscriptSignal: vi.fn(),
     resetVoiceTranscriptMode: () => {
       mode = 'insert';
       listeners = [];
@@ -72,6 +74,10 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges,
 }));
 
+vi.mock('@/lib/services/voice-signal.service', () => ({
+  publishVoiceTranscriptSignal: mockPublishVoiceTranscriptSignal,
+}));
+
 describe('NowInputRow', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -80,6 +86,8 @@ describe('NowInputRow', () => {
     startVoiceSpy.mockReset();
     getVoiceTranscriptSendMode.mockClear();
     subscribeVoiceTranscriptSendModeChanges.mockClear();
+    mockPublishVoiceTranscriptSignal.mockReset();
+    mockPublishVoiceTranscriptSignal.mockResolvedValue(undefined);
     resetVoiceTranscriptMode();
     setLatestVoiceProps(null);
   });
@@ -186,6 +194,19 @@ describe('NowInputRow', () => {
 
     expect(onSend).toHaveBeenCalledWith('直接发送内容');
     expect((textarea as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('publishes voice transcript signal when ASR returns text（语音结果会发布信号）', () => {
+    render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
+
+    act(() => {
+      getLatestVoiceProps()?.onResult?.('  语音转写内容  ');
+    });
+
+    expect(mockPublishVoiceTranscriptSignal).toHaveBeenCalledWith(
+      { text: '语音转写内容' },
+      { source: 'frontend:now-input-row' }
+    );
   });
 
   it('logs voice errors for troubleshooting', () => {

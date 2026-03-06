@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
-import type { SignalRoute, SignalEvent } from '@/lib/types/signal-pool';
+import type { SignalRoute } from '@/lib/types/signal-pool';
 
 const serviceMocks = vi.hoisted(() => ({
   getDeviceView: vi.fn(),
@@ -23,6 +23,12 @@ const runtimeControlMocks = vi.hoisted(() => ({
   startRuntime: vi.fn(),
   stopRuntime: vi.fn(),
   getStatus: vi.fn(),
+}));
+
+const runtimeClientMocks = vi.hoisted(() => ({
+  streamAgentConversation: vi.fn(),
+  createAgent: vi.fn(),
+  deleteAgent: vi.fn(),
 }));
 
 vi.mock('@xyflow/react', () => ({
@@ -73,58 +79,52 @@ vi.mock('@/lib/services', async (importOriginal) => {
 
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
-  findPreferredRuntimeHostForAgent: vi.fn(() => null),
+  findPreferredRuntimeHostForAgent: vi.fn((snapshots, agentId, preferredHostId) => {
+    const exact = preferredHostId
+      ? snapshots.find((snapshot: any) => (
+        snapshot.host.id === preferredHostId
+        && snapshot.agents.some((agent: any) => agent.id === agentId)
+      ))
+      : null;
+    if (exact) return exact.host;
+    const match = snapshots.find((snapshot: any) => snapshot.agents.some((agent: any) => agent.id === agentId));
+    return match?.host ?? null;
+  }),
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
   getRuntimeControlService: () => runtimeControlMocks,
 }));
 
+vi.mock('@/services/runtime-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/runtime-client')>();
+  class RuntimeClientMock {
+    streamAgentConversation = runtimeClientMocks.streamAgentConversation;
+
+    createAgent = runtimeClientMocks.createAgent;
+
+    deleteAgent = runtimeClientMocks.deleteAgent;
+  }
+
+  return {
+    ...actual,
+    RuntimeClient: RuntimeClientMock,
+  };
+});
+
 const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [
   {
-    id: 'route-echo-001',
+    id: 'route-claude-001',
     enabled: true,
     topic: 'user.input.text',
     target_type: 'agent',
-    target_ref: 'echo',
-    created_at: '2026-03-05T00:00:00Z',
-    updated_at: '2026-03-05T00:00:00Z',
-  },
-  {
-    id: 'route-eventlog-001',
-    enabled: true,
-    topic: 'user.input.text',
-    target_type: 'actor',
-    target_ref: 'eventlog',
+    target_ref: 'claude',
     created_at: '2026-03-05T00:00:00Z',
     updated_at: '2026-03-05T00:00:00Z',
   },
 ];
 
-const SAMPLE_SIGNAL_HISTORY: SignalEvent[] = [
-  {
-    schema_version: 1,
-    id: 'sig-001',
-    topic: 'user.input.text',
-    ts: 1741161600000,
-    source: 'ui:test',
-    origin_host_id: 'local',
-    hop: 0,
-    payload: { text: 'hello from signal history' },
-  },
-  {
-    schema_version: 1,
-    id: 'sig-002',
-    topic: 'eventlog.appended',
-    ts: 1741161601000,
-    source: 'actor:eventlog',
-    origin_host_id: 'local',
-    hop: 1,
-    payload: { text: 'saved' },
-  },
-];
-
-describe('agents page signal history + right chat issue-354（历史标签与右侧聊天）', () => {
+describe('agents page runtime chat issue-365（运行时 Agent 对话）', () => {
   beforeEach(() => {
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: true,
@@ -136,9 +136,9 @@ describe('agents page signal history + right chat issue-354（历史标签与右
       updatedAt: '2026-03-05T10:00:00.000Z',
       agents: [
         {
-          id: 'echo',
-          name: 'Echo Agent',
-          description: '回显输入内容',
+          id: 'claude',
+          name: 'Claude Agent',
+          description: 'Claude CLI runtime agent',
           status: 'available',
           sourceHostId: 'host-a',
           sourceHostName: '127.0.0.1:1919',
@@ -157,7 +157,17 @@ describe('agents page signal history + right chat issue-354（历史标签与右
             updatedAt: '2026-03-05T00:00:00.000Z',
           },
           connectionState: 'online',
-          agents: [],
+          agents: [
+            {
+              id: 'claude',
+              name: 'Claude Agent',
+              description: 'Claude CLI runtime agent',
+              status: 'available',
+              sourceHostId: 'host-a',
+              sourceHostName: '127.0.0.1:1919',
+              sourceHostAddress: '127.0.0.1:1919',
+            },
+          ],
           topology: null,
         },
       ],
@@ -165,11 +175,11 @@ describe('agents page signal history + right chat issue-354（历史标签与右
 
     serviceMocks.getDeviceView.mockResolvedValue([]);
     serviceMocks.getAgentDetail.mockResolvedValue({
-      id: 'echo',
+      id: 'claude',
       type: 'agent',
-      title: 'Echo Agent',
+      title: 'Claude Agent',
       status: 'running',
-      description: 'echo detail',
+      description: 'claude detail',
       icon: 'brain',
       tintColor: '#0D9488',
       stats: [],
@@ -180,8 +190,10 @@ describe('agents page signal history + right chat issue-354（历史标签与右
     serviceMocks.getActorDetail.mockResolvedValue(null);
     serviceMocks.getConversation.mockResolvedValue([]);
     serviceMocks.streamConversation.mockImplementation(async function* () {
-      yield { messageId: 'msg-a1', delta: '已收到：', done: false };
-      yield { messageId: 'msg-a1', delta: '测试消息', done: true };
+      yield { messageId: 'msg-fallback', delta: '这是本地 adapter 的占位回复', done: true };
+    });
+    runtimeClientMocks.streamAgentConversation.mockImplementation(async function* () {
+      yield { content: '这是 Claude Runtime 的真实回复', sessionId: 'sid-365' };
     });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -191,13 +203,6 @@ describe('agents page signal history + right chat issue-354（历史标签与右
           ok: true,
           status: 200,
           json: async () => SAMPLE_SIGNAL_ROUTES,
-        } as Response;
-      }
-      if (url.includes('/signals/history')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => SAMPLE_SIGNAL_HISTORY,
         } as Response;
       }
 
@@ -211,32 +216,20 @@ describe('agents page signal history + right chat issue-354（历史标签与右
     vi.stubGlobal('fetch', fetchMock);
   });
 
-  it('renders signal history tab with runtime data（渲染信号历史标签并展示真实数据）', async () => {
-    render(<AgentsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-hub-page')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getByTestId('agent-view-toggle-history'));
-
-    await waitFor(() => {
-      expect(screen.getByTestId('agent-signal-history-view')).toBeInTheDocument();
-    });
-
-    expect(screen.getByText('user.input.text')).toBeInTheDocument();
-    expect(screen.getByText('eventlog.appended')).toBeInTheDocument();
-    expect(screen.getByText('hello from signal history')).toBeInTheDocument();
-  });
-
-  it('supports opening right-panel chat from agent detail（支持从右侧 Agent 详情进入聊天）', async () => {
+  it('uses runtime chat stream for Claude agent（Claude 对话应走 Runtime 实时流）', async () => {
     render(<AgentsPage />);
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('mock-react-flow-node-agent:echo'));
+    fireEvent.click(screen.getByRole('button', { name: '节点' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Claude Agent'));
 
     await waitFor(() => {
       expect(screen.getByTestId('agent-rightpanel-open-chat')).toBeInTheDocument();
@@ -254,7 +247,19 @@ describe('agents page signal history + right chat issue-354（历史标签与右
     fireEvent.click(screen.getByTestId('agent-rightpanel-chat-send'));
 
     await waitFor(() => {
-      expect(screen.getByText('已收到：测试消息')).toBeInTheDocument();
+      expect(screen.getByText('这是 Claude Runtime 的真实回复')).toBeInTheDocument();
     });
+
+    expect(runtimeClientMocks.streamAgentConversation).toHaveBeenCalledWith(
+      expect.objectContaining({
+        host: '127.0.0.1',
+        port: 1919,
+      }),
+      expect.objectContaining({
+        agentId: 'claude',
+        message: '测试消息',
+      }),
+    );
+    expect(serviceMocks.streamConversation).not.toHaveBeenCalled();
   });
 });

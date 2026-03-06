@@ -70,4 +70,45 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
     expect(result.error.code).toBe('http');
     expect(result.error.status).toBe(503);
   });
+
+  it('streams agent chat chunks from SSE（从 SSE 流式解析 Agent 对话分片）', async () => {
+    const encoder = new TextEncoder();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"content":"你好","session_id":"sid-123"}\n\n'));
+          controller.enqueue(encoder.encode('data: {"content":"，我是 Claude"}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const chunks: Array<{ content: string; sessionId?: string }> = [];
+
+    for await (const chunk of client.streamAgentConversation(SAMPLE_HOST, {
+      agentId: 'claude',
+      message: '你好',
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual([
+      { content: '你好', sessionId: 'sid-123' },
+      { content: '，我是 Claude' },
+    ]);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:1919/agents/claude/chat',
+      expect.objectContaining({
+        method: 'POST',
+        headers: expect.objectContaining({
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
+        }),
+      }),
+    );
+  });
 });

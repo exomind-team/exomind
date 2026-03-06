@@ -36,6 +36,34 @@ export interface RuntimeManagerOptions {
   now?: () => Date;
 }
 
+export function findPreferredRuntimeHostForAgent(
+  snapshots: RuntimeHostSnapshot[],
+  agentId: string,
+  preferredHostId?: string,
+): RuntimeHostRecord | null {
+  const exactHost = preferredHostId
+    ? snapshots.find((snapshot) => (
+      snapshot.host.id === preferredHostId
+      && snapshot.agents.some((agent) => agent.id === agentId)
+    ))
+    : undefined;
+
+  if (exactHost) {
+    return exactHost.host;
+  }
+
+  const onlineHost = snapshots.find((snapshot) => (
+    snapshot.connectionState === 'online'
+    && snapshot.agents.some((agent) => agent.id === agentId)
+  ));
+  if (onlineHost) {
+    return onlineHost.host;
+  }
+
+  const fallbackHost = snapshots.find((snapshot) => snapshot.agents.some((agent) => agent.id === agentId));
+  return fallbackHost?.host ?? null;
+}
+
 function mapErrorToConnectionState(errorCode: 'timeout' | 'network' | 'http' | 'invalid_payload'): RuntimeHostConnectionState {
   if (errorCode === 'network') return 'offline';
   return 'error';

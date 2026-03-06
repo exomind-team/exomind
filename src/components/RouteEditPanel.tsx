@@ -56,7 +56,7 @@ export function RouteEditPanel({
           list="route-edit-topics"
           value={topic}
           onChange={(e) => setTopic(e.target.value)}
-          placeholder="e.g. user.input.text"
+          placeholder="e.g. voice.input.transcript / user.input.text"
           className="rounded-lg border border-[#292524] bg-[#1C1917] px-3 py-2 text-sm text-[#FAFAF9] placeholder:text-[#57534E] focus:border-[#C75B3A] focus:outline-none"
         />
         <datalist id="route-edit-topics">
@@ -80,6 +80,7 @@ export function RouteEditPanel({
           <option value="agent">Agent</option>
           <option value="actor">Actor</option>
           <option value="frontend">Frontend</option>
+          <option value="remote">Remote</option>
         </select>
       </label>
 

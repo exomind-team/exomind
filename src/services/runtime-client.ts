@@ -45,10 +45,25 @@ export interface RuntimeClientOptions {
   timeoutMs?: number;
 }
 
+export interface RuntimeAgentConversationRequest {
+  agentId: string;
+  message: string;
+  sessionId?: string;
+}
+
+export interface RuntimeAgentConversationChunk {
+  content: string;
+  sessionId?: string;
+}
+
 const DEFAULT_TIMEOUT_MS = 3500;
 
 function buildBaseUrl(host: RuntimeHostRecord): string {
   return `http://${host.host}:${host.port}`;
+}
+
+function buildAgentChatUrl(host: RuntimeHostRecord, agentId: string): string {
+  return `${buildBaseUrl(host)}/agents/${encodeURIComponent(agentId)}/chat`;
 }
 
 function isTimeoutError(error: unknown): boolean {
@@ -94,6 +109,7 @@ function parseRuntimeAgentSummary(value: unknown): RuntimeAgentSummary | null {
 
 function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
   if (!isObjectRecord(value)) return null;
+  if (value.host_id != null && typeof value.host_id !== 'string') return null;
   if (typeof value.hostname !== 'string') return null;
   if (typeof value.os !== 'string') return null;
   if (typeof value.arch !== 'string') return null;
@@ -104,6 +120,7 @@ function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
   if (value.used_memory_mb != null && typeof value.used_memory_mb !== 'number') return null;
 
   return {
+    host_id: typeof value.host_id === 'string' ? value.host_id : undefined,
     hostname: value.hostname,
     os: value.os,
     arch: value.arch,
@@ -113,6 +130,37 @@ function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
     total_memory_mb: typeof value.total_memory_mb === 'number' ? value.total_memory_mb : undefined,
     used_memory_mb: typeof value.used_memory_mb === 'number' ? value.used_memory_mb : undefined,
   };
+}
+
+function extractSseData(rawEvent: string): string | null {
+  const chunks: string[] = [];
+  for (const rawLine of rawEvent.split(/\r?\n/)) {
+    if (!rawLine.startsWith('data:')) continue;
+    chunks.push(rawLine.slice(5).trim());
+  }
+
+  if (chunks.length === 0) return null;
+  return chunks.join('\n');
+}
+
+function parseRuntimeAgentConversationChunk(data: string): RuntimeAgentConversationChunk | null {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(data);
+  } catch {
+    return null;
+  }
+
+  if (!isObjectRecord(parsed)) return null;
+
+  const content = typeof parsed.content === 'string' ? parsed.content : '';
+  const sessionId = typeof parsed.session_id === 'string' && parsed.session_id
+    ? parsed.session_id
+    : undefined;
+
+  if (!content && !sessionId) return null;
+
+  return { content, sessionId };
 }
 
 export class RuntimeClient {
@@ -248,6 +296,85 @@ export class RuntimeClient {
       ok: true,
       data: { status, id },
     };
+  }
+
+  async *streamAgentConversation(
+    host: RuntimeHostRecord,
+    request: RuntimeAgentConversationRequest,
+  ): AsyncGenerator<RuntimeAgentConversationChunk, void, void> {
+    const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
+    const timer = controller ? setTimeout(() => controller.abort(), this.timeoutMs) : null;
+
+    let response: Response;
+    try {
+      response = await this.fetchImpl(buildAgentChatUrl(host, request.agentId), {
+        method: 'POST',
+        headers: {
+          Accept: 'text/event-stream',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          message: request.message,
+          session_id: request.sessionId,
+        }),
+        signal: controller?.signal,
+      });
+    } catch (error) {
+      if (timer) {
+        clearTimeout(timer);
+      }
+      const networkError = toNetworkError(error);
+      throw new Error(networkError.message);
+    }
+
+    if (timer) {
+      clearTimeout(timer);
+    }
+
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}`);
+    }
+
+    if (!response.body) {
+      throw new Error('empty chat stream body（聊天流响应体为空）');
+    }
+
+    const reader = response.body.getReader();
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const events = buffer.split(/\r?\n\r?\n/);
+        buffer = events.pop() ?? '';
+
+        for (const event of events) {
+          const data = extractSseData(event);
+          if (!data) continue;
+          if (data === '[DONE]') return;
+
+          const chunk = parseRuntimeAgentConversationChunk(data);
+          if (chunk) {
+            yield chunk;
+          }
+        }
+      }
+
+      buffer += decoder.decode();
+      const trailingData = extractSseData(buffer);
+      if (!trailingData || trailingData === '[DONE]') return;
+
+      const trailingChunk = parseRuntimeAgentConversationChunk(trailingData);
+      if (trailingChunk) {
+        yield trailingChunk;
+      }
+    } finally {
+      reader.releaseLock();
+    }
   }
 
   private async getJson(url: string): Promise<RuntimeClientResult<unknown>> {

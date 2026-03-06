@@ -20,6 +20,7 @@ import {
   subscribeVoiceTranscriptSendModeChanges,
   type VoiceTranscriptSendMode,
 } from '@/config/voice-transcript-send-mode';
+import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 
 interface NowInputRowProps {
   onSend: (content: string) => void;
@@ -148,6 +149,12 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   const handleVoiceResult = useCallback((text: string) => {
     const normalized = text.trim();
     if (!normalized) return;
+
+    void publishVoiceTranscriptSignal({ text: normalized }, {
+      source: 'frontend:now-input-row',
+    }).catch((publishError) => {
+      console.warn('[new-now-input][voice-signal]', publishError);
+    });
 
     if (voiceTranscriptSendMode === 'direct-send') {
       onSend(normalized);

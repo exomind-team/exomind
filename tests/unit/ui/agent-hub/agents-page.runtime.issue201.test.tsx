@@ -108,6 +108,7 @@ const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [
 
 vi.mock('@/services/runtime-manager', () => ({
   getRuntimeManager: () => runtimeManagerMocks,
+  findPreferredRuntimeHostForAgent: vi.fn(() => null),
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
@@ -207,9 +208,7 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
     render(<AgentsPage />);
 
     fireEvent.click(await screen.findByTestId('agent-add-node-button'));
-    fireEvent.click(await screen.findByRole('button', { name: '添加信号输入' }));
-    expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
-
+    expect(await screen.findByTestId('agent-add-node-sheet')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('agent-add-node-option-device'));
     expect(screen.getByTestId('agent-host-manager-sheet')).toBeInTheDocument();
   });
@@ -219,7 +218,7 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
     runtimeManagerMocks.removeHost.mockResolvedValue(undefined);
     render(<AgentsPage />);
     fireEvent.click(await screen.findByTestId('agent-add-node-button'));
-    fireEvent.click(await screen.findByRole('button', { name: '添加信号输入' }));
+    expect(await screen.findByTestId('agent-add-node-sheet')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('agent-add-node-option-device'));
 
     fireEvent.click(await screen.findByTestId('runtime-host-probe-host-b'));

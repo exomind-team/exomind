@@ -47,6 +47,7 @@ import {
 import { RouteEditPanel } from '@/components/RouteEditPanel';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+import { KNOWN_AGENT_HUB_TOPICS, VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
 import type { SignalEvent, SignalRoute } from '@/lib/types/signal-pool';
 import type {
   AgentConversationChunk,
@@ -64,6 +65,7 @@ import type {
 } from '@/lib/types/agent-hub';
 import {
   getRuntimeManager,
+  findPreferredRuntimeHostForAgent,
   type RuntimeAggregatedAgent,
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
@@ -112,6 +114,15 @@ const DIRECT_RUNTIME_PORT_CANDIDATES = Array.from(
 const DIRECT_RUNTIME_PORT_STORAGE_KEY = 'exomind:agentHubRuntimePorts';
 
 const MOCK_SIGNAL_ROUTES_FALLBACK: SignalRoute[] = [
+  {
+    id: 'mock-route-000',
+    enabled: true,
+    topic: VOICE_INPUT_TRANSCRIPT_TOPIC,
+    target_type: 'agent',
+    target_ref: 'classifier',
+    created_at: '2026-03-04T00:00:00.000Z',
+    updated_at: '2026-03-04T00:00:00.000Z',
+  },
   {
     id: 'mock-route-001',
     enabled: true,
@@ -353,6 +364,12 @@ function resolveRuntimeEntityId(rawId: string): string {
   return rawId;
 }
 
+function extractPreferredHostId(rawId: string | null | undefined): string | undefined {
+  if (!rawId?.includes('__')) return undefined;
+  const [hostId] = rawId.split('__');
+  return hostId || undefined;
+}
+
 function formatSignalPayload(payload: unknown): string {
   if (typeof payload === 'string') return payload;
   if (payload && typeof payload === 'object' && 'text' in payload) {
@@ -417,6 +434,7 @@ type SignalFlowNodeData = {
 type SignalFlowNodeType = FlowNode<SignalFlowNodeData, SignalGraphNodeType>;
 
 function nodeTypeTint(nodeType: SignalGraphNodeType): string {
+  if (nodeType === 'input') return '#8B5CF6';
   if (nodeType === 'topic') return '#C75B3A';
   if (nodeType === 'agent') return '#0D9488';
   if (nodeType === 'actor') return '#F59E0B';
@@ -453,6 +471,8 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
   const shapeClass =
     data.nodeType === 'topic'
       ? 'rounded-full px-5 py-3'
+      : data.nodeType === 'input'
+        ? 'rounded-2xl px-4 py-3'
       : data.nodeType === 'actor'
         ? 'rounded-xl px-4 py-3'
         : 'rounded-md px-4 py-3';
@@ -471,6 +491,7 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
 }
 
 const SIGNAL_NODE_TYPES = {
+  input: SignalFlowNode,
   topic: SignalFlowNode,
   agent: SignalFlowNode,
   actor: SignalFlowNode,
@@ -569,7 +590,7 @@ function TopologyView({
       style: edge.active
         ? { stroke: activeEdgeColor, strokeWidth: 1.7 }
         : { stroke: inactiveEdgeColor, strokeWidth: 1.2, strokeDasharray: '5 4' },
-      label: `${edge.topic} → ${edge.targetRef}`,
+      label: edge.label,
       labelStyle: {
         fill: edgeLabelColor,
         fontSize: 10,
@@ -622,12 +643,12 @@ function TopologyView({
       {selectedNode && (
         <div
           data-testid="agent-topology-node-detail-card"
-          className="rounded-2xl border border-[#E7E5E4] bg-[#1C1917] px-4 py-3 text-white dark:border-[#44403C] dark:bg-[#0C0A09]"
+          className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 text-[#1C1917] shadow-sm dark:border-[#44403C] dark:bg-[#0C0A09] dark:text-[#FAFAF9]"
           onClick={(event) => event.stopPropagation()}
         >
           <p className="text-sm font-semibold">{selectedNode.label}</p>
-          <p className="mt-1 text-xs text-white/80">状态：{selectedNode.status}</p>
-          <p className="mt-1 text-xs text-white/60">类型：{selectedNode.type}</p>
+          <p className="mt-1 text-xs text-[#57534E] dark:text-white/80">状态：{selectedNode.status}</p>
+          <p className="mt-1 text-xs text-[#78716C] dark:text-white/60">类型：{selectedNode.type}</p>
         </div>
       )}
     </section>
@@ -1316,6 +1337,8 @@ function RoutesTabView({
                           ? 'bg-[#CCFBF1] text-[#0D9488] dark:bg-[#0D9488]/20 dark:text-[#2DD4BF]'
                           : route.target_type === 'actor'
                           ? 'bg-[#FEF3C7] text-[#B45309] dark:bg-[#F59E0B]/20 dark:text-[#FCD34D]'
+                          : route.target_type === 'remote'
+                          ? 'bg-[#E0E7FF] text-[#4338CA] dark:bg-[#4338CA]/20 dark:text-[#C7D2FE]'
                           : 'bg-[#DBEAFE] text-[#1D4ED8] dark:bg-[#3B82F6]/20 dark:text-[#93C5FD]'
                       }`}
                     >
@@ -1667,6 +1690,7 @@ export function AgentsPage() {
   const [rightPanel, setRightPanel] = useState<AgentHubRightPanelContext>({ state: 'CLOSED' });
   const [chatAgentId, setChatAgentId] = useState<string | null>(null);
   const [chatMessages, setChatMessages] = useState<AgentConversationMessage[]>([]);
+  const [chatSessionId, setChatSessionId] = useState<string | null>(null);
   const [chatInput, setChatInput] = useState('');
   const [chatError, setChatError] = useState('');
   const [isChatSending, setIsChatSending] = useState(false);
@@ -1774,9 +1798,20 @@ export function AgentsPage() {
   const handleOpenAgentChat = async (nodeId: string) => {
     const agentId = resolveRuntimeEntityId(nodeId);
     setChatAgentId(agentId);
+    setChatSessionId(null);
     setChatInput('');
     setChatError('');
     setRightPanel({ state: 'AGENT_CHAT', nodeId });
+
+    const runtimeHost = findPreferredRuntimeHostForAgent(
+      runtimeHostSnapshots,
+      agentId,
+      extractPreferredHostId(nodeId),
+    );
+    if (runtimeHost) {
+      setChatMessages([]);
+      return;
+    }
 
     try {
       const history = await getAgentHubService().getConversation(agentId);
@@ -1804,9 +1839,45 @@ export function AgentsPage() {
     setIsChatSending(true);
 
     try {
-      const stream = getAgentHubService().streamConversation({ agentId: chatAgentId, prompt });
-      for await (const chunk of stream) {
-        setChatMessages((prev) => appendConversationChunk(prev, chunk));
+      let receivedVisibleContent = false;
+      const runtimeHost = rightPanel.state === 'AGENT_CHAT'
+        ? findPreferredRuntimeHostForAgent(
+          runtimeHostSnapshots,
+          chatAgentId,
+          extractPreferredHostId(rightPanel.nodeId),
+        )
+        : null;
+
+      if (runtimeHost) {
+        const runtimeClient = new RuntimeClient();
+        const assistantMessageId = `runtime-agent-${Date.now()}`;
+        for await (const chunk of runtimeClient.streamAgentConversation(runtimeHost, {
+          agentId: chatAgentId,
+          message: prompt,
+          sessionId: chatSessionId ?? undefined,
+        })) {
+          if (chunk.sessionId) {
+            setChatSessionId(chunk.sessionId ?? null);
+          }
+          if (!chunk.content) continue;
+          receivedVisibleContent = true;
+          setChatMessages((prev) => appendConversationChunk(prev, {
+            messageId: assistantMessageId,
+            delta: chunk.content,
+            done: false,
+          }));
+        }
+      } else {
+        const stream = getAgentHubService().streamConversation({ agentId: chatAgentId, prompt });
+        for await (const chunk of stream) {
+          if (!chunk.delta) continue;
+          receivedVisibleContent = true;
+          setChatMessages((prev) => appendConversationChunk(prev, chunk));
+        }
+      }
+
+      if (!receivedVisibleContent) {
+        setChatError('Agent 未返回可显示内容');
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -1878,6 +1949,7 @@ export function AgentsPage() {
   useEffect(() => {
     if (rightPanel.state === 'AGENT_CHAT') return;
     setChatAgentId(null);
+    setChatSessionId(null);
     setChatInput('');
     setChatError('');
     setIsChatSending(false);
@@ -2140,7 +2212,7 @@ export function AgentsPage() {
   );
 
   const availableTopics = useMemo(
-    () => [...new Set(signalRoutes.map((r) => r.topic))],
+    () => [...new Set([...KNOWN_AGENT_HUB_TOPICS, ...signalRoutes.map((r) => r.topic)])],
     [signalRoutes]
   );
 
@@ -2267,7 +2339,7 @@ export function AgentsPage() {
       {/* Header */}
       <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
         <div className="flex items-center justify-between">
-          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">Agent 网络</h1>
+          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">信号网络</h1>
           <div className="flex items-center gap-2">
             <button
               type="button"
@@ -2550,13 +2622,15 @@ export function AgentsPage() {
                             <div className="flex items-center gap-2">
                               <span
                                 className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${
-                                  node.type === 'agent'
-                                    ? 'bg-[#CCFBF1] text-[#0D9488]'
-                                    : node.type === 'actor'
-                                      ? 'bg-[#FEF3C7] text-[#B45309]'
-                                      : node.type === 'topic'
-                                        ? 'bg-[#FFEDD5] text-[#EA580C]'
-                                        : 'bg-[#DBEAFE] text-[#1D4ED8]'
+                                  node.type === 'input'
+                                    ? 'bg-[#EDE9FE] text-[#7C3AED]'
+                                    : node.type === 'agent'
+                                      ? 'bg-[#CCFBF1] text-[#0D9488]'
+                                      : node.type === 'actor'
+                                        ? 'bg-[#FEF3C7] text-[#B45309]'
+                                        : node.type === 'topic'
+                                          ? 'bg-[#FFEDD5] text-[#EA580C]'
+                                          : 'bg-[#DBEAFE] text-[#1D4ED8]'
                                 }`}
                               >
                                 {node.type}

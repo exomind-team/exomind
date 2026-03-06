@@ -17,6 +17,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
+import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 
 export interface VoiceMessageInputProps {
   /** 发送消息回调 */
@@ -126,10 +127,18 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
 
   // 语音识别结果
   const handleVoiceResult = useCallback((text: string) => {
+    const normalized = text.trim();
+    if (!normalized) return;
+
     // 追加到输入框
-    setValue(prev => (prev.trim() ? `${prev} ${text}` : text));
+    setValue(prev => (prev.trim() ? `${prev} ${normalized}` : normalized));
     // 触发回调（如果有）
-    onVoiceResult?.(text);
+    onVoiceResult?.(normalized);
+    void publishVoiceTranscriptSignal({ text: normalized }, {
+      source: 'frontend:voice-message-input',
+    }).catch((publishError) => {
+      console.warn('[VoiceMessageInput] 发布语音信号失败（voice signal publish failed）:', publishError);
+    });
   }, [onVoiceResult]);
 
   // 语音状态变化
