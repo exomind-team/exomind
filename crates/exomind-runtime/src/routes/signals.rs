@@ -10,7 +10,8 @@ use std::convert::Infallible;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::broadcast;
-use tokio::time::{Duration, Interval};
+use tokio::time::{Duration, Instant, Interval};
+use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 
 use crate::signal::types::{SignalEvent, SignalRoute, TargetType};
 use crate::AppState;
@@ -275,7 +276,7 @@ fn routes_target_stream_subscriber(
 
 /// A custom stream that merges broadcast events with periodic heartbeats.
 struct SignalSseStream {
-    rx: broadcast::Receiver<SignalEvent>,
+    rx: BroadcastStream<SignalEvent>,
     agent_id: String,
     heartbeat: Interval,
     state: AppState,
@@ -288,9 +289,12 @@ impl SignalSseStream {
         heartbeat_secs: u64,
         state: AppState,
     ) -> Self {
-        let interval = tokio::time::interval(Duration::from_secs(heartbeat_secs));
+        let interval = tokio::time::interval_at(
+            Instant::now() + Duration::from_secs(heartbeat_secs),
+            Duration::from_secs(heartbeat_secs),
+        );
         Self {
-            rx,
+            rx: BroadcastStream::new(rx),
             agent_id,
             heartbeat: interval,
             state,
@@ -304,9 +308,8 @@ impl Stream for SignalSseStream {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // Check for broadcast events first.
-        match this.rx.try_recv() {
-            Ok(event) => {
+        match Pin::new(&mut this.rx).poll_next(cx) {
+            Poll::Ready(Some(Ok(event))) => {
                 if routes_target_stream_subscriber(
                     this.state.signal_pool.routes(),
                     &event.topic,
@@ -318,22 +321,15 @@ impl Stream for SignalSseStream {
                         .id(event.id)
                         .data(json))));
                 }
-                // Event not for this agent or serialization failed; wake to poll again.
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
             }
-            Err(broadcast::error::TryRecvError::Empty) => {
-                // No events available right now; fall through to heartbeat check.
-            }
-            Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                // Missed some events; log and continue.
+            Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(n)))) => {
                 let msg = format!("{{\"warning\":\"lagged\",\"missed\":{n}}}");
                 return Poll::Ready(Some(Ok(Event::default().event("warning").data(msg))));
             }
-            Err(broadcast::error::TryRecvError::Closed) => {
-                // Channel closed; end the stream.
-                return Poll::Ready(None);
-            }
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Pending => {}
         }
 
         // Check heartbeat timer.
@@ -343,32 +339,7 @@ impl Stream for SignalSseStream {
             return Poll::Ready(Some(Ok(Event::default().event("heartbeat").data(data))));
         }
 
-        // Register waker for broadcast channel by attempting an async recv.
-        // We use a future to poll the receiver.
-        let mut recv_fut = Box::pin(this.rx.recv());
-        match Pin::new(&mut recv_fut).poll(cx) {
-            Poll::Ready(Ok(event)) => {
-                if routes_target_stream_subscriber(
-                    this.state.signal_pool.routes(),
-                    &event.topic,
-                    &this.agent_id,
-                ) && let Ok(json) = serde_json::to_string(&event)
-                {
-                    return Poll::Ready(Some(Ok(Event::default()
-                        .event("signal")
-                        .id(event.id)
-                        .data(json))));
-                }
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Poll::Ready(Err(broadcast::error::RecvError::Lagged(n))) => {
-                let msg = format!("{{\"warning\":\"lagged\",\"missed\":{n}}}");
-                Poll::Ready(Some(Ok(Event::default().event("warning").data(msg))))
-            }
-            Poll::Ready(Err(broadcast::error::RecvError::Closed)) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
+        Poll::Pending
     }
 }
 

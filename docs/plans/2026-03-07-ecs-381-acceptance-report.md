@@ -86,10 +86,11 @@ npx tsc --noEmit
 
 ## 结论
 
-当前已经可以比较诚实地声明：
+当前可以有边界地声明：
 
-- ExoMind 前端在 `#381` MVP 范围内，已经能让桌面端和手机端**不经过当前 sync server** 互通 `EventLog + current ActiveBlock`
-- 并且新增了明确的 `:6984` 负面证明
+- ExoMind 前端在 `#381` MVP 范围内，已经通过 **fake runtime pair + HTTP/SSE projector** 证明桌面端和手机端可以**不经过当前 sync server** 互通 `EventLog + current ActiveBlock`
+- 浏览器侧验收新增了明确的 `:6984` 负面证明
+- Rust runtime 的真实 mesh relay / replay / reconnect 仍需继续依赖 runtime 集成测试，而不是把这组 Playwright 结果直接等同于“真实 runtime 端到端已全量证明”
 
 ## 边界说明
 
@@ -103,6 +104,10 @@ npx tsc --noEmit
 - projector 写本地存储
 - 无 `:6984` 访问
 
-它**不替代** Rust mesh 本体的集成测试。
+它**不替代** Rust mesh 本体的集成测试，也**不单独证明**：
+
+- `0` 次 `syncToRemote()` 调用
+- `0` 次 `PouchDB.replicate()` 调用
+- 真实 Rust runtime 在所有 relay / replay / reconnect 情况下都完全等价
 
 Rust mesh / replay / reconnect / hop / dedupe 的真实性仍然应继续依赖 `#373` 相关 runtime 测试基线来保证。

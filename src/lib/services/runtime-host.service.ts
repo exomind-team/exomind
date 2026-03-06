@@ -130,6 +130,26 @@ function shouldPromoteToConfirmedPeer(
   return Boolean(next.manualOverride);
 }
 
+function lockConfirmedPeerHostId(
+  current: RuntimeHostRecord,
+  next: RuntimeHostRecord,
+  patch: RuntimeHostMetadataPatch,
+): RuntimeHostRecord {
+  if (
+    current.trustState === 'confirmed_peer'
+    && current.hostId
+    && patch.hostId
+    && patch.hostId !== current.hostId
+  ) {
+    return {
+      ...next,
+      hostId: current.hostId,
+    };
+  }
+
+  return next;
+}
+
 export class RuntimeHostServiceImpl implements RuntimeHostService {
   private readonly storage: IStoragePort;
   private readonly fetchImpl: RuntimeFetch;
@@ -192,13 +212,14 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       manualOverride: patch.manualOverride ?? current.manualOverride,
       updatedAt: toIso(this.now),
     });
+    const lockedBase = lockConfirmedPeerHostId(current, mergedBase, patch);
 
-    const nextHost = shouldPromoteToConfirmedPeer(current, mergedBase, patch)
+    const nextHost = shouldPromoteToConfirmedPeer(current, lockedBase, patch)
       ? {
-          ...mergedBase,
+          ...lockedBase,
           trustState: 'confirmed_peer' as const,
         }
-      : mergedBase;
+      : lockedBase;
 
     const nextHosts = [...hosts];
     nextHosts[targetIndex] = nextHost;

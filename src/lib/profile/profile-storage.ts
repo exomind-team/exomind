@@ -9,6 +9,7 @@ const PROFILE_INDEX_KEY = 'exomind:profiles:index';
 const PROFILE_SESSION_KEY = 'exomind:profile-session';
 const LEGACY_USERS_KEY = 'exomind:users';
 const LEGACY_SYNC_STORE_KEY = 'exomind:sync-store';
+const LEGACY_LOGIN_ALIAS_KEY = 'exomind:profiles:legacy-login-aliases';
 
 function getProfileMetaKey(profileId: string): string {
   return `exomind:profiles:${profileId}:meta`;
@@ -29,6 +30,47 @@ function readJson<T>(key: string, fallback: T): T {
 
 function writeJson(key: string, value: unknown): void {
   localStorage.setItem(key, JSON.stringify(value));
+}
+
+function getLegacyLoginAliases(): Record<string, string> {
+  return readJson<Record<string, string>>(LEGACY_LOGIN_ALIAS_KEY, {});
+}
+
+function setLegacyLoginAliases(aliases: Record<string, string>): void {
+  writeJson(LEGACY_LOGIN_ALIAS_KEY, aliases);
+}
+
+function findLegacyAliasedProfile(loginName: string): LocalProfile | null {
+  const exactAlias = getLegacyLoginAliases()[loginName.trim()];
+  if (!exactAlias) {
+    return null;
+  }
+
+  return getLocalProfile(exactAlias);
+}
+
+function findProfileByExactDisplayName(displayName: string): LocalProfile | null {
+  const target = displayName.trim();
+  if (!target) {
+    return null;
+  }
+
+  return listLocalProfiles().find((profile) => profile.displayName === target) || null;
+}
+
+function rememberLegacyLoginAlias(loginName: string, profileId: string): void {
+  const normalized = loginName.trim();
+  if (!normalized) {
+    return;
+  }
+
+  const aliases = getLegacyLoginAliases();
+  if (aliases[normalized] === profileId) {
+    return;
+  }
+
+  aliases[normalized] = profileId;
+  setLegacyLoginAliases(aliases);
 }
 
 export function normalizeProfileSlug(value: string): string {
@@ -79,6 +121,24 @@ function ensureUniqueProfileId(slug: string): string {
   return `${base}-${suffix}`;
 }
 
+function resolveAvailableProfileSlug(rawSlug: string): string {
+  const base = normalizeProfileSlug(rawSlug);
+  if (!base) {
+    return '';
+  }
+
+  if (!findProfileBySlug(base)) {
+    return base;
+  }
+
+  let suffix = 2;
+  while (findProfileBySlug(`${base}-${suffix}`)) {
+    suffix += 1;
+  }
+
+  return `${base}-${suffix}`;
+}
+
 export function listLocalProfiles(): LocalProfile[] {
   return getProfileIndex()
     .map((profileId) => getLocalProfile(profileId))
@@ -123,6 +183,11 @@ export function findProfileBySlug(slug: string): LocalProfile | null {
 }
 
 export function findProfileByLoginName(loginName: string): LocalProfile | null {
+  const aliasedProfile = findLegacyAliasedProfile(loginName);
+  if (aliasedProfile) {
+    return aliasedProfile;
+  }
+
   return findProfileBySlug(loginName);
 }
 
@@ -184,8 +249,12 @@ export function migrateLegacyProfileStorage(): void {
   }
 
   for (const legacyUser of legacyUsers) {
-    const existing = findProfileBySlug(legacyUser.username);
+    const existing =
+      findLegacyAliasedProfile(legacyUser.username) ??
+      findProfileByExactDisplayName(legacyUser.username);
+
     if (existing) {
+      rememberLegacyLoginAlias(legacyUser.username, existing.profileId);
       if (legacyUser.passwordHash && !getProfileSecret(existing.profileId)?.localPasswordHash) {
         writeJson(getProfileSecretKey(existing.profileId), {
           profileId: existing.profileId,
@@ -197,7 +266,7 @@ export function migrateLegacyProfileStorage(): void {
     }
 
     const profile = createLocalProfile({
-      slug: legacyUser.username,
+      slug: resolveAvailableProfileSlug(legacyUser.username),
       displayName: legacyUser.username,
       localPasswordHash: legacyUser.passwordHash,
     });
@@ -210,11 +279,13 @@ export function migrateLegacyProfileStorage(): void {
         updatedAt: legacyUser.lastLogin || legacyUser.createdAt,
       } satisfies LocalProfile);
     }
+
+    rememberLegacyLoginAlias(legacyUser.username, profile.profileId);
   }
 
   const legacyActiveUser = getLegacyActiveUser();
   if (legacyActiveUser) {
-    const activeProfile = findProfileBySlug(legacyActiveUser);
+    const activeProfile = findProfileByLoginName(legacyActiveUser);
     if (activeProfile) {
       setActiveProfileId(activeProfile.profileId);
     }

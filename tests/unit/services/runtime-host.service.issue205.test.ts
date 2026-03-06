@@ -159,6 +159,34 @@ describe('runtime host service issue-205（RuntimeHost 服务）', () => {
     expect(updated.lastSuccessfulDialAddress).toBe('10.0.0.30:1949');
   });
 
+  it('keeps confirmed peer host id stable when dial target drifts（confirmed peer 不应被静默改绑到新 host_id）', async () => {
+    const service = new RuntimeHostServiceImpl({
+      storage,
+      fetchImpl: vi.fn(),
+      now: () => new Date('2026-03-07T12:00:00.000Z'),
+    });
+    const created = await service.addHost({
+      name: 'Trusted Peer',
+      host: '10.0.0.40',
+      port: 1949,
+    });
+
+    const confirmed = await service.mergeHostMetadata(created.id, {
+      hostId: 'host-trusted-1',
+      lastSuccessfulDialAddress: '10.0.0.40:1949',
+      advertisedListenAddress: '10.0.0.40:1949',
+    });
+    const drifted = await service.mergeHostMetadata(created.id, {
+      hostId: 'host-impostor-2',
+      lastSuccessfulDialAddress: '10.0.0.99:1949',
+    });
+
+    expect(confirmed.trustState).toBe('confirmed_peer');
+    expect(drifted.trustState).toBe('confirmed_peer');
+    expect(drifted.hostId).toBe('host-trusted-1');
+    expect(drifted.lastSuccessfulDialAddress).toBe('10.0.0.99:1949');
+  });
+
   it('marks host online when probe succeeds（探测成功后标记在线）', async () => {
     const fetchImpl = vi.fn(async () => {
       return {

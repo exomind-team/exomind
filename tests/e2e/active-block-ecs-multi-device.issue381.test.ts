@@ -5,6 +5,16 @@ import {
 } from './helpers/issue381-frontend';
 import { startFakeMeshRuntimePair } from './helpers/issue381-fake-mesh-runtime';
 
+async function safeClose(target: { close: () => Promise<void> | void }): Promise<void> {
+  try {
+    await target.close();
+  } catch (error) {
+    if (!(error instanceof Error) || !error.message.includes('ENOENT')) {
+      throw error;
+    }
+  }
+}
+
 async function expectRuntimeReady(page: import('@playwright/test').Page, runtimeAddress: string): Promise<void> {
   await expect.poll(
     () => page.evaluate(() => localStorage.getItem('exomind:runtimeTargetMode')),
@@ -59,86 +69,86 @@ test.describe('Issue #381: ActiveBlock over ECS multi-device acceptance', () => 
       ...devices['Pixel 7'],
     });
 
-    attachLegacySyncRequestCollector(desktopContext, legacySyncRequests);
-    attachLegacySyncRequestCollector(mobileContext, legacySyncRequests);
+    try {
+      attachLegacySyncRequestCollector(desktopContext, legacySyncRequests);
+      attachLegacySyncRequestCollector(mobileContext, legacySyncRequests);
 
-    const desktopPage = await desktopContext.newPage();
-    const mobilePage = await mobileContext.newPage();
+      const desktopPage = await desktopContext.newPage();
+      const mobilePage = await mobileContext.newPage();
 
-    await Promise.all([
-      seedIssue381Page(desktopPage, {
-        runtimeAddress: runtimeA.address,
-        profileId,
-        displayName: 'Issue381 Shared User',
-        remoteIdentityKey,
-      }),
-      seedIssue381Page(mobilePage, {
-        runtimeAddress: runtimeB.address,
-        profileId,
-        displayName: 'Issue381 Shared User',
-        remoteIdentityKey,
-      }),
-    ]);
+      await Promise.all([
+        seedIssue381Page(desktopPage, {
+          runtimeAddress: runtimeA.address,
+          profileId,
+          displayName: 'Issue381 Shared User',
+          remoteIdentityKey,
+        }),
+        seedIssue381Page(mobilePage, {
+          runtimeAddress: runtimeB.address,
+          profileId,
+          displayName: 'Issue381 Shared User',
+          remoteIdentityKey,
+        }),
+      ]);
 
-    await Promise.all([
-      desktopPage.goto('/eventlog', { waitUntil: 'domcontentloaded' }),
-      mobilePage.goto('/eventlog', { waitUntil: 'domcontentloaded' }),
-    ]);
+      await Promise.all([
+        desktopPage.goto('/eventlog', { waitUntil: 'domcontentloaded' }),
+        mobilePage.goto('/eventlog', { waitUntil: 'domcontentloaded' }),
+      ]);
 
-    await Promise.all([
-      expectRuntimeReady(desktopPage, runtimeA.address),
-      expectRuntimeReady(mobilePage, runtimeB.address),
-    ]);
-    await expect.poll(() => runtimeA.subscriberCount, { timeout: 15000 }).toBeGreaterThan(0);
-    await expect.poll(() => runtimeB.subscriberCount, { timeout: 15000 }).toBeGreaterThan(0);
-    await expect(desktopPage.getByTestId('new-focus-state-idle')).toBeVisible();
-    await expect(mobilePage.getByTestId('new-focus-state-idle')).toBeVisible();
+      await Promise.all([
+        expectRuntimeReady(desktopPage, runtimeA.address),
+        expectRuntimeReady(mobilePage, runtimeB.address),
+      ]);
+      await expect.poll(() => runtimeA.subscriberCount, { timeout: 15000 }).toBeGreaterThan(0);
+      await expect.poll(() => runtimeB.subscriberCount, { timeout: 15000 }).toBeGreaterThan(0);
+      await expect(desktopPage.getByTestId('new-focus-state-idle')).toBeVisible();
+      await expect(mobilePage.getByTestId('new-focus-state-idle')).toBeVisible();
 
-    const desktopTaskName = `issue381-desktop-block-${Date.now()}`;
-    await startFocusBlock(desktopPage, desktopTaskName);
+      const desktopTaskName = `issue381-desktop-block-${Date.now()}`;
+      await startFocusBlock(desktopPage, desktopTaskName);
 
-    await expect
-      .poll(async () => await mobilePage.getByTestId('new-focus-running-task-card').textContent(), {
-        timeout: 15000,
-        intervals: [250, 500, 1000],
-      })
-      .toContain(desktopTaskName);
+      await expect
+        .poll(async () => await mobilePage.getByTestId('new-focus-running-task-card').textContent(), {
+          timeout: 15000,
+          intervals: [250, 500, 1000],
+        })
+        .toContain(desktopTaskName);
 
-    await endFocusBlock(desktopPage, 'desktop feedback');
+      await endFocusBlock(desktopPage, 'desktop feedback');
 
-    await expect
-      .poll(async () => await mobilePage.getByTestId('new-focus-state-idle').isVisible(), {
-        timeout: 15000,
-        intervals: [250, 500, 1000],
-      })
-      .toBe(true);
+      await expect
+        .poll(async () => await mobilePage.getByTestId('new-focus-state-idle').isVisible(), {
+          timeout: 15000,
+          intervals: [250, 500, 1000],
+        })
+        .toBe(true);
 
-    const mobileTaskName = `issue381-mobile-block-${Date.now()}`;
-    await startFocusBlock(mobilePage, mobileTaskName);
+      const mobileTaskName = `issue381-mobile-block-${Date.now()}`;
+      await startFocusBlock(mobilePage, mobileTaskName);
 
-    await expect
-      .poll(async () => await desktopPage.getByTestId('new-focus-running-task-card').textContent(), {
-        timeout: 15000,
-        intervals: [250, 500, 1000],
-      })
-      .toContain(mobileTaskName);
+      await expect
+        .poll(async () => await desktopPage.getByTestId('new-focus-running-task-card').textContent(), {
+          timeout: 15000,
+          intervals: [250, 500, 1000],
+        })
+        .toContain(mobileTaskName);
 
-    await endFocusBlock(mobilePage, 'mobile feedback');
+      await endFocusBlock(mobilePage, 'mobile feedback');
 
-    await expect
-      .poll(async () => await desktopPage.getByTestId('new-focus-state-idle').isVisible(), {
-        timeout: 15000,
-        intervals: [250, 500, 1000],
-      })
-      .toBe(true);
+      await expect
+        .poll(async () => await desktopPage.getByTestId('new-focus-state-idle').isVisible(), {
+          timeout: 15000,
+          intervals: [250, 500, 1000],
+        })
+        .toBe(true);
 
-    expect(legacySyncRequests).toEqual([]);
-
-    await Promise.all([
-      desktopContext.close(),
-      mobileContext.close(),
-      runtimeA.close(),
-      runtimeB.close(),
-    ]);
+      expect(legacySyncRequests).toEqual([]);
+    } finally {
+      await safeClose(desktopContext);
+      await safeClose(mobileContext);
+      await safeClose(runtimeA);
+      await safeClose(runtimeB);
+    }
   });
 });

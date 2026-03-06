@@ -117,6 +117,38 @@ describe('profile-storage（本地档案存储）', () => {
     expect(module.findProfileByLoginName('bob')?.profileId).toBe(profile.profileId);
   });
 
+  it('preserves colliding legacy login names via exact alias mapping（保留冲突 legacy 登录名映射）', async () => {
+    mockLocalStorageData['exomind:users'] = JSON.stringify([
+      {
+        username: 'Alice',
+        passwordHash: 'hash-alice-upper',
+        createdAt: '2026-03-07T10:00:00.000Z',
+      },
+      {
+        username: 'alice',
+        passwordHash: 'hash-alice-lower',
+        createdAt: '2026-03-07T10:01:00.000Z',
+      },
+    ]);
+    mockLocalStorageData['exomind:sync-store'] = JSON.stringify({
+      state: {
+        currentUser: 'alice',
+      },
+    });
+
+    const module = await import('@/lib/profile/profile-storage');
+    module.ensureProfileStorageMigrated();
+
+    const upper = module.findProfileByLoginName('Alice');
+    const lower = module.findProfileByLoginName('alice');
+
+    expect(upper).toBeTruthy();
+    expect(lower).toBeTruthy();
+    expect(upper?.profileId).not.toBe(lower?.profileId);
+    expect(module.listLocalProfiles()).toHaveLength(2);
+    expect(module.getActiveProfileId()).toBe(lower?.profileId ?? null);
+  });
+
   it('falls back to legacy currentUser when session not migrated（未迁移时回退旧 currentUser）', async () => {
     mockLocalStorageData['exomind:sync-store'] = JSON.stringify({
       state: {
