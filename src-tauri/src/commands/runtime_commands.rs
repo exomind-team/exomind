@@ -258,7 +258,7 @@ pub fn signal_publish_fast(
     state: State<'_, Arc<RuntimeProcessState>>,
     request: SignalPublishFastRequest,
 ) -> Result<SignalPublishFastResponse, String> {
-    let signal_pool = {
+    let (signal_pool, host_id) = {
         let inner = lock_or_error(state.inner())?;
         let handle = inner
             .handle
@@ -267,11 +267,12 @@ pub fn signal_publish_fast(
         if !handle.is_running() {
             return Err("embedded runtime is not running".to_string());
         }
-        handle.clone_signal_pool()
+        (handle.clone_signal_pool(), handle.host_id().to_string())
     };
 
     let event_id = RuntimeHandle::publish_signal_to_pool(
         &signal_pool,
+        &host_id,
         RuntimePublishRequest {
             topic: request.topic,
             source: request.source,

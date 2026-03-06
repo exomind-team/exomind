@@ -435,3 +435,36 @@ async fn create_route_without_required_fields_returns_bad_request() {
         response.status()
     );
 }
+
+#[tokio::test]
+async fn default_signal_routes_include_voice_input_transcript_route() {
+    let app = test_app();
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/signal-routes")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let body = response.into_body().collect().await.unwrap().to_bytes();
+    let routes: Value = serde_json::from_slice(&body).unwrap();
+    let route_list = routes.as_array().expect("/signal-routes should return array");
+
+    let voice_route = route_list.iter().find(|route| {
+        route["topic"] == "voice.input.transcript"
+            && route["target_type"] == "agent"
+            && route["target_ref"] == "classifier"
+            && route["enabled"] == true
+    });
+
+    assert!(
+        voice_route.is_some(),
+        "default routes should include voice.input.transcript -> classifier"
+    );
+}

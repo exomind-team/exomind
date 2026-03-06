@@ -1,6 +1,7 @@
 use axum::body::Body;
 use axum::http::Request;
 use exomind_runtime::agent::AgentRegistry;
+use exomind_runtime::mesh::MeshState;
 use exomind_runtime::routes;
 use exomind_runtime::signal::SignalPool;
 use exomind_runtime::AppState;
@@ -11,10 +12,15 @@ use tower::ServiceExt;
 
 #[tokio::test]
 async fn create_and_delete_runtime_agent_via_http_routes() {
+    let signal_pool = Arc::new(SignalPool::new(None));
+    let host_id = "test-agent-lifecycle".to_string();
     let state = AppState {
         port: 3919,
+        host_id: host_id.clone(),
         registry: AgentRegistry::new(),
-        signal_pool: Arc::new(SignalPool::new(None)),
+        signal_pool: Arc::clone(&signal_pool),
+        mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+        mesh_relay: None,
     };
     let app = routes::router().with_state(state);
 

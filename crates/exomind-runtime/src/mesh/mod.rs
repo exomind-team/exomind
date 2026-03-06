@@ -1,0 +1,697 @@
+use crate::signal::{DeliveryRecord, DeliveryStatus, SignalEvent, SignalPool, TargetType};
+use futures_util::StreamExt;
+use serde::{Deserialize, Serialize};
+use std::collections::{HashMap, HashSet, VecDeque};
+use std::convert::Infallible;
+use std::path::PathBuf;
+use std::sync::{Arc, RwLock};
+use tokio::sync::{Mutex, oneshot};
+use tokio::task::JoinHandle;
+use tokio::time::Duration;
+
+pub const MAX_HOP: u8 = 8;
+const DEDUPE_CAPACITY: usize = 4096;
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PeerStatus {
+    Unknown,
+    Connecting,
+    Online,
+    Error,
+    Disabled,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerInfo {
+    pub id: String,
+    pub base_url: String,
+    pub enabled: bool,
+    pub capabilities: Vec<String>,
+    pub status: PeerStatus,
+    pub last_seen: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PeerInterestSnapshot {
+    pub peer_id: String,
+    pub topics: Vec<String>,
+    pub updated_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct MeshPersistedState {
+    peers: Vec<PeerInfo>,
+    interests: Vec<PeerInterestSnapshot>,
+}
+
+#[derive(Debug, Default)]
+struct DedupeWindow {
+    order: VecDeque<String>,
+    seen: HashSet<String>,
+}
+
+impl DedupeWindow {
+    fn remember(&mut self, event_id: &str) -> bool {
+        if self.seen.contains(event_id) {
+            return false;
+        }
+
+        self.order.push_back(event_id.to_string());
+        self.seen.insert(event_id.to_string());
+
+        while self.order.len() > DEDUPE_CAPACITY {
+            if let Some(evicted) = self.order.pop_front() {
+                self.seen.remove(&evicted);
+            }
+        }
+
+        true
+    }
+}
+
+pub struct MeshState {
+    host_id: String,
+    signal_pool: Arc<SignalPool>,
+    persist_path: Option<PathBuf>,
+    peers: RwLock<HashMap<String, PeerInfo>>,
+    interests: RwLock<HashMap<String, PeerInterestSnapshot>>,
+    dedupe: RwLock<DedupeWindow>,
+}
+
+impl MeshState {
+    pub fn new(host_id: String, signal_pool: Arc<SignalPool>, persist_path: Option<PathBuf>) -> Self {
+        let persisted = persist_path
+            .as_ref()
+            .and_then(|path| load_persisted_state(path));
+
+        let mut peers = HashMap::new();
+        let mut interests = HashMap::new();
+
+        if let Some(state) = persisted {
+            for peer in state.peers {
+                peers.insert(peer.id.clone(), peer);
+            }
+            for snapshot in state.interests {
+                interests.insert(snapshot.peer_id.clone(), snapshot);
+            }
+        }
+
+        Self {
+            host_id,
+            signal_pool,
+            persist_path,
+            peers: RwLock::new(peers),
+            interests: RwLock::new(interests),
+            dedupe: RwLock::new(DedupeWindow::default()),
+        }
+    }
+
+    pub fn host_id(&self) -> &str {
+        &self.host_id
+    }
+
+    pub fn list_peers(&self) -> Vec<PeerInfo> {
+        let peers = match self.peers.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let mut items = peers.values().cloned().collect::<Vec<_>>();
+        items.sort_by(|left, right| left.id.cmp(&right.id));
+        items
+    }
+
+    pub fn get_peer(&self, peer_id: &str) -> Option<PeerInfo> {
+        let peers = match self.peers.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        peers.get(peer_id).cloned()
+    }
+
+    pub fn upsert_peer(&self, mut peer: PeerInfo) -> PeerInfo {
+        normalize_peer(&mut peer);
+        let now = now_rfc3339();
+
+        {
+            let mut peers = match self.peers.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+
+            if let Some(existing) = peers.get(&peer.id) {
+                if peer.created_at.is_empty() {
+                    peer.created_at = existing.created_at.clone();
+                }
+                if peer.last_seen.is_none() {
+                    peer.last_seen = existing.last_seen.clone();
+                }
+                if peer.last_error.is_none() {
+                    peer.last_error = existing.last_error.clone();
+                }
+                if peer.created_at.is_empty() {
+                    peer.created_at = now.clone();
+                }
+            } else if peer.created_at.is_empty() {
+                peer.created_at = now.clone();
+            }
+
+            if peer.updated_at.is_empty() {
+                peer.updated_at = now.clone();
+            } else {
+                peer.updated_at = now.clone();
+            }
+
+            if peer.enabled {
+                if matches!(peer.status, PeerStatus::Disabled) {
+                    peer.status = PeerStatus::Unknown;
+                }
+            } else {
+                peer.status = PeerStatus::Disabled;
+            }
+
+            peers.insert(peer.id.clone(), peer.clone());
+        }
+
+        self.persist();
+        peer
+    }
+
+    pub fn delete_peer(&self, peer_id: &str) -> bool {
+        let removed = {
+            let mut peers = match self.peers.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            peers.remove(peer_id).is_some()
+        };
+
+        if removed {
+            let mut interests = match self.interests.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            interests.remove(peer_id);
+            drop(interests);
+            self.persist();
+        }
+
+        removed
+    }
+
+    pub fn set_peer_interests(&self, peer_id: &str, topics: Vec<String>) -> PeerInterestSnapshot {
+        let snapshot = PeerInterestSnapshot {
+            peer_id: peer_id.to_string(),
+            topics: normalize_topics(topics),
+            updated_at: now_rfc3339(),
+        };
+
+        {
+            let mut interests = match self.interests.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            interests.insert(peer_id.to_string(), snapshot.clone());
+        }
+
+        self.persist();
+        snapshot
+    }
+
+    pub fn get_peer_interests(&self, peer_id: &str) -> Option<PeerInterestSnapshot> {
+        let interests = match self.interests.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        interests.get(peer_id).cloned()
+    }
+
+    pub fn peer_accepts_topic(&self, peer_id: &str, topic: &str) -> bool {
+        self.get_peer_interests(peer_id)
+            .map(|snapshot| snapshot.topics.iter().any(|item| item == "*" || item == topic))
+            .unwrap_or(false)
+    }
+
+    pub fn local_interest_topics(&self) -> Vec<String> {
+        let mut topics = self
+            .signal_pool
+            .routes()
+            .get_all()
+            .into_iter()
+            .filter(|route| route.enabled && !matches!(route.target_type, TargetType::Remote))
+            .map(|route| route.topic)
+            .collect::<Vec<_>>();
+        topics.sort();
+        topics.dedup();
+        topics
+    }
+
+    pub fn should_stream_event_to_peer(&self, peer_id: &str, event: &SignalEvent) -> bool {
+        if event.origin_host_id == peer_id {
+            return false;
+        }
+        if event.hop >= MAX_HOP {
+            return false;
+        }
+
+        let targeted_by_remote_route = self
+            .signal_pool
+            .routes()
+            .match_routes(&event.topic)
+            .iter()
+            .any(|route| matches!(route.target_type, TargetType::Remote) && route.target_ref == peer_id);
+
+        targeted_by_remote_route || self.peer_accepts_topic(peer_id, &event.topic)
+    }
+
+    pub async fn ingest_remote_event(
+        &self,
+        from_peer_id: &str,
+        mut event: SignalEvent,
+    ) -> Result<bool, Infallible> {
+        if event.origin_host_id == self.host_id {
+            self.record_mesh_delivery(&event.id, from_peer_id, DeliveryStatus::Skipped, Some("origin bounce".to_string()));
+            return Ok(false);
+        }
+
+        if event.hop >= MAX_HOP {
+            self.record_mesh_delivery(&event.id, from_peer_id, DeliveryStatus::Skipped, Some("hop limit".to_string()));
+            return Ok(false);
+        }
+
+        let accepted = {
+            let mut dedupe = match self.dedupe.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            dedupe.remember(&event.id)
+        };
+
+        if !accepted {
+            self.record_mesh_delivery(
+                &event.id,
+                from_peer_id,
+                DeliveryStatus::Skipped,
+                Some("duplicate event id".to_string()),
+            );
+            return Ok(false);
+        }
+
+        event.hop = event.hop.saturating_add(1);
+        self.mark_peer_online(from_peer_id);
+        self.signal_pool.publish(event.clone());
+        self.record_mesh_delivery(&event.id, from_peer_id, DeliveryStatus::Sent, None);
+
+        Ok(true)
+    }
+
+    pub fn mark_peer_online(&self, peer_id: &str) {
+        self.update_peer_metadata(peer_id, |peer| {
+            peer.status = PeerStatus::Online;
+            peer.last_seen = Some(now_rfc3339());
+            peer.last_error = None;
+        });
+    }
+
+    pub fn mark_peer_connecting(&self, peer_id: &str) {
+        self.update_peer_metadata(peer_id, |peer| {
+            peer.status = PeerStatus::Connecting;
+            peer.last_error = None;
+        });
+    }
+
+    pub fn mark_peer_error(&self, peer_id: &str, error: impl Into<String>) {
+        let error = error.into();
+        self.update_peer_metadata(peer_id, move |peer| {
+            peer.status = PeerStatus::Error;
+            peer.last_error = Some(error.clone());
+        });
+    }
+
+    fn update_peer_metadata(&self, peer_id: &str, mut updater: impl FnMut(&mut PeerInfo)) {
+        let updated = {
+            let mut peers = match self.peers.write() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+
+            if let Some(peer) = peers.get_mut(peer_id) {
+                updater(peer);
+                peer.updated_at = now_rfc3339();
+                true
+            } else {
+                false
+            }
+        };
+
+        if updated {
+            self.persist();
+        }
+    }
+
+    fn record_mesh_delivery(
+        &self,
+        event_id: &str,
+        peer_id: &str,
+        status: DeliveryStatus,
+        reason: Option<String>,
+    ) {
+        let now = now_rfc3339();
+        self.signal_pool.journal().append(DeliveryRecord {
+            event_id: event_id.to_string(),
+            route_id: format!("mesh:{peer_id}"),
+            target_ref: peer_id.to_string(),
+            status,
+            reason,
+            started_at: now.clone(),
+            finished_at: now,
+        });
+    }
+
+    fn persist(&self) {
+        let Some(path) = &self.persist_path else {
+            return;
+        };
+
+        if let Some(parent) = path.parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
+
+        let peers = match self.peers.read() {
+            Ok(guard) => guard.values().cloned().collect::<Vec<_>>(),
+            Err(poisoned) => poisoned.into_inner().values().cloned().collect::<Vec<_>>(),
+        };
+        let interests = match self.interests.read() {
+            Ok(guard) => guard.values().cloned().collect::<Vec<_>>(),
+            Err(poisoned) => poisoned.into_inner().values().cloned().collect::<Vec<_>>(),
+        };
+
+        if let Ok(json) = serde_json::to_string_pretty(&MeshPersistedState { peers, interests }) {
+            let _ = std::fs::write(path, json);
+        }
+    }
+}
+
+pub struct MeshRelayManager {
+    mesh: Arc<MeshState>,
+    client: reqwest::Client,
+    workers: Mutex<HashMap<String, WorkerHandle>>,
+}
+
+struct WorkerHandle {
+    stop_tx: oneshot::Sender<()>,
+    task: JoinHandle<()>,
+}
+
+impl MeshRelayManager {
+    pub fn new(mesh: Arc<MeshState>) -> Self {
+        Self {
+            mesh,
+            client: reqwest::Client::builder()
+                .connect_timeout(Duration::from_secs(2))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new()),
+            workers: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub async fn reconcile_all_peers(self: &Arc<Self>) {
+        for peer in self.mesh.list_peers() {
+            self.reconcile_peer(&peer.id).await;
+        }
+    }
+
+    pub async fn reconcile_peer(self: &Arc<Self>, peer_id: &str) {
+        self.stop_worker(peer_id).await;
+
+        let Some(peer) = self.mesh.get_peer(peer_id) else {
+            return;
+        };
+        if !peer.enabled {
+            return;
+        }
+
+        let (stop_tx, stop_rx) = oneshot::channel();
+        let peer_id = peer.id.clone();
+        let relay = Arc::clone(self);
+        let task = tokio::spawn(async move {
+            relay.peer_worker_loop(peer_id, stop_rx).await;
+        });
+
+        let mut workers = self.workers.lock().await;
+        workers.insert(peer.id, WorkerHandle { stop_tx, task });
+    }
+
+    pub async fn remove_peer(&self, peer_id: &str) {
+        self.stop_worker(peer_id).await;
+    }
+
+    pub async fn sync_local_interests_to_all_peers(&self) {
+        for peer in self.mesh.list_peers() {
+            let _ = self.sync_local_interests_to_peer(&peer.id).await;
+        }
+    }
+
+    pub async fn sync_local_interests_to_peer(
+        &self,
+        peer_id: &str,
+    ) -> Result<(), reqwest::Error> {
+        let Some(peer) = self.mesh.get_peer(peer_id) else {
+            return Ok(());
+        };
+        if !peer.enabled {
+            return Ok(());
+        }
+
+        let url = format!(
+            "{}/mesh/interests/{}",
+            peer.base_url.trim_end_matches('/'),
+            self.mesh.host_id()
+        );
+        let topics = self.mesh.local_interest_topics();
+        let response = self
+            .client
+            .put(url)
+            .timeout(Duration::from_secs(3))
+            .json(&serde_json::json!({ "topics": topics }))
+            .send()
+            .await?;
+        response.error_for_status()?;
+        Ok(())
+    }
+
+    pub async fn forward_event_to_peers(&self, event: SignalEvent) {
+        for peer in self.mesh.list_peers() {
+            if !peer.enabled || !self.mesh.should_stream_event_to_peer(&peer.id, &event) {
+                continue;
+            }
+
+            let url = format!("{}/mesh/events", peer.base_url.trim_end_matches('/'));
+            let response = self
+                .client
+                .post(url)
+                .timeout(Duration::from_secs(3))
+                .json(&serde_json::json!({
+                    "from_peer_id": self.mesh.host_id(),
+                    "event": event.clone(),
+                }))
+                .send()
+                .await;
+
+            match response {
+                Ok(response) => {
+                    if let Err(error) = response.error_for_status() {
+                        self.mesh.mark_peer_error(&peer.id, error.to_string());
+                    } else {
+                        self.mesh.mark_peer_online(&peer.id);
+                    }
+                }
+                Err(error) => {
+                    self.mesh.mark_peer_error(&peer.id, error.to_string());
+                }
+            }
+        }
+    }
+
+    pub async fn shutdown(&self) {
+        let handles = {
+            let mut workers = self.workers.lock().await;
+            workers.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
+        };
+
+        for handle in handles {
+            let _ = handle.stop_tx.send(());
+            handle.task.abort();
+            let _ = handle.task.await;
+        }
+    }
+
+    async fn stop_worker(&self, peer_id: &str) {
+        let handle = {
+            let mut workers = self.workers.lock().await;
+            workers.remove(peer_id)
+        };
+
+        if let Some(handle) = handle {
+            let _ = handle.stop_tx.send(());
+            handle.task.abort();
+            let _ = handle.task.await;
+        }
+    }
+
+    async fn peer_worker_loop(
+        self: Arc<Self>,
+        peer_id: String,
+        mut stop_rx: oneshot::Receiver<()>,
+    ) {
+        let host_id = self.mesh.host_id().to_string();
+        let mut last_event_id: Option<String> = None;
+
+        loop {
+            let Some(peer) = self.mesh.get_peer(&peer_id) else {
+                return;
+            };
+            if !peer.enabled {
+                return;
+            }
+
+            let _ = self.sync_local_interests_to_peer(&peer_id).await;
+            self.mesh.mark_peer_connecting(&peer_id);
+
+            let mut request = self.client.get(format!(
+                "{}/mesh/stream?peer_id={host_id}&heartbeat_interval=10",
+                peer.base_url.trim_end_matches('/')
+            ));
+            if let Some(last_event_id) = last_event_id.as_deref() {
+                request = request.header("Last-Event-ID", last_event_id);
+            }
+
+            let response = tokio::select! {
+                _ = &mut stop_rx => return,
+                result = request.send() => result,
+            };
+
+            let response = match response {
+                Ok(response) => match response.error_for_status() {
+                    Ok(response) => response,
+                    Err(error) => {
+                        self.mesh.mark_peer_error(&peer_id, error.to_string());
+                        if wait_or_stop(&mut stop_rx, Duration::from_millis(500)).await {
+                            return;
+                        }
+                        continue;
+                    }
+                },
+                Err(error) => {
+                    self.mesh.mark_peer_error(&peer_id, error.to_string());
+                    if wait_or_stop(&mut stop_rx, Duration::from_millis(500)).await {
+                        return;
+                    }
+                    continue;
+                }
+            };
+
+            self.mesh.mark_peer_online(&peer_id);
+
+            let mut stream = response.bytes_stream();
+            let mut buffer = String::new();
+
+            loop {
+                let next_chunk = tokio::select! {
+                    _ = &mut stop_rx => return,
+                    chunk = stream.next() => chunk,
+                };
+
+                match next_chunk {
+                    Some(Ok(chunk)) => {
+                        let normalized = String::from_utf8_lossy(&chunk).replace("\r\n", "\n");
+                        buffer.push_str(&normalized);
+                        for block in drain_sse_blocks(&mut buffer) {
+                            if let Some(event) = parse_signal_event_from_block(&block) {
+                                last_event_id = Some(event.id.clone());
+                                let _ = self.mesh.ingest_remote_event(&peer_id, event).await;
+                            }
+                        }
+                    }
+                    Some(Err(error)) => {
+                        self.mesh.mark_peer_error(&peer_id, error.to_string());
+                        break;
+                    }
+                    None => {
+                        break;
+                    }
+                }
+            }
+
+            if wait_or_stop(&mut stop_rx, Duration::from_millis(300)).await {
+                return;
+            }
+        }
+    }
+}
+
+async fn wait_or_stop(stop_rx: &mut oneshot::Receiver<()>, duration: Duration) -> bool {
+    tokio::select! {
+        _ = stop_rx => true,
+        _ = tokio::time::sleep(duration) => false,
+    }
+}
+
+fn normalize_peer(peer: &mut PeerInfo) {
+    peer.base_url = peer.base_url.trim().trim_end_matches('/').to_string();
+    peer.capabilities = normalize_topics(peer.capabilities.clone());
+}
+
+fn normalize_topics(mut topics: Vec<String>) -> Vec<String> {
+    topics.retain(|topic| !topic.trim().is_empty());
+    topics.sort();
+    topics.dedup();
+    topics
+}
+
+fn now_rfc3339() -> String {
+    chrono::Utc::now().to_rfc3339()
+}
+
+fn load_persisted_state(path: &PathBuf) -> Option<MeshPersistedState> {
+    let json = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<MeshPersistedState>(&json).ok()
+}
+
+fn drain_sse_blocks(buffer: &mut String) -> Vec<String> {
+    let mut blocks = Vec::new();
+
+    while let Some(index) = buffer.find("\n\n") {
+        let block = buffer[..index].trim().to_string();
+        buffer.drain(..index + 2);
+        if !block.is_empty() {
+            blocks.push(block);
+        }
+    }
+
+    blocks
+}
+
+fn parse_signal_event_from_block(block: &str) -> Option<SignalEvent> {
+    let mut event_name = "message";
+    let mut data_lines = Vec::new();
+
+    for line in block.lines() {
+        if let Some(value) = line.strip_prefix("event:") {
+            event_name = value.trim();
+            continue;
+        }
+        if let Some(value) = line.strip_prefix("data:") {
+            data_lines.push(value.trim_start().to_string());
+        }
+    }
+
+    if event_name != "signal" || data_lines.is_empty() {
+        return None;
+    }
+
+    serde_json::from_str::<SignalEvent>(&data_lines.join("\n")).ok()
+}

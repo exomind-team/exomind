@@ -3,6 +3,7 @@
  * Mirrors Rust `TopologyResponse` contract（与 Rust `TopologyResponse` 结构体对齐）
  */
 export interface RuntimeTopologyResponse {
+  host_id?: string; // 逻辑主机 ID（logical host id）
   hostname: string; // 主机名
   os: string; // 操作系统
   arch: string; // CPU 架构（CPU architecture）

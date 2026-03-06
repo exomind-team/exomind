@@ -24,12 +24,13 @@ pub struct SignalRoute {
     pub updated_at: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "lowercase")]
 pub enum TargetType {
     Actor,
     Agent,
     Frontend,
+    Remote,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

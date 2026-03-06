@@ -12,9 +12,11 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
 
+use mesh::{MeshRelayManager, MeshState};
 use signal::SignalPool;
 
 pub mod agent;
+pub mod mesh;
 pub mod routes;
 pub mod signal;
 
@@ -47,6 +49,15 @@ pub fn configured_bind_host_from_env() -> String {
     env::var("EXOMIND_RT_BIND").unwrap_or_else(|_| "127.0.0.1".to_string())
 }
 
+/// Read EXOMIND_RT_HOST_ID from env（读取逻辑主机 ID）.
+pub fn configured_host_id_from_env() -> String {
+    env::var("EXOMIND_RT_HOST_ID").unwrap_or_else(|_| format!("rt-{}", uuid::Uuid::new_v4()))
+}
+
+fn default_runtime_host_id(port: u16) -> String {
+    format!("rt-local-{port}")
+}
+
 /// Runtime startup options（运行时启动选项）.
 #[derive(Debug, Clone)]
 pub struct RuntimeStartOptions {
@@ -54,6 +65,8 @@ pub struct RuntimeStartOptions {
     pub bind_host: String,
     /// bind port（绑定端口）. `0` means random available port.
     pub port: u16,
+    /// logical runtime host id（逻辑运行时主机 ID）.
+    pub host_id: String,
     /// spawn built-in rust actors（是否拉起内置 Rust Actor）.
     pub spawn_builtin_actors: bool,
     /// spawn ts agents (reviewer/classifier)（是否拉起 TS Agent）.
@@ -62,6 +75,8 @@ pub struct RuntimeStartOptions {
     pub ts_agent_command: String,
     /// project root used for spawning TS agents（TS Agent 工作目录）.
     pub ts_agent_workdir: Option<PathBuf>,
+    /// optional mesh state path（可选 peer/interest 持久化路径）.
+    pub mesh_state_path: Option<PathBuf>,
 }
 
 impl Default for RuntimeStartOptions {
@@ -76,11 +91,13 @@ impl Default for RuntimeStartOptions {
         Self {
             bind_host: configured_bind_host_from_env(),
             port: configured_port_from_env().unwrap_or(DEFAULT_RT_PORT),
+            host_id: configured_host_id_from_env(),
             spawn_builtin_actors: true,
             spawn_ts_agents,
             ts_agent_command: env::var("EXOMIND_RT_AGENT_CMD")
                 .unwrap_or_else(|_| "bun".to_string()),
             ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
+            mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH").ok().map(PathBuf::from),
         }
     }
 }
@@ -126,7 +143,9 @@ struct TsAgentProcess {
 /// Runtime handle（运行句柄）.
 pub struct RuntimeHandle {
     local_addr: SocketAddr,
+    host_id: String,
     signal_pool: Arc<SignalPool>,
+    mesh_relay: Option<Arc<MeshRelayManager>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
@@ -144,8 +163,28 @@ pub struct RuntimePublishRequest {
 }
 
 impl RuntimeHandle {
+    fn build_signal_event(default_origin_host_id: &str, request: RuntimePublishRequest) -> signal::types::SignalEvent {
+        signal::types::SignalEvent {
+            schema_version: 1,
+            id: uuid::Uuid::new_v4().to_string(),
+            topic: request.topic,
+            ts: chrono::Utc::now().timestamp_millis() as u64,
+            source: request.source.unwrap_or_else(|| "tauri:invoke".to_string()),
+            origin_host_id: request
+                .origin_host_id
+                .unwrap_or_else(|| default_origin_host_id.to_string()),
+            hop: 0,
+            trace_id: request.trace_id,
+            payload: request.payload,
+        }
+    }
+
     pub fn local_addr(&self) -> SocketAddr {
         self.local_addr
+    }
+
+    pub fn host_id(&self) -> &str {
+        &self.host_id
     }
 
     pub fn host(&self) -> String {
@@ -171,29 +210,27 @@ impl RuntimeHandle {
     /// Publish via a provided SignalPool（在指定 SignalPool 上发布）.
     pub fn publish_signal_to_pool(
         signal_pool: &SignalPool,
+        default_origin_host_id: &str,
         request: RuntimePublishRequest,
     ) -> String {
-        let event_id = uuid::Uuid::new_v4().to_string();
-        let event = signal::types::SignalEvent {
-            schema_version: 1,
-            id: event_id.clone(),
-            topic: request.topic,
-            ts: chrono::Utc::now().timestamp_millis() as u64,
-            source: request.source.unwrap_or_else(|| "tauri:invoke".to_string()),
-            origin_host_id: request
-                .origin_host_id
-                .unwrap_or_else(|| "local".to_string()),
-            hop: 0,
-            trace_id: request.trace_id,
-            payload: request.payload,
-        };
+        let event = Self::build_signal_event(default_origin_host_id, request);
+        let event_id = event.id.clone();
         signal_pool.publish(event);
         event_id
     }
 
     /// Publish a signal directly via in-process SignalPool（进程内直发）.
     pub fn publish_signal(&self, request: RuntimePublishRequest) -> String {
-        Self::publish_signal_to_pool(&self.signal_pool, request)
+        let event = Self::build_signal_event(&self.host_id, request);
+        let event_id = event.id.clone();
+        self.signal_pool.publish(event.clone());
+        if let Some(mesh_relay) = &self.mesh_relay {
+            let relay = Arc::clone(mesh_relay);
+            tokio::spawn(async move {
+                relay.forward_event_to_peers(event).await;
+            });
+        }
+        event_id
     }
 
     /// Graceful shutdown（优雅停止）.
@@ -233,11 +270,26 @@ impl RuntimeHandle {
         }
         self.ts_agents.clear();
 
+        if let Some(mesh_relay) = &self.mesh_relay {
+            mesh_relay.shutdown().await;
+        }
+
         if let Some(server_task) = self.server_task.take() {
-            match server_task.await {
-                Ok(Ok(())) => {}
-                Ok(Err(error)) => return Err(RuntimeStopError::ServerIo(error)),
-                Err(error) => return Err(RuntimeStopError::JoinServerTask(error)),
+            let mut server_task = server_task;
+            match tokio::time::timeout(std::time::Duration::from_secs(2), &mut server_task).await {
+                Ok(Ok(Ok(()))) => {}
+                Ok(Ok(Err(error))) => return Err(RuntimeStopError::ServerIo(error)),
+                Ok(Err(error)) if error.is_cancelled() => {}
+                Ok(Err(error)) => return Err(RuntimeStopError::JoinServerTask(error)),
+                Err(_) => {
+                    server_task.abort();
+                    match server_task.await {
+                        Ok(Ok(())) => {}
+                        Ok(Err(error)) => return Err(RuntimeStopError::ServerIo(error)),
+                        Err(error) if error.is_cancelled() => {}
+                        Err(error) => return Err(RuntimeStopError::JoinServerTask(error)),
+                    }
+                }
             }
         }
 
@@ -290,8 +342,14 @@ pub async fn start_with_options(
         .local_addr()
         .map_err(RuntimeStartError::ReadLocalAddr)?;
 
-    let state = AppState::new(local_addr.port());
+    let state = AppState::new_runtime(
+        local_addr.port(),
+        options.host_id.clone(),
+        options.mesh_state_path.clone(),
+        true,
+    );
     let signal_pool = Arc::clone(&state.signal_pool);
+    let mesh_relay = state.mesh_relay.clone();
 
     let mut actor_tasks = Vec::new();
     if options.spawn_builtin_actors {
@@ -319,9 +377,16 @@ pub async fn start_with_options(
             .await
     });
 
+    if let Some(mesh_relay) = &mesh_relay {
+        mesh_relay.sync_local_interests_to_all_peers().await;
+        mesh_relay.reconcile_all_peers().await;
+    }
+
     Ok(RuntimeHandle {
         local_addr,
+        host_id: options.host_id,
         signal_pool,
+        mesh_relay,
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
         actor_tasks,
@@ -419,7 +484,6 @@ fn try_spawn_ts_agent(
 
     #[cfg(target_os = "windows")]
     {
-        use std::os::windows::process::CommandExt;
         const CREATE_NO_WINDOW: u32 = 0x08000000;
         command.creation_flags(CREATE_NO_WINDOW);
     }
@@ -465,12 +529,24 @@ pub fn app_with_state(state: AppState) -> Router {
 #[derive(Clone)]
 pub struct AppState {
     pub port: u16,
+    pub host_id: String,
     pub registry: agent::AgentRegistry,
     pub signal_pool: Arc<SignalPool>,
+    pub mesh: Arc<MeshState>,
+    pub mesh_relay: Option<Arc<MeshRelayManager>>,
 }
 
 impl AppState {
     pub fn new(port: u16) -> Self {
+        Self::new_runtime(port, default_runtime_host_id(port), None, false)
+    }
+
+    pub fn new_runtime(
+        port: u16,
+        host_id: String,
+        mesh_persist_path: Option<PathBuf>,
+        enable_mesh_relay: bool,
+    ) -> Self {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
         registry.register(Arc::new(agent::echo::EchoAgent::new()));
@@ -478,11 +554,20 @@ impl AppState {
         let default_routes_path =
             resolve_default_signal_routes_path().map(|path| path.to_string_lossy().to_string());
         let signal_pool = Arc::new(SignalPool::new(default_routes_path.as_deref()));
+        let mesh = Arc::new(MeshState::new(
+            host_id.clone(),
+            Arc::clone(&signal_pool),
+            mesh_persist_path,
+        ));
+        let mesh_relay = enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
 
         Self {
             port,
+            host_id,
             registry,
             signal_pool,
+            mesh,
+            mesh_relay,
         }
     }
 }
@@ -549,6 +634,22 @@ mod tests {
     use tower::util::ServiceExt;
 
     struct TempRouteAgent;
+
+    fn app_state_with_registry(
+        port: u16,
+        registry: agent::AgentRegistry,
+        signal_pool: Arc<signal::SignalPool>,
+    ) -> AppState {
+        let host_id = format!("lib-test-{port}");
+        AppState {
+            port,
+            host_id: host_id.clone(),
+            registry,
+            signal_pool: Arc::clone(&signal_pool),
+            mesh: Arc::new(mesh::MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+            mesh_relay: None,
+        }
+    }
 
     impl agent::Agent for TempRouteAgent {
         fn id(&self) -> &'static str {
@@ -921,12 +1022,13 @@ mod tests {
     async fn session_endpoints_return_expected_json_payloads() {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(TempSessionAgent::new_with_one_session()));
+        let signal_pool = Arc::new(signal::SignalPool::new(None));
 
-        let router = routes::router().with_state(AppState {
-            port: 3009,
-            registry: registry.clone(),
-            signal_pool: Arc::new(signal::SignalPool::new(None)),
-        });
+        let router = routes::router().with_state(app_state_with_registry(
+            3009,
+            registry.clone(),
+            signal_pool,
+        ));
 
         let list_response = router
             .clone()
@@ -1028,12 +1130,9 @@ mod tests {
     async fn unknown_session_on_existing_agent_returns_not_found() {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(TempSessionAgent::new_with_one_session()));
+        let signal_pool = Arc::new(signal::SignalPool::new(None));
 
-        let router = routes::router().with_state(AppState {
-            port: 3010,
-            registry,
-            signal_pool: Arc::new(signal::SignalPool::new(None)),
-        });
+        let router = routes::router().with_state(app_state_with_registry(3010, registry, signal_pool));
 
         let get_response = router
             .clone()
@@ -1064,12 +1163,13 @@ mod tests {
     async fn agents_endpoint_reflects_runtime_register_and_unregister() {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(TempRouteAgent));
+        let signal_pool = Arc::new(signal::SignalPool::new(None));
 
-        let router = routes::router().with_state(AppState {
-            port: 3003,
-            registry: registry.clone(),
-            signal_pool: Arc::new(signal::SignalPool::new(None)),
-        });
+        let router = routes::router().with_state(app_state_with_registry(
+            3003,
+            registry.clone(),
+            signal_pool,
+        ));
 
         let first_response = router
             .clone()

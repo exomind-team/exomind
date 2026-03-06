@@ -88,14 +88,19 @@ async fn publish_handler(
         topic: req.topic,
         ts: chrono::Utc::now().timestamp_millis() as u64,
         source: req.source.unwrap_or_else(|| "unknown".to_string()),
-        origin_host_id: req.origin_host_id.unwrap_or_else(|| "local".to_string()),
+        origin_host_id: req
+            .origin_host_id
+            .unwrap_or_else(|| state.host_id.clone()),
         hop: 0,
         trace_id: req.trace_id,
         payload: req.payload,
     };
 
     // publish() internally pushes to window cache via bus.publish
-    state.signal_pool.publish(event);
+    state.signal_pool.publish(event.clone());
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.forward_event_to_peers(event).await;
+    }
 
     Json(PublishResponse {
         accepted: true,
@@ -176,6 +181,9 @@ async fn create_route(
 
     let response = route.clone();
     state.signal_pool.routes().add(route);
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.sync_local_interests_to_all_peers().await;
+    }
 
     (StatusCode::CREATED, Json(response))
 }
@@ -205,6 +213,10 @@ async fn update_route(
         return Err(StatusCode::NOT_FOUND);
     }
 
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.sync_local_interests_to_all_peers().await;
+    }
+
     state
         .signal_pool
         .routes()
@@ -219,6 +231,9 @@ async fn delete_route(
     State(state): State<AppState>,
 ) -> StatusCode {
     if state.signal_pool.routes().delete(&id) {
+        if let Some(mesh_relay) = &state.mesh_relay {
+            mesh_relay.sync_local_interests_to_all_peers().await;
+        }
         StatusCode::NO_CONTENT
     } else {
         StatusCode::NOT_FOUND
@@ -248,7 +263,9 @@ fn routes_target_agent(
     agent_id: &str,
 ) -> bool {
     let matched = route_table.match_routes(topic);
-    matched.iter().any(|r| r.target_ref == agent_id)
+    matched
+        .iter()
+        .any(|r| matches!(r.target_type, TargetType::Agent) && r.target_ref == agent_id)
 }
 
 /// A custom stream that merges broadcast events with periodic heartbeats.
@@ -355,6 +372,7 @@ impl Stream for SignalSseStream {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::mesh::MeshState;
     use crate::signal::SignalPool;
     use axum::body::Body;
     use axum::http::Request;
@@ -364,10 +382,15 @@ mod tests {
     use tower::util::ServiceExt;
 
     fn test_state() -> AppState {
+        let signal_pool = Arc::new(SignalPool::new(None));
+        let host_id = "signals-test-host".to_string();
         AppState {
             port: 0,
+            host_id: host_id.clone(),
             registry: crate::agent::AgentRegistry::new(),
-            signal_pool: Arc::new(SignalPool::new(None)),
+            signal_pool: Arc::clone(&signal_pool),
+            mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+            mesh_relay: None,
         }
     }
 

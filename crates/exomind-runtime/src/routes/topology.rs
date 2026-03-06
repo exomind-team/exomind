@@ -16,6 +16,7 @@ static TOPOLOGY_STATIC_INFO: OnceLock<TopologyStaticInfo> = OnceLock::new();
 
 #[derive(Debug, Serialize)]
 pub struct TopologyResponse {
+    pub host_id: String,
     pub hostname: String,
     pub os: String,
     pub arch: String,
@@ -31,6 +32,7 @@ pub async fn get_topology(State(state): State<RuntimeState>) -> Json<TopologyRes
     let static_info = TOPOLOGY_STATIC_INFO.get_or_init(build_static_info);
     let (total_memory_mb, used_memory_mb) = read_memory_stats_mb();
     Json(TopologyResponse {
+        host_id: state.host_id.clone(),
         hostname: static_info.hostname.clone(),
         os: static_info.os.clone(),
         arch: static_info.arch.clone(),
