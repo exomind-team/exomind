@@ -52,9 +52,11 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     expect(workflowContent).toContain("steps.msi_prereq.outputs.MSI_READY == 'true'");
   });
 
-  it('skips MSI on NetworkService runner account / 在 NetworkService 账号下跳过 MSI', () => {
+  it('does not hard-block MSI purely by NetworkService identity / 不再仅因 NetworkService 账号名硬性跳过 MSI', () => {
     const workflowContent = readReleaseWorkflow();
-    expect(workflowContent).toContain('nt authority\\network service');
+    expect(workflowContent).not.toContain('NetworkService account is detected. MSI build is disabled');
+    expect(workflowContent).not.toContain('$runnerIdentity -eq "nt authority\\network service"');
+    expect(workflowContent).toContain('Runner identity / 运行账号');
   });
 
   it('uploads self-hosted artifacts directly to Cloudflare R2 on workflow_dispatch / 手动触发时由 self-hosted 直接上传到 R2', () => {
