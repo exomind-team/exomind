@@ -10,6 +10,8 @@
  */
 
 import type { SignalEvent } from '../types/signal-pool';
+import type { Event as StorageEvent } from '../storage/event-storage';
+import type { ActiveBlockData } from '../types/event';
 
 /** Payload shape for task.auto-created signals. */
 export interface TaskAutoCreatedPayload {
@@ -22,6 +24,30 @@ export interface TaskAutoCreatedPayload {
 export interface EventLogAppendedPayload {
   text: string;
   ts: number;
+}
+
+/** Payload shape for eventlog.replication.appended signals. */
+export interface EventLogReplicationAppendedPayload {
+  schemaVersion: 1;
+  replicationSeq: number;
+  cursor: {
+    kind: 'replication_seq';
+    value: number;
+  };
+  event: StorageEvent;
+}
+
+/** Payload shape for active_block.replication.snapshot signals. */
+export interface ActiveBlockReplicationSnapshotPayload {
+  schemaVersion: 1;
+  block: ActiveBlockData;
+  cursor: {
+    kind: 'active_block_snapshot';
+    startId: string;
+    version: number;
+    lastTransitionAt: number;
+    actorId?: string;
+  };
 }
 
 /** Payload shape for review.completed signals. */
@@ -39,6 +65,8 @@ export interface ReviewCompletedPayload {
 export interface SignalHandlerOptions {
   onTaskAutoCreated?: (payload: TaskAutoCreatedPayload) => Promise<void>;
   onEventLogAppended?: (payload: EventLogAppendedPayload) => Promise<void>;
+  onEventLogReplicationAppended?: (payload: EventLogReplicationAppendedPayload) => Promise<void>;
+  onActiveBlockReplicationSnapshot?: (payload: ActiveBlockReplicationSnapshotPayload) => Promise<void>;
   onReviewCompleted?: (payload: ReviewCompletedPayload) => Promise<void>;
 }
 
@@ -73,6 +101,18 @@ export function startSignalHandlers(
       case 'eventlog.appended':
         if (options.onEventLogAppended) {
           await options.onEventLogAppended(event.payload as EventLogAppendedPayload);
+        }
+        break;
+
+      case 'eventlog.replication.appended':
+        if (options.onEventLogReplicationAppended) {
+          await options.onEventLogReplicationAppended(event.payload as EventLogReplicationAppendedPayload);
+        }
+        break;
+
+      case 'active_block.replication.snapshot':
+        if (options.onActiveBlockReplicationSnapshot) {
+          await options.onActiveBlockReplicationSnapshot(event.payload as ActiveBlockReplicationSnapshotPayload);
         }
         break;
 

@@ -16,6 +16,7 @@ export function ReminderSyncCoordinator(): null {
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
   const remoteDbKey = useSyncStore((state) => resolveRemoteSyncKey(state.credentials));
   const legacySyncState = useSyncStore((state) => state.status.state);
+  const legacySyncActive = legacySyncState === 'connected' || legacySyncState === 'syncing';
   const [syncServerUrl, setSyncServerUrl] = useState(() =>
     resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
   );
@@ -33,7 +34,7 @@ export function ReminderSyncCoordinator(): null {
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn || !remoteDbKey || legacySyncState !== 'connected') {
+    if (!isLoggedIn || !remoteDbKey || !legacySyncActive) {
       void reminderServiceRef.current.stopSync();
       return;
     }
@@ -51,7 +52,7 @@ export function ReminderSyncCoordinator(): null {
       cancelled = true;
       void reminderServiceRef.current.stopSync();
     };
-  }, [isLoggedIn, legacySyncState, remoteDbKey, syncServerUrl]);
+  }, [isLoggedIn, legacySyncActive, remoteDbKey, syncServerUrl]);
 
   return null;
 }

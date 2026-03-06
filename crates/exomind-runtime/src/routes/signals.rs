@@ -129,7 +129,7 @@ async fn stream_handler(
     let route_table = state.signal_pool.routes();
     let replay: Vec<Event> = replay_events
         .into_iter()
-        .filter(|evt| routes_target_agent(route_table, &evt.topic, &agent_id))
+        .filter(|evt| routes_target_stream_subscriber(route_table, &evt.topic, &agent_id))
         .filter_map(|evt| {
             serde_json::to_string(&evt).ok().map(|json| {
                 Event::default()
@@ -256,16 +256,21 @@ pub fn router() -> Router<AppState> {
 
 // ── SSE stream implementation ───────────────────────────────────
 
-/// Check whether any route for the given topic targets the specified agent.
-fn routes_target_agent(
+/// Check whether any route for the given topic targets the current SSE subscriber.
+///
+/// `frontend:ui` and `agent:ui` intentionally share the same `agent_id=ui`
+/// subscription contract so the existing frontend SSE client can project UI-targeted
+/// signals without inventing a second stream endpoint.
+fn routes_target_stream_subscriber(
     route_table: &crate::signal::RouteTable,
     topic: &str,
-    agent_id: &str,
+    subscriber_id: &str,
 ) -> bool {
     let matched = route_table.match_routes(topic);
-    matched
-        .iter()
-        .any(|r| matches!(r.target_type, TargetType::Agent) && r.target_ref == agent_id)
+    matched.iter().any(|route| {
+        matches!(route.target_type, TargetType::Agent | TargetType::Frontend)
+            && route.target_ref == subscriber_id
+    })
 }
 
 /// A custom stream that merges broadcast events with periodic heartbeats.
@@ -302,7 +307,7 @@ impl Stream for SignalSseStream {
         // Check for broadcast events first.
         match this.rx.try_recv() {
             Ok(event) => {
-                if routes_target_agent(
+                if routes_target_stream_subscriber(
                     this.state.signal_pool.routes(),
                     &event.topic,
                     &this.agent_id,
@@ -343,7 +348,7 @@ impl Stream for SignalSseStream {
         let mut recv_fut = Box::pin(this.rx.recv());
         match Pin::new(&mut recv_fut).poll(cx) {
             Poll::Ready(Ok(event)) => {
-                if routes_target_agent(
+                if routes_target_stream_subscriber(
                     this.state.signal_pool.routes(),
                     &event.topic,
                     &this.agent_id,
@@ -690,5 +695,53 @@ mod tests {
         assert_eq!(events[0].trace_id.as_deref(), Some("trace-123"));
         assert_eq!(events[0].hop, 0);
         assert_eq!(events[0].schema_version, 1);
+    }
+
+    #[test]
+    fn stream_route_matching_accepts_frontend_ui_targets() {
+        let signal_pool = SignalPool::new(None);
+        let now = chrono::Utc::now().to_rfc3339();
+        signal_pool.routes().add(SignalRoute {
+            id: "route-ui".to_string(),
+            enabled: true,
+            topic: "eventlog.replication.appended".to_string(),
+            target_type: TargetType::Frontend,
+            target_ref: "ui".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        });
+
+        assert!(
+            routes_target_stream_subscriber(
+                signal_pool.routes(),
+                "eventlog.replication.appended",
+                "ui",
+            ),
+            "frontend:ui routes should be deliverable to the UI SSE subscriber"
+        );
+    }
+
+    #[test]
+    fn stream_route_matching_keeps_actor_targets_out_of_sse_subscriber() {
+        let signal_pool = SignalPool::new(None);
+        let now = chrono::Utc::now().to_rfc3339();
+        signal_pool.routes().add(SignalRoute {
+            id: "route-actor".to_string(),
+            enabled: true,
+            topic: "eventlog.replication.appended".to_string(),
+            target_type: TargetType::Actor,
+            target_ref: "eventlog".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        });
+
+        assert!(
+            !routes_target_stream_subscriber(
+                signal_pool.routes(),
+                "eventlog.replication.appended",
+                "ui",
+            ),
+            "actor routes should not leak into the SSE subscriber stream"
+        );
     }
 }

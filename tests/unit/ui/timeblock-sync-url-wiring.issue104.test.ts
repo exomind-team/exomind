@@ -10,12 +10,12 @@ describe('timeblock sync coordinator wiring issue-104', () => {
   const timeBlockWidgetSource = readFileSync(timeBlockWidgetPath, 'utf-8');
   const focusTimerWidgetSource = readFileSync(focusTimerWidgetPath, 'utf-8');
 
-  it('TimeBlockSyncCoordinator listens to sync server url changes and rebuilds remote url', () => {
-    expect(coordinatorSource).toContain('SYNC_SERVER_URL_CHANGED_EVENT');
-    expect(coordinatorSource).toContain('window.addEventListener(SYNC_SERVER_URL_CHANGED_EVENT');
-    expect(coordinatorSource).toContain('window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT');
-    expect(coordinatorSource).toContain('buildRemoteDbUrl(syncServerUrl, currentUser)');
-    expect(coordinatorSource).toContain('timeBlockServiceRef.current.startSync(remoteUrl)');
+  it('TimeBlockSyncCoordinator starts ECS sync without building legacy remote url', () => {
+    expect(coordinatorSource).not.toContain('SYNC_SERVER_URL_CHANGED_EVENT');
+    expect(coordinatorSource).not.toContain('resolveSyncServerUrl');
+    expect(coordinatorSource).not.toContain('buildRemoteDbUrl');
+    expect(coordinatorSource).not.toContain('6984');
+    expect(coordinatorSource).toContain('timeBlockServiceRef.current.startSync()');
     expect(coordinatorSource).toContain('timeBlockServiceRef.current.stopSync()');
   });
 

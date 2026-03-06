@@ -1,8 +1,13 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+const replicationMocks = vi.hoisted(() => ({
+  appendEventWithEcsReplication: vi.fn(),
+}));
+
 const mocks = {
   getEvents: vi.fn(),
   addEvent: vi.fn(),
+  getEvent: vi.fn(),
   clearAll: vi.fn(),
 };
 
@@ -10,16 +15,26 @@ vi.mock('@/lib/storage/event-storage', () => ({
   getEventStorage: vi.fn(() => ({
     getEvents: mocks.getEvents,
     addEvent: mocks.addEvent,
+    getEvent: mocks.getEvent,
     clearAll: mocks.clearAll,
   })),
+}));
+
+vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
+  appendEventWithEcsReplication: replicationMocks.appendEventWithEcsReplication,
 }));
 
 import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
 
 describe('EventLogService PouchDB backend', () => {
   beforeEach(() => {
+    replicationMocks.appendEventWithEcsReplication.mockReset().mockImplementation(async (event) => {
+      await mocks.addEvent(event);
+      return event;
+    });
     mocks.getEvents.mockReset();
     mocks.addEvent.mockReset();
+    mocks.getEvent.mockReset();
     mocks.clearAll.mockReset();
   });
 
@@ -44,6 +59,14 @@ describe('EventLogService PouchDB backend', () => {
 
   it('overwrite import clears and rewrites EventStorage', async () => {
     mocks.getEvents.mockResolvedValue([]);
+    mocks.getEvent.mockResolvedValue({
+      id: 'evt-2',
+      content: 'imported',
+      createdAt: new Date(1739232000000).toISOString(),
+      type: 'note',
+      metadata: { tags: ['note'] },
+      replicationSeq: 1,
+    });
 
     const service = new EventLogServiceImpl();
     const backup = JSON.stringify({

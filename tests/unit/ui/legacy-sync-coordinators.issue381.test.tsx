@@ -112,4 +112,24 @@ describe('legacy sync coordinators issue-381（旧同步协调器门控）', () 
       expect(reminderService.startSync).toHaveBeenCalledWith('http://127.0.0.1:6984/remote-space__reminders');
     });
   });
+
+  it('TaskSyncCoordinator keeps legacy sync alive while sync-store is syncing（手动同步中不应误停）', async () => {
+    syncStoreState.status.state = 'syncing';
+
+    render(<TaskSyncCoordinator />);
+
+    await waitFor(() => {
+      expect(taskService.startSync).toHaveBeenCalledWith('http://127.0.0.1:6984/remote-space');
+    });
+  });
+
+  it('ReminderSyncCoordinator keeps legacy sync alive while sync-store is syncing（手动同步中不应误停）', async () => {
+    syncStoreState.status.state = 'syncing';
+
+    render(<ReminderSyncCoordinator />);
+
+    await waitFor(() => {
+      expect(reminderService.startSync).toHaveBeenCalledWith('http://127.0.0.1:6984/remote-space__reminders');
+    });
+  });
 });

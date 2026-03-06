@@ -11,8 +11,10 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use futures_util::StreamExt;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
+use tokio::time::{timeout, Duration};
 use tower::util::ServiceExt;
 
 /// Helper: 构建带 Signal 路由的测试 app
@@ -152,6 +154,110 @@ async fn stream_returns_sse_content_type() {
         content_type.contains("text/event-stream"),
         "SSE 端点应返回 text/event-stream，实际: {}",
         content_type
+    );
+}
+
+#[tokio::test]
+async fn stream_replays_frontend_ui_targeted_events_for_ui_agent() {
+    let app = test_app();
+
+    let create_route_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signal-routes")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "topic": "eventlog.replication.appended",
+                        "target_type": "frontend",
+                        "target_ref": "ui"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_route_response.status(), StatusCode::CREATED);
+
+    let first_publish = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signals/publish")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "topic": "eventlog.replication.appended",
+                        "source": "frontend:test",
+                        "payload": { "sequence": 1 }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first_publish.status(), StatusCode::OK);
+    let first_body = first_publish.into_body().collect().await.unwrap().to_bytes();
+    let first_payload: Value = serde_json::from_slice(&first_body).unwrap();
+    let last_event_id = first_payload["event_id"]
+        .as_str()
+        .expect("publish should return event_id")
+        .to_string();
+
+    let second_publish = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signals/publish")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "topic": "eventlog.replication.appended",
+                        "source": "frontend:test",
+                        "payload": { "sequence": 2 }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second_publish.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/signals/stream?agent_id=ui")
+                .header("Last-Event-ID", last_event_id)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut body = response.into_body().into_data_stream();
+    let next_chunk = timeout(Duration::from_millis(200), body.next())
+        .await
+        .expect("frontend ui replay should arrive without waiting for heartbeat")
+        .expect("stream should yield a replay chunk")
+        .expect("stream chunk should be readable");
+
+    let text = String::from_utf8(next_chunk.to_vec()).expect("chunk should be valid utf-8");
+    assert!(
+        text.contains("eventlog.replication.appended"),
+        "frontend:ui replay should be delivered to /signals/stream?agent_id=ui, chunk: {text}"
+    );
+    assert!(
+        text.contains("\"sequence\":2"),
+        "replay should contain the event newer than Last-Event-ID, chunk: {text}"
     );
 }
 

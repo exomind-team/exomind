@@ -28,6 +28,8 @@ import { getFeedbackPreferences, type FeedbackPreferences } from '../../config/f
 import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
+import { appendEventWithEcsReplication } from './ecs-eventlog-replication.service';
+import { publishActiveBlockReplicationSnapshot } from './ecs-active-block-replication.service';
 import { SignalStreamService } from './signal-stream.service';
 
 // 存储键
@@ -73,7 +75,7 @@ export interface TimeBlockService {
   onBlockChange(callback: (block: ActiveBlockData | null) => void): () => void;
 
   /** 启动进行中时间块同步 */
-  startSync(remoteUrl: string): Promise<void>;
+  startSync(remoteUrl?: string): Promise<void>;
 
   /** 停止进行中时间块同步 */
   stopSync(): Promise<void>;
@@ -383,7 +385,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     const storage = getEventStorage();
     const feedbackEventStart = perfNow();
-    await storage.addEvent({
+    await appendEventWithEcsReplication({
       id: createUuidV4(),
       content: report,
       createdAt: new Date(submittedAt).toISOString(),
@@ -476,12 +478,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     return () => this.listeners.delete(callback);
   }
 
-  async startSync(remoteUrl: string): Promise<void> {
+  async startSync(remoteUrl?: string): Promise<void> {
     if (this.useLegacyEnvStorage) {
       return;
     }
 
-    const syncUser = this.extractUserFromRemoteUrl(remoteUrl);
+    const syncUser = remoteUrl ? this.extractUserFromRemoteUrl(remoteUrl) : null;
     this.switchActiveStorage(syncUser ?? undefined);
 
     this.syncSubscriberCount += 1;
@@ -491,7 +493,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
 
     const previousRemoteUrl = this.activeSyncRemoteUrl;
-    this.activeSyncRemoteUrl = remoteUrl;
+    this.activeSyncRemoteUrl = remoteUrl ?? null;
     try {
       await this.pendingStorageStop;
       const seededBlock = await this.seedAcceptedBlockFromStorage();
@@ -500,7 +502,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
           ? seededBlock
           : null
       );
-      await this.getActiveStorage().syncToRemote(remoteUrl);
     } catch (error) {
       this.syncSubscriberCount = Math.max(0, this.syncSubscriberCount - 1);
       this.activeSyncRemoteUrl = this.syncSubscriberCount > 0 ? previousRemoteUrl : null;
@@ -529,8 +530,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     tag: 'block_start' | 'block_end' | 'block_pause' | 'block_resume',
     createdAt: string,
   ): Promise<void> {
-    const storage = getEventStorage();
-    await storage.addEvent({
+    await appendEventWithEcsReplication({
       id: createUuidV4(),
       content,
       createdAt,
@@ -613,6 +613,13 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     }
 
     this.unsubscribeStorageListener = this.getActiveStorage().onBlockChange((block, source) => {
+      if (source === 'local') {
+        if (block && this.syncSubscriberCount > 0) {
+          void this.publishLocalActiveBlockSnapshot(block);
+        }
+        return;
+      }
+
       if (source !== 'sync') {
         return;
       }
@@ -643,6 +650,21 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       }
       this.notifyChange(normalized);
     });
+  }
+
+  private async publishLocalActiveBlockSnapshot(block: ActiveBlockData): Promise<void> {
+    try {
+      await publishActiveBlockReplicationSnapshot(block);
+    } catch (error) {
+      console.warn('[TB-SVC] publish active-block snapshot failed', {
+        storageUserId: this.activeStorageUserId,
+        remoteUrl: this.activeSyncRemoteUrl,
+        startId: block.startId,
+        phase: block.phase ?? this.resolvePhase(block),
+        version: block.version ?? null,
+        error,
+      });
+    }
   }
 
   private async readActiveBlock(): Promise<ActiveBlockData | null> {

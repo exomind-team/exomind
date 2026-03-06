@@ -11,6 +11,7 @@ export function TaskSyncCoordinator(): null {
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
   const remoteDbKey = useSyncStore((state) => resolveRemoteSyncKey(state.credentials));
   const legacySyncState = useSyncStore((state) => state.status.state);
+  const legacySyncActive = legacySyncState === 'connected' || legacySyncState === 'syncing';
   const [syncServerUrl, setSyncServerUrl] = useState(() =>
     resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
   );
@@ -28,7 +29,7 @@ export function TaskSyncCoordinator(): null {
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn || !remoteDbKey || legacySyncState !== 'connected') {
+    if (!isLoggedIn || !remoteDbKey || !legacySyncActive) {
       void taskServiceRef.current.stopSync();
       return;
     }
@@ -46,7 +47,7 @@ export function TaskSyncCoordinator(): null {
       cancelled = true;
       void taskServiceRef.current.stopSync();
     };
-  }, [isLoggedIn, legacySyncState, remoteDbKey, syncServerUrl]);
+  }, [isLoggedIn, legacySyncActive, remoteDbKey, syncServerUrl]);
 
   return null;
 }

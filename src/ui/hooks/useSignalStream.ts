@@ -11,11 +11,17 @@ import { useEffect, useRef, useState } from 'react';
 import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import {
   startSignalHandlers,
+  type EventLogReplicationAppendedPayload,
   type ReviewCompletedPayload,
 } from '@/lib/services/signal-handlers';
-import { getEventStorage } from '@/lib/storage/event-storage';
 import { getEventSourceMetadata } from '@/lib/eventlog/source-metadata';
 import { createUuidV4 } from '@/lib/utils/uuid';
+import {
+  appendEventWithEcsReplication,
+  projectEventLogReplicationAppend,
+} from '@/lib/services/ecs-eventlog-replication.service';
+import type { ActiveBlockReplicationSnapshotPayload } from '@/lib/services/ecs-active-block-replication.service';
+import { projectActiveBlockReplicationSnapshot as projectActiveBlockSnapshot } from '@/lib/services/ecs-active-block-replication.service';
 import {
   getSelectedRuntimeTarget,
   subscribeRuntimeTargetChanges,
@@ -89,10 +95,19 @@ export function useSignalStream(): void {
     });
 
     const handler = startSignalHandlers({
+      onEventLogReplicationAppended: async (payload: EventLogReplicationAppendedPayload) => {
+        const result = await projectEventLogReplicationAppend(payload);
+        if (result === 'inserted') {
+          console.log('[SignalStream] eventlog.replication.appended → EventStorage');
+        }
+      },
+      onActiveBlockReplicationSnapshot: async (payload: ActiveBlockReplicationSnapshotPayload) => {
+        await projectActiveBlockSnapshot(payload);
+        console.log('[SignalStream] active_block.replication.snapshot → ActiveBlockStorage');
+      },
       onReviewCompleted: async (payload) => {
         const content = formatReviewAsMarkdown(payload);
-        const storage = getEventStorage();
-        await storage.addEvent({
+        await appendEventWithEcsReplication({
           id: createUuidV4(),
           content,
           createdAt: new Date().toISOString(),
