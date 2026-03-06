@@ -145,6 +145,7 @@ pub struct RuntimeHandle {
     local_addr: SocketAddr,
     host_id: String,
     signal_pool: Arc<SignalPool>,
+    mesh: Arc<MeshState>,
     mesh_relay: Option<Arc<MeshRelayManager>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<std::io::Result<()>>>,
@@ -205,6 +206,16 @@ impl RuntimeHandle {
     /// Clone underlying SignalPool Arc（克隆底层 SignalPool 引用）.
     pub fn clone_signal_pool(&self) -> Arc<SignalPool> {
         Arc::clone(&self.signal_pool)
+    }
+
+    /// Clone underlying MeshState Arc（克隆底层 MeshState 引用）.
+    pub fn clone_mesh_state(&self) -> Arc<MeshState> {
+        Arc::clone(&self.mesh)
+    }
+
+    /// Clone underlying MeshRelayManager Arc（克隆底层 MeshRelayManager 引用）.
+    pub fn clone_mesh_relay(&self) -> Option<Arc<MeshRelayManager>> {
+        self.mesh_relay.as_ref().map(Arc::clone)
     }
 
     /// Publish via a provided SignalPool（在指定 SignalPool 上发布）.
@@ -349,6 +360,7 @@ pub async fn start_with_options(
         true,
     );
     let signal_pool = Arc::clone(&state.signal_pool);
+    let mesh = Arc::clone(&state.mesh);
     let mesh_relay = state.mesh_relay.clone();
 
     let mut actor_tasks = Vec::new();
@@ -386,6 +398,7 @@ pub async fn start_with_options(
         local_addr,
         host_id: options.host_id,
         signal_pool,
+        mesh,
         mesh_relay,
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
