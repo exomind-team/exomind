@@ -1,5 +1,9 @@
 import type { APIRoute } from 'astro';
-import { isValidVersionParam } from '../../../../../lib/update-api-utils';
+import {
+  isValidVersionParam,
+  resolveLatestAssetForPlatform,
+  type LatestAssetEntry,
+} from '../../../../../lib/update-api-utils';
 
 export const prerender = false;
 
@@ -60,6 +64,81 @@ function getContentType(platform: string): string {
   return map[platform] ?? 'application/octet-stream';
 }
 
+interface LatestJson {
+  version: string;
+  tag: string;
+  published_at: string;
+  assets: Record<string, LatestAssetEntry>;
+}
+
+interface DownloadR2Object {
+  body?: unknown;
+  size?: number;
+  json?: () => Promise<unknown>;
+}
+
+function getContentTypeFromFilename(filename: string, fallbackPlatform: string): string {
+  const lower = filename.toLowerCase();
+  if (lower.endsWith('.apk')) return 'application/vnd.android.package-archive';
+  if (lower.endsWith('.dmg')) return 'application/x-apple-diskimage';
+  if (lower.endsWith('.appimage')) return 'application/octet-stream';
+  if (lower.endsWith('.deb')) return 'application/vnd.debian.binary-package';
+  if (lower.endsWith('.tar.gz')) return 'application/gzip';
+  if (lower.endsWith('.exe') || lower.endsWith('.msi')) return 'application/octet-stream';
+  return getContentType(fallbackPlatform);
+}
+
+function getBasename(key: string): string {
+  const segments = key.split('/');
+  return segments[segments.length - 1] || key;
+}
+
+function matchesVersion(requestedVersion: string, latestVersion: string): boolean {
+  if (requestedVersion === latestVersion) return true;
+  const normalizedRequested = requestedVersion.startsWith('v') ? requestedVersion.slice(1) : requestedVersion;
+  const normalizedLatest = latestVersion.startsWith('v') ? latestVersion.slice(1) : latestVersion;
+  return normalizedRequested === normalizedLatest;
+}
+
+async function resolveLatestAssetDownload(
+  r2: { get: (key: string) => Promise<DownloadR2Object | null> },
+  channel: string,
+  version: string,
+  platform: string,
+): Promise<{
+  filename: string;
+  object: DownloadR2Object;
+  contentType: string;
+} | null> {
+  const latestObject = await r2.get(`${channel}/latest.json`);
+  if (!latestObject || typeof latestObject.json !== 'function') {
+    return null;
+  }
+
+  const latest = await latestObject.json() as LatestJson;
+  if (!matchesVersion(version, latest.version)) {
+    return null;
+  }
+
+  const resolvedAsset = resolveLatestAssetForPlatform(latest.assets, platform);
+  if (!resolvedAsset) {
+    return null;
+  }
+
+  const assetKey = resolvedAsset.asset.url.replace(/^\/+/, '');
+  const object = await r2.get(assetKey);
+  if (!object) {
+    return null;
+  }
+
+  const filename = getBasename(assetKey);
+  return {
+    filename,
+    object,
+    contentType: getContentTypeFromFilename(filename, platform),
+  };
+}
+
 export const GET: APIRoute = async ({ params, locals, request }) => {
   const { channel, version, platform } = params;
   const corsOrigin = resolveCorsOrigin(request.headers.get('origin'));
@@ -98,7 +177,18 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
   try {
     const r2 = locals.runtime.env.RELEASES;
     const key = `${channel}/${version}/${filename}`;
-    const object = await r2.get(key);
+    let resolvedFilename = filename;
+    let resolvedContentType = getContentTypeFromFilename(filename, platform);
+    let object = await r2.get(key);
+
+    if (!object) {
+      const latestAssetDownload = await resolveLatestAssetDownload(r2, channel, version, platform);
+      if (latestAssetDownload) {
+        object = latestAssetDownload.object;
+        resolvedFilename = latestAssetDownload.filename;
+        resolvedContentType = latestAssetDownload.contentType;
+      }
+    }
 
     if (!object) {
       return errorResponse(
@@ -111,8 +201,8 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
     const headers = new Headers({
       'Access-Control-Allow-Origin': corsOrigin,
     });
-    headers.set('Content-Type', getContentType(platform));
-    headers.set('Content-Disposition', `attachment; filename="${filename}"`);
+    headers.set('Content-Type', resolvedContentType);
+    headers.set('Content-Disposition', `attachment; filename="${resolvedFilename}"`);
 
     if (object.size) {
       headers.set('Content-Length', String(object.size));

@@ -16,6 +16,8 @@ const DEFAULT_PREVIEW_RETENTION = 15;
 const PLATFORM_ASSET_CANDIDATES: Record<string, string[]> = {
   'windows-x64': ['windows-x64', 'windows-x64-setup'],
   'android-arm64': ['android-arm64'],
+  'macos-aarch64': ['macos-aarch64', 'runtime-macos-aarch64'],
+  'linux-x64-appimage': ['linux-x64-appimage', 'runtime-linux-x64'],
 };
 
 export function isValidVersionParam(version: string): boolean {

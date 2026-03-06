@@ -75,4 +75,27 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
       /name:\s*Upload Windows EXE Artifact[\s\S]*?if:\s*steps\.targets\.outputs\.BUILD_WINDOWS == 'true' && github\.event_name == 'push' && startsWith\(github\.ref, 'refs\/tags\/release\/'\)/,
     );
   });
+
+  it('uploads macOS DMG from both workspace-root and src-tauri bundle paths / macOS DMG 上传同时兼容 workspace 根目录与 src-tauri 路径', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toMatch(
+      /name:\s*Upload macOS DMG Artifact[\s\S]*?path:\s*\|[\s\S]*?target\/release\/bundle\/dmg\/[\s\S]*?src-tauri\/target\/release\/bundle\/dmg\//,
+    );
+  });
+
+  it('uploads Linux DEB and AppImage from both workspace-root and src-tauri bundle paths / Linux 产物上传同时兼容 workspace 根目录与 src-tauri 路径', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toMatch(
+      /name:\s*Upload Linux DEB Artifact[\s\S]*?path:\s*\|[\s\S]*?target\/release\/bundle\/deb\/[\s\S]*?src-tauri\/target\/release\/bundle\/deb\//,
+    );
+    expect(workflowContent).toMatch(
+      /name:\s*Upload Linux AppImage Artifact[\s\S]*?path:\s*\|[\s\S]*?target\/release\/bundle\/appimage\/[\s\S]*?src-tauri\/target\/release\/bundle\/appimage\//,
+    );
+  });
+
+  it('aliases runtime tarballs into desktop latest.json keys / latest.json 生成时将 runtime tar 包映射为桌面平台键', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toContain('alias_asset "macos-aarch64" "runtime-macos-aarch64"');
+    expect(workflowContent).toContain('alias_asset "linux-x64-appimage" "runtime-linux-x64"');
+  });
 });

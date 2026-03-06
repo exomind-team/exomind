@@ -1,26 +1,10 @@
-import { createRequire } from 'node:module';
 import { describe, expect, it } from 'vitest';
-
-const require = createRequire(import.meta.url);
-
-const canResolveAstroTsconfig = (() => {
-  try {
-    require.resolve('astro/tsconfigs/strict/tsconfig.json', {
-      paths: [process.cwd(), `${process.cwd()}/website`],
-    });
-    return true;
-  } catch {
-    return false;
-  }
-})();
-
-const describeWebsiteUtils = canResolveAstroTsconfig ? describe : describe.skip;
 
 async function loadUpdateApiUtils() {
   return import('../../website/src/lib/update-api-utils');
 }
 
-describeWebsiteUtils('isValidVersionParam', () => {
+describe('isValidVersionParam', () => {
   it('accepts release and preview version tags', async () => {
     const { isValidVersionParam } = await loadUpdateApiUtils();
     expect(isValidVersionParam('v0.3.3')).toBe(true);
@@ -36,7 +20,7 @@ describeWebsiteUtils('isValidVersionParam', () => {
   });
 });
 
-describeWebsiteUtils('normalizePreviewVersionsPayload', () => {
+describe('normalizePreviewVersionsPayload', () => {
   it('supports legacy array payload with default retention', async () => {
     const { normalizePreviewVersionsPayload } = await loadUpdateApiUtils();
     const legacy = [
@@ -89,7 +73,7 @@ describeWebsiteUtils('normalizePreviewVersionsPayload', () => {
   });
 });
 
-describeWebsiteUtils('resolveLatestAssetForPlatform', () => {
+describe('resolveLatestAssetForPlatform', () => {
   it('maps windows-x64 to windows-x64-setup when setup key exists', async () => {
     const { resolveLatestAssetForPlatform } = await loadUpdateApiUtils();
     const assets = {
@@ -121,5 +105,37 @@ describeWebsiteUtils('resolveLatestAssetForPlatform', () => {
 
     expect(resolved?.assetKey).toBe('android-arm64');
     expect(resolved?.asset.size).toBe(456);
+  });
+
+  it('falls back to runtime asset for macOS desktop downloads / macOS 桌面下载可回退到 runtime 产物', async () => {
+    const { resolveLatestAssetForPlatform } = await loadUpdateApiUtils();
+    const assets = {
+      'runtime-macos-aarch64': {
+        url: 'release/v0.3.5/ExoMind-RT-v0.3.5-macos-aarch64.tar.gz',
+        size: 789,
+        sha256: 'ghi',
+      },
+    };
+
+    const resolved = resolveLatestAssetForPlatform(assets, 'macos-aarch64');
+
+    expect(resolved?.assetKey).toBe('runtime-macos-aarch64');
+    expect(resolved?.asset.url).toContain('macos-aarch64.tar.gz');
+  });
+
+  it('falls back to runtime asset for Linux desktop downloads / Linux 桌面下载可回退到 runtime 产物', async () => {
+    const { resolveLatestAssetForPlatform } = await loadUpdateApiUtils();
+    const assets = {
+      'runtime-linux-x64': {
+        url: 'release/v0.3.5/ExoMind-RT-v0.3.5-linux-x64.tar.gz',
+        size: 999,
+        sha256: 'jkl',
+      },
+    };
+
+    const resolved = resolveLatestAssetForPlatform(assets, 'linux-x64-appimage');
+
+    expect(resolved?.assetKey).toBe('runtime-linux-x64');
+    expect(resolved?.asset.url).toContain('linux-x64.tar.gz');
   });
 });
