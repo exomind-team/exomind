@@ -123,6 +123,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
 
   // Task status selector in feedback dialog
   const activeBlockDataRef = useRef<ActiveBlockData | null>(null);
+  const taskStatusChoiceBlockRef = useRef<string | null>(null);
   const [linkedTask, setLinkedTask] = useState<TaskNode | null>(null);
   const [taskStatusChoice, setTaskStatusChoice] = useState<TaskStatusChoice>('continue');
 
@@ -213,6 +214,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
     activeBlockDataRef.current = block;
     if (!block) {
+      taskStatusChoiceBlockRef.current = null;
       setUiState('idle');
       setRunningSubState('running');
       setTaskName('');
@@ -239,7 +241,10 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     } else {
       setLinkedTask(null);
     }
-    setTaskStatusChoice('continue');
+    if (taskStatusChoiceBlockRef.current !== block.startId) {
+      taskStatusChoiceBlockRef.current = block.startId;
+      setTaskStatusChoice('continue');
+    }
 
     setTaskName(block.name);
     setTaskNameDraft(block.name);
@@ -497,6 +502,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const handleSubmitEnd = useCallback(async (feedbackText?: string) => {
     if (feedbackSubmitting) return;
     const trimmedFeedback = feedbackText?.trim() ?? '';
+    const blockDataSnapshot = activeBlockDataRef.current;
+    const taskStatusChoiceSnapshot = taskStatusChoice;
     if (trimmedFeedback.length === 0) {
       if (skipFeedbackConfirmState === 'idle') {
         startSkipFeedbackConfirmCooldown();
@@ -531,12 +538,11 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     console.log('[TB-UI] click submit-end -> endBlock done', { elapsedMs: Math.round(perfNow() - t0) });
 
     // Record block association and apply task status transition
-    const blockData = activeBlockDataRef.current;
-    if (blockData?.taskId) {
+    if (blockDataSnapshot?.taskId) {
       try {
-        await getTaskTimerService().onBlockEndForTask(blockData.taskId, blockData.startId);
-        if (taskStatusChoice !== 'continue') {
-          await getTaskService().transitionTask(blockData.taskId, taskStatusChoice as TaskStatus);
+        await getTaskTimerService().onBlockEndForTask(blockDataSnapshot.taskId, blockDataSnapshot.startId);
+        if (taskStatusChoiceSnapshot !== 'continue') {
+          await getTaskService().transitionTask(blockDataSnapshot.taskId, taskStatusChoiceSnapshot as TaskStatus);
         }
       } catch (error) {
         console.error('[TB-UI] task status update failed', error);
@@ -552,6 +558,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setTaskName('');
     setTaskNameDraft('');
     setLinkedTask(null);
+    taskStatusChoiceBlockRef.current = null;
     setTaskStatusChoice('continue');
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
