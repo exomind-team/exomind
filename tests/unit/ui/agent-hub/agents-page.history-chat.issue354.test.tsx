@@ -248,6 +248,14 @@ describe('agents page signal history + right chat issue-354（历史标签与右
       expect(screen.getByTestId('agent-rightpanel-chat-panel')).toBeInTheDocument();
     });
 
+    const chatPanel = screen.getByTestId('agent-rightpanel-chat-panel');
+    const chatInput = screen.getByTestId('agent-rightpanel-chat-input');
+    expect(chatPanel.className).toContain('bg-surface');
+    expect(chatPanel.className).toContain('text-foreground');
+    expect(chatInput.className).toContain('bg-card');
+    expect(chatInput.className).toContain('text-foreground');
+    expect(chatInput.className).toContain('border-border-card');
+
     fireEvent.change(screen.getByTestId('agent-rightpanel-chat-input'), {
       target: { value: '测试消息' },
     });

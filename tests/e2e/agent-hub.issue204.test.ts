@@ -50,6 +50,32 @@ test.describe('Issue #204 Agent Hub（Agent Hub 全视图）', () => {
     await expect(page.getByText('热门推荐')).toBeVisible();
     await expect(page.getByText('Code Review Agent')).toBeVisible();
   });
+
+  test('agent chat honors light theme surfaces（Agent 对话页应遵循浅色主题表面色）', async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('exomind:themePreference', 'light');
+    });
+
+    await page.goto('/agents/chat/agent-daily');
+    await expect(page.getByTestId('agent-conversation-page')).toBeVisible();
+    await expect(page.getByTestId('agent-chat-input')).toBeVisible();
+
+    const surfaces = await page.evaluate(() => {
+      const pageNode = document.querySelector('[data-testid="agent-conversation-page"]');
+      const inputNode = document.querySelector('[data-testid="agent-chat-input"]');
+      const agentBubble = document.querySelector('[data-testid="agent-conversation-message-agent-history"]');
+
+      return {
+        pageBg: pageNode ? window.getComputedStyle(pageNode).backgroundColor : null,
+        inputBg: inputNode ? window.getComputedStyle(inputNode).backgroundColor : null,
+        bubbleBg: agentBubble ? window.getComputedStyle(agentBubble).backgroundColor : null,
+      };
+    });
+
+    expect(surfaces.pageBg).not.toBe('rgb(12, 10, 9)');
+    expect(surfaces.inputBg).not.toBe('rgb(28, 25, 23)');
+    expect(surfaces.bubbleBg).not.toBe('rgb(28, 25, 23)');
+  });
 });
 
 test.describe('Issue #204 Agent Hub runtime toggle（运行时切换测试数据）', () => {

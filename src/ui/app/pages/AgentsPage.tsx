@@ -2694,25 +2694,25 @@ export function AgentsPage() {
                 </div>
               )}
               {rightPanel.state === 'AGENT_CHAT' && (
-                <div data-testid="agent-rightpanel-chat-panel" className="flex h-full flex-col gap-3 p-4">
-                  <div className="flex-1 space-y-2 overflow-auto rounded-[10px] border border-[#292524] bg-[#0C0A09] p-3">
+                <div data-testid="agent-rightpanel-chat-panel" className="flex h-full flex-col gap-3 bg-surface p-4 text-foreground">
+                  <div className="flex-1 space-y-2 overflow-auto rounded-[10px] border border-border-card bg-card p-3">
                     {chatMessages.length === 0 && (
-                      <p className="text-xs text-[#78716C]">暂无会话内容，发送第一条消息开始对话。</p>
+                      <p className="text-xs text-muted-foreground">暂无会话内容，发送第一条消息开始对话。</p>
                     )}
                     {chatMessages.map((message) => (
                       <div
                         key={message.id}
                         className={`rounded-lg px-3 py-2 text-xs ${
                           message.role === 'user'
-                            ? 'ml-8 bg-[#1F2937] text-[#E5E7EB]'
-                            : 'mr-8 bg-[#0D9488]/20 text-[#D1FAE5]'
+                            ? 'ml-8 bg-[#C75B3A] text-white'
+                            : 'mr-8 border border-border-card bg-card text-strong'
                         }`}
                       >
                         <p>{message.content}</p>
                       </div>
                     ))}
                   </div>
-                  {chatError && <p className="text-xs text-[#FCA5A5]">{chatError}</p>}
+                  {chatError && <p className="text-xs text-destructive">{chatError}</p>}
                   <div className="flex items-center gap-2">
                     <input
                       data-testid="agent-rightpanel-chat-input"
@@ -2725,7 +2725,7 @@ export function AgentsPage() {
                         }
                       }}
                       placeholder="输入消息..."
-                      className="h-9 flex-1 rounded-lg border border-[#44403C] bg-[#1C1917] px-3 text-xs text-[#FAFAF9] outline-none placeholder:text-[#78716C] focus:border-[#0D9488]"
+                      className="h-9 flex-1 rounded-lg border border-border-card bg-card px-3 text-xs text-foreground outline-none placeholder:text-muted-foreground focus:border-[#0D9488]"
                     />
                     <button
                       type="button"
