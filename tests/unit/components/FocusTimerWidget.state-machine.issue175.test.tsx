@@ -13,6 +13,10 @@ const updateElapsedMock = vi.fn();
 const onBlockChangeMock = vi.fn(() => () => {});
 const startSyncMock = vi.fn().mockResolvedValue(undefined);
 const stopSyncMock = vi.fn().mockResolvedValue(undefined);
+const getTaskMock = vi.fn();
+const transitionTaskMock = vi.fn();
+const onBlockEndForTaskMock = vi.fn();
+let onBlockChangeHandler: ((block: unknown) => void) | null = null;
 let originalRequestAnimationFrame: typeof globalThis.requestAnimationFrame | undefined;
 let originalCancelAnimationFrame: typeof globalThis.cancelAnimationFrame | undefined;
 
@@ -28,6 +32,13 @@ vi.mock('@/lib/services', () => ({
     onBlockChange: onBlockChangeMock,
     startSync: startSyncMock,
     stopSync: stopSyncMock,
+  }),
+  getTaskService: () => ({
+    getTask: getTaskMock,
+    transitionTask: transitionTaskMock,
+  }),
+  getTaskTimerService: () => ({
+    onBlockEndForTask: onBlockEndForTaskMock,
   }),
 }));
 
@@ -53,8 +64,22 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     endBlockMock.mockResolvedValue(null);
     markEndingMock.mockResolvedValue(undefined);
     updateElapsedMock.mockResolvedValue(undefined);
+    getTaskMock.mockReset();
+    transitionTaskMock.mockReset();
+    onBlockEndForTaskMock.mockReset();
+    getTaskMock.mockResolvedValue(null);
+    transitionTaskMock.mockResolvedValue(null);
+    onBlockEndForTaskMock.mockResolvedValue(undefined);
+    onBlockChangeHandler = null;
     onBlockChangeMock.mockReset();
-    onBlockChangeMock.mockReturnValue(() => {});
+    onBlockChangeMock.mockImplementation((handler: (block: unknown) => void) => {
+      onBlockChangeHandler = handler;
+      return () => {
+        if (onBlockChangeHandler === handler) {
+          onBlockChangeHandler = null;
+        }
+      };
+    });
     startSyncMock.mockReset();
     stopSyncMock.mockReset();
     startSyncMock.mockResolvedValue(undefined);
@@ -375,6 +400,58 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
       expect(endBlockMock).toHaveBeenCalledWith('记录反馈');
     });
     await waitFor(() => expect(screen.queryByTestId('new-focus-feedback-textarea')).toBeNull());
+  });
+
+  it('keeps task status transition when endBlock clears active block immediately（issue-374 结束瞬间清空活跃块仍更新任务状态）', async () => {
+    const now = Date.now();
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'block-task-1',
+      name: '关联任务时间块',
+      startTime: now - 10_000,
+      elapsed: 10_000,
+      mode: 'countup',
+      paused: false,
+      phase: 'running',
+      taskId: 'task-1',
+    });
+    getTaskMock.mockResolvedValue({
+      id: 'task-1',
+      title: '关联任务',
+      status: 'in_progress',
+      priority: 'medium',
+      dependsOn: [],
+      tags: [],
+      createdAt: now - 20_000,
+      updatedAt: now - 5_000,
+    });
+    endBlockMock.mockImplementation(async () => {
+      onBlockChangeHandler?.(null);
+      return null;
+    });
+
+    render(<FocusTimerWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+      expect(getTaskMock).toHaveBeenCalledWith('task-1');
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    await screen.findByTestId('new-focus-feedback-textarea');
+    await waitFor(() => {
+      expect(screen.getByTestId('feedback-task-status-section')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('feedback-task-status-completed'));
+    fireEvent.change(screen.getByTestId('new-focus-feedback-textarea'), {
+      target: { value: '结束并完成任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-feedback-confirm'));
+
+    await waitFor(() => {
+      expect(onBlockEndForTaskMock).toHaveBeenCalledWith('task-1', 'block-task-1');
+      expect(transitionTaskMock).toHaveBeenCalledWith('task-1', 'completed');
+    });
   });
 
   it('allows closing feedback dialog on Escape and reopening via end button（反馈弹窗可关闭且可再次拉起）', async () => {

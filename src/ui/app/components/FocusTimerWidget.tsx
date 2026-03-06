@@ -497,6 +497,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const handleSubmitEnd = useCallback(async (feedbackText?: string) => {
     if (feedbackSubmitting) return;
     const trimmedFeedback = feedbackText?.trim() ?? '';
+    const blockDataSnapshot = activeBlockDataRef.current;
+    const taskStatusChoiceSnapshot = taskStatusChoice;
     if (trimmedFeedback.length === 0) {
       if (skipFeedbackConfirmState === 'idle') {
         startSkipFeedbackConfirmCooldown();
@@ -531,12 +533,11 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     console.log('[TB-UI] click submit-end -> endBlock done', { elapsedMs: Math.round(perfNow() - t0) });
 
     // Record block association and apply task status transition
-    const blockData = activeBlockDataRef.current;
-    if (blockData?.taskId) {
+    if (blockDataSnapshot?.taskId) {
       try {
-        await getTaskTimerService().onBlockEndForTask(blockData.taskId, blockData.startId);
-        if (taskStatusChoice !== 'continue') {
-          await getTaskService().transitionTask(blockData.taskId, taskStatusChoice as TaskStatus);
+        await getTaskTimerService().onBlockEndForTask(blockDataSnapshot.taskId, blockDataSnapshot.startId);
+        if (taskStatusChoiceSnapshot !== 'continue') {
+          await getTaskService().transitionTask(blockDataSnapshot.taskId, taskStatusChoiceSnapshot as TaskStatus);
         }
       } catch (error) {
         console.error('[TB-UI] task status update failed', error);
