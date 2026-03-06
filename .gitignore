@@ -78,6 +78,9 @@ htmlcov/
 
 # === Website build artifacts ===
 website/preview/
+
+# === Jujutsu metadata ===
+/.jj/
 website/package-lock.json
 
 # === Temporary ===
