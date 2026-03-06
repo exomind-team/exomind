@@ -75,6 +75,18 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     expect(workflowContent).toContain('$shouldPublishLatestMetadata = $isBuildTagPush -or $isReleaseTagPush -or "${{ github.event_name }}" -eq "workflow_dispatch"');
   });
 
+  it('uses OrderedDictionary-compatible asset alias checks / 资源别名检查兼容 OrderedDictionary', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).not.toContain('ContainsKey(');
+    expect(workflowContent).toContain('$assets.Contains($aliasKey)');
+  });
+
+  it('recovers MSI via WiX light -sval fallback on service runners / 服务型 runner 上通过 WiX light -sval 回退恢复 MSI', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toContain('Recover Windows MSI artifact via WiX light fallback');
+    expect(workflowContent).toContain('-sval');
+  });
+
   it('skips GitHub artifact upload on workflow_dispatch in self-hosted job / 手动触发时跳过 GitHub artifact 中转', () => {
     const workflowContent = readReleaseWorkflow();
     expect(workflowContent).toMatch(

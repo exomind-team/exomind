@@ -582,6 +582,90 @@ jobs:
           VITE_BUILD_HASH: ${{ steps.hash.outputs.HASH }}
           RUST_LOG: tauri_bundler=debug
 
+      - name: Recover Windows MSI artifact via WiX light fallback (通过 WiX light 回退恢复 MSI)
+        if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY == 'true'
+        shell: powershell
+        run: |
+          $ErrorActionPreference = "Stop"
+
+          function Find-FirstExistingPath([string[]]$Candidates) {
+            foreach ($candidate in $Candidates) {
+              if (Test-Path $candidate) {
+                return (Resolve-Path $candidate).Path
+              }
+            }
+            return $null
+          }
+
+          $existingMsiDirs = @(
+            "target/release/bundle/msi",
+            "src-tauri/target/release/bundle/msi"
+          )
+          foreach ($msiDir in $existingMsiDirs) {
+            if (-not (Test-Path $msiDir)) { continue }
+            $existingMsi = Get-ChildItem -Path $msiDir -Filter "*.msi" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($existingMsi) {
+              Write-Host "MSI already exists, skip WiX fallback: $($existingMsi.FullName)"
+              exit 0
+            }
+          }
+
+          $wixRoot = Find-FirstExistingPath @(
+            "target/.tauri/WixTools314",
+            "src-tauri/target/.tauri/WixTools314"
+          )
+          $wixBuildDir = Find-FirstExistingPath @(
+            "target/release/wix/x64",
+            "src-tauri/target/release/wix/x64"
+          )
+
+          if (-not $wixRoot -or -not $wixBuildDir) {
+            Write-Warning "WiX fallback inputs are missing. Skip MSI recovery."
+            exit 0
+          }
+
+          $lightExe = Join-Path $wixRoot "light.exe"
+          $wixUtilExt = Join-Path $wixRoot "WixUtilExtension.dll"
+          $wixUiExt = Join-Path $wixRoot "WixUIExtension.dll"
+          $localeFile = Join-Path $wixBuildDir "locale.wxl"
+          $wixObjFiles = Get-ChildItem -Path $wixBuildDir -Filter "*.wixobj" -File -ErrorAction SilentlyContinue |
+            Select-Object -ExpandProperty FullName
+
+          foreach ($requiredPath in @($lightExe, $wixUtilExt, $wixUiExt, $localeFile)) {
+            if (-not (Test-Path $requiredPath)) {
+              throw "Missing WiX fallback dependency: $requiredPath"
+            }
+          }
+          if (-not $wixObjFiles -or $wixObjFiles.Count -eq 0) {
+            throw "Missing .wixobj files for WiX fallback under $wixBuildDir"
+          }
+
+          $releaseDir = Split-Path -Parent (Split-Path -Parent $wixBuildDir)
+          $bundleDir = Join-Path $releaseDir "bundle/msi"
+          New-Item -ItemType Directory -Force -Path $bundleDir | Out-Null
+
+          $appVersion = "${{ steps.app_version.outputs.APP_VERSION }}"
+          $outputMsi = Join-Path $bundleDir "ExoMind_${appVersion}_x64_en-US.msi"
+          $lightArgs = @(
+            "-ext", $wixUtilExt,
+            "-ext", $wixUiExt,
+            "-sval",
+            "-o", $outputMsi,
+            "-cultures:en-us",
+            "-loc", $localeFile
+          ) + $wixObjFiles
+
+          Write-Host "Recover MSI with WiX light fallback / 通过 WiX light 回退恢复 MSI"
+          Write-Host "Command: $lightExe $($lightArgs -join ' ')"
+          & $lightExe @lightArgs
+          if ($LASTEXITCODE -ne 0) {
+            throw "WiX light fallback failed with exit code $LASTEXITCODE"
+          }
+          if (-not (Test-Path $outputMsi)) {
+            throw "WiX light fallback completed but MSI was not created: $outputMsi"
+          }
+          Write-Host "Recovered MSI artifact: $outputMsi"
+
       - name: Skip MSI build when prerequisites are unavailable (前置检查失败时跳过 MSI)
         if: steps.targets.outputs.BUILD_WINDOWS == 'true' && steps.msi_prereq.outputs.MSI_READY != 'true'
         shell: powershell
@@ -791,7 +875,7 @@ jobs:
 
             $latestPath = Join-Path $stagingDir "latest.json"
             function Add-AssetAlias([string]$aliasKey, [string]$sourceKey) {
-              if ($assets.ContainsKey($aliasKey) -or -not $assets.ContainsKey($sourceKey)) {
+              if ($assets.Contains($aliasKey) -or -not $assets.Contains($sourceKey)) {
                 return
               }
               $assets[$aliasKey] = $assets[$sourceKey]
