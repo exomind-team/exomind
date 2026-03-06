@@ -1,4 +1,4 @@
-﻿import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { ChangeEvent } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
@@ -45,6 +45,14 @@ import {
   subscribeDevtoolsChanges,
 } from '@/config/devtools-mode';
 import {
+  getLLMApiKey,
+  getLLMBaseUrl,
+  getLLMModel,
+  setLLMApiKey,
+  setLLMBaseUrl,
+  setLLMModel,
+} from '@/config/llm-settings';
+import {
   getCommandPaletteEnabled,
   setCommandPaletteEnabled,
   subscribeCommandPaletteEnabledChanges,
@@ -87,6 +95,7 @@ import {
   Code,
   Command,
   Download,
+  Key,
   Monitor,
   Mic,
   Moon,
@@ -193,7 +202,7 @@ function useIsDesktop(minWidth = 768): boolean {
 
 export function SettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
-  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.5');
+  const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.6');
   const autoSyncServerUrl = resolveSyncServerUrl(envMap, {
     syncServerOverride: null,
   });
@@ -228,6 +237,10 @@ export function SettingsPage() {
   const [mossApiKey, setMossApiKey] = useState(() => readStoredMossApiKey());
   const [mossApiKeyDraft, setMossApiKeyDraft] = useState('');
   const [showMossApiKey, setShowMossApiKey] = useState(false);
+  const [llmDialogOpen, setLlmDialogOpen] = useState(false);
+  const [llmApiKeyDraft, setLlmApiKeyDraft] = useState(() => getLLMApiKey());
+  const [llmBaseUrlDraft, setLlmBaseUrlDraft] = useState(() => getLLMBaseUrl());
+  const [llmModelDraft, setLlmModelDraft] = useState(() => getLLMModel());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
@@ -496,6 +509,22 @@ export function SettingsPage() {
       return;
     }
     navigate({ to: '/moss-test' });
+  };
+
+  const handleOpenLlmDialog = () => {
+    setLlmApiKeyDraft(getLLMApiKey());
+    setLlmBaseUrlDraft(getLLMBaseUrl());
+    setLlmModelDraft(getLLMModel());
+    setLlmDialogOpen(true);
+  };
+
+  const handleSaveLlmSettings = () => {
+    clearNotice();
+    setLLMApiKey(llmApiKeyDraft);
+    setLLMBaseUrl(llmBaseUrlDraft);
+    setLLMModel(llmModelDraft);
+    setLlmDialogOpen(false);
+    setStatusMessage('AI 设置已保存');
   };
 
   useEffect(() => {
@@ -843,6 +872,23 @@ export function SettingsPage() {
                   />
                 </>
               )}
+            </SectionCard>
+          </section>
+
+          <section className="space-y-2">
+            <SectionTitle>AI 设置</SectionTitle>
+            <SectionCard>
+              <SettingRow
+                icon={<Key className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="AI API Key"
+                onClick={handleOpenLlmDialog}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{llmApiKeyDraft ? '已配置' : '未配置'}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
             </SectionCard>
           </section>
 
@@ -1224,6 +1270,24 @@ export function SettingsPage() {
           </SectionCard>
         </section>
 
+        {/* ── AI Section (AI 设置) ── */}
+        <section className="space-y-2">
+          <SectionTitle>AI 设置</SectionTitle>
+          <SectionCard>
+            <SettingRow
+              icon={<Key className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="AI API Key"
+              onClick={handleOpenLlmDialog}
+              right={
+                <div className="flex items-center gap-1">
+                  <span className="text-sm text-[#A8A29E]">{llmApiKeyDraft ? '已配置' : '未配置'}</span>
+                  <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                </div>
+              }
+            />
+          </SectionCard>
+        </section>
+
         {/* ── Sync Section (同步) ── */}
         <section className="space-y-2">
           <SectionTitle>同步</SectionTitle>
@@ -1499,6 +1563,65 @@ export function SettingsPage() {
               <button
                 type="button"
                 onClick={handleSaveMossApiKey}
+                className="flex-1 rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F]"
+              >
+                保存
+              </button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* ── LLM Settings Dialog ── */}
+      <Dialog open={llmDialogOpen} onOpenChange={setLlmDialogOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>AI 设置</DialogTitle>
+            <DialogDescription>配置 Agent 对话使用的大语言模型（OpenAI 兼容格式）</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">API Key</label>
+              <input
+                type="password"
+                value={llmApiKeyDraft}
+                onChange={(e) => setLlmApiKeyDraft(e.target.value)}
+                placeholder="sk-..."
+                className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">Base URL</label>
+              <input
+                type="url"
+                value={llmBaseUrlDraft}
+                onChange={(e) => setLlmBaseUrlDraft(e.target.value)}
+                placeholder="https://api.openai.com/v1"
+                className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">模型</label>
+              <input
+                type="text"
+                value={llmModelDraft}
+                onChange={(e) => setLlmModelDraft(e.target.value)}
+                placeholder="gpt-4o"
+                className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              />
+            </div>
+            <p className="text-xs text-[#A8A29E]">支持 OpenAI、DeepSeek、Moonshot 等兼容 API</p>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setLlmDialogOpen(false)}
+                className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
+              >
+                取消
+              </button>
+              <button
+                type="button"
+                onClick={handleSaveLlmSettings}
                 className="flex-1 rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F]"
               >
                 保存

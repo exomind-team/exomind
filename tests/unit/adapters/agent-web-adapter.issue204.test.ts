@@ -48,7 +48,7 @@ describe('agent web adapter issue-204（Agent Web 适配器）', () => {
     expect(topology.nodes[0]?.name).toBe('日报 Agent');
   });
 
-  it('streams a placeholder assistant message（可流式输出占位回复）', async () => {
+  it('prompts API key configuration when not set（未配置 API Key 时提示配置）', async () => {
     const deltas: string[] = [];
 
     for await (const chunk of adapter.streamConversation({
@@ -58,7 +58,7 @@ describe('agent web adapter issue-204（Agent Web 适配器）', () => {
       deltas.push(chunk.delta);
     }
 
-    expect(deltas.join('')).toContain('placeholder');
+    expect(deltas.join('')).toContain('API Key');
   });
 });
 
