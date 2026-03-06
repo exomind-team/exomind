@@ -193,7 +193,9 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
       yield { messageId: 'msg-fallback', delta: '这是本地 adapter 的占位回复', done: true };
     });
     runtimeClientMocks.streamAgentConversation.mockImplementation(async function* () {
-      yield { content: '这是 Claude Runtime 的真实回复', sessionId: 'sid-365' };
+      yield { type: 'session.started', sessionId: 'sid-365' };
+      yield { type: 'output.delta', content: '这是 Claude Runtime 的真实回复' };
+      yield { type: 'done' };
     });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {

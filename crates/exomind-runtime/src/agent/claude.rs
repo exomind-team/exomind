@@ -1,4 +1,7 @@
-use super::{Agent, ChatChunk, ChatRequest, SessionInfo};
+use super::provider::AgentProvider;
+use super::{Agent, ChatRequest, RuntimeAgentEvent, SessionInfo};
+#[cfg(test)]
+use super::ChatChunk;
 use chrono::{DateTime, SecondsFormat, Utc};
 use futures_util::stream::{self, BoxStream, StreamExt};
 use serde::Serialize;
@@ -214,7 +217,7 @@ impl ClaudeAgent {
         self.lock_session_snapshots().remove(session_id);
     }
 
-    fn spawn_streaming_task(&self, request: ChatRequest) -> mpsc::Receiver<ChatChunk> {
+    fn spawn_streaming_task(&self, request: ChatRequest) -> mpsc::Receiver<RuntimeAgentEvent> {
         let (sender, receiver) = mpsc::channel(64);
         let agent = self.clone();
 
@@ -225,7 +228,7 @@ impl ClaudeAgent {
         receiver
     }
 
-    async fn handle_chat_request(&self, request: ChatRequest, sender: mpsc::Sender<ChatChunk>) {
+    async fn handle_chat_request(&self, request: ChatRequest, sender: mpsc::Sender<RuntimeAgentEvent>) {
         let normalized_session_id = normalize_session_id(request.session_id.as_deref());
         let existing_session = if let Some(session_id) = normalized_session_id.as_deref() {
             self.find_session(session_id)
@@ -240,19 +243,19 @@ impl ClaudeAgent {
             SessionAction::CreateNew => match self.create_session() {
                 Ok(created) => (created.0, created.1, true),
                 Err(error_message) => {
-                    emit_error_chunk(&sender, error_message).await;
+                    emit_error_event(&sender, error_message).await;
                     return;
                 }
             },
             SessionAction::Reuse { session_id } => {
                 let Some(handle) = existing_session else {
-                    emit_error_chunk(&sender, format!("Claude 会话不存在: {session_id}")).await;
+                    emit_error_event(&sender, format!("Claude 会话不存在: {session_id}")).await;
                     return;
                 };
                 (session_id, handle, false)
             }
             SessionAction::Missing { session_id } => {
-                emit_error_chunk(&sender, format!("Claude 会话不存在: {session_id}")).await;
+                emit_error_event(&sender, format!("Claude 会话不存在: {session_id}")).await;
                 return;
             }
         };
@@ -377,20 +380,20 @@ impl ClaudeAgent {
         session_handle: SharedClaudeSession,
         message: String,
         needs_session_chunk: bool,
-        sender: mpsc::Sender<ChatChunk>,
+        sender: mpsc::Sender<RuntimeAgentEvent>,
     ) {
         let mut session = session_handle.lock().await;
 
         match session.status {
             SessionStatus::Idle => {}
             SessionStatus::Processing => {
-                emit_error_chunk(&sender, "Claude 会话正在处理中，请稍后重试".to_string()).await;
+                emit_error_event(&sender, "Claude 会话正在处理中，请稍后重试".to_string()).await;
                 return;
             }
             SessionStatus::Crashed => {
                 drop(session);
                 self.cleanup_session(&session_id).await;
-                emit_error_chunk(&sender, "Claude 会话已崩溃，请新建会话".to_string()).await;
+                emit_error_event(&sender, "Claude 会话已崩溃，请新建会话".to_string()).await;
                 return;
             }
         }
@@ -399,7 +402,7 @@ impl ClaudeAgent {
             session.status = SessionStatus::Crashed;
             drop(session);
             self.cleanup_session(&session_id).await;
-            emit_error_chunk(&sender, error_message).await;
+            emit_error_event(&sender, error_message).await;
             return;
         }
 
@@ -414,11 +417,21 @@ impl ClaudeAgent {
             self.upsert_snapshot_from_session(&session);
             drop(session);
             self.cleanup_session(&session_id).await;
-            emit_error_chunk(&sender, format!("Claude 输入写入失败: {error}")).await;
+            emit_error_event(&sender, format!("Claude 输入写入失败: {error}")).await;
             return;
         }
 
-        let mut pending_session_chunk = needs_session_chunk;
+        if needs_session_chunk
+            && sender
+                .send(RuntimeAgentEvent::session_started(session_id.clone()))
+                .await
+                .is_err()
+        {
+            session.status = SessionStatus::Idle;
+            self.upsert_snapshot_from_session(&session);
+            return;
+        }
+
         loop {
             match read_next_stream_event(&mut session.stdout).await {
                 Ok(Some(ClaudeStreamEvent::System { claude_session_id })) => {
@@ -431,17 +444,7 @@ impl ClaudeAgent {
                 Ok(Some(ClaudeStreamEvent::AssistantChunk { content })) => {
                     session.last_active = Instant::now();
                     self.upsert_snapshot_from_session(&session);
-                    let chunk = ChatChunk {
-                        content,
-                        session_id: if pending_session_chunk {
-                            pending_session_chunk = false;
-                            Some(session_id.clone())
-                        } else {
-                            None
-                        },
-                    };
-
-                    if sender.send(chunk).await.is_err() {
+                    if sender.send(RuntimeAgentEvent::output_delta(content)).await.is_err() {
                         session.status = SessionStatus::Idle;
                         self.upsert_snapshot_from_session(&session);
                         return;
@@ -458,16 +461,9 @@ impl ClaudeAgent {
                         session.token_usage.accumulate(&turn_usage);
                     }
                     session.total_cost_usd += turn_cost_usd;
-                    if pending_session_chunk {
-                        let _ = sender
-                            .send(ChatChunk {
-                                content: String::new(),
-                                session_id: Some(session_id.clone()),
-                            })
-                            .await;
-                    }
                     session.status = SessionStatus::Idle;
                     self.upsert_snapshot_from_session(&session);
+                    let _ = sender.send(RuntimeAgentEvent::done()).await;
                     return;
                 }
                 Ok(None) => {
@@ -476,7 +472,7 @@ impl ClaudeAgent {
                     let message = build_session_ended_error_message(&mut session);
                     drop(session);
                     self.cleanup_session(&session_id).await;
-                    emit_error_chunk(&sender, message).await;
+                    emit_error_event(&sender, message).await;
                     return;
                 }
                 Err(error) => {
@@ -484,7 +480,7 @@ impl ClaudeAgent {
                     self.upsert_snapshot_from_session(&session);
                     drop(session);
                     self.cleanup_session(&session_id).await;
-                    emit_error_chunk(&sender, format!("Claude 输出读取失败: {error}")).await;
+                    emit_error_event(&sender, format!("Claude 输出读取失败: {error}")).await;
                     return;
                 }
             }
@@ -541,23 +537,11 @@ impl Default for ClaudeAgent {
     }
 }
 
-impl Agent for ClaudeAgent {
-    fn id(&self) -> &'static str {
-        "claude"
-    }
-
-    fn name(&self) -> &'static str {
-        "Claude Agent"
-    }
-
-    fn description(&self) -> &'static str {
-        "通过 Claude Code CLI 提供流式对话"
-    }
-
-    fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk> {
+impl AgentProvider for ClaudeAgent {
+    fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, RuntimeAgentEvent> {
         let receiver = self.spawn_streaming_task(request);
         stream::unfold(receiver, |mut receiver| async move {
-            receiver.recv().await.map(|chunk| (chunk, receiver))
+            receiver.recv().await.map(|event| (event, receiver))
         })
         .boxed()
     }
@@ -611,6 +595,20 @@ impl Agent for ClaudeAgent {
             let stats = self.collect_stats(session_id.as_deref()).await?;
             serde_json::to_value(stats).ok()
         })
+    }
+}
+
+impl Agent for ClaudeAgent {
+    fn id(&self) -> &'static str {
+        "claude"
+    }
+
+    fn name(&self) -> &'static str {
+        "Claude Agent"
+    }
+
+    fn description(&self) -> &'static str {
+        "通过 Claude Code CLI 提供流式对话"
     }
 }
 
@@ -681,8 +679,8 @@ async fn read_next_stream_event(
     }
 }
 
-async fn emit_error_chunk(sender: &mpsc::Sender<ChatChunk>, message: String) {
-    let _ = sender.send(ChatChunk::content_only(message)).await;
+async fn emit_error_event(sender: &mpsc::Sender<RuntimeAgentEvent>, message: String) {
+    let _ = sender.send(RuntimeAgentEvent::error(message)).await;
 }
 
 fn build_claude_persistent_args() -> Vec<String> {

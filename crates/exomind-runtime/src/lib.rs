@@ -557,6 +557,7 @@ impl AppState {
     ) -> Self {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
+        registry.register(Arc::new(agent::codex::CodexAgent::new()));
         registry.register(Arc::new(agent::echo::EchoAgent::new()));
 
         let default_routes_path =
@@ -659,6 +660,19 @@ mod tests {
         }
     }
 
+    impl agent::AgentProvider for TempRouteAgent {
+        fn chat_stream(
+            &self,
+            request: agent::ChatRequest,
+        ) -> BoxStream<'static, agent::RuntimeAgentEvent> {
+            stream::iter(vec![
+                agent::RuntimeAgentEvent::output_delta(request.message),
+                agent::RuntimeAgentEvent::done(),
+            ])
+            .boxed()
+        }
+    }
+
     impl agent::Agent for TempRouteAgent {
         fn id(&self) -> &'static str {
             "temp-route"
@@ -670,10 +684,6 @@ mod tests {
 
         fn description(&self) -> &'static str {
             "用于路由注册/注销可见性测试"
-        }
-
-        fn chat_stream(&self, request: agent::ChatRequest) -> BoxStream<'static, agent::ChatChunk> {
-            stream::iter(vec![agent::ChatChunk::content_only(request.message)]).boxed()
         }
     }
 
@@ -708,21 +718,16 @@ mod tests {
         }
     }
 
-    impl agent::Agent for TempSessionAgent {
-        fn id(&self) -> &'static str {
-            "temp-session"
-        }
-
-        fn name(&self) -> &'static str {
-            "Temp Session Agent"
-        }
-
-        fn description(&self) -> &'static str {
-            "用于会话端点 JSON 结构测试"
-        }
-
-        fn chat_stream(&self, request: agent::ChatRequest) -> BoxStream<'static, agent::ChatChunk> {
-            stream::iter(vec![agent::ChatChunk::content_only(request.message)]).boxed()
+    impl agent::AgentProvider for TempSessionAgent {
+        fn chat_stream(
+            &self,
+            request: agent::ChatRequest,
+        ) -> BoxStream<'static, agent::RuntimeAgentEvent> {
+            stream::iter(vec![
+                agent::RuntimeAgentEvent::output_delta(request.message),
+                agent::RuntimeAgentEvent::done(),
+            ])
+            .boxed()
         }
 
         fn list_sessions(&self) -> Vec<agent::SessionInfo> {
@@ -737,6 +742,20 @@ mod tests {
 
         fn close_session(&self, session_id: &str) -> bool {
             self.lock_sessions().remove(session_id).is_some()
+        }
+    }
+
+    impl agent::Agent for TempSessionAgent {
+        fn id(&self) -> &'static str {
+            "temp-session"
+        }
+
+        fn name(&self) -> &'static str {
+            "Temp Session Agent"
+        }
+
+        fn description(&self) -> &'static str {
+            "用于会话端点 JSON 结构测试"
         }
     }
 
@@ -823,6 +842,12 @@ mod tests {
                     "status": "available"
                 },
                 {
+                    "id": "codex",
+                    "name": "Codex Agent (codex)",
+                    "description": "通过 Codex CLI 提供流式对话（codex）",
+                    "status": "available"
+                },
+                {
                     "id": "echo",
                     "name": "Echo Agent",
                     "description": "回显输入内容",
@@ -883,8 +908,8 @@ mod tests {
         let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
         let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
-        let data_marker = r#"data: {"content":"Echo: hello"}"#;
-        let done_marker = "data: [DONE]";
+        let data_marker = r#"data: {"type":"output.delta","content":"Echo: hello"}"#;
+        let done_marker = r#"data: {"type":"done"}"#;
         let data_index = body_text.find(data_marker).unwrap();
         let done_index = body_text.find(done_marker).unwrap();
 

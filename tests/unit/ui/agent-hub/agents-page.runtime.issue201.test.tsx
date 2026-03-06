@@ -16,6 +16,13 @@ const runtimeControlMocks = vi.hoisted(() => ({
   getStatus: vi.fn(),
 }));
 
+const runtimeClientMocks = vi.hoisted(() => ({
+  getAgents: vi.fn(),
+  createAgent: vi.fn(),
+  deleteAgent: vi.fn(),
+  streamAgentConversation: vi.fn(),
+}));
+
 vi.mock('@xyflow/react', () => ({
   ReactFlow: ({
     nodes,
@@ -115,6 +122,25 @@ vi.mock('@/lib/services/runtime-control.service', () => ({
   getRuntimeControlService: () => runtimeControlMocks,
 }));
 
+vi.mock('@/services/runtime-client', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/services/runtime-client')>();
+
+  class RuntimeClientMock {
+    getAgents = runtimeClientMocks.getAgents;
+
+    createAgent = runtimeClientMocks.createAgent;
+
+    deleteAgent = runtimeClientMocks.deleteAgent;
+
+    streamAgentConversation = runtimeClientMocks.streamAgentConversation;
+  }
+
+  return {
+    ...actual,
+    RuntimeClient: RuntimeClientMock,
+  };
+});
+
 describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () => {
   beforeEach(() => {
     runtimeControlMocks.getStatus.mockResolvedValue({
@@ -179,6 +205,34 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
       ],
     });
 
+    runtimeClientMocks.getAgents.mockResolvedValue({
+      ok: true,
+      data: [
+        {
+          id: 'echo',
+          name: 'Echo Agent',
+          description: '回显输入内容',
+          status: 'available',
+        },
+      ],
+    });
+    runtimeClientMocks.createAgent.mockResolvedValue({
+      ok: true,
+      data: {
+        id: 'runtime-created-agent',
+        name: 'Runtime Created Agent',
+        description: 'created in test',
+        status: 'available',
+      },
+    });
+    runtimeClientMocks.deleteAgent.mockResolvedValue({
+      ok: true,
+      data: {
+        status: 'deleted',
+        id: 'runtime-created-agent',
+      },
+    });
+
     let currentRoutes = SAMPLE_SIGNAL_ROUTES.map((route) => ({ ...route }));
     signalRouteFetchMock.mockImplementation(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
@@ -214,6 +268,41 @@ describe('agents page runtime issue-201（AgentsPage 真实数据聚合）', () 
       } as Response;
     });
     vi.stubGlobal('fetch', signalRouteFetchMock);
+  });
+
+  it.each([
+    ['claude', 'Claude CLI'],
+    ['codex', 'Codex'],
+    ['echo', 'Echo'],
+  ] as const)('creates runtime agent with %s kind（按 provider 类型创建 Runtime Agent）', async (kind, label) => {
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-add-node-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId(`agent-add-node-option-${kind}`));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.createAgent).toHaveBeenCalledWith(
+        expect.objectContaining({
+          host: '127.0.0.1',
+          port: 1919,
+        }),
+        expect.objectContaining({
+          kind,
+        }),
+      );
+    });
+
+    expect(screen.queryByTestId('agent-add-node-sheet')).not.toBeInTheDocument();
+    expect(screen.queryByText(label)).not.toBeInTheDocument();
   });
 
   it('shows aggregated runtime agents with source host badge（聚合显示并标注来源主机）', async () => {

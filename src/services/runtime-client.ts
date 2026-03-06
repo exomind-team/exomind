@@ -1,4 +1,4 @@
-import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
+import type { RuntimeAgentEvent, RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { RuntimeTopologyResponse } from '@/lib/types/runtime-topology';
 
 export type RuntimeClientErrorCode = 'timeout' | 'network' | 'http' | 'invalid_payload';
@@ -27,7 +27,7 @@ export interface RuntimeAgentSummary {
 }
 
 export interface RuntimeCreateAgentRequest {
-  kind: 'echo' | 'claude';
+  kind: 'echo' | 'claude' | 'codex';
   id?: string;
   name?: string;
   description?: string;
@@ -51,10 +51,7 @@ export interface RuntimeAgentConversationRequest {
   sessionId?: string;
 }
 
-export interface RuntimeAgentConversationChunk {
-  content: string;
-  sessionId?: string;
-}
+export type RuntimeAgentConversationChunk = RuntimeAgentEvent;
 
 const DEFAULT_TIMEOUT_MS = 3500;
 
@@ -92,6 +89,12 @@ function toNetworkError(error: unknown): RuntimeClientError {
 
 function isObjectRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null;
+}
+
+function readOptionalString(value: unknown): string | undefined {
+  if (typeof value !== 'string') return undefined;
+  const trimmed = value.trim();
+  return trimmed ? trimmed : undefined;
 }
 
 function parseRuntimeAgentSummary(value: unknown): RuntimeAgentSummary | null {
@@ -143,24 +146,74 @@ function extractSseData(rawEvent: string): string | null {
   return chunks.join('\n');
 }
 
-function parseRuntimeAgentConversationChunk(data: string): RuntimeAgentConversationChunk | null {
+function readSessionId(value: Record<string, unknown>): string | undefined {
+  return readOptionalString(value.sessionId) ?? readOptionalString(value.session_id);
+}
+
+function parseTypedRuntimeAgentEvent(value: Record<string, unknown>): RuntimeAgentConversationChunk[] {
+  const type = readOptionalString(value.type);
+  if (!type) return [];
+
+  const sessionId = readSessionId(value);
+  const content = typeof value.content === 'string' ? value.content : undefined;
+  const name = readOptionalString(value.name);
+
+  switch (type) {
+    case 'session.started':
+      return sessionId ? [{ type, sessionId }] : [];
+    case 'output.delta':
+    case 'thinking.delta':
+      return content ? [{ type, content, sessionId }] : [];
+    case 'tool.call':
+    case 'tool.result':
+      return name
+        ? [{ type, name, payload: value.payload, sessionId }]
+        : [];
+    case 'error': {
+      const message = readOptionalString(value.message);
+      return message ? [{ type, message, sessionId }] : [];
+    }
+    case 'done':
+      return [{ type, sessionId }];
+    default:
+      return [];
+  }
+}
+
+function parseLegacyRuntimeAgentEvent(value: Record<string, unknown>): RuntimeAgentConversationChunk[] {
+  const content = typeof value.content === 'string' ? value.content : undefined;
+  const sessionId = readSessionId(value);
+  const events: RuntimeAgentConversationChunk[] = [];
+
+  if (sessionId) {
+    events.push({ type: 'session.started', sessionId });
+  }
+  if (content) {
+    events.push({ type: 'output.delta', content });
+  }
+
+  return events;
+}
+
+function parseRuntimeAgentConversationChunks(data: string): RuntimeAgentConversationChunk[] {
+  if (data === '[DONE]') {
+    return [{ type: 'done' }];
+  }
+
   let parsed: unknown;
   try {
     parsed = JSON.parse(data);
   } catch {
-    return null;
+    return [];
   }
 
-  if (!isObjectRecord(parsed)) return null;
+  if (!isObjectRecord(parsed)) return [];
 
-  const content = typeof parsed.content === 'string' ? parsed.content : '';
-  const sessionId = typeof parsed.session_id === 'string' && parsed.session_id
-    ? parsed.session_id
-    : undefined;
+  if (readOptionalString(parsed.type)) {
+    return parseTypedRuntimeAgentEvent(parsed);
+  }
 
-  if (!content && !sessionId) return null;
-
-  return { content, sessionId };
+  return parseLegacyRuntimeAgentEvent(parsed);
 }
 
 export class RuntimeClient {
@@ -355,22 +408,21 @@ export class RuntimeClient {
         for (const event of events) {
           const data = extractSseData(event);
           if (!data) continue;
-          if (data === '[DONE]') return;
 
-          const chunk = parseRuntimeAgentConversationChunk(data);
-          if (chunk) {
+          for (const chunk of parseRuntimeAgentConversationChunks(data)) {
             yield chunk;
+            if (chunk.type === 'done') return;
           }
         }
       }
 
       buffer += decoder.decode();
       const trailingData = extractSseData(buffer);
-      if (!trailingData || trailingData === '[DONE]') return;
+      if (!trailingData) return;
 
-      const trailingChunk = parseRuntimeAgentConversationChunk(trailingData);
-      if (trailingChunk) {
+      for (const trailingChunk of parseRuntimeAgentConversationChunks(trailingData)) {
         yield trailingChunk;
+        if (trailingChunk.type === 'done') return;
       }
     } finally {
       reader.releaseLock();

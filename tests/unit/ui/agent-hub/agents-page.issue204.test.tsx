@@ -227,6 +227,9 @@ describe('agents page issue-204（主页面三视图与添加节点）', () => {
     await waitFor(() => {
       expect(screen.getByTestId('agent-add-node-sheet')).toBeInTheDocument();
     });
+    expect(screen.getByText('Claude CLI')).toBeInTheDocument();
+    expect(screen.getByText('Codex')).toBeInTheDocument();
+    expect(screen.getByText('Echo')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('agent-add-node-option-device'));
     expect(screen.getByTestId('agent-host-manager-sheet')).toBeInTheDocument();
     expect(screen.getByText('添加设备')).toBeInTheDocument();

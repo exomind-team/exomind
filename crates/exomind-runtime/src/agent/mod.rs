@@ -1,12 +1,15 @@
-use futures_util::future::BoxFuture;
-use futures_util::stream::BoxStream;
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub mod claude;
+pub mod codex;
 pub mod echo;
+pub mod provider;
+pub mod runtime_event;
+
+pub use provider::AgentProvider;
+pub use runtime_event::RuntimeAgentEvent;
 
 /// Agent summary info (Agent 列表摘要信息).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -53,31 +56,13 @@ pub struct SessionInfo {
 }
 
 /// Agent behavior contract (Agent 行为契约).
-pub trait Agent: Send + Sync {
+pub trait Agent: AgentProvider + Send + Sync {
     fn id(&self) -> &'static str;
     fn name(&self) -> &'static str;
     fn description(&self) -> &'static str;
 
     fn status(&self) -> &'static str {
         "available"
-    }
-
-    fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk>;
-
-    fn list_sessions(&self) -> Vec<SessionInfo> {
-        Vec::new()
-    }
-
-    fn get_session(&self, _session_id: &str) -> Option<SessionInfo> {
-        None
-    }
-
-    fn close_session(&self, _session_id: &str) -> bool {
-        false
-    }
-
-    fn stats(&self, _session_id: Option<String>) -> BoxFuture<'_, Option<Value>> {
-        Box::pin(async { None })
     }
 }
 
@@ -140,10 +125,20 @@ impl AgentRegistry {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use futures_util::stream::{self, StreamExt};
+    use futures_util::stream::{self, BoxStream, StreamExt};
     use std::panic::{self, AssertUnwindSafe};
 
     struct TempAgent;
+
+    impl AgentProvider for TempAgent {
+        fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, RuntimeAgentEvent> {
+            stream::iter(vec![
+                RuntimeAgentEvent::output_delta(request.message),
+                RuntimeAgentEvent::done(),
+            ])
+            .boxed()
+        }
+    }
 
     impl Agent for TempAgent {
         fn id(&self) -> &'static str {
@@ -156,10 +151,6 @@ mod tests {
 
         fn description(&self) -> &'static str {
             "Temporary testing agent"
-        }
-
-        fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk> {
-            stream::iter(vec![ChatChunk::content_only(request.message)]).boxed()
         }
     }
 

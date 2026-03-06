@@ -3,7 +3,7 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use futures_util::stream::{self, StreamExt};
+use futures_util::stream::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::convert::Infallible;
@@ -11,7 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::agent::{self, Agent, AgentSummary, ChatChunk, ChatRequest, SessionInfo};
+use crate::agent::{self, Agent, AgentSummary, ChatRequest, RuntimeAgentEvent, SessionInfo};
 
 #[derive(Debug, Deserialize)]
 struct ChatRequestPayload {
@@ -107,6 +107,26 @@ fn create_claude_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, St
     Ok(Arc::new(agent::claude::ClaudeAgent::new()))
 }
 
+fn create_codex_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, StatusCode> {
+    let requested_id = normalize_optional_text(payload.id);
+    let id = requested_id.unwrap_or_else(|| {
+        let short = Uuid::new_v4().simple().to_string();
+        format!("codex-{}", &short[..8])
+    });
+    if !id
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+    {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    Ok(Arc::new(agent::codex::CodexAgent::managed(
+        id,
+        normalize_optional_text(payload.name),
+        normalize_optional_text(payload.description),
+    )))
+}
+
 async fn create_agent(
     State(state): State<AppState>,
     Json(payload): Json<CreateAgentPayload>,
@@ -115,6 +135,7 @@ async fn create_agent(
     let agent = match kind.as_str() {
         "echo" => create_echo_agent(payload)?,
         "claude" => create_claude_agent(payload)?,
+        "codex" => create_codex_agent(payload)?,
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
@@ -158,16 +179,11 @@ async fn chat_with_agent(
             .filter(|session| !session.is_empty()),
     };
 
-    let data_stream = agent.chat_stream(request).map(|chunk: ChatChunk| {
-        // ChatChunk currently only contains strings, JSON serialization is expected infallible.
-        let encoded = serde_json::to_string(&chunk).expect("ChatChunk serialization failed");
+    let stream = agent.chat_stream(request).map(|event: RuntimeAgentEvent| {
+        let encoded =
+            serde_json::to_string(&event).expect("RuntimeAgentEvent serialization failed");
         Ok::<Event, Infallible>(Event::default().data(encoded))
     });
-
-    let done_stream =
-        stream::once(async { Ok::<Event, Infallible>(Event::default().data("[DONE]")) });
-
-    let stream = data_stream.chain(done_stream);
 
     Ok(Sse::new(stream))
 }

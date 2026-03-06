@@ -52,7 +52,6 @@ import { getRuntimeControlService } from '@/lib/services/runtime-control.service
 import { KNOWN_AGENT_HUB_TOPICS, VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
 import type { SignalEvent, SignalRoute } from '@/lib/types/signal-pool';
 import type {
-  AgentConversationChunk,
   AgentConversationMessage,
   AgentDetailData,
   AgentDeviceGroup,
@@ -71,7 +70,8 @@ import {
   type RuntimeAggregatedAgent,
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
-import { RuntimeClient } from '@/services/runtime-client';
+import { RuntimeClient, type RuntimeCreateAgentRequest } from '@/services/runtime-client';
+import { createUuidV4 } from '@/lib/utils/uuid';
 import {
   buildSignalGraph,
   buildSignalRouteRows,
@@ -97,6 +97,14 @@ import {
   type TopologyViewport,
 } from './topology-layout';
 import { Switch } from '@/components/ui/switch';
+import {
+  appendConversationChunk,
+  appendConversationDelta,
+  appendConversationMessage,
+  createConversationMessage,
+  formatRuntimeEventPayload,
+  getConversationMessageTestId,
+} from './agents/conversation-runtime';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -107,7 +115,7 @@ const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string 
 ];
 
 type AddNodeOption = {
-  id: 'agent' | 'device';
+  id: RuntimeCreateAgentRequest['kind'] | 'device';
   title: string;
   description: string;
   tintColor: string;
@@ -115,9 +123,21 @@ type AddNodeOption = {
 
 const ADD_NODE_OPTIONS: AddNodeOption[] = [
   {
-    id: 'agent',
-    title: '添加 Agent',
-    description: '在当前 Runtime 中手动创建 Echo Agent',
+    id: 'claude',
+    title: 'Claude CLI',
+    description: '创建 Claude CLI runtime agent（创建 Claude CLI 运行节点）',
+    tintColor: '#0D9488',
+  },
+  {
+    id: 'codex',
+    title: 'Codex',
+    description: '创建 Codex app-server runtime agent（创建 Codex 运行节点）',
+    tintColor: '#C75B3A',
+  },
+  {
+    id: 'echo',
+    title: 'Echo',
+    description: '创建 Echo runtime agent（创建 Echo 测试节点）',
     tintColor: '#0D9488',
   },
   {
@@ -236,7 +256,9 @@ function getListItemIcon(item: AgentHubListItem): LucideIcon {
 }
 
 function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
-  if (optionId === 'agent') return Bot;
+  if (optionId === 'claude') return Brain;
+  if (optionId === 'codex') return Crosshair;
+  if (optionId === 'echo') return Bot;
   if (optionId === 'device') return Monitor;
   return Plus;
 }
@@ -416,33 +438,6 @@ function formatSignalTime(timestampMs: number): string {
     minute: '2-digit',
     second: '2-digit',
   });
-}
-
-function appendConversationChunk(
-  messages: AgentConversationMessage[],
-  chunk: AgentConversationChunk,
-): AgentConversationMessage[] {
-  const index = messages.findIndex((item) => item.id === chunk.messageId);
-  if (index === -1) {
-    return [
-      ...messages,
-      {
-        id: chunk.messageId,
-        role: 'agent',
-        content: chunk.delta,
-        createdAt: new Date().toISOString(),
-      },
-    ];
-  }
-
-  const next = [...messages];
-  const current = next[index];
-  if (!current) return messages;
-  next[index] = {
-    ...current,
-    content: `${current.content}${chunk.delta}`,
-  };
-  return next;
 }
 
 type SignalFlowNodeData = {
@@ -1143,12 +1138,12 @@ function DeviceView({
 function AddNodeSheet({
   options,
   onClose,
-  onAddAgent,
+  onSelectAgent,
   onAddDevice,
 }: {
   options: AddNodeOption[];
   onClose: () => void;
-  onAddAgent: () => void;
+  onSelectAgent: (kind: RuntimeCreateAgentRequest['kind']) => void;
   onAddDevice: () => void;
 }) {
   return (
@@ -1188,7 +1183,7 @@ function AddNodeSheet({
                 data-testid={`agent-add-node-option-${option.id}`}
                 onClick={() => {
                   onClose();
-                  if (option.id === 'agent') onAddAgent();
+                  if (option.id !== 'device') onSelectAgent(option.id);
                   if (option.id === 'device') onAddDevice();
                 }}
                 className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left dark:bg-[#292524]"
@@ -1959,12 +1954,11 @@ export function AgentsPage() {
     const prompt = chatInput.trim();
     if (!chatAgentId || !prompt || isChatSending) return;
 
-    const userMessage: AgentConversationMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: prompt,
-      createdAt: new Date().toISOString(),
-    };
+    const userMessage: AgentConversationMessage = createConversationMessage(
+      `user-${Date.now()}`,
+      'user',
+      prompt,
+    );
     setChatMessages((prev) => [...prev, userMessage]);
     setChatInput('');
     setChatError('');
@@ -1982,7 +1976,9 @@ export function AgentsPage() {
 
       if (runtimeHost) {
         const runtimeClient = new RuntimeClient();
-        const assistantMessageId = `runtime-agent-${Date.now()}`;
+        const assistantMessageId = `runtime-agent-output-${createUuidV4()}`;
+        const thinkingMessageId = `runtime-agent-thinking-${createUuidV4()}`;
+        const errorMessageId = `runtime-agent-error-${createUuidV4()}`;
         for await (const chunk of runtimeClient.streamAgentConversation(runtimeHost, {
           agentId: chatAgentId,
           message: prompt,
@@ -1991,13 +1987,62 @@ export function AgentsPage() {
           if (chunk.sessionId) {
             setChatSessionId(chunk.sessionId ?? null);
           }
-          if (!chunk.content) continue;
-          receivedVisibleContent = true;
-          setChatMessages((prev) => appendConversationChunk(prev, {
-            messageId: assistantMessageId,
-            delta: chunk.content,
-            done: false,
-          }));
+          switch (chunk.type) {
+            case 'session.started':
+              setChatSessionId(chunk.sessionId);
+              break;
+            case 'output.delta':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationDelta(prev, assistantMessageId, chunk.content, {
+                source: 'runtime',
+                runtimeEventType: 'output.delta',
+              }));
+              break;
+            case 'thinking.delta':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationDelta(prev, thinkingMessageId, chunk.content, {
+                source: 'runtime',
+                runtimeEventType: 'thinking.delta',
+                title: 'Thinking',
+              }));
+              break;
+            case 'tool.call':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `runtime-tool-call-${createUuidV4()}`,
+                'agent',
+                formatRuntimeEventPayload(chunk.payload),
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'tool.call',
+                  title: `Tool Call · ${chunk.name}`,
+                },
+              )));
+              break;
+            case 'tool.result':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `runtime-tool-result-${createUuidV4()}`,
+                'agent',
+                formatRuntimeEventPayload(chunk.payload),
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'tool.result',
+                  title: `Tool Result · ${chunk.name}`,
+                },
+              )));
+              break;
+            case 'error':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationDelta(prev, errorMessageId, chunk.message, {
+                source: 'runtime',
+                runtimeEventType: 'error',
+                title: 'Runtime Error',
+              }));
+              break;
+            case 'done':
+              break;
+          }
         }
       } else {
         const stream = getAgentHubService().streamConversation({ agentId: chatAgentId, prompt });
@@ -2019,7 +2064,7 @@ export function AgentsPage() {
     }
   };
 
-  const handleCreateManualAgent = async () => {
+  const handleCreateManualAgent = async (kind: RuntimeCreateAgentRequest['kind']) => {
     const host = resolveActiveRuntimeHost();
     if (!host) {
       setRuntimeHostError('未找到可用 Runtime 主机，无法创建 Agent');
@@ -2030,7 +2075,7 @@ export function AgentsPage() {
     setRuntimeHostError('');
     try {
       const runtimeClient = new RuntimeClient();
-      const result = await runtimeClient.createAgent(host, { kind: 'echo' });
+      const result = await runtimeClient.createAgent(host, { kind });
       if (!result.ok) {
         setRuntimeHostError(`创建 Agent 失败: ${result.error.message}`);
         return;
@@ -2953,18 +2998,30 @@ export function AgentsPage() {
                     {chatMessages.length === 0 && (
                       <p className="text-xs text-muted-foreground">暂无会话内容，发送第一条消息开始对话。</p>
                     )}
-                    {chatMessages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`rounded-lg px-3 py-2 text-xs ${
-                          message.role === 'user'
-                            ? 'ml-8 bg-[#C75B3A] text-white'
-                            : 'mr-8 border border-border-card bg-card text-strong'
-                        }`}
-                      >
-                        <p>{message.content}</p>
-                      </div>
-                    ))}
+                    {chatMessages.map((message) => {
+                      const isUser = message.role === 'user';
+                      const isRuntimeMeta = !!message.runtimeEventType && message.runtimeEventType !== 'output.delta';
+                      return (
+                        <div
+                          key={message.id}
+                          data-testid={getConversationMessageTestId(message)}
+                          className={`rounded-lg px-3 py-2 text-xs ${
+                            isUser
+                              ? 'ml-8 bg-[#C75B3A] text-white'
+                              : isRuntimeMeta
+                                ? 'mr-8 border border-border-card bg-muted text-muted-foreground'
+                                : 'mr-8 border border-border-card bg-card text-strong'
+                          }`}
+                        >
+                          {message.title && (
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                              {message.title}
+                            </p>
+                          )}
+                          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                   {chatError && <p className="text-xs text-destructive">{chatError}</p>}
                   <div className="flex items-center gap-2">
@@ -3005,8 +3062,8 @@ export function AgentsPage() {
         <AddNodeSheet
           options={ADD_NODE_OPTIONS}
           onClose={() => setSheetOpen(false)}
-          onAddAgent={() => {
-            void handleCreateManualAgent();
+          onSelectAgent={(kind) => {
+            void handleCreateManualAgent(kind);
           }}
           onAddDevice={() => setHostManagerOpen(true)}
         />

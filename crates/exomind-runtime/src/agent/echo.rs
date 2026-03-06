@@ -1,4 +1,5 @@
-use super::{Agent, ChatChunk, ChatRequest};
+use super::provider::AgentProvider;
+use super::{Agent, ChatRequest, RuntimeAgentEvent};
 use futures_util::stream::{self, BoxStream, StreamExt};
 
 /// Built-in echo agent (内置回显 Agent).
@@ -8,6 +9,16 @@ pub struct EchoAgent;
 impl EchoAgent {
     pub fn new() -> Self {
         Self
+    }
+}
+
+impl AgentProvider for EchoAgent {
+    fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, RuntimeAgentEvent> {
+        stream::iter(vec![
+            RuntimeAgentEvent::output_delta(format!("Echo: {}", request.message)),
+            RuntimeAgentEvent::done(),
+        ])
+        .boxed()
     }
 }
 
@@ -22,14 +33,6 @@ impl Agent for EchoAgent {
 
     fn description(&self) -> &'static str {
         "回显输入内容"
-    }
-
-    fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk> {
-        stream::iter(vec![ChatChunk::content_only(format!(
-            "Echo: {}",
-            request.message
-        ))])
-        .boxed()
     }
 }
 
@@ -69,6 +72,16 @@ impl ManagedEchoAgent {
     }
 }
 
+impl AgentProvider for ManagedEchoAgent {
+    fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, RuntimeAgentEvent> {
+        stream::iter(vec![
+            RuntimeAgentEvent::output_delta(format!("Echo: {}", request.message)),
+            RuntimeAgentEvent::done(),
+        ])
+        .boxed()
+    }
+}
+
 impl Agent for ManagedEchoAgent {
     fn id(&self) -> &'static str {
         self.id
@@ -80,13 +93,5 @@ impl Agent for ManagedEchoAgent {
 
     fn description(&self) -> &'static str {
         self.description
-    }
-
-    fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk> {
-        stream::iter(vec![ChatChunk::content_only(format!(
-            "Echo: {}",
-            request.message
-        ))])
-        .boxed()
     }
 }
