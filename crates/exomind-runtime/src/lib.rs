@@ -213,11 +213,6 @@ impl RuntimeHandle {
         Arc::clone(&self.mesh)
     }
 
-    /// Clone underlying MeshRelayManager Arc（克隆底层 MeshRelayManager 引用）.
-    pub fn clone_mesh_relay(&self) -> Option<Arc<MeshRelayManager>> {
-        self.mesh_relay.as_ref().map(Arc::clone)
-    }
-
     /// Publish via a provided SignalPool（在指定 SignalPool 上发布）.
     pub fn publish_signal_to_pool(
         signal_pool: &SignalPool,
