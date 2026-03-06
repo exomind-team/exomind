@@ -68,6 +68,13 @@ describe('release workflow / 发布流程: self-hosted bun install hardening', (
     expect(workflowContent).toContain('"src-tauri/target/release/exomind.exe"');
   });
 
+  it('generates website-compatible latest metadata on workflow_dispatch / 手动触发时也生成官网可识别的 latest 元数据', () => {
+    const workflowContent = readReleaseWorkflow();
+    expect(workflowContent).toMatch(/\$artifactVersion = if \(\$isBuildTagPush -or \$isReleaseTagPush\) \{ \$versionDir \} else \{ "v\$version" \}/);
+    expect(workflowContent).toContain('Generate latest metadata for website consumers');
+    expect(workflowContent).toContain('$shouldPublishLatestMetadata = $isBuildTagPush -or $isReleaseTagPush -or "${{ github.event_name }}" -eq "workflow_dispatch"');
+  });
+
   it('skips GitHub artifact upload on workflow_dispatch in self-hosted job / 手动触发时跳过 GitHub artifact 中转', () => {
     const workflowContent = readReleaseWorkflow();
     expect(workflowContent).toMatch(

@@ -641,9 +641,10 @@ jobs:
             $channel = "preview"
             $versionDir = "v$version-manual.$runNumber.$shortHash"
           }
-          # artifactVersion (产物版本号): tag push uses "v..." for website API compatibility.
-          # （tag push 使用带 v 前缀，确保官网下载 API 与文件名一致）
-          $artifactVersion = if ($isBuildTagPush -or $isReleaseTagPush) { $versionDir } else { $version }
+          # artifactVersion (产物版本号): normalize to "v..." for website API compatibility.
+          # （统一标准化为带 v 前缀，确保官网下载 API 与文件名一致）
+          $artifactVersion = if ($isBuildTagPush -or $isReleaseTagPush) { $versionDir } else { "v$version" }
+          $shouldPublishLatestMetadata = $isBuildTagPush -or $isReleaseTagPush -or "${{ github.event_name }}" -eq "workflow_dispatch"
 
           $stagingDir = Join-Path $env:RUNNER_TEMP "r2-direct-upload"
           if (Test-Path $stagingDir) {
@@ -760,8 +761,8 @@ jobs:
             throw "Failed to upload self-hosted manifest to R2."
           }
 
-          if ($isBuildTagPush -or $isReleaseTagPush) {
-            Write-Host "Tag push detected (channel=$channel). Generate R2 metadata (检测到 tag push，生成 R2 元数据)."
+          if ($shouldPublishLatestMetadata) {
+            Write-Host "Generate latest metadata for website consumers (为官网消费者生成 latest 元数据). channel=$channel event=${{ github.event_name }}"
             $publishedAt = (Get-Date).ToUniversalTime().ToString("yyyy-MM-ddTHH:mm:ssZ")
 
             function Get-AssetKey([string]$fileName) {
@@ -809,8 +810,9 @@ jobs:
               throw "Failed to upload $channel latest.json."
             }
 
-            # versions.json: only for preview channel (release channel doesn't need rotation/cleanup)
-            if ($channel -eq "preview") {
+            # versions.json: only for preview build/release tag push.
+            # （仅 build/release tag push 更新历史列表，避免 workflow_dispatch 产生无效 release 链接）
+            if ($channel -eq "preview" -and ($isBuildTagPush -or $isReleaseTagPush)) {
               $retention = 15
               $existingVersionsPath = Join-Path $stagingDir "existing-versions.json"
               $existingVersions = @()

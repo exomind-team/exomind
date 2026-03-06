@@ -67,4 +67,51 @@ describe('website download api / 官网下载 API', () => {
     expect(response.headers.get('Content-Type')).toBe('application/gzip');
     expect(response.headers.get('Content-Disposition')).toContain('ExoMind-RT-v0.3.5-linux-x64.tar.gz');
   });
+
+  it('serves windows msi installer when latest metadata exposes windows-x64-installer / latest 元数据包含 windows-x64-installer 时可下载 MSI', async () => {
+    const { GET } = await loadDownloadRoute();
+    const objects = new Map<string, ReturnType<typeof createJsonObject> | ReturnType<typeof createBinaryObject>>([
+      [
+        'preview/latest.json',
+        createJsonObject({
+          version: 'v0.3.5',
+          tag: 'dev',
+          published_at: '2026-03-06T12:00:00Z',
+          assets: {
+            'windows-x64-installer': {
+              url: 'preview/v0.3.5-manual.123.abc1234/ExoMind-v0.3.5-windows-x64-installer.msi',
+              size: 42,
+              sha256: 'msi-sha256',
+            },
+          },
+        }),
+      ],
+      [
+        'preview/v0.3.5-manual.123.abc1234/ExoMind-v0.3.5-windows-x64-installer.msi',
+        createBinaryObject('windows-msi-binary'),
+      ],
+    ]);
+
+    const response = await GET({
+      params: {
+        channel: 'preview',
+        version: 'v0.3.5',
+        platform: 'windows-x64-installer',
+      },
+      locals: {
+        runtime: {
+          env: {
+            RELEASES: {
+              get: async (key: string) => objects.get(key) ?? null,
+            },
+          },
+        },
+      },
+      request: new Request('https://exo-mind.ai/api/download/preview/v0.3.5/windows-x64-installer'),
+    } as never);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get('Content-Type')).toBe('application/octet-stream');
+    expect(response.headers.get('Content-Disposition')).toContain('ExoMind-v0.3.5-windows-x64-installer.msi');
+  });
 });

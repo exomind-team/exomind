@@ -38,6 +38,7 @@ function getFilename(version: string, platform: string): string | null {
   const map: Record<string, string> = {
     'windows-x64-setup': `ExoMind-${version}-windows-x64-setup.exe`,
     'windows-x64': `ExoMind-${version}-windows-x64-setup.exe`,
+    'windows-x64-installer': `ExoMind-${version}-windows-x64-installer.msi`,
     'android-arm64': `ExoMind-${version}-android-arm64.apk`,
     'android-x86': `ExoMind-${version}-android-x86.apk`,
     'macos-aarch64': `ExoMind-${version}-macos-aarch64.dmg`,
@@ -54,6 +55,7 @@ function getContentType(platform: string): string {
   const map: Record<string, string> = {
     'windows-x64': 'application/vnd.microsoft.portable-executable',
     'windows-x64-setup': 'application/vnd.microsoft.portable-executable',
+    'windows-x64-installer': 'application/octet-stream',
     'android-arm64': 'application/vnd.android.package-archive',
     'android-x86': 'application/vnd.android.package-archive',
     'macos-aarch64': 'application/x-apple-diskimage',
@@ -156,7 +158,7 @@ export const GET: APIRoute = async ({ params, locals, request }) => {
   }
 
   const validPlatforms = [
-    'windows-x64', 'windows-x64-setup',
+    'windows-x64', 'windows-x64-setup', 'windows-x64-installer',
     'android-arm64', 'android-x86',
     'macos-aarch64', 'macos-x64',
     'linux-x64-appimage', 'linux-x64-deb',
