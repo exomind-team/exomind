@@ -27,15 +27,20 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).toContain("location.pathname === '/agents'");
   });
 
-  it('uses four desktop nav items without dashboard entry（桌面导航4项且移除总览）', () => {
+  it('uses four desktop nav items with network entry（桌面导航4项且使用网络入口）', () => {
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
     expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
-    expect(desktopNavBlock).toContain("title: 'Agent', path: '/agents'");
+    expect(desktopNavBlock).toContain("title: '网络', path: '/agents', icon: Waypoints");
     expect(desktopNavBlock).toContain("title: '设置', path: '/settings'");
     expect(desktopNavBlock).not.toContain("title: '总览', path: '/dashboard'");
     expect(desktopNavBlock).not.toContain('事件日志');
     expect(desktopNavBlock).not.toContain('专注计时');
     expect(desktopNavBlock).not.toContain('available');
+  });
+
+  it('uses network label and waypoints icon in mobile shell nav（移动端底栏使用网络文案与拓扑图标）', () => {
+    expect(source).toContain("...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : [])");
+    expect(source).not.toContain("...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : [])");
   });
 
   it('registers dashboard route（注册dashboard路由）', () => {

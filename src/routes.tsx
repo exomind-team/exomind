@@ -1,6 +1,6 @@
 ﻿import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Bot, SquareCheckBig, UserRound, Brain, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
@@ -206,7 +206,7 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
-    { key: 'agents', title: 'Agent', path: '/agents', icon: Bot, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
+    { key: 'agents', title: '网络', path: '/agents', icon: Waypoints, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
@@ -356,7 +356,7 @@ function NewLayout() {
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
     { title: 'Me', path: '/me', icon: UserRound },
-    ...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : []),
+    ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
   const isDesktopAdaptiveRoute =
@@ -664,5 +664,4 @@ const newRouteTree = newRootRoute.addChildren([
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
-
 
