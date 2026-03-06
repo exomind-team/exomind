@@ -1,11 +1,13 @@
 import { Plus, SlidersHorizontal } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
-import { getTaskService } from '@/lib/services';
+import { getTaskService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
+import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import { filterMonth, filterNow, filterToday, filterWeek } from './task-tab-filters';
+import { buildTasksTodayViewModel } from './tasks-today-view';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
 type TaskTab = 'now' | 'today' | 'week' | 'month';
@@ -44,6 +46,66 @@ function formatTaskMeta(task: TaskNode): string {
   return task.estimatedMinutes ? `预计 ${task.estimatedMinutes}min` : '未估时';
 }
 
+function formatTaskMetaCompact(task: TaskNode): string {
+  if (!task.estimatedMinutes) {
+    return '未估时';
+  }
+  if (task.estimatedMinutes % 60 === 0) {
+    return `预计 ${task.estimatedMinutes / 60}h`;
+  }
+  return `预计 ${task.estimatedMinutes}min`;
+}
+
+function formatSpentMeta(task: TaskNode): string {
+  return `${formatTaskMetaCompact(task)} · ${task.status === 'in_progress' ? '进行中' : '待开始'}`;
+}
+
+function resolveToneClasses(tone: 'green' | 'orange' | 'blue' | 'red' | 'stone'): {
+  rail: string;
+  tag: string;
+  dot: string;
+  actual: string;
+} {
+  if (tone === 'green') {
+    return {
+      rail: 'bg-[#16A34A]',
+      tag: 'bg-[#DCFCE7] text-[#15803D]',
+      dot: 'bg-[#16A34A]',
+      actual: 'text-[#15803D]',
+    };
+  }
+  if (tone === 'blue') {
+    return {
+      rail: 'bg-[#3B82F6]',
+      tag: 'bg-[#EFF6FF] text-[#2563EB]',
+      dot: 'bg-[#3B82F6]',
+      actual: 'text-[#2563EB]',
+    };
+  }
+  if (tone === 'red') {
+    return {
+      rail: 'bg-[#E7000B]',
+      tag: 'bg-[#FEE2E2] text-[#DC2626]',
+      dot: 'bg-[#E7000B]',
+      actual: 'text-[#DC2626]',
+    };
+  }
+  if (tone === 'orange') {
+    return {
+      rail: 'bg-[#C75B3A]',
+      tag: 'bg-[#FFF7ED] text-[#C75B3A]',
+      dot: 'bg-[#C75B3A]',
+      actual: 'text-[#C75B3A]',
+    };
+  }
+  return {
+    rail: 'bg-[#78716C]',
+    tag: 'bg-[#F5F0ED] text-[#78716C]',
+    dot: 'bg-[#78716C]',
+    actual: 'text-[#57534E]',
+  };
+}
+
 function resolveInitialTaskTab(): TaskTab {
   const preferredTab = consumeTasksDefaultTab();
   if (preferredTab && TAB_ITEMS.some((tab) => tab.id === preferredTab)) {
@@ -66,16 +128,25 @@ export function TasksPage() {
   const isDesktop = useIsDesktop();
   const [activeTab, setActiveTab] = useState<TaskTab>(() => resolveInitialTaskTab());
   const [tasks, setTasks] = useState<TaskNode[]>([]);
+  const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
+  const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [quickInput, setQuickInput] = useState('');
   const quickInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     let disposed = false;
     const svc = getTaskService();
+    const timeBlockService = getTimeBlockService();
     const load = async () => {
-      const list = await svc.listTasks();
+      const [list, blocks, nextActiveBlock] = await Promise.all([
+        svc.listTasks(),
+        timeBlockService.loadTimeBlocks(),
+        timeBlockService.loadActiveBlock(),
+      ]);
       if (!disposed) {
         setTasks(list);
+        setTimeBlocks(blocks);
+        setActiveBlock(nextActiveBlock);
       }
     };
     void load();
@@ -84,10 +155,14 @@ export function TasksPage() {
     const unsubscribe = svc.onTaskChange(() => {
       void load();
     });
+    const unsubscribeBlocks = timeBlockService.onBlockChange(() => {
+      void load();
+    });
 
     return () => {
       disposed = true;
       unsubscribe();
+      unsubscribeBlocks();
     };
   }, []);
 
@@ -99,6 +174,13 @@ export function TasksPage() {
     if (activeTab === 'month') return filterMonth(tasks, now);
     return tasks;
   }, [activeTab, tasks]);
+
+  const todayViewModel = useMemo(() => buildTasksTodayViewModel({
+    tasks: visibleTasks,
+    blocks: timeBlocks,
+    now: new Date(),
+    activeBlock,
+  }), [activeBlock, timeBlocks, visibleTasks]);
 
   const handleQuickAdd = async () => {
     const title = quickInput.trim();
@@ -145,8 +227,102 @@ export function TasksPage() {
           })}
         </div>
 
-        <div className="space-y-3">
-          {visibleTasks.length > 0 ? (
+        {activeTab === 'today' ? (
+          <div className="space-y-4">
+            {todayViewModel.inProgressCount > 0 ? (
+              <section className="space-y-2">
+                <div className="flex items-center gap-2">
+                  <span className="h-2 w-2 rounded-full bg-[#C75B3A]" />
+                  <p className="text-[13px] font-semibold text-[#1C1917] dark:text-[#FAFAF9]">进行中</p>
+                  <span className="text-[13px] text-[#A8A29E]">{todayViewModel.inProgressCount}</span>
+                </div>
+                <div className="space-y-2">
+                  {todayViewModel.inProgressTasks.map((task) => (
+                    <Link key={task.id} to="/tasks/$taskId" params={{ taskId: task.id }} className="block">
+                      <article className="rounded-2xl border border-[#E7E5E4] bg-white px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]">
+                        <div className="flex items-start gap-3">
+                          <div className="mt-1 h-5 w-5 rounded-full border-2 border-[#C75B3A]" />
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+                            <p className="mt-1 text-xs text-[#A8A29E]">{formatSpentMeta(task)}</p>
+                          </div>
+                        </div>
+                      </article>
+                    </Link>
+                  ))}
+                </div>
+              </section>
+            ) : null}
+
+            {todayViewModel.timelineSections.length > 0 ? (
+              <>
+                <div className="h-px w-full bg-[#E7E5E4] dark:bg-[#292524]" />
+                <section className="space-y-5">
+                  {todayViewModel.timelineSections.map((section) => (
+                    <div key={section.id} className="space-y-2.5">
+                      <div className="flex items-center justify-between gap-3">
+                        <div className="flex items-center gap-2">
+                          <p className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{section.label}</p>
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <p className="text-xs text-[#A8A29E]">{section.rangeLabel}</p>
+                          <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[11px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                            {section.durationLabel}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="space-y-2">
+                        {section.items.map((item) => {
+                          const tone = resolveToneClasses(item.tone);
+                          return (
+                            <article key={item.id} className="overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
+                              <div className="flex">
+                                <div className={`w-1 shrink-0 self-stretch ${tone.rail}`} />
+                                <div className="min-w-0 flex-1 px-4 py-3">
+                                  <p className="text-[11px] font-medium text-[#A8A29E]">{item.timeLabel}</p>
+                                  <div className={`mt-1 inline-flex rounded-full px-2 py-0.5 text-[10px] font-semibold ${tone.tag}`}>
+                                    {item.tagLabel}
+                                  </div>
+                                  {item.planText ? (
+                                    <div className="mt-2 flex items-center gap-2 text-xs text-[#A8A29E]">
+                                      <span className="h-1.5 w-1.5 rounded-full bg-[#D6D3D1]" />
+                                      <span>计划: {item.planText}</span>
+                                    </div>
+                                  ) : null}
+                                  <div className={`mt-2 flex items-center gap-2 text-xs font-medium ${tone.actual}`}>
+                                    <span className={`h-1.5 w-1.5 rounded-full ${tone.dot}`} />
+                                    <span>实际: {item.actualText}</span>
+                                  </div>
+                                  <p className="mt-1 text-sm text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                                  <p className="mt-1 text-[11px] text-[#78716C] dark:text-[#A8A29E]">{item.meta}</p>
+                                  {item.note ? (
+                                    <p className="mt-1 text-[11px] text-[#78716C] dark:text-[#A8A29E]">
+                                      {`💬 "${item.note}"`}
+                                    </p>
+                                  ) : null}
+                                </div>
+                              </div>
+                            </article>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  ))}
+                </section>
+              </>
+            ) : todayViewModel.inProgressCount === 0 ? (
+              <p
+                data-testid="tasks-tab-empty"
+                className="rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-4 py-5 text-center text-sm text-[#A8A29E] dark:border-[#3A3432] dark:bg-[#1C1917] dark:text-[#B8B1AC]"
+              >
+                {TAB_EMPTY_TEXT.today}
+              </p>
+            ) : null}
+          </div>
+        ) : (
+          <div className="space-y-3">
+            {visibleTasks.length > 0 ? (
             visibleTasks.map((task) => (
               <Link key={task.id} to="/tasks/$taskId" params={{ taskId: task.id }} className="block">
                 <article className="flex overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
@@ -174,7 +350,8 @@ export function TasksPage() {
               {TAB_EMPTY_TEXT[activeTab]}
             </p>
           )}
-        </div>
+          </div>
+        )}
       </div>
 
       <div className={`sticky px-4 pb-2 md:px-8 lg:px-10 ${isDesktop ? 'bottom-4' : 'bottom-[calc(env(safe-area-inset-bottom,0px)+62px)]'}`}>

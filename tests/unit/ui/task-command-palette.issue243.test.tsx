@@ -27,6 +27,11 @@ vi.mock('@/lib/services', () => ({
     stopSync: vi.fn(async () => {}),
     onTaskChange: vi.fn(() => () => {}),
   }),
+  getTimeBlockService: () => ({
+    loadTimeBlocks: vi.fn(async () => []),
+    loadActiveBlock: vi.fn(async () => null),
+    onBlockChange: vi.fn(() => () => {}),
+  }),
 }));
 
 vi.mock('@/lib/services/command-palette.service', () => ({
