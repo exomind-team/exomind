@@ -188,6 +188,18 @@ describe('timeblock detail back link issue #406', () => {
     expect(backLink).toHaveAttribute('href', '/tasks');
   });
 
+  it.each(['toString', 'constructor'])('falls back to generic tasks link for prototype key source=%s', async (from) => {
+    renderDetail(`?from=${from}`, false);
+
+    await waitFor(() => {
+      expect(loadTimeBlocksMock).toHaveBeenCalled();
+    });
+
+    const backLink = await screen.findByTestId('timeblock-back-link-mobile');
+    expect(backLink).toHaveTextContent('← 返回任务');
+    expect(backLink).toHaveAttribute('href', '/tasks');
+  });
+
   it('renders desktop back link and contextual breadcrumb', async () => {
     renderDetail('?from=today', true);
 

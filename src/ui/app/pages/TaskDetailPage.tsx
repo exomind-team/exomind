@@ -38,6 +38,10 @@ const TIMEBLOCK_SOURCE_LABEL: Record<TimeblockSourceTab, string> = {
   month: '本月',
 };
 
+function isTimeblockSourceTab(value: string): value is TimeblockSourceTab {
+  return Object.prototype.hasOwnProperty.call(TIMEBLOCK_SOURCE_LABEL, value);
+}
+
 interface TimeblockSourceBackLink {
   to: string;
   search?: Record<string, string>;
@@ -104,9 +108,8 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
   }
 
   const searchParams = new URLSearchParams(window.location.search);
-  const from = searchParams.get('from')?.trim() as TimeblockSourceTab | undefined;
-  const isKnownSource = Boolean(from && from in TIMEBLOCK_SOURCE_LABEL);
-  const sourceTab = isKnownSource ? from : undefined;
+  const from = searchParams.get('from')?.trim();
+  const sourceTab = from && isTimeblockSourceTab(from) ? from : undefined;
   const sourceLabel = sourceTab ? TIMEBLOCK_SOURCE_LABEL[sourceTab] : '任务';
 
   return {
