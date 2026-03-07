@@ -8,6 +8,7 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
 import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import {
   startSignalHandlers,
@@ -24,9 +25,12 @@ import type { ActiveBlockReplicationSnapshotPayload } from '@/lib/services/ecs-a
 import { projectActiveBlockReplicationSnapshot as projectActiveBlockSnapshot } from '@/lib/services/ecs-active-block-replication.service';
 import {
   getSelectedRuntimeTarget,
+  getRuntimeTargetMode,
+  persistEmbeddedRuntimeStatus,
   subscribeRuntimeTargetChanges,
   type RuntimeTarget,
 } from '@/config/runtime-target';
+import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 
 function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
   const isTimeblock = payload.review_type === 'timeblock';
@@ -58,6 +62,38 @@ function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
 export function useSignalStream(): void {
   const serviceRef = useRef<SignalStreamService | null>(null);
   const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>(() => getSelectedRuntimeTarget());
+  const [runtimeTargetHydrated, setRuntimeTargetHydrated] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateEmbeddedRuntimeStatus = async () => {
+      try {
+        if (!(await isTauri()) || getRuntimeTargetMode() !== 'embedded') {
+          return;
+        }
+
+        const status = await getRuntimeControlService().getStatus();
+        persistEmbeddedRuntimeStatus({
+          host: status.host,
+          port: status.port,
+          hostId: status.hostId,
+        });
+      } catch (error) {
+        console.warn('[SignalStream] failed to hydrate embedded runtime status:', error);
+      } finally {
+        if (!cancelled) {
+          setRuntimeTargetHydrated(true);
+        }
+      }
+    };
+
+    void hydrateEmbeddedRuntimeStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeRuntimeTargetChanges((nextTarget) => {
@@ -79,6 +115,10 @@ export function useSignalStream(): void {
   }, []);
 
   useEffect(() => {
+    if (!runtimeTargetHydrated) {
+      return;
+    }
+
     const targetLabel = `${runtimeTarget.mode}:${runtimeTarget.host}:${runtimeTarget.port}`;
     const service = new SignalStreamService({
       host: {
@@ -135,5 +175,5 @@ export function useSignalStream(): void {
       serviceRef.current = null;
       console.log(`[SignalStream] SSE connection stopped (${targetLabel})`);
     };
-  }, [runtimeTarget]);
+  }, [runtimeTarget, runtimeTargetHydrated]);
 }

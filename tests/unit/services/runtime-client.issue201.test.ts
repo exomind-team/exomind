@@ -71,6 +71,37 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
     expect(result.error.status).toBe(503);
   });
 
+  it('parses topology capabilities from /topology（解析 /topology 的运行时能力）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        host_id: 'runtime-host-1',
+        hostname: 'local-dev',
+        os: 'Windows 11',
+        arch: 'x86_64',
+        uptime_secs: 100,
+        version: '0.3.6',
+        port: 1919,
+        total_memory_mb: 16000,
+        used_memory_mb: 8000,
+        capabilities: {
+          agent_kinds: ['claude_cli', 'api'],
+          api_providers: ['openai', 'anthropic'],
+        },
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.getTopology(SAMPLE_HOST);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.capabilities.agent_kinds).toEqual(['claude_cli', 'api']);
+    expect(result.data.capabilities.api_providers).toEqual(['openai', 'anthropic']);
+  });
+
   it('streams agent chat chunks from SSE（从 SSE 流式解析 Agent 对话分片）', async () => {
     const encoder = new TextEncoder();
     const fetchImpl = vi.fn(async () => ({
@@ -87,7 +118,7 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
     }));
 
     const client = new RuntimeClient({ fetchImpl });
-    const chunks: Array<{ content: string; sessionId?: string }> = [];
+    const chunks = [];
 
     for await (const chunk of client.streamAgentConversation(SAMPLE_HOST, {
       agentId: 'claude',
@@ -97,8 +128,8 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
     }
 
     expect(chunks).toEqual([
-      { content: '你好', sessionId: 'sid-123' },
-      { content: '，我是 Claude' },
+      { type: 'output.delta', content: '你好', sessionId: 'sid-123', done: false },
+      { type: 'output.delta', content: '，我是 Claude', done: false },
     ]);
     expect(fetchImpl).toHaveBeenCalledWith(
       'http://127.0.0.1:1919/agents/claude/chat',
@@ -110,5 +141,89 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
         }),
       }),
     );
+  });
+
+  it('parses typed runtime events from SSE（解析带类型的 Runtime SSE 事件）', async () => {
+    const encoder = new TextEncoder();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      body: new ReadableStream({
+        start(controller) {
+          controller.enqueue(encoder.encode('data: {"type":"session.started","session_id":"sid-typed"}\n\n'));
+          controller.enqueue(encoder.encode('data: {"type":"output.delta","content":"你好"}\n\n'));
+          controller.enqueue(encoder.encode('data: {"type":"thinking.delta","content":"正在思考"}\n\n'));
+          controller.enqueue(encoder.encode('data: {"type":"done","finish_reason":"stop"}\n\n'));
+          controller.enqueue(encoder.encode('data: [DONE]\n\n'));
+          controller.close();
+        },
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const chunks = [];
+
+    for await (const chunk of client.streamAgentConversation(SAMPLE_HOST, {
+      agentId: 'codex-1',
+      message: '你好',
+    })) {
+      chunks.push(chunk);
+    }
+
+    expect(chunks).toEqual([
+      { type: 'session.started', content: '', sessionId: 'sid-typed', done: false },
+      { type: 'output.delta', content: '你好', done: false },
+      { type: 'thinking.delta', content: '正在思考', done: false },
+      { type: 'done', content: '', finishReason: 'stop', done: true },
+    ]);
+  });
+
+  it('serializes api agent create payload with provider profile（创建 API Agent 时序列化 provider profile）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 201,
+      json: async () => ({
+        id: 'api-agent-1',
+        name: 'API Agent',
+        description: 'OpenAI runtime agent',
+        status: 'available',
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.createAgent(SAMPLE_HOST, {
+      kind: 'api',
+      id: 'api-agent-1',
+      name: 'API Agent',
+      description: 'OpenAI runtime agent',
+      providerProfile: {
+        profileId: 'provider-profile-1',
+        name: 'OpenAI GPT-5',
+        provider: 'openai',
+        model: 'gpt-5',
+        baseUrl: 'https://api.openai.com/v1',
+        apiKey: 'sk-test',
+        createdAt: '2026-03-07T00:00:00.000Z',
+        updatedAt: '2026-03-07T00:00:00.000Z',
+      },
+    });
+
+    expect(result.ok).toBe(true);
+
+    const [, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(requestInit?.body).toBeDefined();
+    expect(JSON.parse(String(requestInit.body))).toEqual(expect.objectContaining({
+      kind: 'api',
+      id: 'api-agent-1',
+      name: 'API Agent',
+      description: 'OpenAI runtime agent',
+      provider_profile: expect.objectContaining({
+        profile_id: 'provider-profile-1',
+        provider: 'openai',
+        model: 'gpt-5',
+        base_url: 'https://api.openai.com/v1',
+        api_key: 'sk-test',
+      }),
+    }));
   });
 });

@@ -7,6 +7,7 @@ import {
   type RuntimeHostService,
   getRuntimeHostService,
 } from '@/lib/services/runtime-host.service';
+import { getRuntimeMeshSyncService, type RuntimeMeshSyncService } from '@/lib/services/runtime-mesh-sync.service';
 import { RuntimeClient, type RuntimeAgentSummary } from './runtime-client';
 
 export type RuntimeHostConnectionState = 'online' | 'error' | 'offline';
@@ -36,6 +37,7 @@ export interface RuntimeManagerOptions {
   hostService?: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>
     & Partial<Pick<RuntimeHostService, 'mergeHostMetadata'>>;
   runtimeClient?: Pick<RuntimeClient, 'getAgents' | 'getTopology'>;
+  runtimeMeshSyncService?: Pick<RuntimeMeshSyncService, 'ensurePeerPair'>;
   now?: () => Date;
 }
 
@@ -115,11 +117,13 @@ export class RuntimeManager {
   private readonly hostService: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>
     & Partial<Pick<RuntimeHostService, 'mergeHostMetadata'>>;
   private readonly runtimeClient: Pick<RuntimeClient, 'getAgents' | 'getTopology'>;
+  private readonly runtimeMeshSyncService: Pick<RuntimeMeshSyncService, 'ensurePeerPair'>;
   private readonly now: () => Date;
 
   constructor(options: RuntimeManagerOptions = {}) {
     this.hostService = options.hostService ?? getRuntimeHostService();
     this.runtimeClient = options.runtimeClient ?? new RuntimeClient();
+    this.runtimeMeshSyncService = options.runtimeMeshSyncService ?? getRuntimeMeshSyncService();
     this.now = options.now ?? (() => new Date());
   }
 
@@ -230,13 +234,28 @@ export class RuntimeManager {
       host.hostId === patch.hostId
       && host.lastSuccessfulDialAddress === patch.lastSuccessfulDialAddress
     ) {
+      await this.ensureConfirmedPeerPair(host);
       return host;
     }
 
     try {
-      return await this.hostService.mergeHostMetadata(host.id, patch);
+      const mergedHost = await this.hostService.mergeHostMetadata(host.id, patch);
+      await this.ensureConfirmedPeerPair(mergedHost);
+      return mergedHost;
     } catch {
       return host;
+    }
+  }
+
+  private async ensureConfirmedPeerPair(host: RuntimeHostRecord): Promise<void> {
+    if (host.trustState !== 'confirmed_peer' || !host.hostId) {
+      return;
+    }
+
+    try {
+      await this.runtimeMeshSyncService.ensurePeerPair(host);
+    } catch {
+      // Pairing sync is best-effort（自动配对失败不应阻塞主机刷新）。
     }
   }
 }

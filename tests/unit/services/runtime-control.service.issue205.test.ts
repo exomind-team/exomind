@@ -13,6 +13,11 @@ function createMockRuntimePort(overrides: Partial<IRuntimePort> = {}): IRuntimeP
     getStatus: vi.fn().mockResolvedValue({
       running: true, host: '127.0.0.1', port: 4077, pid: 9527,
     }),
+    getReachableAddress: vi.fn().mockResolvedValue({
+      host: '192.168.1.20',
+      port: 4077,
+      hostId: 'mobile-host',
+    }),
     ...overrides,
   };
 }
@@ -55,5 +60,14 @@ describe('runtime control service issue-205（Runtime 启停服务）', () => {
 
     expect(status.running).toBe(false);
     expect(status.error).toContain('not supported');
+  });
+
+  it('delegates reachable address lookup（委托查询可达地址）', async () => {
+    const port = createMockRuntimePort();
+    const service = new RuntimeControlServiceImpl(port);
+    const reachable = await service.getReachableAddress('192.168.1.10', 4077);
+
+    expect(port.getReachableAddress).toHaveBeenCalledWith('192.168.1.10', 4077);
+    expect(reachable.host).toBe('192.168.1.20');
   });
 });

@@ -11,7 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::agent::{self, Agent, AgentSummary, ChatChunk, ChatRequest, SessionInfo};
+use crate::agent::{self, Agent, AgentSummary, ChatChunk, ChatRequest, RuntimeAgentEvent, SessionInfo};
 
 #[derive(Debug, Deserialize)]
 struct ChatRequestPayload {
@@ -74,6 +74,24 @@ fn agent_summary(agent: &Arc<dyn Agent>) -> AgentSummary {
         description: agent.description().to_string(),
         status: agent.status().to_string(),
     }
+}
+
+fn encode_runtime_event(event: RuntimeAgentEvent) -> Event {
+    let encoded = serde_json::to_string(&event).expect("RuntimeAgentEvent serialization failed");
+    Event::default().data(encoded)
+}
+
+fn map_chat_chunk_to_runtime_events(chunk: ChatChunk) -> Vec<RuntimeAgentEvent> {
+    let mut events = Vec::new();
+
+    if let Some(session_id) = chunk.session_id {
+        events.push(RuntimeAgentEvent::session_started(session_id));
+    }
+    if !chunk.content.is_empty() {
+        events.push(RuntimeAgentEvent::output_delta(chunk.content));
+    }
+
+    events
 }
 
 fn create_echo_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, StatusCode> {
@@ -158,14 +176,18 @@ async fn chat_with_agent(
             .filter(|session| !session.is_empty()),
     };
 
-    let data_stream = agent.chat_stream(request).map(|chunk: ChatChunk| {
-        // ChatChunk currently only contains strings, JSON serialization is expected infallible.
-        let encoded = serde_json::to_string(&chunk).expect("ChatChunk serialization failed");
-        Ok::<Event, Infallible>(Event::default().data(encoded))
+    let data_stream = agent.chat_stream(request).flat_map(|chunk: ChatChunk| {
+        let events = map_chat_chunk_to_runtime_events(chunk)
+            .into_iter()
+            .map(|event| Ok::<Event, Infallible>(encode_runtime_event(event)))
+            .collect::<Vec<_>>();
+        stream::iter(events)
     });
 
-    let done_stream =
-        stream::once(async { Ok::<Event, Infallible>(Event::default().data("[DONE]")) });
+    let done_stream = stream::iter(vec![
+        Ok::<Event, Infallible>(encode_runtime_event(RuntimeAgentEvent::done(Some("stop")))),
+        Ok::<Event, Infallible>(Event::default().data("[DONE]")),
+    ]);
 
     let stream = data_stream.chain(done_stream);
 

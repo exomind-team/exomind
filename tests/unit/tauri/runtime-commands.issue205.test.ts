@@ -10,6 +10,7 @@ describe('tauri runtime commands issue-205（Tauri Runtime 命令注册）', () 
     expect(tauriLib).toContain('runtime_service_start');
     expect(tauriLib).toContain('runtime_service_stop');
     expect(tauriLib).toContain('runtime_service_status');
+    expect(tauriLib).toContain('runtime_service_reachable_address');
     expect(tauriLib).toContain('signal_publish_fast');
   });
 
@@ -20,6 +21,7 @@ describe('tauri runtime commands issue-205（Tauri Runtime 命令注册）', () 
     expect(runtimeCommands).toContain('pub async fn runtime_service_start');
     expect(runtimeCommands).toContain('pub async fn runtime_service_stop');
     expect(runtimeCommands).toContain('pub fn runtime_service_status');
+    expect(runtimeCommands).toContain('pub fn runtime_service_reachable_address');
     expect(runtimeCommands).toContain('pub fn signal_publish_fast');
   });
 });

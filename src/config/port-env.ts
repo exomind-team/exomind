@@ -1,3 +1,5 @@
+import { resolveLocalServiceHost } from './local-service-host';
+
 export const DEFAULT_PORTS = {
   web: 1420,
   hmr: 1421,
@@ -50,14 +52,14 @@ function normalizeOptionalBaseUrl(url: string | null | undefined): string | null
 
 function resolveDefaultHost(): string {
   if (typeof window !== 'undefined' && window.location?.hostname) {
-    return window.location.hostname;
+    return resolveLocalServiceHost(window.location.hostname);
   }
 
   return 'localhost';
 }
 
 function resolveRuntimeHostname(hostname?: string): string {
-  if (hostname) return hostname;
+  if (hostname) return resolveLocalServiceHost(hostname);
   return resolveDefaultHost();
 }
 

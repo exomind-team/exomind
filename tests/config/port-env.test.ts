@@ -96,6 +96,19 @@ describe('port env resolver', () => {
     expect(serverUrl).toBe('http://192.168.1.20:1930');
   });
 
+  it('resolveSyncServerUrl should normalize tauri.localhost to loopback（Tauri 本地域名应映射到回环地址）', () => {
+    const serverUrl = resolveSyncServerUrl(
+      {
+        EXOMIND_POUCHDB_PORT: '1930',
+      },
+      {
+        hostname: 'tauri.localhost',
+      }
+    );
+
+    expect(serverUrl).toBe('http://127.0.0.1:1930');
+  });
+
   it('resolveAsrServerUrl should prefer VITE_ASR_SERVER_URL', () => {
     const serverUrl = resolveAsrServerUrl({
       VITE_ASR_SERVER_URL: 'http://localhost:19049',
@@ -124,6 +137,19 @@ describe('port env resolver', () => {
     );
 
     expect(serverUrl).toBe('http://192.168.1.20:1931');
+  });
+
+  it('resolveAsrServerUrl should normalize tauri.localhost to loopback（ASR 本地域名应映射到回环地址）', () => {
+    const serverUrl = resolveAsrServerUrl(
+      {
+        EXOMIND_ASR_PORT: '1931',
+      },
+      {
+        hostname: 'tauri.localhost',
+      }
+    );
+
+    expect(serverUrl).toBe('http://127.0.0.1:1931');
   });
 
   it('resolveBffCorsPolicy should allow all origins in development by default', () => {

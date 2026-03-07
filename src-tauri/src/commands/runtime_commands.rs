@@ -7,6 +7,7 @@ use exomind_runtime::{
     RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use serde::{Deserialize, Serialize};
+use std::net::{ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
 use tauri::State;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -16,6 +17,7 @@ struct RuntimeInner {
     handle: Option<RuntimeHandle>,
     host: String,
     port: u16,
+    host_id: Option<String>,
     started_at: Option<String>,
     last_error: Option<String>,
     external_runtime: bool,
@@ -32,6 +34,7 @@ impl RuntimeProcessState {
                 handle: None,
                 host: "127.0.0.1".to_string(),
                 port: DEFAULT_RT_PORT,
+                host_id: None,
                 started_at: None,
                 last_error: None,
                 external_runtime: false,
@@ -46,9 +49,18 @@ pub struct RuntimeServiceStatus {
     pub running: bool,
     pub host: String,
     pub port: u16,
+    pub host_id: Option<String>,
     pub pid: Option<u32>,
     pub started_at: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeReachableAddress {
+    pub host: String,
+    pub port: u16,
+    pub host_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -84,6 +96,7 @@ fn compose_status(
         running,
         host: inner.host.clone(),
         port: inner.port,
+        host_id: inner.host_id.clone(),
         pid: (running && inner.handle.is_some()).then_some(std::process::id()),
         started_at: inner.started_at.clone(),
         error: error.or_else(|| inner.last_error.clone()),
@@ -119,6 +132,26 @@ fn should_restart_running_runtime(
     requested_port: u16,
 ) -> bool {
     current_host != requested_host || current_port != requested_port
+}
+
+fn resolve_reachable_host(remote_host: &str, remote_port: u16) -> Result<String, String> {
+    let remote_addr = format!("{remote_host}:{remote_port}");
+    let mut resolved = remote_addr
+        .to_socket_addrs()
+        .map_err(|error| format!("failed to resolve remote host: {error}"))?;
+    let target = resolved
+        .next()
+        .ok_or_else(|| "remote host did not resolve to any address".to_string())?;
+    let bind_addr = if target.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+    let socket =
+        UdpSocket::bind(bind_addr).map_err(|error| format!("failed to bind udp socket: {error}"))?;
+    socket
+        .connect(target)
+        .map_err(|error| format!("failed to connect udp probe socket: {error}"))?;
+    let local_addr = socket
+        .local_addr()
+        .map_err(|error| format!("failed to inspect local udp address: {error}"))?;
+    Ok(local_addr.ip().to_string())
 }
 
 async fn probe_runtime_health(host: &str, port: u16) -> bool {
@@ -162,6 +195,7 @@ fn mark_external_runtime_running(
     let mut inner = lock_or_error(state)?;
     inner.host = host.to_string();
     inner.port = port;
+    inner.host_id = None;
     inner.started_at = None;
     inner.last_error = None;
     inner.external_runtime = true;
@@ -203,6 +237,7 @@ pub async fn ensure_runtime_started(
         if let Some((host, port)) = running_snapshot {
             inner.host = host;
             inner.port = port;
+            inner.host_id = inner.handle.as_ref().map(|handle| handle.host_id().to_string());
             inner.last_error = None;
             inner.external_runtime = false;
             if !should_restart_running_runtime(
@@ -276,6 +311,7 @@ pub async fn ensure_runtime_started(
     let mut inner = lock_or_error(&state)?;
     inner.host = started_host;
     inner.port = started_port;
+    inner.host_id = Some(handle.host_id().to_string());
     inner.started_at = Some(Utc::now().to_rfc3339());
     inner.last_error = None;
     inner.external_runtime = false;
@@ -339,6 +375,7 @@ pub fn runtime_status_snapshot(
     let running = if let Some((host, port)) = running_snapshot {
         inner.host = host;
         inner.port = port;
+        inner.host_id = inner.handle.as_ref().map(|handle| handle.host_id().to_string());
         inner.external_runtime = false;
         true
     } else if inner.external_runtime {
@@ -372,6 +409,33 @@ pub fn runtime_service_status(
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<RuntimeServiceStatus, String> {
     runtime_status_snapshot(state.inner().clone())
+}
+
+#[tauri::command]
+pub fn runtime_service_reachable_address(
+    state: State<'_, Arc<RuntimeProcessState>>,
+    remote_host: String,
+    remote_port: u16,
+) -> Result<RuntimeReachableAddress, String> {
+    let (host_id, port) = {
+        let inner = lock_or_error(state.inner())?;
+        let handle = match inner.handle.as_ref() {
+            Some(handle) if handle.is_running() => handle,
+            Some(_) => return Err("embedded runtime is not running".to_string()),
+            None if inner.external_runtime => {
+                return Err("embedded runtime is managed by another process".to_string());
+            }
+            None => return Err("embedded runtime not running".to_string()),
+        };
+        (handle.host_id().to_string(), handle.port())
+    };
+
+    let host = resolve_reachable_host(&remote_host, remote_port)?;
+    Ok(RuntimeReachableAddress {
+        host,
+        port,
+        host_id: Some(host_id),
+    })
 }
 
 #[tauri::command]
@@ -466,6 +530,7 @@ mod tests {
             handle: None,
             host: "127.0.0.1".to_string(),
             port: 9124,
+            host_id: None,
             started_at: None,
             last_error: None,
             external_runtime: true,
@@ -483,11 +548,13 @@ mod tests {
             let mut inner = super::lock_or_error(&state).expect("runtime state lock");
             inner.host = "127.0.0.1".to_string();
             inner.port = 9124;
+            inner.host_id = Some("host-local".to_string());
             inner.external_runtime = true;
         }
 
         let status = super::runtime_status_snapshot(state).expect("status snapshot");
         assert!(status.running);
         assert_eq!(status.pid, None);
+        assert_eq!(status.host_id.as_deref(), Some("host-local"));
     }
 }

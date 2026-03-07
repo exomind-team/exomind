@@ -29,13 +29,15 @@ export function buildSignalStreamUrl(baseUrl: string, agentId: string, heartbeat
 
 export class HttpSseSignalTransport implements SignalTransport {
   private readonly baseUrl: string;
+  private readonly host: RuntimeHostRecord;
 
   constructor(options: HttpSseSignalTransportOptions) {
+    this.host = options.host;
     this.baseUrl = buildSignalBaseUrl(options.host);
   }
 
   async publish(request: PublishRequest): Promise<PublishResponse> {
-    if (await isTauri()) {
+    if (this.host.isLocal && await isTauri()) {
       try {
         return await invoke<PublishResponse>('signal_publish_fast', { request });
       } catch (error) {

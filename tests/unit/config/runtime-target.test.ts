@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
   getRuntimeExternalAddress,
   getEmbeddedRuntimeNetworkMode,
   getRuntimeTargetMode,
@@ -25,6 +26,35 @@ describe('runtime target config（Runtime 目标配置）', () => {
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
       port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+    });
+  });
+
+  it('uses loopback for tauri localhost embedded target（Tauri embedded 目标应回落到回环地址）', () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+
+    expect(getSelectedRuntimeTarget()).toMatchObject({
+      mode: 'embedded',
+      host: '127.0.0.1',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+    });
+  });
+
+  it('prefers cached embedded runtime status（优先使用缓存的内嵌 runtime 状态）', () => {
+    window.localStorage.setItem(
+      EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+      JSON.stringify({
+        host: '0.0.0.0',
+        port: 4077,
+      }),
+    );
+
+    expect(getSelectedRuntimeTarget()).toMatchObject({
+      mode: 'embedded',
+      host: '127.0.0.1',
+      port: 4077,
     });
   });
 

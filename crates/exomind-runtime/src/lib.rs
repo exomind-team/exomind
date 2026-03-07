@@ -793,6 +793,20 @@ mod tests {
         assert_eq!(payload["port"], serde_json::json!(TEST_PORT));
         assert!(payload["total_memory_mb"].is_u64());
         assert!(payload["used_memory_mb"].is_u64());
+        assert!(payload["capabilities"].is_object());
+        assert!(payload["capabilities"]["agent_kinds"].is_array());
+        assert!(payload["capabilities"]["api_providers"].is_array());
+        let agent_kinds = payload["capabilities"]["agent_kinds"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let api_providers = payload["capabilities"]["api_providers"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(agent_kinds.iter().any(|item| item == "api"));
+        assert!(api_providers.iter().any(|item| item == "openai"));
+        assert!(api_providers.iter().any(|item| item == "anthropic"));
     }
 
     #[tokio::test]
@@ -857,7 +871,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn echo_chat_stream_returns_data_and_done() {
+    async fn echo_chat_stream_returns_typed_events_and_done_marker() {
         const TEST_PORT: u16 = 3003;
         let response = app(TEST_PORT)
             .oneshot(
@@ -883,12 +897,15 @@ mod tests {
         let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
         let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
-        let data_marker = r#"data: {"content":"Echo: hello"}"#;
+        let data_marker = r#"data: {"type":"output.delta","content":"Echo: hello"}"#;
+        let typed_done_marker = r#"data: {"type":"done","finish_reason":"stop"}"#;
         let done_marker = "data: [DONE]";
         let data_index = body_text.find(data_marker).unwrap();
+        let typed_done_index = body_text.find(typed_done_marker).unwrap();
         let done_index = body_text.find(done_marker).unwrap();
 
-        assert!(data_index < done_index);
+        assert!(data_index < typed_done_index);
+        assert!(typed_done_index < done_index);
     }
 
     #[tokio::test]

@@ -7,6 +7,9 @@ use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 pub mod claude;
 pub mod echo;
+pub mod runtime_event;
+
+pub use runtime_event::RuntimeAgentEvent;
 
 /// Agent summary info (Agent 列表摘要信息).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]

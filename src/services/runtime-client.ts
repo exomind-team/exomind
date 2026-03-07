@@ -1,5 +1,11 @@
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
-import type { RuntimeTopologyResponse } from '@/lib/types/runtime-topology';
+import type { ProviderProfileSnapshot } from '@/lib/agent-provider/types';
+import type {
+  RuntimeCapabilityAgentKind,
+  RuntimeCapabilityApiProvider,
+  RuntimeTopologyCapabilities,
+  RuntimeTopologyResponse,
+} from '@/lib/types/runtime-topology';
 
 export type RuntimeClientErrorCode = 'timeout' | 'network' | 'http' | 'invalid_payload';
 
@@ -27,10 +33,11 @@ export interface RuntimeAgentSummary {
 }
 
 export interface RuntimeCreateAgentRequest {
-  kind: 'echo' | 'claude';
+  kind: 'echo' | 'claude' | 'claude_cli' | 'codex_cli' | 'api';
   id?: string;
   name?: string;
   description?: string;
+  providerProfile?: ProviderProfileSnapshot;
 }
 
 export interface RuntimeDeleteAgentResponse {
@@ -52,8 +59,12 @@ export interface RuntimeAgentConversationRequest {
 }
 
 export interface RuntimeAgentConversationChunk {
+  type: 'session.started' | 'output.delta' | 'thinking.delta' | 'error' | 'done';
   content: string;
   sessionId?: string;
+  message?: string;
+  finishReason?: string;
+  done: boolean;
 }
 
 const DEFAULT_TIMEOUT_MS = 3500;
@@ -107,6 +118,61 @@ function parseRuntimeAgentSummary(value: unknown): RuntimeAgentSummary | null {
   };
 }
 
+function readOptionalString(
+  record: Record<string, unknown>,
+  snakeCaseKey: string,
+  camelCaseKey?: string,
+): string | undefined {
+  const snakeValue = record[snakeCaseKey];
+  if (typeof snakeValue === 'string' && snakeValue) {
+    return snakeValue;
+  }
+
+  if (!camelCaseKey) return undefined;
+  const camelValue = record[camelCaseKey];
+  return typeof camelValue === 'string' && camelValue ? camelValue : undefined;
+}
+
+function parseStringUnionArray<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+): T[] | null {
+  if (!Array.isArray(value)) return null;
+  const parsed: T[] = [];
+  for (const item of value) {
+    if (typeof item !== 'string') {
+      return null;
+    }
+    if (!allowed.includes(item as T)) {
+      return null;
+    }
+    parsed.push(item as T);
+  }
+  return parsed;
+}
+
+function parseTopologyCapabilities(value: unknown): RuntimeTopologyCapabilities | null {
+  if (!isObjectRecord(value)) return null;
+
+  const agentKinds = parseStringUnionArray<RuntimeCapabilityAgentKind>(
+    value.agent_kinds,
+    ['claude_cli', 'codex_cli', 'api'],
+  );
+  const apiProviders = parseStringUnionArray<RuntimeCapabilityApiProvider>(
+    value.api_providers,
+    ['openai', 'anthropic'],
+  );
+
+  if (!agentKinds || !apiProviders) {
+    return null;
+  }
+
+  return {
+    agent_kinds: agentKinds,
+    api_providers: apiProviders,
+  };
+}
+
 function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
   if (!isObjectRecord(value)) return null;
   if (value.host_id != null && typeof value.host_id !== 'string') return null;
@@ -118,6 +184,8 @@ function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
   if (typeof value.port !== 'number') return null;
   if (value.total_memory_mb != null && typeof value.total_memory_mb !== 'number') return null;
   if (value.used_memory_mb != null && typeof value.used_memory_mb !== 'number') return null;
+  const capabilities = parseTopologyCapabilities(value.capabilities);
+  if (!capabilities) return null;
 
   return {
     host_id: typeof value.host_id === 'string' ? value.host_id : undefined,
@@ -129,6 +197,7 @@ function parseTopologyResponse(value: unknown): RuntimeTopologyResponse | null {
     port: value.port,
     total_memory_mb: typeof value.total_memory_mb === 'number' ? value.total_memory_mb : undefined,
     used_memory_mb: typeof value.used_memory_mb === 'number' ? value.used_memory_mb : undefined,
+    capabilities,
   };
 }
 
@@ -143,24 +212,124 @@ function extractSseData(rawEvent: string): string | null {
   return chunks.join('\n');
 }
 
-function parseRuntimeAgentConversationChunk(data: string): RuntimeAgentConversationChunk | null {
+function normalizeProviderProfileForWire(profile: ProviderProfileSnapshot): Record<string, unknown> {
+  return {
+    profile_id: profile.profileId,
+    name: profile.name,
+    provider: profile.provider,
+    model: profile.model,
+    base_url: profile.baseUrl,
+    api_key: profile.apiKey,
+  };
+}
+
+function normalizeCreateAgentRequest(request: RuntimeCreateAgentRequest): Record<string, unknown> {
+  const payload: Record<string, unknown> = {
+    kind: request.kind,
+  };
+
+  if (request.id) payload.id = request.id;
+  if (request.name) payload.name = request.name;
+  if (request.description) payload.description = request.description;
+
+  if (request.kind === 'api') {
+    if (!request.providerProfile) {
+      throw new Error('providerProfile is required for api agent（API Agent 必须提供 providerProfile）');
+    }
+    payload.provider_profile = normalizeProviderProfileForWire(request.providerProfile);
+  }
+
+  return payload;
+}
+
+function parseTypedRuntimeAgentConversationChunk(
+  parsed: Record<string, unknown>,
+): RuntimeAgentConversationChunk | null {
+  const rawType = typeof parsed.type === 'string' ? parsed.type : '';
+  const sessionId = readOptionalString(parsed, 'session_id', 'sessionId');
+  const content = typeof parsed.content === 'string' ? parsed.content : '';
+  const finishReason = readOptionalString(parsed, 'finish_reason', 'finishReason');
+  const message = readOptionalString(parsed, 'message');
+
+  switch (rawType) {
+    case 'session.started':
+      if (!sessionId) return null;
+      return {
+        type: 'session.started',
+        content: '',
+        sessionId,
+        done: false,
+      };
+    case 'output.delta':
+      return {
+        type: 'output.delta',
+        content,
+        sessionId,
+        done: false,
+      };
+    case 'thinking.delta':
+      return {
+        type: 'thinking.delta',
+        content,
+        sessionId,
+        done: false,
+      };
+    case 'error':
+      return {
+        type: 'error',
+        content,
+        sessionId,
+        message: message ?? content,
+        done: false,
+      };
+    case 'done':
+      return {
+        type: 'done',
+        content: '',
+        sessionId,
+        finishReason,
+        done: true,
+      };
+    default:
+      return null;
+  }
+}
+
+function parseRuntimeAgentConversationChunks(data: string): RuntimeAgentConversationChunk[] {
   let parsed: unknown;
   try {
     parsed = JSON.parse(data);
   } catch {
-    return null;
+    return [];
   }
 
-  if (!isObjectRecord(parsed)) return null;
+  if (!isObjectRecord(parsed)) return [];
+
+  const typedChunk = parseTypedRuntimeAgentConversationChunk(parsed);
+  if (typedChunk) {
+    return [typedChunk];
+  }
 
   const content = typeof parsed.content === 'string' ? parsed.content : '';
-  const sessionId = typeof parsed.session_id === 'string' && parsed.session_id
-    ? parsed.session_id
-    : undefined;
+  const sessionId = readOptionalString(parsed, 'session_id', 'sessionId');
 
-  if (!content && !sessionId) return null;
+  if (!content && !sessionId) return [];
 
-  return { content, sessionId };
+  if (!content && sessionId) {
+    return [{
+      type: 'session.started',
+      content: '',
+      sessionId,
+      done: false,
+    }];
+  }
+
+  return [{
+    type: 'output.delta',
+    content,
+    sessionId,
+    done: false,
+  }];
 }
 
 export class RuntimeClient {
@@ -236,7 +405,11 @@ export class RuntimeClient {
     host: RuntimeHostRecord,
     request: RuntimeCreateAgentRequest,
   ): Promise<RuntimeClientResult<RuntimeAgentSummary>> {
-    const response = await this.sendJson(`${buildBaseUrl(host)}/agents`, 'POST', request);
+    const response = await this.sendJson(
+      `${buildBaseUrl(host)}/agents`,
+      'POST',
+      normalizeCreateAgentRequest(request),
+    );
     if (!response.ok) {
       return response;
     }
@@ -357,8 +530,8 @@ export class RuntimeClient {
           if (!data) continue;
           if (data === '[DONE]') return;
 
-          const chunk = parseRuntimeAgentConversationChunk(data);
-          if (chunk) {
+          const chunks = parseRuntimeAgentConversationChunks(data);
+          for (const chunk of chunks) {
             yield chunk;
           }
         }
@@ -368,8 +541,8 @@ export class RuntimeClient {
       const trailingData = extractSseData(buffer);
       if (!trailingData || trailingData === '[DONE]') return;
 
-      const trailingChunk = parseRuntimeAgentConversationChunk(trailingData);
-      if (trailingChunk) {
+      const trailingChunks = parseRuntimeAgentConversationChunks(trailingData);
+      for (const trailingChunk of trailingChunks) {
         yield trailingChunk;
       }
     } finally {

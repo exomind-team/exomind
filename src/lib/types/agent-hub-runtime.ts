@@ -24,6 +24,7 @@ export interface RuntimeServiceStatus {
   running: boolean;
   host: string;
   port: number;
+  hostId?: string; // host_id（逻辑主机 ID）
   pid?: number;
   startedAt?: string;
   error?: string;

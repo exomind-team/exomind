@@ -7,4 +7,10 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     expect(source).toContain('subscribeRuntimeTargetChanges');
     expect(source).toContain('getSelectedRuntimeTarget');
   });
+
+  it('hydrates embedded runtime status before opening SSE（建立 SSE 前先同步内嵌 Runtime 状态）', () => {
+    const source = readFileSync('src/ui/hooks/useSignalStream.ts', 'utf-8');
+    expect(source).toContain('getRuntimeControlService');
+    expect(source).toContain('persistEmbeddedRuntimeStatus');
+  });
 });

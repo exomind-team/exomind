@@ -161,4 +161,111 @@ describe('runtime manager issue-201（多主机聚合管理）', () => {
     );
     expect(addHost).not.toHaveBeenCalled();
   });
+
+  it('syncs mesh peer pair when host becomes confirmed peer（confirmed peer 后触发 mesh 自动配对）', async () => {
+    const mergeHostMetadata = vi.fn(async (_hostId: string, patch: { hostId?: string; lastSuccessfulDialAddress?: string }) => ({
+      ...HOST_B,
+      hostId: patch.hostId,
+      lastSuccessfulDialAddress: patch.lastSuccessfulDialAddress,
+      manualOverride: '192.168.1.22:2919',
+      trustState: 'confirmed_peer' as const,
+    }));
+    const ensurePeerPair = vi.fn(async () => undefined);
+    const hostService = {
+      listHosts: vi.fn(async () => [HOST_B]),
+      addHost: vi.fn(),
+      removeHost: vi.fn(),
+      mergeHostMetadata,
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(async () => ({
+        ok: true as const,
+        data: [],
+      })),
+      getTopology: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          host_id: 'host-b-logic',
+          hostname: 'peer-b',
+          os: 'android',
+          arch: 'arm64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 2919,
+          capabilities: {
+            agent_kinds: ['api' as const],
+            api_providers: ['openai' as const, 'anthropic' as const],
+          },
+        },
+      })),
+    };
+
+    const manager = new RuntimeManager({
+      hostService,
+      runtimeClient,
+      runtimeMeshSyncService: { ensurePeerPair },
+    });
+    await manager.refreshSnapshot();
+
+    expect(mergeHostMetadata).toHaveBeenCalled();
+    expect(ensurePeerPair).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'host-b',
+      trustState: 'confirmed_peer',
+      hostId: 'host-b-logic',
+    }));
+  });
+
+  it('retries mesh sync for unchanged confirmed peer metadata（confirmed peer 元数据未变化时仍重试 mesh 配对）', async () => {
+    const ensurePeerPair = vi.fn(async () => undefined);
+    const confirmedHost: RuntimeHostRecord = {
+      ...HOST_B,
+      hostId: 'host-b-logic',
+      trustState: 'confirmed_peer',
+      lastSuccessfulDialAddress: '192.168.1.22:2919',
+      manualOverride: '192.168.1.22:2919',
+    };
+    const mergeHostMetadata = vi.fn(async () => confirmedHost);
+    const hostService = {
+      listHosts: vi.fn(async () => [confirmedHost]),
+      addHost: vi.fn(),
+      removeHost: vi.fn(),
+      mergeHostMetadata,
+    };
+    const runtimeClient = {
+      getAgents: vi.fn(async () => ({
+        ok: true as const,
+        data: [],
+      })),
+      getTopology: vi.fn(async () => ({
+        ok: true as const,
+        data: {
+          host_id: 'host-b-logic',
+          hostname: 'peer-b',
+          os: 'android',
+          arch: 'arm64',
+          uptime_secs: 100,
+          version: '0.3.6',
+          port: 2919,
+          capabilities: {
+            agent_kinds: ['api' as const],
+            api_providers: ['openai' as const, 'anthropic' as const],
+          },
+        },
+      })),
+    };
+
+    const manager = new RuntimeManager({
+      hostService,
+      runtimeClient,
+      runtimeMeshSyncService: { ensurePeerPair },
+    });
+    await manager.refreshSnapshot();
+
+    expect(mergeHostMetadata).not.toHaveBeenCalled();
+    expect(ensurePeerPair).toHaveBeenCalledWith(expect.objectContaining({
+      id: 'host-b',
+      trustState: 'confirmed_peer',
+      hostId: 'host-b-logic',
+    }));
+  });
 });

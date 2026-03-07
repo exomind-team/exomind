@@ -52,6 +52,38 @@ describe('HttpSseSignalTransport（HTTP/SSE 传输适配器）', () => {
     expect(response.event_id).toBe('evt-fast-transport');
   });
 
+  it('does not use tauri fast publish for external host（外部 RT 不应误走本地快速发布）', async () => {
+    tauriMocks.isTauri.mockResolvedValue(true);
+    tauriMocks.invoke.mockResolvedValue({
+      accepted: true,
+      event_id: 'evt-fast-should-not-run',
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ accepted: true, event_id: 'evt-http-external' }),
+    } as Response);
+
+    const transport = new HttpSseSignalTransport({
+      host: {
+        ...HOST,
+        id: 'remote',
+        name: 'Remote RT',
+        host: '192.168.1.10',
+        port: 4077,
+        isLocal: false,
+      },
+    });
+    const response = await transport.publish(REQUEST);
+
+    expect(tauriMocks.invoke).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledWith('http://192.168.1.10:4077/signals/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(REQUEST),
+    });
+    expect(response.event_id).toBe('evt-http-external');
+  });
+
   it('falls back to HTTP when tauri invoke fails（快速发布失败后降级到 HTTP）', async () => {
     tauriMocks.isTauri.mockResolvedValue(true);
     tauriMocks.invoke.mockRejectedValue(new Error('invoke unavailable'));
@@ -69,6 +101,37 @@ describe('HttpSseSignalTransport（HTTP/SSE 传输适配器）', () => {
       body: JSON.stringify(REQUEST),
     });
     expect(response.event_id).toBe('evt-http-transport');
+  });
+
+  it('uses HTTP directly for external runtime target in tauri（外部 Runtime 不走本地快速发布）', async () => {
+    tauriMocks.isTauri.mockResolvedValue(true);
+    tauriMocks.invoke.mockResolvedValue({
+      accepted: true,
+      event_id: 'evt-fast-should-not-run',
+    });
+    const fetchSpy = vi.spyOn(globalThis, 'fetch').mockResolvedValue({
+      ok: true,
+      json: async () => ({ accepted: true, event_id: 'evt-http-external' }),
+    } as Response);
+
+    const transport = new HttpSseSignalTransport({
+      host: {
+        ...HOST,
+        id: 'desktop-peer',
+        name: 'Desktop Peer',
+        host: '192.168.1.22',
+        isLocal: false,
+      },
+    });
+    const response = await transport.publish(REQUEST);
+
+    expect(tauriMocks.invoke).not.toHaveBeenCalled();
+    expect(fetchSpy).toHaveBeenCalledWith('http://192.168.1.22:1949/signals/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(REQUEST),
+    });
+    expect(response.event_id).toBe('evt-http-external');
   });
 
   it('adds Last-Event-ID when opening stream（建立 SSE 时带上 Last-Event-ID）', async () => {

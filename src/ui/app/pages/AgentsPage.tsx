@@ -36,6 +36,7 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getUseMockDataEnabled } from '@/config/mock-data';
+import { resolveLocalServiceHost } from '@/config/local-service-host';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   DEFAULT_EXTERNAL_RUNTIME_PORT,
@@ -359,7 +360,7 @@ function buildDirectRuntimeCandidates(hosts: RuntimeHostSnapshot[]): RuntimeHost
   const portCandidates = getDirectRuntimePortCandidates();
 
   if (typeof window !== 'undefined' && window.location?.hostname) {
-    hostCandidates.add(window.location.hostname);
+    hostCandidates.add(resolveLocalServiceHost(window.location.hostname));
   }
   hostCandidates.add('localhost');
 
