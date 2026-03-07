@@ -33,7 +33,7 @@ export interface RuntimeAgentSummary {
 }
 
 export interface RuntimeCreateAgentRequest {
-  kind: 'echo' | 'claude' | 'claude_cli' | 'codex_cli' | 'api';
+  kind: 'echo' | 'claude_cli' | 'codex_cli' | 'api';
   id?: string;
   name?: string;
   description?: string;
@@ -59,10 +59,19 @@ export interface RuntimeAgentConversationRequest {
 }
 
 export interface RuntimeAgentConversationChunk {
-  type: 'session.started' | 'output.delta' | 'thinking.delta' | 'error' | 'done';
+  type:
+    | 'session.started'
+    | 'output.delta'
+    | 'thinking.delta'
+    | 'tool.call'
+    | 'tool.result'
+    | 'error'
+    | 'done';
   content: string;
   sessionId?: string;
   message?: string;
+  name?: string;
+  payload?: unknown;
   finishReason?: string;
   done: boolean;
 }
@@ -274,6 +283,30 @@ function parseTypedRuntimeAgentConversationChunk(
         sessionId,
         done: false,
       };
+    case 'tool.call': {
+      const name = readOptionalString(parsed, 'name');
+      if (!name) return null;
+      return {
+        type: 'tool.call',
+        name,
+        payload: parsed.payload,
+        content,
+        sessionId,
+        done: false,
+      };
+    }
+    case 'tool.result': {
+      const name = readOptionalString(parsed, 'name');
+      if (!name) return null;
+      return {
+        type: 'tool.result',
+        name,
+        payload: parsed.payload,
+        content,
+        sessionId,
+        done: false,
+      };
+    }
     case 'error':
       return {
         type: 'error',

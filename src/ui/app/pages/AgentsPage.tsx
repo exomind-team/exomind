@@ -58,7 +58,6 @@ import { getRuntimeControlService } from '@/lib/services/runtime-control.service
 import { KNOWN_AGENT_HUB_TOPICS, VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
 import type { SignalEvent, SignalRoute } from '@/lib/types/signal-pool';
 import type {
-  AgentConversationChunk,
   AgentConversationMessage,
   AgentDetailData,
   AgentDeviceGroup,
@@ -78,6 +77,14 @@ import {
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
 import { RuntimeClient } from '@/services/runtime-client';
+import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
+import {
+  createProviderProfile,
+  listProviderProfiles,
+  markProviderProfileUsed,
+  resolveProviderProfile,
+} from '@/lib/agent-provider/provider-profile-storage';
+import type { ApiProviderId, ProviderProfileMeta } from '@/lib/agent-provider/types';
 import {
   buildSignalGraph,
   buildSignalRouteRows,
@@ -103,6 +110,14 @@ import {
   type TopologyViewport,
 } from './topology-layout';
 import { Switch } from '@/components/ui/switch';
+import {
+  appendAdjacentConversationDelta,
+  appendConversationChunk,
+  appendConversationMessage,
+  createConversationMessage,
+  formatRuntimeEventPayload,
+  getConversationMessageTestId,
+} from './agents/conversation-runtime';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -113,7 +128,7 @@ const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string 
 ];
 
 type AddNodeOption = {
-  id: 'agent' | 'device';
+  id: RuntimeCreateAgentRequest['kind'] | 'device';
   title: string;
   description: string;
   tintColor: string;
@@ -121,10 +136,28 @@ type AddNodeOption = {
 
 const ADD_NODE_OPTIONS: AddNodeOption[] = [
   {
-    id: 'agent',
-    title: '添加 Agent',
-    description: '在当前 Runtime 中手动创建 Echo Agent',
+    id: 'claude_cli',
+    title: 'Claude CLI',
+    description: '在 Runtime 中创建 Claude CLI Agent',
+    tintColor: '#C75B3A',
+  },
+  {
+    id: 'codex_cli',
+    title: 'Codex CLI',
+    description: '在 Runtime 中创建 Codex CLI Agent',
     tintColor: '#0D9488',
+  },
+  {
+    id: 'api',
+    title: 'API Agent',
+    description: '通过 OpenAI / Anthropic 接口创建 Agent',
+    tintColor: '#2563EB',
+  },
+  {
+    id: 'echo',
+    title: 'Echo Agent',
+    description: '本地回显测试 Agent',
+    tintColor: '#78716C',
   },
   {
     id: 'device',
@@ -242,7 +275,10 @@ function getListItemIcon(item: AgentHubListItem): LucideIcon {
 }
 
 function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
-  if (optionId === 'agent') return Bot;
+  if (optionId === 'claude_cli') return Brain;
+  if (optionId === 'codex_cli') return Bot;
+  if (optionId === 'api') return Webhook;
+  if (optionId === 'echo') return MessageCircle;
   if (optionId === 'device') return Monitor;
   return Plus;
 }
@@ -426,33 +462,6 @@ function formatSignalTime(timestampMs: number): string {
     minute: '2-digit',
     second: '2-digit',
   });
-}
-
-function appendConversationChunk(
-  messages: AgentConversationMessage[],
-  chunk: AgentConversationChunk,
-): AgentConversationMessage[] {
-  const index = messages.findIndex((item) => item.id === chunk.messageId);
-  if (index === -1) {
-    return [
-      ...messages,
-      {
-        id: chunk.messageId,
-        role: 'agent',
-        content: chunk.delta,
-        createdAt: new Date().toISOString(),
-      },
-    ];
-  }
-
-  const next = [...messages];
-  const current = next[index];
-  if (!current) return messages;
-  next[index] = {
-    ...current,
-    content: `${current.content}${chunk.delta}`,
-  };
-  return next;
 }
 
 type SignalFlowNodeData = {
@@ -1224,12 +1233,12 @@ function DeviceView({
 function AddNodeSheet({
   options,
   onClose,
-  onAddAgent,
+  onSelectAgent,
   onAddDevice,
 }: {
   options: AddNodeOption[];
   onClose: () => void;
-  onAddAgent: () => void;
+  onSelectAgent: (kind: RuntimeCreateAgentRequest['kind']) => void;
   onAddDevice: () => void;
 }) {
   return (
@@ -1269,7 +1278,7 @@ function AddNodeSheet({
                 data-testid={`agent-add-node-option-${option.id}`}
                 onClick={() => {
                   onClose();
-                  if (option.id === 'agent') onAddAgent();
+                  if (option.id !== 'device') onSelectAgent(option.id);
                   if (option.id === 'device') onAddDevice();
                 }}
                 className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left dark:bg-[#292524]"
@@ -1290,6 +1299,228 @@ function AddNodeSheet({
               </button>
             );
           })}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AgentCreateSheet({
+  kind,
+  providerProfiles,
+  selectedProviderProfileId,
+  apiProfileName,
+  apiProvider,
+  apiModel,
+  apiBaseUrl,
+  apiKey,
+  compatibleHosts,
+  selectedHostId,
+  createError,
+  isCreating,
+  onClose,
+  onKindChange,
+  onSelectProviderProfile,
+  onApiProfileNameChange,
+  onApiProviderChange,
+  onApiModelChange,
+  onApiBaseUrlChange,
+  onApiKeyChange,
+  onSelectHost,
+  onCreate,
+}: {
+  kind: RuntimeCreateAgentRequest['kind'];
+  providerProfiles: ProviderProfileMeta[];
+  selectedProviderProfileId: string;
+  apiProfileName: string;
+  apiProvider: ApiProviderId;
+  apiModel: string;
+  apiBaseUrl: string;
+  apiKey: string;
+  compatibleHosts: RuntimeHostSnapshot[];
+  selectedHostId: string;
+  createError: string;
+  isCreating: boolean;
+  onClose: () => void;
+  onKindChange: (kind: RuntimeCreateAgentRequest['kind']) => void;
+  onSelectProviderProfile: (profileId: string) => void;
+  onApiProfileNameChange: (value: string) => void;
+  onApiProviderChange: (value: ApiProviderId) => void;
+  onApiModelChange: (value: string) => void;
+  onApiBaseUrlChange: (value: string) => void;
+  onApiKeyChange: (value: string) => void;
+  onSelectHost: (hostId: string) => void;
+  onCreate: () => void;
+}) {
+  const showApiFields = kind === 'api';
+  const usingSavedProfile = showApiFields && selectedProviderProfileId.trim().length > 0;
+
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="agent-create-overlay"
+        aria-label="关闭 Agent 创建弹窗（Close Agent Create Sheet）"
+        className="absolute inset-0 z-20 bg-black/35"
+        onClick={onClose}
+      />
+      <section
+        data-testid="agent-create-sheet"
+        className="absolute inset-x-0 bottom-0 z-30 rounded-t-[24px] bg-white pb-7 shadow-[0_-8px_28px_rgba(0,0,0,0.12)] dark:bg-[#1C1917] dark:shadow-[0_-8px_28px_rgba(0,0,0,0.45)]"
+      >
+        <div className="flex justify-center pt-2">
+          <div className="h-1 w-10 rounded bg-[#D6D3D1] dark:bg-[#57534E]" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3">
+          <h2 className="text-[18px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">创建 Agent</h2>
+          <button
+            type="button"
+            data-testid="agent-create-close"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">Agent 类型</p>
+            <div className="grid grid-cols-2 gap-2">
+              {(['claude_cli', 'codex_cli', 'api', 'echo'] as RuntimeCreateAgentRequest['kind'][]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  data-testid={`agent-create-kind-${option}`}
+                  onClick={() => onKindChange(option)}
+                  className={`rounded-xl border px-3 py-2 text-left text-xs ${
+                    kind === option
+                      ? 'border-[#0D9488] bg-[#0D948810] text-[#0D9488]'
+                      : 'border-[#E7E5E4] bg-[#FAF7F5] text-[#57534E] dark:border-[#292524] dark:bg-[#292524] dark:text-[#D6D3D1]'
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {showApiFields && (
+            <div className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-[#FAF7F5] p-3 dark:border-[#292524] dark:bg-[#292524]">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">已保存 Provider Profiles</p>
+                {providerProfiles.length > 0 ? (
+                  <select
+                    data-testid="agent-create-provider-profile-select"
+                    value={selectedProviderProfileId}
+                    onChange={(event) => onSelectProviderProfile(event.target.value)}
+                    className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+                  >
+                    <option value="">新建 Provider Profile</option>
+                    {providerProfiles.map((profile) => (
+                      <option key={profile.profileId} value={profile.profileId}>
+                        {profile.name} · {profile.provider} / {profile.model}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">还没有保存的 Provider Profile，将使用下面的新建表单。</p>
+                )}
+              </div>
+
+              <input
+                data-testid="agent-create-provider-name-input"
+                value={apiProfileName}
+                onChange={(event) => onApiProfileNameChange(event.target.value)}
+                disabled={usingSavedProfile}
+                placeholder="Profile 名称（例如 OpenAI GPT-5）"
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              <select
+                data-testid="agent-create-provider-select"
+                value={apiProvider}
+                onChange={(event) => onApiProviderChange(event.target.value as ApiProviderId)}
+                disabled={usingSavedProfile}
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              >
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+              <input
+                data-testid="agent-create-model-input"
+                value={apiModel}
+                onChange={(event) => onApiModelChange(event.target.value)}
+                disabled={usingSavedProfile}
+                placeholder="Model（例如 gpt-5 / claude-sonnet-4-5）"
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              <input
+                data-testid="agent-create-base-url-input"
+                value={apiBaseUrl}
+                onChange={(event) => onApiBaseUrlChange(event.target.value)}
+                disabled={usingSavedProfile}
+                placeholder="Base URL（可选）"
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              <input
+                data-testid="agent-create-api-key-input"
+                value={apiKey}
+                onChange={(event) => onApiKeyChange(event.target.value)}
+                disabled={usingSavedProfile}
+                placeholder="API Key"
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              {usingSavedProfile && (
+                <p className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">
+                  当前使用已保存 Profile；如需修改请切回“新建 Provider Profile”。
+                </p>
+              )}
+            </div>
+          )}
+
+          {compatibleHosts.length > 1 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">Runtime 目标（多目标时需显式选择）</p>
+              <div className="space-y-2">
+                {compatibleHosts.map((snapshot) => (
+                  <button
+                    key={snapshot.host.id}
+                    type="button"
+                    data-testid={`agent-create-runtime-host-${snapshot.host.id}`}
+                    onClick={() => onSelectHost(snapshot.host.id)}
+                    className={`w-full rounded-xl border px-3 py-2 text-left text-xs ${
+                      selectedHostId === snapshot.host.id
+                        ? 'border-[#0D9488] bg-[#0D948810] text-[#0D9488]'
+                        : 'border-[#E7E5E4] bg-[#FAF7F5] text-[#57534E] dark:border-[#292524] dark:bg-[#292524] dark:text-[#D6D3D1]'
+                    }`}
+                  >
+                    <p className="font-semibold">{snapshot.host.name}</p>
+                    <p className="mt-1 text-[11px] opacity-75">{snapshot.host.host}:{snapshot.host.port}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {compatibleHosts.length === 1 && (
+            <p className="rounded-lg bg-[#0D948810] px-3 py-2 text-[11px] text-[#0D9488]">
+              单目标自动直达：{compatibleHosts[0]?.host.name}
+            </p>
+          )}
+
+          {createError && (
+            <p className="rounded-lg bg-[#EF444410] px-3 py-2 text-[11px] text-[#DC2626]">{createError}</p>
+          )}
+
+          <button
+            type="button"
+            data-testid="agent-create-submit"
+            onClick={onCreate}
+            disabled={isCreating}
+            className="h-10 w-full rounded-xl bg-[#0D9488] text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {isCreating ? '创建中...' : '创建 Agent'}
+          </button>
         </div>
       </section>
     </>
@@ -1903,6 +2134,17 @@ export function AgentsPage() {
   const [isChatSending, setIsChatSending] = useState(false);
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
+  const [agentCreateOpen, setAgentCreateOpen] = useState(false);
+  const [agentCreateKind, setAgentCreateKind] = useState<RuntimeCreateAgentRequest['kind']>('claude_cli');
+  const [agentCreateError, setAgentCreateError] = useState('');
+  const [providerProfiles, setProviderProfiles] = useState<ProviderProfileMeta[]>([]);
+  const [selectedProviderProfileId, setSelectedProviderProfileId] = useState('');
+  const [agentCreateSelectedHostId, setAgentCreateSelectedHostId] = useState('');
+  const [apiProfileNameDraft, setApiProfileNameDraft] = useState('');
+  const [apiProviderDraft, setApiProviderDraft] = useState<ApiProviderId>('openai');
+  const [apiModelDraft, setApiModelDraft] = useState('');
+  const [apiBaseUrlDraft, setApiBaseUrlDraft] = useState('');
+  const [apiKeyDraft, setApiKeyDraft] = useState('');
 
   const openRouteEdit = (routeId: string | null = null) => {
     setRightPanel({ state: 'ROUTE_EDIT', routeId });
@@ -1920,11 +2162,67 @@ export function AgentsPage() {
     setRightPanel({ state: 'CLOSED' });
   };
 
-  const resolveActiveRuntimeHost = (): RuntimeHostRecord | null => {
-    const prioritized = sortRouteHostsByPriority(runtimeHostSnapshots);
-    return prioritized.find((item) => item.connectionState === 'online')?.host
-      ?? prioritized.find((item) => item.host)?.host
-      ?? null;
+  const refreshProviderProfileOptions = () => {
+    const profiles = listProviderProfiles();
+    setProviderProfiles(profiles);
+    return profiles;
+  };
+
+  const buildSelectedApiProfileSnapshot = () => {
+    if (selectedProviderProfileId) {
+      return resolveProviderProfile(selectedProviderProfileId);
+    }
+
+    if (!apiModelDraft.trim() || !apiKeyDraft.trim()) {
+      return null;
+    }
+
+    const created = createProviderProfile({
+      name: apiProfileNameDraft.trim() || `${apiProviderDraft} ${apiModelDraft.trim()}`,
+      provider: apiProviderDraft,
+      model: apiModelDraft.trim(),
+      baseUrl: apiBaseUrlDraft.trim() || undefined,
+      apiKey: apiKeyDraft.trim(),
+    });
+    setSelectedProviderProfileId(created.profileId);
+    const nextProfiles = refreshProviderProfileOptions();
+    return resolveProviderProfile(created.profileId)
+      ?? resolveProviderProfile(nextProfiles[0]?.profileId ?? '');
+  };
+
+  const hostSupportsAgentKind = (
+    snapshot: RuntimeHostSnapshot,
+    kind: RuntimeCreateAgentRequest['kind'],
+    providerId?: ApiProviderId,
+  ) => {
+    if (snapshot.connectionState !== 'online') return false;
+    if (kind === 'echo') return true;
+    const capabilities = snapshot.topology?.capabilities;
+    if (!capabilities) return true;
+    if (kind === 'api') {
+      return capabilities.agent_kinds.includes('api')
+        && (!providerId || capabilities.api_providers.includes(providerId));
+    }
+    return capabilities.agent_kinds.includes(kind);
+  };
+
+  const compatibleCreateHosts = runtimeHostSnapshots.filter((snapshot) => hostSupportsAgentKind(
+    snapshot,
+    agentCreateKind,
+    agentCreateKind === 'api'
+      ? (selectedProviderProfileId
+        ? resolveProviderProfile(selectedProviderProfileId)?.provider
+        : apiProviderDraft)
+      : undefined,
+  ));
+
+  const openAgentCreateSheet = (kind: RuntimeCreateAgentRequest['kind']) => {
+    setAgentCreateKind(kind);
+    setAgentCreateError('');
+    setAgentCreateSelectedHostId('');
+    const profiles = refreshProviderProfileOptions();
+    setSelectedProviderProfileId(kind === 'api' && profiles[0] ? profiles[0].profileId : '');
+    setAgentCreateOpen(true);
   };
 
   // T8: AgentDetail / ActorDetail 右侧栏
@@ -1952,6 +2250,17 @@ export function AgentsPage() {
       setAgentDetail(null);
     }
   }, [rightPanel.state, rightPanel.nodeId]);
+
+  useEffect(() => {
+    if (!selectedProviderProfileId) return;
+    const profile = resolveProviderProfile(selectedProviderProfileId);
+    if (!profile) return;
+    setApiProfileNameDraft(profile.name);
+    setApiProviderDraft(profile.provider);
+    setApiModelDraft(profile.model);
+    setApiBaseUrlDraft(profile.baseUrl ?? '');
+    setApiKeyDraft(profile.apiKey);
+  }, [selectedProviderProfileId]);
 
   const [isRouteSaving, setIsRouteSaving] = useState(false);
 
@@ -2043,12 +2352,7 @@ export function AgentsPage() {
     const prompt = chatInput.trim();
     if (!chatAgentId || !prompt || isChatSending) return;
 
-    const userMessage: AgentConversationMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: prompt,
-      createdAt: new Date().toISOString(),
-    };
+    const userMessage = createConversationMessage(`user-${Date.now()}`, 'user', prompt);
     setChatMessages((prev) => [...prev, userMessage]);
     setChatInput('');
     setChatError('');
@@ -2066,7 +2370,6 @@ export function AgentsPage() {
 
       if (runtimeHost) {
         const runtimeClient = new RuntimeClient();
-        const assistantMessageId = `runtime-agent-${Date.now()}`;
         for await (const chunk of runtimeClient.streamAgentConversation(runtimeHost, {
           agentId: chatAgentId,
           message: prompt,
@@ -2075,13 +2378,77 @@ export function AgentsPage() {
           if (chunk.sessionId) {
             setChatSessionId(chunk.sessionId ?? null);
           }
-          if (!chunk.content) continue;
-          receivedVisibleContent = true;
-          setChatMessages((prev) => appendConversationChunk(prev, {
-            messageId: assistantMessageId,
-            delta: chunk.content,
-            done: false,
-          }));
+          switch (chunk.type) {
+            case 'session.started':
+              setChatSessionId(chunk.sessionId ?? null);
+              break;
+            case 'output.delta':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-output-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'output.delta',
+                },
+              ));
+              break;
+            case 'thinking.delta':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-thinking-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'thinking.delta',
+                  title: 'Thinking',
+                },
+              ));
+              break;
+            case 'tool.call':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `runtime-tool-call-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                'agent',
+                formatRuntimeEventPayload(chunk.payload),
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'tool.call',
+                  title: `Tool Call · ${chunk.name ?? 'unknown'}`,
+                },
+              )));
+              break;
+            case 'tool.result':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `runtime-tool-result-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                'agent',
+                formatRuntimeEventPayload(chunk.payload),
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'tool.result',
+                  title: `Tool Result · ${chunk.name ?? 'unknown'}`,
+                },
+              )));
+              break;
+            case 'error':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-error-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                chunk.message ?? chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'error',
+                  title: 'Runtime Error',
+                },
+              ));
+              break;
+            case 'done':
+              break;
+          }
         }
       } else {
         const stream = getAgentHubService().streamConversation({ agentId: chatAgentId, prompt });
@@ -2104,22 +2471,102 @@ export function AgentsPage() {
   };
 
   const handleCreateManualAgent = async () => {
-    const host = resolveActiveRuntimeHost();
-    if (!host) {
-      setRuntimeHostError('未找到可用 Runtime 主机，无法创建 Agent');
-      return;
-    }
-
     setIsAgentCreating(true);
+    setAgentCreateError('');
     setRuntimeHostError('');
+
     try {
-      const runtimeClient = new RuntimeClient();
-      const result = await runtimeClient.createAgent(host, { kind: 'echo' });
-      if (!result.ok) {
-        setRuntimeHostError(`创建 Agent 失败: ${result.error.message}`);
+      const resolvedProfile = agentCreateKind === 'api'
+        ? buildSelectedApiProfileSnapshot()
+        : null;
+      if (agentCreateKind === 'api' && !resolvedProfile) {
+        setAgentCreateError('API Agent 需要已保存或新建的 Provider Profile');
         return;
       }
+
+      const resolveCompatibleHosts = (hosts: RuntimeHostSnapshot[]) => hosts.filter((snapshot) => hostSupportsAgentKind(
+        snapshot,
+        agentCreateKind,
+        resolvedProfile?.provider,
+      ));
+
+      let candidateSnapshots = resolveCompatibleHosts(runtimeHostSnapshots);
+
+      if (candidateSnapshots.length === 0 && runtimeTargetModeValue === 'embedded' && !runtimeServiceStatus?.running) {
+        await handleRuntimeStart();
+        const nextSnapshot = await getRuntimeManager().refreshSnapshot();
+        applyRuntimeSnapshot(nextSnapshot);
+        await refreshSignalRoutesFromSnapshot(nextSnapshot);
+        candidateSnapshots = resolveCompatibleHosts(nextSnapshot.hosts);
+      }
+
+      let host = agentCreateSelectedHostId
+        ? candidateSnapshots.find((snapshot) => snapshot.host.id === agentCreateSelectedHostId)?.host ?? null
+        : candidateSnapshots.length === 1
+          ? candidateSnapshots[0]?.host ?? null
+          : null;
+
+      if (!host && candidateSnapshots.length > 1) {
+        setAgentCreateError('存在多个可用 Runtime，请先显式选择一个目标');
+        return;
+      }
+
+      if (!host) {
+        const selectedTarget = getSelectedRuntimeTarget();
+        const targetAddress = `${selectedTarget.host}:${selectedTarget.port}`;
+        try {
+          host = await getRuntimeManager().addHostFromAddress(targetAddress, `Selected Runtime · ${targetAddress}`);
+        } catch {
+          host = createDirectRuntimeHost(selectedTarget.host, selectedTarget.port);
+        }
+      }
+
+      if (!host) {
+        setAgentCreateError('未找到可用 Runtime 主机，无法创建 Agent');
+        return;
+      }
+
+      const runtimeClient = new RuntimeClient();
+      if (candidateSnapshots.length === 0) {
+        const topologyResult = await runtimeClient.getTopology(host);
+        if (!topologyResult.ok) {
+          setAgentCreateError(`无法连接当前 Runtime: ${topologyResult.error.message}`);
+          return;
+        }
+
+        const fallbackSnapshot: RuntimeHostSnapshot = {
+          host,
+          connectionState: 'online',
+          agents: [],
+          topology: topologyResult.data,
+        };
+        if (!hostSupportsAgentKind(fallbackSnapshot, agentCreateKind, resolvedProfile?.provider)) {
+          setAgentCreateError('当前 Runtime 不支持所选 Agent 类型');
+          return;
+        }
+      }
+
+      const request: RuntimeCreateAgentRequest = agentCreateKind === 'api'
+        ? {
+            kind: 'api',
+            providerProfile: resolvedProfile ?? undefined,
+          }
+        : {
+            kind: agentCreateKind,
+          };
+
+      const result = await runtimeClient.createAgent(host, request);
+      if (!result.ok) {
+        setAgentCreateError(`创建 Agent 失败: ${result.error.message}`);
+        return;
+      }
+
+      if (resolvedProfile) {
+        markProviderProfileUsed(resolvedProfile.profileId);
+      }
+
       await refreshRuntimeSnapshot();
+      setAgentCreateOpen(false);
       setViewMode('list');
     } finally {
       setIsAgentCreating(false);
@@ -3081,18 +3528,30 @@ export function AgentsPage() {
                     {chatMessages.length === 0 && (
                       <p className="text-xs text-muted-foreground">暂无会话内容，发送第一条消息开始对话。</p>
                     )}
-                    {chatMessages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`rounded-lg px-3 py-2 text-xs ${
-                          message.role === 'user'
-                            ? 'ml-8 bg-[#C75B3A] text-white'
-                            : 'mr-8 border border-border-card bg-card text-strong'
-                        }`}
-                      >
-                        <p>{message.content}</p>
-                      </div>
-                    ))}
+                    {chatMessages.map((message) => {
+                      const isUser = message.role === 'user';
+                      const isRuntimeMeta = !!message.runtimeEventType && message.runtimeEventType !== 'output.delta';
+                      return (
+                        <div
+                          key={message.id}
+                          data-testid={getConversationMessageTestId(message)}
+                          className={`rounded-lg px-3 py-2 text-xs ${
+                            isUser
+                              ? 'ml-8 bg-[#C75B3A] text-white'
+                              : isRuntimeMeta
+                                ? 'mr-8 border border-border-card bg-muted text-muted-foreground'
+                                : 'mr-8 border border-border-card bg-card text-strong'
+                          }`}
+                        >
+                          {message.title && (
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                              {message.title}
+                            </p>
+                          )}
+                          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                   {chatError && <p className="text-xs text-destructive">{chatError}</p>}
                   <div className="flex items-center gap-2">
@@ -3133,10 +3592,43 @@ export function AgentsPage() {
         <AddNodeSheet
           options={ADD_NODE_OPTIONS}
           onClose={() => setSheetOpen(false)}
-          onAddAgent={() => {
-            void handleCreateManualAgent();
+          onSelectAgent={(kind) => {
+            openAgentCreateSheet(kind);
           }}
           onAddDevice={() => setHostManagerOpen(true)}
+        />
+      )}
+      {agentCreateOpen && (
+        <AgentCreateSheet
+          kind={agentCreateKind}
+          providerProfiles={providerProfiles}
+          selectedProviderProfileId={selectedProviderProfileId}
+          apiProfileName={apiProfileNameDraft}
+          apiProvider={apiProviderDraft}
+          apiModel={apiModelDraft}
+          apiBaseUrl={apiBaseUrlDraft}
+          apiKey={apiKeyDraft}
+          compatibleHosts={compatibleCreateHosts}
+          selectedHostId={agentCreateSelectedHostId}
+          createError={agentCreateError}
+          isCreating={isAgentCreating}
+          onClose={() => {
+            setAgentCreateOpen(false);
+            setAgentCreateError('');
+          }}
+          onKindChange={(kind) => {
+            openAgentCreateSheet(kind);
+          }}
+          onSelectProviderProfile={setSelectedProviderProfileId}
+          onApiProfileNameChange={setApiProfileNameDraft}
+          onApiProviderChange={setApiProviderDraft}
+          onApiModelChange={setApiModelDraft}
+          onApiBaseUrlChange={setApiBaseUrlDraft}
+          onApiKeyChange={setApiKeyDraft}
+          onSelectHost={setAgentCreateSelectedHostId}
+          onCreate={() => {
+            void handleCreateManualAgent();
+          }}
         />
       )}
       {hostManagerOpen && (

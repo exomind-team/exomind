@@ -12,6 +12,10 @@ path = "src/main.rs"
 name = "fake-claude-cli"
 path = "tests/bin/fake-claude-cli.rs"
 
+[[bin]]
+name = "fake-codex-cli"
+path = "tests/bin/fake-codex-cli.rs"
+
 [dependencies]
 axum = "0.7"
 chrono = { version = "0.4", features = ["serde"] }

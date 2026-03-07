@@ -155,12 +155,22 @@ export interface AgentDetailData {
 }
 
 export type AgentConversationRole = 'agent' | 'user';
+export type AgentConversationMessageSource = 'history' | 'runtime';
+export type AgentConversationRuntimeMessageType =
+  | 'output.delta'
+  | 'thinking.delta'
+  | 'tool.call'
+  | 'tool.result'
+  | 'error';
 
 export interface AgentConversationMessage {
   id: string;
   role: AgentConversationRole;
   content: string;
   createdAt: string;
+  source?: AgentConversationMessageSource;
+  runtimeEventType?: AgentConversationRuntimeMessageType;
+  title?: string;
 }
 
 export interface AgentConversationChunk {
@@ -168,4 +178,55 @@ export interface AgentConversationChunk {
   delta: string;
   done: boolean;
 }
+
+export type RuntimeAgentEventType =
+  | 'session.started'
+  | 'output.delta'
+  | 'thinking.delta'
+  | 'tool.call'
+  | 'tool.result'
+  | 'error'
+  | 'done';
+
+export interface RuntimeAgentEventBase {
+  type: RuntimeAgentEventType;
+  sessionId?: string;
+  content?: string;
+  name?: string;
+  payload?: unknown;
+  message?: string;
+  finishReason?: string;
+  done?: boolean;
+}
+
+export type RuntimeAgentEvent =
+  | (RuntimeAgentEventBase & {
+      type: 'session.started';
+      sessionId: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'output.delta';
+      content: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'thinking.delta';
+      content: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'tool.call';
+      name: string;
+      payload?: unknown;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'tool.result';
+      name: string;
+      payload?: unknown;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'error';
+      message: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'done';
+    });
 

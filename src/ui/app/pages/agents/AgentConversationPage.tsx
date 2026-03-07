@@ -6,21 +6,21 @@ import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { createUuidV4 } from '@/lib/utils/uuid';
 import { RuntimeClient } from '@/services/runtime-client';
 import { findPreferredRuntimeHostForAgent, getRuntimeManager } from '@/services/runtime-manager';
-
-function createMessage(id: string, role: 'agent' | 'user', content: string): AgentConversationMessage {
-  return {
-    id,
-    role,
-    content,
-    createdAt: new Date().toISOString(),
-  };
-}
+import {
+  appendConversationChunk,
+  appendAdjacentConversationDelta,
+  appendConversationMessage,
+  createConversationMessage,
+  formatRuntimeEventPayload,
+  getConversationMessageTestId,
+} from './conversation-runtime';
 
 export function AgentConversationPage({ agentId }: { agentId?: string }) {
   const isDesktop = useIsDesktop();
   const [messages, setMessages] = useState<AgentConversationMessage[]>([]);
   const [inputValue, setInputValue] = useState('');
   const [sending, setSending] = useState(false);
+  const [chatError, setChatError] = useState('');
   const [runtimeSessionId, setRuntimeSessionId] = useState<string | null>(null);
   const targetId = agentId ?? '';
 
@@ -28,20 +28,31 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
     let disposed = false;
     const load = async () => {
       if (!targetId) return;
-      const snapshot = await getRuntimeManager().refreshSnapshot();
-      const runtimeHost = findPreferredRuntimeHostForAgent(snapshot.hosts, targetId);
-      if (runtimeHost) {
+      try {
+        const snapshot = await getRuntimeManager().refreshSnapshot();
+        const runtimeHost = findPreferredRuntimeHostForAgent(snapshot.hosts, targetId);
+        if (runtimeHost) {
+          if (!disposed) {
+            setMessages([]);
+            setChatError('');
+            setRuntimeSessionId(null);
+          }
+          return;
+        }
+
+        const history = await getAgentHubService().getConversation(targetId);
         if (!disposed) {
-          setMessages([]);
+          setMessages(history);
+          setChatError('');
           setRuntimeSessionId(null);
         }
-        return;
-      }
-
-      const history = await getAgentHubService().getConversation(targetId);
-      if (!disposed) {
-        setMessages(history);
-        setRuntimeSessionId(null);
+      } catch (error) {
+        if (!disposed) {
+          const message = error instanceof Error ? error.message : String(error);
+          setMessages([]);
+          setChatError(`加载会话失败: ${message}`);
+          setRuntimeSessionId(null);
+        }
       }
     };
     void load();
@@ -56,16 +67,15 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
 
     setSending(true);
     setInputValue('');
+    setChatError('');
 
-    const userMessage = createMessage(`msg-user-${createUuidV4()}`, 'user', prompt);
-    const pendingMessageId = `msg-agent-pending-${createUuidV4()}`;
-    const streamMessage = createMessage(pendingMessageId, 'agent', '');
-    setMessages((prev) => [...prev, userMessage, streamMessage]);
+    const userMessage = createConversationMessage(`msg-user-${createUuidV4()}`, 'user', prompt);
+    setMessages((prev) => [...prev, userMessage]);
 
     try {
       const snapshot = await getRuntimeManager().refreshSnapshot();
       const runtimeHost = findPreferredRuntimeHostForAgent(snapshot.hosts, targetId);
-      let receivedVisibleContent = false;
+      let receivedRenderableEvent = false;
 
       if (runtimeHost) {
         const runtimeClient = new RuntimeClient();
@@ -77,35 +87,91 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
           if (chunk.sessionId) {
             setRuntimeSessionId(chunk.sessionId);
           }
-          if (!chunk.content) continue;
-          receivedVisibleContent = true;
-          setMessages((prev) => {
-            const pendingIndex = prev.findIndex((item) => item.id === pendingMessageId);
-            if (pendingIndex >= 0) {
-              const next = [...prev];
-              next[pendingIndex] = {
-                ...next[pendingIndex],
-                id: `msg-agent-${createUuidV4()}`,
-                content: `${next[pendingIndex].content}${chunk.content}`,
-              };
-              return next;
-            }
-            return [...prev, createMessage(`msg-agent-${createUuidV4()}`, 'agent', chunk.content)];
-          });
+
+          switch (chunk.type) {
+            case 'session.started':
+              setRuntimeSessionId(chunk.sessionId ?? null);
+              break;
+            case 'output.delta':
+              receivedRenderableEvent = true;
+              setMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `msg-agent-runtime-output-${createUuidV4()}`,
+                chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'output.delta',
+                },
+              ));
+              break;
+            case 'thinking.delta':
+              receivedRenderableEvent = true;
+              setMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `msg-agent-runtime-thinking-${createUuidV4()}`,
+                chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'thinking.delta',
+                  title: 'Thinking',
+                },
+              ));
+              break;
+            case 'tool.call':
+              receivedRenderableEvent = true;
+              setMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `msg-agent-tool-call-${createUuidV4()}`,
+                'agent',
+                formatRuntimeEventPayload(chunk.payload),
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'tool.call',
+                  title: `Tool Call · ${chunk.name}`,
+                },
+              )));
+              break;
+            case 'tool.result':
+              receivedRenderableEvent = true;
+              setMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `msg-agent-tool-result-${createUuidV4()}`,
+                'agent',
+                formatRuntimeEventPayload(chunk.payload),
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'tool.result',
+                  title: `Tool Result · ${chunk.name}`,
+                },
+              )));
+              break;
+            case 'error':
+              receivedRenderableEvent = true;
+              setMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `msg-agent-runtime-error-${createUuidV4()}`,
+                chunk.message ?? chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'error',
+                  title: 'Runtime Error',
+                },
+              ));
+              break;
+            case 'done':
+              break;
+          }
         }
       } else {
+        const pendingMessageId = `msg-agent-pending-${createUuidV4()}`;
+        const streamMessage = createConversationMessage(pendingMessageId, 'agent', '');
+        setMessages((prev) => [...prev, streamMessage]);
+
         for await (const chunk of getAgentHubService().streamConversation({ agentId: targetId, prompt })) {
           if (!chunk.delta) continue;
-          receivedVisibleContent = true;
+          receivedRenderableEvent = true;
           setMessages((prev) => {
             const chunkMessageIndex = prev.findIndex((item) => item.id === chunk.messageId);
             if (chunkMessageIndex >= 0) {
-              const next = [...prev];
-              next[chunkMessageIndex] = {
-                ...next[chunkMessageIndex],
-                content: `${next[chunkMessageIndex].content}${chunk.delta}`,
-              };
-              return next;
+              return appendConversationChunk(prev, chunk);
             }
 
             const pendingIndex = prev.findIndex((item) => item.id === pendingMessageId);
@@ -119,14 +185,20 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
               return next;
             }
 
-            return [...prev, createMessage(chunk.messageId, 'agent', chunk.delta)];
+            return appendConversationChunk(prev, chunk);
           });
         }
-      }
 
-      if (!receivedVisibleContent) {
-        setMessages((prev) => prev.filter((item) => item.id !== pendingMessageId));
+        if (!receivedRenderableEvent) {
+          setMessages((prev) => prev.filter((item) => item.id !== pendingMessageId));
+        }
       }
+      if (!receivedRenderableEvent) {
+        setChatError('Agent 未返回可显示内容');
+      }
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      setChatError(`发送失败: ${message}`);
     } finally {
       setSending(false);
     }
@@ -156,6 +228,8 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
       <div className={`min-h-0 flex-1 overflow-y-auto space-y-3 px-4 pt-3 md:px-8 lg:px-10 ${isDesktop ? 'pb-4' : 'pb-[calc(env(safe-area-inset-bottom,0px)+108px)]'}`}>
         {messages.map((message) => {
           const isUser = message.role === 'user';
+          const isRuntimeMeta = !!message.runtimeEventType && message.runtimeEventType !== 'output.delta';
+          const testId = getConversationMessageTestId(message);
           return (
             <div key={message.id} className={`flex items-end gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
               {!isUser && (
@@ -164,14 +238,21 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
                 </div>
               )}
               <div
-                data-testid={isUser ? 'agent-conversation-message-user' : 'agent-conversation-message-agent-history'}
+                data-testid={testId}
                 className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
                   isUser
                     ? 'rounded-tr-[6px] bg-[#C75B3A] text-white'
-                    : 'rounded-tl-[6px] border border-border-card bg-card text-strong'
+                    : isRuntimeMeta
+                      ? 'rounded-tl-[6px] border border-border-card bg-muted text-muted-foreground'
+                      : 'rounded-tl-[6px] border border-border-card bg-card text-strong'
                 }`}
               >
-                {message.content}
+                {message.title && (
+                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                    {message.title}
+                  </p>
+                )}
+                <p className="whitespace-pre-wrap break-words">{message.content}</p>
               </div>
               {isUser && (
                 <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-muted text-muted-foreground">
@@ -182,6 +263,12 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
           );
         })}
       </div>
+
+      {chatError && (
+        <div className="border-t border-border-card px-4 py-2 text-xs text-destructive md:px-8 lg:px-10">
+          {chatError}
+        </div>
+      )}
 
       <div
         data-testid="agent-chat-input-bar"
