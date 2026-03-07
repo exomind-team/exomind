@@ -3,7 +3,11 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
-import { DEFAULT_EMBEDDED_RUNTIME_PORT, DEFAULT_EXTERNAL_RUNTIME_PORT } from '@/config/runtime-target';
+import {
+  DEFAULT_EMBEDDED_RUNTIME_PORT,
+  DEFAULT_EXTERNAL_RUNTIME_PORT,
+  EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
+} from '@/config/runtime-target';
 
 const agentHubMocks = vi.hoisted(() => ({
   getTopology: vi.fn(),
@@ -204,6 +208,10 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
     await waitFor(() => {
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
+      expect(screen.getByTestId('runtime-network-mode-local')).toHaveAttribute('aria-pressed', 'true');
+      expect(screen.getByTestId('runtime-local-bind-address')).toHaveTextContent(
+        `127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+      );
     });
 
     fireEvent.click(screen.getByTestId('runtime-local-start-button'));
@@ -219,6 +227,86 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     await waitFor(() => {
       expect(runtimeControlMocks.stopRuntime).toHaveBeenCalledTimes(1);
       expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
+    });
+  });
+
+  it('starts local runtime in lan bind mode（LAN 模式应监听 0.0.0.0 供手机连接）', async () => {
+    runtimeControlMocks.startRuntime.mockResolvedValueOnce({
+      running: true,
+      host: '0.0.0.0',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      pid: 9527,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('stopped');
+    });
+
+    fireEvent.click(screen.getByTestId('runtime-network-mode-lan'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-network-mode-lan')).toHaveAttribute('aria-pressed', 'true');
+      expect(window.localStorage.getItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY)).toBe('lan');
+      expect(screen.getByTestId('runtime-local-bind-address')).toHaveTextContent(
+        `0.0.0.0:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+      );
+      expect(screen.getByTestId('runtime-local-share-hint')).toHaveTextContent('局域网 IP');
+    });
+
+    fireEvent.click(screen.getByTestId('runtime-local-start-button'));
+
+    await waitFor(() => {
+      expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
+        host: '0.0.0.0',
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      });
+      expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
+    });
+  });
+
+  it('rebinds a running localhost runtime into lan mode（已运行的 localhost Runtime 可切换为 LAN 监听）', async () => {
+    runtimeControlMocks.getStatus.mockResolvedValueOnce({
+      running: true,
+      host: '127.0.0.1',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      pid: 9527,
+    });
+    runtimeControlMocks.startRuntime.mockResolvedValueOnce({
+      running: true,
+      host: '0.0.0.0',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      pid: 9527,
+    });
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByRole('button', { name: '设备' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-local-status')).toHaveTextContent('running');
+      expect(screen.getByTestId('runtime-local-bind-address')).toHaveTextContent(
+        `127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+      );
+    });
+
+    fireEvent.click(screen.getByTestId('runtime-network-mode-lan'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('runtime-local-bind-address')).toHaveTextContent(
+        `0.0.0.0:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+      );
+      expect(screen.getByTestId('runtime-local-rebind-hint')).toHaveTextContent('自动重启并切换');
+    });
+
+    fireEvent.click(screen.getByTestId('runtime-local-start-button'));
+
+    await waitFor(() => {
+      expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
+        host: '0.0.0.0',
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      });
     });
   });
 

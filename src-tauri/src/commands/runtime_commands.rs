@@ -112,6 +112,15 @@ fn is_valid_host(host: &str) -> bool {
     })
 }
 
+fn should_restart_running_runtime(
+    current_host: &str,
+    current_port: u16,
+    requested_host: &str,
+    requested_port: u16,
+) -> bool {
+    current_host != requested_host || current_port != requested_port
+}
+
 async fn probe_runtime_health(host: &str, port: u16) -> bool {
     let address = format!("{host}:{port}");
     let mut stream = match timeout(
@@ -182,6 +191,7 @@ pub async fn ensure_runtime_started(
     }
     let requested_host = options.bind_host.clone();
     let requested_port = options.port;
+    let mut should_restart_embedded_runtime = false;
 
     // Fast path: already running（快速路径：已在运行）
     {
@@ -195,8 +205,20 @@ pub async fn ensure_runtime_started(
             inner.port = port;
             inner.last_error = None;
             inner.external_runtime = false;
-            return Ok(compose_status(&inner, true, None));
+            if !should_restart_running_runtime(
+                &inner.host,
+                inner.port,
+                &requested_host,
+                requested_port,
+            ) {
+                return Ok(compose_status(&inner, true, None));
+            }
+            should_restart_embedded_runtime = true;
         }
+    }
+
+    if should_restart_embedded_runtime {
+        ensure_runtime_stopped(state.clone()).await?;
     }
 
     // 等待端口可用（处理热重载时旧端口 TIME_WAIT 延迟，最多等 2s）
@@ -273,10 +295,14 @@ pub async fn ensure_runtime_stopped(
     };
 
     if let Some(runtime) = handle.as_mut() {
-        runtime
-            .stop()
-            .await
-            .map_err(|error| format!("failed to stop embedded runtime: {error}"))?;
+        if let Err(error) = runtime.stop().await {
+            let message = format!("failed to stop embedded runtime: {error}");
+            let mut inner = lock_or_error(&state)?;
+            inner.handle = handle;
+            inner.last_error = Some(message.clone());
+            inner.external_runtime = false;
+            return Err(message);
+        }
     }
 
     if handle.is_none()
@@ -412,6 +438,26 @@ mod tests {
         assert!(!super::is_valid_host("../etc/passwd"));
         assert!(!super::is_valid_host("-invalid"));
         assert!(!super::is_valid_host("invalid-"));
+    }
+
+    #[test]
+    fn should_restart_running_runtime_when_bind_changes() {
+        assert!(super::should_restart_running_runtime(
+            "127.0.0.1",
+            9124,
+            "0.0.0.0",
+            9124,
+        ));
+    }
+
+    #[test]
+    fn should_not_restart_running_runtime_when_bind_matches() {
+        assert!(!super::should_restart_running_runtime(
+            "127.0.0.1",
+            9124,
+            "127.0.0.1",
+            9124,
+        ));
     }
 
     #[test]

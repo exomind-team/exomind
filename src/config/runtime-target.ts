@@ -1,8 +1,10 @@
 export const RUNTIME_TARGET_MODE_STORAGE_KEY = 'exomind:runtimeTargetMode';
 export const RUNTIME_EXTERNAL_ADDRESS_STORAGE_KEY = 'exomind:runtimeExternalAddress';
+export const EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY = 'exomind:embeddedRuntimeNetworkMode';
 export const RUNTIME_TARGET_CHANGED_EVENT = 'exomind:runtime-target-changed';
 
 export type RuntimeTargetMode = 'embedded' | 'external';
+export type EmbeddedRuntimeNetworkMode = 'local' | 'lan';
 
 export interface RuntimeTarget {
   mode: RuntimeTargetMode;
@@ -26,9 +28,16 @@ export const DEFAULT_EMBEDDED_RUNTIME_PORT = resolveEmbeddedRuntimePort(
 const DEFAULT_EXTERNAL_RUNTIME_HOST = '127.0.0.1';
 export const DEFAULT_EXTERNAL_RUNTIME_PORT = 1949;
 const DEFAULT_RUNTIME_TARGET_MODE: RuntimeTargetMode = 'embedded';
+const DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE: EmbeddedRuntimeNetworkMode = 'local';
 
 function normalizeRuntimeMode(rawValue: string | null | undefined): RuntimeTargetMode {
   return rawValue === 'external' ? 'external' : 'embedded';
+}
+
+function normalizeEmbeddedRuntimeNetworkMode(
+  rawValue: string | null | undefined,
+): EmbeddedRuntimeNetworkMode {
+  return rawValue === 'lan' ? 'lan' : 'local';
 }
 
 function formatHostForAddress(host: string): string {
@@ -50,6 +59,12 @@ function resolveEmbeddedHost(): string {
     return window.location.hostname;
   }
   return 'localhost';
+}
+
+export function resolveEmbeddedRuntimeBindHost(
+  mode: EmbeddedRuntimeNetworkMode = getEmbeddedRuntimeNetworkMode(),
+): '127.0.0.1' | '0.0.0.0' {
+  return mode === 'lan' ? '0.0.0.0' : '127.0.0.1';
 }
 
 function parseRuntimePort(rawPort: string): number {
@@ -114,6 +129,16 @@ export function getRuntimeTargetMode(): RuntimeTargetMode {
   return normalizeRuntimeMode(window.localStorage.getItem(RUNTIME_TARGET_MODE_STORAGE_KEY));
 }
 
+export function getEmbeddedRuntimeNetworkMode(): EmbeddedRuntimeNetworkMode {
+  if (typeof window === 'undefined') {
+    return DEFAULT_EMBEDDED_RUNTIME_NETWORK_MODE;
+  }
+
+  return normalizeEmbeddedRuntimeNetworkMode(
+    window.localStorage.getItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY),
+  );
+}
+
 export function setRuntimeTargetMode(mode: RuntimeTargetMode): void {
   if (typeof window === 'undefined') {
     return;
@@ -122,6 +147,15 @@ export function setRuntimeTargetMode(mode: RuntimeTargetMode): void {
   const normalized = normalizeRuntimeMode(mode);
   window.localStorage.setItem(RUNTIME_TARGET_MODE_STORAGE_KEY, normalized);
   emitRuntimeTargetChanged();
+}
+
+export function setEmbeddedRuntimeNetworkMode(mode: EmbeddedRuntimeNetworkMode): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  const normalized = normalizeEmbeddedRuntimeNetworkMode(mode);
+  window.localStorage.setItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY, normalized);
 }
 
 export function getRuntimeExternalAddress(): string {
