@@ -3,6 +3,38 @@ import type { RuntimeHostRecord, RuntimeServiceStatus } from '@/lib/types/agent-
 
 type RuntimeFetch = typeof fetch;
 
+async function readResponseBodySnippet(response: Response): Promise<string | null> {
+  try {
+    const text = (await response.text()).trim();
+    if (!text) {
+      return null;
+    }
+    return text.replace(/\s+/g, ' ').slice(0, 240);
+  } catch {
+    return null;
+  }
+}
+
+async function buildHttpError(
+  operation: string,
+  method: string,
+  url: string,
+  response: Response,
+  options: {
+    authState?: 'present' | 'missing';
+  } = {},
+): Promise<Error> {
+  const statusText = response.statusText?.trim();
+  const body = await readResponseBodySnippet(response);
+  const details = [
+    `HTTP ${response.status}${statusText ? ` ${statusText}` : ''}`,
+    options.authState ? `auth=${options.authState}` : null,
+    body ? `body=${body}` : null,
+  ].filter(Boolean).join(', ');
+
+  return new Error(`${operation} failed: ${method} ${url} -> ${details}`);
+}
+
 interface MeshPeerUpsertRequest {
   id: string;
   base_url: string;
@@ -120,12 +152,15 @@ export class RuntimeMeshSyncService {
     runtimeBaseUrl: string,
     localAuthToken?: string,
   ): Promise<{ session_id: string; pin: string }> {
-    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/pairing/initiate`, {
+    const url = `${runtimeBaseUrl}/mesh/pairing/initiate`;
+    const response = await this.fetchImpl(url, {
       method: 'POST',
       headers: authHeaders('application/json', localAuthToken),
     });
     if (!response.ok) {
-      throw new Error(`initiatePairing failed: HTTP ${response.status}`);
+      throw await buildHttpError('initiatePairing', 'POST', url, response as Response, {
+        authState: localAuthToken ? 'present' : 'missing',
+      });
     }
     return (await response.json()) as { session_id: string; pin: string };
   }
@@ -139,7 +174,8 @@ export class RuntimeMeshSyncService {
     responderBaseUrl: string,
     responderInboundToken?: string,
   ): Promise<{ paired: boolean; peer_token: string; initiator_inbound_token?: string }> {
-    const response = await this.fetchImpl(`${initiatorBaseUrl}/mesh/pairing/respond`, {
+    const url = `${initiatorBaseUrl}/mesh/pairing/respond`;
+    const response = await this.fetchImpl(url, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -151,7 +187,7 @@ export class RuntimeMeshSyncService {
       }),
     });
     if (!response.ok) {
-      throw new Error(`respondToPairing failed: HTTP ${response.status}`);
+      throw await buildHttpError('respondToPairing', 'POST', url, response as Response);
     }
     return (await response.json()) as { paired: boolean; peer_token: string; initiator_inbound_token?: string };
   }
@@ -186,12 +222,15 @@ export class RuntimeMeshSyncService {
     if (localAuthToken) {
       headers['Authorization'] = `Bearer ${localAuthToken}`;
     }
-    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/discovered`, {
+    const url = `${runtimeBaseUrl}/mesh/discovered`;
+    const response = await this.fetchImpl(url, {
       method: 'GET',
       headers,
     });
     if (!response.ok) {
-      throw new Error(`listDiscoveredPeers failed: HTTP ${response.status}`);
+      throw await buildHttpError('listDiscoveredPeers', 'GET', url, response as Response, {
+        authState: localAuthToken ? 'present' : 'missing',
+      });
     }
     return (await response.json()) as Array<{ host_id: string; host: string; port: number }>;
   }

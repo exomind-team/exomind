@@ -41,6 +41,7 @@ import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   DEFAULT_EXTERNAL_RUNTIME_PORT,
   getEmbeddedRuntimeNetworkMode,
+  getPreferredEmbeddedRuntimePort,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
@@ -843,8 +844,12 @@ function DeviceView({
 }) {
   const hostCard = groups.flatMap((group) => group.cards).find((card) => card.isHost) ?? groups[0]?.cards[0];
   const isEmbeddedTarget = runtimeTargetMode === 'embedded';
-  const runtimePort = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
-  const currentRuntimeAddress = `${runtimeServiceStatus?.host ?? '127.0.0.1'}:${runtimePort}`;
+  const currentRuntimeAddress = runtimeServiceStatus?.running
+    ? `${runtimeServiceStatus.host}:${runtimeServiceStatus.port}`
+    : 'not running（未运行）';
+  const lastAttemptAddress = runtimeServiceStatus && !runtimeServiceStatus.running
+    ? `${runtimeServiceStatus.host}:${runtimeServiceStatus.port}`
+    : null;
 
   return (
     <section data-testid="agent-device-view" className="space-y-4">
@@ -1000,9 +1005,14 @@ function DeviceView({
                 : 'Local only 模式只监听 127.0.0.1，手机无法直接连接。'}
             </p>
           </div>
-          <p className="mt-1 text-[10px] text-[#A8A29E]">
+          <p data-testid="runtime-current-address" className="mt-1 text-[10px] text-[#A8A29E]">
             当前运行（Current runtime）：{currentRuntimeAddress}
           </p>
+          {lastAttemptAddress && (
+            <p data-testid="runtime-last-attempt-address" className="mt-1 text-[10px] text-[#A8A29E]">
+              最近尝试（Last attempted）：{lastAttemptAddress}
+            </p>
+          )}
           {runtimeServiceStatus?.pid && (
             <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
           )}
@@ -2651,7 +2661,9 @@ export function AgentsPage() {
   };
 
   const desiredEmbeddedRuntimeHost = resolveEmbeddedRuntimeBindHost(embeddedRuntimeNetworkMode);
-  const desiredEmbeddedRuntimePort = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+  const desiredEmbeddedRuntimePort = runtimeServiceStatus?.running
+    ? runtimeServiceStatus.port
+    : getPreferredEmbeddedRuntimePort();
   const desiredEmbeddedRuntimeAddress = `${desiredEmbeddedRuntimeHost}:${desiredEmbeddedRuntimePort}`;
   const runtimeNeedsRebind = Boolean(
     runtimeServiceStatus?.running

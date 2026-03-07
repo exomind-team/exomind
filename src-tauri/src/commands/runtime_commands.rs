@@ -7,7 +7,7 @@ use exomind_runtime::{
     RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use serde::{Deserialize, Serialize};
-use std::net::{ToSocketAddrs, UdpSocket};
+use std::net::{IpAddr, ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
 use tauri::State;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -138,6 +138,18 @@ fn should_restart_running_runtime(
     current_host != requested_host || current_port != requested_port
 }
 
+fn should_enable_mdns_for_bind_host(host: &str) -> bool {
+    let normalized = host.trim().trim_matches(['[', ']']);
+    if normalized.eq_ignore_ascii_case("localhost") {
+        return false;
+    }
+
+    match normalized.parse::<IpAddr>() {
+        Ok(ip) => !ip.is_loopback(),
+        Err(_) => true,
+    }
+}
+
 fn resolve_reachable_host(remote_host: &str, remote_port: u16) -> Result<String, String> {
     let remote_addr = format!("{remote_host}:{remote_port}");
     let mut resolved = remote_addr
@@ -225,6 +237,10 @@ pub async fn ensure_runtime_started(
     }
 
     options.bind_host = runtime_host;
+    // Tauri embedded runtime follows UI network mode directly:
+    // LAN bind => enable mDNS discovery, loopback bind => disable mDNS.
+    //（桌面/移动端内嵌 RT：局域网监听开启 mDNS，本机监听关闭 mDNS）
+    options.enable_mdns = should_enable_mdns_for_bind_host(&options.bind_host);
     if let Some(runtime_port) = port {
         options.port = runtime_port;
     }
@@ -530,6 +546,20 @@ mod tests {
             "127.0.0.1",
             9124,
         ));
+    }
+
+    #[test]
+    fn enables_mdns_for_lan_bind_hosts() {
+        assert!(super::should_enable_mdns_for_bind_host("0.0.0.0"));
+        assert!(super::should_enable_mdns_for_bind_host("192.168.1.10"));
+        assert!(super::should_enable_mdns_for_bind_host("my-laptop.local"));
+    }
+
+    #[test]
+    fn disables_mdns_for_loopback_bind_hosts() {
+        assert!(!super::should_enable_mdns_for_bind_host("127.0.0.1"));
+        assert!(!super::should_enable_mdns_for_bind_host("localhost"));
+        assert!(!super::should_enable_mdns_for_bind_host("::1"));
     }
 
     #[test]

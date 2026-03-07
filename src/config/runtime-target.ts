@@ -120,6 +120,10 @@ function resolveEmbeddedPort(): number {
   return cachedStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
 }
 
+export function getPreferredEmbeddedRuntimePort(): number {
+  return resolveEmbeddedPort();
+}
+
 export function resolveEmbeddedRuntimeBindHost(
   mode: EmbeddedRuntimeNetworkMode = getEmbeddedRuntimeNetworkMode(),
 ): '127.0.0.1' | '0.0.0.0' {

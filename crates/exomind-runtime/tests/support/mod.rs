@@ -48,7 +48,7 @@ pub async fn start_test_runtime_with_secret(host_id: &str, secret: Option<String
 
 pub async fn start_test_runtime_with_mdns(host_id: &str) -> RuntimeHandle {
     start_with_options(RuntimeStartOptions {
-        bind_host: "127.0.0.1".to_string(),
+        bind_host: "0.0.0.0".to_string(),
         port: 0,
         host_id: host_id.to_string(),
         spawn_builtin_actors: false,

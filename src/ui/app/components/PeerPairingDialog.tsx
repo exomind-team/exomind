@@ -29,6 +29,22 @@ export interface PeerPairingDialogProps {
   localAuthToken?: string;
 }
 
+function buildInitiatorDiagnosticMessage(
+  runtimeBaseUrl: string,
+  localHostId: string,
+  localAuthToken: string | undefined,
+  err: unknown,
+): string {
+  const reason = err instanceof Error ? err.message : String(err);
+  return [
+    '发起配对失败',
+    `runtime=${runtimeBaseUrl}`,
+    `hostId=${localHostId || 'unknown'}`,
+    `auth=${localAuthToken ? 'present' : 'missing'}`,
+    reason,
+  ].join('\n');
+}
+
 // ── Component ──────────────────────────────────────────────────
 
 export function PeerPairingDialog({
@@ -98,10 +114,12 @@ export function PeerPairingDialog({
       setPin(result.pin);
       setStatus('waiting');
     } catch (err) {
-      setErrorMessage(err instanceof Error ? err.message : String(err));
+      setErrorMessage(
+        buildInitiatorDiagnosticMessage(runtimeBaseUrl, localHostId, localAuthToken, err),
+      );
       setStatus('error');
     }
-  }, [meshService, runtimeBaseUrl, localAuthToken]);
+  }, [meshService, runtimeBaseUrl, localAuthToken, localHostId]);
 
   // ── Responder flow ──────────────────────────────────────────
 
@@ -109,15 +127,20 @@ export function PeerPairingDialog({
     setMode('responder');
     setStatus('loading');
     setErrorMessage('');
+    setSelectedPeer(null);
+    setPeers([]);
+
+    if (pollTimerRef.current) {
+      clearInterval(pollTimerRef.current);
+      pollTimerRef.current = null;
+    }
 
     // Start polling for discovered peers
     const poll = async () => {
       try {
         const discovered = await meshService.listDiscoveredPeers(runtimeBaseUrl, localAuthToken);
         setPeers(discovered);
-        if (status === 'loading') {
-          setStatus('idle');
-        }
+        setStatus((currentStatus) => (currentStatus === 'loading' ? 'idle' : currentStatus));
       } catch {
         // Silent retry on poll failure
       }
@@ -125,11 +148,11 @@ export function PeerPairingDialog({
 
     void poll();
     pollTimerRef.current = setInterval(poll, 3000);
-  }, [meshService, runtimeBaseUrl, localAuthToken, status]);
+  }, [meshService, runtimeBaseUrl, localAuthToken]);
 
   const handleRefreshPeers = useCallback(async () => {
     try {
-      const discovered = await meshService.listDiscoveredPeers(runtimeBaseUrl);
+      const discovered = await meshService.listDiscoveredPeers(runtimeBaseUrl, localAuthToken);
       setPeers(discovered);
     } catch {
       // Silently ignore refresh errors
@@ -139,6 +162,8 @@ export function PeerPairingDialog({
   const handleSelectPeer = useCallback((peer: DiscoveredPeer) => {
     setSelectedPeer(peer);
     setPinInput('');
+    setErrorMessage('');
+    setStatus('idle');
   }, []);
 
   const handleSubmitPin = useCallback(async () => {
