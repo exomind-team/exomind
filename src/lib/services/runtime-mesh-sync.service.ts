@@ -8,6 +8,8 @@ interface MeshPeerUpsertRequest {
   base_url: string;
   enabled: boolean;
   capabilities: string[];
+  auth_token?: string;
+  inbound_secret?: string;
 }
 
 export interface RuntimeMeshSyncServiceOptions {
@@ -104,7 +106,7 @@ export class RuntimeMeshSyncService {
 
   // ── Pairing API ───────────────────────────────────────────────
 
-  /** 发起配对会话，返回 session_id 和 6 位 PIN 码 */
+  /** Initiate pairing session, returns session_id and 6-digit PIN */
   async initiatePairing(runtimeBaseUrl: string): Promise<{ session_id: string; pin: string }> {
     const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/pairing/initiate`, {
       method: 'POST',
@@ -116,16 +118,16 @@ export class RuntimeMeshSyncService {
     return (await response.json()) as { session_id: string; pin: string };
   }
 
-  /** 响应配对会话，提交 PIN 码进行验证，成功后获取 peer_token + 对端 auth_secret */
+  /** Respond to pairing session with PIN and per-peer inbound token */
   async respondToPairing(
-    runtimeBaseUrl: string,
+    initiatorBaseUrl: string,
     sessionId: string,
     pin: string,
     responderHostId: string,
     responderBaseUrl: string,
-    responderAuthSecret?: string,
-  ): Promise<{ paired: boolean; peer_token: string; initiator_auth_secret?: string }> {
-    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/pairing/respond`, {
+    responderInboundToken?: string,
+  ): Promise<{ paired: boolean; peer_token: string; initiator_inbound_token?: string }> {
+    const response = await this.fetchImpl(`${initiatorBaseUrl}/mesh/pairing/respond`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
@@ -133,18 +135,36 @@ export class RuntimeMeshSyncService {
         pin,
         responder_host_id: responderHostId,
         responder_base_url: responderBaseUrl,
-        responder_auth_secret: responderAuthSecret,
+        responder_inbound_token: responderInboundToken,
       }),
     });
     if (!response.ok) {
       throw new Error(`respondToPairing failed: HTTP ${response.status}`);
     }
-    return (await response.json()) as { paired: boolean; peer_token: string; initiator_auth_secret?: string };
+    return (await response.json()) as { paired: boolean; peer_token: string; initiator_inbound_token?: string };
+  }
+
+  /** Register a peer on the local runtime (used by responder after pairing) */
+  async registerPeerLocally(
+    localRuntimeBaseUrl: string,
+    peerId: string,
+    peerBaseUrl: string,
+    authToken?: string,
+    inboundSecret?: string,
+  ): Promise<void> {
+    await this.upsertPeer(localRuntimeBaseUrl, {
+      id: peerId,
+      base_url: peerBaseUrl,
+      enabled: true,
+      capabilities: [],
+      auth_token: authToken,
+      inbound_secret: inboundSecret,
+    });
   }
 
   // ── Discovery API ──────────────────────────────────────────────
 
-  /** 列出通过 mDNS 发现的 peer 列表 */
+  /** List peers discovered via mDNS */
   async listDiscoveredPeers(
     runtimeBaseUrl: string,
   ): Promise<Array<{ host_id: string; host: string; port: number }>> {

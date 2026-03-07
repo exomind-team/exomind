@@ -33,10 +33,43 @@ pub struct PeerInfo {
     pub last_error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
-    /// Optional bearer token for authenticating with this peer.
-    /// Never serialized in API responses to prevent token leakage.
-    #[serde(default, skip_serializing)]
+    /// Outbound token: what this RT sends as Bearer when calling the peer.
+    #[serde(default)]
     pub auth_token: Option<String>,
+    /// Inbound token: what the peer must send as Bearer when calling us.
+    /// Generated during pairing and checked by `require_auth`.
+    #[serde(default)]
+    pub inbound_secret: Option<String>,
+}
+
+/// API-safe view of PeerInfo that excludes secret fields.
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerInfoPublic {
+    pub id: String,
+    pub base_url: String,
+    pub enabled: bool,
+    pub capabilities: Vec<String>,
+    pub status: PeerStatus,
+    pub last_seen: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<&PeerInfo> for PeerInfoPublic {
+    fn from(p: &PeerInfo) -> Self {
+        Self {
+            id: p.id.clone(),
+            base_url: p.base_url.clone(),
+            enabled: p.enabled,
+            capabilities: p.capabilities.clone(),
+            status: p.status.clone(),
+            last_seen: p.last_seen.clone(),
+            last_error: p.last_error.clone(),
+            created_at: p.created_at.clone(),
+            updated_at: p.updated_at.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -126,6 +159,20 @@ impl MeshState {
         let mut items = peers.values().cloned().collect::<Vec<_>>();
         items.sort_by(|left, right| left.id.cmp(&right.id));
         items
+    }
+
+    /// List peers without secret fields (for API responses).
+    pub fn list_peers_public(&self) -> Vec<PeerInfoPublic> {
+        self.list_peers().iter().map(PeerInfoPublic::from).collect()
+    }
+
+    /// Check if any registered peer has the given inbound_secret.
+    pub fn has_peer_with_inbound_secret(&self, secret: &str) -> bool {
+        let peers = match self.peers.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        peers.values().any(|p| p.inbound_secret.as_deref() == Some(secret))
     }
 
     pub fn get_peer(&self, peer_id: &str) -> Option<PeerInfo> {

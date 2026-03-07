@@ -9,7 +9,12 @@ use crate::AppState;
 ///
 /// If `AppState.auth_secret` is `None`, all requests are allowed (local dev mode).
 /// If set, the middleware checks `Authorization: Bearer <token>` header or `?token=<token>` query param.
-/// Returns 401 if the token does not match.
+///
+/// Accepts:
+/// 1. The global `auth_secret` (full admin access).
+/// 2. Any registered peer's `inbound_secret` (scoped mesh access).
+///
+/// Returns 401 if the token does not match either.
 pub async fn require_auth(
     State(state): State<AppState>,
     request: Request,
@@ -42,7 +47,12 @@ pub async fn require_auth(
     let provided_token = token_from_header.or(token_from_query);
 
     match provided_token {
+        // 1. Global admin secret.
         Some(ref token) if token == expected_secret => Ok(next.run(request).await),
+        // 2. Per-peer inbound secret.
+        Some(ref token) if state.mesh.has_peer_with_inbound_secret(token) => {
+            Ok(next.run(request).await)
+        }
         _ => Err(StatusCode::UNAUTHORIZED),
     }
 }

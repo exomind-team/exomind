@@ -151,15 +151,28 @@ export function PeerPairingDialog({
     }
 
     try {
-      const targetUrl = `http://${selectedPeer.host}:${selectedPeer.port}`;
+      // Generate a per-peer inbound token for the initiator to use when calling us.
+      const responderInboundToken = crypto.randomUUID();
+
+      const initiatorBaseUrl = `http://${selectedPeer.host}:${selectedPeer.port}`;
       const result = await meshService.respondToPairing(
-        targetUrl,
+        initiatorBaseUrl,
         '', // session_id will be looked up server-side by host_id
         pinInput,
         localHostId,
         runtimeBaseUrl,
+        responderInboundToken,
       );
       if (result.paired) {
+        // Register the initiator as a peer on the local runtime.
+        await meshService.registerPeerLocally(
+          runtimeBaseUrl,
+          selectedPeer.host_id,
+          initiatorBaseUrl,
+          result.initiator_inbound_token, // outbound: what we send to the initiator
+          responderInboundToken,           // inbound: what the initiator sends to us
+        );
+
         setPeerToken(result.peer_token);
         setStatus('success');
       } else {

@@ -57,10 +57,14 @@ async fn pairing_full_flow_correct_pin() {
         .expect("device-b should be registered as peer");
     assert_eq!(peer["enabled"], json!(true));
     assert_eq!(peer["base_url"], "http://192.168.1.100:1949");
-    // auth_token must NOT be leaked in list responses (S7 security fix).
+    // Secrets must NOT be leaked in list responses (PeerInfoPublic).
     assert!(
         peer.get("auth_token").is_none() || peer["auth_token"].is_null(),
-        "auth_token must not be serialized in peer list responses"
+        "auth_token must not be in peer list responses"
+    );
+    assert!(
+        peer.get("inbound_secret").is_none() || peer["inbound_secret"].is_null(),
+        "inbound_secret must not be in peer list responses"
     );
 
     stop_runtime(&mut rt, "pairing-1").await;
