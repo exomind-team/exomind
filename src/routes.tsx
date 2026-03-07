@@ -234,11 +234,17 @@ function MobileShell({
   );
 }
 
-function DesktopSidebar({ activePath }: { activePath: string }) {
+function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
-    { key: 'agents', title: '网络', path: '/agents', icon: Waypoints, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
+    ...(agentPageEnabled ? [{
+      key: 'agents',
+      title: '网络',
+      path: '/agents',
+      icon: Waypoints,
+      match: (path: string) => path === '/agents' || path.startsWith('/agents/'),
+    }] : []),
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
@@ -290,11 +296,11 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
   );
 }
 
-function DesktopLayout({ activePath }: { activePath: string }) {
+function DesktopLayout({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
   return (
     <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
       <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
-        <DesktopSidebar activePath={activePath} />
+        <DesktopSidebar activePath={activePath} agentPageEnabled={agentPageEnabled} />
         <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
           <Outlet />
         </main>
@@ -402,7 +408,7 @@ function NewLayout() {
   if (isDesktop && desktopAdaptiveEnabled && isDesktopAdaptiveRoute) {
     return (
       <>
-        <DesktopLayout activePath={location.pathname} />
+        <DesktopLayout activePath={location.pathname} agentPageEnabled={agentPageEnabled} />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
         <ReminderNotifier />
       </>
