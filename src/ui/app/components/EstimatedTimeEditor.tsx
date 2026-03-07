@@ -41,6 +41,7 @@ export function EstimatedTimeEditor({
   currentMinutes,
   onUpdate,
 }: EstimatedTimeEditorProps) {
+  const activeTaskIdRef = useRef(taskId);
   const [minutes, setMinutes] = useState<number | undefined>(currentMinutes);
   const [customDraft, setCustomDraft] = useState(currentMinutes ? String(currentMinutes) : '');
   const [isCustomEditing, setIsCustomEditing] = useState(false);
@@ -49,9 +50,13 @@ export function EstimatedTimeEditor({
   const customInputRef = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
+    activeTaskIdRef.current = taskId;
     setMinutes(currentMinutes);
     setCustomDraft(currentMinutes ? String(currentMinutes) : '');
-  }, [currentMinutes]);
+    setIsCustomEditing(false);
+    setErrorMessage(null);
+    setIsSaving(false);
+  }, [currentMinutes, taskId]);
 
   useEffect(() => {
     if (!isCustomEditing) return;
@@ -74,22 +79,26 @@ export function EstimatedTimeEditor({
   const isCustomSelected = minutes !== undefined && !isPresetEstimatedMinutes(minutes);
 
   async function persistMinutes(nextMinutes: number | undefined): Promise<void> {
+    const requestTaskId = taskId;
     setIsSaving(true);
     setErrorMessage(null);
 
     try {
-      const updated = await getTaskService().updateTask(taskId, { estimatedMinutes: nextMinutes });
+      const updated = await getTaskService().updateTask(requestTaskId, { estimatedMinutes: nextMinutes });
       if (!updated) {
         throw new Error('当前任务不存在，估时未保存');
       }
+      if (activeTaskIdRef.current !== requestTaskId) return;
 
       setMinutes(nextMinutes);
       setCustomDraft(nextMinutes ? String(nextMinutes) : '');
       setIsCustomEditing(false);
       onUpdate?.(nextMinutes);
     } catch (error) {
+      if (activeTaskIdRef.current !== requestTaskId) return;
       setErrorMessage(error instanceof Error ? error.message : '估时保存失败，请稍后重试');
     } finally {
+      if (activeTaskIdRef.current !== requestTaskId) return;
       setIsSaving(false);
     }
   }

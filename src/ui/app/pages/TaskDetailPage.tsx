@@ -1120,9 +1120,12 @@ export function TaskDetailPage() {
   };
 
   const handleEstimatedMinutesUpdate = useCallback((minutes: number | undefined) => {
+    const sourceTaskId = task?.id;
+    if (!sourceTaskId) return;
+
     const updatedAt = Date.now();
     setTask((current) => {
-      if (!current) return current;
+      if (!current || current.id !== sourceTaskId) return current;
       return {
         ...current,
         estimatedMinutes: minutes,
@@ -1130,7 +1133,7 @@ export function TaskDetailPage() {
       };
     });
     setAllTasks((current) => current.map((candidate) => (
-      candidate.id === task?.id
+      candidate.id === sourceTaskId
         ? {
             ...candidate,
             estimatedMinutes: minutes,
