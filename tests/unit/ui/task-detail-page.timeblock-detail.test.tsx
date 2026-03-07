@@ -268,4 +268,44 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
     });
   });
+
+  it('hides stale timer actions while next task is still loading（切换任务加载中不允许沿用旧配置启动）', async () => {
+    mockMatchMedia(false);
+    getTaskMock.mockImplementation(async (id: string) => {
+      if (id === 'task-2') {
+        await new Promise((resolve) => setTimeout(resolve, 300));
+        return makeTask({
+          id: 'task-2',
+          title: '切换后的任务 B',
+          estimatedMinutes: 30,
+          status: 'not_started',
+          createdAt: 30,
+          updatedAt: 30,
+        });
+      }
+
+      return makeTask({ status: 'in_progress', createdAt: 20, updatedAt: 20 });
+    });
+
+    const { rerender } = render(<TaskDetailPage />);
+
+    await screen.findByText('时间块详情');
+    fireEvent.click(screen.getByTestId('task-mode-countup'));
+
+    currentTaskId = 'task-2';
+    rerender(<TaskDetailPage />);
+
+    expect(screen.getByText('加载中...')).toBeInTheDocument();
+    expect(screen.queryByText('开始计时')).toBeNull();
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('30m');
+    });
+
+    fireEvent.click(screen.getByText('开始计时'));
+
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
+    });
+  });
 });

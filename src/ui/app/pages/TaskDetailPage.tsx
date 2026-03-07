@@ -1,6 +1,6 @@
 import { ArrowLeft, Ellipsis, Pause, Play } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
@@ -823,6 +823,10 @@ export function TaskDetailPage() {
   const [dependencyActionError, setDependencyActionError] = useState<string | null>(null);
   const [isDependencySaving, setIsDependencySaving] = useState(false);
   const [dependencyReloadKey, setDependencyReloadKey] = useState(0);
+  const timerResetKey = taskId ?? preferredBlockId ?? task?.id;
+  const timerInitialMinutes = taskId
+    ? task?.id === taskId ? task.estimatedMinutes : undefined
+    : task?.estimatedMinutes;
   const {
     timerMode,
     countdownMinutes,
@@ -832,7 +836,16 @@ export function TaskDetailPage() {
     setCustomDurationDraft,
     commitCustomDuration,
     timerConfig,
-  } = useTimerConfig(task?.estimatedMinutes, task?.id);
+  } = useTimerConfig(timerInitialMinutes, timerResetKey);
+
+  useLayoutEffect(() => {
+    setIsLoading(true);
+    setTask(null);
+    setActiveBlock(null);
+    setHasOtherActiveBlock(false);
+    setEventLogs([]);
+    setReviewMarkdown('');
+  }, [dependencyReloadKey, preferredBlockId, taskId]);
 
   useEffect(() => {
     setDagVisibilityState({ collapsedUpstreamOf: [] });
