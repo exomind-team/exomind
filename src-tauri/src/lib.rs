@@ -20,6 +20,7 @@ use commands::runtime_commands::{
     runtime_service_status, runtime_service_stop, signal_publish_fast, RuntimeProcessState,
 };
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
+use commands::asr_commands::{volcano_asr_recognize, volcano_asr_check_config};
 use tauri::Manager;
 
 #[tauri::command]
@@ -109,6 +110,9 @@ pub fn run() {
             voice_overlay_hide,
             voice_shortcut_set,
             voice_shortcut_get,
+            // ASR 语音识别命令
+            volcano_asr_recognize,
+            volcano_asr_check_config,
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]
