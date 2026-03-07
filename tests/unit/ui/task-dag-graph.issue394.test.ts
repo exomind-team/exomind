@@ -113,7 +113,7 @@ describe('buildTaskGraph issue-394（任务 DAG 图基础层）', () => {
     expect(graph.currentRootNodeId).toBe('alpha')
   })
 
-  it('emits hard and soft edges and computes executable or blocked flags', () => {
+  it('emits hard and soft edges and keeps soft blockers executable', () => {
     const hardSource = makeTask({
       id: 'hard-source',
       title: 'Hard Source',
@@ -159,7 +159,7 @@ describe('buildTaskGraph issue-394（任务 DAG 图基础层）', () => {
     expect(targetNode).toMatchObject({
       isRoot: false,
       isCompleted: false,
-      isExecutable: false,
+      isExecutable: true,
       isBlocked: true,
     })
   })

@@ -59,6 +59,25 @@ function isDependencyBlocking(task: TaskNode, taskById: Map<string, TaskNode>): 
   })
 }
 
+function isTaskExecutable(task: TaskNode, taskById: Map<string, TaskNode>): boolean {
+  if (task.status !== 'not_started') {
+    return false
+  }
+
+  return !task.dependsOn.some((dependency) => {
+    if (dependency.type !== 'hard') {
+      return false
+    }
+
+    const predecessor = taskById.get(dependency.taskId)
+    if (!predecessor) {
+      return false
+    }
+
+    return predecessor.status !== 'completed'
+  })
+}
+
 export function resolveCurrentRootNodeId({
   rootNodeIds,
   topologicalOrder,
@@ -178,6 +197,7 @@ export function buildTaskGraph(tasks: TaskNode[]): TaskGraph {
     .filter((task): task is TaskNode => Boolean(task))
     .map((task) => {
       const isBlocked = isDependencyBlocking(task, taskById)
+      const isExecutable = isTaskExecutable(task, taskById)
 
       return {
         id: task.id,
@@ -186,7 +206,7 @@ export function buildTaskGraph(tasks: TaskNode[]): TaskGraph {
         priority: task.priority,
         isRoot: rootNodeIdSet.has(task.id),
         isCompleted: task.status === 'completed',
-        isExecutable: task.status === 'not_started' && !isBlocked,
+        isExecutable,
         isBlocked,
       }
     })
