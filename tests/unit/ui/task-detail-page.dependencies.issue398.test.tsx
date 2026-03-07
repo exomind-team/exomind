@@ -244,6 +244,30 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
     expect(screen.queryByTestId('dependency-current-empty')).not.toBeInTheDocument();
   });
 
+  it('renders disabled candidates and prevents blocked selections（渲染禁用候选并阻止选择）', async () => {
+    tasksState[0].dependsOn = [];
+    tasksState.push(makeTask({
+      id: 'task-4',
+      title: '归档旧方案',
+      status: 'abandoned',
+      timeBlockIds: [],
+    }));
+    renderPage();
+
+    const taskSelect = await screen.findByTestId('dependency-add-task-select');
+
+    expect(within(taskSelect).queryByRole('option', { name: '实现依赖关系卡片 · 未开始' })).not.toBeInTheDocument();
+    expect(within(taskSelect).getByRole('option', { name: '补 task.service 单测 · 进行中' })).not.toBeDisabled();
+    expect(within(taskSelect).getByRole('option', { name: '联调任务详情页 · 已完成 · 会形成循环依赖' })).toBeDisabled();
+    expect(within(taskSelect).getByRole('option', { name: '归档旧方案 · 已放弃 · 任务已放弃' })).toBeDisabled();
+
+    fireEvent.change(taskSelect, { target: { value: 'task-3' } });
+
+    expect(screen.getByTestId('dependency-add-button')).toBeDisabled();
+    expect(screen.getByTestId('dependency-add-task-disabled-reason')).toHaveTextContent('会形成循环依赖');
+    expect(addDependencyMock).not.toHaveBeenCalled();
+  });
+
   it('switches dependency type from soft to hard（切换依赖类型）', async () => {
     renderPage();
 
