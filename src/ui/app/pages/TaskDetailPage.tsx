@@ -25,8 +25,9 @@ import {
   type TaskDagDetailView,
 } from './task-dag-detail-view';
 import type { TaskDagVisibilityState } from '@/lib/task/task-dag-visibility';
+import { TimerConfigPanel } from '@/ui/app/components/TimerConfigPanel';
+import { useTimerConfig } from '@/ui/app/hooks/useTimerConfig';
 
-type TimerMode = 'countup' | 'countdown';
 type DependencyType = 'soft' | 'hard';
 
 function badgeClassName(badge: TimeblockBadge): string {
@@ -449,8 +450,7 @@ function MobileTimeblockDetail({
   dependencySelectedType,
   dependencyError,
   isDependencySaving,
-  timerMode,
-  setTimerMode,
+  timerControls,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
   onStartTimer,
@@ -472,8 +472,7 @@ function MobileTimeblockDetail({
   dependencySelectedType: DependencyType;
   dependencyError: string | null;
   isDependencySaving: boolean;
-  timerMode: TimerMode;
-  setTimerMode: (mode: TimerMode) => void;
+  timerControls: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
   onStartTimer: () => void;
@@ -606,26 +605,7 @@ function MobileTimeblockDetail({
           className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
         >
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              data-testid="task-mode-countdown"
-              aria-pressed={timerMode === 'countdown'}
-              onClick={() => setTimerMode('countdown')}
-              className={`rounded-xl px-3 py-1.5 text-xs ${timerMode === 'countdown' ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
-            >
-              倒计时
-            </button>
-            <button
-              type="button"
-              data-testid="task-mode-countup"
-              aria-pressed={timerMode === 'countup'}
-              onClick={() => setTimerMode('countup')}
-              className={`rounded-xl px-3 py-1.5 text-xs ${timerMode === 'countup' ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
-            >
-              正计时
-            </button>
-          </div>
+          {timerControls}
           <div className="mt-3 flex gap-2">
             <button
               type="button"
@@ -661,8 +641,7 @@ function DesktopTimeblockDetail({
   dependencySelectedType,
   dependencyError,
   isDependencySaving,
-  timerMode,
-  setTimerMode,
+  timerControls,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
   onStartTimer,
@@ -684,8 +663,7 @@ function DesktopTimeblockDetail({
   dependencySelectedType: DependencyType;
   dependencyError: string | null;
   isDependencySaving: boolean;
-  timerMode: TimerMode;
-  setTimerMode: (mode: TimerMode) => void;
+  timerControls: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
   onStartTimer: () => void;
@@ -796,26 +774,7 @@ function DesktopTimeblockDetail({
             className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
           >
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                data-testid="task-mode-countdown"
-                aria-pressed={timerMode === 'countdown'}
-                onClick={() => setTimerMode('countdown')}
-                className={`rounded-xl px-3 py-1.5 text-xs ${timerMode === 'countdown' ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
-              >
-                倒计时
-              </button>
-              <button
-                type="button"
-                data-testid="task-mode-countup"
-                aria-pressed={timerMode === 'countup'}
-                onClick={() => setTimerMode('countup')}
-                className={`rounded-xl px-3 py-1.5 text-xs ${timerMode === 'countup' ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
-              >
-                正计时
-              </button>
-            </div>
+            {timerControls}
             <div className="mt-3 flex gap-2">
               <button
                 type="button"
@@ -857,7 +816,6 @@ export function TaskDetailPage() {
   const [reviewMarkdown, setReviewMarkdown] = useState('');
   const [eventLogs, setEventLogs] = useState<TimeblockEventLog[]>([]);
   const [allTasks, setAllTasks] = useState<TaskNode[]>([]);
-  const [timerMode, setTimerMode] = useState<TimerMode>('countdown');
   const [dependencySelectedTaskId, setDependencySelectedTaskId] = useState('');
   const [dependencySelectedType, setDependencySelectedType] = useState<DependencyType>('soft');
   const [dagVisibilityState, setDagVisibilityState] = useState<TaskDagVisibilityState>({ collapsedUpstreamOf: [] });
@@ -865,6 +823,16 @@ export function TaskDetailPage() {
   const [dependencyActionError, setDependencyActionError] = useState<string | null>(null);
   const [isDependencySaving, setIsDependencySaving] = useState(false);
   const [dependencyReloadKey, setDependencyReloadKey] = useState(0);
+  const {
+    timerMode,
+    countdownMinutes,
+    setTimerMode,
+    setCountdownMinutes,
+    customDurationDraft,
+    setCustomDurationDraft,
+    commitCustomDuration,
+    timerConfig,
+  } = useTimerConfig(task?.estimatedMinutes);
 
   useEffect(() => {
     setDagVisibilityState({ collapsedUpstreamOf: [] });
@@ -971,6 +939,17 @@ export function TaskDetailPage() {
   const rootGuidance = useMemo(() => (
     <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
   ), [task?.id, taskById, taskGraph]);
+  const timerControls = (
+    <TimerConfigPanel
+      timerMode={timerMode}
+      countdownMinutes={countdownMinutes}
+      setTimerMode={setTimerMode}
+      setCountdownMinutes={setCountdownMinutes}
+      customDurationDraft={customDurationDraft}
+      setCustomDurationDraft={setCustomDurationDraft}
+      commitCustomDuration={commitCustomDuration}
+    />
+  );
 
   const dependencyView = useMemo(() => {
     if (!task) return null;
@@ -1066,10 +1045,7 @@ export function TaskDetailPage() {
 
   const handleStartTimer = () => {
     if (!taskId) return;
-    const config = timerMode === 'countdown'
-      ? { mode: 'countdown' as const, minutes: 25 }
-      : { mode: 'countup' as const };
-    void getTaskTimerService().startBlockForTask(taskId, config).then(() => {
+    void getTaskTimerService().startBlockForTask(taskId, timerConfig).then(() => {
       void navigate({ to: '/eventlog' });
     });
   };
@@ -1114,17 +1090,16 @@ export function TaskDetailPage() {
 
   if (isDesktop) {
     return (
-        <DesktopTimeblockDetail
-          task={task}
-          model={viewModel}
-          dependencyView={dependencyView}
-          taskDagView={taskDagView}
-          dependencySelectedTaskId={dependencySelectedTaskId}
-          dependencySelectedType={dependencySelectedType}
-          dependencyError={dependencyError}
+      <DesktopTimeblockDetail
+        task={task}
+        model={viewModel}
+        dependencyView={dependencyView}
+        taskDagView={taskDagView}
+        dependencySelectedTaskId={dependencySelectedTaskId}
+        dependencySelectedType={dependencySelectedType}
+        dependencyError={dependencyError}
         isDependencySaving={isDependencySaving}
-        timerMode={timerMode}
-        setTimerMode={setTimerMode}
+        timerControls={timerControls}
         hasOtherActiveBlock={hasOtherActiveBlock}
         hasActiveBlockOnTask={Boolean(activeBlock)}
         onStartTimer={handleStartTimer}
@@ -1133,11 +1108,11 @@ export function TaskDetailPage() {
         rootGuidance={rootGuidance}
         onDependencySelectedTaskChange={setDependencySelectedTaskId}
         onDependencySelectedTypeChange={setDependencySelectedType}
-          onAddDependency={handleAddDependency}
-          onChangeDependencyType={handleChangeDependencyType}
-          onRemoveDependency={handleRemoveDependency}
-          onToggleCollapseUpstream={handleToggleCollapseUpstream}
-        />
+        onAddDependency={handleAddDependency}
+        onChangeDependencyType={handleChangeDependencyType}
+        onRemoveDependency={handleRemoveDependency}
+        onToggleCollapseUpstream={handleToggleCollapseUpstream}
+      />
     );
   }
 
@@ -1151,8 +1126,7 @@ export function TaskDetailPage() {
       dependencySelectedType={dependencySelectedType}
       dependencyError={dependencyError}
       isDependencySaving={isDependencySaving}
-      timerMode={timerMode}
-      setTimerMode={setTimerMode}
+      timerControls={timerControls}
       hasOtherActiveBlock={hasOtherActiveBlock}
       hasActiveBlockOnTask={Boolean(activeBlock)}
       onStartTimer={handleStartTimer}
