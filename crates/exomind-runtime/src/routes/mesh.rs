@@ -23,6 +23,8 @@ struct CreatePeerRequest {
     enabled: bool,
     #[serde(default)]
     capabilities: Vec<String>,
+    #[serde(default)]
+    auth_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -30,6 +32,7 @@ struct UpdatePeerRequest {
     base_url: Option<String>,
     enabled: Option<bool>,
     capabilities: Option<Vec<String>>,
+    auth_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -82,6 +85,7 @@ async fn create_peer(
         last_error: None,
         created_at: now.clone(),
         updated_at: now,
+        auth_token: req.auth_token,
     });
 
     if let Some(relay) = &state.mesh_relay {
@@ -115,6 +119,9 @@ async fn update_peer(
     }
     if let Some(capabilities) = req.capabilities {
         peer.capabilities = capabilities;
+    }
+    if let Some(auth_token) = req.auth_token {
+        peer.auth_token = Some(auth_token);
     }
 
     let peer = state.mesh.upsert_peer(peer);

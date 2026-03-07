@@ -24,6 +24,7 @@ async fn create_and_delete_runtime_agent_via_http_routes() {
         signal_pool: Arc::clone(&signal_pool),
         mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
         mesh_relay: None,
+        auth_secret: None,
     };
     let app = routes::router().with_state(state);
 
@@ -95,6 +96,7 @@ async fn create_and_delete_codex_runtime_agent_via_http_routes() {
         signal_pool: Arc::clone(&signal_pool),
         mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
         mesh_relay: None,
+        auth_secret: None,
     };
     let app = routes::router().with_state(state);
 
@@ -136,6 +138,7 @@ async fn create_and_delete_api_runtime_agent_via_http_routes() {
         signal_pool: Arc::clone(&signal_pool),
         mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
         mesh_relay: None,
+        auth_secret: None,
     };
     let app = routes::router().with_state(state);
 
@@ -186,6 +189,7 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
         signal_pool: Arc::clone(&signal_pool),
         mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
         mesh_relay: None,
+        auth_secret: None,
     };
     let app = routes::router().with_state(state);
 

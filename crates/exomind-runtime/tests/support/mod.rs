@@ -24,6 +24,22 @@ pub async fn start_test_runtime(host_id: &str) -> RuntimeHandle {
         spawn_builtin_actors: false,
         spawn_ts_agents: false,
         mesh_state_path: None,
+        auth_secret: None,
+        ..Default::default()
+    })
+    .await
+    .unwrap_or_else(|error| panic!("runtime {host_id} should start: {error}"))
+}
+
+pub async fn start_test_runtime_with_secret(host_id: &str, secret: Option<String>) -> RuntimeHandle {
+    start_with_options(RuntimeStartOptions {
+        bind_host: "127.0.0.1".to_string(),
+        port: 0,
+        host_id: host_id.to_string(),
+        spawn_builtin_actors: false,
+        spawn_ts_agents: false,
+        mesh_state_path: None,
+        auth_secret: secret,
         ..Default::default()
     })
     .await

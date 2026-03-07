@@ -33,6 +33,9 @@ pub struct PeerInfo {
     pub last_error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Optional bearer token for authenticating with this peer.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub auth_token: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -472,13 +475,15 @@ impl MeshRelayManager {
             self.mesh.host_id()
         );
         let topics = self.mesh.local_interest_topics();
-        let response = self
+        let mut request = self
             .client
             .put(url)
             .timeout(Duration::from_secs(3))
-            .json(&serde_json::json!({ "topics": topics }))
-            .send()
-            .await?;
+            .json(&serde_json::json!({ "topics": topics }));
+        if let Some(token) = &peer.auth_token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        let response = request.send().await?;
         response.error_for_status()?;
         Ok(())
     }
@@ -490,16 +495,18 @@ impl MeshRelayManager {
             }
 
             let url = format!("{}/mesh/events", peer.base_url.trim_end_matches('/'));
-            let response = self
+            let mut request = self
                 .client
                 .post(url)
                 .timeout(Duration::from_secs(3))
                 .json(&serde_json::json!({
                     "from_peer_id": self.mesh.host_id(),
                     "event": event.clone(),
-                }))
-                .send()
-                .await;
+                }));
+            if let Some(token) = &peer.auth_token {
+                request = request.header("Authorization", format!("Bearer {token}"));
+            }
+            let response = request.send().await;
 
             match response {
                 Ok(response) => {
@@ -565,6 +572,9 @@ impl MeshRelayManager {
                 "{}/mesh/stream?peer_id={host_id}&heartbeat_interval=10",
                 peer.base_url.trim_end_matches('/')
             ));
+            if let Some(token) = &peer.auth_token {
+                request = request.header("Authorization", format!("Bearer {token}"));
+            }
             if let Some(last_event_id) = last_event_id.as_deref() {
                 request = request.header("Last-Event-ID", last_event_id);
             }

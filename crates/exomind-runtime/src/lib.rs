@@ -16,6 +16,7 @@ use mesh::{MeshRelayManager, MeshState};
 use signal::SignalPool;
 
 pub mod agent;
+pub mod auth;
 pub mod mesh;
 pub mod routes;
 pub mod signal;
@@ -77,6 +78,8 @@ pub struct RuntimeStartOptions {
     pub ts_agent_workdir: Option<PathBuf>,
     /// optional mesh state path（可选 peer/interest 持久化路径）.
     pub mesh_state_path: Option<PathBuf>,
+    /// optional bearer token secret for HTTP auth（可选 Bearer Token 鉴权密钥）.
+    pub auth_secret: Option<String>,
 }
 
 impl Default for RuntimeStartOptions {
@@ -98,6 +101,7 @@ impl Default for RuntimeStartOptions {
                 .unwrap_or_else(|_| "bun".to_string()),
             ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
             mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH").ok().map(PathBuf::from),
+            auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
         }
     }
 }
@@ -353,6 +357,7 @@ pub async fn start_with_options(
         options.host_id.clone(),
         options.mesh_state_path.clone(),
         true,
+        options.auth_secret.clone(),
     );
     let signal_pool = Arc::clone(&state.signal_pool);
     let mesh = Arc::clone(&state.mesh);
@@ -516,6 +521,7 @@ pub fn app(runtime_port: u16) -> Router {
 /// Build HTTP router from an existing AppState.
 pub fn app_with_state(state: AppState) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
+    // CORS must be outermost so that preflight OPTIONS requests (which carry no token) are handled.
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([
@@ -527,9 +533,16 @@ pub fn app_with_state(state: AppState) -> Router {
         ])
         .allow_headers(Any);
 
+    // Protected routes — auth middleware applied here.
+    let protected = routes::router()
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ));
+
     Router::new()
         .route("/health", get(health))
-        .merge(routes::router())
+        .merge(protected)
         .layer(cors)
         .with_state(state)
 }
@@ -542,11 +555,12 @@ pub struct AppState {
     pub signal_pool: Arc<SignalPool>,
     pub mesh: Arc<MeshState>,
     pub mesh_relay: Option<Arc<MeshRelayManager>>,
+    pub auth_secret: Option<String>,
 }
 
 impl AppState {
     pub fn new(port: u16) -> Self {
-        Self::new_runtime(port, default_runtime_host_id(port), None, false)
+        Self::new_runtime(port, default_runtime_host_id(port), None, false, None)
     }
 
     pub fn new_runtime(
@@ -554,6 +568,7 @@ impl AppState {
         host_id: String,
         mesh_persist_path: Option<PathBuf>,
         enable_mesh_relay: bool,
+        auth_secret: Option<String>,
     ) -> Self {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
@@ -576,6 +591,7 @@ impl AppState {
             signal_pool,
             mesh,
             mesh_relay,
+            auth_secret,
         }
     }
 }
@@ -656,6 +672,7 @@ mod tests {
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(mesh::MeshState::new(host_id, Arc::clone(&signal_pool), None)),
             mesh_relay: None,
+            auth_secret: None,
         }
     }
 

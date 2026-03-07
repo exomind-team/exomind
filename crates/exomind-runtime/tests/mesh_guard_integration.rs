@@ -14,6 +14,7 @@ fn peer(id: &str, base_url: &str) -> PeerInfo {
         last_error: None,
         created_at: "2026-03-06T00:00:00Z".to_string(),
         updated_at: "2026-03-06T00:00:00Z".to_string(),
+        auth_token: None,
     }
 }
 
