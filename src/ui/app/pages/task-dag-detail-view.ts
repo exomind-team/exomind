@@ -43,6 +43,7 @@ export interface TaskDagDetailView {
   totalNodeCount: number;
   visibleNodeCount: number;
   hiddenNodeCount: number;
+  hasCycle: boolean;
   visibleRootNodeIds: string[];
   visibleCurrentRootNodeId: string | null;
   visibleCurrentRootTitle: string | null;
@@ -202,6 +203,7 @@ export function buildTaskDagDetailView(
     totalNodeCount: taskGraph.nodes.length,
     visibleNodeCount: visibleGraph.nodes.length,
     hiddenNodeCount: visibleGraph.hiddenNodeIds.length,
+    hasCycle: visibleGraph.hasCycle,
     visibleRootNodeIds: visibleGraph.visibleRootNodeIds,
     visibleCurrentRootNodeId: visibleGraph.visibleCurrentRootNodeId,
     visibleCurrentRootTitle,

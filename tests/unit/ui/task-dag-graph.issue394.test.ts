@@ -253,4 +253,28 @@ describe('buildTaskGraph issue-394（任务 DAG 图基础层）', () => {
 
     expect(second).toEqual(first)
   })
+
+  it('marks cyclic input without inventing source roots', () => {
+    const taskA = makeTask({
+      id: 'a',
+      title: 'A',
+      createdAt: 10,
+      updatedAt: 10,
+      dependsOn: [{ taskId: 'b', type: 'hard' }],
+    })
+    const taskB = makeTask({
+      id: 'b',
+      title: 'B',
+      createdAt: 20,
+      updatedAt: 20,
+      dependsOn: [{ taskId: 'a', type: 'hard' }],
+    })
+
+    const graph = buildTaskGraph([taskA, taskB])
+
+    expect(graph.hasCycle).toBe(true)
+    expect(graph.rootNodeIds).toEqual([])
+    expect(graph.currentRootNodeId).toBeNull()
+    expect(graph.topologicalOrder).toEqual(['a', 'b'])
+  })
 })

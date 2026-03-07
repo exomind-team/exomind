@@ -204,6 +204,12 @@ function DependencyCard({
               </p>
             ) : null}
 
+            {taskDagView.hasCycle ? (
+              <p className="mt-2 text-xs text-[#B91C1C] dark:text-[#FCA5A5]">
+                检测到循环依赖，当前根节点引导按真实图停用，仅展示可见结构。
+              </p>
+            ) : null}
+
             <div className="mt-3 space-y-2">
               {taskDagView.nodes.map((node) => (
                 <article

@@ -14,6 +14,7 @@ export interface VisibleTaskGraph {
   nodes: VisibleTaskGraphNode[]
   edges: TaskGraphEdge[]
   hiddenNodeIds: string[]
+  hasCycle: boolean
   visibleRootNodeIds: string[]
   visibleCurrentRootNodeId: string | null
   sourceRootNodeIds: string[]
@@ -166,11 +167,13 @@ export function projectVisibleTaskGraph(
 
   const visibleNodeById = new Map(visibleNodes.map((node) => [node.id, node]))
   let visibleCurrentRootNodeId: string | null = null
-  for (const nodeId of visibleRootNodeIds) {
-    const node = visibleNodeById.get(nodeId)
-    if (node && !isTerminalStatus(node.status)) {
-      visibleCurrentRootNodeId = nodeId
-      break
+  if (graph.currentRootNodeId !== null) {
+    for (const nodeId of visibleRootNodeIds) {
+      const node = visibleNodeById.get(nodeId)
+      if (node && !isTerminalStatus(node.status)) {
+        visibleCurrentRootNodeId = nodeId
+        break
+      }
     }
   }
 
@@ -179,6 +182,7 @@ export function projectVisibleTaskGraph(
     nodes: visibleNodes,
     edges: visibleEdges,
     hiddenNodeIds,
+    hasCycle: graph.hasCycle,
     visibleRootNodeIds,
     visibleCurrentRootNodeId,
     sourceRootNodeIds: [...graph.rootNodeIds],

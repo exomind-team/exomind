@@ -228,4 +228,32 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
 
     expect(second).toEqual(first)
   })
+
+  it('does not invent a visible current root when the source graph is cyclic', () => {
+    const taskA = makeTask({
+      id: 'a',
+      title: 'A',
+      createdAt: 10,
+      updatedAt: 10,
+      dependsOn: [{ taskId: 'b', type: 'hard' }],
+    })
+    const taskB = makeTask({
+      id: 'b',
+      title: 'B',
+      createdAt: 20,
+      updatedAt: 20,
+      dependsOn: [{ taskId: 'a', type: 'hard' }],
+    })
+
+    const graph = buildTaskGraph([taskA, taskB])
+    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['a'] })
+
+    expect(graph.hasCycle).toBe(true)
+    expect(graph.rootNodeIds).toEqual([])
+    expect(graph.currentRootNodeId).toBeNull()
+    expect(visible.hasCycle).toBe(true)
+    expect(visible.visibleRootNodeIds).toEqual(['a'])
+    expect(visible.visibleCurrentRootNodeId).toBeNull()
+    expect(visible.sourceCurrentRootNodeId).toBeNull()
+  })
 })
