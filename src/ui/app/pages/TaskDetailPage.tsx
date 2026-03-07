@@ -166,6 +166,8 @@ function DependencyCard({
   onRemoveDependency: (taskId: string) => void;
   onToggleCollapseUpstream: (taskId: string) => void;
 }) {
+  const selectedCandidate = dependencyView.candidates.find((candidate) => candidate.id === selectedTaskId) ?? null;
+
   return (
     <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
       <div className="flex items-center justify-between gap-3">
@@ -375,11 +377,19 @@ function DependencyCard({
               >
                 <option value="">请选择任务</option>
                 {dependencyView.candidates.map((candidate) => (
-                  <option key={candidate.id} value={candidate.id}>
-                    {candidate.title} · {candidate.statusLabel}
+                  <option key={candidate.id} value={candidate.id} disabled={candidate.disabled}>
+                    {candidate.title} · {candidate.statusLabel}{candidate.disabledReason ? ` · ${candidate.disabledReason}` : ''}
                   </option>
                 ))}
               </select>
+              {selectedCandidate?.disabledReason ? (
+                <p
+                  data-testid="dependency-add-task-disabled-reason"
+                  className="text-[11px] text-[#C75B3A] dark:text-[#FDBA74]"
+                >
+                  当前候选不可选：{selectedCandidate.disabledReason}
+                </p>
+              ) : null}
             </label>
 
             <label className="space-y-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
@@ -400,7 +410,7 @@ function DependencyCard({
               <button
                 type="button"
                 data-testid="dependency-add-button"
-                disabled={isSaving || !selectedTaskId}
+                disabled={isSaving || !selectedTaskId || selectedCandidate?.disabled === true}
                 onClick={onAddDependency}
                 className="w-full rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
               >
@@ -996,8 +1006,13 @@ export function TaskDetailPage() {
       setDependencyActionError('请选择依赖任务');
       return;
     }
-    if (!dependencyView.candidates.some((candidate) => candidate.id === dependencySelectedTaskId)) {
+    const selectedCandidate = dependencyView.candidates.find((candidate) => candidate.id === dependencySelectedTaskId);
+    if (!selectedCandidate) {
       setDependencyActionError('依赖任务不存在，请刷新后重试');
+      return;
+    }
+    if (selectedCandidate.disabled) {
+      setDependencyActionError(`该依赖不可选：${selectedCandidate.disabledReason ?? '请更换其他任务'}`);
       return;
     }
 
