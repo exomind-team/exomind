@@ -239,4 +239,34 @@ describe('TaskDetailPage DAG visibility issue #395', () => {
     expect(screen.getByTestId('task-dag-node-task-1')).toHaveTextContent('已隐藏 1 项');
     expect(screen.getByTestId('task-dag-node-task-3')).toHaveTextContent('已隐藏 1 项');
   });
+
+  it('disables current-root guidance in the detail panel when the source graph is cyclic', async () => {
+    tasksState = [
+      makeTask({
+        id: 'task-1',
+        title: '循环 A',
+        dependsOn: [{ taskId: 'task-2', type: 'hard' }],
+        timeBlockIds: ['block-1'],
+      }),
+      makeTask({
+        id: 'task-2',
+        title: '循环 B',
+        dependsOn: [{ taskId: 'task-1', type: 'hard' }],
+      }),
+    ];
+
+    renderPage();
+
+    expect(await screen.findByText('依赖图')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('task-dag-toggle-upstream-task-1'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-node-task-2')).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('task-dag-root-summary')).toHaveTextContent('当前可见根：无');
+    expect(screen.getByTestId('task-dag-root-summary')).toHaveTextContent('真实当前根：无');
+    expect(screen.getByText('检测到循环依赖，当前根节点引导按真实图停用，仅展示可见结构。')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-badge-visible-current-root-task-1')).not.toBeInTheDocument();
+  });
 });
