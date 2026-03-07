@@ -16,6 +16,8 @@ export interface TaskDependencyCandidate {
   id: string;
   title: string;
   statusLabel: string;
+  disabled: boolean;
+  disabledReason?: string;
 }
 
 export interface TaskDependencyViewModel {
@@ -60,8 +62,44 @@ function buildDependencyItem(taskMap: Map<string, TaskNode>, taskId: string, typ
   };
 }
 
+function wouldCreateDependencyCycle(taskId: string, depTaskId: string, taskMap: Map<string, TaskNode>): boolean {
+  const visited = new Set<string>();
+  const queue = [depTaskId];
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current) {
+      continue;
+    }
+
+    if (current === taskId) {
+      return true;
+    }
+
+    if (visited.has(current)) {
+      continue;
+    }
+
+    visited.add(current);
+
+    const task = taskMap.get(current);
+    if (!task) {
+      continue;
+    }
+
+    for (const dependency of task.dependsOn) {
+      if (!visited.has(dependency.taskId)) {
+        queue.push(dependency.taskId);
+      }
+    }
+  }
+
+  return false;
+}
+
 export function buildTaskDependencyView(task: TaskNode, allTasks: TaskNode[]): TaskDependencyViewModel {
   const taskMap = new Map(allTasks.map((item) => [item.id, item]));
+  const existingDependencyIds = new Set(task.dependsOn.map((dependency) => dependency.taskId));
 
   return {
     currentDependencies: task.dependsOn.map((dependency) => buildDependencyItem(taskMap, dependency.taskId, dependency.type)),
@@ -69,11 +107,23 @@ export function buildTaskDependencyView(task: TaskNode, allTasks: TaskNode[]): T
       .flatMap((candidate) => candidate.dependsOn
         .filter((dependency) => dependency.taskId === task.id)
         .map((dependency) => buildDependencyItem(taskMap, candidate.id, dependency.type))),
-    candidates: allTasks.map((candidate) => ({
-      id: candidate.id,
-      title: candidate.title,
-      statusLabel: STATUS_LABELS[candidate.status],
-    })),
+    candidates: allTasks
+      .filter((candidate) => candidate.id !== task.id && !existingDependencyIds.has(candidate.id))
+      .map((candidate) => {
+        const disabledReason = candidate.status === 'abandoned'
+          ? '任务已放弃'
+          : wouldCreateDependencyCycle(task.id, candidate.id, taskMap)
+            ? '会形成循环依赖'
+            : undefined;
+
+        return {
+          id: candidate.id,
+          title: candidate.title,
+          statusLabel: STATUS_LABELS[candidate.status],
+          disabled: Boolean(disabledReason),
+          disabledReason,
+        };
+      }),
   };
 }
 
