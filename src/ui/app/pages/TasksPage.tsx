@@ -318,6 +318,7 @@ export function TasksPage() {
                               key={item.id}
                               to="/tasks/block/$blockId"
                               params={{ blockId: item.blockId }}
+                              search={{ from: activeTab }}
                               data-testid={`tasks-today-block-link-${item.blockId}`}
                               className="block"
                             >

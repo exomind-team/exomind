@@ -29,6 +29,22 @@ import { TimerConfigPanel } from '@/ui/app/components/TimerConfigPanel';
 import { useTimerConfig } from '@/ui/app/hooks/useTimerConfig';
 
 type DependencyType = 'soft' | 'hard';
+type TimeblockSourceTab = 'now' | 'today' | 'week' | 'month';
+
+const TIMEBLOCK_SOURCE_LABEL: Record<TimeblockSourceTab, string> = {
+  now: '当下',
+  today: '今日',
+  week: '一周',
+  month: '本月',
+};
+
+interface TimeblockSourceBackLink {
+  to: string;
+  search?: Record<string, string>;
+  label: string;
+  breadcrumb: string;
+  sourceLabel: string;
+}
 
 function badgeClassName(badge: TimeblockBadge): string {
   if (badge.tone === 'success') return 'bg-[#DCFCE7] text-[#15803D]';
@@ -77,6 +93,31 @@ function resolvePreferredBlockId(): string | undefined {
   return fromHash || undefined;
 }
 
+function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
+  if (typeof window === 'undefined') {
+    return {
+      to: '/tasks',
+      label: '← 返回任务',
+      breadcrumb: '任务 > 时间块详情',
+      sourceLabel: '任务',
+    };
+  }
+
+  const searchParams = new URLSearchParams(window.location.search);
+  const from = searchParams.get('from')?.trim() as TimeblockSourceTab | undefined;
+  const isKnownSource = Boolean(from && from in TIMEBLOCK_SOURCE_LABEL);
+  const sourceTab = isKnownSource ? from : undefined;
+  const sourceLabel = sourceTab ? TIMEBLOCK_SOURCE_LABEL[sourceTab] : '任务';
+
+  return {
+    to: '/tasks',
+    search: sourceTab ? { tab: sourceTab } : undefined,
+    label: `← 返回${sourceLabel}`,
+    breadcrumb: sourceTab ? `任务 > ${sourceLabel} > 时间块详情` : '任务 > 时间块详情',
+    sourceLabel,
+  };
+}
+
 function buildVirtualTaskFromBlock(block: TimeBlock): TaskNode {
   const estimatedMinutes = Math.max(1, Math.round((block.endTime - block.startTime) / 60_000));
   return {
@@ -109,15 +150,17 @@ function DetailActionsCard({
       <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">操作</h3>
       <div className="mt-3 space-y-2">
         {model.actions.map((action) => {
-          if (action.id === 'open-task' || action.id === 'open-eventlog') {
+          if (action.id === 'back-source' || action.id === 'open-task' || action.id === 'open-eventlog') {
             return (
               <Link
                 key={action.id}
                 to={action.to!}
+                search={action.search}
                 className="flex w-full items-center justify-between rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#44403C] transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#E7E5E4] dark:hover:bg-[#292524]"
+                data-testid={action.id === 'back-source' ? 'timeblock-action-back-link' : undefined}
               >
                 <span>{action.label}</span>
-                <span className="text-xs text-[#A8A29E]">打开</span>
+                <span className="text-xs text-[#A8A29E]">{action.id === 'back-source' ? '返回' : '打开'}</span>
               </Link>
             );
           }
@@ -454,6 +497,7 @@ function DependencyCard({
 function MobileTimeblockDetail({
   task,
   model,
+  backLink,
   dependencyView,
   taskDagView,
   dependencySelectedTaskId,
@@ -476,6 +520,7 @@ function MobileTimeblockDetail({
 }: {
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
+  backLink: TimeblockSourceBackLink;
   dependencyView: TaskDependencyViewModel;
   taskDagView: TaskDagDetailView | null;
   dependencySelectedTaskId: string;
@@ -498,18 +543,29 @@ function MobileTimeblockDetail({
 }) {
   return (
     <div className="min-h-full bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
-      <header className="sticky top-0 z-10 flex items-center justify-between border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-4 py-3 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95">
+      <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-4 py-3 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95">
         <Link
-          to="/tasks"
+          to={backLink.to}
+          search={backLink.search}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
-          aria-label="返回任务列表（Back to tasks）"
+          aria-label={`返回${backLink.sourceLabel}`}
         >
           <ArrowLeft size={16} />
         </Link>
-        <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">时间块详情</h1>
+        <div className="min-w-0 flex-1 pt-0.5">
+          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">时间块详情</h1>
+          <Link
+            to={backLink.to}
+            search={backLink.search}
+            className="mt-1 inline-flex text-xs font-medium text-[#78716C] underline-offset-2 hover:underline dark:text-[#A8A29E]"
+            data-testid="timeblock-back-link-mobile"
+          >
+            {backLink.label}
+          </Link>
+        </div>
         <button
           type="button"
-          className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+          className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
           aria-label="更多操作（More actions）"
         >
           <Ellipsis size={16} />
@@ -645,6 +701,7 @@ function MobileTimeblockDetail({
 function DesktopTimeblockDetail({
   task,
   model,
+  backLink,
   dependencyView,
   taskDagView,
   dependencySelectedTaskId,
@@ -667,6 +724,7 @@ function DesktopTimeblockDetail({
 }: {
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
+  backLink: TimeblockSourceBackLink;
   dependencyView: TaskDependencyViewModel;
   taskDagView: TaskDagDetailView | null;
   dependencySelectedTaskId: string;
@@ -690,9 +748,19 @@ function DesktopTimeblockDetail({
   return (
     <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
       <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <p className="text-xs text-[#A8A29E]">任务 &gt; 今日 &gt; 时间块详情</p>
+        <p className="text-xs text-[#A8A29E]">{backLink.breadcrumb}</p>
         <div className="mt-2 flex items-center justify-between gap-3">
-          <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
+          <div className="min-w-0">
+            <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
+            <Link
+              to={backLink.to}
+              search={backLink.search}
+              className="mt-2 inline-flex text-sm font-medium text-[#78716C] underline-offset-2 hover:underline dark:text-[#A8A29E]"
+              data-testid="timeblock-back-link-desktop"
+            >
+              {backLink.label}
+            </Link>
+          </div>
           <div className="flex flex-wrap items-center gap-2">
             {model.summary.badges.map((badge) => (
               <span key={badge.label} className={`rounded-full px-3 py-1 text-xs font-semibold ${badgeClassName(badge)}`}>
@@ -817,6 +885,7 @@ export function TaskDetailPage() {
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
   const preferredBlockId = blockIdParam || resolvePreferredBlockId();
+  const backLink = resolveTimeblockSourceBackLink();
 
   const [task, setTask] = useState<TaskNode | null>(null);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
@@ -954,8 +1023,13 @@ export function TaskDetailPage() {
       eventLogs,
       reviewMarkdown,
       useMockData: getUseMockDataEnabled(),
+      backAction: {
+        label: backLink.label,
+        to: backLink.to,
+        search: backLink.search,
+      },
     });
-  }, [activeBlock, eventLogs, preferredBlockId, reviewMarkdown, task, timeBlocks]);
+  }, [activeBlock, backLink.label, backLink.search, backLink.to, eventLogs, preferredBlockId, reviewMarkdown, task, timeBlocks]);
 
   const taskGraph = useMemo(() => buildTaskGraph(allTasks), [allTasks]);
   const taskById = useMemo(() => new Map(allTasks.map((candidate) => [candidate.id, candidate])), [allTasks]);
@@ -1107,9 +1181,9 @@ export function TaskDetailPage() {
   if (!task || !viewModel || !dependencyView) {
     return (
       <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
-        <Link to="/tasks" className="inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
+        <Link to={backLink.to} search={backLink.search} className="inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
           <ArrowLeft size={16} />
-          返回任务
+          {backLink.label.replace('← ', '')}
         </Link>
         <p className="mt-3 text-sm text-[#A8A29E]">任务不存在</p>
       </div>
@@ -1121,6 +1195,7 @@ export function TaskDetailPage() {
       <DesktopTimeblockDetail
         task={task}
         model={viewModel}
+        backLink={backLink}
         dependencyView={dependencyView}
         taskDagView={taskDagView}
         dependencySelectedTaskId={dependencySelectedTaskId}
@@ -1148,6 +1223,7 @@ export function TaskDetailPage() {
     <MobileTimeblockDetail
       task={task}
       model={viewModel}
+      backLink={backLink}
       dependencyView={dependencyView}
       taskDagView={taskDagView}
       dependencySelectedTaskId={dependencySelectedTaskId}
