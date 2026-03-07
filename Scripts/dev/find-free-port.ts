@@ -11,6 +11,8 @@
  */
 import { createServer } from "net";
 
+const PROBE_HOST = "0.0.0.0";
+
 function findFreePort(preferred?: number): Promise<number> {
   return new Promise((resolve, reject) => {
     const server = createServer();
@@ -23,7 +25,7 @@ function findFreePort(preferred?: number): Promise<number> {
         reject(err);
       }
     });
-    server.listen(preferred ?? 0, "127.0.0.1", () => {
+    server.listen({ port: preferred ?? 0, host: PROBE_HOST, exclusive: true }, () => {
       const addr = server.address();
       const port = typeof addr === "object" && addr ? addr.port : 0;
       server.close(() => resolve(port));
