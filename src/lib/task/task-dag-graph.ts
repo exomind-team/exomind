@@ -24,6 +24,7 @@ export interface TaskGraph {
   rootNodeIds: string[]
   currentRootNodeId: string | null
   topologicalOrder: string[]
+  hasCycle: boolean
 }
 
 function compareTasksForGraphOrder(left: TaskNode, right: TaskNode): number {
@@ -180,7 +181,9 @@ export function buildTaskGraph(tasks: TaskNode[]): TaskGraph {
     }
   }
 
-  if (topologicalOrder.length < stableTasks.length) {
+  const hasCycle = topologicalOrder.length < stableTasks.length
+
+  if (hasCycle) {
     const remaining = stableTasks
       .map((task) => task.id)
       .filter((taskId) => !topologicalOrder.includes(taskId))
@@ -236,5 +239,6 @@ export function buildTaskGraph(tasks: TaskNode[]): TaskGraph {
       taskById,
     }),
     topologicalOrder,
+    hasCycle,
   }
 }

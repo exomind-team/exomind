@@ -20,6 +20,11 @@ import {
   formatDependencyActionError,
   type TaskDependencyViewModel,
 } from './task-dependency-view';
+import {
+  buildTaskDagDetailView,
+  type TaskDagDetailView,
+} from './task-dag-detail-view';
+import type { TaskDagVisibilityState } from '@/lib/task/task-dag-visibility';
 
 type TimerMode = 'countup' | 'countdown';
 type DependencyType = 'soft' | 'hard';
@@ -135,6 +140,7 @@ function DetailActionsCard({
 
 function DependencyCard({
   dependencyView,
+  taskDagView,
   selectedTaskId,
   selectedType,
   errorMessage,
@@ -144,8 +150,10 @@ function DependencyCard({
   onAddDependency,
   onChangeDependencyType,
   onRemoveDependency,
+  onToggleCollapseUpstream,
 }: {
   dependencyView: TaskDependencyViewModel;
+  taskDagView: TaskDagDetailView | null;
   selectedTaskId: string;
   selectedType: DependencyType;
   errorMessage: string | null;
@@ -155,6 +163,7 @@ function DependencyCard({
   onAddDependency: () => void;
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
+  onToggleCollapseUpstream: (taskId: string) => void;
 }) {
   return (
     <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
@@ -172,6 +181,127 @@ function DependencyCard({
       ) : null}
 
       <div className="mt-4 space-y-4">
+        {taskDagView ? (
+          <div className="rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]" data-testid="task-dag-panel">
+            <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+              <div>
+                <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">依赖图</h4>
+                <p className="mt-1 text-sm text-[#57534E] dark:text-[#D6D3D1]">
+                  当前显示 {taskDagView.visibleNodeCount}/{taskDagView.totalNodeCount} 个相关节点
+                </p>
+              </div>
+              <div className="text-xs text-[#78716C] dark:text-[#A8A29E]" data-testid="task-dag-root-summary">
+                <p>当前可见根：{taskDagView.visibleCurrentRootTitle ?? '无'}</p>
+                <p>
+                  真实当前根：
+                  {taskDagView.sourceCurrentRootTitle ?? '无'}
+                  {taskDagView.sourceCurrentRootTitle && !taskDagView.isSourceCurrentRootVisible ? '（当前已隐藏）' : ''}
+                </p>
+              </div>
+            </div>
+
+            {taskDagView.hiddenNodeCount > 0 ? (
+              <p className="mt-2 text-xs text-[#C75B3A] dark:text-[#FDBA74]">
+                当前折叠共隐藏 {taskDagView.hiddenNodeCount} 个上游节点。
+              </p>
+            ) : null}
+
+            {taskDagView.hasCycle ? (
+              <p className="mt-2 text-xs text-[#B91C1C] dark:text-[#FCA5A5]">
+                检测到循环依赖，当前根节点引导按真实图停用，仅展示可见结构。
+              </p>
+            ) : null}
+
+            <div className="mt-3 space-y-2">
+              {taskDagView.nodes.map((node) => (
+                <article
+                  key={node.id}
+                  data-testid={`task-dag-node-${node.id}`}
+                  className="rounded-xl border border-[#E7E5E4] bg-white px-3 py-3 dark:border-[#3F3F46] dark:bg-[#1C1917]"
+                >
+                  <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <p className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{node.title}</p>
+                        <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[11px] text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
+                          {node.statusLabel}
+                        </span>
+                        {node.isCurrentTask ? (
+                          <span
+                            data-testid={`task-dag-badge-current-task-${node.id}`}
+                            className="rounded-full bg-[#E0F2FE] px-2 py-0.5 text-[11px] text-[#0369A1] dark:bg-[#172554] dark:text-[#BAE6FD]"
+                          >
+                            当前任务
+                          </span>
+                        ) : null}
+                        {node.isVisibleRoot ? (
+                          <span
+                            data-testid={`task-dag-badge-visible-root-${node.id}`}
+                            className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[11px] text-[#15803D] dark:bg-[#14532D] dark:text-[#BBF7D0]"
+                          >
+                            可见根
+                          </span>
+                        ) : null}
+                        {node.isVisibleCurrentRoot ? (
+                          <span
+                            data-testid={`task-dag-badge-visible-current-root-${node.id}`}
+                            className="rounded-full bg-[#FDE68A] px-2 py-0.5 text-[11px] text-[#92400E] dark:bg-[#78350F] dark:text-[#FDE68A]"
+                          >
+                            当前可见根
+                          </span>
+                        ) : null}
+                      </div>
+
+                      <div className="mt-2 flex flex-wrap gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                        <span>上游节点：{node.upstreamNodeCount}</span>
+                        {node.isCollapsedTarget ? <span>已折叠上游</span> : null}
+                      </div>
+
+                      {node.hiddenUpstreamCount > 0 ? (
+                        <p
+                          data-testid={`task-dag-hidden-summary-${node.id}`}
+                          className="mt-2 rounded-lg bg-[#FFF7ED] px-2.5 py-1.5 text-xs text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]"
+                        >
+                          已隐藏 {node.hiddenUpstreamCount} 项
+                        </p>
+                      ) : null}
+                    </div>
+
+                    <button
+                      type="button"
+                      data-testid={`task-dag-toggle-upstream-${node.id}`}
+                      disabled={!node.canCollapseUpstream}
+                      onClick={() => onToggleCollapseUpstream(node.id)}
+                      className="rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#57534E] transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
+                    >
+                      {node.isCollapsedTarget ? '展开上游' : '折叠上游'}
+                    </button>
+                  </div>
+                </article>
+              ))}
+            </div>
+
+            <div className="mt-3">
+              <h5 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">可见连线</h5>
+              <div className="mt-2 space-y-1">
+                {taskDagView.edges.length > 0 ? taskDagView.edges.map((edge) => (
+                  <p
+                    key={edge.id}
+                    data-testid={`task-dag-edge-${edge.id}`}
+                    className="rounded-lg bg-white px-2.5 py-2 text-xs text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]"
+                  >
+                    {edge.sourceTitle} → {edge.targetTitle} · {edge.typeLabel}
+                  </p>
+                )) : (
+                  <p data-testid="task-dag-edges-empty" className="text-xs text-[#A8A29E]">
+                    当前可见图中暂无连线
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        ) : null}
+
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">前置依赖</h4>
           <div className="mt-2 space-y-2">
@@ -314,6 +444,7 @@ function MobileTimeblockDetail({
   task,
   model,
   dependencyView,
+  taskDagView,
   dependencySelectedTaskId,
   dependencySelectedType,
   dependencyError,
@@ -331,10 +462,12 @@ function MobileTimeblockDetail({
   onAddDependency,
   onChangeDependencyType,
   onRemoveDependency,
+  onToggleCollapseUpstream,
 }: {
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
   dependencyView: TaskDependencyViewModel;
+  taskDagView: TaskDagDetailView | null;
   dependencySelectedTaskId: string;
   dependencySelectedType: DependencyType;
   dependencyError: string | null;
@@ -352,6 +485,7 @@ function MobileTimeblockDetail({
   onAddDependency: () => void;
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
+  onToggleCollapseUpstream: (taskId: string) => void;
 }) {
   return (
     <div className="min-h-full bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
@@ -448,6 +582,7 @@ function MobileTimeblockDetail({
 
         <DependencyCard
           dependencyView={dependencyView}
+          taskDagView={taskDagView}
           selectedTaskId={dependencySelectedTaskId}
           selectedType={dependencySelectedType}
           errorMessage={dependencyError}
@@ -457,6 +592,7 @@ function MobileTimeblockDetail({
           onAddDependency={onAddDependency}
           onChangeDependencyType={onChangeDependencyType}
           onRemoveDependency={onRemoveDependency}
+          onToggleCollapseUpstream={onToggleCollapseUpstream}
         />
 
         <DetailActionsCard
@@ -520,6 +656,7 @@ function DesktopTimeblockDetail({
   task,
   model,
   dependencyView,
+  taskDagView,
   dependencySelectedTaskId,
   dependencySelectedType,
   dependencyError,
@@ -537,10 +674,12 @@ function DesktopTimeblockDetail({
   onAddDependency,
   onChangeDependencyType,
   onRemoveDependency,
+  onToggleCollapseUpstream,
 }: {
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
   dependencyView: TaskDependencyViewModel;
+  taskDagView: TaskDagDetailView | null;
   dependencySelectedTaskId: string;
   dependencySelectedType: DependencyType;
   dependencyError: string | null;
@@ -558,6 +697,7 @@ function DesktopTimeblockDetail({
   onAddDependency: () => void;
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
+  onToggleCollapseUpstream: (taskId: string) => void;
 }) {
   return (
     <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
@@ -617,6 +757,7 @@ function DesktopTimeblockDetail({
 
           <DependencyCard
             dependencyView={dependencyView}
+            taskDagView={taskDagView}
             selectedTaskId={dependencySelectedTaskId}
             selectedType={dependencySelectedType}
             errorMessage={dependencyError}
@@ -626,6 +767,7 @@ function DesktopTimeblockDetail({
             onAddDependency={onAddDependency}
             onChangeDependencyType={onChangeDependencyType}
             onRemoveDependency={onRemoveDependency}
+            onToggleCollapseUpstream={onToggleCollapseUpstream}
           />
 
           <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
@@ -718,10 +860,15 @@ export function TaskDetailPage() {
   const [timerMode, setTimerMode] = useState<TimerMode>('countdown');
   const [dependencySelectedTaskId, setDependencySelectedTaskId] = useState('');
   const [dependencySelectedType, setDependencySelectedType] = useState<DependencyType>('soft');
+  const [dagVisibilityState, setDagVisibilityState] = useState<TaskDagVisibilityState>({ collapsedUpstreamOf: [] });
   const [dependencyLoadError, setDependencyLoadError] = useState<string | null>(null);
   const [dependencyActionError, setDependencyActionError] = useState<string | null>(null);
   const [isDependencySaving, setIsDependencySaving] = useState(false);
   const [dependencyReloadKey, setDependencyReloadKey] = useState(0);
+
+  useEffect(() => {
+    setDagVisibilityState({ collapsedUpstreamOf: [] });
+  }, [task?.id]);
 
   useEffect(() => {
     let disposed = false;
@@ -830,10 +977,23 @@ export function TaskDetailPage() {
     return buildTaskDependencyView(task, allTasks);
   }, [allTasks, task]);
 
+  const taskDagView = useMemo(() => {
+    if (!task) return null;
+    return buildTaskDagDetailView(task, allTasks, dagVisibilityState);
+  }, [allTasks, dagVisibilityState, task]);
+
   const dependencyError = dependencyActionError ?? dependencyLoadError;
 
   const reloadDependencies = () => {
     setDependencyReloadKey((value) => value + 1);
+  };
+
+  const handleToggleCollapseUpstream = (targetTaskId: string) => {
+    setDagVisibilityState((currentState) => ({
+      collapsedUpstreamOf: currentState.collapsedUpstreamOf.includes(targetTaskId)
+        ? currentState.collapsedUpstreamOf.filter((taskId) => taskId !== targetTaskId)
+        : [...currentState.collapsedUpstreamOf, targetTaskId],
+    }));
   };
 
   const handleAddDependency = async () => {
@@ -954,13 +1114,14 @@ export function TaskDetailPage() {
 
   if (isDesktop) {
     return (
-      <DesktopTimeblockDetail
-        task={task}
-        model={viewModel}
-        dependencyView={dependencyView}
-        dependencySelectedTaskId={dependencySelectedTaskId}
-        dependencySelectedType={dependencySelectedType}
-        dependencyError={dependencyError}
+        <DesktopTimeblockDetail
+          task={task}
+          model={viewModel}
+          dependencyView={dependencyView}
+          taskDagView={taskDagView}
+          dependencySelectedTaskId={dependencySelectedTaskId}
+          dependencySelectedType={dependencySelectedType}
+          dependencyError={dependencyError}
         isDependencySaving={isDependencySaving}
         timerMode={timerMode}
         setTimerMode={setTimerMode}
@@ -972,10 +1133,11 @@ export function TaskDetailPage() {
         rootGuidance={rootGuidance}
         onDependencySelectedTaskChange={setDependencySelectedTaskId}
         onDependencySelectedTypeChange={setDependencySelectedType}
-        onAddDependency={handleAddDependency}
-        onChangeDependencyType={handleChangeDependencyType}
-        onRemoveDependency={handleRemoveDependency}
-      />
+          onAddDependency={handleAddDependency}
+          onChangeDependencyType={handleChangeDependencyType}
+          onRemoveDependency={handleRemoveDependency}
+          onToggleCollapseUpstream={handleToggleCollapseUpstream}
+        />
     );
   }
 
@@ -984,6 +1146,7 @@ export function TaskDetailPage() {
       task={task}
       model={viewModel}
       dependencyView={dependencyView}
+      taskDagView={taskDagView}
       dependencySelectedTaskId={dependencySelectedTaskId}
       dependencySelectedType={dependencySelectedType}
       dependencyError={dependencyError}
@@ -1001,6 +1164,7 @@ export function TaskDetailPage() {
       onAddDependency={handleAddDependency}
       onChangeDependencyType={handleChangeDependencyType}
       onRemoveDependency={handleRemoveDependency}
+      onToggleCollapseUpstream={handleToggleCollapseUpstream}
     />
   );
 }
