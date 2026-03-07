@@ -25,12 +25,13 @@ import type { ActiveBlockReplicationSnapshotPayload } from '@/lib/services/ecs-a
 import { projectActiveBlockReplicationSnapshot as projectActiveBlockSnapshot } from '@/lib/services/ecs-active-block-replication.service';
 import {
   getSelectedRuntimeTarget,
-  getRuntimeTargetMode,
   persistEmbeddedRuntimeStatus,
   subscribeRuntimeTargetChanges,
   type RuntimeTarget,
 } from '@/config/runtime-target';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+
+const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
 
 function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
   const isTimeblock = payload.review_type === 'timeblock';
@@ -66,23 +67,46 @@ export function useSignalStream(): void {
 
   useEffect(() => {
     let cancelled = false;
+    let loggedHydrationError = false;
 
     const hydrateEmbeddedRuntimeStatus = async () => {
+      if (!(await isTauri()) || runtimeTarget.mode !== 'embedded') {
+        if (!cancelled) {
+          setRuntimeTargetHydrated(true);
+        }
+        return;
+      }
+
       try {
-        if (!(await isTauri()) || getRuntimeTargetMode() !== 'embedded') {
-          return;
+        if (!cancelled) {
+          setRuntimeTargetHydrated(false);
         }
 
-        const status = await getRuntimeControlService().getStatus();
-        persistEmbeddedRuntimeStatus({
-          host: status.host,
-          port: status.port,
-          hostId: status.hostId,
-        });
-      } catch (error) {
-        console.warn('[SignalStream] failed to hydrate embedded runtime status:', error);
+        while (!cancelled) {
+          try {
+            const status = await getRuntimeControlService().getStatus();
+            if (status.running) {
+              persistEmbeddedRuntimeStatus({
+                host: status.host,
+                port: status.port,
+                hostId: status.hostId,
+              });
+              if (!cancelled) {
+                setRuntimeTargetHydrated(true);
+              }
+              return;
+            }
+          } catch (error) {
+            if (!loggedHydrationError) {
+              console.warn('[SignalStream] failed to hydrate embedded runtime status:', error);
+              loggedHydrationError = true;
+            }
+          }
+
+          await new Promise((resolve) => window.setTimeout(resolve, EMBEDDED_RUNTIME_STATUS_RETRY_MS));
+        }
       } finally {
-        if (!cancelled) {
+        if (!cancelled && runtimeTarget.mode !== 'embedded') {
           setRuntimeTargetHydrated(true);
         }
       }
@@ -93,7 +117,7 @@ export function useSignalStream(): void {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [runtimeTarget.mode]);
 
   useEffect(() => {
     const unsubscribe = subscribeRuntimeTargetChanges((nextTarget) => {

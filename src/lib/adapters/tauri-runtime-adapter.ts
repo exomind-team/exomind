@@ -18,11 +18,13 @@ const DEFAULT_RUNTIME_STATUS: RuntimeServiceStatus = {
 };
 
 function rememberEmbeddedRuntimeStatus(status: RuntimeServiceStatus): RuntimeServiceStatus {
-  persistEmbeddedRuntimeStatus({
-    host: status.host,
-    port: status.port,
-    hostId: status.hostId,
-  });
+  if (status.running) {
+    persistEmbeddedRuntimeStatus({
+      host: status.host,
+      port: status.port,
+      hostId: status.hostId,
+    });
+  }
   return status;
 }
 
