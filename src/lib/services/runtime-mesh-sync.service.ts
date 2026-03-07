@@ -106,7 +106,7 @@ export class RuntimeMeshSyncService {
 
   /** 发起配对会话，返回 session_id 和 6 位 PIN 码 */
   async initiatePairing(runtimeBaseUrl: string): Promise<{ session_id: string; pin: string }> {
-    const response = await this.fetchImpl(`${runtimeBaseUrl}/auth/pair/initiate`, {
+    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/pairing/initiate`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
     });
@@ -124,7 +124,7 @@ export class RuntimeMeshSyncService {
     responderHostId: string,
     responderBaseUrl: string,
   ): Promise<{ paired: boolean; peer_token: string }> {
-    const response = await this.fetchImpl(`${runtimeBaseUrl}/auth/pair/respond`, {
+    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/pairing/respond`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({

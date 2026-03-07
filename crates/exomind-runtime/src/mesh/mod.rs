@@ -34,7 +34,8 @@ pub struct PeerInfo {
     pub created_at: String,
     pub updated_at: String,
     /// Optional bearer token for authenticating with this peer.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    /// Never serialized in API responses to prevent token leakage.
+    #[serde(default, skip_serializing)]
     pub auth_token: Option<String>,
 }
 

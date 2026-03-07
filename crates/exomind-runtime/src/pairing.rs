@@ -119,6 +119,33 @@ impl PairingManager {
         })
     }
 
+    /// Respond to a pairing session by looking up via initiator host_id.
+    ///
+    /// Used when the responder does not know the session_id (e.g. discovered via mDNS).
+    /// If the initiator has exactly one active session, it will be matched.
+    pub fn respond_by_initiator(
+        &self,
+        initiator_host_id: &str,
+        pin: &str,
+        responder_host_id: &str,
+    ) -> Result<PairingResult, PairingError> {
+        self.cleanup_expired();
+
+        let session_id = {
+            let sessions = match self.sessions.read() {
+                Ok(guard) => guard,
+                Err(poisoned) => poisoned.into_inner(),
+            };
+            sessions
+                .values()
+                .find(|s| s.initiator_host_id == initiator_host_id && s.created_at.elapsed() <= SESSION_TTL)
+                .map(|s| s.session_id.clone())
+                .ok_or(PairingError::SessionNotFound)?
+        };
+
+        self.respond(&session_id, pin, responder_host_id)
+    }
+
     /// Remove all expired sessions.
     fn cleanup_expired(&self) {
         let mut sessions = match self.sessions.write() {

@@ -240,13 +240,20 @@ async fn pairing_respond(
     State(state): State<AppState>,
     Json(req): Json<PairingRespondRequest>,
 ) -> Result<Json<PairingRespondResponse>, StatusCode> {
-    let result = state
-        .pairing
-        .respond(&req.session_id, &req.pin, &req.responder_host_id)
-        .map_err(|err| match err {
-            crate::pairing::PairingError::SessionNotFound => StatusCode::FORBIDDEN,
-            crate::pairing::PairingError::IncorrectPin => StatusCode::FORBIDDEN,
-        })?;
+    // When session_id is empty, look up by the initiator's host_id (this RT).
+    let result = if req.session_id.is_empty() {
+        state
+            .pairing
+            .respond_by_initiator(&state.host_id, &req.pin, &req.responder_host_id)
+    } else {
+        state
+            .pairing
+            .respond(&req.session_id, &req.pin, &req.responder_host_id)
+    }
+    .map_err(|err| match err {
+        crate::pairing::PairingError::SessionNotFound => StatusCode::FORBIDDEN,
+        crate::pairing::PairingError::IncorrectPin => StatusCode::FORBIDDEN,
+    })?;
 
     // Register the responder as a confirmed peer on this (initiator) side.
     let now = chrono::Utc::now().to_rfc3339();

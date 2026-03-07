@@ -225,7 +225,7 @@ async fn auth_pairing_relay() {
     let (_session_id, _pin, peer_token) =
         do_pairing_with_auth(&client, &a_url, "secret-a", "e2e-auth-b", &b_url).await;
 
-    // ---- Step 4: Verify peer was created with auth_token --------------
+    // ---- Step 4: Verify peer was created (auth_token must NOT leak in response) ---
     let peers: Value = client
         .get(format!("{a_url}/mesh/peers"))
         .header("Authorization", "Bearer secret-a")
@@ -241,11 +241,11 @@ async fn auth_pairing_relay() {
         .iter()
         .find(|p| p["id"] == "e2e-auth-b")
         .expect("RT-A should have RT-B as a peer after pairing");
-    assert_eq!(
-        peer_b["auth_token"].as_str().unwrap(),
-        peer_token,
-        "peer's auth_token should match the issued peer_token"
+    assert!(
+        peer_b.get("auth_token").is_none() || peer_b["auth_token"].is_null(),
+        "auth_token must not be serialized in peer list responses (security)"
     );
+    let _ = peer_token; // token is used internally, not exposed via API
 
     // ---- Step 5: Setup routes and bidirectional peering ----------------
     // On RT-B: route for "test.ping" so it's locally relevant.
