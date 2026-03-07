@@ -1069,6 +1069,7 @@ dependencies = [
  "futures-util",
  "http-body-util",
  "mdns-sd",
+ "percent-encoding",
  "rand 0.8.5",
  "reqwest 0.12.28",
  "serde",

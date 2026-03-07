@@ -2,6 +2,14 @@ import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/re
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
 
+function formatMinuteLabel(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
 const {
   loadActiveBlockMock,
   startBlockMock,
@@ -117,6 +125,7 @@ describe('TimeBlockWidget resume behavior', () => {
 
   it('restores countdown overtime after remounting a running countdown block', async () => {
     const resumeAt = Date.now();
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(resumeAt);
     loadActiveBlockMock.mockResolvedValue({
       startId: 'block-overrun',
       name: 'Countdown overtime',
@@ -138,6 +147,38 @@ describe('TimeBlockWidget resume behavior', () => {
     });
 
     await screen.findByText(/^\+0:3\d$/);
+    expect(screen.getByTestId('timeblock-end-time')).toHaveTextContent(`已于 ${formatMinuteLabel(resumeAt - 30_000)} 到点`);
+    dateNowSpy.mockRestore();
+  });
+
+  it('shows paused expected end time for countdown blocks', async () => {
+    const pausedNow = Date.UTC(2026, 1, 11, 8, 0, 0);
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(pausedNow);
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-paused-countdown',
+      name: 'Paused countdown',
+      startTime: pausedNow - 12 * 60 * 1000,
+      elapsed: 15 * 60 * 1000,
+      mode: 'countdown',
+      targetMinutes: 25,
+      paused: true,
+      pausedAt: pausedNow - 2 * 60 * 1000,
+      phase: 'paused',
+      accumulatedRunMs: 10 * 60 * 1000,
+      lastResumedAt: undefined,
+      pauseAccumulatedMs: 2 * 60 * 1000,
+    });
+
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(screen.getByTestId('timeblock-end-time')).toHaveTextContent(
+      `暂停中，若恢复预计 ${formatMinuteLabel(pausedNow + 15 * 60 * 1000)} 结束`,
+    );
+    dateNowSpy.mockRestore();
   });
 
   it('marks ending before opening feedback dialog when clicking end', async () => {

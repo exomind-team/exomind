@@ -3,6 +3,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 
+function formatMinuteLabel(timestamp: number): string {
+  return new Date(timestamp).toLocaleTimeString('zh-CN', {
+    hour: '2-digit',
+    minute: '2-digit',
+    hour12: false,
+  });
+}
+
 const loadActiveBlockMock = vi.fn();
 const startBlockMock = vi.fn();
 const pauseBlockMock = vi.fn();
@@ -355,6 +363,7 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
 
   it('restores countdown overtime after remount（倒计时超时在重载后可恢复）', async () => {
     const now = Date.now();
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
     loadActiveBlockMock.mockResolvedValueOnce({
       startId: 'block-overrun',
       name: '超时任务',
@@ -376,6 +385,36 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     });
 
     expect(screen.getByTestId('new-focus-running-clock').textContent).toMatch(/^\+00:3\d$/);
+    expect(screen.getByTestId('new-focus-end-time')).toHaveTextContent(`已于 ${formatMinuteLabel(now - 30_000)} 到点`);
+    dateNowSpy.mockRestore();
+  });
+
+  it('shows expected end time while countdown is active（倒计时运行中展示预计结束时间）', async () => {
+    const now = Date.UTC(2026, 1, 11, 8, 0, 0);
+    const dateNowSpy = vi.spyOn(Date, 'now').mockReturnValue(now);
+    loadActiveBlockMock.mockResolvedValueOnce({
+      startId: 'block-expected-end',
+      name: '预计结束任务',
+      startTime: now - 5 * 60 * 1000,
+      elapsed: 20 * 60 * 1000,
+      mode: 'countdown',
+      targetMinutes: 25,
+      paused: false,
+      phase: 'running',
+      accumulatedRunMs: 5 * 60 * 1000,
+      lastResumedAt: now,
+      pauseAccumulatedMs: 0,
+    });
+
+    render(<FocusTimerWidget />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    const endTime = screen.getByTestId('new-focus-end-time');
+    expect(endTime).toHaveTextContent(`预计 ${formatMinuteLabel(now + 20 * 60 * 1000)} 结束`);
+    dateNowSpy.mockRestore();
   });
 
   it('confirms feedback end with Ctrl+Enter（反馈弹窗 Ctrl+Enter 确认结束）', async () => {
