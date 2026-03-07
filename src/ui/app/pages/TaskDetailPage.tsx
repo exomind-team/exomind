@@ -1,12 +1,14 @@
 import { ArrowLeft, Ellipsis, Pause, Play } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import { getEventStorage } from '@/lib/storage/event-storage';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { getUseMockDataEnabled } from '@/config/mock-data';
+import { buildTaskGraph } from '@/lib/task/task-dag-graph';
+import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
 import {
   buildTaskTimeblockDetailViewModel,
   type TimeblockEventLog,
@@ -135,6 +137,7 @@ function MobileTimeblockDetail({
   onStartTimer,
   onPauseAndGoEventlog,
   onCopySummary,
+  rootGuidance,
 }: {
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
@@ -145,6 +148,7 @@ function MobileTimeblockDetail({
   onStartTimer: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
+  rootGuidance?: ReactNode;
 }) {
   return (
     <div className="min-h-full bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
@@ -186,6 +190,8 @@ function MobileTimeblockDetail({
             ))}
           </div>
         </section>
+
+        {rootGuidance}
 
         <section className="rounded-2xl border border-[#E7E5E4] bg-white p-2 dark:border-[#292524] dark:bg-[#1C1917]">
           <div className="flex gap-1 overflow-x-auto">
@@ -304,6 +310,7 @@ function DesktopTimeblockDetail({
   onStartTimer,
   onPauseAndGoEventlog,
   onCopySummary,
+  rootGuidance,
 }: {
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
@@ -314,6 +321,7 @@ function DesktopTimeblockDetail({
   onStartTimer: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
+  rootGuidance?: ReactNode;
 }) {
   return (
     <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
@@ -364,6 +372,8 @@ function DesktopTimeblockDetail({
         </div>
 
         <aside className="space-y-3">
+          {rootGuidance}
+
           <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">洞察</h3>
             <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{task.title}</p>
@@ -449,6 +459,7 @@ export function TaskDetailPage() {
   const preferredBlockId = blockIdParam || resolvePreferredBlockId();
 
   const [task, setTask] = useState<TaskNode | null>(null);
+  const [allTasks, setAllTasks] = useState<TaskNode[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [hasOtherActiveBlock, setHasOtherActiveBlock] = useState(false);
@@ -467,8 +478,9 @@ export function TaskDetailPage() {
         return;
       }
 
-      const [loadedTask, blocks, currentBlock] = await Promise.all([
+      const [loadedTask, nextAllTasks, blocks, currentBlock] = await Promise.all([
         taskId ? taskService.getTask(taskId) : Promise.resolve(null),
+        taskService.listTasks(true),
         timeBlockService.loadTimeBlocks(),
         timeBlockService.loadActiveBlock(),
       ]);
@@ -476,18 +488,17 @@ export function TaskDetailPage() {
       if (!nextTask && preferredBlockId) {
         const matchedBlock = blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId);
         if (matchedBlock) {
-          const allTasks = await taskService.listTasks(true);
-          const linked = allTasks.find((candidate) => (candidate.timeBlockIds ?? []).includes(matchedBlock.startId));
+          const linked = nextAllTasks.find((candidate) => (candidate.timeBlockIds ?? []).includes(matchedBlock.startId));
           nextTask = linked ?? buildVirtualTaskFromBlock(matchedBlock);
         }
       }
       if (!nextTask) {
-        const fallbackTasks = await taskService.listTasks();
-        nextTask = fallbackTasks[0] ?? null;
+        nextTask = nextAllTasks[0] ?? null;
       }
 
       if (disposed) return;
       setTask(nextTask);
+      setAllTasks(nextAllTasks);
       setTimeBlocks(blocks);
       setActiveBlock(nextTask && currentBlock?.taskId === nextTask.id ? currentBlock : null);
       setHasOtherActiveBlock(Boolean(currentBlock && nextTask && currentBlock.taskId !== nextTask.id));
@@ -540,6 +551,12 @@ export function TaskDetailPage() {
       useMockData: getUseMockDataEnabled(),
     });
   }, [activeBlock, eventLogs, preferredBlockId, reviewMarkdown, task, timeBlocks]);
+
+  const taskGraph = useMemo(() => buildTaskGraph(allTasks), [allTasks]);
+  const taskById = useMemo(() => new Map(allTasks.map((candidate) => [candidate.id, candidate])), [allTasks]);
+  const rootGuidance = useMemo(() => (
+    <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
+  ), [task?.id, taskById, taskGraph]);
 
   const handleStartTimer = () => {
     if (!taskId) return;
@@ -601,6 +618,7 @@ export function TaskDetailPage() {
         onStartTimer={handleStartTimer}
         onPauseAndGoEventlog={handlePauseAndGoEventlog}
         onCopySummary={handleCopySummary}
+        rootGuidance={rootGuidance}
       />
     );
   }
@@ -616,6 +634,7 @@ export function TaskDetailPage() {
       onStartTimer={handleStartTimer}
       onPauseAndGoEventlog={handlePauseAndGoEventlog}
       onCopySummary={handleCopySummary}
+      rootGuidance={rootGuidance}
     />
   );
 }

@@ -8,6 +8,7 @@ import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 const navigateMock = vi.fn();
 
 const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>();
+const listTasksMock = vi.fn<(includeAbandoned?: boolean) => Promise<TaskNode[]>>();
 const getAvailableTransitionsMock = vi.fn<(id: string) => Promise<Array<TaskNode['status']>>>();
 const getChildTasksMock = vi.fn<(parentId: string) => Promise<TaskNode[]>>();
 const checkDependenciesMetMock = vi.fn<(taskId: string) => Promise<{ met: boolean; blocking: Array<{ taskId: string; type: 'soft' | 'hard'; status: TaskNode['status'] }> }>>();
@@ -33,6 +34,7 @@ vi.mock('@tanstack/react-router', () => ({
 vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     getTask: getTaskMock,
+    listTasks: listTasksMock,
     getAvailableTransitions: getAvailableTransitionsMock,
     getChildTasks: getChildTasksMock,
     checkDependenciesMet: checkDependenciesMetMock,
@@ -111,7 +113,23 @@ function makeBlock(overrides: Partial<TimeBlock> = {}): TimeBlock {
 describe('TaskDetailPage timeblock detail layout（时间块详情布局）', () => {
   beforeEach(() => {
     navigateMock.mockReset();
-    getTaskMock.mockResolvedValue(makeTask());
+    getTaskMock.mockResolvedValue(makeTask({ status: 'in_progress', createdAt: 20, updatedAt: 20 }));
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: 'task-root',
+        title: '优先收口 DAG 根节点',
+        status: 'not_started',
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+      makeTask({
+        id: 'task-1',
+        title: '深度工作：EventLog 模块实现',
+        status: 'in_progress',
+        createdAt: 20,
+        updatedAt: 20,
+      }),
+    ]);
     getAvailableTransitionsMock.mockResolvedValue(['in_progress']);
     getChildTasksMock.mockResolvedValue([]);
     checkDependenciesMetMock.mockResolvedValue({ met: true, blocking: [] });
@@ -160,5 +178,18 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
     expect(screen.getByText('事件时间线')).toBeInTheDocument();
     expect(screen.getByText('洞察')).toBeInTheDocument();
     expect(screen.getByText('操作')).toBeInTheDocument();
+  });
+
+  it('renders current root guidance with DAG link（详情页复用当前根节点规则）', async () => {
+    mockMatchMedia(true);
+    render(<TaskDetailPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledWith(true);
+    });
+
+    expect(await screen.findByTestId('task-current-root-card')).toHaveTextContent('优先收口 DAG 根节点');
+    expect(screen.getByTestId('task-current-root-link')).toBeInTheDocument();
+    expect(screen.getByTestId('task-current-root-dag-link')).toBeInTheDocument();
   });
 });
