@@ -1,12 +1,14 @@
 import { ArrowLeft, Ellipsis, Pause, Play } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import { getEventStorage } from '@/lib/storage/event-storage';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { getUseMockDataEnabled } from '@/config/mock-data';
+import { buildTaskGraph } from '@/lib/task/task-dag-graph';
+import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
 import {
   buildTaskTimeblockDetailViewModel,
   type TimeblockEventLog,
@@ -454,6 +456,7 @@ function MobileTimeblockDetail({
   onStartTimer,
   onPauseAndGoEventlog,
   onCopySummary,
+  rootGuidance,
   onDependencySelectedTaskChange,
   onDependencySelectedTypeChange,
   onAddDependency,
@@ -476,6 +479,7 @@ function MobileTimeblockDetail({
   onStartTimer: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
+  rootGuidance?: ReactNode;
   onDependencySelectedTaskChange: (value: string) => void;
   onDependencySelectedTypeChange: (value: DependencyType) => void;
   onAddDependency: () => void;
@@ -523,6 +527,8 @@ function MobileTimeblockDetail({
             ))}
           </div>
         </section>
+
+        {rootGuidance}
 
         <section className="rounded-2xl border border-[#E7E5E4] bg-white p-2 dark:border-[#292524] dark:bg-[#1C1917]">
           <div className="flex gap-1 overflow-x-auto">
@@ -662,6 +668,7 @@ function DesktopTimeblockDetail({
   onStartTimer,
   onPauseAndGoEventlog,
   onCopySummary,
+  rootGuidance,
   onDependencySelectedTaskChange,
   onDependencySelectedTypeChange,
   onAddDependency,
@@ -684,6 +691,7 @@ function DesktopTimeblockDetail({
   onStartTimer: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
+  rootGuidance?: ReactNode;
   onDependencySelectedTaskChange: (value: string) => void;
   onDependencySelectedTypeChange: (value: DependencyType) => void;
   onAddDependency: () => void;
@@ -740,6 +748,8 @@ function DesktopTimeblockDetail({
         </div>
 
         <aside className="space-y-3">
+          {rootGuidance}
+
           <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">洞察</h3>
             <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{task.title}</p>
@@ -956,6 +966,12 @@ export function TaskDetailPage() {
     });
   }, [activeBlock, eventLogs, preferredBlockId, reviewMarkdown, task, timeBlocks]);
 
+  const taskGraph = useMemo(() => buildTaskGraph(allTasks), [allTasks]);
+  const taskById = useMemo(() => new Map(allTasks.map((candidate) => [candidate.id, candidate])), [allTasks]);
+  const rootGuidance = useMemo(() => (
+    <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
+  ), [task?.id, taskById, taskGraph]);
+
   const dependencyView = useMemo(() => {
     if (!task) return null;
     return buildTaskDependencyView(task, allTasks);
@@ -1114,6 +1130,7 @@ export function TaskDetailPage() {
         onStartTimer={handleStartTimer}
         onPauseAndGoEventlog={handlePauseAndGoEventlog}
         onCopySummary={handleCopySummary}
+        rootGuidance={rootGuidance}
         onDependencySelectedTaskChange={setDependencySelectedTaskId}
         onDependencySelectedTypeChange={setDependencySelectedType}
           onAddDependency={handleAddDependency}
@@ -1141,6 +1158,7 @@ export function TaskDetailPage() {
       onStartTimer={handleStartTimer}
       onPauseAndGoEventlog={handlePauseAndGoEventlog}
       onCopySummary={handleCopySummary}
+      rootGuidance={rootGuidance}
       onDependencySelectedTaskChange={setDependencySelectedTaskId}
       onDependencySelectedTypeChange={setDependencySelectedType}
       onAddDependency={handleAddDependency}

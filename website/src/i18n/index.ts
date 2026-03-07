@@ -70,6 +70,16 @@ export const ui = {
     'about.philosophy.desc': '生命不是实体或状态，而是时间中持续展开的过程。ExoMind 帮你观察这个过程，理解这个过程，最终掌控这个过程。',
     'about.opensource.title': '开源',
     'about.opensource.desc': 'ExoMind 是开源项目，代码托管在 GitHub。我们相信透明和社区的力量。',
+    'about.brand.eyebrow': '命名与愿景',
+    'about.brand.title': '先建立一个人的外心，再连接更多人的外心',
+    'about.brand.desc': 'ExoMind 是单数品牌，指一个人的外心与认知基础设施；exominds 是复数愿景，指多个外心逐步联结成的协作网络。',
+    'about.brand.line1': 'Build your exomind.',
+    'about.brand.line1_note': '先建立一个人的外心。',
+    'about.brand.line2': 'Connect exominds.',
+    'about.brand.line2_note': '再把更多人的外心连接起来。',
+    'about.brand.line3': 'ExoMind is infrastructure for exominds.',
+    'about.brand.line3_note': 'ExoMind 是通向 exominds 的基础设施。',
+
     // Footer
     'footer.product': '产品',
     'footer.resources': '资源',
@@ -142,6 +152,16 @@ export const ui = {
     'about.philosophy.desc': 'Life is not an entity or state, but a process that continuously unfolds in time. ExoMind helps you observe, understand, and ultimately master this process.',
     'about.opensource.title': 'Open Source',
     'about.opensource.desc': 'ExoMind is open source, hosted on GitHub. We believe in the power of transparency and community.',
+    'about.brand.eyebrow': 'Naming & Vision',
+    'about.brand.title': 'Start with one exomind, then connect many exominds',
+    'about.brand.desc': 'ExoMind is the singular brand for one person\'s cognitive infrastructure. exominds is the plural vision for many minds gradually linked into a collaborative network.',
+    'about.brand.line1': 'Build your exomind.',
+    'about.brand.line1_note': 'Start with one person\'s exomind.',
+    'about.brand.line2': 'Connect exominds.',
+    'about.brand.line2_note': 'Then connect more people\'s exominds.',
+    'about.brand.line3': 'ExoMind is infrastructure for exominds.',
+    'about.brand.line3_note': 'ExoMind is the infrastructure layer for exominds.',
+
     // Footer
     'footer.product': 'Product',
     'footer.resources': 'Resources',

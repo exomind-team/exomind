@@ -27,6 +27,7 @@ import {
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
 import { getTaskService, getTaskTimerService, getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
+import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
 import type { ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 
@@ -137,6 +138,17 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
   const isCountdownWarning =
     timerMode === 'countdown'
     && (isCountdownOvertime || (elapsedMs <= 60000 && elapsedMs > 0));
+  const countdownEndTimeDisplay = isRunningUi
+    ? resolveCountdownEndTimeDisplay({
+      block: activeBlockDataRef.current,
+      mode: timerMode,
+      remainingMs: timerMode === 'countdown' ? elapsedMs : undefined,
+      overtimeMs: isCountdownOvertime ? countdownOvertimeMs : 0,
+      paused: isPaused,
+      isActionEnded: feedbackInProgress,
+      now: Date.now(),
+    })
+    : null;
 
   const clearSkipFeedbackConfirmInterval = useCallback(() => {
     if (!skipFeedbackConfirmIntervalRef.current) {
@@ -394,6 +406,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
     setCountdownOvertimeMs(0);
 
     const block = await timeBlockServiceRef.current.startBlock(name, config, description || undefined);
+    activeBlockDataRef.current = block;
     setTaskName(name);
     setTaskNameDraft(name);
     setElapsedMs(Math.max(0, block.elapsed));
@@ -850,16 +863,26 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle>(function Focu
                 >
                   {isPaused ? <Play size={18} /> : <Pause size={18} />}
                 </Button>
-                <span
-                  className={`font-mono text-[40px] font-normal leading-[1.1] tracking-[2px] ${
-                    isCountdownWarning ? 'text-[#C75B3A]' : 'text-[#1C1917] dark:text-[#FAFAF9]'
-                  }`}
-                  data-testid="new-focus-running-clock"
-                >
-                  {isCountdownOvertime
-                    ? `+${formatClock(countdownOvertimeMs)}`
-                    : formatClock(elapsedMs)}
-                </span>
+                <div className="flex min-w-0 flex-col items-center gap-1 px-2">
+                  <span
+                    className={`font-mono text-[40px] font-normal leading-[1.1] tracking-[2px] ${
+                      isCountdownWarning ? 'text-[#C75B3A]' : 'text-[#1C1917] dark:text-[#FAFAF9]'
+                    }`}
+                    data-testid="new-focus-running-clock"
+                  >
+                    {isCountdownOvertime
+                      ? `+${formatClock(countdownOvertimeMs)}`
+                      : formatClock(elapsedMs)}
+                  </span>
+                  {countdownEndTimeDisplay && (
+                    <span
+                      data-testid="new-focus-end-time"
+                      className="max-w-full truncate text-[12px] leading-[1.2] text-[#8C7D78] dark:text-[#A8A29E]"
+                    >
+                      {countdownEndTimeDisplay.text}
+                    </span>
+                  )}
+                </div>
                 <Button
                   type="button"
                   data-testid="new-focus-end-button"

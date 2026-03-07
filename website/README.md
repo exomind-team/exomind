@@ -1,5 +1,17 @@
 # ExoMind Website
 
+## Brand Language / 品牌文案
+
+- `ExoMind` = singular brand（单数品牌）: one person's exomind, one person's cognitive infrastructure（一个人的外心 / 认知基础设施）
+- `exominds` = plural vision（复数愿景）: many exominds gradually linked into a collaborative network（更多人的外心逐步连接成协作网络）
+- Current domain（当前域名）: `exo-mind.ai`
+
+Recommended copy / 推荐文案:
+
+- `Build your exomind.` / `先建立一个人的外心。`
+- `Connect exominds.` / `再把更多人的外心连接起来。`
+- `ExoMind is infrastructure for exominds.` / `ExoMind 是通向 exominds 的基础设施。`
+
 ## Theme / 主题模式
 
 - The website now supports a built-in dark mode toggle (`theme-toggle`) in the header.

@@ -1,5 +1,5 @@
 import type { ReactNode } from 'react';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TasksPage } from '@/ui/app/pages/TasksPage';
 import type { TaskNode } from '@/lib/types/task';
@@ -46,8 +46,8 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
     priority: 'medium',
     dependsOn: [],
     tags: [],
-    createdAt: Date.now(),
-    updatedAt: Date.now(),
+    createdAt: 1,
+    updatedAt: 1,
     ...overrides,
   };
 }
@@ -70,7 +70,8 @@ describe('TasksPage today view（任务页今日时间块视图）', () => {
   const afternoon = new Date('2026-03-06T15:00:00.000+08:00').getTime();
 
   beforeEach(() => {
-    vi.useRealTimers();
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    vi.setSystemTime(new Date('2026-03-06T12:00:00.000+08:00'));
     listTasksMock.mockReset();
     loadTimeBlocksMock.mockReset();
     loadActiveBlockMock.mockReset();
@@ -82,6 +83,7 @@ describe('TasksPage today view（任务页今日时间块视图）', () => {
         status: 'in_progress',
         timeBlockIds: ['block-1'],
         estimatedMinutes: 120,
+        createdAt: 200,
         updatedAt: morning,
       }),
       makeTask({
@@ -89,6 +91,7 @@ describe('TasksPage today view（任务页今日时间块视图）', () => {
         title: '实现下午编码任务',
         status: 'not_started',
         dueAt: afternoon,
+        createdAt: 100,
         updatedAt: afternoon,
       }),
     ]);
@@ -109,6 +112,18 @@ describe('TasksPage today view（任务页今日时间块视图）', () => {
       }),
     ]);
     loadActiveBlockMock.mockResolvedValue(null);
+  });
+
+  it('renders current root summary and badge in now view', async () => {
+    render(<TasksPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledWith(true);
+    });
+
+    expect(await screen.findByTestId('task-current-root-card')).toHaveTextContent('实现下午编码任务');
+    expect(screen.getByTestId('task-current-root-badge-task-2')).toBeInTheDocument();
+    expect(screen.getByTestId('task-current-root-dag-link')).toBeInTheDocument();
   });
 
   it('renders today timeblock layout when 今日 tab is active', async () => {
@@ -150,4 +165,9 @@ describe('TasksPage today view（任务页今日时间块视图）', () => {
     expect(await screen.findByTestId('tasks-today-block-link-block-1')).toBeInTheDocument();
     expect(screen.getByTestId('tasks-today-block-link-block-2')).toBeInTheDocument();
   });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
 });
+

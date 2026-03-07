@@ -117,8 +117,23 @@ function makeBlock(overrides: Partial<TimeBlock> = {}): TimeBlock {
 describe('TaskDetailPage timeblock detail layout（时间块详情布局）', () => {
   beforeEach(() => {
     navigateMock.mockReset();
-    getTaskMock.mockResolvedValue(makeTask());
-    listTasksMock.mockResolvedValue([makeTask()]);
+    getTaskMock.mockResolvedValue(makeTask({ status: 'in_progress', createdAt: 20, updatedAt: 20 }));
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: 'task-root',
+        title: '优先收口 DAG 根节点',
+        status: 'not_started',
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+      makeTask({
+        id: 'task-1',
+        title: '深度工作：EventLog 模块实现',
+        status: 'in_progress',
+        createdAt: 20,
+        updatedAt: 20,
+      }),
+    ]);
     addDependencyMock.mockResolvedValue(makeTask());
     removeDependencyMock.mockResolvedValue(makeTask());
     getAvailableTransitionsMock.mockResolvedValue(['in_progress']);
@@ -169,5 +184,18 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
     expect(screen.getByText('事件时间线')).toBeInTheDocument();
     expect(screen.getByText('洞察')).toBeInTheDocument();
     expect(screen.getByText('操作')).toBeInTheDocument();
+  });
+
+  it('renders current root guidance with DAG link（详情页复用当前根节点规则）', async () => {
+    mockMatchMedia(true);
+    render(<TaskDetailPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledWith(true);
+    });
+
+    expect(await screen.findByTestId('task-current-root-card')).toHaveTextContent('优先收口 DAG 根节点');
+    expect(screen.getByTestId('task-current-root-link')).toBeInTheDocument();
+    expect(screen.getByTestId('task-current-root-dag-link')).toBeInTheDocument();
   });
 });

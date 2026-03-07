@@ -1,4 +1,4 @@
-﻿import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
+import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -33,6 +33,11 @@ const LegalSupportPage = lazy(async () => {
 const TasksPage = lazy(async () => {
   const module = await import('@/ui/app/pages/TasksPage');
   return { default: module.TasksPage };
+});
+
+const TaskDagPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskDagPage');
+  return { default: module.TaskDagPage };
 });
 
 const RemindersPage = lazy(async () => {
@@ -530,6 +535,18 @@ const newRemindersRoute = createRoute({
   },
 });
 
+const newTaskDagRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/dag',
+  component: function NewTaskDag() {
+    return (
+      <LazyPage>
+        <TaskDagPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newTaskDetailRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks/$taskId',
@@ -718,6 +735,7 @@ const newRouteTree = newRootRoute.addChildren([
   newDashboardRoute,
   newEventlogRoute,
   newTasksRoute,
+  newTaskDagRoute,
   newRemindersRoute,
   newTimeblockDetailRoute,
   newTaskDetailRoute,
@@ -739,4 +757,5 @@ const newRouteTree = newRootRoute.addChildren([
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
+
 
