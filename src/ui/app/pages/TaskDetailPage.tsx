@@ -15,8 +15,14 @@ import {
   type TaskTimeblockDetailViewModel,
   type TimeblockBadge,
 } from './task-timeblock-detail-view';
+import {
+  buildTaskDependencyView,
+  formatDependencyActionError,
+  type TaskDependencyViewModel,
+} from './task-dependency-view';
 
 type TimerMode = 'countup' | 'countdown';
+type DependencyType = 'soft' | 'hard';
 
 function badgeClassName(badge: TimeblockBadge): string {
   if (badge.tone === 'success') return 'bg-[#DCFCE7] text-[#15803D]';
@@ -127,9 +133,191 @@ function DetailActionsCard({
   );
 }
 
+function DependencyCard({
+  dependencyView,
+  selectedTaskId,
+  selectedType,
+  errorMessage,
+  isSaving,
+  onSelectedTaskChange,
+  onSelectedTypeChange,
+  onAddDependency,
+  onChangeDependencyType,
+  onRemoveDependency,
+}: {
+  dependencyView: TaskDependencyViewModel;
+  selectedTaskId: string;
+  selectedType: DependencyType;
+  errorMessage: string | null;
+  isSaving: boolean;
+  onSelectedTaskChange: (value: string) => void;
+  onSelectedTypeChange: (value: DependencyType) => void;
+  onAddDependency: () => void;
+  onChangeDependencyType: (taskId: string, type: DependencyType) => void;
+  onRemoveDependency: (taskId: string) => void;
+}) {
+  return (
+    <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">依赖关系</h3>
+          <p className="mt-1 text-xs text-[#A8A29E]">先完成前置任务，再推进当前任务。</p>
+        </div>
+      </div>
+
+      {errorMessage ? (
+        <p role="alert" className="mt-3 rounded-xl bg-[#FEE2E2] px-3 py-2 text-xs text-[#B91C1C] dark:bg-[#3F1D1D] dark:text-[#FECACA]">
+          {errorMessage}
+        </p>
+      ) : null}
+
+      <div className="mt-4 space-y-4">
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">前置依赖</h4>
+          <div className="mt-2 space-y-2">
+            {dependencyView.currentDependencies.length > 0 ? dependencyView.currentDependencies.map((dependency) => (
+              <article
+                key={dependency.taskId}
+                data-testid={`dependency-item-${dependency.taskId}`}
+                className="rounded-xl border border-[#E7E5E4] px-3 py-3 dark:border-[#292524]"
+              >
+                <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{dependency.title}</p>
+                    <div className="mt-2 flex flex-wrap gap-2">
+                      <span className="rounded-full bg-[#F5F0ED] px-2.5 py-1 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
+                        {dependency.statusLabel}
+                      </span>
+                      {dependency.missing ? (
+                        <span className="rounded-full bg-[#FFF7ED] px-2.5 py-1 text-xs text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]">
+                          请刷新后确认
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+
+                  <div className="flex flex-col gap-2 sm:w-[176px]">
+                    <select
+                      data-testid={`dependency-type-${dependency.taskId}`}
+                      value={dependency.type}
+                      disabled={isSaving}
+                      onChange={(event) => onChangeDependencyType(dependency.taskId, event.target.value as DependencyType)}
+                      className="w-full rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 text-sm text-[#44403C] focus:outline-none focus:ring-2 focus:ring-[#C75B3A]/40 dark:border-[#292524] dark:bg-[#292524] dark:text-[#E7E5E4]"
+                    >
+                      <option value="soft">soft</option>
+                      <option value="hard">hard</option>
+                    </select>
+                    <button
+                      type="button"
+                      data-testid={`dependency-remove-${dependency.taskId}`}
+                      disabled={isSaving}
+                      onClick={() => onRemoveDependency(dependency.taskId)}
+                      className="rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#57534E] transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#292524] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
+                    >
+                      删除依赖
+                    </button>
+                  </div>
+                </div>
+              </article>
+            )) : (
+              <p
+                data-testid="dependency-current-empty"
+                className="rounded-xl bg-[#F8F5F2] px-3 py-3 text-sm text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+              >
+                暂无前置依赖
+              </p>
+            )}
+          </div>
+        </div>
+
+        <div className="rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
+          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">新增依赖</h4>
+          <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
+            <label className="space-y-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+              <span>依赖任务</span>
+              <select
+                data-testid="dependency-add-task-select"
+                value={selectedTaskId}
+                disabled={isSaving}
+                onChange={(event) => onSelectedTaskChange(event.target.value)}
+                className="w-full rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] focus:outline-none focus:ring-2 focus:ring-[#C75B3A]/40 dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+              >
+                <option value="">请选择任务</option>
+                {dependencyView.candidates.map((candidate) => (
+                  <option key={candidate.id} value={candidate.id}>
+                    {candidate.title} · {candidate.statusLabel}
+                  </option>
+                ))}
+              </select>
+            </label>
+
+            <label className="space-y-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+              <span>类型</span>
+              <select
+                data-testid="dependency-add-type-select"
+                value={selectedType}
+                disabled={isSaving}
+                onChange={(event) => onSelectedTypeChange(event.target.value as DependencyType)}
+                className="w-full rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] focus:outline-none focus:ring-2 focus:ring-[#C75B3A]/40 dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+              >
+                <option value="soft">soft</option>
+                <option value="hard">hard</option>
+              </select>
+            </label>
+
+            <div className="flex items-end">
+              <button
+                type="button"
+                data-testid="dependency-add-button"
+                disabled={isSaving || !selectedTaskId}
+                onClick={onAddDependency}
+                className="w-full rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+              >
+                添加依赖
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div>
+          <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">谁依赖我</h4>
+          <div className="mt-2 space-y-2">
+            {dependencyView.reverseDependencies.length > 0 ? dependencyView.reverseDependencies.map((dependency) => (
+              <article
+                key={dependency.taskId}
+                data-testid={`reverse-dependency-item-${dependency.taskId}`}
+                className="rounded-xl border border-[#E7E5E4] px-3 py-3 dark:border-[#292524]"
+              >
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="min-w-0 flex-1">
+                    <p className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{dependency.title}</p>
+                    <p className="mt-1 text-xs text-[#A8A29E]">状态：{dependency.statusLabel}</p>
+                  </div>
+                  <span className="rounded-full bg-[#F5F0ED] px-2.5 py-1 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
+                    {dependency.typeLabel}
+                  </span>
+                </div>
+              </article>
+            )) : (
+              <p className="rounded-xl bg-[#F8F5F2] px-3 py-3 text-sm text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                暂无任务依赖当前任务
+              </p>
+            )}
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
+
 function MobileTimeblockDetail({
   task,
   model,
+  dependencyView,
+  dependencySelectedTaskId,
+  dependencySelectedType,
+  dependencyError,
+  isDependencySaving,
   timerMode,
   setTimerMode,
   hasOtherActiveBlock,
@@ -138,9 +326,19 @@ function MobileTimeblockDetail({
   onPauseAndGoEventlog,
   onCopySummary,
   rootGuidance,
+  onDependencySelectedTaskChange,
+  onDependencySelectedTypeChange,
+  onAddDependency,
+  onChangeDependencyType,
+  onRemoveDependency,
 }: {
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
+  dependencyView: TaskDependencyViewModel;
+  dependencySelectedTaskId: string;
+  dependencySelectedType: DependencyType;
+  dependencyError: string | null;
+  isDependencySaving: boolean;
   timerMode: TimerMode;
   setTimerMode: (mode: TimerMode) => void;
   hasOtherActiveBlock: boolean;
@@ -149,6 +347,11 @@ function MobileTimeblockDetail({
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
   rootGuidance?: ReactNode;
+  onDependencySelectedTaskChange: (value: string) => void;
+  onDependencySelectedTypeChange: (value: DependencyType) => void;
+  onAddDependency: () => void;
+  onChangeDependencyType: (taskId: string, type: DependencyType) => void;
+  onRemoveDependency: (taskId: string) => void;
 }) {
   return (
     <div className="min-h-full bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
@@ -243,6 +446,19 @@ function MobileTimeblockDetail({
           </div>
         </section>
 
+        <DependencyCard
+          dependencyView={dependencyView}
+          selectedTaskId={dependencySelectedTaskId}
+          selectedType={dependencySelectedType}
+          errorMessage={dependencyError}
+          isSaving={isDependencySaving}
+          onSelectedTaskChange={onDependencySelectedTaskChange}
+          onSelectedTypeChange={onDependencySelectedTypeChange}
+          onAddDependency={onAddDependency}
+          onChangeDependencyType={onChangeDependencyType}
+          onRemoveDependency={onRemoveDependency}
+        />
+
         <DetailActionsCard
           model={model}
           onRestart={onStartTimer}
@@ -303,6 +519,11 @@ function MobileTimeblockDetail({
 function DesktopTimeblockDetail({
   task,
   model,
+  dependencyView,
+  dependencySelectedTaskId,
+  dependencySelectedType,
+  dependencyError,
+  isDependencySaving,
   timerMode,
   setTimerMode,
   hasOtherActiveBlock,
@@ -311,9 +532,19 @@ function DesktopTimeblockDetail({
   onPauseAndGoEventlog,
   onCopySummary,
   rootGuidance,
+  onDependencySelectedTaskChange,
+  onDependencySelectedTypeChange,
+  onAddDependency,
+  onChangeDependencyType,
+  onRemoveDependency,
 }: {
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
+  dependencyView: TaskDependencyViewModel;
+  dependencySelectedTaskId: string;
+  dependencySelectedType: DependencyType;
+  dependencyError: string | null;
+  isDependencySaving: boolean;
   timerMode: TimerMode;
   setTimerMode: (mode: TimerMode) => void;
   hasOtherActiveBlock: boolean;
@@ -322,6 +553,11 @@ function DesktopTimeblockDetail({
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
   rootGuidance?: ReactNode;
+  onDependencySelectedTaskChange: (value: string) => void;
+  onDependencySelectedTypeChange: (value: DependencyType) => void;
+  onAddDependency: () => void;
+  onChangeDependencyType: (taskId: string, type: DependencyType) => void;
+  onRemoveDependency: (taskId: string) => void;
 }) {
   return (
     <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
@@ -378,6 +614,19 @@ function DesktopTimeblockDetail({
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">洞察</h3>
             <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{task.title}</p>
           </section>
+
+          <DependencyCard
+            dependencyView={dependencyView}
+            selectedTaskId={dependencySelectedTaskId}
+            selectedType={dependencySelectedType}
+            errorMessage={dependencyError}
+            isSaving={isDependencySaving}
+            onSelectedTaskChange={onDependencySelectedTaskChange}
+            onSelectedTypeChange={onDependencySelectedTypeChange}
+            onAddDependency={onAddDependency}
+            onChangeDependencyType={onChangeDependencyType}
+            onRemoveDependency={onRemoveDependency}
+          />
 
           <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计划 vs 实际</h3>
@@ -459,14 +708,20 @@ export function TaskDetailPage() {
   const preferredBlockId = blockIdParam || resolvePreferredBlockId();
 
   const [task, setTask] = useState<TaskNode | null>(null);
-  const [allTasks, setAllTasks] = useState<TaskNode[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [hasOtherActiveBlock, setHasOtherActiveBlock] = useState(false);
   const [isLoading, setIsLoading] = useState(true);
   const [reviewMarkdown, setReviewMarkdown] = useState('');
   const [eventLogs, setEventLogs] = useState<TimeblockEventLog[]>([]);
+  const [allTasks, setAllTasks] = useState<TaskNode[]>([]);
   const [timerMode, setTimerMode] = useState<TimerMode>('countdown');
+  const [dependencySelectedTaskId, setDependencySelectedTaskId] = useState('');
+  const [dependencySelectedType, setDependencySelectedType] = useState<DependencyType>('soft');
+  const [dependencyLoadError, setDependencyLoadError] = useState<string | null>(null);
+  const [dependencyActionError, setDependencyActionError] = useState<string | null>(null);
+  const [isDependencySaving, setIsDependencySaving] = useState(false);
+  const [dependencyReloadKey, setDependencyReloadKey] = useState(0);
 
   useEffect(() => {
     let disposed = false;
@@ -474,31 +729,43 @@ export function TaskDetailPage() {
     const timeBlockService = getTimeBlockService();
     const load = async () => {
       if (!taskId && !preferredBlockId) {
+        setAllTasks([]);
+        setDependencyLoadError(null);
         setIsLoading(false);
         return;
       }
 
-      const [loadedTask, nextAllTasks, blocks, currentBlock] = await Promise.all([
+      const listedTasksPromise = taskService.listTasks(true)
+        .then((tasks) => {
+          if (!disposed) setDependencyLoadError(null);
+          return tasks;
+        })
+        .catch((error) => {
+          if (!disposed) setDependencyLoadError(formatDependencyActionError(error, 'load'));
+          return [] as TaskNode[];
+        });
+
+      const [loadedTask, blocks, currentBlock, listedTasks] = await Promise.all([
         taskId ? taskService.getTask(taskId) : Promise.resolve(null),
-        taskService.listTasks(true),
         timeBlockService.loadTimeBlocks(),
         timeBlockService.loadActiveBlock(),
+        listedTasksPromise,
       ]);
       let nextTask = loadedTask;
       if (!nextTask && preferredBlockId) {
         const matchedBlock = blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId);
         if (matchedBlock) {
-          const linked = nextAllTasks.find((candidate) => (candidate.timeBlockIds ?? []).includes(matchedBlock.startId));
+          const linked = listedTasks.find((candidate) => (candidate.timeBlockIds ?? []).includes(matchedBlock.startId));
           nextTask = linked ?? buildVirtualTaskFromBlock(matchedBlock);
         }
       }
       if (!nextTask) {
-        nextTask = nextAllTasks[0] ?? null;
+        nextTask = listedTasks[0] ?? null;
       }
 
       if (disposed) return;
       setTask(nextTask);
-      setAllTasks(nextAllTasks);
+      setAllTasks(listedTasks);
       setTimeBlocks(blocks);
       setActiveBlock(nextTask && currentBlock?.taskId === nextTask.id ? currentBlock : null);
       setHasOtherActiveBlock(Boolean(currentBlock && nextTask && currentBlock.taskId !== nextTask.id));
@@ -537,7 +804,7 @@ export function TaskDetailPage() {
       unsubscribeTasks();
       unsubscribeBlocks();
     };
-  }, [preferredBlockId, taskId]);
+  }, [dependencyReloadKey, preferredBlockId, taskId]);
 
   const viewModel = useMemo(() => {
     if (!task) return null;
@@ -557,6 +824,85 @@ export function TaskDetailPage() {
   const rootGuidance = useMemo(() => (
     <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
   ), [task?.id, taskById, taskGraph]);
+
+  const dependencyView = useMemo(() => {
+    if (!task) return null;
+    return buildTaskDependencyView(task, allTasks);
+  }, [allTasks, task]);
+
+  const dependencyError = dependencyActionError ?? dependencyLoadError;
+
+  const reloadDependencies = () => {
+    setDependencyReloadKey((value) => value + 1);
+  };
+
+  const handleAddDependency = async () => {
+    if (!task || !dependencyView) return;
+
+    setDependencyActionError(null);
+    if (!dependencySelectedTaskId) {
+      setDependencyActionError('请选择依赖任务');
+      return;
+    }
+    if (!dependencyView.candidates.some((candidate) => candidate.id === dependencySelectedTaskId)) {
+      setDependencyActionError('依赖任务不存在，请刷新后重试');
+      return;
+    }
+
+    setIsDependencySaving(true);
+    try {
+      const updated = await getTaskService().addDependency(task.id, dependencySelectedTaskId, dependencySelectedType);
+      if (!updated) {
+        setDependencyActionError('当前任务不存在，依赖未保存');
+        return;
+      }
+      setDependencySelectedTaskId('');
+      setDependencySelectedType('soft');
+      reloadDependencies();
+    } catch (error) {
+      setDependencyActionError(formatDependencyActionError(error, 'add'));
+    } finally {
+      setIsDependencySaving(false);
+    }
+  };
+
+  const handleChangeDependencyType = async (depTaskId: string, type: DependencyType) => {
+    if (!task) return;
+
+    setDependencyActionError(null);
+    setIsDependencySaving(true);
+    try {
+      const updated = await getTaskService().addDependency(task.id, depTaskId, type);
+      if (!updated) {
+        setDependencyActionError('当前任务不存在，依赖未更新');
+        return;
+      }
+      reloadDependencies();
+    } catch (error) {
+      setDependencyActionError(formatDependencyActionError(error, 'update'));
+    } finally {
+      setIsDependencySaving(false);
+    }
+  };
+
+  const handleRemoveDependency = async (depTaskId: string) => {
+    if (!task) return;
+
+    setDependencyActionError(null);
+    setIsDependencySaving(true);
+    try {
+      const updated = await getTaskService().removeDependency(task.id, depTaskId);
+      if (!updated) {
+        setDependencyActionError('当前任务不存在，依赖未删除');
+        return;
+      }
+      reloadDependencies();
+    } catch (error) {
+      setDependencyActionError(formatDependencyActionError(error, 'remove'));
+    } finally {
+      setIsDependencySaving(false);
+    }
+  };
 
   const handleStartTimer = () => {
     if (!taskId) return;
@@ -594,7 +940,7 @@ export function TaskDetailPage() {
     );
   }
 
-  if (!task || !viewModel) {
+  if (!task || !viewModel || !dependencyView) {
     return (
       <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
         <Link to="/tasks" className="inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
@@ -611,6 +957,11 @@ export function TaskDetailPage() {
       <DesktopTimeblockDetail
         task={task}
         model={viewModel}
+        dependencyView={dependencyView}
+        dependencySelectedTaskId={dependencySelectedTaskId}
+        dependencySelectedType={dependencySelectedType}
+        dependencyError={dependencyError}
+        isDependencySaving={isDependencySaving}
         timerMode={timerMode}
         setTimerMode={setTimerMode}
         hasOtherActiveBlock={hasOtherActiveBlock}
@@ -619,6 +970,11 @@ export function TaskDetailPage() {
         onPauseAndGoEventlog={handlePauseAndGoEventlog}
         onCopySummary={handleCopySummary}
         rootGuidance={rootGuidance}
+        onDependencySelectedTaskChange={setDependencySelectedTaskId}
+        onDependencySelectedTypeChange={setDependencySelectedType}
+        onAddDependency={handleAddDependency}
+        onChangeDependencyType={handleChangeDependencyType}
+        onRemoveDependency={handleRemoveDependency}
       />
     );
   }
@@ -627,6 +983,11 @@ export function TaskDetailPage() {
     <MobileTimeblockDetail
       task={task}
       model={viewModel}
+      dependencyView={dependencyView}
+      dependencySelectedTaskId={dependencySelectedTaskId}
+      dependencySelectedType={dependencySelectedType}
+      dependencyError={dependencyError}
+      isDependencySaving={isDependencySaving}
       timerMode={timerMode}
       setTimerMode={setTimerMode}
       hasOtherActiveBlock={hasOtherActiveBlock}
@@ -635,6 +996,11 @@ export function TaskDetailPage() {
       onPauseAndGoEventlog={handlePauseAndGoEventlog}
       onCopySummary={handleCopySummary}
       rootGuidance={rootGuidance}
+      onDependencySelectedTaskChange={setDependencySelectedTaskId}
+      onDependencySelectedTypeChange={setDependencySelectedType}
+      onAddDependency={handleAddDependency}
+      onChangeDependencyType={handleChangeDependencyType}
+      onRemoveDependency={handleRemoveDependency}
     />
   );
 }

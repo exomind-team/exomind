@@ -23,8 +23,12 @@ export function buildSignalBaseUrl(host: RuntimeHostRecord): string {
   return `http://${host.host}:${host.port}`;
 }
 
-export function buildSignalStreamUrl(baseUrl: string, agentId: string, heartbeatInterval: number): string {
-  return `${baseUrl}/signals/stream?agent_id=${encodeURIComponent(agentId)}&heartbeat_interval=${heartbeatInterval}`;
+export function buildSignalStreamUrl(baseUrl: string, agentId: string, heartbeatInterval: number, authToken?: string): string {
+  let url = `${baseUrl}/signals/stream?agent_id=${encodeURIComponent(agentId)}&heartbeat_interval=${heartbeatInterval}`;
+  if (authToken) {
+    url += `&token=${encodeURIComponent(authToken)}`;
+  }
+  return url;
 }
 
 export class HttpSseSignalTransport implements SignalTransport {
@@ -34,6 +38,15 @@ export class HttpSseSignalTransport implements SignalTransport {
   constructor(options: HttpSseSignalTransportOptions) {
     this.host = options.host;
     this.baseUrl = buildSignalBaseUrl(options.host);
+  }
+
+  /** Build common headers with optional Bearer auth token. */
+  private authHeaders(extra?: Record<string, string>): Record<string, string> {
+    const headers: Record<string, string> = { ...extra };
+    if (this.host.authToken) {
+      headers['Authorization'] = `Bearer ${this.host.authToken}`;
+    }
+    return headers;
   }
 
   async publish(request: PublishRequest): Promise<PublishResponse> {
@@ -47,7 +60,7 @@ export class HttpSseSignalTransport implements SignalTransport {
 
     const response = await fetch(`${this.baseUrl}/signals/publish`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: this.authHeaders({ 'Content-Type': 'application/json' }),
       body: JSON.stringify(request),
     });
 
@@ -60,7 +73,9 @@ export class HttpSseSignalTransport implements SignalTransport {
 
   async history(limit?: number): Promise<SignalEvent[]> {
     const params = limit != null ? `?limit=${limit}` : '';
-    const response = await fetch(`${this.baseUrl}/signals/history${params}`);
+    const response = await fetch(`${this.baseUrl}/signals/history${params}`, {
+      headers: this.authHeaders(),
+    });
 
     if (!response.ok) {
       throw new Error(`history failed: HTTP ${response.status}`);
@@ -70,15 +85,18 @@ export class HttpSseSignalTransport implements SignalTransport {
   }
 
   async openStream(request: SignalStreamOpenRequest): Promise<Response> {
-    const headers: Record<string, string> = {
+    const headers = this.authHeaders({
       Accept: 'text/event-stream',
       'Cache-Control': 'no-cache',
-    };
+    });
     if (request.lastEventId) {
       headers['Last-Event-ID'] = request.lastEventId;
     }
 
-    const response = await fetch(buildSignalStreamUrl(this.baseUrl, request.agentId, request.heartbeatInterval), {
+    // SSE via fetch: pass auth token as query param as well (EventSource fallback doesn't support headers)
+    const url = buildSignalStreamUrl(this.baseUrl, request.agentId, request.heartbeatInterval, this.host.authToken);
+
+    const response = await fetch(url, {
       headers,
       signal: request.signal,
     });

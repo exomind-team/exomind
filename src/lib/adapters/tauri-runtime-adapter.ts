@@ -23,6 +23,7 @@ function rememberEmbeddedRuntimeStatus(status: RuntimeServiceStatus): RuntimeSer
       host: status.host,
       port: status.port,
       hostId: status.hostId,
+      authSecret: status.authSecret,
     });
   }
   return status;

@@ -33,6 +33,43 @@ pub struct PeerInfo {
     pub last_error: Option<String>,
     pub created_at: String,
     pub updated_at: String,
+    /// Outbound token: what this RT sends as Bearer when calling the peer.
+    #[serde(default)]
+    pub auth_token: Option<String>,
+    /// Inbound token: what the peer must send as Bearer when calling us.
+    /// Generated during pairing and checked by `require_auth`.
+    #[serde(default)]
+    pub inbound_secret: Option<String>,
+}
+
+/// API-safe view of PeerInfo that excludes secret fields.
+#[derive(Debug, Clone, Serialize)]
+pub struct PeerInfoPublic {
+    pub id: String,
+    pub base_url: String,
+    pub enabled: bool,
+    pub capabilities: Vec<String>,
+    pub status: PeerStatus,
+    pub last_seen: Option<String>,
+    pub last_error: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<&PeerInfo> for PeerInfoPublic {
+    fn from(p: &PeerInfo) -> Self {
+        Self {
+            id: p.id.clone(),
+            base_url: p.base_url.clone(),
+            enabled: p.enabled,
+            capabilities: p.capabilities.clone(),
+            status: p.status.clone(),
+            last_seen: p.last_seen.clone(),
+            last_error: p.last_error.clone(),
+            created_at: p.created_at.clone(),
+            updated_at: p.updated_at.clone(),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -122,6 +159,21 @@ impl MeshState {
         let mut items = peers.values().cloned().collect::<Vec<_>>();
         items.sort_by(|left, right| left.id.cmp(&right.id));
         items
+    }
+
+    /// List peers without secret fields (for API responses).
+    pub fn list_peers_public(&self) -> Vec<PeerInfoPublic> {
+        self.list_peers().iter().map(PeerInfoPublic::from).collect()
+    }
+
+    /// Check if any **enabled** peer has the given inbound_secret.
+    /// Disabled peers are excluded so that disabling a peer immediately revokes its token.
+    pub fn has_peer_with_inbound_secret(&self, secret: &str) -> bool {
+        let peers = match self.peers.read() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        peers.values().any(|p| p.enabled && p.inbound_secret.as_deref() == Some(secret))
     }
 
     pub fn get_peer(&self, peer_id: &str) -> Option<PeerInfo> {
@@ -472,13 +524,15 @@ impl MeshRelayManager {
             self.mesh.host_id()
         );
         let topics = self.mesh.local_interest_topics();
-        let response = self
+        let mut request = self
             .client
             .put(url)
             .timeout(Duration::from_secs(3))
-            .json(&serde_json::json!({ "topics": topics }))
-            .send()
-            .await?;
+            .json(&serde_json::json!({ "topics": topics }));
+        if let Some(token) = &peer.auth_token {
+            request = request.header("Authorization", format!("Bearer {token}"));
+        }
+        let response = request.send().await?;
         response.error_for_status()?;
         Ok(())
     }
@@ -490,16 +544,18 @@ impl MeshRelayManager {
             }
 
             let url = format!("{}/mesh/events", peer.base_url.trim_end_matches('/'));
-            let response = self
+            let mut request = self
                 .client
                 .post(url)
                 .timeout(Duration::from_secs(3))
                 .json(&serde_json::json!({
                     "from_peer_id": self.mesh.host_id(),
                     "event": event.clone(),
-                }))
-                .send()
-                .await;
+                }));
+            if let Some(token) = &peer.auth_token {
+                request = request.header("Authorization", format!("Bearer {token}"));
+            }
+            let response = request.send().await;
 
             match response {
                 Ok(response) => {
@@ -565,6 +621,9 @@ impl MeshRelayManager {
                 "{}/mesh/stream?peer_id={host_id}&heartbeat_interval=10",
                 peer.base_url.trim_end_matches('/')
             ));
+            if let Some(token) = &peer.auth_token {
+                request = request.header("Authorization", format!("Bearer {token}"));
+            }
             if let Some(last_event_id) = last_event_id.as_deref() {
                 request = request.header("Last-Event-ID", last_event_id);
             }

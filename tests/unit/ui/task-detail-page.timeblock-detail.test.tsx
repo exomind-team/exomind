@@ -9,6 +9,8 @@ const navigateMock = vi.fn();
 
 const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>();
 const listTasksMock = vi.fn<(includeAbandoned?: boolean) => Promise<TaskNode[]>>();
+const addDependencyMock = vi.fn<(taskId: string, depTaskId: string, type: 'soft' | 'hard') => Promise<TaskNode | null>>();
+const removeDependencyMock = vi.fn<(taskId: string, depTaskId: string) => Promise<TaskNode | null>>();
 const getAvailableTransitionsMock = vi.fn<(id: string) => Promise<Array<TaskNode['status']>>>();
 const getChildTasksMock = vi.fn<(parentId: string) => Promise<TaskNode[]>>();
 const checkDependenciesMetMock = vi.fn<(taskId: string) => Promise<{ met: boolean; blocking: Array<{ taskId: string; type: 'soft' | 'hard'; status: TaskNode['status'] }> }>>();
@@ -35,6 +37,8 @@ vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     getTask: getTaskMock,
     listTasks: listTasksMock,
+    addDependency: addDependencyMock,
+    removeDependency: removeDependencyMock,
     getAvailableTransitions: getAvailableTransitionsMock,
     getChildTasks: getChildTasksMock,
     checkDependenciesMet: checkDependenciesMetMock,
@@ -130,6 +134,8 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
         updatedAt: 20,
       }),
     ]);
+    addDependencyMock.mockResolvedValue(makeTask());
+    removeDependencyMock.mockResolvedValue(makeTask());
     getAvailableTransitionsMock.mockResolvedValue(['in_progress']);
     getChildTasksMock.mockResolvedValue([]);
     checkDependenciesMetMock.mockResolvedValue({ met: true, blocking: [] });

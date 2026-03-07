@@ -83,6 +83,45 @@ const t = useTranslations('en');
     </div>
   </section>
 
+  {/* Naming & Vision / 命名与愿景 */}
+  <section class="pb-16">
+    <div class="section-container">
+      <div class="mx-auto max-w-4xl">
+        <div class="card p-8 md:p-10">
+          <p class="text-sm font-medium uppercase tracking-[0.22em] text-brand">
+            {t('about.brand.eyebrow')}
+          </p>
+          <h2 class="heading-display mt-3 text-3xl leading-tight text-stone-900 sm:text-4xl dark:text-stone-50">
+            {t('about.brand.title')}
+          </h2>
+          <p class="mt-4 max-w-3xl text-base leading-relaxed text-stone-500">
+            {t('about.brand.desc')}
+          </p>
+
+          <div class="mt-8 grid gap-4 md:grid-cols-3">
+            <div class="rounded-2xl border border-stone-200 bg-stone-50 p-5 dark:border-stone-800 dark:bg-stone-950">
+              <p class="text-base font-semibold text-stone-900 dark:text-stone-50">{t('about.brand.line1')}</p>
+              <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('about.brand.line1_note')}</p>
+            </div>
+            <div class="rounded-2xl border border-stone-200 bg-stone-50 p-5 dark:border-stone-800 dark:bg-stone-950">
+              <p class="text-base font-semibold text-stone-900 dark:text-stone-50">{t('about.brand.line2')}</p>
+              <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('about.brand.line2_note')}</p>
+            </div>
+            <div class="rounded-2xl border border-stone-200 bg-stone-50 p-5 dark:border-stone-800 dark:bg-stone-950">
+              <p class="text-base font-semibold text-stone-900 dark:text-stone-50">{t('about.brand.line3')}</p>
+              <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('about.brand.line3_note')}</p>
+            </div>
+          </div>
+
+          <div class="mt-6 space-y-3 text-sm leading-relaxed text-stone-500">
+            <p>{t('about.brand.note1')}</p>
+            <p>{t('about.brand.note2')}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   {/* Quote */}
   <section class="pb-24">
     <div class="section-container">

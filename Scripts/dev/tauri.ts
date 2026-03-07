@@ -2,7 +2,10 @@
 
 import { spawnSync } from 'node:child_process';
 import { join } from 'node:path';
-import { ensureRequiredAudioPermissionsInManifestFile } from './android-manifest-permission-lib';
+import {
+  ensureMdnsMulticastLockInMainActivityFile,
+  ensureRequiredAudioPermissionsInManifestFile,
+} from './android-manifest-permission-lib';
 import { resolveTauriExecutable } from './tauri-cli-lib';
 
 type AndroidLifecycleCommand = 'init' | 'build' | 'dev';
@@ -18,26 +21,51 @@ function getAndroidLifecycleCommand(args: string[]): AndroidLifecycleCommand | n
   return candidate && ANDROID_LIFECYCLE_COMMANDS.includes(candidate) ? candidate : null;
 }
 
-function ensureAndroidAudioPermissions(projectRoot: string): void {
+function ensureAndroidNetworkDiscoveryPrerequisites(projectRoot: string): void {
   const manifestPath = join(projectRoot, 'src-tauri', 'gen', 'android', 'app', 'src', 'main', 'AndroidManifest.xml');
+  const mainActivityPath = join(
+    projectRoot,
+    'src-tauri',
+    'gen',
+    'android',
+    'app',
+    'src',
+    'main',
+    'java',
+    'com',
+    'exomind',
+    'app',
+    'MainActivity.kt',
+  );
   const result = ensureRequiredAudioPermissionsInManifestFile(manifestPath);
+  const activityResult = ensureMdnsMulticastLockInMainActivityFile(mainActivityPath);
 
   if (result.status === 'updated') {
     console.log('[android-permission] injected required audio permissions');
-    return;
-  }
-
-  if (result.status === 'missing-file') {
+  } else if (result.status === 'missing-file') {
     console.log('[android-permission] skipped: AndroidManifest.xml not found yet');
-    return;
-  }
-
-  if (result.status === 'already-present') {
+  } else if (result.status === 'already-present') {
     console.log('[android-permission] already present');
+  } else {
+    console.warn('[android-permission] skipped: manifest format is not recognized');
+  }
+
+  if (activityResult.status === 'updated') {
+    console.log('[android-permission] injected mDNS multicast lock into MainActivity');
     return;
   }
 
-  console.warn('[android-permission] skipped: manifest format is not recognized');
+  if (activityResult.status === 'missing-file') {
+    console.log('[android-permission] skipped: MainActivity.kt not found yet');
+    return;
+  }
+
+  if (activityResult.status === 'already-present') {
+    console.log('[android-permission] MainActivity multicast lock already present');
+    return;
+  }
+
+  console.warn('[android-permission] skipped: MainActivity format is not recognized');
 }
 
 function main(): never {
@@ -46,7 +74,7 @@ function main(): never {
 
   // For build/dev: patch first, then execute tauri.
   if (androidCommand && androidCommand !== 'init') {
-    ensureAndroidAudioPermissions(process.cwd());
+    ensureAndroidNetworkDiscoveryPrerequisites(process.cwd());
   }
 
   const tauriExecutable = resolveTauriExecutable({ projectRoot: process.cwd() });
@@ -63,7 +91,7 @@ function main(): never {
 
   // For init: project is generated after command, so patch here.
   if (androidCommand === 'init' && run.status === 0) {
-    ensureAndroidAudioPermissions(process.cwd());
+    ensureAndroidNetworkDiscoveryPrerequisites(process.cwd());
   }
 
   process.exit(run.status ?? 1);

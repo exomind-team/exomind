@@ -19,6 +19,8 @@ export interface EmbeddedRuntimeStatusSnapshot {
   host: string;
   port: number;
   hostId?: string;
+  /** Admin auth secret for the embedded runtime (when EXOMIND_RT_SECRET is set). */
+  authSecret?: string;
 }
 
 function resolveEmbeddedRuntimePort(rawValue: string | undefined): number {
@@ -82,6 +84,7 @@ function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
       host: resolveLocalServiceHost(parsed.host),
       port: parsed.port,
       hostId: typeof parsed.hostId === 'string' ? parsed.hostId : undefined,
+      authSecret: typeof parsed.authSecret === 'string' ? parsed.authSecret : undefined,
     };
   } catch {
     return null;
@@ -115,6 +118,10 @@ function resolveEmbeddedHost(): string {
 function resolveEmbeddedPort(): number {
   const cachedStatus = readEmbeddedRuntimeStatus();
   return cachedStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+}
+
+export function getPreferredEmbeddedRuntimePort(): number {
+  return resolveEmbeddedPort();
 }
 
 export function resolveEmbeddedRuntimeBindHost(
@@ -287,6 +294,7 @@ export function persistEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnapsh
       host: resolveLocalServiceHost(status.host),
       port: status.port,
       hostId: status.hostId,
+      authSecret: status.authSecret,
     }),
   );
   emitRuntimeTargetChanged();
