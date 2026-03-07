@@ -23,6 +23,7 @@ describe('issue-198 settings desktop VC layout（设置页桌面VC布局）', ()
     expect(settingsSource).toContain('data-testid="new-settings-desktop-vc-section-theme"');
     expect(settingsSource).toContain('data-testid="new-settings-desktop-vc-section-focus"');
     expect(settingsSource).toContain('data-testid="new-settings-desktop-vc-section-notification"');
+    expect(settingsSource).toContain('data-testid="new-settings-desktop-vc-section-data"');
     expect(settingsSource).toContain('data-testid="new-settings-desktop-vc-section-danger"');
     expect(settingsSource).toContain('data-testid="new-settings-desktop-vc-section-about"');
   });

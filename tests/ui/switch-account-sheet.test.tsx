@@ -21,8 +21,10 @@ describe('SwitchAccountSheet local-profile copy（本地档案文案）', () => 
   it('contains local-profile action labels（包含档案动作标签）', () => {
     expect(content).toContain('打开档案');
     expect(content).toContain('创建档案');
+    expect(content).toContain('退出当前档案');
     expect(content).toContain('打开中...');
     expect(content).toContain('创建中...');
+    expect(content).toContain('退出中...');
   });
 
   it('contains local-profile navigation labels（包含档案导航标签）', () => {

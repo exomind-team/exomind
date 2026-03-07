@@ -116,7 +116,7 @@ type PickedJsonFile = {
   content: string;
 };
 
-type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'about' | 'danger';
+type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'data' | 'about' | 'danger';
 
 const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
@@ -256,6 +256,7 @@ export function SettingsPage() {
   const sectionThemeRef = useRef<HTMLElement | null>(null);
   const sectionFocusRef = useRef<HTMLElement | null>(null);
   const sectionNotificationRef = useRef<HTMLElement | null>(null);
+  const sectionDataRef = useRef<HTMLElement | null>(null);
   const sectionDangerRef = useRef<HTMLElement | null>(null);
   const sectionAboutRef = useRef<HTMLElement | null>(null);
   const isDesktop = useIsDesktop();
@@ -628,6 +629,7 @@ export function SettingsPage() {
     { key: 'theme', label: '外观主题', ref: sectionThemeRef },
     { key: 'focus', label: '专注设置', ref: sectionFocusRef },
     { key: 'notification', label: '通知', ref: sectionNotificationRef },
+    { key: 'data', label: '数据', ref: sectionDataRef },
     { key: 'about', label: '关于', ref: sectionAboutRef },
     { key: 'danger', label: '危险区域', ref: sectionDangerRef },
   ];
@@ -906,6 +908,29 @@ export function SettingsPage() {
                   />
                 </>
               )}
+            </SectionCard>
+          </section>
+
+          <section ref={sectionDataRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-data">
+            <SectionTitle>数据</SectionTitle>
+            <SectionCard>
+              <div data-testid="new-settings-desktop-vc-export-row">
+                <SettingRow
+                  icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="导出备份"
+                  onClick={handleExportBackup}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+              </div>
+              <Divider />
+              <div data-testid="new-settings-desktop-vc-import-row">
+                <SettingRow
+                  icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="导入数据"
+                  onClick={handleImportBackup}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+              </div>
             </SectionCard>
           </section>
 

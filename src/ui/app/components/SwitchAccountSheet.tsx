@@ -22,7 +22,7 @@ interface SwitchAccountSheetProps {
 }
 
 export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAccountSheetProps) {
-  const { login, register, activeProfileId } = useSyncStore();
+  const { login, register, logout, activeProfileId, isLoggedIn } = useSyncStore();
 
   const [mode, setMode] = useState<'switch' | 'login' | 'register'>(initialMode);
   const [previousMode, setPreviousMode] = useState<'switch' | 'login'>(initialMode === 'register' ? 'login' : initialMode as 'switch' | 'login');
@@ -107,6 +107,20 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
       onOpenChange(false);
     } catch (e) {
       setError(e instanceof Error ? e.message : '创建档案失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    if (!isLoggedIn || !activeProfileId) return;
+    setLoading(true);
+    setError('');
+    try {
+      await logout();
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '退出档案失败');
     } finally {
       setLoading(false);
     }
@@ -216,9 +230,20 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 variant="outline"
                 className="w-full rounded-xl"
                 onClick={goToRegister}
+                disabled={loading}
               >
                 创建档案
               </Button>
+              {isLoggedIn && activeProfileId && (
+                <Button
+                  variant="ghost"
+                  className="w-full rounded-xl text-[#B91C1C] hover:bg-[#FEF2F2] hover:text-[#991B1B]"
+                  onClick={handleLogout}
+                  disabled={loading}
+                >
+                  {loading ? '退出中...' : '退出当前档案'}
+                </Button>
+              )}
             </div>
           )}
 
