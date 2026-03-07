@@ -104,6 +104,7 @@ import {
   Sun,
   Timer,
   Upload,
+  Waypoints,
   Wifi,
 } from 'lucide-react';
 
@@ -1687,8 +1688,8 @@ export function SettingsPage() {
               </div>
               <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
                 <div className="flex items-center gap-2">
-                  <Bot className="h-[16px] w-[16px] text-[#78716C]" />
-                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
+                  <Waypoints className="h-[16px] w-[16px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">网络页面</span>
                 </div>
                 <Switch
                   data-testid="feature-toggle-agent-page-switch"
