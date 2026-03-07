@@ -367,6 +367,9 @@ mod tests {
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
             mesh_relay: None,
+            auth_secret: None,
+            mdns: None,
+            pairing: Arc::new(crate::pairing::PairingManager::new()),
         }
     }
 

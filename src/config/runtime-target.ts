@@ -19,6 +19,8 @@ export interface EmbeddedRuntimeStatusSnapshot {
   host: string;
   port: number;
   hostId?: string;
+  /** Admin auth secret for the embedded runtime (when EXOMIND_RT_SECRET is set). */
+  authSecret?: string;
 }
 
 function resolveEmbeddedRuntimePort(rawValue: string | undefined): number {
@@ -287,6 +289,7 @@ export function persistEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnapsh
       host: resolveLocalServiceHost(status.host),
       port: status.port,
       hostId: status.hostId,
+      authSecret: status.authSecret,
     }),
   );
   emitRuntimeTargetChanged();

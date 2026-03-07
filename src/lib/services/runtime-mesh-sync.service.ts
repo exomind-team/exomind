@@ -8,6 +8,8 @@ interface MeshPeerUpsertRequest {
   base_url: string;
   enabled: boolean;
   capabilities: string[];
+  auth_token?: string;
+  inbound_secret?: string;
 }
 
 export interface RuntimeMeshSyncServiceOptions {
@@ -40,6 +42,15 @@ function resolveRemotePeerBaseUrl(host: RuntimeHostRecord): string | null {
 function resolveLocalRuntimeBaseUrl(status: RuntimeServiceStatus): string {
   const host = status.host === '0.0.0.0' ? '127.0.0.1' : status.host;
   return `http://${host}:${status.port}`;
+}
+
+/** Build headers with optional Bearer auth token for local runtime calls. */
+function authHeaders(contentType: string, authToken?: string): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': contentType };
+  if (authToken) {
+    headers['Authorization'] = `Bearer ${authToken}`;
+  }
+  return headers;
 }
 
 async function ensureOk(response: Response): Promise<void> {
@@ -102,10 +113,99 @@ export class RuntimeMeshSyncService {
     });
   }
 
-  private async upsertPeer(runtimeBaseUrl: string, request: MeshPeerUpsertRequest): Promise<void> {
-    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/peers`, {
+  // ── Pairing API ───────────────────────────────────────────────
+
+  /** Initiate pairing session on the LOCAL runtime (requires admin auth). */
+  async initiatePairing(
+    runtimeBaseUrl: string,
+    localAuthToken?: string,
+  ): Promise<{ session_id: string; pin: string }> {
+    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/pairing/initiate`, {
+      method: 'POST',
+      headers: authHeaders('application/json', localAuthToken),
+    });
+    if (!response.ok) {
+      throw new Error(`initiatePairing failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as { session_id: string; pin: string };
+  }
+
+  /** Respond to pairing session on the REMOTE runtime (public endpoint, no auth needed). */
+  async respondToPairing(
+    initiatorBaseUrl: string,
+    sessionId: string,
+    pin: string,
+    responderHostId: string,
+    responderBaseUrl: string,
+    responderInboundToken?: string,
+  ): Promise<{ paired: boolean; peer_token: string; initiator_inbound_token?: string }> {
+    const response = await this.fetchImpl(`${initiatorBaseUrl}/mesh/pairing/respond`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        pin,
+        responder_host_id: responderHostId,
+        responder_base_url: responderBaseUrl,
+        responder_inbound_token: responderInboundToken,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`respondToPairing failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as { paired: boolean; peer_token: string; initiator_inbound_token?: string };
+  }
+
+  /** Register a peer on the LOCAL runtime (requires admin auth). */
+  async registerPeerLocally(
+    localRuntimeBaseUrl: string,
+    peerId: string,
+    peerBaseUrl: string,
+    authToken?: string,
+    inboundSecret?: string,
+    localAuthToken?: string,
+  ): Promise<void> {
+    await this.upsertPeer(localRuntimeBaseUrl, {
+      id: peerId,
+      base_url: peerBaseUrl,
+      enabled: true,
+      capabilities: [],
+      auth_token: authToken,
+      inbound_secret: inboundSecret,
+    }, localAuthToken);
+  }
+
+  // ── Discovery API ──────────────────────────────────────────────
+
+  /** List peers discovered via mDNS (calls local runtime, requires auth). */
+  async listDiscoveredPeers(
+    runtimeBaseUrl: string,
+    localAuthToken?: string,
+  ): Promise<Array<{ host_id: string; host: string; port: number }>> {
+    const headers: Record<string, string> = { Accept: 'application/json' };
+    if (localAuthToken) {
+      headers['Authorization'] = `Bearer ${localAuthToken}`;
+    }
+    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/discovered`, {
+      method: 'GET',
+      headers,
+    });
+    if (!response.ok) {
+      throw new Error(`listDiscoveredPeers failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as Array<{ host_id: string; host: string; port: number }>;
+  }
+
+  // ── Peer Upsert ────────────────────────────────────────────────
+
+  private async upsertPeer(
+    runtimeBaseUrl: string,
+    request: MeshPeerUpsertRequest,
+    localAuthToken?: string,
+  ): Promise<void> {
+    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/peers`, {
+      method: 'POST',
+      headers: authHeaders('application/json', localAuthToken),
       body: JSON.stringify(request),
     });
     await ensureOk(response as Response);
