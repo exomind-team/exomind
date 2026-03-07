@@ -6,10 +6,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { getRuntimeMeshSyncService } from '@/lib/services/runtime-mesh-sync.service';
-import { Loader2, RefreshCw, Check, X } from 'lucide-react';
+import { Loader2, RefreshCw, Check, X, ChevronLeft } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -209,7 +207,7 @@ export function PeerPairingDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="rounded-2xl">
         <DialogHeader>
           <DialogTitle>
             {mode === 'select' && '设备配对'}
@@ -225,19 +223,27 @@ export function PeerPairingDialog({
 
         {/* ── Mode Selection ── */}
         {mode === 'select' && (
-          <div className="flex flex-col gap-3 pt-2">
-            <Button onClick={handleInitiate} variant="outline" className="justify-start gap-3 h-auto py-3">
-              <div className="text-left">
-                <div className="font-medium">发起配对</div>
-                <div className="text-xs text-muted-foreground">生成 PIN 码，等待其他设备输入</div>
+          <div className="space-y-2 pt-2">
+            <button
+              type="button"
+              onClick={handleInitiate}
+              className="flex w-full items-center rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
+            >
+              <div>
+                <div className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">发起配对</div>
+                <div className="mt-0.5 text-xs text-[#A8A29E]">生成 PIN 码，等待其他设备输入</div>
               </div>
-            </Button>
-            <Button onClick={handleResponderMode} variant="outline" className="justify-start gap-3 h-auto py-3">
-              <div className="text-left">
-                <div className="font-medium">响应配对</div>
-                <div className="text-xs text-muted-foreground">扫描局域网设备，输入对方的 PIN 码</div>
+            </button>
+            <button
+              type="button"
+              onClick={handleResponderMode}
+              className="flex w-full items-center rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
+            >
+              <div>
+                <div className="font-medium text-[#1C1917] dark:text-[#FAFAF9]">响应配对</div>
+                <div className="mt-0.5 text-xs text-[#A8A29E]">扫描局域网设备，输入对方的 PIN 码</div>
               </div>
-            </Button>
+            </button>
           </div>
         )}
 
@@ -245,7 +251,7 @@ export function PeerPairingDialog({
         {mode === 'initiator' && (
           <div className="flex flex-col items-center gap-4 py-4">
             {status === 'loading' && (
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <Loader2 className="h-8 w-8 animate-spin text-[#A8A29E]" />
             )}
             {status === 'waiting' && (
               <>
@@ -253,16 +259,16 @@ export function PeerPairingDialog({
                   {pin.split('').map((digit, i) => (
                     <div
                       key={i}
-                      className="flex h-14 w-11 items-center justify-center rounded-lg border-2 border-primary bg-muted text-2xl font-bold tabular-nums"
+                      className="flex h-14 w-11 items-center justify-center rounded-xl border-2 border-[#C75B3A] bg-[#FAF7F5] text-2xl font-bold tabular-nums text-[#1C1917] dark:bg-[#292524] dark:text-[#FAFAF9]"
                     >
                       {digit}
                     </div>
                   ))}
                 </div>
-                <p className="text-sm text-muted-foreground">
+                <p className="text-sm text-[#78716C]">
                   在对方设备的「响应配对」中输入此 PIN 码
                 </p>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div className="flex items-center gap-2 text-xs text-[#A8A29E]">
                   <Loader2 className="h-3 w-3 animate-spin" />
                   等待对方连接...
                 </div>
@@ -270,11 +276,15 @@ export function PeerPairingDialog({
             )}
             {status === 'error' && (
               <div className="flex flex-col items-center gap-2">
-                <X className="h-8 w-8 text-destructive" />
-                <p className="text-sm text-destructive">{errorMessage}</p>
-                <Button variant="outline" size="sm" onClick={handleInitiate}>
+                <X className="h-8 w-8 text-red-500" />
+                <p className="text-sm text-red-500">{errorMessage}</p>
+                <button
+                  type="button"
+                  onClick={handleInitiate}
+                  className="rounded-xl border border-[#F0ECE8] px-4 py-2 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
+                >
                   重试
-                </Button>
+                </button>
               </div>
             )}
           </div>
@@ -285,38 +295,47 @@ export function PeerPairingDialog({
           <div className="flex flex-col gap-3 py-2">
             {status === 'loading' && (
               <div className="flex items-center justify-center py-6">
-                <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+                <Loader2 className="h-6 w-6 animate-spin text-[#A8A29E]" />
               </div>
             )}
             {peers.length === 0 && status !== 'loading' && (
-              <div className="flex flex-col items-center gap-2 py-6 text-sm text-muted-foreground">
+              <div className="flex flex-col items-center gap-2 py-6 text-sm text-[#78716C]">
                 <p>未发现局域网设备</p>
-                <p className="text-xs">请确保对方设备已启动 Runtime</p>
+                <p className="text-xs text-[#A8A29E]">请确保对方设备已启动 Runtime</p>
               </div>
             )}
             {peers.map((peer) => (
-              <Button
+              <button
                 key={peer.host_id}
-                variant="outline"
-                className="justify-start gap-3 h-auto py-3"
+                type="button"
+                className="flex w-full items-center rounded-xl border border-[#F0ECE8] px-4 py-3 text-left text-sm hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#1C1917]"
                 onClick={() => handleSelectPeer(peer)}
               >
-                <div className="text-left">
-                  <div className="font-medium font-mono text-xs">{peer.host_id.slice(0, 12)}...</div>
-                  <div className="text-xs text-muted-foreground">
+                <div>
+                  <div className="font-medium font-mono text-xs text-[#1C1917] dark:text-[#FAFAF9]">{peer.host_id.slice(0, 12)}...</div>
+                  <div className="mt-0.5 text-xs text-[#A8A29E]">
                     {peer.host}:{peer.port}
                   </div>
                 </div>
-              </Button>
+              </button>
             ))}
             <div className="flex justify-between">
-              <Button variant="ghost" size="sm" onClick={() => setMode('select')}>
+              <button
+                type="button"
+                onClick={() => setMode('select')}
+                className="flex items-center gap-1 text-sm text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+              >
+                <ChevronLeft className="h-4 w-4" />
                 返回
-              </Button>
-              <Button variant="ghost" size="sm" onClick={handleRefreshPeers}>
-                <RefreshCw className="h-4 w-4 mr-1" />
+              </button>
+              <button
+                type="button"
+                onClick={handleRefreshPeers}
+                className="flex items-center gap-1 text-sm text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+              >
+                <RefreshCw className="h-4 w-4" />
                 刷新
-              </Button>
+              </button>
             </div>
           </div>
         )}
@@ -325,13 +344,13 @@ export function PeerPairingDialog({
         {mode === 'responder' && selectedPeer && status !== 'success' && (
           <div className="flex flex-col items-center gap-4 py-4">
             {status === 'loading' && (
-              <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+              <Loader2 className="h-8 w-8 animate-spin text-[#A8A29E]" />
             )}
             {(status === 'idle' || status === 'error') && (
               <>
                 <div className="flex gap-2">
                   {Array.from({ length: 6 }).map((_, i) => (
-                    <Input
+                    <input
                       key={i}
                       ref={(el) => { pinInputRefs.current[i] = el; }}
                       type="text"
@@ -340,33 +359,34 @@ export function PeerPairingDialog({
                       value={pinInput[i] ?? ''}
                       onChange={(e) => handlePinDigitChange(i, e.target.value)}
                       onKeyDown={(e) => handlePinKeyDown(i, e)}
-                      className="h-14 w-11 text-center text-2xl font-bold tabular-nums"
+                      className="h-14 w-11 rounded-xl border border-[#F0ECE8] bg-white text-center text-2xl font-bold tabular-nums text-[#1C1917] outline-none focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
                     />
                   ))}
                 </div>
                 {status === 'error' && (
-                  <p className="text-sm text-destructive">{errorMessage}</p>
+                  <p className="text-sm text-red-500">{errorMessage}</p>
                 )}
                 <div className="flex gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
+                  <button
+                    type="button"
                     onClick={() => {
                       setSelectedPeer(null);
                       setPinInput('');
                       setStatus('idle');
                       setErrorMessage('');
                     }}
+                    className="rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
                   >
                     返回
-                  </Button>
-                  <Button
-                    size="sm"
+                  </button>
+                  <button
+                    type="button"
                     disabled={pinInput.length !== 6}
                     onClick={handleSubmitPin}
+                    className="rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F] disabled:opacity-40 disabled:cursor-not-allowed"
                   >
                     确认配对
-                  </Button>
+                  </button>
                 </div>
               </>
             )}
@@ -377,15 +397,19 @@ export function PeerPairingDialog({
         {mode === 'responder' && status === 'success' && (
           <div className="flex flex-col items-center gap-4 py-4">
             <Check className="h-10 w-10 text-green-500" />
-            <p className="text-sm font-medium">配对成功</p>
+            <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">配对成功</p>
             {peerToken && (
-              <p className="text-xs text-muted-foreground font-mono break-all max-w-full">
+              <p className="text-xs text-[#A8A29E] font-mono break-all max-w-full">
                 Token: {peerToken.slice(0, 16)}...
               </p>
             )}
-            <Button size="sm" onClick={() => onOpenChange(false)}>
+            <button
+              type="button"
+              onClick={() => onOpenChange(false)}
+              className="rounded-xl bg-[#C75B3A] px-6 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F]"
+            >
               完成
-            </Button>
+            </button>
           </div>
         )}
       </DialogContent>
