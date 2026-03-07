@@ -84,6 +84,7 @@ function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
       host: resolveLocalServiceHost(parsed.host),
       port: parsed.port,
       hostId: typeof parsed.hostId === 'string' ? parsed.hostId : undefined,
+      authSecret: typeof parsed.authSecret === 'string' ? parsed.authSecret : undefined,
     };
   } catch {
     return null;

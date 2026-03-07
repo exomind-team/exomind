@@ -18,6 +18,7 @@ struct RuntimeInner {
     host: String,
     port: u16,
     host_id: Option<String>,
+    auth_secret: Option<String>,
     started_at: Option<String>,
     last_error: Option<String>,
     external_runtime: bool,
@@ -35,6 +36,7 @@ impl RuntimeProcessState {
                 host: "127.0.0.1".to_string(),
                 port: DEFAULT_RT_PORT,
                 host_id: None,
+                auth_secret: std::env::var("EXOMIND_RT_SECRET").ok(),
                 started_at: None,
                 last_error: None,
                 external_runtime: false,
@@ -50,6 +52,7 @@ pub struct RuntimeServiceStatus {
     pub host: String,
     pub port: u16,
     pub host_id: Option<String>,
+    pub auth_secret: Option<String>,
     pub pid: Option<u32>,
     pub started_at: Option<String>,
     pub error: Option<String>,
@@ -97,6 +100,7 @@ fn compose_status(
         host: inner.host.clone(),
         port: inner.port,
         host_id: inner.host_id.clone(),
+        auth_secret: inner.auth_secret.clone(),
         pid: (running && inner.handle.is_some()).then_some(std::process::id()),
         started_at: inner.started_at.clone(),
         error: error.or_else(|| inner.last_error.clone()),
@@ -196,6 +200,7 @@ fn mark_external_runtime_running(
     inner.host = host.to_string();
     inner.port = port;
     inner.host_id = None;
+    inner.auth_secret = std::env::var("EXOMIND_RT_SECRET").ok();
     inner.started_at = None;
     inner.last_error = None;
     inner.external_runtime = true;
@@ -225,6 +230,7 @@ pub async fn ensure_runtime_started(
     }
     let requested_host = options.bind_host.clone();
     let requested_port = options.port;
+    let requested_auth_secret = options.auth_secret.clone();
     let mut should_restart_embedded_runtime = false;
 
     // Fast path: already running（快速路径：已在运行）
@@ -238,6 +244,7 @@ pub async fn ensure_runtime_started(
             inner.host = host;
             inner.port = port;
             inner.host_id = inner.handle.as_ref().map(|handle| handle.host_id().to_string());
+            inner.auth_secret = requested_auth_secret.clone();
             inner.last_error = None;
             inner.external_runtime = false;
             if !should_restart_running_runtime(
@@ -312,6 +319,7 @@ pub async fn ensure_runtime_started(
     inner.host = started_host;
     inner.port = started_port;
     inner.host_id = Some(handle.host_id().to_string());
+    inner.auth_secret = requested_auth_secret;
     inner.started_at = Some(Utc::now().to_rfc3339());
     inner.last_error = None;
     inner.external_runtime = false;
@@ -531,6 +539,7 @@ mod tests {
             host: "127.0.0.1".to_string(),
             port: 9124,
             host_id: None,
+            auth_secret: None,
             started_at: None,
             last_error: None,
             external_runtime: true,
@@ -549,6 +558,7 @@ mod tests {
             inner.host = "127.0.0.1".to_string();
             inner.port = 9124;
             inner.host_id = Some("host-local".to_string());
+            inner.auth_secret = Some("embedded-secret".to_string());
             inner.external_runtime = true;
         }
 
@@ -556,5 +566,24 @@ mod tests {
         assert!(status.running);
         assert_eq!(status.pid, None);
         assert_eq!(status.host_id.as_deref(), Some("host-local"));
+        assert_eq!(status.auth_secret.as_deref(), Some("embedded-secret"));
+    }
+
+    #[test]
+    fn compose_status_includes_auth_secret_for_embedded_runtime() {
+        let inner = super::RuntimeInner {
+            handle: None,
+            host: "127.0.0.1".to_string(),
+            port: 9124,
+            host_id: Some("host-local".to_string()),
+            started_at: None,
+            last_error: None,
+            external_runtime: false,
+            auth_secret: Some("embedded-secret".to_string()),
+        };
+        let status = super::compose_status(&inner, true, None);
+
+        assert!(status.running);
+        assert_eq!(status.auth_secret.as_deref(), Some("embedded-secret"));
     }
 }

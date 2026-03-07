@@ -26,6 +26,7 @@ export interface RuntimeServiceStatus {
   host: string;
   port: number;
   hostId?: string; // host_id（逻辑主机 ID）
+  authSecret?: string; // auth_secret（本地 Runtime 管理鉴权密钥）
   pid?: number;
   startedAt?: string;
   error?: string;
