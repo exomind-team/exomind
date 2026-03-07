@@ -19,6 +19,7 @@ pub mod agent;
 pub mod auth;
 pub mod discovery;
 pub mod mesh;
+pub mod pairing;
 pub mod routes;
 pub mod signal;
 
@@ -601,6 +602,7 @@ pub struct AppState {
     pub mesh_relay: Option<Arc<MeshRelayManager>>,
     pub auth_secret: Option<String>,
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
+    pub pairing: Arc<pairing::PairingManager>,
 }
 
 impl AppState {
@@ -638,6 +640,7 @@ impl AppState {
             mesh_relay,
             auth_secret,
             mdns: None,
+            pairing: Arc::new(pairing::PairingManager::new()),
         }
     }
 }
@@ -720,6 +723,7 @@ mod tests {
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
+            pairing: Arc::new(pairing::PairingManager::new()),
         }
     }
 

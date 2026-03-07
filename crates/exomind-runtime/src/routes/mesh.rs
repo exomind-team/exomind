@@ -15,6 +15,7 @@ use tokio::time::{Duration, Interval};
 use crate::AppState;
 use crate::discovery::DiscoveredPeer;
 use crate::mesh::{PeerInfo, PeerInterestSnapshot, PeerStatus};
+use serde::Serialize;
 
 #[derive(Debug, Deserialize)]
 struct CreatePeerRequest {
@@ -203,6 +204,76 @@ async fn stream_handler(
     Sse::new(replay_stream.chain(live_stream))
 }
 
+// --- Pairing types ---
+
+#[derive(Debug, Serialize)]
+struct PairingInitiateResponse {
+    session_id: String,
+    pin: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct PairingRespondRequest {
+    session_id: String,
+    pin: String,
+    responder_host_id: String,
+    responder_base_url: String,
+}
+
+#[derive(Debug, Serialize)]
+struct PairingRespondResponse {
+    paired: bool,
+    peer_token: String,
+}
+
+// --- Pairing handlers ---
+
+async fn pairing_initiate(State(state): State<AppState>) -> Json<PairingInitiateResponse> {
+    let session = state.pairing.initiate(state.host_id.clone());
+    Json(PairingInitiateResponse {
+        session_id: session.session_id,
+        pin: session.pin,
+    })
+}
+
+async fn pairing_respond(
+    State(state): State<AppState>,
+    Json(req): Json<PairingRespondRequest>,
+) -> Result<Json<PairingRespondResponse>, StatusCode> {
+    let result = state
+        .pairing
+        .respond(&req.session_id, &req.pin, &req.responder_host_id)
+        .map_err(|err| match err {
+            crate::pairing::PairingError::SessionNotFound => StatusCode::FORBIDDEN,
+            crate::pairing::PairingError::IncorrectPin => StatusCode::FORBIDDEN,
+        })?;
+
+    // Register the responder as a confirmed peer on this (initiator) side.
+    let now = chrono::Utc::now().to_rfc3339();
+    state.mesh.upsert_peer(PeerInfo {
+        id: req.responder_host_id.clone(),
+        base_url: req.responder_base_url,
+        enabled: true,
+        capabilities: vec![],
+        status: PeerStatus::Unknown,
+        last_seen: None,
+        last_error: None,
+        created_at: now.clone(),
+        updated_at: now,
+        auth_token: Some(result.peer_token.clone()),
+    });
+
+    // If mesh relay is active, reconcile peers.
+    if let Some(relay) = &state.mesh_relay {
+        relay.reconcile_all_peers().await;
+    }
+
+    Ok(Json(PairingRespondResponse {
+        paired: true,
+        peer_token: result.peer_token,
+    }))
+}
+
 async fn list_discovered(State(state): State<AppState>) -> Json<Vec<DiscoveredPeer>> {
     let peers = state
         .mdns
@@ -220,6 +291,8 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/events", post(ingest_remote_event))
         .route("/mesh/stream", get(stream_handler))
         .route("/mesh/discovered", get(list_discovered))
+        .route("/mesh/pairing/initiate", post(pairing_initiate))
+        .route("/mesh/pairing/respond", post(pairing_respond))
 }
 
 struct MeshSseStream {

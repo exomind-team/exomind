@@ -369,6 +369,7 @@ mod tests {
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
+            pairing: Arc::new(crate::pairing::PairingManager::new()),
         }
     }
 
