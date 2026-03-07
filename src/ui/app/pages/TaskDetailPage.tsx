@@ -1,6 +1,6 @@
 import { ArrowLeft, Ellipsis, Pause, Play } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
@@ -9,7 +9,6 @@ import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { getUseMockDataEnabled } from '@/config/mock-data';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
-import { EstimatedTimeEditor } from '@/ui/app/components/EstimatedTimeEditor';
 import {
   buildTaskTimeblockDetailViewModel,
   type TimeblockEventLog,
@@ -468,8 +467,6 @@ function MobileTimeblockDetail({
   onPauseAndGoEventlog,
   onCopySummary,
   rootGuidance,
-  canEditEstimatedTime,
-  onEstimatedMinutesUpdate,
   onDependencySelectedTaskChange,
   onDependencySelectedTypeChange,
   onAddDependency,
@@ -492,8 +489,6 @@ function MobileTimeblockDetail({
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
   rootGuidance?: ReactNode;
-  canEditEstimatedTime: boolean;
-  onEstimatedMinutesUpdate: (minutes: number | undefined) => void;
   onDependencySelectedTaskChange: (value: string) => void;
   onDependencySelectedTypeChange: (value: DependencyType) => void;
   onAddDependency: () => void;
@@ -532,13 +527,6 @@ function MobileTimeblockDetail({
           </div>
           <h2 className="mt-3 text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h2>
           <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联任务：{task.title}</p>
-          {canEditEstimatedTime ? (
-            <EstimatedTimeEditor
-              taskId={task.id}
-              currentMinutes={task.estimatedMinutes}
-              onUpdate={onEstimatedMinutesUpdate}
-            />
-          ) : null}
           <div className="mt-3 grid grid-cols-2 gap-2">
             {model.summary.metrics.map((metric) => (
               <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
@@ -670,8 +658,6 @@ function DesktopTimeblockDetail({
   onPauseAndGoEventlog,
   onCopySummary,
   rootGuidance,
-  canEditEstimatedTime,
-  onEstimatedMinutesUpdate,
   onDependencySelectedTaskChange,
   onDependencySelectedTypeChange,
   onAddDependency,
@@ -694,8 +680,6 @@ function DesktopTimeblockDetail({
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
   rootGuidance?: ReactNode;
-  canEditEstimatedTime: boolean;
-  onEstimatedMinutesUpdate: (minutes: number | undefined) => void;
   onDependencySelectedTaskChange: (value: string) => void;
   onDependencySelectedTypeChange: (value: DependencyType) => void;
   onAddDependency: () => void;
@@ -728,13 +712,6 @@ function DesktopTimeblockDetail({
             </div>
           ))}
         </div>
-        {canEditEstimatedTime ? (
-          <EstimatedTimeEditor
-            taskId={task.id}
-            currentMinutes={task.estimatedMinutes}
-            onUpdate={onEstimatedMinutesUpdate}
-          />
-        ) : null}
       </section>
 
       <section className="mt-4 grid grid-cols-[minmax(0,1fr)_340px] gap-4">
@@ -985,10 +962,6 @@ export function TaskDetailPage() {
   const rootGuidance = useMemo(() => (
     <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
   ), [task?.id, taskById, taskGraph]);
-  const canEditEstimatedTime = useMemo(
-    () => (task ? allTasks.some((candidate) => candidate.id === task.id) : false),
-    [allTasks, task],
-  );
   const timerControls = (
     <TimerConfigPanel
       timerMode={timerMode}
@@ -1123,30 +1096,6 @@ export function TaskDetailPage() {
     }
   };
 
-  const handleEstimatedMinutesUpdate = useCallback((minutes: number | undefined) => {
-    const sourceTaskId = task?.id;
-    if (!sourceTaskId) return;
-
-    const updatedAt = Date.now();
-    setTask((current) => {
-      if (!current || current.id !== sourceTaskId) return current;
-      return {
-        ...current,
-        estimatedMinutes: minutes,
-        updatedAt,
-      };
-    });
-    setAllTasks((current) => current.map((candidate) => (
-      candidate.id === sourceTaskId
-        ? {
-            ...candidate,
-            estimatedMinutes: minutes,
-            updatedAt,
-          }
-        : candidate
-    )));
-  }, [task?.id]);
-
   if (isLoading) {
     return (
       <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
@@ -1185,8 +1134,6 @@ export function TaskDetailPage() {
         onPauseAndGoEventlog={handlePauseAndGoEventlog}
         onCopySummary={handleCopySummary}
         rootGuidance={rootGuidance}
-        canEditEstimatedTime={canEditEstimatedTime}
-        onEstimatedMinutesUpdate={handleEstimatedMinutesUpdate}
         onDependencySelectedTaskChange={setDependencySelectedTaskId}
         onDependencySelectedTypeChange={setDependencySelectedType}
         onAddDependency={handleAddDependency}
@@ -1214,8 +1161,6 @@ export function TaskDetailPage() {
       onPauseAndGoEventlog={handlePauseAndGoEventlog}
       onCopySummary={handleCopySummary}
       rootGuidance={rootGuidance}
-      canEditEstimatedTime={canEditEstimatedTime}
-      onEstimatedMinutesUpdate={handleEstimatedMinutesUpdate}
       onDependencySelectedTaskChange={setDependencySelectedTaskId}
       onDependencySelectedTypeChange={setDependencySelectedType}
       onAddDependency={handleAddDependency}
