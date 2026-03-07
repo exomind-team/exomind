@@ -832,7 +832,7 @@ export function TaskDetailPage() {
     setCustomDurationDraft,
     commitCustomDuration,
     timerConfig,
-  } = useTimerConfig(task?.estimatedMinutes);
+  } = useTimerConfig(task?.estimatedMinutes, task?.id);
 
   useEffect(() => {
     setDagVisibilityState({ collapsedUpstreamOf: [] });

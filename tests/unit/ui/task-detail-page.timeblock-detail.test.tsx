@@ -27,10 +27,11 @@ const startBlockForTaskMock = vi.fn();
 const getEventsMock = vi.fn<
   () => Promise<Array<{ id: string; content: string; createdAt: string; type?: string }>>
 >();
+let currentTaskId = 'task-1';
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
-  useParams: () => ({ taskId: 'task-1' }),
+  useParams: () => ({ taskId: currentTaskId }),
   useNavigate: () => navigateMock,
 }));
 
@@ -117,10 +118,24 @@ function makeBlock(overrides: Partial<TimeBlock> = {}): TimeBlock {
 
 describe('TaskDetailPage timeblock detail layout（时间块详情布局）', () => {
   beforeEach(() => {
+    currentTaskId = 'task-1';
     navigateMock.mockReset();
     startBlockForTaskMock.mockReset();
     startBlockForTaskMock.mockResolvedValue(null);
-    getTaskMock.mockResolvedValue(makeTask({ status: 'in_progress', createdAt: 20, updatedAt: 20 }));
+    getTaskMock.mockImplementation(async (id: string) => {
+      if (id === 'task-2') {
+        return makeTask({
+          id: 'task-2',
+          title: '切换后的任务 B',
+          estimatedMinutes: 30,
+          status: 'not_started',
+          createdAt: 30,
+          updatedAt: 30,
+        });
+      }
+
+      return makeTask({ status: 'in_progress', createdAt: 20, updatedAt: 20 });
+    });
     listTasksMock.mockResolvedValue([
       makeTask({
         id: 'task-root',
@@ -135,6 +150,14 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
         status: 'in_progress',
         createdAt: 20,
         updatedAt: 20,
+      }),
+      makeTask({
+        id: 'task-2',
+        title: '切换后的任务 B',
+        estimatedMinutes: 30,
+        status: 'not_started',
+        createdAt: 30,
+        updatedAt: 30,
       }),
     ]);
     addDependencyMock.mockResolvedValue(makeTask());
@@ -214,6 +237,35 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 120 });
+    });
+  });
+
+  it('resets timer config after switching to another task（切换任务后重置为新任务的初始计时配置）', async () => {
+    mockMatchMedia(false);
+    const { rerender } = render(<TaskDetailPage />);
+
+    await screen.findByText('时间块详情');
+
+    fireEvent.click(screen.getByTestId('task-mode-countup'));
+    expect(screen.getByTestId('task-mode-countup')).toHaveAttribute('aria-pressed', 'true');
+
+    currentTaskId = 'task-2';
+    rerender(<TaskDetailPage />);
+
+    await waitFor(() => {
+      expect(getTaskMock).toHaveBeenCalledWith('task-2');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-mode-countdown')).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('30m');
+
+    fireEvent.click(screen.getByText('开始计时'));
+
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
     });
   });
 });

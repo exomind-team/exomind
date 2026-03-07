@@ -24,4 +24,24 @@ describe('useTimerConfig', () => {
 
     expect(result.current.timerConfig).toEqual({ mode: 'countup' });
   });
+
+  it('resets to next task initial minutes when reset key changes（任务切换时按新任务重新初始化）', () => {
+    const { result, rerender } = renderHook(
+      ({ initialMinutes, resetKey }: { initialMinutes?: number; resetKey?: string }) => useTimerConfig(initialMinutes, resetKey),
+      {
+        initialProps: { initialMinutes: 120, resetKey: 'task-1' },
+      },
+    );
+
+    act(() => {
+      result.current.setTimerMode('countup');
+    });
+
+    rerender({ initialMinutes: 30, resetKey: 'task-2' });
+
+    expect(result.current.timerMode).toBe('countdown');
+    expect(result.current.countdownMinutes).toBe(30);
+    expect(result.current.customDurationDraft).toBe('30');
+    expect(result.current.timerConfig).toEqual({ mode: 'countdown', minutes: 30 });
+  });
 });

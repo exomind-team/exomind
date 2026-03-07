@@ -23,13 +23,26 @@ export interface UseTimerConfigResult {
   timerConfig: { mode: 'countup' } | { mode: 'countdown'; minutes: number };
 }
 
-export function useTimerConfig(initialMinutes?: number): UseTimerConfigResult {
+export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseTimerConfigResult {
   const normalizedInitialMinutes = normalizeCountdownMinutes(initialMinutes);
   const hasUserConfiguredRef = useRef(false);
+  const lastResetKeyRef = useRef(resetKey);
 
   const [timerMode, setTimerModeState] = useState<TimerMode>('countdown');
   const [countdownMinutes, setCountdownMinutesState] = useState(normalizedInitialMinutes);
   const [customDurationDraft, setCustomDurationDraftState] = useState(String(normalizedInitialMinutes));
+
+  useEffect(() => {
+    if (lastResetKeyRef.current === resetKey) {
+      return;
+    }
+
+    lastResetKeyRef.current = resetKey;
+    hasUserConfiguredRef.current = false;
+    setTimerModeState('countdown');
+    setCountdownMinutesState(normalizedInitialMinutes);
+    setCustomDurationDraftState(String(normalizedInitialMinutes));
+  }, [normalizedInitialMinutes, resetKey]);
 
   useEffect(() => {
     if (hasUserConfiguredRef.current) {
