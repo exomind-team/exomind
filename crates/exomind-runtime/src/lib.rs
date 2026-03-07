@@ -587,6 +587,7 @@ pub fn app_with_state(state: AppState) -> Router {
 
     Router::new()
         .route("/health", get(health))
+        .merge(routes::public_router())
         .merge(protected)
         .layer(cors)
         .with_state(state)

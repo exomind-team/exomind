@@ -33,7 +33,7 @@ pub async fn require_auth(
         .and_then(|value| value.strip_prefix("Bearer "))
         .map(|token| token.to_string());
 
-    // Fall back to ?token= query param.
+    // Fall back to ?token= query param (URL-decoded).
     let token_from_query = request
         .uri()
         .query()
@@ -42,7 +42,11 @@ pub async fn require_auth(
                 .split('&')
                 .find_map(|pair| pair.strip_prefix("token="))
         })
-        .map(|token| token.to_string());
+        .map(|token| {
+            percent_encoding::percent_decode_str(token)
+                .decode_utf8_lossy()
+                .into_owned()
+        });
 
     let provided_token = token_from_header.or(token_from_query);
 

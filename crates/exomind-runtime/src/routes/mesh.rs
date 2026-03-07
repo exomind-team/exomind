@@ -308,6 +308,7 @@ async fn list_discovered(State(state): State<AppState>) -> Json<Vec<DiscoveredPe
     Json(peers)
 }
 
+/// Protected mesh routes (behind auth middleware).
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/mesh/peers", get(list_peers).post(create_peer))
@@ -316,6 +317,11 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/events", post(ingest_remote_event))
         .route("/mesh/stream", get(stream_handler))
         .route("/mesh/discovered", get(list_discovered))
+}
+
+/// Public mesh routes (no auth — pairing is the trust bootstrapping mechanism).
+pub fn public_router() -> Router<AppState> {
+    Router::new()
         .route("/mesh/pairing/initiate", post(pairing_initiate))
         .route("/mesh/pairing/respond", post(pairing_respond))
 }
