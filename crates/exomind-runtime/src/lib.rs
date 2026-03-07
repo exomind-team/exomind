@@ -17,6 +17,7 @@ use signal::SignalPool;
 
 pub mod agent;
 pub mod auth;
+pub mod discovery;
 pub mod mesh;
 pub mod routes;
 pub mod signal;
@@ -80,6 +81,8 @@ pub struct RuntimeStartOptions {
     pub mesh_state_path: Option<PathBuf>,
     /// optional bearer token secret for HTTP auth（可选 Bearer Token 鉴权密钥）.
     pub auth_secret: Option<String>,
+    /// enable mDNS service discovery for LAN peer auto-detection（启用 mDNS 局域网自动发现）.
+    pub enable_mdns: bool,
 }
 
 impl Default for RuntimeStartOptions {
@@ -90,6 +93,13 @@ impl Default for RuntimeStartOptions {
                 !(value == "1" || value == "true" || value == "yes")
             })
             .unwrap_or(true);
+
+        let enable_mdns = env::var("EXOMIND_RT_MDNS")
+            .map(|value| {
+                let value = value.to_ascii_lowercase();
+                value == "1" || value == "true"
+            })
+            .unwrap_or(false);
 
         Self {
             bind_host: configured_bind_host_from_env(),
@@ -102,6 +112,7 @@ impl Default for RuntimeStartOptions {
             ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
             mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH").ok().map(PathBuf::from),
             auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
+            enable_mdns,
         }
     }
 }
@@ -151,6 +162,7 @@ pub struct RuntimeHandle {
     signal_pool: Arc<SignalPool>,
     mesh: Arc<MeshState>,
     mesh_relay: Option<Arc<MeshRelayManager>>,
+    mdns: Option<Arc<discovery::MdnsDiscovery>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
@@ -280,6 +292,10 @@ impl RuntimeHandle {
         }
         self.ts_agents.clear();
 
+        if let Some(mdns) = self.mdns.take() {
+            mdns.shutdown();
+        }
+
         if let Some(mesh_relay) = &self.mesh_relay {
             mesh_relay.shutdown().await;
         }
@@ -309,6 +325,9 @@ impl RuntimeHandle {
 
 impl Drop for RuntimeHandle {
     fn drop(&mut self) {
+        if let Some(mdns) = self.mdns.take() {
+            mdns.shutdown();
+        }
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
@@ -352,13 +371,37 @@ pub async fn start_with_options(
         .local_addr()
         .map_err(RuntimeStartError::ReadLocalAddr)?;
 
-    let state = AppState::new_runtime(
+    let mut state = AppState::new_runtime(
         local_addr.port(),
         options.host_id.clone(),
         options.mesh_state_path.clone(),
         true,
         options.auth_secret.clone(),
     );
+
+    // mDNS discovery setup.
+    let mdns = if options.enable_mdns {
+        match discovery::MdnsDiscovery::new(options.host_id.clone(), local_addr.port()) {
+            Ok(mdns) => {
+                if let Err(e) = mdns.register() {
+                    tracing::warn!("mDNS register failed: {e}");
+                }
+                if let Err(e) = mdns.start_browsing() {
+                    tracing::warn!("mDNS browsing failed: {e}");
+                }
+                let arc = Arc::new(mdns);
+                state.mdns = Some(Arc::clone(&arc));
+                Some(arc)
+            }
+            Err(e) => {
+                tracing::warn!("mDNS daemon creation failed: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let signal_pool = Arc::clone(&state.signal_pool);
     let mesh = Arc::clone(&state.mesh);
     let mesh_relay = state.mesh_relay.clone();
@@ -400,6 +443,7 @@ pub async fn start_with_options(
         signal_pool,
         mesh,
         mesh_relay,
+        mdns,
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
         actor_tasks,
@@ -556,6 +600,7 @@ pub struct AppState {
     pub mesh: Arc<MeshState>,
     pub mesh_relay: Option<Arc<MeshRelayManager>>,
     pub auth_secret: Option<String>,
+    pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
 }
 
 impl AppState {
@@ -592,6 +637,7 @@ impl AppState {
             mesh,
             mesh_relay,
             auth_secret,
+            mdns: None,
         }
     }
 }
@@ -673,6 +719,7 @@ mod tests {
             mesh: Arc::new(mesh::MeshState::new(host_id, Arc::clone(&signal_pool), None)),
             mesh_relay: None,
             auth_secret: None,
+            mdns: None,
         }
     }
 

@@ -368,6 +368,7 @@ mod tests {
             mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
             mesh_relay: None,
             auth_secret: None,
+            mdns: None,
         }
     }
 

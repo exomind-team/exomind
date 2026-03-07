@@ -13,6 +13,7 @@ use tokio::sync::broadcast;
 use tokio::time::{Duration, Interval};
 
 use crate::AppState;
+use crate::discovery::DiscoveredPeer;
 use crate::mesh::{PeerInfo, PeerInterestSnapshot, PeerStatus};
 
 #[derive(Debug, Deserialize)]
@@ -202,6 +203,15 @@ async fn stream_handler(
     Sse::new(replay_stream.chain(live_stream))
 }
 
+async fn list_discovered(State(state): State<AppState>) -> Json<Vec<DiscoveredPeer>> {
+    let peers = state
+        .mdns
+        .as_ref()
+        .map(|mdns| mdns.discovered_peers())
+        .unwrap_or_default();
+    Json(peers)
+}
+
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/mesh/peers", get(list_peers).post(create_peer))
@@ -209,6 +219,7 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/interests/:peer_id", put(update_peer_interests))
         .route("/mesh/events", post(ingest_remote_event))
         .route("/mesh/stream", get(stream_handler))
+        .route("/mesh/discovered", get(list_discovered))
 }
 
 struct MeshSseStream {
