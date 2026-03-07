@@ -102,6 +102,62 @@ export class RuntimeMeshSyncService {
     });
   }
 
+  // ── Pairing API ───────────────────────────────────────────────
+
+  /** 发起配对会话，返回 session_id 和 6 位 PIN 码 */
+  async initiatePairing(runtimeBaseUrl: string): Promise<{ session_id: string; pin: string }> {
+    const response = await this.fetchImpl(`${runtimeBaseUrl}/auth/pair/initiate`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`initiatePairing failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as { session_id: string; pin: string };
+  }
+
+  /** 响应配对会话，提交 PIN 码进行验证，成功后获取 peer_token */
+  async respondToPairing(
+    runtimeBaseUrl: string,
+    sessionId: string,
+    pin: string,
+    responderHostId: string,
+    responderBaseUrl: string,
+  ): Promise<{ paired: boolean; peer_token: string }> {
+    const response = await this.fetchImpl(`${runtimeBaseUrl}/auth/pair/respond`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        session_id: sessionId,
+        pin,
+        responder_host_id: responderHostId,
+        responder_base_url: responderBaseUrl,
+      }),
+    });
+    if (!response.ok) {
+      throw new Error(`respondToPairing failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as { paired: boolean; peer_token: string };
+  }
+
+  // ── Discovery API ──────────────────────────────────────────────
+
+  /** 列出通过 mDNS 发现的 peer 列表 */
+  async listDiscoveredPeers(
+    runtimeBaseUrl: string,
+  ): Promise<Array<{ host_id: string; host: string; port: number }>> {
+    const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/discovered`, {
+      method: 'GET',
+      headers: { Accept: 'application/json' },
+    });
+    if (!response.ok) {
+      throw new Error(`listDiscoveredPeers failed: HTTP ${response.status}`);
+    }
+    return (await response.json()) as Array<{ host_id: string; host: string; port: number }>;
+  }
+
+  // ── Peer Upsert ────────────────────────────────────────────────
+
   private async upsertPeer(runtimeBaseUrl: string, request: MeshPeerUpsertRequest): Promise<void> {
     const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/peers`, {
       method: 'POST',

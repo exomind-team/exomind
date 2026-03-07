@@ -85,6 +85,7 @@ import {
 import { UserCard } from '@/ui/app/components/UserCard';
 import { MoreSection } from '@/ui/app/components/MoreSection';
 import { AboutSection } from '@/ui/app/components/AboutSection';
+import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
 import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/app/components/settings-shared';
 import { useNavigate } from '@tanstack/react-router';
 import {
@@ -234,6 +235,7 @@ export function SettingsPage() {
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [countdownModeDialogOpen, setCountdownModeDialogOpen] = useState(false);
   const [featureTogglesDialogOpen, setFeatureTogglesDialogOpen] = useState(false);
+  const [pairingDialogOpen, setPairingDialogOpen] = useState(false);
   const [voiceInputDialogOpen, setVoiceInputDialogOpen] = useState(false);
   const [mossApiKey, setMossApiKey] = useState(() => readStoredMossApiKey());
   const [mossApiKeyDraft, setMossApiKeyDraft] = useState('');
@@ -894,6 +896,13 @@ export function SettingsPage() {
                     onClick={() => setFeatureTogglesDialogOpen(true)}
                     right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                   />
+                  <Divider />
+                  <SettingRow
+                    icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="设备配对"
+                    onClick={() => setPairingDialogOpen(true)}
+                    right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                  />
                 </>
               )}
             </SectionCard>
@@ -1426,6 +1435,13 @@ export function SettingsPage() {
                   onClick={() => setFeatureTogglesDialogOpen(true)}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
+                <Divider />
+                <SettingRow
+                  icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="设备配对"
+                  onClick={() => setPairingDialogOpen(true)}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
               </>
             )}
           </SectionCard>
@@ -1753,6 +1769,14 @@ export function SettingsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Peer Pairing Dialog ── */}
+      <PeerPairingDialog
+        open={pairingDialogOpen}
+        onOpenChange={setPairingDialogOpen}
+        runtimeBaseUrl="http://127.0.0.1:1949"
+        localHostId="local"
+      />
     </div>
   );
 }
