@@ -218,12 +218,18 @@ struct PairingRespondRequest {
     pin: String,
     responder_host_id: String,
     responder_base_url: String,
+    /// The responder's auth_secret so the initiator can relay to it.
+    #[serde(default)]
+    responder_auth_secret: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
 struct PairingRespondResponse {
     paired: bool,
     peer_token: String,
+    /// The initiator's auth_secret so the responder can relay to it.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    initiator_auth_secret: Option<String>,
 }
 
 // --- Pairing handlers ---
@@ -256,6 +262,8 @@ async fn pairing_respond(
     })?;
 
     // Register the responder as a confirmed peer on this (initiator) side.
+    // Use the responder's auth_secret (if provided) so relay can authenticate.
+    // Fall back to peer_token if no secret was exchanged.
     let now = chrono::Utc::now().to_rfc3339();
     state.mesh.upsert_peer(PeerInfo {
         id: req.responder_host_id.clone(),
@@ -267,7 +275,7 @@ async fn pairing_respond(
         last_error: None,
         created_at: now.clone(),
         updated_at: now,
-        auth_token: Some(result.peer_token.clone()),
+        auth_token: req.responder_auth_secret.or(Some(result.peer_token.clone())),
     });
 
     // If mesh relay is active, reconcile peers.
@@ -278,6 +286,7 @@ async fn pairing_respond(
     Ok(Json(PairingRespondResponse {
         paired: true,
         peer_token: result.peer_token,
+        initiator_auth_secret: state.auth_secret.clone(),
     }))
 }
 

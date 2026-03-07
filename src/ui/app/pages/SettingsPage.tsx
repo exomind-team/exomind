@@ -86,6 +86,7 @@ import { UserCard } from '@/ui/app/components/UserCard';
 import { MoreSection } from '@/ui/app/components/MoreSection';
 import { AboutSection } from '@/ui/app/components/AboutSection';
 import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
+import { getSelectedRuntimeTarget, toRuntimeBaseUrl, EMBEDDED_RUNTIME_STATUS_STORAGE_KEY } from '@/config/runtime-target';
 import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/app/components/settings-shared';
 import { useNavigate } from '@tanstack/react-router';
 import {
@@ -1774,8 +1775,20 @@ export function SettingsPage() {
       <PeerPairingDialog
         open={pairingDialogOpen}
         onOpenChange={setPairingDialogOpen}
-        runtimeBaseUrl="http://127.0.0.1:1949"
-        localHostId="local"
+        runtimeBaseUrl={(() => {
+          const target = getSelectedRuntimeTarget();
+          return toRuntimeBaseUrl(target);
+        })()}
+        localHostId={(() => {
+          try {
+            const raw = window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (typeof parsed.hostId === 'string') return parsed.hostId;
+            }
+          } catch { /* ignore */ }
+          return 'local';
+        })()}
       />
     </div>
   );

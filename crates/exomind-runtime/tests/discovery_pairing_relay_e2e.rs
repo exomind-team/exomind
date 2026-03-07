@@ -63,7 +63,8 @@ async fn do_pairing_with_auth(
     secret_a: &str,
     responder_host_id: &str,
     responder_base_url: &str,
-) -> (String, String, String) {
+    responder_secret: Option<&str>,
+) -> (String, String, String, Option<String>) {
     // 1. Initiate with auth.
     let initiate: Value = client
         .post(format!("{base_a}/mesh/pairing/initiate"))
@@ -79,16 +80,20 @@ async fn do_pairing_with_auth(
     let session_id = initiate["session_id"].as_str().unwrap().to_string();
     let pin = initiate["pin"].as_str().unwrap().to_string();
 
-    // 2. Respond with auth.
+    // 2. Respond with auth + optional responder_auth_secret for secret exchange.
+    let mut body = json!({
+        "session_id": session_id,
+        "pin": pin,
+        "responder_host_id": responder_host_id,
+        "responder_base_url": responder_base_url,
+    });
+    if let Some(rs) = responder_secret {
+        body["responder_auth_secret"] = json!(rs);
+    }
     let respond: Value = client
         .post(format!("{base_a}/mesh/pairing/respond"))
         .header("Authorization", format!("Bearer {secret_a}"))
-        .json(&json!({
-            "session_id": session_id,
-            "pin": pin,
-            "responder_host_id": responder_host_id,
-            "responder_base_url": responder_base_url,
-        }))
+        .json(&body)
         .send()
         .await
         .expect("respond should send")
@@ -99,8 +104,9 @@ async fn do_pairing_with_auth(
         .unwrap();
     assert_eq!(respond["paired"], json!(true));
     let peer_token = respond["peer_token"].as_str().unwrap().to_string();
+    let initiator_secret = respond["initiator_auth_secret"].as_str().map(|s| s.to_string());
 
-    (session_id, pin, peer_token)
+    (session_id, pin, peer_token, initiator_secret)
 }
 
 // =========================================================================
@@ -221,9 +227,16 @@ async fn auth_pairing_relay() {
         "request without token should return 401"
     );
 
-    // ---- Step 2-3: Pair RT-A with RT-B using auth ---------------------
-    let (_session_id, _pin, peer_token) =
-        do_pairing_with_auth(&client, &a_url, "secret-a", "e2e-auth-b", &b_url).await;
+    // ---- Step 2-3: Pair RT-A with RT-B, exchanging auth secrets --------
+    let (_session_id, _pin, _peer_token, initiator_secret) =
+        do_pairing_with_auth(&client, &a_url, "secret-a", "e2e-auth-b", &b_url, Some("secret-b")).await;
+
+    // Verify secret exchange: initiator returns its auth_secret.
+    assert_eq!(
+        initiator_secret.as_deref(),
+        Some("secret-a"),
+        "pairing response should include initiator's auth_secret"
+    );
 
     // ---- Step 4: Verify peer was created (auth_token must NOT leak in response) ---
     let peers: Value = client
@@ -245,7 +258,6 @@ async fn auth_pairing_relay() {
         peer_b.get("auth_token").is_none() || peer_b["auth_token"].is_null(),
         "auth_token must not be serialized in peer list responses (security)"
     );
-    let _ = peer_token; // token is used internally, not exposed via API
 
     // ---- Step 5: Setup routes and bidirectional peering ----------------
     // On RT-B: route for "test.ping" so it's locally relevant.
@@ -263,7 +275,7 @@ async fn auth_pairing_relay() {
         .error_for_status()
         .unwrap();
 
-    // Register RT-A as a peer on RT-B (with RT-A's secret for forwarding).
+    // Register RT-A as a peer on RT-B using the exchanged initiator_secret.
     client
         .post(format!("{b_url}/mesh/peers"))
         .header("Authorization", "Bearer secret-b")
@@ -272,28 +284,14 @@ async fn auth_pairing_relay() {
             "base_url": a_url,
             "enabled": true,
             "capabilities": ["relay"],
-            "auth_token": "secret-a",
+            "auth_token": initiator_secret.as_deref().unwrap_or(""),
         }))
         .send()
         .await
         .unwrap()
         .error_for_status()
         .unwrap();
-
-    // Update RT-A's peer entry for RT-B with RT-B's actual auth secret
-    // so the relay can authenticate when forwarding events to RT-B.
-    // (The pairing flow stores a peer_token hash, not the remote secret.)
-    client
-        .put(format!("{a_url}/mesh/peers/e2e-auth-b"))
-        .header("Authorization", "Bearer secret-a")
-        .json(&json!({
-            "auth_token": "secret-b",
-        }))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
+    // No manual auth_token patch needed — pairing exchanged responder_auth_secret directly.
 
     // Tell RT-A that peer "e2e-auth-b" is interested in "test.ping".
     client

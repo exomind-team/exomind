@@ -49,7 +49,8 @@ impl PairingManager {
     /// Initiate a new pairing session.
     ///
     /// Generates a random 6-digit PIN and a UUID session ID.
-    /// Expired sessions are cleaned up before creating the new one.
+    /// Any previous sessions for the same initiator are removed first,
+    /// ensuring at most one active session per host_id (deterministic lookup).
     pub fn initiate(&self, initiator_host_id: String) -> PairingSession {
         self.cleanup_expired();
 
@@ -58,7 +59,7 @@ impl PairingManager {
         let session = PairingSession {
             session_id: session_id.clone(),
             pin: pin.clone(),
-            initiator_host_id,
+            initiator_host_id: initiator_host_id.clone(),
             created_at: Instant::now(),
         };
 
@@ -67,6 +68,8 @@ impl PairingManager {
                 Ok(guard) => guard,
                 Err(poisoned) => poisoned.into_inner(),
             };
+            // Remove any previous sessions for this initiator (at-most-one invariant).
+            sessions.retain(|_, s| s.initiator_host_id != initiator_host_id);
             sessions.insert(session_id, session.clone());
         }
 

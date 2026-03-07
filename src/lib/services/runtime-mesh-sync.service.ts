@@ -116,14 +116,15 @@ export class RuntimeMeshSyncService {
     return (await response.json()) as { session_id: string; pin: string };
   }
 
-  /** 响应配对会话，提交 PIN 码进行验证，成功后获取 peer_token */
+  /** 响应配对会话，提交 PIN 码进行验证，成功后获取 peer_token + 对端 auth_secret */
   async respondToPairing(
     runtimeBaseUrl: string,
     sessionId: string,
     pin: string,
     responderHostId: string,
     responderBaseUrl: string,
-  ): Promise<{ paired: boolean; peer_token: string }> {
+    responderAuthSecret?: string,
+  ): Promise<{ paired: boolean; peer_token: string; initiator_auth_secret?: string }> {
     const response = await this.fetchImpl(`${runtimeBaseUrl}/mesh/pairing/respond`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -132,12 +133,13 @@ export class RuntimeMeshSyncService {
         pin,
         responder_host_id: responderHostId,
         responder_base_url: responderBaseUrl,
+        responder_auth_secret: responderAuthSecret,
       }),
     });
     if (!response.ok) {
       throw new Error(`respondToPairing failed: HTTP ${response.status}`);
     }
-    return (await response.json()) as { paired: boolean; peer_token: string };
+    return (await response.json()) as { paired: boolean; peer_token: string; initiator_auth_secret?: string };
   }
 
   // ── Discovery API ──────────────────────────────────────────────
