@@ -198,6 +198,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
   });
 
   it('renders desktop two-column timeblock detail（桌面端双列时间块详情）', async () => {
+    window.history.replaceState({}, '', '/tasks/block/block-1?from=today');
     mockMatchMedia(true);
     render(<TaskDetailPage />);
 
