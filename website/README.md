@@ -12,11 +12,6 @@ Recommended copy / 推荐文案:
 - `Connect exominds.` / `再把更多人的外心连接起来。`
 - `ExoMind is infrastructure for exominds.` / `ExoMind 是通向 exominds 的基础设施。`
 
-Working naming note / 命名说明:
-
-- Keep `exo-mind.ai` as the current domain and the home of the ExoMind brand（继续使用 `exo-mind.ai` 作为 ExoMind 核心品牌域名）
-- As the product grows from personal growth into collective collaboration, use `exominds` in copy as the plural vision without forcing a domain migration first（当产品从个人成长扩展到群体协作时，在文案层使用 `exominds` 表达复数愿景，不必先迁移域名）
-
 ## Theme / 主题模式
 
 - The website now supports a built-in dark mode toggle (`theme-toggle`) in the header.

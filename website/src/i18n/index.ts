@@ -79,8 +79,7 @@ export const ui = {
     'about.brand.line2_note': '再把更多人的外心连接起来。',
     'about.brand.line3': 'ExoMind is infrastructure for exominds.',
     'about.brand.line3_note': 'ExoMind 是通向 exominds 的基础设施。',
-    'about.brand.note1': '当前域名继续使用 exo-mind.ai，统一承载 ExoMind 这个核心品牌。',
-    'about.brand.note2': '当系统从个人生命成长扩展到群体协作时，exominds 作为复数愿景出现在文案层即可，不必先改域名。',
+
     // Footer
     'footer.product': '产品',
     'footer.resources': '资源',
@@ -162,8 +161,7 @@ export const ui = {
     'about.brand.line2_note': 'Then connect more people\'s exominds.',
     'about.brand.line3': 'ExoMind is infrastructure for exominds.',
     'about.brand.line3_note': 'ExoMind is the infrastructure layer for exominds.',
-    'about.brand.note1': 'Keep exo-mind.ai as the current domain and the home of the ExoMind brand.',
-    'about.brand.note2': 'As the system grows from personal growth into collective collaboration, use exominds as the plural vision in copy without forcing a domain change first.',
+
     // Footer
     'footer.product': 'Product',
     'footer.resources': 'Resources',
