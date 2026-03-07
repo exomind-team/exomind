@@ -1789,6 +1789,16 @@ export function SettingsPage() {
           } catch { /* ignore */ }
           return 'local';
         })()}
+        localAuthToken={(() => {
+          try {
+            const raw = window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (typeof parsed.authSecret === 'string') return parsed.authSecret;
+            }
+          } catch { /* ignore */ }
+          return undefined;
+        })()}
       />
     </div>
   );

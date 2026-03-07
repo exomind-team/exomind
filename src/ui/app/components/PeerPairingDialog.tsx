@@ -25,6 +25,8 @@ export interface PeerPairingDialogProps {
   onOpenChange: (open: boolean) => void;
   runtimeBaseUrl: string;
   localHostId: string;
+  /** Admin auth token for the local runtime (required when EXOMIND_RT_SECRET is set). */
+  localAuthToken?: string;
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -34,6 +36,7 @@ export function PeerPairingDialog({
   onOpenChange,
   runtimeBaseUrl,
   localHostId,
+  localAuthToken,
 }: PeerPairingDialogProps) {
   const [mode, setMode] = useState<PairingMode>('select');
   const [status, setStatus] = useState<PairingStatus>('idle');
@@ -90,7 +93,7 @@ export function PeerPairingDialog({
     setStatus('loading');
     setErrorMessage('');
     try {
-      const result = await meshService.initiatePairing(runtimeBaseUrl);
+      const result = await meshService.initiatePairing(runtimeBaseUrl, localAuthToken);
       setSessionId(result.session_id);
       setPin(result.pin);
       setStatus('waiting');
@@ -98,7 +101,7 @@ export function PeerPairingDialog({
       setErrorMessage(err instanceof Error ? err.message : String(err));
       setStatus('error');
     }
-  }, [meshService, runtimeBaseUrl]);
+  }, [meshService, runtimeBaseUrl, localAuthToken]);
 
   // ── Responder flow ──────────────────────────────────────────
 
@@ -110,7 +113,7 @@ export function PeerPairingDialog({
     // Start polling for discovered peers
     const poll = async () => {
       try {
-        const discovered = await meshService.listDiscoveredPeers(runtimeBaseUrl);
+        const discovered = await meshService.listDiscoveredPeers(runtimeBaseUrl, localAuthToken);
         setPeers(discovered);
         if (status === 'loading') {
           setStatus('idle');
@@ -122,7 +125,7 @@ export function PeerPairingDialog({
 
     void poll();
     pollTimerRef.current = setInterval(poll, 3000);
-  }, [meshService, runtimeBaseUrl, status]);
+  }, [meshService, runtimeBaseUrl, localAuthToken, status]);
 
   const handleRefreshPeers = useCallback(async () => {
     try {
@@ -131,7 +134,7 @@ export function PeerPairingDialog({
     } catch {
       // Silently ignore refresh errors
     }
-  }, [meshService, runtimeBaseUrl]);
+  }, [meshService, runtimeBaseUrl, localAuthToken]);
 
   const handleSelectPeer = useCallback((peer: DiscoveredPeer) => {
     setSelectedPeer(peer);
@@ -171,6 +174,7 @@ export function PeerPairingDialog({
           initiatorBaseUrl,
           result.initiator_inbound_token, // outbound: what we send to the initiator
           responderInboundToken,           // inbound: what the initiator sends to us
+          localAuthToken,
         );
 
         setPeerToken(result.peer_token);
@@ -183,7 +187,7 @@ export function PeerPairingDialog({
       setErrorMessage(err instanceof Error ? err.message : String(err));
       setStatus('error');
     }
-  }, [selectedPeer, pinInput, meshService, localHostId, runtimeBaseUrl]);
+  }, [selectedPeer, pinInput, meshService, localHostId, runtimeBaseUrl, localAuthToken]);
 
   // ── PIN input handler with auto-advance ─────────────────────
 
