@@ -3,8 +3,8 @@ name: Build & Release
 on:
   push:
     tags:
-      - 'build/**'      # 构建触发：只构建，不发布
-      - 'release/**'     # 发布触发：构建 + GitHub Release
+      - "build/**" # 构建触发：只构建，不发布
+      - "release/**" # 发布触发：构建 + GitHub Release
   workflow_dispatch:
     inputs:
       build_scope:
@@ -24,7 +24,7 @@ permissions:
 
 env:
   RUST_TOOLCHAIN: stable
-  BUN_VERSION: '1.3.8'           # 固定版本，v1.3.10 在 Windows 上有 resolving hang bug
+  BUN_VERSION: "1.3.8" # 固定版本，v1.3.10 在 Windows 上有 resolving hang bug
 
 jobs:
   # ─────────────────────────────────────────────────────────────
@@ -56,7 +56,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Ensure local Bun is available (确保本机 Bun 可用，版本锁定)
         shell: powershell
@@ -350,13 +350,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Patch Android audio permissions and release cleartext（注入音频权限与 release cleartext）
+      - name: Patch Android network discovery prerequisites（注入 Android 发现权限 / 组播锁 / release cleartext）
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
         shell: powershell
         run: |
           bun Scripts/dev/android-manifest-permission.ts
 
-      - name: Verify Android permission and cleartext patch persisted（校验权限与 cleartext 配置）
+      - name: Verify Android discovery patch persisted（校验 Android 发现权限 / 组播锁 / cleartext 配置）
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
         shell: powershell
         run: |
@@ -364,9 +364,31 @@ jobs:
           if (-not (Test-Path $manifestPath)) {
             throw "Manifest not found: $manifestPath"
           }
-          foreach ($permission in @("android.permission.RECORD_AUDIO", "android.permission.MODIFY_AUDIO_SETTINGS")) {
+          foreach ($permission in @(
+            "android.permission.RECORD_AUDIO",
+            "android.permission.MODIFY_AUDIO_SETTINGS",
+            "android.permission.ACCESS_NETWORK_STATE",
+            "android.permission.ACCESS_WIFI_STATE",
+            "android.permission.CHANGE_WIFI_MULTICAST_STATE"
+          )) {
             if (-not (Select-String -Path $manifestPath -Pattern $permission -SimpleMatch -Quiet)) {
               throw "Missing $permission in AndroidManifest.xml"
+            }
+          }
+
+          $mainActivityPath = "src-tauri/gen/android/app/src/main/java/com/exomind/app/MainActivity.kt"
+          if (-not (Test-Path $mainActivityPath)) {
+            throw "MainActivity not found: $mainActivityPath"
+          }
+          $mainActivityContent = Get-Content -Path $mainActivityPath -Raw -Encoding UTF8
+          foreach ($pattern in @(
+            'WifiManager\.MulticastLock',
+            'acquireMulticastLock\(\)',
+            'releaseMulticastLock\(\)',
+            'createMulticastLock\("exomind-mdns-lock"\)'
+          )) {
+            if (-not ($mainActivityContent -match $pattern)) {
+              throw "Missing Android multicast patch pattern: $pattern"
             }
           }
 
@@ -380,7 +402,7 @@ jobs:
             throw "Missing usesCleartextTraffic=true in release block."
           }
 
-          Write-Host "Android permissions and cleartext release placeholder verified."
+          Write-Host "Android discovery permissions, multicast lock, and cleartext release placeholder verified."
 
       - name: Build Android APK only (仅构建 APK，aarch64 + i686)
         if: steps.targets.outputs.BUILD_ANDROID == 'true'
@@ -1006,7 +1028,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install Bun
         run: npm install -g bun
@@ -1091,7 +1113,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: "20"
 
       - name: Install Bun
         run: npm install -g bun

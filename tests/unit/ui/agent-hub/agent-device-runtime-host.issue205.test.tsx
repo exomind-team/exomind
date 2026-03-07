@@ -310,7 +310,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     });
   });
 
-  it('uses current runtime status port when starting（启动时沿用当前状态端口）', async () => {
+  it('falls back to default embedded port when stopped status has no cached runtime（停止态且无缓存时回退默认端口）', async () => {
     runtimeControlMocks.getStatus.mockResolvedValueOnce({
       running: false,
       host: '127.0.0.1',
@@ -328,7 +328,7 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
     await waitFor(() => {
       expect(runtimeControlMocks.startRuntime).toHaveBeenCalledWith({
         host: '127.0.0.1',
-        port: 1950,
+        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
       });
     });
   });

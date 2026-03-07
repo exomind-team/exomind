@@ -56,6 +56,7 @@ type RuntimeStatus = {
   host: string;
   port: number;
   hostId?: string;
+  authSecret?: string;
   error?: string;
 };
 
@@ -139,6 +140,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
         host: '127.0.0.1',
         port: 48202,
         hostId: 'desktop-host',
+        authSecret: 'embedded-secret',
       },
     );
 
@@ -167,5 +169,6 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
       }),
     });
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"port":48202');
+    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"authSecret":"embedded-secret"');
   });
 });

@@ -18,6 +18,7 @@ export interface RuntimeHostRecord {
   advertisedListenAddress?: string; // advertised_listen_address（对端自宣告监听地址）
   lastSuccessfulDialAddress?: string; // last_successful_dial_address（最近一次成功拨号地址）
   manualOverride?: string; // manual_override（手工固定地址）
+  authToken?: string; // auth_token（Bearer / peer token，配对后获取）
 }
 
 export interface RuntimeServiceStatus {
@@ -25,6 +26,7 @@ export interface RuntimeServiceStatus {
   host: string;
   port: number;
   hostId?: string; // host_id（逻辑主机 ID）
+  authSecret?: string; // auth_secret（本地 Runtime 管理鉴权密钥）
   pid?: number;
   startedAt?: string;
   error?: string;
