@@ -166,13 +166,14 @@ impl MeshState {
         self.list_peers().iter().map(PeerInfoPublic::from).collect()
     }
 
-    /// Check if any registered peer has the given inbound_secret.
+    /// Check if any **enabled** peer has the given inbound_secret.
+    /// Disabled peers are excluded so that disabling a peer immediately revokes its token.
     pub fn has_peer_with_inbound_secret(&self, secret: &str) -> bool {
         let peers = match self.peers.read() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        peers.values().any(|p| p.inbound_secret.as_deref() == Some(secret))
+        peers.values().any(|p| p.enabled && p.inbound_secret.as_deref() == Some(secret))
     }
 
     pub fn get_peer(&self, peer_id: &str) -> Option<PeerInfo> {

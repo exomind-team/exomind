@@ -50,12 +50,20 @@ pub async fn require_auth(
 
     let provided_token = token_from_header.or(token_from_query);
 
+    // Check the request path before consuming the request.
+    let path = request.uri().path().to_string();
+
     match provided_token {
-        // 1. Global admin secret.
+        // 1. Global admin secret — full access to all protected routes.
         Some(ref token) if token == expected_secret => Ok(next.run(request).await),
-        // 2. Per-peer inbound secret.
+        // 2. Per-peer inbound secret — scoped to /mesh/ routes only.
+        //    Peers should only access mesh relay, not topology/agents/signals.
         Some(ref token) if state.mesh.has_peer_with_inbound_secret(token) => {
-            Ok(next.run(request).await)
+            if path.starts_with("/mesh/") {
+                Ok(next.run(request).await)
+            } else {
+                Err(StatusCode::FORBIDDEN)
+            }
         }
         _ => Err(StatusCode::UNAUTHORIZED),
     }

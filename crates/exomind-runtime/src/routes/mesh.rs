@@ -317,12 +317,16 @@ pub fn router() -> Router<AppState> {
         .route("/mesh/events", post(ingest_remote_event))
         .route("/mesh/stream", get(stream_handler))
         .route("/mesh/discovered", get(list_discovered))
+        // Initiate is protected: only the local admin can create pairing sessions.
+        // This prevents remote attackers from calling initiate + respond to self-pair.
+        .route("/mesh/pairing/initiate", post(pairing_initiate))
 }
 
-/// Public mesh routes (no auth — pairing is the trust bootstrapping mechanism).
+/// Public mesh routes (no auth required).
+/// Only `respond` is public — the remote device calls this before it has any token.
+/// The PIN provides single-use, time-limited, out-of-band authentication.
 pub fn public_router() -> Router<AppState> {
     Router::new()
-        .route("/mesh/pairing/initiate", post(pairing_initiate))
         .route("/mesh/pairing/respond", post(pairing_respond))
 }
 
