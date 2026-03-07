@@ -368,11 +368,23 @@ impl Agent for CodexAgent {
 }
 
 fn resolve_codex_command() -> String {
-    std::env::var("EXOMIND_CODEX_COMMAND")
+    let command = std::env::var("EXOMIND_CODEX_COMMAND")
         .ok()
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "codex".to_string())
+        .unwrap_or_else(|| "codex".to_string());
+    normalize_codex_command(command)
+}
+
+fn normalize_codex_command(command: String) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if command.eq_ignore_ascii_case("codex") {
+            return "codex.cmd".to_string();
+        }
+    }
+
+    command
 }
 
 fn build_codex_exec_args(session_id: Option<&str>) -> Vec<String> {
@@ -459,4 +471,61 @@ async fn emit_error_chunk(sender: &mpsc::Sender<ChatChunk>, message: String) {
 
 fn format_utc_iso8601(value: DateTime<Utc>) -> String {
     value.to_rfc3339_opts(SecondsFormat::Secs, true)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn resolve_codex_command_defaults_to_cmd_on_windows() {
+        let original = std::env::var_os("EXOMIND_CODEX_COMMAND");
+        unsafe {
+            std::env::remove_var("EXOMIND_CODEX_COMMAND");
+        }
+
+        let resolved = resolve_codex_command();
+
+        match original {
+            Some(value) => unsafe {
+                std::env::set_var("EXOMIND_CODEX_COMMAND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("EXOMIND_CODEX_COMMAND");
+            },
+        }
+
+        assert_eq!(resolved, "codex.cmd");
+    }
+
+    #[cfg(target_os = "windows")]
+    #[test]
+    fn resolve_codex_command_normalizes_bare_alias_on_windows() {
+        let original = std::env::var_os("EXOMIND_CODEX_COMMAND");
+        unsafe {
+            std::env::set_var("EXOMIND_CODEX_COMMAND", "codex");
+        }
+
+        let resolved = resolve_codex_command();
+
+        match original {
+            Some(value) => unsafe {
+                std::env::set_var("EXOMIND_CODEX_COMMAND", value);
+            },
+            None => unsafe {
+                std::env::remove_var("EXOMIND_CODEX_COMMAND");
+            },
+        }
+
+        assert_eq!(resolved, "codex.cmd");
+    }
+
+    #[test]
+    fn normalize_codex_command_keeps_explicit_command_path() {
+        assert_eq!(
+            normalize_codex_command("/custom/bin/codex".to_string()),
+            "/custom/bin/codex"
+        );
+    }
 }
