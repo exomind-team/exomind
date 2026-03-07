@@ -39,12 +39,16 @@ import { getUseMockDataEnabled } from '@/config/mock-data';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   DEFAULT_EXTERNAL_RUNTIME_PORT,
+  getEmbeddedRuntimeNetworkMode,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
+  resolveEmbeddedRuntimeBindHost,
+  setEmbeddedRuntimeNetworkMode,
   setRuntimeExternalAddress,
   setRuntimeTargetMode,
   subscribeRuntimeTargetChanges,
+  type EmbeddedRuntimeNetworkMode,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
@@ -257,6 +261,10 @@ function formatHostUptime(uptimeSecs?: number): string {
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+function getEmbeddedRuntimeModeLabel(mode: EmbeddedRuntimeNetworkMode): string {
+  return mode === 'lan' ? '局域网（LAN）' : '仅本机（Local only）';
 }
 
 function formatHostMemory(usedMb?: number, totalMb?: number): string {
@@ -786,11 +794,15 @@ function DeviceView({
   runtimeHostSnapshots,
   runtimeServiceStatus,
   runtimeHostError,
+  embeddedRuntimeNetworkMode,
+  embeddedRuntimeBindAddress,
+  runtimeNeedsRebind,
   runtimeTargetMode,
   runtimeTargetAddress,
   runtimeTargetError,
   runtimeExternalAddressDraft,
   onRuntimeHostProbe,
+  onEmbeddedRuntimeNetworkModeChange,
   onRuntimeStart,
   onRuntimeStop,
   onRuntimeTargetModeChange,
@@ -802,11 +814,15 @@ function DeviceView({
   runtimeHostSnapshots: RuntimeHostSnapshot[];
   runtimeServiceStatus: RuntimeServiceStatus | null;
   runtimeHostError: string;
+  embeddedRuntimeNetworkMode: EmbeddedRuntimeNetworkMode;
+  embeddedRuntimeBindAddress: string;
+  runtimeNeedsRebind: boolean;
   runtimeTargetMode: RuntimeTargetMode;
   runtimeTargetAddress: string;
   runtimeTargetError: string;
   runtimeExternalAddressDraft: string;
   onRuntimeHostProbe: (hostId: string) => Promise<void>;
+  onEmbeddedRuntimeNetworkModeChange: (mode: EmbeddedRuntimeNetworkMode) => void;
   onRuntimeStart: () => Promise<void>;
   onRuntimeStop: () => Promise<void>;
   onRuntimeTargetModeChange: (mode: RuntimeTargetMode) => void;
@@ -816,6 +832,8 @@ function DeviceView({
 }) {
   const hostCard = groups.flatMap((group) => group.cards).find((card) => card.isHost) ?? groups[0]?.cards[0];
   const isEmbeddedTarget = runtimeTargetMode === 'embedded';
+  const runtimePort = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+  const currentRuntimeAddress = `${runtimeServiceStatus?.host ?? '127.0.0.1'}:${runtimePort}`;
 
   return (
     <section data-testid="agent-device-view" className="space-y-4">
@@ -918,11 +936,72 @@ function DeviceView({
               {runtimeServiceStatus?.running ? 'running' : 'stopped'}
             </span>
           </div>
+          <div className="mt-2 rounded-lg bg-white p-2 dark:bg-[#1C1917]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-medium text-[#44403C] dark:text-[#E7E5E4]">
+                  监听模式（Bind mode）
+                </p>
+                <p className="text-[10px] text-[#A8A29E]">
+                  {embeddedRuntimeNetworkMode === 'lan'
+                    ? '手机/平板可用电脑局域网 IP + 端口直连'
+                    : '仅当前电脑可访问内嵌 Runtime'}
+                </p>
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                data-testid="runtime-network-mode-local"
+                aria-pressed={embeddedRuntimeNetworkMode === 'local'}
+                onClick={() => onEmbeddedRuntimeNetworkModeChange('local')}
+                className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                  embeddedRuntimeNetworkMode === 'local'
+                    ? 'bg-[#0D948820] text-[#0D9488]'
+                    : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
+                }`}
+              >
+                仅本机
+              </button>
+              <button
+                type="button"
+                data-testid="runtime-network-mode-lan"
+                aria-pressed={embeddedRuntimeNetworkMode === 'lan'}
+                onClick={() => onEmbeddedRuntimeNetworkModeChange('lan')}
+                className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                  embeddedRuntimeNetworkMode === 'lan'
+                    ? 'bg-[#C75B3A20] text-[#C75B3A]'
+                    : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
+                }`}
+              >
+                局域网
+              </button>
+            </div>
+            <p className="mt-2 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+              目标监听（Desired bind）：<span data-testid="runtime-local-bind-address">{embeddedRuntimeBindAddress}</span>
+            </p>
+            <p
+              data-testid="runtime-local-share-hint"
+              className="mt-1 text-[10px] text-[#A8A29E]"
+            >
+              {embeddedRuntimeNetworkMode === 'lan'
+                ? 'LAN 模式会监听 0.0.0.0；手机请填写这台电脑的局域网 IP + 端口连接。'
+                : 'Local only 模式只监听 127.0.0.1，手机无法直接连接。'}
+            </p>
+          </div>
           <p className="mt-1 text-[10px] text-[#A8A29E]">
-            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT}
+            当前运行（Current runtime）：{currentRuntimeAddress}
           </p>
           {runtimeServiceStatus?.pid && (
             <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
+          )}
+          {runtimeNeedsRebind && (
+            <p
+              data-testid="runtime-local-rebind-hint"
+              className="mt-1 rounded-md bg-[#C75B3A10] px-2 py-1 text-[10px] text-[#C75B3A]"
+            >
+              当前正在运行的监听地址与 {getEmbeddedRuntimeModeLabel(embeddedRuntimeNetworkMode)} 不一致，点击 Start 会自动重启并切换到目标监听地址。
+            </p>
           )}
           {runtimeServiceStatus?.error && (
             <p className="mt-1 text-[10px] text-[#DC2626]">{runtimeServiceStatus.error}</p>
@@ -1803,6 +1882,9 @@ export function AgentsPage() {
     `127.0.0.1:${DEFAULT_EXTERNAL_RUNTIME_PORT}`,
   );
   const [runtimeHostError, setRuntimeHostError] = useState('');
+  const [embeddedRuntimeNetworkMode, setEmbeddedRuntimeNetworkModeValue] = useState<EmbeddedRuntimeNetworkMode>(
+    getEmbeddedRuntimeNetworkMode(),
+  );
   const [runtimeTargetModeValue, setRuntimeTargetModeValue] = useState<RuntimeTargetMode>(initialRuntimeTarget.mode);
   const [runtimeTargetAddress, setRuntimeTargetAddress] = useState(
     formatRuntimeTargetAddress(initialRuntimeTarget),
@@ -2102,6 +2184,15 @@ export function AgentsPage() {
     setRuntimeExternalAddressDraft(getRuntimeExternalAddress());
   };
 
+  const desiredEmbeddedRuntimeHost = resolveEmbeddedRuntimeBindHost(embeddedRuntimeNetworkMode);
+  const desiredEmbeddedRuntimePort = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+  const desiredEmbeddedRuntimeAddress = `${desiredEmbeddedRuntimeHost}:${desiredEmbeddedRuntimePort}`;
+  const runtimeNeedsRebind = Boolean(
+    runtimeServiceStatus?.running
+      && (runtimeServiceStatus.host !== desiredEmbeddedRuntimeHost
+        || runtimeServiceStatus.port !== desiredEmbeddedRuntimePort),
+  );
+
   const tryLoadRoutesFromHost = async (
     host: RuntimeHostRecord
   ): Promise<{
@@ -2295,6 +2386,12 @@ export function AgentsPage() {
     syncRuntimeTargetState();
   };
 
+  const handleEmbeddedRuntimeNetworkModeChange = (mode: EmbeddedRuntimeNetworkMode) => {
+    setRuntimeTargetError('');
+    setEmbeddedRuntimeNetworkMode(mode);
+    setEmbeddedRuntimeNetworkModeValue(mode);
+  };
+
   const handleApplyRuntimeExternalAddress = () => {
     try {
       setRuntimeTargetError('');
@@ -2309,8 +2406,8 @@ export function AgentsPage() {
 
   const handleRuntimeStart = async () => {
     const runtimeControlService = getRuntimeControlService();
-    const targetHost = runtimeServiceStatus?.host ?? '127.0.0.1';
-    const targetPort = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+    const targetHost = desiredEmbeddedRuntimeHost;
+    const targetPort = desiredEmbeddedRuntimePort;
     try {
       const status = await runtimeControlService.startRuntime({
         host: targetHost,
@@ -2339,8 +2436,8 @@ export function AgentsPage() {
 
   const handleRuntimeStop = async () => {
     const runtimeControlService = getRuntimeControlService();
-    const fallbackHost = runtimeServiceStatus?.host ?? '127.0.0.1';
-    const fallbackPort = runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+    const fallbackHost = runtimeServiceStatus?.host ?? desiredEmbeddedRuntimeHost;
+    const fallbackPort = runtimeServiceStatus?.port ?? desiredEmbeddedRuntimePort;
     try {
       const status = await runtimeControlService.stopRuntime();
       setRuntimeServiceStatus(status);
@@ -2558,11 +2655,15 @@ export function AgentsPage() {
           runtimeHostSnapshots={runtimeHostSnapshots}
           runtimeServiceStatus={runtimeServiceStatus}
           runtimeHostError={runtimeHostError}
+          embeddedRuntimeNetworkMode={embeddedRuntimeNetworkMode}
+          embeddedRuntimeBindAddress={desiredEmbeddedRuntimeAddress}
+          runtimeNeedsRebind={runtimeNeedsRebind}
           runtimeTargetMode={runtimeTargetModeValue}
           runtimeTargetAddress={runtimeTargetAddress}
           runtimeTargetError={runtimeTargetError}
           runtimeExternalAddressDraft={runtimeExternalAddressDraft}
           onRuntimeHostProbe={handleProbeRuntimeHost}
+          onEmbeddedRuntimeNetworkModeChange={handleEmbeddedRuntimeNetworkModeChange}
           onRuntimeStart={handleRuntimeStart}
           onRuntimeStop={handleRuntimeStop}
           onRuntimeTargetModeChange={handleRuntimeTargetModeChange}
@@ -2612,6 +2713,9 @@ export function AgentsPage() {
     signalRouteHostLabel,
     signalRouteRows,
     runtimeHostError,
+    embeddedRuntimeNetworkMode,
+    desiredEmbeddedRuntimeAddress,
+    runtimeNeedsRebind,
     runtimeTargetAddress,
     runtimeTargetError,
     runtimeTargetModeValue,
