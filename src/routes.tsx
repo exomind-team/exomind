@@ -65,6 +65,11 @@ const MOSSASRTestPage = lazy(async () => {
   return { default: module.MOSSASRTestPage };
 });
 
+const VolcanoASRTestPage = lazy(async () => {
+  const module = await import('@/pages/VolcanoASRTestPage');
+  return { default: module.VolcanoASRTestPage };
+});
+
 const AgentsPage = lazy(async () => {
   const module = await import('@/ui/app/pages/AgentsPage');
   return { default: module.AgentsPage };
@@ -603,6 +608,18 @@ const newMossTestRoute = createRoute({
   },
 });
 
+const newVolcanoAsrTestRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/volcano-asr-test',
+  component: function NewVolcanoAsrTest() {
+    return (
+      <LazyPage>
+        <VolcanoASRTestPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newSyncTestRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/sync-test',
@@ -703,6 +720,7 @@ const newRouteTree = newRootRoute.addChildren([
   newLegalSupportRoute,
   newUserManageRoute,
   newMossTestRoute,
+  newVolcanoAsrTestRoute,
   newSyncTestRoute,
   newAgentsRoute,
   newUpdateRoute,

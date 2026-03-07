@@ -511,6 +511,15 @@ export function SettingsPage() {
     navigate({ to: '/moss-test' });
   };
 
+  const handleOpenVolcanoTest = () => {
+    clearNotice();
+    if (!developerMode) {
+      setErrorMessage('请先开启开发者模式后使用语音测试');
+      return;
+    }
+    navigate({ to: '/volcano-asr-test' });
+  };
+
   const handleOpenLlmDialog = () => {
     setLlmApiKeyDraft(getLLMApiKey());
     setLlmBaseUrlDraft(getLLMBaseUrl());
@@ -820,6 +829,20 @@ export function SettingsPage() {
                     icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
                     label="MOSS 语音测试"
                     onClick={handleOpenVoiceTest}
+                    right={
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
+                        <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                      </div>
+                    }
+                  />
+                </div>
+                <Divider />
+                <div data-testid="new-settings-volcano-test-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="火山引擎 ASR 测试"
+                    onClick={handleOpenVolcanoTest}
                     right={
                       <div className="flex items-center gap-1">
                         <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
@@ -1193,6 +1216,20 @@ export function SettingsPage() {
                 icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
                 label="MOSS 语音测试"
                 onClick={handleOpenVoiceTest}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+            </div>
+            <Divider />
+            <div data-testid="new-settings-volcano-test-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="火山引擎 ASR 测试"
+                onClick={handleOpenVolcanoTest}
                 right={
                   <div className="flex items-center gap-1">
                     <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
