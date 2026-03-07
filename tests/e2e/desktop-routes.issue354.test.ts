@@ -97,6 +97,33 @@ test.describe('Issue #354 desktop route regression（桌面路由回归）', () 
     await expect(page.getByText(/已收到：桌面端回归测试消息/)).toBeVisible();
   });
 
+  test('mobile /agents/chat opens as fullscreen secondary page（移动端对话页作为全屏二级页打开）', async ({ page }) => {
+    await page.setViewportSize({ width: 430, height: 932 });
+    await page.goto('/agents/chat/agent-daily');
+
+    await expect(page.getByTestId('agent-conversation-page')).toBeVisible();
+    await expect(page.getByTestId('agent-chat-input-bar')).toBeVisible();
+    await expect(page.getByTestId('mobile-bottom-tab')).toHaveCount(0);
+
+    const inputBarClassName = await page.getByTestId('agent-chat-input-bar').evaluate((node) => {
+      return (node as HTMLDivElement).className;
+    });
+    expect(inputBarClassName).toContain('bottom-[env(safe-area-inset-bottom,0px)]');
+  });
+
+  test('mobile /agents list opens chat as fullscreen secondary page（移动端从节点列表进入全屏聊天页）', async ({ page }) => {
+    await page.setViewportSize({ width: 430, height: 932 });
+    await page.goto('/agents');
+
+    await page.getByTestId('agent-view-toggle-list').click();
+    await expect(page.getByTestId('agent-list-view')).toBeVisible();
+    await page.getByText('Classifier Agent').click();
+
+    await expect(page).toHaveURL(/\/agents\/chat\/classifier$/);
+    await expect(page.getByTestId('agent-conversation-page')).toBeVisible();
+    await expect(page.getByTestId('mobile-bottom-tab')).toHaveCount(0);
+  });
+
   test('desktop /agents/market keeps shell and category filter works（桌面市场页壳层与分类筛选）', async ({ page }) => {
     await page.goto('/agents/market');
 
@@ -128,4 +155,3 @@ test.describe('Issue #354 desktop route regression（桌面路由回归）', () 
     await expect(page.getByPlaceholder('记录当下的事实...')).toBeVisible();
   });
 });
-

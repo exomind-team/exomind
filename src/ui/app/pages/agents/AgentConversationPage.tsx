@@ -23,6 +23,12 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
   const [chatError, setChatError] = useState('');
   const [runtimeSessionId, setRuntimeSessionId] = useState<string | null>(null);
   const targetId = agentId ?? '';
+  const isMobileFullscreenChatRoute = !isDesktop
+    && typeof window !== 'undefined'
+    && window.location.pathname.startsWith('/agents/chat/');
+  const mobileContentPaddingClass = isMobileFullscreenChatRoute
+    ? 'pb-[calc(env(safe-area-inset-bottom,0px)+84px)]'
+    : 'pb-[calc(env(safe-area-inset-bottom,0px)+108px)]';
 
   useEffect(() => {
     let disposed = false;
@@ -225,7 +231,7 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
         </button>
       </header>
 
-      <div className={`min-h-0 flex-1 overflow-y-auto space-y-3 px-4 pt-3 md:px-8 lg:px-10 ${isDesktop ? 'pb-4' : 'pb-[calc(env(safe-area-inset-bottom,0px)+108px)]'}`}>
+      <div className={`min-h-0 flex-1 overflow-y-auto space-y-3 px-4 pt-3 md:px-8 lg:px-10 ${isDesktop ? 'pb-4' : mobileContentPaddingClass}`}>
         {messages.map((message) => {
           const isUser = message.role === 'user';
           const isRuntimeMeta = !!message.runtimeEventType && message.runtimeEventType !== 'output.delta';
@@ -274,7 +280,9 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
         data-testid="agent-chat-input-bar"
         className={isDesktop
           ? 'flex items-center gap-2 border-t border-border-card bg-surface px-4 py-3 md:px-8 lg:px-10'
-          : 'fixed bottom-[calc(env(safe-area-inset-bottom,0px)+64px)] left-0 right-0 mx-auto flex w-full max-w-[393px] items-center gap-2 border-t border-border-card bg-surface px-4 py-3'
+          : isMobileFullscreenChatRoute
+            ? 'fixed bottom-[env(safe-area-inset-bottom,0px)] left-0 right-0 mx-auto flex w-full max-w-[393px] items-center gap-2 border-t border-border-card bg-surface px-4 py-3'
+            : 'fixed bottom-[calc(env(safe-area-inset-bottom,0px)+64px)] left-0 right-0 mx-auto flex w-full max-w-[393px] items-center gap-2 border-t border-border-card bg-surface px-4 py-3'
         }
       >
         <input

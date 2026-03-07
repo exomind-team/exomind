@@ -110,6 +110,7 @@ import {
   type TopologyViewport,
 } from './topology-layout';
 import { Switch } from '@/components/ui/switch';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import {
   appendAdjacentConversationDelta,
   appendConversationChunk,
@@ -2092,6 +2093,7 @@ function SignalHistoryTabView({
 }
 
 export function AgentsPage() {
+  const supportsInlineRightPanel = useIsDesktop(1024);
   const initialRuntimeTarget = getSelectedRuntimeTarget();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
@@ -2146,13 +2148,29 @@ export function AgentsPage() {
   const [apiBaseUrlDraft, setApiBaseUrlDraft] = useState('');
   const [apiKeyDraft, setApiKeyDraft] = useState('');
 
+  const navigateToSecondaryPage = (path: string) => {
+    if (typeof window === 'undefined' || window.location.pathname === path) return;
+    window.history.pushState({}, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
+
   const openRouteEdit = (routeId: string | null = null) => {
     setRightPanel({ state: 'ROUTE_EDIT', routeId });
   };
   const openAgentDetail = (nodeId: string) => {
+    if (!supportsInlineRightPanel) {
+      const runtimeEntityId = resolveRuntimeEntityId(nodeId);
+      navigateToSecondaryPage(`/agents/chat/${encodeURIComponent(runtimeEntityId)}`);
+      return;
+    }
     setRightPanel({ state: 'AGENT_DETAIL', nodeId });
   };
   const openActorDetail = (nodeId: string) => {
+    if (!supportsInlineRightPanel) {
+      const runtimeEntityId = resolveRuntimeEntityId(nodeId);
+      navigateToSecondaryPage(`/agents/actor/${encodeURIComponent(runtimeEntityId)}`);
+      return;
+    }
     setRightPanel({ state: 'ACTOR_DETAIL', nodeId });
   };
   const openSignalDetail = (signalId: string) => {
