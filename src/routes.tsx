@@ -10,6 +10,7 @@ import { getCommandRegistryService } from '@/lib/services/command-registry.servi
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
+import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
 import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
@@ -259,15 +260,7 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
       </nav>
 
       <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
-        <div className="flex items-center gap-3 rounded-md px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--sidebar-accent))] text-xs font-semibold text-[hsl(var(--sidebar-accent-foreground))]">
-            S
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">Starlin</p>
-            <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">starlin@exomind.ai</p>
-          </div>
-        </div>
+        <DesktopSidebarAccountEntry />
       </div>
     </aside>
   );

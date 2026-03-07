@@ -7,6 +7,50 @@ async function setupIssue198Flags(page: Page) {
   });
 }
 
+async function seedLoggedInDesktopProfile(page: Page) {
+  await page.addInitScript(() => {
+    const profileId = 'profile-hailay';
+    const linkId = 'link-hailay';
+    const now = '2026-03-07T00:00:00.000Z';
+
+    localStorage.setItem('exomind:profiles:index', JSON.stringify([profileId]));
+    localStorage.setItem(`exomind:profiles:${profileId}:meta`, JSON.stringify({
+      profileId,
+      slug: 'hailay',
+      displayName: 'Hailay',
+      createdAt: now,
+      updatedAt: now,
+      authMode: 'password',
+      state: 'active',
+      defaultSyncPolicy: 'local-only',
+    }));
+    localStorage.setItem('exomind:profile-session', JSON.stringify({
+      version: 1,
+      activeProfileId: profileId,
+      unlockedProfileIds: [profileId],
+    }));
+    localStorage.setItem('exomind:identity-links:index', JSON.stringify([linkId]));
+    localStorage.setItem(`exomind:identity-links:meta:${linkId}`, JSON.stringify({
+      linkId,
+      profileId,
+      providerId: 'pouchdb',
+      remoteIdentityId: 'remote-hailay',
+      remoteIdentityKey: 'hailay@example.com',
+      authMode: 'basic',
+      status: 'linked',
+      syncMode: 'realtime',
+      linkedAt: now,
+    }));
+    localStorage.setItem(`exomind:identity-links:secret:${linkId}`, JSON.stringify({
+      linkId,
+      authType: 'basic',
+      authUsername: 'hailay',
+      authSecret: 'issue198-secret',
+      updatedAt: now,
+    }));
+  });
+}
+
 test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', () => {
   test.beforeEach(async ({ page }) => {
     await setupIssue198Flags(page);
@@ -137,5 +181,34 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByRole('heading', { name: '更新', exact: true })).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
+  });
+
+  test('desktop sidebar footer opens local profile sheet when logged out（未登录时桌面侧栏左下角打开本地档案）', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+
+    const footerEntry = page.getByTestId('desktop-sidebar-account-entry');
+    await expect(footerEntry).toBeVisible();
+    await footerEntry.click();
+
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByText('打开本地档案')).toBeVisible();
+  });
+
+  test('desktop sidebar footer opens switch sheet for active profile（已登录时桌面侧栏左下角打开切换档案）', async ({ page }) => {
+    await seedLoggedInDesktopProfile(page);
+    await page.goto('/settings');
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+
+    const footerEntry = page.getByTestId('desktop-sidebar-account-entry');
+    await expect(footerEntry).toBeVisible();
+    await expect(footerEntry).toContainText('Hailay');
+    await expect(footerEntry).toContainText('已连接远端同步身份');
+    await expect(footerEntry).not.toContainText('hailay@example.com');
+
+    await footerEntry.click();
+
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByText('切换本地档案')).toBeVisible();
   });
 });
