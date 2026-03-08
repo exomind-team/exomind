@@ -96,6 +96,29 @@ describe('buildTaskGraph issue-394（任务 DAG 图基础层）', () => {
     expect(graph.currentRootNodeId).toBe('live')
   })
 
+  it('selects an unblocked unfinished node even when all structural roots are terminal', () => {
+    const completedRoot = makeTask({
+      id: 'done',
+      title: 'Completed Root',
+      status: 'completed',
+      createdAt: 10,
+      updatedAt: 10,
+    })
+    const executableChild = makeTask({
+      id: 'child',
+      title: 'Executable Child',
+      createdAt: 20,
+      updatedAt: 20,
+      dependsOn: [{ taskId: 'done', type: 'hard' }],
+    })
+
+    const graph = buildTaskGraph([executableChild, completedRoot])
+
+    expect(graph.rootNodeIds).toEqual(['done'])
+    expect(graph.currentRootCandidateNodeIds).toEqual(['child'])
+    expect(graph.currentRootNodeId).toBe('child')
+  })
+
   it('selects the first unfinished root by stable order when roots are parallel', () => {
     const firstRoot = makeTask({ id: 'alpha', title: 'Alpha', createdAt: 10, updatedAt: 90 })
     const secondRoot = makeTask({ id: 'beta', title: 'Beta', createdAt: 20, updatedAt: 40 })

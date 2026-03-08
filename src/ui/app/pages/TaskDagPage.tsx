@@ -184,10 +184,10 @@ export function TaskDagPage() {
             <div className="min-w-0 flex-1">
               <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">当前根节点</p>
               <p className="mt-2 truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
-                {currentRootTask?.title ?? '暂无未完成根节点'}
+                {currentRootTask?.title ?? '暂无未阻塞节点'}
               </p>
               <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                {`节点 ${graph.nodes.length} 个 · 边 ${graph.edges.length} 条 · 根节点 ${graph.rootNodeIds.length} 个`}
+                {`节点 ${graph.nodes.length} 个 · 边 ${graph.edges.length} 条 · 未阻塞节点 ${graph.currentRootCandidateNodeIds.length} 个`}
               </p>
             </div>
           </div>
