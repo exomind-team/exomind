@@ -258,7 +258,7 @@ export function TaskDagPage() {
             }}
           >
             <Background gap={20} color="#E7E5E4" />
-            <Controls />
+            <Controls showInteractive className="agent-topology-controls" />
           </ReactFlow>
         </div>
       </section>
