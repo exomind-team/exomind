@@ -1,14 +1,15 @@
 use std::collections::VecDeque;
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
+use super::sqlite_store::SqliteSignalStore;
 use super::types::DeliveryRecord;
 
 const DEFAULT_CAPACITY: usize = 1000;
 
-/// Ring buffer storing delivery records for observability.
 pub struct Journal {
     records: RwLock<VecDeque<DeliveryRecord>>,
     capacity: usize,
+    store: Option<Arc<SqliteSignalStore>>,
 }
 
 impl Default for Journal {
@@ -26,25 +27,45 @@ impl Journal {
         Self {
             records: RwLock::new(VecDeque::with_capacity(capacity)),
             capacity,
+            store: None,
         }
     }
 
-    /// Append a delivery record. Evicts oldest if at capacity.
+    pub(crate) fn with_sqlite_store(store: Arc<SqliteSignalStore>) -> Self {
+        let initial = store
+            .load_recent_journal(DEFAULT_CAPACITY)
+            .unwrap_or_default();
+        let mut records = VecDeque::with_capacity(DEFAULT_CAPACITY);
+        for record in initial {
+            records.push_back(record);
+        }
+
+        Self {
+            records: RwLock::new(records),
+            capacity: DEFAULT_CAPACITY,
+            store: Some(store),
+        }
+    }
+
     pub fn append(&self, record: DeliveryRecord) {
         let mut records = match self.records.write() {
-            Ok(r) => r,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
         if records.len() >= self.capacity {
             records.pop_front();
         }
-        records.push_back(record);
+        records.push_back(record.clone());
+        drop(records);
+
+        if let Some(store) = &self.store {
+            let _ = store.append_journal(&record);
+        }
     }
 
-    /// Return the most recent `limit` records (newest last).
     pub fn recent(&self, limit: usize) -> Vec<DeliveryRecord> {
         let records = match self.records.read() {
-            Ok(r) => r,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
         let len = records.len();
@@ -52,10 +73,9 @@ impl Journal {
         records.iter().skip(skip).cloned().collect()
     }
 
-    /// Return total number of records currently held.
     pub fn len(&self) -> usize {
         let records = match self.records.read() {
-            Ok(r) => r,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
         records.len()
@@ -63,6 +83,34 @@ impl Journal {
 
     pub fn is_empty(&self) -> bool {
         self.len() == 0
+    }
+
+    pub fn all_records(&self) -> Vec<DeliveryRecord> {
+        if let Some(store) = &self.store {
+            return store
+                .load_all_journal()
+                .unwrap_or_else(|_| self.recent(self.capacity));
+        }
+        self.recent(self.capacity)
+    }
+
+    pub fn replace_all(&self, records: Vec<DeliveryRecord>) {
+        let mut buffer = VecDeque::with_capacity(self.capacity);
+        let start = records.len().saturating_sub(self.capacity);
+        for record in records.iter().skip(start) {
+            buffer.push_back(record.clone());
+        }
+
+        let mut current = match self.records.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *current = buffer;
+        drop(current);
+
+        if let Some(store) = &self.store {
+            let _ = store.replace_journal(&records);
+        }
     }
 }
 

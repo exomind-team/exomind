@@ -80,6 +80,8 @@ pub struct RuntimeStartOptions {
     pub ts_agent_workdir: Option<PathBuf>,
     /// optional mesh state path（可选 peer/interest 持久化路径）.
     pub mesh_state_path: Option<PathBuf>,
+    /// optional signal sqlite path（可选 SignalPool SQLite 路径）.
+    pub signal_storage_path: Option<PathBuf>,
     /// optional bearer token secret for HTTP auth（可选 Bearer Token 鉴权密钥）.
     pub auth_secret: Option<String>,
     /// enable mDNS service discovery for LAN peer auto-detection（启用 mDNS 局域网自动发现）.
@@ -111,7 +113,12 @@ impl Default for RuntimeStartOptions {
             ts_agent_command: env::var("EXOMIND_RT_AGENT_CMD")
                 .unwrap_or_else(|_| "bun".to_string()),
             ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
-            mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH").ok().map(PathBuf::from),
+            mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH")
+                .ok()
+                .map(PathBuf::from),
+            signal_storage_path: env::var("EXOMIND_RT_SIGNAL_SQLITE_PATH")
+                .ok()
+                .map(PathBuf::from),
             auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
             enable_mdns,
         }
@@ -181,7 +188,10 @@ pub struct RuntimePublishRequest {
 }
 
 impl RuntimeHandle {
-    fn build_signal_event(default_origin_host_id: &str, request: RuntimePublishRequest) -> signal::types::SignalEvent {
+    fn build_signal_event(
+        default_origin_host_id: &str,
+        request: RuntimePublishRequest,
+    ) -> signal::types::SignalEvent {
         signal::types::SignalEvent {
             schema_version: 1,
             id: uuid::Uuid::new_v4().to_string(),
@@ -376,6 +386,7 @@ pub async fn start_with_options(
         local_addr.port(),
         options.host_id.clone(),
         options.mesh_state_path.clone(),
+        options.signal_storage_path.clone(),
         true,
         options.auth_secret.clone(),
     );
@@ -485,7 +496,10 @@ fn resolve_project_root(options: &RuntimeStartOptions) -> PathBuf {
     resolve_project_root_from(options.ts_agent_workdir.as_deref(), current_dir.as_deref())
 }
 
-fn resolve_project_root_from(ts_agent_workdir: Option<&Path>, current_dir: Option<&Path>) -> PathBuf {
+fn resolve_project_root_from(
+    ts_agent_workdir: Option<&Path>,
+    current_dir: Option<&Path>,
+) -> PathBuf {
     const REVIEWER_ENTRY: &str = "packages/ts-agent-cli/agents/reviewer/index.ts";
     const CLASSIFIER_ENTRY: &str = "packages/ts-agent-cli/agents/classifier/index.ts";
 
@@ -579,11 +593,10 @@ pub fn app_with_state(state: AppState) -> Router {
         .allow_headers(Any);
 
     // Protected routes — auth middleware applied here.
-    let protected = routes::router()
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth::require_auth,
-        ));
+    let protected = routes::router().route_layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        auth::require_auth,
+    ));
 
     Router::new()
         .route("/health", get(health))
@@ -608,13 +621,14 @@ pub struct AppState {
 
 impl AppState {
     pub fn new(port: u16) -> Self {
-        Self::new_runtime(port, default_runtime_host_id(port), None, false, None)
+        Self::new_runtime(port, default_runtime_host_id(port), None, None, false, None)
     }
 
     pub fn new_runtime(
         port: u16,
         host_id: String,
         mesh_persist_path: Option<PathBuf>,
+        signal_storage_path: Option<PathBuf>,
         enable_mesh_relay: bool,
         auth_secret: Option<String>,
     ) -> Self {
@@ -624,13 +638,17 @@ impl AppState {
 
         let default_routes_path =
             resolve_default_signal_routes_path().map(|path| path.to_string_lossy().to_string());
-        let signal_pool = Arc::new(SignalPool::new(default_routes_path.as_deref()));
+        let signal_pool = Arc::new(match signal_storage_path {
+            Some(path) => SignalPool::with_sqlite_path(default_routes_path.as_deref(), &path),
+            None => SignalPool::new(default_routes_path.as_deref()),
+        });
         let mesh = Arc::new(MeshState::new(
             host_id.clone(),
             Arc::clone(&signal_pool),
             mesh_persist_path,
         ));
-        let mesh_relay = enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
+        let mesh_relay =
+            enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
 
         Self {
             port,
@@ -720,7 +738,11 @@ mod tests {
             host_id: host_id.clone(),
             registry,
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(mesh::MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(mesh::MeshState::new(
+                host_id,
+                Arc::clone(&signal_pool),
+                None,
+            )),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
@@ -1226,7 +1248,8 @@ mod tests {
         registry.register(Arc::new(TempSessionAgent::new_with_one_session()));
         let signal_pool = Arc::new(signal::SignalPool::new(None));
 
-        let router = routes::router().with_state(app_state_with_registry(3010, registry, signal_pool));
+        let router =
+            routes::router().with_state(app_state_with_registry(3010, registry, signal_pool));
 
         let get_response = router
             .clone()
@@ -1322,10 +1345,21 @@ mod tests {
         let fake_cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/non-existent-cwd");
         let resolved = resolve_default_signal_routes_path_from(Some(fake_cwd.as_path()));
 
-        assert!(resolved.is_some(), "should resolve default routes from workspace root");
+        assert!(
+            resolved.is_some(),
+            "should resolve default routes from workspace root"
+        );
         let resolved_path = resolved.expect("resolved path should exist");
-        assert!(resolved_path.exists(), "resolved path must exist: {}", resolved_path.display());
-        assert!(resolved_path.to_string_lossy().contains("config/signal-routes.default.json"));
+        assert!(
+            resolved_path.exists(),
+            "resolved path must exist: {}",
+            resolved_path.display()
+        );
+        assert!(
+            resolved_path
+                .to_string_lossy()
+                .contains("config/signal-routes.default.json")
+        );
     }
 
     #[test]

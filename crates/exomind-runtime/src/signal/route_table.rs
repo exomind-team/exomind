@@ -1,19 +1,21 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::RwLock;
+use std::sync::{Arc, RwLock};
 
+use super::sqlite_store::SqliteSignalStore;
 use super::types::{SignalRoute, TargetType};
 
-/// Persistent route table backed by a JSON file.
-pub struct RouteTable {
-    /// Routes indexed by topic for fast lookup.
-    routes: RwLock<HashMap<String, Vec<SignalRoute>>>,
-    /// Path to the user-mutable routes file (written on CRUD).
-    persist_path: Option<PathBuf>,
+enum RoutePersistBackend {
+    None,
+    Json(PathBuf),
+    Sqlite(Arc<SqliteSignalStore>),
 }
 
-/// Minimal JSON shape accepted in default-routes config files.
-/// Fields like `id`, `enabled`, `created_at`, `updated_at` are auto-generated.
+pub struct RouteTable {
+    routes: RwLock<HashMap<String, Vec<SignalRoute>>>,
+    persist_backend: RoutePersistBackend,
+}
+
 #[derive(serde::Deserialize)]
 struct DefaultRouteEntry {
     topic: String,
@@ -22,92 +24,73 @@ struct DefaultRouteEntry {
 }
 
 impl RouteTable {
-    /// Create a new RouteTable, optionally loading innate routes from `default_path`
-    /// and user routes from `persist_path`.
     pub fn new(default_path: Option<&Path>, persist_path: Option<PathBuf>) -> Self {
-        let mut all_routes: Vec<SignalRoute> = Vec::new();
-
-        // Load innate (default) routes.
-        if let Some(path) = default_path
-            && let Ok(data) = std::fs::read_to_string(path)
-            && let Ok(entries) = serde_json::from_str::<Vec<DefaultRouteEntry>>(&data)
-        {
-            let now = chrono::Utc::now().to_rfc3339();
-            for entry in entries {
-                all_routes.push(SignalRoute {
-                    id: uuid::Uuid::new_v4().to_string(),
-                    enabled: true,
-                    topic: entry.topic,
-                    target_type: entry.target_type,
-                    target_ref: entry.target_ref,
-                    created_at: now.clone(),
-                    updated_at: now.clone(),
-                });
-            }
-        }
-
-        // Load persisted user routes (overrides nothing, just appends).
-        if let Some(ref path) = persist_path
-            && let Ok(data) = std::fs::read_to_string(path)
-            && let Ok(persisted) = serde_json::from_str::<Vec<SignalRoute>>(&data)
-        {
-            all_routes.extend(persisted);
-        }
-
-        let mut map: HashMap<String, Vec<SignalRoute>> = HashMap::new();
-        for route in all_routes {
-            map.entry(route.topic.clone()).or_default().push(route);
-        }
-
+        let all_routes = load_routes_from_default_and_json(default_path, persist_path.as_deref());
         Self {
-            routes: RwLock::new(map),
-            persist_path,
+            routes: RwLock::new(build_route_map(all_routes)),
+            persist_backend: persist_path
+                .map(RoutePersistBackend::Json)
+                .unwrap_or(RoutePersistBackend::None),
         }
     }
 
-    /// Add a new route and persist.
+    pub(crate) fn with_sqlite_store(
+        default_path: Option<&Path>,
+        store: Arc<SqliteSignalStore>,
+    ) -> Self {
+        let legacy_path = store.path().with_file_name("routes.json");
+        let _ = store.import_legacy_routes_if_needed(&legacy_path);
+        let persisted_routes = store.load_routes().unwrap_or_default();
+        let all_routes = if persisted_routes.is_empty() {
+            load_default_routes(default_path)
+        } else {
+            persisted_routes
+        };
+
+        Self {
+            routes: RwLock::new(build_route_map(all_routes)),
+            persist_backend: RoutePersistBackend::Sqlite(store),
+        }
+    }
+
     pub fn add(&self, route: SignalRoute) {
         let topic = route.topic.clone();
         let mut map = match self.routes.write() {
-            Ok(m) => m,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
         map.entry(topic).or_default().push(route);
         self.persist_locked(&map);
     }
 
-    /// Get all routes across all topics.
     pub fn get_all(&self) -> Vec<SignalRoute> {
         let map = match self.routes.read() {
-            Ok(m) => m,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
         map.values().flatten().cloned().collect()
     }
 
-    /// Get a route by its ID.
     pub fn get_by_id(&self, id: &str) -> Option<SignalRoute> {
         let map = match self.routes.read() {
-            Ok(m) => m,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        map.values().flatten().find(|r| r.id == id).cloned()
+        map.values().flatten().find(|route| route.id == id).cloned()
     }
 
-    /// Update an existing route. Returns true if found and updated.
     pub fn update(&self, id: &str, mut updater: impl FnMut(&mut SignalRoute)) -> bool {
         let mut map = match self.routes.write() {
-            Ok(m) => m,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
 
-        // Find the route across all topics.
         let mut found = false;
         let mut old_topic: Option<String> = None;
         let mut updated_route: Option<SignalRoute> = None;
 
         for (topic, routes) in map.iter_mut() {
-            if let Some(route) = routes.iter_mut().find(|r| r.id == id) {
+            if let Some(route) = routes.iter_mut().find(|route| route.id == id) {
                 old_topic = Some(topic.clone());
                 updater(route);
                 route.updated_at = chrono::Utc::now().to_rfc3339();
@@ -117,18 +100,18 @@ impl RouteTable {
             }
         }
 
-        // If topic changed, relocate.
         if let (Some(old), Some(route)) = (&old_topic, &updated_route)
             && *old != route.topic
         {
             if let Some(routes) = map.get_mut(old.as_str()) {
-                routes.retain(|r| r.id != id);
+                routes.retain(|candidate| candidate.id != id);
                 if routes.is_empty() {
                     map.remove(old.as_str());
                 }
             }
-            let new_topic = route.topic.clone();
-            map.entry(new_topic).or_default().push(route.clone());
+            map.entry(route.topic.clone())
+                .or_default()
+                .push(route.clone());
         }
 
         if found {
@@ -137,19 +120,17 @@ impl RouteTable {
         found
     }
 
-    /// Delete a route by ID. Returns true if found and deleted.
     pub fn delete(&self, id: &str) -> bool {
         let mut map = match self.routes.write() {
-            Ok(m) => m,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
 
         let mut found = false;
         let mut empty_topics = Vec::new();
-
         for (topic, routes) in map.iter_mut() {
             let before = routes.len();
-            routes.retain(|r| r.id != id);
+            routes.retain(|route| route.id != id);
             if routes.len() < before {
                 found = true;
                 if routes.is_empty() {
@@ -168,31 +149,27 @@ impl RouteTable {
         found
     }
 
-    /// Match routes for a given topic: exact match + wildcard "*".
     pub fn match_routes(&self, topic: &str) -> Vec<SignalRoute> {
         let map = match self.routes.read() {
-            Ok(m) => m,
+            Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
 
         let mut result = Vec::new();
-
-        // Exact match.
         if let Some(routes) = map.get(topic) {
-            for r in routes {
-                if r.enabled {
-                    result.push(r.clone());
+            for route in routes {
+                if route.enabled {
+                    result.push(route.clone());
                 }
             }
         }
 
-        // Wildcard match (skip if topic is already "*").
         if topic != "*"
             && let Some(wildcard_routes) = map.get("*")
         {
-            for r in wildcard_routes {
-                if r.enabled {
-                    result.push(r.clone());
+            for route in wildcard_routes {
+                if route.enabled {
+                    result.push(route.clone());
                 }
             }
         }
@@ -200,16 +177,77 @@ impl RouteTable {
         result
     }
 
-    /// Persist current state to the persist_path.
+    pub fn replace_all(&self, routes: Vec<SignalRoute>) {
+        let mut map = match self.routes.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *map = build_route_map(routes);
+        self.persist_locked(&map);
+    }
+
     fn persist_locked(&self, map: &HashMap<String, Vec<SignalRoute>>) {
-        if let Some(ref path) = self.persist_path {
-            let all: Vec<&SignalRoute> = map.values().flatten().collect();
-            if let Ok(json) = serde_json::to_string_pretty(&all) {
-                // Best-effort write; ignore errors.
-                let _ = std::fs::write(path, json);
+        let all_routes: Vec<SignalRoute> = map.values().flatten().cloned().collect();
+        match &self.persist_backend {
+            RoutePersistBackend::None => {}
+            RoutePersistBackend::Json(path) => {
+                if let Ok(json) = serde_json::to_string_pretty(&all_routes) {
+                    let _ = std::fs::write(path, json);
+                }
+            }
+            RoutePersistBackend::Sqlite(store) => {
+                let _ = store.replace_routes(&all_routes);
             }
         }
     }
+}
+
+fn load_routes_from_default_and_json(
+    default_path: Option<&Path>,
+    persist_path: Option<&Path>,
+) -> Vec<SignalRoute> {
+    let mut all_routes = load_default_routes(default_path);
+
+    if let Some(path) = persist_path
+        && let Ok(data) = std::fs::read_to_string(path)
+        && let Ok(persisted) = serde_json::from_str::<Vec<SignalRoute>>(&data)
+    {
+        all_routes.extend(persisted);
+    }
+
+    all_routes
+}
+
+fn load_default_routes(default_path: Option<&Path>) -> Vec<SignalRoute> {
+    let mut routes = Vec::new();
+    if let Some(path) = default_path
+        && let Ok(data) = std::fs::read_to_string(path)
+        && let Ok(entries) = serde_json::from_str::<Vec<DefaultRouteEntry>>(&data)
+    {
+        let now = chrono::Utc::now().to_rfc3339();
+        for entry in entries {
+            routes.push(SignalRoute {
+                id: uuid::Uuid::new_v4().to_string(),
+                enabled: true,
+                topic: entry.topic,
+                target_type: entry.target_type,
+                target_ref: entry.target_ref,
+                created_at: now.clone(),
+                updated_at: now.clone(),
+            });
+        }
+    }
+    routes
+}
+
+fn build_route_map(routes: Vec<SignalRoute>) -> HashMap<String, Vec<SignalRoute>> {
+    let mut map = HashMap::new();
+    for route in routes {
+        map.entry(route.topic.clone())
+            .or_insert_with(Vec::new)
+            .push(route);
+    }
+    map
 }
 
 #[cfg(test)]
@@ -280,8 +318,8 @@ mod tests {
         let id = route.id.clone();
         table.add(route);
 
-        let updated = table.update(&id, |r| {
-            r.target_ref = "new-target".to_string();
+        let updated = table.update(&id, |route| {
+            route.target_ref = "new-target".to_string();
         });
         assert!(updated);
         assert_eq!(table.get_by_id(&id).unwrap().target_ref, "new-target");
@@ -302,7 +340,10 @@ mod tests {
         let matched = table.match_routes("user.input.text");
         assert_eq!(matched.len(), 2);
 
-        let refs: Vec<&str> = matched.iter().map(|r| r.target_ref.as_str()).collect();
+        let refs: Vec<&str> = matched
+            .iter()
+            .map(|route| route.target_ref.as_str())
+            .collect();
         assert!(refs.contains(&"classifier"));
         assert!(refs.contains(&"ui"));
     }
@@ -312,7 +353,6 @@ mod tests {
         let table = RouteTable::new(None, None);
         table.add(make_route("*", "ui"));
 
-        // Querying for "*" itself should only return once.
         let matched = table.match_routes("*");
         assert_eq!(matched.len(), 1);
     }
@@ -354,13 +394,11 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         let persist_path = dir.join("routes.json");
 
-        // Create table and add a route.
         let table = RouteTable::new(None, Some(persist_path.clone()));
         let route = make_route("test", "target-persist");
         let id = route.id.clone();
         table.add(route);
 
-        // Reload from persisted file.
         let table2 = RouteTable::new(None, Some(persist_path));
         let reloaded = table2.get_by_id(&id);
         assert!(reloaded.is_some());
