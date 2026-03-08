@@ -22,6 +22,7 @@ export interface TaskGraph {
   nodes: TaskGraphNode[]
   edges: TaskGraphEdge[]
   rootNodeIds: string[]
+  currentRootCandidateNodeIds: string[]
   currentRootNodeId: string | null
   topologicalOrder: string[]
   hasCycle: boolean
@@ -79,29 +80,35 @@ function isTaskExecutable(task: TaskNode, taskById: Map<string, TaskNode>): bool
   })
 }
 
-export function resolveCurrentRootNodeId({
-  rootNodeIds,
+export function resolveCurrentRootCandidateNodeIds({
   topologicalOrder,
   taskById,
 }: {
-  rootNodeIds: string[]
   topologicalOrder: string[]
   taskById: Map<string, TaskNode>
-}): string | null {
-  const rootNodeIdSet = new Set(rootNodeIds)
+}): string[] {
+  const candidates: string[] = []
 
   for (const taskId of topologicalOrder) {
-    if (!rootNodeIdSet.has(taskId)) {
+    const task = taskById.get(taskId)
+    if (!task || isTerminalStatus(task.status)) {
       continue
     }
 
-    const task = taskById.get(taskId)
-    if (task && !isTerminalStatus(task.status)) {
-      return taskId
+    if (!isDependencyBlocking(task, taskById)) {
+      candidates.push(taskId)
     }
   }
 
-  return null
+  return candidates
+}
+
+export function resolveCurrentRootNodeId({
+  currentRootCandidateNodeIds,
+}: {
+  currentRootCandidateNodeIds: string[]
+}): string | null {
+  return currentRootCandidateNodeIds[0] ?? null
 }
 
 export function buildTaskGraph(tasks: TaskNode[]): TaskGraph {
@@ -192,6 +199,10 @@ export function buildTaskGraph(tasks: TaskNode[]): TaskGraph {
   }
 
   const rootNodeIds = topologicalOrder.filter((taskId) => (indegree.get(taskId) ?? 0) === 0)
+  const currentRootCandidateNodeIds = resolveCurrentRootCandidateNodeIds({
+    topologicalOrder,
+    taskById,
+  })
   const topologicalIndex = new Map(topologicalOrder.map((taskId, index) => [taskId, index]))
   const rootNodeIdSet = new Set(rootNodeIds)
 
@@ -233,10 +244,9 @@ export function buildTaskGraph(tasks: TaskNode[]): TaskGraph {
     nodes,
     edges,
     rootNodeIds,
+    currentRootCandidateNodeIds,
     currentRootNodeId: resolveCurrentRootNodeId({
-      rootNodeIds,
-      topologicalOrder,
-      taskById,
+      currentRootCandidateNodeIds,
     }),
     topologicalOrder,
     hasCycle,

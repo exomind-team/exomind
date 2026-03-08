@@ -36,7 +36,7 @@ export function TaskCurrentRootCard({
     ? graph.nodes.find((node) => node.id === graph.currentRootNodeId) ?? null
     : null;
   const isViewingCurrentRoot = Boolean(currentRootTask && currentTaskId === currentRootTask.id);
-  const rootOrder = currentRootTask ? graph.rootNodeIds.indexOf(currentRootTask.id) + 1 : 0;
+  const currentRootOrder = currentRootTask ? graph.currentRootCandidateNodeIds.indexOf(currentRootTask.id) + 1 : 0;
 
   return (
     <section
@@ -66,14 +66,14 @@ export function TaskCurrentRootCard({
               </div>
               <p className="mt-3 truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{currentRootTask.title}</p>
               <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                {`共 ${graph.rootNodeIds.length} 个根节点 · 当前按稳定顺序排第 ${rootOrder} 个`}
+                {`共 ${graph.currentRootCandidateNodeIds.length} 个未阻塞节点 · 当前按稳定顺序排第 ${currentRootOrder} 个`}
               </p>
             </>
           ) : (
             <>
-              <p className="mt-3 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">暂无未完成根节点</p>
+              <p className="mt-3 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">暂无未阻塞节点</p>
               <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                所有根节点都已完成或放弃，后续可从 DAG 视图继续检查整体依赖结构。
+                当前所有未终态节点都被依赖关系阻塞，可前往 DAG 视图检查阻塞来源。
               </p>
             </>
           )}

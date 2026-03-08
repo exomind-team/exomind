@@ -127,6 +127,35 @@ describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
     expect(flowApiMocks.setCenter).toHaveBeenCalled();
   });
 
+  it('uses unblocked unfinished node as current root when structural roots are terminal', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: 'done-root',
+        title: '已完成根节点',
+        status: 'completed',
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+      makeTask({
+        id: 'downstream-open',
+        title: '下游可执行节点',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'done-root', type: 'hard' }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledWith(true);
+    });
+
+    expect(await screen.findByTestId('task-dag-current-root-summary')).toHaveTextContent('下游可执行节点');
+    expect(screen.getByTestId('task-dag-current-root-summary')).toHaveTextContent('未阻塞节点 1 个');
+    expect(screen.queryByText('暂无未阻塞节点')).not.toBeInTheDocument();
+  });
+
   it('updates the side panel when selecting another node', async () => {
     render(<TaskDagPage />);
 
