@@ -22,12 +22,16 @@ const DATE_VIEW_STATUS_PRIORITY: Record<TaskNode['status'], number> = {
   completed: 3,
   abandoned: 4,
 };
+const DATE_VIEW_UNKNOWN_STATUS_PRIORITY = Number.MAX_SAFE_INTEGER;
 
 /** Sort contract for date tabs: group by status priority, then updatedAt desc */
 export function sortByStatusThenUpdatedAt(tasks: TaskNode[]): TaskNode[] {
   return [...tasks].sort((a, b) => {
-    const priorityDiff = DATE_VIEW_STATUS_PRIORITY[a.status] - DATE_VIEW_STATUS_PRIORITY[b.status];
+    const aPriority = DATE_VIEW_STATUS_PRIORITY[a.status] ?? DATE_VIEW_UNKNOWN_STATUS_PRIORITY;
+    const bPriority = DATE_VIEW_STATUS_PRIORITY[b.status] ?? DATE_VIEW_UNKNOWN_STATUS_PRIORITY;
+    const priorityDiff = aPriority - bPriority;
     if (priorityDiff !== 0) return priorityDiff;
+    if (a.status !== b.status) return a.status.localeCompare(b.status);
     return b.updatedAt - a.updatedAt;
   });
 }

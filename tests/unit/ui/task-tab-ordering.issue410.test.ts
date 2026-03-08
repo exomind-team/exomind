@@ -99,4 +99,28 @@ describe('#410 task tab ordering contract', () => {
     expect(filterWeek([abandonedToday], now)).toEqual([]);
     expect(filterMonth([abandonedToday], now)).toEqual([]);
   });
+
+  it('date views keep stable ordering when unexpected statuses appear', () => {
+    const completed = makeTask({
+      id: 'completed',
+      status: 'completed',
+      dueAt: todayStart + 10_000,
+      updatedAt: todayStart + 10_000,
+    });
+    const unknownAlpha = makeTask({
+      id: 'unknownAlpha',
+      status: 'alpha_custom' as TaskNode['status'],
+      dueAt: todayStart + 20_000,
+      updatedAt: todayStart + 1_000,
+    });
+    const unknownZombie = makeTask({
+      id: 'unknownZombie',
+      status: 'zombie_custom' as TaskNode['status'],
+      dueAt: todayStart + 30_000,
+      updatedAt: todayStart + 9_000,
+    });
+
+    const result = filterToday([unknownZombie, completed, unknownAlpha], now);
+    expect(result.map((task) => task.id)).toEqual(['completed', 'unknownAlpha', 'unknownZombie']);
+  });
 });
