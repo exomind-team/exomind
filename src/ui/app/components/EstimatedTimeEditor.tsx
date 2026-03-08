@@ -4,6 +4,7 @@ import { Input } from '@/components/ui/input';
 import { getTaskService } from '@/lib/services';
 
 const PRESET_ESTIMATED_MINUTES = [15, 25, 45, 60] as const;
+const ESTIMATED_OPTION_COUNT = PRESET_ESTIMATED_MINUTES.length + 2;
 
 function expectedOptionClass(active: boolean): string {
   return `relative z-10 h-8 w-full whitespace-nowrap rounded-[8px] px-[8px] text-center text-[12px] transition-colors duration-200 ${
@@ -24,10 +25,6 @@ function normalizePositiveMinutes(value: string): number | undefined {
   const parsed = Number.parseInt(digitsOnly, 10);
   if (!Number.isFinite(parsed) || parsed <= 0) return undefined;
   return parsed;
-}
-
-function formatCurrentMinutes(minutes: number | undefined): string {
-  return minutes ? `${minutes} 分钟` : '未估时';
 }
 
 export interface EstimatedTimeEditorProps {
@@ -72,10 +69,10 @@ export function EstimatedTimeEditor({
   }, [isCustomEditing]);
 
   const activeIndex = minutes === undefined
-    ? null
+    ? 0
     : isPresetEstimatedMinutes(minutes)
-      ? PRESET_ESTIMATED_MINUTES.indexOf(minutes as (typeof PRESET_ESTIMATED_MINUTES)[number])
-      : PRESET_ESTIMATED_MINUTES.length;
+      ? PRESET_ESTIMATED_MINUTES.indexOf(minutes as (typeof PRESET_ESTIMATED_MINUTES)[number]) + 1
+      : PRESET_ESTIMATED_MINUTES.length + 1;
   const isCustomSelected = minutes !== undefined && !isPresetEstimatedMinutes(minutes);
 
   async function persistMinutes(nextMinutes: number | undefined): Promise<void> {
@@ -144,48 +141,38 @@ export function EstimatedTimeEditor({
 
   return (
     <div className="mt-3 flex min-w-0 flex-col gap-2" data-testid="estimated-time-editor">
-      <div className="flex flex-wrap items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">任务估时</p>
-          <p
-            data-testid="estimated-time-current"
-            className="mt-1 text-xs font-semibold text-[#1C1917] dark:text-[#FAFAF9]"
-          >
-            当前：{formatCurrentMinutes(minutes)}
-          </p>
-        </div>
-
-        <button
-          type="button"
-          data-testid="estimated-time-clear"
-          aria-pressed={minutes === undefined}
-          disabled={isSaving}
-          onClick={() => {
-            void persistMinutes(undefined);
-          }}
-          className={`rounded-full border px-3 py-1 text-[11px] transition-colors ${
-            minutes === undefined
-              ? 'border-[#C75B3A] bg-[#FFF7ED] text-[#C75B3A] dark:border-[#E8734E] dark:bg-[#2A1510] dark:text-[#F4A589]'
-              : 'border-[#E7E5E4] text-[#78716C] hover:text-[#57534E] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:text-[#D6D3D1]'
-          } disabled:cursor-not-allowed disabled:opacity-60`}
-        >
-          {isSaving && minutes === undefined ? '保存中...' : '清空'}
-        </button>
-      </div>
+      <p className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">任务估时</p>
 
       <div
         className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
         data-testid="estimated-time-selector"
       >
-        {activeIndex !== null ? (
-          <div
-            data-testid="estimated-time-active-indicator"
-            className="pointer-events-none absolute inset-y-0 left-0 w-1/5 rounded-[8px] border border-[#FFFFFFCC] bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out dark:border-[#FFFFFF66] dark:bg-[#FFFFFF14]"
-            style={{ transform: `translateX(${activeIndex * 100}%)` }}
-          />
-        ) : null}
+        <div
+          data-testid="estimated-time-active-indicator"
+          className="pointer-events-none absolute inset-y-0 left-0 rounded-[8px] border border-[#FFFFFFCC] bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out dark:border-[#FFFFFF66] dark:bg-[#FFFFFF14]"
+          style={{
+            width: `${100 / ESTIMATED_OPTION_COUNT}%`,
+            transform: `translateX(${activeIndex * 100}%)`,
+          }}
+        />
 
-        <div className="relative z-10 grid min-w-0 grid-cols-5 gap-0">
+        <div
+          className="relative z-10 grid min-w-0 gap-0"
+          style={{ gridTemplateColumns: `repeat(${ESTIMATED_OPTION_COUNT}, minmax(0, 1fr))` }}
+        >
+          <button
+            type="button"
+            data-testid="estimated-time-none"
+            aria-pressed={minutes === undefined}
+            disabled={isSaving}
+            onClick={() => {
+              void persistMinutes(undefined);
+            }}
+            className={expectedOptionClass(minutes === undefined)}
+          >
+            无
+          </button>
+
           {PRESET_ESTIMATED_MINUTES.map((preset) => (
             <button
               key={preset}

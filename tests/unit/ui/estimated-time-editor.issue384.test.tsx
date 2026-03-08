@@ -31,10 +31,11 @@ describe('EstimatedTimeEditor issue #384', () => {
     updateTaskMock.mockResolvedValue(makeTask());
   });
 
-  it('renders current estimatedMinutes and highlights current preset（显示当前估时并高亮预设）', () => {
+  it('renders selected preset without current text（高亮预设且不显示当前文案）', () => {
     render(<EstimatedTimeEditor taskId="task-1" currentMinutes={25} />);
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：25 分钟');
+    expect(screen.queryByTestId('estimated-time-current')).not.toBeInTheDocument();
+    expect(screen.getByTestId('estimated-time-none')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('estimated-time-preset-25')).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -47,7 +48,7 @@ describe('EstimatedTimeEditor issue #384', () => {
       expect(updateTaskMock).toHaveBeenCalledWith('task-1', { estimatedMinutes: 45 });
     });
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：45 分钟');
+    expect(screen.getByTestId('estimated-time-none')).toHaveAttribute('aria-pressed', 'false');
     expect(screen.getByTestId('estimated-time-preset-45')).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -62,21 +63,20 @@ describe('EstimatedTimeEditor issue #384', () => {
       expect(updateTaskMock).toHaveBeenCalledWith('task-1', { estimatedMinutes: 90 });
     });
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：90 分钟');
+    expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveTextContent('90m');
     expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('clear resets the value to undefined（清空估时）', async () => {
+  it('none option resets the value to undefined（无选项重置估时）', async () => {
     render(<EstimatedTimeEditor taskId="task-1" currentMinutes={60} />);
 
-    fireEvent.click(screen.getByTestId('estimated-time-clear'));
+    fireEvent.click(screen.getByTestId('estimated-time-none'));
 
     await waitFor(() => {
       expect(updateTaskMock).toHaveBeenCalledWith('task-1', { estimatedMinutes: undefined });
     });
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：未估时');
-    expect(screen.getByTestId('estimated-time-clear')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('estimated-time-none')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('calls onUpdate after successful save（保存成功后回调 onUpdate）', async () => {

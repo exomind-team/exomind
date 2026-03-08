@@ -146,7 +146,7 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
     const view = render(<TaskDetailPage />);
 
     await screen.findByText('关联任务：任务 A');
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：60 分钟');
+    expect(screen.getByTestId('estimated-time-preset-60')).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(screen.getByTestId('estimated-time-preset-45'));
 
@@ -158,14 +158,16 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
     view.rerender(<TaskDetailPage />);
 
     await screen.findByText('关联任务：任务 B');
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：30 分钟');
+    expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveTextContent('30m');
+    expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
 
     await act(async () => {
       pendingSave.resolve(makeTask({ id: 'task-1', title: '任务 A', estimatedMinutes: 45, updatedAt: 999 }));
       await pendingSave.promise;
     });
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：30 分钟');
+    expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveTextContent('30m');
+    expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('shows estimated editor when task is loaded directly even if listTasks is empty（任务直达加载时仍显示估时入口）', async () => {
@@ -178,6 +180,6 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
 
     await screen.findByText('关联任务：任务 A');
     expect(screen.getByTestId('estimated-time-editor')).toBeInTheDocument();
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：25 分钟');
+    expect(screen.getByTestId('estimated-time-preset-25')).toHaveAttribute('aria-pressed', 'true');
   });
 });
