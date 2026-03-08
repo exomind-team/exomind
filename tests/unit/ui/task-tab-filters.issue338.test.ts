@@ -107,11 +107,10 @@ describe('filterNow（"当下" tab）', () => {
     expect(result[0].id).toBe('a');
   });
 
-  it('shows all non-abandoned tasks', () => {
-    const t1 = makeTask({ id: 't1', status: 'not_started', updatedAt: 1 });
-    const t2 = makeTask({ id: 't2', status: 'not_started', updatedAt: 2 });
-    const t3 = makeTask({ id: 't3', status: 'suspended', updatedAt: 3 });
-    expect(filterNow([t1, t2, t3]).length).toBe(3);
+  it('excludes completed tasks', () => {
+    const active = makeTask({ id: 'active', status: 'in_progress', updatedAt: 1 });
+    const done = makeTask({ id: 'done', status: 'completed', updatedAt: 2 });
+    expect(filterNow([active, done]).map((t) => t.id)).toEqual(['active']);
   });
 
   it('sorts non-in_progress tasks by due date', () => {
@@ -170,12 +169,20 @@ describe('filterToday（"今日" tab）', () => {
     expect(filterToday([task], today)).toEqual([]);
   });
 
-  it('sorts results by due date', () => {
-    const late = makeTask({ id: 'late', dueAt: todayStart + 50_000, updatedAt: todayStart });
-    const early = makeTask({ id: 'early', dueAt: todayStart + 10_000, updatedAt: todayStart });
-    const noDue = makeTask({ id: 'noDue', status: 'in_progress', updatedAt: todayStart + 1000 });
-    const result = filterToday([late, noDue, early], today);
-    expect(result.map((t) => t.id)).toEqual(['early', 'late', 'noDue']);
+  it('sorts by status priority, then updatedAt descending', () => {
+    const inProgressOld = makeTask({ id: 'inProgressOld', status: 'in_progress', updatedAt: todayStart + 1_000 });
+    const inProgressNew = makeTask({ id: 'inProgressNew', status: 'in_progress', updatedAt: todayStart + 9_000 });
+    const notStarted = makeTask({ id: 'notStarted', status: 'not_started', dueAt: todayStart + 10_000, updatedAt: todayStart + 3_000 });
+    const suspended = makeTask({ id: 'suspended', status: 'suspended', dueAt: todayStart + 20_000, updatedAt: todayStart + 4_000 });
+    const completed = makeTask({ id: 'completed', status: 'completed', dueAt: todayStart + 30_000, updatedAt: todayStart + 5_000 });
+    const result = filterToday([completed, inProgressOld, suspended, notStarted, inProgressNew], today);
+    expect(result.map((t) => t.id)).toEqual([
+      'inProgressNew',
+      'inProgressOld',
+      'notStarted',
+      'suspended',
+      'completed',
+    ]);
   });
 });
 
@@ -205,12 +212,20 @@ describe('filterWeek（"一周" tab）', () => {
     expect(filterWeek([task], now)).toEqual([]);
   });
 
-  it('sorts: dueAt asc, no-due at bottom', () => {
-    const far = makeTask({ id: 'far', dueAt: nowMs + 5 * 86_400_000, updatedAt: nowMs });
-    const near = makeTask({ id: 'near', dueAt: nowMs + 1 * 86_400_000, updatedAt: nowMs });
-    const noDue = makeTask({ id: 'noDue', status: 'in_progress', updatedAt: nowMs });
-    const result = filterWeek([far, noDue, near], now);
-    expect(result.map((t) => t.id)).toEqual(['near', 'far', 'noDue']);
+  it('sorts by status priority, then updatedAt descending', () => {
+    const inProgressOld = makeTask({ id: 'inProgressOld', status: 'in_progress', updatedAt: nowMs + 1_000 });
+    const inProgressNew = makeTask({ id: 'inProgressNew', status: 'in_progress', updatedAt: nowMs + 9_000 });
+    const notStarted = makeTask({ id: 'notStarted', status: 'not_started', dueAt: nowMs + 1 * 86_400_000, updatedAt: nowMs + 2_000 });
+    const suspended = makeTask({ id: 'suspended', status: 'suspended', dueAt: nowMs + 2 * 86_400_000, updatedAt: nowMs + 3_000 });
+    const completed = makeTask({ id: 'completed', status: 'completed', dueAt: nowMs + 3 * 86_400_000, updatedAt: nowMs + 4_000 });
+    const result = filterWeek([completed, inProgressOld, suspended, notStarted, inProgressNew], now);
+    expect(result.map((t) => t.id)).toEqual([
+      'inProgressNew',
+      'inProgressOld',
+      'notStarted',
+      'suspended',
+      'completed',
+    ]);
   });
 });
 

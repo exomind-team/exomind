@@ -15,6 +15,23 @@ export function sortByDue(tasks: TaskNode[]): TaskNode[] {
   });
 }
 
+const DATE_VIEW_STATUS_PRIORITY: Record<TaskNode['status'], number> = {
+  in_progress: 0,
+  not_started: 1,
+  suspended: 2,
+  completed: 3,
+  abandoned: 4,
+};
+
+/** Sort contract for date tabs: group by status priority, then updatedAt desc */
+export function sortByStatusThenUpdatedAt(tasks: TaskNode[]): TaskNode[] {
+  return [...tasks].sort((a, b) => {
+    const priorityDiff = DATE_VIEW_STATUS_PRIORITY[a.status] - DATE_VIEW_STATUS_PRIORITY[b.status];
+    if (priorityDiff !== 0) return priorityDiff;
+    return b.updatedAt - a.updatedAt;
+  });
+}
+
 /** Check if a not_started task has all hard dependencies completed */
 export function isExecutable(task: TaskNode, allTasks: TaskNode[]): boolean {
   if (task.status !== 'not_started') return false;
@@ -31,9 +48,9 @@ function excludeAbandoned(tasks: TaskNode[]): TaskNode[] {
   return tasks.filter((t) => t.status !== 'abandoned');
 }
 
-/** "当下" tab: show all non-abandoned tasks, in_progress pinned to top, rest sorted by due */
+/** "当下" tab: hide completed/abandoned tasks, in_progress pinned to top, rest sorted by due */
 export function filterNow(tasks: TaskNode[]): TaskNode[] {
-  const pool = excludeAbandoned(tasks);
+  const pool = excludeAbandoned(tasks).filter((t) => t.status !== 'completed');
   const inProgress = pool.filter((t) => t.status === 'in_progress');
   const rest = pool.filter((t) => t.status !== 'in_progress');
   return [...inProgress, ...sortByDue(rest)];
@@ -49,7 +66,7 @@ export function filterToday(tasks: TaskNode[], now: Date): TaskNode[] {
       (t.dueAt !== undefined && t.dueAt >= todayStart && t.dueAt < todayEnd) ||
       (t.status === 'in_progress' && t.updatedAt >= todayStart),
   );
-  return sortByDue(filtered);
+  return sortByStatusThenUpdatedAt(filtered);
 }
 
 /** "一周" tab: dueAt within 7 days OR in_progress */
@@ -59,7 +76,7 @@ export function filterWeek(tasks: TaskNode[], now: Date): TaskNode[] {
   const filtered = pool.filter(
     (t) => t.status === 'in_progress' || (t.dueAt !== undefined && t.dueAt <= weekEnd),
   );
-  return sortByDue(filtered);
+  return sortByStatusThenUpdatedAt(filtered);
 }
 
 /** "月" tab: dueAt in current month OR in_progress */
@@ -72,5 +89,5 @@ export function filterMonth(tasks: TaskNode[], now: Date): TaskNode[] {
       t.status === 'in_progress' ||
       (t.dueAt !== undefined && t.dueAt >= monthStart && t.dueAt < monthEnd),
   );
-  return sortByDue(filtered);
+  return sortByStatusThenUpdatedAt(filtered);
 }
