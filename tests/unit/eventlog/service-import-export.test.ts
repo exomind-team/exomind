@@ -90,4 +90,41 @@ describe('EventLogService import/export', () => {
     expect(result.tasks).toEqual({ imported: 1, skipped: 0, total: 2 });
     expect(taskBackup.importTasks).toHaveBeenCalledWith(expect.any(Array), 'merge');
   });
+
+  it('rolls back imported events when task import fails', async () => {
+    const importTasksMock = vi.fn()
+      .mockRejectedValueOnce(new Error('boom'))
+      .mockResolvedValueOnce({ imported: 0, skipped: 0, total: 1 });
+    taskBackup.importTasks = importTasksMock;
+    const service = new EventLogServiceImpl({ port, taskBackup });
+    const backup = JSON.stringify({
+      version: 1,
+      exportedAt: new Date().toISOString(),
+      events: [
+        { id: 'e2', timestamp: 3000, content: 'new-2', tags: ['note'] },
+        { id: 'e3', timestamp: 4000, content: 'new-3', tags: ['note'] },
+      ],
+      tasks: [
+        {
+          id: 't2',
+          title: 'task-2',
+          status: 'in_progress',
+          priority: 'high',
+          dependsOn: [],
+          tags: ['focus'],
+          createdAt: 2000,
+          updatedAt: 2500,
+        },
+      ],
+    });
+
+    await expect(service.importEventsFromJson(backup, 'merge')).rejects.toThrow('boom');
+
+    const events = await service.loadEvents();
+    expect(events.map((event) => event.id).sort()).toEqual(['e1', 'e2']);
+    expect(events.find((event) => event.id === 'e2')?.content).toBe('old-2');
+    expect(events.find((event) => event.id === 'e3')).toBeUndefined();
+    expect(importTasksMock).toHaveBeenCalledTimes(2);
+    expect(importTasksMock.mock.calls[1]?.[1]).toBe('overwrite');
+  });
 });

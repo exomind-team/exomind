@@ -252,10 +252,26 @@ export async function importTasksFromBackup(
   }
 
   const storage = getTaskStorage(getCurrentUserId())
-  await storage.clearAll()
+  const nextSorted = sortTasksForStorageWrite(next)
+  const existingSorted = sortTasksForStorageWrite(existing)
 
-  for (const task of sortTasksForStorageWrite(next)) {
-    await storage.addTask(task)
+  try {
+    await storage.clearAll()
+    for (const task of nextSorted) {
+      await storage.addTask(task)
+    }
+  } catch (error) {
+    try {
+      await storage.clearAll()
+      for (const task of existingSorted) {
+        await storage.addTask(task)
+      }
+    } catch (rollbackError) {
+      const importMessage = error instanceof Error ? error.message : String(error)
+      const rollbackMessage = rollbackError instanceof Error ? rollbackError.message : String(rollbackError)
+      throw new Error(`任务导入失败且回滚失败：${importMessage}; rollback=${rollbackMessage}`)
+    }
+    throw error
   }
 
   return {

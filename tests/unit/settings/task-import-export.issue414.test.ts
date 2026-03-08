@@ -118,6 +118,33 @@ describe('Issue #414 task backup import/export', () => {
     expect(tasks[0]?.id).toBe('t9');
   });
 
+  it('rolls back previous tasks when overwrite import fails midway', async () => {
+    await seedTasks([
+      createTask('t1'),
+      createTask('t2'),
+    ]);
+
+    const storage = getTaskStorage(getCurrentUserId());
+    const originalAddTask = storage.addTask.bind(storage);
+    let addCount = 0;
+    const addSpy = vi.spyOn(storage, 'addTask').mockImplementation(async (task: TaskNode) => {
+      addCount += 1;
+      if (addCount === 2) {
+        throw new Error('boom');
+      }
+      return originalAddTask(task);
+    });
+
+    await expect(importTasksFromBackup([
+      createTask('t9'),
+      createTask('t10'),
+    ], 'overwrite')).rejects.toThrow('boom');
+
+    addSpy.mockRestore();
+    const tasks = await exportTasksForBackup();
+    expect(tasks.map((task) => task.id).sort()).toEqual(['t1', 't2']);
+  });
+
   it('imports legacy events-only backup without changing tasks', async () => {
     await seedTasks([
       createTask('t1'),

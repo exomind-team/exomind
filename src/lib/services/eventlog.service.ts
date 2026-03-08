@@ -117,6 +117,8 @@ export class EventLogServiceImpl implements EventLogService {
     const payload = parseTransferPayload(json);
     const incoming = mergeEventsById([], payload.events);
     const existing = await this.readEventData();
+    const incomingTasks = Array.isArray(payload.tasks) ? payload.tasks : null;
+    const existingTasks = incomingTasks ? await this.taskBackup.exportTasks() : null;
 
     let next: EventData[];
     let imported = 0;
@@ -132,31 +134,60 @@ export class EventLogServiceImpl implements EventLogService {
       next = mergeEventsById(existing, incoming);
     }
 
-    await this.writeEventData(next);
-
     const eventResult: ImportCollectionResult = {
       imported,
       skipped,
       total: next.length,
     };
 
-    let taskResult: ImportCollectionResult;
-    if (Array.isArray(payload.tasks)) {
-      taskResult = await this.taskBackup.importTasks(payload.tasks, strategy);
-    } else {
-      const tasks = await this.taskBackup.exportTasks();
-      taskResult = {
-        imported: 0,
-        skipped: 0,
-        total: tasks.length,
-      };
-    }
+    try {
+      await this.writeEventData(next);
 
-    return {
-      ...eventResult,
-      events: eventResult,
-      tasks: taskResult,
-    };
+      let taskResult: ImportCollectionResult;
+      if (incomingTasks) {
+        taskResult = await this.taskBackup.importTasks(incomingTasks, strategy);
+      } else {
+        const tasks = await this.taskBackup.exportTasks();
+        taskResult = {
+          imported: 0,
+          skipped: 0,
+          total: tasks.length,
+        };
+      }
+
+      return {
+        ...eventResult,
+        events: eventResult,
+        tasks: taskResult,
+      };
+    } catch (error) {
+      const rollbackErrors: string[] = [];
+
+      try {
+        await this.writeEventData(existing);
+      } catch (rollbackError) {
+        rollbackErrors.push(
+          `events rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+        );
+      }
+
+      if (incomingTasks && existingTasks) {
+        try {
+          await this.taskBackup.importTasks(existingTasks, 'overwrite');
+        } catch (rollbackError) {
+          rollbackErrors.push(
+            `tasks rollback failed: ${rollbackError instanceof Error ? rollbackError.message : String(rollbackError)}`,
+          );
+        }
+      }
+
+      if (rollbackErrors.length > 0) {
+        const errorMessage = error instanceof Error ? error.message : String(error);
+        throw new Error(`导入失败：${errorMessage}; ${rollbackErrors.join('; ')}`);
+      }
+
+      throw error;
+    }
   }
 
   onEvent(callback: (event: Event) => void): () => void {
