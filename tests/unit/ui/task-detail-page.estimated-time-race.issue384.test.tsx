@@ -167,4 +167,17 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
 
     expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：30 分钟');
   });
+
+  it('shows estimated editor when task is loaded directly even if listTasks is empty（任务直达加载时仍显示估时入口）', async () => {
+    const directTask = makeTask({ id: 'task-1', title: '任务 A', estimatedMinutes: 25, updatedAt: 30 });
+
+    getTaskMock.mockResolvedValueOnce(structuredClone(directTask));
+    listTasksMock.mockResolvedValueOnce([]);
+
+    render(<TaskDetailPage />);
+
+    await screen.findByText('关联任务：任务 A');
+    expect(screen.getByTestId('estimated-time-editor')).toBeInTheDocument();
+    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：25 分钟');
+  });
 });

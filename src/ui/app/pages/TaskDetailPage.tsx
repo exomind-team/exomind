@@ -914,6 +914,7 @@ export function TaskDetailPage() {
   const backLink = resolveTimeblockSourceBackLink();
 
   const [task, setTask] = useState<TaskNode | null>(null);
+  const [isVirtualTask, setIsVirtualTask] = useState(false);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [hasOtherActiveBlock, setHasOtherActiveBlock] = useState(false);
@@ -946,6 +947,7 @@ export function TaskDetailPage() {
   useLayoutEffect(() => {
     setIsLoading(true);
     setTask(null);
+    setIsVirtualTask(false);
     setActiveBlock(null);
     setHasOtherActiveBlock(false);
     setEventLogs([]);
@@ -985,11 +987,17 @@ export function TaskDetailPage() {
         listedTasksPromise,
       ]);
       let nextTask = loadedTask;
+      let nextTaskIsVirtual = false;
       if (!nextTask && preferredBlockId) {
         const matchedBlock = blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId);
         if (matchedBlock) {
           const linked = listedTasks.find((candidate) => (candidate.timeBlockIds ?? []).includes(matchedBlock.startId));
-          nextTask = linked ?? buildVirtualTaskFromBlock(matchedBlock);
+          if (linked) {
+            nextTask = linked;
+          } else {
+            nextTask = buildVirtualTaskFromBlock(matchedBlock);
+            nextTaskIsVirtual = true;
+          }
         }
       }
       if (!nextTask) {
@@ -998,6 +1006,7 @@ export function TaskDetailPage() {
 
       if (disposed) return;
       setTask(nextTask);
+      setIsVirtualTask(nextTaskIsVirtual);
       setAllTasks(listedTasks);
       setTimeBlocks(blocks);
       setActiveBlock(nextTask && currentBlock?.taskId === nextTask.id ? currentBlock : null);
@@ -1062,10 +1071,7 @@ export function TaskDetailPage() {
   const rootGuidance = useMemo(() => (
     <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
   ), [task?.id, taskById, taskGraph]);
-  const canEditEstimatedTime = useMemo(
-    () => (task ? allTasks.some((candidate) => candidate.id === task.id) : false),
-    [allTasks, task],
-  );
+  const canEditEstimatedTime = useMemo(() => Boolean(task) && !isVirtualTask, [isVirtualTask, task]);
   const timerControls = (
     <TimerConfigPanel
       timerMode={timerMode}
