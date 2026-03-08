@@ -22,6 +22,9 @@ pub mod mesh;
 pub mod pairing;
 pub mod routes;
 pub mod signal;
+pub mod task;
+pub mod energy;
+pub mod tick;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_RT_PORT: u16 = 1949;
@@ -168,6 +171,8 @@ pub struct RuntimeHandle {
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
     ts_agents: Vec<TsAgentProcess>,
+    tick_cancel: Arc<std::sync::atomic::AtomicBool>,
+    tick_tasks: Vec<JoinHandle<()>>,
 }
 
 /// Publish request for in-process fast path（进程内快速发布请求）.
@@ -262,6 +267,12 @@ impl RuntimeHandle {
             let _ = tx.send(());
         }
 
+        self.tick_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        for task in self.tick_tasks.drain(..) {
+            task.abort();
+            let _ = task.await;
+        }
+
         for task in &self.actor_tasks {
             task.abort();
         }
@@ -331,6 +342,10 @@ impl Drop for RuntimeHandle {
         }
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
+        }
+        self.tick_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        for task in self.tick_tasks.drain(..) {
+            task.abort();
         }
         for task in self.actor_tasks.drain(..) {
             task.abort();
@@ -409,11 +424,15 @@ pub async fn start_with_options(
 
     let mut actor_tasks = Vec::new();
     if options.spawn_builtin_actors {
-        actor_tasks.push(signal::actors::task_actor::spawn_task_actor(Arc::clone(
+        actor_tasks.push(signal::actors::task_classifier_actor::spawn_task_actor(Arc::clone(
             &state.signal_pool,
         )));
         actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(
             Arc::clone(&state.signal_pool),
+        ));
+        actor_tasks.push(task::actor::spawn_task_store_actor(
+            Arc::clone(&state.signal_pool),
+            Arc::clone(&state.task_store),
         ));
     }
 
@@ -422,6 +441,23 @@ pub async fn start_with_options(
     } else {
         Vec::new()
     };
+
+    // Register heartbeat demo agent + energy
+    if options.spawn_builtin_actors {
+        let heartbeat = Arc::new(agent::heartbeat::HeartbeatAgent::new("heartbeat"));
+        state.registry.register(heartbeat);
+        state.energy_registry.register("heartbeat", energy::AgentEnergy::new(100, 10));
+    }
+
+    // Start tick scheduler for all agents with tick_interval_secs > 0
+    let tick_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tick_tasks = tick::start_all_ticks(
+        &state.registry,
+        &state.energy_registry,
+        &state.signal_pool,
+        &options.host_id,
+        Arc::clone(&tick_cancel),
+    );
 
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -449,6 +485,8 @@ pub async fn start_with_options(
         server_task: Some(server_task),
         actor_tasks,
         ts_agents,
+        tick_cancel,
+        tick_tasks,
     })
 }
 
@@ -604,6 +642,8 @@ pub struct AppState {
     pub auth_secret: Option<String>,
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub pairing: Arc<pairing::PairingManager>,
+    pub task_store: Arc<task::TaskStore>,
+    pub energy_registry: energy::EnergyRegistry,
 }
 
 impl AppState {
@@ -642,6 +682,8 @@ impl AppState {
             auth_secret,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
+            task_store: Arc::new(task::TaskStore::new()),
+            energy_registry: energy::EnergyRegistry::new(),
         }
     }
 }
@@ -725,6 +767,8 @@ mod tests {
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
+            task_store: Arc::new(task::TaskStore::new()),
+            energy_registry: energy::EnergyRegistry::new(),
         }
     }
 
@@ -903,13 +947,19 @@ mod tests {
                     "id": "claude",
                     "name": "Claude Agent",
                     "description": "通过 Claude Code CLI 提供流式对话",
-                    "status": "available"
+                    "status": "available",
+                    "subscriptions": [],
+                    "publications": [],
+                    "tick_interval_secs": 0
                 },
                 {
                     "id": "echo",
                     "name": "Echo Agent",
                     "description": "回显输入内容",
-                    "status": "available"
+                    "status": "available",
+                    "subscriptions": [],
+                    "publications": [],
+                    "tick_interval_secs": 0
                 }
             ])
         );
@@ -1290,7 +1340,10 @@ mod tests {
                     "id": "temp-route",
                     "name": "Temp Route Agent",
                     "description": "用于路由注册/注销可见性测试",
-                    "status": "available"
+                    "status": "available",
+                    "subscriptions": [],
+                    "publications": [],
+                    "tick_interval_secs": 0
                 }
             ])
         );

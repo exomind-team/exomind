@@ -230,3 +230,14 @@ export type RuntimeAgentEvent =
       type: 'done';
     });
 
+// Agent 能量快照（对应 RT GET /agents/:id/energy）
+export interface AgentEnergySnapshot {
+  agent_id: string;
+  current: number;
+  max: number;
+  ratio: number;
+  tick_cost: number;
+  phase: string; // 'normal' | 'slowing' | 'critical' | 'dying' | 'dormant'
+  is_dormant: boolean;
+}
+

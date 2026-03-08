@@ -22,7 +22,7 @@ ExoMind 有两个层次的定位：
 
 ---
 
-## 1.5、认知操作系统子系统框架
+## 1.5 认知操作系统子系统框架
 
 ### 设计原则：否决式定义
 
@@ -61,6 +61,13 @@ ExoMind 有两个层次的定位：
 
 ### ExoMind 现状对照
 
+> **状态口径（status semantics，状态语义）**
+> - **已实现** = 代码/Agent/接口存在
+> - **已验证** = 至少有一个真实链路可复现
+> - **已验收** = 对应产品闭环通过明确验收标准
+>
+> 下文若写“跑通”，默认指**已验证**，不自动等于**已验收**。
+
 #### 个人层完成度
 
 ```
@@ -69,7 +76,7 @@ ExoMind 有两个层次的定位：
   Memory/Knowledge  ##------------------  10%   手动SM-2，Knowledge Agent 0%
   Goals/Tasks       ###############-----  75%   TaskNode+DAG+状态机，缺承诺语义
   Execution         ##############------  70%   TimeBlock+TaskTimer，缺日历
-  Review/Governor   ##########----------  50%   Reviewer 100%，Governor 0%
+  Review/Governor   ##########----------  50%   Reviewer 有实现且 timeblock 反馈已验证，session.end 收工闭环待验收；Governor 0%
   Energy/Homeo      --------------------   0%   完全空白
   Agent Runtime     ###################-  95%   SignalPool+RT 基本完成
 
@@ -109,7 +116,7 @@ TaskNode 只是任务，没有"承诺"这一层。承诺 = 对自己说了要做
 
 **集体层核心前提：#4 + #6**
 
-知识生产模型（#4）和认知治理（#6）定义了 Phase D 的最小可行集。不是做完所有 8 个才能启动集体层，而是至少有 #4 + #6 才不会退化。
+知识生产模型（#4）和认知治理（#6）不是 Phase D 才考虑的“高级功能”，而是**双人协作一开始就要有的最小护栏**。不是做完所有 8 个才能启动集体层，而是至少有 #4 + #6 才不会退化。
 
 ---
 
@@ -182,11 +189,11 @@ TaskNode 只是任务，没有"承诺"这一层。承诺 = 对自己说了要做
 
   看见自己      ████████░░░░░░░░░░░░  Growth Coach 未实现
   自动记录      ████████████░░░░░░░░  EventLog 有，跨设备未完成
-  收工反馈      ████████████████████  Reviewer Agent 跑通
+  收工反馈      ████████████░░░░░░░░  Reviewer 已有实现；timeblock 反馈已验证，session.end 收工闭环待补验收
   持续学习      ████░░░░░░░░░░░░░░░░  手动 SM-2，Knowledge Agent 未实现
 
-四个 Agent 状态：
-  Reviewer Agent    [已完成]  能做收工反馈
+  四个 Agent 状态：
+  Reviewer Agent    [部分完成]  timeblock 反馈已验证，session.end 收工闭环待验收
   Governor Agent    [未实现]  日程调控 + 输出治理
   Growth Coach      [未实现]  行为模式识别
   Knowledge Agent   [未实现]  知识捕获 + 复习调度
@@ -286,20 +293,21 @@ ExoMind：    每个节点是一个"细胞"，集体构成知识生命体
 
 **时间**：现在 → 2026-04
 
-**前提**：SignalPool Phase 1-2 已完成，Reviewer Agent 已跑通
+**前提**：SignalPool Phase 1-2 已完成；Reviewer 已有实现，但 `session.end -> review.completed` 收工闭环仍需在 Phase A 内补验收
 
 #### 任务列表（按子系统框架排序）
 
 | 任务 | 优先级 | 对应子系统 | 说明 | 预估工期 |
 |------|--------|-----------|------|---------|
-| A1: Knowledge Agent | P0 | #3 Memory & Knowledge | SM-2 到期扫描 + 推送复习 + 评估理解度 | 2-3 天 |
-| A2: Governor 基础版 | P0 | #6 Review/Governor | 开机推荐 + 关机复盘 + 防膨胀 | 2-3 天 |
+| A0: Reviewer 收工闭环补验收 | P0 | #6 Review/Governor | 补齐 `session.end -> review.completed` 真实链路 + UI 接收 + 7 天可用性验证 | 0.5-1 天 |
+| A1: Knowledge Agent | P0 | #3 Memory & Knowledge | SM-2 到期扫描 + 推送复习 + 评估理解度 | 3-5 天 |
+| A2: Governor 基础版 | P0 | #6 Review/Governor | 开机校准 + 关机收束 + 输出治理 + 防膨胀（**不做任务推荐**） | 1-2 天 |
 | A3: Energy 最小追踪 | P0 | #7 Energy/Homeostasis | 开机能量自评 + 时间块间隔检测 + 睡眠记录 | 1-2 天 |
 | A4: Task 承诺语义 | P1 | #4 Goals/Commitments | commitment 标志 + 放弃需记录原因（不可删除） | 1 天 |
 | A5: Growth Coach | P1 | #6+#7 跨系统 | 跨天行为模式分析 + 证据三角 + Energy 趋势 | 3-5 天 |
-| A6: 任务智能推荐 | P2 | #5 Execution | 状态x需求x能量x时间 → 推荐 1 件事 | 1-2 天 |
+| A6: 任务智能推荐 | P2 | #5 Execution | 状态 x 需求 x 能量 x 时间 → 推荐 1 个任务 + 1 个备选，并解释取舍 | 1-2 天 |
 
-**总预估**：10-16 天（方案 B 快速版：A1+A2+A3 = 5-8 天）
+**总预估**：10.5-17 天（方案 B 快速版：A0+A1+A2+A3 = 5.5-10 天）
 
 #### 子系统覆盖检查
 
@@ -311,7 +319,7 @@ Phase A 完成后个人层覆盖度：
   #3 Memory/Knowledge  10% → 70%   ← A1 Knowledge Agent
   #4 Goals/Tasks       75% → 85%   ← A4 承诺语义
   #5 Execution         70% → 80%   ← A6 任务推荐
-  #6 Review/Governor   50% → 80%   ← A2 Governor + A5 Growth Coach
+  #6 Review/Governor   50% → 80%   ← A0 Reviewer 验收 + A2 Governor + A5 Growth Coach
   #7 Energy/Homeo       0% → 40%   ← A3 Energy 最小追踪
   +1 Agent Runtime     95% → 95%   （已完成）
 
@@ -325,6 +333,15 @@ Phase A 完成后个人层覆盖度：
 - 系统没有变成负担
 - 每天至少有一次能量自评记录（#7 最小验证）
 
+**6 个验证问题（直接内嵌，避免依赖外部文档）**
+
+1. 我更少无谓点开了吗？
+2. 我更快开始做事了吗？
+3. 我更容易恢复上下文了吗？
+4. 我开始复用下次方案 / 避免项了吗？
+5. 我更清楚自己的状态 / 触发器 / 模式，并更快回到可行动了吗？
+6. 我睡前更能放下，手机更可控了吗？
+
 #### 关键约束
 
 - 优先补完 Agent，而不是继续扩展基础设施
@@ -337,43 +354,54 @@ Phase A 完成后个人层覆盖度：
 
 **时间**：2026-04 → 2026-05
 
-**前提**：Phase A 闭合 + ECS mesh 稳定
+**前提**：Phase A 验收通过 + 单机体验成立
+
+**说明**：Phase B 本身就是“多设备底座是否稳定”的验证阶段，不把 `ECS mesh 稳定` 当作一个已经证明的前提。
 
 | 任务 | 说明 |
 |------|------|
+| B0: 多设备底座闸门 | 两台设备真实验证：EventLog 同步、ActiveBlock 切换、断线重连、重复/冲突可见 |
 | B1: ECS 数据同步 MVP (#381) | EventLog + ActiveBlock 跨设备同步 |
 | B2: 手机观察终端 | 语音 → EventLog（ASR 已有 Rust 后端） |
 | B3: 桌面回顾终端 | 完整时间线 + Agent 反馈 + 成长洞察 |
 
 ### Phase C: 双人验证 — 集体层萌芽
 
-**目标**：验证知识在两个节点间能流动和评审
+**目标**：在最小治理护栏下，验证知识在两个节点间能流动和评审
 
 **时间**：2026-05 → 2026-06
 
-**前提**：Phase B 稳定 + 单节点体验让自己离不开
+**前提**：
+
+- Phase B 通过真实双设备验证
+- 单机体验满足 Phase A 验收
+- 先建立最小知识模型（minimum knowledge model，最小知识模型）与沙盒治理（sandbox governance，沙盒治理），再启动双人共享
 
 | 任务 | 说明 |
 |------|------|
-| C1: 双节点互通 | 你 + 吴震宇两个 ExoMind 节点通过 ECS mesh 连接 |
-| C2: 集体缓冲区迁移 | 从微信"集体缓冲区"迁移到 ExoMind mesh |
-| C3: 跨节点观察共享 | 选择性发布观察 → mesh 广播 → 对方缓存 |
-| C4: 双人评审验证 | 发表主张 → 对方评审 → 评审结果回传 |
+| C0: 双人沙盒治理 | 成员、角色、共享 topic 白名单、最小 ACL、可审计日志 |
+| C1: 最小知识模型 | Observation / Claim / Source / Review 四元组，先不做 Article 层 |
+| C2: 双节点互通 | 你 + 吴震宇两个 ExoMind 节点通过 ECS mesh 连接 |
+| C3: 跨节点观察共享 | 选择性发布 Observation → 对方缓存与引用 |
+| C4: 双人评审验证 | 基于 Claim + Source 做评审回传，不开放任意文本互喷 |
+| C5: 集体缓冲区迁移 | 从微信“集体缓冲区”迁移到 ExoMind 双人沙盒 |
 
-### Phase D: 知识自组织 — 文明方向原型
+### Phase D: 知识自组织 — 小规模联邦原型
 
-**目标**：三层知识模型 + 分布式知识发现
+**目标**：从双人沙盒扩展到小规模研究小组，形成可升级到公共层的知识协作原型
 
 **时间**：2026-06 →
 
-**前提**：Phase C 验证知识流可行
+**前提**：Phase C 验证双人知识流可行，且治理护栏不制造明显负担
 
 | 任务 | 说明 |
 |------|------|
-| D1: 三层知识模型 | 观察 → 主张 → 文章，AI 辅助聚合 |
+| D1: 三层知识模型 | 在 Observation / Claim 基础上增加 Article 升级路径 |
 | D2: 质量机制 | 底层证据链 + 高层信任图谱（Web of Trust） |
 | D3: 语义路由 | 跨节点知识发现，按含义而非 hash 寻址 |
-| D4: 三条流统一 | 信息流 / 物质流 / 价值流统一事件模型 |
+| D4: 渐进公有出口 | 小组成果升级为公开条目 / 专题索引 / 可引用知识包 |
+
+**不纳入当前阶段承诺**：信息流 / 物质流 / 价值流统一事件模型仍保留为文明方向研究议题，不作为近期交付承诺。
 
 ### 阶段间关系
 
@@ -387,17 +415,19 @@ Phase A ──→ Phase B ──→ Phase C ──→ Phase D
 
 ---
 
-## 五、架构约束（NOW 就要遵守）
+## 五、架构兼容约束（NOW 就要注意，但不强制一步到位）
 
-在 Phase A 做个人成长时，遵守以下规则确保不堵 Phase D 的路：
+在 Phase A 做个人成长时，优先采用**兼容字段（compat fields，兼容字段）**和命名约定，避免为了远景一次性推翻当前 schema。
 
 | 设计决策 | 当前做法 | 不堵路的做法 | 成本差异 |
 |---|---|---|---|
-| EventLog ID | 自增数字 | `node_id:timestamp:seq` | 几乎没有 |
-| 事件格式 | 自由 JSON | 加 `source_node` 字段 | 加一个字段 |
+| EventLog ID | `evt-YYYYMMDD-NNN` | **保留现有 ID**，另预留 `source_node` / `logical_id` 兼容字段，不立刻切主键 | 低 |
+| 事件格式 | 自由 JSON | 新事件优先加 `source_node` / `origin_host_id`，历史数据不强制回填 | 低 |
 | Signal 类型命名 | 随意 | `domain.action` 命名空间 | 已在做 |
-| 存储层 | PouchDB 直存 | 预留 `content_hash` 字段 | 加一个字段 |
-| Agent 反馈 | 本地渲染 | 带 `reviewer_node_id` | 加一个字段 |
+| 存储层 | PouchDB 直存 | 新文档/新事件预留 `content_hash` 可选字段，历史数据不回填 | 低 |
+| Agent 反馈 | 本地渲染 | 新反馈事件带 `reviewer_node_id` 可选字段 | 低 |
+
+**规则**：如果这里与具体实施计划或冻结后的架构文档冲突，以更具体、更新的 schema 文档为准。
 
 ---
 

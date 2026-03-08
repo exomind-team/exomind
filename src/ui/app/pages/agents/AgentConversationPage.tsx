@@ -1,11 +1,12 @@
-import { ArrowLeft, Bot, MoreHorizontal, SendHorizontal, UserRound } from 'lucide-react';
-import { useEffect, useState } from 'react';
+import { ArrowLeft, Bot, Heart, MoreHorizontal, SendHorizontal, UserRound } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentConversationMessage } from '@/lib/types/agent-hub';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { createUuidV4 } from '@/lib/utils/uuid';
 import { RuntimeClient } from '@/services/runtime-client';
 import { findPreferredRuntimeHostForAgent, getRuntimeManager } from '@/services/runtime-manager';
+import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import {
   appendConversationChunk,
   appendAdjacentConversationDelta,
@@ -64,6 +65,82 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
     void load();
     return () => {
       disposed = true;
+    };
+  }, [targetId]);
+
+  // Subscribe to SSE signal stream for tick/heartbeat signals
+  const sseRef = useRef<EventSource | null>(null);
+  useEffect(() => {
+    if (!targetId) return;
+    let disposed = false;
+
+    const connect = async () => {
+      try {
+        const hosts = await getRuntimeHostService().listHosts();
+        if (hosts.length === 0 || disposed) return;
+        const host = hosts[0];
+        const url = `http://${host.host}:${host.port}/signals/stream?agent_id=${encodeURIComponent(targetId)}&heartbeat_interval=30`;
+        const es = new EventSource(url);
+        sseRef.current = es;
+
+        es.addEventListener('signal', (event) => {
+          if (disposed) return;
+          try {
+            const signal = JSON.parse(event.data);
+            const topic: string = signal.topic ?? '';
+            const payload = signal.payload ?? {};
+            const signalAgentId: string = payload.agent_id ?? '';
+
+            // Only show signals relevant to this agent
+            if (signalAgentId && signalAgentId !== targetId) return;
+
+            if (topic === 'heartbeat.pulse') {
+              const message = payload.message ?? '💓 心跳';
+              setMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `msg-tick-${signal.id ?? createUuidV4()}`,
+                'agent',
+                message,
+                { title: '自主心跳' },
+              )));
+            } else if (topic === 'agent.tick') {
+              const energy = payload.energy ?? {};
+              const phase = payload.phase ?? '';
+              const tickCount = payload.tick_count ?? 0;
+              const interval = payload.tick_interval_secs ?? 0;
+              setMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `msg-tick-meta-${signal.id ?? createUuidV4()}`,
+                'agent',
+                `Tick #${tickCount} · 能量 ${energy.current ?? '?'}/${energy.max ?? '?'} · ${phase} · 下次 ${interval}s`,
+                { source: 'runtime', runtimeEventType: 'output.delta', title: '⏱ Tick 元信号' },
+              )));
+            } else if (topic === 'agent.dormant') {
+              setMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `msg-dormant-${signal.id ?? createUuidV4()}`,
+                'agent',
+                '🩶 能量耗尽，进入休眠。生命过程暂停。',
+                { title: '休眠' },
+              )));
+            }
+          } catch {
+            // ignore malformed SSE data
+          }
+        });
+
+        es.onerror = () => {
+          // SSE will auto-reconnect
+        };
+      } catch {
+        // ignore connection errors
+      }
+    };
+
+    void connect();
+    return () => {
+      disposed = true;
+      if (sseRef.current) {
+        sseRef.current.close();
+        sseRef.current = null;
+      }
     };
   }, [targetId]);
 
@@ -234,13 +311,16 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
       <div className={`min-h-0 flex-1 overflow-y-auto space-y-3 px-4 pt-3 md:px-8 lg:px-10 ${isDesktop ? 'pb-4' : mobileContentPaddingClass}`}>
         {messages.map((message) => {
           const isUser = message.role === 'user';
-          const isRuntimeMeta = !!message.runtimeEventType && message.runtimeEventType !== 'output.delta';
+          const isTickSignal = message.id.startsWith('msg-tick-') || message.id.startsWith('msg-dormant-');
+          const isRuntimeMeta = !isTickSignal && !!message.runtimeEventType && message.runtimeEventType !== 'output.delta';
           const testId = getConversationMessageTestId(message);
           return (
             <div key={message.id} className={`flex items-end gap-2 ${isUser ? 'justify-end' : 'justify-start'}`}>
               {!isUser && (
-                <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[#C75B3A] text-white">
-                  <Bot size={12} />
+                <div className={`flex h-6 w-6 shrink-0 items-center justify-center rounded-full ${
+                  isTickSignal ? 'bg-[#EF444420] text-[#EF4444]' : 'bg-[#C75B3A] text-white'
+                }`}>
+                  {isTickSignal ? <Heart size={12} /> : <Bot size={12} />}
                 </div>
               )}
               <div
@@ -248,13 +328,17 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
                 className={`max-w-[80%] rounded-2xl px-4 py-2 text-sm ${
                   isUser
                     ? 'rounded-tr-[6px] bg-[#C75B3A] text-white'
-                    : isRuntimeMeta
-                      ? 'rounded-tl-[6px] border border-border-card bg-muted text-muted-foreground'
-                      : 'rounded-tl-[6px] border border-border-card bg-card text-strong'
+                    : isTickSignal
+                      ? 'rounded-tl-[6px] border border-[#EF444430] bg-[#EF444408] text-foreground'
+                      : isRuntimeMeta
+                        ? 'rounded-tl-[6px] border border-border-card bg-muted text-muted-foreground'
+                        : 'rounded-tl-[6px] border border-border-card bg-card text-strong'
                 }`}
               >
                 {message.title && (
-                  <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                  <p className={`mb-1 text-[11px] font-semibold uppercase tracking-[0.08em] ${
+                    isTickSignal ? 'text-[#EF4444]' : 'text-muted-foreground'
+                  }`}>
                     {message.title}
                   </p>
                 )}

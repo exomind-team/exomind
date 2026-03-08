@@ -370,6 +370,8 @@ mod tests {
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
+            task_store: Arc::new(crate::task::TaskStore::new()),
+            energy_registry: crate::energy::EnergyRegistry::new(),
         }
     }
 

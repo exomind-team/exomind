@@ -1,4 +1,4 @@
-import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
+import type { AgentEnergySnapshot, RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { ProviderProfileSnapshot } from '@/lib/agent-provider/types';
 import type {
   RuntimeCapabilityAgentKind,
@@ -502,6 +502,19 @@ export class RuntimeClient {
       ok: true,
       data: { status, id },
     };
+  }
+
+  async getAgentEnergy(
+    host: RuntimeHostRecord,
+    agentId: string,
+  ): Promise<AgentEnergySnapshot | null> {
+    const result = await this.getJson(
+      `${buildBaseUrl(host)}/agents/${encodeURIComponent(agentId)}/energy`,
+    );
+    if (!result.ok) return null;
+    const data = result.data;
+    if (!isObjectRecord(data)) return null;
+    return data as unknown as AgentEnergySnapshot;
   }
 
   async *streamAgentConversation(

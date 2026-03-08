@@ -84,6 +84,9 @@ fn agent_summary(agent: &Arc<dyn Agent>) -> AgentSummary {
         name: agent.name().to_string(),
         description: agent.description().to_string(),
         status: agent.status().to_string(),
+        subscriptions: agent.subscriptions(),
+        publications: agent.publications(),
+        tick_interval_secs: agent.tick_interval_secs(),
     }
 }
 
