@@ -177,4 +177,28 @@ describe('#410 task tab ordering contract', () => {
       'unknownZombieMonth',
     ]);
   });
+
+  it('unknown statuses use code-unit ordering to avoid locale-dependent drift', () => {
+    const completed = makeTask({
+      id: 'completed',
+      status: 'completed',
+      dueAt: todayStart + 10_000,
+      updatedAt: todayStart + 10_000,
+    });
+    const unknownZ = makeTask({
+      id: 'unknownZ',
+      status: 'z_custom' as TaskNode['status'],
+      dueAt: todayStart + 20_000,
+      updatedAt: todayStart + 1_000,
+    });
+    const unknownUmlaut = makeTask({
+      id: 'unknownUmlaut',
+      status: '\u00E4_custom' as TaskNode['status'],
+      dueAt: todayStart + 30_000,
+      updatedAt: todayStart + 9_000,
+    });
+
+    const result = filterToday([unknownUmlaut, completed, unknownZ], now);
+    expect(result.map((task) => task.id)).toEqual(['completed', 'unknownZ', 'unknownUmlaut']);
+  });
 });

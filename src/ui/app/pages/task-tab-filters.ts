@@ -24,6 +24,11 @@ const DATE_VIEW_STATUS_PRIORITY: Record<TaskNode['status'], number> = {
 };
 const DATE_VIEW_UNKNOWN_STATUS_PRIORITY = Number.MAX_SAFE_INTEGER;
 
+function compareStringByCodeUnit(a: string, b: string): number {
+  if (a === b) return 0;
+  return a < b ? -1 : 1;
+}
+
 /** Sort contract for date tabs: group by status priority, then updatedAt desc */
 export function sortByStatusThenUpdatedAt(tasks: TaskNode[]): TaskNode[] {
   return [...tasks].sort((a, b) => {
@@ -31,7 +36,7 @@ export function sortByStatusThenUpdatedAt(tasks: TaskNode[]): TaskNode[] {
     const bPriority = DATE_VIEW_STATUS_PRIORITY[b.status] ?? DATE_VIEW_UNKNOWN_STATUS_PRIORITY;
     const priorityDiff = aPriority - bPriority;
     if (priorityDiff !== 0) return priorityDiff;
-    if (a.status !== b.status) return a.status.localeCompare(b.status);
+    if (a.status !== b.status) return compareStringByCodeUnit(a.status, b.status);
     return b.updatedAt - a.updatedAt;
   });
 }
