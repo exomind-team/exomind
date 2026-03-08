@@ -27,6 +27,11 @@ vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
 import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
 
 describe('EventLogService PouchDB backend', () => {
+  const taskBackup = {
+    exportTasks: vi.fn(async () => []),
+    importTasks: vi.fn(async () => ({ imported: 0, skipped: 0, total: 0 })),
+  };
+
   beforeEach(() => {
     replicationMocks.appendEventWithEcsReplication.mockReset().mockImplementation(async (event) => {
       await mocks.addEvent(event);
@@ -36,6 +41,8 @@ describe('EventLogService PouchDB backend', () => {
     mocks.addEvent.mockReset();
     mocks.getEvent.mockReset();
     mocks.clearAll.mockReset();
+    taskBackup.exportTasks.mockClear();
+    taskBackup.importTasks.mockClear();
   });
 
   it('exports events from EventStorage by default', async () => {
@@ -49,7 +56,7 @@ describe('EventLogService PouchDB backend', () => {
       },
     ]);
 
-    const service = new EventLogServiceImpl();
+    const service = new EventLogServiceImpl({ taskBackup });
     const raw = await service.exportEventsAsJson();
     const payload = JSON.parse(raw) as { events: Array<{ content: string }> };
 
@@ -68,7 +75,7 @@ describe('EventLogService PouchDB backend', () => {
       replicationSeq: 1,
     });
 
-    const service = new EventLogServiceImpl();
+    const service = new EventLogServiceImpl({ taskBackup });
     const backup = JSON.stringify({
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -81,7 +88,13 @@ describe('EventLogService PouchDB backend', () => {
 
     expect(mocks.clearAll).toHaveBeenCalledTimes(1);
     expect(mocks.addEvent).toHaveBeenCalledTimes(1);
-    expect(result).toEqual({ imported: 1, skipped: 0, total: 1 });
+    expect(result).toEqual({
+      imported: 1,
+      skipped: 0,
+      total: 1,
+      events: { imported: 1, skipped: 0, total: 1 },
+      tasks: { imported: 0, skipped: 0, total: 0 },
+    });
   });
 });
 

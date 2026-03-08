@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import type { EventData } from '@/lib/types/event';
-import { EventLogServiceImpl } from '@/lib/services/eventlog.service';
+import type { TaskNode } from '@/lib/types/task';
+import { EventLogServiceImpl, type TaskBackupGateway } from '@/lib/services/eventlog.service';
 
 type EventLogPortShape = {
   listEvents: () => Promise<EventData[]>;
@@ -25,24 +26,41 @@ function createMockPort(initialEvents: EventData[] = []): EventLogPortShape {
 
 describe('EventLogService import/export', () => {
   let port: EventLogPortShape;
+  let taskBackup: TaskBackupGateway;
 
   beforeEach(() => {
     port = createMockPort([
       { id: 'e1', timestamp: 1000, content: 'old', tags: ['note'] },
       { id: 'e2', timestamp: 2000, content: 'old-2', tags: ['note'] },
     ]);
+    const task: TaskNode = {
+      id: 't1',
+      title: 'task-1',
+      status: 'not_started',
+      priority: 'medium',
+      dependsOn: [],
+      tags: [],
+      createdAt: 1000,
+      updatedAt: 1000,
+    };
+    taskBackup = {
+      exportTasks: vi.fn(async () => [task]),
+      importTasks: vi.fn(async () => ({ imported: 0, skipped: 0, total: 1 })),
+    };
   });
 
   it('exports eventlog as json backup', async () => {
-    const service = new EventLogServiceImpl({ port });
+    const service = new EventLogServiceImpl({ port, taskBackup });
     const json = await service.exportEventsAsJson();
-    const parsed = JSON.parse(json) as { version: number; events: EventData[] };
+    const parsed = JSON.parse(json) as { version: number; events: EventData[]; tasks: TaskNode[] };
     expect(parsed.version).toBe(1);
     expect(parsed.events).toHaveLength(2);
+    expect(parsed.tasks).toHaveLength(1);
   });
 
   it('imports backup with merge strategy', async () => {
-    const service = new EventLogServiceImpl({ port });
+    taskBackup.importTasks = vi.fn(async () => ({ imported: 1, skipped: 0, total: 2 }));
+    const service = new EventLogServiceImpl({ port, taskBackup });
     const backup = JSON.stringify({
       version: 1,
       exportedAt: new Date().toISOString(),
@@ -50,11 +68,26 @@ describe('EventLogService import/export', () => {
         { id: 'e2', timestamp: 3000, content: 'new-2', tags: ['note'] },
         { id: 'e3', timestamp: 4000, content: 'new-3', tags: ['note'] },
       ],
+      tasks: [
+        {
+          id: 't2',
+          title: 'task-2',
+          status: 'in_progress',
+          priority: 'high',
+          dependsOn: [],
+          tags: ['focus'],
+          createdAt: 2000,
+          updatedAt: 2500,
+        },
+      ],
     });
 
     const result = await service.importEventsFromJson(backup, 'merge');
     expect(result.imported).toBe(1);
     expect(result.skipped).toBe(1);
     expect(result.total).toBe(3);
+    expect(result.events).toEqual({ imported: 1, skipped: 1, total: 3 });
+    expect(result.tasks).toEqual({ imported: 1, skipped: 0, total: 2 });
+    expect(taskBackup.importTasks).toHaveBeenCalledWith(expect.any(Array), 'merge');
   });
 });

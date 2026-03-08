@@ -316,8 +316,9 @@ export function SettingsPage() {
     try {
       const service = getEventLogService();
       const json = await service.exportEventsAsJson();
-      const payload = JSON.parse(json) as { events?: unknown[] };
-      const count = Array.isArray(payload.events) ? payload.events.length : 0;
+      const payload = JSON.parse(json) as { events?: unknown[]; tasks?: unknown[] };
+      const eventCount = Array.isArray(payload.events) ? payload.events.length : 0;
+      const taskCount = Array.isArray(payload.tasks) ? payload.tasks.length : 0;
       const defaultName = buildBackupFileName();
 
       const isRunningInTauri = await isTauri();
@@ -330,12 +331,12 @@ export function SettingsPage() {
           setStatusMessage('已取消保存。');
           return;
         }
-        setStatusMessage(`导出成功，共 ${count} 条事件。保存路径：${savedPath}`);
+        setStatusMessage(`导出成功：事件 ${eventCount} 条，任务 ${taskCount} 条。保存路径：${savedPath}`);
         return;
       }
 
       downloadJsonFallback(json, defaultName);
-      setStatusMessage(`导出成功，共 ${count} 条事件。`);
+      setStatusMessage(`导出成功：事件 ${eventCount} 条，任务 ${taskCount} 条。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`导出失败：${message}`);
@@ -398,8 +399,18 @@ export function SettingsPage() {
     try {
       const service = getEventLogService();
       const result = await service.importEventsFromJson(picked.content, importStrategy);
+      const eventStats = result.events ?? {
+        imported: result.imported,
+        skipped: result.skipped,
+        total: result.total,
+      };
+      const taskStats = result.tasks ?? {
+        imported: 0,
+        skipped: 0,
+        total: 0,
+      };
       setStatusMessage(
-        `导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。来源：${picked.path}`
+        `导入成功：事件新增 ${eventStats.imported} 条，跳过 ${eventStats.skipped} 条，当前共 ${eventStats.total} 条；任务新增 ${taskStats.imported} 条，跳过 ${taskStats.skipped} 条，当前共 ${taskStats.total} 条。来源：${picked.path}`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';

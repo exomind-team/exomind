@@ -112,8 +112,17 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
-    mocks.exportEventsAsJson.mockResolvedValue(JSON.stringify({ events: [{ id: 'evt-1' }] }));
-    mocks.importEventsFromJson.mockResolvedValue({ imported: 0, skipped: 0, total: 0 });
+    mocks.exportEventsAsJson.mockResolvedValue(JSON.stringify({
+      events: [{ id: 'evt-1' }],
+      tasks: [{ id: 'task-1' }],
+    }));
+    mocks.importEventsFromJson.mockResolvedValue({
+      imported: 0,
+      skipped: 0,
+      total: 0,
+      events: { imported: 0, skipped: 0, total: 0 },
+      tasks: { imported: 0, skipped: 0, total: 0 },
+    });
     mocks.isTauri.mockResolvedValue(false);
     mocks.invoke.mockResolvedValue(null);
     anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
@@ -137,7 +146,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
       }));
     });
 
-    expect(screen.getByText(/导出成功，共 1 条事件。保存路径：/)).toBeInTheDocument();
+    expect(screen.getByText(/导出成功：事件 1 条，任务 1 条。保存路径：/)).toBeInTheDocument();
     expect(anchorClickSpy).not.toHaveBeenCalled();
   });
 
@@ -153,7 +162,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
 
     expect(anchorClickSpy).toHaveBeenCalledTimes(1);
     expect(mocks.invoke).not.toHaveBeenCalled();
-    expect(screen.getByText('导出成功，共 1 条事件。')).toBeInTheDocument();
+    expect(screen.getByText('导出成功：事件 1 条，任务 1 条。')).toBeInTheDocument();
   });
 
   it('uses tauri native pick command for import in tauri runtime', async () => {
@@ -172,7 +181,13 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
       }
       return Promise.resolve(null);
     });
-    mocks.importEventsFromJson.mockResolvedValue({ imported: 1, skipped: 0, total: 2 });
+    mocks.importEventsFromJson.mockResolvedValue({
+      imported: 1,
+      skipped: 0,
+      total: 2,
+      events: { imported: 1, skipped: 0, total: 2 },
+      tasks: { imported: 1, skipped: 1, total: 3 },
+    });
 
     render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: '导入数据' }));
@@ -182,7 +197,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
     });
 
     expect(mocks.importEventsFromJson).toHaveBeenCalledWith(expect.stringContaining('"version":1'), 'merge');
-    expect(screen.getByText(/导入成功：新增 1 条/)).toBeInTheDocument();
+    expect(screen.getByText(/导入成功：事件新增 1 条，跳过 0 条，当前共 2 条；任务新增 1 条，跳过 1 条，当前共 3 条。/)).toBeInTheDocument();
     expect(screen.getByText(/来源：content:\/\/downloads\/document\/eventlog\.json/)).toBeInTheDocument();
   });
 });

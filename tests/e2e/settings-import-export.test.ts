@@ -5,12 +5,19 @@ import path from 'node:path';
 test.describe('设置页导入导出', () => {
   test('导出 JSON 应包含事件日志页面中的真实事件', async ({ page }, testInfo) => {
     const marker = `e2e-export-${Date.now()}`;
+    const taskMarker = `e2e-task-${Date.now()}`;
     const input = page.getByPlaceholder(/记录当下的事实|输入内容记录事件/);
+    const taskInput = page.getByPlaceholder('快速添加任务...');
 
     await page.goto('/eventlog');
     await input.fill(marker);
     await input.press('Control+Enter');
     await expect(page.getByText(marker)).toBeVisible();
+
+    await page.goto('/tasks');
+    await taskInput.fill(taskMarker);
+    await taskInput.press('Enter');
+    await expect(page.getByText(taskMarker).first()).toBeVisible();
 
     await page.goto('/settings');
     const downloadPromise = page.waitForEvent('download');
@@ -21,9 +28,14 @@ test.describe('设置页导入导出', () => {
     await download.saveAs(downloadPath);
 
     const raw = await readFile(downloadPath, 'utf-8');
-    const payload = JSON.parse(raw) as { events?: Array<{ content?: string }> };
+    const payload = JSON.parse(raw) as {
+      events?: Array<{ content?: string }>;
+      tasks?: Array<{ title?: string }>;
+    };
     const contents = (payload.events ?? []).map((event) => event.content).filter(Boolean);
+    const taskTitles = (payload.tasks ?? []).map((task) => task.title).filter(Boolean);
 
     expect(contents).toContain(marker);
+    expect(taskTitles).toContain(taskMarker);
   });
 });

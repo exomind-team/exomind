@@ -14,8 +14,14 @@ import { vi } from 'vitest';
 
 vi.mock('@/lib/services', () => ({
   getEventLogService: vi.fn(() => ({
-    exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
-    importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0 }),
+    exportEventsAsJson: vi.fn().mockResolvedValue(JSON.stringify({ version: 1, events: [], tasks: [] })),
+    importEventsFromJson: vi.fn().mockResolvedValue({
+      imported: 0,
+      skipped: 0,
+      total: 0,
+      events: { imported: 0, skipped: 0, total: 0 },
+      tasks: { imported: 0, skipped: 0, total: 0 },
+    }),
   })),
 }));
 

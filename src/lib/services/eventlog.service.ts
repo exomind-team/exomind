@@ -12,6 +12,7 @@
 import { ExoMindEnvironment } from '../environment/environment';
 import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
+import type { TaskNode } from '../types/task';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
@@ -21,14 +22,25 @@ import {
   mergeEventsById,
   type ImportStrategy,
 } from '../eventlog/transfer';
+import { exportTasksForBackup, importTasksFromBackup } from './task.service';
 
 // 标签常量
 const NOTE_TAG: Tag = 'note';
 
-export interface ImportEventsResult {
+export interface ImportCollectionResult {
   imported: number;
   skipped: number;
   total: number;
+}
+
+export interface ImportEventsResult extends ImportCollectionResult {
+  events: ImportCollectionResult;
+  tasks: ImportCollectionResult;
+}
+
+export interface TaskBackupGateway {
+  exportTasks(): Promise<TaskNode[]>;
+  importTasks(tasks: TaskNode[], strategy: ImportStrategy): Promise<ImportCollectionResult>;
 }
 
 export interface EventLogService {
@@ -50,14 +62,20 @@ export interface EventLogService {
 
 export interface EventLogServiceOptions {
   port?: IEventLogPort;
+  taskBackup?: TaskBackupGateway;
 }
 
 export class EventLogServiceImpl implements EventLogService {
   private readonly port: IEventLogPort;
+  private readonly taskBackup: TaskBackupGateway;
   private listeners: Set<(event: Event) => void> = new Set();
 
   constructor(options: EventLogServiceOptions = {}) {
     this.port = options.port ?? new WebEventLogStorageAdapter();
+    this.taskBackup = options.taskBackup ?? {
+      exportTasks: exportTasksForBackup,
+      importTasks: importTasksFromBackup,
+    };
   }
 
   async loadEvents(): Promise<Event[]> {
@@ -87,8 +105,11 @@ export class EventLogServiceImpl implements EventLogService {
   }
 
   async exportEventsAsJson(): Promise<string> {
-    const events = await this.readEventData();
-    const payload = createTransferPayload(events);
+    const [events, tasks] = await Promise.all([
+      this.readEventData(),
+      this.taskBackup.exportTasks(),
+    ]);
+    const payload = createTransferPayload(events, tasks);
     return JSON.stringify(payload, null, 2);
   }
 
@@ -113,10 +134,28 @@ export class EventLogServiceImpl implements EventLogService {
 
     await this.writeEventData(next);
 
-    return {
+    const eventResult: ImportCollectionResult = {
       imported,
       skipped,
       total: next.length,
+    };
+
+    let taskResult: ImportCollectionResult;
+    if (Array.isArray(payload.tasks)) {
+      taskResult = await this.taskBackup.importTasks(payload.tasks, strategy);
+    } else {
+      const tasks = await this.taskBackup.exportTasks();
+      taskResult = {
+        imported: 0,
+        skipped: 0,
+        total: tasks.length,
+      };
+    }
+
+    return {
+      ...eventResult,
+      events: eventResult,
+      tasks: taskResult,
     };
   }
 

@@ -1,6 +1,7 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment'
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
+import { mergeTasksById, type ImportStrategy } from '@/lib/eventlog/transfer'
 import { getTaskStorage } from '@/lib/storage/task-storage'
 import { getCurrentUserId } from '@/lib/storage/event-storage'
 
@@ -11,6 +12,12 @@ type TaskEnvironmentLike = {
 export interface DependencyCheckResult {
   met: boolean
   blocking: Array<{ taskId: string; type: 'soft' | 'hard'; status: TaskStatus }>
+}
+
+export interface TaskBackupImportResult {
+  imported: number
+  skipped: number
+  total: number
 }
 
 export interface TaskService {
@@ -213,4 +220,47 @@ let instance: TaskService | null = null
 export function getTaskService(): TaskService {
   if (!instance) instance = new TaskServiceImpl()
   return instance
+}
+
+function sortTasksForStorageWrite(tasks: TaskNode[]): TaskNode[] {
+  return [...tasks].sort((a, b) => (a.createdAt - b.createdAt) || (a.updatedAt - b.updatedAt))
+}
+
+export async function exportTasksForBackup(): Promise<TaskNode[]> {
+  return getTaskService().listTasks(true)
+}
+
+export async function importTasksFromBackup(
+  tasks: TaskNode[],
+  strategy: ImportStrategy,
+): Promise<TaskBackupImportResult> {
+  const incoming = mergeTasksById([], tasks)
+  const existing = await getTaskService().listTasks(true)
+
+  let next: TaskNode[]
+  let imported = 0
+  let skipped = 0
+
+  if (strategy === 'overwrite') {
+    next = incoming
+    imported = incoming.length
+  } else {
+    const existingIds = new Set(existing.map((task) => task.id))
+    imported = incoming.filter((task) => !existingIds.has(task.id)).length
+    skipped = incoming.length - imported
+    next = mergeTasksById(existing, incoming)
+  }
+
+  const storage = getTaskStorage(getCurrentUserId())
+  await storage.clearAll()
+
+  for (const task of sortTasksForStorageWrite(next)) {
+    await storage.addTask(task)
+  }
+
+  return {
+    imported,
+    skipped,
+    total: next.length,
+  }
 }
