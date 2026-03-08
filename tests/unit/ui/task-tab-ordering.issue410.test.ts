@@ -123,4 +123,58 @@ describe('#410 task tab ordering contract', () => {
     const result = filterToday([unknownZombie, completed, unknownAlpha], now);
     expect(result.map((task) => task.id)).toEqual(['completed', 'unknownAlpha', 'unknownZombie']);
   });
+
+  it('week/month views keep stable ordering when unexpected statuses appear', () => {
+    const completedInWeek = makeTask({
+      id: 'completedInWeek',
+      status: 'completed',
+      dueAt: weekNowMs + 1 * 86_400_000,
+      updatedAt: weekNowMs + 10_000,
+    });
+    const unknownAlphaWeek = makeTask({
+      id: 'unknownAlphaWeek',
+      status: 'alpha_custom' as TaskNode['status'],
+      dueAt: weekNowMs + 2 * 86_400_000,
+      updatedAt: weekNowMs + 1_000,
+    });
+    const unknownZombieWeek = makeTask({
+      id: 'unknownZombieWeek',
+      status: 'zombie_custom' as TaskNode['status'],
+      dueAt: weekNowMs + 3 * 86_400_000,
+      updatedAt: weekNowMs + 9_000,
+    });
+
+    const weekResult = filterWeek([unknownZombieWeek, completedInWeek, unknownAlphaWeek], now);
+    expect(weekResult.map((task) => task.id)).toEqual([
+      'completedInWeek',
+      'unknownAlphaWeek',
+      'unknownZombieWeek',
+    ]);
+
+    const completedInMonth = makeTask({
+      id: 'completedInMonth',
+      status: 'completed',
+      dueAt: monthStart + 5 * 86_400_000,
+      updatedAt: monthStart + 10_000,
+    });
+    const unknownAlphaMonth = makeTask({
+      id: 'unknownAlphaMonth',
+      status: 'alpha_custom' as TaskNode['status'],
+      dueAt: monthStart + 10 * 86_400_000,
+      updatedAt: monthStart + 1_000,
+    });
+    const unknownZombieMonth = makeTask({
+      id: 'unknownZombieMonth',
+      status: 'zombie_custom' as TaskNode['status'],
+      dueAt: monthStart + 15 * 86_400_000,
+      updatedAt: monthStart + 9_000,
+    });
+
+    const monthResult = filterMonth([unknownZombieMonth, completedInMonth, unknownAlphaMonth], now);
+    expect(monthResult.map((task) => task.id)).toEqual([
+      'completedInMonth',
+      'unknownAlphaMonth',
+      'unknownZombieMonth',
+    ]);
+  });
 });
