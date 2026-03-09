@@ -2811,7 +2811,17 @@ export function AgentsPage() {
       const resp = await fetch(`${rtUrl}/pty`);
       if (resp.ok) {
         const data = await resp.json() as Array<{ id: string; name: string; status: string; workdir: string }>;
-        setPtyAgents(data);
+        setPtyAgents(prev => {
+          if (
+            prev.length === data.length &&
+            prev.every((p, i) =>
+              p.id === data[i].id && p.name === data[i].name && p.status === data[i].status
+            )
+          ) {
+            return prev; // No change — preserve reference identity
+          }
+          return data;
+        });
       }
     } catch {
       // PTY endpoint may not be available; silently ignore
@@ -3034,13 +3044,6 @@ export function AgentsPage() {
     }),
     [topologyDatasetKey, topologyFilterKey, topologyLayoutStore]
   );
-  const topologyManualResult = useMemo(
-    () => applyManualLayoutSnapshot({
-      nodes: baseSignalGraph.nodes,
-      snapshot: topologyManualSnapshot,
-    }),
-    [baseSignalGraph.nodes, topologyManualSnapshot]
-  );
   const ptyGraphNodes = useMemo((): SignalGraphNode[] => {
     return ptyAgents.map((pty, idx) => ({
       id: `pty-${pty.id}`,
@@ -3050,16 +3053,26 @@ export function AgentsPage() {
       position: { x: 600, y: 80 + idx * 100 },
     }));
   }, [ptyAgents]);
-
+  const allGraphNodes = useMemo(
+    () => [...baseSignalGraph.nodes, ...ptyGraphNodes],
+    [baseSignalGraph.nodes, ptyGraphNodes]
+  );
+  const topologyManualResult = useMemo(
+    () => applyManualLayoutSnapshot({
+      nodes: allGraphNodes,
+      snapshot: topologyManualSnapshot,
+    }),
+    [allGraphNodes, topologyManualSnapshot]
+  );
   const signalGraph = useMemo(() => {
-    const baseNodes = topologyLayoutMode === 'manual'
+    const nodes = topologyLayoutMode === 'manual'
       ? topologyManualResult.nodes
-      : buildAutoFlowLayout(baseSignalGraph.nodes);
+      : buildAutoFlowLayout(allGraphNodes);
     return {
-      nodes: [...baseNodes, ...ptyGraphNodes],
+      nodes,
       edges: baseSignalGraph.edges,
     };
-  }, [baseSignalGraph.edges, baseSignalGraph.nodes, topologyLayoutMode, topologyManualResult.nodes, ptyGraphNodes]);
+  }, [baseSignalGraph.edges, topologyLayoutMode, topologyManualResult.nodes, allGraphNodes]);
   const manualViewport = topologyManualSnapshot?.viewport;
 
   const flushTopologyStoreWrite = () => {
