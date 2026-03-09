@@ -15,19 +15,27 @@
 
 import { execSync } from 'child_process';
 
+// ========== 常量定义 ==========
+const LOCK_LABEL = '🔒 locked';
+const LOCK_METADATA_MARKER = '<!-- LOCK_METADATA';
+
 interface LockMetadata {
   lock_id: string;                // 唯一标识：lock-{timestamp}-{random}
   agent_id: string;               // Agent 标识
   worktree_path?: string;         // 工作目录路径
+  branch?: string;                // Git 分支名
   acquired_at: string;            // 获取时间 ISO 8601
   lock_duration_minutes: number;  // 锁时长（分钟）
   task_id?: string;               // 关联任务 ID
   reason?: string;                // 锁定原因
+  released?: boolean;             // 是否已释放
+  released_at?: string;           // 释放时间
 }
 
 interface LockState {
   lock_id: string;                // 锁 ID
   pr_number: number;              // PR 编号
+  comment_id?: number;            // 评论 ID（用于编辑）
   acquired_at: string;            // 获取时间 ISO 8601
   lock_duration_minutes: number;  // 锁时长（分钟）
   pr_last_updated_at: string;     // PR 最后更新时间
@@ -57,6 +65,19 @@ export class PRLockManager {
     private repo: string,      // "exomind-team/exomind"
     private agentId: string    // "fixer@pr-draft-cleanup"
   ) {}
+
+  // ========== Git 分支管理 ==========
+
+  /**
+   * 获取当前 Git 分支名
+   */
+  private getCurrentBranch(): string | undefined {
+    try {
+      return execSync('git branch --show-current', { encoding: 'utf-8' }).trim();
+    } catch {
+      return undefined;
+    }
+  }
 
   // ========== 动态过期时间计算 ==========
 
@@ -124,7 +145,8 @@ export class PRLockManager {
   private async saveLockState(
     prNumber: number,
     lock: LockMetadata,
-    prLastUpdatedAt: string
+    prLastUpdatedAt: string,
+    commentId?: number
   ): Promise<void> {
     const lockFile = '.exomind/lock-state.json';
     const contextDir = '.exomind';
@@ -140,6 +162,7 @@ export class PRLockManager {
     const lockState: LockState = {
       lock_id: lock.lock_id,
       pr_number: prNumber,
+      comment_id: commentId,
       acquired_at: lock.acquired_at,
       lock_duration_minutes: lock.lock_duration_minutes,
       pr_last_updated_at: prLastUpdatedAt,
@@ -219,7 +242,7 @@ export class PRLockManager {
    * 1. 检查是否已有锁
    * 2. 如果有锁且未过期，返回失败
    * 3. 如果有锁但已过期，强制释放
-   * 4. 添加标签 + 创建 Comment
+   * 4. 添加标签 + 创建/更新 Comment
    * 5. 重新检查 timeline，检测竞争条件
    * 6. 如果有竞争，比较时间戳，较晚的主动放弃
    * 7. 保存本地锁文件
@@ -227,7 +250,7 @@ export class PRLockManager {
   async acquire(
     prNumber: number,
     timeoutMinutes: number,
-    options?: { worktreePath?: string; taskId?: string; reason?: string }
+    options?: { worktreePath?: string; branch?: string; taskId?: string; reason?: string }
   ): Promise<LockResult> {
     console.log(`[PRLock] Agent ${this.agentId} attempting to acquire lock on PR #${prNumber}`);
 
@@ -251,10 +274,12 @@ export class PRLockManager {
 
     // 2. 生成锁元数据
     const now = new Date();
+    const branch = options?.branch || this.getCurrentBranch();
     const lock: LockMetadata = {
       lock_id: `lock-${now.getTime()}-${Math.random().toString(36).substr(2, 9)}`,
       agent_id: this.agentId,
       worktree_path: options?.worktreePath,
+      branch: branch,
       acquired_at: now.toISOString(),
       lock_duration_minutes: timeoutMinutes,
       task_id: options?.taskId,
@@ -263,11 +288,11 @@ export class PRLockManager {
 
     // 3. 添加锁标签
     console.log(`[PRLock] Adding lock label to PR #${prNumber}`);
-    await this.addLabel(prNumber, '🔒 locked');
+    await this.addLabel(prNumber, LOCK_LABEL);
 
-    // 4. 创建锁元数据 Comment
-    console.log(`[PRLock] Creating lock comment with metadata`);
-    await this.createLockComment(prNumber, lock);
+    // 4. 创建/更新锁元数据 Comment
+    console.log(`[PRLock] Creating/updating lock comment with metadata`);
+    const commentId = await this.updateLockComment(prNumber, lock);
 
     // 5. 等待 GitHub API 同步（避免 race condition）
     await this.sleep(2000);
@@ -279,7 +304,7 @@ export class PRLockManager {
     if (conflictCheck.hasConflict) {
       // 发现竞争，主动放弃
       console.log(`[PRLock] Race condition detected! ${conflictCheck.winner} won, ${conflictCheck.loser} backing off`);
-      await this.removeLabel(prNumber, '🔒 locked');
+      await this.removeLabel(prNumber, LOCK_LABEL);
       await this.createComment(prNumber,
         `🔓 **锁竞争检测**\n\n` +
         `检测到多个 Agent 同时尝试获取锁：\n` +
@@ -302,13 +327,13 @@ export class PRLockManager {
 
     // 7. 保存本地锁文件
     const prLastUpdatedAt = await this.getPRLastUpdatedAt(prNumber);
-    await this.saveLockState(prNumber, lock, prLastUpdatedAt);
+    await this.saveLockState(prNumber, lock, prLastUpdatedAt, commentId);
 
     return { success: true, lock };
   }
 
   /**
-   * 释放锁
+   * 释放锁（编辑评论标记为已释放）
    */
   async release(prNumber: number): Promise<LockResult> {
     console.log(`[PRLock] Releasing lock on PR #${prNumber}`);
@@ -328,17 +353,30 @@ export class PRLockManager {
     }
 
     // 移除锁标签
-    await this.removeLabel(prNumber, '🔒 locked');
+    await this.removeLabel(prNumber, LOCK_LABEL);
 
-    // 添加释放评论
-    await this.createComment(prNumber,
-      `🔓 **锁已释放**\n\n` +
-      `- 持有者：\`${lock.agent_id}\`\n` +
-      `- 获取时间：${lock.acquired_at}\n` +
-      `- 释放时间：${new Date().toISOString()}\n` +
-      (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
-      `\nPR 现在可以被其他 Agent 处理。`
-    );
+    // 更新锁元数据：标记为已释放
+    const releasedLock: LockMetadata = {
+      ...lock,
+      released: true,
+      released_at: new Date().toISOString()
+    };
+
+    // 编辑评论标记为已释放
+    const localLockState = await this.loadLockState();
+    if (localLockState?.comment_id) {
+      await this.updateLockCommentWithRelease(prNumber, localLockState.comment_id, releasedLock);
+    } else {
+      // 如果没有本地锁文件，创建新评论
+      await this.createComment(prNumber,
+        `🔓 **锁已释放**\n\n` +
+        `- 持有者：\`${lock.agent_id}\`\n` +
+        `- 获取时间：${lock.acquired_at}\n` +
+        `- 释放时间：${releasedLock.released_at}\n` +
+        (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
+        `\nPR 现在可以被其他 Agent 处理。`
+      );
+    }
 
     console.log(`[PRLock] Lock released successfully`);
 
@@ -364,7 +402,7 @@ export class PRLockManager {
       oldLock = lock;
     }
 
-    await this.removeLabel(prNumber, '🔒 locked');
+    await this.removeLabel(prNumber, LOCK_LABEL);
 
     await this.createComment(prNumber,
       `🔓 **锁已超时释放**\n\n` +
@@ -391,7 +429,7 @@ export class PRLockManager {
       console.warn(`[PRLock] Failed to get labels for PR #${prNumber}:`, e);
       return null;
     }
-    const hasLock = labels.some((l: any) => l.name === '🔒 locked');
+    const hasLock = labels.some((l: any) => l.name === LOCK_LABEL);
 
     if (!hasLock) {
       return null;
@@ -535,6 +573,88 @@ export class PRLockManager {
     Bun.write(tmpFile, body);
     this.gh(`issue comment ${prNumber} --body-file ${tmpFile}`);
     execSync(`rm ${tmpFile}`);
+  }
+
+  /**
+   * 编辑评论
+   */
+  private async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
+    // 使用临时文件避免 shell 转义问题
+    const tmpFile = `/tmp/pr-lock-comment-${Date.now()}.md`;
+    await Bun.write(tmpFile, body);
+    this.gh(`api repos/${this.repo}/issues/comments/${commentId} -X PATCH -f body=@${tmpFile}`);
+    execSync(`rm ${tmpFile}`);
+  }
+
+  /**
+   * 创建或更新锁评论
+   *
+   * 返回评论 ID
+   */
+  private async updateLockComment(prNumber: number, lock: LockMetadata): Promise<number | undefined> {
+    // 1. 查找是否已存在锁评论
+    const comments = await this.getComments(prNumber);
+    const existingLockComment = comments
+      .reverse()  // 从最新开始
+      .find((c: any) => c.body?.includes(LOCK_METADATA_MARKER));
+
+    const body =
+      `<!-- LOCK_METADATA\n${JSON.stringify(lock, null, 2)}\n-->\n\n` +
+      `🔒 **PR 已被锁定**\n\n` +
+      `- 持有者：\`${lock.agent_id}\`\n` +
+      (lock.worktree_path ? `- 工作目录：\`${lock.worktree_path}\`\n` : '') +
+      (lock.branch ? `- Git 分支：\`${lock.branch}\`\n` : '') +
+      `- 锁 ID：\`${lock.lock_id}\`\n` +
+      `- 获取时间：${lock.acquired_at}\n` +
+      `- 锁时长：${lock.lock_duration_minutes} 分钟\n` +
+      (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
+      (lock.reason ? `- 原因：${lock.reason}\n` : '') +
+      `\n**过期时间动态计算：**\n` +
+      `过期时间 = PR 最后更新时间 + ${lock.lock_duration_minutes} 分钟\n` +
+      `每次提交或评论后，锁自动延期。`;
+
+    if (existingLockComment) {
+      // 2. 如果存在，编辑该评论
+      console.log(`[PRLock] Updating existing lock comment #${existingLockComment.id}`);
+      await this.updateComment(prNumber, existingLockComment.id, body);
+      return existingLockComment.id;
+    } else {
+      // 3. 如果不存在，创建新评论
+      console.log(`[PRLock] Creating new lock comment`);
+      await this.createComment(prNumber, body);
+
+      // 获取刚创建的评论 ID
+      const updatedComments = await this.getComments(prNumber);
+      const newComment = updatedComments[updatedComments.length - 1];
+      return newComment?.id;
+    }
+  }
+
+  /**
+   * 更新锁评论为已释放状态
+   */
+  private async updateLockCommentWithRelease(
+    prNumber: number,
+    commentId: number,
+    lock: LockMetadata
+  ): Promise<void> {
+    const body =
+      `<!-- LOCK_METADATA\n${JSON.stringify(lock, null, 2)}\n-->\n\n` +
+      `🔓 **锁已释放**\n\n` +
+      `- 持有者：\`${lock.agent_id}\`\n` +
+      (lock.worktree_path ? `- 工作目录：\`${lock.worktree_path}\`\n` : '') +
+      (lock.branch ? `- Git 分支：\`${lock.branch}\`\n` : '') +
+      `- 锁 ID：\`${lock.lock_id}\`\n` +
+      `- 获取时间：${lock.acquired_at}\n` +
+      `- 锁时长：${lock.lock_duration_minutes} 分钟\n` +
+      (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
+      (lock.reason ? `- 原因：${lock.reason}\n` : '') +
+      `- 释放时间：${lock.released_at}\n` +
+      `\n**过期时间动态计算：**\n` +
+      `过期时间 = PR 最后更新时间 + ${lock.lock_duration_minutes} 分钟\n` +
+      `每次提交或评论后，锁自动延期。`;
+
+    await this.updateComment(prNumber, commentId, body);
   }
 
   private async createLockComment(prNumber: number, lock: LockMetadata): Promise<void> {
