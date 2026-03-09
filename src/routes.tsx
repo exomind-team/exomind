@@ -243,6 +243,7 @@ function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; 
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
+    { key: 'me', title: 'Me', path: '/me', icon: UserRound, match: (path: string) => path === '/me' || path.startsWith('/me/') },
     ...(agentPageEnabled ? [{
       key: 'agents',
       title: '网络',

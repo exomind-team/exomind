@@ -41,6 +41,8 @@ describe('issue-198 settings desktop VC tabs（设置页桌面VC标签与跳转�
     expect(screen.getByRole('button', { name: '关于' })).toBeInTheDocument();
     expect(screen.getByText('导出备份')).toBeInTheDocument();
     expect(screen.getByText('导入数据')).toBeInTheDocument();
+    expect(screen.getByText('语音转写后')).toBeInTheDocument();
+    expect(screen.getByText('反馈内容')).toBeInTheDocument();
 
     expect(screen.queryByText('工作模式')).not.toBeInTheDocument();
     expect(screen.queryByText('番茄时长')).not.toBeInTheDocument();

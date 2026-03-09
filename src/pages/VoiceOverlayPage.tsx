@@ -26,6 +26,10 @@ interface OverlayData {
   duration: number;
   /** ASR 结果文本预览，done 状态使用 */
   text: string;
+  /** 当前使用的识别引擎标签，done 状态使用 */
+  providerLabel?: string;
+  /** 识别耗时（毫秒），done 状态使用 */
+  recognitionMs?: number;
   /** 错误信息，error 状态使用 */
   errorMessage: string;
 }
@@ -42,6 +46,8 @@ export function VoiceOverlayPage() {
     state: "idle",
     duration: 0,
     text: "",
+    providerLabel: "",
+    recognitionMs: undefined,
     errorMessage: "",
   });
 
@@ -96,7 +102,14 @@ export function VoiceOverlayPage() {
     <div className="voice-overlay-root">
       <div className={`voice-overlay voice-overlay--${data.state}`}>
         <StatusIndicator state={data.state} />
-        <StatusText state={data.state} duration={data.duration} text={data.text} errorMessage={data.errorMessage} />
+        <StatusText
+          state={data.state}
+          duration={data.duration}
+          text={data.text}
+          providerLabel={data.providerLabel}
+          recognitionMs={data.recognitionMs}
+          errorMessage={data.errorMessage}
+        />
       </div>
 
       <style>{overlayStyles}</style>
@@ -141,11 +154,15 @@ function StatusText({
   state,
   duration,
   text,
+  providerLabel,
+  recognitionMs,
   errorMessage,
 }: {
   state: OverlayState;
   duration: number;
   text: string;
+  providerLabel?: string;
+  recognitionMs?: number;
   errorMessage: string;
 }) {
   switch (state) {
@@ -155,7 +172,19 @@ function StatusText({
       return <span className="overlay-text overlay-text--secondary">识别中...</span>;
     case "done": {
       const preview = text.length > 20 ? text.slice(0, 20) + "..." : text;
-      return <span className="overlay-text">{preview || "完成"}</span>;
+      const providerMeta = providerLabel?.trim();
+      const elapsed = typeof recognitionMs === "number" ? formatRecognitionMs(recognitionMs) : "";
+      const meta = providerMeta && elapsed
+        ? `${providerMeta} · 识别 ${elapsed}`
+        : elapsed
+          ? `识别 ${elapsed}`
+          : providerMeta || "";
+      return (
+        <span className="overlay-text-group">
+          <span className="overlay-text">{preview || "完成"}</span>
+          {meta ? <span className="overlay-text overlay-text--secondary">{meta}</span> : null}
+        </span>
+      );
     }
     case "error":
       return <span className="overlay-text overlay-text--error">{errorMessage || "识别失败"}</span>;
@@ -170,6 +199,10 @@ function formatDuration(seconds: number): string {
   const m = Math.floor(seconds / 60);
   const s = Math.floor(seconds % 60);
   return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+}
+
+function formatRecognitionMs(milliseconds: number): string {
+  return `${(milliseconds / 1000).toFixed(2)}s`;
 }
 
 // --- Styles ---
@@ -279,6 +312,13 @@ const overlayStyles = /* css */ `
   .overlay-text {
     font-weight: 500;
     font-variant-numeric: tabular-nums;
+  }
+
+  .overlay-text-group {
+    display: inline-flex;
+    flex-direction: column;
+    gap: 4px;
+    max-width: 240px;
   }
 
   .overlay-text--secondary {

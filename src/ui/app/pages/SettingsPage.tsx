@@ -71,6 +71,13 @@ import {
   type VoiceShortcutHotkey,
 } from '@/config/voice-shortcut-hotkey';
 import {
+  getVoiceShortcutAsrProvider,
+  getVoiceShortcutAsrProviderLabel,
+  setVoiceShortcutAsrProvider,
+  subscribeVoiceShortcutAsrProviderChanges,
+  type VoiceShortcutAsrProvider,
+} from '@/config/voice-shortcut-asr-provider';
+import {
   getFeedbackPreferences,
   setFeedbackPreferences,
   subscribeFeedbackPreferencesChanges,
@@ -227,6 +234,9 @@ export function SettingsPage() {
   );
   const [voiceShortcutHotkey, setVoiceShortcutHotkeyState] = useState<VoiceShortcutHotkey>(
     () => getVoiceShortcutHotkey()
+  );
+  const [voiceShortcutAsrProvider, setVoiceShortcutAsrProviderState] = useState<VoiceShortcutAsrProvider>(
+    () => getVoiceShortcutAsrProvider()
   );
   const [feedbackPreferences, setFeedbackPreferencesState] = useState<FeedbackPreferences>(
     () => getFeedbackPreferences()
@@ -465,9 +475,34 @@ export function SettingsPage() {
     setVoiceTranscriptSendMode(mode);
     setVoiceTranscriptSendModeState(mode);
   };
-  const handleVoiceShortcutHotkeyChange = (hotkey: VoiceShortcutHotkey) => {
-    const normalizedHotkey = setVoiceShortcutHotkey(hotkey);
-    setVoiceShortcutHotkeyState(normalizedHotkey);
+  const handleVoiceShortcutHotkeyChange = async (hotkey: VoiceShortcutHotkey) => {
+    clearNotice();
+    const previousHotkey = voiceShortcutHotkey;
+
+    if (!await isTauri()) {
+      const normalizedHotkey = setVoiceShortcutHotkey(hotkey);
+      setVoiceShortcutHotkeyState(normalizedHotkey);
+      return;
+    }
+
+    try {
+      const appliedHotkey = await invoke<string>('voice_shortcut_set', { shortcut: hotkey });
+      const normalizedHotkey = setVoiceShortcutHotkey(appliedHotkey, { emitEvent: false });
+      setVoiceShortcutHotkeyState(normalizedHotkey);
+      setStatusMessage(`全局语音快捷键已切换为 ${normalizedHotkey}`);
+    } catch (error) {
+      const runtimeHotkey = await invoke<string>('voice_shortcut_get').catch(() => previousHotkey);
+      const normalizedHotkey = setVoiceShortcutHotkey(runtimeHotkey, { emitEvent: false });
+      setVoiceShortcutHotkeyState(normalizedHotkey);
+      const message = error instanceof Error ? error.message : String(error);
+      setErrorMessage(`全局语音快捷键切换失败：${message}`);
+    }
+  };
+  const handleVoiceShortcutAsrProviderChange = (provider: VoiceShortcutAsrProvider) => {
+    const normalizedProvider = setVoiceShortcutAsrProvider(provider);
+    setVoiceShortcutAsrProviderState(normalizedProvider);
+    clearNotice();
+    setStatusMessage(`快捷语音引擎已切换为 ${getVoiceShortcutAsrProviderLabel(normalizedProvider)}`);
   };
   const handleFeedbackPreferenceToggle = (key: keyof FeedbackPreferences) => {
     const next = {
@@ -579,6 +614,33 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    return subscribeVoiceShortcutAsrProviderChanges((provider) => {
+      setVoiceShortcutAsrProviderState(provider);
+    });
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      if (!await isTauri()) return;
+
+      try {
+        const runtimeHotkey = await invoke<string>('voice_shortcut_get');
+        if (cancelled) return;
+        const normalizedHotkey = setVoiceShortcutHotkey(runtimeHotkey, { emitEvent: false });
+        setVoiceShortcutHotkeyState(normalizedHotkey);
+      } catch {
+        // Ignore runtime sync failure and keep the locally cached value.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
     return subscribeFeedbackPreferencesChanges((nextPreferences) => {
       setFeedbackPreferencesState(nextPreferences);
     });
@@ -616,6 +678,50 @@ export function SettingsPage() {
     ? `已配置 (${maskMossApiKey(mossApiKey)})`
     : '未配置';
   const voiceTestStatusLabel = developerMode ? '可用' : '需开发者模式';
+  const voiceShortcutProviderLabel = getVoiceShortcutAsrProviderLabel(voiceShortcutAsrProvider);
+
+  const renderVoiceShortcutProviderControl = () => (
+    <div
+      role="group"
+      aria-label="快捷语音引擎"
+      className="relative grid min-w-[156px] grid-cols-2 rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+    >
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute bottom-[3px] top-[3px] w-[calc(50%-3px)] rounded-[8px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition-transform dark:bg-[#44403C] ${
+          voiceShortcutAsrProvider === 'volcano' ? 'translate-x-[calc(100%-0px)]' : 'translate-x-0'
+        }`}
+      />
+      <button
+        type="button"
+        data-testid="new-settings-voice-provider-moss"
+        aria-pressed={voiceShortcutAsrProvider === 'moss'}
+        onClick={() => handleVoiceShortcutAsrProviderChange('moss')}
+        disabled={loading}
+        className={`relative z-10 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+          voiceShortcutAsrProvider === 'moss'
+            ? 'font-medium text-[#1C1917] dark:text-[#FAFAF9]'
+            : 'text-[#A8A29E]'
+        }`}
+      >
+        MOSS
+      </button>
+      <button
+        type="button"
+        data-testid="new-settings-voice-provider-volcano"
+        aria-pressed={voiceShortcutAsrProvider === 'volcano'}
+        onClick={() => handleVoiceShortcutAsrProviderChange('volcano')}
+        disabled={loading}
+        className={`relative z-10 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+          voiceShortcutAsrProvider === 'volcano'
+            ? 'font-medium text-[#1C1917] dark:text-[#FAFAF9]'
+            : 'text-[#A8A29E]'
+        }`}
+      >
+        火山
+      </button>
+    </div>
+  );
 
   const syncHost = (() => {
     try {
@@ -755,6 +861,66 @@ export function SettingsPage() {
                   </div>
                 }
               />
+              <Divider />
+              <div data-testid="new-settings-feedback-content-row">
+                <SettingRow
+                  icon={<List className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="反馈内容"
+                  right={(
+                    <div
+                      role="group"
+                      aria-label="时间块反馈内容"
+                      className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                    >
+                      <button
+                        type="button"
+                        data-testid="new-settings-feedback-content-timing"
+                        aria-pressed={feedbackPreferences.timingInfoEnabled}
+                        onClick={() => handleFeedbackPreferenceToggle('timingInfoEnabled')}
+                        disabled={loading}
+                        className={`rounded-l-[8px] rounded-r-none px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                          feedbackPreferences.timingInfoEnabled
+                            ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                            : 'text-[#A8A29E]'
+                        }`}
+                      >
+                        时刻信息
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="new-settings-feedback-content-statistics"
+                        aria-pressed={feedbackPreferences.statisticsEnabled}
+                        onClick={() => handleFeedbackPreferenceToggle('statisticsEnabled')}
+                        disabled={loading}
+                        className={`rounded-none px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                          feedbackPreferences.statisticsEnabled
+                            ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                            : 'text-[#A8A29E]'
+                        }`}
+                      >
+                        统计信息
+                      </button>
+                      <button
+                        type="button"
+                        data-testid="new-settings-feedback-content-quick"
+                        aria-pressed={feedbackPreferences.quickFeedbackEnabled}
+                        onClick={() => handleFeedbackPreferenceToggle('quickFeedbackEnabled')}
+                        disabled={loading}
+                        className={`rounded-l-none rounded-r-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                          feedbackPreferences.quickFeedbackEnabled
+                            ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                            : 'text-[#A8A29E]'
+                        }`}
+                      >
+                        快速反馈
+                      </button>
+                    </div>
+                  )}
+                />
+              </div>
+              <div className="pb-[14px] pl-[46px] pr-4">
+                <span className="text-xs text-[#A8A29E]">可多选，默认仅开启快速反馈</span>
+              </div>
             </SectionCard>
           </section>
 
@@ -773,6 +939,52 @@ export function SettingsPage() {
                 }
               />
               <div data-testid="new-settings-input-section">
+                <Divider />
+                <div data-testid="new-settings-voice-transcript-mode-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="语音转写后"
+                    right={(
+                      <div
+                        role="group"
+                        aria-label="语音转写后行为"
+                        className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+                      >
+                        <button
+                          type="button"
+                          data-testid="new-settings-voice-transcript-mode-insert"
+                          aria-pressed={voiceTranscriptSendMode === 'insert'}
+                          onClick={() => handleVoiceTranscriptSendModeChange('insert')}
+                          disabled={loading}
+                          className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                            voiceTranscriptSendMode === 'insert'
+                              ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                              : 'text-[#A8A29E]'
+                          }`}
+                        >
+                          插入输入框
+                        </button>
+                        <button
+                          type="button"
+                          data-testid="new-settings-voice-transcript-mode-direct-send"
+                          aria-pressed={voiceTranscriptSendMode === 'direct-send'}
+                          onClick={() => handleVoiceTranscriptSendModeChange('direct-send')}
+                          disabled={loading}
+                          className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+                            voiceTranscriptSendMode === 'direct-send'
+                              ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+                              : 'text-[#A8A29E]'
+                          }`}
+                        >
+                          直接发送
+                        </button>
+                      </div>
+                    )}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">仅作用于「当下」页面输入框，默认插入输入框</span>
+                </div>
                 <Divider />
                 <div data-testid="new-settings-voice-shortcut-row">
                   <SettingRow
@@ -814,6 +1026,19 @@ export function SettingsPage() {
                 </div>
                 <div className="pb-[14px] pl-[46px] pr-4">
                   <span className="text-xs text-[#A8A29E]">Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束</span>
+                </div>
+                <Divider />
+                <div data-testid="new-settings-voice-provider-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="快捷语音引擎"
+                    right={renderVoiceShortcutProviderControl()}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">
+                    影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
+                  </span>
                 </div>
                 <Divider />
                 <div data-testid="new-settings-voice-token-row">
@@ -1231,6 +1456,19 @@ export function SettingsPage() {
             </div>
             <div className="pb-[14px] pl-[46px] pr-4">
               <span className="text-xs text-[#A8A29E]">Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束</span>
+            </div>
+            <Divider />
+            <div data-testid="new-settings-voice-provider-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="快捷语音引擎"
+                right={renderVoiceShortcutProviderControl()}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">
+                影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
+              </span>
             </div>
             <Divider />
             <div data-testid="new-settings-voice-token-row">

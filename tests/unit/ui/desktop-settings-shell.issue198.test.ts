@@ -27,9 +27,11 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).toContain("location.pathname === '/agents'");
   });
 
-  it('uses four desktop nav items with network entry（桌面导航4项且使用网络入口）', () => {
+  it('uses five desktop nav items including me entry（桌面导航5项且包含 Me 入口）', () => {
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
     expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
+    expect(desktopNavBlock).toContain("title: 'Me', path: '/me'");
+    expect(desktopNavBlock).toContain("icon: UserRound");
     expect(desktopNavBlock).toContain("key: 'agents'");
     expect(desktopNavBlock).toContain("title: '网络'");
     expect(desktopNavBlock).toContain("path: '/agents'");

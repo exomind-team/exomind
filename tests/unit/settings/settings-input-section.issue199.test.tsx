@@ -1,12 +1,22 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
-import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
+import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
+import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
+
+const invokeMock = vi.fn();
+const isTauriMock = vi.fn(() => false);
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: (...args: unknown[]) => invokeMock(...args),
+  isTauri: (...args: unknown[]) => isTauriMock(...args),
+}));
 
 describe('SettingsPage input section（输入分组语音配置）', () => {
   beforeEach(() => {
+    vi.clearAllMocks();
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -22,6 +32,9 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     if (typeof storage.removeItem === 'function') {
       storage.removeItem('moss_api_key');
     }
+
+    isTauriMock.mockReturnValue(false);
+    invokeMock.mockResolvedValue(null);
   });
 
   it('renders input section with voice-related rows', () => {
@@ -30,8 +43,25 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
+    expect(screen.getByText('快捷语音引擎')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
+  });
+
+  it('switches shortcut voice provider from input section', () => {
+    render(<SettingsPage />);
+
+    const volcanoButton = screen.getByTestId('new-settings-voice-provider-volcano');
+    const mossButton = screen.getByTestId('new-settings-voice-provider-moss');
+
+    fireEvent.click(volcanoButton);
+    expect(volcanoButton).toHaveAttribute('aria-pressed', 'true');
+    expect(mossButton).toHaveAttribute('aria-pressed', 'false');
+    expect(setVoiceShortcutAsrProvider('volcano')).toBe('volcano');
+
+    fireEvent.click(mossButton);
+    expect(mossButton).toHaveAttribute('aria-pressed', 'true');
+    expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('toggles voice transcript send mode from input section', () => {
@@ -50,10 +80,35 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     render(<SettingsPage />);
 
     fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-ctrl-space'));
-    expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
-
     fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-alt-w'));
-    expect(setHotkeyMock).toHaveBeenCalledWith('Alt+W');
+    return waitFor(() => {
+      expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
+      expect(setHotkeyMock).toHaveBeenCalledWith('Alt+W');
+    });
+  });
+
+  it('reverts to runtime hotkey when tauri shortcut switch fails（Tauri 切换失败时回滚到实际快捷键）', async () => {
+    isTauriMock.mockReturnValue(true);
+    vi.mocked(getVoiceShortcutHotkey).mockReturnValue('Alt+Q');
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'voice_shortcut_set') {
+        throw new Error('shortcut already registered');
+      }
+      if (command === 'voice_shortcut_get') {
+        return 'Alt+Q';
+      }
+      return null;
+    });
+
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-ctrl-space'));
+
+    await waitFor(() => {
+      expect(screen.getByText('全局语音快捷键切换失败：shortcut already registered')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('new-settings-voice-shortcut-alt-q')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('new-settings-voice-shortcut-ctrl-space')).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('saves MOSS token from input settings dialog', () => {

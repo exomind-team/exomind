@@ -62,7 +62,14 @@ impl SignalBus {
                 finished_at: chrono::Utc::now().to_rfc3339(),
             };
 
-            journal.append(record.clone());
+            if let Err(error) = journal.append(record.clone()) {
+                tracing::warn!(
+                    event_id = %record.event_id,
+                    route_id = %record.route_id,
+                    error = %error,
+                    "signal journal append failed during publish (日志追加失败)"
+                );
+            }
             records.push(record);
         }
 
@@ -108,7 +115,8 @@ mod tests {
             target_ref: "classifier".to_string(),
             created_at: now.clone(),
             updated_at: now.clone(),
-        });
+        })
+        .unwrap();
         table.add(crate::signal::types::SignalRoute {
             id: "route-ui".to_string(),
             enabled: true,
@@ -117,7 +125,8 @@ mod tests {
             target_ref: "ui".to_string(),
             created_at: now.clone(),
             updated_at: now,
-        });
+        })
+        .unwrap();
         table
     }
 

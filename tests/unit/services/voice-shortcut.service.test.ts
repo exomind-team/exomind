@@ -1,4 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
+import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
 
 let voiceShortcutListener: ((event: { payload: string }) => void | Promise<void>) | null = null;
 
@@ -96,7 +98,7 @@ vi.mock('@/lib/services/eventlog.service', () => ({
 
 import { VoiceShortcutService } from '@/services/voice-shortcut.service';
 
-async function emitVoiceShortcut(payload: 'start' | 'stop'): Promise<void> {
+async function emitVoiceShortcut(payload: 'start' | 'stop' | 'cancel'): Promise<void> {
   voiceShortcutListener?.({ payload });
   await Promise.resolve();
   await Promise.resolve();
@@ -120,6 +122,10 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     addEventMock.mockReset();
     getUserMediaWithConstraintFallbackMock.mockReset();
     subscribeHotkeyMock.mockClear();
+    window.localStorage.removeItem('exomind:voiceShortcutAsrProvider');
+    window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
+    window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.accessKey);
+    window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.resourceId);
 
     getUserMediaWithConstraintFallbackMock.mockResolvedValue({
       getTracks: () => [{ stop: vi.fn() }],
@@ -138,6 +144,14 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
       if (command === 'voice_shortcut_set') {
         return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_recognize') {
+        return {
+          text: '火山识别文本',
+          confidence: 0.98,
+          lang: 'zh-CN',
+          duration: 1800,
+        };
       }
       return null;
     });
@@ -181,11 +195,66 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     voiceShortcutListener?.({ payload: 'stop' });
     voiceShortcutListener?.({ payload: 'stop' });
-    await Promise.resolve();
-    await Promise.resolve();
+    await flushAsync();
 
     expect(convertWebmBlobToWavMock).toHaveBeenCalledTimes(1);
     expect(transcribeMock).toHaveBeenCalledTimes(1);
+
+    service.destroy();
+  });
+
+  it('cancels active recording on cancel event without running ASR（收到 cancel 时立即取消录音且不走识别）', async () => {
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('cancel');
+    await flushAsync();
+
+    expect(convertWebmBlobToWavMock).not.toHaveBeenCalled();
+    expect(transcribeMock).not.toHaveBeenCalled();
+    expect(writeClipboardMock).not.toHaveBeenCalled();
+    expect(addEventMock).not.toHaveBeenCalled();
+    expect(emitMock).toHaveBeenCalledWith('voice-overlay-state', expect.objectContaining({ state: 'idle' }));
+    expect(invokeMock).toHaveBeenCalledWith('voice_overlay_hide');
+
+    service.destroy();
+  });
+
+  it('uses volcano provider when selected in settings（切换到火山提供商后走 volcano_asr_recognize）', async () => {
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.bigasr.sauc.duration');
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(transcribeMock).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith(
+      'volcano_asr_recognize',
+      expect.objectContaining({
+        audioData: expect.any(Array),
+        config: expect.objectContaining({
+          appKey: 'test-app-key',
+          accessKey: 'test-access-key',
+          endpoint: 'bigmodel_async',
+        }),
+      })
+    );
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'done',
+        text: '火山识别文本',
+        providerLabel: '火山',
+        recognitionMs: expect.any(Number),
+      })
+    );
 
     service.destroy();
   });
