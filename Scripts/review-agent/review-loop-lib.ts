@@ -1,3 +1,5 @@
+import type { PersistedState, ReviewAgentStateValue } from './state-lib.ts';
+
 export interface PullRequestFile {
   path: string;
   status: string;
@@ -29,9 +31,27 @@ export interface ReviewSummary {
   needsWorktree: boolean;
 }
 
+export type ReviewCompletionResult =
+  | 'review-posted'
+  | 'needs-human-test'
+  | 'approve-ready'
+  | 'merge-ready';
+
+interface BuildCompletedReviewStateInput {
+  completion: ReviewCompletionResult;
+  selectedPrNumber: number;
+  previousState: PersistedState | null;
+}
+
 const ISSUE_REF_PATTERN = /\b(?:ref|refs|close|closes|fix|fixes)\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+)\b/gi;
 const TEST_FILE_PATTERN = /(^|\/)(test|tests|__tests__)\b|\.test\.[A-Za-z0-9]+$|\.spec\.[A-Za-z0-9]+$/i;
 const CORE_FILE_PATTERN = /(service|controller|model)/i;
+const COMPLETION_STATE_MAP: Record<ReviewCompletionResult, Extract<ReviewAgentStateValue, 'REVIEW_POSTED' | 'NEEDS_HUMAN_TEST' | 'APPROVE_READY' | 'MERGE_READY'>> = {
+  'review-posted': 'REVIEW_POSTED',
+  'needs-human-test': 'NEEDS_HUMAN_TEST',
+  'approve-ready': 'APPROVE_READY',
+  'merge-ready': 'MERGE_READY',
+};
 
 export function parseLinkedIssueNumbers(text: string): number[] {
   const issueNumbers: number[] = [];
@@ -79,6 +99,23 @@ export function buildReviewSummary(input: ReviewSummaryInput): ReviewSummary {
     reviewMode: classifyReviewMode(input),
     prioritizedFiles: prioritizeFiles(input.files),
     needsWorktree: false,
+  };
+}
+
+export function buildCompletedReviewState(input: BuildCompletedReviewStateInput): PersistedState {
+  return {
+    state: COMPLETION_STATE_MAP[input.completion],
+    phase: 'REVIEW',
+    lastPhase: 'REVIEW',
+    nextAction: 'discovery',
+    selectedPrNumber: input.selectedPrNumber,
+    selectedReason: input.previousState?.selectedReason ?? null,
+    inspectedPrCount: input.previousState?.inspectedPrCount ?? 0,
+    skippedPrCount: input.previousState?.skippedPrCount ?? 0,
+    actionableCount: input.previousState?.actionableCount ?? 1,
+    failureStreak: 0,
+    nextSleepSeconds: input.previousState?.nextSleepSeconds ?? 180,
+    updatedAt: new Date().toISOString(),
   };
 }
 

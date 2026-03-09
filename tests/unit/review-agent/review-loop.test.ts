@@ -1,9 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildReviewSummary,
+  buildCompletedReviewState,
   classifyReviewMode,
   parseLinkedIssueNumbers,
   prioritizeFiles,
+  type ReviewCompletionResult,
   type PullRequestFile,
 } from '../../../Scripts/review-agent/review-loop-lib.ts';
 
@@ -74,5 +76,39 @@ describe('review-agent review loop', () => {
     expect(summary.prioritizedFiles.map((file) => file.path)).toEqual([
       'Scripts/review-agent/review-loop.ts',
     ]);
+  });
+
+  it.each([
+    ['review-posted', 'REVIEW_POSTED'],
+    ['needs-human-test', 'NEEDS_HUMAN_TEST'],
+    ['approve-ready', 'APPROVE_READY'],
+    ['merge-ready', 'MERGE_READY'],
+  ] as const)('maps %s to persisted terminal state %s', (completion, expectedState) => {
+    const state = buildCompletedReviewState({
+      completion: completion as ReviewCompletionResult,
+      selectedPrNumber: 450,
+      previousState: {
+        state: 'HAS_TARGET',
+        phase: 'REVIEW',
+        lastPhase: 'DISCOVERY',
+        nextAction: 'review',
+        selectedPrNumber: 450,
+        selectedReason: 'new-comment',
+        inspectedPrCount: 8,
+        skippedPrCount: 1,
+        actionableCount: 2,
+        failureStreak: 0,
+        nextSleepSeconds: 180,
+        updatedAt: '2026-03-10T00:00:00Z',
+      },
+    });
+
+    expect(state.state).toBe(expectedState);
+    expect(state.phase).toBe('REVIEW');
+    expect(state.lastPhase).toBe('REVIEW');
+    expect(state.nextAction).toBe('discovery');
+    expect(state.selectedPrNumber).toBe(450);
+    expect(state.selectedReason).toBe('new-comment');
+    expect(state.inspectedPrCount).toBe(8);
   });
 });

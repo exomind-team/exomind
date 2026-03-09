@@ -88,3 +88,27 @@
 - `APPROVE_READY`：本地审核结论干净，且门禁全部通过
 - `MERGE_READY`：所有合并条件满足
 - `FAILED_RETRYABLE`：暂时性失败，可重试
+
+## 终态落盘
+
+review 阶段在真正完成 GitHub 动作后，不能只停留在内存结论，必须立即把终态写回 `state.json`。
+
+推荐做法：
+
+1. 先完成实际动作：
+   - 发布评论
+   - 或标记 `request-changes`
+   - 或 `approve`
+   - 或 `merge`
+2. 再执行：
+   - `npx tsx Scripts/review-agent/review-loop.ts --mark-result review-posted`
+   - `npx tsx Scripts/review-agent/review-loop.ts --mark-result needs-human-test`
+   - `npx tsx Scripts/review-agent/review-loop.ts --mark-result approve-ready`
+   - `npx tsx Scripts/review-agent/review-loop.ts --mark-result merge-ready`
+3. 下一轮统一入口 prompt 重启时，router 会据此回到 `discovery`，而不是误续接上一轮 `review`
+
+约束：
+
+- `--mark-result` 只应在对应 GitHub 动作已经成功后调用
+- 若动作未真正完成，不要提前写终态
+- 若动作失败，应保留或写成可重试失败状态，而不是伪造成功终态

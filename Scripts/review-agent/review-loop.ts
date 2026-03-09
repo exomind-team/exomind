@@ -2,7 +2,9 @@ import { execFileSync } from 'node:child_process';
 
 import {
   buildReviewSummary,
+  buildCompletedReviewState,
   parseLinkedIssueNumbers,
+  type ReviewCompletionResult,
   type PullRequestFile,
 } from './review-loop-lib.ts';
 import {
@@ -18,6 +20,7 @@ import {
 interface CliOptions {
   repo?: string;
   prNumber?: number;
+  markResult?: ReviewCompletionResult;
 }
 
 interface PullRequestView {
@@ -47,6 +50,18 @@ function main(): void {
   const options = parseArgs(process.argv.slice(2));
   const repo = resolveRepo(options.repo);
   const prNumber = options.prNumber ?? readSelectedPrNumber();
+
+  if (options.markResult) {
+    const persistedState = persistCompletedReviewState(prNumber, options.markResult);
+    console.log(JSON.stringify({
+      selectedPrNumber: prNumber,
+      completion: options.markResult,
+      persistedState: persistedState.state,
+      nextAction: persistedState.nextAction,
+    }, null, 2));
+    return;
+  }
+
   const pullRequest = viewPullRequest(prNumber, repo);
   const files = fetchPullFiles(prNumber, repo);
   const reviewSummary = buildReviewSummary({
@@ -71,7 +86,7 @@ function main(): void {
     url: pullRequest.url,
   };
 
-  persistReviewState(reviewSummary.selectedPr.number);
+  persistActiveReviewState(reviewSummary.selectedPr.number);
   console.log(JSON.stringify(output, null, 2));
 }
 
@@ -91,6 +106,15 @@ function parseArgs(argv: string[]): CliOptions {
         throw new Error(`Invalid --pr value: ${argv[index + 1] ?? ''}`);
       }
       options.prNumber = nextValue;
+      index += 1;
+      continue;
+    }
+    if (value === '--mark-result') {
+      const nextValue = argv[index + 1] as ReviewCompletionResult | undefined;
+      if (!isReviewCompletionResult(nextValue)) {
+        throw new Error(`Invalid --mark-result value: ${argv[index + 1] ?? ''}`);
+      }
+      options.markResult = nextValue;
       index += 1;
       continue;
     }
@@ -181,7 +205,7 @@ function resolveRepo(explicitRepo: string | undefined): string {
   throw new Error(`Unable to resolve repo from origin remote: ${remoteUrl}`);
 }
 
-function persistReviewState(selectedPrNumber: number): void {
+function persistActiveReviewState(selectedPrNumber: number): void {
   ensurePrMonitorDir();
   const previousState = readJson<PersistedState | null>(STATE_FILE, null);
 
@@ -199,6 +223,28 @@ function persistReviewState(selectedPrNumber: number): void {
     nextSleepSeconds: previousState?.nextSleepSeconds ?? 180,
     updatedAt: new Date().toISOString(),
   } satisfies PersistedState);
+}
+
+function persistCompletedReviewState(
+  selectedPrNumber: number,
+  completion: ReviewCompletionResult,
+): PersistedState {
+  ensurePrMonitorDir();
+  const previousState = readJson<PersistedState | null>(STATE_FILE, null);
+  const nextState = buildCompletedReviewState({
+    completion,
+    selectedPrNumber,
+    previousState,
+  });
+  writeJson(STATE_FILE, nextState);
+  return nextState;
+}
+
+function isReviewCompletionResult(value: string | undefined): value is ReviewCompletionResult {
+  return value === 'review-posted'
+    || value === 'needs-human-test'
+    || value === 'approve-ready'
+    || value === 'merge-ready';
 }
 
 main();
