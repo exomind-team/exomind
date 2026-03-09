@@ -49,6 +49,7 @@
 - 用户只复制一条恒定主提示词：`docs/worker-agent/prompts/main.md`
 - Agent 每轮先运行 `next-action`
 - 每轮只做一个最高优先级动作
+- 若本轮已经吸收了当前 feedback 批次，先同步 handled cursor
 - 动作完成后显式续锁
 - 需要时发 `[Codex Worker]` 进展评论
 - 然后再次运行 `next-action`
@@ -77,6 +78,8 @@
 
 - `restore`
 - `next-action`
+- `pr sync`
+- `cursor sync`
 - `lock acquire`
 - `lock renew`
 - `lock release`

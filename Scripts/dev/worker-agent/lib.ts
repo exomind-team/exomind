@@ -6,6 +6,7 @@ export const REVIEWER_PREFIX = '[Codex Reviewer]';
 export const HUMAN_TEST_LABEL = '🙋needs-human-test';
 export const HUMAN_TEST_LABEL_ALIASES = [HUMAN_TEST_LABEL, '🙋 needs-human-test'];
 export const HUMAN_TEST_REVIEW_PREFIX = '[Codex Reviewer] ❤️ 需要人类测试';
+export const AUTOMATION_LOGINS = ['cloudflare-workers-and-pages', 'github-actions[bot]'];
 
 export type WaitingReason = 'reviewer' | 'human-comment' | 'human-test' | 'ci-failure';
 
@@ -62,6 +63,7 @@ export interface WorkerTempPaths {
 }
 
 const QUESTION_NOISE_PATTERN = /[?？]{5,}/;
+const LINKED_ISSUE_PATTERN = /(?:refs|closes|fixes)\s+#(\d+)/i;
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -69,6 +71,16 @@ function escapeRegExp(value: string): string {
 
 function normalizeSectionContent(value: string): string {
   return value.trim();
+}
+
+export function extractLinkedIssueNumber(body: string): number | null {
+  const match = body.match(LINKED_ISSUE_PATTERN);
+  if (!match?.[1]) {
+    return null;
+  }
+
+  const parsed = Number.parseInt(match[1], 10);
+  return Number.isFinite(parsed) ? parsed : null;
 }
 
 export function getWorkerTempPaths(tempRoot = 'temp/worker-agent'): WorkerTempPaths {
@@ -127,6 +139,31 @@ export function hasHumanTestLabel(labels: Iterable<string>): boolean {
   }
 
   return false;
+}
+
+export function isAutomationActor(authorLogin: string): boolean {
+  return AUTOMATION_LOGINS.includes(authorLogin) || authorLogin.endsWith('[bot]');
+}
+
+export function shouldIgnoreFeedbackItem(input: {
+  authorLogin: string;
+  body: string;
+}): boolean {
+  return input.body.startsWith(WORKER_PREFIX) || isAutomationActor(input.authorLogin);
+}
+
+export function buildHandledCursor(input: {
+  commentIds: string[];
+  reviewIds: string[];
+  previous?: Partial<WorkerCursor>;
+  seenAt?: string;
+}): WorkerCursor {
+  return {
+    lastCommentIds: Array.from(new Set(input.commentIds)),
+    lastReviewIds: Array.from(new Set(input.reviewIds)),
+    lastReviewThreadIds: input.previous?.lastReviewThreadIds ?? [],
+    lastSeenAt: input.seenAt ?? new Date().toISOString(),
+  };
 }
 
 export function renderWorkerComment(input: {

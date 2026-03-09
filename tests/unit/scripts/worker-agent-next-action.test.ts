@@ -102,6 +102,32 @@ describe('worker-agent next-action', () => {
     expect(result.blockers?.[0]?.reason).toBe('reviewer');
   });
 
+  it('ignores worker progress comments and automation comments when no real blocker exists', () => {
+    const result = determineNextAction(
+      makeInput({
+        pr: {
+          ...makeInput().pr,
+          comments: [
+            {
+              id: 'comment-worker',
+              authorLogin: 'ARCJ137442',
+              body: '[Codex Worker]\n\nChange\nUpdated progress.\n\nVerification\n- pending\n\nResult\n- pending',
+              createdAt: '2026-03-10T08:01:00.000Z',
+            },
+            {
+              id: 'comment-bot',
+              authorLogin: 'cloudflare-workers-and-pages',
+              body: 'Deployment successful',
+              createdAt: '2026-03-10T08:02:00.000Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.action).toBe('wait-for-update');
+  });
+
   it('waits when human-test is active and no newer feedback outranks it', () => {
     const result = determineNextAction(
       makeInput({

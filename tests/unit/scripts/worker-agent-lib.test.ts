@@ -4,7 +4,9 @@ import {
   HUMAN_TEST_LABEL_ALIASES,
   REVIEWER_PREFIX,
   WORKER_PREFIX,
+  buildHandledCursor,
   buildRestoredContext,
+  extractLinkedIssueNumber,
   renderWorkerDissentComment,
   renderWorkerDissentIssueBody,
   renderWorkerBody,
@@ -121,6 +123,32 @@ describe('worker-agent lib', () => {
     expect(context.baseBranch).toBe('dev');
     expect(context.waiting.waitingOn).toBe('human-comment');
     expect(context.lock.owner).toBe('codex-worker@test');
+  });
+
+  it('builds a handled cursor snapshot from the current PR feedback ids', () => {
+    const cursor = buildHandledCursor({
+      commentIds: ['comment-1', 'comment-2'],
+      reviewIds: ['review-1'],
+      previous: {
+        lastCommentIds: [],
+        lastReviewIds: [],
+        lastReviewThreadIds: ['thread-1'],
+      },
+      seenAt: '2026-03-10T09:00:00.000Z',
+    });
+
+    expect(cursor).toEqual({
+      lastCommentIds: ['comment-1', 'comment-2'],
+      lastReviewIds: ['review-1'],
+      lastReviewThreadIds: ['thread-1'],
+      lastSeenAt: '2026-03-10T09:00:00.000Z',
+    });
+  });
+
+  it('extracts the first linked issue number from worker or PR body text', () => {
+    expect(extractLinkedIssueNumber('[Codex Worker]\n\nrefs #421')).toBe(421);
+    expect(extractLinkedIssueNumber('fixes #450\nrefs #451')).toBe(450);
+    expect(extractLinkedIssueNumber('plain body without issue refs')).toBeNull();
   });
 
   it('exports protocol constants used across the worker-agent flow', () => {

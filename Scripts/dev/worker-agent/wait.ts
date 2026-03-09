@@ -4,6 +4,7 @@ import {
   HUMAN_TEST_LABEL,
   HUMAN_TEST_REVIEW_PREFIX,
   REVIEWER_PREFIX,
+  shouldIgnoreFeedbackItem,
   type WaitingReason,
   type WorkerCursor,
 } from './lib.ts';
@@ -85,6 +86,10 @@ export function detectWakeEvents(input: {
       continue;
     }
 
+    if (shouldIgnoreFeedbackItem(comment)) {
+      continue;
+    }
+
     if (comment.body.startsWith(HUMAN_TEST_REVIEW_PREFIX)) {
       events.push({
         reason: 'human-test',
@@ -115,6 +120,10 @@ export function detectWakeEvents(input: {
 
   for (const review of input.current.reviews) {
     if (knownReviewIds.has(review.id)) {
+      continue;
+    }
+
+    if (shouldIgnoreFeedbackItem(review)) {
       continue;
     }
 

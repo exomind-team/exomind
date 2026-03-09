@@ -13,6 +13,7 @@
 - PR body 已同步
 - 本轮应发评论已发送
 - 本地状态文件已更新
+- 当前 feedback 批次已执行 `cursor sync`
 - 已执行一次显式 `lock renew`
 
 ## Wake Events

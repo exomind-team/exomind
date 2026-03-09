@@ -9,9 +9,11 @@
    - `npx tsx Scripts/dev/worker-agent/index.ts next-action`
    - 若环境提供 bun，也可使用：`bun Scripts/dev/worker-agent/index.ts next-action`
 3. 以脚本状态机结果为准，执行当前唯一最高优先级动作。
+   - `create-draft-pr` / `sync-pr-body` 时，优先使用：`npx tsx Scripts/dev/worker-agent/index.ts pr sync`
 4. 每轮只做一个动作，不要混做多件事。
 5. 动作完成后：
-   - 显式续锁：`lock renew`
+   - 若本轮已经处理并吸收了当前 feedback 批次，先执行：`npx tsx Scripts/dev/worker-agent/index.ts cursor sync`
+   - 显式续锁：`npx tsx Scripts/dev/worker-agent/index.ts lock renew --pr <CURRENT_PR> --additional-minutes 30`
    - 若本轮产生了 review 回复、代码修改、验证结果、等待边界、人测状态变化或执行异议，则发一条 `[Codex Worker]` 评论
 6. 然后再次运行 `next-action`，继续下一轮。
 7. 若 `next-action` 返回 `wait-for-update`，则调用等待命令并阻塞，直到被 reviewer / human / CI / human-test 事件唤醒。

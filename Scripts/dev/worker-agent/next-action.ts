@@ -3,6 +3,7 @@ import {
   HUMAN_TEST_REVIEW_PREFIX,
   REVIEWER_PREFIX,
   WORKER_PREFIX,
+  shouldIgnoreFeedbackItem,
   type WorkerCursor,
   type WorkerLockSnapshot,
 } from './lib.ts';
@@ -104,6 +105,10 @@ export function collectPendingFeedback(pr: NextActionPrState, cursor: WorkerCurs
       continue;
     }
 
+    if (shouldIgnoreFeedbackItem(comment)) {
+      continue;
+    }
+
     if (comment.body.startsWith(HUMAN_TEST_REVIEW_PREFIX)) {
       items.push({
         reason: 'human-test',
@@ -134,6 +139,10 @@ export function collectPendingFeedback(pr: NextActionPrState, cursor: WorkerCurs
 
   for (const review of pr.reviews) {
     if (knownReviewIds.has(review.id)) {
+      continue;
+    }
+
+    if (shouldIgnoreFeedbackItem(review)) {
       continue;
     }
 

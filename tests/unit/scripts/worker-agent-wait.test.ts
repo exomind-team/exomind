@@ -64,6 +64,34 @@ describe('worker-agent wait logic', () => {
     expect(events[0]?.summary).toContain('Hailaylin');
   });
 
+  it('ignores worker progress comments and automation comments while waiting', () => {
+    const events = detectWakeEvents({
+      previous: makeSnapshot(),
+      current: makeSnapshot({
+        comments: [
+          {
+            id: 'comment-worker',
+            authorLogin: 'ARCJ137442',
+            body: '[Codex Worker]\n\nChange\nUpdated progress.\n\nVerification\n- pending\n\nResult\n- pending',
+            createdAt: '2026-03-09T10:02:00.000Z',
+          },
+          {
+            id: 'comment-bot',
+            authorLogin: 'cloudflare-workers-and-pages',
+            body: 'Deployment successful',
+            createdAt: '2026-03-09T10:03:00.000Z',
+          },
+        ],
+      }),
+      cursor: {
+        lastCommentIds: [],
+        lastReviewIds: [],
+      },
+    });
+
+    expect(events).toEqual([]);
+  });
+
   it('wakes when the needs-human-test label is added', () => {
     const events = detectWakeEvents({
       previous: makeSnapshot({ labels: [] }),

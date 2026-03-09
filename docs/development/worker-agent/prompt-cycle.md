@@ -4,6 +4,7 @@
 main prompt
   -> next-action
   -> do one action
+  -> cursor sync if feedback handled
   -> renew lock
   -> progress comment if needed
   -> next-action
@@ -43,6 +44,7 @@ main prompt
 每轮动作完成后：
 
 - 必须重新运行 `next-action`
+- 若当前 feedback 批次已处理，先执行 `cursor sync`
 - 必须显式 `lock renew`
 - 不允许把“发评论”当成续锁手段
 

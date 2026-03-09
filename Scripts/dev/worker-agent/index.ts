@@ -1,10 +1,12 @@
 #!/usr/bin/env node
 
 import { execFileSync } from 'node:child_process';
-import { readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import {
+  buildHandledCursor,
   buildRestoredContext,
   ensureWorkerTempDirs,
+  extractLinkedIssueNumber,
   getWorkerTempPaths,
   readJsonFileIfExists,
   renderWorkerBody,
@@ -33,6 +35,7 @@ import {
   type NextActionPrState,
   type NextActionResult,
 } from './next-action.ts';
+import { planPrSync } from './pr-sync.ts';
 import { fetchWaitSnapshot, summarizeWakeItems, waitForUpdateLoop } from './wait.ts';
 
 type ParsedArgs = {
@@ -160,7 +163,7 @@ function fetchPrMetadata(repo: string, prNumber: number, cwd = process.cwd()): {
       '--repo',
       repo,
       '--json',
-      'number,baseRefName,headRefName,headRefOid,closingIssuesReferences',
+      'number,baseRefName,headRefName,headRefOid,body,closingIssuesReferences',
     ],
     {
       cwd,
@@ -174,6 +177,7 @@ function fetchPrMetadata(repo: string, prNumber: number, cwd = process.cwd()): {
     baseRefName: string;
     headRefName: string;
     headRefOid: string;
+    body?: string;
     closingIssuesReferences?: Array<{ number: number }>;
   };
 
@@ -182,7 +186,7 @@ function fetchPrMetadata(repo: string, prNumber: number, cwd = process.cwd()): {
     baseBranch: parsed.baseRefName,
     headBranch: parsed.headRefName,
     headSha: parsed.headRefOid,
-    issueNumber: parsed.closingIssuesReferences?.[0]?.number ?? null,
+    issueNumber: parsed.closingIssuesReferences?.[0]?.number ?? extractLinkedIssueNumber(parsed.body ?? ''),
   };
 }
 
@@ -235,7 +239,7 @@ function fetchPrRuntimeState(repo: string, prNumber: number, cwd = process.cwd()
 
   return {
     number: parsed.number,
-    issueNumber: parsed.closingIssuesReferences?.[0]?.number ?? null,
+    issueNumber: parsed.closingIssuesReferences?.[0]?.number ?? extractLinkedIssueNumber(parsed.body ?? ''),
     body: parsed.body ?? '',
     labels: parsed.labels.map((label) => label.name),
     headSha: parsed.headRefOid,
@@ -412,6 +416,134 @@ function runValidateMessage(parsed: ParsedArgs): void {
   console.log(JSON.stringify({ ok: issues.length === 0, issues }, null, 2));
   if (issues.length > 0) {
     process.exitCode = 1;
+  }
+}
+
+async function runCursor(parsed: ParsedArgs): Promise<void> {
+  const action = parsed.positionals[1];
+  const tempRoot = flagValue(parsed, 'temp-root', 'temp/worker-agent')!;
+  const cwd = flagValue(parsed, 'cwd', process.cwd())!;
+  const repo = resolveRepo(flagValue(parsed, 'repo'), cwd);
+  const paths = getWorkerTempPaths(tempRoot);
+  ensureWorkerTempDirs(paths);
+
+  switch (action) {
+    case 'sync': {
+      const explicitPr = flagValue(parsed, 'pr');
+      const snapshot = loadLockSnapshot(tempRoot);
+      const branch = currentBranch(cwd);
+      const branchPr = fetchCurrentPrForBranch(repo, branch, cwd);
+      const prNumber = Number.parseInt(
+        explicitPr ?? String(snapshot?.prNumber ?? branchPr?.number ?? ''),
+        10,
+      );
+
+      if (!Number.isFinite(prNumber)) {
+        throw new Error('Unable to resolve PR number for cursor sync. Pass --pr or restore/acquire a lock first.');
+      }
+
+      const prState = fetchPrRuntimeState(repo, prNumber, cwd);
+      const previous = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? defaultCursor();
+      const cursor = buildHandledCursor({
+        commentIds: prState.comments.map((comment) => comment.id),
+        reviewIds: prState.reviews.map((review) => review.id),
+        previous,
+      });
+      writeJsonFile(paths.handledCursorFile, cursor);
+      console.log(JSON.stringify(cursor, null, 2));
+      return;
+    }
+
+    default:
+      throw new Error(`Unknown cursor action: ${action}`);
+  }
+}
+
+function appendBodyArgs(args: string[], plan: { bodyMode: 'none' | 'text' | 'file'; bodyValue?: string }): void {
+  if (plan.bodyMode === 'text' && plan.bodyValue) {
+    args.push('--body', plan.bodyValue);
+  }
+
+  if (plan.bodyMode === 'file' && plan.bodyValue) {
+    args.push('--body-file', plan.bodyValue);
+  }
+}
+
+async function runPr(parsed: ParsedArgs): Promise<void> {
+  const action = parsed.positionals[1];
+  const tempRoot = flagValue(parsed, 'temp-root', 'temp/worker-agent')!;
+  const cwd = flagValue(parsed, 'cwd', process.cwd())!;
+  const repo = resolveRepo(flagValue(parsed, 'repo'), cwd);
+  const branch = currentBranch(cwd);
+  const baseBranch = flagValue(parsed, 'base-branch', 'dev')!;
+  const paths = getWorkerTempPaths(tempRoot);
+  ensureWorkerTempDirs(paths);
+
+  switch (action) {
+    case 'sync': {
+      const existingPr = fetchCurrentPrForBranch(repo, branch, cwd);
+      const plan = planPrSync({
+        existingPr: existingPr
+          ? {
+              number: existingPr.number,
+              title: existingPr.title,
+            }
+          : null,
+        baseBranch,
+        title: flagValue(parsed, 'title'),
+        explicitBody: flagValue(parsed, 'body'),
+        explicitBodyFile: flagValue(parsed, 'body-file'),
+        defaultBodyFile: paths.prBodyDraftFile,
+        defaultBodyExists: existsSync(paths.prBodyDraftFile),
+      });
+
+      if (plan.mode === 'noop') {
+        console.log(JSON.stringify({ ok: true, mode: 'noop', prNumber: plan.prNumber }, null, 2));
+        return;
+      }
+
+      if (plan.mode === 'create') {
+        const args = [
+          'pr',
+          'create',
+          '--repo',
+          repo,
+          '--base',
+          plan.baseBranch,
+          '--head',
+          branch,
+          '--draft',
+          '--title',
+          plan.title,
+        ];
+        appendBodyArgs(args, plan);
+        const output = execFileSync('gh', args, {
+          cwd,
+          encoding: 'utf8',
+          maxBuffer: 1024 * 1024 * 16,
+        }).trim();
+        const created = fetchCurrentPrForBranch(repo, branch, cwd);
+        console.log(JSON.stringify({ ok: true, mode: 'create', output, pr: created }, null, 2));
+        return;
+      }
+
+      const args = ['pr', 'edit', String(plan.prNumber), '--repo', repo];
+      if (plan.title) {
+        args.push('--title', plan.title);
+      }
+      appendBodyArgs(args, plan);
+      execFileSync('gh', args, {
+        cwd,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024 * 16,
+      }).trim();
+      const updated = fetchCurrentPrForBranch(repo, branch, cwd);
+      console.log(JSON.stringify({ ok: true, mode: 'update', pr: updated }, null, 2));
+      return;
+    }
+
+    default:
+      throw new Error(`Unknown pr action: ${action}`);
   }
 }
 
@@ -632,6 +764,8 @@ function printHelp(): void {
   console.log(`Usage:
   worker-agent restore [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>]
   worker-agent next-action [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>] [--base-branch <name>]
+  worker-agent cursor sync [--repo <owner/repo>] [--pr <number>] [--temp-root <path>]
+  worker-agent pr sync [--repo <owner/repo>] [--base-branch <name>] [--title <text>] [--body <text> | --body-file <path>] [--temp-root <path>]
   worker-agent render-comment --quote <text> --change <text> --verification <text> --result <text> [--output <path>]
   worker-agent render-dissent-comment --script-conclusion <text> --actual-conclusion <text> --repro-evidence <text> --trace-process <text> --impact <text> --linked-issue <text> [--output <path>]
   worker-agent render-body --summary <text> --scope <text> --verification <text> --links-refs <text> [--output <path>]
@@ -657,6 +791,12 @@ async function main(): Promise<void> {
       return;
     case 'next-action':
       await runNextAction(parsed);
+      return;
+    case 'cursor':
+      await runCursor(parsed);
+      return;
+    case 'pr':
+      await runPr(parsed);
       return;
     case 'render-comment':
       runRenderComment(parsed);

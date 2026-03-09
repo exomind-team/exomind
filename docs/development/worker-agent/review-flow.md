@@ -42,3 +42,9 @@
 只有当前 `head SHA` 上没有未处理阻塞项时，才允许继续推进原始开发任务。
 
 不允许一边欠 review 债，一边继续扩功能。
+
+## Cursor Sync Rule
+
+当当前这批 review / human comment 已经被处理并吸收后，工作 Agent 应运行一次 `cursor sync`，把当前 comment/review 集合写入 handled cursor。
+
+否则同一批反馈会在下一轮继续被识别为“新阻塞项”。

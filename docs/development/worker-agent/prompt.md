@@ -15,10 +15,11 @@
 1. 先运行 `next-action`
 2. 以脚本状态机结果为准
 3. 每轮只做一个最高优先级动作
-4. 动作完成后显式续锁
-5. 需要时发 `[Codex Worker]` 评论
-6. 再次运行 `next-action`
-7. 若结果是等待，则调用 `wait-for-update`
+4. 若当前 feedback 批次已处理，先运行 `cursor sync`
+5. 动作完成后显式续锁
+6. 需要时发 `[Codex Worker]` 评论
+7. 再次运行 `next-action`
+8. 若结果是等待，则调用 `wait-for-update`
 
 ## Hard Gates
 
