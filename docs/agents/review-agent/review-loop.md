@@ -8,6 +8,12 @@
 - PR diff
 - 在规则允许时可选使用本地 worktree
 
+## 前置条件
+
+- discovery 阶段必须先产出 `HAS_TARGET`
+- `selected_pr` 必须来自 `./temp/pr-monitor/queue.json`
+- review 阶段不重新负责 PR 选择
+
 ## Issue 上下文收集
 
 1. 读取 PR 描述。

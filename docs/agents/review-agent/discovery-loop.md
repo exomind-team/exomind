@@ -13,7 +13,7 @@
 2. 对每个 PR，找到正文以 `[Codex Reviewer]` 开头的最后一条评论。
 3. 若不存在这样的评论，则将该 PR 标记为待处理。
 4. 若存在，则比较该评论时间戳与其后的 PR 活动。
-5. 若其后存在任意新评论、新 review 活动或新提交，则将该 PR 标记为待处理。
+5. 若其后存在任意新评论、新 review 活动、review thread 回复或新提交，则将该 PR 标记为待处理。
 6. 否则跳过该 PR。
 
 ## 增量规则
@@ -52,7 +52,7 @@
 
 每一轮发现阶段都应产出：
 
-- `state`：`HAS_TARGET` 或 `NO_TARGET`
+- `state`：`HAS_TARGET`、`NO_TARGET` 或 `FAILED_RETRYABLE`
 - `actionable_prs`
 - `selected_pr`
 - `pending_queue`
