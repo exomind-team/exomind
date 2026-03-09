@@ -941,17 +941,23 @@ if (import.meta.main) {
   if (!command) {
     console.log(`
 Usage:
-  bun pr-lock.ts acquire <pr-number> <timeout-minutes> <agent-id> [--worktree-path=<path>] [--task-id=X] [--reason="..."]
-  bun pr-lock.ts check <pr-number>
-  bun pr-lock.ts release <pr-number> <agent-id>
-  bun pr-lock.ts renew <pr-number> <additional-minutes> <agent-id>
-  bun pr-lock.ts force-release <pr-number>
+  bun pr-lock.ts <command> [args...]
+  # 如果 bun 不可用，可以使用：
+  npx tsx pr-lock.ts <command> [args...]
+  node --loader ts-node/esm pr-lock.ts <command> [args...]
+
+Commands:
+  acquire <pr-number> <timeout-minutes> <agent-id> [--worktree-path=<path>] [--task-id=X] [--reason="..."]
+  check <pr-number>
+  release <pr-number> <agent-id>
+  renew <pr-number> <additional-minutes> <agent-id>
+  force-release <pr-number>
 
 Examples:
   bun pr-lock.ts acquire 419 60 fixer@team --worktree-path="exomind-worktree-pr-419" --task-id=4 --reason="修复 TypeScript 类型错误"
-  bun pr-lock.ts check 419
+  npx tsx pr-lock.ts check 419
   bun pr-lock.ts release 419 fixer@team
-  bun pr-lock.ts renew 419 30 fixer@team
+  npx tsx pr-lock.ts renew 419 30 fixer@team
   bun pr-lock.ts force-release 419
     `);
     process.exit(1);
