@@ -403,6 +403,112 @@ export class PRLockManager {
   }
 
   /**
+   * 续期锁（延长过期时间）
+   *
+   * 设计理由：
+   * - Agent 长时间工作时需要主动续期，避免锁过期被其他 Agent 误获取
+   * - 续期比"过期后重新获取"更安全：
+   *   1. 避免竞争窗口：过期瞬间其他 Agent 可能获取锁
+   *   2. 保持锁的连续性：lock_id 不变，便于追踪
+   *   3. 降低 DDOS 风险：相比频繁重新获取，续期操作更轻量
+   *
+   * @param prNumber PR 编号
+   * @param additionalMinutes 额外延长的分钟数（正数）
+   * @returns 续期结果
+   */
+  async renew(prNumber: number, additionalMinutes: number): Promise<LockResult> {
+    console.log(`[PRLock] Renewing lock on PR #${prNumber} for ${additionalMinutes} minutes`);
+
+    // 验证参数
+    if (additionalMinutes <= 0) {
+      return {
+        success: false,
+        error: `additionalMinutes must be positive, got: ${additionalMinutes}`
+      };
+    }
+
+    // 检查当前锁状态
+    const lock = await this.checkLock(prNumber);
+
+    if (!lock) {
+      return {
+        success: false,
+        error: 'No lock found to renew'
+      };
+    }
+
+    // 验证锁的所有权
+    if (lock.agent_id !== this.agentId) {
+      return {
+        success: false,
+        error: `Lock is held by ${lock.agent_id}, not ${this.agentId}`
+      };
+    }
+
+    // 检查锁是否已过期
+    if (lock.is_expired) {
+      return {
+        success: false,
+        error: `Lock has expired ${Math.abs(lock.remaining_minutes)} minutes ago, cannot renew. Use acquire() to get a new lock.`
+      };
+    }
+
+    // 计算新的锁时长
+    const newDurationMinutes = lock.lock_duration_minutes + additionalMinutes;
+
+    // 更新锁元数据
+    const renewedLock: LockMetadata = {
+      ...lock,
+      lock_duration_minutes: newDurationMinutes
+    };
+
+    // 查找原始评论并更新
+    const localLockState = await this.loadLockState();
+    let commentUpdated = false;
+
+    // 优先使用本地状态中的 comment_id
+    if (localLockState?.comment_id &&
+        localLockState.pr_number === prNumber &&
+        localLockState.lock_id === lock.lock_id) {
+      await this.updateLockCommentWithConfirm(prNumber, localLockState.comment_id, renewedLock);
+      commentUpdated = true;
+    } else {
+      // 本地状态不匹配或缺失，按 lock_id 查找原始评论
+      console.warn(`[PRLock] Local state unavailable or mismatch, searching for original comment by lock_id`);
+      const originalComment = await this.findCommentByLockId(prNumber, lock.lock_id);
+
+      if (originalComment) {
+        await this.updateLockCommentWithConfirm(prNumber, originalComment.id, renewedLock);
+        commentUpdated = true;
+      } else {
+        return {
+          success: false,
+          error: `Cannot find original comment for lock_id ${lock.lock_id}`
+        };
+      }
+    }
+
+    // 更新本地锁状态
+    const newExpiresAt = this.calculateExpiresAt(lock.acquired_at, newDurationMinutes);
+    await this.saveLockState({
+      lock_id: lock.lock_id,
+      pr_number: prNumber,
+      comment_id: localLockState?.comment_id,
+      acquired_at: lock.acquired_at,
+      lock_duration_minutes: newDurationMinutes,
+      pr_last_updated_at: lock.pr_last_updated_at,
+      expires_at: newExpiresAt
+    });
+
+    console.log(`[PRLock] Lock renewed successfully, new duration: ${newDurationMinutes} minutes, expires at: ${newExpiresAt}`);
+
+    return {
+      success: true,
+      lock: renewedLock
+    };
+  }
+
+  /**
    * 强制释放过期锁
    */
   async forceRelease(prNumber: number, oldLock?: LockStatus): Promise<void> {
@@ -838,12 +944,14 @@ Usage:
   bun pr-lock.ts acquire <pr-number> <timeout-minutes> <agent-id> [--worktree-path=<path>] [--task-id=X] [--reason="..."]
   bun pr-lock.ts check <pr-number>
   bun pr-lock.ts release <pr-number> <agent-id>
+  bun pr-lock.ts renew <pr-number> <additional-minutes> <agent-id>
   bun pr-lock.ts force-release <pr-number>
 
 Examples:
   bun pr-lock.ts acquire 419 60 fixer@team --worktree-path="exomind-worktree-pr-419" --task-id=4 --reason="修复 TypeScript 类型错误"
   bun pr-lock.ts check 419
   bun pr-lock.ts release 419 fixer@team
+  bun pr-lock.ts renew 419 30 fixer@team
   bun pr-lock.ts force-release 419
     `);
     process.exit(1);
@@ -891,6 +999,23 @@ Examples:
       const agentId = args[2] || 'manual-cli';
       const lockManager = new PRLockManager(repo, agentId);
       const result = await lockManager.release(prNumber);
+      console.log(JSON.stringify(result, null, 2));
+      process.exit(result.success ? 0 : 1);
+    }
+
+    case 'renew': {
+      const prNumber = parseInt(args[1]);
+      const additionalMinutes = parseInt(args[2]);
+      const agentId = args[3] || 'manual-cli';
+
+      // 验证 additionalMinutes 必须为正数
+      if (isNaN(additionalMinutes) || additionalMinutes <= 0) {
+        console.error(`Error: additional-minutes must be a positive number, got: ${args[2]}`);
+        process.exit(1);
+      }
+
+      const lockManager = new PRLockManager(repo, agentId);
+      const result = await lockManager.renew(prNumber, additionalMinutes);
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.success ? 0 : 1);
     }
