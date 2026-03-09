@@ -116,6 +116,54 @@ describe('PR Lock - 降级路径测试', () => {
     });
   });
 
+  describe('场景 3.5: Renew metadata cleanliness（续期元数据清洁性）', () => {
+    test('renew() 应只写入基础字段，不包含派生字段', async () => {
+      // 1. Agent A 获取锁
+      const acquireResult = await agentA.acquire(1, 60);
+      expect(acquireResult.success).toBe(true);
+      const lockId = acquireResult.lock!.lock_id;
+
+      // 2. Agent A 续期锁
+      const renewResult = await agentA.renew(1, 30);
+      expect(renewResult.success).toBe(true);
+      expect(renewResult.lock!.lock_duration_minutes).toBe(90); // 60 + 30
+
+      // 3. 验证评论中的元数据只包含基础字段
+      const comments = await mockAPI.getComments(1);
+      const lockComment = comments.find(c => {
+        const match = c.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/);
+        if (!match) return false;
+        const metadata = JSON.parse(match[1]);
+        return metadata.lock_id === lockId;
+      });
+
+      expect(lockComment).toBeDefined();
+      const metadata = JSON.parse(
+        lockComment!.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/)?.[1] || '{}'
+      );
+
+      // 4. 验证基础字段存在
+      expect(metadata.lock_id).toBe(lockId);
+      expect(metadata.agent_id).toBe('agent-a@test');
+      expect(metadata.acquired_at).toBeDefined();
+      expect(metadata.lock_duration_minutes).toBe(90);
+
+      // 5. 验证派生字段不存在
+      expect(metadata.expires_at).toBeUndefined();
+      expect(metadata.remaining_minutes).toBeUndefined();
+      expect(metadata.is_expired).toBeUndefined();
+      expect(metadata.should_renew).toBeUndefined();
+      expect(metadata.renew_reason).toBeUndefined();
+      expect(metadata.pr_number).toBeUndefined();
+      expect(metadata.pr_last_updated_at).toBeUndefined();
+
+      // 6. 验证返回值包含正确的派生字段
+      expect(renewResult.lock!.expires_at).toBeDefined();
+      expect(renewResult.lock!.remaining_minutes).toBeGreaterThan(0);
+      expect(renewResult.lock!.is_expired).toBe(false);
+    });
+  });
+
   describe('场景 4: Force release（强制释放）', () => {
     test.skip('强制释放应更新元数据为 released: true', async () => {
       // TODO: 需要实现时间模拟
