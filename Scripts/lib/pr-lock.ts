@@ -112,7 +112,7 @@ export class PRLockManager {
     try {
       const comments = await this.getComments(prNumber);
       if (comments.length > 0) {
-        lastCommentTime = new Date(comments[comments.length - 1].created_at);
+        lastCommentTime = new Date(comments[comments.length - 1].createdAt);
       }
     } catch (e) {
       console.warn('[PRLock] Failed to get comment times:', e);
@@ -611,7 +611,13 @@ export class PRLockManager {
 
   private async createComment(prNumber: number, body: string): Promise<void> {
     // 使用临时文件避免 shell 转义问题
-    const tmpFile = `/tmp/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
+    const tempDir = '.exomind/temp';
+    try {
+      execSync(`mkdir -p ${tempDir}`, { stdio: 'ignore' });
+    } catch (e) {
+      console.warn('[PRLock] Failed to create temp directory:', e);
+    }
+    const tmpFile = `${tempDir}/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
     await Bun.write(tmpFile, body);
     try {
       this.gh(`issue comment ${prNumber} --body-file ${tmpFile}`);
@@ -625,7 +631,13 @@ export class PRLockManager {
    */
   private async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
     // 使用临时文件避免 shell 转义问题
-    const tmpFile = `/tmp/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
+    const tempDir = '.exomind/temp';
+    try {
+      execSync(`mkdir -p ${tempDir}`, { stdio: 'ignore' });
+    } catch (e) {
+      console.warn('[PRLock] Failed to create temp directory:', e);
+    }
+    const tmpFile = `${tempDir}/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
     await Bun.write(tmpFile, body);
     try {
       // 使用 -F body=@file 让 gh CLI 自动处理 JSON 封装
