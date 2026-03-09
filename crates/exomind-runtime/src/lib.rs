@@ -645,6 +645,7 @@ pub struct AppState {
     pub pairing: Arc<pairing::PairingManager>,
     pub task_store: Arc<task::TaskStore>,
     pub energy_registry: energy::EnergyRegistry,
+    pub pty_manager: Arc<pty::PtyManager>,
 }
 
 impl AppState {
@@ -672,6 +673,10 @@ impl AppState {
             mesh_persist_path,
         ));
         let mesh_relay = enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
+        let pty_manager = Arc::new(pty::PtyManager::new(
+            Arc::clone(&signal_pool),
+            host_id.clone(),
+        ));
 
         Self {
             port,
@@ -685,6 +690,7 @@ impl AppState {
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
+            pty_manager,
         }
     }
 }
@@ -763,13 +769,14 @@ mod tests {
             host_id: host_id.clone(),
             registry,
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(mesh::MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(mesh::MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
+            pty_manager: Arc::new(pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
     }
 
