@@ -111,6 +111,7 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       }
       // Ctrl+V or Ctrl+Shift+V → paste from clipboard
       if (e.ctrlKey && (e.code === 'KeyV') && e.type === 'keydown') {
+        e.preventDefault(); // Prevent browser paste event (avoids double input from simulate_paste)
         void navigator.clipboard.readText().then((text) => {
           if (text) sendTextInput(text);
         });
