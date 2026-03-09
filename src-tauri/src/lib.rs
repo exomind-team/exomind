@@ -21,6 +21,10 @@ use commands::shortcut_commands::{
     voice_overlay_hide, voice_overlay_show, voice_shortcut_get, voice_shortcut_set,
 };
 use commands::ws_commands::{WsClientState, ws_connect, ws_disconnect, ws_get_state, ws_send};
+use commands::workspace_commands::{
+    get_agent_workspace_soul, get_agent_workspace_knowledge_list,
+    get_agent_workspace_knowledge, get_agent_workspace_actions, get_agent_workspace_status,
+};
 use tauri::Manager;
 
 #[tauri::command]
@@ -142,6 +146,12 @@ pub fn run() {
             // ASR 语音识别命令
             volcano_asr_recognize,
             volcano_asr_check_config,
+            // Workspace 认知生命体命令
+            get_agent_workspace_soul,
+            get_agent_workspace_knowledge_list,
+            get_agent_workspace_knowledge,
+            get_agent_workspace_actions,
+            get_agent_workspace_status,
         ]);
 
     #[cfg(not(any(target_os = "android", target_os = "ios")))]

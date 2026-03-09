@@ -43,6 +43,15 @@ impl RuntimeProcessState {
             }),
         }
     }
+
+    /// Return the HTTP base URL for the embedded runtime (e.g. `http://127.0.0.1:7234`).
+    pub fn runtime_base_url(&self) -> Result<String, String> {
+        let inner = self
+            .inner
+            .lock()
+            .map_err(|_| "failed to lock runtime state".to_string())?;
+        Ok(format!("http://{}:{}", inner.host, inner.port))
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
