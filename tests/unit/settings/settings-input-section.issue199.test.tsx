@@ -4,6 +4,7 @@ import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
+import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 
 const invokeMock = vi.fn();
 const isTauriMock = vi.fn(() => false);
@@ -42,8 +43,25 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
+    expect(screen.getByText('快捷语音引擎')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
+  });
+
+  it('switches shortcut voice provider from input section', () => {
+    render(<SettingsPage />);
+
+    const volcanoButton = screen.getByTestId('new-settings-voice-provider-volcano');
+    const mossButton = screen.getByTestId('new-settings-voice-provider-moss');
+
+    fireEvent.click(volcanoButton);
+    expect(volcanoButton).toHaveAttribute('aria-pressed', 'true');
+    expect(mossButton).toHaveAttribute('aria-pressed', 'false');
+    expect(setVoiceShortcutAsrProvider('volcano')).toBe('volcano');
+
+    fireEvent.click(mossButton);
+    expect(mossButton).toHaveAttribute('aria-pressed', 'true');
+    expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
   });
 
   it('toggles voice transcript send mode from input section', () => {

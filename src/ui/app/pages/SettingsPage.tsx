@@ -71,6 +71,13 @@ import {
   type VoiceShortcutHotkey,
 } from '@/config/voice-shortcut-hotkey';
 import {
+  getVoiceShortcutAsrProvider,
+  getVoiceShortcutAsrProviderLabel,
+  setVoiceShortcutAsrProvider,
+  subscribeVoiceShortcutAsrProviderChanges,
+  type VoiceShortcutAsrProvider,
+} from '@/config/voice-shortcut-asr-provider';
+import {
   getFeedbackPreferences,
   setFeedbackPreferences,
   subscribeFeedbackPreferencesChanges,
@@ -227,6 +234,9 @@ export function SettingsPage() {
   );
   const [voiceShortcutHotkey, setVoiceShortcutHotkeyState] = useState<VoiceShortcutHotkey>(
     () => getVoiceShortcutHotkey()
+  );
+  const [voiceShortcutAsrProvider, setVoiceShortcutAsrProviderState] = useState<VoiceShortcutAsrProvider>(
+    () => getVoiceShortcutAsrProvider()
   );
   const [feedbackPreferences, setFeedbackPreferencesState] = useState<FeedbackPreferences>(
     () => getFeedbackPreferences()
@@ -488,6 +498,12 @@ export function SettingsPage() {
       setErrorMessage(`全局语音快捷键切换失败：${message}`);
     }
   };
+  const handleVoiceShortcutAsrProviderChange = (provider: VoiceShortcutAsrProvider) => {
+    const normalizedProvider = setVoiceShortcutAsrProvider(provider);
+    setVoiceShortcutAsrProviderState(normalizedProvider);
+    clearNotice();
+    setStatusMessage(`快捷语音引擎已切换为 ${getVoiceShortcutAsrProviderLabel(normalizedProvider)}`);
+  };
   const handleFeedbackPreferenceToggle = (key: keyof FeedbackPreferences) => {
     const next = {
       ...feedbackPreferences,
@@ -598,6 +614,12 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    return subscribeVoiceShortcutAsrProviderChanges((provider) => {
+      setVoiceShortcutAsrProviderState(provider);
+    });
+  }, []);
+
+  useEffect(() => {
     let cancelled = false;
 
     void (async () => {
@@ -656,6 +678,50 @@ export function SettingsPage() {
     ? `已配置 (${maskMossApiKey(mossApiKey)})`
     : '未配置';
   const voiceTestStatusLabel = developerMode ? '可用' : '需开发者模式';
+  const voiceShortcutProviderLabel = getVoiceShortcutAsrProviderLabel(voiceShortcutAsrProvider);
+
+  const renderVoiceShortcutProviderControl = () => (
+    <div
+      role="group"
+      aria-label="快捷语音引擎"
+      className="relative grid min-w-[156px] grid-cols-2 rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+    >
+      <span
+        aria-hidden="true"
+        className={`pointer-events-none absolute bottom-[3px] top-[3px] w-[calc(50%-3px)] rounded-[8px] bg-white shadow-[0_1px_3px_rgba(0,0,0,0.08)] transition-transform dark:bg-[#44403C] ${
+          voiceShortcutAsrProvider === 'volcano' ? 'translate-x-[calc(100%-0px)]' : 'translate-x-0'
+        }`}
+      />
+      <button
+        type="button"
+        data-testid="new-settings-voice-provider-moss"
+        aria-pressed={voiceShortcutAsrProvider === 'moss'}
+        onClick={() => handleVoiceShortcutAsrProviderChange('moss')}
+        disabled={loading}
+        className={`relative z-10 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+          voiceShortcutAsrProvider === 'moss'
+            ? 'font-medium text-[#1C1917] dark:text-[#FAFAF9]'
+            : 'text-[#A8A29E]'
+        }`}
+      >
+        MOSS
+      </button>
+      <button
+        type="button"
+        data-testid="new-settings-voice-provider-volcano"
+        aria-pressed={voiceShortcutAsrProvider === 'volcano'}
+        onClick={() => handleVoiceShortcutAsrProviderChange('volcano')}
+        disabled={loading}
+        className={`relative z-10 rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+          voiceShortcutAsrProvider === 'volcano'
+            ? 'font-medium text-[#1C1917] dark:text-[#FAFAF9]'
+            : 'text-[#A8A29E]'
+        }`}
+      >
+        火山
+      </button>
+    </div>
+  );
 
   const syncHost = (() => {
     try {
@@ -960,6 +1026,19 @@ export function SettingsPage() {
                 </div>
                 <div className="pb-[14px] pl-[46px] pr-4">
                   <span className="text-xs text-[#A8A29E]">Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束</span>
+                </div>
+                <Divider />
+                <div data-testid="new-settings-voice-provider-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="快捷语音引擎"
+                    right={renderVoiceShortcutProviderControl()}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">
+                    影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
+                  </span>
                 </div>
                 <Divider />
                 <div data-testid="new-settings-voice-token-row">
@@ -1377,6 +1456,19 @@ export function SettingsPage() {
             </div>
             <div className="pb-[14px] pl-[46px] pr-4">
               <span className="text-xs text-[#A8A29E]">Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束</span>
+            </div>
+            <Divider />
+            <div data-testid="new-settings-voice-provider-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="快捷语音引擎"
+                right={renderVoiceShortcutProviderControl()}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">
+                影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
+              </span>
             </div>
             <Divider />
             <div data-testid="new-settings-voice-token-row">

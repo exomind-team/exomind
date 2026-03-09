@@ -1,20 +1,29 @@
 /**
- * 火山引擎 ASR 测试页面
+ * Volcano ASR test page（火山 ASR 测试页）
  *
- * 功能：
- * - 配置火山引擎 ASR 凭证（AppKey / AccessKey / ResourceId）
- * - 麦克风录音 → PCM 16kHz → Tauri Rust 后端 → 火山引擎 WebSocket API
- * - 浏览器环境回退到 Bun 后端代理
- * - 实时显示识别结果和运行日志
+ * Purpose（用途）:
+ * - verify official websocket mode/resource settings（核对官方模式与资源配置）
+ * - send buffered PCM to Bun or Tauri backend（把录好的 PCM 发到 Bun / Tauri 后端）
+ * - compare speed/accuracy presets（对比速度/准确率配置）
  */
 
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { Input } from '@/components/ui/input';
 import { cn } from '@/lib/utils';
-
-// ========== 类型 ==========
+import {
+  DEFAULT_VOLCANO_ASR_OPTIONS,
+  VOLCANO_ENDPOINT_OPTIONS,
+  VOLCANO_LANGUAGE_OPTIONS,
+  VOLCANO_MODEL_NAME,
+  VOLCANO_RESOURCE_PRESETS,
+  VOLCANO_STORAGE_KEYS,
+  buildVolcanoHttpRequestPayload,
+  buildVolcanoRuntimeConfig,
+  findVolcanoResourcePreset,
+  type VolcanoEndpoint,
+} from '@/lib/asr/volcano-config';
 
 type RecordingState = 'idle' | 'recording' | 'recognizing';
 
@@ -31,19 +40,28 @@ interface LogEntry {
   text?: string;
 }
 
-// ========== 常量 ==========
-
-const STORAGE_KEYS = {
-  appKey: 'volcano_asr_app_key',
-  accessKey: 'volcano_asr_access_key',
-  resourceId: 'volcano_asr_resource_id',
-} as const;
-
-const DEFAULT_RESOURCE_ID = 'volc.bigasr.sauc.duration';
-
 function loadSaved(key: string, fallback: string): string {
   try {
     return localStorage.getItem(key) || fallback;
+  } catch {
+    return fallback;
+  }
+}
+
+function loadSavedBoolean(key: string, fallback: boolean): boolean {
+  try {
+    const raw = localStorage.getItem(key);
+    return raw == null ? fallback : raw === 'true';
+  } catch {
+    return fallback;
+  }
+}
+
+function loadSavedNumber(key: string, fallback: number): number {
+  try {
+    const raw = localStorage.getItem(key);
+    const parsed = Number.parseInt(raw ?? '', 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   } catch {
     return fallback;
   }
@@ -55,23 +73,44 @@ function maskKey(value: string): string {
   return `${value.slice(0, 4)}***${value.slice(-4)}`;
 }
 
-// ========== 组件 ==========
-
 export function VolcanoASRTestPage() {
-  // 配置
-  const [appKey, setAppKey] = useState(() => loadSaved(STORAGE_KEYS.appKey, ''));
-  const [accessKey, setAccessKey] = useState(() => loadSaved(STORAGE_KEYS.accessKey, ''));
-  const [resourceId, setResourceId] = useState(() => loadSaved(STORAGE_KEYS.resourceId, DEFAULT_RESOURCE_ID));
+  const [appKey, setAppKey] = useState(() => loadSaved(VOLCANO_STORAGE_KEYS.appKey, ''));
+  const [accessKey, setAccessKey] = useState(() => loadSaved(VOLCANO_STORAGE_KEYS.accessKey, ''));
+  const [resourceId, setResourceId] = useState(() => loadSaved(
+    VOLCANO_STORAGE_KEYS.resourceId,
+    'volc.bigasr.sauc.duration'
+  ));
+  const [endpoint, setEndpoint] = useState<VolcanoEndpoint>(() => {
+    const raw = loadSaved(VOLCANO_STORAGE_KEYS.endpoint, DEFAULT_VOLCANO_ASR_OPTIONS.endpoint);
+    return VOLCANO_ENDPOINT_OPTIONS.some((item) => item.value === raw)
+      ? raw as VolcanoEndpoint
+      : DEFAULT_VOLCANO_ASR_OPTIONS.endpoint;
+  });
+  const [language, setLanguage] = useState(() => loadSaved(VOLCANO_STORAGE_KEYS.language, 'zh-CN'));
+  const [enableNonstream, setEnableNonstream] = useState(() => loadSavedBoolean(
+    VOLCANO_STORAGE_KEYS.enableNonstream,
+    DEFAULT_VOLCANO_ASR_OPTIONS.enableNonstream
+  ));
+  const [showUtterances, setShowUtterances] = useState(() => loadSavedBoolean(
+    VOLCANO_STORAGE_KEYS.showUtterances,
+    DEFAULT_VOLCANO_ASR_OPTIONS.showUtterances
+  ));
+  const [endWindowSize, setEndWindowSize] = useState(() => loadSavedNumber(
+    VOLCANO_STORAGE_KEYS.endWindowSize,
+    DEFAULT_VOLCANO_ASR_OPTIONS.endWindowSize
+  ));
+  const [forceToSpeechTime, setForceToSpeechTime] = useState(() => loadSavedNumber(
+    VOLCANO_STORAGE_KEYS.forceToSpeechTime,
+    DEFAULT_VOLCANO_ASR_OPTIONS.forceToSpeechTime
+  ));
   const [showKeys, setShowKeys] = useState(false);
   const [configSaved, setConfigSaved] = useState(false);
 
-  // 录音状态
   const [state, setState] = useState<RecordingState>('idle');
   const [duration, setDuration] = useState(0);
   const [result, setResult] = useState<AsrResult | null>(null);
   const [logs, setLogs] = useState<LogEntry[]>([]);
 
-  // refs
   const streamRef = useRef<MediaStream | null>(null);
   const audioContextRef = useRef<AudioContext | null>(null);
   const processorRef = useRef<ScriptProcessorNode | null>(null);
@@ -80,14 +119,21 @@ export function VolcanoASRTestPage() {
   const startTimeRef = useRef(0);
 
   const isTauri = !!(window as any).__TAURI__;
-  const isConfigured = !!(appKey && accessKey);
+  const isConfigured = !!(appKey && accessKey && resourceId);
+  const endpointMeta = useMemo(
+    () => VOLCANO_ENDPOINT_OPTIONS.find((item) => item.value === endpoint),
+    [endpoint]
+  );
+  const resourcePresetValue = useMemo(() => {
+    const matched = findVolcanoResourcePreset(resourceId);
+    return VOLCANO_RESOURCE_PRESETS.some((item) => item.value === matched) ? matched : '__custom__';
+  }, [resourceId]);
 
   const addLog = useCallback((message: string, text?: string) => {
     const time = new Date().toLocaleTimeString('zh-CN', { hour12: false });
-    setLogs((prev) => [{ time, message, text }, ...prev.slice(0, 49)]);
+    setLogs((prev) => [{ time, message, text }, ...prev.slice(0, 79)]);
   }, []);
 
-  // 加载 env 配置作为默认值
   useEffect(() => {
     if (!appKey) {
       const envKey = (import.meta.env?.VITE_VOLCANO_APP_KEY as string) || '';
@@ -97,26 +143,34 @@ export function VolcanoASRTestPage() {
       const envAccess = (import.meta.env?.VITE_VOLCANO_ACCESS_KEY as string) || '';
       if (envAccess) setAccessKey(envAccess);
     }
-  }, []);
+    if (!resourceId) {
+      const envResource = (import.meta.env?.VITE_VOLCANO_RESOURCE_ID as string) || '';
+      if (envResource) setResourceId(envResource);
+    }
+  }, [accessKey, appKey, resourceId]);
 
-  // 保存配置
   const handleSaveConfig = () => {
     try {
-      localStorage.setItem(STORAGE_KEYS.appKey, appKey);
-      localStorage.setItem(STORAGE_KEYS.accessKey, accessKey);
-      localStorage.setItem(STORAGE_KEYS.resourceId, resourceId);
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, appKey);
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, accessKey);
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, resourceId);
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.endpoint, endpoint);
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.language, language);
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.enableNonstream, String(enableNonstream));
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.showUtterances, String(showUtterances));
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.endWindowSize, String(endWindowSize));
+      localStorage.setItem(VOLCANO_STORAGE_KEYS.forceToSpeechTime, String(forceToSpeechTime));
       setConfigSaved(true);
-      addLog('配置已保存');
+      addLog(`配置已保存，模式=${endpoint}，资源=${resourceId}`);
       setTimeout(() => setConfigSaved(false), 2000);
     } catch {
       addLog('保存配置失败');
     }
   };
 
-  // 开始录音
   const handleStart = async () => {
     if (!isConfigured) {
-      addLog('请先配置 AppKey 和 AccessKey');
+      addLog('请先配置 AppKey、AccessKey 和 Resource ID');
       return;
     }
 
@@ -138,7 +192,6 @@ export function VolcanoASRTestPage() {
         chunksRef.current.push(new Float32Array(event.inputBuffer.getChannelData(0)));
       };
 
-      // 静音输出避免回声
       const silentGain = audioContext.createGain();
       silentGain.gain.value = 0;
       silentGain.connect(audioContext.destination);
@@ -154,13 +207,12 @@ export function VolcanoASRTestPage() {
         setDuration((Date.now() - startTimeRef.current) / 1000);
       }, 100);
 
-      addLog('录音开始');
+      addLog(`录音开始，模式=${endpoint}`);
     } catch (err) {
       addLog(`麦克风权限被拒绝: ${err}`);
     }
   };
 
-  // 停止录音并识别
   const handleStop = async () => {
     if (timerRef.current) {
       clearInterval(timerRef.current);
@@ -171,15 +223,12 @@ export function VolcanoASRTestPage() {
     setDuration(finalDuration);
     addLog(`录音结束，时长 ${finalDuration.toFixed(1)}s`);
 
-    // 停止音频处理
     processorRef.current?.disconnect();
     audioContextRef.current?.close();
-    streamRef.current?.getTracks().forEach((t) => t.stop());
+    streamRef.current?.getTracks().forEach((track) => track.stop());
 
-    // 合并 PCM
     const chunks = chunksRef.current;
-    const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
-
+    const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
     if (totalLength === 0) {
       addLog('没有录到音频数据');
       setState('idle');
@@ -193,11 +242,10 @@ export function VolcanoASRTestPage() {
       offset += chunk.length;
     }
 
-    // Float32 → PCM 16bit
     const pcm = new Int16Array(totalLength);
     for (let i = 0; i < totalLength; i++) {
-      const s = Math.max(-1, Math.min(1, merged[i]));
-      pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+      const sample = Math.max(-1, Math.min(1, merged[i]));
+      pcm[i] = sample < 0 ? sample * 0x8000 : sample * 0x7fff;
     }
     const pcmBytes = new Uint8Array(pcm.buffer);
 
@@ -216,20 +264,30 @@ export function VolcanoASRTestPage() {
     }
   };
 
-  // Tauri Rust 后端识别
-  const recognizeViaTauri = async (pcmBytes: Uint8Array) => {
-    addLog('通过 Tauri Rust 后端发送到火山引擎...');
-    const startMs = Date.now();
+  const buildRuntimeConfig = () => buildVolcanoRuntimeConfig(
+    {
+      appKey,
+      accessKey,
+      resourceId,
+      language,
+    },
+    {
+      endpoint,
+      enableNonstream,
+      showUtterances,
+      endWindowSize,
+      forceToSpeechTime,
+    }
+  );
 
+  const recognizeViaTauri = async (pcmBytes: Uint8Array) => {
+    addLog(`通过 Tauri Rust 后端发送到火山引擎 (${endpoint})...`);
+    const startMs = Date.now();
     const { invoke } = await import('@tauri-apps/api/core');
+
     const res = (await invoke('volcano_asr_recognize', {
       audioData: Array.from(pcmBytes),
-      config: {
-        appKey,
-        accessKey,
-        resourceId,
-        language: 'zh-CN',
-      },
+      config: buildRuntimeConfig(),
     })) as AsrResult;
 
     const elapsed = Date.now() - startMs;
@@ -238,18 +296,31 @@ export function VolcanoASRTestPage() {
     addLog(`识别完成 (${elapsed}ms)`, res.text);
   };
 
-  // Bun 后端代理识别
   const recognizeViaBun = async (pcmBytes: Uint8Array) => {
-    addLog('通过 Bun 后端代理发送到火山引擎...');
+    addLog(`通过 Bun 后端代理发送到火山引擎 (${endpoint})...`);
     const startMs = Date.now();
-
     const serverUrl = (import.meta.env?.VITE_ASR_SERVER_URL as string) || 'http://localhost:1949';
 
     const response = await fetch(`${serverUrl}/api/asr`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/octet-stream' },
-      body: pcmBytes,
-      signal: AbortSignal.timeout(30000),
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(buildVolcanoHttpRequestPayload(
+        pcmBytes,
+        {
+          appKey,
+          accessKey,
+          resourceId,
+          language,
+        },
+        {
+          endpoint,
+          enableNonstream,
+          showUtterances,
+          endWindowSize,
+          forceToSpeechTime,
+        }
+      )),
+      signal: AbortSignal.timeout(60000),
     });
 
     if (!response.ok) {
@@ -263,7 +334,6 @@ export function VolcanoASRTestPage() {
     addLog(`识别完成 (${elapsed}ms)`, res.text);
   };
 
-  // 重置
   const handleReset = () => {
     setResult(null);
     setDuration(0);
@@ -274,10 +344,9 @@ export function VolcanoASRTestPage() {
     <div className="mx-auto max-w-3xl space-y-4 p-6">
       <h1 className="text-2xl font-bold">火山引擎 ASR 测试</h1>
       <p className="text-sm text-muted-foreground">
-        {isTauri ? 'Tauri 环境 - 使用 Rust 原生 WebSocket' : '浏览器环境 - 使用 Bun 后端代理 (localhost:1949)'}
+        {isTauri ? 'Tauri 环境 - 使用 Rust 原生 WebSocket' : '浏览器环境 - 使用 Bun 后端代理'}
       </p>
 
-      {/* 配置区域 */}
       <Card className="shadow-sm">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
@@ -286,43 +355,151 @@ export function VolcanoASRTestPage() {
               type="button"
               variant="ghost"
               size="sm"
-              onClick={() => setShowKeys(!showKeys)}
+              onClick={() => setShowKeys((value) => !value)}
               className="text-xs"
             >
               {showKeys ? '隐藏' : '显示'}密钥
             </Button>
           </div>
         </CardHeader>
-        <CardContent className="space-y-3 pt-0">
+        <CardContent className="space-y-4 pt-0">
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">App Key</label>
+            <label htmlFor="volcano-app-key" className="text-xs text-muted-foreground">App Key</label>
             <Input
+              id="volcano-app-key"
               type={showKeys ? 'text' : 'password'}
               value={appKey}
-              onChange={(e) => setAppKey(e.target.value)}
+              onChange={(event) => setAppKey(event.target.value)}
               placeholder="火山引擎 App Key"
               className="h-9 font-mono text-sm"
             />
           </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">Access Key</label>
+            <label htmlFor="volcano-access-key" className="text-xs text-muted-foreground">Access Key</label>
             <Input
+              id="volcano-access-key"
               type={showKeys ? 'text' : 'password'}
               value={accessKey}
-              onChange={(e) => setAccessKey(e.target.value)}
+              onChange={(event) => setAccessKey(event.target.value)}
               placeholder="火山引擎 Access Key"
               className="h-9 font-mono text-sm"
             />
           </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <label htmlFor="volcano-endpoint" className="text-xs text-muted-foreground">识别模式</label>
+              <select
+                id="volcano-endpoint"
+                value={endpoint}
+                onChange={(event) => setEndpoint(event.target.value as VolcanoEndpoint)}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {VOLCANO_ENDPOINT_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">{endpointMeta?.description}</p>
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="volcano-resource-preset" className="text-xs text-muted-foreground">资源模型</label>
+              <select
+                id="volcano-resource-preset"
+                value={resourcePresetValue}
+                onChange={(event) => {
+                  if (event.target.value !== '__custom__') {
+                    setResourceId(event.target.value);
+                  }
+                }}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm"
+              >
+                {VOLCANO_RESOURCE_PRESETS.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+                <option value="__custom__">自定义 Resource ID</option>
+              </select>
+            </div>
+          </div>
           <div className="space-y-1.5">
-            <label className="text-xs text-muted-foreground">Resource ID</label>
+            <label htmlFor="volcano-resource-id" className="text-xs text-muted-foreground">Resource ID</label>
             <Input
+              id="volcano-resource-id"
               value={resourceId}
-              onChange={(e) => setResourceId(e.target.value)}
-              placeholder="volc.bigasr.sauc.duration"
+              onChange={(event) => setResourceId(event.target.value)}
+              placeholder="volc.seedasr.sauc.duration"
               className="h-9 font-mono text-sm"
             />
           </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-1.5">
+              <label htmlFor="volcano-language" className="text-xs text-muted-foreground">识别语言</label>
+              <select
+                id="volcano-language"
+                value={language}
+                onChange={(event) => setLanguage(event.target.value)}
+                disabled={endpoint !== 'bigmodel_nostream'}
+                className="flex h-9 w-full rounded-md border border-input bg-background px-3 text-sm disabled:opacity-60"
+              >
+                {VOLCANO_LANGUAGE_OPTIONS.map((item) => (
+                  <option key={item.value} value={item.value}>{item.label}</option>
+                ))}
+              </select>
+              <p className="text-xs text-muted-foreground">
+                官方文档说明 `audio.language` 目前仅 `bigmodel_nostream` 支持。
+              </p>
+            </div>
+            <div className="rounded-lg border border-dashed p-3 text-xs text-muted-foreground">
+              <div className="font-medium text-foreground">模型名固定</div>
+              <div>request.model_name = {VOLCANO_MODEL_NAME}</div>
+              <div>官方当前通过 Resource ID 切换 1.0 / 2.0 资源模型。</div>
+            </div>
+          </div>
+
+          <div className="grid gap-3 rounded-lg border bg-muted/30 p-3 md:grid-cols-2">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={enableNonstream}
+                onChange={(event) => setEnableNonstream(event.target.checked)}
+                disabled={endpoint !== 'bigmodel_async'}
+              />
+              二遍识别（仅 async 推荐）
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={showUtterances}
+                onChange={(event) => setShowUtterances(event.target.checked)}
+              />
+              输出分句信息
+            </label>
+            <div className="space-y-1.5">
+              <label htmlFor="volcano-end-window-size" className="text-xs text-muted-foreground">判停阈值(ms)</label>
+              <Input
+                id="volcano-end-window-size"
+                type="number"
+                min={200}
+                step={100}
+                value={String(endWindowSize)}
+                disabled={endpoint !== 'bigmodel_async'}
+                onChange={(event) => setEndWindowSize(Number.parseInt(event.target.value || '0', 10) || 0)}
+                className="h-9 text-sm"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label htmlFor="volcano-force-to-speech-time" className="text-xs text-muted-foreground">最短语音时长(ms)</label>
+              <Input
+                id="volcano-force-to-speech-time"
+                type="number"
+                min={1}
+                step={100}
+                value={String(forceToSpeechTime)}
+                disabled={endpoint !== 'bigmodel_async'}
+                onChange={(event) => setForceToSpeechTime(Number.parseInt(event.target.value || '0', 10) || 0)}
+                className="h-9 text-sm"
+              />
+            </div>
+          </div>
+
           <div className="flex items-center gap-2">
             <Button type="button" variant="outline" size="sm" onClick={handleSaveConfig}>
               保存配置
@@ -337,7 +514,6 @@ export function VolcanoASRTestPage() {
         </CardContent>
       </Card>
 
-      {/* 状态指示 */}
       <Card
         className={cn(
           'shadow-sm',
@@ -346,21 +522,18 @@ export function VolcanoASRTestPage() {
       >
         <CardContent className="flex items-center justify-between p-4">
           <div>
-            <span className="text-sm font-medium">
-              火山引擎大模型流式语音识别
-            </span>
+            <span className="text-sm font-medium">火山引擎大模型语音识别</span>
             <p className="text-xs text-muted-foreground">
-              {isTauri
-                ? 'Rust WebSocket → wss://openspeech.bytedance.com'
-                : 'Bun 后端代理 → 火山引擎 API'}
+              {isTauri ? 'Rust WebSocket → openspeech.bytedance.com' : 'Bun 后端代理 → openspeech.bytedance.com'}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              当前模式：{endpointMeta?.label} | 当前资源：{resourceId}
             </p>
           </div>
           <span
             className={cn(
               'rounded-md px-2 py-0.5 text-xs font-semibold',
-              isConfigured
-                ? 'bg-green-500 text-white'
-                : 'bg-red-500 text-white'
+              isConfigured ? 'bg-green-500 text-white' : 'bg-red-500 text-white'
             )}
           >
             {isConfigured ? '就绪' : '未配置'}
@@ -368,7 +541,6 @@ export function VolcanoASRTestPage() {
         </CardContent>
       </Card>
 
-      {/* 录音控制 */}
       <div
         className={cn(
           'rounded-xl border p-6 text-center',
@@ -396,8 +568,8 @@ export function VolcanoASRTestPage() {
           </div>
         )}
         {state === 'recognizing' && (
-          <div className="mt-2 text-sm text-muted-foreground animate-pulse">
-            正在连接火山引擎 API...
+          <div className="mt-2 animate-pulse text-sm text-muted-foreground">
+            正在调用 {endpoint}...
           </div>
         )}
       </div>
@@ -441,7 +613,6 @@ export function VolcanoASRTestPage() {
         )}
       </div>
 
-      {/* 识别结果 */}
       {result && (
         <Card className="border-green-500/30 bg-green-50 shadow-sm dark:bg-green-950/20">
           <CardHeader className="pb-3">
@@ -451,7 +622,7 @@ export function VolcanoASRTestPage() {
             <p className="text-lg font-medium">{result.text || '（无识别结果）'}</p>
             <div className="text-xs text-muted-foreground">
               {result.confidence && `置信度: ${(result.confidence * 100).toFixed(1)}%`}
-              {result.duration != null && ` | 时长: ${result.duration.toFixed(2)}s`}
+              {result.duration != null && ` | 时长: ${result.duration.toFixed(2)}ms`}
               {result.lang && ` | 语言: ${result.lang}`}
             </div>
             <Button
@@ -469,7 +640,6 @@ export function VolcanoASRTestPage() {
         </Card>
       )}
 
-      {/* 运行日志 */}
       <Card className="shadow-sm">
         <CardHeader className="flex-row items-center justify-between space-y-0 pb-3">
           <CardTitle className="text-sm">运行日志</CardTitle>
@@ -478,8 +648,8 @@ export function VolcanoASRTestPage() {
           </Button>
         </CardHeader>
         <CardContent className="space-y-2 pt-0 font-mono text-xs">
-          {logs.map((log, i) => (
-            <div key={i} className="leading-relaxed">
+          {logs.map((log, index) => (
+            <div key={`${log.time}-${index}`} className="leading-relaxed">
               <span className="text-muted-foreground">[{log.time}]</span>{' '}
               <span className="text-foreground">{log.message}</span>
               {log.text && (
@@ -489,9 +659,7 @@ export function VolcanoASRTestPage() {
               )}
             </div>
           ))}
-          {logs.length === 0 && (
-            <div className="text-muted-foreground">暂无日志</div>
-          )}
+          {logs.length === 0 && <div className="text-muted-foreground">暂无日志</div>}
         </CardContent>
       </Card>
     </div>

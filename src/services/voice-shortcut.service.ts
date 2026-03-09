@@ -30,6 +30,13 @@ import {
 } from '../lib/media/microphone-capture';
 import { convertWebmBlobToWav } from '../lib/media/wav-audio';
 import type { ASRResult } from '../lib/ports/asr-port';
+import {
+  getVoiceShortcutAsrProvider,
+  getVoiceShortcutAsrProviderLabel,
+  subscribeVoiceShortcutAsrProviderChanges,
+  type VoiceShortcutAsrProvider,
+} from '@/config/voice-shortcut-asr-provider';
+import { getStoredVolcanoRuntimeConfig } from '@/lib/asr/volcano-config';
 
 export type VoiceShortcutState = 'idle' | 'recording' | 'recognizing' | 'done' | 'error';
 
@@ -48,8 +55,10 @@ export class VoiceShortcutService {
   private adapter: MOSSASRAdapter;
   private unlisten: (() => void) | null = null;
   private unlistenHotkey: (() => void) | null = null;
+  private unlistenProvider: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private initializing = false;
+  private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
 
   constructor() {
     this.adapter = new MOSSASRAdapter();
@@ -73,10 +82,15 @@ export class VoiceShortcutService {
           console.error(LOG_TAG, 'failed to apply updated voice shortcut:', error);
         });
       });
+      this.unlistenProvider = subscribeVoiceShortcutAsrProviderChanges((provider) => {
+        this.asrProvider = provider;
+        console.log(LOG_TAG, `voice asr provider switched: ${provider}`);
+      });
 
       this.unlisten = await listen<string>('voice-shortcut', (event) => {
         if (event.payload === 'start') this.handleStart();
         if (event.payload === 'stop') this.handleStop();
+        if (event.payload === 'cancel') this.handleCancel();
       });
 
       console.log(LOG_TAG, 'initialized');
@@ -90,6 +104,9 @@ export class VoiceShortcutService {
     this.unlisten = null;
     this.unlistenHotkey?.();
     this.unlistenHotkey = null;
+    this.unlistenProvider?.();
+    this.unlistenProvider = null;
+    void this.syncRecordingActive(false);
     this.releaseResources();
     this.clearAutoHide();
   }
@@ -137,6 +154,7 @@ export class VoiceShortcutService {
       };
 
       recorder.start(100);
+      await this.syncRecordingActive(true);
       this.setState('recording');
     } catch (err) {
       this.handleError(`录音失败: ${err}`);
@@ -146,6 +164,7 @@ export class VoiceShortcutService {
   private async handleStop(): Promise<void> {
     if (this.state !== 'recording') return;
     this.setState('recognizing');
+    await this.syncRecordingActive(false);
 
     // Stop MediaRecorder
     const recorder = this.mediaRecorder;
@@ -176,13 +195,12 @@ export class VoiceShortcutService {
         targetSampleRate: 16000,
         gain: 4,
       });
-      const result = await this.adapter.transcribe({
-        lang: 'zh-CN',
-        preRecordedAudio: wavData,
-      });
+      const recognitionStartedAt = Date.now();
+      const result = await this.transcribeWithSelectedProvider(wavData);
+      const recognitionMs = Date.now() - recognitionStartedAt;
 
       if (result?.text) {
-        await this.handleResult(result);
+        await this.handleResult(result, recognitionMs, getVoiceShortcutAsrProviderLabel(this.asrProvider));
       } else {
         this.handleError('未识别到文字');
       }
@@ -191,9 +209,25 @@ export class VoiceShortcutService {
     }
   }
 
+  private async handleCancel(): Promise<void> {
+    if (this.state !== 'recording') {
+      return;
+    }
+
+    await this.syncRecordingActive(false);
+    this.releaseResources();
+    this.clearAutoHide();
+    this.setState('idle');
+    invoke('voice_overlay_hide').catch(() => {});
+  }
+
   // --- Dual-path output (T5 integration) ---
 
-  private async handleResult(result: ASRResult): Promise<void> {
+  private async handleResult(
+    result: ASRResult,
+    recognitionMs: number,
+    providerLabel: string,
+  ): Promise<void> {
     const [clipboardResult, eventLogResult] = await Promise.allSettled([
       // Path A: clipboard + paste
       (async () => {
@@ -212,7 +246,7 @@ export class VoiceShortcutService {
       console.error(LOG_TAG, 'eventlog write failed:', eventLogResult.reason);
     }
 
-    this.emitOverlayState('done', { text: result.text });
+    this.emitOverlayState('done', { text: result.text, recognitionMs, providerLabel });
     this.state = 'done';
 
     this.autoHideTimer = setTimeout(() => {
@@ -251,9 +285,37 @@ export class VoiceShortcutService {
     emit('voice-overlay-state', { state, ...extra }).catch(() => {});
   }
 
+  private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
+    if (this.asrProvider === 'volcano') {
+      const config = getStoredVolcanoRuntimeConfig(import.meta.env as Record<string, string | undefined>);
+      if (!config.appKey || !config.accessKey || !config.resourceId) {
+        throw new Error('火山配置不完整，请先到火山 ASR 测试页保存 AppKey / AccessKey / Resource ID');
+      }
+
+      // Volcano command expects PCM payload（火山命令要的是纯 PCM，不要 WAV 头）
+      const pcmAudio = wavData.slice(44);
+      return await invoke<ASRResult>('volcano_asr_recognize', {
+        audioData: Array.from(pcmAudio),
+        config,
+      });
+    }
+
+    return await this.adapter.transcribe({
+      lang: 'zh-CN',
+      preRecordedAudio: wavData,
+    });
+  }
+
   // --- Cleanup ---
 
   private releaseResources(): void {
+    if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
+      try {
+        this.mediaRecorder.stop();
+      } catch {
+        // Ignore stop errors during forced cleanup.
+      }
+    }
     if (this.stream) {
       this.stream.getTracks().forEach((t) => t.stop());
       this.stream = null;
@@ -266,6 +328,14 @@ export class VoiceShortcutService {
     if (this.autoHideTimer !== null) {
       clearTimeout(this.autoHideTimer);
       this.autoHideTimer = null;
+    }
+  }
+
+  private async syncRecordingActive(active: boolean): Promise<void> {
+    try {
+      await invoke('voice_recording_set_active', { active });
+    } catch (error) {
+      console.error(LOG_TAG, `failed to sync recording active=${active}:`, error);
     }
   }
 

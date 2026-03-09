@@ -38,8 +38,9 @@ portable-pty = "0.8"
 base64 = "0.22"
 async-stream = "0.3"
 dirs = "5"
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [dev-dependencies]
 http-body-util = "0.1"
 tower = { version = "0.5", features = ["util"] }
-
+tracing-subscriber = { version = "0.3", features = ["fmt"] }

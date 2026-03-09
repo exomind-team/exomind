@@ -46,7 +46,7 @@ fn add_route(pool: &SignalPool, id: &str, topic: &str, target_type: TargetType, 
         target_ref: target_ref.to_string(),
         created_at: now.clone(),
         updated_at: now,
-    });
+    }).unwrap();
 }
 
 // ─── Task Actor Tests ───────────────────────────────────────────
