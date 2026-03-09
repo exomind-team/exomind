@@ -27,6 +27,17 @@ describe('voice shortcut hotkey config（语音全局快捷键配置）', () => 
     expect(getVoiceShortcutHotkey()).toBe('Alt+Q');
   });
 
+  it('can store hotkey without notifying subscribers（可静默同步快捷键存储）', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeVoiceShortcutHotkeyChanges(listener);
+
+    setVoiceShortcutHotkey('Ctrl+Space', { emitEvent: false });
+
+    expect(getVoiceShortcutHotkey()).toBe('Ctrl+Space');
+    expect(listener).not.toHaveBeenCalled();
+    unsubscribe();
+  });
+
   it('notifies subscribers on local changes（本地变更通知订阅者）', () => {
     const listener = vi.fn();
     const unsubscribe = subscribeVoiceShortcutHotkeyChanges(listener);

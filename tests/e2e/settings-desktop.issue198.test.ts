@@ -4,6 +4,8 @@ async function setupIssue198Flags(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('exomind:uiMode', 'new');
     localStorage.setItem('exomind:developerMode', 'true');
+    localStorage.setItem('exomind:agentPageEnabled', 'true');
+    localStorage.setItem('exomind:desktopAdaptiveEnabled', 'true');
   });
 }
 
@@ -66,12 +68,14 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('new-settings-desktop-vc-tabs')).toBeVisible();
     await expect(page.getByTestId('new-settings-desktop-vc-scroll')).toBeVisible();
     await expect(page.getByTestId('new-settings-desktop-vc-section-theme')).toBeVisible();
-    await expect(page.getByRole('button', { name: '外观主题' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '专注设置' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '通知' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '数据' })).toBeVisible();
-    await expect(page.getByRole('button', { name: '危险区域' })).toBeVisible();
-    const aboutTab = page.getByRole('button', { name: '关于' });
+    await expect(page.getByRole('button', { name: '外观主题', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '专注设置', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '通知', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '数据', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '危险区域', exact: true })).toBeVisible();
+    await expect(page.getByText('语音转写后')).toBeVisible();
+    await expect(page.getByText('反馈内容')).toBeVisible();
+    const aboutTab = page.getByRole('button', { name: '关于', exact: true });
     await expect(aboutTab).toBeVisible();
     await aboutTab.click();
     await expect(aboutTab).toHaveAttribute('aria-pressed', 'true');
@@ -85,7 +89,7 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByText('开源软件使用声明')).toHaveCount(0);
     await expect(page.getByText('工作模式')).toHaveCount(0);
     await expect(page.getByText('更新日志')).toHaveCount(0);
-    await page.getByRole('button', { name: '数据' }).click();
+    await page.getByRole('button', { name: '数据', exact: true }).click();
     await expect(page.getByTestId('new-settings-desktop-vc-section-data')).toBeVisible();
     await expect(page.getByRole('button', { name: '导出备份' })).toBeVisible();
     await expect(page.getByRole('button', { name: '导入数据' })).toBeVisible();
@@ -125,9 +129,9 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
 
   test('legal-support page contains only legal three items（法律与支持页仅法务三项）', async ({ page }) => {
     await page.goto('/settings');
-    await expect(page.getByRole('button', { name: '关于' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '关于', exact: true })).toBeVisible();
 
-    const aboutTab = page.getByRole('button', { name: '关于' });
+    const aboutTab = page.getByRole('button', { name: '关于', exact: true });
     await aboutTab.click();
     await page.getByText('法律与支持').click();
 

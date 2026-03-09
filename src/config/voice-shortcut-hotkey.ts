@@ -11,6 +11,10 @@ function normalizeHotkey(rawValue: string | null | undefined): VoiceShortcutHotk
   return 'Alt+Q';
 }
 
+type SetVoiceShortcutOptions = {
+  emitEvent?: boolean;
+};
+
 function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   if (typeof window === 'undefined') return null;
   const localStorageLike = window.localStorage as Partial<Storage> | undefined;
@@ -26,12 +30,17 @@ export function getVoiceShortcutHotkey(): VoiceShortcutHotkey {
   return normalizeHotkey(storage.getItem(VOICE_SHORTCUT_HOTKEY_STORAGE_KEY));
 }
 
-export function setVoiceShortcutHotkey(hotkey: string): VoiceShortcutHotkey {
+export function setVoiceShortcutHotkey(
+  hotkey: string,
+  options: SetVoiceShortcutOptions = {},
+): VoiceShortcutHotkey {
   const normalized = normalizeHotkey(hotkey);
   const storage = getStorage();
   if (!storage) return normalized;
   storage.setItem(VOICE_SHORTCUT_HOTKEY_STORAGE_KEY, normalized);
-  window.dispatchEvent(new CustomEvent<VoiceShortcutHotkey>(VOICE_SHORTCUT_HOTKEY_CHANGED_EVENT, { detail: normalized }));
+  if (options.emitEvent !== false) {
+    window.dispatchEvent(new CustomEvent<VoiceShortcutHotkey>(VOICE_SHORTCUT_HOTKEY_CHANGED_EVENT, { detail: normalized }));
+  }
   return normalized;
 }
 
