@@ -1,17 +1,22 @@
-# Worker Agent Prompt Cycle
+# Worker Agent Prompt Entry
 
-```text
-1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 1
-```
+## Single Entry Rule
 
-## How To Use
+用户实际循环输入的提示词只有一条：
 
-1. 启动一个 Codex 会话。
-2. 打开本目录中的 `1.md`。
-3. 复制其内容发送给 Codex。
-4. 该步完成后，继续复制 `2.md`。
-5. 如此循环到 `7.md`。
-6. `7.md` 被唤醒后，再回到 `1.md`。
+- `docs/worker-agent/prompts/main.md`
+
+## Reference Manual
+
+以下文件继续保留，但仅作为参考手册，不再要求用户按顺序轮流复制：
+
+- `1.md`
+- `2.md`
+- `3.md`
+- `4.md`
+- `5.md`
+- `6.md`
+- `7.md`
 
 ## Command Rule
 
@@ -26,6 +31,8 @@
 ## Related Docs
 
 - `docs/development/worker-agent/overview.md`
+- `docs/development/worker-agent/prompt-cycle.md`
 - `docs/development/worker-agent/review-flow.md`
 - `docs/development/worker-agent/waiting.md`
 - `docs/development/worker-agent/message-protocol.md`
+- `docs/development/worker-agent/dissent.md`

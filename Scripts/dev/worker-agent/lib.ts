@@ -157,6 +157,36 @@ export function renderWorkerComment(input: {
   ].join('\n');
 }
 
+export function renderWorkerDissentComment(input: {
+  scriptConclusion: string;
+  actualConclusion: string;
+  reproducibleEvidence: string;
+  traceProcess: string;
+  impact: string;
+  linkedIssue: string;
+}): string {
+  return [
+    WORKER_PREFIX,
+    '',
+    'Conclusion',
+    `Script: ${normalizeSectionContent(input.scriptConclusion)}`,
+    `Actual: ${normalizeSectionContent(input.actualConclusion)}`,
+    '',
+    'Repro Evidence',
+    normalizeSectionContent(input.reproducibleEvidence),
+    '',
+    'Trace Process',
+    normalizeSectionContent(input.traceProcess),
+    '',
+    'Impact',
+    normalizeSectionContent(input.impact),
+    '',
+    'Linked Issue',
+    normalizeSectionContent(input.linkedIssue),
+    '',
+  ].join('\n');
+}
+
 export function renderWorkerBody(input: {
   summary: string;
   scope: string;
@@ -178,6 +208,41 @@ export function renderWorkerBody(input: {
     '## Links/Refs',
     normalizeSectionContent(input.linksRefs),
     '',
+  ].join('\n');
+}
+
+export function renderWorkerDissentIssueBody(input: {
+  scriptConclusion: string;
+  actualConclusion: string;
+  reproducibleEvidence: string;
+  traceProcess: string;
+  impact: string;
+  linkedPr: string;
+  extraNotes?: string;
+}): string {
+  const extraNotes = normalizeSectionContent(input.extraNotes ?? '');
+
+  return [
+    WORKER_PREFIX,
+    '',
+    '## Script Conclusion',
+    normalizeSectionContent(input.scriptConclusion),
+    '',
+    '## Actual Conclusion',
+    normalizeSectionContent(input.actualConclusion),
+    '',
+    '## Repro Evidence',
+    normalizeSectionContent(input.reproducibleEvidence),
+    '',
+    '## Trace Process',
+    normalizeSectionContent(input.traceProcess),
+    '',
+    '## Impact',
+    normalizeSectionContent(input.impact),
+    '',
+    '## Linked PR',
+    normalizeSectionContent(input.linkedPr),
+    extraNotes ? `\n---\n${extraNotes}\n` : '',
   ].join('\n');
 }
 

@@ -4,14 +4,35 @@ import { getWorkerTempPaths, readJsonFileIfExists, writeJsonFile } from './lib.t
 
 const LOCK_METADATA_PATTERN = /<!-- LOCK_METADATA\n([\s\S]*?)\n-->/;
 
+export interface RawRemoteLockMetadata {
+  lock_id: string;
+  agent_id: string;
+  acquired_at: string;
+  expires_at?: string;
+  timeout_minutes?: number;
+  lock_duration_minutes?: number;
+  task_id?: string;
+  reason?: string;
+  worktree_path?: string;
+  branch?: string;
+  pending?: boolean;
+  released?: boolean;
+  released_at?: string;
+}
+
 export interface RemoteLockMetadata {
   lock_id: string;
   agent_id: string;
   acquired_at: string;
   expires_at: string;
-  timeout_minutes: number;
+  lock_duration_minutes: number;
   task_id?: string;
   reason?: string;
+  worktree_path?: string;
+  branch?: string;
+  pending?: boolean;
+  released?: boolean;
+  released_at?: string;
 }
 
 export interface WorkerLockSnapshot {
@@ -65,6 +86,96 @@ function runGh(args: string[], cwd = process.cwd()): string {
   }).trim();
 }
 
+function calculateExpiresAt(acquiredAt: string, lockDurationMinutes: number): string {
+  const acquired = new Date(acquiredAt);
+  if (Number.isNaN(acquired.getTime())) {
+    throw new Error(`Invalid acquired_at timestamp: ${acquiredAt}`);
+  }
+
+  return new Date(acquired.getTime() + lockDurationMinutes * 60 * 1000).toISOString();
+}
+
+function inferDurationMinutes(raw: RawRemoteLockMetadata): number {
+  if (typeof raw.lock_duration_minutes === 'number') {
+    return raw.lock_duration_minutes;
+  }
+
+  if (typeof raw.timeout_minutes === 'number') {
+    return raw.timeout_minutes;
+  }
+
+  if (raw.expires_at) {
+    const acquired = new Date(raw.acquired_at);
+    const expires = new Date(raw.expires_at);
+    if (!Number.isNaN(acquired.getTime()) && !Number.isNaN(expires.getTime())) {
+      return Math.max(1, Math.round((expires.getTime() - acquired.getTime()) / 60000));
+    }
+  }
+
+  throw new Error('Lock metadata is missing both lock_duration_minutes and timeout_minutes.');
+}
+
+function parseJsonFromCommandOutput<T>(raw: string): T {
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    const match = raw.match(/(\{[\s\S]*\})\s*$/);
+    if (!match?.[1]) {
+      throw new Error(`Unable to parse JSON output from pr-lock command:\n${raw}`);
+    }
+
+    return JSON.parse(match[1]) as T;
+  }
+}
+
+export function normalizeRemoteLockMetadata(raw: RawRemoteLockMetadata | null | undefined): RemoteLockMetadata | null {
+  if (!raw?.lock_id || !raw.agent_id || !raw.acquired_at) {
+    return null;
+  }
+
+  if (raw.released) {
+    return null;
+  }
+
+  const lockDurationMinutes = inferDurationMinutes(raw);
+  const expiresAt = raw.expires_at ?? calculateExpiresAt(raw.acquired_at, lockDurationMinutes);
+
+  return {
+    lock_id: raw.lock_id,
+    agent_id: raw.agent_id,
+    acquired_at: raw.acquired_at,
+    expires_at: expiresAt,
+    lock_duration_minutes: lockDurationMinutes,
+    task_id: raw.task_id,
+    reason: raw.reason,
+    worktree_path: raw.worktree_path,
+    branch: raw.branch,
+    pending: raw.pending,
+    released: raw.released,
+    released_at: raw.released_at,
+  };
+}
+
+function updateSnapshotFromLock(params: {
+  repo: string;
+  prNumber: number;
+  agentId: string;
+  lock: RemoteLockMetadata;
+  tempRoot?: string;
+}): WorkerLockSnapshot {
+  const snapshot: WorkerLockSnapshot = {
+    repo: params.repo,
+    prNumber: params.prNumber,
+    agentId: params.agentId,
+    lockId: params.lock.lock_id,
+    acquiredAt: params.lock.acquired_at,
+    verifiedAt: new Date().toISOString(),
+  };
+
+  saveLockSnapshot(snapshot, params.tempRoot);
+  return snapshot;
+}
+
 export function resolveRepo(explicitRepo?: string, cwd = process.cwd()): string {
   if (explicitRepo) {
     return explicitRepo;
@@ -115,7 +226,7 @@ export function readRemoteLock(repo: string, prNumber: number, cwd = process.cwd
     return null;
   }
 
-  return JSON.parse(match[1]) as RemoteLockMetadata;
+  return normalizeRemoteLockMetadata(JSON.parse(match[1]) as RawRemoteLockMetadata);
 }
 
 export function verifyRemoteLock(params: {
@@ -170,27 +281,70 @@ export function acquireLockViaPrLock(params: {
     maxBuffer: 1024 * 1024 * 16,
   }).trim();
 
-  const parsed = JSON.parse(raw) as {
+  const parsed = parseJsonFromCommandOutput<{
     success: boolean;
-    lock?: RemoteLockMetadata;
+    lock?: RawRemoteLockMetadata;
     error?: string;
-  };
+  }>(raw);
+  const lock = normalizeRemoteLockMetadata(parsed.lock);
 
-  if (!parsed.success || !parsed.lock) {
+  if (!parsed.success || !lock) {
     throw new Error(parsed.error ?? 'Failed to acquire PR lock.');
   }
 
-  const snapshot: WorkerLockSnapshot = {
+  return updateSnapshotFromLock({
     repo: params.repo,
     prNumber: params.prNumber,
     agentId: params.agentId,
-    lockId: parsed.lock.lock_id,
-    acquiredAt: parsed.lock.acquired_at,
-    verifiedAt: new Date().toISOString(),
-  };
+    lock,
+    tempRoot: params.tempRoot,
+  });
+}
 
-  saveLockSnapshot(snapshot, params.tempRoot);
-  return snapshot;
+export function renewLockViaPrLock(params: {
+  repo: string;
+  prNumber: number;
+  agentId: string;
+  additionalMinutes: number;
+  cwd?: string;
+  tempRoot?: string;
+}): WorkerLockSnapshot {
+  const runner = resolvePrLockRunner();
+  const raw = execFileSync(
+    runner.command,
+    [
+      ...runner.argsPrefix,
+      'Scripts/lib/pr-lock.ts',
+      'renew',
+      String(params.prNumber),
+      String(params.additionalMinutes),
+      params.agentId,
+    ],
+    {
+      cwd: params.cwd ?? process.cwd(),
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 16,
+    },
+  ).trim();
+
+  const parsed = parseJsonFromCommandOutput<{
+    success: boolean;
+    lock?: RawRemoteLockMetadata;
+    error?: string;
+  }>(raw);
+  const lock = normalizeRemoteLockMetadata(parsed.lock);
+
+  if (!parsed.success || !lock) {
+    throw new Error(parsed.error ?? 'Failed to renew PR lock.');
+  }
+
+  return updateSnapshotFromLock({
+    repo: params.repo,
+    prNumber: params.prNumber,
+    agentId: params.agentId,
+    lock,
+    tempRoot: params.tempRoot,
+  });
 }
 
 export function releaseLockViaPrLock(params: {

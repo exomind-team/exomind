@@ -5,6 +5,8 @@ import {
   REVIEWER_PREFIX,
   WORKER_PREFIX,
   buildRestoredContext,
+  renderWorkerDissentComment,
+  renderWorkerDissentIssueBody,
   renderWorkerBody,
   renderWorkerComment,
   validateWorkerText,
@@ -39,6 +41,32 @@ describe('worker-agent lib', () => {
     expect(body).toContain('## Scope');
     expect(body).toContain('## Verification');
     expect(body).toContain('## Links/Refs');
+  });
+
+  it('renders dissent issue/comment templates with fixed evidence sections', () => {
+    const issueBody = renderWorkerDissentIssueBody({
+      scriptConclusion: 'next-action returned acquire-lock',
+      actualConclusion: 'current PR is already locked by another agent',
+      reproducibleEvidence: '1. restore context\n2. inspect current PR lock comment',
+      traceProcess: 'Checked lock snapshot, PR comments, and lock owner chain.',
+      impact: 'Worker would overwrite lock ownership assumptions.',
+      linkedPr: '- pr #466',
+    });
+    const commentBody = renderWorkerDissentComment({
+      scriptConclusion: 'next-action returned acquire-lock',
+      actualConclusion: 'current PR is already locked by another agent',
+      reproducibleEvidence: '1. restore context\n2. inspect current PR lock comment',
+      traceProcess: 'Checked lock snapshot, PR comments, and lock owner chain.',
+      impact: 'Worker would overwrite lock ownership assumptions.',
+      linkedIssue: 'https://github.com/exomind-team/exomind/issues/999',
+    });
+
+    expect(issueBody.startsWith(WORKER_PREFIX)).toBe(true);
+    expect(issueBody).toContain('## Script Conclusion');
+    expect(issueBody).toContain('## Trace Process');
+    expect(commentBody).toContain('Conclusion');
+    expect(commentBody).toContain('Repro Evidence');
+    expect(commentBody).toContain('Linked Issue');
   });
 
   it('flags missing worker prefix and required sections', () => {

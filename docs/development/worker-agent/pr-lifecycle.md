@@ -17,6 +17,8 @@
 
 - 创建 draft PR 后立即上锁。
 - 每轮循环开始先验证锁归属。
+- 每轮动作完成后显式 `lock renew`。
+- 进入等待前再显式 `lock renew` 一次。
 - 本地 `temp/worker-agent/lock/current-lock.json` 只是缓存。
 - 远程锁状态才是主真相源。
 

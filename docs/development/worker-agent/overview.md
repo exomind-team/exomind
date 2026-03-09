@@ -1,32 +1,34 @@
 # Worker Agent Overview
 
 ```text
-+--------+     +----------+     +----------+     +--------+
-| issue  | --> | 首个提交 | --> | draft PR | --> | 上锁   |
-+--------+     +----------+     +----------+     +--------+
-                                                        |
-                                                        v
-+-------------+     +-------------+     +----------------------+
-| restore     | --> | 刷新PR真相  | --> | 有阻塞项?            |
-+-------------+     +-------------+     +----------------------+
-                                              | yes       | no
-                                              v           v
-                                    +----------------+  +----------------+
-                                    | 回复并处理     |  | 继续开发       |
-                                    +----------------+  +----------------+
-                                              \           /
-                                               \         /
-                                                v       v
-                                         +--------------------+
-                                         | 同步PR body        |
-                                         | 提交/推送/回传     |
-                                         +--------------------+
-                                                    |
-                                                    v
-                                         +--------------------+
-                                         | 无事可做则 wait    |
-                                         | 新评论可唤醒       |
-                                         +--------------------+
++-------------------+
+| user copies       |
+| prompts/main.md   |
++---------+---------+
+          |
+          v
++-------------------+
+| next-action       |
+| restore truth     |
++---------+---------+
+          |
+          v
++-------------------+
+| do exactly one    |
+| highest action    |
++---------+---------+
+          |
+          v
++-------------------+
+| renew lock        |
+| post progress     |
++---------+---------+
+          |
+          v
++-------------------+
+| next-action again |
+| or wait           |
++-------------------+
 ```
 
 ## Overview
@@ -38,38 +40,32 @@
 - PR 被合并
 - PR 被关闭
 - 人工明确要求放弃该 PR
+- 或进入等待状态等待下一次 reviewer / human / CI / human-test 事件
 
-## Roles
+## Runtime Model
 
-- `Worker Agent`
-  - 写代码
-  - 修 review
-  - 回复人类评论
-  - 回传验证证据
-- `Reviewer Agent`
-  - 发 `[Codex Reviewer]`
-  - approve
-  - merge
+运行模型已经从“用户手工切换 1..7 步”收敛为：
 
-## Single-PR Loop
+- 用户只复制一条恒定主提示词：`docs/worker-agent/prompts/main.md`
+- Agent 每轮先运行 `next-action`
+- 每轮只做一个最高优先级动作
+- 动作完成后显式续锁
+- 需要时发 `[Codex Worker]` 进展评论
+- 然后再次运行 `next-action`
+- 若结果是等待，则进入 `wait-for-update`
 
-核心规则：
+## Priorities
 
-1. 当前 PR 的真相源优先来自 `PR 锁系统`。
-2. `Worker Agent` 只处理自己当前持锁的 PR。
-3. 进入等待后，不切换别的 PR。
-4. 人类普通评论也视为阻塞项。
+状态机优先级固定为：
 
-## Prompt Cycle Overview
-
-提示词采用循环模式：
-
-`1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 1`
-
-详见：
-
-- [prompt-cycle.md](./prompt-cycle.md)
-- [../../worker-agent/prompts/README.md](../../worker-agent/prompts/README.md)
+1. `raise-dissent`
+2. `create-draft-pr` / `acquire-lock`
+3. `reply-blocking-comment`
+4. `handle-ci-failure`
+5. `sync-pr-body`
+6. `implement-next-change`
+7. `commit-and-push`
+8. `wait-for-update`
 
 ## Script Entry Points
 
@@ -77,13 +73,18 @@
 
 - `Scripts/dev/worker-agent/index.ts`
 
-首批子命令：
+当前关键子命令：
 
 - `restore`
-- `lock`
+- `next-action`
+- `lock acquire`
+- `lock renew`
+- `lock release`
 - `wait-for-update`
 - `render-comment`
+- `render-dissent-comment`
 - `render-body`
+- `render-dissent-issue`
 - `validate-message`
 
 ## State Files Under temp/worker-agent
@@ -101,4 +102,6 @@
 - [review-flow.md](./review-flow.md)
 - [waiting.md](./waiting.md)
 - [message-protocol.md](./message-protocol.md)
+- [dissent.md](./dissent.md)
 - [prompt.md](./prompt.md)
+- [prompt-cycle.md](./prompt-cycle.md)

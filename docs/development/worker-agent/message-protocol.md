@@ -11,16 +11,21 @@
 
 标题不加前缀。
 
-## Body Template
+## Per-Round Progress Comment Rule
 
-PR / issue body 至少包含：
+工作 Agent 现在按“单动作循环机”推进，因此每完成一轮关键动作，都要更新一条 `[Codex Worker]` 评论。
 
-- `Summary`
-- `Scope`
-- `Verification`
-- `Links/Refs`
+至少以下情况必须评论：
 
-## Comment Template
+- 代码发生变化
+- 完成一轮验证
+- 完成提交/推送
+- 进入等待边界
+- `🙋needs-human-test` 状态发生变化
+- 触发 Worker 执行异议
+- 处理 reviewer / human comment
+
+## Standard Comment Template
 
 ```text
 [Codex Worker]
@@ -36,13 +41,64 @@ Result
 ...
 ```
 
-## Quoted Reply Rule
+## Body Template
 
-对 review 或人类评论回复时，必须使用：
+PR / issue body 至少包含：
 
-`> 原文关键句`
+- `Summary`
+- `Scope`
+- `Verification`
+- `Links/Refs`
 
-不要直接丢一句“已修复”而没有引用上下文。
+## Worker Dissent Templates
+
+### PR Comment
+
+```text
+[Codex Worker]
+
+Conclusion
+Script: ...
+Actual: ...
+
+Repro Evidence
+...
+
+Trace Process
+...
+
+Impact
+...
+
+Linked Issue
+...
+```
+
+### Issue Body
+
+```text
+[Codex Worker]
+
+## Script Conclusion
+...
+
+## Actual Conclusion
+...
+
+## Repro Evidence
+...
+
+## Trace Process
+...
+
+## Impact
+...
+
+## Linked PR
+...
+```
+
+允许在 issue body 末尾通过 `---` 分隔后追加自由说明。
 
 ## Validation Rules
 

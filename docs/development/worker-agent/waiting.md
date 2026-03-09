@@ -4,6 +4,17 @@
 
 当前设计选择“单 PR 深度推进”，所以当 PR 暂时没有可继续动作时，工作 Agent 进入阻塞等待，而不是切走别的任务。
 
+## Pre-Wait Rules
+
+进入等待前，必须满足：
+
+- 工作区干净，或所有修改已明确提交
+- 该推送的提交已经推送
+- PR body 已同步
+- 本轮应发评论已发送
+- 本地状态文件已更新
+- 已执行一次显式 `lock renew`
+
 ## Wake Events
 
 等待脚本只监听当前持锁 PR，且以下事件会唤醒它：
@@ -31,13 +42,3 @@
 - `human-comment`
 - `human-test`
 - `ci-failure`
-
-## Pre-Wait Checklist
-
-进入等待前，必须满足：
-
-- 工作区干净，或修改已明确提交
-- 该推送的提交已经推送
-- PR body 已同步
-- 本轮应发评论已发送
-- `temp/worker-agent/state/` 已更新

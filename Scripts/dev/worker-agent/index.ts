@@ -9,6 +9,8 @@ import {
   readJsonFileIfExists,
   renderWorkerBody,
   renderWorkerComment,
+  renderWorkerDissentComment,
+  renderWorkerDissentIssueBody,
   validateWorkerText,
   writeJsonFile,
   writeTextFile,
@@ -17,17 +19,34 @@ import {
 } from './lib.ts';
 import {
   acquireLockViaPrLock,
+  clearLockSnapshot,
   loadLockSnapshot,
+  readRemoteLock,
   releaseLockViaPrLock,
+  renewLockViaPrLock,
   resolveRepo,
   saveLockSnapshot,
   verifyRemoteLock,
 } from './lock.ts';
+import {
+  determineNextAction,
+  type NextActionPrState,
+  type NextActionResult,
+} from './next-action.ts';
 import { fetchWaitSnapshot, summarizeWakeItems, waitForUpdateLoop } from './wait.ts';
 
 type ParsedArgs = {
   positionals: string[];
   flags: Map<string, string[]>;
+};
+
+type PrListEntry = {
+  number: number;
+  title: string;
+  url: string;
+  isDraft: boolean;
+  headRefName: string;
+  baseRefName: string;
 };
 
 function parseArgs(argv: string[]): ParsedArgs {
@@ -84,6 +103,47 @@ function currentWorktree(cwd = process.cwd()): string {
   return cwd;
 }
 
+function gitHasChanges(cwd = process.cwd()): boolean {
+  return execFileSync('git', ['status', '--porcelain'], {
+    cwd,
+    encoding: 'utf8',
+  }).trim().length > 0;
+}
+
+function gitAheadCount(cwd = process.cwd()): number {
+  try {
+    const raw = execFileSync('git', ['rev-list', '--left-right', '--count', '@{upstream}...HEAD'], {
+      cwd,
+      encoding: 'utf8',
+    }).trim();
+    const parts = raw.split(/\s+/);
+    return Number.parseInt(parts[1] ?? '0', 10);
+  } catch {
+    return 0;
+  }
+}
+
+function hasCommitsBeyondBase(baseBranch: string, cwd = process.cwd()): boolean {
+  for (const candidate of [baseBranch, `origin/${baseBranch}`]) {
+    try {
+      execFileSync('git', ['rev-parse', '--verify', candidate], {
+        cwd,
+        stdio: 'ignore',
+      });
+
+      const raw = execFileSync('git', ['rev-list', '--count', `${candidate}..HEAD`], {
+        cwd,
+        encoding: 'utf8',
+      }).trim();
+      return Number.parseInt(raw || '0', 10) > 0;
+    } catch {
+      continue;
+    }
+  }
+
+  return false;
+}
+
 function fetchPrMetadata(repo: string, prNumber: number, cwd = process.cwd()): {
   prNumber: number;
   baseBranch: string;
@@ -126,6 +186,97 @@ function fetchPrMetadata(repo: string, prNumber: number, cwd = process.cwd()): {
   };
 }
 
+function fetchCurrentPrForBranch(repo: string, branch: string, cwd = process.cwd()): PrListEntry | null {
+  const raw = execFileSync(
+    'gh',
+    ['pr', 'list', '--repo', repo, '--state', 'open', '--head', branch, '--json', 'number,title,url,isDraft,headRefName,baseRefName'],
+    {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 16,
+    },
+  ).trim();
+
+  const parsed = JSON.parse(raw) as PrListEntry[];
+  return parsed.find((entry) => entry.headRefName === branch) ?? parsed[0] ?? null;
+}
+
+function fetchPrRuntimeState(repo: string, prNumber: number, cwd = process.cwd()): NextActionPrState {
+  const raw = execFileSync(
+    'gh',
+    [
+      'pr',
+      'view',
+      String(prNumber),
+      '--repo',
+      repo,
+      '--json',
+      'number,isDraft,body,headRefOid,baseRefName,closingIssuesReferences,comments,reviews,labels,statusCheckRollup',
+    ],
+    {
+      cwd,
+      encoding: 'utf8',
+      maxBuffer: 1024 * 1024 * 16,
+    },
+  ).trim();
+
+  const parsed = JSON.parse(raw) as {
+    number: number;
+    isDraft: boolean;
+    body: string;
+    headRefOid: string;
+    baseRefName: string;
+    closingIssuesReferences?: Array<{ number: number }>;
+    comments: Array<{ id: string; author?: { login?: string }; body: string; createdAt: string }>;
+    reviews: Array<{ id: string; author?: { login?: string }; body: string; state: string; submittedAt: string }>;
+    labels: Array<{ name: string }>;
+    statusCheckRollup?: Array<{ name: string; status: string; conclusion?: string | null }>;
+  };
+
+  return {
+    number: parsed.number,
+    issueNumber: parsed.closingIssuesReferences?.[0]?.number ?? null,
+    body: parsed.body ?? '',
+    labels: parsed.labels.map((label) => label.name),
+    headSha: parsed.headRefOid,
+    comments: parsed.comments.map((comment) => ({
+      id: comment.id,
+      authorLogin: comment.author?.login ?? 'unknown',
+      body: comment.body ?? '',
+      createdAt: comment.createdAt,
+    })),
+    reviews: parsed.reviews.map((review) => ({
+      id: review.id,
+      authorLogin: review.author?.login ?? 'unknown',
+      body: review.body ?? '',
+      state: review.state ?? '',
+      submittedAt: review.submittedAt,
+    })),
+    statusChecks: (parsed.statusCheckRollup ?? []).map((check) => ({
+      name: check.name,
+      status: check.status,
+      conclusion: check.conclusion ?? '',
+    })),
+    isDraft: parsed.isDraft,
+    baseBranch: parsed.baseRefName,
+  };
+}
+
+function defaultCursor(): WorkerCursor {
+  return {
+    lastCommentIds: [],
+    lastReviewIds: [],
+    lastReviewThreadIds: [],
+  };
+}
+
+function renderAndMaybeWrite(body: string, output?: string): void {
+  if (output) {
+    writeTextFile(output, body);
+  }
+  console.log(body);
+}
+
 async function runRestore(parsed: ParsedArgs): Promise<void> {
   const tempRoot = flagValue(parsed, 'temp-root', 'temp/worker-agent')!;
   const cwd = flagValue(parsed, 'cwd', process.cwd())!;
@@ -150,11 +301,7 @@ async function runRestore(parsed: ParsedArgs): Promise<void> {
   }
 
   const currentState = readJsonFileIfExists<Record<string, unknown>>(paths.currentStateFile) ?? {};
-  const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? {
-    lastCommentIds: [],
-    lastReviewIds: [],
-    lastReviewThreadIds: [],
-  };
+  const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? defaultCursor();
   const waiting = readJsonFileIfExists<WorkerWaitingState>(paths.waitingStateFile);
   const metadata = fetchPrMetadata(repo, snapshot.prNumber, cwd);
 
@@ -202,31 +349,56 @@ async function runRestore(parsed: ParsedArgs): Promise<void> {
 }
 
 function runRenderComment(parsed: ParsedArgs): void {
-  const body = renderWorkerComment({
-    quote: requireFlag(parsed, 'quote'),
-    change: requireFlag(parsed, 'change'),
-    verification: requireFlag(parsed, 'verification'),
-    result: requireFlag(parsed, 'result'),
-  });
-  const output = flagValue(parsed, 'output');
-  if (output) {
-    writeTextFile(output, body);
-  }
-  console.log(body);
+  renderAndMaybeWrite(
+    renderWorkerComment({
+      quote: requireFlag(parsed, 'quote'),
+      change: requireFlag(parsed, 'change'),
+      verification: requireFlag(parsed, 'verification'),
+      result: requireFlag(parsed, 'result'),
+    }),
+    flagValue(parsed, 'output'),
+  );
+}
+
+function runRenderDissentComment(parsed: ParsedArgs): void {
+  renderAndMaybeWrite(
+    renderWorkerDissentComment({
+      scriptConclusion: requireFlag(parsed, 'script-conclusion'),
+      actualConclusion: requireFlag(parsed, 'actual-conclusion'),
+      reproducibleEvidence: requireFlag(parsed, 'repro-evidence'),
+      traceProcess: requireFlag(parsed, 'trace-process'),
+      impact: requireFlag(parsed, 'impact'),
+      linkedIssue: requireFlag(parsed, 'linked-issue'),
+    }),
+    flagValue(parsed, 'output'),
+  );
 }
 
 function runRenderBody(parsed: ParsedArgs): void {
-  const body = renderWorkerBody({
-    summary: requireFlag(parsed, 'summary'),
-    scope: requireFlag(parsed, 'scope'),
-    verification: requireFlag(parsed, 'verification'),
-    linksRefs: requireFlag(parsed, 'links-refs'),
-  });
-  const output = flagValue(parsed, 'output');
-  if (output) {
-    writeTextFile(output, body);
-  }
-  console.log(body);
+  renderAndMaybeWrite(
+    renderWorkerBody({
+      summary: requireFlag(parsed, 'summary'),
+      scope: requireFlag(parsed, 'scope'),
+      verification: requireFlag(parsed, 'verification'),
+      linksRefs: requireFlag(parsed, 'links-refs'),
+    }),
+    flagValue(parsed, 'output'),
+  );
+}
+
+function runRenderDissentIssue(parsed: ParsedArgs): void {
+  renderAndMaybeWrite(
+    renderWorkerDissentIssueBody({
+      scriptConclusion: requireFlag(parsed, 'script-conclusion'),
+      actualConclusion: requireFlag(parsed, 'actual-conclusion'),
+      reproducibleEvidence: requireFlag(parsed, 'repro-evidence'),
+      traceProcess: requireFlag(parsed, 'trace-process'),
+      impact: requireFlag(parsed, 'impact'),
+      linkedPr: requireFlag(parsed, 'linked-pr'),
+      extraNotes: flagValue(parsed, 'extra-notes'),
+    }),
+    flagValue(parsed, 'output'),
+  );
 }
 
 function runValidateMessage(parsed: ParsedArgs): void {
@@ -268,6 +440,20 @@ async function runLock(parsed: ParsedArgs): Promise<void> {
       return;
     }
 
+    case 'renew': {
+      const additionalMinutes = Number.parseInt(requireFlag(parsed, 'additional-minutes'), 10);
+      const snapshot = renewLockViaPrLock({
+        repo,
+        prNumber,
+        agentId,
+        additionalMinutes,
+        cwd,
+        tempRoot,
+      });
+      console.log(JSON.stringify(snapshot, null, 2));
+      return;
+    }
+
     case 'release': {
       const raw = releaseLockViaPrLock({
         repo,
@@ -275,7 +461,7 @@ async function runLock(parsed: ParsedArgs): Promise<void> {
         agentId,
         cwd,
       });
-      writeJsonFile(getWorkerTempPaths(tempRoot).currentLockFile, {});
+      clearLockSnapshot(tempRoot);
       console.log(raw);
       return;
     }
@@ -297,6 +483,82 @@ async function runLock(parsed: ParsedArgs): Promise<void> {
     default:
       throw new Error(`Unknown lock action: ${action}`);
   }
+}
+
+async function runNextAction(parsed: ParsedArgs): Promise<void> {
+  const tempRoot = flagValue(parsed, 'temp-root', 'temp/worker-agent')!;
+  const cwd = flagValue(parsed, 'cwd', process.cwd())!;
+  const repo = resolveRepo(flagValue(parsed, 'repo'), cwd);
+  const paths = getWorkerTempPaths(tempRoot);
+  ensureWorkerTempDirs(paths);
+
+  const branch = currentBranch(cwd);
+  const currentState = readJsonFileIfExists<Record<string, unknown>>(paths.currentStateFile) ?? {};
+  const prSummary = fetchCurrentPrForBranch(repo, branch, cwd);
+  const prState = prSummary ? fetchPrRuntimeState(repo, prSummary.number, cwd) : null;
+  const baseBranch = prState?.baseBranch ?? flagValue(parsed, 'base-branch', 'dev')!;
+  const git = {
+    branch,
+    isDefaultBranch: branch === baseBranch || branch === 'main',
+    hasChanges: gitHasChanges(cwd),
+    aheadCount: gitAheadCount(cwd),
+    hasCommitsBeyondBase: hasCommitsBeyondBase(baseBranch, cwd),
+  };
+  const localLock = loadLockSnapshot(tempRoot);
+  const agentId = flagValue(parsed, 'agent-id', localLock?.agentId ?? 'codex-worker')!;
+  const remoteLock = prState ? readRemoteLock(repo, prState.number, cwd) : null;
+  const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? defaultCursor();
+  const result: NextActionResult = determineNextAction({
+    worker: {
+      agentId,
+    },
+    git,
+    pr: prState,
+    cursor,
+    lock: {
+      local: localLock,
+      remote: remoteLock,
+    },
+    dissent: {
+      requested: flagValue(parsed, 'dissent', 'false') === 'true',
+      summary: flagValue(parsed, 'dissent-summary'),
+    },
+  });
+
+  writeJsonFile(paths.currentStateFile, {
+    ...currentState,
+    prNumber: prState?.number ?? null,
+    issueNumber: prState?.issueNumber ?? null,
+    branch,
+    baseBranch,
+    worktree: currentWorktree(cwd),
+    headSha: prState?.headSha ?? null,
+    nextAction: result.action,
+    nextActionReason: result.reason,
+    lastSyncedAt: new Date().toISOString(),
+  });
+
+  console.log(
+    JSON.stringify(
+      {
+        context: {
+          repo,
+          branch,
+          worktree: currentWorktree(cwd),
+          prNumber: prState?.number ?? null,
+          issueNumber: prState?.issueNumber ?? null,
+          baseBranch,
+          headSha: prState?.headSha ?? null,
+          localLock,
+          remoteLock,
+          git,
+        },
+        result,
+      },
+      null,
+      2,
+    ),
+  );
 }
 
 async function runWaitForUpdate(parsed: ParsedArgs): Promise<void> {
@@ -322,11 +584,7 @@ async function runWaitForUpdate(parsed: ParsedArgs): Promise<void> {
     throw new Error(`Unable to verify remote PR lock for PR #${snapshot.prNumber}.`);
   }
 
-  const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? {
-    lastCommentIds: [],
-    lastReviewIds: [],
-    lastReviewThreadIds: [],
-  };
+  const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? defaultCursor();
 
   writeJsonFile(paths.waitingStateFile, {
     waiting: true,
@@ -373,10 +631,13 @@ async function runWaitForUpdate(parsed: ParsedArgs): Promise<void> {
 function printHelp(): void {
   console.log(`Usage:
   worker-agent restore [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>]
+  worker-agent next-action [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>] [--base-branch <name>]
   worker-agent render-comment --quote <text> --change <text> --verification <text> --result <text> [--output <path>]
+  worker-agent render-dissent-comment --script-conclusion <text> --actual-conclusion <text> --repro-evidence <text> --trace-process <text> --impact <text> --linked-issue <text> [--output <path>]
   worker-agent render-body --summary <text> --scope <text> --verification <text> --links-refs <text> [--output <path>]
+  worker-agent render-dissent-issue --script-conclusion <text> --actual-conclusion <text> --repro-evidence <text> --trace-process <text> --impact <text> --linked-pr <text> [--extra-notes <text>] [--output <path>]
   worker-agent validate-message (--file <path> | --body <text>) [--section <name>...]
-  worker-agent lock <acquire|release|check> --pr <number> [--repo <owner/repo>] [--agent-id <id>]
+  worker-agent lock <acquire|renew|release|check> --pr <number> [--repo <owner/repo>] [--agent-id <id>]
   worker-agent wait-for-update [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>]
 `);
 }
@@ -394,11 +655,20 @@ async function main(): Promise<void> {
     case 'restore':
       await runRestore(parsed);
       return;
+    case 'next-action':
+      await runNextAction(parsed);
+      return;
     case 'render-comment':
       runRenderComment(parsed);
       return;
+    case 'render-dissent-comment':
+      runRenderDissentComment(parsed);
+      return;
     case 'render-body':
       runRenderBody(parsed);
+      return;
+    case 'render-dissent-issue':
+      runRenderDissentIssue(parsed);
       return;
     case 'validate-message':
       runValidateMessage(parsed);

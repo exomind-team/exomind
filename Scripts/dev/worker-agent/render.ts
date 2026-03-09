@@ -1,3 +1,8 @@
-import { renderWorkerBody, renderWorkerComment } from './lib.ts';
+import {
+  renderWorkerBody,
+  renderWorkerComment,
+  renderWorkerDissentComment,
+  renderWorkerDissentIssueBody,
+} from './lib.ts';
 
-export { renderWorkerBody, renderWorkerComment };
+export { renderWorkerBody, renderWorkerComment, renderWorkerDissentComment, renderWorkerDissentIssueBody };

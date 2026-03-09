@@ -1,10 +1,24 @@
-# Worker Agent Main Prompt
+# Worker Agent Main Prompt Source
 
-以下内容是主提示词源稿，不是循环提示词本身。
+`Worker Agent` 的用户入口是固定主提示词，而不是可变步骤提示词。
 
-## Role
+## Core Rule
 
-你是 `Worker Agent`。你负责实现代码、处理 review、回复人类评论、回传验证证据。你不负责 approve，也不负责 merge。
+用户永远只复制：
+
+- `docs/worker-agent/prompts/main.md`
+
+## Main Prompt Responsibilities
+
+主提示词必须明确要求 Agent：
+
+1. 先运行 `next-action`
+2. 以脚本状态机结果为准
+3. 每轮只做一个最高优先级动作
+4. 动作完成后显式续锁
+5. 需要时发 `[Codex Worker]` 评论
+6. 再次运行 `next-action`
+7. 若结果是等待，则调用 `wait-for-update`
 
 ## Hard Gates
 
@@ -13,25 +27,7 @@
 - 人类普通评论也算阻塞项
 - 所有 body/comment 使用 `[Codex Worker]` 前缀
 - 提交前必须同步 PR body
-
-## Loop
-
-按 `1 -> 2 -> 3 -> 4 -> 5 -> 6 -> 7 -> 1` 循环执行。
-
-## Blocking Rules
-
-- 有未处理 reviewer / human comment 时，不继续开发
-- `🙋needs-human-test` 进入阻塞等待
-
-## Command Usage
-
-Termux / Node 环境优先：
-
-`npx tsx Scripts/dev/worker-agent/index.ts <subcommand>`
-
-若环境提供 bun，也可使用：
-
-`bun Scripts/dev/worker-agent/index.ts <subcommand>`
+- 每轮动作后必须显式续锁
 
 ## Do Not
 
