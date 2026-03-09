@@ -16,26 +16,30 @@
 import { execSync } from 'child_process';
 
 interface LockMetadata {
-  lock_id: string;           // 唯一标识：lock-{timestamp}-{random}
-  agent_id: string;          // Agent 标识
-  acquired_at: string;       // 获取时间 ISO 8601
-  expires_at: string;        // 过期时间 ISO 8601
-  timeout_minutes: number;   // 超时分钟数
-  task_id?: string;          // 关联任务 ID
-  reason?: string;           // 锁定原因
+  lock_id: string;                // 唯一标识：lock-{timestamp}-{random}
+  agent_id: string;               // Agent 标识
+  worktree_path?: string;         // 工作目录路径
+  acquired_at: string;            // 获取时间 ISO 8601
+  lock_duration_minutes: number;  // 锁时长（分钟）
+  task_id?: string;               // 关联任务 ID
+  reason?: string;                // 锁定原因
 }
 
-interface LocalContext {
-  pr_number: number;         // PR 编号
-  lock_id: string;           // 锁 ID
-  agent_id: string;          // Agent 标识
-  acquired_at: string;       // 获取时间
-  expires_at: string;        // 过期时间
-  timeout_minutes: number;   // 超时分钟数
-  working_directory: string; // 工作目录
-  branch: string;            // Git 分支
-  task_id?: string;          // 关联任务 ID
-  reason?: string;           // 锁定原因
+interface LockState {
+  lock_id: string;                // 锁 ID
+  pr_number: number;              // PR 编号
+  acquired_at: string;            // 获取时间 ISO 8601
+  lock_duration_minutes: number;  // 锁时长（分钟）
+  pr_last_updated_at: string;     // PR 最后更新时间
+  expires_at: string;             // 过期时间（动态计算）
+}
+
+interface LockStatus extends LockMetadata {
+  pr_number: number;              // PR 编号
+  pr_last_updated_at: string;     // PR 最后更新时间
+  expires_at: string;             // 过期时间（动态计算）
+  is_expired: boolean;            // 是否过期
+  remaining_minutes: number;      // 剩余分钟数
 }
 
 interface LockResult {
@@ -54,6 +58,160 @@ export class PRLockManager {
     private agentId: string    // "fixer@pr-draft-cleanup"
   ) {}
 
+  // ========== 动态过期时间计算 ==========
+
+  /**
+   * 获取 PR 最后更新时间
+   *
+   * 包含：
+   * - 最后一次 commit 时间
+   * - 最后一次 comment 时间
+   *
+   * 取两者中较晚的时间
+   */
+  private async getPRLastUpdatedAt(prNumber: number): Promise<string> {
+    let lastCommitTime: Date | null = null;
+    let lastCommentTime: Date | null = null;
+
+    // 获取最后一次 commit 时间
+    try {
+      const commits = this.gh(`api repos/${this.repo}/pulls/${prNumber}/commits --jq '.[].commit.committer.date'`);
+      const commitTimes = commits.trim().split('\n').filter(t => t);
+      if (commitTimes.length > 0) {
+        lastCommitTime = new Date(commitTimes[commitTimes.length - 1]);
+      }
+    } catch (e) {
+      console.warn('[PRLock] Failed to get commit times:', e);
+    }
+
+    // 获取最后一次 comment 时间
+    try {
+      const comments = await this.getComments(prNumber);
+      if (comments.length > 0) {
+        lastCommentTime = new Date(comments[comments.length - 1].created_at);
+      }
+    } catch (e) {
+      console.warn('[PRLock] Failed to get comment times:', e);
+    }
+
+    // 取两者中较晚的时间
+    const times = [lastCommitTime, lastCommentTime].filter(t => t !== null) as Date[];
+    if (times.length === 0) {
+      // 如果都获取失败，使用当前时间
+      return new Date().toISOString();
+    }
+
+    const latestTime = new Date(Math.max(...times.map(t => t.getTime())));
+    return latestTime.toISOString();
+  }
+
+  /**
+   * 计算过期时间
+   *
+   * expires_at = pr_last_updated_at + lock_duration
+   */
+  private calculateExpiresAt(prLastUpdatedAt: string, lockDurationMinutes: number): string {
+    const lastUpdated = new Date(prLastUpdatedAt);
+    const expiresAt = new Date(lastUpdated.getTime() + lockDurationMinutes * 60 * 1000);
+    return expiresAt.toISOString();
+  }
+
+  // ========== 本地锁文件管理 ==========
+
+  /**
+   * 保存锁状态到本地文件
+   */
+  private async saveLockState(
+    prNumber: number,
+    lock: LockMetadata,
+    prLastUpdatedAt: string
+  ): Promise<void> {
+    const lockFile = '.exomind/lock-state.json';
+    const contextDir = '.exomind';
+
+    // 确保目录存在
+    try {
+      execSync(`mkdir -p ${contextDir}`, { stdio: 'ignore' });
+    } catch (e) {
+      console.warn('[PRLock] Failed to create .exomind directory:', e);
+      return;
+    }
+
+    const lockState: LockState = {
+      lock_id: lock.lock_id,
+      pr_number: prNumber,
+      acquired_at: lock.acquired_at,
+      lock_duration_minutes: lock.lock_duration_minutes,
+      pr_last_updated_at: prLastUpdatedAt,
+      expires_at: this.calculateExpiresAt(prLastUpdatedAt, lock.lock_duration_minutes)
+    };
+
+    try {
+      await Bun.write(lockFile, JSON.stringify(lockState, null, 2));
+      console.log(`[PRLock] Lock state saved to ${lockFile}`);
+    } catch (e) {
+      console.warn('[PRLock] Failed to save lock state:', e);
+    }
+  }
+
+  /**
+   * 读取本地锁状态
+   */
+  private async loadLockState(): Promise<LockState | null> {
+    const lockFile = '.exomind/lock-state.json';
+
+    try {
+      const file = Bun.file(lockFile);
+      if (!(await file.exists())) {
+        return null;
+      }
+
+      const lockState = await file.json() as LockState;
+      return lockState;
+    } catch (e) {
+      console.warn('[PRLock] Failed to load lock state:', e);
+      return null;
+    }
+  }
+
+  /**
+   * 删除本地锁文件
+   */
+  private async deleteLockState(): Promise<void> {
+    const lockFile = '.exomind/lock-state.json';
+
+    try {
+      execSync(`rm -f ${lockFile}`, { stdio: 'ignore' });
+      console.log('[PRLock] Lock state deleted');
+    } catch (e) {
+      console.warn('[PRLock] Failed to delete lock state:', e);
+    }
+  }
+
+  /**
+   * 更新本地锁状态
+   */
+  private async updateLockState(
+    prLastUpdatedAt: string,
+    lockDurationMinutes: number
+  ): Promise<void> {
+    const lockState = await this.loadLockState();
+    if (!lockState) {
+      return;
+    }
+
+    lockState.pr_last_updated_at = prLastUpdatedAt;
+    lockState.expires_at = this.calculateExpiresAt(prLastUpdatedAt, lockDurationMinutes);
+
+    const lockFile = '.exomind/lock-state.json';
+    try {
+      await Bun.write(lockFile, JSON.stringify(lockState, null, 2));
+      console.log('[PRLock] Lock state updated');
+    } catch (e) {
+      console.warn('[PRLock] Failed to update lock state:', e);
+    }
+  }
+
   /**
    * 尝试获取 PR 锁
    *
@@ -64,61 +222,57 @@ export class PRLockManager {
    * 4. 添加标签 + 创建 Comment
    * 5. 重新检查 timeline，检测竞争条件
    * 6. 如果有竞争，比较时间戳，较晚的主动放弃
+   * 7. 保存本地锁文件
    */
   async acquire(
     prNumber: number,
     timeoutMinutes: number,
-    options?: { taskId?: string; reason?: string }
+    options?: { worktreePath?: string; taskId?: string; reason?: string }
   ): Promise<LockResult> {
     console.log(`[PRLock] Agent ${this.agentId} attempting to acquire lock on PR #${prNumber}`);
 
-    // 1. 检查是否已有锁
+    // 1. 检查是否已有锁（动态计算过期状态）
     const existingLock = await this.checkLock(prNumber);
 
-    if (existingLock) {
-      // 2. 检查锁是否过期
-      const now = new Date();
-      const expiresAt = new Date(existingLock.expires_at);
+    if (existingLock && !existingLock.is_expired) {
+      // 锁未过期，获取失败
+      console.log(`[PRLock] PR #${prNumber} is locked by ${existingLock.agent_id}, expires in ${existingLock.remaining_minutes} minutes`);
+      return {
+        success: false,
+        error: `PR #${prNumber} is locked by ${existingLock.agent_id} until ${existingLock.expires_at} (${existingLock.remaining_minutes} minutes remaining)`
+      };
+    }
 
-      if (now < expiresAt) {
-        // 锁未过期，获取失败
-        const remainingMinutes = Math.ceil((expiresAt.getTime() - now.getTime()) / 60000);
-        console.log(`[PRLock] PR #${prNumber} is locked by ${existingLock.agent_id}, expires in ${remainingMinutes} minutes`);
-        return {
-          success: false,
-          error: `PR #${prNumber} is locked by ${existingLock.agent_id} until ${existingLock.expires_at} (${remainingMinutes} minutes remaining)`
-        };
-      }
-
+    if (existingLock && existingLock.is_expired) {
       // 锁已过期，强制释放
       console.log(`[PRLock] Existing lock on PR #${prNumber} has expired, force releasing`);
       await this.forceRelease(prNumber, existingLock);
     }
 
-    // 3. 生成锁元数据
+    // 2. 生成锁元数据
     const now = new Date();
     const lock: LockMetadata = {
       lock_id: `lock-${now.getTime()}-${Math.random().toString(36).substr(2, 9)}`,
       agent_id: this.agentId,
+      worktree_path: options?.worktreePath,
       acquired_at: now.toISOString(),
-      expires_at: new Date(now.getTime() + timeoutMinutes * 60 * 1000).toISOString(),
-      timeout_minutes: timeoutMinutes,
+      lock_duration_minutes: timeoutMinutes,
       task_id: options?.taskId,
       reason: options?.reason
     };
 
-    // 4. 添加锁标签
+    // 3. 添加锁标签
     console.log(`[PRLock] Adding lock label to PR #${prNumber}`);
     await this.addLabel(prNumber, '🔒 locked');
 
-    // 5. 创建锁元数据 Comment
+    // 4. 创建锁元数据 Comment
     console.log(`[PRLock] Creating lock comment with metadata`);
     await this.createLockComment(prNumber, lock);
 
-    // 6. 等待 GitHub API 同步（避免 race condition）
+    // 5. 等待 GitHub API 同步（避免 race condition）
     await this.sleep(2000);
 
-    // 7. 重新检查 timeline，检测竞争条件
+    // 6. 重新检查 timeline，检测竞争条件
     console.log(`[PRLock] Checking for race conditions`);
     const conflictCheck = await this.detectConflict(prNumber, lock);
 
@@ -146,43 +300,10 @@ export class PRLockManager {
 
     console.log(`[PRLock] Lock acquired successfully: ${lock.lock_id}`);
 
-    // 8. 保存本地上下文
-    await this.saveLocalContext(lock, prNumber);
+    // 7. 保存本地锁文件
+    const prLastUpdatedAt = await this.getPRLastUpdatedAt(prNumber);
+    await this.saveLockState(prNumber, lock, prLastUpdatedAt);
 
-    return { success: true, lock };
-  }
-
-  /**
-   * 续期锁（延长超时时间）
-   */
-  async renew(
-    prNumber: number,
-    additionalMinutes: number
-  ): Promise<LockResult> {
-    console.log(`[PRLock] Renewing lock on PR #${prNumber} for ${additionalMinutes} more minutes`);
-
-    const lock = await this.checkLock(prNumber);
-
-    if (!lock) {
-      return { success: false, error: 'No lock found' };
-    }
-
-    if (lock.agent_id !== this.agentId) {
-      return {
-        success: false,
-        error: `Lock is held by ${lock.agent_id}, not ${this.agentId}`
-      };
-    }
-
-    // 更新过期时间
-    const newExpiresAt = new Date(Date.now() + additionalMinutes * 60 * 1000);
-    lock.expires_at = newExpiresAt.toISOString();
-    lock.timeout_minutes = additionalMinutes;
-
-    // 创建新的锁 Comment（更新时间戳）
-    await this.createLockComment(prNumber, lock);
-
-    console.log(`[PRLock] Lock renewed, new expiry: ${lock.expires_at}`);
     return { success: true, lock };
   }
 
@@ -221,18 +342,55 @@ export class PRLockManager {
 
     console.log(`[PRLock] Lock released successfully`);
 
-    // 清理本地上下文
-    await this.clearLocalContext();
+    // 删除本地锁文件
+    await this.deleteLockState();
 
     return { success: true };
   }
 
   /**
-   * 检查 PR 是否被锁定
+   * 强制释放过期锁
    */
-  async checkLock(prNumber: number): Promise<LockMetadata | null> {
+  async forceRelease(prNumber: number, oldLock?: LockStatus): Promise<void> {
+    if (!oldLock) {
+      const lock = await this.checkLock(prNumber);
+      if (!lock) {
+        console.log(`[PRLock] No lock found, nothing to force release`);
+        return;
+      }
+      if (!lock.is_expired) {
+        throw new Error(`Cannot force release: lock is not expired (${lock.remaining_minutes} minutes remaining)`);
+      }
+      oldLock = lock;
+    }
+
+    await this.removeLabel(prNumber, '🔒 locked');
+
+    await this.createComment(prNumber,
+      `🔓 **锁已超时释放**\n\n` +
+      `- 原持有者：\`${oldLock.agent_id}\`\n` +
+      `- 获取时间：${oldLock.acquired_at}\n` +
+      `- 过期时间：${oldLock.expires_at}\n` +
+      `- 超时原因：锁已过期 ${oldLock.lock_duration_minutes} 分钟，自动释放\n\n` +
+      `锁现在可以被其他 Agent 获取。`
+    );
+
+    console.log(`[PRLock] Lock force released successfully`);
+  }
+
+  /**
+   * 检查 PR 是否被锁定（返回动态计算的锁状态）
+   */
+  async checkLock(prNumber: number): Promise<LockStatus | null> {
     // 1. 检查是否有 🔒 locked 标签
-    const labels = await this.getLabels(prNumber);
+    let labels;
+    try {
+      labels = await this.getLabels(prNumber);
+    } catch (e) {
+      // PR 不存在或无法访问
+      console.warn(`[PRLock] Failed to get labels for PR #${prNumber}:`, e);
+      return null;
+    }
     const hasLock = labels.some((l: any) => l.name === '🔒 locked');
 
     if (!hasLock) {
@@ -256,12 +414,40 @@ export class PRLockManager {
       return null;
     }
 
+    let lockMetadata: LockMetadata;
     try {
-      return JSON.parse(match[1]);
+      lockMetadata = JSON.parse(match[1]);
     } catch (e) {
       console.error('[PRLock] Failed to parse lock metadata:', e);
       return null;
     }
+
+    // 4. 获取 PR 最后更新时间
+    const prLastUpdatedAt = await this.getPRLastUpdatedAt(prNumber);
+
+    // 5. 动态计算过期时间
+    const expiresAt = this.calculateExpiresAt(prLastUpdatedAt, lockMetadata.lock_duration_minutes);
+
+    // 6. 判断是否过期
+    const now = new Date();
+    const expiresAtDate = new Date(expiresAt);
+    const isExpired = now >= expiresAtDate;
+    const remainingMinutes = Math.max(0, Math.ceil((expiresAtDate.getTime() - now.getTime()) / 60000));
+
+    // 7. 如果本地有锁文件，更新本地状态
+    const localLockState = await this.loadLockState();
+    if (localLockState && localLockState.lock_id === lockMetadata.lock_id) {
+      await this.updateLockState(prLastUpdatedAt, lockMetadata.lock_duration_minutes);
+    }
+
+    return {
+      ...lockMetadata,
+      pr_number: prNumber,
+      pr_last_updated_at: prLastUpdatedAt,
+      expires_at: expiresAt,
+      is_expired: isExpired,
+      remaining_minutes: remainingMinutes
+    };
   }
 
   /**
@@ -323,25 +509,6 @@ export class PRLockManager {
     };
   }
 
-  /**
-   * 强制释放过期的锁
-   */
-  private async forceRelease(
-    prNumber: number,
-    oldLock: LockMetadata
-  ): Promise<void> {
-    await this.removeLabel(prNumber, '🔒 locked');
-
-    await this.createComment(prNumber,
-      `🔓 **锁已超时释放**\n\n` +
-      `- 原持有者：\`${oldLock.agent_id}\`\n` +
-      `- 获取时间：${oldLock.acquired_at}\n` +
-      `- 过期时间：${oldLock.expires_at}\n` +
-      `- 超时原因：锁已过期 ${oldLock.timeout_minutes} 分钟，自动释放\n\n` +
-      `锁现在可以被其他 Agent 获取。`
-    );
-  }
-
   // ========== GitHub API 封装 ==========
 
   private async addLabel(prNumber: number, label: string): Promise<void> {
@@ -375,12 +542,15 @@ export class PRLockManager {
       `<!-- LOCK_METADATA\n${JSON.stringify(lock, null, 2)}\n-->\n\n` +
       `🔒 **PR 已被锁定**\n\n` +
       `- 持有者：\`${lock.agent_id}\`\n` +
+      (lock.worktree_path ? `- 工作目录：\`${lock.worktree_path}\`\n` : '') +
       `- 锁 ID：\`${lock.lock_id}\`\n` +
       `- 获取时间：${lock.acquired_at}\n` +
-      `- 过期时间：${lock.expires_at}（${lock.timeout_minutes} 分钟后）\n` +
+      `- 锁时长：${lock.lock_duration_minutes} 分钟\n` +
       (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
       (lock.reason ? `- 原因：${lock.reason}\n` : '') +
-      `\n其他 Agent 请等待锁释放或超时后再处理此 PR。`;
+      `\n**过期时间动态计算：**\n` +
+      `过期时间 = PR 最后更新时间 + ${lock.lock_duration_minutes} 分钟\n` +
+      `每次提交或评论后，锁自动延期。`;
 
     await this.createComment(prNumber, body);
   }
@@ -395,156 +565,6 @@ export class PRLockManager {
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
-
-  // ========== 本地上下文管理 ==========
-
-  /**
-   * 保存本地上下文
-   *
-   * 在获取锁成功后调用，记录当前工作目录与 PR 的关联关系
-   */
-  private async saveLocalContext(
-    lock: LockMetadata,
-    prNumber: number
-  ): Promise<void> {
-    const contextDir = '.exomind';
-    const contextFile = `${contextDir}/pr-context.json`;
-
-    // 确保目录存在
-    try {
-      execSync(`mkdir -p ${contextDir}`, { stdio: 'ignore' });
-    } catch (e) {
-      console.warn('[PRLock] Failed to create .exomind directory:', e);
-      return;
-    }
-
-    // 获取当前分支
-    let branch = 'unknown';
-    try {
-      branch = execSync('git branch --show-current', { encoding: 'utf-8' }).trim();
-    } catch (e) {
-      console.warn('[PRLock] Failed to get current branch:', e);
-    }
-
-    const context: LocalContext = {
-      pr_number: prNumber,
-      lock_id: lock.lock_id,
-      agent_id: lock.agent_id,
-      acquired_at: lock.acquired_at,
-      expires_at: lock.expires_at,
-      timeout_minutes: lock.timeout_minutes,
-      working_directory: process.cwd(),
-      branch,
-      task_id: lock.task_id,
-      reason: lock.reason
-    };
-
-    try {
-      await Bun.write(contextFile, JSON.stringify(context, null, 2));
-      console.log(`[PRLock] Local context saved to ${contextFile}`);
-    } catch (e) {
-      console.warn('[PRLock] Failed to save local context:', e);
-    }
-  }
-
-  /**
-   * 读取本地上下文
-   *
-   * Agent 重启后可以通过此方法恢复工作上下文
-   */
-  async loadLocalContext(): Promise<LocalContext | null> {
-    const contextFile = '.exomind/pr-context.json';
-
-    try {
-      const file = Bun.file(contextFile);
-      if (!(await file.exists())) {
-        return null;
-      }
-
-      const context = await file.json() as LocalContext;
-      console.log(`[PRLock] Local context loaded: PR #${context.pr_number}`);
-      return context;
-    } catch (e) {
-      console.warn('[PRLock] Failed to load local context:', e);
-      return null;
-    }
-  }
-
-  /**
-   * 清理本地上下文
-   *
-   * 在释放锁后调用，清除工作目录与 PR 的关联关系
-   */
-  private async clearLocalContext(): Promise<void> {
-    const contextFile = '.exomind/pr-context.json';
-
-    try {
-      execSync(`rm -f ${contextFile}`, { stdio: 'ignore' });
-      console.log('[PRLock] Local context cleared');
-    } catch (e) {
-      console.warn('[PRLock] Failed to clear local context:', e);
-    }
-  }
-
-  /**
-   * 检查本地上下文是否与远程锁一致
-   *
-   * 用于验证本地上下文的有效性
-   */
-  async validateLocalContext(): Promise<{
-    valid: boolean;
-    reason?: string;
-    localContext?: LocalContext;
-    remoteLock?: LockMetadata;
-  }> {
-    const localContext = await this.loadLocalContext();
-
-    if (!localContext) {
-      return { valid: false, reason: 'No local context found' };
-    }
-
-    const remoteLock = await this.checkLock(localContext.pr_number);
-
-    if (!remoteLock) {
-      return {
-        valid: false,
-        reason: 'Remote lock not found (may have been released or expired)',
-        localContext
-      };
-    }
-
-    if (remoteLock.lock_id !== localContext.lock_id) {
-      return {
-        valid: false,
-        reason: 'Lock ID mismatch (another agent may have acquired the lock)',
-        localContext,
-        remoteLock
-      };
-    }
-
-    if (remoteLock.agent_id !== localContext.agent_id) {
-      return {
-        valid: false,
-        reason: 'Agent ID mismatch',
-        localContext,
-        remoteLock
-      };
-    }
-
-    // 检查是否过期
-    const now = new Date();
-    const expiresAt = new Date(remoteLock.expires_at);
-    if (now >= expiresAt) {
-      return {
-        valid: false,
-        reason: 'Lock has expired',
-        localContext,
-        remoteLock
-      };
-    }
-
-    return { valid: true, localContext, remoteLock };
-  }
 }
 
 // ========== CLI 工具 ==========
@@ -556,20 +576,16 @@ if (import.meta.main) {
   if (!command) {
     console.log(`
 Usage:
-  bun pr-lock.ts acquire <pr-number> <timeout-minutes> [agent-id] [--task-id=X] [--reason="..."]
-  bun pr-lock.ts release <pr-number> [agent-id]
+  bun pr-lock.ts acquire <pr-number> <timeout-minutes> <agent-id> [--worktree-path=<path>] [--task-id=X] [--reason="..."]
   bun pr-lock.ts check <pr-number>
-  bun pr-lock.ts renew <pr-number> <additional-minutes> [agent-id]
-  bun pr-lock.ts context                    # 查看本地上下文
-  bun pr-lock.ts validate                   # 验证本地上下文
+  bun pr-lock.ts release <pr-number> <agent-id>
+  bun pr-lock.ts force-release <pr-number>
 
 Examples:
-  bun pr-lock.ts acquire 379 5 fixer@team --task-id=4 --reason="修复逻辑问题"
-  bun pr-lock.ts release 379 fixer@team
-  bun pr-lock.ts check 379
-  bun pr-lock.ts renew 379 5 fixer@team
-  bun pr-lock.ts context                    # 查看当前工作目录的 PR 上下文
-  bun pr-lock.ts validate                   # 验证本地上下文是否有效
+  bun pr-lock.ts acquire 419 60 fixer@team --worktree-path="exomind-worktree-pr-419" --task-id=4 --reason="修复 TypeScript 类型错误"
+  bun pr-lock.ts check 419
+  bun pr-lock.ts release 419 fixer@team
+  bun pr-lock.ts force-release 419
     `);
     process.exit(1);
   }
@@ -581,13 +597,27 @@ Examples:
       const prNumber = parseInt(args[1]);
       const timeoutMinutes = parseInt(args[2]);
       const agentId = args[3] || 'manual-cli';
+      const worktreePath = args.find(a => a.startsWith('--worktree-path='))?.split('=')[1];
       const taskId = args.find(a => a.startsWith('--task-id='))?.split('=')[1];
       const reason = args.find(a => a.startsWith('--reason='))?.split('=')[1];
 
       const lockManager = new PRLockManager(repo, agentId);
-      const result = await lockManager.acquire(prNumber, timeoutMinutes, { taskId, reason });
+      const result = await lockManager.acquire(prNumber, timeoutMinutes, { worktreePath, taskId, reason });
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.success ? 0 : 1);
+    }
+
+    case 'check': {
+      const prNumber = parseInt(args[1]);
+      const agentId = 'manual-cli';
+      const lockManager = new PRLockManager(repo, agentId);
+      const lock = await lockManager.checkLock(prNumber);
+      if (lock) {
+        console.log(JSON.stringify(lock, null, 2));
+      } else {
+        console.log('No lock found');
+      }
+      process.exit(0);
     }
 
     case 'release': {
@@ -599,50 +629,18 @@ Examples:
       process.exit(result.success ? 0 : 1);
     }
 
-    case 'check': {
+    case 'force-release': {
       const prNumber = parseInt(args[1]);
       const agentId = 'manual-cli';
       const lockManager = new PRLockManager(repo, agentId);
-      const lock = await lockManager.checkLock(prNumber);
-      if (lock) {
-        const now = new Date();
-        const expiresAt = new Date(lock.expires_at);
-        const isExpired = now >= expiresAt;
-        console.log(JSON.stringify({ ...lock, is_expired: isExpired }, null, 2));
-      } else {
-        console.log('No lock found');
+      try {
+        await lockManager.forceRelease(prNumber);
+        console.log(JSON.stringify({ success: true }, null, 2));
+        process.exit(0);
+      } catch (e) {
+        console.error(JSON.stringify({ success: false, error: (e as Error).message }, null, 2));
+        process.exit(1);
       }
-      process.exit(0);
-    }
-
-    case 'renew': {
-      const prNumber = parseInt(args[1]);
-      const additionalMinutes = parseInt(args[2]);
-      const agentId = args[3] || 'manual-cli';
-      const lockManager = new PRLockManager(repo, agentId);
-      const result = await lockManager.renew(prNumber, additionalMinutes);
-      console.log(JSON.stringify(result, null, 2));
-      process.exit(result.success ? 0 : 1);
-    }
-
-    case 'context': {
-      const agentId = 'manual-cli';
-      const lockManager = new PRLockManager(repo, agentId);
-      const context = await lockManager.loadLocalContext();
-      if (context) {
-        console.log(JSON.stringify(context, null, 2));
-      } else {
-        console.log('No local context found');
-      }
-      process.exit(0);
-    }
-
-    case 'validate': {
-      const agentId = 'manual-cli';
-      const lockManager = new PRLockManager(repo, agentId);
-      const validation = await lockManager.validateLocalContext();
-      console.log(JSON.stringify(validation, null, 2));
-      process.exit(validation.valid ? 0 : 1);
     }
 
     default:
