@@ -11,7 +11,12 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
   );
   const rtBaseUrl =
     searchParams.get('baseUrl') ?? `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`;
-  const authToken = searchParams.get('token') ?? undefined;
+  // Auth token is passed via history.state (not URL) to keep it out of
+  // browser history, address bar, and screenshots.
+  const authToken =
+    (typeof window !== 'undefined'
+      ? (window.history.state as Record<string, unknown> | null)?.ptyToken
+      : undefined) as string | undefined;
 
   const navigateBack = () => {
     if (typeof window !== 'undefined') {

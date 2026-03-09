@@ -2169,9 +2169,9 @@ export function AgentsPage() {
   const [apiBaseUrlDraft, setApiBaseUrlDraft] = useState('');
   const [apiKeyDraft, setApiKeyDraft] = useState('');
 
-  const navigateToSecondaryPage = (path: string) => {
+  const navigateToSecondaryPage = (path: string, state: Record<string, unknown> = {}) => {
     if (typeof window === 'undefined' || window.location.pathname === path) return;
-    window.history.pushState({}, '', path);
+    window.history.pushState(state, '', path);
     window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
@@ -3272,8 +3272,8 @@ export function AgentsPage() {
             } else {
               const ptyParams = new URLSearchParams({ baseUrl: resolveRtBaseUrl() });
               const tok = resolveRtAuthToken();
-              if (tok) ptyParams.set('token', tok);
-              navigateToSecondaryPage(`/agents/pty/${encodeURIComponent(ptyId)}?${ptyParams.toString()}`);
+              const ptyState: Record<string, unknown> = tok ? { ptyToken: tok } : {};
+              navigateToSecondaryPage(`/agents/pty/${encodeURIComponent(ptyId)}?${ptyParams.toString()}`, ptyState);
             }
             return;
           }
@@ -3418,8 +3418,8 @@ export function AgentsPage() {
                     onClick={() => {
                       const ptyParams = new URLSearchParams({ baseUrl: resolveRtBaseUrl() });
                       const tok = resolveRtAuthToken();
-                      if (tok) ptyParams.set('token', tok);
-                      window.history.pushState({}, '', `/agents/pty/${rightPanel.ptyId}?${ptyParams.toString()}`);
+                      const ptyState: Record<string, unknown> = tok ? { ptyToken: tok } : {};
+                      window.history.pushState(ptyState, '', `/agents/pty/${rightPanel.ptyId}?${ptyParams.toString()}`);
                       window.dispatchEvent(new PopStateEvent('popstate'));
                     }}
                     className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
