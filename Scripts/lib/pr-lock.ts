@@ -418,6 +418,17 @@ export class PRLockManager {
       oldLock = lock;
     }
 
+    // 查找原始锁评论并标记为 released
+    const originalComment = await this.findCommentByLockId(prNumber, oldLock.lock_id);
+    if (originalComment) {
+      const metadata: LockMetadata = {
+        ...oldLock,
+        released: true,
+        released_at: new Date().toISOString()
+      };
+      await this.updateLockCommentWithRelease(prNumber, originalComment.id, metadata);
+    }
+
     await this.removeLabel(prNumber, LOCK_LABEL);
 
     await this.createComment(prNumber,
@@ -581,9 +592,17 @@ export class PRLockManager {
       return { hasConflict: false };
     }
 
-    // 有其他锁，按 lock_id 中的时间戳排序（lock_id 格式：lock-{timestamp}-{random}）
+    // 有其他锁，按 GitHub createdAt 排序（真相源）
+    // 使用 GitHub timeline 而非本地时钟，避免时钟偏移导致的误判
     const allLocks = [...lockComments];
     allLocks.sort((a: any, b: any) => {
+      // 优先使用 GitHub createdAt（ISO 8601 字符串可直接比较）
+      const aCreated = a.comment_created_at;
+      const bCreated = b.comment_created_at;
+      if (aCreated !== bCreated) {
+        return aCreated < bCreated ? -1 : 1;
+      }
+      // 如果 createdAt 相同（极少见），使用 lock_id 作为 tie-breaker
       const aTime = parseInt(a.lock_id.split('-')[1]);
       const bTime = parseInt(b.lock_id.split('-')[1]);
       return aTime - bTime;
@@ -837,6 +856,13 @@ Examples:
       const prNumber = parseInt(args[1]);
       const timeoutMinutes = parseInt(args[2]);
       const agentId = args[3] || 'manual-cli';
+
+      // 验证 timeoutMinutes 必须为正数
+      if (isNaN(timeoutMinutes) || timeoutMinutes <= 0) {
+        console.error(`Error: timeout-minutes must be a positive number, got: ${args[2]}`);
+        process.exit(1);
+      }
+
       const worktreePath = args.find(a => a.startsWith('--worktree-path='))?.split('=')[1];
       const taskId = args.find(a => a.startsWith('--task-id='))?.split('=')[1];
       const reason = args.find(a => a.startsWith('--reason='))?.split('=')[1];
