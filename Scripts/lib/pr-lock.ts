@@ -25,6 +25,19 @@ interface LockMetadata {
   reason?: string;           // 锁定原因
 }
 
+interface LocalContext {
+  pr_number: number;         // PR 编号
+  lock_id: string;           // 锁 ID
+  agent_id: string;          // Agent 标识
+  acquired_at: string;       // 获取时间
+  expires_at: string;        // 过期时间
+  timeout_minutes: number;   // 超时分钟数
+  working_directory: string; // 工作目录
+  branch: string;            // Git 分支
+  task_id?: string;          // 关联任务 ID
+  reason?: string;           // 锁定原因
+}
+
 interface LockResult {
   success: boolean;
   lock?: LockMetadata;
@@ -132,6 +145,10 @@ export class PRLockManager {
     }
 
     console.log(`[PRLock] Lock acquired successfully: ${lock.lock_id}`);
+
+    // 8. 保存本地上下文
+    await this.saveLocalContext(lock, prNumber);
+
     return { success: true, lock };
   }
 
@@ -203,6 +220,10 @@ export class PRLockManager {
     );
 
     console.log(`[PRLock] Lock released successfully`);
+
+    // 清理本地上下文
+    await this.clearLocalContext();
+
     return { success: true };
   }
 
@@ -374,6 +395,156 @@ export class PRLockManager {
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+
+  // ========== 本地上下文管理 ==========
+
+  /**
+   * 保存本地上下文
+   *
+   * 在获取锁成功后调用，记录当前工作目录与 PR 的关联关系
+   */
+  private async saveLocalContext(
+    lock: LockMetadata,
+    prNumber: number
+  ): Promise<void> {
+    const contextDir = '.exomind';
+    const contextFile = `${contextDir}/pr-context.json`;
+
+    // 确保目录存在
+    try {
+      execSync(`mkdir -p ${contextDir}`, { stdio: 'ignore' });
+    } catch (e) {
+      console.warn('[PRLock] Failed to create .exomind directory:', e);
+      return;
+    }
+
+    // 获取当前分支
+    let branch = 'unknown';
+    try {
+      branch = execSync('git branch --show-current', { encoding: 'utf-8' }).trim();
+    } catch (e) {
+      console.warn('[PRLock] Failed to get current branch:', e);
+    }
+
+    const context: LocalContext = {
+      pr_number: prNumber,
+      lock_id: lock.lock_id,
+      agent_id: lock.agent_id,
+      acquired_at: lock.acquired_at,
+      expires_at: lock.expires_at,
+      timeout_minutes: lock.timeout_minutes,
+      working_directory: process.cwd(),
+      branch,
+      task_id: lock.task_id,
+      reason: lock.reason
+    };
+
+    try {
+      await Bun.write(contextFile, JSON.stringify(context, null, 2));
+      console.log(`[PRLock] Local context saved to ${contextFile}`);
+    } catch (e) {
+      console.warn('[PRLock] Failed to save local context:', e);
+    }
+  }
+
+  /**
+   * 读取本地上下文
+   *
+   * Agent 重启后可以通过此方法恢复工作上下文
+   */
+  async loadLocalContext(): Promise<LocalContext | null> {
+    const contextFile = '.exomind/pr-context.json';
+
+    try {
+      const file = Bun.file(contextFile);
+      if (!(await file.exists())) {
+        return null;
+      }
+
+      const context = await file.json() as LocalContext;
+      console.log(`[PRLock] Local context loaded: PR #${context.pr_number}`);
+      return context;
+    } catch (e) {
+      console.warn('[PRLock] Failed to load local context:', e);
+      return null;
+    }
+  }
+
+  /**
+   * 清理本地上下文
+   *
+   * 在释放锁后调用，清除工作目录与 PR 的关联关系
+   */
+  private async clearLocalContext(): Promise<void> {
+    const contextFile = '.exomind/pr-context.json';
+
+    try {
+      execSync(`rm -f ${contextFile}`, { stdio: 'ignore' });
+      console.log('[PRLock] Local context cleared');
+    } catch (e) {
+      console.warn('[PRLock] Failed to clear local context:', e);
+    }
+  }
+
+  /**
+   * 检查本地上下文是否与远程锁一致
+   *
+   * 用于验证本地上下文的有效性
+   */
+  async validateLocalContext(): Promise<{
+    valid: boolean;
+    reason?: string;
+    localContext?: LocalContext;
+    remoteLock?: LockMetadata;
+  }> {
+    const localContext = await this.loadLocalContext();
+
+    if (!localContext) {
+      return { valid: false, reason: 'No local context found' };
+    }
+
+    const remoteLock = await this.checkLock(localContext.pr_number);
+
+    if (!remoteLock) {
+      return {
+        valid: false,
+        reason: 'Remote lock not found (may have been released or expired)',
+        localContext
+      };
+    }
+
+    if (remoteLock.lock_id !== localContext.lock_id) {
+      return {
+        valid: false,
+        reason: 'Lock ID mismatch (another agent may have acquired the lock)',
+        localContext,
+        remoteLock
+      };
+    }
+
+    if (remoteLock.agent_id !== localContext.agent_id) {
+      return {
+        valid: false,
+        reason: 'Agent ID mismatch',
+        localContext,
+        remoteLock
+      };
+    }
+
+    // 检查是否过期
+    const now = new Date();
+    const expiresAt = new Date(remoteLock.expires_at);
+    if (now >= expiresAt) {
+      return {
+        valid: false,
+        reason: 'Lock has expired',
+        localContext,
+        remoteLock
+      };
+    }
+
+    return { valid: true, localContext, remoteLock };
+  }
 }
 
 // ========== CLI 工具 ==========
@@ -389,27 +560,31 @@ Usage:
   bun pr-lock.ts release <pr-number> [agent-id]
   bun pr-lock.ts check <pr-number>
   bun pr-lock.ts renew <pr-number> <additional-minutes> [agent-id]
+  bun pr-lock.ts context                    # 查看本地上下文
+  bun pr-lock.ts validate                   # 验证本地上下文
 
 Examples:
   bun pr-lock.ts acquire 379 5 fixer@team --task-id=4 --reason="修复逻辑问题"
   bun pr-lock.ts release 379 fixer@team
   bun pr-lock.ts check 379
   bun pr-lock.ts renew 379 5 fixer@team
+  bun pr-lock.ts context                    # 查看当前工作目录的 PR 上下文
+  bun pr-lock.ts validate                   # 验证本地上下文是否有效
     `);
     process.exit(1);
   }
 
   const repo = 'exomind-team/exomind';
-  const agentId = args[3] || 'manual-cli';
-  const lockManager = new PRLockManager(repo, agentId);
 
   switch (command) {
     case 'acquire': {
       const prNumber = parseInt(args[1]);
       const timeoutMinutes = parseInt(args[2]);
+      const agentId = args[3] || 'manual-cli';
       const taskId = args.find(a => a.startsWith('--task-id='))?.split('=')[1];
       const reason = args.find(a => a.startsWith('--reason='))?.split('=')[1];
 
+      const lockManager = new PRLockManager(repo, agentId);
       const result = await lockManager.acquire(prNumber, timeoutMinutes, { taskId, reason });
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.success ? 0 : 1);
@@ -417,6 +592,8 @@ Examples:
 
     case 'release': {
       const prNumber = parseInt(args[1]);
+      const agentId = args[2] || 'manual-cli';
+      const lockManager = new PRLockManager(repo, agentId);
       const result = await lockManager.release(prNumber);
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.success ? 0 : 1);
@@ -424,6 +601,8 @@ Examples:
 
     case 'check': {
       const prNumber = parseInt(args[1]);
+      const agentId = 'manual-cli';
+      const lockManager = new PRLockManager(repo, agentId);
       const lock = await lockManager.checkLock(prNumber);
       if (lock) {
         const now = new Date();
@@ -439,9 +618,31 @@ Examples:
     case 'renew': {
       const prNumber = parseInt(args[1]);
       const additionalMinutes = parseInt(args[2]);
+      const agentId = args[3] || 'manual-cli';
+      const lockManager = new PRLockManager(repo, agentId);
       const result = await lockManager.renew(prNumber, additionalMinutes);
       console.log(JSON.stringify(result, null, 2));
       process.exit(result.success ? 0 : 1);
+    }
+
+    case 'context': {
+      const agentId = 'manual-cli';
+      const lockManager = new PRLockManager(repo, agentId);
+      const context = await lockManager.loadLocalContext();
+      if (context) {
+        console.log(JSON.stringify(context, null, 2));
+      } else {
+        console.log('No local context found');
+      }
+      process.exit(0);
+    }
+
+    case 'validate': {
+      const agentId = 'manual-cli';
+      const lockManager = new PRLockManager(repo, agentId);
+      const validation = await lockManager.validateLocalContext();
+      console.log(JSON.stringify(validation, null, 2));
+      process.exit(validation.valid ? 0 : 1);
     }
 
     default:
