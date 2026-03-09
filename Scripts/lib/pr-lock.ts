@@ -651,17 +651,16 @@ export class PRLockManager {
   }
 
   /**
-   * 创建或更新锁评论
+   * 创建锁评论（总是创建新评论，不复用旧评论）
+   *
+   * 修复并发覆盖问题：
+   * - 并发 A/B 如果复用同一条评论，较晚写入会覆盖较早写入
+   * - detectConflict 只能看到最终那一份元数据
+   * - 总是创建新评论，确保每个 Agent 都有独立的锁记录
    *
    * 返回评论 ID
    */
   private async updateLockComment(prNumber: number, lock: LockMetadata): Promise<number | undefined> {
-    // 1. 查找是否已存在锁评论
-    const comments = await this.getComments(prNumber);
-    const existingLockComment = comments
-      .reverse()  // 从最新开始
-      .find((c: any) => c.body?.includes(LOCK_METADATA_MARKER));
-
     const body =
       `<!-- LOCK_METADATA\n${JSON.stringify(lock, null, 2)}\n-->\n\n` +
       `🔒 **PR 已被锁定**\n\n` +
@@ -677,21 +676,14 @@ export class PRLockManager {
       `过期时间 = PR 最后更新时间 + ${lock.lock_duration_minutes} 分钟\n` +
       `每次提交或评论后，锁自动延期。`;
 
-    if (existingLockComment) {
-      // 2. 如果存在，编辑该评论
-      console.log(`[PRLock] Updating existing lock comment #${existingLockComment.id}`);
-      await this.updateComment(prNumber, existingLockComment.id, body);
-      return existingLockComment.id;
-    } else {
-      // 3. 如果不存在，创建新评论
-      console.log(`[PRLock] Creating new lock comment`);
-      await this.createComment(prNumber, body);
+    // 总是创建新评论（不复用旧评论）
+    console.log(`[PRLock] Creating new lock comment for ${lock.agent_id}`);
+    await this.createComment(prNumber, body);
 
-      // 获取刚创建的评论 ID
-      const updatedComments = await this.getComments(prNumber);
-      const newComment = updatedComments[updatedComments.length - 1];
-      return newComment?.id;
-    }
+    // 获取刚创建的评论 ID
+    const updatedComments = await this.getComments(prNumber);
+    const newComment = updatedComments[updatedComments.length - 1];
+    return newComment?.id;
   }
 
   /**
