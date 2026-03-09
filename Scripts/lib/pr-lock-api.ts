@@ -115,12 +115,12 @@ export class RealGitHubAPI implements IGitHubAPI {
   }
 
   async getComments(prNumber: number): Promise<Array<{ id: number; body: string; createdAt: string }>> {
-    const result = this.gh(`pr view ${prNumber} --json comments`);
-    const data = JSON.parse(result);
-    return data.comments.map((c: any) => ({
-      id: c.id,
-      body: c.body,
-      createdAt: c.createdAt
+    const result = this.gh(`api repos/${this.repo}/issues/${prNumber}/comments --paginate`);
+    const data = JSON.parse(result) as Array<{ id: number; body: string; created_at: string }>;
+    return data.map((comment) => ({
+      id: comment.id,
+      body: comment.body,
+      createdAt: comment.created_at,
     }));
   }
 
