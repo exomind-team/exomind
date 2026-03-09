@@ -1,5 +1,9 @@
 //! pty_agent.rs — Integration tests for PTY spawn, interact, and Claude session
 //! discovery through the HTTP API（PTY Agent HTTP API 集成测试）.
+//!
+//! PTY routes are only compiled on non-Android targets (`cfg(not(target_os = "android"))`).
+//! Gate the entire file to keep the test suite green on Android / Termux.
+#![cfg(not(target_os = "android"))]
 
 use exomind_runtime::{start_with_options, RuntimeStartOptions};
 use serde_json::Value;

@@ -6,6 +6,7 @@ import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
 
 export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
   const [rtBaseUrl, setRtBaseUrl] = useState(`http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`);
+  const [authToken, setAuthToken] = useState<string | undefined>(undefined);
 
   useEffect(() => {
     let disposed = false;
@@ -15,6 +16,7 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
         if (hosts.length > 0 && !disposed) {
           const host = hosts[0];
           setRtBaseUrl(`http://${host.host}:${host.port}`);
+          if (host.authToken) setAuthToken(host.authToken);
         }
       } catch {
         // fallback already set
@@ -52,7 +54,7 @@ export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
         <span className="text-sm font-semibold text-[#FAFAF9]">Terminal</span>
       </header>
       <div className="flex-1 overflow-hidden">
-        <PtyTerminal rtBaseUrl={rtBaseUrl} ptyId={ptyId} />
+        <PtyTerminal rtBaseUrl={rtBaseUrl} ptyId={ptyId} authToken={authToken} />
       </div>
     </div>
   );
