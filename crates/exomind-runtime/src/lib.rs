@@ -25,6 +25,7 @@ pub mod signal;
 pub mod task;
 pub mod energy;
 pub mod tick;
+pub mod pty;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_RT_PORT: u16 = 1949;
