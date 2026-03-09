@@ -120,14 +120,27 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       return true;
     });
 
-    // ── Browser paste event (right-click paste, etc.) ──────────
+    // ── Browser paste event ──────────────────────────────────
+    // Listen on DOCUMENT level to capture paste events even when focus is
+    // elsewhere (e.g. after voice recognition's simulate_paste steals focus).
+    // Only intercept when the terminal container is visible.
 
-    const pasteHandler = (e: ClipboardEvent) => {
+    const documentPasteHandler = (e: ClipboardEvent) => {
+      // Only intercept if our container is visible (not display:none) and
+      // the paste target isn't another input/textarea element.
+      const target = e.target as HTMLElement | null;
+      if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
+      if (!container.offsetParent) return; // hidden (display:none)
+
       e.preventDefault();
       const text = e.clipboardData?.getData('text');
-      if (text) sendTextInput(text);
+      if (text) {
+        sendTextInput(text);
+        // Refocus terminal after paste (voice shortcut may have moved focus)
+        terminal.focus();
+      }
     };
-    container.addEventListener('paste', pasteHandler);
+    document.addEventListener('paste', documentPasteHandler);
 
     // ── Handle resize → POST to backend ──────────────────────
 
@@ -192,6 +205,8 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
         // Ignore
       }
       sendResize(terminal.rows, terminal.cols);
+      // Auto-focus the terminal so keyboard/paste events reach it
+      terminal.focus();
       // Small delay to let the resize reach the PTY before output streams in
       setTimeout(() => connectSSE(), 50);
     });
@@ -199,7 +214,7 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     // ── Cleanup ──────────────────────────────────────────────
 
     return () => {
-      container.removeEventListener('paste', pasteHandler);
+      document.removeEventListener('paste', documentPasteHandler);
       inputDisposable.dispose();
       resizeDisposable.dispose();
 

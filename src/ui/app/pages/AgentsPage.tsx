@@ -2811,7 +2811,11 @@ export function AgentsPage() {
   const fetchPtyAgents = async () => {
     try {
       const rtUrl = resolveRtBaseUrl();
-      const resp = await fetch(`${rtUrl}/pty`);
+      const headers: Record<string, string> = {};
+      if (runtimeServiceStatus?.authSecret) {
+        headers['Authorization'] = `Bearer ${runtimeServiceStatus.authSecret}`;
+      }
+      const resp = await fetch(`${rtUrl}/pty`, { headers });
       if (resp.ok) {
         const data = await resp.json() as Array<{ id: string; name: string; status: string; workdir: string }>;
         setPtyAgents(prev => {

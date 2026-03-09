@@ -12,8 +12,8 @@ import { Loader2, Terminal } from 'lucide-react';
 
 interface ClaudeSessionInfo {
   session_id: string;
-  project: string;
-  last_active: string; // ISO 8601
+  project_path: string;
+  last_modified: string; // ISO 8601
 }
 
 export interface PtySpawnDialogProps {
@@ -262,9 +262,9 @@ export function PtySpawnDialog({
                   >
                     <Terminal className="h-4 w-4 shrink-0 text-muted-foreground" />
                     <div className="min-w-0 flex-1">
-                      <div className="truncate font-medium">{session.project || session.session_id.slice(0, 12)}</div>
+                      <div className="truncate font-medium">{session.project_path || session.session_id.slice(0, 12)}</div>
                       <div className="text-xs text-muted-foreground">
-                        {formatRelativeTime(session.last_active)}
+                        {formatRelativeTime(session.last_modified)}
                       </div>
                     </div>
                   </button>
