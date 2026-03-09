@@ -237,6 +237,7 @@ impl PtyManager {
                 "--continue".to_string(),
                 "--session-id".to_string(),
                 request.session_id.clone(),
+                "--fork-session".to_string(),
             ],
             rows: request.rows,
             cols: request.cols,
