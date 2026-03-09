@@ -52,6 +52,7 @@ pub struct PtyAgentInfo {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtySpawnRequest {
+    #[serde(default)]
     pub name: String,
     pub workdir: Option<String>,
     #[serde(default = "default_command")]
@@ -78,7 +79,9 @@ fn default_cols() -> u16 {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtyResumeRequest {
+    #[serde(default)]
     pub name: String,
+    #[serde(default)]
     pub workdir: Option<String>,
     pub session_id: String,
     #[serde(default = "default_rows")]
@@ -147,6 +150,15 @@ impl PtyManager {
         for arg in &request.args {
             cmd.arg(arg);
         }
+        // Auto-add --dangerously-skip-permissions for Claude to avoid interactive permission prompts
+        if request.command == "claude"
+            && !request
+                .args
+                .iter()
+                .any(|a| a.contains("dangerously-skip-permissions"))
+        {
+            cmd.arg("--dangerously-skip-permissions");
+        }
         if let Some(ref workdir) = request.workdir {
             cmd.cwd(workdir);
         }
@@ -175,11 +187,18 @@ impl PtyManager {
         let id = uuid::Uuid::new_v4().to_string();
         let now = Utc::now();
 
+        // Generate a default name if none provided
+        let name = if request.name.is_empty() {
+            format!("{}-{}", request.command, &id[..8])
+        } else {
+            request.name
+        };
+
         let info = PtyAgentInfo {
             id: id.clone(),
-            name: request.name,
+            name,
             session_id: None,
-            workdir: request.workdir.unwrap_or_default(),
+            workdir: request.workdir.unwrap_or_else(|| ".".to_string()),
             command: request.command,
             status: PtyAgentStatus::Running,
             created_at: now.to_rfc3339(),
@@ -200,14 +219,22 @@ impl PtyManager {
         Ok(info)
     }
 
-    /// Resume an existing Claude session by spawning with `--resume --session-id`.
+    /// Resume an existing Claude session by spawning with `--continue --session-id`.
     pub async fn resume(&self, request: PtyResumeRequest) -> Result<PtyAgentInfo, PtyError> {
+        // Generate default name from session_id if not provided
+        let name = if request.name.is_empty() {
+            let len = 8.min(request.session_id.len());
+            format!("Claude-{}", &request.session_id[..len])
+        } else {
+            request.name
+        };
+
         let spawn_request = PtySpawnRequest {
-            name: request.name,
+            name,
             workdir: request.workdir,
             command: default_command(),
             args: vec![
-                "--resume".to_string(),
+                "--continue".to_string(),
                 "--session-id".to_string(),
                 request.session_id.clone(),
             ],
@@ -229,15 +256,28 @@ impl PtyManager {
     }
 
     /// Write raw input data to the PTY.
+    ///
+    /// Uses `spawn_blocking` to avoid blocking the tokio runtime with synchronous I/O.
     pub async fn write_input(&self, id: &str, data: &[u8]) -> Result<(), PtyError> {
-        let instances = self.instances.lock().await;
-        let instance = instances
-            .get(id)
-            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
-
-        let mut writer = instance.writer.lock().await;
-        writer.write_all(data)?;
-        writer.flush()?;
+        let writer = {
+            let instances = self.instances.lock().await;
+            let instance = instances
+                .get(id)
+                .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+            Arc::clone(&instance.writer)
+        };
+        // Release instances lock before spawning blocking task
+        let data = data.to_vec();
+        tokio::task::spawn_blocking(move || {
+            let mut w = writer.blocking_lock();
+            w.write_all(&data)?;
+            w.flush()?;
+            Ok::<(), std::io::Error>(())
+        })
+        .await
+        .map_err(|e| PtyError::SpawnFailed {
+            reason: format!("write_input task failed: {e}"),
+        })??;
         Ok(())
     }
 
@@ -444,6 +484,25 @@ mod tests {
         assert_eq!(req.cols, 80);
         assert!(req.args.is_empty());
         assert!(req.workdir.is_none());
+    }
+
+    #[test]
+    fn pty_spawn_request_name_defaults_to_empty() {
+        let json = r#"{}"#;
+        let req: PtySpawnRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "");
+        assert_eq!(req.command, "claude");
+    }
+
+    #[test]
+    fn pty_resume_request_name_and_workdir_default() {
+        let json = r#"{"session_id": "abc-12345678-xyz"}"#;
+        let req: PtyResumeRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "");
+        assert!(req.workdir.is_none());
+        assert_eq!(req.session_id, "abc-12345678-xyz");
+        assert_eq!(req.rows, 24);
+        assert_eq!(req.cols, 80);
     }
 
     #[test]

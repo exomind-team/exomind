@@ -21,6 +21,7 @@ export interface PtySpawnDialogProps {
   onOpenChange: (open: boolean) => void;
   rtBaseUrl: string;
   authToken?: string;
+  defaultWorkdir?: string;
   onSpawned: (info: { id: string; name: string }) => void;
 }
 
@@ -53,10 +54,11 @@ export function PtySpawnDialog({
   onOpenChange,
   rtBaseUrl,
   authToken,
+  defaultWorkdir,
   onSpawned,
 }: PtySpawnDialogProps) {
   const [name, setName] = useState('');
-  const [workdir, setWorkdir] = useState('');
+  const [workdir, setWorkdir] = useState(defaultWorkdir || '');
   const [sessions, setSessions] = useState<ClaudeSessionInfo[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -76,12 +78,12 @@ export function PtySpawnDialog({
   useEffect(() => {
     if (!open) {
       setName('');
-      setWorkdir('');
+      setWorkdir(defaultWorkdir || '');
       setSessions([]);
       setLoading(false);
       setError('');
     }
-  }, [open]);
+  }, [open, defaultWorkdir]);
 
   // ── Fetch Claude sessions on open ───────────────────────────
 

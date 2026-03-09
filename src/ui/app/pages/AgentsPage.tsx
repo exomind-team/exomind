@@ -3691,6 +3691,7 @@ export function AgentsPage() {
         open={showPtySpawnDialog}
         onOpenChange={setShowPtySpawnDialog}
         rtBaseUrl={resolveRtBaseUrl()}
+        defaultWorkdir={import.meta.env.VITE_PTY_DEFAULT_WORKDIR || 'D:\\project\\exomind'}
         onSpawned={(info) => {
           openPtyTerminal(info.id);
           void refreshRuntimeSnapshot();

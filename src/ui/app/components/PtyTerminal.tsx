@@ -78,7 +78,14 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     es.addEventListener('output', (event) => {
       try {
         const decoded = atob(event.data);
-        terminal.write(decoded);
+        // Convert binary string to Uint8Array so xterm.js decodes UTF-8 correctly.
+        // atob() returns a binary string; passing it directly to terminal.write(string)
+        // treats each char as UTF-16, corrupting multi-byte UTF-8 sequences (e.g. box-drawing chars).
+        const bytes = new Uint8Array(decoded.length);
+        for (let i = 0; i < decoded.length; i++) {
+          bytes[i] = decoded.charCodeAt(i);
+        }
+        terminal.write(bytes);
       } catch {
         // If base64 decode fails, write raw data
         terminal.write(event.data);
@@ -96,14 +103,18 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     // ── Handle user input → POST to backend ──────────────────
 
     const inputDisposable = terminal.onData((data) => {
-      const encoded = btoa(data);
+      // Encode string to UTF-8 bytes first, then to base64.
+      // btoa() only handles Latin-1; this approach correctly handles all characters.
+      const encoder = new TextEncoder();
+      const bytes = encoder.encode(data);
+      const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
+      const encoded = btoa(binary);
+
       fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/input`, {
         method: 'POST',
         headers: buildHeaders(),
         body: JSON.stringify({ data: encoded }),
-      }).catch(() => {
-        // Silently ignore input send failures
-      });
+      }).catch(console.error);
     });
 
     // ── Handle resize → POST to backend ──────────────────────
