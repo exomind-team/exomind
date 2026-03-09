@@ -1,19 +1,34 @@
-//! 火山引擎 ASR (语音识别) Tauri 命令
+//! Volcano ASR (语音识别) Tauri 命令
 //!
-//! 通过 WebSocket 连接火山引擎大模型流式语音识别服务，
-//! 解决浏览器无法设置 WebSocket 自定义头部的限制。
-//!
-//! 协议文档: https://www.volcengine.com/docs/6561/1354869
-//! WebSocket 地址: wss://openspeech.bytedance.com/api/v3/sauc/bigmodel
+//! Sync points（关键对齐点）:
+//! - use official websocket endpoints（使用官方 websocket endpoint）
+//! - gzip request/audio frames（请求和音频都走 gzip 压缩）
+//! - wait for async final flag=3（async 模式等待 flags=3 的最终包）
 
+use std::io::{Read, Write};
+
+use flate2::{read::GzDecoder, write::GzEncoder, Compression};
 use serde::{Deserialize, Serialize};
 use tokio_tungstenite::{connect_async, tungstenite};
 use tungstenite::http::Request as HttpRequest;
 
-// ========== 类型定义 ==========
+#[derive(Debug, Deserialize, Clone)]
+pub struct VolcanoAsrRequestOptions {
+    #[serde(default = "default_true")]
+    #[serde(alias = "showUtterances")]
+    pub show_utterances: bool,
+    #[serde(default = "default_true")]
+    #[serde(alias = "enableNonstream")]
+    pub enable_nonstream: bool,
+    #[serde(default = "default_end_window_size")]
+    #[serde(alias = "endWindowSize")]
+    pub end_window_size: u32,
+    #[serde(default = "default_force_to_speech_time")]
+    #[serde(alias = "forceToSpeechTime")]
+    pub force_to_speech_time: u32,
+}
 
-/// 前端传入的 ASR 配置
-#[derive(Debug, Deserialize)]
+#[derive(Debug, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct VolcanoAsrConfig {
     pub app_key: String,
@@ -22,17 +37,12 @@ pub struct VolcanoAsrConfig {
     pub resource_id: String,
     #[serde(default = "default_language")]
     pub language: String,
+    #[serde(default = "default_endpoint")]
+    pub endpoint: String,
+    #[serde(default)]
+    pub request: Option<VolcanoAsrRequestOptions>,
 }
 
-fn default_resource_id() -> String {
-    "volc.bigasr.sauc.duration".to_string()
-}
-
-fn default_language() -> String {
-    "zh-CN".to_string()
-}
-
-/// ASR 识别结果（返回给前端）
 #[derive(Debug, Serialize)]
 pub struct AsrResult {
     pub text: String,
@@ -41,7 +51,6 @@ pub struct AsrResult {
     pub duration: Option<f64>,
 }
 
-/// 火山引擎 API 响应
 #[derive(Debug, Deserialize)]
 struct VolcanoResponse {
     code: Option<i64>,
@@ -60,96 +69,160 @@ struct VolcanoAudioInfo {
     duration: Option<f64>,
 }
 
-// ========== 二进制协议 ==========
-//
-// 火山引擎自定义二进制 WebSocket 协议:
-//
-// Header (4 bytes):
-//   Byte 0: (version << 4) | header_size    → 0x11 (version=1, header=1*4=4 bytes)
-//   Byte 1: (message_type << 4) | flags
-//   Byte 2: (serialization << 4) | compression
-//   Byte 3: reserved (0x00)
-//
-// Payload Size (4 bytes): big-endian u32
-// Payload: raw bytes or JSON
-//
-// Message Types:
-//   1 = Full Client Request (JSON config)
-//   2 = Audio Only
-//   9 = Server ASR Result
-//  15 = Server Error
-//
-// Serialization: 0=raw, 1=JSON
-// Compression: 0=none, 1=gzip
-
-/// 构建请求消息 (Full Client Request, JSON)
-fn build_request_message(data: &serde_json::Value) -> Vec<u8> {
-    let json_bytes = serde_json::to_vec(data).expect("JSON serialization failed");
-    let payload_size = (json_bytes.len() as u32).to_be_bytes();
-    let header: [u8; 4] = [
-        0x11, // version=1, headerSize=1
-        0x10, // messageType=1 (full client request), flags=0
-        0x10, // serialization=1 (JSON), compression=0
-        0x00, // reserved
-    ];
-    let mut msg = Vec::with_capacity(4 + 4 + json_bytes.len());
-    msg.extend_from_slice(&header);
-    msg.extend_from_slice(&payload_size);
-    msg.extend_from_slice(&json_bytes);
-    msg
+#[derive(Debug)]
+struct ParsedVolcanoFrame {
+    message_type: u8,
+    flags: u8,
+    sequence: Option<i32>,
+    response: Option<VolcanoResponse>,
 }
 
-/// 构建音频消息
-fn build_audio_message(audio_data: &[u8], is_last: bool) -> Vec<u8> {
-    // messageType=2 (audio only)
-    // flags: 0x00=normal, 0x02=last packet
-    let flags: u8 = if is_last { 0x02 } else { 0x00 };
-    let header: [u8; 4] = [
-        0x11,                  // version=1, headerSize=1
-        (0x02 << 4) | flags,   // messageType=2, flags
-        0x00,                  // serialization=0 (raw), compression=0
-        0x00,                  // reserved
-    ];
-    let payload_size = (audio_data.len() as u32).to_be_bytes();
-    let mut msg = Vec::with_capacity(4 + 4 + audio_data.len());
-    msg.extend_from_slice(&header);
-    msg.extend_from_slice(&payload_size);
-    msg.extend_from_slice(audio_data);
-    msg
+fn default_true() -> bool {
+    true
 }
 
-/// 解析响应消息
-fn parse_response_message(data: &[u8]) -> Result<VolcanoResponse, String> {
-    // 先尝试直接 JSON 解析（某些情况下服务器返回纯 JSON）
-    if let Ok(resp) = serde_json::from_slice::<VolcanoResponse>(data) {
-        return Ok(resp);
-    }
+fn default_resource_id() -> String {
+    "volc.bigasr.sauc.duration".to_string()
+}
 
-    // 二进制格式：跳过 4 字节 header + 4 字节 payload size
+fn default_language() -> String {
+    "zh-CN".to_string()
+}
+
+fn default_endpoint() -> String {
+    "bigmodel_async".to_string()
+}
+
+fn default_end_window_size() -> u32 {
+    800
+}
+
+fn default_force_to_speech_time() -> u32 {
+    1000
+}
+
+fn gzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::default());
+    encoder
+        .write_all(bytes)
+        .map_err(|error| format!("gzip 写入失败: {error}"))?;
+    encoder
+        .finish()
+        .map_err(|error| format!("gzip 完成失败: {error}"))
+}
+
+fn gunzip_bytes(bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let mut decoder = GzDecoder::new(bytes);
+    let mut output = Vec::new();
+    decoder
+        .read_to_end(&mut output)
+        .map_err(|error| format!("gunzip 解压失败: {error}"))?;
+    Ok(output)
+}
+
+fn build_request_message(data: &serde_json::Value) -> Result<Vec<u8>, String> {
+    let json_bytes = serde_json::to_vec(data).map_err(|error| format!("JSON 序列化失败: {error}"))?;
+    let payload = gzip_bytes(&json_bytes)?;
+    let payload_size = (payload.len() as u32).to_be_bytes();
+    let header = [0x11, 0x10, 0x11, 0x00];
+    let mut msg = Vec::with_capacity(4 + 4 + payload.len());
+    msg.extend_from_slice(&header);
+    msg.extend_from_slice(&payload_size);
+    msg.extend_from_slice(&payload);
+    Ok(msg)
+}
+
+fn build_audio_message(audio_data: &[u8], is_last: bool) -> Result<Vec<u8>, String> {
+    let payload = gzip_bytes(audio_data)?;
+    let payload_size = (payload.len() as u32).to_be_bytes();
+    let header = [0x11, if is_last { 0x22 } else { 0x20 }, 0x01, 0x00];
+    let mut msg = Vec::with_capacity(4 + 4 + payload.len());
+    msg.extend_from_slice(&header);
+    msg.extend_from_slice(&payload_size);
+    msg.extend_from_slice(&payload);
+    Ok(msg)
+}
+
+fn parse_response_message(data: &[u8]) -> Result<ParsedVolcanoFrame, String> {
     if data.len() < 8 {
-        return Err(format!("Response too short: {} bytes", data.len()));
+        return Err(format!("响应长度过短: {} bytes", data.len()));
     }
 
-    let json_bytes = &data[8..];
+    let byte1 = data[1];
+    let byte2 = data[2];
+    let flags = byte1 & 0x0f;
+    let message_type = byte1 >> 4;
+    let serialization = byte2 >> 4;
+    let compression = byte2 & 0x0f;
 
-    // 尝试找到 JSON 的起始位置（跳过可能的前缀）
-    if let Some(pos) = json_bytes.iter().position(|&b| b == b'{') {
-        let json_slice = &json_bytes[pos..];
-        serde_json::from_slice(json_slice)
-            .map_err(|e| format!("JSON parse error: {e}"))
+    let mut offset = 4usize;
+    let sequence = if flags == 0x01 || flags == 0x03 {
+        if data.len() < offset + 4 {
+            return Err("响应缺少 sequence 字段".to_string());
+        }
+        let seq = i32::from_be_bytes(data[offset..offset + 4].try_into().unwrap());
+        offset += 4;
+        Some(seq)
     } else {
-        Err(format!(
-            "No JSON found in response ({} bytes)",
-            data.len()
-        ))
+        None
+    };
+
+    if data.len() < offset + 4 {
+        return Err("响应缺少 payload size".to_string());
     }
+    let payload_size = u32::from_be_bytes(data[offset..offset + 4].try_into().unwrap()) as usize;
+    offset += 4;
+    if data.len() < offset + payload_size {
+        return Err("响应 payload 不完整".to_string());
+    }
+
+    let payload_slice = &data[offset..offset + payload_size];
+    let payload = if compression == 1 {
+        gunzip_bytes(payload_slice)?
+    } else {
+        payload_slice.to_vec()
+    };
+
+    let response = if serialization == 1 {
+        Some(
+            serde_json::from_slice::<VolcanoResponse>(&payload)
+                .map_err(|error| format!("响应 JSON 解析失败: {error}"))?,
+        )
+    } else {
+        None
+    };
+
+    Ok(ParsedVolcanoFrame {
+        message_type,
+        flags,
+        sequence,
+        response,
+    })
 }
 
-// ========== Tauri 命令 ==========
+fn is_final_response(endpoint: &str, frame: &ParsedVolcanoFrame) -> bool {
+    if frame.message_type == 15 {
+        return true;
+    }
+    if endpoint == "bigmodel_async" {
+        return frame.flags == 0x03;
+    }
+    frame
+        .response
+        .as_ref()
+        .and_then(|resp| resp.audio_info.as_ref())
+        .is_some()
+}
 
-/// 一次性语音识别：接收 PCM 音频数据，返回识别结果
-///
-/// 前端调用: invoke('volcano_asr_recognize', { audioData: Uint8Array, config: {...} })
+fn resolve_request_options(config: &VolcanoAsrConfig) -> VolcanoAsrRequestOptions {
+    config.request.clone().unwrap_or(VolcanoAsrRequestOptions {
+        show_utterances: true,
+        enable_nonstream: true,
+        end_window_size: default_end_window_size(),
+        force_to_speech_time: default_force_to_speech_time(),
+    })
+}
+
 #[tauri::command]
 pub async fn volcano_asr_recognize(
     audio_data: Vec<u8>,
@@ -157,23 +230,25 @@ pub async fn volcano_asr_recognize(
 ) -> Result<AsrResult, String> {
     use futures_util::{SinkExt, StreamExt};
 
-    eprintln!("[ASR-Rust] 开始识别, 音频大小: {} bytes", audio_data.len());
-    eprintln!(
-        "[ASR-Rust] AppKey: {}***",
-        &config.app_key[..config.app_key.len().min(8)]
-    );
-    eprintln!("[ASR-Rust] ResourceId: {}", config.resource_id);
-
     if audio_data.is_empty() {
         return Err("音频数据为空".to_string());
     }
 
-    let ws_url = "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel";
+    let endpoint = config.endpoint.trim();
+    let endpoint = if endpoint.is_empty() {
+        "bigmodel_async"
+    } else {
+        endpoint
+    };
+    let ws_url = format!("wss://openspeech.bytedance.com/api/v3/sauc/{endpoint}");
     let connect_id = uuid::Uuid::new_v4().to_string();
+    let request_options = resolve_request_options(&config);
 
-    // 构建带认证头的 HTTP 升级请求
+    eprintln!("[ASR-Rust] 开始识别: endpoint={endpoint}, audio={} bytes", audio_data.len());
+    eprintln!("[ASR-Rust] ResourceId: {}", config.resource_id);
+
     let request = HttpRequest::builder()
-        .uri(ws_url)
+        .uri(&ws_url)
         .header("Host", "openspeech.bytedance.com")
         .header("X-Api-App-Key", &config.app_key)
         .header("X-Api-Access-Key", &config.access_key)
@@ -184,157 +259,150 @@ pub async fn volcano_asr_recognize(
         .header("Connection", "Upgrade")
         .header("Upgrade", "websocket")
         .body(())
-        .map_err(|e| format!("构建请求失败: {e}"))?;
+        .map_err(|error| format!("构建请求失败: {error}"))?;
 
-    // 连接 WebSocket
-    eprintln!("[ASR-Rust] 正在连接 WebSocket...");
     let (ws_stream, _response) = tokio::time::timeout(
         std::time::Duration::from_secs(10),
         connect_async(request),
     )
     .await
     .map_err(|_| "WebSocket 连接超时 (10s)".to_string())?
-    .map_err(|e| format!("WebSocket 连接失败: {e}"))?;
-
-    eprintln!("[ASR-Rust] WebSocket 已连接");
+    .map_err(|error| format!("WebSocket 连接失败: {error}"))?;
 
     let (mut write, mut read) = ws_stream.split();
 
-    // 1. 发送 Full Client Request (配置)
-    let request_payload = serde_json::json!({
+    let mut audio = serde_json::json!({
+        "format": "pcm",
+        "codec": "raw",
+        "rate": 16000,
+        "bits": 16,
+        "channel": 1,
+    });
+    if endpoint == "bigmodel_nostream" {
+        audio["language"] = serde_json::Value::String(config.language.clone());
+    }
+
+    let mut request_payload = serde_json::json!({
         "user": { "uid": connect_id },
-        "audio": {
-            "format": "pcm",
-            "rate": 16000,
-            "bits": 16,
-            "channel": 1,
-            "language": config.language,
-        },
+        "audio": audio,
         "request": {
             "model_name": "bigmodel",
             "enable_itn": true,
             "enable_punc": true,
-            "show_utterances": true,
+            "show_utterances": request_options.show_utterances,
         },
     });
 
-    let config_msg = build_request_message(&request_payload);
+    if endpoint == "bigmodel_async" && request_options.enable_nonstream {
+        request_payload["request"]["enable_nonstream"] = serde_json::Value::Bool(true);
+        request_payload["request"]["end_window_size"] =
+            serde_json::Value::Number(request_options.end_window_size.into());
+        request_payload["request"]["force_to_speech_time"] =
+            serde_json::Value::Number(request_options.force_to_speech_time.into());
+    }
+
+    let config_msg = build_request_message(&request_payload)?;
     write
         .send(tungstenite::Message::Binary(config_msg))
         .await
-        .map_err(|e| format!("发送配置失败: {e}"))?;
-    eprintln!("[ASR-Rust] 配置请求已发送");
+        .map_err(|error| format!("发送配置失败: {error}"))?;
 
-    // 2. 分块发送音频数据（每块 3200 bytes ≈ 100ms @ 16kHz 16bit mono）
-    let chunk_size = 3200;
-    let chunks: Vec<&[u8]> = audio_data.chunks(chunk_size).collect();
-    let total_chunks = chunks.len();
-
-    for (i, chunk) in chunks.iter().enumerate() {
-        let is_last = i == total_chunks - 1;
-        let audio_msg = build_audio_message(chunk, is_last);
+    let chunk_size = 6400usize;
+    let total_chunks = audio_data.chunks(chunk_size).len();
+    for (index, chunk) in audio_data.chunks(chunk_size).enumerate() {
+        let is_last = index == total_chunks.saturating_sub(1);
+        let audio_msg = build_audio_message(chunk, is_last)?;
         write
             .send(tungstenite::Message::Binary(audio_msg))
             .await
-            .map_err(|e| format!("发送音频块 {}/{} 失败: {e}", i + 1, total_chunks))?;
+            .map_err(|error| format!("发送音频块 {}/{} 失败: {error}", index + 1, total_chunks))?;
     }
-    eprintln!(
-        "[ASR-Rust] 音频已发送: {} 块, {} bytes",
-        total_chunks,
-        audio_data.len()
-    );
 
-    // 3. 等待识别结果
+    let mut latest_text = String::new();
+    let mut latest_duration = None;
+
     let result = tokio::time::timeout(std::time::Duration::from_secs(30), async {
         while let Some(msg) = read.next().await {
             match msg {
                 Ok(tungstenite::Message::Binary(data)) => {
-                    match parse_response_message(&data) {
-                        Ok(resp) => {
-                            // 检查错误码
-                            if let Some(code) = resp.code {
-                                if code != 20000000 {
-                                    return Err(format!(
-                                        "API 错误 {}: {}",
-                                        code,
-                                        resp.message.unwrap_or_default()
-                                    ));
-                                }
-                            }
-
-                            // 检查是否有最终结果（audio_info 表示识别完成）
-                            if resp.audio_info.is_some() {
-                                let text = resp
-                                    .result
-                                    .as_ref()
-                                    .and_then(|r| r.text.as_deref())
-                                    .unwrap_or("")
-                                    .to_string();
-                                let duration = resp
-                                    .audio_info
-                                    .as_ref()
-                                    .and_then(|a| a.duration);
-
-                                eprintln!("[ASR-Rust] 识别完成: \"{}\"", text);
-
-                                return Ok(AsrResult {
-                                    text,
-                                    confidence: 1.0,
-                                    lang: config.language.clone(),
-                                    duration,
-                                });
-                            }
-
-                            // 中间结果，继续等待
-                            if let Some(ref result_payload) = resp.result {
-                                if let Some(ref text) = result_payload.text {
-                                    eprintln!("[ASR-Rust] 中间结果: \"{}\"", text);
-                                }
+                    let frame = parse_response_message(&data)?;
+                    if let Some(resp) = frame.response.as_ref() {
+                        if let Some(code) = resp.code {
+                            if code != 20000000 {
+                                return Err(format!(
+                                    "API 错误 {}: {}",
+                                    code,
+                                    resp.message.clone().unwrap_or_default()
+                                ));
                             }
                         }
-                        Err(e) => {
-                            eprintln!("[ASR-Rust] 解析响应失败: {}", e);
+                        if let Some(text) = resp
+                            .result
+                            .as_ref()
+                            .and_then(|result| result.text.as_ref())
+                        {
+                            latest_text = text.clone();
+                        }
+                        if let Some(duration) = resp
+                            .audio_info
+                            .as_ref()
+                            .and_then(|audio| audio.duration)
+                        {
+                            latest_duration = Some(duration);
                         }
                     }
-                }
-                Ok(tungstenite::Message::Text(text)) => {
-                    // 某些情况下服务器返回纯文本 JSON
-                    match serde_json::from_str::<VolcanoResponse>(&text) {
-                        Ok(resp) => {
-                            if let Some(code) = resp.code {
-                                if code != 20000000 {
-                                    return Err(format!(
-                                        "API 错误 {}: {}",
-                                        code,
-                                        resp.message.unwrap_or_default()
-                                    ));
-                                }
-                            }
-                            if resp.audio_info.is_some() {
-                                let text_result = resp
-                                    .result
-                                    .as_ref()
-                                    .and_then(|r| r.text.as_deref())
-                                    .unwrap_or("")
-                                    .to_string();
-                                return Ok(AsrResult {
-                                    text: text_result,
-                                    confidence: 1.0,
-                                    lang: config.language.clone(),
-                                    duration: resp.audio_info.as_ref().and_then(|a| a.duration),
-                                });
-                            }
-                        }
-                        Err(e) => {
-                            eprintln!("[ASR-Rust] 解析文本响应失败: {}", e);
-                        }
+
+                    eprintln!(
+                        "[ASR-Rust] frame type={} flags={} seq={:?} text=\"{}\"",
+                        frame.message_type,
+                        frame.flags,
+                        frame.sequence,
+                        latest_text
+                    );
+
+                    if is_final_response(endpoint, &frame) {
+                        return Ok(AsrResult {
+                            text: latest_text.clone(),
+                            confidence: 1.0,
+                            lang: if endpoint == "bigmodel_nostream" {
+                                config.language.clone()
+                            } else {
+                                "zh-CN".to_string()
+                            },
+                            duration: latest_duration,
+                        });
                     }
                 }
                 Ok(tungstenite::Message::Close(_)) => {
+                    if !latest_text.is_empty() {
+                        return Ok(AsrResult {
+                            text: latest_text.clone(),
+                            confidence: 1.0,
+                            lang: if endpoint == "bigmodel_nostream" {
+                                config.language.clone()
+                            } else {
+                                "zh-CN".to_string()
+                            },
+                            duration: latest_duration,
+                        });
+                    }
                     return Err("WebSocket 被服务器关闭".to_string());
                 }
-                Err(e) => {
-                    return Err(format!("WebSocket 读取错误: {e}"));
+                Ok(tungstenite::Message::Text(text)) => {
+                    if let Ok(resp) = serde_json::from_str::<VolcanoResponse>(&text) {
+                        if let Some(code) = resp.code {
+                            if code != 20000000 {
+                                return Err(format!(
+                                    "API 错误 {}: {}",
+                                    code,
+                                    resp.message.unwrap_or_default()
+                                ));
+                            }
+                        }
+                    }
+                }
+                Err(error) => {
+                    return Err(format!("WebSocket 读取错误: {error}"));
                 }
                 _ => {}
             }
@@ -342,15 +410,12 @@ pub async fn volcano_asr_recognize(
         Err("WebSocket 流结束但未收到最终结果".to_string())
     })
     .await
-    .map_err(|_| "等待识别结果超时 (30s)".to_string())?;
+    .map_err(|_| "等待识别结果超时 (30s)".to_string())??;
 
-    // 关闭连接
     let _ = write.close().await;
-
-    result
+    Ok(result)
 }
 
-/// 检查火山引擎 ASR 配置是否有效（快速检查，不建立连接）
 #[tauri::command]
 pub fn volcano_asr_check_config(config: VolcanoAsrConfig) -> Result<bool, String> {
     Ok(!config.app_key.is_empty()

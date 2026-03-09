@@ -1038,6 +1038,7 @@ dependencies = [
  "chrono",
  "enigo",
  "exomind-runtime",
+ "flate2",
  "futures",
  "futures-util",
  "parking_lot",
