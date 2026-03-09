@@ -12,6 +12,7 @@ import {
   renderWorkerDissentIssueBody,
   renderWorkerBody,
   renderWorkerComment,
+  shouldIgnoreFeedbackItem,
   validateWorkerText,
 } from '../../../Scripts/dev/worker-agent/lib.ts';
 
@@ -122,10 +123,10 @@ describe('worker-agent lib', () => {
     expect(language).toBe('zh');
   });
 
-  it('prefers the most recent human language signal over the issue fallback', () => {
+  it('prefers the most recent issue comment language signal when the issue text is ambiguous', () => {
     const language = resolveWorkerTargetLanguage({
-      issueTitle: 'workflow: worker agent loop',
-      issueBody: 'Keep the worker prompt and reports aligned.',
+      issueTitle: '',
+      issueBody: '',
       issueComments: [
         {
           authorLogin: 'ARCJ137442',
@@ -140,9 +141,10 @@ describe('worker-agent lib', () => {
           createdAt: '2026-03-09T10:00:00.000Z',
         },
       ],
+      fallback: 'zh',
     });
 
-    expect(language).toBe('zh');
+    expect(language).toBe('en');
   });
 
   it('builds restored context from verified lock and current metadata', () => {
@@ -210,5 +212,41 @@ describe('worker-agent lib', () => {
     expect(REVIEWER_PREFIX).toBe('[Codex Reviewer]');
     expect(HUMAN_TEST_LABEL).toBe('🙋needs-human-test');
     expect(HUMAN_TEST_LABEL_ALIASES).toEqual(['🙋needs-human-test', '🙋 needs-human-test']);
+  });
+
+  it('ignores raw lock metadata bookkeeping comments when classifying feedback', () => {
+    expect(shouldIgnoreFeedbackItem({
+      authorLogin: 'ARCJ137442',
+      body: '<!-- LOCK_METADATA\n{"lock_id":"lock-1"}\n-->',
+    })).toBe(true);
+  });
+
+  it('keeps the linked issue language even when a newer PR comment uses another language', async () => {
+    const lib = await import('../../../Scripts/dev/worker-agent/lib.ts');
+    const resolveWorkerTargetLanguage = (lib as Record<string, unknown>).resolveWorkerTargetLanguage;
+
+    expect(typeof resolveWorkerTargetLanguage).toBe('function');
+
+    const language = (resolveWorkerTargetLanguage as (input: unknown) => string)({
+      issueTitle: 'workflow: worker agent loop',
+      issueBody: 'Keep the worker protocol and reports aligned in English.',
+      issueComments: [
+        {
+          authorLogin: 'ARCJ137442',
+          body: 'Please keep this issue in English.',
+          createdAt: '2026-03-09T09:00:00.000Z',
+        },
+      ],
+      prComments: [
+        {
+          authorLogin: 'ARCJ137442',
+          body: '后续这条链路统一改成中文。',
+          createdAt: '2026-03-09T10:00:00.000Z',
+        },
+      ],
+      fallback: 'en',
+    });
+
+    expect(language).toBe('en');
   });
 });

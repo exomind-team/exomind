@@ -204,6 +204,33 @@ export function clearLockSnapshot(tempRoot = 'temp/worker-agent'): void {
   writeJsonFile(getWorkerTempPaths(tempRoot).currentLockFile, {});
 }
 
+export function extractLatestActiveLockFromComments(
+  comments: Array<{ body?: string | null }>,
+): RemoteLockMetadata | null {
+  for (const comment of [...comments].reverse()) {
+    if (!LOCK_METADATA_PATTERN.test(comment.body ?? '')) {
+      continue;
+    }
+
+    const match = comment.body?.match(LOCK_METADATA_PATTERN);
+    if (!match?.[1]) {
+      continue;
+    }
+
+    try {
+      const lock = normalizeRemoteLockMetadata(JSON.parse(match[1]) as RawRemoteLockMetadata);
+      if (!lock || lock.pending) {
+        continue;
+      }
+      return lock;
+    } catch {
+      continue;
+    }
+  }
+
+  return null;
+}
+
 export function readRemoteLock(repo: string, prNumber: number, cwd = process.cwd()): RemoteLockMetadata | null {
   const raw = runGh(['issue', 'view', String(prNumber), '--repo', repo, '--json', 'labels,comments'], cwd);
   const parsed = JSON.parse(raw) as {
@@ -216,17 +243,7 @@ export function readRemoteLock(repo: string, prNumber: number, cwd = process.cwd
     return null;
   }
 
-  const lockComment = [...parsed.comments].reverse().find((comment) => LOCK_METADATA_PATTERN.test(comment.body ?? ''));
-  if (!lockComment?.body) {
-    return null;
-  }
-
-  const match = lockComment.body.match(LOCK_METADATA_PATTERN);
-  if (!match?.[1]) {
-    return null;
-  }
-
-  return normalizeRemoteLockMetadata(JSON.parse(match[1]) as RawRemoteLockMetadata);
+  return extractLatestActiveLockFromComments(parsed.comments);
 }
 
 export function verifyRemoteLock(params: {

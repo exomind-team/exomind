@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  extractLatestActiveLockFromComments,
   normalizeRemoteLockMetadata,
   resolvePrLockRunner,
 } from '../../../Scripts/dev/worker-agent/lock.ts';
@@ -60,5 +61,31 @@ describe('worker-agent lock runner', () => {
     });
 
     expect(lock).toBeNull();
+  });
+
+  it('returns the newest active lock when a newer released loser comment exists', () => {
+    const lock = extractLatestActiveLockFromComments([
+      {
+        body: '<!-- LOCK_METADATA\n{"lock_id":"winner","agent_id":"worker-1","acquired_at":"2026-03-10T00:00:00.000Z","lock_duration_minutes":30}\n-->',
+      },
+      {
+        body: '<!-- LOCK_METADATA\n{"lock_id":"loser","agent_id":"worker-2","acquired_at":"2026-03-10T00:00:05.000Z","lock_duration_minutes":30,"released":true}\n-->',
+      },
+    ]);
+
+    expect(lock?.lock_id).toBe('winner');
+  });
+
+  it('returns the newest active lock when a newer pending comment exists', () => {
+    const lock = extractLatestActiveLockFromComments([
+      {
+        body: '<!-- LOCK_METADATA\n{"lock_id":"confirmed","agent_id":"worker-1","acquired_at":"2026-03-10T00:00:00.000Z","lock_duration_minutes":30}\n-->',
+      },
+      {
+        body: '<!-- LOCK_METADATA\n{"lock_id":"pending","agent_id":"worker-1","acquired_at":"2026-03-10T00:00:05.000Z","lock_duration_minutes":30,"pending":true}\n-->',
+      },
+    ]);
+
+    expect(lock?.lock_id).toBe('confirmed');
   });
 });

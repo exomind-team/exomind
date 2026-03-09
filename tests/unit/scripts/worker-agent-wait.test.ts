@@ -64,6 +64,76 @@ describe('worker-agent wait logic', () => {
     expect(events[0]?.summary).toContain('Hailaylin');
   });
 
+  it('does not wake on a plain APPROVED review', () => {
+    const events = detectWakeEvents({
+      previous: makeSnapshot(),
+      current: makeSnapshot({
+        reviews: [
+          {
+            id: 'review-approved',
+            authorLogin: 'ARCJ137442',
+            body: '',
+            state: 'APPROVED',
+            submittedAt: '2026-03-09T10:01:00.000Z',
+          },
+        ],
+      }),
+      cursor: {
+        lastCommentIds: [],
+        lastReviewIds: [],
+      },
+    });
+
+    expect(events).toEqual([]);
+  });
+
+  it('wakes on a COMMENTED review as human feedback', () => {
+    const events = detectWakeEvents({
+      previous: makeSnapshot(),
+      current: makeSnapshot({
+        reviews: [
+          {
+            id: 'review-commented',
+            authorLogin: 'ARCJ137442',
+            body: '这里需要补一条说明',
+            state: 'COMMENTED',
+            submittedAt: '2026-03-09T10:02:00.000Z',
+          },
+        ],
+      }),
+      cursor: {
+        lastCommentIds: [],
+        lastReviewIds: [],
+      },
+    });
+
+    expect(events[0]?.reason).toBe('human-comment');
+    expect(events[0]?.itemId).toBe('review-commented');
+  });
+
+  it('does not wake on a plain DISMISSED review', () => {
+    const events = detectWakeEvents({
+      previous: makeSnapshot(),
+      current: makeSnapshot({
+        reviews: [
+          {
+            id: 'review-dismissed',
+            authorLogin: 'ARCJ137442',
+            body: '',
+            state: 'DISMISSED',
+            submittedAt: '2026-03-09T10:03:00.000Z',
+          },
+        ],
+      }),
+      cursor: {
+        lastCommentIds: [],
+        lastReviewIds: [],
+      },
+    });
+
+    expect(events).toEqual([]);
+  });
+
   it('ignores worker progress comments and automation comments while waiting', () => {
     const events = detectWakeEvents({
       previous: makeSnapshot(),

@@ -102,6 +102,70 @@ describe('worker-agent next-action', () => {
     expect(result.blockers?.[0]?.reason).toBe('reviewer');
   });
 
+  it('ignores a new APPROVED review when no actionable feedback exists', () => {
+    const result = determineNextAction(
+      makeInput({
+        pr: {
+          ...makeInput().pr,
+          reviews: [
+            {
+              id: 'review-approved',
+              authorLogin: 'ARCJ137442',
+              body: '',
+              state: 'APPROVED',
+              submittedAt: '2026-03-10T08:00:00.000Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.action).toBe('wait-for-update');
+  });
+
+  it('treats a COMMENTED review as actionable human feedback', () => {
+    const result = determineNextAction(
+      makeInput({
+        pr: {
+          ...makeInput().pr,
+          reviews: [
+            {
+              id: 'review-commented',
+              authorLogin: 'ARCJ137442',
+              body: '这里还要补一条说明',
+              state: 'COMMENTED',
+              submittedAt: '2026-03-10T08:01:00.000Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.action).toBe('reply-blocking-comment');
+    expect(result.blockers?.[0]?.reason).toBe('human-comment');
+  });
+
+  it('ignores a DISMISSED review when no actionable feedback exists', () => {
+    const result = determineNextAction(
+      makeInput({
+        pr: {
+          ...makeInput().pr,
+          reviews: [
+            {
+              id: 'review-dismissed',
+              authorLogin: 'ARCJ137442',
+              body: '',
+              state: 'DISMISSED',
+              submittedAt: '2026-03-10T08:02:00.000Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.action).toBe('wait-for-update');
+  });
+
   it('ignores worker progress comments and automation comments when no real blocker exists', () => {
     const result = determineNextAction(
       makeInput({

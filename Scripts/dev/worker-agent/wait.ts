@@ -3,6 +3,7 @@ import {
   hasHumanTestLabel,
   HUMAN_TEST_LABEL,
   HUMAN_TEST_REVIEW_PREFIX,
+  isNonBlockingReviewState,
   REVIEWER_PREFIX,
   shouldIgnoreFeedbackItem,
   type WaitingReason,
@@ -134,6 +135,10 @@ export function detectWakeEvents(input: {
         itemType: 'review',
         summary: `${review.authorLogin}: review state=${review.state}`,
       });
+      continue;
+    }
+
+    if (isNonBlockingReviewState(review.state)) {
       continue;
     }
 

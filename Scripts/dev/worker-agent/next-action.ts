@@ -1,6 +1,7 @@
 import {
   hasHumanTestLabel,
   HUMAN_TEST_REVIEW_PREFIX,
+  isNonBlockingReviewState,
   REVIEWER_PREFIX,
   WORKER_PREFIX,
   shouldIgnoreFeedbackItem,
@@ -153,6 +154,10 @@ export function collectPendingFeedback(pr: NextActionPrState, cursor: WorkerCurs
         itemType: 'review',
         summary: `${review.authorLogin}: review state=${review.state}`,
       });
+      continue;
+    }
+
+    if (isNonBlockingReviewState(review.state)) {
       continue;
     }
 

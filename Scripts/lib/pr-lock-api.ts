@@ -3,6 +3,8 @@
  * 用于依赖注入和测试 mock
  */
 
+import { execSync } from 'node:child_process';
+
 export interface IGitHubAPI {
   /**
    * 添加标签到 PR
@@ -69,12 +71,14 @@ export class RealGitHubAPI implements IGitHubAPI {
     fs.writeFileSync(tempFile, body, 'utf-8');
 
     try {
-      const result = this.gh(`pr comment ${prNumber} --body-file "${tempFile}"`);
-      const match = result.match(/\/(\d+)$/);
-      if (!match) {
+      const result = this.gh(
+        `api repos/${this.repo}/issues/${prNumber}/comments -X POST -F body=@"${tempFile}" --jq .id`,
+      ).trim();
+      const commentId = Number.parseInt(result, 10);
+      if (Number.isNaN(commentId)) {
         throw new Error('Failed to extract comment ID from gh output');
       }
-      return parseInt(match[1]);
+      return commentId;
     } finally {
       // 清理临时文件
       try {
@@ -121,7 +125,6 @@ export class RealGitHubAPI implements IGitHubAPI {
   }
 
   private gh(command: string): string {
-    const { execSync } = require('child_process');
     // gh api 命令不接受 --repo 参数，需要在 URL 中指定 repo
     const isApiCommand = command.trim().startsWith('api ');
     const fullCommand = isApiCommand

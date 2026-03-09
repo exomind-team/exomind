@@ -307,11 +307,21 @@ export function isAutomationActor(authorLogin: string): boolean {
   return AUTOMATION_LOGINS.includes(authorLogin) || authorLogin.endsWith('[bot]');
 }
 
+export function isLockMetadataComment(body: string): boolean {
+  return body.trimStart().startsWith(LOCK_METADATA_PREFIX);
+}
+
 export function shouldIgnoreFeedbackItem(input: {
   authorLogin: string;
   body: string;
 }): boolean {
-  return input.body.startsWith(WORKER_PREFIX) || isAutomationActor(input.authorLogin);
+  return input.body.startsWith(WORKER_PREFIX)
+    || isAutomationActor(input.authorLogin)
+    || isLockMetadataComment(input.body);
+}
+
+export function isNonBlockingReviewState(state: string): boolean {
+  return state === 'APPROVED' || state === 'DISMISSED';
 }
 
 export function resolveWorkerTargetLanguage(input: {
@@ -321,8 +331,12 @@ export function resolveWorkerTargetLanguage(input: {
   prComments?: WorkerLanguageSignalItem[];
   fallback?: WorkerMessageLanguage;
 }): WorkerMessageLanguage {
-  const baseline = defaultWorkerLanguage(input);
-  const signals = [...(input.issueComments ?? []), ...(input.prComments ?? [])]
+  const issueLanguage = inferLanguageFromText(`${input.issueTitle ?? ''}\n${input.issueBody ?? ''}`);
+  if (issueLanguage) {
+    return issueLanguage;
+  }
+
+  const issueSignals = (input.issueComments ?? [])
     .filter((item) => !shouldIgnoreLanguageSignal(item))
     .map((item) => ({
       language: inferLanguageFromText(item.body),
@@ -331,7 +345,7 @@ export function resolveWorkerTargetLanguage(input: {
     .filter((item): item is { language: WorkerMessageLanguage; createdAt: number } => Boolean(item.language))
     .sort((left, right) => right.createdAt - left.createdAt);
 
-  return signals[0]?.language ?? baseline;
+  return issueSignals[0]?.language ?? defaultWorkerLanguage(input);
 }
 
 export function buildHandledCursor(input: {
