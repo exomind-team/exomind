@@ -412,7 +412,7 @@ impl MeshState {
         reason: Option<String>,
     ) {
         let now = now_rfc3339();
-        self.signal_pool.journal().append(DeliveryRecord {
+        if let Err(error) = self.signal_pool.journal().append(DeliveryRecord {
             event_id: event_id.to_string(),
             route_id: format!("mesh:{peer_id}"),
             target_ref: peer_id.to_string(),
@@ -420,7 +420,14 @@ impl MeshState {
             reason,
             started_at: now.clone(),
             finished_at: now,
-        });
+        }) {
+            tracing::warn!(
+                event_id = %event_id,
+                peer_id = %peer_id,
+                error = %error,
+                "mesh delivery journal append failed (网格投递日志追加失败)"
+            );
+        }
     }
 
     fn persist(&self) {

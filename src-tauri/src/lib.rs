@@ -2,6 +2,7 @@
 
 mod commands;
 
+use commands::asr_commands::{volcano_asr_check_config, volcano_asr_recognize};
 use commands::device_commands::get_device_id;
 use commands::eventlog_commands::{
     eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
@@ -11,16 +12,15 @@ use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
     list_files, pick_json_file, read_file, read_file_binary, save_json_file, write_file,
 };
-use commands::shortcut_commands::{
-    ensure_voice_overlay_window, register_voice_shortcut, simulate_paste, voice_overlay_hide, voice_overlay_show,
-    voice_shortcut_get, voice_shortcut_set, VoiceShortcutState,
-};
 use commands::runtime_commands::{
-    ensure_runtime_started, runtime_service_reachable_address, runtime_service_start,
-    runtime_service_status, runtime_service_stop, signal_publish_fast, RuntimeProcessState,
+    RuntimeProcessState, ensure_runtime_started, runtime_service_reachable_address,
+    runtime_service_start, runtime_service_status, runtime_service_stop, signal_publish_fast,
 };
-use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
-use commands::asr_commands::{volcano_asr_recognize, volcano_asr_check_config};
+use commands::shortcut_commands::{
+    VoiceShortcutState, ensure_voice_overlay_window, register_voice_shortcut, simulate_paste,
+    voice_overlay_hide, voice_overlay_show, voice_shortcut_get, voice_shortcut_set,
+};
+use commands::ws_commands::{WsClientState, ws_connect, ws_disconnect, ws_get_state, ws_send};
 use tauri::Manager;
 
 #[tauri::command]
@@ -59,11 +59,40 @@ pub fn run() {
                 eprintln!("[tauri/setup] failed to prewarm voice overlay window: {error}");
             }
 
+            if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
+                match app.path().app_data_dir() {
+                    Ok(app_data_dir) => {
+                        let runtime_dir = app_data_dir.join("runtime");
+                        if let Err(error) = std::fs::create_dir_all(&runtime_dir) {
+                            eprintln!(
+                                "[tauri/setup] failed to create runtime data dir for signal sqlite: {error}"
+                            );
+                        } else {
+                            let signal_sqlite_path = runtime_dir.join("signal-pool.sqlite");
+                            // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+                            unsafe {
+                                std::env::set_var(
+                                    "EXOMIND_RT_SIGNAL_SQLITE_PATH",
+                                    signal_sqlite_path,
+                                );
+                            }
+                        }
+                    }
+                    Err(error) => {
+                        eprintln!(
+                            "[tauri/setup] failed to resolve app data dir for signal sqlite: {error}"
+                        );
+                    }
+                }
+            }
+
             let runtime_state = runtime_process_state_for_setup.clone();
             let runtime_port = resolve_embedded_runtime_port();
             tauri::async_runtime::spawn(async move {
                 // Keep embedded runtime port aligned with EXOMIND_RT_PORT（与前端端口配置保持一致）.
-                if let Err(error) = ensure_runtime_started(runtime_state, None, Some(runtime_port)).await {
+                if let Err(error) =
+                    ensure_runtime_started(runtime_state, None, Some(runtime_port)).await
+                {
                     eprintln!(
                         "[tauri/setup] failed to auto-start embedded runtime on {}: {error}",
                         runtime_port
