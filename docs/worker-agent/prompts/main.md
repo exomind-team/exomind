@@ -7,9 +7,11 @@
 1. 用户每次都只会输入这条主提示词，不会切换别的步骤提示词。
 2. 先运行：
    - `npx tsx Scripts/dev/worker-agent/index.ts next-action`
-   - 若环境提供 bun，也可使用：`bun Scripts/dev/worker-agent/index.ts next-action`
 3. 以脚本状态机结果为准，执行当前唯一最高优先级动作。
    - `create-draft-pr` / `sync-pr-body` 时，优先使用：`npx tsx Scripts/dev/worker-agent/index.ts pr sync`
+   - `next-action` / `restore` 输出里的 `context.targetLanguage` 是当前对外文本的语言真相
+   - 之后所有新写的 PR title、PR body、issue/PR comment、执行异议文本，都必须跟随这个 `targetLanguage`
+   - 若调用 `render-comment` / `render-body` / `render-dissent-*`，传入 `--language <targetLanguage>`
 4. 每轮只做一个动作，不要混做多件事。
 5. 动作完成后：
    - 若本轮已经处理并吸收了当前 feedback 批次，先执行：`npx tsx Scripts/dev/worker-agent/index.ts cursor sync`
@@ -25,6 +27,7 @@
 - 只处理自己当前持锁 PR
 - 人类普通评论也算阻塞项
 - 所有 body/comment 使用 `[Codex Worker]` 前缀
+- 所有对外文本语言必须与关联 issue 的主语言一致
 - 提交前必须同步 PR body
 - 不要使用 `[Codex Reviewer]`
 - 不要执行 `gh pr review`

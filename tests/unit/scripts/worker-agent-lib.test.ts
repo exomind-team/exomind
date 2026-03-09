@@ -7,6 +7,7 @@ import {
   buildHandledCursor,
   buildRestoredContext,
   extractLinkedIssueNumber,
+  resolveWorkerTargetLanguage,
   renderWorkerDissentComment,
   renderWorkerDissentIssueBody,
   renderWorkerBody,
@@ -15,8 +16,9 @@ import {
 } from '../../../Scripts/dev/worker-agent/lib.ts';
 
 describe('worker-agent lib', () => {
-  it('renders a worker comment with fixed sections and prefix', () => {
+  it('renders a worker comment with localized sections and prefix', () => {
     const body = renderWorkerComment({
+      language: 'zh',
       quote: '原文关键句',
       change: 'Adjusted the locking flow.',
       verification: 'npx vitest run tests/unit/scripts/worker-agent-lib.test.ts',
@@ -25,13 +27,14 @@ describe('worker-agent lib', () => {
 
     expect(body).toContain(WORKER_PREFIX);
     expect(body).toContain('> 原文关键句');
-    expect(body).toContain('Change');
-    expect(body).toContain('Verification');
-    expect(body).toContain('Result');
+    expect(body).toContain('变更');
+    expect(body).toContain('验证');
+    expect(body).toContain('结果');
   });
 
-  it('renders a worker body with fixed top-level sections', () => {
+  it('renders a worker body with localized top-level sections', () => {
     const body = renderWorkerBody({
+      language: 'zh',
       summary: 'Track the worker-agent lifecycle.',
       scope: '- Add prompt docs\n- Add CLI skeleton',
       verification: '- pending',
@@ -39,14 +42,15 @@ describe('worker-agent lib', () => {
     });
 
     expect(body.startsWith(WORKER_PREFIX)).toBe(true);
-    expect(body).toContain('## Summary');
-    expect(body).toContain('## Scope');
-    expect(body).toContain('## Verification');
-    expect(body).toContain('## Links/Refs');
+    expect(body).toContain('## 摘要');
+    expect(body).toContain('## 范围');
+    expect(body).toContain('## 验证');
+    expect(body).toContain('## 关联/引用');
   });
 
-  it('renders dissent issue/comment templates with fixed evidence sections', () => {
+  it('renders dissent issue/comment templates with localized evidence sections', () => {
     const issueBody = renderWorkerDissentIssueBody({
+      language: 'zh',
       scriptConclusion: 'next-action returned acquire-lock',
       actualConclusion: 'current PR is already locked by another agent',
       reproducibleEvidence: '1. restore context\n2. inspect current PR lock comment',
@@ -55,6 +59,7 @@ describe('worker-agent lib', () => {
       linkedPr: '- pr #466',
     });
     const commentBody = renderWorkerDissentComment({
+      language: 'zh',
       scriptConclusion: 'next-action returned acquire-lock',
       actualConclusion: 'current PR is already locked by another agent',
       reproducibleEvidence: '1. restore context\n2. inspect current PR lock comment',
@@ -64,39 +69,87 @@ describe('worker-agent lib', () => {
     });
 
     expect(issueBody.startsWith(WORKER_PREFIX)).toBe(true);
-    expect(issueBody).toContain('## Script Conclusion');
-    expect(issueBody).toContain('## Trace Process');
-    expect(commentBody).toContain('Conclusion');
-    expect(commentBody).toContain('Repro Evidence');
-    expect(commentBody).toContain('Linked Issue');
+    expect(issueBody).toContain('## 脚本结论');
+    expect(issueBody).toContain('## 追踪过程');
+    expect(commentBody).toContain('结论');
+    expect(commentBody).toContain('复现证据');
+    expect(commentBody).toContain('关联议题');
   });
 
-  it('flags missing worker prefix and required sections', () => {
-    const issues = validateWorkerText('plain body', {
-      requiredSections: ['Change', 'Verification', 'Result'],
-    });
+  it('only flags missing worker prefix during light validation', () => {
+    const issues = validateWorkerText('plain body');
 
-    expect(issues.map((issue) => issue.code)).toEqual([
-      'missing-prefix',
-      'missing-section',
-      'missing-section',
-      'missing-section',
-    ]);
+    expect(issues.map((issue) => issue.code)).toEqual(['missing-prefix']);
   });
 
   it('flags suspicious escaped newlines and question noise', () => {
-    const issues = validateWorkerText(`${WORKER_PREFIX}\\n???????`, {
-      requiredSections: [],
-    });
+    const issues = validateWorkerText(`${WORKER_PREFIX}\\n???????`);
 
     expect(issues.map((issue) => issue.code)).toContain('escaped-newline');
     expect(issues.map((issue) => issue.code)).toContain('question-noise');
+  });
+
+  it('detects zh as the worker target language from issue context and ignores worker/reviewer/bot noise', () => {
+    const language = resolveWorkerTargetLanguage({
+      issueTitle: 'workflow: 单 Worker 锁定 issue/PR 的 Ralph 循环 Agent 流程',
+      issueBody: '目标是建立一个常驻 Agent 工作流。',
+      issueComments: [
+        {
+          authorLogin: 'ARCJ137442',
+          body: `${WORKER_PREFIX}\n\n## Summary\nThis is automation output.`,
+          createdAt: '2026-03-09T09:00:00.000Z',
+        },
+        {
+          authorLogin: 'ARCJ137442',
+          body: '请继续保持中文汇报。',
+          createdAt: '2026-03-09T09:10:00.000Z',
+        },
+      ],
+      prComments: [
+        {
+          authorLogin: 'cloudflare-workers-and-pages',
+          body: 'Deployment successful',
+          createdAt: '2026-03-09T09:20:00.000Z',
+        },
+        {
+          authorLogin: 'ARCJ137442',
+          body: `${REVIEWER_PREFIX}\n\nPlease follow the linked issue language.`,
+          createdAt: '2026-03-09T09:30:00.000Z',
+        },
+      ],
+    });
+
+    expect(language).toBe('zh');
+  });
+
+  it('prefers the most recent human language signal over the issue fallback', () => {
+    const language = resolveWorkerTargetLanguage({
+      issueTitle: 'workflow: worker agent loop',
+      issueBody: 'Keep the worker prompt and reports aligned.',
+      issueComments: [
+        {
+          authorLogin: 'ARCJ137442',
+          body: 'Please keep this issue in English.',
+          createdAt: '2026-03-09T09:00:00.000Z',
+        },
+      ],
+      prComments: [
+        {
+          authorLogin: 'ARCJ137442',
+          body: '后续这条链路统一改成中文。',
+          createdAt: '2026-03-09T10:00:00.000Z',
+        },
+      ],
+    });
+
+    expect(language).toBe('zh');
   });
 
   it('builds restored context from verified lock and current metadata', () => {
     const context = buildRestoredContext({
       prNumber: 421,
       issueNumber: 421,
+      targetLanguage: 'zh',
       branch: 'feature/issue-421-worker-agent',
       baseBranch: 'dev',
       worktree: '/tmp/worktrees/issue-421-worker-agent',
@@ -119,6 +172,7 @@ describe('worker-agent lib', () => {
 
     expect(context.prNumber).toBe(421);
     expect(context.issueNumber).toBe(421);
+    expect(context.targetLanguage).toBe('zh');
     expect(context.branch).toBe('feature/issue-421-worker-agent');
     expect(context.baseBranch).toBe('dev');
     expect(context.waiting.waitingOn).toBe('human-comment');

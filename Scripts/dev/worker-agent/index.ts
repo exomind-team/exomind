@@ -9,6 +9,7 @@ import {
   extractLinkedIssueNumber,
   getWorkerTempPaths,
   readJsonFileIfExists,
+  resolveWorkerTargetLanguage,
   renderWorkerBody,
   renderWorkerComment,
   renderWorkerDissentComment,
@@ -17,6 +18,7 @@ import {
   writeJsonFile,
   writeTextFile,
   type WorkerCursor,
+  type WorkerMessageLanguage,
   type WorkerWaitingState,
 } from './lib.ts';
 import {
@@ -52,6 +54,16 @@ type PrListEntry = {
   baseRefName: string;
 };
 
+type IssueLanguageContext = {
+  title: string;
+  body: string;
+  comments: Array<{
+    authorLogin: string;
+    body: string;
+    createdAt: string;
+  }>;
+};
+
 function parseArgs(argv: string[]): ParsedArgs {
   const flags = new Map<string, string[]>();
   const positionals: string[] = [];
@@ -85,6 +97,10 @@ function flagValue(parsed: ParsedArgs, key: string, fallback?: string): string |
 
 function repeatedFlagValues(parsed: ParsedArgs, key: string): string[] {
   return parsed.flags.get(key) ?? [];
+}
+
+function parseWorkerLanguage(value: unknown): WorkerMessageLanguage | undefined {
+  return value === 'zh' || value === 'en' ? value : undefined;
 }
 
 function requireFlag(parsed: ParsedArgs, key: string): string {
@@ -266,6 +282,84 @@ function fetchPrRuntimeState(repo: string, prNumber: number, cwd = process.cwd()
   };
 }
 
+function fetchIssueLanguageContext(
+  repo: string,
+  issueNumber: number | null,
+  cwd = process.cwd(),
+): IssueLanguageContext | null {
+  if (!issueNumber) {
+    return null;
+  }
+
+  try {
+    const raw = execFileSync(
+      'gh',
+      [
+        'issue',
+        'view',
+        String(issueNumber),
+        '--repo',
+        repo,
+        '--json',
+        'title,body,comments',
+      ],
+      {
+        cwd,
+        encoding: 'utf8',
+        maxBuffer: 1024 * 1024 * 16,
+      },
+    ).trim();
+
+    const parsed = JSON.parse(raw) as {
+      title?: string;
+      body?: string;
+      comments?: Array<{ author?: { login?: string }; body?: string; createdAt?: string }>;
+    };
+
+    return {
+      title: parsed.title ?? '',
+      body: parsed.body ?? '',
+      comments: (parsed.comments ?? []).map((comment) => ({
+        authorLogin: comment.author?.login ?? 'unknown',
+        body: comment.body ?? '',
+        createdAt: comment.createdAt ?? '',
+      })),
+    };
+  } catch {
+    return null;
+  }
+}
+
+function determineTargetLanguage(input: {
+  repo: string;
+  issueNumber: number | null;
+  prState: NextActionPrState | null;
+  currentState: Record<string, unknown>;
+  cwd?: string;
+}): WorkerMessageLanguage {
+  const issueContext = fetchIssueLanguageContext(input.repo, input.issueNumber, input.cwd);
+  const fallback = parseWorkerLanguage(input.currentState.targetLanguage) ?? 'en';
+
+  return resolveWorkerTargetLanguage({
+    issueTitle: issueContext?.title,
+    issueBody: issueContext?.body,
+    issueComments: issueContext?.comments,
+    prComments: [
+      ...(input.prState?.comments ?? []).map((comment) => ({
+        authorLogin: comment.authorLogin,
+        body: comment.body,
+        createdAt: comment.createdAt,
+      })),
+      ...(input.prState?.reviews ?? []).map((review) => ({
+        authorLogin: review.authorLogin,
+        body: review.body,
+        createdAt: review.submittedAt,
+      })),
+    ],
+    fallback,
+  });
+}
+
 function defaultCursor(): WorkerCursor {
   return {
     lastCommentIds: [],
@@ -308,10 +402,18 @@ async function runRestore(parsed: ParsedArgs): Promise<void> {
   const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? defaultCursor();
   const waiting = readJsonFileIfExists<WorkerWaitingState>(paths.waitingStateFile);
   const metadata = fetchPrMetadata(repo, snapshot.prNumber, cwd);
+  const targetLanguage = determineTargetLanguage({
+    repo,
+    issueNumber: metadata.issueNumber,
+    prState: fetchPrRuntimeState(repo, snapshot.prNumber, cwd),
+    currentState,
+    cwd,
+  });
 
   const context = buildRestoredContext({
     prNumber: snapshot.prNumber,
     issueNumber: metadata.issueNumber,
+    targetLanguage,
     branch: metadata.headBranch || currentBranch(cwd),
     baseBranch: metadata.baseBranch,
     worktree: currentWorktree(cwd),
@@ -329,6 +431,7 @@ async function runRestore(parsed: ParsedArgs): Promise<void> {
     ...currentState,
     prNumber: context.prNumber,
     issueNumber: context.issueNumber,
+    targetLanguage: context.targetLanguage,
     branch: context.branch,
     baseBranch: context.baseBranch,
     worktree: context.worktree,
@@ -355,6 +458,7 @@ async function runRestore(parsed: ParsedArgs): Promise<void> {
 function runRenderComment(parsed: ParsedArgs): void {
   renderAndMaybeWrite(
     renderWorkerComment({
+      language: parseWorkerLanguage(flagValue(parsed, 'language')) ?? 'en',
       quote: requireFlag(parsed, 'quote'),
       change: requireFlag(parsed, 'change'),
       verification: requireFlag(parsed, 'verification'),
@@ -367,6 +471,7 @@ function runRenderComment(parsed: ParsedArgs): void {
 function runRenderDissentComment(parsed: ParsedArgs): void {
   renderAndMaybeWrite(
     renderWorkerDissentComment({
+      language: parseWorkerLanguage(flagValue(parsed, 'language')) ?? 'en',
       scriptConclusion: requireFlag(parsed, 'script-conclusion'),
       actualConclusion: requireFlag(parsed, 'actual-conclusion'),
       reproducibleEvidence: requireFlag(parsed, 'repro-evidence'),
@@ -381,6 +486,7 @@ function runRenderDissentComment(parsed: ParsedArgs): void {
 function runRenderBody(parsed: ParsedArgs): void {
   renderAndMaybeWrite(
     renderWorkerBody({
+      language: parseWorkerLanguage(flagValue(parsed, 'language')) ?? 'en',
       summary: requireFlag(parsed, 'summary'),
       scope: requireFlag(parsed, 'scope'),
       verification: requireFlag(parsed, 'verification'),
@@ -393,6 +499,7 @@ function runRenderBody(parsed: ParsedArgs): void {
 function runRenderDissentIssue(parsed: ParsedArgs): void {
   renderAndMaybeWrite(
     renderWorkerDissentIssueBody({
+      language: parseWorkerLanguage(flagValue(parsed, 'language')) ?? 'en',
       scriptConclusion: requireFlag(parsed, 'script-conclusion'),
       actualConclusion: requireFlag(parsed, 'actual-conclusion'),
       reproducibleEvidence: requireFlag(parsed, 'repro-evidence'),
@@ -640,6 +747,13 @@ async function runNextAction(parsed: ParsedArgs): Promise<void> {
   const agentId = flagValue(parsed, 'agent-id', localLock?.agentId ?? 'codex-worker')!;
   const remoteLock = prState ? readRemoteLock(repo, prState.number, cwd) : null;
   const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? defaultCursor();
+  const targetLanguage = determineTargetLanguage({
+    repo,
+    issueNumber: prState?.issueNumber ?? null,
+    prState,
+    currentState,
+    cwd,
+  });
   const result: NextActionResult = determineNextAction({
     worker: {
       agentId,
@@ -661,6 +775,7 @@ async function runNextAction(parsed: ParsedArgs): Promise<void> {
     ...currentState,
     prNumber: prState?.number ?? null,
     issueNumber: prState?.issueNumber ?? null,
+    targetLanguage,
     branch,
     baseBranch,
     worktree: currentWorktree(cwd),
@@ -679,6 +794,7 @@ async function runNextAction(parsed: ParsedArgs): Promise<void> {
           worktree: currentWorktree(cwd),
           prNumber: prState?.number ?? null,
           issueNumber: prState?.issueNumber ?? null,
+          targetLanguage,
           baseBranch,
           headSha: prState?.headSha ?? null,
           localLock,
@@ -766,10 +882,10 @@ function printHelp(): void {
   worker-agent next-action [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>] [--base-branch <name>]
   worker-agent cursor sync [--repo <owner/repo>] [--pr <number>] [--temp-root <path>]
   worker-agent pr sync [--repo <owner/repo>] [--base-branch <name>] [--title <text>] [--body <text> | --body-file <path>] [--temp-root <path>]
-  worker-agent render-comment --quote <text> --change <text> --verification <text> --result <text> [--output <path>]
-  worker-agent render-dissent-comment --script-conclusion <text> --actual-conclusion <text> --repro-evidence <text> --trace-process <text> --impact <text> --linked-issue <text> [--output <path>]
-  worker-agent render-body --summary <text> --scope <text> --verification <text> --links-refs <text> [--output <path>]
-  worker-agent render-dissent-issue --script-conclusion <text> --actual-conclusion <text> --repro-evidence <text> --trace-process <text> --impact <text> --linked-pr <text> [--extra-notes <text>] [--output <path>]
+  worker-agent render-comment --quote <text> --change <text> --verification <text> --result <text> [--language <zh|en>] [--output <path>]
+  worker-agent render-dissent-comment --script-conclusion <text> --actual-conclusion <text> --repro-evidence <text> --trace-process <text> --impact <text> --linked-issue <text> [--language <zh|en>] [--output <path>]
+  worker-agent render-body --summary <text> --scope <text> --verification <text> --links-refs <text> [--language <zh|en>] [--output <path>]
+  worker-agent render-dissent-issue --script-conclusion <text> --actual-conclusion <text> --repro-evidence <text> --trace-process <text> --impact <text> --linked-pr <text> [--language <zh|en>] [--extra-notes <text>] [--output <path>]
   worker-agent validate-message (--file <path> | --body <text>) [--section <name>...]
   worker-agent lock <acquire|renew|release|check> --pr <number> [--repo <owner/repo>] [--agent-id <id>]
   worker-agent wait-for-update [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>]

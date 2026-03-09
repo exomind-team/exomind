@@ -48,10 +48,11 @@
 
 - 用户只复制一条恒定主提示词：`docs/worker-agent/prompts/main.md`
 - Agent 每轮先运行 `next-action`
+- `next-action` / `restore` 会返回 `context.targetLanguage`
 - 每轮只做一个最高优先级动作
 - 若本轮已经吸收了当前 feedback 批次，先同步 handled cursor
 - 动作完成后显式续锁
-- 需要时发 `[Codex Worker]` 进展评论
+- 需要时发 `[Codex Worker]` 进展评论，且语言必须跟随 `targetLanguage`
 - 然后再次运行 `next-action`
 - 若结果是等待，则进入 `wait-for-update`
 

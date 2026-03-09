@@ -7,8 +7,10 @@ export const HUMAN_TEST_LABEL = '🙋needs-human-test';
 export const HUMAN_TEST_LABEL_ALIASES = [HUMAN_TEST_LABEL, '🙋 needs-human-test'];
 export const HUMAN_TEST_REVIEW_PREFIX = '[Codex Reviewer] ❤️ 需要人类测试';
 export const AUTOMATION_LOGINS = ['cloudflare-workers-and-pages', 'github-actions[bot]'];
+export const LOCK_METADATA_PREFIX = '<!-- LOCK_METADATA';
 
 export type WaitingReason = 'reviewer' | 'human-comment' | 'human-test' | 'ci-failure';
+export type WorkerMessageLanguage = 'zh' | 'en';
 
 export interface WorkerCursor {
   lastCommentIds: string[];
@@ -30,9 +32,16 @@ export interface WorkerLockContext {
   acquiredAt: string;
 }
 
+export interface WorkerLanguageSignalItem {
+  authorLogin: string;
+  body: string;
+  createdAt?: string;
+}
+
 export interface WorkerContext {
   prNumber: number;
   issueNumber: number | null;
+  targetLanguage: WorkerMessageLanguage;
   branch: string;
   baseBranch: string;
   worktree: string;
@@ -65,12 +74,165 @@ export interface WorkerTempPaths {
 const QUESTION_NOISE_PATTERN = /[?？]{5,}/;
 const LINKED_ISSUE_PATTERN = /(?:refs|closes|fixes)\s+#(\d+)/i;
 
-function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-}
-
 function normalizeSectionContent(value: string): string {
   return value.trim();
+}
+
+function countMatches(input: string, pattern: RegExp): number {
+  return input.match(pattern)?.length ?? 0;
+}
+
+function inferLanguageFromText(input: string): WorkerMessageLanguage | null {
+  const text = input.trim();
+  if (!text) {
+    return null;
+  }
+
+  const hanCount = countMatches(text, /[\p{Script=Han}]/gu);
+  const latinCount = countMatches(text, /[A-Za-z]/g);
+  if (hanCount === 0 && latinCount === 0) {
+    return null;
+  }
+
+  if (hanCount > 0 && hanCount * 2 >= Math.max(latinCount, 1)) {
+    return 'zh';
+  }
+
+  if (latinCount >= Math.max(hanCount * 2, 6)) {
+    return 'en';
+  }
+
+  if (hanCount > latinCount) {
+    return 'zh';
+  }
+
+  if (latinCount > hanCount) {
+    return 'en';
+  }
+
+  return null;
+}
+
+function defaultWorkerLanguage(input: {
+  issueTitle?: string;
+  issueBody?: string;
+  fallback?: WorkerMessageLanguage;
+}): WorkerMessageLanguage {
+  return inferLanguageFromText(`${input.issueTitle ?? ''}\n${input.issueBody ?? ''}`) ?? input.fallback ?? 'en';
+}
+
+function parseSignalTimestamp(value?: string): number {
+  if (!value) {
+    return 0;
+  }
+
+  const timestamp = Date.parse(value);
+  return Number.isFinite(timestamp) ? timestamp : 0;
+}
+
+function shouldIgnoreLanguageSignal(input: WorkerLanguageSignalItem): boolean {
+  const body = input.body.trimStart();
+  return (
+    body.startsWith(WORKER_PREFIX) ||
+    body.startsWith(REVIEWER_PREFIX) ||
+    body.startsWith(LOCK_METADATA_PREFIX) ||
+    isAutomationActor(input.authorLogin)
+  );
+}
+
+function workerMessageLabels(language: WorkerMessageLanguage): {
+  comment: {
+    change: string;
+    verification: string;
+    result: string;
+  };
+  dissentComment: {
+    conclusion: string;
+    script: string;
+    actual: string;
+    reproEvidence: string;
+    traceProcess: string;
+    impact: string;
+    linkedIssue: string;
+  };
+  body: {
+    summary: string;
+    scope: string;
+    verification: string;
+    linksRefs: string;
+  };
+  dissentIssue: {
+    scriptConclusion: string;
+    actualConclusion: string;
+    reproEvidence: string;
+    traceProcess: string;
+    impact: string;
+    linkedPr: string;
+  };
+} {
+  if (language === 'zh') {
+    return {
+      comment: {
+        change: '变更',
+        verification: '验证',
+        result: '结果',
+      },
+      dissentComment: {
+        conclusion: '结论',
+        script: '脚本',
+        actual: '实际',
+        reproEvidence: '复现证据',
+        traceProcess: '追踪过程',
+        impact: '影响',
+        linkedIssue: '关联议题',
+      },
+      body: {
+        summary: '摘要',
+        scope: '范围',
+        verification: '验证',
+        linksRefs: '关联/引用',
+      },
+      dissentIssue: {
+        scriptConclusion: '脚本结论',
+        actualConclusion: '实际结论',
+        reproEvidence: '复现证据',
+        traceProcess: '追踪过程',
+        impact: '影响',
+        linkedPr: '关联 PR',
+      },
+    };
+  }
+
+  return {
+    comment: {
+      change: 'Change',
+      verification: 'Verification',
+      result: 'Result',
+    },
+    dissentComment: {
+      conclusion: 'Conclusion',
+      script: 'Script',
+      actual: 'Actual',
+      reproEvidence: 'Repro Evidence',
+      traceProcess: 'Trace Process',
+      impact: 'Impact',
+      linkedIssue: 'Linked Issue',
+    },
+    body: {
+      summary: 'Summary',
+      scope: 'Scope',
+      verification: 'Verification',
+      linksRefs: 'Links/Refs',
+    },
+    dissentIssue: {
+      scriptConclusion: 'Script Conclusion',
+      actualConclusion: 'Actual Conclusion',
+      reproEvidence: 'Repro Evidence',
+      traceProcess: 'Trace Process',
+      impact: 'Impact',
+      linkedPr: 'Linked PR',
+    },
+  };
 }
 
 export function extractLinkedIssueNumber(body: string): number | null {
@@ -152,6 +314,26 @@ export function shouldIgnoreFeedbackItem(input: {
   return input.body.startsWith(WORKER_PREFIX) || isAutomationActor(input.authorLogin);
 }
 
+export function resolveWorkerTargetLanguage(input: {
+  issueTitle?: string;
+  issueBody?: string;
+  issueComments?: WorkerLanguageSignalItem[];
+  prComments?: WorkerLanguageSignalItem[];
+  fallback?: WorkerMessageLanguage;
+}): WorkerMessageLanguage {
+  const baseline = defaultWorkerLanguage(input);
+  const signals = [...(input.issueComments ?? []), ...(input.prComments ?? [])]
+    .filter((item) => !shouldIgnoreLanguageSignal(item))
+    .map((item) => ({
+      language: inferLanguageFromText(item.body),
+      createdAt: parseSignalTimestamp(item.createdAt),
+    }))
+    .filter((item): item is { language: WorkerMessageLanguage; createdAt: number } => Boolean(item.language))
+    .sort((left, right) => right.createdAt - left.createdAt);
+
+  return signals[0]?.language ?? baseline;
+}
+
 export function buildHandledCursor(input: {
   commentIds: string[];
   reviewIds: string[];
@@ -167,11 +349,13 @@ export function buildHandledCursor(input: {
 }
 
 export function renderWorkerComment(input: {
+  language?: WorkerMessageLanguage;
   quote: string;
   change: string;
   verification: string;
   result: string;
 }): string {
+  const labels = workerMessageLabels(input.language ?? 'en');
   const quote = normalizeSectionContent(input.quote);
   const change = normalizeSectionContent(input.change);
   const verification = normalizeSectionContent(input.verification);
@@ -182,19 +366,20 @@ export function renderWorkerComment(input: {
     '',
     `> ${quote}`,
     '',
-    'Change',
+    labels.comment.change,
     change,
     '',
-    'Verification',
+    labels.comment.verification,
     verification,
     '',
-    'Result',
+    labels.comment.result,
     result,
     '',
   ].join('\n');
 }
 
 export function renderWorkerDissentComment(input: {
+  language?: WorkerMessageLanguage;
   scriptConclusion: string;
   actualConclusion: string;
   reproducibleEvidence: string;
@@ -202,53 +387,57 @@ export function renderWorkerDissentComment(input: {
   impact: string;
   linkedIssue: string;
 }): string {
+  const labels = workerMessageLabels(input.language ?? 'en');
   return [
     WORKER_PREFIX,
     '',
-    'Conclusion',
-    `Script: ${normalizeSectionContent(input.scriptConclusion)}`,
-    `Actual: ${normalizeSectionContent(input.actualConclusion)}`,
+    labels.dissentComment.conclusion,
+    `${labels.dissentComment.script}: ${normalizeSectionContent(input.scriptConclusion)}`,
+    `${labels.dissentComment.actual}: ${normalizeSectionContent(input.actualConclusion)}`,
     '',
-    'Repro Evidence',
+    labels.dissentComment.reproEvidence,
     normalizeSectionContent(input.reproducibleEvidence),
     '',
-    'Trace Process',
+    labels.dissentComment.traceProcess,
     normalizeSectionContent(input.traceProcess),
     '',
-    'Impact',
+    labels.dissentComment.impact,
     normalizeSectionContent(input.impact),
     '',
-    'Linked Issue',
+    labels.dissentComment.linkedIssue,
     normalizeSectionContent(input.linkedIssue),
     '',
   ].join('\n');
 }
 
 export function renderWorkerBody(input: {
+  language?: WorkerMessageLanguage;
   summary: string;
   scope: string;
   verification: string;
   linksRefs: string;
 }): string {
+  const labels = workerMessageLabels(input.language ?? 'en');
   return [
     WORKER_PREFIX,
     '',
-    '## Summary',
+    `## ${labels.body.summary}`,
     normalizeSectionContent(input.summary),
     '',
-    '## Scope',
+    `## ${labels.body.scope}`,
     normalizeSectionContent(input.scope),
     '',
-    '## Verification',
+    `## ${labels.body.verification}`,
     normalizeSectionContent(input.verification),
     '',
-    '## Links/Refs',
+    `## ${labels.body.linksRefs}`,
     normalizeSectionContent(input.linksRefs),
     '',
   ].join('\n');
 }
 
 export function renderWorkerDissentIssueBody(input: {
+  language?: WorkerMessageLanguage;
   scriptConclusion: string;
   actualConclusion: string;
   reproducibleEvidence: string;
@@ -257,27 +446,28 @@ export function renderWorkerDissentIssueBody(input: {
   linkedPr: string;
   extraNotes?: string;
 }): string {
+  const labels = workerMessageLabels(input.language ?? 'en');
   const extraNotes = normalizeSectionContent(input.extraNotes ?? '');
 
   return [
     WORKER_PREFIX,
     '',
-    '## Script Conclusion',
+    `## ${labels.dissentIssue.scriptConclusion}`,
     normalizeSectionContent(input.scriptConclusion),
     '',
-    '## Actual Conclusion',
+    `## ${labels.dissentIssue.actualConclusion}`,
     normalizeSectionContent(input.actualConclusion),
     '',
-    '## Repro Evidence',
+    `## ${labels.dissentIssue.reproEvidence}`,
     normalizeSectionContent(input.reproducibleEvidence),
     '',
-    '## Trace Process',
+    `## ${labels.dissentIssue.traceProcess}`,
     normalizeSectionContent(input.traceProcess),
     '',
-    '## Impact',
+    `## ${labels.dissentIssue.impact}`,
     normalizeSectionContent(input.impact),
     '',
-    '## Linked PR',
+    `## ${labels.dissentIssue.linkedPr}`,
     normalizeSectionContent(input.linkedPr),
     extraNotes ? `\n---\n${extraNotes}\n` : '',
   ].join('\n');
@@ -288,7 +478,7 @@ export function validateWorkerText(
   options: { requiredSections?: string[] } = {},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  const requiredSections = options.requiredSections ?? [];
+  void options;
 
   if (!body.startsWith(WORKER_PREFIX)) {
     issues.push({
@@ -311,22 +501,13 @@ export function validateWorkerText(
     });
   }
 
-  for (const section of requiredSections) {
-    const pattern = new RegExp(`(^|\\n)${escapeRegExp(section)}\\s*(\\n|$)`);
-    if (!pattern.test(body)) {
-      issues.push({
-        code: 'missing-section',
-        message: `Message is missing required section: ${section}`,
-      });
-    }
-  }
-
   return issues;
 }
 
 export function buildRestoredContext(input: {
   prNumber: number;
   issueNumber?: number | null;
+  targetLanguage?: WorkerMessageLanguage;
   branch: string;
   baseBranch: string;
   worktree: string;
@@ -338,6 +519,7 @@ export function buildRestoredContext(input: {
   return {
     prNumber: input.prNumber,
     issueNumber: input.issueNumber ?? null,
+    targetLanguage: input.targetLanguage ?? 'en',
     branch: input.branch,
     baseBranch: input.baseBranch,
     worktree: input.worktree,
