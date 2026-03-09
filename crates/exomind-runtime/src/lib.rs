@@ -172,6 +172,7 @@ pub struct RuntimeHandle {
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
     ts_agents: Vec<TsAgentProcess>,
+    pty_manager: Arc<pty::PtyManager>,
     tick_cancel: Arc<std::sync::atomic::AtomicBool>,
     tick_tasks: Vec<JoinHandle<()>>,
 }
@@ -304,6 +305,8 @@ impl RuntimeHandle {
             }
         }
         self.ts_agents.clear();
+
+        self.pty_manager.shutdown().await;
 
         if let Some(mdns) = self.mdns.take() {
             mdns.shutdown();
@@ -460,6 +463,7 @@ pub async fn start_with_options(
         Arc::clone(&tick_cancel),
     );
 
+    let pty_manager = Arc::clone(&state.pty_manager);
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {
@@ -486,6 +490,7 @@ pub async fn start_with_options(
         server_task: Some(server_task),
         actor_tasks,
         ts_agents,
+        pty_manager,
         tick_cancel,
         tick_tasks,
     })

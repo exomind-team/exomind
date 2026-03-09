@@ -129,6 +129,13 @@ struct PtyInstance {
     output_tx: broadcast::Sender<PtyOutputMsg>,
 }
 
+impl Drop for PtyInstance {
+    fn drop(&mut self) {
+        // Kill the child process when the instance is dropped to prevent orphans.
+        let _ = self.child.kill();
+    }
+}
+
 // ---------------------------------------------------------------------------
 // PtyManager
 // ---------------------------------------------------------------------------
@@ -437,6 +444,13 @@ impl PtyManager {
             Some(projects_dir) => discover_claude_sessions(&projects_dir),
             None => Vec::new(),
         }
+    }
+
+    /// Kill all running PTY child processes and clear instances (graceful shutdown).
+    pub async fn shutdown(&self) {
+        let mut instances = self.instances.lock().await;
+        // Drop triggers PtyInstance::drop which kills the child process.
+        instances.clear();
     }
 
     /// Publish a lifecycle signal to the SignalPool.
