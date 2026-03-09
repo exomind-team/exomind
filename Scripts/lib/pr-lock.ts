@@ -517,8 +517,9 @@ export class PRLockManager {
    * 1. 查询 PR timeline 中所有的 lock comment
    * 2. 过滤竞争窗口内的锁评论（最近 10 秒）
    * 3. 过滤掉已释放的锁（released: true）
-   * 4. 找出时间戳最早的 lock comment
-   * 5. 如果不是自己，说明有竞争，自己是败者
+   * 4. 检查是否有其他不同的 lock_id（不依赖评论数量）
+   * 5. 如果有其他锁，按时间戳排序，找出最早的锁
+   * 6. 如果不是自己，说明有竞争，自己是败者
    */
   private async detectConflict(
     prNumber: number,
@@ -557,19 +558,23 @@ export class PRLockManager {
         return lockTime >= windowStart && lockTime <= windowEnd;
       });
 
-    if (lockComments.length <= 1) {
-      // 只有自己的锁，没有竞争
+    // 检查是否有其他不同的 lock_id（不依赖评论数量）
+    const otherLocks = lockComments.filter((lock: any) => lock.lock_id !== myLock.lock_id);
+
+    if (otherLocks.length === 0) {
+      // 竞争窗口内没有其他锁，没有竞争
       return { hasConflict: false };
     }
 
-    // 按 lock_id 中的时间戳排序（lock_id 格式：lock-{timestamp}-{random}）
-    lockComments.sort((a: any, b: any) => {
+    // 有其他锁，按 lock_id 中的时间戳排序（lock_id 格式：lock-{timestamp}-{random}）
+    const allLocks = [...lockComments];
+    allLocks.sort((a: any, b: any) => {
       const aTime = parseInt(a.lock_id.split('-')[1]);
       const bTime = parseInt(b.lock_id.split('-')[1]);
       return aTime - bTime;
     });
 
-    const winner = lockComments[0];
+    const winner = allLocks[0];
 
     if (winner.lock_id === myLock.lock_id) {
       // 自己是胜者，没有冲突
@@ -623,7 +628,8 @@ export class PRLockManager {
     const tmpFile = `/tmp/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
     await Bun.write(tmpFile, body);
     try {
-      execSync(`gh api repos/${this.repo}/issues/comments/${commentId} -X PATCH --input ${tmpFile}`, {
+      // 使用 -F body=@file 让 gh CLI 自动处理 JSON 封装
+      execSync(`gh api repos/${this.repo}/issues/comments/${commentId} -X PATCH -F body=@${tmpFile}`, {
         encoding: 'utf-8',
         stdio: ['pipe', 'pipe', 'pipe']
       });
