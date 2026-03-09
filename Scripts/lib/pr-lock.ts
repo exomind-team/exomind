@@ -489,18 +489,17 @@ export class PRLockManager {
     }
 
     // 更新本地锁状态
-    const newExpiresAt = this.calculateExpiresAt(lock.acquired_at, newDurationMinutes);
-    await this.saveLockState({
-      lock_id: lock.lock_id,
-      pr_number: prNumber,
-      comment_id: localLockState?.comment_id,
-      acquired_at: lock.acquired_at,
-      lock_duration_minutes: newDurationMinutes,
-      pr_last_updated_at: lock.pr_last_updated_at,
-      expires_at: newExpiresAt
-    });
+    const renewedLockMetadata: LockMetadata = {
+      ...renewedLock,
+      lock_duration_minutes: newDurationMinutes
+    };
 
-    console.log(`[PRLock] Lock renewed successfully, new duration: ${newDurationMinutes} minutes, expires at: ${newExpiresAt}`);
+    // 如果找到了原始评论 ID，也更新到本地状态
+    const finalCommentId = originalCommentId || localLockState?.comment_id;
+
+    await this.saveLockState(prNumber, renewedLockMetadata, finalCommentId);
+
+    console.log(`[PRLock] Lock renewed successfully, new duration: ${newDurationMinutes} minutes, expires at: ${this.calculateExpiresAt(lock.acquired_at, newDurationMinutes)}`);
 
     return {
       success: true,
