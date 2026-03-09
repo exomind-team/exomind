@@ -322,7 +322,7 @@ export class PRLockManager {
       ...lock,
       pending: undefined  // 移除 pending 标记
     };
-    await this.updateLockCommentWithRelease(prNumber, commentId, confirmedLock);
+    await this.updateLockCommentWithConfirm(prNumber, commentId, confirmedLock);
 
     // 8. 保存本地锁文件
     await this.saveLockState(prNumber, confirmedLock, commentId);
@@ -666,6 +666,31 @@ export class PRLockManager {
     console.log(`[PRLock] Creating new lock comment for ${lock.agent_id}`);
     const commentId = await this.createComment(prNumber, body);
     return commentId;
+  }
+
+  /**
+   * 更新锁评论为确认状态（移除 pending 标记）
+   */
+  private async updateLockCommentWithConfirm(
+    prNumber: number,
+    commentId: number,
+    lock: LockMetadata
+  ): Promise<void> {
+    const expiresAt = this.calculateExpiresAt(lock.acquired_at, lock.lock_duration_minutes);
+    const body =
+      `<!-- LOCK_METADATA\n${JSON.stringify(lock, null, 2)}\n-->\n\n` +
+      `🔒 **PR 已被锁定**\n\n` +
+      `- 持有者：\`${lock.agent_id}\`\n` +
+      (lock.worktree_path ? `- 工作目录：\`${lock.worktree_path}\`\n` : '') +
+      (lock.branch ? `- Git 分支：\`${lock.branch}\`\n` : '') +
+      `- 锁 ID：\`${lock.lock_id}\`\n` +
+      `- 获取时间：${lock.acquired_at}\n` +
+      `- 锁时长：${lock.lock_duration_minutes} 分钟\n` +
+      `- 过期时间：${expiresAt}\n` +
+      (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
+      (lock.reason ? `- 原因：${lock.reason}\n` : '');
+
+    await this.updateComment(prNumber, commentId, body);
   }
 
   /**
