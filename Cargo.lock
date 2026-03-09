@@ -1077,6 +1077,7 @@ dependencies = [
 name = "exomind-runtime"
 version = "0.1.0"
 dependencies = [
+ "anyhow",
  "axum",
  "chrono",
  "futures-util",
@@ -1090,6 +1091,7 @@ dependencies = [
  "serde_json",
  "sha2",
  "sysinfo",
+ "tempfile",
  "thiserror 1.0.69",
  "tokio",
  "tokio-stream",
