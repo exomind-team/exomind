@@ -79,74 +79,26 @@ export class PRLockManager {
     }
   }
 
-  // ========== 动态过期时间计算 ==========
+  // ========== 固定过期时间计算 ==========
 
   /**
-   * 获取 PR 最后更新时间
+   * 计算过期时间（固定时长，不受 PR 活动影响）
    *
-   * 包含：
-   * - 最后一次 commit 时间
-   * - 最后一次 comment 时间
+   * expires_at = acquired_at + lock_duration
    *
-   * 取两者中较晚的时间
+   * 设计理由：
+   * - 避免拒绝服务风险（非持锁者评论不应延长锁）
+   * - 过期时间可预测
+   * - 后续可通过显式 renew 命令延期
    */
-  private async getPRLastUpdatedAt(prNumber: number): Promise<string> {
-    let lastCommitTime: Date | null = null;
-    let lastCommentTime: Date | null = null;
-
-    // 获取最后一次 commit 时间
-    try {
-      const commits = execSync(`gh api repos/${this.repo}/pulls/${prNumber}/commits --jq '.[].commit.committer.date'`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-      const commitTimes = commits.trim().split('\n').filter(t => t);
-      if (commitTimes.length > 0) {
-        lastCommitTime = new Date(commitTimes[commitTimes.length - 1]);
-      }
-    } catch (e) {
-      console.warn('[PRLock] Failed to get commit times:', e);
-    }
-
-    // 获取最后一次 comment 时间
-    try {
-      const comments = await this.getComments(prNumber);
-      if (comments.length > 0) {
-        lastCommentTime = new Date(comments[comments.length - 1].createdAt);
-      }
-    } catch (e) {
-      console.warn('[PRLock] Failed to get comment times:', e);
-    }
-
-    // 取两者中较晚的时间
-    const times = [lastCommitTime, lastCommentTime].filter(t => t !== null && !isNaN(t.getTime())) as Date[];
-    if (times.length === 0) {
-      // 如果都获取失败，使用当前时间
-      console.warn('[PRLock] No valid timestamps found, using current time');
-      return new Date().toISOString();
-    }
-
-    const latestTime = new Date(Math.max(...times.map(t => t.getTime())));
-    if (isNaN(latestTime.getTime())) {
-      console.warn('[PRLock] Invalid latest time, using current time');
-      return new Date().toISOString();
-    }
-    return latestTime.toISOString();
-  }
-
-  /**
-   * 计算过期时间
-   *
-   * expires_at = pr_last_updated_at + lock_duration
-   */
-  private calculateExpiresAt(prLastUpdatedAt: string, lockDurationMinutes: number): string {
-    const lastUpdated = new Date(prLastUpdatedAt);
-    if (isNaN(lastUpdated.getTime())) {
-      console.warn(`[PRLock] Invalid date: ${prLastUpdatedAt}, using current time`);
+  private calculateExpiresAt(acquiredAt: string, lockDurationMinutes: number): string {
+    const acquired = new Date(acquiredAt);
+    if (isNaN(acquired.getTime())) {
+      console.warn(`[PRLock] Invalid acquired_at: ${acquiredAt}, using current time`);
       const now = new Date();
       return new Date(now.getTime() + lockDurationMinutes * 60 * 1000).toISOString();
     }
-    const expiresAt = new Date(lastUpdated.getTime() + lockDurationMinutes * 60 * 1000);
+    const expiresAt = new Date(acquired.getTime() + lockDurationMinutes * 60 * 1000);
     return expiresAt.toISOString();
   }
 
@@ -158,7 +110,6 @@ export class PRLockManager {
   private async saveLockState(
     prNumber: number,
     lock: LockMetadata,
-    prLastUpdatedAt: string,
     commentId?: number
   ): Promise<void> {
     const lockFile = '.exomind/lock-state.json';
@@ -178,8 +129,8 @@ export class PRLockManager {
       comment_id: commentId,
       acquired_at: lock.acquired_at,
       lock_duration_minutes: lock.lock_duration_minutes,
-      pr_last_updated_at: prLastUpdatedAt,
-      expires_at: this.calculateExpiresAt(prLastUpdatedAt, lock.lock_duration_minutes)
+      pr_last_updated_at: lock.acquired_at,  // 使用 acquired_at 作为基准时间
+      expires_at: this.calculateExpiresAt(lock.acquired_at, lock.lock_duration_minutes)
     };
 
     try {
@@ -232,7 +183,7 @@ export class PRLockManager {
    * 更新本地锁状态
    */
   private async updateLockState(
-    prLastUpdatedAt: string,
+    acquiredAt: string,
     lockDurationMinutes: number
   ): Promise<void> {
     const lockState = await this.loadLockState();
@@ -240,8 +191,8 @@ export class PRLockManager {
       return;
     }
 
-    lockState.pr_last_updated_at = prLastUpdatedAt;
-    lockState.expires_at = this.calculateExpiresAt(prLastUpdatedAt, lockDurationMinutes);
+    lockState.pr_last_updated_at = acquiredAt;
+    lockState.expires_at = this.calculateExpiresAt(acquiredAt, lockDurationMinutes);
 
     const lockFile = '.exomind/lock-state.json';
     try {
@@ -359,8 +310,7 @@ export class PRLockManager {
     console.log(`[PRLock] Lock acquired successfully: ${lock.lock_id}`);
 
     // 7. 保存本地锁文件
-    const prLastUpdatedAt = await this.getPRLastUpdatedAt(prNumber);
-    await this.saveLockState(prNumber, lock, prLastUpdatedAt, commentId);
+    await this.saveLockState(prNumber, lock, commentId);
 
     return { success: true, lock };
   }
@@ -450,7 +400,7 @@ export class PRLockManager {
   }
 
   /**
-   * 检查 PR 是否被锁定（返回动态计算的锁状态）
+   * 检查 PR 是否被锁定（返回固定过期时间的锁状态）
    */
   async checkLock(prNumber: number): Promise<LockStatus | null> {
     // 1. 检查是否有 🔒 locked 标签
@@ -509,28 +459,25 @@ export class PRLockManager {
       return null;
     }
 
-    // 4. 获取 PR 最后更新时间
-    const prLastUpdatedAt = await this.getPRLastUpdatedAt(prNumber);
+    // 4. 计算固定过期时间（acquired_at + lock_duration）
+    const expiresAt = this.calculateExpiresAt(lockMetadata.acquired_at, lockMetadata.lock_duration_minutes);
 
-    // 5. 动态计算过期时间
-    const expiresAt = this.calculateExpiresAt(prLastUpdatedAt, lockMetadata.lock_duration_minutes);
-
-    // 6. 判断是否过期
+    // 5. 判断是否过期
     const now = new Date();
     const expiresAtDate = new Date(expiresAt);
     const isExpired = now >= expiresAtDate;
     const remainingMinutes = Math.max(0, Math.ceil((expiresAtDate.getTime() - now.getTime()) / 60000));
 
-    // 7. 如果本地有锁文件，更新本地状态
+    // 6. 如果本地有锁文件，更新本地状态
     const localLockState = await this.loadLockState();
     if (localLockState && localLockState.lock_id === lockMetadata.lock_id) {
-      await this.updateLockState(prLastUpdatedAt, lockMetadata.lock_duration_minutes);
+      await this.updateLockState(lockMetadata.acquired_at, lockMetadata.lock_duration_minutes);
     }
 
     return {
       ...lockMetadata,
       pr_number: prNumber,
-      pr_last_updated_at: prLastUpdatedAt,
+      pr_last_updated_at: lockMetadata.acquired_at,  // 使用 acquired_at 作为基准时间
       expires_at: expiresAt,
       is_expired: isExpired,
       remaining_minutes: remainingMinutes
@@ -714,6 +661,7 @@ export class PRLockManager {
    * 返回评论 ID
    */
   private async updateLockComment(prNumber: number, lock: LockMetadata): Promise<number | undefined> {
+    const expiresAt = this.calculateExpiresAt(lock.acquired_at, lock.lock_duration_minutes);
     const body =
       `<!-- LOCK_METADATA\n${JSON.stringify(lock, null, 2)}\n-->\n\n` +
       `🔒 **PR 已被锁定**\n\n` +
@@ -723,11 +671,9 @@ export class PRLockManager {
       `- 锁 ID：\`${lock.lock_id}\`\n` +
       `- 获取时间：${lock.acquired_at}\n` +
       `- 锁时长：${lock.lock_duration_minutes} 分钟\n` +
+      `- 过期时间：${expiresAt}\n` +
       (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
-      (lock.reason ? `- 原因：${lock.reason}\n` : '') +
-      `\n**过期时间动态计算：**\n` +
-      `过期时间 = PR 最后更新时间 + ${lock.lock_duration_minutes} 分钟\n` +
-      `每次提交或评论后，锁自动延期。`;
+      (lock.reason ? `- 原因：${lock.reason}\n` : '');
 
     // 总是创建新评论（不复用旧评论）
     console.log(`[PRLock] Creating new lock comment for ${lock.agent_id}`);
@@ -743,6 +689,7 @@ export class PRLockManager {
     commentId: number,
     lock: LockMetadata
   ): Promise<void> {
+    const expiresAt = this.calculateExpiresAt(lock.acquired_at, lock.lock_duration_minutes);
     const body =
       `<!-- LOCK_METADATA\n${JSON.stringify(lock, null, 2)}\n-->\n\n` +
       `🔓 **锁已释放**\n\n` +
@@ -752,17 +699,16 @@ export class PRLockManager {
       `- 锁 ID：\`${lock.lock_id}\`\n` +
       `- 获取时间：${lock.acquired_at}\n` +
       `- 锁时长：${lock.lock_duration_minutes} 分钟\n` +
+      `- 过期时间：${expiresAt}\n` +
       (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
       (lock.reason ? `- 原因：${lock.reason}\n` : '') +
-      `- 释放时间：${lock.released_at}\n` +
-      `\n**过期时间动态计算：**\n` +
-      `过期时间 = PR 最后更新时间 + ${lock.lock_duration_minutes} 分钟\n` +
-      `每次提交或评论后，锁自动延期。`;
+      `- 释放时间：${lock.released_at}\n`;
 
     await this.updateComment(prNumber, commentId, body);
   }
 
   private async createLockComment(prNumber: number, lock: LockMetadata): Promise<void> {
+    const expiresAt = this.calculateExpiresAt(lock.acquired_at, lock.lock_duration_minutes);
     const body =
       `<!-- LOCK_METADATA\n${JSON.stringify(lock, null, 2)}\n-->\n\n` +
       `🔒 **PR 已被锁定**\n\n` +
@@ -771,11 +717,9 @@ export class PRLockManager {
       `- 锁 ID：\`${lock.lock_id}\`\n` +
       `- 获取时间：${lock.acquired_at}\n` +
       `- 锁时长：${lock.lock_duration_minutes} 分钟\n` +
+      `- 过期时间：${expiresAt}\n` +
       (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
-      (lock.reason ? `- 原因：${lock.reason}\n` : '') +
-      `\n**过期时间动态计算：**\n` +
-      `过期时间 = PR 最后更新时间 + ${lock.lock_duration_minutes} 分钟\n` +
-      `每次提交或评论后，锁自动延期。`;
+      (lock.reason ? `- 原因：${lock.reason}\n` : '');
 
     await this.createComment(prNumber, body);
   }
