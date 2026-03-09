@@ -951,7 +951,6 @@ Usage:
   bun pr-lock.ts <command> [args...]
   # 如果 bun 不可用，可以使用：
   npx tsx pr-lock.ts <command> [args...]
-  node --loader ts-node/esm pr-lock.ts <command> [args...]
 
 Commands:
   acquire <pr-number> <timeout-minutes> <agent-id> [--worktree-path=<path>] [--task-id=X] [--reason="..."]
