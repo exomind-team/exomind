@@ -7,6 +7,7 @@ import {
   Filter,
   List,
   Mail,
+  Maximize2,
   MessageCircle,
   Monitor,
   Plus,
@@ -708,7 +709,7 @@ function TopologyView({
     >
       <div
         data-testid="agent-topology-canvas"
-        className="relative h-full min-h-0 w-full overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
+        className="relative h-full min-h-0 w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#1C1917]"
       >
         <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center justify-end gap-2">
           <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 p-1 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
@@ -3324,7 +3325,7 @@ export function AgentsPage() {
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
-        <div className={`flex-1 min-h-0 overflow-auto ${viewMode === 'topology' ? 'p-2 md:p-3 lg:p-4' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
+        <div className={`flex-1 min-h-0 overflow-auto ${viewMode === 'topology' ? '' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
           {content}
         </div>
 
@@ -3363,14 +3364,29 @@ export function AgentsPage() {
                 {rightPanel.state === 'AGENT_CHAT' && 'Agent 对话'}
                 {rightPanel.state === 'PTY_TERMINAL' && 'Terminal'}
               </span>
-              <button
-                type="button"
-                onClick={closeRightPanel}
-                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                aria-label="关闭"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-1">
+                {rightPanel.state === 'PTY_TERMINAL' && rightPanel.ptyId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      window.history.pushState({}, '', `/agents/pty/${rightPanel.ptyId}`);
+                      window.dispatchEvent(new PopStateEvent('popstate'));
+                    }}
+                    className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                    aria-label="全屏"
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={closeRightPanel}
+                  className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                  aria-label="关闭"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             {/* 右侧栏内容 */}
             <div className="flex-1 overflow-auto">

@@ -25,6 +25,34 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     const container = containerRef.current;
     if (!container) return;
 
+    // ── Build auth helper ────────────────────────────────────
+
+    const buildHeaders = (): Record<string, string> => {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (authToken) {
+        headers['Authorization'] = `Bearer ${authToken}`;
+      }
+      return headers;
+    };
+
+    const buildStreamUrl = (): string => {
+      const base = `${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/stream`;
+      if (authToken) {
+        return `${base}?token=${encodeURIComponent(authToken)}`;
+      }
+      return base;
+    };
+
+    const sendResize = (rows: number, cols: number) => {
+      fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize`, {
+        method: 'POST',
+        headers: buildHeaders(),
+        body: JSON.stringify({ rows, cols }),
+      }).catch(() => {
+        // Silently ignore resize failures
+      });
+    };
+
     // ── Create terminal ──────────────────────────────────────
 
     const terminal = new Terminal({
@@ -47,64 +75,13 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     terminal.loadAddon(webLinksAddon);
 
     terminal.open(container);
-    fitAddon.fit();
 
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    // ── Build auth helper ────────────────────────────────────
-
-    const buildHeaders = (): Record<string, string> => {
-      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-      if (authToken) {
-        headers['Authorization'] = `Bearer ${authToken}`;
-      }
-      return headers;
-    };
-
-    const buildStreamUrl = (): string => {
-      const base = `${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/stream`;
-      if (authToken) {
-        return `${base}?token=${encodeURIComponent(authToken)}`;
-      }
-      return base;
-    };
-
-    // ── Connect SSE output stream ────────────────────────────
-
-    const es = new EventSource(buildStreamUrl());
-    eventSourceRef.current = es;
-
-    es.addEventListener('output', (event) => {
-      try {
-        const decoded = atob(event.data);
-        // Convert binary string to Uint8Array so xterm.js decodes UTF-8 correctly.
-        // atob() returns a binary string; passing it directly to terminal.write(string)
-        // treats each char as UTF-16, corrupting multi-byte UTF-8 sequences (e.g. box-drawing chars).
-        const bytes = new Uint8Array(decoded.length);
-        for (let i = 0; i < decoded.length; i++) {
-          bytes[i] = decoded.charCodeAt(i);
-        }
-        terminal.write(bytes);
-      } catch {
-        // If base64 decode fails, write raw data
-        terminal.write(event.data);
-      }
-    });
-
-    es.addEventListener('eof', () => {
-      terminal.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
-    });
-
-    es.onerror = () => {
-      // EventSource will auto-reconnect by default
-    };
-
     // ── Handle user input → POST to backend ──────────────────
 
     const inputDisposable = terminal.onData((data) => {
-      // Encode string to UTF-8 bytes first, then to base64.
-      // btoa() only handles Latin-1; this approach correctly handles all characters.
       const encoder = new TextEncoder();
       const bytes = encoder.encode(data);
       const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
@@ -120,13 +97,7 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     // ── Handle resize → POST to backend ──────────────────────
 
     const resizeDisposable = terminal.onResize(({ rows, cols }) => {
-      fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize`, {
-        method: 'POST',
-        headers: buildHeaders(),
-        body: JSON.stringify({ rows, cols }),
-      }).catch(() => {
-        // Silently ignore resize failures
-      });
+      sendResize(rows, cols);
     });
 
     // ── ResizeObserver → refit terminal ──────────────────────
@@ -141,22 +112,53 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     resizeObserver.observe(container);
     resizeObserverRef.current = resizeObserver;
 
-    // ── Send initial resize ──────────────────────────────────
+    // ── Initial fit + resize THEN connect SSE ────────────────
+    // Critical order: fit → resize → SSE.
+    // If SSE connects before resize, the PTY uses default 80 cols
+    // but the terminal may be narrower, causing cursor drift on backspace.
 
-    // Defer to ensure terminal has computed its dimensions
+    let eventSource: EventSource | null = null;
+
+    const connectSSE = () => {
+      const es = new EventSource(buildStreamUrl());
+      eventSourceRef.current = es;
+      eventSource = es;
+
+      es.addEventListener('output', (event) => {
+        try {
+          const decoded = atob(event.data);
+          const bytes = new Uint8Array(decoded.length);
+          for (let i = 0; i < decoded.length; i++) {
+            bytes[i] = decoded.charCodeAt(i);
+          }
+          terminal.write(bytes);
+        } catch {
+          terminal.write(event.data);
+        }
+      });
+
+      es.addEventListener('eof', () => {
+        terminal.write('\r\n\x1b[90m[Process exited]\x1b[0m\r\n');
+      });
+
+      es.onerror = () => {
+        // EventSource will auto-reconnect by default
+      };
+    };
+
+    // Use rAF to ensure container has layout dimensions, then:
+    // 1. fit terminal to container
+    // 2. send resize to PTY backend
+    // 3. connect SSE only after resize is dispatched
     requestAnimationFrame(() => {
       try {
         fitAddon.fit();
       } catch {
         // Ignore
       }
-      fetch(`${rtBaseUrl}/pty/${encodeURIComponent(ptyId)}/resize`, {
-        method: 'POST',
-        headers: buildHeaders(),
-        body: JSON.stringify({ rows: terminal.rows, cols: terminal.cols }),
-      }).catch(() => {
-        // Silently ignore
-      });
+      sendResize(terminal.rows, terminal.cols);
+      // Small delay to let the resize reach the PTY before output streams in
+      setTimeout(() => connectSSE(), 50);
     });
 
     // ── Cleanup ──────────────────────────────────────────────
@@ -173,6 +175,10 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
+      }
+      if (eventSource) {
+        eventSource.close();
+        eventSource = null;
       }
 
       terminal.dispose();
