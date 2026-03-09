@@ -1,7 +1,7 @@
 use std::collections::VecDeque;
 use std::sync::{Arc, RwLock};
 
-use super::sqlite_store::SqliteSignalStore;
+use super::sqlite_store::{SignalStoreError, SqliteSignalStore};
 use super::types::DeliveryRecord;
 
 const DEFAULT_CAPACITY: usize = 1000;
@@ -31,23 +31,25 @@ impl Journal {
         }
     }
 
-    pub(crate) fn with_sqlite_store(store: Arc<SqliteSignalStore>) -> Self {
-        let initial = store
-            .load_recent_journal(DEFAULT_CAPACITY)
-            .unwrap_or_default();
+    pub(crate) fn with_sqlite_store(store: Arc<SqliteSignalStore>) -> Result<Self, SignalStoreError> {
+        let initial = store.load_recent_journal(DEFAULT_CAPACITY)?;
         let mut records = VecDeque::with_capacity(DEFAULT_CAPACITY);
         for record in initial {
             records.push_back(record);
         }
 
-        Self {
+        Ok(Self {
             records: RwLock::new(records),
             capacity: DEFAULT_CAPACITY,
             store: Some(store),
-        }
+        })
     }
 
-    pub fn append(&self, record: DeliveryRecord) {
+    pub fn append(&self, record: DeliveryRecord) -> Result<(), SignalStoreError> {
+        if let Some(store) = &self.store {
+            store.append_journal(&record)?;
+        }
+
         let mut records = match self.records.write() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
@@ -55,12 +57,8 @@ impl Journal {
         if records.len() >= self.capacity {
             records.pop_front();
         }
-        records.push_back(record.clone());
-        drop(records);
-
-        if let Some(store) = &self.store {
-            let _ = store.append_journal(&record);
-        }
+        records.push_back(record);
+        Ok(())
     }
 
     pub fn recent(&self, limit: usize) -> Vec<DeliveryRecord> {
@@ -87,14 +85,25 @@ impl Journal {
 
     pub fn all_records(&self) -> Vec<DeliveryRecord> {
         if let Some(store) = &self.store {
-            return store
-                .load_all_journal()
-                .unwrap_or_else(|_| self.recent(self.capacity));
+            return match store.load_all_journal() {
+                Ok(records) => records,
+                Err(error) => {
+                    tracing::warn!(
+                        error = %error,
+                        "signal journal reload failed, falling back to memory cache (日志重载失败，回退到内存缓存)"
+                    );
+                    self.recent(self.capacity)
+                }
+            };
         }
         self.recent(self.capacity)
     }
 
-    pub fn replace_all(&self, records: Vec<DeliveryRecord>) {
+    pub fn replace_all(&self, records: Vec<DeliveryRecord>) -> Result<(), SignalStoreError> {
+        if let Some(store) = &self.store {
+            store.replace_journal(&records)?;
+        }
+
         let mut buffer = VecDeque::with_capacity(self.capacity);
         let start = records.len().saturating_sub(self.capacity);
         for record in records.iter().skip(start) {
@@ -106,11 +115,21 @@ impl Journal {
             Err(poisoned) => poisoned.into_inner(),
         };
         *current = buffer;
-        drop(current);
+        Ok(())
+    }
 
-        if let Some(store) = &self.store {
-            let _ = store.replace_journal(&records);
+    pub(crate) fn replace_all_in_memory(&self, records: Vec<DeliveryRecord>) {
+        let mut buffer = VecDeque::with_capacity(self.capacity);
+        let start = records.len().saturating_sub(self.capacity);
+        for record in records.iter().skip(start) {
+            buffer.push_back(record.clone());
         }
+
+        let mut current = match self.records.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        *current = buffer;
     }
 }
 
@@ -134,9 +153,9 @@ mod tests {
     #[test]
     fn append_and_recent() {
         let journal = Journal::new();
-        journal.append(make_record("evt-1"));
-        journal.append(make_record("evt-2"));
-        journal.append(make_record("evt-3"));
+        journal.append(make_record("evt-1")).unwrap();
+        journal.append(make_record("evt-2")).unwrap();
+        journal.append(make_record("evt-3")).unwrap();
 
         let recent = journal.recent(2);
         assert_eq!(recent.len(), 2);
@@ -147,7 +166,7 @@ mod tests {
     #[test]
     fn recent_returns_all_when_limit_exceeds_length() {
         let journal = Journal::new();
-        journal.append(make_record("evt-1"));
+        journal.append(make_record("evt-1")).unwrap();
 
         let recent = journal.recent(100);
         assert_eq!(recent.len(), 1);
@@ -156,10 +175,10 @@ mod tests {
     #[test]
     fn ring_buffer_evicts_oldest() {
         let journal = Journal::with_capacity(3);
-        journal.append(make_record("evt-1"));
-        journal.append(make_record("evt-2"));
-        journal.append(make_record("evt-3"));
-        journal.append(make_record("evt-4"));
+        journal.append(make_record("evt-1")).unwrap();
+        journal.append(make_record("evt-2")).unwrap();
+        journal.append(make_record("evt-3")).unwrap();
+        journal.append(make_record("evt-4")).unwrap();
 
         assert_eq!(journal.len(), 3);
         let recent = journal.recent(10);

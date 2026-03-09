@@ -34,12 +34,14 @@ fn migrates_legacy_route_json_into_sqlite() {
     )
     .expect("legacy route json should be written");
 
-    let migrated = SignalPool::with_sqlite_path(None, &sqlite_path);
+    let migrated = SignalPool::with_sqlite_path(None, &sqlite_path)
+        .expect("sqlite-backed signal pool should initialize");
     assert!(migrated.routes().get_by_id(&legacy_route_id).is_some());
     drop(migrated);
 
     std::fs::remove_file(&legacy_path).expect("legacy json should be removed after migration test");
-    let reopened = SignalPool::with_sqlite_path(None, &sqlite_path);
+    let reopened = SignalPool::with_sqlite_path(None, &sqlite_path)
+        .expect("sqlite-backed signal pool should reopen");
     let routes = reopened.routes().get_all();
     assert_eq!(
         routes

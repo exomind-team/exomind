@@ -639,7 +639,18 @@ impl AppState {
         let default_routes_path =
             resolve_default_signal_routes_path().map(|path| path.to_string_lossy().to_string());
         let signal_pool = Arc::new(match signal_storage_path {
-            Some(path) => SignalPool::with_sqlite_path(default_routes_path.as_deref(), &path),
+            Some(path) => match SignalPool::with_sqlite_path(default_routes_path.as_deref(), &path)
+            {
+                Ok(pool) => pool,
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "signal sqlite init failed, falling back to in-memory pool (Signal SQLite 初始化失败，降级到内存池)"
+                    );
+                    SignalPool::new(default_routes_path.as_deref())
+                }
+            },
             None => SignalPool::new(default_routes_path.as_deref()),
         });
         let mesh = Arc::new(MeshState::new(
@@ -959,6 +970,52 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("*")
         );
+    }
+
+    #[test]
+    fn new_runtime_falls_back_when_signal_sqlite_init_fails() {
+        let dir = std::env::temp_dir().join(format!(
+            "exomind-runtime-invalid-sqlite-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let blocked_parent = dir.join("not-a-directory");
+        std::fs::write(&blocked_parent, "file blocks sqlite parent").unwrap();
+        let invalid_sqlite_path = blocked_parent.join("signal-pool.sqlite");
+
+        let runtime = std::panic::catch_unwind(|| {
+            AppState::new_runtime(
+                0,
+                "host-invalid-sqlite".to_string(),
+                None,
+                Some(invalid_sqlite_path.clone()),
+                false,
+                None,
+            )
+        })
+        .expect("runtime should degrade instead of panicking when sqlite init fails");
+
+        let initial_route_count = runtime.signal_pool.routes().get_all().len();
+        let now = chrono::Utc::now().to_rfc3339();
+        let route_id = uuid::Uuid::new_v4().to_string();
+        runtime.signal_pool.routes().add(crate::signal::SignalRoute {
+            id: route_id.clone(),
+            enabled: true,
+            topic: "runtime.fallback.topic".to_string(),
+            target_type: crate::signal::TargetType::Agent,
+            target_ref: "fallback-agent".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        }).unwrap();
+
+        assert_eq!(
+            runtime.signal_pool.routes().get_all().len(),
+            initial_route_count + 1
+        );
+        assert!(runtime.signal_pool.routes().get_by_id(&route_id).is_some());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[tokio::test]

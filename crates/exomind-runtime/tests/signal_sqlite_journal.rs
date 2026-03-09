@@ -41,9 +41,11 @@ fn persists_delivery_records_in_sqlite_after_publish() {
     let dir = temp_signal_dir("signal-sqlite-journal");
     let sqlite_path = dir.join("signal-pool.sqlite");
 
-    let pool = SignalPool::with_sqlite_path(None, &sqlite_path);
+    let pool = SignalPool::with_sqlite_path(None, &sqlite_path)
+        .expect("sqlite-backed signal pool should initialize");
     pool.routes()
-        .add(make_route("user.input.text", "classifier"));
+        .add(make_route("user.input.text", "classifier"))
+        .expect("route should persist");
     let _rx = pool.subscribe();
 
     let event = make_event("user.input.text");
@@ -53,7 +55,8 @@ fn persists_delivery_records_in_sqlite_after_publish() {
     assert_eq!(records[0].status, DeliveryStatus::Sent);
     drop(pool);
 
-    let reopened = SignalPool::with_sqlite_path(None, &sqlite_path);
+    let reopened = SignalPool::with_sqlite_path(None, &sqlite_path)
+        .expect("sqlite-backed signal pool should reopen");
     let journal = reopened.journal().recent(10);
     assert_eq!(journal.len(), 1);
     assert_eq!(journal[0].event_id, event_id);
@@ -67,10 +70,12 @@ fn persists_delivery_records_in_sqlite_after_publish() {
 fn exports_and_imports_signal_pool_snapshot() {
     let source_dir = temp_signal_dir("signal-sqlite-export-source");
     let source_sqlite = source_dir.join("signal-pool.sqlite");
-    let source_pool = SignalPool::with_sqlite_path(None, &source_sqlite);
+    let source_pool = SignalPool::with_sqlite_path(None, &source_sqlite)
+        .expect("source sqlite-backed signal pool should initialize");
     source_pool
         .routes()
-        .add(make_route("knowledge.item.captured", "journal-agent"));
+        .add(make_route("knowledge.item.captured", "journal-agent"))
+        .expect("source route should persist");
     let _rx = source_pool.subscribe();
     source_pool.publish(make_event("knowledge.item.captured"));
 
@@ -83,13 +88,15 @@ fn exports_and_imports_signal_pool_snapshot() {
 
     let target_dir = temp_signal_dir("signal-sqlite-export-target");
     let target_sqlite = target_dir.join("signal-pool.sqlite");
-    let target_pool = SignalPool::with_sqlite_path(None, &target_sqlite);
+    let target_pool = SignalPool::with_sqlite_path(None, &target_sqlite)
+        .expect("target sqlite-backed signal pool should initialize");
     target_pool
         .import_snapshot(round_tripped)
         .expect("sqlite-backed pool should import a snapshot");
     drop(target_pool);
 
-    let reopened = SignalPool::with_sqlite_path(None, &target_sqlite);
+    let reopened = SignalPool::with_sqlite_path(None, &target_sqlite)
+        .expect("target sqlite-backed signal pool should reopen");
     assert_eq!(reopened.routes().get_all().len(), 1);
     assert_eq!(reopened.journal().recent(10).len(), 1);
     drop(reopened);

@@ -28,13 +28,15 @@ fn persists_user_routes_in_sqlite_after_restart() {
     let dir = temp_signal_dir("signal-sqlite-routes");
     let sqlite_path = dir.join("signal-pool.sqlite");
 
-    let pool = SignalPool::with_sqlite_path(None, &sqlite_path);
+    let pool = SignalPool::with_sqlite_path(None, &sqlite_path)
+        .expect("sqlite-backed signal pool should initialize");
     let route = make_route("user.input.text", "classifier");
     let route_id = route.id.clone();
-    pool.routes().add(route);
+    pool.routes().add(route).expect("route should persist");
     drop(pool);
 
-    let reopened = SignalPool::with_sqlite_path(None, &sqlite_path);
+    let reopened = SignalPool::with_sqlite_path(None, &sqlite_path)
+        .expect("sqlite-backed signal pool should reopen");
     let persisted = reopened
         .routes()
         .get_by_id(&route_id)

@@ -60,25 +60,25 @@ impl SignalPool {
         }
     }
 
-    pub fn with_sqlite_path(config_path: Option<&str>, sqlite_path: &Path) -> Self {
+    pub fn with_sqlite_path(
+        config_path: Option<&str>,
+        sqlite_path: &Path,
+    ) -> Result<Self, SignalStoreError> {
         let default_path = config_path.map(std::path::PathBuf::from);
         let default_ref = default_path
             .as_ref()
             .filter(|path| path.exists())
             .map(|path| path.as_path());
 
-        let store = Arc::new(
-            SqliteSignalStore::open(sqlite_path)
-                .unwrap_or_else(|error| panic!("signal sqlite store should initialize: {error}")),
-        );
+        let store = Arc::new(SqliteSignalStore::open(sqlite_path)?);
 
-        Self {
+        Ok(Self {
             bus: SignalBus::new(),
-            route_table: RouteTable::with_sqlite_store(default_ref, Arc::clone(&store)),
-            journal: Journal::with_sqlite_store(Arc::clone(&store)),
+            route_table: RouteTable::with_sqlite_store(default_ref, Arc::clone(&store))?,
+            journal: Journal::with_sqlite_store(Arc::clone(&store))?,
             window: WindowCache::new(),
             store: Some(store),
-        }
+        })
     }
 
     pub fn publish(&self, event: SignalEvent) -> Vec<DeliveryRecord> {
@@ -114,8 +114,15 @@ impl SignalPool {
     }
 
     pub fn import_snapshot(&self, snapshot: SignalPoolSnapshot) -> Result<(), SignalStoreError> {
-        self.route_table.replace_all(snapshot.routes);
-        self.journal.replace_all(snapshot.journal);
+        if let Some(store) = &self.store {
+            store.import_snapshot(&snapshot)?;
+            self.route_table.replace_all_in_memory(snapshot.routes);
+            self.journal.replace_all_in_memory(snapshot.journal);
+            return Ok(());
+        }
+
+        self.route_table.replace_all(snapshot.routes)?;
+        self.journal.replace_all(snapshot.journal)?;
         Ok(())
     }
 }
@@ -162,7 +169,8 @@ mod tests {
             target_ref: "echo".to_string(),
             created_at: now.clone(),
             updated_at: now,
-        });
+        })
+        .unwrap();
 
         let _rx = pool.subscribe();
         let event = make_event("test.topic");

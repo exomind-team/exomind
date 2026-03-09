@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, RwLock};
 
-use super::sqlite_store::SqliteSignalStore;
+use super::sqlite_store::{SignalStoreError, SqliteSignalStore};
 use super::types::{SignalRoute, TargetType};
 
 enum RoutePersistBackend {
@@ -37,30 +37,32 @@ impl RouteTable {
     pub(crate) fn with_sqlite_store(
         default_path: Option<&Path>,
         store: Arc<SqliteSignalStore>,
-    ) -> Self {
+    ) -> Result<Self, SignalStoreError> {
         let legacy_path = store.path().with_file_name("routes.json");
-        let _ = store.import_legacy_routes_if_needed(&legacy_path);
-        let persisted_routes = store.load_routes().unwrap_or_default();
+        store.import_legacy_routes_if_needed(&legacy_path)?;
+        let persisted_routes = store.load_routes()?;
         let all_routes = if persisted_routes.is_empty() {
             load_default_routes(default_path)
         } else {
             persisted_routes
         };
 
-        Self {
+        Ok(Self {
             routes: RwLock::new(build_route_map(all_routes)),
             persist_backend: RoutePersistBackend::Sqlite(store),
-        }
+        })
     }
 
-    pub fn add(&self, route: SignalRoute) {
-        let topic = route.topic.clone();
+    pub fn add(&self, route: SignalRoute) -> Result<(), SignalStoreError> {
         let mut map = match self.routes.write() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
-        map.entry(topic).or_default().push(route);
-        self.persist_locked(&map);
+        let mut next = map.clone();
+        next.entry(route.topic.clone()).or_default().push(route);
+        self.persist_locked(&next)?;
+        *map = next;
+        Ok(())
     }
 
     pub fn get_all(&self) -> Vec<SignalRoute> {
@@ -79,17 +81,22 @@ impl RouteTable {
         map.values().flatten().find(|route| route.id == id).cloned()
     }
 
-    pub fn update(&self, id: &str, mut updater: impl FnMut(&mut SignalRoute)) -> bool {
+    pub fn update(
+        &self,
+        id: &str,
+        mut updater: impl FnMut(&mut SignalRoute),
+    ) -> Result<bool, SignalStoreError> {
         let mut map = match self.routes.write() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+        let mut next = map.clone();
 
         let mut found = false;
         let mut old_topic: Option<String> = None;
         let mut updated_route: Option<SignalRoute> = None;
 
-        for (topic, routes) in map.iter_mut() {
+        for (topic, routes) in next.iter_mut() {
             if let Some(route) = routes.iter_mut().find(|route| route.id == id) {
                 old_topic = Some(topic.clone());
                 updater(route);
@@ -103,32 +110,34 @@ impl RouteTable {
         if let (Some(old), Some(route)) = (&old_topic, &updated_route)
             && *old != route.topic
         {
-            if let Some(routes) = map.get_mut(old.as_str()) {
+            if let Some(routes) = next.get_mut(old.as_str()) {
                 routes.retain(|candidate| candidate.id != id);
                 if routes.is_empty() {
-                    map.remove(old.as_str());
+                    next.remove(old.as_str());
                 }
             }
-            map.entry(route.topic.clone())
+            next.entry(route.topic.clone())
                 .or_default()
                 .push(route.clone());
         }
 
         if found {
-            self.persist_locked(&map);
+            self.persist_locked(&next)?;
+            *map = next;
         }
-        found
+        Ok(found)
     }
 
-    pub fn delete(&self, id: &str) -> bool {
+    pub fn delete(&self, id: &str) -> Result<bool, SignalStoreError> {
         let mut map = match self.routes.write() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
+        let mut next = map.clone();
 
         let mut found = false;
         let mut empty_topics = Vec::new();
-        for (topic, routes) in map.iter_mut() {
+        for (topic, routes) in next.iter_mut() {
             let before = routes.len();
             routes.retain(|route| route.id != id);
             if routes.len() < before {
@@ -140,13 +149,14 @@ impl RouteTable {
         }
 
         for topic in empty_topics {
-            map.remove(&topic);
+            next.remove(&topic);
         }
 
         if found {
-            self.persist_locked(&map);
+            self.persist_locked(&next)?;
+            *map = next;
         }
-        found
+        Ok(found)
     }
 
     pub fn match_routes(&self, topic: &str) -> Vec<SignalRoute> {
@@ -177,27 +187,38 @@ impl RouteTable {
         result
     }
 
-    pub fn replace_all(&self, routes: Vec<SignalRoute>) {
+    pub fn replace_all(&self, routes: Vec<SignalRoute>) -> Result<(), SignalStoreError> {
+        let mut map = match self.routes.write() {
+            Ok(guard) => guard,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let next = build_route_map(routes);
+        self.persist_locked(&next)?;
+        *map = next;
+        Ok(())
+    }
+
+    pub(crate) fn replace_all_in_memory(&self, routes: Vec<SignalRoute>) {
         let mut map = match self.routes.write() {
             Ok(guard) => guard,
             Err(poisoned) => poisoned.into_inner(),
         };
         *map = build_route_map(routes);
-        self.persist_locked(&map);
     }
 
-    fn persist_locked(&self, map: &HashMap<String, Vec<SignalRoute>>) {
+    fn persist_locked(
+        &self,
+        map: &HashMap<String, Vec<SignalRoute>>,
+    ) -> Result<(), SignalStoreError> {
         let all_routes: Vec<SignalRoute> = map.values().flatten().cloned().collect();
         match &self.persist_backend {
-            RoutePersistBackend::None => {}
+            RoutePersistBackend::None => Ok(()),
             RoutePersistBackend::Json(path) => {
-                if let Ok(json) = serde_json::to_string_pretty(&all_routes) {
-                    let _ = std::fs::write(path, json);
-                }
+                let json = serde_json::to_string_pretty(&all_routes)?;
+                std::fs::write(path, json)?;
+                Ok(())
             }
-            RoutePersistBackend::Sqlite(store) => {
-                let _ = store.replace_routes(&all_routes);
-            }
+            RoutePersistBackend::Sqlite(store) => store.replace_routes(&all_routes),
         }
     }
 }
@@ -270,8 +291,10 @@ mod tests {
     #[test]
     fn add_and_get_all() {
         let table = RouteTable::new(None, None);
-        table.add(make_route("user.input.text", "classifier"));
-        table.add(make_route("session.end", "reviewer"));
+        table
+            .add(make_route("user.input.text", "classifier"))
+            .unwrap();
+        table.add(make_route("session.end", "reviewer")).unwrap();
         assert_eq!(table.get_all().len(), 2);
     }
 
@@ -280,7 +303,7 @@ mod tests {
         let table = RouteTable::new(None, None);
         let route = make_route("test.topic", "target-a");
         let id = route.id.clone();
-        table.add(route);
+        table.add(route).unwrap();
 
         let found = table.get_by_id(&id);
         assert!(found.is_some());
@@ -298,9 +321,9 @@ mod tests {
         let table = RouteTable::new(None, None);
         let route = make_route("topic", "target");
         let id = route.id.clone();
-        table.add(route);
+        table.add(route).unwrap();
 
-        assert!(table.delete(&id));
+        assert!(table.delete(&id).unwrap());
         assert!(table.get_by_id(&id).is_none());
         assert_eq!(table.get_all().len(), 0);
     }
@@ -308,7 +331,7 @@ mod tests {
     #[test]
     fn delete_returns_false_for_missing() {
         let table = RouteTable::new(None, None);
-        assert!(!table.delete("nonexistent"));
+        assert!(!table.delete("nonexistent").unwrap());
     }
 
     #[test]
@@ -316,26 +339,28 @@ mod tests {
         let table = RouteTable::new(None, None);
         let route = make_route("topic", "old-target");
         let id = route.id.clone();
-        table.add(route);
+        table.add(route).unwrap();
 
         let updated = table.update(&id, |route| {
             route.target_ref = "new-target".to_string();
         });
-        assert!(updated);
+        assert!(updated.unwrap());
         assert_eq!(table.get_by_id(&id).unwrap().target_ref, "new-target");
     }
 
     #[test]
     fn update_returns_false_for_missing() {
         let table = RouteTable::new(None, None);
-        assert!(!table.update("nonexistent", |_| {}));
+        assert!(!table.update("nonexistent", |_| {}).unwrap());
     }
 
     #[test]
     fn match_routes_exact_and_wildcard() {
         let table = RouteTable::new(None, None);
-        table.add(make_route("user.input.text", "classifier"));
-        table.add(make_route("*", "ui"));
+        table
+            .add(make_route("user.input.text", "classifier"))
+            .unwrap();
+        table.add(make_route("*", "ui")).unwrap();
 
         let matched = table.match_routes("user.input.text");
         assert_eq!(matched.len(), 2);
@@ -351,7 +376,7 @@ mod tests {
     #[test]
     fn match_routes_wildcard_topic_does_not_double_match() {
         let table = RouteTable::new(None, None);
-        table.add(make_route("*", "ui"));
+        table.add(make_route("*", "ui")).unwrap();
 
         let matched = table.match_routes("*");
         assert_eq!(matched.len(), 1);
@@ -362,7 +387,7 @@ mod tests {
         let table = RouteTable::new(None, None);
         let mut route = make_route("topic", "target");
         route.enabled = false;
-        table.add(route);
+        table.add(route).unwrap();
 
         let matched = table.match_routes("topic");
         assert_eq!(matched.len(), 0);
@@ -397,7 +422,7 @@ mod tests {
         let table = RouteTable::new(None, Some(persist_path.clone()));
         let route = make_route("test", "target-persist");
         let id = route.id.clone();
-        table.add(route);
+        table.add(route).unwrap();
 
         let table2 = RouteTable::new(None, Some(persist_path));
         let reloaded = table2.get_by_id(&id);

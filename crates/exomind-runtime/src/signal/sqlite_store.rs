@@ -1,7 +1,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{Connection, OptionalExtension, Transaction, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -84,23 +84,7 @@ impl SqliteSignalStore {
             Err(poisoned) => poisoned.into_inner(),
         };
         let tx = connection.transaction()?;
-        tx.execute("DELETE FROM signal_routes", [])?;
-        for route in routes {
-            tx.execute(
-                "INSERT INTO signal_routes
-                 (id, enabled, topic, target_type, target_ref, created_at, updated_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    route.id,
-                    if route.enabled { 1 } else { 0 },
-                    route.topic,
-                    target_type_to_db(&route.target_type),
-                    route.target_ref,
-                    route.created_at,
-                    route.updated_at,
-                ],
-            )?;
-        }
+        replace_routes_in_tx(&tx, routes)?;
         tx.commit()?;
         Ok(())
     }
@@ -206,23 +190,7 @@ impl SqliteSignalStore {
             Err(poisoned) => poisoned.into_inner(),
         };
         let tx = connection.transaction()?;
-        tx.execute("DELETE FROM signal_journal", [])?;
-        for record in records {
-            tx.execute(
-                "INSERT INTO signal_journal
-                 (event_id, route_id, target_ref, status, reason, started_at, finished_at)
-                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
-                params![
-                    record.event_id,
-                    record.route_id,
-                    record.target_ref,
-                    delivery_status_to_db(&record.status),
-                    record.reason,
-                    record.started_at,
-                    record.finished_at,
-                ],
-            )?;
-        }
+        replace_journal_in_tx(&tx, records)?;
         tx.commit()?;
         Ok(())
     }
@@ -235,8 +203,14 @@ impl SqliteSignalStore {
     }
 
     pub fn import_snapshot(&self, snapshot: &SignalPoolSnapshot) -> Result<(), SignalStoreError> {
-        self.replace_routes(&snapshot.routes)?;
-        self.replace_journal(&snapshot.journal)?;
+        let mut connection = match self.connection.lock() {
+            Ok(lock) => lock,
+            Err(poisoned) => poisoned.into_inner(),
+        };
+        let tx = connection.transaction()?;
+        replace_routes_in_tx(&tx, &snapshot.routes)?;
+        replace_journal_in_tx(&tx, &snapshot.journal)?;
+        tx.commit()?;
         Ok(())
     }
 
@@ -368,4 +342,52 @@ fn map_target_type_error(error: SignalStoreError) -> rusqlite::Error {
 
 fn map_delivery_status_error(error: SignalStoreError) -> rusqlite::Error {
     rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
+}
+
+fn replace_routes_in_tx(
+    tx: &Transaction<'_>,
+    routes: &[SignalRoute],
+) -> Result<(), rusqlite::Error> {
+    tx.execute("DELETE FROM signal_routes", [])?;
+    for route in routes {
+        tx.execute(
+            "INSERT INTO signal_routes
+             (id, enabled, topic, target_type, target_ref, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                route.id,
+                if route.enabled { 1 } else { 0 },
+                route.topic,
+                target_type_to_db(&route.target_type),
+                route.target_ref,
+                route.created_at,
+                route.updated_at,
+            ],
+        )?;
+    }
+    Ok(())
+}
+
+fn replace_journal_in_tx(
+    tx: &Transaction<'_>,
+    records: &[DeliveryRecord],
+) -> Result<(), rusqlite::Error> {
+    tx.execute("DELETE FROM signal_journal", [])?;
+    for record in records {
+        tx.execute(
+            "INSERT INTO signal_journal
+             (event_id, route_id, target_ref, status, reason, started_at, finished_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                record.event_id,
+                record.route_id,
+                record.target_ref,
+                delivery_status_to_db(&record.status),
+                record.reason,
+                record.started_at,
+                record.finished_at,
+            ],
+        )?;
+    }
+    Ok(())
 }
