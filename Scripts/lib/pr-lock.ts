@@ -16,7 +16,7 @@
 import { execSync } from 'child_process';
 
 // ========== 常量定义 ==========
-const LOCK_LABEL = '🔒 locked';
+const LOCK_LABEL = '🔒locked';
 const LOCK_METADATA_MARKER = '<!-- LOCK_METADATA';
 
 interface LockMetadata {
