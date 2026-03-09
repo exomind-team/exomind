@@ -33,15 +33,12 @@ describe('PR Lock - 降级路径测试', () => {
 
   describe('场景 2: Local state mismatch（本地状态不匹配）', () => {
     test('本地状态 pr_number 不匹配时，应按 lock_id 查找并更新原始评论', async () => {
-      // RED: 这个测试应该失败
-
       // 1. Agent A 获取锁
       const result = await agentA.acquire(1, 5);
       expect(result.success).toBe(true);
 
-      // 2. 模拟本地状态损坏（pr_number 错误）
-      // TODO: 需要添加测试辅助方法
-      // await agentA.corruptLocalState({ pr_number: 999 });
+      // 2. 篡改本地状态（pr_number 错误）
+      await agentA.corruptLocalState({ pr_number: 999 });
 
       // 3. Agent A 释放锁
       const releaseResult = await agentA.release(1);
@@ -59,16 +56,13 @@ describe('PR Lock - 降级路径测试', () => {
     });
 
     test('本地状态 lock_id 不匹配时，应按 lock_id 查找并更新原始评论', async () => {
-      // RED: 这个测试应该失败
-
       // 1. Agent A 获取锁
       const result = await agentA.acquire(1, 5);
       expect(result.success).toBe(true);
       const originalLockId = result.lock!.lock_id;
 
-      // 2. 模拟本地状态损坏（lock_id 错误）
-      // TODO: 需要添加测试辅助方法
-      // await agentA.corruptLocalState({ lock_id: 'wrong-lock-id' });
+      // 2. 篡改本地状态（lock_id 错误）
+      await agentA.corruptLocalState({ lock_id: 'wrong-lock-id' });
 
       // 3. Agent A 释放锁
       const releaseResult = await agentA.release(1);
@@ -93,16 +87,13 @@ describe('PR Lock - 降级路径测试', () => {
 
   describe('场景 3: Local state missing（本地状态丢失）', () => {
     test('本地状态丢失时，应按 lock_id 查找并更新原始评论', async () => {
-      // RED: 这个测试应该失败
-
       // 1. Agent A 获取锁
       const result = await agentA.acquire(1, 5);
       expect(result.success).toBe(true);
       const lockId = result.lock!.lock_id;
 
-      // 2. 模拟本地状态丢失
-      // TODO: 需要添加测试辅助方法
-      // await agentA.deleteLocalState();
+      // 2. 删除本地状态
+      await agentA.deleteLocalState();
 
       // 3. Agent A 释放锁
       const releaseResult = await agentA.release(1);

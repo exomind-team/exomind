@@ -745,6 +745,41 @@ export class PRLockManager {
   private sleep(ms: number): Promise<void> {
     return new Promise(resolve => setTimeout(resolve, ms));
   }
+
+  // ========== 测试辅助方法 ==========
+
+  /**
+   * 测试辅助：篡改本地状态
+   * 用于测试降级路径
+   */
+  async corruptLocalState(corruption: Partial<LockState>): Promise<void> {
+    const lockFile = '.exomind/lock-state.json';
+    try {
+      const fs = await import('fs');
+      const content = fs.readFileSync(lockFile, 'utf-8');
+      const state: LockState = JSON.parse(content);
+      const corruptedState = { ...state, ...corruption };
+      fs.writeFileSync(lockFile, JSON.stringify(corruptedState, null, 2), 'utf-8');
+      console.log('[PRLock] Local state corrupted for testing');
+    } catch (e) {
+      console.warn('[PRLock] Failed to corrupt local state:', e);
+    }
+  }
+
+  /**
+   * 测试辅助：删除本地状态
+   * 用于测试降级路径
+   */
+  async deleteLocalState(): Promise<void> {
+    const lockFile = '.exomind/lock-state.json';
+    try {
+      const fs = await import('fs');
+      fs.unlinkSync(lockFile);
+      console.log('[PRLock] Local state deleted for testing');
+    } catch (e) {
+      console.warn('[PRLock] Failed to delete local state:', e);
+    }
+  }
 }
 
 // ========== CLI 工具 ==========
