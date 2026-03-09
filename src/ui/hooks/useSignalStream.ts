@@ -8,19 +8,30 @@
  */
 
 import { useEffect, useRef, useState } from 'react';
+import { isTauri } from '@tauri-apps/api/core';
 import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import {
   startSignalHandlers,
+  type EventLogReplicationAppendedPayload,
   type ReviewCompletedPayload,
 } from '@/lib/services/signal-handlers';
-import { getEventStorage } from '@/lib/storage/event-storage';
 import { getEventSourceMetadata } from '@/lib/eventlog/source-metadata';
 import { createUuidV4 } from '@/lib/utils/uuid';
 import {
+  appendEventWithEcsReplication,
+  projectEventLogReplicationAppend,
+} from '@/lib/services/ecs-eventlog-replication.service';
+import type { ActiveBlockReplicationSnapshotPayload } from '@/lib/services/ecs-active-block-replication.service';
+import { projectActiveBlockReplicationSnapshot as projectActiveBlockSnapshot } from '@/lib/services/ecs-active-block-replication.service';
+import {
   getSelectedRuntimeTarget,
+  persistEmbeddedRuntimeStatus,
   subscribeRuntimeTargetChanges,
   type RuntimeTarget,
 } from '@/config/runtime-target';
+import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+
+const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
 
 function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
   const isTimeblock = payload.review_type === 'timeblock';
@@ -52,6 +63,62 @@ function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
 export function useSignalStream(): void {
   const serviceRef = useRef<SignalStreamService | null>(null);
   const [runtimeTarget, setRuntimeTarget] = useState<RuntimeTarget>(() => getSelectedRuntimeTarget());
+  const [runtimeTargetHydrated, setRuntimeTargetHydrated] = useState(false);
+
+  useEffect(() => {
+    let cancelled = false;
+    let loggedHydrationError = false;
+
+    const hydrateEmbeddedRuntimeStatus = async () => {
+      if (!(await isTauri()) || runtimeTarget.mode !== 'embedded') {
+        if (!cancelled) {
+          setRuntimeTargetHydrated(true);
+        }
+        return;
+      }
+
+      try {
+        if (!cancelled) {
+          setRuntimeTargetHydrated(false);
+        }
+
+        while (!cancelled) {
+          try {
+            const status = await getRuntimeControlService().getStatus();
+            if (status.running) {
+              persistEmbeddedRuntimeStatus({
+                host: status.host,
+                port: status.port,
+                hostId: status.hostId,
+                authSecret: status.authSecret,
+              });
+              if (!cancelled) {
+                setRuntimeTargetHydrated(true);
+              }
+              return;
+            }
+          } catch (error) {
+            if (!loggedHydrationError) {
+              console.warn('[SignalStream] failed to hydrate embedded runtime status:', error);
+              loggedHydrationError = true;
+            }
+          }
+
+          await new Promise((resolve) => window.setTimeout(resolve, EMBEDDED_RUNTIME_STATUS_RETRY_MS));
+        }
+      } finally {
+        if (!cancelled && runtimeTarget.mode !== 'embedded') {
+          setRuntimeTargetHydrated(true);
+        }
+      }
+    };
+
+    void hydrateEmbeddedRuntimeStatus();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [runtimeTarget.mode]);
 
   useEffect(() => {
     const unsubscribe = subscribeRuntimeTargetChanges((nextTarget) => {
@@ -73,6 +140,10 @@ export function useSignalStream(): void {
   }, []);
 
   useEffect(() => {
+    if (!runtimeTargetHydrated) {
+      return;
+    }
+
     const targetLabel = `${runtimeTarget.mode}:${runtimeTarget.host}:${runtimeTarget.port}`;
     const service = new SignalStreamService({
       host: {
@@ -89,10 +160,19 @@ export function useSignalStream(): void {
     });
 
     const handler = startSignalHandlers({
+      onEventLogReplicationAppended: async (payload: EventLogReplicationAppendedPayload) => {
+        const result = await projectEventLogReplicationAppend(payload);
+        if (result === 'inserted') {
+          console.log('[SignalStream] eventlog.replication.appended → EventStorage');
+        }
+      },
+      onActiveBlockReplicationSnapshot: async (payload: ActiveBlockReplicationSnapshotPayload) => {
+        await projectActiveBlockSnapshot(payload);
+        console.log('[SignalStream] active_block.replication.snapshot → ActiveBlockStorage');
+      },
       onReviewCompleted: async (payload) => {
         const content = formatReviewAsMarkdown(payload);
-        const storage = getEventStorage();
-        await storage.addEvent({
+        await appendEventWithEcsReplication({
           id: createUuidV4(),
           content,
           createdAt: new Date().toISOString(),
@@ -120,5 +200,5 @@ export function useSignalStream(): void {
       serviceRef.current = null;
       console.log(`[SignalStream] SSE connection stopped (${targetLabel})`);
     };
-  }, [runtimeTarget]);
+  }, [runtimeTarget, runtimeTargetHydrated]);
 }

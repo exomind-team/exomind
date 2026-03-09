@@ -1,4 +1,4 @@
-﻿import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
+import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -10,6 +10,7 @@ import { getCommandRegistryService } from '@/lib/services/command-registry.servi
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
+import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
 import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
@@ -32,6 +33,11 @@ const LegalSupportPage = lazy(async () => {
 const TasksPage = lazy(async () => {
   const module = await import('@/ui/app/pages/TasksPage');
   return { default: module.TasksPage };
+});
+
+const TaskDagPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskDagPage');
+  return { default: module.TaskDagPage };
 });
 
 const RemindersPage = lazy(async () => {
@@ -62,6 +68,11 @@ const SyncTestPage = lazy(async () => {
 const MOSSASRTestPage = lazy(async () => {
   const module = await import('@/pages/MOSSASRTestPage');
   return { default: module.MOSSASRTestPage };
+});
+
+const VolcanoASRTestPage = lazy(async () => {
+  const module = await import('@/pages/VolcanoASRTestPage');
+  return { default: module.VolcanoASRTestPage };
 });
 
 const AgentsPage = lazy(async () => {
@@ -145,6 +156,12 @@ type ShellNavItem = {
   icon: LucideIcon;
 };
 
+function isMobileFullscreenRoute(pathname: string): boolean {
+  return pathname.startsWith('/agents/chat/')
+    || pathname.startsWith('/agents/agent/')
+    || pathname.startsWith('/agents/actor/');
+}
+
 function MobileShell({
   locationPath,
   navItems,
@@ -159,6 +176,7 @@ function MobileShell({
   commandContext?: CommandContext;
 }) {
   const previewFrame = desktopFrame && resolveRuntimePlatform() !== 'tauri';
+  const fullscreenRoute = isMobileFullscreenRoute(locationPath);
 
   return (
     <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', previewFrame && 'p-6')}>
@@ -168,7 +186,17 @@ function MobileShell({
           previewFrame && 'mx-auto max-w-[393px] h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
         )}
       >
-        <main className={cn("absolute inset-x-0 bottom-[calc(env(safe-area-inset-bottom,0px)+60px)] overflow-y-auto", previewFrame ? "top-0" : "top-[env(safe-area-inset-top,0px)]")}>
+        <main
+          className={cn(
+            'absolute inset-x-0 overflow-y-auto',
+            fullscreenRoute
+              ? (previewFrame ? 'top-0 bottom-0' : 'top-[env(safe-area-inset-top,0px)] bottom-0')
+              : cn(
+                'bottom-[calc(env(safe-area-inset-bottom,0px)+60px)]',
+                previewFrame ? 'top-0' : 'top-[env(safe-area-inset-top,0px)]',
+              ),
+          )}
+        >
           <Outlet />
         </main>
 
@@ -176,44 +204,52 @@ function MobileShell({
           <CommandPalette context={commandContext} />
         ) : null}
 
-        <nav
-          data-testid="mobile-bottom-tab"
-          className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur"
-        >
-          <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
-            {navItems.map((item) => {
-              const Icon = item.icon;
-              const active = locationPath === item.path
-                || (item.path === '/eventlog' && locationPath === '/')
-                || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
-                || (item.path === '/me' && locationPath.startsWith('/me'))
-                || (item.path === '/settings' && locationPath.startsWith('/settings'));
-              return (
-                <Link
-                  key={item.path}
-                  to={item.path}
-                  className={cn(
-                    'flex flex-1 min-w-0 flex-col items-center gap-1 rounded-xl py-1 text-[11px] transition-colors',
-                    active ? 'text-[#C75B3A] dark:text-[#E8734E] font-semibold' : 'text-stone-400 dark:text-[#57534E]'
-                  )}
-                >
-                  <Icon size={20} />
-                  <span>{item.title}</span>
-                </Link>
-              );
-            })}
-          </div>
-        </nav>
+        {!fullscreenRoute ? (
+          <nav
+            data-testid="mobile-bottom-tab"
+            className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur"
+          >
+            <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const active = locationPath === item.path
+                  || (item.path === '/eventlog' && locationPath === '/')
+                  || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
+                  || (item.path === '/me' && locationPath.startsWith('/me'))
+                  || (item.path === '/settings' && locationPath.startsWith('/settings'));
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={cn(
+                      'flex flex-1 min-w-0 flex-col items-center gap-1 rounded-xl py-1 text-[11px] transition-colors',
+                      active ? 'text-[#C75B3A] dark:text-[#E8734E] font-semibold' : 'text-stone-400 dark:text-[#57534E]'
+                    )}
+                  >
+                    <Icon size={20} />
+                    <span>{item.title}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        ) : null}
       </div>
     </div>
   );
 }
 
-function DesktopSidebar({ activePath }: { activePath: string }) {
+function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
-    { key: 'agents', title: '网络', path: '/agents', icon: Waypoints, match: (path: string) => path === '/agents' || path.startsWith('/agents/') },
+    ...(agentPageEnabled ? [{
+      key: 'agents',
+      title: '网络',
+      path: '/agents',
+      icon: Waypoints,
+      match: (path: string) => path === '/agents' || path.startsWith('/agents/'),
+    }] : []),
     { key: 'settings', title: '设置', path: '/settings', icon: Settings, match: (path: string) => path === '/settings' || path.startsWith('/settings/') },
   ];
 
@@ -259,25 +295,17 @@ function DesktopSidebar({ activePath }: { activePath: string }) {
       </nav>
 
       <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
-        <div className="flex items-center gap-3 rounded-md px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-full bg-[hsl(var(--sidebar-accent))] text-xs font-semibold text-[hsl(var(--sidebar-accent-foreground))]">
-            S
-          </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-medium">Starlin</p>
-            <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">starlin@exomind.ai</p>
-          </div>
-        </div>
+        <DesktopSidebarAccountEntry />
       </div>
     </aside>
   );
 }
 
-function DesktopLayout({ activePath }: { activePath: string }) {
+function DesktopLayout({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
   return (
     <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
       <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
-        <DesktopSidebar activePath={activePath} />
+        <DesktopSidebar activePath={activePath} agentPageEnabled={agentPageEnabled} />
         <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
           <Outlet />
         </main>
@@ -385,7 +413,7 @@ function NewLayout() {
   if (isDesktop && desktopAdaptiveEnabled && isDesktopAdaptiveRoute) {
     return (
       <>
-        <DesktopLayout activePath={location.pathname} />
+        <DesktopLayout activePath={location.pathname} agentPageEnabled={agentPageEnabled} />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
         <ReminderNotifier />
       </>
@@ -507,6 +535,18 @@ const newRemindersRoute = createRoute({
   },
 });
 
+const newTaskDagRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/dag',
+  component: function NewTaskDag() {
+    return (
+      <LazyPage>
+        <TaskDagPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newTaskDetailRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks/$taskId',
@@ -586,6 +626,18 @@ const newMossTestRoute = createRoute({
     return (
       <LazyPage>
         <MOSSASRTestPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newVolcanoAsrTestRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/volcano-asr-test',
+  component: function NewVolcanoAsrTest() {
+    return (
+      <LazyPage>
+        <VolcanoASRTestPage />
       </LazyPage>
     );
   },
@@ -683,6 +735,7 @@ const newRouteTree = newRootRoute.addChildren([
   newDashboardRoute,
   newEventlogRoute,
   newTasksRoute,
+  newTaskDagRoute,
   newRemindersRoute,
   newTimeblockDetailRoute,
   newTaskDetailRoute,
@@ -691,6 +744,7 @@ const newRouteTree = newRootRoute.addChildren([
   newLegalSupportRoute,
   newUserManageRoute,
   newMossTestRoute,
+  newVolcanoAsrTestRoute,
   newSyncTestRoute,
   newAgentsRoute,
   newUpdateRoute,
@@ -703,4 +757,5 @@ const newRouteTree = newRootRoute.addChildren([
 const appRouter = createRouter({ routeTree: newRouteTree });
 
 export { appRouter };
+
 

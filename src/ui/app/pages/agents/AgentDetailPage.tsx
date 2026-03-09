@@ -1,8 +1,69 @@
-import { ArrowLeft, CheckCheck, Clock3, MessageCircle, MoreHorizontal, Send, Sparkles } from 'lucide-react';
+import { ArrowLeft, CheckCheck, Clock3, Heart, MessageCircle, MoreHorizontal, Send, Sparkles } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
-import type { AgentDetailData, AgentHubListItem } from '@/lib/types/agent-hub';
+import type { AgentDetailData, AgentEnergySnapshot, AgentHubListItem } from '@/lib/types/agent-hub';
+import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+
+const PHASE_LABELS: Record<string, string> = {
+  normal: '正常',
+  slowing: '降频中',
+  critical: '能量不足',
+  dying: '濒死',
+  dormant: '休眠',
+};
+
+const PHASE_COLORS: Record<string, string> = {
+  normal: '#22C55E',
+  slowing: '#EAB308',
+  critical: '#F97316',
+  dying: '#EF4444',
+  dormant: '#6B7280',
+};
+
+function EnergyBar({ energy }: { energy: AgentEnergySnapshot }) {
+  const percent = Math.round(energy.ratio * 100);
+  const color = PHASE_COLORS[energy.phase] ?? '#6B7280';
+  const label = PHASE_LABELS[energy.phase] ?? energy.phase;
+
+  return (
+    <section className="mt-4">
+      <h3 className="flex items-center gap-1.5 text-[13px] font-semibold text-muted-foreground">
+        <Heart size={12} />
+        生命能量 (C1)
+      </h3>
+      <div className="mt-2 rounded-2xl border border-border-card bg-card p-4">
+        <div className="mb-2 flex items-center justify-between">
+          <span className="text-xs text-muted-foreground">
+            {energy.current} / {energy.max}
+          </span>
+          <span
+            className="rounded-full px-2 py-0.5 text-xs font-semibold"
+            style={{ color, backgroundColor: `${color}15` }}
+          >
+            {label}
+          </span>
+        </div>
+        <div className="h-3 overflow-hidden rounded-full bg-muted">
+          <div
+            className="h-full rounded-full transition-all duration-700 ease-out"
+            style={{ width: `${percent}%`, backgroundColor: color }}
+          />
+        </div>
+        <div className="mt-2 grid grid-cols-2 gap-2 text-center">
+          <div className="rounded-lg bg-background py-1.5">
+            <span className="text-[11px] text-muted-foreground">每 tick 消耗</span>
+            <p className="text-sm font-semibold text-foreground">{energy.tick_cost}</p>
+          </div>
+          <div className="rounded-lg bg-background py-1.5">
+            <span className="text-[11px] text-muted-foreground">剩余能量</span>
+            <p className="text-sm font-semibold text-foreground">{percent}%</p>
+          </div>
+        </div>
+      </div>
+    </section>
+  );
+}
 
 function getTargetIcon(target: AgentHubListItem) {
   if (target.id.includes('telegram')) return Send;
@@ -14,6 +75,7 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
   const isDesktop = useIsDesktop();
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loading, setLoading] = useState(true);
+  const [energy, setEnergy] = useState<AgentEnergySnapshot | null>(null);
   const targetId = agentId ?? '';
 
   useEffect(() => {
@@ -46,6 +108,34 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
     void load();
     return () => {
       disposed = true;
+    };
+  }, [targetId]);
+
+  // Energy polling (2s interval)
+  useEffect(() => {
+    if (!targetId) return;
+    let disposed = false;
+
+    const poll = async () => {
+      try {
+        const hosts = await getRuntimeHostService().listHosts();
+        if (hosts.length === 0 || disposed) return;
+        const host = hosts[0];
+        const url = `http://${host.host}:${host.port}/agents/${encodeURIComponent(targetId)}/energy`;
+        const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+        if (!resp.ok || disposed) return;
+        const snap: AgentEnergySnapshot = await resp.json();
+        if (!disposed) setEnergy(snap);
+      } catch {
+        // ignore polling errors
+      }
+    };
+
+    void poll();
+    const timer = setInterval(poll, 2000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
     };
   }, [targetId]);
 
@@ -120,6 +210,8 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
           ))}
         </div>
       </section>
+
+      {energy && <EnergyBar energy={energy} />}
 
       <section className="mt-4">
         <h3 className="text-[13px] font-semibold text-muted-foreground">触发规则</h3>

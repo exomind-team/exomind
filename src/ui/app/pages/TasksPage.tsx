@@ -1,4 +1,4 @@
-import { Plus, SlidersHorizontal } from 'lucide-react';
+import { Plus, SlidersHorizontal, Waypoints } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
@@ -9,6 +9,8 @@ import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import { filterMonth, filterNow, filterToday, filterWeek } from './task-tab-filters';
 import { buildTasksTodayViewModel } from './tasks-today-view';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { buildTaskGraph } from '@/lib/task/task-dag-graph';
+import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
 
 type TaskTab = 'now' | 'today' | 'week' | 'month';
 
@@ -58,6 +60,27 @@ function formatTaskMetaCompact(task: TaskNode): string {
 
 function formatSpentMeta(task: TaskNode): string {
   return `${formatTaskMetaCompact(task)} · ${task.status === 'in_progress' ? '进行中' : '待开始'}`;
+}
+
+function CurrentRootBadge({
+  taskId,
+  currentRootNodeId,
+}: {
+  taskId: string;
+  currentRootNodeId: string | null;
+}) {
+  if (taskId !== currentRootNodeId) {
+    return null;
+  }
+
+  return (
+    <span
+      data-testid={`task-current-root-badge-${taskId}`}
+      className="inline-flex items-center rounded-full bg-[#FDE7DC] px-2 py-0.5 text-[10px] font-semibold text-[#C75B3A]"
+    >
+      当前根节点
+    </span>
+  );
 }
 
 function resolveToneClasses(tone: 'green' | 'orange' | 'blue' | 'red' | 'stone'): {
@@ -139,7 +162,7 @@ export function TasksPage() {
     const timeBlockService = getTimeBlockService();
     const load = async () => {
       const [list, blocks, nextActiveBlock] = await Promise.all([
-        svc.listTasks(),
+        svc.listTasks(true),
         timeBlockService.loadTimeBlocks(),
         timeBlockService.loadActiveBlock(),
       ]);
@@ -182,6 +205,9 @@ export function TasksPage() {
     activeBlock,
   }), [activeBlock, timeBlocks, visibleTasks]);
 
+  const taskGraph = useMemo(() => buildTaskGraph(tasks), [tasks]);
+  const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+
   const handleQuickAdd = async () => {
     const title = quickInput.trim();
     if (!title) {
@@ -201,6 +227,13 @@ export function TasksPage() {
       <header className="flex items-center justify-between border-b border-[#F0ECE8] px-6 py-3 dark:border-[#292524] md:px-8 lg:px-10">
         <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
         <div className="flex items-center gap-2">
+          <Link
+            to="/tasks/dag"
+            className="inline-flex items-center gap-1 rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+          >
+            <Waypoints size={16} />
+            <span className="hidden md:inline">DAG</span>
+          </Link>
           <button type="button" className="flex h-9 w-9 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
             <SlidersHorizontal size={18} />
           </button>
@@ -227,6 +260,8 @@ export function TasksPage() {
           })}
         </div>
 
+        <TaskCurrentRootCard graph={taskGraph} taskById={taskById} className="mb-4" />
+
         {activeTab === 'today' ? (
           <div className="space-y-4">
             {todayViewModel.inProgressCount > 0 ? (
@@ -243,7 +278,10 @@ export function TasksPage() {
                         <div className="flex items-start gap-3">
                           <div className="mt-1 h-5 w-5 rounded-full border-2 border-[#C75B3A]" />
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+                            <div className="flex flex-wrap items-center gap-2">
+                              <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+                              <CurrentRootBadge taskId={task.id} currentRootNodeId={taskGraph.currentRootNodeId} />
+                            </div>
                             <p className="mt-1 text-xs text-[#A8A29E]">{formatSpentMeta(task)}</p>
                           </div>
                         </div>
@@ -280,6 +318,7 @@ export function TasksPage() {
                               key={item.id}
                               to="/tasks/block/$blockId"
                               params={{ blockId: item.blockId }}
+                              search={{ from: activeTab }}
                               data-testid={`tasks-today-block-link-${item.blockId}`}
                               className="block"
                             >
@@ -337,7 +376,10 @@ export function TasksPage() {
                   <div className={`w-[3px] shrink-0 self-stretch ${STATUS_DOT[task.status] ?? 'bg-[#A8A29E]'}`} />
                   <div className="flex-1 px-4 py-3">
                     <div className="flex items-center justify-between gap-2">
-                      <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+                      <div className="flex min-w-0 flex-1 flex-wrap items-center gap-2">
+                        <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+                        <CurrentRootBadge taskId={task.id} currentRootNodeId={taskGraph.currentRootNodeId} />
+                      </div>
                       <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-[#F5F0ED] px-2 py-0.5 dark:bg-[#292524]">
                         <span className={`h-1.5 w-1.5 rounded-full ${STATUS_DOT[task.status] ?? 'bg-[#A8A29E]'}`} />
                         <span className="text-[10px] font-medium text-[#78716C] dark:text-[#A8A29E]">

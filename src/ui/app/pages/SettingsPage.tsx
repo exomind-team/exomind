@@ -85,6 +85,8 @@ import {
 import { UserCard } from '@/ui/app/components/UserCard';
 import { MoreSection } from '@/ui/app/components/MoreSection';
 import { AboutSection } from '@/ui/app/components/AboutSection';
+import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
+import { getSelectedRuntimeTarget, toRuntimeBaseUrl, EMBEDDED_RUNTIME_STATUS_STORAGE_KEY } from '@/config/runtime-target';
 import { Divider, SectionCard, SectionTitle, SettingRow } from '@/ui/app/components/settings-shared';
 import { useNavigate } from '@tanstack/react-router';
 import {
@@ -104,6 +106,7 @@ import {
   Sun,
   Timer,
   Upload,
+  Waypoints,
   Wifi,
 } from 'lucide-react';
 
@@ -113,7 +116,7 @@ type PickedJsonFile = {
   content: string;
 };
 
-type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'about' | 'danger';
+type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'data' | 'about' | 'danger';
 
 const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
@@ -233,6 +236,7 @@ export function SettingsPage() {
   const [syncDialogOpen, setSyncDialogOpen] = useState(false);
   const [countdownModeDialogOpen, setCountdownModeDialogOpen] = useState(false);
   const [featureTogglesDialogOpen, setFeatureTogglesDialogOpen] = useState(false);
+  const [pairingDialogOpen, setPairingDialogOpen] = useState(false);
   const [voiceInputDialogOpen, setVoiceInputDialogOpen] = useState(false);
   const [mossApiKey, setMossApiKey] = useState(() => readStoredMossApiKey());
   const [mossApiKeyDraft, setMossApiKeyDraft] = useState('');
@@ -252,6 +256,7 @@ export function SettingsPage() {
   const sectionThemeRef = useRef<HTMLElement | null>(null);
   const sectionFocusRef = useRef<HTMLElement | null>(null);
   const sectionNotificationRef = useRef<HTMLElement | null>(null);
+  const sectionDataRef = useRef<HTMLElement | null>(null);
   const sectionDangerRef = useRef<HTMLElement | null>(null);
   const sectionAboutRef = useRef<HTMLElement | null>(null);
   const isDesktop = useIsDesktop();
@@ -511,6 +516,15 @@ export function SettingsPage() {
     navigate({ to: '/moss-test' });
   };
 
+  const handleOpenVolcanoTest = () => {
+    clearNotice();
+    if (!developerMode) {
+      setErrorMessage('请先开启开发者模式后使用语音测试');
+      return;
+    }
+    navigate({ to: '/volcano-asr-test' });
+  };
+
   const handleOpenLlmDialog = () => {
     setLlmApiKeyDraft(getLLMApiKey());
     setLlmBaseUrlDraft(getLLMBaseUrl());
@@ -615,6 +629,7 @@ export function SettingsPage() {
     { key: 'theme', label: '外观主题', ref: sectionThemeRef },
     { key: 'focus', label: '专注设置', ref: sectionFocusRef },
     { key: 'notification', label: '通知', ref: sectionNotificationRef },
+    { key: 'data', label: '数据', ref: sectionDataRef },
     { key: 'about', label: '关于', ref: sectionAboutRef },
     { key: 'danger', label: '危险区域', ref: sectionDangerRef },
   ];
@@ -828,6 +843,20 @@ export function SettingsPage() {
                     }
                   />
                 </div>
+                <Divider />
+                <div data-testid="new-settings-volcano-test-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="火山引擎 ASR 测试"
+                    onClick={handleOpenVolcanoTest}
+                    right={
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
+                        <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                      </div>
+                    }
+                  />
+                </div>
               </div>
               <Divider />
               <SettingRow
@@ -870,8 +899,38 @@ export function SettingsPage() {
                     onClick={() => setFeatureTogglesDialogOpen(true)}
                     right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                   />
+                  <Divider />
+                  <SettingRow
+                    icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="设备配对"
+                    onClick={() => setPairingDialogOpen(true)}
+                    right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                  />
                 </>
               )}
+            </SectionCard>
+          </section>
+
+          <section ref={sectionDataRef} className="space-y-2" data-testid="new-settings-desktop-vc-section-data">
+            <SectionTitle>数据</SectionTitle>
+            <SectionCard>
+              <div data-testid="new-settings-desktop-vc-export-row">
+                <SettingRow
+                  icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="导出备份"
+                  onClick={handleExportBackup}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+              </div>
+              <Divider />
+              <div data-testid="new-settings-desktop-vc-import-row">
+                <SettingRow
+                  icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="导入数据"
+                  onClick={handleImportBackup}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+              </div>
             </SectionCard>
           </section>
 
@@ -1201,6 +1260,20 @@ export function SettingsPage() {
                 }
               />
             </div>
+            <Divider />
+            <div data-testid="new-settings-volcano-test-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="火山引擎 ASR 测试"
+                onClick={handleOpenVolcanoTest}
+                right={
+                  <div className="flex items-center gap-1">
+                    <span className="text-sm text-[#A8A29E]">{voiceTestStatusLabel}</span>
+                    <ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />
+                  </div>
+                }
+              />
+            </div>
           </SectionCard>
         </section>
 
@@ -1386,6 +1459,13 @@ export function SettingsPage() {
                   icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
                   label="功能开关"
                   onClick={() => setFeatureTogglesDialogOpen(true)}
+                  right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+                />
+                <Divider />
+                <SettingRow
+                  icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
+                  label="设备配对"
+                  onClick={() => setPairingDialogOpen(true)}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
               </>
@@ -1650,8 +1730,8 @@ export function SettingsPage() {
               </div>
               <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3 dark:border-[#292524]">
                 <div className="flex items-center gap-2">
-                  <Bot className="h-[16px] w-[16px] text-[#78716C]" />
-                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">Agent 页面</span>
+                  <Waypoints className="h-[16px] w-[16px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">网络页面</span>
                 </div>
                 <Switch
                   data-testid="feature-toggle-agent-page-switch"
@@ -1715,6 +1795,36 @@ export function SettingsPage() {
           </div>
         </DialogContent>
       </Dialog>
+
+      {/* ── Peer Pairing Dialog ── */}
+      <PeerPairingDialog
+        open={pairingDialogOpen}
+        onOpenChange={setPairingDialogOpen}
+        runtimeBaseUrl={(() => {
+          const target = getSelectedRuntimeTarget();
+          return toRuntimeBaseUrl(target);
+        })()}
+        localHostId={(() => {
+          try {
+            const raw = window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (typeof parsed.hostId === 'string') return parsed.hostId;
+            }
+          } catch { /* ignore */ }
+          return 'local';
+        })()}
+        localAuthToken={(() => {
+          try {
+            const raw = window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY);
+            if (raw) {
+              const parsed = JSON.parse(raw);
+              if (typeof parsed.authSecret === 'string') return parsed.authSecret;
+            }
+          } catch { /* ignore */ }
+          return undefined;
+        })()}
+      />
     </div>
   );
 }

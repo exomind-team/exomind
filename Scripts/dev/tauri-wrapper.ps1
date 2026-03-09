@@ -83,7 +83,10 @@ function Ensure-AndroidManifestPermissions {
 
   $requiredPermissions = @(
     "android.permission.RECORD_AUDIO",
-    "android.permission.MODIFY_AUDIO_SETTINGS"
+    "android.permission.MODIFY_AUDIO_SETTINGS",
+    "android.permission.ACCESS_NETWORK_STATE",
+    "android.permission.ACCESS_WIFI_STATE",
+    "android.permission.CHANGE_WIFI_MULTICAST_STATE"
   )
 
   foreach ($permission in $requiredPermissions) {
@@ -236,6 +239,34 @@ function Resolve-FreeDevPort {
   }
 }
 
+function Invoke-AndroidGeneratedProjectPatch {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectRoot
+  )
+
+  $patchScriptPath = Join-Path $PSScriptRoot "android-manifest-permission.ts"
+  if (-not (Test-Path -LiteralPath $patchScriptPath)) {
+    Write-Warning "[tauri-wrapper] Android patch script not found: $patchScriptPath"
+    return
+  }
+
+  $bunCommand = Get-Command bun -ErrorAction SilentlyContinue
+  if (-not $bunCommand) {
+    Write-Warning "[tauri-wrapper] bun not found; skip Android generated project patch"
+    return
+  }
+
+  try {
+    & $bunCommand.Source $patchScriptPath
+    if ($LASTEXITCODE -ne 0) {
+      Write-Warning "[tauri-wrapper] Android generated project patch exited with code $LASTEXITCODE"
+    }
+  } catch {
+    Write-Warning "[tauri-wrapper] Failed to patch Android generated project: $_"
+  }
+}
+
 function Test-PortAvailable {
   param(
     [Parameter(Mandatory = $true)]
@@ -262,26 +293,65 @@ function Resolve-EmbeddedRuntimePort {
     return
   }
 
-  # Keep deterministic candidates first, then fallback to random port.
-  #（优先固定候选端口，失败再回退到随机端口）
-  $candidates = @(9124, 1950, 1949)
-  foreach ($candidate in $candidates) {
-    if (Test-PortAvailable -Port $candidate) {
-      $env:EXOMIND_RT_PORT = "$candidate"
-      Write-Host "[tauri-wrapper] Embedded runtime port resolved: $candidate"
-      return
+  $reservedPorts = @()
+  foreach ($value in @($env:EXOMIND_WEB_PORT, $env:EXOMIND_HMR_PORT)) {
+    if ($value -and $value -match '^\d+$') {
+      $reservedPorts += $value
     }
   }
 
-  $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
-  try {
-    $listener.Start()
-    $randomPort = ([System.Net.IPEndPoint]$listener.LocalEndpoint).Port
-    $env:EXOMIND_RT_PORT = "$randomPort"
-    Write-Host "[tauri-wrapper] Embedded runtime port resolved (random): $randomPort"
-  } finally {
-    $listener.Stop()
+  # Keep deterministic candidates first, then fallback to random port.
+  #（优先固定候选端口，失败再回退到随机端口）
+  $scriptPath = Join-Path $PSScriptRoot "embedded-runtime-port.ts"
+  if (-not (Test-Path -LiteralPath $scriptPath)) {
+    throw "embedded runtime port resolver script not found: $scriptPath"
   }
+
+  $candidateCsv = "9124,1950,1949"
+  $reservedCsv = ($reservedPorts | Select-Object -Unique) -join ","
+  try {
+    $resolved = (& bun $scriptPath $candidateCsv $reservedCsv 2>$null).Trim()
+    if ($resolved -and $resolved -match '^\d+$') {
+      $env:EXOMIND_RT_PORT = "$resolved"
+      Write-Host "[tauri-wrapper] Embedded runtime port resolved: $resolved"
+      return
+    }
+  } catch {
+    Write-Warning "[tauri-wrapper] Failed to resolve embedded runtime port: $_"
+  }
+
+  throw "failed to resolve embedded runtime port"
+}
+
+function Resolve-TauriDevTargetDir {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectRoot
+  )
+
+  if ($env:CARGO_TARGET_DIR) {
+    Write-Host "[tauri-wrapper] Reusing explicit CARGO_TARGET_DIR: $env:CARGO_TARGET_DIR"
+    return
+  }
+
+  $scriptPath = Join-Path $PSScriptRoot "tauri-dev-target-dir.ts"
+  if (-not (Test-Path -LiteralPath $scriptPath)) {
+    throw "tauri dev target dir resolver script not found: $scriptPath"
+  }
+
+  $resolved = (& bun $scriptPath $ProjectRoot 2>$null | Select-Object -First 1)
+  if (-not $resolved) {
+    throw "failed to resolve tauri dev target dir"
+  }
+
+  $resolved = $resolved.Trim()
+  if ([string]::IsNullOrWhiteSpace($resolved)) {
+    throw "resolved tauri dev target dir is empty"
+  }
+
+  $env:CARGO_TARGET_DIR = $resolved
+  New-Item -ItemType Directory -Path $resolved -Force | Out-Null
+  Write-Host "[tauri-wrapper] Cargo target dir resolved: $resolved"
 }
 
 $projectRoot = Join-Path $PSScriptRoot "..\..\"
@@ -304,11 +374,13 @@ $isTauriDev = $TauriArgs -and $TauriArgs.Count -ge 1 -and $TauriArgs[0] -eq "dev
 if ($isTauriDev) {
   Resolve-FreeDevPort
   Resolve-EmbeddedRuntimePort
+  Resolve-TauriDevTargetDir -ProjectRoot $projectRoot
 }
 
 # Sync launcher icons before android build/dev/run/init (构建前同步 Android 图标)
 $androidCommandsNeedIconSync = @("build", "dev", "run", "init")
 if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android" -and ($androidCommandsNeedIconSync -contains $TauriArgs[1])) {
+  Invoke-AndroidGeneratedProjectPatch -ProjectRoot $projectRoot
   Ensure-AndroidLauncherIcons -ProjectRoot $projectRoot
 }
 
@@ -340,6 +412,7 @@ try {
 
 # Patch again for `tauri android init`-like flows (初始化后再次补权限与 cleartext 配置)
 if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android") {
+  Invoke-AndroidGeneratedProjectPatch -ProjectRoot $projectRoot
   Ensure-AndroidManifestPermissions -ManifestPath $manifestPath
   Ensure-AndroidReleaseCleartextTraffic -BuildGradlePath $buildGradlePath
   if ($androidCommandsNeedIconSync -contains $TauriArgs[1]) {

@@ -3,18 +3,20 @@ import { resolveSyncServerUrl, SYNC_SERVER_URL_CHANGED_EVENT } from '@/config/po
 import { getReminderService } from '@/lib/services/reminder.service';
 import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
-import { useSyncStore } from '@/ui/stores/sync-store';
+import { resolveRemoteSyncKey, useSyncStore } from '@/ui/stores/sync-store';
 
 const REMINDER_REMOTE_DB_SUFFIX = 'reminders';
 
-function buildReminderRemoteDbUrl(baseUrl: string, currentUser: string): string {
-  return buildRemoteDbUrl(baseUrl, `${currentUser}__${REMINDER_REMOTE_DB_SUFFIX}`);
+function buildReminderRemoteDbUrl(baseUrl: string, remoteDbKey: string): string {
+  return buildRemoteDbUrl(baseUrl, `${remoteDbKey}__${REMINDER_REMOTE_DB_SUFFIX}`);
 }
 
 export function ReminderSyncCoordinator(): null {
   const reminderServiceRef = useRef(getReminderService());
   const isLoggedIn = useSyncStore((state) => state.isLoggedIn);
-  const currentUser = useSyncStore((state) => state.currentUser);
+  const remoteDbKey = useSyncStore((state) => resolveRemoteSyncKey(state.credentials));
+  const legacySyncState = useSyncStore((state) => state.status.state);
+  const legacySyncActive = legacySyncState === 'connected' || legacySyncState === 'syncing';
   const [syncServerUrl, setSyncServerUrl] = useState(() =>
     resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>)
   );
@@ -32,13 +34,13 @@ export function ReminderSyncCoordinator(): null {
   }, []);
 
   useEffect(() => {
-    if (!isLoggedIn || !currentUser) {
+    if (!isLoggedIn || !remoteDbKey || !legacySyncActive) {
       void reminderServiceRef.current.stopSync();
       return;
     }
 
     let cancelled = false;
-    const remoteUrl = buildReminderRemoteDbUrl(syncServerUrl, currentUser);
+    const remoteUrl = buildReminderRemoteDbUrl(syncServerUrl, remoteDbKey);
 
     void reminderServiceRef.current.startSync(remoteUrl).catch((error) => {
       if (cancelled) return;
@@ -50,7 +52,7 @@ export function ReminderSyncCoordinator(): null {
       cancelled = true;
       void reminderServiceRef.current.stopSync();
     };
-  }, [currentUser, isLoggedIn, syncServerUrl]);
+  }, [isLoggedIn, legacySyncActive, remoteDbKey, syncServerUrl]);
 
   return null;
 }

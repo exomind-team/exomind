@@ -63,36 +63,6 @@ test.describe('Issue #204 Agent Hub（Agent Hub 全视图）', () => {
     await expect(page.getByRole('heading', { name: '日报 Agent' })).toBeVisible();
   });
 
-  test('topology settings uses desktop right panel and mobile sheet（拓扑设置桌面右栏 + 移动底部抽屉）', async ({ page }) => {
-    await page.setViewportSize({ width: 1440, height: 960 });
-    await page.goto('/agents');
-    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
-
-    await page.getByTestId('agent-topology-settings-button').click();
-    await expect(page.getByTestId('agent-rightpanel-shell')).toBeVisible();
-    await expect(page.getByTestId('agent-rightpanel-topology-settings')).toBeVisible();
-    await expect(page.getByTestId('agent-topology-settings-panel')).toHaveCount(0);
-
-    await page.getByRole('button', { name: '关闭' }).click();
-    await expect(page.getByTestId('agent-rightpanel-shell')).toBeHidden();
-
-    await page.setViewportSize({ width: 393, height: 852 });
-    await page.reload();
-    await expect(page.getByTestId('agent-hub-page')).toBeVisible();
-
-    await page.getByTestId('agent-topology-settings-button').click();
-    await expect(page.getByTestId('agent-topology-settings-panel')).toBeVisible();
-    await expect(page.getByTestId('agent-rightpanel-shell')).toHaveCount(0);
-
-    const mobileRect = await page.getByTestId('agent-topology-settings-panel').evaluate((node) => {
-      const rect = node.getBoundingClientRect();
-      return {
-        bottom: rect.bottom,
-      };
-    });
-    expect(mobileRect.bottom).toBeGreaterThan(840);
-  });
-
   test('chat streaming + market browse（对话流式与市场浏览）', async ({ page }) => {
     await page.goto('/agents/chat/agent-daily');
     await page.waitForLoadState('networkidle');

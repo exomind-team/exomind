@@ -4,11 +4,13 @@ import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Button } from '@/components/ui/button';
+import { listLocalProfiles } from '@/lib/profile/profile-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 
 interface UserInfo {
-  username: string;
-  passwordHash: string;
+  profileId: string;
+  loginName: string;
+  displayName: string;
   createdAt: string;
   lastLogin?: string;
 }
@@ -20,7 +22,7 @@ interface SwitchAccountSheetProps {
 }
 
 export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAccountSheetProps) {
-  const { login, register, currentUser } = useSyncStore();
+  const { login, register, logout, activeProfileId, isLoggedIn } = useSyncStore();
 
   const [mode, setMode] = useState<'switch' | 'login' | 'register'>(initialMode);
   const [previousMode, setPreviousMode] = useState<'switch' | 'login'>(initialMode === 'register' ? 'login' : initialMode as 'switch' | 'login');
@@ -50,12 +52,13 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
   }, [open, initialMode]);
 
   function loadUsers() {
-    try {
-      const stored = localStorage.getItem('exomind:users');
-      setUsers(stored ? JSON.parse(stored) : []);
-    } catch {
-      setUsers([]);
-    }
+    const profiles = listLocalProfiles().map((profile) => ({
+      profileId: profile.profileId,
+      loginName: profile.slug,
+      displayName: profile.displayName,
+      createdAt: profile.createdAt,
+    }));
+    setUsers(profiles);
   }
 
   async function handleSwitchLogin() {
@@ -66,7 +69,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
       await login(selectedUser, password);
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '登录失败');
+      setError(e instanceof Error ? e.message : '打开档案失败');
     } finally {
       setLoading(false);
     }
@@ -80,7 +83,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
       await login(username, password);
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '登录失败');
+      setError(e instanceof Error ? e.message : '打开档案失败');
     } finally {
       setLoading(false);
     }
@@ -103,7 +106,21 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
       await login(username, regPassword);
       onOpenChange(false);
     } catch (e) {
-      setError(e instanceof Error ? e.message : '注册失败');
+      setError(e instanceof Error ? e.message : '创建档案失败');
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  async function handleLogout() {
+    if (!isLoggedIn || !activeProfileId) return;
+    setLoading(true);
+    setError('');
+    try {
+      await logout();
+      onOpenChange(false);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : '退出档案失败');
     } finally {
       setLoading(false);
     }
@@ -130,6 +147,8 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
     setError('');
   }
 
+  const selectedProfile = users.find((user) => user.loginName === selectedUser) || null;
+
   return (
     <Drawer open={open} onOpenChange={onOpenChange}>
       <DrawerContent>
@@ -138,16 +157,16 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
           {mode === 'switch' && (
             <div className="space-y-3">
               <DrawerTitle className="text-base font-semibold text-stone-800">
-                切换账户
+                切换本地档案
               </DrawerTitle>
 
               <div className="space-y-2">
                 {users.map((user) => {
-                  const isCurrent = user.username === currentUser;
-                  const isSelected = user.username === selectedUser;
+                  const isCurrent = user.profileId === activeProfileId;
+                  const isSelected = user.loginName === selectedUser;
                   return (
                     <button
-                      key={user.username}
+                      key={user.profileId}
                       className={`w-full flex items-center justify-between rounded-xl border px-4 py-3 text-left transition-colors ${
                         isCurrent
                           ? 'border-[#C75B3A]/30 bg-[#C75B3A]/5'
@@ -157,7 +176,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                       }`}
                       onClick={() => {
                         if (!isCurrent) {
-                          setSelectedUser(user.username);
+                          setSelectedUser(user.loginName);
                           setPassword('');
                           setError('');
                         }
@@ -165,9 +184,10 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                     >
                       <div>
                         <div className="text-sm font-medium text-stone-800">
-                          {user.username}
+                          {user.displayName}
                         </div>
-                        <div className="text-xs text-stone-400">
+                        <div className="text-xs text-stone-400 space-y-0.5">
+                          <div>档案标识：{user.loginName}</div>
                           注册于 {new Date(user.createdAt).toLocaleDateString()}
                         </div>
                       </div>
@@ -181,8 +201,8 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 })}
               </div>
 
-              {/* Password input for selected user */}
-              {selectedUser && selectedUser !== currentUser && (
+              {/* Password input for selected profile（已选档案的密码输入） */}
+              {selectedUser && selectedProfile?.profileId !== activeProfileId && (
                 <div className="space-y-3">
                   <div className="space-y-1.5">
                     <Label className="text-xs text-stone-500">密码</Label>
@@ -199,7 +219,7 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                     onClick={handleSwitchLogin}
                     disabled={loading || !password}
                   >
-                    {loading ? '登录中...' : '登录'}
+                    {loading ? '打开中...' : '打开档案'}
                   </Button>
                 </div>
               )}
@@ -210,9 +230,20 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 variant="outline"
                 className="w-full rounded-xl"
                 onClick={goToRegister}
+                disabled={loading}
               >
-                注册新账户
+                创建档案
               </Button>
+              {isLoggedIn && activeProfileId && (
+                <Button
+                  variant="ghost"
+                  className="w-full rounded-xl text-[#B91C1C] hover:bg-[#FEF2F2] hover:text-[#991B1B]"
+                  onClick={handleLogout}
+                  disabled={loading}
+                >
+                  {loading ? '退出中...' : '退出当前档案'}
+                </Button>
+              )}
             </div>
           )}
 
@@ -220,14 +251,14 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
           {mode === 'login' && (
             <div className="space-y-3">
               <DrawerTitle className="text-base font-semibold text-stone-800">
-                登录
+                打开本地档案
               </DrawerTitle>
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-stone-500">用户名</Label>
+                <Label className="text-xs text-stone-500">档案标识</Label>
                 <Input
                   type="text"
-                  placeholder="请输入用户名"
+                  placeholder="请输入档案标识"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                 />
@@ -251,14 +282,14 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 onClick={handleLogin}
                 disabled={loading || !username || !password}
               >
-                {loading ? '登录中...' : '登录'}
+                {loading ? '打开中...' : '打开档案'}
               </Button>
 
               <button
                 className="w-full text-center text-xs text-stone-400 hover:text-stone-600"
                 onClick={goToRegister}
               >
-                没有账户？去注册
+                没有本地档案？去创建
               </button>
             </div>
           )}
@@ -274,15 +305,15 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                   <ChevronLeft className="h-5 w-5 text-stone-600" />
                 </button>
                 <DrawerTitle className="text-base font-semibold text-stone-800">
-                  注册新账户
+                  创建本地档案
                 </DrawerTitle>
               </div>
 
               <div className="space-y-1.5">
-                <Label className="text-xs text-stone-500">用户名</Label>
+                <Label className="text-xs text-stone-500">档案标识</Label>
                 <Input
                   type="text"
-                  placeholder="请输入用户名"
+                  placeholder="请输入档案标识"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                 />
@@ -316,14 +347,14 @@ export function SwitchAccountSheet({ open, onOpenChange, initialMode }: SwitchAc
                 onClick={handleRegister}
                 disabled={loading || !username || !regPassword || !confirmPassword}
               >
-                {loading ? '注册中...' : '注册'}
+                {loading ? '创建中...' : '创建档案'}
               </Button>
 
               <button
                 className="w-full text-center text-xs text-stone-400 hover:text-stone-600"
                 onClick={goToLogin}
               >
-                已有账户？去登录
+                已有本地档案？去打开
               </button>
             </div>
           )}

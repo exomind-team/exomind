@@ -1,5 +1,10 @@
 // Re-export split types for backward compatibility
-export type { RuntimeHostStatus, RuntimeHostRecord, RuntimeServiceStatus } from './agent-hub-runtime';
+export type {
+  RuntimeHostStatus,
+  RuntimeHostRecord,
+  RuntimeHostTrustState,
+  RuntimeServiceStatus,
+} from './agent-hub-runtime';
 export type { AgentMarketCategory, AgentMarketItem } from './agent-hub-market';
 
 // Agent Hub view modes（视图模式）
@@ -14,7 +19,6 @@ export const AGENT_HUB_RIGHT_PANEL_STATES = [
   'AGENT_DETAIL',
   'ACTOR_DETAIL',
   'AGENT_CHAT',
-  'TOPOLOGY_SETTINGS',
 ] as const;
 export type AgentHubRightPanelState = (typeof AGENT_HUB_RIGHT_PANEL_STATES)[number];
 
@@ -151,17 +155,89 @@ export interface AgentDetailData {
 }
 
 export type AgentConversationRole = 'agent' | 'user';
+export type AgentConversationMessageSource = 'history' | 'runtime';
+export type AgentConversationRuntimeMessageType =
+  | 'output.delta'
+  | 'thinking.delta'
+  | 'tool.call'
+  | 'tool.result'
+  | 'error';
 
 export interface AgentConversationMessage {
   id: string;
   role: AgentConversationRole;
   content: string;
   createdAt: string;
+  source?: AgentConversationMessageSource;
+  runtimeEventType?: AgentConversationRuntimeMessageType;
+  title?: string;
 }
 
 export interface AgentConversationChunk {
   messageId: string;
   delta: string;
   done: boolean;
+}
+
+export type RuntimeAgentEventType =
+  | 'session.started'
+  | 'output.delta'
+  | 'thinking.delta'
+  | 'tool.call'
+  | 'tool.result'
+  | 'error'
+  | 'done';
+
+export interface RuntimeAgentEventBase {
+  type: RuntimeAgentEventType;
+  sessionId?: string;
+  content?: string;
+  name?: string;
+  payload?: unknown;
+  message?: string;
+  finishReason?: string;
+  done?: boolean;
+}
+
+export type RuntimeAgentEvent =
+  | (RuntimeAgentEventBase & {
+      type: 'session.started';
+      sessionId: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'output.delta';
+      content: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'thinking.delta';
+      content: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'tool.call';
+      name: string;
+      payload?: unknown;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'tool.result';
+      name: string;
+      payload?: unknown;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'error';
+      message: string;
+    })
+  | (RuntimeAgentEventBase & {
+      type: 'done';
+    });
+
+// Agent 能量快照（对应 RT GET /agents/:id/energy）
+export interface AgentEnergySnapshot {
+  agent_id: string;
+  current: number;
+  max: number;
+  ratio: number;
+  tick_cost: number;
+  phase: string; // 'normal' | 'slowing' | 'critical' | 'dying' | 'dormant'
+  is_dormant: boolean;
 }
 

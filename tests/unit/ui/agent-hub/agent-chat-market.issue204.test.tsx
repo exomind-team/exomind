@@ -22,6 +22,19 @@ vi.mock('@/lib/services', () => ({
 
 describe('agent chat and market issue-204（对话与市场）', () => {
   beforeEach(() => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches: false,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
     serviceMocks.getConversation.mockResolvedValue(AGENT_HUB_MOCK_FIXTURE.conversations['agent-daily'] ?? []);
     serviceMocks.streamConversation.mockImplementation(async function* () {
       yield { messageId: 'stream-1', delta: '今天共收集了 ', done: false };
@@ -76,5 +89,19 @@ describe('agent chat and market issue-204（对话与市场）', () => {
     expect(screen.getByText('热门推荐')).toBeInTheDocument();
     expect(screen.getByText('Code Review Agent')).toBeInTheDocument();
     expect(screen.getByText('Google Calendar 数据源')).toBeInTheDocument();
+  });
+
+  it('uses fullscreen mobile composer offset on chat route（移动端二级聊天页贴到底部安全区）', async () => {
+    window.history.pushState({}, '', '/agents/chat/agent-daily');
+
+    render(<AgentConversationPage agentId="agent-daily" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-chat-input-bar')).toBeInTheDocument();
+    });
+
+    const inputBarClassName = screen.getByTestId('agent-chat-input-bar').className;
+    expect(inputBarClassName).toContain('bottom-[env(safe-area-inset-bottom,0px)]');
+    expect(inputBarClassName).not.toContain('bottom-[calc(env(safe-area-inset-bottom,0px)+64px)]');
   });
 });

@@ -37,6 +37,7 @@ import {
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
 import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
+import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
 
 interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
@@ -106,6 +107,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   // 定时器引用
   const timerRef = useRef<number | null>(null);
   const startTimeRef = useRef<number | null>(null);
+  const activeBlockDataRef = useRef<ActiveBlockData | null>(null);
   const mutationQueueRef = useRef<Promise<void>>(Promise.resolve());
   const isRunningRef = useRef(false);  // 使用 ref 跟踪运行状态，避免闭包问题
   const taskNameRef = useRef<HTMLTextAreaElement | null>(null);
@@ -189,6 +191,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   };
 
   const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
+    activeBlockDataRef.current = block;
     if (!block) {
       if (timerState === 'idle') {
         return;
@@ -509,6 +512,7 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     setCountdownOvertimeMs(0);
 
     const block = await timeBlockService.startBlock(name, config, description || undefined);
+    activeBlockDataRef.current = block;
     setTaskName(name);
     setElapsed(block.elapsed);
     setFeedbackInProgress(false);
@@ -537,6 +541,17 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const isCountdownWarning =
     timerMode === 'countdown'
     && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0));
+  const countdownEndTimeDisplay = !isIdle
+    ? resolveCountdownEndTimeDisplay({
+      block: activeBlockDataRef.current,
+      mode: timerMode,
+      remainingMs: timerMode === 'countdown' ? elapsed : undefined,
+      overtimeMs: countdownOverrunRef.current ? countdownOvertimeMs : 0,
+      paused: isPaused,
+      isActionEnded: feedbackInProgress,
+      now: Date.now(),
+    })
+    : null;
   const isEmptyFeedback = feedback.trim().length === 0;
   const isSkipFeedbackCoolingDown = isEmptyFeedback && skipFeedbackConfirmState === 'cooldown';
   const isEndActionDisabled = feedbackInProgress && feedbackOpen;
@@ -602,6 +617,16 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
                   {timerDisplayValue}
                 </span>
               </div>
+              {countdownEndTimeDisplay && (
+                <div className="flex justify-center px-6 pb-1">
+                  <span
+                    data-testid="timeblock-end-time"
+                    className="max-w-full truncate text-[11px] text-stone-500"
+                  >
+                    {countdownEndTimeDisplay.text}
+                  </span>
+                </div>
+              )}
               <div className="flex items-center justify-center gap-3 px-6 pb-1" data-testid="timeblock-action-row">
                 {isRunning && (
                   <Button
@@ -721,19 +746,29 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
           </div>
 
           {/* 中间：计时显示 */}
-          <div className="flex items-center gap-2 font-mono text-lg">
-            <span
-              className={
-                timerMode === 'countdown'
-                  && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0))
-                  ? 'text-red-500'
-                  : ''
-              }
-            >
-              {timerMode === 'countdown'
-                ? (countdownOverrunRef.current ? `+${formatTime(countdownOvertimeMs)}` : formatCountdown(elapsed))
-                : formatTime(elapsed)}
-            </span>
+          <div className="flex min-w-0 flex-col items-center gap-0.5">
+            <div className="flex items-center gap-2 font-mono text-lg">
+              <span
+                className={
+                  timerMode === 'countdown'
+                    && (countdownOverrunRef.current || (elapsed <= 60000 && elapsed > 0))
+                    ? 'text-red-500'
+                    : ''
+                }
+              >
+                {timerMode === 'countdown'
+                  ? (countdownOverrunRef.current ? `+${formatTime(countdownOvertimeMs)}` : formatCountdown(elapsed))
+                  : formatTime(elapsed)}
+              </span>
+            </div>
+            {countdownEndTimeDisplay && (
+              <span
+                data-testid="timeblock-end-time"
+                className="max-w-full truncate text-[11px] text-muted-foreground"
+              >
+                {countdownEndTimeDisplay.text}
+              </span>
+            )}
           </div>
 
           {/* 右侧：展开按钮 */}

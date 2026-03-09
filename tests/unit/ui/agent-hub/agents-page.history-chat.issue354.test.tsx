@@ -125,7 +125,26 @@ const SAMPLE_SIGNAL_HISTORY: SignalEvent[] = [
 ];
 
 describe('agents page signal history + right chat issue-354（历史标签与右侧聊天）', () => {
+  const mockMatchMedia = (matches: boolean) => {
+    Object.defineProperty(window, 'matchMedia', {
+      writable: true,
+      value: vi.fn().mockImplementation((query: string) => ({
+        matches,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+      })),
+    });
+  };
+
   beforeEach(() => {
+    window.history.pushState({}, '', '/agents');
+    mockMatchMedia(true);
+
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: true,
       host: '127.0.0.1',
@@ -264,5 +283,22 @@ describe('agents page signal history + right chat issue-354（历史标签与右
     await waitFor(() => {
       expect(screen.getByText('已收到：测试消息')).toBeInTheDocument();
     });
+  });
+
+  it('opens full-screen chat route on narrow screens（小屏点击 Agent 节点直接进入全屏聊天页）', async () => {
+    mockMatchMedia(false);
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-agent:echo'));
+
+    await waitFor(() => {
+      expect(window.location.pathname).toBe('/agents/chat/echo');
+    });
+
+    expect(screen.queryByTestId('agent-rightpanel-shell')).not.toBeInTheDocument();
   });
 });

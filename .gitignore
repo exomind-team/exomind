@@ -78,6 +78,9 @@ htmlcov/
 
 # === Website build artifacts ===
 website/preview/
+
+# === Jujutsu metadata ===
+/.jj/
 website/package-lock.json
 
 # === Temporary ===
@@ -88,6 +91,8 @@ website/package-lock.json
 .tmp/pouchdb-active-block/
 .turbo/
 pnpm-store/
+temp/
+tmp/
 
 # === Secrets (must be committed) ===
 # IMPORTANT: Never commit actual API keys or tokens!

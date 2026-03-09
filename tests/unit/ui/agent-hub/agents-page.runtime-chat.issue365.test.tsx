@@ -193,7 +193,11 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
       yield { messageId: 'msg-fallback', delta: '这是本地 adapter 的占位回复', done: true };
     });
     runtimeClientMocks.streamAgentConversation.mockImplementation(async function* () {
-      yield { content: '这是 Claude Runtime 的真实回复', sessionId: 'sid-365' };
+      yield { type: 'session.started', sessionId: 'sid-365' };
+      yield { type: 'output.delta', content: '这是 Claude Runtime 的' };
+      yield { type: 'tool.call', name: 'searchDocs', payload: { query: '测试消息' } };
+      yield { type: 'output.delta', content: '真实回复' };
+      yield { type: 'done' };
     });
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
@@ -247,7 +251,11 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
     fireEvent.click(screen.getByTestId('agent-rightpanel-chat-send'));
 
     await waitFor(() => {
-      expect(screen.getByText('这是 Claude Runtime 的真实回复')).toBeInTheDocument();
+      const outputs = screen.getAllByTestId('agent-runtime-event-output');
+      expect(outputs).toHaveLength(2);
+      expect(outputs[0]).toHaveTextContent('这是 Claude Runtime 的');
+      expect(outputs[1]).toHaveTextContent('真实回复');
+      expect(screen.getByTestId('agent-runtime-event-tool-call')).toHaveTextContent('searchDocs');
     });
 
     expect(runtimeClientMocks.streamAgentConversation).toHaveBeenCalledWith(

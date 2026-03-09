@@ -24,14 +24,8 @@ import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
 import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
-import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { getEventLogService } from '@/lib/services/eventlog.service';
-import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { useSyncStore } from '@/ui/stores/sync-store';
-import {
-  resolveSyncServerUrl,
-  SYNC_SERVER_URL_CHANGED_EVENT,
-} from '@/config/port-env';
 import {
   mergeLatestEventsAscending,
   normalizeStorageEventsAscending,
@@ -110,10 +104,7 @@ function formatEventSourceLabel(event: Event): string {
 }
 
 export function ChatPage({ variant = 'default', hideHeader = false }: ChatPageProps = {}) {
-  const envMap = import.meta.env as Record<string, string | undefined>;
   const [events, setEvents] = useState<Event[]>([]);
-  const [syncStatus, setSyncStatus] = useState<'connected' | 'disconnected' | 'syncing'>('disconnected');
-  const [syncServerUrl, setSyncServerUrl] = useState(() => resolveSyncServerUrl(envMap));
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
   const [hasMore, setHasMore] = useState(false);
@@ -126,7 +117,10 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const refreshInFlightRef = useRef(false);
   const refreshQueuedRef = useRef(false);
   const eventLogService = useRef(getEventLogService());
-  const { currentUser, isLoggedIn } = useSyncStore();
+  const { currentUser, isLoggedIn, activeProfileId } = useSyncStore();
+  const syncStatus: 'connected' | 'disconnected' | 'syncing' = isLoggedIn && Boolean(currentUser)
+    ? 'connected'
+    : 'disconnected';
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
   const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
@@ -255,21 +249,9 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     }
   }, [loadOlderEvents]);
 
-  useEffect(() => {
-    const refreshSyncServerUrl = () => {
-      setSyncServerUrl(resolveSyncServerUrl(import.meta.env as Record<string, string | undefined>));
-    };
-
-    refreshSyncServerUrl();
-    window.addEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
-    return () => {
-      window.removeEventListener(SYNC_SERVER_URL_CHANGED_EVENT, refreshSyncServerUrl);
-    };
-  }, []);
-
   // 初始化 EventStorage 和加载事件
   useEffect(() => {
-    const storage = getEventStorage(currentUser || undefined);
+    const storage = getEventStorage(activeProfileId || undefined);
     storageRef.current = storage;
     void loadInitialEvents(storage);
 
@@ -288,31 +270,15 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       scheduleLatestRefresh(storage);
     });
 
-    if (isLoggedIn && currentUser) {
-      setSyncStatus('syncing');
-      const remoteUrl = buildRemoteDbUrl(syncServerUrl, currentUser);
-      storage.syncToRemote(remoteUrl).then(() => {
-        setSyncStatus('connected');
-        console.log('[ChatPage] 远程同步已启动');
-      }).catch((err) => {
-        const [message, payload] = buildSyncErrorLog('ChatPage', remoteUrl, err);
-        console.error(message, payload);
-        setSyncStatus('disconnected');
-      });
-    }
-
     return () => {
       unsubscribe();
-      storage.stopSync();
     };
   }, [
-    currentUser,
-    isLoggedIn,
+    activeProfileId,
     isNearBottom,
     loadInitialEvents,
     refreshLatestEvents,
     scheduleLatestRefresh,
-    syncServerUrl,
   ]);
 
   // 处理发送消息
@@ -516,10 +482,10 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
             <h2 className="text-lg sm:text-2xl font-bold">事件日志</h2>
             {/* 同步状态 */}
             <Badge
-              variant={syncStatus === 'connected' ? 'default' : syncStatus === 'syncing' ? 'outline' : 'secondary'}
+              variant={syncStatus === 'connected' ? 'default' : 'secondary'}
               className="text-xs"
             >
-              {syncStatus === 'connected' ? '已同步' : syncStatus === 'syncing' ? '同步中...' : '未同步'}
+              {syncStatus === 'connected' ? '已同步' : '未同步'}
             </Badge>
           </div>
           <Badge variant="secondary" className="text-xs">

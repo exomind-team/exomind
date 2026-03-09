@@ -26,7 +26,7 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     render(<SettingsPage />);
     const row = screen.getByText('功能开关');
     fireEvent.click(row);
-    expect(screen.getByText('Agent 页面')).toBeInTheDocument();
+    expect(screen.getByText('网络页面')).toBeInTheDocument();
     expect(screen.getByText('命令面板')).toBeInTheDocument();
   });
 

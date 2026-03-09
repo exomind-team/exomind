@@ -1,6 +1,7 @@
 import type { EventData, EventMetadata, Tag } from '../types/event';
 import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
 import { getEventStorage, type Event as StorageEvent } from '../storage/event-storage';
+import { appendEventWithEcsReplication } from '../services/ecs-eventlog-replication.service';
 
 const NOTE_TAG: Tag = 'note';
 const TAGS_METADATA_KEY = 'tags';
@@ -27,7 +28,7 @@ export class WebEventLogStorageAdapter implements IEventLogPort {
   }
 
   async appendEvent(event: EventData): Promise<void> {
-    await this.storage.addEvent(this.toStorageEvent(event));
+    await appendEventWithEcsReplication(this.toStorageEvent(event), this.userId);
   }
 
   async getEvent(id: string): Promise<EventData | null> {

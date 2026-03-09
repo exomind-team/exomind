@@ -10,7 +10,8 @@ use std::convert::Infallible;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::broadcast;
-use tokio::time::{Duration, Interval};
+use tokio::time::{Duration, Instant, Interval};
+use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
 
 use crate::signal::types::{SignalEvent, SignalRoute, TargetType};
 use crate::AppState;
@@ -129,7 +130,7 @@ async fn stream_handler(
     let route_table = state.signal_pool.routes();
     let replay: Vec<Event> = replay_events
         .into_iter()
-        .filter(|evt| routes_target_agent(route_table, &evt.topic, &agent_id))
+        .filter(|evt| routes_target_stream_subscriber(route_table, &evt.topic, &agent_id))
         .filter_map(|evt| {
             serde_json::to_string(&evt).ok().map(|json| {
                 Event::default()
@@ -256,21 +257,26 @@ pub fn router() -> Router<AppState> {
 
 // ── SSE stream implementation ───────────────────────────────────
 
-/// Check whether any route for the given topic targets the specified agent.
-fn routes_target_agent(
+/// Check whether any route for the given topic targets the current SSE subscriber.
+///
+/// `frontend:ui` and `agent:ui` intentionally share the same `agent_id=ui`
+/// subscription contract so the existing frontend SSE client can project UI-targeted
+/// signals without inventing a second stream endpoint.
+fn routes_target_stream_subscriber(
     route_table: &crate::signal::RouteTable,
     topic: &str,
-    agent_id: &str,
+    subscriber_id: &str,
 ) -> bool {
     let matched = route_table.match_routes(topic);
-    matched
-        .iter()
-        .any(|r| matches!(r.target_type, TargetType::Agent) && r.target_ref == agent_id)
+    matched.iter().any(|route| {
+        matches!(route.target_type, TargetType::Agent | TargetType::Frontend)
+            && route.target_ref == subscriber_id
+    })
 }
 
 /// A custom stream that merges broadcast events with periodic heartbeats.
 struct SignalSseStream {
-    rx: broadcast::Receiver<SignalEvent>,
+    rx: BroadcastStream<SignalEvent>,
     agent_id: String,
     heartbeat: Interval,
     state: AppState,
@@ -283,9 +289,12 @@ impl SignalSseStream {
         heartbeat_secs: u64,
         state: AppState,
     ) -> Self {
-        let interval = tokio::time::interval(Duration::from_secs(heartbeat_secs));
+        let interval = tokio::time::interval_at(
+            Instant::now() + Duration::from_secs(heartbeat_secs),
+            Duration::from_secs(heartbeat_secs),
+        );
         Self {
-            rx,
+            rx: BroadcastStream::new(rx),
             agent_id,
             heartbeat: interval,
             state,
@@ -299,10 +308,9 @@ impl Stream for SignalSseStream {
     fn poll_next(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Option<Self::Item>> {
         let this = self.get_mut();
 
-        // Check for broadcast events first.
-        match this.rx.try_recv() {
-            Ok(event) => {
-                if routes_target_agent(
+        match Pin::new(&mut this.rx).poll_next(cx) {
+            Poll::Ready(Some(Ok(event))) => {
+                if routes_target_stream_subscriber(
                     this.state.signal_pool.routes(),
                     &event.topic,
                     &this.agent_id,
@@ -313,22 +321,15 @@ impl Stream for SignalSseStream {
                         .id(event.id)
                         .data(json))));
                 }
-                // Event not for this agent or serialization failed; wake to poll again.
                 cx.waker().wake_by_ref();
                 return Poll::Pending;
             }
-            Err(broadcast::error::TryRecvError::Empty) => {
-                // No events available right now; fall through to heartbeat check.
-            }
-            Err(broadcast::error::TryRecvError::Lagged(n)) => {
-                // Missed some events; log and continue.
+            Poll::Ready(Some(Err(BroadcastStreamRecvError::Lagged(n)))) => {
                 let msg = format!("{{\"warning\":\"lagged\",\"missed\":{n}}}");
                 return Poll::Ready(Some(Ok(Event::default().event("warning").data(msg))));
             }
-            Err(broadcast::error::TryRecvError::Closed) => {
-                // Channel closed; end the stream.
-                return Poll::Ready(None);
-            }
+            Poll::Ready(None) => return Poll::Ready(None),
+            Poll::Pending => {}
         }
 
         // Check heartbeat timer.
@@ -338,32 +339,7 @@ impl Stream for SignalSseStream {
             return Poll::Ready(Some(Ok(Event::default().event("heartbeat").data(data))));
         }
 
-        // Register waker for broadcast channel by attempting an async recv.
-        // We use a future to poll the receiver.
-        let mut recv_fut = Box::pin(this.rx.recv());
-        match Pin::new(&mut recv_fut).poll(cx) {
-            Poll::Ready(Ok(event)) => {
-                if routes_target_agent(
-                    this.state.signal_pool.routes(),
-                    &event.topic,
-                    &this.agent_id,
-                ) && let Ok(json) = serde_json::to_string(&event)
-                {
-                    return Poll::Ready(Some(Ok(Event::default()
-                        .event("signal")
-                        .id(event.id)
-                        .data(json))));
-                }
-                cx.waker().wake_by_ref();
-                Poll::Pending
-            }
-            Poll::Ready(Err(broadcast::error::RecvError::Lagged(n))) => {
-                let msg = format!("{{\"warning\":\"lagged\",\"missed\":{n}}}");
-                Poll::Ready(Some(Ok(Event::default().event("warning").data(msg))))
-            }
-            Poll::Ready(Err(broadcast::error::RecvError::Closed)) => Poll::Ready(None),
-            Poll::Pending => Poll::Pending,
-        }
+        Poll::Pending
     }
 }
 
@@ -391,6 +367,11 @@ mod tests {
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
             mesh_relay: None,
+            auth_secret: None,
+            mdns: None,
+            pairing: Arc::new(crate::pairing::PairingManager::new()),
+            task_store: Arc::new(crate::task::TaskStore::new()),
+            energy_registry: crate::energy::EnergyRegistry::new(),
         }
     }
 
@@ -690,5 +671,53 @@ mod tests {
         assert_eq!(events[0].trace_id.as_deref(), Some("trace-123"));
         assert_eq!(events[0].hop, 0);
         assert_eq!(events[0].schema_version, 1);
+    }
+
+    #[test]
+    fn stream_route_matching_accepts_frontend_ui_targets() {
+        let signal_pool = SignalPool::new(None);
+        let now = chrono::Utc::now().to_rfc3339();
+        signal_pool.routes().add(SignalRoute {
+            id: "route-ui".to_string(),
+            enabled: true,
+            topic: "eventlog.replication.appended".to_string(),
+            target_type: TargetType::Frontend,
+            target_ref: "ui".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        });
+
+        assert!(
+            routes_target_stream_subscriber(
+                signal_pool.routes(),
+                "eventlog.replication.appended",
+                "ui",
+            ),
+            "frontend:ui routes should be deliverable to the UI SSE subscriber"
+        );
+    }
+
+    #[test]
+    fn stream_route_matching_keeps_actor_targets_out_of_sse_subscriber() {
+        let signal_pool = SignalPool::new(None);
+        let now = chrono::Utc::now().to_rfc3339();
+        signal_pool.routes().add(SignalRoute {
+            id: "route-actor".to_string(),
+            enabled: true,
+            topic: "eventlog.replication.appended".to_string(),
+            target_type: TargetType::Actor,
+            target_ref: "eventlog".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        });
+
+        assert!(
+            !routes_target_stream_subscriber(
+                signal_pool.routes(),
+                "eventlog.replication.appended",
+                "ui",
+            ),
+            "actor routes should not leak into the SSE subscriber stream"
+        );
     }
 }

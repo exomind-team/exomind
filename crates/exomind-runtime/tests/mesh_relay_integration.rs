@@ -1,106 +1,24 @@
+mod support;
+
 use exomind_runtime::{RuntimePublishRequest, RuntimeStartOptions, start_with_options};
 use futures_util::StreamExt;
 use serde_json::json;
 use std::time::Duration;
-
-async fn wait_until<F>(timeout: Duration, mut predicate: F)
--> bool
-where
-    F: FnMut() -> bool,
-{
-    let started = std::time::Instant::now();
-    while started.elapsed() < timeout {
-        if predicate() {
-            return true;
-        }
-        tokio::time::sleep(Duration::from_millis(50)).await;
-    }
-    false
-}
+use support::{create_peer, create_route, runtime_base_url, set_peer_interests, start_test_runtime, stop_runtime, wait_until};
 
 #[tokio::test]
 async fn relays_remote_targeted_events_between_two_runtimes() {
-    let mut rt_a = start_with_options(RuntimeStartOptions {
-        bind_host: "127.0.0.1".to_string(),
-        port: 0,
-        host_id: "rt-a".to_string(),
-        spawn_builtin_actors: false,
-        spawn_ts_agents: false,
-        mesh_state_path: None,
-        ..Default::default()
-    })
-    .await
-    .expect("runtime A should start");
-
-    let mut rt_b = start_with_options(RuntimeStartOptions {
-        bind_host: "127.0.0.1".to_string(),
-        port: 0,
-        host_id: "rt-b".to_string(),
-        spawn_builtin_actors: false,
-        spawn_ts_agents: false,
-        mesh_state_path: None,
-        ..Default::default()
-    })
-    .await
-    .expect("runtime B should start");
+    let mut rt_a = start_test_runtime("rt-a").await;
+    let mut rt_b = start_test_runtime("rt-b").await;
 
     let client = reqwest::Client::new();
-    let a_url = format!("http://127.0.0.1:{}", rt_a.port());
-    let b_url = format!("http://127.0.0.1:{}", rt_b.port());
+    let a_url = runtime_base_url(&rt_a);
+    let b_url = runtime_base_url(&rt_b);
 
-    client
-        .post(format!("{a_url}/mesh/peers"))
-        .json(&json!({
-            "id": "rt-b",
-            "base_url": b_url,
-            "enabled": true,
-            "capabilities": ["relay"]
-        }))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
-
-    client
-        .post(format!("{b_url}/mesh/peers"))
-        .json(&json!({
-            "id": "rt-a",
-            "base_url": a_url,
-            "enabled": true,
-            "capabilities": ["relay"]
-        }))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
-
-    client
-        .post(format!("{b_url}/signal-routes"))
-        .json(&json!({
-            "topic": "mesh.test",
-            "target_type": "agent",
-            "target_ref": "relay-probe"
-        }))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
-
-    client
-        .post(format!("{a_url}/signal-routes"))
-        .json(&json!({
-            "topic": "mesh.test",
-            "target_type": "remote",
-            "target_ref": "rt-b"
-        }))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
+    create_peer(&client, &rt_a, "rt-b", &b_url).await;
+    create_peer(&client, &rt_b, "rt-a", &a_url).await;
+    create_route(&client, &rt_b, "mesh.test", "agent", "relay-probe").await;
+    create_route(&client, &rt_a, "mesh.test", "remote", "rt-b").await;
 
     assert!(wait_until(Duration::from_secs(3), || {
         let interests = rt_a
@@ -153,14 +71,8 @@ async fn relays_remote_targeted_events_between_two_runtimes() {
         );
     }
 
-    tokio::time::timeout(Duration::from_secs(5), rt_b.stop())
-        .await
-        .expect("runtime B stop should not hang")
-        .expect("runtime B should stop");
-    tokio::time::timeout(Duration::from_secs(5), rt_a.stop())
-        .await
-        .expect("runtime A stop should not hang")
-        .expect("runtime A should stop");
+    stop_runtime(&mut rt_b, "B").await;
+    stop_runtime(&mut rt_a, "A").await;
 }
 
 #[tokio::test]
@@ -178,31 +90,10 @@ async fn mesh_stream_replays_remote_routed_events_from_last_event_id() {
     .expect("runtime A should start");
 
     let client = reqwest::Client::new();
-    let a_url = format!("http://127.0.0.1:{}", rt_a.port());
+    let a_url = runtime_base_url(&rt_a);
 
-    client
-        .post(format!("{a_url}/signal-routes"))
-        .json(&json!({
-            "topic": "mesh.test",
-            "target_type": "remote",
-            "target_ref": "rt-b"
-        }))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
-
-    client
-        .put(format!("{a_url}/mesh/interests/rt-b"))
-        .json(&json!({
-            "topics": ["mesh.test"]
-        }))
-        .send()
-        .await
-        .unwrap()
-        .error_for_status()
-        .unwrap();
+    create_route(&client, &rt_a, "mesh.test", "remote", "rt-b").await;
+    set_peer_interests(&client, &rt_a, "rt-b", &["mesh.test"]).await;
 
     let first_id = rt_a.publish_signal(RuntimePublishRequest {
         topic: "mesh.test".to_string(),

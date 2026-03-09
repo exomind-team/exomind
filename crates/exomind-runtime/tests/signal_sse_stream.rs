@@ -11,8 +11,10 @@
 
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use futures_util::StreamExt;
 use http_body_util::BodyExt;
 use serde_json::{json, Value};
+use tokio::time::{timeout, Duration};
 use tower::util::ServiceExt;
 
 /// Helper: 构建带 Signal 路由的测试 app
@@ -155,17 +157,190 @@ async fn stream_returns_sse_content_type() {
     );
 }
 
-// SSE 事件格式验证需要在完整实现后测试
-// 预期格式:
-//   event: signal
-//   id: <event_id>
-//   data: {"schema_version":1,"id":"...","topic":"...","ts":...,"source":"...","payload":{...}}
-//
-// #[tokio::test]
-// async fn stream_receives_published_event() {
-//     // 需要并发: 一个 task 监听 stream，另一个 publish
-//     // 实现后补充完整测试
-// }
+#[tokio::test]
+async fn stream_replays_frontend_ui_targeted_events_for_ui_agent() {
+    let app = test_app();
+
+    let create_route_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signal-routes")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "topic": "eventlog.replication.appended",
+                        "target_type": "frontend",
+                        "target_ref": "ui"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_route_response.status(), StatusCode::CREATED);
+
+    let first_publish = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signals/publish")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "topic": "eventlog.replication.appended",
+                        "source": "frontend:test",
+                        "payload": { "sequence": 1 }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(first_publish.status(), StatusCode::OK);
+    let first_body = first_publish.into_body().collect().await.unwrap().to_bytes();
+    let first_payload: Value = serde_json::from_slice(&first_body).unwrap();
+    let last_event_id = first_payload["event_id"]
+        .as_str()
+        .expect("publish should return event_id")
+        .to_string();
+
+    let second_publish = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signals/publish")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "topic": "eventlog.replication.appended",
+                        "source": "frontend:test",
+                        "payload": { "sequence": 2 }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(second_publish.status(), StatusCode::OK);
+
+    let response = app
+        .oneshot(
+            Request::builder()
+                .uri("/signals/stream?agent_id=ui")
+                .header("Last-Event-ID", last_event_id)
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut body = response.into_body().into_data_stream();
+    let next_chunk = timeout(Duration::from_millis(200), body.next())
+        .await
+        .expect("frontend ui replay should arrive without waiting for heartbeat")
+        .expect("stream should yield a replay chunk")
+        .expect("stream chunk should be readable");
+
+    let text = String::from_utf8(next_chunk.to_vec()).expect("chunk should be valid utf-8");
+    assert!(
+        text.contains("eventlog.replication.appended"),
+        "frontend:ui replay should be delivered to /signals/stream?agent_id=ui, chunk: {text}"
+    );
+    assert!(
+        text.contains("\"sequence\":2"),
+        "replay should contain the event newer than Last-Event-ID, chunk: {text}"
+    );
+}
+
+#[tokio::test]
+async fn stream_receives_live_frontend_ui_event_without_waiting_for_heartbeat() {
+    let app = test_app();
+
+    let create_route_response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signal-routes")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "topic": "eventlog.replication.appended",
+                        "target_type": "frontend",
+                        "target_ref": "ui"
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(create_route_response.status(), StatusCode::CREATED);
+
+    let response = app
+        .clone()
+        .oneshot(
+            Request::builder()
+                .uri("/signals/stream?agent_id=ui&heartbeat_interval=30")
+                .body(Body::empty())
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+
+    let mut body = response.into_body().into_data_stream();
+    let read_task = tokio::spawn(async move {
+        let next_chunk = timeout(Duration::from_millis(400), body.next())
+            .await
+            .expect("live event should arrive without waiting for heartbeat")
+            .expect("stream should yield a live chunk")
+            .expect("stream chunk should be readable");
+
+        String::from_utf8(next_chunk.to_vec()).expect("chunk should be valid utf-8")
+    });
+
+    tokio::time::sleep(Duration::from_millis(10)).await;
+
+    let publish_response = app
+        .oneshot(
+            Request::builder()
+                .method("POST")
+                .uri("/signals/publish")
+                .header("content-type", "application/json")
+                .body(Body::from(
+                    json!({
+                        "topic": "eventlog.replication.appended",
+                        "source": "frontend:test",
+                        "payload": { "sequence": 3 }
+                    })
+                    .to_string(),
+                ))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+    assert_eq!(publish_response.status(), StatusCode::OK);
+
+    let text = read_task.await.unwrap();
+    assert!(
+        text.contains("eventlog.replication.appended"),
+        "live stream should deliver frontend:ui events, chunk: {text}"
+    );
+    assert!(
+        text.contains("\"sequence\":3"),
+        "live chunk should contain the published payload, chunk: {text}"
+    );
+}
 
 // ═══════════════════════════════════════════════════════
 //  3. GET /signals/history

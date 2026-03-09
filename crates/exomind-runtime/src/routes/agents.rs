@@ -11,7 +11,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::AppState;
-use crate::agent::{self, Agent, AgentSummary, ChatChunk, ChatRequest, SessionInfo};
+use crate::agent::{self, Agent, AgentSummary, ChatChunk, ChatRequest, RuntimeAgentEvent, SessionInfo};
 
 #[derive(Debug, Deserialize)]
 struct ChatRequestPayload {
@@ -35,6 +35,17 @@ struct CreateAgentPayload {
     name: Option<String>,
     #[serde(default)]
     description: Option<String>,
+    #[serde(default)]
+    provider_profile: Option<ApiProviderProfilePayload>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct ApiProviderProfilePayload {
+    provider: String,
+    model: String,
+    #[serde(default)]
+    base_url: Option<String>,
+    api_key: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -73,19 +84,44 @@ fn agent_summary(agent: &Arc<dyn Agent>) -> AgentSummary {
         name: agent.name().to_string(),
         description: agent.description().to_string(),
         status: agent.status().to_string(),
+        subscriptions: agent.subscriptions(),
+        publications: agent.publications(),
+        tick_interval_secs: agent.tick_interval_secs(),
     }
+}
+
+fn is_valid_runtime_agent_id(id: &str) -> bool {
+    id.chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
+}
+
+fn generate_runtime_agent_id(prefix: &str) -> String {
+    let short = Uuid::new_v4().simple().to_string();
+    format!("{prefix}-{}", &short[..8])
+}
+
+fn encode_runtime_event(event: RuntimeAgentEvent) -> Event {
+    let encoded = serde_json::to_string(&event).expect("RuntimeAgentEvent serialization failed");
+    Event::default().data(encoded)
+}
+
+fn map_chat_chunk_to_runtime_events(chunk: ChatChunk) -> Vec<RuntimeAgentEvent> {
+    let mut events = Vec::new();
+
+    if let Some(session_id) = chunk.session_id {
+        events.push(RuntimeAgentEvent::session_started(session_id));
+    }
+    if !chunk.content.is_empty() {
+        events.push(RuntimeAgentEvent::output_delta(chunk.content));
+    }
+
+    events
 }
 
 fn create_echo_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, StatusCode> {
     let requested_id = normalize_optional_text(payload.id);
-    let id = requested_id.unwrap_or_else(|| {
-        let short = Uuid::new_v4().simple().to_string();
-        format!("echo-{}", &short[..8])
-    });
-    if !id
-        .chars()
-        .all(|ch| ch.is_ascii_alphanumeric() || ch == '-' || ch == '_')
-    {
+    let id = requested_id.unwrap_or_else(|| generate_runtime_agent_id("echo"));
+    if !is_valid_runtime_agent_id(&id) {
         return Err(StatusCode::BAD_REQUEST);
     }
 
@@ -96,15 +132,79 @@ fn create_echo_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, Stat
     )))
 }
 
-fn create_claude_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, StatusCode> {
+fn create_claude_agent(payload: CreateAgentPayload, dynamic_id: bool) -> Result<Arc<dyn Agent>, StatusCode> {
     let requested_id = normalize_optional_text(payload.id);
-    if let Some(id) = requested_id
-        && id != "claude"
-    {
+    let id = if dynamic_id {
+        requested_id.unwrap_or_else(|| generate_runtime_agent_id("claude"))
+    } else {
+        requested_id.unwrap_or_else(|| "claude".to_string())
+    };
+    if !dynamic_id && id != "claude" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !is_valid_runtime_agent_id(&id) {
         return Err(StatusCode::BAD_REQUEST);
     }
 
-    Ok(Arc::new(agent::claude::ClaudeAgent::new()))
+    Ok(Arc::new(agent::claude::ClaudeAgent::managed(
+        id,
+        normalize_optional_text(payload.name),
+        normalize_optional_text(payload.description),
+    )))
+}
+
+fn create_codex_agent(payload: CreateAgentPayload, dynamic_id: bool) -> Result<Arc<dyn Agent>, StatusCode> {
+    let requested_id = normalize_optional_text(payload.id);
+    let id = if dynamic_id {
+        requested_id.unwrap_or_else(|| generate_runtime_agent_id("codex"))
+    } else {
+        requested_id.unwrap_or_else(|| "codex".to_string())
+    };
+    if !dynamic_id && id != "codex" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    if !is_valid_runtime_agent_id(&id) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    Ok(Arc::new(agent::codex::CodexAgent::managed(
+        id,
+        normalize_optional_text(payload.name),
+        normalize_optional_text(payload.description),
+    )))
+}
+
+fn create_api_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, StatusCode> {
+    let requested_id = normalize_optional_text(payload.id);
+    let id = requested_id.unwrap_or_else(|| generate_runtime_agent_id("api"));
+    if !is_valid_runtime_agent_id(&id) {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    let Some(provider_profile) = payload.provider_profile else {
+        return Err(StatusCode::BAD_REQUEST);
+    };
+    let provider = provider_profile.provider.trim().to_ascii_lowercase();
+    if provider != "openai" && provider != "anthropic" {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+    let model = provider_profile.model.trim().to_string();
+    let api_key = provider_profile.api_key.trim().to_string();
+    if model.is_empty() || api_key.is_empty() {
+        return Err(StatusCode::BAD_REQUEST);
+    }
+
+    Ok(Arc::new(agent::api::ApiAgent::managed(
+        id,
+        normalize_optional_text(payload.name),
+        normalize_optional_text(payload.description),
+        agent::api::ApiProviderProfile {
+            provider,
+            model,
+            base_url: normalize_optional_text(provider_profile.base_url),
+            api_key,
+        },
+    )))
 }
 
 async fn create_agent(
@@ -114,7 +214,11 @@ async fn create_agent(
     let kind = payload.kind.trim().to_ascii_lowercase();
     let agent = match kind.as_str() {
         "echo" => create_echo_agent(payload)?,
-        "claude" => create_claude_agent(payload)?,
+        "claude" => create_claude_agent(payload, false)?,
+        "claude_cli" => create_claude_agent(payload, true)?,
+        "codex" => create_codex_agent(payload, false)?,
+        "codex_cli" => create_codex_agent(payload, true)?,
+        "api" => create_api_agent(payload)?,
         _ => return Err(StatusCode::BAD_REQUEST),
     };
 
@@ -158,14 +262,18 @@ async fn chat_with_agent(
             .filter(|session| !session.is_empty()),
     };
 
-    let data_stream = agent.chat_stream(request).map(|chunk: ChatChunk| {
-        // ChatChunk currently only contains strings, JSON serialization is expected infallible.
-        let encoded = serde_json::to_string(&chunk).expect("ChatChunk serialization failed");
-        Ok::<Event, Infallible>(Event::default().data(encoded))
+    let data_stream = agent.chat_stream(request).flat_map(|chunk: ChatChunk| {
+        let events = map_chat_chunk_to_runtime_events(chunk)
+            .into_iter()
+            .map(|event| Ok::<Event, Infallible>(encode_runtime_event(event)))
+            .collect::<Vec<_>>();
+        stream::iter(events)
     });
 
-    let done_stream =
-        stream::once(async { Ok::<Event, Infallible>(Event::default().data("[DONE]")) });
+    let done_stream = stream::iter(vec![
+        Ok::<Event, Infallible>(encode_runtime_event(RuntimeAgentEvent::done(Some("stop")))),
+        Ok::<Event, Infallible>(Event::default().data("[DONE]")),
+    ]);
 
     let stream = data_stream.chain(done_stream);
 

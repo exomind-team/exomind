@@ -16,9 +16,15 @@ use mesh::{MeshRelayManager, MeshState};
 use signal::SignalPool;
 
 pub mod agent;
+pub mod auth;
+pub mod discovery;
 pub mod mesh;
+pub mod pairing;
 pub mod routes;
 pub mod signal;
+pub mod task;
+pub mod energy;
+pub mod tick;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_RT_PORT: u16 = 1949;
@@ -77,6 +83,10 @@ pub struct RuntimeStartOptions {
     pub ts_agent_workdir: Option<PathBuf>,
     /// optional mesh state path（可选 peer/interest 持久化路径）.
     pub mesh_state_path: Option<PathBuf>,
+    /// optional bearer token secret for HTTP auth（可选 Bearer Token 鉴权密钥）.
+    pub auth_secret: Option<String>,
+    /// enable mDNS service discovery for LAN peer auto-detection（启用 mDNS 局域网自动发现）.
+    pub enable_mdns: bool,
 }
 
 impl Default for RuntimeStartOptions {
@@ -88,6 +98,13 @@ impl Default for RuntimeStartOptions {
             })
             .unwrap_or(true);
 
+        let enable_mdns = env::var("EXOMIND_RT_MDNS")
+            .map(|value| {
+                let value = value.to_ascii_lowercase();
+                value == "1" || value == "true"
+            })
+            .unwrap_or(false);
+
         Self {
             bind_host: configured_bind_host_from_env(),
             port: configured_port_from_env().unwrap_or(DEFAULT_RT_PORT),
@@ -98,6 +115,8 @@ impl Default for RuntimeStartOptions {
                 .unwrap_or_else(|_| "bun".to_string()),
             ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
             mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH").ok().map(PathBuf::from),
+            auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
+            enable_mdns,
         }
     }
 }
@@ -145,11 +164,15 @@ pub struct RuntimeHandle {
     local_addr: SocketAddr,
     host_id: String,
     signal_pool: Arc<SignalPool>,
+    mesh: Arc<MeshState>,
     mesh_relay: Option<Arc<MeshRelayManager>>,
+    mdns: Option<Arc<discovery::MdnsDiscovery>>,
     shutdown_tx: Option<oneshot::Sender<()>>,
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
     ts_agents: Vec<TsAgentProcess>,
+    tick_cancel: Arc<std::sync::atomic::AtomicBool>,
+    tick_tasks: Vec<JoinHandle<()>>,
 }
 
 /// Publish request for in-process fast path（进程内快速发布请求）.
@@ -207,6 +230,11 @@ impl RuntimeHandle {
         Arc::clone(&self.signal_pool)
     }
 
+    /// Clone underlying MeshState Arc（克隆底层 MeshState 引用）.
+    pub fn clone_mesh_state(&self) -> Arc<MeshState> {
+        Arc::clone(&self.mesh)
+    }
+
     /// Publish via a provided SignalPool（在指定 SignalPool 上发布）.
     pub fn publish_signal_to_pool(
         signal_pool: &SignalPool,
@@ -237,6 +265,12 @@ impl RuntimeHandle {
     pub async fn stop(&mut self) -> Result<(), RuntimeStopError> {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
+        }
+
+        self.tick_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        for task in self.tick_tasks.drain(..) {
+            task.abort();
+            let _ = task.await;
         }
 
         for task in &self.actor_tasks {
@@ -270,6 +304,10 @@ impl RuntimeHandle {
         }
         self.ts_agents.clear();
 
+        if let Some(mdns) = self.mdns.take() {
+            mdns.shutdown();
+        }
+
         if let Some(mesh_relay) = &self.mesh_relay {
             mesh_relay.shutdown().await;
         }
@@ -299,8 +337,15 @@ impl RuntimeHandle {
 
 impl Drop for RuntimeHandle {
     fn drop(&mut self) {
+        if let Some(mdns) = self.mdns.take() {
+            mdns.shutdown();
+        }
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
+        }
+        self.tick_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
+        for task in self.tick_tasks.drain(..) {
+            task.abort();
         }
         for task in self.actor_tasks.drain(..) {
             task.abort();
@@ -342,22 +387,52 @@ pub async fn start_with_options(
         .local_addr()
         .map_err(RuntimeStartError::ReadLocalAddr)?;
 
-    let state = AppState::new_runtime(
+    let mut state = AppState::new_runtime(
         local_addr.port(),
         options.host_id.clone(),
         options.mesh_state_path.clone(),
         true,
+        options.auth_secret.clone(),
     );
+
+    // mDNS discovery setup.
+    let mdns = if options.enable_mdns {
+        match discovery::MdnsDiscovery::new(options.host_id.clone(), local_addr.port()) {
+            Ok(mdns) => {
+                if let Err(e) = mdns.register() {
+                    tracing::warn!("mDNS register failed: {e}");
+                }
+                if let Err(e) = mdns.start_browsing() {
+                    tracing::warn!("mDNS browsing failed: {e}");
+                }
+                let arc = Arc::new(mdns);
+                state.mdns = Some(Arc::clone(&arc));
+                Some(arc)
+            }
+            Err(e) => {
+                tracing::warn!("mDNS daemon creation failed: {e}");
+                None
+            }
+        }
+    } else {
+        None
+    };
+
     let signal_pool = Arc::clone(&state.signal_pool);
+    let mesh = Arc::clone(&state.mesh);
     let mesh_relay = state.mesh_relay.clone();
 
     let mut actor_tasks = Vec::new();
     if options.spawn_builtin_actors {
-        actor_tasks.push(signal::actors::task_actor::spawn_task_actor(Arc::clone(
+        actor_tasks.push(signal::actors::task_classifier_actor::spawn_task_actor(Arc::clone(
             &state.signal_pool,
         )));
         actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(
             Arc::clone(&state.signal_pool),
+        ));
+        actor_tasks.push(task::actor::spawn_task_store_actor(
+            Arc::clone(&state.signal_pool),
+            Arc::clone(&state.task_store),
         ));
     }
 
@@ -366,6 +441,23 @@ pub async fn start_with_options(
     } else {
         Vec::new()
     };
+
+    // Register heartbeat demo agent + energy
+    if options.spawn_builtin_actors {
+        let heartbeat = Arc::new(agent::heartbeat::HeartbeatAgent::new("heartbeat"));
+        state.registry.register(heartbeat);
+        state.energy_registry.register("heartbeat", energy::AgentEnergy::new(100, 10));
+    }
+
+    // Start tick scheduler for all agents with tick_interval_secs > 0
+    let tick_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let tick_tasks = tick::start_all_ticks(
+        &state.registry,
+        &state.energy_registry,
+        &state.signal_pool,
+        &options.host_id,
+        Arc::clone(&tick_cancel),
+    );
 
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
@@ -386,11 +478,15 @@ pub async fn start_with_options(
         local_addr,
         host_id: options.host_id,
         signal_pool,
+        mesh,
         mesh_relay,
+        mdns,
         shutdown_tx: Some(shutdown_tx),
         server_task: Some(server_task),
         actor_tasks,
         ts_agents,
+        tick_cancel,
+        tick_tasks,
     })
 }
 
@@ -508,6 +604,7 @@ pub fn app(runtime_port: u16) -> Router {
 /// Build HTTP router from an existing AppState.
 pub fn app_with_state(state: AppState) -> Router {
     // Enable CORS for browser-side host aggregation (允许浏览器跨端口访问 runtime).
+    // CORS must be outermost so that preflight OPTIONS requests (which carry no token) are handled.
     let cors = CorsLayer::new()
         .allow_origin(Any)
         .allow_methods([
@@ -519,9 +616,17 @@ pub fn app_with_state(state: AppState) -> Router {
         ])
         .allow_headers(Any);
 
+    // Protected routes — auth middleware applied here.
+    let protected = routes::router()
+        .route_layer(axum::middleware::from_fn_with_state(
+            state.clone(),
+            auth::require_auth,
+        ));
+
     Router::new()
         .route("/health", get(health))
-        .merge(routes::router())
+        .merge(routes::public_router())
+        .merge(protected)
         .layer(cors)
         .with_state(state)
 }
@@ -534,11 +639,16 @@ pub struct AppState {
     pub signal_pool: Arc<SignalPool>,
     pub mesh: Arc<MeshState>,
     pub mesh_relay: Option<Arc<MeshRelayManager>>,
+    pub auth_secret: Option<String>,
+    pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
+    pub pairing: Arc<pairing::PairingManager>,
+    pub task_store: Arc<task::TaskStore>,
+    pub energy_registry: energy::EnergyRegistry,
 }
 
 impl AppState {
     pub fn new(port: u16) -> Self {
-        Self::new_runtime(port, default_runtime_host_id(port), None, false)
+        Self::new_runtime(port, default_runtime_host_id(port), None, false, None)
     }
 
     pub fn new_runtime(
@@ -546,6 +656,7 @@ impl AppState {
         host_id: String,
         mesh_persist_path: Option<PathBuf>,
         enable_mesh_relay: bool,
+        auth_secret: Option<String>,
     ) -> Self {
         let registry = agent::AgentRegistry::new();
         registry.register(Arc::new(agent::claude::ClaudeAgent::new()));
@@ -568,6 +679,11 @@ impl AppState {
             signal_pool,
             mesh,
             mesh_relay,
+            auth_secret,
+            mdns: None,
+            pairing: Arc::new(pairing::PairingManager::new()),
+            task_store: Arc::new(task::TaskStore::new()),
+            energy_registry: energy::EnergyRegistry::new(),
         }
     }
 }
@@ -648,6 +764,11 @@ mod tests {
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(mesh::MeshState::new(host_id, Arc::clone(&signal_pool), None)),
             mesh_relay: None,
+            auth_secret: None,
+            mdns: None,
+            pairing: Arc::new(pairing::PairingManager::new()),
+            task_store: Arc::new(task::TaskStore::new()),
+            energy_registry: energy::EnergyRegistry::new(),
         }
     }
 
@@ -785,6 +906,20 @@ mod tests {
         assert_eq!(payload["port"], serde_json::json!(TEST_PORT));
         assert!(payload["total_memory_mb"].is_u64());
         assert!(payload["used_memory_mb"].is_u64());
+        assert!(payload["capabilities"].is_object());
+        assert!(payload["capabilities"]["agent_kinds"].is_array());
+        assert!(payload["capabilities"]["api_providers"].is_array());
+        let agent_kinds = payload["capabilities"]["agent_kinds"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        let api_providers = payload["capabilities"]["api_providers"]
+            .as_array()
+            .cloned()
+            .unwrap_or_default();
+        assert!(agent_kinds.iter().any(|item| item == "api"));
+        assert!(api_providers.iter().any(|item| item == "openai"));
+        assert!(api_providers.iter().any(|item| item == "anthropic"));
     }
 
     #[tokio::test]
@@ -812,13 +947,19 @@ mod tests {
                     "id": "claude",
                     "name": "Claude Agent",
                     "description": "通过 Claude Code CLI 提供流式对话",
-                    "status": "available"
+                    "status": "available",
+                    "subscriptions": [],
+                    "publications": [],
+                    "tick_interval_secs": 0
                 },
                 {
                     "id": "echo",
                     "name": "Echo Agent",
                     "description": "回显输入内容",
-                    "status": "available"
+                    "status": "available",
+                    "subscriptions": [],
+                    "publications": [],
+                    "tick_interval_secs": 0
                 }
             ])
         );
@@ -849,7 +990,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn echo_chat_stream_returns_data_and_done() {
+    async fn echo_chat_stream_returns_typed_events_and_done_marker() {
         const TEST_PORT: u16 = 3003;
         let response = app(TEST_PORT)
             .oneshot(
@@ -875,12 +1016,15 @@ mod tests {
         let body_bytes = response.into_body().collect().await.unwrap().to_bytes();
         let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
-        let data_marker = r#"data: {"content":"Echo: hello"}"#;
+        let data_marker = r#"data: {"type":"output.delta","content":"Echo: hello"}"#;
+        let typed_done_marker = r#"data: {"type":"done","finish_reason":"stop"}"#;
         let done_marker = "data: [DONE]";
         let data_index = body_text.find(data_marker).unwrap();
+        let typed_done_index = body_text.find(typed_done_marker).unwrap();
         let done_index = body_text.find(done_marker).unwrap();
 
-        assert!(data_index < done_index);
+        assert!(data_index < typed_done_index);
+        assert!(typed_done_index < done_index);
     }
 
     #[tokio::test]
@@ -1196,7 +1340,10 @@ mod tests {
                     "id": "temp-route",
                     "name": "Temp Route Agent",
                     "description": "用于路由注册/注销可见性测试",
-                    "status": "available"
+                    "status": "available",
+                    "subscriptions": [],
+                    "publications": [],
+                    "tick_interval_secs": 0
                 }
             ])
         );

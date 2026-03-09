@@ -5,8 +5,17 @@ use serde_json::Value;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+use crate::energy::AgentEnergySnapshot;
+use crate::signal::types::SignalEvent;
+
+pub mod api;
 pub mod claude;
+pub mod codex;
 pub mod echo;
+pub mod heartbeat;
+pub mod runtime_event;
+
+pub use runtime_event::RuntimeAgentEvent;
 
 /// Agent summary info (Agent 列表摘要信息).
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
@@ -15,6 +24,12 @@ pub struct AgentSummary {
     pub name: String,
     pub description: String,
     pub status: String,
+    /// 订阅的信号 topic 列表.
+    pub subscriptions: Vec<String>,
+    /// 可发布的信号 topic 列表.
+    pub publications: Vec<String>,
+    /// 定时 tick 间隔（秒），0 = 无定时.
+    pub tick_interval_secs: u64,
 }
 
 /// Streaming chat chunk (流式聊天分片).
@@ -53,14 +68,23 @@ pub struct SessionInfo {
 }
 
 /// Agent behavior contract (Agent 行为契约).
+///
+/// 两层能力：
+/// - 对话能力（chat_stream）— 人和 Agent 交互
+/// - 信号网络能力（subscriptions / publications / on_signal / tick）— Agent 接入信号池
+///
+/// 现成 Agent（echo/claude/codex）只需实现对话能力，信号网络声明为空（默认值）。
+/// 自定义 Agent（Governor/Growth Coach）同时实现两层。
 pub trait Agent: Send + Sync {
-    fn id(&self) -> &'static str;
-    fn name(&self) -> &'static str;
-    fn description(&self) -> &'static str;
+    fn id(&self) -> &str;
+    fn name(&self) -> &str;
+    fn description(&self) -> &str;
 
     fn status(&self) -> &'static str {
         "available"
     }
+
+    // ── 对话能力 ──
 
     fn chat_stream(&self, request: ChatRequest) -> BoxStream<'static, ChatChunk>;
 
@@ -78,6 +102,41 @@ pub trait Agent: Send + Sync {
 
     fn stats(&self, _session_id: Option<String>) -> BoxFuture<'_, Option<Value>> {
         Box::pin(async { None })
+    }
+
+    // ── 信号网络能力 ──
+
+    /// 订阅的信号 topic 列表（输入）.
+    /// 返回空表示不订阅任何信号（纯对话 Agent）.
+    fn subscriptions(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// 可发布的信号 topic 列表（输出）.
+    /// 用于拓扑可视化和连接验证，不强制限制发布.
+    fn publications(&self) -> Vec<String> {
+        Vec::new()
+    }
+
+    /// 定时 tick 间隔（秒）. 0 = 无定时触发（纯事件驱动）.
+    /// 自定义 Agent 设为 300（5min），现成 Agent 保持 0.
+    fn tick_interval_secs(&self) -> u64 {
+        0
+    }
+
+    /// 收到匹配信号时的处理函数.
+    /// 返回要发布的信号列表（可以为空 = 决定不行动）.
+    /// 默认实现：忽略所有信号.
+    fn on_signal(&self, _event: SignalEvent) -> BoxFuture<'_, Vec<SignalEvent>> {
+        Box::pin(async { Vec::new() })
+    }
+
+    /// 定时 tick 触发时的处理函数.
+    /// tick 调度器传入当前能量快照，Agent 可据此决策.
+    /// 返回要发布的信号列表（可以为空 = 决定不行动）.
+    /// 默认实现：不做任何事.
+    fn on_tick(&self, _energy: &AgentEnergySnapshot) -> BoxFuture<'_, Vec<SignalEvent>> {
+        Box::pin(async { Vec::new() })
     }
 }
 
@@ -129,6 +188,9 @@ impl AgentRegistry {
                 name: agent.name().to_string(),
                 description: agent.description().to_string(),
                 status: agent.status().to_string(),
+                subscriptions: agent.subscriptions(),
+                publications: agent.publications(),
+                tick_interval_secs: agent.tick_interval_secs(),
             })
             .collect::<Vec<_>>();
 
@@ -146,15 +208,15 @@ mod tests {
     struct TempAgent;
 
     impl Agent for TempAgent {
-        fn id(&self) -> &'static str {
+        fn id(&self) -> &str {
             "temp"
         }
 
-        fn name(&self) -> &'static str {
+        fn name(&self) -> &str {
             "Temp Agent"
         }
 
-        fn description(&self) -> &'static str {
+        fn description(&self) -> &str {
             "Temporary testing agent"
         }
 
@@ -178,6 +240,9 @@ mod tests {
                 name: "Temp Agent".to_string(),
                 description: "Temporary testing agent".to_string(),
                 status: "available".to_string(),
+                subscriptions: vec![],
+                publications: vec![],
+                tick_interval_secs: 0,
             }]
         );
 

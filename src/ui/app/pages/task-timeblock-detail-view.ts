@@ -57,9 +57,10 @@ export interface TimeblockAiSummary {
 }
 
 export interface TimeblockActionItem {
-  id: 'open-task' | 'open-eventlog' | 'restart' | 'copy-summary';
+  id: 'back-source' | 'open-task' | 'open-eventlog' | 'restart' | 'copy-summary';
   label: string;
   to?: string;
+  search?: Record<string, string>;
 }
 
 export interface TimeblockEventLog {
@@ -87,6 +88,11 @@ export interface BuildTaskTimeblockDetailViewModelInput {
   reviewMarkdown?: string;
   useMockData?: boolean;
   now?: Date;
+  backAction?: {
+    label: string;
+    to: string;
+    search?: Record<string, string>;
+  };
 }
 
 const STATUS_BADGE_LABEL: Record<TaskNode['status'], string> = {
@@ -399,6 +405,15 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     { key: 'expected', label: '预期', value: input.task.estimatedMinutes ? formatMinutes(input.task.estimatedMinutes) : '未估时' },
     { key: 'event_count', label: '事件数', value: `${timeline.items.length}` },
   ];
+  const actions: TimeblockActionItem[] = [
+    ...(input.backAction
+      ? [{ id: 'back-source', label: input.backAction.label, to: input.backAction.to, search: input.backAction.search } as const]
+      : []),
+    { id: 'open-task', label: '查看关联任务', to: `/tasks/${input.task.id}` },
+    { id: 'open-eventlog', label: '打开 EventLog', to: '/eventlog' },
+    { id: 'restart', label: '再来一个时间块' },
+    { id: 'copy-summary', label: '复制总结' },
+  ];
 
   return {
     summary: {
@@ -416,11 +431,6 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     planActual: buildPlanActual(input.task, block, scheduleBadge),
     timeline,
     aiSummary,
-    actions: [
-      { id: 'open-task', label: '查看关联任务', to: `/tasks/${input.task.id}` },
-      { id: 'open-eventlog', label: '打开 EventLog', to: '/eventlog' },
-      { id: 'restart', label: '再来一个时间块' },
-      { id: 'copy-summary', label: '复制总结' },
-    ],
+    actions,
   };
 }

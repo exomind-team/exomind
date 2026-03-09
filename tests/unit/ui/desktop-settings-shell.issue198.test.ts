@@ -30,7 +30,10 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   it('uses four desktop nav items with network entry（桌面导航4项且使用网络入口）', () => {
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
     expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
-    expect(desktopNavBlock).toContain("title: '网络', path: '/agents', icon: Waypoints");
+    expect(desktopNavBlock).toContain("key: 'agents'");
+    expect(desktopNavBlock).toContain("title: '网络'");
+    expect(desktopNavBlock).toContain("path: '/agents'");
+    expect(desktopNavBlock).toContain('icon: Waypoints');
     expect(desktopNavBlock).toContain("title: '设置', path: '/settings'");
     expect(desktopNavBlock).not.toContain("title: '总览', path: '/dashboard'");
     expect(desktopNavBlock).not.toContain('事件日志');

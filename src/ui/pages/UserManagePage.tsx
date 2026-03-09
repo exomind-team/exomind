@@ -1,7 +1,7 @@
 /**
- * 用户管理页面
+ * 本地档案管理页面
  *
- * 用于用户注册、登录和用户管理
+ * 用于本地档案创建、打开和管理
  * 使用 PBKDF2 哈希密码存储
  *
  * TODO: 当前使用明文密码哈希，后续需要迁移到真正的 PBKDF2 加密模块
@@ -17,11 +17,13 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
 import { Badge } from '@/components/ui/badge';
+import { listLocalProfiles } from '@/lib/profile/profile-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
 
 interface UserInfo {
-  username: string;
-  passwordHash: string;
+  profileId: string;
+  loginName: string;
+  displayName: string;
   createdAt: string;
   lastLogin?: string;
 }
@@ -49,13 +51,20 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
     register,
   } = useSyncStore();
 
-  // 模拟从服务器获取用户列表
+  const reloadUsers = () => {
+    setUsers(
+      listLocalProfiles().map((profile) => ({
+        profileId: profile.profileId,
+        loginName: profile.slug,
+        displayName: profile.displayName,
+        createdAt: profile.createdAt,
+      }))
+    );
+  };
+
+  // 从本地档案索引加载列表（local-first，本地优先）
   useEffect(() => {
-    // 实际项目中，这里应该从服务器获取用户列表
-    const storedUsers = localStorage.getItem('exomind:users');
-    if (storedUsers) {
-      setUsers(JSON.parse(storedUsers));
-    }
+    reloadUsers();
   }, []);
 
   // 显示消息并自动清除
@@ -66,10 +75,10 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
     }
   }, [message]);
 
-  // 处理用户注册
+  // 处理本地档案创建
   const handleRegister = async () => {
     if (!newUsername || !newPassword) {
-      setMessage({ type: 'error', text: '用户名和密码不能为空' });
+      setMessage({ type: 'error', text: '档案标识和密码不能为空' });
       return;
     }
 
@@ -87,25 +96,20 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
     try {
       await register(newUsername, newPassword);
 
-      // sync-store 已保存用户到 localStorage（包含 passwordHash）
-      // 重新加载用户列表以获取最新数据
-      const storedUsers = localStorage.getItem('exomind:users');
-      if (storedUsers) {
-        setUsers(JSON.parse(storedUsers));
-      }
+      reloadUsers();
 
-      setMessage({ type: 'success', text: `用户 ${newUsername} 注册成功` });
+      setMessage({ type: 'success', text: `本地档案 ${newUsername} 创建成功` });
       setNewUsername('');
       setNewPassword('');
       setConfirmPassword('');
     } catch (error) {
-      setMessage({ type: 'error', text: `注册失败: ${(error as Error).message}` });
+      setMessage({ type: 'error', text: `创建档案失败: ${(error as Error).message}` });
     } finally {
       setIsLoading(false);
     }
   };
 
-  // 快速登录
+  // 快速打开本地档案
   const handleQuickLogin = async (username: string, password: string) => {
     if (!password) {
       setMessage({ type: 'error', text: '请输入密码' });
@@ -115,12 +119,12 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
     setIsLoading(true);
     try {
       await login(username, password);
-      setMessage({ type: 'success', text: `用户 ${username} 登录成功` });
+      setMessage({ type: 'success', text: `本地档案 ${username} 已打开` });
       setLoginUsername('');
       setLoginPassword('');
       setShowLoginForm(false);
     } catch (error) {
-      setMessage({ type: 'error', text: `登录失败: ${(error as Error).message}` });
+      setMessage({ type: 'error', text: `打开档案失败: ${(error as Error).message}` });
     } finally {
       setIsLoading(false);
     }
@@ -129,12 +133,19 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
   // 处理登出
   const handleLogout = () => {
     logout();
-    setMessage({ type: 'success', text: '已退出登录' });
+    setMessage({ type: 'success', text: '已退出当前档案' });
   };
 
   return (
     <div className={embedded ? 'space-y-4' : 'container mx-auto p-6 space-y-6'}>
-      {!embedded && <h1 className="text-2xl font-bold">用户管理</h1>}
+      {!embedded && (
+        <div className="space-y-1">
+          <h1 className="text-2xl font-bold">档案与同步身份</h1>
+          <p className="text-sm text-muted-foreground">
+            远端同步身份请前往同步设置绑定；本页只管理本地档案。
+          </p>
+        </div>
+      )}
 
       {/* 消息提示 */}
       {message && (
@@ -149,10 +160,10 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
         </div>
       )}
 
-      {/* 当前用户状态 */}
+      {/* 当前本地档案状态 */}
       <Card>
         <CardHeader>
-          <CardTitle>当前用户</CardTitle>
+          <CardTitle>当前本地档案</CardTitle>
         </CardHeader>
         <CardContent>
           {isLoggedIn ? (
@@ -161,26 +172,26 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
                 {currentUser}
               </Badge>
               <Button variant="outline" onClick={handleLogout}>
-                退出登录
+                退出当前档案
               </Button>
             </div>
           ) : (
-            <div className="text-muted-foreground">未登录</div>
+            <div className="text-muted-foreground">未打开档案</div>
           )}
         </CardContent>
       </Card>
 
-      {/* 用户注册 */}
+      {/* 本地档案创建 */}
       <Card>
         <CardHeader>
-          <CardTitle>注册新用户</CardTitle>
+          <CardTitle>创建本地档案</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-2">
-            <Label htmlFor="newUsername">用户名</Label>
+            <Label htmlFor="newUsername">档案标识</Label>
             <Input
               id="newUsername"
-              placeholder="请输入用户名"
+              placeholder="请输入档案标识"
               value={newUsername}
               onChange={(e) => setNewUsername(e.target.value)}
               disabled={isLoading}
@@ -212,34 +223,35 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
           </div>
 
           <Button onClick={handleRegister} disabled={isLoading}>
-            {isLoading ? '注册中...' : '注册'}
+            {isLoading ? '创建中...' : '创建档案'}
           </Button>
         </CardContent>
       </Card>
 
-      {/* 用户列表 */}
+      {/* 本地档案列表 */}
       <Card>
         <CardHeader>
-          <CardTitle>已注册用户</CardTitle>
+          <CardTitle>本地档案列表</CardTitle>
         </CardHeader>
         <CardContent>
           {users.length === 0 ? (
-            <div className="text-muted-foreground">暂无已注册用户</div>
+            <div className="text-muted-foreground">暂无本地档案</div>
           ) : (
             <div className="space-y-2">
               {users.map((user) => (
                 <div
-                  key={user.username}
+                  key={user.profileId}
                   className="flex items-center justify-between p-3 border rounded-lg"
                 >
                   <div>
-                    <div className="font-medium">{user.username}</div>
+                    <div className="font-medium">{user.displayName}</div>
                     <div className="text-sm text-muted-foreground">
-                      注册时间: {new Date(user.createdAt).toLocaleString()}
-                      {user.lastLogin && ` | 最后登录: ${new Date(user.lastLogin).toLocaleString()}`}
+                      档案标识: {user.loginName}
+                      {' | '}注册时间: {new Date(user.createdAt).toLocaleString()}
+                      {user.lastLogin && ` | 最后打开: ${new Date(user.lastLogin).toLocaleString()}`}
                     </div>
                   </div>
-                  {showLoginForm && loginUsername === user.username && (
+                  {showLoginForm && loginUsername === user.loginName && (
                     <div className="flex items-center gap-2 ml-4" style={{ width: '140px' }}>
                       <Input
                         type="password"
@@ -257,13 +269,13 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
                           variant="outline"
                           size="sm"
                           onClick={() => {
-                            setLoginUsername(user.username);
+                            setLoginUsername(user.loginName);
                             setShowLoginForm(true);
                           }}
                         >
-                          登录
+                          打开档案
                         </Button>
-                      ) : loginUsername === user.username ? (
+                      ) : loginUsername === user.loginName ? (
                         <>
                           <Button
                             variant="ghost"
@@ -278,7 +290,7 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
                           </Button>
                           <Button
                             size="sm"
-                            onClick={() => handleQuickLogin(user.username, loginPassword)}
+                            onClick={() => handleQuickLogin(user.loginName, loginPassword)}
                             disabled={isLoading || !loginPassword}
                           >
                             确定
@@ -300,10 +312,10 @@ export function UserManagePage({ embedded = false }: UserManagePageProps) {
           <CardTitle>使用说明</CardTitle>
         </CardHeader>
         <CardContent className="space-y-2 text-sm text-muted-foreground">
-          <p>1. 先注册一个新用户（用户名和密码）</p>
-          <p>2. 使用注册的用户名和密码登录</p>
-          <p>3. 在设置页配置同步服务器地址（局域网可用）</p>
-          <p>4. 同一用户名可以在多个设备上登录，数据会自动同步</p>
+          <p>1. 先创建一个本地档案（档案标识和密码）</p>
+          <p>2. 使用档案标识和密码打开本地档案</p>
+          <p>3. 不绑定服务器也能本地运行和记录</p>
+          <p>4. 只有绑定远端同步身份后，才会启用多人联邦或云同步</p>
         </CardContent>
       </Card>
     </div>

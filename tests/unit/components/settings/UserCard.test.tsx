@@ -40,7 +40,7 @@ describe('UserCard', () => {
 
     it('renders switch account button', () => {
       render(<UserCard />);
-      expect(screen.getByText('切换账户')).toBeInTheDocument();
+      expect(screen.getByText('切换档案')).toBeInTheDocument();
     });
 
     it('renders logout button', () => {
@@ -68,14 +68,19 @@ describe('UserCard', () => {
       } as any);
     });
 
-    it('renders login button', () => {
+    it('renders open-profile button（打开档案按钮）', () => {
       render(<UserCard />);
-      expect(screen.getByText('登录')).toBeInTheDocument();
+      expect(screen.getByText('打开档案')).toBeInTheDocument();
     });
 
-    it('renders register button', () => {
+    it('renders create-profile button（创建档案按钮）', () => {
       render(<UserCard />);
-      expect(screen.getByText('注册')).toBeInTheDocument();
+      expect(screen.getByText('创建档案')).toBeInTheDocument();
+    });
+
+    it('renders closed-profile state（未打开档案状态）', () => {
+      render(<UserCard />);
+      expect(screen.getByText('未打开档案')).toBeInTheDocument();
     });
 
     it('does not render activate button when logged out', () => {

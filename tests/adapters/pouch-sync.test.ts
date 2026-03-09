@@ -362,6 +362,38 @@ describe('同步类型定义', () => {
       expect(credentials.username).toBe('testuser');
       expect(credentials.passwordHash).toBe('hash123');
     });
+
+    it('优先使用 remoteIdentityKey 和远端 auth 字段（prefer remote identity fields）', async () => {
+      const module = await import('@/adapters/pouch-sync');
+      const result = module.resolveRemoteSyncTarget('http://localhost:6984', {
+        username: 'legacy-user',
+        passwordHash: 'legacy-hash',
+        remoteIdentityKey: 'space-hailay',
+        authType: 'basic',
+        authUsername: 'remote-user',
+        authSecret: 'remote-secret',
+      } as SyncCredentials);
+
+      expect(result.remoteDbKey).toBe('space-hailay');
+      expect(result.remoteUrl).toContain('/space-hailay');
+      expect(result.remoteConfig).toEqual({
+        auth: {
+          username: 'remote-user',
+          password: 'remote-secret',
+        },
+      });
+    });
+
+    it('本地同步库名应优先使用 localProfileId（prefer local profile for local db name）', async () => {
+      const module = await import('@/adapters/pouch-sync');
+      const dbName = module.resolveLocalSyncDbName({
+        localProfileId: 'profile-hailay',
+        username: 'space-hailay',
+        passwordHash: 'remote-secret',
+      } as SyncCredentials);
+
+      expect(dbName).toBe('local_profile-hailay');
+    });
   });
 });
 

@@ -1,6 +1,7 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment';
 import type { IStoragePort } from '@/lib/environment/interfaces/storage.port';
-import type { RuntimeHostRecord, RuntimeHostStatus } from '@/lib/types/agent-hub';
+import { DEFAULT_EXTERNAL_RUNTIME_PORT } from '@/config/runtime-target';
+import type { RuntimeHostRecord, RuntimeHostStatus, RuntimeHostTrustState } from '@/lib/types/agent-hub';
 import { createUuidV4 } from '@/lib/utils/uuid';
 
 const RUNTIME_HOST_STORAGE_KEY = 'agent_runtime_hosts_v1';
@@ -11,13 +12,27 @@ type RuntimeFetch = typeof fetch;
 export interface AddRuntimeHostInput {
   name?: string;
   host: string;
-  port: number;
+  port?: number;
   isLocal?: boolean;
+  hostId?: string;
+  trustState?: RuntimeHostTrustState;
+  advertisedListenAddress?: string;
+  lastSuccessfulDialAddress?: string;
+  manualOverride?: string;
+}
+
+export interface RuntimeHostMetadataPatch {
+  hostId?: string;
+  trustState?: RuntimeHostTrustState;
+  advertisedListenAddress?: string;
+  lastSuccessfulDialAddress?: string;
+  manualOverride?: string;
 }
 
 export interface RuntimeHostService {
   listHosts(): Promise<RuntimeHostRecord[]>;
   addHost(input: AddRuntimeHostInput): Promise<RuntimeHostRecord>;
+  mergeHostMetadata(hostId: string, patch: RuntimeHostMetadataPatch): Promise<RuntimeHostRecord>;
   removeHost(hostId: string): Promise<void>;
   probeHost(hostId: string): Promise<RuntimeHostRecord>;
   probeAllHosts(): Promise<RuntimeHostRecord[]>;
@@ -38,7 +53,10 @@ function normalizeStatusByHttp(ok: boolean): RuntimeHostStatus {
   return ok ? 'online' : 'warning';
 }
 
-function ensurePort(port: number): number {
+function ensurePort(port?: number): number {
+  if (typeof port === 'undefined') {
+    return DEFAULT_EXTERNAL_RUNTIME_PORT;
+  }
   if (!Number.isInteger(port) || port <= 0 || port > 65535) {
     throw new Error('port must be an integer between 1 and 65535');
   }
@@ -62,6 +80,76 @@ function normalizeProbeError(error: unknown): string {
   return message;
 }
 
+function normalizeTrustState(value: RuntimeHostTrustState | undefined): RuntimeHostTrustState {
+  if (value === 'discovered_candidate' || value === 'confirmed_peer') {
+    return value;
+  }
+  return 'manual_seed';
+}
+
+function normalizeOptionalText(value: string | undefined): string | undefined {
+  if (typeof value !== 'string') {
+    return undefined;
+  }
+  const normalized = value.trim();
+  return normalized.length > 0 ? normalized : undefined;
+}
+
+function formatDialAddress(host: string, port: number): string {
+  const normalizedHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host;
+  return `${normalizedHost}:${port}`;
+}
+
+function normalizeRuntimeHostRecord(record: RuntimeHostRecord): RuntimeHostRecord {
+  const trustState = normalizeTrustState(record.trustState);
+  return {
+    ...record,
+    trustState,
+    hostId: normalizeOptionalText(record.hostId),
+    advertisedListenAddress: normalizeOptionalText(record.advertisedListenAddress),
+    lastSuccessfulDialAddress: normalizeOptionalText(record.lastSuccessfulDialAddress),
+    manualOverride: normalizeOptionalText(record.manualOverride)
+      ?? (trustState === 'manual_seed' ? formatDialAddress(record.host, record.port) : undefined),
+  };
+}
+
+function shouldPromoteToConfirmedPeer(
+  current: RuntimeHostRecord,
+  next: RuntimeHostRecord,
+  patch: RuntimeHostMetadataPatch,
+): boolean {
+  if (patch.trustState) {
+    return false;
+  }
+  if (current.trustState === 'confirmed_peer') {
+    return false;
+  }
+  if (!next.hostId || !next.lastSuccessfulDialAddress) {
+    return false;
+  }
+  return Boolean(next.manualOverride);
+}
+
+function lockConfirmedPeerHostId(
+  current: RuntimeHostRecord,
+  next: RuntimeHostRecord,
+  patch: RuntimeHostMetadataPatch,
+): RuntimeHostRecord {
+  if (
+    current.trustState === 'confirmed_peer'
+    && current.hostId
+    && patch.hostId
+    && patch.hostId !== current.hostId
+  ) {
+    return {
+      ...next,
+      hostId: current.hostId,
+    };
+  }
+
+  return next;
+}
+
 export class RuntimeHostServiceImpl implements RuntimeHostService {
   private readonly storage: IStoragePort;
   private readonly fetchImpl: RuntimeFetch;
@@ -83,6 +171,7 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
     const host = ensureHost(input.host);
     const port = ensurePort(input.port);
     const nowIso = toIso(this.now);
+    const trustState = normalizeTrustState(input.trustState);
     const nextRecord: RuntimeHostRecord = {
       id: `runtime-host-${createUuidV4()}`,
       name: input.name?.trim() || `${host}:${port}`,
@@ -92,12 +181,50 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       createdAt: nowIso,
       updatedAt: nowIso,
       isLocal: Boolean(input.isLocal),
+      hostId: normalizeOptionalText(input.hostId),
+      trustState,
+      advertisedListenAddress: normalizeOptionalText(input.advertisedListenAddress),
+      lastSuccessfulDialAddress: normalizeOptionalText(input.lastSuccessfulDialAddress),
+      manualOverride: normalizeOptionalText(input.manualOverride)
+        ?? (trustState === 'manual_seed' ? formatDialAddress(host, port) : undefined),
     };
 
     const existing = await this.readHosts();
-    const next = [...existing, nextRecord];
+    const next = [...existing, normalizeRuntimeHostRecord(nextRecord)];
     await this.writeHosts(next);
-    return nextRecord;
+    return next[next.length - 1]!;
+  }
+
+  async mergeHostMetadata(hostId: string, patch: RuntimeHostMetadataPatch): Promise<RuntimeHostRecord> {
+    const hosts = await this.readHosts();
+    const targetIndex = hosts.findIndex((item) => item.id === hostId);
+    if (targetIndex < 0) {
+      throw new Error(`runtime host not found: ${hostId}`);
+    }
+
+    const current = hosts[targetIndex];
+    const mergedBase = normalizeRuntimeHostRecord({
+      ...current,
+      hostId: patch.hostId ?? current.hostId,
+      trustState: patch.trustState ?? current.trustState,
+      advertisedListenAddress: patch.advertisedListenAddress ?? current.advertisedListenAddress,
+      lastSuccessfulDialAddress: patch.lastSuccessfulDialAddress ?? current.lastSuccessfulDialAddress,
+      manualOverride: patch.manualOverride ?? current.manualOverride,
+      updatedAt: toIso(this.now),
+    });
+    const lockedBase = lockConfirmedPeerHostId(current, mergedBase, patch);
+
+    const nextHost = shouldPromoteToConfirmedPeer(current, lockedBase, patch)
+      ? {
+          ...lockedBase,
+          trustState: 'confirmed_peer' as const,
+        }
+      : lockedBase;
+
+    const nextHosts = [...hosts];
+    nextHosts[targetIndex] = nextHost;
+    await this.writeHosts(nextHosts);
+    return nextHost;
   }
 
   async removeHost(hostId: string): Promise<void> {
@@ -153,11 +280,14 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
   private async readHosts(): Promise<RuntimeHostRecord[]> {
     const payload = await this.storage.read<RuntimeHostRecord[]>(RUNTIME_HOST_STORAGE_KEY);
     if (!Array.isArray(payload)) return [];
-    return payload;
+    return payload.map((record) => normalizeRuntimeHostRecord(record));
   }
 
   private async writeHosts(hosts: RuntimeHostRecord[]): Promise<void> {
-    await this.storage.write(RUNTIME_HOST_STORAGE_KEY, hosts);
+    await this.storage.write(
+      RUNTIME_HOST_STORAGE_KEY,
+      hosts.map((record) => normalizeRuntimeHostRecord(record)),
+    );
   }
 
   private async probeEndpoint(host: string, port: number): Promise<{ status: RuntimeHostStatus; lastError?: string }> {

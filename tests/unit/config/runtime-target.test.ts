@@ -1,9 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
+  EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY,
+  EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
   getRuntimeExternalAddress,
+  getEmbeddedRuntimeNetworkMode,
   getRuntimeTargetMode,
   getSelectedRuntimeTarget,
+  resolveEmbeddedRuntimeBindHost,
+  setEmbeddedRuntimeNetworkMode,
   setRuntimeExternalAddress,
   setRuntimeTargetMode,
   subscribeRuntimeTargetChanges,
@@ -16,10 +21,49 @@ describe('runtime target config（Runtime 目标配置）', () => {
 
   it('defaults to embedded runtime port（默认内嵌 runtime 端口）', () => {
     expect(getRuntimeTargetMode()).toBe('embedded');
+    expect(getEmbeddedRuntimeNetworkMode()).toBe('local');
+    expect(resolveEmbeddedRuntimeBindHost()).toBe('127.0.0.1');
     expect(getSelectedRuntimeTarget()).toMatchObject({
       mode: 'embedded',
       port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
+  });
+
+  it('uses loopback for tauri localhost embedded target（Tauri embedded 目标应回落到回环地址）', () => {
+    Object.defineProperty(window, '__TAURI_INTERNALS__', {
+      configurable: true,
+      value: {},
+    });
+
+    expect(getSelectedRuntimeTarget()).toMatchObject({
+      mode: 'embedded',
+      host: '127.0.0.1',
+      port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+    });
+  });
+
+  it('prefers cached embedded runtime status（优先使用缓存的内嵌 runtime 状态）', () => {
+    window.localStorage.setItem(
+      EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
+      JSON.stringify({
+        host: '0.0.0.0',
+        port: 4077,
+      }),
+    );
+
+    expect(getSelectedRuntimeTarget()).toMatchObject({
+      mode: 'embedded',
+      host: '127.0.0.1',
+      port: 4077,
+    });
+  });
+
+  it('persists embedded runtime LAN bind mode（保存内嵌 Runtime 局域网监听模式）', () => {
+    setEmbeddedRuntimeNetworkMode('lan');
+
+    expect(getEmbeddedRuntimeNetworkMode()).toBe('lan');
+    expect(resolveEmbeddedRuntimeBindHost()).toBe('0.0.0.0');
+    expect(window.localStorage.getItem(EMBEDDED_RUNTIME_NETWORK_MODE_STORAGE_KEY)).toBe('lan');
   });
 
   it('switches to external runtime with default 1949（切到外部默认 1949）', () => {

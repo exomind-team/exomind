@@ -54,6 +54,7 @@
 | 文档 | 职责 |
 |------|------|
 | [development/exomind-runtime-agents-api.md](./development/exomind-runtime-agents-api.md) | Runtime Agent HTTP/SSE 接口说明（含 `session_id` 复用） |
+| [development/issue-tracking-compass.md](./development/issue-tracking-compass.md) | Issue 追踪罗盘（查重→决策→新建/追加→关联） |
 
 ---
 

@@ -21,6 +21,23 @@ import {
   hashPasswordWithSalt,
   verifyPassword,
 } from '@/adapters/crypto-adapter';
+import {
+  createLocalProfile,
+  ensureProfileStorageMigrated,
+  findProfileByLoginName,
+  getActiveProfile,
+  getProfileSession,
+  getProfileSecret,
+  setProfileSession,
+} from '@/lib/profile/profile-storage';
+import type { LocalProfile } from '@/lib/profile/types';
+import {
+  createIdentityLink,
+  getIdentityLinkSecret,
+  getPreferredIdentityLink,
+  listIdentityLinks,
+  revokeIdentityLink,
+} from '@/lib/profile/identity-link-storage';
 
 // 类型延迟导入（不实际加载模块）
 import type { PouchSyncAdapter } from '@/adapters/pouch-sync';
@@ -28,6 +45,37 @@ import type { PouchSyncAdapter } from '@/adapters/pouch-sync';
 // 存储动态导入的适配器实例
 let syncAdapter: PouchSyncAdapter | null = null;
 const USERNAME_WHITESPACE_PATTERN = /\s/;
+const SYNC_STORE_KEY = 'exomind:sync-store';
+const DEFAULT_PROFILE_SESSION = {
+  version: 1 as const,
+  activeProfileId: null,
+  unlockedProfileIds: [] as string[],
+};
+
+type PersistedSyncStorePayload = {
+  state?: {
+    isLoggedIn?: boolean;
+    currentUser?: string | null;
+    activeProfileId?: string | null;
+    credentials?: Partial<SyncCredentials> | null;
+  };
+  isLoggedIn?: boolean;
+  currentUser?: string | null;
+  activeProfileId?: string | null;
+  credentials?: Partial<SyncCredentials> | null;
+};
+
+function readLegacyUsersMirror(): Array<{ username: string; passwordHash: string; createdAt: string }> {
+  try {
+    return JSON.parse(localStorage.getItem('exomind:users') || '[]');
+  } catch {
+    return [];
+  }
+}
+
+function writeLegacyUsersMirror(users: Array<{ username: string; passwordHash: string; createdAt: string }>): void {
+  localStorage.setItem('exomind:users', JSON.stringify(users));
+}
 
 // 动态导入 PouchSyncAdapter（浏览器兼容）
 async function loadSyncAdapter(): Promise<typeof import('@/adapters/pouch-sync')> {
@@ -44,7 +92,6 @@ export async function initSyncAdapter(): Promise<PouchSyncAdapter> {
   return syncAdapter;
 }
 
-// 获取设备信息
 function getDeviceInfo(): { deviceName: string; deviceType: DeviceType; platform: string } {
   if (typeof window === 'undefined') {
     return {
@@ -78,12 +125,91 @@ function getDeviceInfo(): { deviceName: string; deviceType: DeviceType; platform
   return { deviceName, deviceType, platform };
 }
 
+function buildCredentialsFromLinkedIdentity(profileId: string, fallbackUsername: string): SyncCredentials | null {
+  const link = getPreferredIdentityLink(profileId);
+  if (!link) {
+    return null;
+  }
+
+  const secret = getIdentityLinkSecret(link.linkId);
+  const deviceInfo = getDeviceInfo();
+  return {
+    localProfileId: profileId,
+    username: link.remoteIdentityKey || fallbackUsername,
+    passwordHash: secret?.authSecret || '',
+    providerId: link.providerId,
+    remoteIdentityId: link.remoteIdentityId,
+    remoteIdentityKey: link.remoteIdentityKey,
+    authType: secret?.authType || link.authMode,
+    authUsername: secret?.authUsername,
+    authSecret: secret?.authSecret,
+    deviceName: deviceInfo.deviceName,
+    deviceType: deviceInfo.deviceType,
+    platform: deviceInfo.platform,
+  };
+}
+
+function readPersistedSyncStore(): PersistedSyncStorePayload | null {
+  try {
+    const raw = localStorage.getItem(SYNC_STORE_KEY);
+    return raw ? JSON.parse(raw) as PersistedSyncStorePayload : null;
+  } catch {
+    return null;
+  }
+}
+
+function migrateLegacySyncCredentialsToIdentityLink(activeProfile: LocalProfile | null): void {
+  if (!activeProfile) {
+    return;
+  }
+
+  const persisted = readPersistedSyncStore();
+  const legacyCredentials = persisted?.state?.credentials || persisted?.credentials;
+  if (!legacyCredentials || getPreferredIdentityLink(activeProfile.profileId)) {
+    return;
+  }
+
+  const remoteIdentityKey = legacyCredentials.remoteIdentityKey?.trim() || legacyCredentials.username?.trim();
+  if (!remoteIdentityKey) {
+    return;
+  }
+
+  createIdentityLink({
+    profileId: activeProfile.profileId,
+    providerId: legacyCredentials.providerId || 'legacy-sync-store',
+    remoteIdentityId: legacyCredentials.remoteIdentityId || remoteIdentityKey,
+    remoteIdentityKey,
+    authType: legacyCredentials.authType || (legacyCredentials.authSecret || legacyCredentials.passwordHash ? 'basic' : 'none'),
+    authUsername: legacyCredentials.authUsername || legacyCredentials.username,
+    authSecret: legacyCredentials.authSecret || legacyCredentials.passwordHash,
+  });
+}
+
+function clearLegacySyncStorePersist(): void {
+  try {
+    localStorage.removeItem(SYNC_STORE_KEY);
+  } catch {
+    // ignore storage cleanup failures
+  }
+}
+
+export function resolveRemoteSyncKey(credentials: SyncCredentials | null): string | null {
+  const candidate = credentials?.remoteIdentityKey || credentials?.username;
+  if (typeof candidate !== 'string') {
+    return null;
+  }
+
+  const normalized = candidate.trim();
+  return normalized.length > 0 ? normalized : null;
+}
+
 interface SyncState {
   // 状态
   status: SyncStatus;
   credentials: SyncCredentials | null;
   isLoggedIn: boolean;
   currentUser: string | null;
+  activeProfileId: string | null;
   conflicts: Conflict[];
 
   // Actions
@@ -91,6 +217,15 @@ interface SyncState {
   setCredentials: (credentials: SyncCredentials | null) => void;
   login: (username: string, password: string) => Promise<void>;
   register: (username: string, password: string) => Promise<void>;
+  linkRemoteIdentity: (input: {
+    providerId: string;
+    remoteIdentityId: string;
+    remoteIdentityKey: string;
+    authType: 'none' | 'basic' | 'token';
+    authUsername?: string;
+    authSecret?: string;
+  }) => Promise<void>;
+  unlinkRemoteIdentity: () => Promise<void>;
   logout: () => Promise<void>;
   connect: (url: string) => Promise<void>;
   disconnect: () => Promise<void>;
@@ -111,7 +246,17 @@ function validateAuthInput(username: string, password: string): void {
 
 export const useSyncStore = create<SyncState>()(
   persist(
-    (set, get) => ({
+    (set, get) => {
+      ensureProfileStorageMigrated();
+      const initialSession = getProfileSession();
+      const initialActiveProfile = getActiveProfile();
+      migrateLegacySyncCredentialsToIdentityLink(initialActiveProfile);
+      const initialCredentials = initialActiveProfile
+        ? buildCredentialsFromLinkedIdentity(initialActiveProfile.profileId, initialActiveProfile.slug)
+        : null;
+      clearLegacySyncStorePersist();
+
+      return ({
       // 初始状态
       status: {
         state: 'disconnected',
@@ -121,9 +266,13 @@ export const useSyncStore = create<SyncState>()(
         syncMode: 'realtime',
         pollInterval: 5,
       },
-      credentials: null,
-      isLoggedIn: false,
-      currentUser: null,
+      credentials: initialCredentials,
+      isLoggedIn: Boolean(
+        initialSession.activeProfileId
+        && initialSession.unlockedProfileIds.includes(initialSession.activeProfileId)
+      ),
+      currentUser: initialActiveProfile?.displayName || initialActiveProfile?.slug || null,
+      activeProfileId: initialSession.activeProfileId,
       conflicts: [],
 
       // 更新状态
@@ -140,76 +289,112 @@ export const useSyncStore = create<SyncState>()(
       // 登录
       async login(username: string, password: string) {
         validateAuthInput(username, password);
+        ensureProfileStorageMigrated();
 
-        // 验证用户凭据
-        const users = JSON.parse(
-          localStorage.getItem('exomind:users') || '[]'
-        );
-        const user = users.find(
-          (u: { username: string; passwordHash: string }) =>
-            u.username === username
-        );
-
-        if (!user) {
+        const profile = findProfileByLoginName(username);
+        if (!profile) {
           throw new Error('用户不存在');
         }
 
-        // 使用 SPEC-302 的密码验证
-        const isValid = await verifyPassword(password, user.passwordHash);
+        const secret = getProfileSecret(profile.profileId);
+        const isValid = secret?.localPasswordHash
+          ? await verifyPassword(password, secret.localPasswordHash)
+          : password.length === 0;
         if (!isValid) {
           throw new Error('密码错误');
         }
-        const deviceInfo = getDeviceInfo();
-        const credentials: SyncCredentials = {
-          username,
-          passwordHash: user.passwordHash,
-          deviceName: deviceInfo.deviceName,
-          deviceType: deviceInfo.deviceType,
-          platform: deviceInfo.platform,
-        };
+
+        setProfileSession({
+          version: 1,
+          activeProfileId: profile.profileId,
+          unlockedProfileIds: [profile.profileId],
+        });
 
         set({
           isLoggedIn: true,
-          currentUser: username,
-          credentials,
+          currentUser: profile.displayName || profile.slug,
+          activeProfileId: profile.profileId,
+          credentials: buildCredentialsFromLinkedIdentity(profile.profileId, profile.slug),
         });
       },
 
       // 注册
       async register(username: string, password: string) {
         validateAuthInput(username, password);
+        ensureProfileStorageMigrated();
 
         if (password.length < 6) {
           throw new Error('密码长度至少6位');
         }
 
-        // 检查用户是否已存在
-        const users = JSON.parse(localStorage.getItem('exomind:users') || '[]');
-        if (users.find((u: { username: string }) => u.username === username)) {
+        if (findProfileByLoginName(username)) {
           throw new Error('用户名已存在');
         }
 
         // 使用 SPEC-302 的密码哈希
         const passwordHash = await hashPasswordWithSalt(password);
+        const createdProfile = createLocalProfile({
+          slug: username,
+          displayName: username,
+          localPasswordHash: passwordHash,
+        });
 
-        // 保存新用户
+        // 兼容旧 users mirror（旧 users 镜像）
+        const users = readLegacyUsersMirror();
         const newUser = {
           username,
           passwordHash,
-          createdAt: new Date().toISOString(),
+          createdAt: createdProfile.createdAt,
         };
         users.push(newUser);
-        localStorage.setItem('exomind:users', JSON.stringify(users));
+        writeLegacyUsersMirror(users);
+      },
+
+      async linkRemoteIdentity(input) {
+        const { activeProfileId, isLoggedIn } = get();
+        if (!isLoggedIn || !activeProfileId) {
+          throw new Error('请先打开本地档案');
+        }
+
+        const activeProfile = getActiveProfile();
+        createIdentityLink({
+          profileId: activeProfileId,
+          providerId: input.providerId,
+          remoteIdentityId: input.remoteIdentityId || input.remoteIdentityKey,
+          remoteIdentityKey: input.remoteIdentityKey,
+          authType: input.authType,
+          authUsername: input.authUsername,
+          authSecret: input.authSecret,
+        });
+
+        set({
+          credentials: buildCredentialsFromLinkedIdentity(activeProfileId, activeProfile?.slug || input.remoteIdentityKey),
+        });
+      },
+
+      async unlinkRemoteIdentity() {
+        const { activeProfileId } = get();
+        if (!activeProfileId) {
+          return;
+        }
+
+        const links = listIdentityLinks(activeProfileId).filter((link) => link.status === 'linked');
+        links.forEach((link) => revokeIdentityLink(link.linkId));
+
+        await get().disconnect();
+        set({ credentials: null });
       },
 
       // 退出登录
       async logout() {
         // 先断开连接
         await get().disconnect();
+        setProfileSession(DEFAULT_PROFILE_SESSION);
 
         set({
           isLoggedIn: false,
           currentUser: null,
+          activeProfileId: null,
           credentials: null,
           status: {
             state: 'disconnected',
@@ -224,9 +409,12 @@ export const useSyncStore = create<SyncState>()(
 
       // 连接
       async connect(url: string) {
-        const { credentials } = get();
-        if (!credentials) {
+        const { credentials, isLoggedIn, activeProfileId } = get();
+        if (!isLoggedIn || !activeProfileId) {
           throw new Error('未登录，请先登录');
+        }
+        if (!credentials) {
+          throw new Error('当前档案未连接远端同步身份');
         }
 
         set({
@@ -400,14 +588,11 @@ export const useSyncStore = create<SyncState>()(
           throw new Error(errorMessage);
         }
       },
-    }),
+    });
+    },
     {
       name: 'exomind:sync-store',
-      partialize: (state) => ({
-        isLoggedIn: state.isLoggedIn,
-        currentUser: state.currentUser,
-        credentials: state.credentials,
-      }),
+      partialize: () => ({}),
     }
   )
 );

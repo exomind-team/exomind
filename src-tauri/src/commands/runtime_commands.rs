@@ -3,19 +3,25 @@
 
 use chrono::Utc;
 use exomind_runtime::{
-    start_with_options, RuntimeHandle, RuntimePublishRequest, RuntimeStartOptions, DEFAULT_RT_PORT,
+    start_with_options, RuntimeHandle, RuntimePublishRequest, RuntimeStartError,
+    RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use serde::{Deserialize, Serialize};
+use std::net::{IpAddr, ToSocketAddrs, UdpSocket};
 use std::sync::{Arc, Mutex};
 use tauri::State;
-use tokio::time::{sleep, Duration};
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::{sleep, timeout, Duration};
 
 struct RuntimeInner {
     handle: Option<RuntimeHandle>,
     host: String,
     port: u16,
+    host_id: Option<String>,
+    auth_secret: Option<String>,
     started_at: Option<String>,
     last_error: Option<String>,
+    external_runtime: bool,
 }
 
 pub struct RuntimeProcessState {
@@ -29,8 +35,11 @@ impl RuntimeProcessState {
                 handle: None,
                 host: "127.0.0.1".to_string(),
                 port: DEFAULT_RT_PORT,
+                host_id: None,
+                auth_secret: std::env::var("EXOMIND_RT_SECRET").ok(),
                 started_at: None,
                 last_error: None,
+                external_runtime: false,
             }),
         }
     }
@@ -42,9 +51,19 @@ pub struct RuntimeServiceStatus {
     pub running: bool,
     pub host: String,
     pub port: u16,
+    pub host_id: Option<String>,
+    pub auth_secret: Option<String>,
     pub pid: Option<u32>,
     pub started_at: Option<String>,
     pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RuntimeReachableAddress {
+    pub host: String,
+    pub port: u16,
+    pub host_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -80,7 +99,9 @@ fn compose_status(
         running,
         host: inner.host.clone(),
         port: inner.port,
-        pid: running.then_some(std::process::id()),
+        host_id: inner.host_id.clone(),
+        auth_secret: inner.auth_secret.clone(),
+        pid: (running && inner.handle.is_some()).then_some(std::process::id()),
         started_at: inner.started_at.clone(),
         error: error.or_else(|| inner.last_error.clone()),
     }
@@ -108,6 +129,96 @@ fn is_valid_host(host: &str) -> bool {
     })
 }
 
+fn should_restart_running_runtime(
+    current_host: &str,
+    current_port: u16,
+    requested_host: &str,
+    requested_port: u16,
+) -> bool {
+    current_host != requested_host || current_port != requested_port
+}
+
+fn should_enable_mdns_for_bind_host(host: &str) -> bool {
+    let normalized = host.trim().trim_matches(['[', ']']);
+    if normalized.eq_ignore_ascii_case("localhost") {
+        return false;
+    }
+
+    match normalized.parse::<IpAddr>() {
+        Ok(ip) => !ip.is_loopback(),
+        Err(_) => true,
+    }
+}
+
+fn resolve_reachable_host(remote_host: &str, remote_port: u16) -> Result<String, String> {
+    let remote_addr = format!("{remote_host}:{remote_port}");
+    let mut resolved = remote_addr
+        .to_socket_addrs()
+        .map_err(|error| format!("failed to resolve remote host: {error}"))?;
+    let target = resolved
+        .next()
+        .ok_or_else(|| "remote host did not resolve to any address".to_string())?;
+    let bind_addr = if target.is_ipv4() { "0.0.0.0:0" } else { "[::]:0" };
+    let socket =
+        UdpSocket::bind(bind_addr).map_err(|error| format!("failed to bind udp socket: {error}"))?;
+    socket
+        .connect(target)
+        .map_err(|error| format!("failed to connect udp probe socket: {error}"))?;
+    let local_addr = socket
+        .local_addr()
+        .map_err(|error| format!("failed to inspect local udp address: {error}"))?;
+    Ok(local_addr.ip().to_string())
+}
+
+async fn probe_runtime_health(host: &str, port: u16) -> bool {
+    let address = format!("{host}:{port}");
+    let mut stream = match timeout(
+        Duration::from_millis(250),
+        tokio::net::TcpStream::connect(&address),
+    )
+    .await
+    {
+        Ok(Ok(stream)) => stream,
+        _ => return false,
+    };
+
+    let request = format!("GET /health HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n");
+    if timeout(
+        Duration::from_millis(250),
+        stream.write_all(request.as_bytes()),
+    )
+    .await
+    .is_err()
+    {
+        return false;
+    }
+
+    let mut response = [0u8; 128];
+    match timeout(Duration::from_millis(250), stream.read(&mut response)).await {
+        Ok(Ok(size)) if size > 0 => {
+            let head = String::from_utf8_lossy(&response[..size]);
+            head.starts_with("HTTP/1.1 200") || head.starts_with("HTTP/1.0 200")
+        }
+        _ => false,
+    }
+}
+
+fn mark_external_runtime_running(
+    state: &Arc<RuntimeProcessState>,
+    host: &str,
+    port: u16,
+) -> Result<RuntimeServiceStatus, String> {
+    let mut inner = lock_or_error(state)?;
+    inner.host = host.to_string();
+    inner.port = port;
+    inner.host_id = None;
+    inner.auth_secret = std::env::var("EXOMIND_RT_SECRET").ok();
+    inner.started_at = None;
+    inner.last_error = None;
+    inner.external_runtime = true;
+    Ok(compose_status(&inner, true, None))
+}
+
 pub async fn ensure_runtime_started(
     state: Arc<RuntimeProcessState>,
     host: Option<String>,
@@ -126,9 +237,17 @@ pub async fn ensure_runtime_started(
     }
 
     options.bind_host = runtime_host;
+    // Tauri embedded runtime follows UI network mode directly:
+    // LAN bind => enable mDNS discovery, loopback bind => disable mDNS.
+    //（桌面/移动端内嵌 RT：局域网监听开启 mDNS，本机监听关闭 mDNS）
+    options.enable_mdns = should_enable_mdns_for_bind_host(&options.bind_host);
     if let Some(runtime_port) = port {
         options.port = runtime_port;
     }
+    let requested_host = options.bind_host.clone();
+    let requested_port = options.port;
+    let requested_auth_secret = options.auth_secret.clone();
+    let mut should_restart_embedded_runtime = false;
 
     // Fast path: already running（快速路径：已在运行）
     {
@@ -140,9 +259,24 @@ pub async fn ensure_runtime_started(
         if let Some((host, port)) = running_snapshot {
             inner.host = host;
             inner.port = port;
+            inner.host_id = inner.handle.as_ref().map(|handle| handle.host_id().to_string());
+            inner.auth_secret = requested_auth_secret.clone();
             inner.last_error = None;
-            return Ok(compose_status(&inner, true, None));
+            inner.external_runtime = false;
+            if !should_restart_running_runtime(
+                &inner.host,
+                inner.port,
+                &requested_host,
+                requested_port,
+            ) {
+                return Ok(compose_status(&inner, true, None));
+            }
+            should_restart_embedded_runtime = true;
         }
+    }
+
+    if should_restart_embedded_runtime {
+        ensure_runtime_stopped(state.clone()).await?;
     }
 
     // 等待端口可用（处理热重载时旧端口 TIME_WAIT 延迟，最多等 2s）
@@ -153,8 +287,14 @@ pub async fn ensure_runtime_started(
             if StdTcpListener::bind(&addr).is_ok() {
                 break;
             }
+            if probe_runtime_health(&options.bind_host, options.port).await {
+                return mark_external_runtime_running(&state, &options.bind_host, options.port);
+            }
             if i == 0 {
-                eprintln!("[tauri/setup] port {} busy, waiting for release...", options.port);
+                eprintln!(
+                    "[tauri/setup] port {} busy, waiting for release...",
+                    options.port
+                );
             }
             sleep(Duration::from_millis(100)).await;
         }
@@ -163,6 +303,14 @@ pub async fn ensure_runtime_started(
     let handle = match start_with_options(options).await {
         Ok(handle) => handle,
         Err(error) => {
+            if let RuntimeStartError::BindListener { source, .. } = &error {
+                if source.kind() == std::io::ErrorKind::AddrInUse
+                    && probe_runtime_health(&requested_host, requested_port).await
+                {
+                    return mark_external_runtime_running(&state, &requested_host, requested_port);
+                }
+            }
+
             // Handle startup race gracefully（处理并发启动竞争）.
             for _ in 0..10 {
                 if let Ok(status) = runtime_status_snapshot(state.clone()) {
@@ -176,6 +324,7 @@ pub async fn ensure_runtime_started(
             let message = format!("failed to start embedded runtime: {error}");
             let mut inner = lock_or_error(&state)?;
             inner.last_error = Some(message.clone());
+            inner.external_runtime = false;
             return Err(message);
         }
     };
@@ -185,8 +334,11 @@ pub async fn ensure_runtime_started(
     let mut inner = lock_or_error(&state)?;
     inner.host = started_host;
     inner.port = started_port;
+    inner.host_id = Some(handle.host_id().to_string());
+    inner.auth_secret = requested_auth_secret;
     inner.started_at = Some(Utc::now().to_rfc3339());
     inner.last_error = None;
+    inner.external_runtime = false;
     inner.handle = Some(handle);
     Ok(compose_status(&inner, true, None))
 }
@@ -194,18 +346,44 @@ pub async fn ensure_runtime_started(
 pub async fn ensure_runtime_stopped(
     state: Arc<RuntimeProcessState>,
 ) -> Result<RuntimeServiceStatus, String> {
-    let mut handle = { lock_or_error(&state)?.handle.take() };
+    let (mut handle, external_snapshot) = {
+        let mut inner = lock_or_error(&state)?;
+        (
+            inner.handle.take(),
+            (inner.external_runtime, inner.host.clone(), inner.port),
+        )
+    };
 
     if let Some(runtime) = handle.as_mut() {
-        runtime
-            .stop()
-            .await
-            .map_err(|error| format!("failed to stop embedded runtime: {error}"))?;
+        if let Err(error) = runtime.stop().await {
+            let message = format!("failed to stop embedded runtime: {error}");
+            let mut inner = lock_or_error(&state)?;
+            inner.handle = handle;
+            inner.last_error = Some(message.clone());
+            inner.external_runtime = false;
+            return Err(message);
+        }
+    }
+
+    if handle.is_none()
+        && external_snapshot.0
+        && probe_runtime_health(&external_snapshot.1, external_snapshot.2).await
+    {
+        let message = format!(
+            "embedded runtime is managed by another process at {}:{}; stop request skipped",
+            external_snapshot.1, external_snapshot.2
+        );
+        let mut inner = lock_or_error(&state)?;
+        inner.started_at = None;
+        inner.last_error = Some(message.clone());
+        inner.external_runtime = true;
+        return Ok(compose_status(&inner, true, Some(message)));
     }
 
     let mut inner = lock_or_error(&state)?;
     inner.started_at = None;
     inner.last_error = None;
+    inner.external_runtime = false;
     Ok(compose_status(&inner, false, None))
 }
 
@@ -221,6 +399,10 @@ pub fn runtime_status_snapshot(
     let running = if let Some((host, port)) = running_snapshot {
         inner.host = host;
         inner.port = port;
+        inner.host_id = inner.handle.as_ref().map(|handle| handle.host_id().to_string());
+        inner.external_runtime = false;
+        true
+    } else if inner.external_runtime {
         true
     } else {
         inner.started_at = None;
@@ -254,19 +436,50 @@ pub fn runtime_service_status(
 }
 
 #[tauri::command]
+pub fn runtime_service_reachable_address(
+    state: State<'_, Arc<RuntimeProcessState>>,
+    remote_host: String,
+    remote_port: u16,
+) -> Result<RuntimeReachableAddress, String> {
+    let (host_id, port) = {
+        let inner = lock_or_error(state.inner())?;
+        let handle = match inner.handle.as_ref() {
+            Some(handle) if handle.is_running() => handle,
+            Some(_) => return Err("embedded runtime is not running".to_string()),
+            None if inner.external_runtime => {
+                return Err("embedded runtime is managed by another process".to_string());
+            }
+            None => return Err("embedded runtime not running".to_string()),
+        };
+        (handle.host_id().to_string(), handle.port())
+    };
+
+    let host = resolve_reachable_host(&remote_host, remote_port)?;
+    Ok(RuntimeReachableAddress {
+        host,
+        port,
+        host_id: Some(host_id),
+    })
+}
+
+#[tauri::command]
 pub fn signal_publish_fast(
     state: State<'_, Arc<RuntimeProcessState>>,
     request: SignalPublishFastRequest,
 ) -> Result<SignalPublishFastResponse, String> {
     let (signal_pool, host_id) = {
         let inner = lock_or_error(state.inner())?;
-        let handle = inner
-            .handle
-            .as_ref()
-            .ok_or_else(|| "embedded runtime not running".to_string())?;
-        if !handle.is_running() {
-            return Err("embedded runtime is not running".to_string());
-        }
+        let handle = match inner.handle.as_ref() {
+            Some(handle) if handle.is_running() => handle,
+            Some(_) => return Err("embedded runtime is not running".to_string()),
+            None if inner.external_runtime => {
+                return Err(format!(
+                    "embedded runtime is managed by another process at {}:{}; fast publish is unavailable",
+                    inner.host, inner.port
+                ));
+            }
+            None => return Err("embedded runtime not running".to_string()),
+        };
         (handle.clone_signal_pool(), handle.host_id().to_string())
     };
 
@@ -290,6 +503,8 @@ pub fn signal_publish_fast(
 
 #[cfg(test)]
 mod tests {
+    use std::sync::Arc;
+
     #[test]
     fn is_valid_host_accepts_ipv4() {
         assert!(super::is_valid_host("127.0.0.1"));
@@ -311,5 +526,94 @@ mod tests {
         assert!(!super::is_valid_host("../etc/passwd"));
         assert!(!super::is_valid_host("-invalid"));
         assert!(!super::is_valid_host("invalid-"));
+    }
+
+    #[test]
+    fn should_restart_running_runtime_when_bind_changes() {
+        assert!(super::should_restart_running_runtime(
+            "127.0.0.1",
+            9124,
+            "0.0.0.0",
+            9124,
+        ));
+    }
+
+    #[test]
+    fn should_not_restart_running_runtime_when_bind_matches() {
+        assert!(!super::should_restart_running_runtime(
+            "127.0.0.1",
+            9124,
+            "127.0.0.1",
+            9124,
+        ));
+    }
+
+    #[test]
+    fn enables_mdns_for_lan_bind_hosts() {
+        assert!(super::should_enable_mdns_for_bind_host("0.0.0.0"));
+        assert!(super::should_enable_mdns_for_bind_host("192.168.1.10"));
+        assert!(super::should_enable_mdns_for_bind_host("my-laptop.local"));
+    }
+
+    #[test]
+    fn disables_mdns_for_loopback_bind_hosts() {
+        assert!(!super::should_enable_mdns_for_bind_host("127.0.0.1"));
+        assert!(!super::should_enable_mdns_for_bind_host("localhost"));
+        assert!(!super::should_enable_mdns_for_bind_host("::1"));
+    }
+
+    #[test]
+    fn compose_status_hides_pid_for_external_runtime() {
+        let inner = super::RuntimeInner {
+            handle: None,
+            host: "127.0.0.1".to_string(),
+            port: 9124,
+            host_id: None,
+            auth_secret: None,
+            started_at: None,
+            last_error: None,
+            external_runtime: true,
+        };
+        let status = super::compose_status(&inner, true, None);
+
+        assert!(status.running);
+        assert_eq!(status.pid, None);
+    }
+
+    #[test]
+    fn runtime_status_snapshot_reports_external_runtime_running() {
+        let state = Arc::new(super::RuntimeProcessState::new());
+        {
+            let mut inner = super::lock_or_error(&state).expect("runtime state lock");
+            inner.host = "127.0.0.1".to_string();
+            inner.port = 9124;
+            inner.host_id = Some("host-local".to_string());
+            inner.auth_secret = Some("embedded-secret".to_string());
+            inner.external_runtime = true;
+        }
+
+        let status = super::runtime_status_snapshot(state).expect("status snapshot");
+        assert!(status.running);
+        assert_eq!(status.pid, None);
+        assert_eq!(status.host_id.as_deref(), Some("host-local"));
+        assert_eq!(status.auth_secret.as_deref(), Some("embedded-secret"));
+    }
+
+    #[test]
+    fn compose_status_includes_auth_secret_for_embedded_runtime() {
+        let inner = super::RuntimeInner {
+            handle: None,
+            host: "127.0.0.1".to_string(),
+            port: 9124,
+            host_id: Some("host-local".to_string()),
+            started_at: None,
+            last_error: None,
+            external_runtime: false,
+            auth_secret: Some("embedded-secret".to_string()),
+        };
+        let status = super::compose_status(&inner, true, None);
+
+        assert!(status.running);
+        assert_eq!(status.auth_secret.as_deref(), Some("embedded-secret"));
     }
 }

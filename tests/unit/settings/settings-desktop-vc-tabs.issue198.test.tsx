@@ -36,8 +36,11 @@ describe('issue-198 settings desktop VC tabs（设置页桌面VC标签与跳转�
     expect(screen.getByRole('button', { name: '外观主题' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '专注设置' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '通知' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '数据' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '危险区域' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '关于' })).toBeInTheDocument();
+    expect(screen.getByText('导出备份')).toBeInTheDocument();
+    expect(screen.getByText('导入数据')).toBeInTheDocument();
 
     expect(screen.queryByText('工作模式')).not.toBeInTheDocument();
     expect(screen.queryByText('番茄时长')).not.toBeInTheDocument();

@@ -9,6 +9,7 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { hashPasswordWithSalt } from '@/adapters/crypto-adapter';
 
 // Mock localStorage
 const mockLocalStorageData: Record<string, string> = {};
@@ -42,6 +43,7 @@ describe('SyncStore', () => {
     // 清空 mock 数据
     Object.keys(mockLocalStorageData).forEach(key => delete mockLocalStorageData[key]);
     vi.clearAllMocks();
+    vi.resetModules();
 
     // 重置 mock 数据
     mockLocalStorageData['exomind:users'] = JSON.stringify([]);
@@ -64,6 +66,7 @@ describe('SyncStore', () => {
       expect(store.credentials).toBeNull();
       expect(store.isLoggedIn).toBe(false);
       expect(store.currentUser).toBeNull();
+      expect((store as typeof store & { activeProfileId?: string | null }).activeProfileId).toBeNull();
       expect(store.conflicts).toEqual([]);
     });
   });
@@ -131,11 +134,17 @@ describe('SyncStore', () => {
 
       await register('newuser', 'password123');
 
-      // 验证用户已保存到 localStorage
+      // 验证 legacy users mirror（旧 users 镜像）仍写入 localStorage
       const storedUsers = JSON.parse(mockLocalStorageData['exomind:users']);
       expect(storedUsers.length).toBe(1);
       expect(storedUsers[0].username).toBe('newuser');
       expect(storedUsers[0].passwordHash).toBeTruthy();
+
+      // 验证 canonical profile storage（规范档案存储）也已创建
+      const profileModule = await import('@/lib/profile/profile-storage');
+      const profiles = profileModule.listLocalProfiles();
+      expect(profiles).toHaveLength(1);
+      expect(profiles[0].slug).toBe('newuser');
     });
 
     it('应该拒绝空用户名', async () => {
@@ -201,14 +210,12 @@ describe('SyncStore', () => {
   });
 
   describe('login', () => {
-    // 这些测试需要 CryptoAdapter mock，跳过
-    const originalCryptoAdapter = globalThis.crypto;
-
-    it.skip('应该登录成功', async () => {
+    it('应该登录成功并激活本地档案', async () => {
+      const passwordHash = await hashPasswordWithSalt('password123');
       mockLocalStorageData['exomind:users'] = JSON.stringify([
         {
           username: 'testuser',
-          passwordHash: '$pbkdf2$salt123$hash456',
+          passwordHash,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -217,16 +224,23 @@ describe('SyncStore', () => {
 
       await login('testuser', 'password123');
 
-      const { isLoggedIn, currentUser } = useSyncStore.getState();
+      const state = useSyncStore.getState() as typeof useSyncStore.getState extends () => infer T ? T & { activeProfileId?: string | null } : never;
+      const profileModule = await import('@/lib/profile/profile-storage');
+      const activeProfile = profileModule.getActiveProfile();
+
+      const { isLoggedIn, currentUser } = state;
       expect(isLoggedIn).toBe(true);
       expect(currentUser).toBe('testuser');
+      expect(state.activeProfileId).toBeTruthy();
+      expect(activeProfile?.slug).toBe('testuser');
     });
 
-    it.skip('应该登录后设置凭据', async () => {
+    it('纯本地登录后不应该自动设置远端同步凭据', async () => {
+      const passwordHash = await hashPasswordWithSalt('password123');
       mockLocalStorageData['exomind:users'] = JSON.stringify([
         {
           username: 'testuser',
-          passwordHash: '$pbkdf2$salt123$hash456',
+          passwordHash,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -236,8 +250,7 @@ describe('SyncStore', () => {
       await login('testuser', 'password123');
 
       const { credentials } = useSyncStore.getState();
-      expect(credentials).toBeDefined();
-      expect(credentials?.username).toBe('testuser');
+      expect(credentials).toBeNull();
     });
 
     it('应该拒绝不存在的用户', async () => {
@@ -246,11 +259,12 @@ describe('SyncStore', () => {
       await expect(login('nonexistent', 'password123')).rejects.toThrow('用户不存在');
     });
 
-    it.skip('应该拒绝错误的密码', async () => {
+    it('应该拒绝错误的密码', async () => {
+      const passwordHash = await hashPasswordWithSalt('password123');
       mockLocalStorageData['exomind:users'] = JSON.stringify([
         {
           username: 'testuser',
-          passwordHash: '$pbkdf2$salt123$hash456',
+          passwordHash,
           createdAt: new Date().toISOString(),
         },
       ]);
@@ -492,16 +506,83 @@ describe('SyncStore', () => {
   });
 
   describe('持久化', () => {
-    it.skip('应该持久化登录状态', async () => {
-      // 设置已登录的用户数据
+    it('应该从 profile + identity-link 重建登录状态与远端凭据', async () => {
+      const passwordHash = await hashPasswordWithSalt('password123');
+      mockLocalStorageData['exomind:profiles:index'] = JSON.stringify(['profile-persisteduser']);
+      mockLocalStorageData['exomind:profiles:profile-persisteduser:meta'] = JSON.stringify({
+        profileId: 'profile-persisteduser',
+        slug: 'persisteduser',
+        displayName: 'Persisted User',
+        createdAt: '2026-03-07T10:00:00.000Z',
+        updatedAt: '2026-03-07T10:00:00.000Z',
+        authMode: 'password',
+        state: 'active',
+        defaultSyncPolicy: 'auto-sync-when-linked',
+      });
+      mockLocalStorageData['exomind:profiles:profile-persisteduser:secret'] = JSON.stringify({
+        profileId: 'profile-persisteduser',
+        localPasswordHash: passwordHash,
+        updatedAt: '2026-03-07T10:00:00.000Z',
+      });
+      mockLocalStorageData['exomind:profile-session'] = JSON.stringify({
+        version: 1,
+        activeProfileId: 'profile-persisteduser',
+        unlockedProfileIds: ['profile-persisteduser'],
+      });
+      mockLocalStorageData['exomind:identity-links:index'] = JSON.stringify(['link-persisteduser']);
+      mockLocalStorageData['exomind:identity-links:meta:link-persisteduser'] = JSON.stringify({
+        linkId: 'link-persisteduser',
+        profileId: 'profile-persisteduser',
+        providerId: 'self-hosted-sync',
+        remoteIdentityId: 'rid-persisteduser',
+        remoteIdentityKey: 'space-persisteduser',
+        authMode: 'basic',
+        status: 'linked',
+        syncMode: 'realtime',
+        linkedAt: '2026-03-07T10:00:00.000Z',
+      });
+      mockLocalStorageData['exomind:identity-links:secret:link-persisteduser'] = JSON.stringify({
+        linkId: 'link-persisteduser',
+        authType: 'basic',
+        authUsername: 'cloud-user',
+        authSecret: 'remote-secret',
+        updatedAt: '2026-03-07T10:00:00.000Z',
+      });
+
+      vi.resetModules();
+      const module = await import('@/ui/stores/sync-store');
+      const persistedStore = module.useSyncStore.getState();
+
+      expect(persistedStore.isLoggedIn).toBe(true);
+      expect(persistedStore.currentUser).toBe('Persisted User');
+      expect(persistedStore.credentials?.remoteIdentityKey).toBe('space-persisteduser');
+      expect(persistedStore.credentials?.authSecret).toBe('remote-secret');
+      expect(persistedStore.credentials?.localProfileId).toBe('profile-persisteduser');
+    });
+
+    it('应该迁移 legacy sync-store.credentials 到 identity-link，并且不再持久化机密', async () => {
+      const passwordHash = await hashPasswordWithSalt('password123');
+      mockLocalStorageData['exomind:users'] = JSON.stringify([
+        {
+          username: 'legacyuser',
+          passwordHash,
+          createdAt: '2026-03-07T10:00:00.000Z',
+        },
+      ]);
       mockLocalStorageData['exomind:sync-store'] = JSON.stringify({
         state: {
           isLoggedIn: true,
-          currentUser: 'persisteduser',
+          currentUser: 'legacyuser',
           credentials: {
-            username: 'persisteduser',
-            passwordHash: 'hash123',
-            deviceName: 'Test Device',
+            username: 'legacy-cloud-user',
+            passwordHash: 'legacy-remote-secret',
+            providerId: 'legacy-sync',
+            remoteIdentityId: 'rid-legacyuser',
+            remoteIdentityKey: 'space-legacyuser',
+            authType: 'basic',
+            authUsername: 'legacy-cloud-user',
+            authSecret: 'legacy-remote-secret',
+            deviceName: 'Legacy Device',
             deviceType: 'desktop',
             platform: 'Windows',
           },
@@ -509,23 +590,17 @@ describe('SyncStore', () => {
         version: 0,
       });
 
-      // 重新导入模块以加载持久化状态
+      vi.resetModules();
       const module = await import('@/ui/stores/sync-store');
-      const persistedStore = module.useSyncStore.getState();
+      const state = module.useSyncStore.getState();
+      const identityModule = await import('@/lib/profile/identity-link-storage');
+      const profileModule = await import('@/lib/profile/profile-storage');
+      const profile = profileModule.findProfileByLoginName('legacyuser');
 
-      // 验证持久化状态被恢复
-      expect(persistedStore.isLoggedIn).toBe(true);
-      expect(persistedStore.currentUser).toBe('persisteduser');
-    });
-
-    it.skip('应该只持久化必要字段', async () => {
-      // 检查 partialize 函数是否正确工作
-      // 通过检查 localStorage 中的键名来验证
-      const { register } = useSyncStore.getState();
-      await register('testuser', 'password123');
-
-      // sync-store 持久化的键应该是 'exomind:sync-store'
-      expect(Object.keys(mockLocalStorageData).some(k => k.startsWith('exomind:sync-store'))).toBe(true);
+      expect(profile).toBeTruthy();
+      expect(identityModule.getPreferredIdentityLink(profile!.profileId)?.remoteIdentityKey).toBe('space-legacyuser');
+      expect(state.credentials?.authSecret).toBe('legacy-remote-secret');
+      expect(JSON.parse(mockLocalStorageData['exomind:sync-store'] || '{"state":{}}')).toEqual({ state: {} });
     });
   });
 });

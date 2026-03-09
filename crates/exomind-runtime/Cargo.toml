@@ -12,6 +12,10 @@ path = "src/main.rs"
 name = "fake-claude-cli"
 path = "tests/bin/fake-claude-cli.rs"
 
+[[bin]]
+name = "fake-codex-cli"
+path = "tests/bin/fake-codex-cli.rs"
+
 [dependencies]
 axum = "0.7"
 chrono = { version = "0.4", features = ["serde"] }
@@ -22,10 +26,14 @@ tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "io-uti
 thiserror = "1"
 sysinfo = { version = "0.30", default-features = false }
 tower-http = { version = "0.6", features = ["cors"] }
-tokio-stream = "0.1"
+tokio-stream = { version = "0.1", features = ["sync"] }
 tracing = "0.1"
 uuid = { version = "1", features = ["v4"] }
 reqwest = { version = "0.12", default-features = false, features = ["json", "stream", "rustls-tls"] }
+mdns-sd = "0.11"
+sha2 = "0.10"
+percent-encoding = "2"
+rand = "0.8"
 
 [dev-dependencies]
 http-body-util = "0.1"

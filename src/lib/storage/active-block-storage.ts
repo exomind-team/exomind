@@ -1,5 +1,6 @@
 import PouchDB from 'pouchdb';
 import type { ActiveBlockData } from '../types/event';
+import { getCurrentProfileOrLegacyId } from '../profile/profile-storage';
 import { buildSyncErrorLog } from './sync-error';
 
 const ACTIVE_BLOCK_DOC_ID = 'current';
@@ -56,44 +57,8 @@ function resolvePouchDbPrefix(explicitPrefix?: string): string | undefined {
   return undefined;
 }
 
-function toSafeStorageValue(raw: unknown): string | null {
-  if (typeof raw !== 'string') {
-    return null;
-  }
-  const trimmed = raw.trim();
-  return trimmed.length > 0 ? trimmed : null;
-}
-
 export function getCurrentSyncUserId(): string {
-  if (typeof localStorage === 'undefined') {
-    return 'anonymous';
-  }
-
-  try {
-    const syncStoreData = localStorage.getItem('exomind:sync-store');
-    if (!syncStoreData) {
-      return 'anonymous';
-    }
-
-    const parsed = JSON.parse(syncStoreData) as {
-      state?: { currentUser?: string };
-      currentUser?: string;
-    };
-
-    const stateUser = toSafeStorageValue(parsed.state?.currentUser);
-    if (stateUser) {
-      return stateUser;
-    }
-
-    const directUser = toSafeStorageValue(parsed.currentUser);
-    if (directUser) {
-      return directUser;
-    }
-  } catch {
-    // ignore malformed local data
-  }
-
-  return 'anonymous';
+  return getCurrentProfileOrLegacyId();
 }
 
 export function normalizeActiveBlockDbName(userId: string): string {
@@ -149,6 +114,17 @@ export class ActiveBlockStorage {
   }
 
   async saveActiveBlock(block: ActiveBlockData): Promise<void> {
+    await this.persistActiveBlock(block, 'local');
+  }
+
+  async projectReplicatedActiveBlock(block: ActiveBlockData): Promise<void> {
+    await this.persistActiveBlock(block, 'sync');
+  }
+
+  private async persistActiveBlock(
+    block: ActiveBlockData,
+    source: ActiveBlockChangeSource,
+  ): Promise<void> {
     let attempt = 0;
 
     while (attempt < MAX_SAVE_RETRY) {
@@ -175,7 +151,7 @@ export class ActiveBlockStorage {
 
       try {
         await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
-        this.emitChange(nextBlock, 'local');
+        this.emitChange(nextBlock, source);
         return;
       } catch (error: unknown) {
         if (!this.isConflictError(error) || attempt >= MAX_SAVE_RETRY) {

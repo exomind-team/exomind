@@ -106,19 +106,19 @@ export function createCoreNavigationCommands(
     },
     {
       id: 'navigate:agents',
-      title: '打开 Agent',
-      description: '跳转到 Agent Hub 页面',
+      title: '打开网络',
+      description: '跳转到网络页面',
       category: 'navigation',
       permissionTier: 'safe',
-      aliases: ['agent', 'agents', '智能体'],
-      keywords: ['hub', '代理'],
+      aliases: ['网络', 'network', 'agent', 'agents', '智能体'],
+      keywords: ['信号网络', 'hub', '代理'],
       isAvailable(context) {
         if (context.featureFlags.agentPageEnabled) {
           return true;
         }
         return {
           available: false,
-          reason: '请先在设置-开发者中启用 Agent 页面',
+          reason: '请先在设置-开发者中启用网络页面',
         };
       },
       async execute() {

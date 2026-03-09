@@ -143,6 +143,8 @@ Copy-Item .env.example .env
 | `EXOMIND_POUCHDB_PORT` | `6984`      | 同步服务端口                                  |
 | `EXOMIND_POUCHDB_HOST` | `127.0.0.1` | 同步服务监听地址                              |
 | `EXOMIND_ASR_PORT`     | `1949`      | ASR 服务端口                                  |
+| `EXOMIND_TAURI_INSTANCE_NAME` | 空 | Tauri 开发实例名（用于派生独立构建目录） |
+| `EXOMIND_TAURI_TARGET_DIR` | 空 | 显式指定 Tauri/Cargo 开发构建目录 |
 | `VITE_SYNC_SERVER_URL` | 空            | 前端强制覆盖同步地址                          |
 | `VITE_ASR_SERVER_URL`  | 空            | 前端强制覆盖 ASR 地址                         |
 | `VITE_APP_VERSION`     | 自动解析      | 应用显示版本（CI 可注入）                     |
@@ -152,12 +154,36 @@ Copy-Item .env.example .env
 
 - 未设置 `VITE_SYNC_SERVER_URL` 时，前端会按 `当前 hostname + EXOMIND_POUCHDB_PORT` 自动拼接同步地址。
 - 局域网联调时，显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，并在客户端填写可达 IP。
+- `bun run tauri dev` 下若未显式设置 `CARGO_TARGET_DIR`，`Scripts/dev/tauri-wrapper.ps1` 会自动注入独立目录，避免 Windows 多开实例时多个 `cargo run` 同时争抢同一个 `target\debug\exomind.exe` 并触发 `拒绝访问 / os error 5`。
 
 windows powershell指定端口启动桌面端的例子：
 
 ```powershell
 $env:EXOMIND_WEB_PORT='1520'; $env:EXOMIND_HMR_PORT='1521'; bun run tauri dev
 ```
+
+并行启动多个 Tauri 开发实例（parallel Tauri dev / 并行桌面调试）：
+
+```powershell
+# 终端 A：较窄窗口
+$env:EXOMIND_WEB_PORT='1520'
+$env:EXOMIND_HMR_PORT='1521'
+$env:EXOMIND_TAURI_INSTANCE_NAME='narrow'
+bun run tauri dev
+
+# 终端 B：较宽窗口
+$env:EXOMIND_WEB_PORT='1620'
+$env:EXOMIND_HMR_PORT='1621'
+$env:EXOMIND_TAURI_INSTANCE_NAME='wide'
+bun run tauri dev
+```
+
+说明：
+
+- `Scripts/dev/tauri-wrapper.ps1` 会在 `tauri dev` 时自动为每个实例注入独立 `CARGO_TARGET_DIR`，默认目录形如 `target/tauri-dev/web-1520`，避免 Windows 上多个 `cargo run` 争抢同一个 `target\debug\exomind.exe`。
+- 如需手动指定构建输出目录，可设置 `EXOMIND_TAURI_TARGET_DIR`；若你已自行设置 `CARGO_TARGET_DIR`，wrapper 会直接复用。
+- 若未设置 `EXOMIND_TAURI_INSTANCE_NAME`，默认会按 `EXOMIND_WEB_PORT` 生成实例目录名，例如 `web-1520`、`web-1620`，便于同时测试不同 UI 尺寸（UI sizes / 界面尺寸）。
+- 若要做局域网多机联调，建议单独启动一个同步服务终端并设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，各实例再通过 `VITE_SYNC_SERVER_URL=http://<LAN-IP>:<PORT>` 指向同一同步地址。
 
 ## 测试与验收（Testing / 测试）
 

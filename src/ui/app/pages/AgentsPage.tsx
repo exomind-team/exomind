@@ -3,6 +3,7 @@ import {
   Bot,
   Brain,
   ChevronRight,
+  Crosshair,
   Filter,
   List,
   Mail,
@@ -19,7 +20,7 @@ import {
   X,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   ReactFlow,
   Background,
@@ -30,18 +31,26 @@ import {
   type Edge as FlowEdge,
   type Node as FlowNode,
   type NodeProps as FlowNodeProps,
+  type ReactFlowInstance,
   useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { getUseMockDataEnabled } from '@/config/mock-data';
+import { resolveLocalServiceHost } from '@/config/local-service-host';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
+  DEFAULT_EXTERNAL_RUNTIME_PORT,
+  getEmbeddedRuntimeNetworkMode,
+  getPreferredEmbeddedRuntimePort,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
+  resolveEmbeddedRuntimeBindHost,
+  setEmbeddedRuntimeNetworkMode,
   setRuntimeExternalAddress,
   setRuntimeTargetMode,
   subscribeRuntimeTargetChanges,
+  type EmbeddedRuntimeNetworkMode,
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
@@ -50,7 +59,6 @@ import { getRuntimeControlService } from '@/lib/services/runtime-control.service
 import { KNOWN_AGENT_HUB_TOPICS, VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
 import type { SignalEvent, SignalRoute } from '@/lib/types/signal-pool';
 import type {
-  AgentConversationChunk,
   AgentConversationMessage,
   AgentDetailData,
   AgentDeviceGroup,
@@ -70,15 +78,48 @@ import {
   type RuntimeHostSnapshot,
 } from '@/services/runtime-manager';
 import { RuntimeClient } from '@/services/runtime-client';
+import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
+import {
+  createProviderProfile,
+  listProviderProfiles,
+  markProviderProfileUsed,
+  resolveProviderProfile,
+} from '@/lib/agent-provider/provider-profile-storage';
+import type { ApiProviderId, ProviderProfileMeta } from '@/lib/agent-provider/types';
 import {
   buildSignalGraph,
   buildSignalRouteRows,
   type SignalGraph,
-  type SignalGraphNode,
   type SignalGraphNodeType,
   type SignalRouteRow,
 } from './agents-signal-topology';
+import {
+  applyManualLayoutSnapshot,
+  buildAutoFlowLayout,
+  buildManualLayoutSnapshot,
+  buildTopologyDatasetKey,
+  buildTopologyFilterKey,
+  clearTopologyScopeLayouts,
+  getTopologyLayoutSnapshot,
+  readTopologyLayoutStore,
+  removeTopologyLayoutSnapshot,
+  setTopologyLayoutSnapshot,
+  writeTopologyLayoutStore,
+  type TopologyLayoutMode,
+  type TopologyLayoutStore,
+  type TopologyNodePosition,
+  type TopologyViewport,
+} from './topology-layout';
 import { Switch } from '@/components/ui/switch';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import {
+  appendAdjacentConversationDelta,
+  appendConversationChunk,
+  appendConversationMessage,
+  createConversationMessage,
+  formatRuntimeEventPayload,
+  getConversationMessageTestId,
+} from './agents/conversation-runtime';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -88,55 +129,8 @@ const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string 
   { id: 'device', icon: Monitor, label: '设备' },
 ];
 
-type TopologySettingsTab = 'layout' | 'style' | 'filter';
-type TopologyLayoutMode = 'force' | 'tree' | 'ring' | 'grid';
-type TopologyNodeSize = 'sm' | 'md' | 'lg';
-type TopologyEdgeStyle = 'straight' | 'smooth' | 'step';
-type TopologyColorScheme = 'type' | 'status' | 'mixed';
-
-type TopologyNodeFilter = {
-  signalInput: boolean;
-  topic: boolean;
-  agent: boolean;
-  actor: boolean;
-  frontend: boolean;
-};
-
-type TopologySettingsState = {
-  layoutMode: TopologyLayoutMode;
-  nodeSpacing: number;
-  autoLayout: boolean;
-  nodeSize: TopologyNodeSize;
-  edgeStyle: TopologyEdgeStyle;
-  showLabels: boolean;
-  colorScheme: TopologyColorScheme;
-  filters: TopologyNodeFilter;
-  groupByLayer: boolean;
-  hideDisconnected: boolean;
-};
-
-const TOPOLOGY_SETTINGS_STORAGE_KEY = 'exomind:agentHubTopologySettings';
-const DEFAULT_TOPOLOGY_SETTINGS: TopologySettingsState = {
-  layoutMode: 'force',
-  nodeSpacing: 56,
-  autoLayout: true,
-  nodeSize: 'md',
-  edgeStyle: 'smooth',
-  showLabels: true,
-  colorScheme: 'type',
-  filters: {
-    signalInput: true,
-    topic: true,
-    agent: true,
-    actor: true,
-    frontend: true,
-  },
-  groupByLayer: false,
-  hideDisconnected: false,
-};
-
 type AddNodeOption = {
-  id: 'agent' | 'device';
+  id: RuntimeCreateAgentRequest['kind'] | 'device';
   title: string;
   description: string;
   tintColor: string;
@@ -144,10 +138,28 @@ type AddNodeOption = {
 
 const ADD_NODE_OPTIONS: AddNodeOption[] = [
   {
-    id: 'agent',
-    title: '添加 Agent',
-    description: '在当前 Runtime 中手动创建 Echo Agent',
+    id: 'claude_cli',
+    title: 'Claude CLI',
+    description: '在 Runtime 中创建 Claude CLI Agent',
+    tintColor: '#C75B3A',
+  },
+  {
+    id: 'codex_cli',
+    title: 'Codex CLI',
+    description: '在 Runtime 中创建 Codex CLI Agent',
     tintColor: '#0D9488',
+  },
+  {
+    id: 'api',
+    title: 'API Agent',
+    description: '通过 OpenAI / Anthropic 接口创建 Agent',
+    tintColor: '#2563EB',
+  },
+  {
+    id: 'echo',
+    title: 'Echo Agent',
+    description: '本地回显测试 Agent',
+    tintColor: '#78716C',
   },
   {
     id: 'device',
@@ -265,7 +277,10 @@ function getListItemIcon(item: AgentHubListItem): LucideIcon {
 }
 
 function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
-  if (optionId === 'agent') return Bot;
+  if (optionId === 'claude_cli') return Brain;
+  if (optionId === 'codex_cli') return Bot;
+  if (optionId === 'api') return Webhook;
+  if (optionId === 'echo') return MessageCircle;
   if (optionId === 'device') return Monitor;
   return Plus;
 }
@@ -285,6 +300,10 @@ function formatHostUptime(uptimeSecs?: number): string {
   if (days > 0) return `${days}d ${hours}h`;
   if (hours > 0) return `${hours}h ${minutes}m`;
   return `${minutes}m`;
+}
+
+function getEmbeddedRuntimeModeLabel(mode: EmbeddedRuntimeNetworkMode): string {
+  return mode === 'lan' ? '局域网（LAN）' : '仅本机（Local only）';
 }
 
 function formatHostMemory(usedMb?: number, totalMb?: number): string {
@@ -379,7 +398,7 @@ function buildDirectRuntimeCandidates(hosts: RuntimeHostSnapshot[]): RuntimeHost
   const portCandidates = getDirectRuntimePortCandidates();
 
   if (typeof window !== 'undefined' && window.location?.hostname) {
-    hostCandidates.add(window.location.hostname);
+    hostCandidates.add(resolveLocalServiceHost(window.location.hostname));
   }
   hostCandidates.add('localhost');
 
@@ -447,43 +466,14 @@ function formatSignalTime(timestampMs: number): string {
   });
 }
 
-function appendConversationChunk(
-  messages: AgentConversationMessage[],
-  chunk: AgentConversationChunk,
-): AgentConversationMessage[] {
-  const index = messages.findIndex((item) => item.id === chunk.messageId);
-  if (index === -1) {
-    return [
-      ...messages,
-      {
-        id: chunk.messageId,
-        role: 'agent',
-        content: chunk.delta,
-        createdAt: new Date().toISOString(),
-      },
-    ];
-  }
-
-  const next = [...messages];
-  const current = next[index];
-  if (!current) return messages;
-  next[index] = {
-    ...current,
-    content: `${current.content}${chunk.delta}`,
-  };
-  return next;
-}
-
 type SignalFlowNodeData = {
   label: string;
   subtitle: string;
   nodeType: SignalGraphNodeType;
-  nodeSize: TopologyNodeSize;
-  showLabels: boolean;
-  colorScheme: TopologyColorScheme;
 };
 
 type SignalFlowNodeType = FlowNode<SignalFlowNodeData, SignalGraphNodeType>;
+const TOPOLOGY_SCOPE_KEY = 'global';
 
 function nodeTypeTint(nodeType: SignalGraphNodeType): string {
   if (nodeType === 'signal-input') return '#8B5CF6';
@@ -493,55 +483,13 @@ function nodeTypeTint(nodeType: SignalGraphNodeType): string {
   return '#6366F1';
 }
 
-function nodeStatusTint(status: string): string {
-  if (status === 'running' || status === 'online' || status === 'available') return '#0D9488';
-  if (status === 'busy' || status === 'warning') return '#D97706';
-  if (status === 'error' || status === 'offline') return '#DC2626';
-  return '#78716C';
-}
-
-function resolveNodeTint(nodeType: SignalGraphNodeType, status: string, colorScheme: TopologyColorScheme): string {
-  if (colorScheme === 'status') return nodeStatusTint(status);
-  if (colorScheme === 'mixed' && (nodeType === 'agent' || nodeType === 'actor')) {
-    return nodeStatusTint(status);
-  }
-  return nodeTypeTint(nodeType);
-}
-
-function nodeSizeMinWidth(nodeSize: TopologyNodeSize): string {
-  if (nodeSize === 'sm') return 'min-w-[98px]';
-  if (nodeSize === 'lg') return 'min-w-[150px]';
-  return 'min-w-[120px]';
-}
-
-function nodeSizePadding(nodeType: SignalGraphNodeType, nodeSize: TopologyNodeSize): string {
-  if (nodeType === 'topic') {
-    if (nodeSize === 'sm') return 'px-4 py-2';
-    if (nodeSize === 'lg') return 'px-6 py-4';
-    return 'px-5 py-3';
-  }
-  if (nodeType === 'signal-input') {
-    if (nodeSize === 'sm') return 'px-3 py-2.5';
-    if (nodeSize === 'lg') return 'px-5 py-4';
-    return 'px-4 py-3';
-  }
-  if (nodeType === 'actor') {
-    if (nodeSize === 'sm') return 'px-3 py-2.5';
-    if (nodeSize === 'lg') return 'px-5 py-4';
-    return 'px-4 py-3';
-  }
-  if (nodeSize === 'sm') return 'px-3 py-2.5';
-  if (nodeSize === 'lg') return 'px-5 py-4';
-  return 'px-4 py-3';
-}
-
 function signalNodeTypeBadgeLabel(nodeType: SignalGraphNodeType): string {
   if (nodeType === 'signal-input') return 'input';
   return nodeType;
 }
 
 function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
-  const tint = resolveNodeTint(data.nodeType, data.subtitle, data.colorScheme);
+  const tint = nodeTypeTint(data.nodeType);
   const handleBaseStyle = {
     width: 8,
     height: 8,
@@ -551,29 +499,17 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
     pointerEvents: 'none' as const,
   };
   if (data.nodeType === 'frontend') {
-    const frontendSizeClass = data.nodeSize === 'sm'
-      ? 'h-[62px] w-[118px]'
-      : data.nodeSize === 'lg'
-        ? 'h-[78px] w-[148px]'
-        : 'h-[70px] w-[130px]';
-    const frontendDiamondClass = data.nodeSize === 'sm'
-      ? 'h-[56px] w-[56px]'
-      : data.nodeSize === 'lg'
-        ? 'h-[70px] w-[70px]'
-        : 'h-[64px] w-[64px]';
     return (
-      <div className={`relative ${frontendSizeClass}`}>
+      <div className="relative h-[70px] w-[130px]">
         <Handle type="target" position={Position.Left} style={handleBaseStyle} />
         <Handle type="source" position={Position.Right} style={handleBaseStyle} />
         <div
-          className={`absolute left-1/2 top-1/2 ${frontendDiamondClass} -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-card`}
+          className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-card"
           style={{ borderColor: `${tint}80` }}
         />
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <p className="max-w-[120px] truncate text-xs font-semibold text-foreground">{data.label}</p>
-          {data.showLabels && (
-            <p className="mt-1 max-w-[120px] truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
-          )}
+          <p className="mt-1 max-w-[120px] truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
         </div>
       </div>
     );
@@ -581,24 +517,22 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
 
   const shapeClass =
     data.nodeType === 'topic'
-      ? `rounded-full ${nodeSizePadding(data.nodeType, data.nodeSize)}`
+      ? 'rounded-full px-5 py-3'
       : data.nodeType === 'signal-input'
-        ? `rounded-2xl ${nodeSizePadding(data.nodeType, data.nodeSize)}`
+        ? 'rounded-2xl px-4 py-3'
       : data.nodeType === 'actor'
-        ? `rounded-xl ${nodeSizePadding(data.nodeType, data.nodeSize)}`
-        : `rounded-md ${nodeSizePadding(data.nodeType, data.nodeSize)}`;
+        ? 'rounded-xl px-4 py-3'
+        : 'rounded-md px-4 py-3';
 
   return (
     <div
-      className={`${nodeSizeMinWidth(data.nodeSize)} border bg-card text-center shadow-sm ${shapeClass}`}
+      className={`min-w-[120px] border bg-card text-center shadow-sm ${shapeClass}`}
       style={{ borderColor: `${tint}80` }}
     >
       <Handle type="target" position={Position.Left} style={handleBaseStyle} />
       <Handle type="source" position={Position.Right} style={handleBaseStyle} />
       <p className="truncate text-xs font-semibold text-foreground">{data.label}</p>
-      {data.showLabels && (
-        <p className="mt-1 truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
-      )}
+      <p className="mt-1 truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
     </div>
   );
 }
@@ -624,7 +558,7 @@ function TabBar({
   onChange: (value: AgentHubViewMode) => void;
 }) {
   return (
-    <div className="flex items-center gap-1 rounded-[14px] border border-[#E7DED7] bg-[#F7F1EC] p-1.5 shadow-[inset_0_1px_0_rgba(255,255,255,0.5)] dark:border-[#3A3431] dark:bg-[#221F1D]">
+    <div className="flex items-center gap-1 rounded-[10px] bg-[#F5F0ED] p-1 dark:bg-[#292524]">
       {VIEW_ITEMS.map((item) => {
         const Icon = item.icon;
         const active = value === item.id;
@@ -634,10 +568,10 @@ function TabBar({
             type="button"
             data-testid={`agent-view-toggle-${item.id}`}
             onClick={() => onChange(item.id)}
-            className={`flex items-center gap-1.5 rounded-[10px] px-3 py-1.5 text-xs font-medium transition-all ${
+            className={`flex items-center gap-1.5 rounded-[8px] px-3 py-1.5 text-xs font-medium transition-colors ${
               active
-                ? 'bg-white text-[#1C1917] shadow-sm ring-1 ring-[#E8DDD5] dark:bg-[#141110] dark:text-[#FAFAF9] dark:ring-[#3A3431]'
-                : 'text-[#78716C] hover:bg-white/70 hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:bg-[#2B2624] dark:hover:text-[#FAFAF9]'
+                ? 'bg-white text-[#1C1917] shadow-sm dark:bg-[#1C1917] dark:text-[#FAFAF9]'
+                : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
             }`}
             aria-selected={active}
           >
@@ -650,506 +584,30 @@ function TabBar({
   );
 }
 
-function topologyFilterKey(nodeType: SignalGraphNodeType): keyof TopologyNodeFilter | null {
-  if (nodeType === 'signal-input') return 'signalInput';
-  if (nodeType === 'topic') return 'topic';
-  if (nodeType === 'agent') return 'agent';
-  if (nodeType === 'actor') return 'actor';
-  if (nodeType === 'frontend') return 'frontend';
-  return null;
-}
-
-function isDesktopViewport(): boolean {
-  if (typeof window === 'undefined') return true;
-  if (typeof window.matchMedia === 'function') {
-    return window.matchMedia('(min-width: 1024px)').matches;
-  }
-  return window.innerWidth >= 1024;
-}
-
-function nodeTypeLayoutOrder(nodeType: SignalGraphNodeType): number {
-  if (nodeType === 'signal-input') return 0;
-  if (nodeType === 'topic') return 1;
-  if (nodeType === 'agent') return 2;
-  if (nodeType === 'actor') return 3;
-  if (nodeType === 'frontend') return 4;
-  return 5;
-}
-
-function stableNodeSeed(nodeId: string): number {
-  let hash = 0;
-  for (let index = 0; index < nodeId.length; index += 1) {
-    hash = ((hash << 5) - hash) + nodeId.charCodeAt(index);
-    hash |= 0;
-  }
-  return Math.abs(hash);
-}
-
-function applyTopologyLayout(nodes: SignalGraphNode[], settings: TopologySettingsState): SignalGraphNode[] {
-  if (!settings.autoLayout) return nodes;
-
-  const spacing = Math.max(32, settings.nodeSpacing);
-  const grouped = new Map<string, SignalGraphNode[]>();
-  for (const node of nodes) {
-    const key = settings.groupByLayer ? node.type : 'all';
-    const current = grouped.get(key) ?? [];
-    current.push(node);
-    grouped.set(key, current);
-  }
-
-  const groupKeys = Array.from(grouped.keys()).sort((left, right) => {
-    if (!settings.groupByLayer) return left.localeCompare(right);
-    return nodeTypeLayoutOrder(left as SignalGraphNodeType) - nodeTypeLayoutOrder(right as SignalGraphNodeType);
-  });
-
-  const positions = new Map<string, { x: number; y: number }>();
-  const allNodes = groupKeys.flatMap((key) => {
-    const items = grouped.get(key) ?? [];
-    return [...items].sort((left, right) => left.label.localeCompare(right.label));
-  });
-
-  if (settings.layoutMode === 'ring') {
-    const centerX = 520;
-    const centerY = 320;
-    if (settings.groupByLayer) {
-      groupKeys.forEach((key, groupIndex) => {
-        const items = [...(grouped.get(key) ?? [])].sort((left, right) => left.label.localeCompare(right.label));
-        const radius = 110 + (groupIndex * (spacing * 0.7));
-        items.forEach((node, index) => {
-          const angle = ((Math.PI * 2) / Math.max(items.length, 1)) * index;
-          positions.set(node.id, {
-            x: centerX + Math.cos(angle) * radius,
-            y: centerY + Math.sin(angle) * radius,
-          });
-        });
-      });
-    } else {
-      allNodes.forEach((node, index) => {
-        const angle = ((Math.PI * 2) / Math.max(allNodes.length, 1)) * index;
-        positions.set(node.id, {
-          x: centerX + Math.cos(angle) * Math.max(180, spacing * 2.2),
-          y: centerY + Math.sin(angle) * Math.max(180, spacing * 2.2),
-        });
-      });
-    }
-  } else if (settings.layoutMode === 'grid') {
-    const columns = Math.max(2, Math.ceil(Math.sqrt(allNodes.length)));
-    allNodes.forEach((node, index) => {
-      const col = index % columns;
-      const row = Math.floor(index / columns);
-      positions.set(node.id, {
-        x: 120 + col * Math.max(170, spacing * 2),
-        y: 80 + row * (spacing + 28),
-      });
-    });
-  } else {
-    groupKeys.forEach((key, groupIndex) => {
-      const items = [...(grouped.get(key) ?? [])].sort((left, right) => left.label.localeCompare(right.label));
-      items.forEach((node, index) => {
-        const baseX = settings.groupByLayer
-          ? 120 + groupIndex * Math.max(190, spacing * 2.8)
-          : 120 + (index % 4) * Math.max(180, spacing * 2.1);
-        const baseY = settings.groupByLayer
-          ? 80 + index * (spacing + 28)
-          : 80 + Math.floor(index / 4) * (spacing + 28);
-        const seed = stableNodeSeed(node.id);
-        const offsetX = settings.layoutMode === 'force' ? ((seed % 9) - 4) * 4 : 0;
-        const offsetY = settings.layoutMode === 'force' ? (((seed >> 3) % 9) - 4) * 4 : 0;
-        positions.set(node.id, {
-          x: baseX + offsetX,
-          y: baseY + offsetY,
-        });
-      });
-    });
-  }
-
-  return nodes.map((node) => ({
-    ...node,
-    position: positions.get(node.id) ?? node.position,
-  }));
-}
-
-const TOPOLOGY_SETTINGS_TABS: Array<{ id: TopologySettingsTab; label: string }> = [
-  { id: 'layout', label: '布局' },
-  { id: 'style', label: '样式' },
-  { id: 'filter', label: '过滤' },
-];
-
-const TOPOLOGY_FILTER_ITEMS: Array<{ key: keyof TopologyNodeFilter; label: string }> = [
-  { key: 'signalInput', label: '信号输入' },
-  { key: 'topic', label: '主题' },
-  { key: 'agent', label: 'Agent' },
-  { key: 'actor', label: 'Actor' },
-  { key: 'frontend', label: '输出' },
-];
-
-function TopologySettingsContent({
-  activeTab,
-  settings,
-  visibleNodeCount,
-  totalNodeCount,
-  onTabChange,
-  onUpdate,
-  className,
-}: {
-  activeTab: TopologySettingsTab;
-  settings: TopologySettingsState;
-  visibleNodeCount: number;
-  totalNodeCount: number;
-  onTabChange: (tab: TopologySettingsTab) => void;
-  onUpdate: (updater: (previous: TopologySettingsState) => TopologySettingsState) => void;
-  className?: string;
-}) {
-  const layoutOptions: Array<{ id: TopologyLayoutMode; label: string }> = [
-    { id: 'force', label: '力导向' },
-    { id: 'tree', label: '树布局' },
-    { id: 'ring', label: '环形' },
-    { id: 'grid', label: '网格' },
-  ];
-  const nodeSizeOptions: Array<{ id: TopologyNodeSize; label: string }> = [
-    { id: 'sm', label: '小' },
-    { id: 'md', label: '中' },
-    { id: 'lg', label: '大' },
-  ];
-  const edgeStyleOptions: Array<{ id: TopologyEdgeStyle; label: string }> = [
-    { id: 'straight', label: '直线' },
-    { id: 'smooth', label: '曲线' },
-    { id: 'step', label: '折线' },
-  ];
-  const colorOptions: Array<{ id: TopologyColorScheme; label: string }> = [
-    { id: 'type', label: '类型' },
-    { id: 'status', label: '状态' },
-    { id: 'mixed', label: '混合' },
-  ];
-
-  const rootClassName = className
-    ? `flex min-h-0 flex-1 flex-col gap-3 ${className}`
-    : 'flex min-h-0 flex-1 flex-col gap-3';
-
-  return (
-    <div className={rootClassName}>
-      <div className="rounded-[20px] border border-[#E7DED7] bg-[linear-gradient(180deg,#FFFDFB_0%,#F8F2ED_100%)] px-4 py-3 shadow-sm dark:border-[#3A3431] dark:bg-[linear-gradient(180deg,#1F1B19_0%,#171412_100%)]">
-        <div className="flex items-start justify-between gap-3">
-          <div>
-            <p className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#A8A29E]">Topology Console</p>
-            <h3 className="mt-1 text-sm font-semibold text-foreground">拓扑布局</h3>
-            <p className="mt-1 text-[11px] text-muted-foreground">节点密度、连线表现和过滤器会实时作用到当前画布。</p>
-          </div>
-          <div className="rounded-2xl border border-[#E7DED7] bg-white/90 px-3 py-2 text-right dark:border-[#3A3431] dark:bg-[#120F0E]/90">
-            <p className="text-[10px] uppercase tracking-[0.12em] text-muted-foreground">Visible</p>
-            <p className="mt-1 text-lg font-semibold leading-none text-foreground">
-              {visibleNodeCount}
-              <span className="ml-1 text-xs font-medium text-muted-foreground">/ {totalNodeCount}</span>
-            </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-3 rounded-[14px] border border-[#E7DED7] bg-[#F7F1EC] p-1 dark:border-[#3A3431] dark:bg-[#221F1D]">
-        {TOPOLOGY_SETTINGS_TABS.map((item) => (
-          <button
-            key={item.id}
-            type="button"
-            data-testid={`agent-topology-settings-tab-${item.id}`}
-            aria-pressed={activeTab === item.id}
-            onClick={() => onTabChange(item.id)}
-            className={`rounded-[10px] px-2 py-2 text-xs transition-all ${
-              activeTab === item.id
-                ? 'bg-white font-semibold text-foreground shadow-sm dark:bg-[#141110]'
-                : 'text-muted-foreground hover:bg-white/70 hover:text-foreground dark:hover:bg-[#2B2624]'
-            }`}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
-      <div className="min-h-0 flex-1 space-y-3 overflow-y-auto pb-2">
-        {activeTab === 'layout' && (
-          <div data-testid="agent-topology-settings-section-layout" className="space-y-3">
-            <section className="space-y-2 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">拓扑布局</h3>
-              <div className="grid grid-cols-4 gap-2">
-                {layoutOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={settings.layoutMode === option.id}
-                    onClick={() => {
-                      onUpdate((previous) => ({ ...previous, layoutMode: option.id }));
-                    }}
-                    className={`rounded-md border px-2 py-1.5 text-[11px] ${
-                      settings.layoutMode === option.id
-                        ? 'border-[#C75B3A] bg-[#C75B3A]/10 text-[#C75B3A]'
-                        : 'border-border-card text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="space-y-2 rounded-xl border border-border-card bg-card p-3">
-              <div className="flex items-center justify-between">
-                <h3 className="text-xs font-semibold text-foreground">节点密度</h3>
-                <span className="rounded bg-surface px-2 py-0.5 text-[11px] text-muted-foreground">
-                  {settings.nodeSpacing}
-                </span>
-              </div>
-              <input
-                data-testid="agent-topology-settings-spacing-slider"
-                type="range"
-                min={32}
-                max={96}
-                step={4}
-                value={settings.nodeSpacing}
-                onChange={(event) => {
-                  const nextValue = Number(event.target.value);
-                  onUpdate((previous) => ({
-                    ...previous,
-                    nodeSpacing: Number.isFinite(nextValue) ? nextValue : previous.nodeSpacing,
-                  }));
-                }}
-                className="h-2 w-full cursor-pointer accent-[#C75B3A]"
-              />
-              <div className="flex justify-between text-[10px] text-muted-foreground">
-                <span>紧凑</span>
-                <span>宽松</span>
-              </div>
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card px-3 py-2.5">
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">自动排列</h3>
-                <p className="text-[11px] text-muted-foreground">拖拽后按当前布局自动整理</p>
-              </div>
-              <Switch
-                checked={settings.autoLayout}
-                onCheckedChange={(checked) => {
-                  onUpdate((previous) => ({ ...previous, autoLayout: checked }));
-                }}
-              />
-            </section>
-          </div>
-        )}
-
-        {activeTab === 'style' && (
-          <div data-testid="agent-topology-settings-section-style" className="space-y-3">
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">节点大小</h3>
-              <div className="inline-flex rounded-md border border-border-card bg-surface p-0.5">
-                {nodeSizeOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={settings.nodeSize === option.id}
-                    onClick={() => {
-                      onUpdate((previous) => ({ ...previous, nodeSize: option.id }));
-                    }}
-                    className={`rounded px-2.5 py-1 text-[11px] ${
-                      settings.nodeSize === option.id
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">连线样式</h3>
-              <div className="inline-flex rounded-md border border-border-card bg-surface p-0.5">
-                {edgeStyleOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={settings.edgeStyle === option.id}
-                    onClick={() => {
-                      onUpdate((previous) => ({ ...previous, edgeStyle: option.id }));
-                    }}
-                    className={`rounded px-2.5 py-1 text-[11px] ${
-                      settings.edgeStyle === option.id
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card px-3 py-2.5">
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">显示标签</h3>
-                <p className="text-[11px] text-muted-foreground">显示节点状态与连线文字</p>
-              </div>
-              <Switch
-                checked={settings.showLabels}
-                onCheckedChange={(checked) => {
-                  onUpdate((previous) => ({ ...previous, showLabels: checked }));
-                }}
-              />
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">颜色方案</h3>
-              <div className="inline-flex rounded-md border border-border-card bg-surface p-0.5">
-                {colorOptions.map((option) => (
-                  <button
-                    key={option.id}
-                    type="button"
-                    aria-pressed={settings.colorScheme === option.id}
-                    onClick={() => {
-                      onUpdate((previous) => ({ ...previous, colorScheme: option.id }));
-                    }}
-                    className={`rounded px-2.5 py-1 text-[11px] ${
-                      settings.colorScheme === option.id
-                        ? 'bg-card text-foreground shadow-sm'
-                        : 'text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {option.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-          </div>
-        )}
-
-        {activeTab === 'filter' && (
-          <div data-testid="agent-topology-settings-section-filter" className="space-y-3">
-            <section className="space-y-2 rounded-xl border border-border-card bg-card p-3">
-              <h3 className="text-xs font-semibold text-foreground">节点类型</h3>
-              <div className="flex flex-wrap gap-1.5">
-                {TOPOLOGY_FILTER_ITEMS.map((item) => (
-                  <button
-                    key={item.key}
-                    type="button"
-                    aria-pressed={settings.filters[item.key]}
-                    onClick={() => {
-                      onUpdate((previous) => ({
-                        ...previous,
-                        filters: {
-                          ...previous.filters,
-                          [item.key]: !previous.filters[item.key],
-                        },
-                      }));
-                    }}
-                    className={`rounded-full border px-2.5 py-1 text-[11px] ${
-                      settings.filters[item.key]
-                        ? 'border-[#C75B3A] bg-[#C75B3A]/10 text-[#C75B3A]'
-                        : 'border-border-card text-muted-foreground hover:text-foreground'
-                    }`}
-                  >
-                    {item.label}
-                  </button>
-                ))}
-              </div>
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card px-3 py-2.5">
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">按层级分组</h3>
-                <p className="text-[11px] text-muted-foreground">按输入/主题/Agent/Actor 分层展示</p>
-              </div>
-              <Switch
-                checked={settings.groupByLayer}
-                onCheckedChange={(checked) => {
-                  onUpdate((previous) => ({ ...previous, groupByLayer: checked }));
-                }}
-              />
-            </section>
-
-            <section className="flex items-center justify-between gap-3 rounded-xl border border-border-card bg-card px-3 py-2.5">
-              <div>
-                <h3 className="text-xs font-semibold text-foreground">隐藏无连接节点</h3>
-                <p className="text-[11px] text-muted-foreground">只显示当前有路由关系的节点</p>
-              </div>
-              <Switch
-                checked={settings.hideDisconnected}
-                onCheckedChange={(checked) => {
-                  onUpdate((previous) => ({ ...previous, hideDisconnected: checked }));
-                }}
-              />
-            </section>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function TopologySettingsSheet({
-  activeTab,
-  settings,
-  visibleNodeCount,
-  totalNodeCount,
-  onTabChange,
-  onUpdate,
-  onClose,
-}: {
-  activeTab: TopologySettingsTab;
-  settings: TopologySettingsState;
-  visibleNodeCount: number;
-  totalNodeCount: number;
-  onTabChange: (tab: TopologySettingsTab) => void;
-  onUpdate: (updater: (previous: TopologySettingsState) => TopologySettingsState) => void;
-  onClose: () => void;
-}) {
-  return (
-    <div className="fixed inset-0 z-40 lg:hidden">
-      <button
-        type="button"
-        data-testid="agent-topology-settings-overlay"
-        className="absolute inset-0 bg-black/35"
-        aria-label="关闭拓扑设置（Close Topology Settings）"
-        onClick={onClose}
-      />
-      <section
-        data-testid="agent-topology-settings-panel"
-        className="absolute inset-x-0 bottom-0 z-10 flex h-[min(84vh,620px)] flex-col rounded-t-[24px] border-t border-border-card bg-surface pb-4 shadow-[0_-8px_28px_rgba(0,0,0,0.2)]"
-      >
-        <div className="flex justify-center pt-2">
-          <div className="h-1 w-10 rounded bg-[#D6D3D1] dark:bg-[#57534E]" />
-        </div>
-        <div className="flex items-center justify-between px-5 py-3">
-          <h2 className="text-[18px] font-semibold text-foreground">拓扑设置</h2>
-          <button
-            type="button"
-            data-testid="agent-topology-settings-close"
-            onClick={onClose}
-            className="flex h-8 w-8 items-center justify-center rounded-md border border-border-card bg-card text-muted-foreground"
-            aria-label="关闭拓扑设置（Close Topology Settings）"
-          >
-            <X size={16} />
-          </button>
-        </div>
-        <TopologySettingsContent
-          activeTab={activeTab}
-          settings={settings}
-          visibleNodeCount={visibleNodeCount}
-          totalNodeCount={totalNodeCount}
-          onTabChange={onTabChange}
-          onUpdate={onUpdate}
-          className="px-5"
-        />
-      </section>
-    </div>
-  );
-}
-
 function TopologyView({
   graph,
-  settings,
+  layoutMode,
+  manualViewport,
+  onLayoutModeChange,
+  onCommitNodePosition,
+  onCommitViewport,
+  onResetCurrentLayout,
+  onClearSavedLayouts,
   onSelectNode,
   onClearSelection,
 }: {
   graph: SignalGraph;
-  settings: TopologySettingsState;
+  layoutMode: TopologyLayoutMode;
+  manualViewport?: TopologyViewport;
+  onLayoutModeChange: (mode: TopologyLayoutMode) => void;
+  onCommitNodePosition: (
+    nodeId: string,
+    position: TopologyNodePosition,
+    viewport?: TopologyViewport,
+  ) => void;
+  onCommitViewport: (viewport: TopologyViewport) => void;
+  onResetCurrentLayout: () => void;
+  onClearSavedLayouts: () => void;
   onSelectNode: (nodeId: string) => void;
   onClearSelection: () => void;
 }) {
@@ -1159,73 +617,32 @@ function TopologyView({
   const edgeLabelColor = isDarkMode ? '#D6D3D1' : '#78716C';
   const edgeLabelBgColor = isDarkMode ? '#1C1917' : '#FAF7F5';
   const backgroundDotColor = isDarkMode ? '#44403C' : '#E7E5E4';
-
-  const visibleGraph = useMemo(() => {
-    const nodesByFilter = graph.nodes.filter((node) => {
-      const key = topologyFilterKey(node.type);
-      if (!key) return true;
-      return settings.filters[key];
-    });
-    const visibleNodeIds = new Set(nodesByFilter.map((node) => node.id));
-    let edgesByFilter = graph.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
-
-    if (settings.hideDisconnected) {
-      const connectedNodeIds = new Set<string>();
-      for (const edge of edgesByFilter) {
-        connectedNodeIds.add(edge.source);
-        connectedNodeIds.add(edge.target);
-      }
-      const nodesConnected = nodesByFilter.filter((node) => connectedNodeIds.has(node.id));
-      const connectedSet = new Set(nodesConnected.map((node) => node.id));
-      edgesByFilter = edgesByFilter.filter((edge) => connectedSet.has(edge.source) && connectedSet.has(edge.target));
-      return {
-        totalNodes: graph.nodes.length,
-        nodes: applyTopologyLayout(nodesConnected, settings),
-        edges: edgesByFilter,
-      };
-    }
-
-    return {
-      totalNodes: graph.nodes.length,
-      nodes: applyTopologyLayout(nodesByFilter, settings),
-      edges: edgesByFilter,
-    };
-  }, [graph.edges, graph.nodes, settings]);
+  const flowInstanceRef = useRef<ReactFlowInstance<SignalFlowNodeType> | null>(null);
 
   const nextFlowNodes = useMemo<SignalFlowNodeType[]>(() => {
-    return visibleGraph.nodes.map((node) => ({
+    return graph.nodes.map((node) => ({
       id: node.id,
       type: node.type,
       position: node.position,
-      draggable: true,
+      draggable: layoutMode === 'manual',
       data: {
         label: node.label,
         subtitle: node.status,
         nodeType: node.type,
-        nodeSize: settings.nodeSize,
-        showLabels: settings.showLabels,
-        colorScheme: settings.colorScheme,
       },
     }));
-  }, [settings.colorScheme, settings.nodeSize, settings.showLabels, visibleGraph.nodes]);
+  }, [graph.nodes, layoutMode]);
   const [flowNodes, setFlowNodes, onFlowNodesChange] = useNodesState<SignalFlowNodeType>(nextFlowNodes);
 
   useEffect(() => {
     setFlowNodes(nextFlowNodes);
   }, [nextFlowNodes, setFlowNodes]);
 
-  const edgeType = settings.edgeStyle === 'straight'
-    ? 'straight'
-    : settings.edgeStyle === 'step'
-      ? 'step'
-      : 'smoothstep';
-
   const flowEdges = useMemo<FlowEdge[]>(() => {
-    return visibleGraph.edges.map((edge) => ({
+    return graph.edges.map((edge) => ({
       id: edge.id,
       source: edge.source,
       target: edge.target,
-      type: edgeType,
       animated: edge.active,
       markerEnd: {
         type: MarkerType.ArrowClosed,
@@ -1235,7 +652,7 @@ function TopologyView({
       style: edge.active
         ? { stroke: activeEdgeColor, strokeWidth: 1.7 }
         : { stroke: inactiveEdgeColor, strokeWidth: 1.2, strokeDasharray: '5 4' },
-      label: settings.showLabels ? edge.label : '',
+      label: edge.label,
       labelStyle: {
         fill: edgeLabelColor,
         fontSize: 10,
@@ -1249,7 +666,31 @@ function TopologyView({
         active: edge.active,
       },
     }));
-  }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, edgeType, inactiveEdgeColor, settings.showLabels, visibleGraph.edges]);
+  }, [activeEdgeColor, edgeLabelBgColor, edgeLabelColor, graph.edges, inactiveEdgeColor]);
+
+  useEffect(() => {
+    const instance = flowInstanceRef.current;
+    if (!instance) return;
+
+    if (layoutMode === 'auto:flow') {
+      void instance.fitView({ padding: 0.2 });
+      return;
+    }
+
+    if (manualViewport) {
+      const currentViewport = instance.getViewport();
+      const matchesCurrentViewport =
+        Math.abs(currentViewport.x - manualViewport.x) < 0.5
+        && Math.abs(currentViewport.y - manualViewport.y) < 0.5
+        && Math.abs(currentViewport.zoom - manualViewport.zoom) < 0.001;
+      if (!matchesCurrentViewport) {
+        void instance.setViewport(manualViewport, { duration: 0 });
+      }
+      return;
+    }
+
+    void instance.fitView({ padding: 0.2 });
+  }, [layoutMode, manualViewport]);
 
   return (
     <section
@@ -1265,16 +706,88 @@ function TopologyView({
         data-testid="agent-topology-canvas"
         className="relative h-full min-h-0 w-full overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
       >
+        <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center justify-end gap-2">
+          <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 p-1 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
+            <button
+              type="button"
+              data-testid="agent-topology-layout-mode-manual"
+              onClick={() => onLayoutModeChange('manual')}
+              className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                layoutMode === 'manual'
+                  ? 'bg-[#C75B3A] text-white'
+                  : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
+              }`}
+            >
+              手动布局
+            </button>
+            <button
+              type="button"
+              data-testid="agent-topology-layout-mode-auto-flow"
+              onClick={() => onLayoutModeChange('auto:flow')}
+              className={`rounded-full px-3 py-1 text-[11px] font-medium transition-colors ${
+                layoutMode === 'auto:flow'
+                  ? 'bg-[#1D4ED8] text-white'
+                  : 'text-[#78716C] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
+              }`}
+            >
+              自动布局
+            </button>
+          </div>
+          <button
+            type="button"
+            data-testid="agent-topology-fit-view"
+            onClick={() => {
+              void flowInstanceRef.current?.fitView({ padding: 0.2 });
+            }}
+            className="pointer-events-auto inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-1 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+          >
+            <Crosshair size={12} />
+            适配视口
+          </button>
+          <button
+            type="button"
+            data-testid="agent-topology-reset-layout"
+            onClick={onResetCurrentLayout}
+            className="pointer-events-auto rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-1 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+          >
+            重置当前布局
+          </button>
+          <button
+            type="button"
+            data-testid="agent-topology-clear-layouts"
+            onClick={onClearSavedLayouts}
+            className="pointer-events-auto rounded-full border border-[#E7E3E0] bg-white/90 px-3 py-1 text-[11px] font-medium text-[#57534E] shadow-sm backdrop-blur transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+          >
+            清空已保存布局
+          </button>
+        </div>
         <ReactFlow
           data-testid="agent-signal-flow"
           nodes={flowNodes}
           edges={flowEdges}
           nodeTypes={SIGNAL_NODE_TYPES}
-          fitView
+          defaultViewport={layoutMode === 'manual' ? manualViewport : undefined}
+          fitView={layoutMode === 'auto:flow' || !manualViewport}
           fitViewOptions={{ padding: 0.2 }}
           minZoom={0.3}
           maxZoom={1.8}
           onNodesChange={onFlowNodesChange}
+          onInit={(instance) => {
+            flowInstanceRef.current = instance;
+            if (layoutMode === 'manual' && manualViewport) {
+              void instance.setViewport(manualViewport, { duration: 0 });
+              return;
+            }
+            void instance.fitView({ padding: 0.2 });
+          }}
+          onNodeDragStop={(_, node) => {
+            if (layoutMode !== 'manual') return;
+            onCommitNodePosition(node.id, node.position, flowInstanceRef.current?.getViewport());
+          }}
+          onMoveEnd={(_, viewport) => {
+            if (layoutMode !== 'manual') return;
+            onCommitViewport(viewport);
+          }}
           onNodeClick={(_, node: SignalFlowNodeType) => {
             onSelectNode(node.id);
           }}
@@ -1283,9 +796,6 @@ function TopologyView({
           <Background gap={20} color={backgroundDotColor} />
           <Controls showInteractive className="agent-topology-controls" />
         </ReactFlow>
-      </div>
-      <div className="sr-only" data-testid="agent-topology-visible-count">
-        {visibleGraph.nodes.length}/{visibleGraph.totalNodes}
       </div>
     </section>
   );
@@ -1296,11 +806,15 @@ function DeviceView({
   runtimeHostSnapshots,
   runtimeServiceStatus,
   runtimeHostError,
+  embeddedRuntimeNetworkMode,
+  embeddedRuntimeBindAddress,
+  runtimeNeedsRebind,
   runtimeTargetMode,
   runtimeTargetAddress,
   runtimeTargetError,
   runtimeExternalAddressDraft,
   onRuntimeHostProbe,
+  onEmbeddedRuntimeNetworkModeChange,
   onRuntimeStart,
   onRuntimeStop,
   onRuntimeTargetModeChange,
@@ -1312,11 +826,15 @@ function DeviceView({
   runtimeHostSnapshots: RuntimeHostSnapshot[];
   runtimeServiceStatus: RuntimeServiceStatus | null;
   runtimeHostError: string;
+  embeddedRuntimeNetworkMode: EmbeddedRuntimeNetworkMode;
+  embeddedRuntimeBindAddress: string;
+  runtimeNeedsRebind: boolean;
   runtimeTargetMode: RuntimeTargetMode;
   runtimeTargetAddress: string;
   runtimeTargetError: string;
   runtimeExternalAddressDraft: string;
   onRuntimeHostProbe: (hostId: string) => Promise<void>;
+  onEmbeddedRuntimeNetworkModeChange: (mode: EmbeddedRuntimeNetworkMode) => void;
   onRuntimeStart: () => Promise<void>;
   onRuntimeStop: () => Promise<void>;
   onRuntimeTargetModeChange: (mode: RuntimeTargetMode) => void;
@@ -1326,6 +844,12 @@ function DeviceView({
 }) {
   const hostCard = groups.flatMap((group) => group.cards).find((card) => card.isHost) ?? groups[0]?.cards[0];
   const isEmbeddedTarget = runtimeTargetMode === 'embedded';
+  const currentRuntimeAddress = runtimeServiceStatus?.running
+    ? `${runtimeServiceStatus.host}:${runtimeServiceStatus.port}`
+    : 'not running（未运行）';
+  const lastAttemptAddress = runtimeServiceStatus && !runtimeServiceStatus.running
+    ? `${runtimeServiceStatus.host}:${runtimeServiceStatus.port}`
+    : null;
 
   return (
     <section data-testid="agent-device-view" className="space-y-4">
@@ -1428,11 +952,77 @@ function DeviceView({
               {runtimeServiceStatus?.running ? 'running' : 'stopped'}
             </span>
           </div>
-          <p className="mt-1 text-[10px] text-[#A8A29E]">
-            {runtimeServiceStatus?.host ?? '127.0.0.1'}:{runtimeServiceStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT}
+          <div className="mt-2 rounded-lg bg-white p-2 dark:bg-[#1C1917]">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[10px] font-medium text-[#44403C] dark:text-[#E7E5E4]">
+                  监听模式（Bind mode）
+                </p>
+                <p className="text-[10px] text-[#A8A29E]">
+                  {embeddedRuntimeNetworkMode === 'lan'
+                    ? '手机/平板可用电脑局域网 IP + 端口直连'
+                    : '仅当前电脑可访问内嵌 Runtime'}
+                </p>
+              </div>
+            </div>
+            <div className="mt-2 grid grid-cols-2 gap-1">
+              <button
+                type="button"
+                data-testid="runtime-network-mode-local"
+                aria-pressed={embeddedRuntimeNetworkMode === 'local'}
+                onClick={() => onEmbeddedRuntimeNetworkModeChange('local')}
+                className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                  embeddedRuntimeNetworkMode === 'local'
+                    ? 'bg-[#0D948820] text-[#0D9488]'
+                    : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
+                }`}
+              >
+                仅本机
+              </button>
+              <button
+                type="button"
+                data-testid="runtime-network-mode-lan"
+                aria-pressed={embeddedRuntimeNetworkMode === 'lan'}
+                onClick={() => onEmbeddedRuntimeNetworkModeChange('lan')}
+                className={`rounded-md px-2 py-1 text-[11px] font-medium transition ${
+                  embeddedRuntimeNetworkMode === 'lan'
+                    ? 'bg-[#C75B3A20] text-[#C75B3A]'
+                    : 'text-[#78716C] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]'
+                }`}
+              >
+                局域网
+              </button>
+            </div>
+            <p className="mt-2 text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+              目标监听（Desired bind）：<span data-testid="runtime-local-bind-address">{embeddedRuntimeBindAddress}</span>
+            </p>
+            <p
+              data-testid="runtime-local-share-hint"
+              className="mt-1 text-[10px] text-[#A8A29E]"
+            >
+              {embeddedRuntimeNetworkMode === 'lan'
+                ? 'LAN 模式会监听 0.0.0.0；手机请填写这台电脑的局域网 IP + 端口连接。'
+                : 'Local only 模式只监听 127.0.0.1，手机无法直接连接。'}
+            </p>
+          </div>
+          <p data-testid="runtime-current-address" className="mt-1 text-[10px] text-[#A8A29E]">
+            当前运行（Current runtime）：{currentRuntimeAddress}
           </p>
+          {lastAttemptAddress && (
+            <p data-testid="runtime-last-attempt-address" className="mt-1 text-[10px] text-[#A8A29E]">
+              最近尝试（Last attempted）：{lastAttemptAddress}
+            </p>
+          )}
           {runtimeServiceStatus?.pid && (
             <p className="mt-1 text-[10px] text-[#A8A29E]">pid: {runtimeServiceStatus.pid}</p>
+          )}
+          {runtimeNeedsRebind && (
+            <p
+              data-testid="runtime-local-rebind-hint"
+              className="mt-1 rounded-md bg-[#C75B3A10] px-2 py-1 text-[10px] text-[#C75B3A]"
+            >
+              当前正在运行的监听地址与 {getEmbeddedRuntimeModeLabel(embeddedRuntimeNetworkMode)} 不一致，点击 Start 会自动重启并切换到目标监听地址。
+            </p>
           )}
           {runtimeServiceStatus?.error && (
             <p className="mt-1 text-[10px] text-[#DC2626]">{runtimeServiceStatus.error}</p>
@@ -1654,12 +1244,12 @@ function DeviceView({
 function AddNodeSheet({
   options,
   onClose,
-  onAddAgent,
+  onSelectAgent,
   onAddDevice,
 }: {
   options: AddNodeOption[];
   onClose: () => void;
-  onAddAgent: () => void;
+  onSelectAgent: (kind: RuntimeCreateAgentRequest['kind']) => void;
   onAddDevice: () => void;
 }) {
   return (
@@ -1699,7 +1289,7 @@ function AddNodeSheet({
                 data-testid={`agent-add-node-option-${option.id}`}
                 onClick={() => {
                   onClose();
-                  if (option.id === 'agent') onAddAgent();
+                  if (option.id !== 'device') onSelectAgent(option.id);
                   if (option.id === 'device') onAddDevice();
                 }}
                 className="flex w-full items-center justify-between rounded-2xl bg-[#FAF7F5] px-4 py-3 text-left dark:bg-[#292524]"
@@ -1720,6 +1310,228 @@ function AddNodeSheet({
               </button>
             );
           })}
+        </div>
+      </section>
+    </>
+  );
+}
+
+function AgentCreateSheet({
+  kind,
+  providerProfiles,
+  selectedProviderProfileId,
+  apiProfileName,
+  apiProvider,
+  apiModel,
+  apiBaseUrl,
+  apiKey,
+  compatibleHosts,
+  selectedHostId,
+  createError,
+  isCreating,
+  onClose,
+  onKindChange,
+  onSelectProviderProfile,
+  onApiProfileNameChange,
+  onApiProviderChange,
+  onApiModelChange,
+  onApiBaseUrlChange,
+  onApiKeyChange,
+  onSelectHost,
+  onCreate,
+}: {
+  kind: RuntimeCreateAgentRequest['kind'];
+  providerProfiles: ProviderProfileMeta[];
+  selectedProviderProfileId: string;
+  apiProfileName: string;
+  apiProvider: ApiProviderId;
+  apiModel: string;
+  apiBaseUrl: string;
+  apiKey: string;
+  compatibleHosts: RuntimeHostSnapshot[];
+  selectedHostId: string;
+  createError: string;
+  isCreating: boolean;
+  onClose: () => void;
+  onKindChange: (kind: RuntimeCreateAgentRequest['kind']) => void;
+  onSelectProviderProfile: (profileId: string) => void;
+  onApiProfileNameChange: (value: string) => void;
+  onApiProviderChange: (value: ApiProviderId) => void;
+  onApiModelChange: (value: string) => void;
+  onApiBaseUrlChange: (value: string) => void;
+  onApiKeyChange: (value: string) => void;
+  onSelectHost: (hostId: string) => void;
+  onCreate: () => void;
+}) {
+  const showApiFields = kind === 'api';
+  const usingSavedProfile = showApiFields && selectedProviderProfileId.trim().length > 0;
+
+  return (
+    <>
+      <button
+        type="button"
+        data-testid="agent-create-overlay"
+        aria-label="关闭 Agent 创建弹窗（Close Agent Create Sheet）"
+        className="absolute inset-0 z-20 bg-black/35"
+        onClick={onClose}
+      />
+      <section
+        data-testid="agent-create-sheet"
+        className="absolute inset-x-0 bottom-0 z-30 rounded-t-[24px] bg-white pb-7 shadow-[0_-8px_28px_rgba(0,0,0,0.12)] dark:bg-[#1C1917] dark:shadow-[0_-8px_28px_rgba(0,0,0,0.45)]"
+      >
+        <div className="flex justify-center pt-2">
+          <div className="h-1 w-10 rounded bg-[#D6D3D1] dark:bg-[#57534E]" />
+        </div>
+        <div className="flex items-center justify-between px-5 py-3">
+          <h2 className="text-[18px] font-bold text-[#1C1917] dark:text-[#FAFAF9]">创建 Agent</h2>
+          <button
+            type="button"
+            data-testid="agent-create-close"
+            onClick={onClose}
+            className="flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#A8A29E] dark:bg-[#292524] dark:text-[#78716C]"
+          >
+            <X size={16} />
+          </button>
+        </div>
+
+        <div className="space-y-4 px-5">
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">Agent 类型</p>
+            <div className="grid grid-cols-2 gap-2">
+              {(['claude_cli', 'codex_cli', 'api', 'echo'] as RuntimeCreateAgentRequest['kind'][]).map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  data-testid={`agent-create-kind-${option}`}
+                  onClick={() => onKindChange(option)}
+                  className={`rounded-xl border px-3 py-2 text-left text-xs ${
+                    kind === option
+                      ? 'border-[#0D9488] bg-[#0D948810] text-[#0D9488]'
+                      : 'border-[#E7E5E4] bg-[#FAF7F5] text-[#57534E] dark:border-[#292524] dark:bg-[#292524] dark:text-[#D6D3D1]'
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {showApiFields && (
+            <div className="space-y-3 rounded-2xl border border-[#E7E5E4] bg-[#FAF7F5] p-3 dark:border-[#292524] dark:bg-[#292524]">
+              <div className="space-y-1">
+                <p className="text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">已保存 Provider Profiles</p>
+                {providerProfiles.length > 0 ? (
+                  <select
+                    data-testid="agent-create-provider-profile-select"
+                    value={selectedProviderProfileId}
+                    onChange={(event) => onSelectProviderProfile(event.target.value)}
+                    className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+                  >
+                    <option value="">新建 Provider Profile</option>
+                    {providerProfiles.map((profile) => (
+                      <option key={profile.profileId} value={profile.profileId}>
+                        {profile.name} · {profile.provider} / {profile.model}
+                      </option>
+                    ))}
+                  </select>
+                ) : (
+                  <p className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">还没有保存的 Provider Profile，将使用下面的新建表单。</p>
+                )}
+              </div>
+
+              <input
+                data-testid="agent-create-provider-name-input"
+                value={apiProfileName}
+                onChange={(event) => onApiProfileNameChange(event.target.value)}
+                disabled={usingSavedProfile}
+                placeholder="Profile 名称（例如 OpenAI GPT-5）"
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              <select
+                data-testid="agent-create-provider-select"
+                value={apiProvider}
+                onChange={(event) => onApiProviderChange(event.target.value as ApiProviderId)}
+                disabled={usingSavedProfile}
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              >
+                <option value="openai">OpenAI</option>
+                <option value="anthropic">Anthropic</option>
+              </select>
+              <input
+                data-testid="agent-create-model-input"
+                value={apiModel}
+                onChange={(event) => onApiModelChange(event.target.value)}
+                disabled={usingSavedProfile}
+                placeholder="Model（例如 gpt-5 / claude-sonnet-4-5）"
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              <input
+                data-testid="agent-create-base-url-input"
+                value={apiBaseUrl}
+                onChange={(event) => onApiBaseUrlChange(event.target.value)}
+                disabled={usingSavedProfile}
+                placeholder="Base URL（可选）"
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              <input
+                data-testid="agent-create-api-key-input"
+                value={apiKey}
+                onChange={(event) => onApiKeyChange(event.target.value)}
+                disabled={usingSavedProfile}
+                placeholder="API Key"
+                className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#44403C] dark:bg-[#1C1917] dark:text-[#FAFAF9]"
+              />
+              {usingSavedProfile && (
+                <p className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">
+                  当前使用已保存 Profile；如需修改请切回“新建 Provider Profile”。
+                </p>
+              )}
+            </div>
+          )}
+
+          {compatibleHosts.length > 1 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">Runtime 目标（多目标时需显式选择）</p>
+              <div className="space-y-2">
+                {compatibleHosts.map((snapshot) => (
+                  <button
+                    key={snapshot.host.id}
+                    type="button"
+                    data-testid={`agent-create-runtime-host-${snapshot.host.id}`}
+                    onClick={() => onSelectHost(snapshot.host.id)}
+                    className={`w-full rounded-xl border px-3 py-2 text-left text-xs ${
+                      selectedHostId === snapshot.host.id
+                        ? 'border-[#0D9488] bg-[#0D948810] text-[#0D9488]'
+                        : 'border-[#E7E5E4] bg-[#FAF7F5] text-[#57534E] dark:border-[#292524] dark:bg-[#292524] dark:text-[#D6D3D1]'
+                    }`}
+                  >
+                    <p className="font-semibold">{snapshot.host.name}</p>
+                    <p className="mt-1 text-[11px] opacity-75">{snapshot.host.host}:{snapshot.host.port}</p>
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
+
+          {compatibleHosts.length === 1 && (
+            <p className="rounded-lg bg-[#0D948810] px-3 py-2 text-[11px] text-[#0D9488]">
+              单目标自动直达：{compatibleHosts[0]?.host.name}
+            </p>
+          )}
+
+          {createError && (
+            <p className="rounded-lg bg-[#EF444410] px-3 py-2 text-[11px] text-[#DC2626]">{createError}</p>
+          )}
+
+          <button
+            type="button"
+            data-testid="agent-create-submit"
+            onClick={onCreate}
+            disabled={isCreating}
+            className="h-10 w-full rounded-xl bg-[#0D9488] text-sm font-semibold text-white disabled:opacity-50"
+          >
+            {isCreating ? '创建中...' : '创建 Agent'}
+          </button>
         </div>
       </section>
     </>
@@ -1789,7 +1601,7 @@ function RuntimeHostManagerSheet({
             data-testid="runtime-host-address-input"
             value={runtimeHostAddress}
             onChange={(event) => onRuntimeHostAddressChange(event.target.value)}
-            placeholder={`host:port（例如 127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}）`}
+            placeholder={`host 或 host:port（例如 127.0.0.1 或 127.0.0.1:${DEFAULT_EXTERNAL_RUNTIME_PORT}）`}
             className="h-9 w-full rounded-lg border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] outline-none dark:border-[#292524] dark:bg-[#292524] dark:text-[#FAFAF9]"
           />
           <button
@@ -2291,12 +2103,14 @@ function SignalHistoryTabView({
 }
 
 export function AgentsPage() {
+  const supportsInlineRightPanel = useIsDesktop(1024);
   const initialRuntimeTarget = getSelectedRuntimeTarget();
   const [viewMode, setViewMode] = useState<AgentHubViewMode>('topology');
-  const [topologySettingsOpen, setTopologySettingsOpen] = useState(false);
-  const [topologySettingsTab, setTopologySettingsTab] = useState<TopologySettingsTab>('layout');
-  const [topologySettings, setTopologySettings] = useState<TopologySettingsState>(DEFAULT_TOPOLOGY_SETTINGS);
   const [nodesFilter, setNodesFilter] = useState<NodeFilterType>('all');
+  const [topologyLayoutMode, setTopologyLayoutMode] = useState<TopologyLayoutMode>('manual');
+  const [topologyLayoutStore, setTopologyLayoutStore] = useState<TopologyLayoutStore>(() => readTopologyLayoutStore());
+  const topologyPendingStoreRef = useRef<TopologyLayoutStore | null>(null);
+  const topologyWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [activeSignalRouteHost, setActiveSignalRouteHost] = useState<RuntimeHostRecord | null>(null);
@@ -2309,9 +2123,12 @@ export function AgentsPage() {
   const [runtimeServiceStatus, setRuntimeServiceStatus] = useState<RuntimeServiceStatus | null>(null);
   const [runtimeHostModalName, setRuntimeHostModalName] = useState('');
   const [runtimeHostModalAddress, setRuntimeHostModalAddress] = useState(
-    `127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`,
+    `127.0.0.1:${DEFAULT_EXTERNAL_RUNTIME_PORT}`,
   );
   const [runtimeHostError, setRuntimeHostError] = useState('');
+  const [embeddedRuntimeNetworkMode, setEmbeddedRuntimeNetworkModeValue] = useState<EmbeddedRuntimeNetworkMode>(
+    getEmbeddedRuntimeNetworkMode(),
+  );
   const [runtimeTargetModeValue, setRuntimeTargetModeValue] = useState<RuntimeTargetMode>(initialRuntimeTarget.mode);
   const [runtimeTargetAddress, setRuntimeTargetAddress] = useState(
     formatRuntimeTargetAddress(initialRuntimeTarget),
@@ -2329,14 +2146,41 @@ export function AgentsPage() {
   const [isChatSending, setIsChatSending] = useState(false);
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
+  const [agentCreateOpen, setAgentCreateOpen] = useState(false);
+  const [agentCreateKind, setAgentCreateKind] = useState<RuntimeCreateAgentRequest['kind']>('claude_cli');
+  const [agentCreateError, setAgentCreateError] = useState('');
+  const [providerProfiles, setProviderProfiles] = useState<ProviderProfileMeta[]>([]);
+  const [selectedProviderProfileId, setSelectedProviderProfileId] = useState('');
+  const [agentCreateSelectedHostId, setAgentCreateSelectedHostId] = useState('');
+  const [apiProfileNameDraft, setApiProfileNameDraft] = useState('');
+  const [apiProviderDraft, setApiProviderDraft] = useState<ApiProviderId>('openai');
+  const [apiModelDraft, setApiModelDraft] = useState('');
+  const [apiBaseUrlDraft, setApiBaseUrlDraft] = useState('');
+  const [apiKeyDraft, setApiKeyDraft] = useState('');
+
+  const navigateToSecondaryPage = (path: string) => {
+    if (typeof window === 'undefined' || window.location.pathname === path) return;
+    window.history.pushState({}, '', path);
+    window.dispatchEvent(new PopStateEvent('popstate'));
+  };
 
   const openRouteEdit = (routeId: string | null = null) => {
     setRightPanel({ state: 'ROUTE_EDIT', routeId });
   };
   const openAgentDetail = (nodeId: string) => {
+    if (!supportsInlineRightPanel) {
+      const runtimeEntityId = resolveRuntimeEntityId(nodeId);
+      navigateToSecondaryPage(`/agents/chat/${encodeURIComponent(runtimeEntityId)}`);
+      return;
+    }
     setRightPanel({ state: 'AGENT_DETAIL', nodeId });
   };
   const openActorDetail = (nodeId: string) => {
+    if (!supportsInlineRightPanel) {
+      const runtimeEntityId = resolveRuntimeEntityId(nodeId);
+      navigateToSecondaryPage(`/agents/actor/${encodeURIComponent(runtimeEntityId)}`);
+      return;
+    }
     setRightPanel({ state: 'ACTOR_DETAIL', nodeId });
   };
   const openSignalDetail = (signalId: string) => {
@@ -2346,11 +2190,67 @@ export function AgentsPage() {
     setRightPanel({ state: 'CLOSED' });
   };
 
-  const resolveActiveRuntimeHost = (): RuntimeHostRecord | null => {
-    const prioritized = sortRouteHostsByPriority(runtimeHostSnapshots);
-    return prioritized.find((item) => item.connectionState === 'online')?.host
-      ?? prioritized.find((item) => item.host)?.host
-      ?? null;
+  const refreshProviderProfileOptions = () => {
+    const profiles = listProviderProfiles();
+    setProviderProfiles(profiles);
+    return profiles;
+  };
+
+  const buildSelectedApiProfileSnapshot = () => {
+    if (selectedProviderProfileId) {
+      return resolveProviderProfile(selectedProviderProfileId);
+    }
+
+    if (!apiModelDraft.trim() || !apiKeyDraft.trim()) {
+      return null;
+    }
+
+    const created = createProviderProfile({
+      name: apiProfileNameDraft.trim() || `${apiProviderDraft} ${apiModelDraft.trim()}`,
+      provider: apiProviderDraft,
+      model: apiModelDraft.trim(),
+      baseUrl: apiBaseUrlDraft.trim() || undefined,
+      apiKey: apiKeyDraft.trim(),
+    });
+    setSelectedProviderProfileId(created.profileId);
+    const nextProfiles = refreshProviderProfileOptions();
+    return resolveProviderProfile(created.profileId)
+      ?? resolveProviderProfile(nextProfiles[0]?.profileId ?? '');
+  };
+
+  const hostSupportsAgentKind = (
+    snapshot: RuntimeHostSnapshot,
+    kind: RuntimeCreateAgentRequest['kind'],
+    providerId?: ApiProviderId,
+  ) => {
+    if (snapshot.connectionState !== 'online') return false;
+    if (kind === 'echo') return true;
+    const capabilities = snapshot.topology?.capabilities;
+    if (!capabilities) return true;
+    if (kind === 'api') {
+      return capabilities.agent_kinds.includes('api')
+        && (!providerId || capabilities.api_providers.includes(providerId));
+    }
+    return capabilities.agent_kinds.includes(kind);
+  };
+
+  const compatibleCreateHosts = runtimeHostSnapshots.filter((snapshot) => hostSupportsAgentKind(
+    snapshot,
+    agentCreateKind,
+    agentCreateKind === 'api'
+      ? (selectedProviderProfileId
+        ? resolveProviderProfile(selectedProviderProfileId)?.provider
+        : apiProviderDraft)
+      : undefined,
+  ));
+
+  const openAgentCreateSheet = (kind: RuntimeCreateAgentRequest['kind']) => {
+    setAgentCreateKind(kind);
+    setAgentCreateError('');
+    setAgentCreateSelectedHostId('');
+    const profiles = refreshProviderProfileOptions();
+    setSelectedProviderProfileId(kind === 'api' && profiles[0] ? profiles[0].profileId : '');
+    setAgentCreateOpen(true);
   };
 
   // T8: AgentDetail / ActorDetail 右侧栏
@@ -2378,6 +2278,17 @@ export function AgentsPage() {
       setAgentDetail(null);
     }
   }, [rightPanel.state, rightPanel.nodeId]);
+
+  useEffect(() => {
+    if (!selectedProviderProfileId) return;
+    const profile = resolveProviderProfile(selectedProviderProfileId);
+    if (!profile) return;
+    setApiProfileNameDraft(profile.name);
+    setApiProviderDraft(profile.provider);
+    setApiModelDraft(profile.model);
+    setApiBaseUrlDraft(profile.baseUrl ?? '');
+    setApiKeyDraft(profile.apiKey);
+  }, [selectedProviderProfileId]);
 
   const [isRouteSaving, setIsRouteSaving] = useState(false);
 
@@ -2469,12 +2380,7 @@ export function AgentsPage() {
     const prompt = chatInput.trim();
     if (!chatAgentId || !prompt || isChatSending) return;
 
-    const userMessage: AgentConversationMessage = {
-      id: `user-${Date.now()}`,
-      role: 'user',
-      content: prompt,
-      createdAt: new Date().toISOString(),
-    };
+    const userMessage = createConversationMessage(`user-${Date.now()}`, 'user', prompt);
     setChatMessages((prev) => [...prev, userMessage]);
     setChatInput('');
     setChatError('');
@@ -2492,7 +2398,6 @@ export function AgentsPage() {
 
       if (runtimeHost) {
         const runtimeClient = new RuntimeClient();
-        const assistantMessageId = `runtime-agent-${Date.now()}`;
         for await (const chunk of runtimeClient.streamAgentConversation(runtimeHost, {
           agentId: chatAgentId,
           message: prompt,
@@ -2501,13 +2406,77 @@ export function AgentsPage() {
           if (chunk.sessionId) {
             setChatSessionId(chunk.sessionId ?? null);
           }
-          if (!chunk.content) continue;
-          receivedVisibleContent = true;
-          setChatMessages((prev) => appendConversationChunk(prev, {
-            messageId: assistantMessageId,
-            delta: chunk.content,
-            done: false,
-          }));
+          switch (chunk.type) {
+            case 'session.started':
+              setChatSessionId(chunk.sessionId ?? null);
+              break;
+            case 'output.delta':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-output-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'output.delta',
+                },
+              ));
+              break;
+            case 'thinking.delta':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-thinking-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'thinking.delta',
+                  title: 'Thinking',
+                },
+              ));
+              break;
+            case 'tool.call':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `runtime-tool-call-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                'agent',
+                formatRuntimeEventPayload(chunk.payload),
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'tool.call',
+                  title: `Tool Call · ${chunk.name ?? 'unknown'}`,
+                },
+              )));
+              break;
+            case 'tool.result':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendConversationMessage(prev, createConversationMessage(
+                `runtime-tool-result-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                'agent',
+                formatRuntimeEventPayload(chunk.payload),
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'tool.result',
+                  title: `Tool Result · ${chunk.name ?? 'unknown'}`,
+                },
+              )));
+              break;
+            case 'error':
+              receivedVisibleContent = true;
+              setChatMessages((prev) => appendAdjacentConversationDelta(
+                prev,
+                `runtime-agent-error-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+                chunk.message ?? chunk.content,
+                {
+                  source: 'runtime',
+                  runtimeEventType: 'error',
+                  title: 'Runtime Error',
+                },
+              ));
+              break;
+            case 'done':
+              break;
+          }
         }
       } else {
         const stream = getAgentHubService().streamConversation({ agentId: chatAgentId, prompt });
@@ -2530,22 +2499,102 @@ export function AgentsPage() {
   };
 
   const handleCreateManualAgent = async () => {
-    const host = resolveActiveRuntimeHost();
-    if (!host) {
-      setRuntimeHostError('未找到可用 Runtime 主机，无法创建 Agent');
-      return;
-    }
-
     setIsAgentCreating(true);
+    setAgentCreateError('');
     setRuntimeHostError('');
+
     try {
-      const runtimeClient = new RuntimeClient();
-      const result = await runtimeClient.createAgent(host, { kind: 'echo' });
-      if (!result.ok) {
-        setRuntimeHostError(`创建 Agent 失败: ${result.error.message}`);
+      const resolvedProfile = agentCreateKind === 'api'
+        ? buildSelectedApiProfileSnapshot()
+        : null;
+      if (agentCreateKind === 'api' && !resolvedProfile) {
+        setAgentCreateError('API Agent 需要已保存或新建的 Provider Profile');
         return;
       }
+
+      const resolveCompatibleHosts = (hosts: RuntimeHostSnapshot[]) => hosts.filter((snapshot) => hostSupportsAgentKind(
+        snapshot,
+        agentCreateKind,
+        resolvedProfile?.provider,
+      ));
+
+      let candidateSnapshots = resolveCompatibleHosts(runtimeHostSnapshots);
+
+      if (candidateSnapshots.length === 0 && runtimeTargetModeValue === 'embedded' && !runtimeServiceStatus?.running) {
+        await handleRuntimeStart();
+        const nextSnapshot = await getRuntimeManager().refreshSnapshot();
+        applyRuntimeSnapshot(nextSnapshot);
+        await refreshSignalRoutesFromSnapshot(nextSnapshot);
+        candidateSnapshots = resolveCompatibleHosts(nextSnapshot.hosts);
+      }
+
+      let host = agentCreateSelectedHostId
+        ? candidateSnapshots.find((snapshot) => snapshot.host.id === agentCreateSelectedHostId)?.host ?? null
+        : candidateSnapshots.length === 1
+          ? candidateSnapshots[0]?.host ?? null
+          : null;
+
+      if (!host && candidateSnapshots.length > 1) {
+        setAgentCreateError('存在多个可用 Runtime，请先显式选择一个目标');
+        return;
+      }
+
+      if (!host) {
+        const selectedTarget = getSelectedRuntimeTarget();
+        const targetAddress = `${selectedTarget.host}:${selectedTarget.port}`;
+        try {
+          host = await getRuntimeManager().addHostFromAddress(targetAddress, `Selected Runtime · ${targetAddress}`);
+        } catch {
+          host = createDirectRuntimeHost(selectedTarget.host, selectedTarget.port);
+        }
+      }
+
+      if (!host) {
+        setAgentCreateError('未找到可用 Runtime 主机，无法创建 Agent');
+        return;
+      }
+
+      const runtimeClient = new RuntimeClient();
+      if (candidateSnapshots.length === 0) {
+        const topologyResult = await runtimeClient.getTopology(host);
+        if (!topologyResult.ok) {
+          setAgentCreateError(`无法连接当前 Runtime: ${topologyResult.error.message}`);
+          return;
+        }
+
+        const fallbackSnapshot: RuntimeHostSnapshot = {
+          host,
+          connectionState: 'online',
+          agents: [],
+          topology: topologyResult.data,
+        };
+        if (!hostSupportsAgentKind(fallbackSnapshot, agentCreateKind, resolvedProfile?.provider)) {
+          setAgentCreateError('当前 Runtime 不支持所选 Agent 类型');
+          return;
+        }
+      }
+
+      const request: RuntimeCreateAgentRequest = agentCreateKind === 'api'
+        ? {
+            kind: 'api',
+            providerProfile: resolvedProfile ?? undefined,
+          }
+        : {
+            kind: agentCreateKind,
+          };
+
+      const result = await runtimeClient.createAgent(host, request);
+      if (!result.ok) {
+        setAgentCreateError(`创建 Agent 失败: ${result.error.message}`);
+        return;
+      }
+
+      if (resolvedProfile) {
+        markProviderProfileUsed(resolvedProfile.profileId);
+      }
+
       await refreshRuntimeSnapshot();
+      setAgentCreateOpen(false);
       setViewMode('list');
     } finally {
       setIsAgentCreating(false);
@@ -2597,53 +2646,6 @@ export function AgentsPage() {
     setIsChatSending(false);
   }, [rightPanel.state]);
 
-  // Topology settings（拓扑设置）: mount 时读取本地缓存
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    try {
-      const raw = window.localStorage.getItem(TOPOLOGY_SETTINGS_STORAGE_KEY);
-      if (!raw) return;
-      const parsed = JSON.parse(raw) as Partial<TopologySettingsState>;
-      setTopologySettings((previous) => ({
-        ...previous,
-        ...parsed,
-        filters: {
-          ...previous.filters,
-          ...parsed.filters,
-        },
-      }));
-    } catch {
-      // ignore parse errors（忽略拓扑设置缓存损坏）
-    }
-  }, []);
-
-  useEffect(() => {
-    if (typeof window === 'undefined') return;
-    window.localStorage.setItem(TOPOLOGY_SETTINGS_STORAGE_KEY, JSON.stringify(topologySettings));
-  }, [topologySettings]);
-
-  useEffect(() => {
-    if (viewMode !== 'topology' && topologySettingsOpen) {
-      setTopologySettingsOpen(false);
-    }
-  }, [topologySettingsOpen, viewMode]);
-
-  const updateTopologySettings = (updater: (previous: TopologySettingsState) => TopologySettingsState) => {
-    setTopologySettings((previous) => updater(previous));
-  };
-
-  const handleOpenTopologySettings = () => {
-    if (viewMode !== 'topology') return;
-    setTopologySettingsTab('layout');
-    if (isDesktopViewport()) {
-      setTopologySettingsOpen(false);
-      setRightPanel({ state: 'TOPOLOGY_SETTINGS' });
-      return;
-    }
-    setRightPanel({ state: 'CLOSED' });
-    setTopologySettingsOpen(true);
-  };
-
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
 
@@ -2657,6 +2659,17 @@ export function AgentsPage() {
     setRuntimeTargetAddress(formatRuntimeTargetAddress(target));
     setRuntimeExternalAddressDraft(getRuntimeExternalAddress());
   };
+
+  const desiredEmbeddedRuntimeHost = resolveEmbeddedRuntimeBindHost(embeddedRuntimeNetworkMode);
+  const desiredEmbeddedRuntimePort = runtimeServiceStatus?.running
+    ? runtimeServiceStatus.port
+    : getPreferredEmbeddedRuntimePort();
+  const desiredEmbeddedRuntimeAddress = `${desiredEmbeddedRuntimeHost}:${desiredEmbeddedRuntimePort}`;
+  const runtimeNeedsRebind = Boolean(
+    runtimeServiceStatus?.running
+      && (runtimeServiceStatus.host !== desiredEmbeddedRuntimeHost
+        || runtimeServiceStatus.port !== desiredEmbeddedRuntimePort),
+  );
 
   const tryLoadRoutesFromHost = async (
     host: RuntimeHostRecord
@@ -2851,6 +2864,12 @@ export function AgentsPage() {
     syncRuntimeTargetState();
   };
 
+  const handleEmbeddedRuntimeNetworkModeChange = (mode: EmbeddedRuntimeNetworkMode) => {
+    setRuntimeTargetError('');
+    setEmbeddedRuntimeNetworkMode(mode);
+    setEmbeddedRuntimeNetworkModeValue(mode);
+  };
+
   const handleApplyRuntimeExternalAddress = () => {
     try {
       setRuntimeTargetError('');
@@ -2864,37 +2883,59 @@ export function AgentsPage() {
   };
 
   const handleRuntimeStart = async () => {
+    const runtimeControlService = getRuntimeControlService();
+    const targetHost = desiredEmbeddedRuntimeHost;
+    const targetPort = desiredEmbeddedRuntimePort;
     try {
-      const status = await getRuntimeControlService().startRuntime({
-        host: '127.0.0.1',
-        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
+      const status = await runtimeControlService.startRuntime({
+        host: targetHost,
+        port: targetPort,
       });
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRuntimeServiceStatus({
-        running: false,
-        host: '127.0.0.1',
-        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
-        error: message,
-      });
+      try {
+        const latestStatus = await runtimeControlService.getStatus();
+        setRuntimeServiceStatus({
+          ...latestStatus,
+          error: latestStatus.error ?? message,
+        });
+      } catch {
+        setRuntimeServiceStatus({
+          running: false,
+          host: targetHost,
+          port: targetPort,
+          error: message,
+        });
+      }
     }
   };
 
   const handleRuntimeStop = async () => {
+    const runtimeControlService = getRuntimeControlService();
+    const fallbackHost = runtimeServiceStatus?.host ?? desiredEmbeddedRuntimeHost;
+    const fallbackPort = runtimeServiceStatus?.port ?? desiredEmbeddedRuntimePort;
     try {
-      const status = await getRuntimeControlService().stopRuntime();
+      const status = await runtimeControlService.stopRuntime();
       setRuntimeServiceStatus(status);
       await refreshRuntimeSnapshot();
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      setRuntimeServiceStatus({
-        running: false,
-        host: '127.0.0.1',
-        port: DEFAULT_EMBEDDED_RUNTIME_PORT,
-        error: message,
-      });
+      try {
+        const latestStatus = await runtimeControlService.getStatus();
+        setRuntimeServiceStatus({
+          ...latestStatus,
+          error: latestStatus.error ?? message,
+        });
+      } catch {
+        setRuntimeServiceStatus({
+          running: false,
+          host: fallbackHost,
+          port: fallbackPort,
+          error: message,
+        });
+      }
     }
   };
 
@@ -2914,36 +2955,138 @@ export function AgentsPage() {
     return fallbackRuntimeAgents;
   }, [fallbackRuntimeAgents, runtimeHostSnapshots]);
 
-  const signalGraph = useMemo(
+  const baseSignalGraph = useMemo(
     () => buildSignalGraph(signalRoutes, graphAgents),
     [graphAgents, signalRoutes]
   );
 
-  const topologyVisibleCounts = useMemo(() => {
-    const nodesByFilter = signalGraph.nodes.filter((node) => {
-      const key = topologyFilterKey(node.type);
-      if (!key) return true;
-      return topologySettings.filters[key];
-    });
-    if (!topologySettings.hideDisconnected) {
+  const topologyDatasetKey = useMemo(
+    () => buildTopologyDatasetKey(baseSignalGraph),
+    [baseSignalGraph]
+  );
+  const topologyFilterKey = useMemo(
+    () => buildTopologyFilterKey(),
+    []
+  );
+  const topologyManualSnapshot = useMemo(
+    () => getTopologyLayoutSnapshot(topologyLayoutStore, {
+      datasetKey: topologyDatasetKey,
+      scopeKey: TOPOLOGY_SCOPE_KEY,
+      filterKey: topologyFilterKey,
+    }),
+    [topologyDatasetKey, topologyFilterKey, topologyLayoutStore]
+  );
+  const topologyManualResult = useMemo(
+    () => applyManualLayoutSnapshot({
+      nodes: baseSignalGraph.nodes,
+      snapshot: topologyManualSnapshot,
+    }),
+    [baseSignalGraph.nodes, topologyManualSnapshot]
+  );
+  const signalGraph = useMemo(() => {
+    if (topologyLayoutMode === 'manual') {
       return {
-        visible: nodesByFilter.length,
-        total: signalGraph.nodes.length,
+        nodes: topologyManualResult.nodes,
+        edges: baseSignalGraph.edges,
       };
     }
-
-    const visibleNodeIds = new Set(nodesByFilter.map((node) => node.id));
-    const edges = signalGraph.edges.filter((edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target));
-    const connected = new Set<string>();
-    for (const edge of edges) {
-      connected.add(edge.source);
-      connected.add(edge.target);
-    }
     return {
-      visible: nodesByFilter.filter((node) => connected.has(node.id)).length,
-      total: signalGraph.nodes.length,
+      nodes: buildAutoFlowLayout(baseSignalGraph.nodes),
+      edges: baseSignalGraph.edges,
     };
-  }, [signalGraph.edges, signalGraph.nodes, topologySettings.filters, topologySettings.hideDisconnected]);
+  }, [baseSignalGraph.edges, baseSignalGraph.nodes, topologyLayoutMode, topologyManualResult.nodes]);
+  const manualViewport = topologyManualSnapshot?.viewport;
+
+  const flushTopologyStoreWrite = () => {
+    if (topologyWriteTimerRef.current) {
+      clearTimeout(topologyWriteTimerRef.current);
+      topologyWriteTimerRef.current = null;
+    }
+    if (!topologyPendingStoreRef.current) return;
+    writeTopologyLayoutStore(topologyPendingStoreRef.current);
+    topologyPendingStoreRef.current = null;
+  };
+
+  useEffect(() => {
+    return () => {
+      flushTopologyStoreWrite();
+    };
+  }, []);
+
+  const persistTopologyStore = (updater: (current: TopologyLayoutStore) => TopologyLayoutStore) => {
+    setTopologyLayoutStore((current) => {
+      const nextStore = updater(current);
+      topologyPendingStoreRef.current = nextStore;
+      if (topologyWriteTimerRef.current) {
+        clearTimeout(topologyWriteTimerRef.current);
+      }
+      topologyWriteTimerRef.current = setTimeout(() => {
+        flushTopologyStoreWrite();
+      }, 120);
+      return nextStore;
+    });
+  };
+
+  const saveManualTopologySnapshot = ({
+    nodes,
+    viewport,
+  }: {
+    nodes: Array<{ id: string; position: TopologyNodePosition }>;
+    viewport?: TopologyViewport;
+  }) => {
+    persistTopologyStore((current) => setTopologyLayoutSnapshot(current, {
+      datasetKey: topologyDatasetKey,
+      scopeKey: TOPOLOGY_SCOPE_KEY,
+      filterKey: topologyFilterKey,
+      snapshot: buildManualLayoutSnapshot({
+        nodes,
+        viewport,
+      }),
+    }));
+  };
+
+  const commitManualNodePosition = (
+    nodeId: string,
+    position: TopologyNodePosition,
+    flowViewport?: TopologyViewport,
+  ) => {
+    if (topologyLayoutMode !== 'manual') return;
+    const currentViewport = flowViewport ?? manualViewport;
+    const nextNodes = topologyManualResult.nodes.map((node) => (
+      node.id === nodeId
+        ? { ...node, position }
+        : node
+    ));
+    saveManualTopologySnapshot({
+      nodes: nextNodes,
+      viewport: currentViewport,
+    });
+  };
+
+  const commitManualViewport = (viewport: TopologyViewport) => {
+    if (topologyLayoutMode !== 'manual') return;
+    saveManualTopologySnapshot({
+      nodes: topologyManualResult.nodes,
+      viewport,
+    });
+  };
+
+  const handleResetCurrentTopologyLayout = () => {
+    setTopologyLayoutMode('manual');
+    persistTopologyStore((current) => removeTopologyLayoutSnapshot(current, {
+      datasetKey: topologyDatasetKey,
+      scopeKey: TOPOLOGY_SCOPE_KEY,
+      filterKey: topologyFilterKey,
+    }));
+  };
+
+  const handleClearSavedTopologyLayouts = () => {
+    setTopologyLayoutMode('manual');
+    persistTopologyStore((current) => clearTopologyScopeLayouts(current, {
+      datasetKey: topologyDatasetKey,
+      scopeKey: TOPOLOGY_SCOPE_KEY,
+    }));
+  };
 
   const content = useMemo(() => {
     if (viewMode === 'list') {
@@ -2990,11 +3133,15 @@ export function AgentsPage() {
           runtimeHostSnapshots={runtimeHostSnapshots}
           runtimeServiceStatus={runtimeServiceStatus}
           runtimeHostError={runtimeHostError}
+          embeddedRuntimeNetworkMode={embeddedRuntimeNetworkMode}
+          embeddedRuntimeBindAddress={desiredEmbeddedRuntimeAddress}
+          runtimeNeedsRebind={runtimeNeedsRebind}
           runtimeTargetMode={runtimeTargetModeValue}
           runtimeTargetAddress={runtimeTargetAddress}
           runtimeTargetError={runtimeTargetError}
           runtimeExternalAddressDraft={runtimeExternalAddressDraft}
           onRuntimeHostProbe={handleProbeRuntimeHost}
+          onEmbeddedRuntimeNetworkModeChange={handleEmbeddedRuntimeNetworkModeChange}
           onRuntimeStart={handleRuntimeStart}
           onRuntimeStop={handleRuntimeStop}
           onRuntimeTargetModeChange={handleRuntimeTargetModeChange}
@@ -3007,7 +3154,13 @@ export function AgentsPage() {
     return (
       <TopologyView
         graph={signalGraph}
-        settings={topologySettings}
+        layoutMode={topologyLayoutMode}
+        manualViewport={manualViewport}
+        onLayoutModeChange={setTopologyLayoutMode}
+        onCommitNodePosition={commitManualNodePosition}
+        onCommitViewport={commitManualViewport}
+        onResetCurrentLayout={handleResetCurrentTopologyLayout}
+        onClearSavedLayouts={handleClearSavedTopologyLayouts}
         onSelectNode={(nodeId) => {
           // 判断节点类型
           const node = signalGraph.nodes.find((n) => n.id === nodeId);
@@ -3022,8 +3175,15 @@ export function AgentsPage() {
       />
     );
   }, [
+    commitManualNodePosition,
+    commitManualViewport,
     deviceGroups,
+    handleClearSavedTopologyLayouts,
+    handleResetCurrentTopologyLayout,
     listSections,
+    manualViewport,
+    setTopologyLayoutMode,
+    topologyLayoutMode,
     runtimeHostSnapshots,
     signalGraph,
     signalHistory,
@@ -3031,13 +3191,15 @@ export function AgentsPage() {
     signalRouteHostLabel,
     signalRouteRows,
     runtimeHostError,
+    embeddedRuntimeNetworkMode,
+    desiredEmbeddedRuntimeAddress,
+    runtimeNeedsRebind,
     runtimeTargetAddress,
     runtimeTargetError,
     runtimeTargetModeValue,
     runtimeExternalAddressDraft,
     runtimeServiceStatus,
     nodesFilter,
-    topologySettings,
     viewMode,
   ]);
 
@@ -3048,41 +3210,31 @@ export function AgentsPage() {
     >
       {/* Header */}
       <header className="flex flex-col gap-2 border-b border-[#F0ECE8] px-5 py-3 dark:border-[#292524] md:px-8 lg:px-10">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="flex items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[11px] font-medium uppercase tracking-[0.14em] text-[#A8A29E]">Agent Hub / Signal Network</p>
-              <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">信号网络</h1>
-            </div>
-            <div className="flex items-center gap-2 rounded-[16px] border border-[#E7DED7] bg-[#F7F1EC] p-1.5 dark:border-[#3A3431] dark:bg-[#221F1D]">
-              <button
-                type="button"
-                data-testid="agent-topology-settings-button"
-                onClick={handleOpenTopologySettings}
-                disabled={viewMode !== 'topology'}
-                className="flex h-10 min-w-[112px] items-center justify-center gap-2 rounded-[12px] border border-[#E7DED7] bg-white px-3 text-sm font-medium text-[#44403C] shadow-sm transition-colors hover:bg-[#FCFAF8] disabled:cursor-not-allowed disabled:opacity-40 dark:border-[#3A3431] dark:bg-[#141110] dark:text-[#D6D3D1] dark:hover:bg-[#1C1917]"
-                aria-label="拓扑设置"
-              >
-                <Settings size={16} />
-                <span>拓扑设置</span>
-              </button>
-              <button
-                type="button"
-                data-testid="agent-add-node-button"
-                onClick={() => setSheetOpen(true)}
-                disabled={isAgentCreating}
-                className="flex h-10 items-center gap-2 rounded-[12px] bg-[#C75B3A] px-3.5 text-sm font-medium text-white shadow-sm transition-colors hover:bg-[#B74E30] disabled:opacity-70"
-                aria-label="添加节点"
-              >
-                <Plus size={16} />
-                {isAgentCreating ? '创建中...' : '添加节点'}
-              </button>
-            </div>
-          </div>
-          <div className="flex items-center justify-between gap-3">
-            <TabBar value={viewMode} onChange={handleTabChange} />
+        <div className="flex items-center justify-between">
+          <h1 className="text-lg font-semibold leading-[1.5] text-[#1C1917] dark:text-[#FAFAF9]">信号网络</h1>
+          <div className="flex items-center gap-2">
+            <button
+              type="button"
+              className="flex h-9 w-9 items-center justify-center rounded-[10px] bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
+              aria-label="设置"
+            >
+              <Settings size={18} />
+            </button>
+            <button
+              type="button"
+              data-testid="agent-add-node-button"
+              onClick={() => setSheetOpen(true)}
+              disabled={isAgentCreating}
+              className="flex h-9 items-center gap-1.5 rounded-full bg-[#C75B3A] px-3 text-sm text-white"
+              aria-label="添加节点"
+            >
+              <Plus size={16} />
+              {isAgentCreating ? '创建中...' : '添加'}
+            </button>
           </div>
         </div>
+        {/* Tab Bar（桌面端内嵌到 header，移动端显示在 header 下方） */}
+        <TabBar value={viewMode} onChange={handleTabChange} />
       </header>
 
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
@@ -3119,7 +3271,6 @@ export function AgentsPage() {
                 {rightPanel.state === 'ACTOR_DETAIL' && (agentDetail?.title ?? 'Actor 详情')}
                 {rightPanel.state === 'SIGNAL_DETAIL' && '信号详情'}
                 {rightPanel.state === 'AGENT_CHAT' && 'Agent 对话'}
-                {rightPanel.state === 'TOPOLOGY_SETTINGS' && '拓扑设置'}
               </span>
               <button
                 type="button"
@@ -3132,18 +3283,6 @@ export function AgentsPage() {
             </div>
             {/* 右侧栏内容 */}
             <div className="flex-1 overflow-auto">
-              {rightPanel.state === 'TOPOLOGY_SETTINGS' && (
-                <div data-testid="agent-rightpanel-topology-settings" className="flex h-full flex-col gap-4 bg-surface px-5 py-4">
-                  <TopologySettingsContent
-                    activeTab={topologySettingsTab}
-                    settings={topologySettings}
-                    visibleNodeCount={topologyVisibleCounts.visible}
-                    totalNodeCount={topologyVisibleCounts.total}
-                    onTabChange={setTopologySettingsTab}
-                    onUpdate={updateTopologySettings}
-                  />
-                </div>
-              )}
               {rightPanel.state === 'ROUTE_EDIT' && (
                 <RouteEditPanel
                   route={
@@ -3419,18 +3558,30 @@ export function AgentsPage() {
                     {chatMessages.length === 0 && (
                       <p className="text-xs text-muted-foreground">暂无会话内容，发送第一条消息开始对话。</p>
                     )}
-                    {chatMessages.map((message) => (
-                      <div
-                        key={message.id}
-                        className={`rounded-lg px-3 py-2 text-xs ${
-                          message.role === 'user'
-                            ? 'ml-8 bg-[#C75B3A] text-white'
-                            : 'mr-8 border border-border-card bg-card text-strong'
-                        }`}
-                      >
-                        <p>{message.content}</p>
-                      </div>
-                    ))}
+                    {chatMessages.map((message) => {
+                      const isUser = message.role === 'user';
+                      const isRuntimeMeta = !!message.runtimeEventType && message.runtimeEventType !== 'output.delta';
+                      return (
+                        <div
+                          key={message.id}
+                          data-testid={getConversationMessageTestId(message)}
+                          className={`rounded-lg px-3 py-2 text-xs ${
+                            isUser
+                              ? 'ml-8 bg-[#C75B3A] text-white'
+                              : isRuntimeMeta
+                                ? 'mr-8 border border-border-card bg-muted text-muted-foreground'
+                                : 'mr-8 border border-border-card bg-card text-strong'
+                          }`}
+                        >
+                          {message.title && (
+                            <p className="mb-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">
+                              {message.title}
+                            </p>
+                          )}
+                          <p className="whitespace-pre-wrap break-words">{message.content}</p>
+                        </div>
+                      );
+                    })}
                   </div>
                   {chatError && <p className="text-xs text-destructive">{chatError}</p>}
                   <div className="flex items-center gap-2">
@@ -3466,27 +3617,48 @@ export function AgentsPage() {
         )}
       </div>
 
-      {topologySettingsOpen && (
-        <TopologySettingsSheet
-          activeTab={topologySettingsTab}
-          settings={topologySettings}
-          visibleNodeCount={topologyVisibleCounts.visible}
-          totalNodeCount={topologyVisibleCounts.total}
-          onTabChange={setTopologySettingsTab}
-          onUpdate={updateTopologySettings}
-          onClose={() => setTopologySettingsOpen(false)}
-        />
-      )}
-
       {/* Sheets（移动端） */}
       {sheetOpen && (
         <AddNodeSheet
           options={ADD_NODE_OPTIONS}
           onClose={() => setSheetOpen(false)}
-          onAddAgent={() => {
-            void handleCreateManualAgent();
+          onSelectAgent={(kind) => {
+            openAgentCreateSheet(kind);
           }}
           onAddDevice={() => setHostManagerOpen(true)}
+        />
+      )}
+      {agentCreateOpen && (
+        <AgentCreateSheet
+          kind={agentCreateKind}
+          providerProfiles={providerProfiles}
+          selectedProviderProfileId={selectedProviderProfileId}
+          apiProfileName={apiProfileNameDraft}
+          apiProvider={apiProviderDraft}
+          apiModel={apiModelDraft}
+          apiBaseUrl={apiBaseUrlDraft}
+          apiKey={apiKeyDraft}
+          compatibleHosts={compatibleCreateHosts}
+          selectedHostId={agentCreateSelectedHostId}
+          createError={agentCreateError}
+          isCreating={isAgentCreating}
+          onClose={() => {
+            setAgentCreateOpen(false);
+            setAgentCreateError('');
+          }}
+          onKindChange={(kind) => {
+            openAgentCreateSheet(kind);
+          }}
+          onSelectProviderProfile={setSelectedProviderProfileId}
+          onApiProfileNameChange={setApiProfileNameDraft}
+          onApiProviderChange={setApiProviderDraft}
+          onApiModelChange={setApiModelDraft}
+          onApiBaseUrlChange={setApiBaseUrlDraft}
+          onApiKeyChange={setApiKeyDraft}
+          onSelectHost={setAgentCreateSelectedHostId}
+          onCreate={() => {
+            void handleCreateManualAgent();
+          }}
         />
       )}
       {hostManagerOpen && (

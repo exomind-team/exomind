@@ -13,8 +13,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   startSignalHandlers,
+  type ActiveBlockReplicationSnapshotPayload,
   type TaskAutoCreatedPayload,
   type EventLogAppendedPayload,
+  type EventLogReplicationAppendedPayload,
   type ReviewCompletedPayload,
   type SignalHandlerOptions,
 } from '@/lib/services/signal-handlers';
@@ -147,6 +149,78 @@ describe('signal-handlers: eventlog.appended', () => {
         }),
       ),
     ).resolves.toBeUndefined();
+  });
+});
+
+describe('signal-handlers: eventlog.replication.appended', () => {
+  it('calls onEventLogReplicationAppended when topic is eventlog.replication.appended', async () => {
+    const onEventLogReplicationAppended = vi
+      .fn<[EventLogReplicationAppendedPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onEventLogReplicationAppended });
+    const payload: EventLogReplicationAppendedPayload = {
+      schemaVersion: 1,
+      replicationSeq: 9,
+      cursor: {
+        kind: 'replication_seq',
+        value: 9,
+      },
+      event: {
+        id: 'evt-rep-1',
+        content: '跨端同步事件',
+        createdAt: '2026-03-07T00:00:00.000Z',
+        type: 'note',
+        replicationSeq: 9,
+      },
+    };
+
+    await handler(makeSignalEvent('eventlog.replication.appended', payload));
+
+    expect(onEventLogReplicationAppended).toHaveBeenCalledTimes(1);
+    expect(onEventLogReplicationAppended).toHaveBeenCalledWith(payload);
+  });
+});
+
+describe('signal-handlers: active_block.replication.snapshot', () => {
+  it('calls onActiveBlockReplicationSnapshot when topic is active_block.replication.snapshot', async () => {
+    const onActiveBlockReplicationSnapshot = vi
+      .fn<[ActiveBlockReplicationSnapshotPayload], Promise<void>>()
+      .mockResolvedValue(undefined);
+
+    const handler = startSignalHandlers({ onActiveBlockReplicationSnapshot });
+    const now = Date.now();
+    const payload: ActiveBlockReplicationSnapshotPayload = {
+      schemaVersion: 1,
+      block: {
+        startId: 'tb-ecs-1',
+        name: '跨端时间块',
+        startTime: now - 10_000,
+        elapsed: 5_000,
+        mode: 'countup',
+        paused: false,
+        phase: 'running',
+        version: 2,
+        actorId: 'desktop',
+        lastTransitionAt: now - 1_000,
+        lastResumedAt: now - 1_000,
+        accumulatedRunMs: 5_000,
+        updatedAt: now - 1_000,
+        pauseAccumulatedMs: 0,
+      },
+      cursor: {
+        kind: 'active_block_snapshot',
+        startId: 'tb-ecs-1',
+        version: 2,
+        lastTransitionAt: now - 1_000,
+        actorId: 'desktop',
+      },
+    };
+
+    await handler(makeSignalEvent('active_block.replication.snapshot', payload));
+
+    expect(onActiveBlockReplicationSnapshot).toHaveBeenCalledTimes(1);
+    expect(onActiveBlockReplicationSnapshot).toHaveBeenCalledWith(payload);
   });
 });
 

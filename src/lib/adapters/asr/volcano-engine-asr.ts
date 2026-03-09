@@ -227,15 +227,24 @@ export class VolcanoEngineASRAdapter implements IASRPort {
 
   /**
    * Tauri 环境连接（使用 Rust 后端）
+   *
+   * 流程：录制 MediaStream → PCM 16kHz 16bit mono → 传给 Rust → 火山引擎 WebSocket
    */
   private async connectWithTauri(stream: MediaStream, lang?: string): Promise<void> {
     try {
-      // 通过 Tauri invoke 调用 Rust 后端
       const { invoke } = await import('@tauri-apps/api/core');
 
-      // 发送音频数据到后端处理
+      // 录制音频并转换为 PCM
+      const pcmData = await this.recordStreamToPcm(stream);
+      console.log(`[ASR-Volcano] PCM 录制完成: ${pcmData.length} bytes`);
+
+      if (pcmData.length === 0) {
+        throw new Error('没有录制到音频数据');
+      }
+
+      // 传 PCM 字节给 Rust 后端
       const result = await invoke('volcano_asr_recognize', {
-        audioStream: stream,
+        audioData: Array.from(pcmData),
         config: {
           appKey: this.config.appKey,
           accessKey: this.config.accessKey,
@@ -250,6 +259,58 @@ export class VolcanoEngineASRAdapter implements IASRPort {
       console.error('[ASR-Volcano] Tauri 调用失败:', error);
       this.onError(new Error(`识别失败: ${error}`));
     }
+  }
+
+  /**
+   * 从 MediaStream 录制音频并转换为 PCM 16kHz 16bit mono
+   */
+  private recordStreamToPcm(stream: MediaStream): Promise<Uint8Array> {
+    return new Promise((resolve) => {
+      const audioContext = new AudioContext({ sampleRate: 16000 });
+      const source = audioContext.createMediaStreamSource(stream);
+      const processor = audioContext.createScriptProcessor(4096, 1, 1);
+      const chunks: Float32Array[] = [];
+      let stopped = false;
+
+      processor.onaudioprocess = (event) => {
+        if (stopped) return;
+        chunks.push(new Float32Array(event.inputBuffer.getChannelData(0)));
+      };
+
+      source.connect(processor);
+      processor.connect(audioContext.destination);
+
+      const stop = async () => {
+        if (stopped) return;
+        stopped = true;
+        processor.disconnect();
+        source.disconnect();
+        await audioContext.close();
+
+        const totalLength = chunks.reduce((sum, c) => sum + c.length, 0);
+        if (totalLength === 0) { resolve(new Uint8Array(0)); return; }
+
+        const merged = new Float32Array(totalLength);
+        let offset = 0;
+        for (const chunk of chunks) { merged.set(chunk, offset); offset += chunk.length; }
+
+        // Float32 → PCM 16bit
+        const pcm = new Int16Array(totalLength);
+        for (let i = 0; i < totalLength; i++) {
+          const s = Math.max(-1, Math.min(1, merged[i]));
+          pcm[i] = s < 0 ? s * 0x8000 : s * 0x7FFF;
+        }
+        resolve(new Uint8Array(pcm.buffer));
+      };
+
+      // 等待外部停止信号
+      const checkStop = setInterval(() => {
+        if (!(window as any).__asrRecordingActive) {
+          clearInterval(checkStop);
+          stop();
+        }
+      }, 100);
+    });
   }
 
   /**
