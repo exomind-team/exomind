@@ -218,6 +218,13 @@ function findCandidates(
       const hasAnyNonAuthorReply = later.some((next) => (next.user?.login ?? '') !== author);
       if (hasAnyNonAuthorReply) continue;
 
+      // Skip if author clarified with a non-noise comment later
+      const authorClarified = later.some((next) => {
+        const nextLogin = next.user?.login ?? '';
+        return nextLogin === author && !isQuestionMarkNoise(next.body);
+      });
+      if (authorClarified) continue;
+
       const alreadyTemplated = later.some((next) => {
         const body = normalizeBody(next.body);
         const nextLogin = next.user?.login ?? '';
