@@ -12,6 +12,8 @@
     "dev:sync": "powershell -ExecutionPolicy Bypass -File dev.ps1",
     "build:tag": "bun Scripts/dev/build-tag.ts",
     "gh:comment": "bun Scripts/dev/github-comment.ts",
+    "gh:qmark:once": "bun Scripts/dev/gh-auto-reply-qmark.ts --once",
+    "gh:qmark:watch": "bun Scripts/dev/gh-auto-reply-qmark.ts --watch --interval-seconds 180",
     "check:android:meta": "bun Scripts/dev/android-meta-check.ts",
     "server": "bun server/pouchdb-server.js",
     "server:dev": "bun --watch server/pouchdb-server.js",
