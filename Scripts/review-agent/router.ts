@@ -1,6 +1,6 @@
 import { execFileSync } from 'node:child_process';
 
-import { decideBootstrapAction } from './bootstrap-lib.ts';
+import { decideNextAction } from './router-lib.ts';
 import {
   QUEUE_FILE,
   STATE_FILE,
@@ -18,7 +18,7 @@ function main(): void {
   const state = readJson<PersistedState | null>(STATE_FILE, null);
   const queue = readJson<QueueState | null>(QUEUE_FILE, null);
   const openPrNumbers = listOpenPrNumbers(options.repo);
-  const decision = decideBootstrapAction({
+  const decision = decideNextAction({
     state,
     queue,
     openPrNumbers,

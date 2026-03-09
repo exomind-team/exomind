@@ -24,21 +24,19 @@
 按以下顺序阅读：
 
 1. `docs/agents/review-agent/common-contract.md`
-2. `docs/agents/review-agent/bootstrap-and-recovery.md`
-3. `docs/agents/review-agent/discovery-loop.md`
-4. `docs/agents/review-agent/review-loop.md`
-5. `docs/agents/review-agent/comment-policy-and-templates.md`
-6. `docs/agents/review-agent/state-files-and-worktrees.md`
-7. `docs/agents/review-agent/prompts/bootstrap.prompt.md`
-8. `docs/agents/review-agent/prompts/discovery.prompt.md`
-9. `docs/agents/review-agent/prompts/review.prompt.md`
+2. `docs/agents/review-agent/review-agent.prompt.md`
+3. `docs/agents/review-agent/router-and-recovery.md`
+4. `docs/agents/review-agent/discovery-loop.md`
+5. `docs/agents/review-agent/review-loop.md`
+6. `docs/agents/review-agent/comment-policy-and-templates.md`
+7. `docs/agents/review-agent/state-files-and-worktrees.md`
 
 ## 循环总览
 
-审核 Agent 以 bootstrap + 两阶段状态机运行：
+审核 Agent 以统一入口 prompt + router + 两阶段状态机运行：
 
-- 启动入口（`Bootstrap`）：重启后判断下一步进入哪个 prompt。
-
+- 统一入口：人类重复输入同一份 prompt。
+- 路由入口（`Router`）：每轮先基于持久化状态和 GitHub 当前事实决定下一步动作。
 - 阶段 A（`Discovery`）：扫描 open PR 并构建待处理队列。
 - 阶段 B（`Review`）：读取当前选中 PR 的上下文，执行审阅，并为该轮发布恰好一条审核评论。
 
@@ -61,45 +59,34 @@
         |
         v
 ┌─────────────────────────────────────────────────────────────────────┐
-│ 阶段 A：发现                                                       │
-│ - gh pr list --state open（按 updatedAt 排序）                     │
-│ - 对每个 PR：                                                      │
-│   * 找最后一条 [Codex Reviewer] 评论                               │
-│   * 比较其后的 comments / reviews / thread replies / commits       │
-│ - 构建待处理 PR 队列                                               │
+│ Router                                                              │
+│ - 读取 state / queue                                                │
+│ - 拉取当前 open PR 编号                                             │
+│ - 输出下一步动作：discovery / review / idle-wait                    │
 └─────────────────────────────────────────────────────────────────────┘
         |
-        +-------------------------------+
-        |                               |
-        | 队列为空                      | 队列非空
-        v                               v
-┌──────────────────────────────┐   ┌─────────────────────────────────┐
-│ 当前无目标                   │   │ 选中 PR                        │
-│ - 清理已合并 worktree        │   │ - 选出下一个待处理 PR          │
-│ - 计算退避                  │   │ - 持久化 selected_pr           │
-│ - sleep                      │   │ - 持久化 pending_queue         │
-└──────────────────────────────┘   └─────────────────────────────────┘
-        |                               |
-        |                               v
-        |                    ┌──────────────────────────────────────┐
-        |                    │ 阶段 B：审阅                         │
-        |                    │ - 读取 PR body                       │
-        |                    │ - 解析 refs/closes/fixes            │
-        |                    │ - 读取 issue / 子 issue 上下文       │
-        |                    │ - 检查 diff                          │
-        |                    │ - 全量审阅或优先级审阅               │
-        |                    │ - 形成问题与验证方式                 │
-        |                    └──────────────────────────────────────┘
-        |                               |
-        |                               v
-        |                    ┌──────────────────────────────────────┐
-        |                    │ 发布 1 条审核评论                    │
-        |                    │ - [Codex Reviewer]                   │
-        |                    │ - 或需要人类测试评论                │
-        |                    │ - 回读并校验                         │
-        |                    └──────────────────────────────────────┘
-        |                               |
-        +-------------------------------+
+        |
+        +--------------------+------------------------+
+        |                    |                        |
+        | discovery          | review                 | idle-wait
+        v                    v                        v
+┌──────────────────────┐  ┌──────────────────────────┐  ┌──────────────────────┐
+│ 阶段 A：发现         │  │ 阶段 B：审阅             │  │ 当前无目标           │
+│ - gh pr list         │  │ - 读取 PR body           │  │ - 清理已合并 worktree│
+│ - 找最后 reviewer    │  │ - 解析 issue / diff      │  │ - 计算退避           │
+│ - 比较后续活动       │  │ - 全量或优先级审阅       │  │ - sleep              │
+│ - 构建待处理队列     │  │ - 形成问题与验证方式     │  └──────────────────────┘
+└──────────────────────┘  └──────────────────────────┘             |
+        |                                |                          |
+        |                                v                          |
+        |                   ┌──────────────────────────────────────┐ |
+        |                   │ 发布 1 条审核评论                    │ |
+        |                   │ - [Codex Reviewer]                   │ |
+        |                   │ - 或需要人类测试评论                │ |
+        |                   │ - 回读并校验                         │ |
+        |                   └──────────────────────────────────────┘ |
+        |                                |                          |
+        +--------------------------------+--------------------------+
                                         |
                                         v
                          ┌──────────────────────────────────────────┐

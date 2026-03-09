@@ -1,15 +1,22 @@
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-export type ReviewAgentStateValue = 'HAS_TARGET' | 'NO_TARGET' | 'FAILED_RETRYABLE';
+export type ReviewAgentStateValue =
+  | 'HAS_TARGET'
+  | 'NO_TARGET'
+  | 'REVIEW_POSTED'
+  | 'NEEDS_HUMAN_TEST'
+  | 'APPROVE_READY'
+  | 'MERGE_READY'
+  | 'FAILED_RETRYABLE';
 export type ReviewAgentPhase = 'DISCOVERY' | 'REVIEW' | 'IDLE_WAIT';
-export type ReviewAgentNextPrompt = 'bootstrap' | 'discovery' | 'review' | 'idle-wait';
+export type ReviewAgentNextAction = 'discovery' | 'review' | 'idle-wait';
 
 export interface PersistedState {
   state: ReviewAgentStateValue;
   phase: ReviewAgentPhase;
   lastPhase: ReviewAgentPhase | null;
-  nextPrompt: ReviewAgentNextPrompt;
+  nextAction: ReviewAgentNextAction;
   selectedPrNumber: number | null;
   selectedReason: string | null;
   inspectedPrCount: number;

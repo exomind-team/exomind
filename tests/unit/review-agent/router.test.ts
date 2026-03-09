@@ -1,11 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  decideBootstrapAction,
-  type BootstrapContext,
-} from '../../../Scripts/review-agent/bootstrap-lib.ts';
+  decideNextAction,
+  type RouterContext,
+} from '../../../Scripts/review-agent/router-lib.ts';
 
-function makeContext(overrides: Partial<BootstrapContext> = {}): BootstrapContext {
+function makeContext(overrides: Partial<RouterContext> = {}): RouterContext {
   return {
     state: null,
     queue: null,
@@ -14,22 +14,22 @@ function makeContext(overrides: Partial<BootstrapContext> = {}): BootstrapContex
   };
 }
 
-describe('review-agent bootstrap router', () => {
+describe('review-agent router', () => {
   it('routes to discovery when no persisted state exists', () => {
-    const result = decideBootstrapAction(makeContext());
+    const result = decideNextAction(makeContext());
 
-    expect(result.nextPrompt).toBe('discovery');
+    expect(result.action).toBe('discovery');
     expect(result.reason).toBe('missing-state');
   });
 
   it('routes to review when state has a valid selected PR', () => {
-    const result = decideBootstrapAction(
+    const result = decideNextAction(
       makeContext({
         state: {
           state: 'HAS_TARGET',
           phase: 'DISCOVERY',
           lastPhase: 'DISCOVERY',
-          nextPrompt: 'review',
+          nextAction: 'review',
           selectedPrNumber: 461,
           selectedReason: 'new-comment',
           inspectedPrCount: 5,
@@ -37,7 +37,7 @@ describe('review-agent bootstrap router', () => {
           actionableCount: 1,
           failureStreak: 0,
           nextSleepSeconds: 180,
-          updatedAt: '2026-03-09T15:00:00Z',
+          updatedAt: '2026-03-10T01:00:00Z',
         },
         queue: {
           selectedPr: { number: 461 },
@@ -46,19 +46,19 @@ describe('review-agent bootstrap router', () => {
       }),
     );
 
-    expect(result.nextPrompt).toBe('review');
+    expect(result.action).toBe('review');
     expect(result.selectedPrNumber).toBe(461);
     expect(result.reason).toBe('resume-selected-pr');
   });
 
   it('falls back to discovery when selected PR is no longer open', () => {
-    const result = decideBootstrapAction(
+    const result = decideNextAction(
       makeContext({
         state: {
           state: 'HAS_TARGET',
           phase: 'DISCOVERY',
           lastPhase: 'DISCOVERY',
-          nextPrompt: 'review',
+          nextAction: 'review',
           selectedPrNumber: 461,
           selectedReason: 'new-comment',
           inspectedPrCount: 5,
@@ -66,7 +66,7 @@ describe('review-agent bootstrap router', () => {
           actionableCount: 1,
           failureStreak: 0,
           nextSleepSeconds: 180,
-          updatedAt: '2026-03-09T15:00:00Z',
+          updatedAt: '2026-03-10T01:00:00Z',
         },
         queue: {
           selectedPr: { number: 461 },
@@ -75,18 +75,18 @@ describe('review-agent bootstrap router', () => {
       }),
     );
 
-    expect(result.nextPrompt).toBe('discovery');
+    expect(result.action).toBe('discovery');
     expect(result.reason).toBe('stale-selected-pr');
   });
 
   it('routes to idle-wait when state says no target', () => {
-    const result = decideBootstrapAction(
+    const result = decideNextAction(
       makeContext({
         state: {
           state: 'NO_TARGET',
           phase: 'DISCOVERY',
           lastPhase: 'DISCOVERY',
-          nextPrompt: 'idle-wait',
+          nextAction: 'idle-wait',
           selectedPrNumber: null,
           selectedReason: null,
           inspectedPrCount: 5,
@@ -94,25 +94,25 @@ describe('review-agent bootstrap router', () => {
           actionableCount: 0,
           failureStreak: 0,
           nextSleepSeconds: 360,
-          updatedAt: '2026-03-09T15:00:00Z',
+          updatedAt: '2026-03-10T01:00:00Z',
         },
         openPrNumbers: [462],
       }),
     );
 
-    expect(result.nextPrompt).toBe('idle-wait');
+    expect(result.action).toBe('idle-wait');
     expect(result.sleepSeconds).toBe(360);
     expect(result.reason).toBe('no-target');
   });
 
   it('retries review when the last retryable failure came from review and selected PR is still open', () => {
-    const result = decideBootstrapAction(
+    const result = decideNextAction(
       makeContext({
         state: {
           state: 'FAILED_RETRYABLE',
           phase: 'REVIEW',
           lastPhase: 'REVIEW',
-          nextPrompt: 'review',
+          nextAction: 'review',
           selectedPrNumber: 461,
           selectedReason: 'new-comment',
           inspectedPrCount: 0,
@@ -120,7 +120,7 @@ describe('review-agent bootstrap router', () => {
           actionableCount: 0,
           failureStreak: 1,
           nextSleepSeconds: 180,
-          updatedAt: '2026-03-09T15:00:00Z',
+          updatedAt: '2026-03-10T01:00:00Z',
           error: 'temporary failure',
         },
         queue: {
@@ -130,18 +130,18 @@ describe('review-agent bootstrap router', () => {
       }),
     );
 
-    expect(result.nextPrompt).toBe('review');
+    expect(result.action).toBe('review');
     expect(result.reason).toBe('retry-review');
   });
 
   it('falls back to discovery when retryable failure does not have a valid review target', () => {
-    const result = decideBootstrapAction(
+    const result = decideNextAction(
       makeContext({
         state: {
           state: 'FAILED_RETRYABLE',
           phase: 'DISCOVERY',
           lastPhase: 'REVIEW',
-          nextPrompt: 'review',
+          nextAction: 'review',
           selectedPrNumber: 461,
           selectedReason: 'new-comment',
           inspectedPrCount: 0,
@@ -149,7 +149,7 @@ describe('review-agent bootstrap router', () => {
           actionableCount: 0,
           failureStreak: 1,
           nextSleepSeconds: 180,
-          updatedAt: '2026-03-09T15:00:00Z',
+          updatedAt: '2026-03-10T01:00:00Z',
           error: 'temporary failure',
         },
         queue: {
@@ -159,7 +159,39 @@ describe('review-agent bootstrap router', () => {
       }),
     );
 
-    expect(result.nextPrompt).toBe('discovery');
+    expect(result.action).toBe('discovery');
     expect(result.reason).toBe('retry-discovery');
+  });
+
+  it('routes back to discovery after a review loop terminal state is persisted', () => {
+    const terminalStates = ['REVIEW_POSTED', 'NEEDS_HUMAN_TEST', 'APPROVE_READY', 'MERGE_READY'] as const;
+
+    for (const terminalState of terminalStates) {
+      const result = decideNextAction(
+        makeContext({
+          state: {
+            state: terminalState,
+            phase: 'REVIEW',
+            lastPhase: 'REVIEW',
+            nextAction: 'review',
+            selectedPrNumber: 461,
+            selectedReason: 'new-comment',
+            inspectedPrCount: 5,
+            skippedPrCount: 0,
+            actionableCount: 1,
+            failureStreak: 0,
+            nextSleepSeconds: 180,
+            updatedAt: '2026-03-10T01:00:00Z',
+          },
+          queue: {
+            selectedPr: { number: 461 },
+          },
+          openPrNumbers: [461, 462],
+        }),
+      );
+
+      expect(result.action).toBe('discovery');
+      expect(result.reason).toBe('review-finished');
+    }
   });
 });

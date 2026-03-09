@@ -1,29 +1,25 @@
 import type {
   PersistedState,
   QueueState,
-  ReviewAgentNextPrompt,
-  ReviewAgentPhase,
 } from './state-lib.ts';
 
-export interface BootstrapContext {
+export interface RouterContext {
   state: PersistedState | null;
   queue: QueueState | null;
   openPrNumbers: number[];
 }
 
-export interface BootstrapDecision {
-  phase: ReviewAgentPhase;
-  nextPrompt: Exclude<ReviewAgentNextPrompt, 'bootstrap'>;
+export interface RouterDecision {
+  action: 'discovery' | 'review' | 'idle-wait';
   reason: string;
   selectedPrNumber: number | null;
   sleepSeconds: number;
 }
 
-export function decideBootstrapAction(context: BootstrapContext): BootstrapDecision {
+export function decideNextAction(context: RouterContext): RouterDecision {
   if (!context.state) {
     return {
-      phase: 'DISCOVERY',
-      nextPrompt: 'discovery',
+      action: 'discovery',
       reason: 'missing-state',
       selectedPrNumber: null,
       sleepSeconds: 0,
@@ -36,8 +32,7 @@ export function decideBootstrapAction(context: BootstrapContext): BootstrapDecis
   if (context.state.state === 'HAS_TARGET') {
     if (selectedPrOpen) {
       return {
-        phase: 'REVIEW',
-        nextPrompt: 'review',
+        action: 'review',
         reason: 'resume-selected-pr',
         selectedPrNumber,
         sleepSeconds: 0,
@@ -45,8 +40,7 @@ export function decideBootstrapAction(context: BootstrapContext): BootstrapDecis
     }
 
     return {
-      phase: 'DISCOVERY',
-      nextPrompt: 'discovery',
+      action: 'discovery',
       reason: 'stale-selected-pr',
       selectedPrNumber: null,
       sleepSeconds: 0,
@@ -55,18 +49,30 @@ export function decideBootstrapAction(context: BootstrapContext): BootstrapDecis
 
   if (context.state.state === 'NO_TARGET') {
     return {
-      phase: 'IDLE_WAIT',
-      nextPrompt: 'idle-wait',
+      action: 'idle-wait',
       reason: 'no-target',
       selectedPrNumber: null,
       sleepSeconds: context.state.nextSleepSeconds,
     };
   }
 
+  if (
+    context.state.state === 'REVIEW_POSTED'
+    || context.state.state === 'NEEDS_HUMAN_TEST'
+    || context.state.state === 'APPROVE_READY'
+    || context.state.state === 'MERGE_READY'
+  ) {
+    return {
+      action: 'discovery',
+      reason: 'review-finished',
+      selectedPrNumber: null,
+      sleepSeconds: 0,
+    };
+  }
+
   if (context.state.lastPhase === 'REVIEW' && selectedPrOpen) {
     return {
-      phase: 'REVIEW',
-      nextPrompt: 'review',
+      action: 'review',
       reason: 'retry-review',
       selectedPrNumber,
       sleepSeconds: 0,
@@ -74,8 +80,7 @@ export function decideBootstrapAction(context: BootstrapContext): BootstrapDecis
   }
 
   return {
-    phase: 'DISCOVERY',
-    nextPrompt: 'discovery',
+    action: 'discovery',
     reason: 'retry-discovery',
     selectedPrNumber: null,
     sleepSeconds: 0,

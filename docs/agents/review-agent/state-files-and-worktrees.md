@@ -22,7 +22,7 @@ temp/
 
 - 当前循环状态
 - 当前阶段（`phase`）
-- 下一步建议进入的 prompt（`nextPrompt`）
+- 下一步动作（`nextAction`）
 - 上一轮失败或成功前的阶段（`lastPhase`）
 - 当前选中的 PR 编号
 - 最近一次成功轮次的时间戳
@@ -95,7 +95,7 @@ temp/
 
 重启后应：
 
-1. 先运行 bootstrap
+1. 先运行 router
 2. 读取 `state.json`、`queue.json`、`backoff.json` 与 `cursor.json`
 3. 校验 `selected_pr` 仍然处于 open 状态
 4. 校验 `pending_queue` 中的 PR 仍然处于 open 状态

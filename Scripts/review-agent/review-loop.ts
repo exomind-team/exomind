@@ -189,7 +189,7 @@ function persistReviewState(selectedPrNumber: number): void {
     state: 'HAS_TARGET',
     phase: 'REVIEW',
     lastPhase: 'REVIEW',
-    nextPrompt: 'review',
+    nextAction: 'review',
     selectedPrNumber,
     selectedReason: previousState?.selectedReason ?? null,
     inspectedPrCount: previousState?.inspectedPrCount ?? 0,
