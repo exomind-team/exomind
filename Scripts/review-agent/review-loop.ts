@@ -1,24 +1,23 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 
 import {
   buildReviewSummary,
   parseLinkedIssueNumbers,
   type PullRequestFile,
 } from './review-loop-lib.ts';
-
-const QUEUE_FILE = path.resolve(process.cwd(), 'temp/pr-monitor/queue.json');
+import {
+  QUEUE_FILE,
+  STATE_FILE,
+  ensurePrMonitorDir,
+  readJson,
+  writeJson,
+  type PersistedState,
+  type QueueState,
+} from './state-lib.ts';
 
 interface CliOptions {
   repo?: string;
   prNumber?: number;
-}
-
-interface QueueState {
-  selectedPr?: {
-    number: number;
-  } | null;
 }
 
 interface PullRequestView {
@@ -60,8 +59,7 @@ function main(): void {
     files,
   });
   const issues = reviewSummary.linkedIssues.map((issueNumber) => viewIssue(issueNumber, repo));
-
-  console.log(JSON.stringify({
+  const output = {
     repo,
     selectedPr: reviewSummary.selectedPr,
     linkedIssues: reviewSummary.linkedIssues,
@@ -71,7 +69,10 @@ function main(): void {
     needsWorktree: reviewSummary.needsWorktree,
     parsedIssueRefs: parseLinkedIssueNumbers(pullRequest.body ?? ''),
     url: pullRequest.url,
-  }, null, 2));
+  };
+
+  persistReviewState(reviewSummary.selectedPr.number);
+  console.log(JSON.stringify(output, null, 2));
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -101,7 +102,7 @@ function parseArgs(argv: string[]): CliOptions {
 }
 
 function readSelectedPrNumber(): number {
-  const queue = JSON.parse(readFileSync(QUEUE_FILE, 'utf8')) as QueueState;
+  const queue = readJson<QueueState | null>(QUEUE_FILE, null);
   const prNumber = queue.selectedPr?.number;
   if (!prNumber) {
     throw new Error('No selected_pr found in temp/pr-monitor/queue.json');
@@ -178,6 +179,26 @@ function resolveRepo(explicitRepo: string | undefined): string {
   }
 
   throw new Error(`Unable to resolve repo from origin remote: ${remoteUrl}`);
+}
+
+function persistReviewState(selectedPrNumber: number): void {
+  ensurePrMonitorDir();
+  const previousState = readJson<PersistedState | null>(STATE_FILE, null);
+
+  writeJson(STATE_FILE, {
+    state: 'HAS_TARGET',
+    phase: 'REVIEW',
+    lastPhase: 'REVIEW',
+    nextPrompt: 'review',
+    selectedPrNumber,
+    selectedReason: previousState?.selectedReason ?? null,
+    inspectedPrCount: previousState?.inspectedPrCount ?? 0,
+    skippedPrCount: previousState?.skippedPrCount ?? 0,
+    actionableCount: previousState?.actionableCount ?? 1,
+    failureStreak: 0,
+    nextSleepSeconds: previousState?.nextSleepSeconds ?? 180,
+    updatedAt: new Date().toISOString(),
+  } satisfies PersistedState);
 }
 
 main();

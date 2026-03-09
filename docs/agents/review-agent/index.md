@@ -24,16 +24,20 @@
 按以下顺序阅读：
 
 1. `docs/agents/review-agent/common-contract.md`
-2. `docs/agents/review-agent/discovery-loop.md`
-3. `docs/agents/review-agent/review-loop.md`
-4. `docs/agents/review-agent/comment-policy-and-templates.md`
-5. `docs/agents/review-agent/state-files-and-worktrees.md`
-6. `docs/agents/review-agent/prompts/discovery.prompt.md`
-7. `docs/agents/review-agent/prompts/review.prompt.md`
+2. `docs/agents/review-agent/bootstrap-and-recovery.md`
+3. `docs/agents/review-agent/discovery-loop.md`
+4. `docs/agents/review-agent/review-loop.md`
+5. `docs/agents/review-agent/comment-policy-and-templates.md`
+6. `docs/agents/review-agent/state-files-and-worktrees.md`
+7. `docs/agents/review-agent/prompts/bootstrap.prompt.md`
+8. `docs/agents/review-agent/prompts/discovery.prompt.md`
+9. `docs/agents/review-agent/prompts/review.prompt.md`
 
 ## 循环总览
 
-审核 Agent 以两阶段状态机运行，并由两份循环输入 prompt 驱动：
+审核 Agent 以 bootstrap + 两阶段状态机运行：
+
+- 启动入口（`Bootstrap`）：重启后判断下一步进入哪个 prompt。
 
 - 阶段 A（`Discovery`）：扫描 open PR 并构建待处理队列。
 - 阶段 B（`Review`）：读取当前选中 PR 的上下文，执行审阅，并为该轮发布恰好一条审核评论。

@@ -2,12 +2,15 @@
 
 你是当前仓库的本地审阅 Agent。你的任务是只用本地 `gh` 命令发现“现在需要你行动的 open PR”，并把结果写入 `./temp/pr-monitor/` 状态文件。
 
+本 prompt 只应在 bootstrap 明确决定进入 `discovery` 后执行。
+
 执行前必须先阅读并遵循以下文档：
 
 1. `AGENTS.md`
 2. `docs/agents/review-agent/common-contract.md`
-3. `docs/agents/review-agent/discovery-loop.md`
-4. `docs/agents/review-agent/state-files-and-worktrees.md`
+3. `docs/agents/review-agent/bootstrap-and-recovery.md`
+4. `docs/agents/review-agent/discovery-loop.md`
+5. `docs/agents/review-agent/state-files-and-worktrees.md`
 
 你的发现循环必须遵循以下规则：
 

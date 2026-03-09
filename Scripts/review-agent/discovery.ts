@@ -1,7 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import path from 'node:path';
-
 import {
   DEFAULT_SLEEP_SECONDS,
   buildDiscoveryRound,
@@ -13,12 +10,16 @@ import {
   type PullRequestThreadReply,
   type PullRequestSnapshot,
 } from './discovery-lib.ts';
-
-const TEMP_DIR = path.resolve(process.cwd(), 'temp/pr-monitor');
-const STATE_FILE = path.join(TEMP_DIR, 'state.json');
-const QUEUE_FILE = path.join(TEMP_DIR, 'queue.json');
-const BACKOFF_FILE = path.join(TEMP_DIR, 'backoff.json');
-const CURSOR_FILE = path.join(TEMP_DIR, 'cursor.json');
+import {
+  BACKOFF_FILE,
+  CURSOR_FILE,
+  QUEUE_FILE,
+  STATE_FILE,
+  ensurePrMonitorDir,
+  readJson,
+  writeJson,
+  type PersistedState,
+} from './state-lib.ts';
 
 interface CliOptions {
   repo?: string;
@@ -82,19 +83,6 @@ interface GhPrView {
   comments?: GhComment[];
   reviews?: GhReview[];
   commits?: GhCommit[];
-}
-
-interface PersistedState {
-  state: 'HAS_TARGET' | 'NO_TARGET' | 'FAILED_RETRYABLE';
-  selectedPrNumber: number | null;
-  selectedReason: string | null;
-  inspectedPrCount: number;
-  skippedPrCount: number;
-  actionableCount: number;
-  failureStreak: number;
-  nextSleepSeconds: number;
-  updatedAt: string;
-  error?: string;
 }
 
 interface PersistedCursor {
@@ -384,11 +372,14 @@ function resolveRepo(explicitRepo: string | undefined): string {
 }
 
 function persistRound(result: RoundResult): void {
-  ensureTempDir();
+  ensurePrMonitorDir();
 
   if (result.status === 'FAILED') {
     writeJson(STATE_FILE, {
       state: 'FAILED_RETRYABLE',
+      phase: 'DISCOVERY',
+      lastPhase: 'DISCOVERY',
+      nextPrompt: 'discovery',
       selectedPrNumber: null,
       selectedReason: null,
       inspectedPrCount: result.inspectedPrCount,
@@ -409,6 +400,9 @@ function persistRound(result: RoundResult): void {
 
   writeJson(STATE_FILE, {
     state: result.state,
+    phase: result.state === 'NO_TARGET' ? 'IDLE_WAIT' : 'DISCOVERY',
+    lastPhase: 'DISCOVERY',
+    nextPrompt: result.state === 'HAS_TARGET' ? 'review' : 'idle-wait',
     selectedPrNumber: result.selectedPr?.number ?? null,
     selectedReason: result.selectedPr?.reason ?? null,
     inspectedPrCount: result.inspectedPrCount,
@@ -511,22 +505,6 @@ function parseArgs(argv: string[]): CliOptions {
   }
 
   return options;
-}
-
-function readJson<T>(filePath: string, fallback: T): T {
-  try {
-    return JSON.parse(readFileSync(filePath, 'utf8')) as T;
-  } catch {
-    return fallback;
-  }
-}
-
-function writeJson(filePath: string, value: unknown): void {
-  writeFileSync(filePath, `${JSON.stringify(value, null, 2)}\n`, 'utf8');
-}
-
-function ensureTempDir(): void {
-  mkdirSync(TEMP_DIR, { recursive: true });
 }
 
 function parseRepo(repo: string): { owner: string; name: string } {

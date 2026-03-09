@@ -40,7 +40,8 @@
 - 每条问题都必须附带验证方式。
 - 每条已发布评论都必须回读并校验。
 - Agent 必须保留足够的本地状态，以便中断后恢复。
-- discovery 与 review 两阶段都必须有各自独立的循环输入 prompt 文件。
+- 每次重启都必须先经过 bootstrap，再决定进入 discovery、review 或 idle-wait。
+- bootstrap、discovery 与 review 三阶段都必须有各自独立的循环输入 prompt 文件。
 
 ## 合法输出状态
 

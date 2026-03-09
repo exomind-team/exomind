@@ -21,6 +21,9 @@ temp/
 ### `state.json`
 
 - 当前循环状态
+- 当前阶段（`phase`）
+- 下一步建议进入的 prompt（`nextPrompt`）
+- 上一轮失败或成功前的阶段（`lastPhase`）
 - 当前选中的 PR 编号
 - 最近一次成功轮次的时间戳
 - 连续失败次数
@@ -92,7 +95,8 @@ temp/
 
 重启后应：
 
-1. 读取 `state.json`、`queue.json`、`backoff.json` 与 `cursor.json`
-2. 校验 `selected_pr` 仍然处于 open 状态
-3. 校验 `pending_queue` 中的 PR 仍然处于 open 状态
-4. 基于当前 GitHub 事实恢复，而不是盲目依赖本地旧状态
+1. 先运行 bootstrap
+2. 读取 `state.json`、`queue.json`、`backoff.json` 与 `cursor.json`
+3. 校验 `selected_pr` 仍然处于 open 状态
+4. 校验 `pending_queue` 中的 PR 仍然处于 open 状态
+5. 基于当前 GitHub 事实恢复，而不是盲目依赖本地旧状态
