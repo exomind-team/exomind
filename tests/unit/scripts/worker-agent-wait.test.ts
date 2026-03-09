@@ -41,6 +41,28 @@ describe('worker-agent wait logic', () => {
     expect(events[0]?.itemId).toBe('comment-1');
   });
 
+  it('does not wake on a reviewer state-sync comment with no new issues', () => {
+    const events = detectWakeEvents({
+      previous: makeSnapshot(),
+      current: makeSnapshot({
+        comments: [
+          {
+            id: 'comment-reviewer-sync',
+            authorLogin: 'ARCJ137442',
+            body: '[Codex Reviewer]\n已审阅最新变更，未发现问题。only state synchronization, no new issues found.',
+            createdAt: '2026-03-09T10:00:30.000Z',
+          },
+        ],
+      }),
+      cursor: {
+        lastCommentIds: [],
+        lastReviewIds: [],
+      },
+    });
+
+    expect(events).toEqual([]);
+  });
+
   it('wakes on a new human comment and classifies it as a pending item', () => {
     const events = detectWakeEvents({
       previous: makeSnapshot(),

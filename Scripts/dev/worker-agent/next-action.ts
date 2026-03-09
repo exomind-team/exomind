@@ -1,6 +1,7 @@
 import {
   hasHumanTestLabel,
   HUMAN_TEST_REVIEW_PREFIX,
+  isNonBlockingReviewerComment,
   isNonBlockingReviewState,
   REVIEWER_PREFIX,
   WORKER_PREFIX,
@@ -121,6 +122,10 @@ export function collectPendingFeedback(pr: NextActionPrState, cursor: WorkerCurs
     }
 
     if (comment.body.startsWith(REVIEWER_PREFIX)) {
+      if (isNonBlockingReviewerComment(comment.body)) {
+        continue;
+      }
+
       items.push({
         reason: 'reviewer',
         itemId: comment.id,

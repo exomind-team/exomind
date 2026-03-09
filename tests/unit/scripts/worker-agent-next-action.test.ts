@@ -102,6 +102,26 @@ describe('worker-agent next-action', () => {
     expect(result.blockers?.[0]?.reason).toBe('reviewer');
   });
 
+  it('does not treat a reviewer state-sync comment with no new issues as a blocker', () => {
+    const result = determineNextAction(
+      makeInput({
+        pr: {
+          ...makeInput().pr,
+          comments: [
+            {
+              id: 'comment-reviewer-sync',
+              authorLogin: 'ARCJ137442',
+              body: '[Codex Reviewer]\n已审阅最新变更，未发现问题。only state synchronization, no new issues found.',
+              createdAt: '2026-03-10T08:00:30.000Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.action).toBe('wait-for-update');
+  });
+
   it('ignores a new APPROVED review when no actionable feedback exists', () => {
     const result = determineNextAction(
       makeInput({
