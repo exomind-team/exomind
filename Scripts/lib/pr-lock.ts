@@ -347,32 +347,36 @@ export class PRLockManager {
 
     // 编辑评论标记为已释放
     const localLockState = await this.loadLockState();
-    if (localLockState?.comment_id) {
-      // 验证本地状态是否属于当前 PR 和锁
-      if (localLockState.pr_number === prNumber && localLockState.lock_id === lock.lock_id) {
-        await this.updateLockCommentWithRelease(prNumber, localLockState.comment_id, releasedLock);
+    let commentUpdated = false;
+
+    // 优先使用本地状态中的 comment_id
+    if (localLockState?.comment_id &&
+        localLockState.pr_number === prNumber &&
+        localLockState.lock_id === lock.lock_id) {
+      await this.updateLockCommentWithRelease(prNumber, localLockState.comment_id, releasedLock);
+      commentUpdated = true;
+    } else {
+      // 本地状态不匹配或缺失，按 lock_id 查找原始评论
+      console.warn(`[PRLock] Local state unavailable or mismatch, searching for original comment by lock_id`);
+      const originalCommentId = await this.findCommentByLockId(prNumber, lock.lock_id);
+
+      if (originalCommentId) {
+        // 找到原始评论，更新为已释放
+        await this.updateLockCommentWithRelease(prNumber, originalCommentId, releasedLock);
+        commentUpdated = true;
       } else {
-        // 本地状态不匹配，创建新评论
-        console.warn(`[PRLock] Local state mismatch (PR: ${localLockState.pr_number} vs ${prNumber}, Lock: ${localLockState.lock_id} vs ${lock.lock_id}), creating new comment`);
+        // 极端情况：找不到原始评论（可能已被删除），创建新评论
+        console.warn(`[PRLock] Original comment not found for lock_id ${lock.lock_id}, creating new release comment`);
         await this.createComment(prNumber,
           `🔓 **锁已释放**\n\n` +
           `- 持有者：\`${lock.agent_id}\`\n` +
+          `- 锁 ID：\`${lock.lock_id}\`\n` +
           `- 获取时间：${lock.acquired_at}\n` +
           `- 释放时间：${releasedLock.released_at}\n` +
           (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
-          `\nPR 现在可以被其他 Agent 处理。`
+          `\n⚠️ 注意：原始锁评论未找到，可能已被删除。`
         );
       }
-    } else {
-      // 如果没有本地锁文件，创建新评论
-      await this.createComment(prNumber,
-        `🔓 **锁已释放**\n\n` +
-        `- 持有者：\`${lock.agent_id}\`\n` +
-        `- 获取时间：${lock.acquired_at}\n` +
-        `- 释放时间：${releasedLock.released_at}\n` +
-        (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
-        `\nPR 现在可以被其他 Agent 处理。`
-      );
     }
 
     console.log(`[PRLock] Lock released successfully`);
@@ -736,6 +740,37 @@ export class PRLockManager {
       (lock.reason ? `- 原因：${lock.reason}\n` : '');
 
     await this.createComment(prNumber, body);
+  }
+
+  /**
+   * 按 lock_id 查找评论 ID
+   * 用于降级路径：当本地状态丢失时，仍能找到原始评论并更新
+   */
+  private async findCommentByLockId(prNumber: number, lockId: string): Promise<number | null> {
+    const comments = await this.getComments(prNumber);
+
+    for (const comment of comments) {
+      if (!comment.body?.includes('<!-- LOCK_METADATA')) {
+        continue;
+      }
+
+      const match = comment.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/);
+      if (!match) {
+        continue;
+      }
+
+      try {
+        const metadata: LockMetadata = JSON.parse(match[1]);
+        if (metadata.lock_id === lockId) {
+          return comment.id;
+        }
+      } catch (e) {
+        // 解析失败，跳过
+        continue;
+      }
+    }
+
+    return null;
   }
 
   private gh(command: string): string {
