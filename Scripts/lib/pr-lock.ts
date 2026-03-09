@@ -16,7 +16,7 @@
 import { execSync } from 'child_process';
 
 // ========== 常量定义 ==========
-const LOCK_LABEL = '🔒locked';
+const LOCK_LABEL = '🔒 locked';  // 注意：保持空格以兼容历史锁
 const LOCK_METADATA_MARKER = '<!-- LOCK_METADATA';
 
 interface LockMetadata {
@@ -348,7 +348,21 @@ export class PRLockManager {
     // 编辑评论标记为已释放
     const localLockState = await this.loadLockState();
     if (localLockState?.comment_id) {
-      await this.updateLockCommentWithRelease(prNumber, localLockState.comment_id, releasedLock);
+      // 验证本地状态是否属于当前 PR 和锁
+      if (localLockState.pr_number === prNumber && localLockState.lock_id === lock.lock_id) {
+        await this.updateLockCommentWithRelease(prNumber, localLockState.comment_id, releasedLock);
+      } else {
+        // 本地状态不匹配，创建新评论
+        console.warn(`[PRLock] Local state mismatch (PR: ${localLockState.pr_number} vs ${prNumber}, Lock: ${localLockState.lock_id} vs ${lock.lock_id}), creating new comment`);
+        await this.createComment(prNumber,
+          `🔓 **锁已释放**\n\n` +
+          `- 持有者：\`${lock.agent_id}\`\n` +
+          `- 获取时间：${lock.acquired_at}\n` +
+          `- 释放时间：${releasedLock.released_at}\n` +
+          (lock.task_id ? `- 任务：#${lock.task_id}\n` : '') +
+          `\nPR 现在可以被其他 Agent 处理。`
+        );
+      }
     } else {
       // 如果没有本地锁文件，创建新评论
       await this.createComment(prNumber,
