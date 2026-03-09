@@ -12,18 +12,20 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
 
+use eventlog::EventLogStore;
 use mesh::{MeshRelayManager, MeshState};
 use signal::SignalPool;
 
 pub mod agent;
 pub mod auth;
 pub mod discovery;
+pub mod energy;
+pub mod eventlog;
 pub mod mesh;
 pub mod pairing;
 pub mod routes;
 pub mod signal;
 pub mod task;
-pub mod energy;
 pub mod tick;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -644,6 +646,15 @@ pub struct AppState {
     pub pairing: Arc<pairing::PairingManager>,
     pub task_store: Arc<task::TaskStore>,
     pub energy_registry: energy::EnergyRegistry,
+    pub eventlog_store: Arc<EventLogStore>,
+}
+
+/// Resolve the runtime data directory from `EXOMIND_RT_DATA_DIR` env var,
+/// falling back to `./runtime-data`.
+fn resolve_data_dir() -> PathBuf {
+    env::var("EXOMIND_RT_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("./runtime-data"))
 }
 
 impl AppState {
@@ -672,6 +683,9 @@ impl AppState {
         ));
         let mesh_relay = enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
 
+        let data_dir = resolve_data_dir();
+        let eventlog_store = Arc::new(EventLogStore::new(data_dir));
+
         Self {
             port,
             host_id,
@@ -684,6 +698,7 @@ impl AppState {
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
+            eventlog_store,
         }
     }
 }
@@ -769,6 +784,9 @@ mod tests {
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
+            eventlog_store: Arc::new(eventlog::EventLogStore::new(
+                std::env::temp_dir().join("exomind-test-lib"),
+            )),
         }
     }
 
