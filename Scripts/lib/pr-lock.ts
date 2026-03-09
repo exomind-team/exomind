@@ -111,6 +111,26 @@ export class PRLockManager {
     return expiresAt.toISOString();
   }
 
+  /**
+   * 从 LockStatus 提取基础字段，过滤派生字段
+   * 用于序列化到远端元数据时，避免持久化派生字段
+   */
+  private extractBasicFields(lock: LockStatus | LockMetadata): LockMetadata {
+    return {
+      lock_id: lock.lock_id,
+      agent_id: lock.agent_id,
+      worktree_path: lock.worktree_path,
+      branch: lock.branch,
+      acquired_at: lock.acquired_at,
+      lock_duration_minutes: lock.lock_duration_minutes,
+      task_id: lock.task_id,
+      reason: lock.reason,
+      pending: lock.pending,
+      released: lock.released,
+      released_at: lock.released_at
+    };
+  }
+
   // ========== 本地锁文件管理 ==========
 
   /**
@@ -357,7 +377,7 @@ export class PRLockManager {
 
     // 更新锁元数据：标记为已释放
     const releasedLock: LockMetadata = {
-      ...lock,
+      ...this.extractBasicFields(lock),
       released: true,
       released_at: new Date().toISOString()
     };
@@ -458,10 +478,19 @@ export class PRLockManager {
     // 计算新的锁时长
     const newDurationMinutes = lock.lock_duration_minutes + additionalMinutes;
 
-    // 更新锁元数据
+    // 更新锁元数据（只包含基础字段，不包含派生字段）
     const renewedLock: LockMetadata = {
-      ...lock,
-      lock_duration_minutes: newDurationMinutes
+      lock_id: lock.lock_id,
+      agent_id: lock.agent_id,
+      worktree_path: lock.worktree_path,
+      branch: lock.branch,
+      acquired_at: lock.acquired_at,
+      lock_duration_minutes: newDurationMinutes,
+      task_id: lock.task_id,
+      reason: lock.reason,
+      pending: lock.pending,
+      released: lock.released,
+      released_at: lock.released_at
     };
 
     // 查找原始评论并更新
@@ -493,13 +522,8 @@ export class PRLockManager {
       }
     }
 
-    // 更新本地锁状态
-    const renewedLockMetadata: LockMetadata = {
-      ...renewedLock,
-      lock_duration_minutes: newDurationMinutes
-    };
-
-    await this.saveLockState(prNumber, renewedLockMetadata, originalCommentId);
+    // 更新本地锁状态（renewedLock 已经包含正确的 lock_duration_minutes）
+    await this.saveLockState(prNumber, renewedLock, originalCommentId);
 
     console.log(`[PRLock] Lock renewed successfully, new duration: ${newDurationMinutes} minutes, expires at: ${this.calculateExpiresAt(lock.acquired_at, newDurationMinutes)}`);
 
@@ -538,7 +562,7 @@ export class PRLockManager {
     const originalCommentId = await this.findCommentByLockId(prNumber, oldLock.lock_id);
     if (originalCommentId) {
       const metadata: LockMetadata = {
-        ...oldLock,
+        ...this.extractBasicFields(oldLock),
         released: true,
         released_at: new Date().toISOString()
       };
