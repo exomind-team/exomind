@@ -475,10 +475,10 @@ export class PRLockManager {
     } else {
       // 本地状态不匹配或缺失，按 lock_id 查找原始评论
       console.warn(`[PRLock] Local state unavailable or mismatch, searching for original comment by lock_id`);
-      const originalComment = await this.findCommentByLockId(prNumber, lock.lock_id);
+      const originalCommentId = await this.findCommentByLockId(prNumber, lock.lock_id);
 
-      if (originalComment) {
-        await this.updateLockCommentWithConfirm(prNumber, originalComment.id, renewedLock);
+      if (originalCommentId) {
+        await this.updateLockCommentWithConfirm(prNumber, originalCommentId, renewedLock);
         commentUpdated = true;
       } else {
         return {
@@ -525,14 +525,14 @@ export class PRLockManager {
     }
 
     // 查找原始锁评论并标记为 released
-    const originalComment = await this.findCommentByLockId(prNumber, oldLock.lock_id);
-    if (originalComment) {
+    const originalCommentId = await this.findCommentByLockId(prNumber, oldLock.lock_id);
+    if (originalCommentId) {
       const metadata: LockMetadata = {
         ...oldLock,
         released: true,
         released_at: new Date().toISOString()
       };
-      await this.updateLockCommentWithRelease(prNumber, originalComment.id, metadata);
+      await this.updateLockCommentWithRelease(prNumber, originalCommentId, metadata);
     }
 
     await this.removeLabel(prNumber, LOCK_LABEL);
@@ -659,11 +659,19 @@ export class PRLockManager {
   ): Promise<{ hasConflict: boolean; winner?: string; loser?: string }> {
     const comments = await this.getComments(prNumber);
 
-    // 竞争窗口：最近 10 秒内的锁评论
-    const competitionWindowMs = 10 * 1000;
-    const myLockTime = parseInt(myLock.lock_id.split('-')[1]);
-    const windowStart = myLockTime - competitionWindowMs;
-    const windowEnd = myLockTime + competitionWindowMs;
+    // 竞争窗口：基于 GitHub timeline（createdAt）而非本地时钟
+    // 使用我的锁的 createdAt 作为参考点
+    const myComments = comments.filter((c: any) => c.body?.includes(myLock.lock_id));
+    if (myComments.length === 0) {
+      // 找不到自己的评论，无法判断竞争
+      console.warn(`[PRLock] Cannot find my lock comment for lock_id ${myLock.lock_id}`);
+      return { hasConflict: false };
+    }
+    const myCreatedAt = myComments[0].createdAt;
+    const myCreatedTime = new Date(myCreatedAt).getTime();
+    const competitionWindowMs = 10 * 1000;  // 10 秒窗口
+    const windowStart = myCreatedTime - competitionWindowMs;
+    const windowEnd = myCreatedTime + competitionWindowMs;
 
     // 找出所有包含 LOCK_METADATA 的 comment
     const lockComments = comments
@@ -685,9 +693,9 @@ export class PRLockManager {
         if (!m) return false;
         // 过滤掉已释放的锁
         if (m.released) return false;
-        // 只保留竞争窗口内的锁
-        const lockTime = parseInt(m.lock_id.split('-')[1]);
-        return lockTime >= windowStart && lockTime <= windowEnd;
+        // 只保留竞争窗口内的锁（基于 GitHub createdAt）
+        const createdTime = new Date(m.comment_created_at).getTime();
+        return createdTime >= windowStart && createdTime <= windowEnd;
       });
 
     // 检查是否有其他不同的 lock_id（不依赖评论数量）
