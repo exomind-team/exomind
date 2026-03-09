@@ -50,6 +50,8 @@ interface LockStatus extends LockMetadata {
   expires_at: string;             // 过期时间（动态计算）
   is_expired: boolean;            // 是否过期
   remaining_minutes: number;      // 剩余分钟数
+  should_renew?: boolean;         // 是否建议续期（剩余时间不足一半）
+  renew_reason?: string;          // 续期建议原因
 }
 
 interface LockResult {
@@ -617,7 +619,14 @@ export class PRLockManager {
     const isExpired = now >= expiresAtDate;
     const remainingMinutes = Math.max(0, Math.ceil((expiresAtDate.getTime() - now.getTime()) / 60000));
 
-    // 6. 如果本地有锁文件，更新本地状态
+    // 6. 判断是否建议续期（剩余时间不足锁时长的一半）
+    const halfDuration = lockMetadata.lock_duration_minutes / 2;
+    const shouldRenew = !isExpired && remainingMinutes < halfDuration;
+    const renewReason = shouldRenew
+      ? `剩余 ${remainingMinutes} 分钟（不足锁时长 ${lockMetadata.lock_duration_minutes} 分钟的一半），建议调用 renew() 续期`
+      : undefined;
+
+    // 7. 如果本地有锁文件，更新本地状态
     const localLockState = await this.loadLockState();
     if (localLockState && localLockState.lock_id === lockMetadata.lock_id) {
       await this.updateLockState(lockMetadata.acquired_at, lockMetadata.lock_duration_minutes);
@@ -629,7 +638,9 @@ export class PRLockManager {
       pr_last_updated_at: lockMetadata.acquired_at,  // 使用 acquired_at 作为基准时间
       expires_at: expiresAt,
       is_expired: isExpired,
-      remaining_minutes: remainingMinutes
+      remaining_minutes: remainingMinutes,
+      should_renew: shouldRenew,
+      renew_reason: renewReason
     };
   }
 
@@ -1000,6 +1011,13 @@ Examples:
       const lock = await lockManager.checkLock(prNumber);
       if (lock) {
         console.log(JSON.stringify(lock, null, 2));
+
+        // 如果建议续期，输出醒目提示
+        if (lock.should_renew) {
+          console.log('\n⚠️  续期建议：');
+          console.log(`   ${lock.renew_reason}`);
+          console.log(`   命令：bun pr-lock.ts renew ${prNumber} <additional-minutes> ${lock.agent_id}`);
+        }
       } else {
         console.log('No lock found');
       }
