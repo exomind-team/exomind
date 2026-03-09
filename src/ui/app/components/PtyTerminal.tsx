@@ -79,11 +79,11 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     terminalRef.current = terminal;
     fitAddonRef.current = fitAddon;
 
-    // ── Handle user input → POST to backend ──────────────────
+    // ── Helper: send raw text to PTY backend ──────────────────
 
-    const inputDisposable = terminal.onData((data) => {
+    const sendTextInput = (text: string) => {
       const encoder = new TextEncoder();
-      const bytes = encoder.encode(data);
+      const bytes = encoder.encode(text);
       const binary = Array.from(bytes, (b) => String.fromCharCode(b)).join('');
       const encoded = btoa(binary);
 
@@ -92,7 +92,41 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
         headers: buildHeaders(),
         body: JSON.stringify({ data: encoded }),
       }).catch(console.error);
+    };
+
+    // ── Handle user input → POST to backend ──────────────────
+
+    const inputDisposable = terminal.onData((data) => {
+      sendTextInput(data);
     });
+
+    // ── Clipboard: Ctrl+Shift+C copy, Ctrl+V / Ctrl+Shift+V paste ──
+
+    terminal.attachCustomKeyEventHandler((e) => {
+      // Ctrl+Shift+C → copy selection
+      if (e.ctrlKey && e.shiftKey && e.code === 'KeyC' && e.type === 'keydown') {
+        const sel = terminal.getSelection();
+        if (sel) void navigator.clipboard.writeText(sel);
+        return false;
+      }
+      // Ctrl+V or Ctrl+Shift+V → paste from clipboard
+      if (e.ctrlKey && (e.code === 'KeyV') && e.type === 'keydown') {
+        void navigator.clipboard.readText().then((text) => {
+          if (text) sendTextInput(text);
+        });
+        return false;
+      }
+      return true;
+    });
+
+    // ── Browser paste event (right-click paste, etc.) ──────────
+
+    const pasteHandler = (e: ClipboardEvent) => {
+      e.preventDefault();
+      const text = e.clipboardData?.getData('text');
+      if (text) sendTextInput(text);
+    };
+    container.addEventListener('paste', pasteHandler);
 
     // ── Handle resize → POST to backend ──────────────────────
 
@@ -164,6 +198,7 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
     // ── Cleanup ──────────────────────────────────────────────
 
     return () => {
+      container.removeEventListener('paste', pasteHandler);
       inputDisposable.dispose();
       resizeDisposable.dispose();
 

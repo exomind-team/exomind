@@ -2152,6 +2152,8 @@ export function AgentsPage() {
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
   const [ptyAgents, setPtyAgents] = useState<Array<{ id: string; name: string; status: string; workdir: string }>>([]);
+  /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
+  const [activePtyId, setActivePtyId] = useState<string | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [agentCreateKind, setAgentCreateKind] = useState<RuntimeCreateAgentRequest['kind']>('claude_cli');
@@ -2661,6 +2663,7 @@ export function AgentsPage() {
   const [showPtySpawnDialog, setShowPtySpawnDialog] = useState(false);
 
   const openPtyTerminal = (ptyId: string) => {
+    setActivePtyId(ptyId);
     setRightPanel({ state: 'PTY_TERMINAL', ptyId });
   };
 
@@ -2821,6 +2824,11 @@ export function AgentsPage() {
             return prev; // No change — preserve reference identity
           }
           return data;
+        });
+        // Clear activePtyId if the PTY agent was removed
+        setActivePtyId(prev => {
+          if (prev && !data.some(d => d.id === prev)) return null;
+          return prev;
         });
       }
     } catch {
@@ -3342,17 +3350,24 @@ export function AgentsPage() {
           {content}
         </div>
 
-        {/* 右侧栏：桌面端可拖拽调整宽度，CLOSED 时不渲染 */}
-        {rightPanel.state !== 'CLOSED' && (
+        {/* 右侧栏：桌面端可拖拽调整宽度。
+            当 PTY 终端活跃时，关闭面板只隐藏 aside（display:none），
+            PtyTerminal 保持挂载 → SSE 连接不断 → 终端状态持久化。 */}
+        {(rightPanel.state !== 'CLOSED' || activePtyId != null) && (
           <>
-          <div
-            className="hidden w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-border-card active:bg-[#C75B3A] transition-colors lg:block"
-            onMouseDown={handleRightPanelDragStart}
-          />
+          {rightPanel.state !== 'CLOSED' && (
+            <div
+              className="hidden w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-border-card active:bg-[#C75B3A] transition-colors lg:block"
+              onMouseDown={handleRightPanelDragStart}
+            />
+          )}
           <aside
             data-testid="agent-rightpanel-shell"
             className="hidden shrink-0 border-l border-border-card bg-surface text-foreground lg:flex lg:flex-col"
-            style={{ width: rightPanelWidth }}
+            style={{
+              width: rightPanelWidth,
+              ...(rightPanel.state === 'CLOSED' ? { display: 'none' } : {}),
+            }}
           >
             <div className="flex items-center justify-between border-b border-border-card px-4 py-3">
               <span className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -3732,11 +3747,15 @@ export function AgentsPage() {
                   </div>
                 </div>
               )}
-              {rightPanel.state === 'PTY_TERMINAL' && rightPanel.ptyId && (
-                <div className="flex h-full flex-col overflow-hidden">
+              {/* PTY terminal — stays mounted when activePtyId is set, hidden when panel shows other content */}
+              {activePtyId && (
+                <div
+                  className="flex h-full flex-col overflow-hidden"
+                  style={rightPanel.state !== 'PTY_TERMINAL' ? { display: 'none' } : undefined}
+                >
                   <PtyTerminal
                     rtBaseUrl={resolveRtBaseUrl()}
-                    ptyId={rightPanel.ptyId}
+                    ptyId={activePtyId}
                   />
                 </div>
               )}
