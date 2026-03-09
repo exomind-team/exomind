@@ -14,6 +14,7 @@
  */
 
 import { execSync } from 'child_process';
+import { IGitHubAPI, RealGitHubAPI } from './pr-lock-api';
 
 // ========== 常量定义 ==========
 const LOCK_LABEL = '🔒 locked';  // 注意：保持空格以兼容历史锁
@@ -61,10 +62,15 @@ interface LockResult {
 }
 
 export class PRLockManager {
+  private api: IGitHubAPI;
+
   constructor(
     private repo: string,      // "exomind-team/exomind"
-    private agentId: string    // "fixer@pr-draft-cleanup"
-  ) {}
+    private agentId: string,   // "fixer@pr-draft-cleanup"
+    api?: IGitHubAPI           // 可选：用于测试注入 mock
+  ) {
+    this.api = api || new RealGitHubAPI(repo);
+  }
 
   // ========== Git 分支管理 ==========
 
@@ -430,7 +436,7 @@ export class PRLockManager {
       console.warn(`[PRLock] Failed to get labels for PR #${prNumber}:`, e);
       return null;
     }
-    const hasLock = labels.some((l: any) => l.name === LOCK_LABEL);
+    const hasLock = labels.includes(LOCK_LABEL);
 
     if (!hasLock) {
       return null;
@@ -592,76 +598,30 @@ export class PRLockManager {
   // ========== GitHub API 封装 ==========
 
   private async addLabel(prNumber: number, label: string): Promise<void> {
-    this.gh(`issue edit ${prNumber} --add-label "${label}"`);
+    await this.api.addLabel(prNumber, label);
   }
 
   private async removeLabel(prNumber: number, label: string): Promise<void> {
-    this.gh(`issue edit ${prNumber} --remove-label "${label}"`);
+    await this.api.removeLabel(prNumber, label);
   }
 
-  private async getLabels(prNumber: number): Promise<any[]> {
-    const result = this.gh(`issue view ${prNumber} --json labels`);
-    return JSON.parse(result).labels;
+  private async getLabels(prNumber: number): Promise<string[]> {
+    return await this.api.getLabels(prNumber);
   }
 
   private async getComments(prNumber: number): Promise<any[]> {
-    const result = this.gh(`issue view ${prNumber} --json comments`);
-    return JSON.parse(result).comments;
+    return await this.api.getComments(prNumber);
   }
 
   private async createComment(prNumber: number, body: string): Promise<number | undefined> {
-    // 使用临时文件避免 shell 转义问题
-    const tempDir = 'temp/pr-lock';
-    try {
-      execSync(`mkdir -p ${tempDir}`, { stdio: 'ignore' });
-    } catch (e) {
-      console.warn('[PRLock] Failed to create temp directory:', e);
-    }
-    const tmpFile = `${tempDir}/comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
-
-    // Node/Bun 兼容：使用 fs.writeFileSync
-    const fs = await import('fs');
-    fs.writeFileSync(tmpFile, body, 'utf-8');
-
-    try {
-      // gh issue comment 返回评论 URL，格式：https://github.com/owner/repo/issues/123#issuecomment-456789
-      const output = this.gh(`issue comment ${prNumber} --body-file ${tmpFile}`);
-      const match = output.match(/#issuecomment-(\d+)/);
-      if (match) {
-        return parseInt(match[1], 10);
-      }
-      return undefined;
-    } finally {
-      execSync(`rm -f ${tmpFile}`, { stdio: 'ignore' });
-    }
+    return await this.api.createComment(prNumber, body);
   }
 
   /**
    * 编辑评论
    */
   private async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
-    // 使用临时文件避免 shell 转义问题
-    const tempDir = 'temp/pr-lock';
-    try {
-      execSync(`mkdir -p ${tempDir}`, { stdio: 'ignore' });
-    } catch (e) {
-      console.warn('[PRLock] Failed to create temp directory:', e);
-    }
-    const tmpFile = `${tempDir}/comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
-
-    // Node/Bun 兼容：使用 fs.writeFileSync
-    const fs = await import('fs');
-    fs.writeFileSync(tmpFile, body, 'utf-8');
-
-    try {
-      // 使用 -F body=@file 让 gh CLI 自动处理 JSON 封装
-      execSync(`gh api repos/${this.repo}/issues/comments/${commentId} -X PATCH -F body=@${tmpFile}`, {
-        encoding: 'utf-8',
-        stdio: ['pipe', 'pipe', 'pipe']
-      });
-    } finally {
-      execSync(`rm -f ${tmpFile}`, { stdio: 'ignore' });
-    }
+    await this.api.updateComment(prNumber, commentId, body);
   }
 
   /**
@@ -771,13 +731,6 @@ export class PRLockManager {
     }
 
     return null;
-  }
-
-  private gh(command: string): string {
-    return execSync(`gh ${command} --repo ${this.repo}`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
   }
 
   private sleep(ms: number): Promise<void> {

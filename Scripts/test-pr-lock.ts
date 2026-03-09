@@ -14,7 +14,9 @@
 import { PRLockManager } from './lib/pr-lock';
 
 const REPO = 'exomind-team/exomind';
-const PR_NUMBER = 419;
+// 使用 PR #436（PR 锁系统自身的 PR）作为测试 PR
+// 避免污染其他无关 PR 的 timeline
+const PR_NUMBER = 436;
 
 // 测试场景 1：互斥性测试
 async function testMutualExclusion() {
@@ -250,7 +252,7 @@ async function testForceRelease() {
 async function main() {
   console.log('\n╔═══════════════════════════════════════════════════════════╗');
   console.log('║           PR Lock 机制完整测试套件                        ║');
-  console.log('║           测试 PR: #419                                   ║');
+  console.log('║           测试 PR: #436 (PR 锁系统自身的 PR)             ║');
   console.log('╚═══════════════════════════════════════════════════════════╝');
 
   try {
