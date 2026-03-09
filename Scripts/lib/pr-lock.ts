@@ -465,20 +465,23 @@ export class PRLockManager {
     // 查找原始评论并更新
     const localLockState = await this.loadLockState();
     let commentUpdated = false;
+    let originalCommentId: number | undefined;
 
     // 优先使用本地状态中的 comment_id
     if (localLockState?.comment_id &&
         localLockState.pr_number === prNumber &&
         localLockState.lock_id === lock.lock_id) {
       await this.updateLockCommentWithConfirm(prNumber, localLockState.comment_id, renewedLock);
+      originalCommentId = localLockState.comment_id;
       commentUpdated = true;
     } else {
       // 本地状态不匹配或缺失，按 lock_id 查找原始评论
       console.warn(`[PRLock] Local state unavailable or mismatch, searching for original comment by lock_id`);
-      const originalCommentId = await this.findCommentByLockId(prNumber, lock.lock_id);
+      const foundCommentId = await this.findCommentByLockId(prNumber, lock.lock_id);
 
-      if (originalCommentId) {
-        await this.updateLockCommentWithConfirm(prNumber, originalCommentId, renewedLock);
+      if (foundCommentId) {
+        await this.updateLockCommentWithConfirm(prNumber, foundCommentId, renewedLock);
+        originalCommentId = foundCommentId;
         commentUpdated = true;
       } else {
         return {
@@ -494,10 +497,7 @@ export class PRLockManager {
       lock_duration_minutes: newDurationMinutes
     };
 
-    // 如果找到了原始评论 ID，也更新到本地状态
-    const finalCommentId = originalCommentId || localLockState?.comment_id;
-
-    await this.saveLockState(prNumber, renewedLockMetadata, finalCommentId);
+    await this.saveLockState(prNumber, renewedLockMetadata, originalCommentId);
 
     console.log(`[PRLock] Lock renewed successfully, new duration: ${newDurationMinutes} minutes, expires at: ${this.calculateExpiresAt(lock.acquired_at, newDurationMinutes)}`);
 
