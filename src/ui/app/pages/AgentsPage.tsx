@@ -2116,6 +2116,8 @@ export function AgentsPage() {
   const [topologyLayoutStore, setTopologyLayoutStore] = useState<TopologyLayoutStore>(() => readTopologyLayoutStore());
   const topologyPendingStoreRef = useRef<TopologyLayoutStore | null>(null);
   const topologyWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref to always call the latest fetchPtyAgents from the polling interval (avoids stale closure).
+  const fetchPtyAgentsRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [activeSignalRouteHost, setActiveSignalRouteHost] = useState<RuntimeHostRecord | null>(null);
@@ -2694,6 +2696,13 @@ export function AgentsPage() {
     return `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`;
   };
 
+  /** Resolve the auth token for the currently active RT host. */
+  const resolveRtAuthToken = (): string | undefined => {
+    const activeHost = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+    if (activeHost?.authToken) return activeHost.authToken;
+    return runtimeServiceStatus?.authSecret ?? undefined;
+  };
+
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
     setListSections(buildListSectionsFromRuntimeAgents(snapshot.agents));
@@ -2812,8 +2821,9 @@ export function AgentsPage() {
     try {
       const rtUrl = resolveRtBaseUrl();
       const headers: Record<string, string> = {};
-      if (runtimeServiceStatus?.authSecret) {
-        headers['Authorization'] = `Bearer ${runtimeServiceStatus.authSecret}`;
+      const token = resolveRtAuthToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
       }
       const resp = await fetch(`${rtUrl}/pty`, { headers });
       if (resp.ok) {
@@ -2839,6 +2849,8 @@ export function AgentsPage() {
       // PTY endpoint may not be available; silently ignore
     }
   };
+  // Keep ref in sync so the polling interval always calls the latest version.
+  fetchPtyAgentsRef.current = fetchPtyAgents;
 
   const refreshRuntimeSnapshot = async () => {
     const snapshot = await getRuntimeManager().refreshSnapshot();
@@ -2873,7 +2885,7 @@ export function AgentsPage() {
           if (disposed) return;
           applyRuntimeSnapshot(nextRuntimeSnapshot);
           await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
-          await fetchPtyAgents();
+          await fetchPtyAgentsRef.current();
         } catch {
           // Ignore polling errors（轮询错误不打断页面渲染）
         }
@@ -3760,6 +3772,7 @@ export function AgentsPage() {
                   <PtyTerminal
                     rtBaseUrl={resolveRtBaseUrl()}
                     ptyId={activePtyId}
+                    authToken={resolveRtAuthToken()}
                   />
                 </div>
               )}
@@ -3774,7 +3787,8 @@ export function AgentsPage() {
         open={showPtySpawnDialog}
         onOpenChange={setShowPtySpawnDialog}
         rtBaseUrl={resolveRtBaseUrl()}
-        defaultWorkdir={import.meta.env.VITE_PTY_DEFAULT_WORKDIR || 'D:\\project\\exomind'}
+        authToken={resolveRtAuthToken()}
+        defaultWorkdir={import.meta.env.VITE_PTY_DEFAULT_WORKDIR ?? ''}
         onSpawned={(info) => {
           openPtyTerminal(info.id);
           void refreshRuntimeSnapshot();

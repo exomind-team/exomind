@@ -34,11 +34,14 @@ mdns-sd = "0.11"
 sha2 = "0.10"
 percent-encoding = "2"
 rand = "0.8"
-portable-pty = "0.8"
 base64 = "0.22"
 async-stream = "0.3"
-dirs = "5"
 rusqlite = { version = "0.32", features = ["bundled"] }
+
+# PTY support: not available on Android (portable-pty → termios → no android impl)
+[target.'cfg(not(target_os = "android"))'.dependencies]
+portable-pty = "0.8"
+dirs = "5"
 
 [dev-dependencies]
 http-body-util = "0.1"
