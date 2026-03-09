@@ -646,13 +646,13 @@ export class PRLockManager {
 
   private async createComment(prNumber: number, body: string): Promise<number | undefined> {
     // 使用临时文件避免 shell 转义问题
-    const tempDir = '.exomind/temp';
+    const tempDir = 'temp/pr-lock';
     try {
       execSync(`mkdir -p ${tempDir}`, { stdio: 'ignore' });
     } catch (e) {
       console.warn('[PRLock] Failed to create temp directory:', e);
     }
-    const tmpFile = `${tempDir}/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
+    const tmpFile = `${tempDir}/comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
 
     // Node/Bun 兼容：使用 fs.writeFileSync
     const fs = await import('fs');
@@ -676,13 +676,13 @@ export class PRLockManager {
    */
   private async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
     // 使用临时文件避免 shell 转义问题
-    const tempDir = '.exomind/temp';
+    const tempDir = 'temp/pr-lock';
     try {
       execSync(`mkdir -p ${tempDir}`, { stdio: 'ignore' });
     } catch (e) {
       console.warn('[PRLock] Failed to create temp directory:', e);
     }
-    const tmpFile = `${tempDir}/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
+    const tmpFile = `${tempDir}/comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
 
     // Node/Bun 兼容：使用 fs.writeFileSync
     const fs = await import('fs');
