@@ -295,7 +295,13 @@ impl PtyManager {
         }
     }
 
-    /// Resume an existing Claude session by spawning with `--continue --session-id`.
+    /// Resume an existing Claude session by spawning with `--resume <session-id>`.
+    ///
+    /// Uses `--resume` (not `--continue --session-id`) because:
+    /// - `--resume <id>` directly resumes the specified session
+    /// - `--continue --session-id <id>` tries to continue the most recent session
+    ///   while forcing a specific session ID, causing "session ID already in use" errors
+    /// - `--fork-session` creates a new session ID to avoid modifying the original
     pub async fn resume(&self, request: PtyResumeRequest) -> Result<PtyAgentInfo, PtyError> {
         // Generate default name from session_id if not provided
         let name = if request.name.is_empty() {
@@ -310,10 +316,8 @@ impl PtyManager {
             workdir: request.workdir,
             command: default_command(),
             args: vec![
-                "--continue".to_string(),
-                "--session-id".to_string(),
+                "--resume".to_string(),
                 request.session_id.clone(),
-                "--fork-session".to_string(),
             ],
             rows: request.rows,
             cols: request.cols,
