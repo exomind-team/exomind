@@ -3270,7 +3270,10 @@ export function AgentsPage() {
             if (supportsInlineRightPanel) {
               openPtyTerminal(ptyId);
             } else {
-              navigateToSecondaryPage(`/agents/pty/${encodeURIComponent(ptyId)}`);
+              const ptyParams = new URLSearchParams({ baseUrl: resolveRtBaseUrl() });
+              const tok = resolveRtAuthToken();
+              if (tok) ptyParams.set('token', tok);
+              navigateToSecondaryPage(`/agents/pty/${encodeURIComponent(ptyId)}?${ptyParams.toString()}`);
             }
             return;
           }
@@ -3413,7 +3416,10 @@ export function AgentsPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      window.history.pushState({}, '', `/agents/pty/${rightPanel.ptyId}`);
+                      const ptyParams = new URLSearchParams({ baseUrl: resolveRtBaseUrl() });
+                      const tok = resolveRtAuthToken();
+                      if (tok) ptyParams.set('token', tok);
+                      window.history.pushState({}, '', `/agents/pty/${rightPanel.ptyId}?${ptyParams.toString()}`);
                       window.dispatchEvent(new PopStateEvent('popstate'));
                     }}
                     className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"

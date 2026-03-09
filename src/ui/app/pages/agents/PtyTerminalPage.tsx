@@ -1,30 +1,17 @@
 import { ChevronLeft } from 'lucide-react';
-import { useEffect, useState } from 'react';
 import { PtyTerminal } from '../../components/PtyTerminal';
-import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { DEFAULT_EMBEDDED_RUNTIME_PORT } from '@/config/runtime-target';
 
 export function PtyTerminalPage({ ptyId }: { ptyId?: string }) {
-  const [rtBaseUrl, setRtBaseUrl] = useState(`http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`);
-  const [authToken, setAuthToken] = useState<string | undefined>(undefined);
-
-  useEffect(() => {
-    let disposed = false;
-    const resolve = async () => {
-      try {
-        const hosts = await getRuntimeHostService().listHosts();
-        if (hosts.length > 0 && !disposed) {
-          const host = hosts[0];
-          setRtBaseUrl(`http://${host.host}:${host.port}`);
-          if (host.authToken) setAuthToken(host.authToken);
-        }
-      } catch {
-        // fallback already set
-      }
-    };
-    void resolve();
-    return () => { disposed = true; };
-  }, []);
+  // Read baseUrl and token from URL search params — set by AgentsPage when navigating.
+  // This avoids re-guessing the host inside the page and ensures the correct auth token
+  // is used regardless of whether it is an embedded RT or a remote peer RT.
+  const searchParams = new URLSearchParams(
+    typeof window !== 'undefined' ? window.location.search : '',
+  );
+  const rtBaseUrl =
+    searchParams.get('baseUrl') ?? `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`;
+  const authToken = searchParams.get('token') ?? undefined;
 
   const navigateBack = () => {
     if (typeof window !== 'undefined') {
