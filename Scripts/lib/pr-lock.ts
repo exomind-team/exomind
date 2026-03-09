@@ -29,6 +29,7 @@ interface LockMetadata {
   lock_duration_minutes: number;  // 锁时长（分钟）
   task_id?: string;               // 关联任务 ID
   reason?: string;                // 锁定原因
+  pending?: boolean;              // 是否为待确认状态（竞争检测前）
   released?: boolean;             // 是否已释放
   released_at?: string;           // 释放时间
 }
@@ -248,7 +249,7 @@ export class PRLockManager {
       await this.forceRelease(prNumber, existingLock);
     }
 
-    // 2. 生成锁元数据
+    // 2. 生成锁元数据（pending 状态）
     const now = new Date();
     const branch = options?.branch || this.getCurrentBranch();
     const lock: LockMetadata = {
@@ -259,7 +260,8 @@ export class PRLockManager {
       acquired_at: now.toISOString(),
       lock_duration_minutes: timeoutMinutes,
       task_id: options?.taskId,
-      reason: options?.reason
+      reason: options?.reason,
+      pending: true  // 标记为待确认，竞争检测通过后才确认
     };
 
     // 3. 添加锁标签
@@ -315,10 +317,17 @@ export class PRLockManager {
 
     console.log(`[PRLock] Lock acquired successfully: ${lock.lock_id}`);
 
-    // 7. 保存本地锁文件
-    await this.saveLockState(prNumber, lock, commentId);
+    // 7. 确认锁（移除 pending 标记）
+    const confirmedLock: LockMetadata = {
+      ...lock,
+      pending: undefined  // 移除 pending 标记
+    };
+    await this.updateLockCommentWithRelease(prNumber, commentId, confirmedLock);
 
-    return { success: true, lock };
+    // 8. 保存本地锁文件
+    await this.saveLockState(prNumber, confirmedLock, commentId);
+
+    return { success: true, lock: confirmedLock };
   }
 
   /**
@@ -442,7 +451,7 @@ export class PRLockManager {
       return null;
     }
 
-    // 2. 查找最新的有效锁元数据 Comment（过滤掉已释放的锁）
+    // 2. 查找最新的有效锁元数据 Comment（过滤掉已释放和待确认的锁）
     const comments = await this.getComments(prNumber);
     const lockComment = comments
       .reverse()  // 从最新开始
@@ -450,15 +459,15 @@ export class PRLockManager {
         if (!c.body?.includes('<!-- LOCK_METADATA')) {
           return false;
         }
-        // 解析元数据，检查是否已释放
+        // 解析元数据，检查是否已释放或待确认
         const match = c.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/);
         if (!match) {
           return false;
         }
         try {
           const metadata: LockMetadata = JSON.parse(match[1]);
-          // 过滤掉已释放的锁
-          return !metadata.released;
+          // 过滤掉已释放的锁和待确认的锁
+          return !metadata.released && !metadata.pending;
         } catch (e) {
           return false;
         }
