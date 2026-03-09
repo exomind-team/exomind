@@ -122,7 +122,12 @@ export class RealGitHubAPI implements IGitHubAPI {
 
   private gh(command: string): string {
     const { execSync } = require('child_process');
-    return execSync(`gh ${command} --repo ${this.repo}`, {
+    // gh api 命令不接受 --repo 参数，需要在 URL 中指定 repo
+    const isApiCommand = command.trim().startsWith('api ');
+    const fullCommand = isApiCommand
+      ? `gh ${command}`
+      : `gh ${command} --repo ${this.repo}`;
+    return execSync(fullCommand, {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe']
     });
