@@ -2151,6 +2151,7 @@ export function AgentsPage() {
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
   const [ptyAgents, setPtyAgents] = useState<Array<{ id: string; name: string; status: string; workdir: string }>>([]);
+  const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [agentCreateKind, setAgentCreateKind] = useState<RuntimeCreateAgentRequest['kind']>('claude_cli');
   const [agentCreateError, setAgentCreateError] = useState('');
@@ -2639,7 +2640,10 @@ export function AgentsPage() {
 
   const handleTabChange = (tab: AgentHubViewMode) => {
     setViewMode(tab);
-    closeRightPanel(); // 切换 Tab 时关闭右侧栏（保守策略）
+    // 保留 PTY 终端面板状态（避免切换 Tab 丢失终端会话）
+    if (rightPanel.state !== 'PTY_TERMINAL') {
+      closeRightPanel();
+    }
   };
 
   useEffect(() => {
@@ -2657,6 +2661,26 @@ export function AgentsPage() {
 
   const openPtyTerminal = (ptyId: string) => {
     setRightPanel({ state: 'PTY_TERMINAL', ptyId });
+  };
+
+  const handleRightPanelDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = rightPanelWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX; // Moving left increases panel width
+      const newWidth = Math.max(300, Math.min(700, startWidth + delta));
+      setRightPanelWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
   };
 
   /** Resolve the first available RT base URL from runtime host snapshots. */
@@ -3021,7 +3045,7 @@ export function AgentsPage() {
       id: `pty-${pty.id}`,
       type: 'agent' as SignalGraphNodeType,
       label: pty.name,
-      status: pty.status === 'running' ? 'running' : 'offline',
+      status: pty.status === 'running' ? 'Terminal · running' : 'Terminal · offline',
       position: { x: 600, y: 80 + idx * 100 },
     }));
   }, [ptyAgents]);
@@ -3300,15 +3324,21 @@ export function AgentsPage() {
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
-        <div className="flex-1 min-h-0 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10">
+        <div className={`flex-1 min-h-0 overflow-auto ${viewMode === 'topology' ? 'p-2 md:p-3 lg:p-4' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
           {content}
         </div>
 
-        {/* 右侧栏：桌面端固定 380px，CLOSED 时不渲染 */}
+        {/* 右侧栏：桌面端可拖拽调整宽度，CLOSED 时不渲染 */}
         {rightPanel.state !== 'CLOSED' && (
+          <>
+          <div
+            className="hidden w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-border-card active:bg-[#C75B3A] transition-colors lg:block"
+            onMouseDown={handleRightPanelDragStart}
+          />
           <aside
             data-testid="agent-rightpanel-shell"
-            className="hidden w-[380px] shrink-0 border-l border-border-card bg-surface text-foreground lg:flex lg:flex-col"
+            className="hidden shrink-0 border-l border-border-card bg-surface text-foreground lg:flex lg:flex-col"
+            style={{ width: rightPanelWidth }}
           >
             <div className="flex items-center justify-between border-b border-border-card px-4 py-3">
               <span className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -3683,6 +3713,7 @@ export function AgentsPage() {
               )}
             </div>
           </aside>
+          </>
         )}
       </div>
 
