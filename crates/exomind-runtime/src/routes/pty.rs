@@ -7,10 +7,10 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
-use std::io::Read;
+use tokio_stream::wrappers::ReceiverStream;
 
 use crate::pty::{
-    ClaudeSessionInfo, PtyAgentInfo, PtyError, PtyResumeRequest, PtySpawnRequest,
+    ClaudeSessionInfo, PtyAgentInfo, PtyError, PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
 };
 use crate::AppState;
 
@@ -73,66 +73,84 @@ async fn list_claude_sessions() -> Json<Vec<ClaudeSessionInfo>> {
 }
 
 /// GET /pty/{id}/stream — SSE stream of PTY output (base64-encoded).
+///
+/// On connect, replays the scrollback buffer first, then streams live output.
+/// This ensures terminal content survives component remounts (fullscreen toggle,
+/// tab switches, SSE reconnects).
 async fn stream_pty_output(
     Path(id): Path<String>,
     State(state): State<AppState>,
-) -> Result<Sse<impl futures_util::Stream<Item = Result<Event, Infallible>>>, (StatusCode, String)>
-{
-    let reader = state
+) -> Result<Sse<ReceiverStream<Result<Event, Infallible>>>, (StatusCode, String)> {
+    let (event_tx, event_rx) =
+        tokio::sync::mpsc::channel::<Result<Event, Infallible>>(1024);
+
+    let (buffer_snapshot, mut rx) = state
         .pty_manager
-        .get_reader(&id)
+        .subscribe_output(&id)
         .await
         .map_err(map_pty_error)?;
 
-    let stream = async_stream::stream! {
-        let mut keep_alive_interval = tokio::time::interval(std::time::Duration::from_secs(15));
-        // Skip first immediate tick.
-        keep_alive_interval.tick().await;
-
-        loop {
-            let reader_clone = reader.clone();
-            let read_result = tokio::task::spawn_blocking(move || {
-                let mut guard = reader_clone.blocking_lock();
-                let mut local_buf = [0u8; 4096];
-                match guard.read(&mut local_buf) {
-                    Ok(0) => Ok(None),
-                    Ok(n) => Ok(Some(local_buf[..n].to_vec())),
-                    Err(e) => Err(e),
-                }
-            });
-
-            tokio::select! {
-                result = read_result => {
-                    match result {
-                        Ok(Ok(Some(data))) => {
-                            let encoded = BASE64.encode(&data);
-                            yield Ok(Event::default().event("output").data(encoded));
-                        }
-                        Ok(Ok(None)) => {
-                            // EOF
-                            yield Ok(Event::default().event("eof").data(""));
-                            break;
-                        }
-                        Ok(Err(_)) => {
-                            // IO error — treat as EOF.
-                            yield Ok(Event::default().event("eof").data(""));
-                            break;
-                        }
-                        Err(_) => {
-                            // JoinError — task panicked or was cancelled.
-                            yield Ok(Event::default().event("eof").data(""));
-                            break;
-                        }
-                    }
-                }
-                _ = keep_alive_interval.tick() => {
-                    yield Ok(Event::default().event("keep-alive").data(""));
+    // Forward broadcast → mpsc in a spawned task.
+    tokio::spawn(async move {
+        // 1. Replay scrollback buffer.
+        if !buffer_snapshot.is_empty() {
+            for chunk in buffer_snapshot.chunks(4096) {
+                let encoded = BASE64.encode(chunk);
+                let event = Ok(Event::default().event("output").data(encoded));
+                if event_tx.send(event).await.is_err() {
+                    return;
                 }
             }
         }
-    };
 
-    Ok(Sse::new(stream))
+        // 2. Stream live output from the broadcast channel.
+        let mut keep_alive_interval =
+            tokio::time::interval(std::time::Duration::from_secs(15));
+        keep_alive_interval.tick().await;
+
+        loop {
+            tokio::select! {
+                result = rx.recv() => {
+                    let event = match result {
+                        Ok(PtyOutputMsg::Data(data)) => {
+                            let encoded = BASE64.encode(&data);
+                            Ok(Event::default().event("output").data(encoded))
+                        }
+                        Ok(PtyOutputMsg::Eof) => {
+                            let _ = event_tx
+                                .send(Ok(Event::default().event("eof").data("")))
+                                .await;
+                            return;
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                            let msg = format!("skipped {skipped} messages");
+                            Ok(Event::default().event("warning").data(msg))
+                        }
+                        Err(tokio::sync::broadcast::error::RecvError::Closed) => {
+                            let _ = event_tx
+                                .send(Ok(Event::default().event("eof").data("")))
+                                .await;
+                            return;
+                        }
+                    };
+                    if event_tx.send(event).await.is_err() {
+                        return;
+                    }
+                }
+                _ = keep_alive_interval.tick() => {
+                    if event_tx
+                        .send(Ok(Event::default().event("keep-alive").data("")))
+                        .await
+                        .is_err()
+                    {
+                        return;
+                    }
+                }
+            }
+        }
+    });
+
+    Ok(Sse::new(ReceiverStream::new(event_rx)))
 }
 
 /// POST /pty/{id}/input — Write to PTY stdin (base64-encoded body).

@@ -6,10 +6,13 @@ use std::io::{Read, Write};
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
-use tokio::sync::Mutex;
+use tokio::sync::{broadcast, Mutex};
 
 use crate::signal::SignalPool;
 use crate::signal::types::SignalEvent;
+
+/// Max scrollback buffer size in bytes (256 KB).
+const MAX_OUTPUT_BUFFER: usize = 256 * 1024;
 
 // ---------------------------------------------------------------------------
 // Error type
@@ -25,6 +28,19 @@ pub enum PtyError {
 
     #[error("IO error: {0}")]
     IoError(#[from] std::io::Error),
+}
+
+// ---------------------------------------------------------------------------
+// Output message broadcast type
+// ---------------------------------------------------------------------------
+
+/// Messages sent through the broadcast channel.
+#[derive(Debug, Clone)]
+pub enum PtyOutputMsg {
+    /// Raw bytes from the PTY process.
+    Data(Vec<u8>),
+    /// The PTY process has exited / reader hit EOF.
+    Eof,
 }
 
 // ---------------------------------------------------------------------------
@@ -106,8 +122,11 @@ struct PtyInstance {
     #[allow(dead_code)]
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
-    reader: Arc<Mutex<Box<dyn Read + Send>>>,
     writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Scrollback buffer — stores recent output for replay on SSE reconnect.
+    output_buffer: Arc<Mutex<Vec<u8>>>,
+    /// Broadcast sender — every SSE consumer subscribes here for live data.
+    output_tx: broadcast::Sender<PtyOutputMsg>,
 }
 
 // ---------------------------------------------------------------------------
@@ -204,12 +223,26 @@ impl PtyManager {
             created_at: now.to_rfc3339(),
         };
 
+        // Create output buffering infrastructure
+        let output_buffer = Arc::new(Mutex::new(Vec::new()));
+        let (output_tx, _) = broadcast::channel::<PtyOutputMsg>(1024);
+
+        // Spawn background reader task that reads from PTY and:
+        // 1. Appends to the scrollback buffer (capped at MAX_OUTPUT_BUFFER)
+        // 2. Broadcasts to all SSE consumers
+        let buffer_clone = Arc::clone(&output_buffer);
+        let tx_clone = output_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            Self::reader_loop(reader, buffer_clone, tx_clone);
+        });
+
         let instance = PtyInstance {
             info: info.clone(),
             master: pair.master,
             child,
-            reader: Arc::new(Mutex::new(reader)),
             writer: Arc::new(Mutex::new(writer)),
+            output_buffer,
+            output_tx,
         };
 
         self.instances.lock().await.insert(id, instance);
@@ -217,6 +250,42 @@ impl PtyManager {
         self.publish_lifecycle_signal("pty.spawned", &info);
 
         Ok(info)
+    }
+
+    /// Background reader loop — runs on a blocking thread.
+    fn reader_loop(
+        mut reader: Box<dyn Read + Send>,
+        buffer: Arc<Mutex<Vec<u8>>>,
+        tx: broadcast::Sender<PtyOutputMsg>,
+    ) {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    // EOF
+                    let _ = tx.send(PtyOutputMsg::Eof);
+                    break;
+                }
+                Ok(n) => {
+                    let data = buf[..n].to_vec();
+                    // Append to scrollback buffer
+                    {
+                        let mut b = buffer.blocking_lock();
+                        b.extend_from_slice(&data);
+                        if b.len() > MAX_OUTPUT_BUFFER {
+                            let drain = b.len() - MAX_OUTPUT_BUFFER;
+                            b.drain(..drain);
+                        }
+                    }
+                    // Broadcast to SSE consumers (ignore if no receivers)
+                    let _ = tx.send(PtyOutputMsg::Data(data));
+                }
+                Err(_) => {
+                    let _ = tx.send(PtyOutputMsg::Eof);
+                    break;
+                }
+            }
+        }
     }
 
     /// Resume an existing Claude session by spawning with `--continue --session-id`.
@@ -282,17 +351,29 @@ impl PtyManager {
         Ok(())
     }
 
-    /// Get a cloned Arc of the reader for SSE streaming.
-    pub async fn get_reader(
+    /// Get the output buffer snapshot and a broadcast receiver for live output.
+    ///
+    /// The caller should:
+    /// 1. Send the buffer snapshot first (replay)
+    /// 2. Then stream from the receiver (live)
+    pub async fn subscribe_output(
         &self,
         id: &str,
-    ) -> Result<Arc<Mutex<Box<dyn Read + Send>>>, PtyError> {
-        let instances = self.instances.lock().await;
-        let instance = instances
-            .get(id)
-            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+    ) -> Result<(Vec<u8>, broadcast::Receiver<PtyOutputMsg>), PtyError> {
+        // Extract Arc clones while holding the instances lock, then drop it
+        // before awaiting the output_buffer lock. Holding both locks across
+        // an await would make the future !Send (PtyInstance contains
+        // Box<dyn MasterPty + Send> which is !Sync).
+        let (output_buffer, rx) = {
+            let instances = self.instances.lock().await;
+            let instance = instances
+                .get(id)
+                .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+            (Arc::clone(&instance.output_buffer), instance.output_tx.subscribe())
+        };
 
-        Ok(Arc::clone(&instance.reader))
+        let buffer_snapshot = output_buffer.lock().await.clone();
+        Ok((buffer_snapshot, rx))
     }
 
     /// Resize the PTY terminal.
