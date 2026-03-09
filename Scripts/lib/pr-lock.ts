@@ -361,7 +361,9 @@ export class PRLockManager {
     const lock = await this.checkLock(prNumber);
 
     if (!lock) {
-      console.log(`[PRLock] No lock found, nothing to release`);
+      console.log(`[PRLock] No lock found, cleaning up local state if exists`);
+      // 远程锁不存在，清理本地状态文件（如果存在）
+      await this.deleteLockState();
       return { success: true };  // 已经没有锁了，视为成功
     }
 

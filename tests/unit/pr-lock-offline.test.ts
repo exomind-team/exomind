@@ -164,6 +164,30 @@ describe('PR Lock - 降级路径测试', () => {
     });
   });
 
+  describe('场景 3.6: Release with no remote lock（远程锁不存在时释放）', () => {
+    test('release() 在远程锁不存在时应清理本地状态', async () => {
+      // 1. Agent A 获取锁
+      const acquireResult = await agentA.acquire(1, 5);
+      expect(acquireResult.success).toBe(true);
+
+      // 2. 验证本地状态存在
+      const localStateBefore = await agentA.loadLockState();
+      expect(localStateBefore).toBeDefined();
+      expect(localStateBefore!.pr_number).toBe(1);
+
+      // 3. 手动移除远程锁标签（模拟远程锁被其他方式移除）
+      await mockAPI.removeLabel(1, '🔒 locked');
+
+      // 4. Agent A 尝试释放锁
+      const releaseResult = await agentA.release(1);
+      expect(releaseResult.success).toBe(true);
+
+      // 5. 验证本地状态已被清理
+      const localStateAfter = await agentA.loadLockState();
+      expect(localStateAfter).toBeNull();
+    });
+  });
+
   describe('场景 4: Force release（强制释放）', () => {
     test.skip('强制释放应更新元数据为 released: true', async () => {
       // TODO: 需要实现时间模拟
