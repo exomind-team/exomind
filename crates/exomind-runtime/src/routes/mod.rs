@@ -5,6 +5,7 @@ use crate::AppState;
 pub mod agents;
 pub mod energy;
 pub mod mesh;
+pub mod pty;
 pub mod signals;
 pub mod tasks;
 pub mod topology;
@@ -16,6 +17,7 @@ pub fn router() -> Router<AppState> {
         .merge(agents::router())
         .merge(energy::router())
         .merge(mesh::router())
+        .merge(pty::router())
         .merge(signals::router())
         .merge(tasks::router())
 }

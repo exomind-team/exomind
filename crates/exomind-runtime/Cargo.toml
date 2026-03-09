@@ -36,6 +36,7 @@ percent-encoding = "2"
 rand = "0.8"
 portable-pty = "0.8"
 base64 = "0.22"
+async-stream = "0.3"
 dirs = "5"
 
 [dev-dependencies]
