@@ -1,12 +1,23 @@
 import { execFileSync } from 'node:child_process';
+import { readFileSync } from 'node:fs';
 
 import {
+  NEEDS_HUMAN_TEST_LABEL,
   buildReviewSummary,
   buildCompletedReviewState,
+  buildRetryableReviewFailureState,
   parseLinkedIssueNumbers,
+  resolveReviewCommentLanguage,
+  type ReviewActionMode,
   type ReviewCompletionResult,
   type PullRequestFile,
 } from './review-loop-lib.ts';
+import {
+  executeReviewAction,
+  paginatePullFiles,
+  type PullFileApiItem,
+  type ReviewCommentRecord,
+} from './review-loop-runtime-lib.ts';
 import {
   QUEUE_FILE,
   STATE_FILE,
@@ -21,6 +32,11 @@ interface CliOptions {
   repo?: string;
   prNumber?: number;
   markResult?: ReviewCompletionResult;
+  bodyFile?: string;
+  commentId?: string;
+  needsHumanTest?: boolean;
+  requestChanges?: boolean;
+  approve?: boolean;
 }
 
 interface PullRequestView {
@@ -33,23 +49,38 @@ interface PullRequestView {
   deletions: number;
 }
 
+interface PullRequestActionView {
+  number: number;
+  title: string;
+  body?: string;
+  url: string;
+  labels?: Array<{ name?: string }>;
+  comments?: Array<{ body?: string }>;
+}
+
 interface IssueView {
   number: number;
   title: string;
   body?: string;
 }
 
-interface PullFileApiItem {
-  filename: string;
-  status: string;
-  additions: number;
-  deletions: number;
+interface GhIssueComment {
+  id: number | string;
+  body?: string;
+  html_url?: string;
+  url?: string;
 }
 
-function main(): void {
+interface ReviewCommentContext {
+  activeReviewCommentId?: string | null;
+  activeReviewCommentUrl?: string | null;
+}
+
+async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const repo = resolveRepo(options.repo);
   const prNumber = options.prNumber ?? readSelectedPrNumber();
+  const actionMode = resolveActionMode(options);
 
   if (options.markResult) {
     const persistedState = persistCompletedReviewState(prNumber, options.markResult);
@@ -62,32 +93,147 @@ function main(): void {
     return;
   }
 
-  const pullRequest = viewPullRequest(prNumber, repo);
-  const files = fetchPullFiles(prNumber, repo);
-  const reviewSummary = buildReviewSummary({
-    prNumber: pullRequest.number,
+  if (actionMode) {
+    await runReviewAction({
+      prNumber,
+      repo,
+      actionMode,
+      bodyFile: options.bodyFile as string,
+      explicitCommentId: options.commentId,
+    });
+    return;
+  }
+
+  try {
+    const pullRequest = viewPullRequest(prNumber, repo);
+    const files = await fetchPullFiles(prNumber, repo);
+    const reviewSummary = buildReviewSummary({
+      prNumber: pullRequest.number,
+      title: pullRequest.title,
+      body: pullRequest.body ?? '',
+      changedFiles: pullRequest.changedFiles,
+      additions: pullRequest.additions,
+      deletions: pullRequest.deletions,
+      files,
+    });
+    const issues = reviewSummary.linkedIssues.map((issueNumber) => viewIssue(issueNumber, repo));
+    const output = {
+      repo,
+      selectedPr: reviewSummary.selectedPr,
+      linkedIssues: reviewSummary.linkedIssues,
+      linkedIssueTitles: issues.map((issue) => ({ number: issue.number, title: issue.title })),
+      reviewMode: reviewSummary.reviewMode,
+      prioritizedFiles: reviewSummary.prioritizedFiles,
+      parsedIssueRefs: parseLinkedIssueNumbers(pullRequest.body ?? ''),
+      url: pullRequest.url,
+    };
+
+    persistActiveReviewState(reviewSummary.selectedPr.number);
+    console.log(JSON.stringify(output, null, 2));
+  } catch (error) {
+    const failureState = persistRetryableReviewFailureState(prNumber, toErrorMessage(error));
+    console.log(JSON.stringify({
+      selectedPrNumber: prNumber,
+      state: failureState.state,
+      nextAction: failureState.nextAction,
+      error: failureState.error,
+    }, null, 2));
+    process.exitCode = 1;
+  }
+}
+
+async function runReviewAction(input: {
+  prNumber: number;
+  repo: string;
+  actionMode: ReviewActionMode;
+  bodyFile: string;
+  explicitCommentId?: string;
+}): Promise<void> {
+  const pullRequest = viewPullRequestActionContext(input.prNumber, input.repo);
+  const previousState = readJson<PersistedState | null>(STATE_FILE, null);
+  const commentId = input.explicitCommentId
+    ?? resolveRetryCommentId(previousState, input.prNumber);
+  const expectedLanguage = resolveReviewCommentLanguage({
     title: pullRequest.title,
     body: pullRequest.body ?? '',
-    changedFiles: pullRequest.changedFiles,
-    additions: pullRequest.additions,
-    deletions: pullRequest.deletions,
-    files,
+    commentBodies: (pullRequest.comments ?? []).map((comment) => comment.body ?? ''),
   });
-  const issues = reviewSummary.linkedIssues.map((issueNumber) => viewIssue(issueNumber, repo));
-  const output = {
-    repo,
-    selectedPr: reviewSummary.selectedPr,
-    linkedIssues: reviewSummary.linkedIssues,
-    linkedIssueTitles: issues.map((issue) => ({ number: issue.number, title: issue.title })),
-    reviewMode: reviewSummary.reviewMode,
-    prioritizedFiles: reviewSummary.prioritizedFiles,
-    needsWorktree: reviewSummary.needsWorktree,
-    parsedIssueRefs: parseLinkedIssueNumbers(pullRequest.body ?? ''),
-    url: pullRequest.url,
-  };
+  const body = readFileSync(input.bodyFile, 'utf8');
+  const hasNeedsHumanTestLabel = (pullRequest.labels ?? []).some((label) => label.name === NEEDS_HUMAN_TEST_LABEL);
 
-  persistActiveReviewState(reviewSummary.selectedPr.number);
-  console.log(JSON.stringify(output, null, 2));
+  const result = await executeReviewAction({
+    mode: input.actionMode,
+    body,
+    expectedLanguage,
+    hasNeedsHumanTestLabel,
+    commentId,
+  }, {
+    createComment: () => createIssueComment(input.prNumber, input.repo, input.bodyFile),
+    editComment: (nextCommentId) => editIssueComment(nextCommentId, input.repo, input.bodyFile),
+    readComment: (nextCommentId) => viewIssueComment(nextCommentId, input.repo),
+    addLabel: (label) => addPrLabel(input.prNumber, input.repo, label),
+    submitReviewDecision: (decision) => submitReviewDecision(input.prNumber, input.repo, decision),
+  });
+
+  if (result.status === 'completed') {
+    const persistedState = persistCompletedReviewState(
+      input.prNumber,
+      result.completion,
+      toReviewCommentContext(result.comment),
+    );
+    console.log(JSON.stringify({
+      selectedPrNumber: input.prNumber,
+      action: input.actionMode,
+      comment: result.comment,
+      commentOperation: result.commentOperation,
+      labelAdded: result.labelAdded,
+      reviewDecision: result.reviewDecision,
+      completion: result.completion,
+      persistedState: persistedState.state,
+      nextAction: persistedState.nextAction,
+    }, null, 2));
+    return;
+  }
+
+  if (result.status === 'comment-invalid') {
+    const error = `Review comment validation failed: ${result.validationErrors.join(' | ')}`;
+    const failureState = persistRetryableReviewFailureState(
+      input.prNumber,
+      error,
+      toReviewCommentContext(result.comment),
+    );
+    console.log(JSON.stringify({
+      selectedPrNumber: input.prNumber,
+      action: input.actionMode,
+      state: failureState.state,
+      nextAction: failureState.nextAction,
+      comment: result.comment,
+      commentOperation: result.commentOperation,
+      labelAdded: result.labelAdded,
+      validationErrors: result.validationErrors,
+      error: failureState.error,
+    }, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
+  const failureState = persistRetryableReviewFailureState(
+    input.prNumber,
+    result.error,
+    result.comment ? toReviewCommentContext(result.comment) : undefined,
+  );
+  console.log(JSON.stringify({
+    selectedPrNumber: input.prNumber,
+    action: input.actionMode,
+    state: failureState.state,
+    nextAction: failureState.nextAction,
+    failedStage: result.failedStage,
+    comment: result.comment,
+    commentOperation: result.commentOperation,
+    labelAdded: result.labelAdded,
+    error: failureState.error,
+  }, null, 2));
+  process.exitCode = 1;
 }
 
 function parseArgs(argv: string[]): CliOptions {
@@ -118,11 +264,59 @@ function parseArgs(argv: string[]): CliOptions {
       index += 1;
       continue;
     }
+    if (value === '--body-file') {
+      options.bodyFile = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (value === '--comment-id') {
+      options.commentId = argv[index + 1];
+      index += 1;
+      continue;
+    }
+    if (value === '--needs-human-test') {
+      options.needsHumanTest = true;
+      continue;
+    }
+    if (value === '--request-changes') {
+      options.requestChanges = true;
+      continue;
+    }
+    if (value === '--approve') {
+      options.approve = true;
+      continue;
+    }
 
     throw new Error(`Unknown argument: ${value}`);
   }
 
+  const actionMode = resolveActionMode(options);
+  if (options.markResult && (actionMode || options.commentId)) {
+    throw new Error('--mark-result cannot be combined with review-action arguments.');
+  }
+  if ((actionMode || options.commentId) && !options.bodyFile) {
+    throw new Error('Review actions require --body-file.');
+  }
+
   return options;
+}
+
+function resolveActionMode(options: CliOptions): ReviewActionMode | null {
+  const flaggedModes = [
+    options.needsHumanTest ? 'needs-human-test' : null,
+    options.requestChanges ? 'request-changes' : null,
+    options.approve ? 'approve' : null,
+  ].filter((value): value is ReviewActionMode => value !== null);
+
+  if (flaggedModes.length > 1) {
+    throw new Error('Choose only one of --needs-human-test, --request-changes, or --approve.');
+  }
+
+  if (flaggedModes.length === 1) {
+    return flaggedModes[0] ?? null;
+  }
+
+  return options.bodyFile ? 'comment' : null;
 }
 
 function readSelectedPrNumber(): number {
@@ -147,6 +341,18 @@ function viewPullRequest(prNumber: number, repo: string): PullRequestView {
   ]);
 }
 
+function viewPullRequestActionContext(prNumber: number, repo: string): PullRequestActionView {
+  return runGhJson<PullRequestActionView>([
+    'pr',
+    'view',
+    String(prNumber),
+    '--repo',
+    repo,
+    '--json',
+    'number,title,body,url,labels,comments',
+  ]);
+}
+
 function viewIssue(issueNumber: number, repo: string): IssueView {
   return runGhJson<IssueView>([
     'issue',
@@ -159,11 +365,13 @@ function viewIssue(issueNumber: number, repo: string): IssueView {
   ]);
 }
 
-function fetchPullFiles(prNumber: number, repo: string): PullRequestFile[] {
-  const files = runGhJson<PullFileApiItem[]>([
-    'api',
-    `repos/${repo}/pulls/${prNumber}/files?per_page=100`,
-  ]);
+async function fetchPullFiles(prNumber: number, repo: string): Promise<PullRequestFile[]> {
+  const files = await paginatePullFiles(({ page, perPage }) =>
+    runGhJson<PullFileApiItem[]>([
+      'api',
+      `repos/${repo}/pulls/${prNumber}/files?per_page=${perPage}&page=${page}`,
+    ]),
+  );
 
   return files.map((file) => ({
     path: file.filename,
@@ -173,6 +381,71 @@ function fetchPullFiles(prNumber: number, repo: string): PullRequestFile[] {
   }));
 }
 
+function createIssueComment(prNumber: number, repo: string, bodyFile: string): ReviewCommentRecord {
+  return normalizeIssueComment(runGhJson<GhIssueComment>([
+    'api',
+    `repos/${repo}/issues/${prNumber}/comments`,
+    '-F',
+    `body=@${bodyFile}`,
+  ]));
+}
+
+function editIssueComment(commentId: string, repo: string, bodyFile: string): ReviewCommentRecord {
+  return normalizeIssueComment(runGhJson<GhIssueComment>([
+    'api',
+    `repos/${repo}/issues/comments/${commentId}`,
+    '--method',
+    'PATCH',
+    '-F',
+    `body=@${bodyFile}`,
+  ]));
+}
+
+function viewIssueComment(commentId: string, repo: string): ReviewCommentRecord {
+  return normalizeIssueComment(runGhJson<GhIssueComment>([
+    'api',
+    `repos/${repo}/issues/comments/${commentId}`,
+  ]));
+}
+
+function addPrLabel(prNumber: number, repo: string, label: string): void {
+  runGh([
+    'pr',
+    'edit',
+    String(prNumber),
+    '--repo',
+    repo,
+    '--add-label',
+    label,
+  ]);
+}
+
+function submitReviewDecision(
+  prNumber: number,
+  repo: string,
+  decision: 'request-changes' | 'approve',
+): void {
+  const decisionFlag = decision === 'approve' ? '--approve' : '--request-changes';
+  runGh([
+    'pr',
+    'review',
+    String(prNumber),
+    '--repo',
+    repo,
+    decisionFlag,
+    '--body',
+    '',
+  ]);
+}
+
+function normalizeIssueComment(comment: GhIssueComment): ReviewCommentRecord {
+  return {
+    id: String(comment.id),
+    url: comment.html_url ?? comment.url ?? '',
+    body: comment.body ?? '',
+  };
+}
+
 function runGhJson<T>(args: string[]): T {
   const stdout = execFileSync('gh', args, {
     encoding: 'utf8',
@@ -180,6 +453,13 @@ function runGhJson<T>(args: string[]): T {
   });
 
   return JSON.parse(stdout) as T;
+}
+
+function runGh(args: string[]): void {
+  execFileSync('gh', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
 }
 
 function resolveRepo(explicitRepo: string | undefined): string {
@@ -208,6 +488,17 @@ function resolveRepo(explicitRepo: string | undefined): string {
 function persistActiveReviewState(selectedPrNumber: number): void {
   ensurePrMonitorDir();
   const previousState = readJson<PersistedState | null>(STATE_FILE, null);
+  const retryCommentContext = previousState?.state === 'FAILED_RETRYABLE'
+    && previousState.lastPhase === 'REVIEW'
+    && previousState.selectedPrNumber === selectedPrNumber
+    ? {
+        activeReviewCommentId: previousState.activeReviewCommentId ?? null,
+        activeReviewCommentUrl: previousState.activeReviewCommentUrl ?? null,
+      }
+    : {
+        activeReviewCommentId: null,
+        activeReviewCommentUrl: null,
+      };
 
   writeJson(STATE_FILE, {
     state: 'HAS_TARGET',
@@ -216,6 +507,7 @@ function persistActiveReviewState(selectedPrNumber: number): void {
     nextAction: 'review',
     selectedPrNumber,
     selectedReason: previousState?.selectedReason ?? null,
+    ...retryCommentContext,
     inspectedPrCount: previousState?.inspectedPrCount ?? 0,
     skippedPrCount: previousState?.skippedPrCount ?? 0,
     actionableCount: previousState?.actionableCount ?? 1,
@@ -228,6 +520,7 @@ function persistActiveReviewState(selectedPrNumber: number): void {
 function persistCompletedReviewState(
   selectedPrNumber: number,
   completion: ReviewCompletionResult,
+  commentContext?: ReviewCommentContext,
 ): PersistedState {
   ensurePrMonitorDir();
   const previousState = readJson<PersistedState | null>(STATE_FILE, null);
@@ -235,9 +528,47 @@ function persistCompletedReviewState(
     completion,
     selectedPrNumber,
     previousState,
+    ...commentContext,
   });
   writeJson(STATE_FILE, nextState);
   return nextState;
+}
+
+function persistRetryableReviewFailureState(
+  selectedPrNumber: number,
+  error: string,
+  commentContext?: ReviewCommentContext,
+): PersistedState {
+  ensurePrMonitorDir();
+  const previousState = readJson<PersistedState | null>(STATE_FILE, null);
+  const nextState = buildRetryableReviewFailureState({
+    selectedPrNumber,
+    previousState,
+    error,
+    ...commentContext,
+  });
+  writeJson(STATE_FILE, nextState);
+  return nextState;
+}
+
+function resolveRetryCommentId(previousState: PersistedState | null, prNumber: number): string | undefined {
+  if (
+    previousState?.state === 'FAILED_RETRYABLE'
+    && previousState.lastPhase === 'REVIEW'
+    && previousState.selectedPrNumber === prNumber
+    && previousState.activeReviewCommentId
+  ) {
+    return previousState.activeReviewCommentId;
+  }
+
+  return undefined;
+}
+
+function toReviewCommentContext(comment: ReviewCommentRecord): ReviewCommentContext {
+  return {
+    activeReviewCommentId: comment.id,
+    activeReviewCommentUrl: comment.url,
+  };
 }
 
 function isReviewCompletionResult(value: string | undefined): value is ReviewCompletionResult {
@@ -247,4 +578,12 @@ function isReviewCompletionResult(value: string | undefined): value is ReviewCom
     || value === 'merge-ready';
 }
 
-main();
+function toErrorMessage(error: unknown): string {
+  if (error instanceof Error) {
+    return error.message;
+  }
+
+  return String(error);
+}
+
+void main();

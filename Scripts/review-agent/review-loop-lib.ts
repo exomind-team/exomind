@@ -1,3 +1,4 @@
+import { REVIEWER_PREFIX } from './discovery-lib.ts';
 import type { PersistedState, ReviewAgentStateValue } from './state-lib.ts';
 
 export interface PullRequestFile {
@@ -28,7 +29,6 @@ export interface ReviewSummary {
   linkedIssues: number[];
   reviewMode: 'full-review' | 'priority-review';
   prioritizedFiles: PullRequestFile[];
-  needsWorktree: boolean;
 }
 
 export type ReviewCompletionResult =
@@ -37,15 +37,53 @@ export type ReviewCompletionResult =
   | 'approve-ready'
   | 'merge-ready';
 
+export type ReviewActionMode =
+  | 'comment'
+  | 'needs-human-test'
+  | 'request-changes'
+  | 'approve';
+
+export type ReviewCommentLanguage = 'zh-CN' | 'en';
+
+export interface ReviewLanguageInput {
+  title: string;
+  body: string;
+  commentBodies: string[];
+}
+
+export interface ReviewCommentValidationInput {
+  body: string;
+  expectedLanguage: ReviewCommentLanguage | null;
+  mode: ReviewActionMode;
+}
+
+export interface ReviewCommentValidationResult {
+  valid: boolean;
+  detectedLanguage: ReviewCommentLanguage | null;
+  errors: string[];
+}
+
 interface BuildCompletedReviewStateInput {
   completion: ReviewCompletionResult;
   selectedPrNumber: number;
   previousState: PersistedState | null;
+  activeReviewCommentId?: string | null;
+  activeReviewCommentUrl?: string | null;
+}
+
+interface BuildRetryableReviewFailureStateInput {
+  selectedPrNumber: number;
+  previousState: PersistedState | null;
+  error: string;
+  activeReviewCommentId?: string | null;
+  activeReviewCommentUrl?: string | null;
 }
 
 const ISSUE_REF_PATTERN = /\b(?:ref|refs|close|closes|fix|fixes)\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+)\b/gi;
 const TEST_FILE_PATTERN = /(^|\/)(test|tests|__tests__)\b|\.test\.[A-Za-z0-9]+$|\.spec\.[A-Za-z0-9]+$/i;
 const CORE_FILE_PATTERN = /(service|controller|model)/i;
+export const HUMAN_TEST_PREFIX = `${REVIEWER_PREFIX} ❤️ 需要人类测试`;
+export const NEEDS_HUMAN_TEST_LABEL = '🙋needs-human-test';
 const COMPLETION_STATE_MAP: Record<ReviewCompletionResult, Extract<ReviewAgentStateValue, 'REVIEW_POSTED' | 'NEEDS_HUMAN_TEST' | 'APPROVE_READY' | 'MERGE_READY'>> = {
   'review-posted': 'REVIEW_POSTED',
   'needs-human-test': 'NEEDS_HUMAN_TEST',
@@ -98,8 +136,67 @@ export function buildReviewSummary(input: ReviewSummaryInput): ReviewSummary {
     linkedIssues: parseLinkedIssueNumbers(input.body),
     reviewMode: classifyReviewMode(input),
     prioritizedFiles: prioritizeFiles(input.files),
-    needsWorktree: false,
   };
+}
+
+export function resolveReviewCommentLanguage(input: ReviewLanguageInput): ReviewCommentLanguage | null {
+  return detectLanguage([
+    input.title,
+    input.body,
+    ...input.commentBodies,
+  ].filter(Boolean).join('\n'));
+}
+
+export function validateReviewComment(
+  input: ReviewCommentValidationInput,
+): ReviewCommentValidationResult {
+  const trimmed = input.body.trimStart();
+  const errors: string[] = [];
+
+  if (input.mode === 'needs-human-test') {
+    if (!trimmed.startsWith(HUMAN_TEST_PREFIX)) {
+      errors.push(`Comment must start with ${HUMAN_TEST_PREFIX}.`);
+    }
+    if (!input.body.includes(NEEDS_HUMAN_TEST_LABEL)) {
+      errors.push(`Human-test comments must mention ${NEEDS_HUMAN_TEST_LABEL}.`);
+    }
+    if (!/(移除|remove)/i.test(input.body)) {
+      errors.push('Human-test comments must tell humans to remove the label after testing.');
+    }
+  } else if (!trimmed.startsWith(REVIEWER_PREFIX)) {
+    errors.push(`Comment must start with ${REVIEWER_PREFIX}.`);
+  }
+
+  if (/\?{5,}/.test(input.body)) {
+    errors.push('Comment contains a suspicious sequence of 5+ question marks.');
+  }
+
+  if (/\\n/.test(input.body)) {
+    errors.push('Comment contains a literal \\n sequence.');
+  }
+
+  const detectedLanguage = detectLanguage(input.body);
+  if (input.expectedLanguage && detectedLanguage && input.expectedLanguage !== detectedLanguage) {
+    errors.push(`Comment language ${detectedLanguage} does not match PR language ${input.expectedLanguage}.`);
+  }
+
+  return {
+    valid: errors.length === 0,
+    detectedLanguage,
+    errors,
+  };
+}
+
+export function mapActionModeToCompletion(mode: ReviewActionMode): Exclude<ReviewCompletionResult, 'merge-ready'> {
+  if (mode === 'needs-human-test') {
+    return 'needs-human-test';
+  }
+
+  if (mode === 'approve') {
+    return 'approve-ready';
+  }
+
+  return 'review-posted';
 }
 
 export function buildCompletedReviewState(input: BuildCompletedReviewStateInput): PersistedState {
@@ -110,12 +207,36 @@ export function buildCompletedReviewState(input: BuildCompletedReviewStateInput)
     nextAction: 'discovery',
     selectedPrNumber: input.selectedPrNumber,
     selectedReason: input.previousState?.selectedReason ?? null,
+    activeReviewCommentId: input.activeReviewCommentId ?? input.previousState?.activeReviewCommentId ?? null,
+    activeReviewCommentUrl: input.activeReviewCommentUrl ?? input.previousState?.activeReviewCommentUrl ?? null,
     inspectedPrCount: input.previousState?.inspectedPrCount ?? 0,
     skippedPrCount: input.previousState?.skippedPrCount ?? 0,
     actionableCount: input.previousState?.actionableCount ?? 1,
     failureStreak: 0,
     nextSleepSeconds: input.previousState?.nextSleepSeconds ?? 180,
     updatedAt: new Date().toISOString(),
+  };
+}
+
+export function buildRetryableReviewFailureState(
+  input: BuildRetryableReviewFailureStateInput,
+): PersistedState {
+  return {
+    state: 'FAILED_RETRYABLE',
+    phase: 'REVIEW',
+    lastPhase: 'REVIEW',
+    nextAction: 'review',
+    selectedPrNumber: input.selectedPrNumber,
+    selectedReason: input.previousState?.selectedReason ?? null,
+    activeReviewCommentId: input.activeReviewCommentId ?? input.previousState?.activeReviewCommentId ?? null,
+    activeReviewCommentUrl: input.activeReviewCommentUrl ?? input.previousState?.activeReviewCommentUrl ?? null,
+    inspectedPrCount: input.previousState?.inspectedPrCount ?? 0,
+    skippedPrCount: input.previousState?.skippedPrCount ?? 0,
+    actionableCount: input.previousState?.actionableCount ?? 1,
+    failureStreak: (input.previousState?.failureStreak ?? 0) + 1,
+    nextSleepSeconds: input.previousState?.nextSleepSeconds ?? 180,
+    updatedAt: new Date().toISOString(),
+    error: input.error,
   };
 }
 
@@ -131,4 +252,27 @@ function scoreFile(file: PullRequestFile): number {
   }
 
   return 3;
+}
+
+function detectLanguage(text: string): ReviewCommentLanguage | null {
+  const chineseCount = (text.match(/[\p{Script=Han}]/gu) ?? []).length;
+  const latinCount = (text.match(/[A-Za-z]/g) ?? []).length;
+
+  if (chineseCount >= 4 && chineseCount * 2 >= latinCount) {
+    return 'zh-CN';
+  }
+
+  if (latinCount >= 20) {
+    return 'en';
+  }
+
+  if (chineseCount > 0 && latinCount === 0) {
+    return 'zh-CN';
+  }
+
+  if (latinCount > 0 && chineseCount === 0) {
+    return 'en';
+  }
+
+  return null;
 }

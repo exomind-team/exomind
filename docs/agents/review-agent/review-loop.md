@@ -33,6 +33,12 @@
 
 对于大 PR，审核评论必须显式说明本轮使用的是优先级审阅，而不是全量审阅。
 
+优先级审阅建立在完整文件列表之上：
+
+- review-loop 必须拉全分页后的 PR 文件列表
+- 若分页中途失败，当前 review 结果不可信，必须停止本轮并写成可重试失败
+- 分页失败属于阻塞当前 review，而不是回退到 discovery
+
 ## 审阅深度规则
 
 审阅必须同时对照：
@@ -81,6 +87,35 @@
 - 允许为本地验证而修改代码
 - 不允许 commit 或 push
 
+当前 review summary 不再输出 `needsWorktree` 这种布尔结论字段。
+
+原因：
+
+- 现阶段尚未有足够可靠的自动判定规则
+- 输出硬编码 `false` 比不输出更危险
+- 是否需要 worktree，暂时由 review 执行逻辑和评论内容显式表达
+
+## GitHub 动作层
+
+当前 `review-loop.ts` 已承担 review 阶段的真实 GitHub 动作执行。
+
+本阶段仍不自动执行 `merge`。
+
+支持的动作入口：
+
+- `--body-file <path>`：发布或更新一条主审核评论
+- `--comment-id <id>`：在已知评论 id 时显式编辑同一条评论
+- `--needs-human-test`：添加 `🙋needs-human-test` 标签，并发布人测评论
+- `--request-changes`：发布主审核评论后，再执行 `request changes`
+- `--approve`：发布主审核评论后，再执行 `approve`
+
+约束：
+
+- 每次 review round 只维护一条主审核评论作为当前机器审阅真相源
+- 若评论发布后校验失败，后续重试必须编辑同一条评论，而不是新发第二条
+- `needs-human-test` 路径先加标签，再发评论，因为标签才是真相源
+- 只要 `🙋needs-human-test` 标签仍在，`approve` 必须被阻断并写成可重试失败
+
 ## 退出状态
 
 - `REVIEW_POSTED`：审核评论已成功发布
@@ -95,20 +130,16 @@ review 阶段在真正完成 GitHub 动作后，不能只停留在内存结论�
 
 推荐做法：
 
-1. 先完成实际动作：
-   - 发布评论
-   - 或标记 `request-changes`
-   - 或 `approve`
-   - 或 `merge`
-2. 再执行：
-   - `npx tsx Scripts/review-agent/review-loop.ts --mark-result review-posted`
-   - `npx tsx Scripts/review-agent/review-loop.ts --mark-result needs-human-test`
-   - `npx tsx Scripts/review-agent/review-loop.ts --mark-result approve-ready`
-   - `npx tsx Scripts/review-agent/review-loop.ts --mark-result merge-ready`
+1. 优先通过 `review-loop.ts` 的动作参数直接执行真实 GitHub 动作
+2. 脚本在动作成功后自动把终态写回 `state.json`
 3. 下一轮统一入口 prompt 重启时，router 会据此回到 `discovery`，而不是误续接上一轮 `review`
+
+`--mark-result` 仍保留，但只作为手动恢复或补记终态的兜底入口，不应成为正常路径。
 
 约束：
 
+- 正常动作路径必须由脚本自动完成终态落盘
 - `--mark-result` 只应在对应 GitHub 动作已经成功后调用
 - 若动作未真正完成，不要提前写终态
-- 若动作失败，应保留或写成可重试失败状态，而不是伪造成功终态
+- 若动作失败，应保留当前 PR 上下文，并写成可重试失败状态，而不是伪造成功终态
+- 若失败发生在评论已发布之后，必须保留该评论 id，以便下一轮继续编辑同一条评论

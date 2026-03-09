@@ -11,6 +11,10 @@ import {
   type PullRequestSnapshot,
 } from './discovery-lib.ts';
 import {
+  loadThreadRepliesWithFallback,
+  type DiscoveryWarning,
+} from './discovery-runtime-lib.ts';
+import {
   BACKOFF_FILE,
   CURSOR_FILE,
   QUEUE_FILE,
@@ -124,6 +128,7 @@ interface RoundResult {
   consecutiveNoChangeRounds: number;
   checkedAt: string;
   cursor: PersistedCursor;
+  warnings: DiscoveryWarning[];
   error?: string;
 }
 
@@ -173,6 +178,7 @@ function runDiscoveryRound(
       consecutiveNoChangeRounds: previousBackoff.consecutiveNoChangeRounds,
       checkedAt,
       cursor: {},
+      warnings: [],
       error: toErrorMessage(error),
     };
   }
@@ -193,15 +199,21 @@ function runDiscoveryRound(
       consecutiveNoChangeRounds: round.consecutiveNoChangeRounds,
       checkedAt,
       cursor: {},
+      warnings: [],
     };
   }
 
   const inspectedSnapshots: PullRequestSnapshot[] = [];
   const skippedPrs: Array<{ number: number; error: string }> = [];
+  const warnings: DiscoveryWarning[] = [];
 
   for (const pullRequest of pullRequests) {
     try {
-      inspectedSnapshots.push(viewPullRequest(pullRequest.number, repo ?? resolveRepo(options.repo), options));
+      const result = viewPullRequest(pullRequest.number, repo ?? resolveRepo(options.repo), options);
+      inspectedSnapshots.push(result.snapshot);
+      if (result.warning) {
+        warnings.push(result.warning);
+      }
     } catch (error) {
       skippedPrs.push({
         number: pullRequest.number,
@@ -226,6 +238,7 @@ function runDiscoveryRound(
       consecutiveNoChangeRounds: previousBackoff.consecutiveNoChangeRounds,
       checkedAt,
       cursor: {},
+      warnings,
       error: 'All PR inspections failed in this round.',
     };
   }
@@ -247,6 +260,7 @@ function runDiscoveryRound(
     consecutiveNoChangeRounds: round.consecutiveNoChangeRounds,
     checkedAt,
     cursor: buildCursor(inspectedSnapshots),
+    warnings,
   };
 }
 
@@ -260,22 +274,30 @@ function listOpenPullRequests(options: CliOptions): GhListItem[] {
   return result.sort((left, right) => Date.parse(right.updatedAt) - Date.parse(left.updatedAt));
 }
 
-function viewPullRequest(number: number, repo: string, options: CliOptions): PullRequestSnapshot {
+function viewPullRequest(
+  number: number,
+  repo: string,
+  options: CliOptions,
+): { snapshot: PullRequestSnapshot; warning?: DiscoveryWarning } {
   const args = ['pr', 'view', String(number), '--json', 'number,title,url,updatedAt,comments,reviews,commits'];
   if (options.repo) {
     args.push('--repo', options.repo);
   }
 
   const result = runGhJson<GhPrView>(args);
+  const threadReplyResult = loadThreadRepliesWithFallback(number, () => fetchReviewThreadReplies(number, repo));
   return {
-    number: result.number,
-    title: result.title,
-    url: result.url,
-    updatedAt: result.updatedAt,
-    comments: normalizeComments(result.comments),
-    reviews: normalizeReviews(result.reviews),
-    threadReplies: fetchReviewThreadReplies(number, repo),
-    commits: normalizeCommits(result.commits),
+    snapshot: {
+      number: result.number,
+      title: result.title,
+      url: result.url,
+      updatedAt: result.updatedAt,
+      comments: normalizeComments(result.comments),
+      reviews: normalizeReviews(result.reviews),
+      threadReplies: threadReplyResult.threadReplies,
+      commits: normalizeCommits(result.commits),
+    },
+    warning: threadReplyResult.warning,
   };
 }
 
@@ -418,6 +440,7 @@ function persistRound(result: RoundResult): void {
     actionablePrs: result.actionablePrs,
     pendingQueue: result.pendingQueue,
     skippedPrs: result.skippedPrs,
+    warnings: result.warnings,
     updatedAt: result.checkedAt,
   });
 

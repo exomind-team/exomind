@@ -25,6 +25,7 @@ temp/
 - 下一步动作（`nextAction`）
 - 上一轮失败或成功前的阶段（`lastPhase`）
 - 当前选中的 PR 编号
+- 当前 round 正在复用的主审核评论 id / url（若存在）
 - 最近一次成功轮次的时间戳
 - 连续失败次数
 
@@ -32,6 +33,7 @@ temp/
 
 - 有序的 `actionable_prs`
 - 当前 `pending_queue`
+- 本轮 discovery 的 `warnings`（例如 GraphQL thread reply 信号退化）
 
 ### `backoff.json`
 
@@ -49,6 +51,7 @@ temp/
 - 仅在成功轮次结束后更新游标。
 - 若评论发布失败，不要推进游标。
 - 必须保留足够的游标数据，以避免重启后重复发审核评论。
+- 若 review 在评论发布后、approve/request-changes 前失败，`state.json` 仍应保留该评论 id，便于重试时编辑同一条评论。
 
 ## 退避状态
 

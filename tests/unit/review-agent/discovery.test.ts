@@ -6,6 +6,7 @@ import {
   REVIEWER_PREFIX,
   type PullRequestSnapshot,
 } from '../../../Scripts/review-agent/discovery-lib.ts';
+import { loadThreadRepliesWithFallback } from '../../../Scripts/review-agent/discovery-runtime-lib.ts';
 
 function makeSnapshot(overrides: Partial<PullRequestSnapshot> = {}): PullRequestSnapshot {
   return {
@@ -154,5 +155,29 @@ describe('review-agent discovery', () => {
       nextSleepSeconds: 180,
       consecutiveNoChangeRounds: 0,
     });
+  });
+
+  it('degrades GraphQL thread reply failures to an empty list with a visible warning', () => {
+    const result = loadThreadRepliesWithFallback(101, () => {
+      throw new Error('graphql unavailable');
+    });
+
+    expect(result.threadReplies).toEqual([]);
+    expect(result.warning).toMatchObject({
+      prNumber: 101,
+      signal: 'review-thread-replies',
+    });
+    expect(result.warning?.message).toContain('graphql unavailable');
+  });
+
+  it('passes thread replies through without warning when the fetch succeeds', () => {
+    const result = loadThreadRepliesWithFallback(101, () => [
+      { id: 'thread-1', body: 'reply', createdAt: '2026-03-10T01:00:00Z' },
+    ]);
+
+    expect(result.threadReplies).toEqual([
+      { id: 'thread-1', body: 'reply', createdAt: '2026-03-10T01:00:00Z' },
+    ]);
+    expect(result.warning).toBeUndefined();
   });
 });
