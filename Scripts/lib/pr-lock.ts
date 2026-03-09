@@ -96,7 +96,10 @@ export class PRLockManager {
 
     // 获取最后一次 commit 时间
     try {
-      const commits = this.gh(`api repos/${this.repo}/pulls/${prNumber}/commits --jq '.[].commit.committer.date'`);
+      const commits = execSync(`gh api repos/${this.repo}/pulls/${prNumber}/commits --jq '.[].commit.committer.date'`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
       const commitTimes = commits.trim().split('\n').filter(t => t);
       if (commitTimes.length > 0) {
         lastCommitTime = new Date(commitTimes[commitTimes.length - 1]);
@@ -116,13 +119,18 @@ export class PRLockManager {
     }
 
     // 取两者中较晚的时间
-    const times = [lastCommitTime, lastCommentTime].filter(t => t !== null) as Date[];
+    const times = [lastCommitTime, lastCommentTime].filter(t => t !== null && !isNaN(t.getTime())) as Date[];
     if (times.length === 0) {
       // 如果都获取失败，使用当前时间
+      console.warn('[PRLock] No valid timestamps found, using current time');
       return new Date().toISOString();
     }
 
     const latestTime = new Date(Math.max(...times.map(t => t.getTime())));
+    if (isNaN(latestTime.getTime())) {
+      console.warn('[PRLock] Invalid latest time, using current time');
+      return new Date().toISOString();
+    }
     return latestTime.toISOString();
   }
 
@@ -133,6 +141,11 @@ export class PRLockManager {
    */
   private calculateExpiresAt(prLastUpdatedAt: string, lockDurationMinutes: number): string {
     const lastUpdated = new Date(prLastUpdatedAt);
+    if (isNaN(lastUpdated.getTime())) {
+      console.warn(`[PRLock] Invalid date: ${prLastUpdatedAt}, using current time`);
+      const now = new Date();
+      return new Date(now.getTime() + lockDurationMinutes * 60 * 1000).toISOString();
+    }
     const expiresAt = new Date(lastUpdated.getTime() + lockDurationMinutes * 60 * 1000);
     return expiresAt.toISOString();
   }
@@ -582,7 +595,10 @@ export class PRLockManager {
     // 使用临时文件避免 shell 转义问题
     const tmpFile = `/tmp/pr-lock-comment-${Date.now()}.md`;
     await Bun.write(tmpFile, body);
-    this.gh(`api repos/${this.repo}/issues/comments/${commentId} -X PATCH -f body=@${tmpFile}`);
+    execSync(`gh api repos/${this.repo}/issues/comments/${commentId} -X PATCH -f body=@${tmpFile}`, {
+      encoding: 'utf-8',
+      stdio: ['pipe', 'pipe', 'pipe']
+    });
     execSync(`rm ${tmpFile}`);
   }
 
