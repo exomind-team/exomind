@@ -1,7 +1,9 @@
 import {
   NEEDS_HUMAN_TEST_LABEL,
+  findApproveBlockingReason,
   mapActionModeToCompletion,
   validateReviewComment,
+  type ReviewApprovalGate,
   type ReviewActionMode,
   type ReviewCommentLanguage,
   type ReviewCompletionResult,
@@ -26,6 +28,7 @@ export interface ExecuteReviewActionInput {
   expectedLanguage: ReviewCommentLanguage | null;
   hasNeedsHumanTestLabel: boolean;
   commentId?: string | null;
+  approvalGate?: ReviewApprovalGate;
 }
 
 interface ExecuteReviewActionDeps {
@@ -86,13 +89,19 @@ export async function executeReviewAction(
   input: ExecuteReviewActionInput,
   deps: ExecuteReviewActionDeps,
 ): Promise<ExecuteReviewActionResult> {
-  if (input.mode === 'approve' && input.hasNeedsHumanTestLabel) {
-    return {
-      status: 'failed',
-      failedStage: 'approve-blocked',
-      error: `Cannot approve while ${NEEDS_HUMAN_TEST_LABEL} is still present.`,
-      labelAdded: false,
-    };
+  if (input.mode === 'approve') {
+    const approveBlockingReason = findApproveBlockingReason({
+      hasNeedsHumanTestLabel: input.hasNeedsHumanTestLabel,
+      approvalGate: input.approvalGate,
+    });
+    if (approveBlockingReason) {
+      return {
+        status: 'failed',
+        failedStage: 'approve-blocked',
+        error: approveBlockingReason,
+        labelAdded: false,
+      };
+    }
   }
 
   let labelAdded = false;

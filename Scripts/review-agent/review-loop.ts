@@ -8,9 +8,11 @@ import {
   buildRetryableReviewFailureState,
   parseLinkedIssueNumbers,
   resolveReviewCommentLanguage,
+  type ReviewApprovalGate,
   type ReviewActionMode,
   type ReviewCompletionResult,
   type PullRequestFile,
+  type VerificationStatus,
 } from './review-loop-lib.ts';
 import {
   executeReviewAction,
@@ -37,6 +39,8 @@ interface CliOptions {
   needsHumanTest?: boolean;
   requestChanges?: boolean;
   approve?: boolean;
+  ciStatus?: VerificationStatus;
+  localVerificationStatus?: VerificationStatus;
 }
 
 interface PullRequestView {
@@ -100,6 +104,7 @@ async function main(): Promise<void> {
       actionMode,
       bodyFile: options.bodyFile as string,
       explicitCommentId: options.commentId,
+      options,
     });
     return;
   }
@@ -148,6 +153,7 @@ async function runReviewAction(input: {
   actionMode: ReviewActionMode;
   bodyFile: string;
   explicitCommentId?: string;
+  options: CliOptions;
 }): Promise<void> {
   const pullRequest = viewPullRequestActionContext(input.prNumber, input.repo);
   const previousState = readJson<PersistedState | null>(STATE_FILE, null);
@@ -160,6 +166,9 @@ async function runReviewAction(input: {
   });
   const body = readFileSync(input.bodyFile, 'utf8');
   const hasNeedsHumanTestLabel = (pullRequest.labels ?? []).some((label) => label.name === NEEDS_HUMAN_TEST_LABEL);
+  const approvalGate = input.actionMode === 'approve'
+    ? buildApprovalGate(input.options)
+    : undefined;
 
   const result = await executeReviewAction({
     mode: input.actionMode,
@@ -167,6 +176,7 @@ async function runReviewAction(input: {
     expectedLanguage,
     hasNeedsHumanTestLabel,
     commentId,
+    approvalGate,
   }, {
     createComment: () => createIssueComment(input.prNumber, input.repo, input.bodyFile),
     editComment: (nextCommentId) => editIssueComment(nextCommentId, input.repo, input.bodyFile),
@@ -286,6 +296,24 @@ function parseArgs(argv: string[]): CliOptions {
       options.approve = true;
       continue;
     }
+    if (value === '--ci-status') {
+      const nextValue = argv[index + 1];
+      if (!isVerificationStatus(nextValue)) {
+        throw new Error(`Invalid --ci-status value: ${argv[index + 1] ?? ''}`);
+      }
+      options.ciStatus = nextValue;
+      index += 1;
+      continue;
+    }
+    if (value === '--local-verification-status') {
+      const nextValue = argv[index + 1];
+      if (!isVerificationStatus(nextValue)) {
+        throw new Error(`Invalid --local-verification-status value: ${argv[index + 1] ?? ''}`);
+      }
+      options.localVerificationStatus = nextValue;
+      index += 1;
+      continue;
+    }
 
     throw new Error(`Unknown argument: ${value}`);
   }
@@ -317,6 +345,13 @@ function resolveActionMode(options: CliOptions): ReviewActionMode | null {
   }
 
   return options.bodyFile ? 'comment' : null;
+}
+
+function buildApprovalGate(options: CliOptions): ReviewApprovalGate {
+  return {
+    ciStatus: options.ciStatus ?? 'missing',
+    localVerificationStatus: options.localVerificationStatus ?? 'missing',
+  };
 }
 
 function readSelectedPrNumber(): number {
@@ -576,6 +611,12 @@ function isReviewCompletionResult(value: string | undefined): value is ReviewCom
     || value === 'needs-human-test'
     || value === 'approve-ready'
     || value === 'merge-ready';
+}
+
+function isVerificationStatus(value: string | undefined): value is VerificationStatus {
+  return value === 'passed'
+    || value === 'failed'
+    || value === 'missing';
 }
 
 function toErrorMessage(error: unknown): string {

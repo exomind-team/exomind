@@ -108,6 +108,8 @@
 - `--needs-human-test`：添加 `🙋needs-human-test` 标签，并发布人测评论
 - `--request-changes`：发布主审核评论后，再执行 `request changes`
 - `--approve`：发布主审核评论后，再执行 `approve`
+- `--ci-status <passed|failed|missing>`：为 `--approve` 显式提供 CI 门禁结果
+- `--local-verification-status <passed|failed|missing>`：为 `--approve` 显式提供本地验证门禁结果
 
 约束：
 
@@ -115,6 +117,9 @@
 - 若评论发布后校验失败，后续重试必须编辑同一条评论，而不是新发第二条
 - `needs-human-test` 路径先加标签，再发评论，因为标签才是真相源
 - 只要 `🙋needs-human-test` 标签仍在，`approve` 必须被阻断并写成可重试失败
+- `approve` 只有在显式传入 `--ci-status passed` 与 `--local-verification-status passed` 时才允许执行
+- 若任一门禁参数缺失，脚本必须按 `missing` 处理，并阻断 `approve`
+- 若任一门禁为 `failed`，脚本必须阻断 `approve`，不得写出 `APPROVE_READY`
 
 ## 退出状态
 

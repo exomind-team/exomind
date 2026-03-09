@@ -248,6 +248,19 @@ describe('review-agent review loop', () => {
     ]));
   });
 
+  it('rejects suspicious full-width question-mark runs in zh-CN comments', () => {
+    const result = validateReviewComment({
+      body: '[Codex Reviewer] 已审阅最新变更，是否已完成验证？？？？？',
+      expectedLanguage: 'zh-CN',
+      mode: 'comment',
+    });
+
+    expect(result.valid).toBe(false);
+    expect(result.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('question marks'),
+    ]));
+  });
+
   it('maps review actions to persisted terminal completions', () => {
     expect(mapActionModeToCompletion('comment')).toBe('review-posted');
     expect(mapActionModeToCompletion('request-changes')).toBe('review-posted');
@@ -319,6 +332,80 @@ describe('review-agent review loop', () => {
       readComment: () => {
         throw new Error('should not read comment');
       },
+      submitReviewDecision: () => {
+        throw new Error('should not submit review decision');
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      failedStage: 'approve-blocked',
+    });
+  });
+
+  it('blocks approve when CI and local verification gates are missing', async () => {
+    const result = await executeReviewAction({
+      mode: 'approve',
+      body: '[Codex Reviewer] Reviewed the latest change. No blocking issues remain.',
+      expectedLanguage: 'en',
+      hasNeedsHumanTestLabel: false,
+    }, {
+      addLabel: () => {
+        throw new Error('should not add label');
+      },
+      createComment: () => ({
+        id: '301',
+        url: 'https://example.com/comments/301',
+        body: 'placeholder',
+      }),
+      editComment: () => {
+        throw new Error('should not edit comment');
+      },
+      readComment: () => ({
+        id: '301',
+        url: 'https://example.com/comments/301',
+        body: '[Codex Reviewer] Reviewed the latest change. No blocking issues remain.',
+      }),
+      submitReviewDecision: () => {
+        throw new Error('should not submit review decision');
+      },
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      failedStage: 'approve-blocked',
+    });
+  });
+
+  it('blocks approve when CI or local verification gates are red', async () => {
+    const input = {
+      mode: 'approve' as const,
+      body: '[Codex Reviewer] Reviewed the latest change. No blocking issues remain.',
+      expectedLanguage: 'en' as const,
+      hasNeedsHumanTestLabel: false,
+      approvalGate: {
+        ciStatus: 'failed' as const,
+        localVerificationStatus: 'passed' as const,
+      },
+    };
+
+    const result = await executeReviewAction(input, {
+      addLabel: () => {
+        throw new Error('should not add label');
+      },
+      createComment: () => ({
+        id: '302',
+        url: 'https://example.com/comments/302',
+        body: 'placeholder',
+      }),
+      editComment: () => {
+        throw new Error('should not edit comment');
+      },
+      readComment: () => ({
+        id: '302',
+        url: 'https://example.com/comments/302',
+        body: '[Codex Reviewer] Reviewed the latest change. No blocking issues remain.',
+      }),
       submitReviewDecision: () => {
         throw new Error('should not submit review decision');
       },

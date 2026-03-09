@@ -44,6 +44,7 @@ export type ReviewActionMode =
   | 'approve';
 
 export type ReviewCommentLanguage = 'zh-CN' | 'en';
+export type VerificationStatus = 'passed' | 'failed' | 'missing';
 
 export interface ReviewLanguageInput {
   title: string;
@@ -61,6 +62,11 @@ export interface ReviewCommentValidationResult {
   valid: boolean;
   detectedLanguage: ReviewCommentLanguage | null;
   errors: string[];
+}
+
+export interface ReviewApprovalGate {
+  ciStatus: VerificationStatus;
+  localVerificationStatus: VerificationStatus;
 }
 
 interface BuildCompletedReviewStateInput {
@@ -167,7 +173,7 @@ export function validateReviewComment(
     errors.push(`Comment must start with ${REVIEWER_PREFIX}.`);
   }
 
-  if (/\?{5,}/.test(input.body)) {
+  if (/[?？]{5,}/u.test(input.body)) {
     errors.push('Comment contains a suspicious sequence of 5+ question marks.');
   }
 
@@ -197,6 +203,29 @@ export function mapActionModeToCompletion(mode: ReviewActionMode): Exclude<Revie
   }
 
   return 'review-posted';
+}
+
+export function findApproveBlockingReason(input: {
+  hasNeedsHumanTestLabel: boolean;
+  approvalGate?: ReviewApprovalGate;
+}): string | null {
+  if (input.hasNeedsHumanTestLabel) {
+    return `Cannot approve while ${NEEDS_HUMAN_TEST_LABEL} is still present.`;
+  }
+
+  if (!input.approvalGate) {
+    return 'Cannot approve without explicit CI and local verification results.';
+  }
+
+  if (input.approvalGate.ciStatus !== 'passed') {
+    return `Cannot approve because CI status is ${input.approvalGate.ciStatus}.`;
+  }
+
+  if (input.approvalGate.localVerificationStatus !== 'passed') {
+    return `Cannot approve because local verification status is ${input.approvalGate.localVerificationStatus}.`;
+  }
+
+  return null;
 }
 
 export function buildCompletedReviewState(input: BuildCompletedReviewStateInput): PersistedState {
