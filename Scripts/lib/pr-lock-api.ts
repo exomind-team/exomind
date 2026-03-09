@@ -58,7 +58,14 @@ export class RealGitHubAPI implements IGitHubAPI {
   async createComment(prNumber: number, body: string): Promise<number> {
     // 使用临时文件避免 shell 转义破坏换行符
     const fs = await import('fs');
-    const tempFile = `.exomind/temp/comment-${Date.now()}.txt`;
+
+    // 确保临时目录存在
+    const tempDir = '.exomind/temp';
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const tempFile = `${tempDir}/comment-${Date.now()}.txt`;
     fs.writeFileSync(tempFile, body, 'utf-8');
 
     try {
@@ -81,7 +88,14 @@ export class RealGitHubAPI implements IGitHubAPI {
   async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
     // 使用临时文件避免 shell 转义破坏换行符
     const fs = await import('fs');
-    const tempFile = `.exomind/temp/comment-${Date.now()}.txt`;
+
+    // 确保临时目录存在
+    const tempDir = '.exomind/temp';
+    if (!fs.existsSync(tempDir)) {
+      fs.mkdirSync(tempDir, { recursive: true });
+    }
+
+    const tempFile = `${tempDir}/comment-${Date.now()}.txt`;
     fs.writeFileSync(tempFile, body, 'utf-8');
 
     try {
