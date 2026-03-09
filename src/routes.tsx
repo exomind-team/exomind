@@ -12,6 +12,7 @@ import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/ser
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
+import { UpdateToast } from '@/ui/components/UpdateToast';
 import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
 
@@ -105,11 +106,6 @@ const AgentMarketPage = lazy(async () => {
   return { default: module.AgentMarketPage };
 });
 
-const PtyTerminalPage = lazy(async () => {
-  const module = await import('@/ui/app/pages/agents/PtyTerminalPage');
-  return { default: module.PtyTerminalPage };
-});
-
 function PageFallback() {
   return (
     <div className="px-6 py-6 text-sm text-[#A8A29E] dark:text-[#78716C]">
@@ -164,46 +160,83 @@ type ShellNavItem = {
 function isMobileFullscreenRoute(pathname: string): boolean {
   return pathname.startsWith('/agents/chat/')
     || pathname.startsWith('/agents/agent/')
-    || pathname.startsWith('/agents/actor/')
-    || pathname.startsWith('/agents/pty/');
+    || pathname.startsWith('/agents/actor/');
 }
 
-function MobileBottomTab({
+function MobileShell({
   locationPath,
   navItems,
+  desktopFrame = false,
+  commandPaletteActive = false,
+  commandContext,
 }: {
   locationPath: string;
   navItems: ShellNavItem[];
+  desktopFrame?: boolean;
+  commandPaletteActive?: boolean;
+  commandContext?: CommandContext;
 }) {
+  const previewFrame = desktopFrame && resolveRuntimePlatform() !== 'tauri';
+  const fullscreenRoute = isMobileFullscreenRoute(locationPath);
+
   return (
-    <nav
-      data-testid="mobile-bottom-tab"
-      className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur"
-    >
-      <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
-        {navItems.map((item) => {
-          const Icon = item.icon;
-          const active = locationPath === item.path
-            || (item.path === '/eventlog' && locationPath === '/')
-            || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
-            || (item.path === '/me' && locationPath.startsWith('/me'))
-            || (item.path === '/settings' && locationPath.startsWith('/settings'));
-          return (
-            <Link
-              key={item.path}
-              to={item.path}
-              className={cn(
-                'flex flex-1 min-w-0 flex-col items-center gap-1 rounded-xl py-1 text-[11px] transition-colors',
-                active ? 'text-[#C75B3A] dark:text-[#E8734E] font-semibold' : 'text-stone-400 dark:text-[#57534E]'
-              )}
-            >
-              <Icon size={20} />
-              <span>{item.title}</span>
-            </Link>
-          );
-        })}
+    <div className={cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', previewFrame && 'p-6')}>
+      <div
+        className={cn(
+          'relative h-[100dvh] w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]',
+          previewFrame && 'mx-auto max-w-[393px] h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]'
+        )}
+      >
+        <main
+          className={cn(
+            'absolute inset-x-0 overflow-y-auto',
+            fullscreenRoute
+              ? (previewFrame ? 'top-0 bottom-0' : 'top-[env(safe-area-inset-top,0px)] bottom-0')
+              : cn(
+                'bottom-[calc(env(safe-area-inset-bottom,0px)+60px)]',
+                previewFrame ? 'top-0' : 'top-[env(safe-area-inset-top,0px)]',
+              ),
+          )}
+        >
+          <Outlet />
+        </main>
+
+        {commandPaletteActive && commandContext ? (
+          <CommandPalette context={commandContext} />
+        ) : null}
+
+        {!fullscreenRoute ? (
+          <nav
+            data-testid="mobile-bottom-tab"
+            className="absolute inset-x-0 bottom-0 z-40 border-t border-[#E4DED7] dark:border-[#292524] bg-[#FAF7F5]/95 dark:bg-[#0C0A09]/95 backdrop-blur"
+          >
+            <div className="flex items-center px-2 pb-[calc(env(safe-area-inset-bottom,0px)+12px)] pt-2">
+              {navItems.map((item) => {
+                const Icon = item.icon;
+                const active = locationPath === item.path
+                  || (item.path === '/eventlog' && locationPath === '/')
+                  || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
+                  || (item.path === '/me' && locationPath.startsWith('/me'))
+                  || (item.path === '/settings' && locationPath.startsWith('/settings'));
+                return (
+                  <Link
+                    key={item.path}
+                    to={item.path}
+                    className={cn(
+                      'flex flex-1 min-w-0 flex-col items-center gap-1 rounded-xl py-1 text-[11px] transition-colors',
+                      active ? 'text-[#C75B3A] dark:text-[#E8734E] font-semibold' : 'text-stone-400 dark:text-[#57534E]'
+                    )}
+                  >
+                    <Icon size={20} />
+                    <span>{item.title}</span>
+                  </Link>
+                );
+              })}
+            </div>
+          </nav>
+        ) : null}
       </div>
-    </nav>
+    </div>
   );
 }
 
@@ -267,6 +300,19 @@ function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; 
         <DesktopSidebarAccountEntry />
       </div>
     </aside>
+  );
+}
+
+function DesktopLayout({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
+  return (
+    <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
+      <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
+        <DesktopSidebar activePath={activePath} agentPageEnabled={agentPageEnabled} />
+        <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
+          <Outlet />
+        </main>
+      </div>
+    </div>
   );
 }
 
@@ -366,63 +412,27 @@ function NewLayout() {
     || location.pathname === '/agents'
     || location.pathname.startsWith('/agents/');
 
-  // Unified layout: <Outlet /> stays in the same React tree position regardless
-  // of desktop/mobile mode. This prevents child pages (AgentsPage, etc.) from
-  // being unmounted and remounted when the viewport crosses the breakpoint.
-  const showDesktopShell = isDesktop && desktopAdaptiveEnabled && isDesktopAdaptiveRoute;
-  const previewFrame = !showDesktopShell && isDesktop && resolveRuntimePlatform() !== 'tauri';
-  const fullscreenRoute = !showDesktopShell && isMobileFullscreenRoute(location.pathname);
+  if (isDesktop && desktopAdaptiveEnabled && isDesktopAdaptiveRoute) {
+    return (
+      <>
+        <DesktopLayout activePath={location.pathname} agentPageEnabled={agentPageEnabled} />
+        {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
+        <ReminderNotifier />
+      </>
+    );
+  }
 
   return (
     <>
-      <div
-        className={cn(
-          showDesktopShell
-            ? 'h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]'
-            : cn('min-h-[100dvh] bg-[#ECE6E1] dark:bg-[#0C0A09]', previewFrame && 'p-6'),
-        )}
-      >
-        <div
-          className={cn(
-            showDesktopShell
-              ? 'flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]'
-              : cn(
-                'relative h-[100dvh] w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]',
-                previewFrame && 'mx-auto max-w-[393px] h-[852px] rounded-[40px] border border-[#E6DFD8] dark:border-[#292524] shadow-[0_24px_60px_-28px_rgba(0,0,0,0.35)]',
-              ),
-          )}
-        >
-          {showDesktopShell && (
-            <DesktopSidebar activePath={location.pathname} agentPageEnabled={agentPageEnabled} />
-          )}
-
-          <main
-            data-testid="desktop-settings-content"
-            className={cn(
-              showDesktopShell
-                ? 'min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]'
-                : cn(
-                  'absolute inset-x-0 overflow-y-auto',
-                  fullscreenRoute
-                    ? (previewFrame ? 'top-0 bottom-0' : 'top-[env(safe-area-inset-top,0px)] bottom-0')
-                    : cn(
-                      'bottom-[calc(env(safe-area-inset-bottom,0px)+60px)]',
-                      previewFrame ? 'top-0' : 'top-[env(safe-area-inset-top,0px)]',
-                    ),
-                ),
-            )}
-          >
-            <Outlet />
-          </main>
-
-          {!showDesktopShell && !fullscreenRoute && (
-            <MobileBottomTab locationPath={location.pathname} navItems={navItems} />
-          )}
-        </div>
-      </div>
-
-      {commandPaletteActive && commandContext ? <CommandPalette context={commandContext} /> : null}
+      <MobileShell
+        locationPath={location.pathname}
+        navItems={navItems}
+        desktopFrame={isDesktop}
+        commandPaletteActive={commandPaletteActive}
+        commandContext={commandContext}
+      />
       <ReminderNotifier />
+      <UpdateToast />
     </>
   );
 }
@@ -723,19 +733,6 @@ const newAgentMarketRoute = createRoute({
   },
 });
 
-const newPtyTerminalRoute = createRoute({
-  getParentRoute: () => newRootRoute,
-  path: '/agents/pty/$ptyId',
-  component: function NewPtyTerminal() {
-    const { ptyId } = useParams({ strict: false }) as { ptyId?: string };
-    return (
-      <LazyPage>
-        <PtyTerminalPage ptyId={ptyId} />
-      </LazyPage>
-    );
-  },
-});
-
 const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newDashboardRoute,
@@ -758,7 +755,6 @@ const newRouteTree = newRootRoute.addChildren([
   newActorDetailRoute,
   newAgentConversationRoute,
   newAgentMarketRoute,
-  newPtyTerminalRoute,
 ]);
 
 const appRouter = createRouter({ routeTree: newRouteTree });

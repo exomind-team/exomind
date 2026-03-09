@@ -5,6 +5,7 @@ import {
   ensureMdnsMulticastLockInMainActivityFile,
   ensureReleaseCleartextTrafficInGradleFile,
   ensureRequiredAudioPermissionsInManifestFile,
+  resolveInstalledNdkVersion,
 } from './android-manifest-permission-lib';
 
 function resolveManifestPath(cliArgs: string[]): string {
@@ -51,8 +52,9 @@ function main(): void {
   const manifestPath = resolveManifestPath(cliArgs);
   const buildGradlePath = resolveBuildGradlePath(cliArgs);
   const mainActivityPath = resolveMainActivityPath(cliArgs);
+  const desiredNdkVersion = resolveInstalledNdkVersion();
   const manifestResult = ensureRequiredAudioPermissionsInManifestFile(manifestPath);
-  const gradleResult = ensureReleaseCleartextTrafficInGradleFile(buildGradlePath);
+  const gradleResult = ensureReleaseCleartextTrafficInGradleFile(buildGradlePath, desiredNdkVersion);
   const activityResult = ensureMdnsMulticastLockInMainActivityFile(mainActivityPath);
 
   if (manifestResult.status === 'missing-file' || manifestResult.status === 'invalid-manifest') {

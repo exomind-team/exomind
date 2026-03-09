@@ -354,6 +354,224 @@ function Resolve-TauriDevTargetDir {
   Write-Host "[tauri-wrapper] Cargo target dir resolved: $resolved"
 }
 
+function Test-IsAndroidDevCommand {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$CommandArgs
+  )
+
+  return $CommandArgs.Count -ge 2 -and $CommandArgs[0] -eq "android" -and $CommandArgs[1] -eq "dev"
+}
+
+function Test-AndroidInstallFailureOutput {
+  param(
+    [AllowNull()]
+    [object[]]$OutputLines
+  )
+
+  if (-not $OutputLines) {
+    return $false
+  }
+
+  $joined = ($OutputLines | ForEach-Object { "$_" }) -join "`n"
+  return $joined.Contains("failed to install APK") -or $joined.Contains("adb.exe: failed to install")
+}
+
+function Resolve-AdbCommandPath {
+  $adbCommand = Get-Command adb -ErrorAction SilentlyContinue
+  if ($adbCommand) {
+    return $adbCommand.Source
+  }
+
+  if ($env:ANDROID_HOME) {
+    $sdkAdb = Join-Path $env:ANDROID_HOME "platform-tools\adb.exe"
+    if (Test-Path -LiteralPath $sdkAdb) {
+      return $sdkAdb
+    }
+  }
+
+  return $null
+}
+
+function Resolve-AndroidDeviceSerial {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$CommandArgs,
+    [Parameter(Mandatory = $true)]
+    [string]$AdbPath
+  )
+
+  if ($CommandArgs.Count -ge 3 -and -not [string]::IsNullOrWhiteSpace($CommandArgs[2]) -and -not $CommandArgs[2].StartsWith("-")) {
+    return $CommandArgs[2]
+  }
+
+  $adbDevicesOutput = & $AdbPath devices
+  if ($LASTEXITCODE -ne 0) {
+    return $null
+  }
+
+  $deviceLines = @($adbDevicesOutput | Where-Object {
+    $line = "$_"
+    $line -and $line -match "^\S+\s+device$"
+  })
+
+  if ($deviceLines.Count -eq 1) {
+    return ($deviceLines[0] -split "\s+")[0]
+  }
+
+  return $null
+}
+
+function Resolve-AndroidTargetAbi {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string[]]$CommandArgs
+  )
+
+  for ($i = 0; $i -lt $CommandArgs.Count; $i++) {
+    if ($CommandArgs[$i] -eq "--target" -and ($i + 1) -lt $CommandArgs.Count) {
+      return $CommandArgs[$i + 1]
+    }
+  }
+
+  return "x86_64"
+}
+
+function Resolve-AndroidBuiltApkPath {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectRoot,
+    [Parameter(Mandatory = $true)]
+    [string]$TargetAbi
+  )
+
+  $preferredPath = Join-Path $ProjectRoot ("src-tauri\gen\android\app\build\outputs\apk\{0}\debug\app-{0}-debug.apk" -f $TargetAbi)
+  if (Test-Path -LiteralPath $preferredPath) {
+    return $preferredPath
+  }
+
+  $apkDir = Join-Path $ProjectRoot "src-tauri\gen\android\app\build\outputs\apk"
+  if (-not (Test-Path -LiteralPath $apkDir)) {
+    return $null
+  }
+
+  $latestApk = Get-ChildItem -Path $apkDir -Recurse -File -Filter "*.apk" |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+
+  if ($latestApk) {
+    return $latestApk.FullName
+  }
+
+  return $null
+}
+
+function Resolve-AndroidAppIdentifier {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectRoot
+  )
+
+  $tauriConfigPath = Join-Path $ProjectRoot "src-tauri\tauri.conf.json"
+  if (-not (Test-Path -LiteralPath $tauriConfigPath)) {
+    return $null
+  }
+
+  try {
+    $raw = Get-Content -LiteralPath $tauriConfigPath -Raw -Encoding UTF8
+    $json = $raw | ConvertFrom-Json
+    return $json.identifier
+  } catch {
+    return $null
+  }
+}
+
+function Invoke-AndroidInstallFallback {
+  param(
+    [Parameter(Mandatory = $true)]
+    [string]$ProjectRoot,
+    [Parameter(Mandatory = $true)]
+    [string[]]$CommandArgs
+  )
+
+  $adbPath = Resolve-AdbCommandPath
+  if (-not $adbPath) {
+    Write-Warning "[tauri-wrapper] Android fallback skipped: adb not found."
+    return $false
+  }
+
+  $deviceSerial = Resolve-AndroidDeviceSerial -CommandArgs $CommandArgs -AdbPath $adbPath
+  if (-not $deviceSerial) {
+    Write-Warning "[tauri-wrapper] Android fallback skipped: unable to resolve a single device."
+    return $false
+  }
+
+  $targetAbi = Resolve-AndroidTargetAbi -CommandArgs $CommandArgs
+  $apkPath = Resolve-AndroidBuiltApkPath -ProjectRoot $ProjectRoot -TargetAbi $targetAbi
+  if (-not $apkPath) {
+    Write-Warning "[tauri-wrapper] Android fallback skipped: APK not found."
+    return $false
+  }
+
+  $appId = Resolve-AndroidAppIdentifier -ProjectRoot $ProjectRoot
+  if (-not $appId) {
+    Write-Warning "[tauri-wrapper] Android fallback skipped: app identifier not found."
+    return $false
+  }
+
+  Write-Host "[tauri-wrapper] Retrying Android install with adb fallback: $apkPath"
+  & $adbPath -s $deviceSerial install -r -d -g -t $apkPath
+  if ($LASTEXITCODE -ne 0) {
+    Write-Warning "[tauri-wrapper] Android fallback install failed."
+    return $false
+  }
+
+  & $adbPath -s $deviceSerial shell monkey -p $appId -c android.intent.category.LAUNCHER 1 | Out-Null
+  Write-Host "[tauri-wrapper] Android fallback install succeeded."
+  return $true
+}
+
+function Invoke-TauriCommandWithCapture {
+  param(
+    [AllowNull()]
+    [string[]]$CommandArgs
+  )
+
+  $capturedOutput = @()
+  $exitCode = 0
+  $previousErrorActionPreference = $ErrorActionPreference
+
+  try {
+    # Native stderr becomes ErrorRecord after 2>&1 in PowerShell.
+    #（原生命令 stderr 经 2>&1 后会变成 ErrorRecord）
+    # Tauri prints status lines like "Running BeforeDevCommand" to stderr,
+    # so keep them as log output instead of terminating the wrapper.
+    #（Tauri 会把状态日志写到 stderr，这里保留日志，不把它当成包装脚本异常）
+    $ErrorActionPreference = "Continue"
+
+    if ($CommandArgs -and $CommandArgs.Count -gt 0) {
+      & tauri @CommandArgs 2>&1 | ForEach-Object {
+        $capturedOutput += $_
+        Write-Host "$_"
+      }
+    } else {
+      & tauri 2>&1 | ForEach-Object {
+        $capturedOutput += $_
+        Write-Host "$_"
+      }
+    }
+
+    $exitCode = $LASTEXITCODE
+  } finally {
+    $ErrorActionPreference = $previousErrorActionPreference
+  }
+
+  return [pscustomobject]@{
+    ExitCode = $exitCode
+    Output = $capturedOutput
+  }
+}
+
 $projectRoot = Join-Path $PSScriptRoot "..\..\"
 $projectRoot = [System.IO.Path]::GetFullPath($projectRoot)
 $manifestPath = Join-Path $PSScriptRoot "..\..\src-tauri\gen\android\app\src\main\AndroidManifest.xml"
@@ -387,22 +605,31 @@ if ($TauriArgs -and $TauriArgs.Count -ge 2 -and $TauriArgs[0] -eq "android" -and
 # Run tauri CLI (执行 tauri 命令)
 $exitCode = 0
 $tempConfigPath = $null
+$tauriOutput = @()
 try {
+  $tauriCommandArgs = @()
   if ($TauriArgs -and $TauriArgs.Count -gt 0) {
+    $tauriCommandArgs = @($TauriArgs)
+
     # Inject --config to override devUrl when port differs from default
     # (端口非默认值时，通过 --config 覆盖 devUrl)
     if ($isTauriDev -and $env:EXOMIND_WEB_PORT -and $env:EXOMIND_WEB_PORT -ne "1420") {
       $tempConfigPath = Join-Path $env:TEMP ("exomind-tauri-dev-config-{0}.json" -f [Guid]::NewGuid().ToString("N"))
       $devUrlOverride = '{"build":{"devUrl":"http://localhost:' + $env:EXOMIND_WEB_PORT + '"}}'
       Write-TextUtf8NoBom -Path $tempConfigPath -Content $devUrlOverride
-      & tauri @TauriArgs --config $tempConfigPath
-    } else {
-      & tauri @TauriArgs
+      $tauriCommandArgs += @("--config", $tempConfigPath)
     }
-  } else {
-    & tauri
   }
-  $exitCode = $LASTEXITCODE
+
+  $tauriResult = Invoke-TauriCommandWithCapture -CommandArgs $tauriCommandArgs
+  $tauriOutput = @($tauriResult.Output)
+  $exitCode = $tauriResult.ExitCode
+
+  if ($exitCode -ne 0 -and (Test-IsAndroidDevCommand -CommandArgs $TauriArgs) -and (Test-AndroidInstallFailureOutput -OutputLines $tauriOutput)) {
+    if (Invoke-AndroidInstallFallback -ProjectRoot $projectRoot -CommandArgs $TauriArgs) {
+      $exitCode = 0
+    }
+  }
 } finally {
   if ($tempConfigPath -and (Test-Path -LiteralPath $tempConfigPath)) {
     Remove-Item -LiteralPath $tempConfigPath -Force -ErrorAction SilentlyContinue

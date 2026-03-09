@@ -3,7 +3,6 @@ import { RouterProvider } from "@tanstack/react-router";
 import { appRouter } from "@/routes";
 import { ThemeController } from "@/components/ThemeController";
 import { Toaster } from "@/components/ui/toaster";
-import { UpdateToast } from "@/ui/components/UpdateToast";
 import { TimeBlockSyncCoordinator } from "@/ui/app/components/TimeBlockSyncCoordinator";
 import { TaskSyncCoordinator } from "@/ui/app/components/TaskSyncCoordinator";
 import { ReminderSyncCoordinator } from "@/ui/app/components/ReminderSyncCoordinator";
@@ -39,7 +38,6 @@ function App() {
       <ReminderSyncCoordinator />
       <RouterProvider router={appRouter} />
       <Toaster />
-      <UpdateToast />
     </>
   );
 }
