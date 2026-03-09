@@ -503,9 +503,18 @@ export class PRLockManager {
 
     console.log(`[PRLock] Lock renewed successfully, new duration: ${newDurationMinutes} minutes, expires at: ${this.calculateExpiresAt(lock.acquired_at, newDurationMinutes)}`);
 
+    // 重新检查锁状态，确保返回值包含正确的派生字段（expires_at, remaining_minutes, is_expired）
+    const freshLock = await this.checkLock(prNumber);
+    if (!freshLock) {
+      return {
+        success: false,
+        error: 'Failed to verify renewed lock state'
+      };
+    }
+
     return {
       success: true,
-      lock: renewedLock
+      lock: freshLock
     };
   }
 
