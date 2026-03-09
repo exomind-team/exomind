@@ -317,7 +317,8 @@ export class PRLockManager {
     if (conflictCheck.hasConflict) {
       // 发现竞争，主动放弃
       console.log(`[PRLock] Race condition detected! ${conflictCheck.winner} won, ${conflictCheck.loser} backing off`);
-      await this.removeLabel(prNumber, LOCK_LABEL);
+      // 注意：败者不应移除锁标签，标签由赢家持有
+      // 败者只需要创建一个说明评论
       await this.createComment(prNumber,
         `🔓 **锁竞争检测**\n\n` +
         `检测到多个 Agent 同时尝试获取锁：\n` +
@@ -509,15 +510,31 @@ export class PRLockManager {
    * 2. 找出时间戳最早的 lock comment
    * 3. 如果不是自己，说明有竞争，自己是败者
    */
+  /**
+   * 检测竞争条件
+   *
+   * 原理：
+   * 1. 查询 PR timeline 中所有的 lock comment
+   * 2. 过滤竞争窗口内的锁评论（最近 10 秒）
+   * 3. 过滤掉已释放的锁（released: true）
+   * 4. 找出时间戳最早的 lock comment
+   * 5. 如果不是自己，说明有竞争，自己是败者
+   */
   private async detectConflict(
     prNumber: number,
     myLock: LockMetadata
   ): Promise<{ hasConflict: boolean; winner?: string; loser?: string }> {
     const comments = await this.getComments(prNumber);
 
+    // 竞争窗口：最近 10 秒内的锁评论
+    const competitionWindowMs = 10 * 1000;
+    const myLockTime = parseInt(myLock.lock_id.split('-')[1]);
+    const windowStart = myLockTime - competitionWindowMs;
+    const windowEnd = myLockTime + competitionWindowMs;
+
     // 找出所有包含 LOCK_METADATA 的 comment
     const lockComments = comments
-      .filter((c: any) => c.body?.includes('<!-- LOCK_METADATA'))
+      .filter((c: any) => c.body?.includes(LOCK_METADATA_MARKER))
       .map((c: any) => {
         const match = c.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/);
         if (!match) return null;
@@ -525,13 +542,20 @@ export class PRLockManager {
           const metadata = JSON.parse(match[1]);
           return {
             ...metadata,
-            comment_created_at: c.created_at
+            comment_created_at: c.createdAt
           };
         } catch {
           return null;
         }
       })
-      .filter((m: any) => m !== null);
+      .filter((m: any) => {
+        if (!m) return false;
+        // 过滤掉已释放的锁
+        if (m.released) return false;
+        // 只保留竞争窗口内的锁
+        const lockTime = parseInt(m.lock_id.split('-')[1]);
+        return lockTime >= windowStart && lockTime <= windowEnd;
+      });
 
     if (lockComments.length <= 1) {
       // 只有自己的锁，没有竞争
@@ -547,7 +571,7 @@ export class PRLockManager {
 
     const winner = lockComments[0];
 
-    if (winner.agent_id === this.agentId) {
+    if (winner.lock_id === myLock.lock_id) {
       // 自己是胜者，没有冲突
       return { hasConflict: false };
     }
@@ -582,10 +606,13 @@ export class PRLockManager {
 
   private async createComment(prNumber: number, body: string): Promise<void> {
     // 使用临时文件避免 shell 转义问题
-    const tmpFile = `/tmp/pr-lock-comment-${Date.now()}.md`;
-    Bun.write(tmpFile, body);
-    this.gh(`issue comment ${prNumber} --body-file ${tmpFile}`);
-    execSync(`rm ${tmpFile}`);
+    const tmpFile = `/tmp/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
+    await Bun.write(tmpFile, body);
+    try {
+      this.gh(`issue comment ${prNumber} --body-file ${tmpFile}`);
+    } finally {
+      execSync(`rm -f ${tmpFile}`, { stdio: 'ignore' });
+    }
   }
 
   /**
@@ -593,13 +620,16 @@ export class PRLockManager {
    */
   private async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
     // 使用临时文件避免 shell 转义问题
-    const tmpFile = `/tmp/pr-lock-comment-${Date.now()}.md`;
+    const tmpFile = `/tmp/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
     await Bun.write(tmpFile, body);
-    execSync(`gh api repos/${this.repo}/issues/comments/${commentId} -X PATCH -f body=@${tmpFile}`, {
-      encoding: 'utf-8',
-      stdio: ['pipe', 'pipe', 'pipe']
-    });
-    execSync(`rm ${tmpFile}`);
+    try {
+      execSync(`gh api repos/${this.repo}/issues/comments/${commentId} -X PATCH --input ${tmpFile}`, {
+        encoding: 'utf-8',
+        stdio: ['pipe', 'pipe', 'pipe']
+      });
+    } finally {
+      execSync(`rm -f ${tmpFile}`, { stdio: 'ignore' });
+    }
   }
 
   /**
