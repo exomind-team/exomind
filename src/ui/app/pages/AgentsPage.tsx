@@ -15,6 +15,7 @@ import {
   Send,
   Settings,
   Sparkles,
+  TerminalSquare,
   Waypoints,
   Webhook,
   X,
@@ -54,6 +55,8 @@ import {
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
+import { PtyTerminal } from '../components/PtyTerminal';
+import { PtySpawnDialog } from '../components/PtySpawnDialog';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import { KNOWN_AGENT_HUB_TOPICS, VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
@@ -90,6 +93,7 @@ import {
   buildSignalGraph,
   buildSignalRouteRows,
   type SignalGraph,
+  type SignalGraphNode,
   type SignalGraphNodeType,
   type SignalRouteRow,
 } from './agents-signal-topology';
@@ -2146,6 +2150,7 @@ export function AgentsPage() {
   const [isChatSending, setIsChatSending] = useState(false);
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
+  const [ptyAgents, setPtyAgents] = useState<Array<{ id: string; name: string; status: string; workdir: string }>>([]);
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [agentCreateKind, setAgentCreateKind] = useState<RuntimeCreateAgentRequest['kind']>('claude_cli');
   const [agentCreateError, setAgentCreateError] = useState('');
@@ -2648,6 +2653,18 @@ export function AgentsPage() {
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
+  const [showPtySpawnDialog, setShowPtySpawnDialog] = useState(false);
+
+  const openPtyTerminal = (ptyId: string) => {
+    setRightPanel({ state: 'PTY_TERMINAL', ptyId });
+  };
+
+  /** Resolve the first available RT base URL from runtime host snapshots. */
+  const resolveRtBaseUrl = (): string => {
+    const host = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+    if (host) return `http://${host.host}:${host.port}`;
+    return `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`;
+  };
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
@@ -2763,10 +2780,24 @@ export function AgentsPage() {
     setFallbackRuntimeAgents([]);
   };
 
+  const fetchPtyAgents = async () => {
+    try {
+      const rtUrl = resolveRtBaseUrl();
+      const resp = await fetch(`${rtUrl}/pty`);
+      if (resp.ok) {
+        const data = await resp.json() as Array<{ id: string; name: string; status: string; workdir: string }>;
+        setPtyAgents(data);
+      }
+    } catch {
+      // PTY endpoint may not be available; silently ignore
+    }
+  };
+
   const refreshRuntimeSnapshot = async () => {
     const snapshot = await getRuntimeManager().refreshSnapshot();
     applyRuntimeSnapshot(snapshot);
     await refreshSignalRoutesFromSnapshot(snapshot);
+    await fetchPtyAgents();
   };
 
   useEffect(() => {
@@ -2785,6 +2816,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus(nextRuntimeStatus);
       applyRuntimeSnapshot(nextRuntimeSnapshot);
       await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
+      await fetchPtyAgents();
     };
 
     const refreshInterval = setInterval(() => {
@@ -2794,6 +2826,7 @@ export function AgentsPage() {
           if (disposed) return;
           applyRuntimeSnapshot(nextRuntimeSnapshot);
           await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
+          await fetchPtyAgents();
         } catch {
           // Ignore polling errors（轮询错误不打断页面渲染）
         }
@@ -2983,18 +3016,25 @@ export function AgentsPage() {
     }),
     [baseSignalGraph.nodes, topologyManualSnapshot]
   );
+  const ptyGraphNodes = useMemo((): SignalGraphNode[] => {
+    return ptyAgents.map((pty, idx) => ({
+      id: `pty-${pty.id}`,
+      type: 'agent' as SignalGraphNodeType,
+      label: pty.name,
+      status: pty.status === 'running' ? 'running' : 'offline',
+      position: { x: 600, y: 80 + idx * 100 },
+    }));
+  }, [ptyAgents]);
+
   const signalGraph = useMemo(() => {
-    if (topologyLayoutMode === 'manual') {
-      return {
-        nodes: topologyManualResult.nodes,
-        edges: baseSignalGraph.edges,
-      };
-    }
+    const baseNodes = topologyLayoutMode === 'manual'
+      ? topologyManualResult.nodes
+      : buildAutoFlowLayout(baseSignalGraph.nodes);
     return {
-      nodes: buildAutoFlowLayout(baseSignalGraph.nodes),
+      nodes: [...baseNodes, ...ptyGraphNodes],
       edges: baseSignalGraph.edges,
     };
-  }, [baseSignalGraph.edges, baseSignalGraph.nodes, topologyLayoutMode, topologyManualResult.nodes]);
+  }, [baseSignalGraph.edges, baseSignalGraph.nodes, topologyLayoutMode, topologyManualResult.nodes, ptyGraphNodes]);
   const manualViewport = topologyManualSnapshot?.viewport;
 
   const flushTopologyStoreWrite = () => {
@@ -3162,6 +3202,16 @@ export function AgentsPage() {
         onResetCurrentLayout={handleResetCurrentTopologyLayout}
         onClearSavedLayouts={handleClearSavedTopologyLayouts}
         onSelectNode={(nodeId) => {
+          // PTY nodes: open terminal panel or navigate on mobile
+          if (nodeId.startsWith('pty-')) {
+            const ptyId = nodeId.replace('pty-', '');
+            if (supportsInlineRightPanel) {
+              openPtyTerminal(ptyId);
+            } else {
+              navigateToSecondaryPage(`/agents/pty/${encodeURIComponent(ptyId)}`);
+            }
+            return;
+          }
           // 判断节点类型
           const node = signalGraph.nodes.find((n) => n.id === nodeId);
           if (node?.type === 'agent') openAgentDetail(nodeId);
@@ -3222,6 +3272,16 @@ export function AgentsPage() {
             </button>
             <button
               type="button"
+              data-testid="pty-spawn-button"
+              onClick={() => setShowPtySpawnDialog(true)}
+              className="flex h-9 items-center gap-1.5 rounded-full bg-[#0D9488] px-3 text-sm text-white"
+              aria-label="新建 Terminal"
+            >
+              <TerminalSquare size={16} />
+              <span className="hidden sm:inline">Terminal</span>
+            </button>
+            <button
+              type="button"
               data-testid="agent-add-node-button"
               onClick={() => setSheetOpen(true)}
               disabled={isAgentCreating}
@@ -3271,6 +3331,7 @@ export function AgentsPage() {
                 {rightPanel.state === 'ACTOR_DETAIL' && (agentDetail?.title ?? 'Actor 详情')}
                 {rightPanel.state === 'SIGNAL_DETAIL' && '信号详情'}
                 {rightPanel.state === 'AGENT_CHAT' && 'Agent 对话'}
+                {rightPanel.state === 'PTY_TERMINAL' && 'Terminal'}
               </span>
               <button
                 type="button"
@@ -3612,10 +3673,29 @@ export function AgentsPage() {
                   </div>
                 </div>
               )}
+              {rightPanel.state === 'PTY_TERMINAL' && rightPanel.ptyId && (
+                <div className="flex h-full flex-col overflow-hidden">
+                  <PtyTerminal
+                    rtBaseUrl={resolveRtBaseUrl()}
+                    ptyId={rightPanel.ptyId}
+                  />
+                </div>
+              )}
             </div>
           </aside>
         )}
       </div>
+
+      {/* PTY Spawn Dialog */}
+      <PtySpawnDialog
+        open={showPtySpawnDialog}
+        onOpenChange={setShowPtySpawnDialog}
+        rtBaseUrl={resolveRtBaseUrl()}
+        onSpawned={(info) => {
+          openPtyTerminal(info.id);
+          void refreshRuntimeSnapshot();
+        }}
+      />
 
       {/* Sheets（移动端） */}
       {sheetOpen && (

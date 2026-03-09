@@ -105,6 +105,11 @@ const AgentMarketPage = lazy(async () => {
   return { default: module.AgentMarketPage };
 });
 
+const PtyTerminalPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/agents/PtyTerminalPage');
+  return { default: module.PtyTerminalPage };
+});
+
 function PageFallback() {
   return (
     <div className="px-6 py-6 text-sm text-[#A8A29E] dark:text-[#78716C]">
@@ -159,7 +164,8 @@ type ShellNavItem = {
 function isMobileFullscreenRoute(pathname: string): boolean {
   return pathname.startsWith('/agents/chat/')
     || pathname.startsWith('/agents/agent/')
-    || pathname.startsWith('/agents/actor/');
+    || pathname.startsWith('/agents/actor/')
+    || pathname.startsWith('/agents/pty/');
 }
 
 function MobileShell({
@@ -731,6 +737,19 @@ const newAgentMarketRoute = createRoute({
   },
 });
 
+const newPtyTerminalRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/pty/$ptyId',
+  component: function NewPtyTerminal() {
+    const { ptyId } = useParams({ strict: false }) as { ptyId?: string };
+    return (
+      <LazyPage>
+        <PtyTerminalPage ptyId={ptyId} />
+      </LazyPage>
+    );
+  },
+});
+
 const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newDashboardRoute,
@@ -753,6 +772,7 @@ const newRouteTree = newRootRoute.addChildren([
   newActorDetailRoute,
   newAgentConversationRoute,
   newAgentMarketRoute,
+  newPtyTerminalRoute,
 ]);
 
 const appRouter = createRouter({ routeTree: newRouteTree });

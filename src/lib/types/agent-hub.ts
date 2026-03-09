@@ -19,6 +19,7 @@ export const AGENT_HUB_RIGHT_PANEL_STATES = [
   'AGENT_DETAIL',
   'ACTOR_DETAIL',
   'AGENT_CHAT',
+  'PTY_TERMINAL',
 ] as const;
 export type AgentHubRightPanelState = (typeof AGENT_HUB_RIGHT_PANEL_STATES)[number];
 
@@ -31,6 +32,8 @@ export interface AgentHubRightPanelContext {
   nodeId?: string | null;
   // SIGNAL_DETAIL: signalId
   signalId?: string | null;
+  // PTY_TERMINAL: ptyId
+  ptyId?: string | null;
 }
 
 // Node type（节点类型）and status（运行状态）
