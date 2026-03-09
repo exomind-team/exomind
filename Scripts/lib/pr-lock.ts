@@ -317,8 +317,21 @@ export class PRLockManager {
     if (conflictCheck.hasConflict) {
       // 发现竞争，主动放弃
       console.log(`[PRLock] Race condition detected! ${conflictCheck.winner} won, ${conflictCheck.loser} backing off`);
+
+      // 败者需要将自己的锁元数据标记为 released: true
+      // 避免污染后续的 checkLock() 判定
+      if (commentId) {
+        console.log(`[PRLock] Marking loser's lock metadata as released (comment ${commentId})`);
+        const releasedLock: LockMetadata = {
+          ...lock,
+          released: true,
+          released_at: new Date().toISOString()
+        };
+        await this.updateLockCommentWithRelease(prNumber, commentId, releasedLock);
+      }
+
       // 注意：败者不应移除锁标签，标签由赢家持有
-      // 败者只需要创建一个说明评论
+      // 败者创建一个说明评论
       await this.createComment(prNumber,
         `🔓 **锁竞争检测**\n\n` +
         `检测到多个 Agent 同时尝试获取锁：\n` +
@@ -449,11 +462,27 @@ export class PRLockManager {
       return null;
     }
 
-    // 2. 查找最新的锁元数据 Comment
+    // 2. 查找最新的有效锁元数据 Comment（过滤掉已释放的锁）
     const comments = await this.getComments(prNumber);
     const lockComment = comments
       .reverse()  // 从最新开始
-      .find((c: any) => c.body?.includes('<!-- LOCK_METADATA'));
+      .find((c: any) => {
+        if (!c.body?.includes('<!-- LOCK_METADATA')) {
+          return false;
+        }
+        // 解析元数据，检查是否已释放
+        const match = c.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/);
+        if (!match) {
+          return false;
+        }
+        try {
+          const metadata: LockMetadata = JSON.parse(match[1]);
+          // 过滤掉已释放的锁
+          return !metadata.released;
+        } catch (e) {
+          return false;
+        }
+      });
 
     if (!lockComment) {
       console.warn(`[PRLock] PR #${prNumber} has lock label but no metadata comment (orphaned lock)`);
@@ -609,7 +638,7 @@ export class PRLockManager {
     return JSON.parse(result).comments;
   }
 
-  private async createComment(prNumber: number, body: string): Promise<void> {
+  private async createComment(prNumber: number, body: string): Promise<number | undefined> {
     // 使用临时文件避免 shell 转义问题
     const tempDir = '.exomind/temp';
     try {
@@ -620,7 +649,13 @@ export class PRLockManager {
     const tmpFile = `${tempDir}/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
     await Bun.write(tmpFile, body);
     try {
-      this.gh(`issue comment ${prNumber} --body-file ${tmpFile}`);
+      // gh issue comment 返回评论 URL，格式：https://github.com/owner/repo/issues/123#issuecomment-456789
+      const output = this.gh(`issue comment ${prNumber} --body-file ${tmpFile}`);
+      const match = output.match(/#issuecomment-(\d+)/);
+      if (match) {
+        return parseInt(match[1], 10);
+      }
+      return undefined;
     } finally {
       execSync(`rm -f ${tmpFile}`, { stdio: 'ignore' });
     }
@@ -658,6 +693,10 @@ export class PRLockManager {
    * - detectConflict 只能看到最终那一份元数据
    * - 总是创建新评论，确保每个 Agent 都有独立的锁记录
    *
+   * 修复 comment_id 归属竞态：
+   * - 通过 createComment 返回值直接获取评论 ID
+   * - 避免"取最新评论"导致的 ID 错配
+   *
    * 返回评论 ID
    */
   private async updateLockComment(prNumber: number, lock: LockMetadata): Promise<number | undefined> {
@@ -678,12 +717,8 @@ export class PRLockManager {
 
     // 总是创建新评论（不复用旧评论）
     console.log(`[PRLock] Creating new lock comment for ${lock.agent_id}`);
-    await this.createComment(prNumber, body);
-
-    // 获取刚创建的评论 ID
-    const updatedComments = await this.getComments(prNumber);
-    const newComment = updatedComments[updatedComments.length - 1];
-    return newComment?.id;
+    const commentId = await this.createComment(prNumber, body);
+    return commentId;
   }
 
   /**
