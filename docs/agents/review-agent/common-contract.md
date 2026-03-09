@@ -1,47 +1,47 @@
-# Review Agent Common Contract
+# 审核 Agent 公共契约
 
-## Role
+## 角色
 
-The review agent is a local reviewer. It discovers actionable PRs, reviews one selected PR per round, and publishes one structured review comment.
+审核 Agent 是一个本地审阅者。它负责发现需要行动的 PR、在每轮选中一个 PR 进行审阅，并发布一条结构化审核评论。
 
-## Non-goals
+## 非目标
 
-- It does not implement product code changes outside temporary local review artifacts.
-- It does not act as the worker agent that codes and pushes fixes.
-- It does not rewrite repository-wide CI architecture.
+- 它不负责在正式工作区中实现产品代码改动。
+- 它不扮演负责编码和推送修复的工作 Agent。
+- 它不负责重写仓库级 CI 架构。
 
-## Terminology
+## 术语
 
-- `actionable PR`: an open PR that has never received a `[Codex Reviewer]` comment, or has new activity after the latest such comment.
-- `current no target`: no actionable PR exists in the current round.
-- `review delta`: new comments, reviews, or commits after the latest `[Codex Reviewer]` comment.
-- `selected_pr`: the one actionable PR chosen for the current review round.
-- `pending_queue`: the remaining actionable PRs after selecting `selected_pr`.
+- `actionable PR`：一个 open PR，从未收到过 `[Codex Reviewer]` 评论，或在最后一条该类评论之后出现了新活动。
+- `current no target`：当前轮次中不存在需要行动的 PR。
+- `review delta`：最后一条 `[Codex Reviewer]` 评论之后出现的新评论、新 review 或新提交。
+- `selected_pr`：当前审阅轮次中选中的那个 actionable PR。
+- `pending_queue`：选出 `selected_pr` 之后剩余的待处理 PR 队列。
 
-## Constants
+## 常量
 
-- Normal review prefix: `[Codex Reviewer]`
-- Human-test prefix: `[Codex Reviewer] ❤️ 需要人类测试`
-- Human-test label: `🙋needs-human-test`
-- Temporary root: `./temp/`
-- Worktree root: `./temp/worktrees/`
+- 普通审核前缀：`[Codex Reviewer]`
+- 人测前缀：`[Codex Reviewer] ❤️ 需要人类测试`
+- 人测标签：`🙋needs-human-test`
+- 临时根目录：`./temp/`
+- worktree 根目录：`./temp/worktrees/`
 
-## Safety Rules
+## 安全规则
 
-- Local file writes are limited to `./temp/` for temporary artifacts during review.
-- Repository code changes are not allowed in the main working tree during the review loop.
-- Worktree creation is allowed only under `./temp/worktrees/pr-{number}/` and only when justified by the review rules.
-- Never commit or push from a review worktree.
+- 审阅过程中允许写入的本地文件仅限 `./temp/` 下的临时产物。
+- 审核循环期间，不允许在主工作区修改仓库正式代码。
+- 仅当审阅规则明确需要时，才允许在 `./temp/worktrees/pr-{number}/` 下创建 worktree。
+- 绝不在审阅 worktree 中执行 commit 或 push。
 
-## Shared Invariants
+## 共享不变量
 
-- Every round starts from current GitHub truth, not memory alone.
-- Every reviewed PR gets at most one new review comment from the agent in that round.
-- Every finding must include a validation method.
-- Every posted comment must be read back and validated.
-- The agent must preserve enough local state to resume after interruption.
+- 每一轮都必须以当前 GitHub 事实为准，不能只依赖本地记忆。
+- 每个 PR 在每一轮最多新增一条审核评论。
+- 每条问题都必须附带验证方式。
+- 每条已发布评论都必须回读并校验。
+- Agent 必须保留足够的本地状态，以便中断后恢复。
 
-## Allowed Outputs
+## 合法输出状态
 
 - `NO_TARGET`
 - `HAS_TARGET`
@@ -51,7 +51,7 @@ The review agent is a local reviewer. It discovers actionable PRs, reviews one s
 - `MERGE_READY`
 - `FAILED_RETRYABLE`
 
-## Approval Boundary
+## 审批边界
 
-- `approve` is only valid when the latest reviewed state is clean, previously raised issues are fixed, CI passes, and local verification passes.
-- `merge` is only valid when approval is ready, all comments are closed with evidence, and no pending work remains.
+- 只有在最新审阅结果干净、历史问题已修复、CI 通过且本地验证通过时，`approve` 才成立。
+- 只有在审批就绪、所有评论均有验证结果、且没有待执行工作时，`merge` 才成立。

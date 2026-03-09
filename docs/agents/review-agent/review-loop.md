@@ -1,84 +1,84 @@
-# Review Loop
+# 审阅循环
 
-## Inputs
+## 输入
 
-- `selected_pr` from the discovery loop
-- PR body and metadata
-- related issues and sub-issues
+- 来自 discovery 阶段的 `selected_pr`
+- PR body 与元数据
+- 关联 issue 与子 issue
 - PR diff
-- optional local worktree when justified
+- 在规则允许时可选使用本地 worktree
 
-## Issue Context Collection
+## Issue 上下文收集
 
-1. Read the PR description.
-2. Parse referenced issue ids from `refs`, `closes`, and `fixes`.
-3. Read each referenced issue body and comments.
-4. Read child issues up to two levels deep.
-5. De-duplicate repeated issue ids before reading.
+1. 读取 PR 描述。
+2. 解析 `refs`、`closes`、`fixes` 中引用的 issue id。
+3. 读取每个关联 issue 的 body 与评论。
+4. 读取最多两层的子 issue。
+5. 在读取前先对重复 issue id 去重。
 
-## Diff Triage
+## Diff 分流
 
-- If the diff is `<= 5` files and `<= 100` changed lines, review the full diff.
-- Otherwise review in this priority order:
-  - newly added files
-  - test files
-  - files whose names or paths indicate `service`, `controller`, or `model`
-  - all remaining files
+- 若 diff 满足 `<= 5` 文件且 `<= 100` 变更行，则进行全量审阅。
+- 否则按以下优先级审阅：
+  - 新增文件
+  - 测试文件
+  - 文件名或路径含 `service`、`controller`、`model` 的文件
+  - 其余文件
 
-For large PRs, the review comment must explicitly say that this round used priority review rather than full review.
+对于大 PR，审核评论必须显式说明本轮使用的是优先级审阅，而不是全量审阅。
 
-## Review Depth Rules
+## 审阅深度规则
 
-The review must compare:
+审阅必须同时对照：
 
-- PR description
-- issue requirements
-- actual code changes
+- PR 描述
+- issue 需求
+- 实际代码变更
 
-It must answer:
+必须回答：
 
-- Does the code implement the stated PR scope?
-- Does it satisfy the issue requirement?
-- Is there an obvious omission, regression, or mismatch?
+- 代码是否实现了 PR 声称的范围？
+- 代码是否满足 issue 需求？
+- 是否存在明显遗漏、回归或不匹配？
 
-## Alignment Check
+## 对齐检查
 
-The review should explicitly call out:
+审阅时应明确指出：
 
-- scope mismatch
-- missing tests
-- risky assumptions
-- security or data-loss paths
-- behavior likely to regress under real usage
+- 范围不匹配
+- 测试缺失
+- 风险假设
+- 安全或数据丢失路径
+- 在真实使用中可能回归的行为
 
-## Finding Format
+## 问题格式
 
-Each finding should include:
+每条问题都应包含：
 
-- what is wrong
-- where it is located
-- why it matters
-- how to validate it
-- what the next step should be
+- 问题是什么
+- 定位在哪里
+- 为什么重要
+- 如何验证
+- 下一步建议是什么
 
-## When To Use Worktree
+## 何时使用工作树（Worktree）
 
-Create or reuse `./temp/worktrees/pr-{number}/` only when:
+仅在以下场景才创建或复用 `./temp/worktrees/pr-{number}/`：
 
-- local tests or builds must be run
-- cross-file references need to be checked reliably
+- 必须运行本地测试或构建
+- 必须可靠地检查跨文件引用关系
 
-Inside the worktree:
+在 worktree 内：
 
-- reading files is allowed
-- running tests and builds is allowed
-- modifying code for local validation is allowed
-- commit and push are not allowed
+- 允许读取文件
+- 允许运行测试和构建
+- 允许为本地验证而修改代码
+- 不允许 commit 或 push
 
-## Exit States
+## 退出状态
 
-- `REVIEW_POSTED`: one review comment was published successfully
-- `NEEDS_HUMAN_TEST`: human validation is required
-- `APPROVE_READY`: local review is clean and all gates pass
-- `MERGE_READY`: all merge conditions are satisfied
-- `FAILED_RETRYABLE`: transient failure, safe to retry
+- `REVIEW_POSTED`：审核评论已成功发布
+- `NEEDS_HUMAN_TEST`：需要人类验证
+- `APPROVE_READY`：本地审核结论干净，且门禁全部通过
+- `MERGE_READY`：所有合并条件满足
+- `FAILED_RETRYABLE`：暂时性失败，可重试

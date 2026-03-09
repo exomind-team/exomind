@@ -1,8 +1,8 @@
-# State Files And Worktrees
+# 状态文件与工作树（Worktree）
 
-## Directory Layout
+## 目录结构
 
-Recommended state layout under `./temp/`:
+建议在 `./temp/` 下使用如下状态布局：
 
 ```text
 temp/
@@ -16,83 +16,83 @@ temp/
     pr-<number>/
 ```
 
-## State Schema
+## 状态结构
 
 ### `state.json`
 
-- current loop state
-- selected PR number
-- last successful round timestamp
-- failure streak
+- 当前循环状态
+- 当前选中的 PR 编号
+- 最近一次成功轮次的时间戳
+- 连续失败次数
 
 ### `queue.json`
 
-- ordered `actionable_prs`
-- current `pending_queue`
+- 有序的 `actionable_prs`
+- 当前 `pending_queue`
 
 ### `backoff.json`
 
-- current sleep seconds
-- consecutive no-change rounds
+- 当前 sleep 秒数
+- 连续无变化轮次
 
 ### `cursor.json`
 
-- last handled `[Codex Reviewer]` comment timestamp per PR
-- last seen commit SHA per PR
-- last handled comment or review id per PR
+- 每个 PR 上最后处理的 `[Codex Reviewer]` 评论时间戳
+- 每个 PR 上最后看到的 commit SHA
+- 每个 PR 上最后处理的 comment 或 review id
 
-## Cursor Rules
+## 游标规则
 
-- Update cursors only after a successful round.
-- Do not advance cursors when review publishing fails.
-- Keep enough cursor data to avoid duplicate review comments after restart.
+- 仅在成功轮次结束后更新游标。
+- 若评论发布失败，不要推进游标。
+- 必须保留足够的游标数据，以避免重启后重复发审核评论。
 
-## Backoff State
+## 退避状态
 
-- initialize at 180 seconds
-- double on consecutive no-change rounds
-- cap at 1800 seconds
-- reset to 180 when any actionable PR appears
+- 初始值为 180 秒
+- 连续无变化轮次时翻倍
+- 上限为 1800 秒
+- 一旦发现待处理 PR，立即重置为 180 秒
 
-## Worktree Lifecycle
+## 工作树（Worktree）生命周期
 
-### Create
+### 创建
 
-Create `./temp/worktrees/pr-{number}/` only when review-loop rules justify it.
+只有在 review-loop 规则明确需要时，才创建 `./temp/worktrees/pr-{number}/`。
 
-### Reuse
+### 复用
 
-Reuse an existing PR worktree when:
+满足以下条件时复用已有 PR worktree：
 
-- it points to the same PR head context
-- it is still readable and usable
+- 它仍指向相同的 PR head 上下文
+- 它仍可正常读取和使用
 
-### Keep
+### 保留
 
-Keep the worktree after a review round if the PR is still open and more validation may be needed.
+若 PR 仍处于 open 状态，且后续可能继续做本地验证，则保留该 worktree。
 
-### Remove
+### 删除
 
-Remove the worktree only after the PR is merged or clearly obsolete.
+只有在 PR 已合并，或该 worktree 明确过时无用时，才删除它。
 
-## Cleanup Rules
+## 清理规则
 
-At the end of a review round:
+在一次审阅轮次结束时：
 
-- clean temporary drafts under `./temp/pr-monitor/drafts/` when no longer needed
-- preserve queue and cursor state
-- preserve relevant PR worktrees
+- 清理 `./temp/pr-monitor/drafts/` 下不再需要的临时草稿
+- 保留队列与游标状态
+- 保留相关 PR worktree
 
-At the end of a no-target round:
+在一次“当前无目标”轮次结束时：
 
-- check for merged PR worktrees and remove them
-- persist backoff state before sleeping
+- 检查已合并 PR 的 worktree 并删除
+- 在进入 sleep 前持久化 backoff 状态
 
-## Recovery After Restart
+## 重启恢复
 
-On restart:
+重启后应：
 
-1. read `state.json`, `queue.json`, `backoff.json`, and `cursor.json`
-2. verify the selected PR is still open
-3. verify pending queue entries are still open
-4. resume from current GitHub truth, not blindly from saved local state
+1. 读取 `state.json`、`queue.json`、`backoff.json` 与 `cursor.json`
+2. 校验 `selected_pr` 仍然处于 open 状态
+3. 校验 `pending_queue` 中的 PR 仍然处于 open 状态
+4. 基于当前 GitHub 事实恢复，而不是盲目依赖本地旧状态

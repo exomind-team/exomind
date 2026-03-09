@@ -1,27 +1,27 @@
-# Review Agent Docs
+# 审核 Agent 文档
 
-## Purpose
+## 目的
 
-This document set defines the local review-agent loop that scans open PRs, selects actionable targets, reviews them, and publishes one structured review comment per round.
+这组文档定义了本地审核 Agent 的循环协议：扫描 open PR、找出需要行动的目标、选择一个 PR 进入审阅，并在每一轮只发布一条结构化审核评论。
 
-This doc set is intentionally narrower than the repository-wide PR automation discussion. It is written for the local `gh`-driven review loop and its downstream handoff.
+这组文档刻意收窄在本地 `gh` 驱动的审核循环与其下游交接，不展开到仓库级 PR 自动化总设计。
 
-## Scope Boundary
+## 范围边界
 
-- In scope:
-  - discover actionable PRs from open PRs
-  - select one PR from the actionable queue
-  - collect PR and issue context for review
-  - publish one review comment per PR per round
-  - maintain local state in `./temp/`
-- Out of scope:
-  - worker-agent coding flow
-  - branch implementation locks
-  - repository-wide CI architecture redesign
+- 范围内：
+  - 从 open PR 中识别需要行动的 PR
+  - 从待处理队列中选出一个当前目标 PR
+  - 收集该 PR 的审阅上下文
+  - 每轮每个 PR 发布一条审核评论
+  - 在 `./temp/` 中维护本地状态
+- 范围外：
+  - 工作 Agent 的编码执行流
+  - 分支实现锁
+  - 仓库级 CI 架构重构
 
-## Reading Order
+## 阅读顺序
 
-Read these files in order:
+按以下顺序阅读：
 
 1. `docs/agents/review-agent/common-contract.md`
 2. `docs/agents/review-agent/discovery-loop.md`
@@ -29,90 +29,90 @@ Read these files in order:
 4. `docs/agents/review-agent/review-loop.md`
 5. `docs/agents/review-agent/comment-policy-and-templates.md`
 
-## Loop Overview
+## 循环总览
 
-The review agent runs as a two-stage state machine:
+审核 Agent 以两阶段状态机运行：
 
-- Stage A `Discovery`: scan open PRs and build an actionable queue.
-- Stage B `Review`: read context for the selected PR, perform review, and publish exactly one review comment for that round.
+- 阶段 A（`Discovery`）：扫描 open PR 并构建待处理队列。
+- 阶段 B（`Review`）：读取当前选中 PR 的上下文，执行审阅，并为该轮发布恰好一条审核评论。
 
-## Flow Preview
+## 流程预览
 
 ```text
 ┌─────────────────────────────────────────────────────────────────────┐
-│                Review Agent Loop (Preview)                         │
+│                 审核 Agent 循环（预览）                            │
 └─────────────────────────────────────────────────────────────────────┘
 
-  [Loop Start]
+  [循环开始]
         |
         v
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Load Contracts + State                                             │
-│ - read AGENTS.md                                                   │
-│ - read review-agent contracts                                      │
-│ - read ./temp/ queue / cursor / backoff / selected_pr              │
+│ 载入契约与状态                                                      │
+│ - 读取 AGENTS.md                                                   │
+│ - 读取 review-agent 契约文档                                       │
+│ - 读取 ./temp/ 队列 / 游标 / 退避 / selected_pr                    │
 └─────────────────────────────────────────────────────────────────────┘
         |
         v
 ┌─────────────────────────────────────────────────────────────────────┐
-│ Stage A: Discovery                                                 │
-│ - gh pr list --state open (sorted by updatedAt)                    │
-│ - for each PR:                                                     │
-│   * find last [Codex Reviewer] comment                             │
-│   * compare later comments / reviews / commits                     │
-│ - build actionable PR queue                                        │
+│ 阶段 A：发现                                                       │
+│ - gh pr list --state open（按 updatedAt 排序）                     │
+│ - 对每个 PR：                                                      │
+│   * 找最后一条 [Codex Reviewer] 评论                               │
+│   * 比较其后的 comments / reviews / commits                        │
+│ - 构建待处理 PR 队列                                               │
 └─────────────────────────────────────────────────────────────────────┘
         |
         +-------------------------------+
         |                               |
-        | queue empty                   | queue not empty
+        | 队列为空                      | 队列非空
         v                               v
 ┌──────────────────────────────┐   ┌─────────────────────────────────┐
-│ No Target                    │   │ Select PR                      │
-│ - cleanup merged worktrees   │   │ - choose next actionable PR    │
-│ - compute backoff            │   │ - persist selected_pr          │
-│ - sleep                      │   │ - persist pending_queue        │
+│ 当前无目标                   │   │ 选中 PR                        │
+│ - 清理已合并 worktree        │   │ - 选出下一个待处理 PR          │
+│ - 计算退避                  │   │ - 持久化 selected_pr           │
+│ - sleep                      │   │ - 持久化 pending_queue         │
 └──────────────────────────────┘   └─────────────────────────────────┘
         |                               |
         |                               v
         |                    ┌──────────────────────────────────────┐
-        |                    │ Stage B: Review                      │
-        |                    │ - read PR body                       │
-        |                    │ - parse refs/closes/fixes            │
-        |                    │ - read issue / sub-issue context     │
-        |                    │ - inspect diff                       │
-        |                    │ - full review or priority review     │
-        |                    │ - build findings + validation        │
+        |                    │ 阶段 B：审阅                         │
+        |                    │ - 读取 PR body                       │
+        |                    │ - 解析 refs/closes/fixes            │
+        |                    │ - 读取 issue / 子 issue 上下文       │
+        |                    │ - 检查 diff                          │
+        |                    │ - 全量审阅或优先级审阅               │
+        |                    │ - 形成问题与验证方式                 │
         |                    └──────────────────────────────────────┘
         |                               |
         |                               v
         |                    ┌──────────────────────────────────────┐
-        |                    │ Publish 1 Review Comment             │
+        |                    │ 发布 1 条审核评论                    │
         |                    │ - [Codex Reviewer]                   │
-        |                    │ - or needs-human-test comment        │
-        |                    │ - read back and validate             │
+        |                    │ - 或需要人类测试评论                │
+        |                    │ - 回读并校验                         │
         |                    └──────────────────────────────────────┘
         |                               |
         +-------------------------------+
                                         |
                                         v
                          ┌──────────────────────────────────────────┐
-                         │ Persist State + Next Loop                │
-                         │ - update cursor / queue / backoff        │
-                         │ - cleanup temp files                     │
-                         │ - go back to Loop Start                  │
+                         │ 持久化状态并进入下一轮                   │
+                         │ - 更新 cursor / queue / 退避            │
+                         │ - 清理临时文件                          │
+                         │ - 回到循环开始                          │
                          └──────────────────────────────────────────┘
 ```
 
-## State Flow
+## 状态流转
 
-- `NO_TARGET`: no actionable PRs were found in the current scan.
-- `HAS_TARGET`: at least one actionable PR exists and one PR is selected.
-- `REVIEW_POSTED`: the selected PR was reviewed and one comment was posted.
-- `NEEDS_HUMAN_TEST`: the selected PR needs human verification and the agent should not try to auto-resolve it.
-- `FAILED_RETRYABLE`: the current round failed but should be retried later.
+- `NO_TARGET`：本轮扫描未发现需要行动的 PR。
+- `HAS_TARGET`：本轮存在至少一个需要行动的 PR，并已选中一个目标。
+- `REVIEW_POSTED`：当前目标 PR 已完成审阅并发布评论。
+- `NEEDS_HUMAN_TEST`：当前目标 PR 需要人类验证，Agent 不应继续尝试自动收口。
+- `FAILED_RETRYABLE`：本轮失败，但属于可重试失败。
 
-## Issue Mapping
+## Issue 映射
 
-- Issue `#450` covers Stage A `Discovery` and the state handoff needed to make it stable.
-- Downstream review depth, comment policy, and approval gates are documented here because Stage A must hand off into them cleanly.
+- Issue `#450` 覆盖阶段 A（`Discovery`）以及让它稳定运行所需的状态交接。
+- 这里同时记录下游审阅深度、评论策略和审批门禁，是为了让阶段 A 的输出能够稳定衔接到下游。

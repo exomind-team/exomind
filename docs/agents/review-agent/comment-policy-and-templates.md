@@ -1,110 +1,110 @@
-# Comment Policy And Templates
+# 评论策略与模板
 
-## Comment Types
+## 评论类型
 
-- Normal review comment
-- No-issue confirmation comment
-- Needs-human-test comment
-- Inline quoted reply within the same comment
+- 普通审核评论
+- 无问题确认评论
+- 需要人类测试评论
+- 同一条评论中的引用回复
 
-## Normal Review Template
+## 普通审核模板
 
-Use `[Codex Reviewer]` as the prefix.
+使用 `[Codex Reviewer]` 作为前缀。
 
-Suggested structure:
+建议结构：
 
-1. Conclusion
-2. Findings
-3. Validation
-4. Next step
+1. 结论
+2. 问题
+3. 验证方式
+4. 下一步
 
-## No-Issue Template
+## 无问题模板
 
-Use a short confirmation when no problems are found.
+在未发现问题时使用简短确认。
 
-Example:
+示例：
 
 ```text
 [Codex Reviewer] 已审阅最新变更，未发现问题。
 ```
 
-## Needs-Human-Test Template
+## 需要人类测试模板
 
-Use `[Codex Reviewer] ❤️ 需要人类测试` as the prefix.
+使用 `[Codex Reviewer] ❤️ 需要人类测试` 作为前缀。
 
-The comment must include:
+评论必须包含：
 
-- why machine review is insufficient
-- what human should test
-- how to test it
-- what counts as pass or fail
-- confirmation that label `🙋needs-human-test` was added
+- 为什么机器审阅不足以完成判断
+- 人类需要测试什么
+- 应如何测试
+- 什么结果算通过，什么算失败
+- 已添加 `🙋needs-human-test` 标签的确认
 
-## Reply Style
+## 回复风格
 
-If the comment needs to answer multiple earlier remarks, keep all replies in one comment.
+若需要回应多条已有意见，必须合并在同一条评论中。
 
-Quote format:
+引用格式：
 
 ```text
 > 原文关键句
 ```
 
-Then provide:
+然后提供：
 
-- analysis
-- validation
-- next step
+- 分析
+- 验证方式
+- 下一步建议
 
-## Readback Validation
+## 回读校验
 
-After posting a comment, read it back and check:
+评论发布后，必须回读并检查：
 
-- prefix is valid
-- no suspicious long question-mark sequence
-- no unescaped `\n`
-- language matches the PR language
+- 前缀是否合法
+- 是否存在可疑的连续问号乱码
+- 是否存在未转义的 `\n`
+- 语言是否与 PR 一致
 
-If the comment fails validation:
+若评论未通过校验：
 
-- write a corrected draft under `./temp/`
-- edit the comment via `gh api`
-- validate again
+- 先将修正版草稿写入 `./temp/`
+- 再通过 `gh api` 编辑评论
+- 编辑后重新校验
 
-## Language Policy
+## 语言策略
 
-Use the PR's primary language.
+使用 PR 的主语言。
 
-Recommended signal order:
+推荐判定顺序：
 
-- PR title language
-- PR body language
-- existing discussion language
+- PR 标题语言
+- PR body 语言
+- 现有讨论语言
 
-Do not switch language mid-comment without reason.
+没有充分理由时，不要在同一条评论中随意切换语言。
 
-## Label Policy
+## 标签策略
 
-Add `🙋needs-human-test` only when machine review cannot safely validate the required behavior.
+只有在机器审阅无法安全验证目标行为时，才添加 `🙋needs-human-test`。
 
-Do not add that label for purely speculative concerns.
+不要因为纯推测性担忧就添加该标签。
 
-## Approval And Merge Gates
+## 审批与合并门禁
 
-### Approve
+### 批准（approve）
 
-All must be true:
+必须同时满足：
 
-- no current blocking findings
-- previously raised findings are fixed
-- CI passes
-- local verification passes
+- 当前无阻塞问题
+- 先前提出的问题均已修复
+- CI 通过
+- 本地验证通过
 
-### Merge
+### 合并（merge）
 
-All must be true:
+必须同时满足：
 
-- approve conditions already satisfied
-- every review item has a verification result
-- no pending work remains
-- no `🙋needs-human-test` label remains active
+- approve 条件已经满足
+- 每个审阅项都有验证结果
+- 没有剩余待执行工作
+- 不再存在有效的 `🙋needs-human-test` 标签
