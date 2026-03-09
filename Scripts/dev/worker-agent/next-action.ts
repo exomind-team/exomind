@@ -283,20 +283,20 @@ export function determineNextAction(input: NextActionInput): NextActionResult {
     };
   }
 
-  if (input.git.hasChanges) {
-    return {
-      action: 'implement-next-change',
-      continueAfterAction: true,
-      reason: 'The worktree has local modifications and no higher-priority blockers remain.',
-      notes,
-    };
-  }
-
   if (input.git.aheadCount > 0) {
     return {
       action: 'commit-and-push',
       continueAfterAction: true,
       reason: `The current branch is ahead of its upstream by ${input.git.aheadCount} commit(s).`,
+      notes,
+    };
+  }
+
+  if (input.git.hasChanges) {
+    return {
+      action: 'commit-and-push',
+      continueAfterAction: true,
+      reason: 'The worktree has local modifications and should move into the verification/commit/push step.',
       notes,
     };
   }

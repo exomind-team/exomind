@@ -187,7 +187,7 @@ describe('worker-agent next-action', () => {
     expect(result.action).toBe('commit-and-push');
   });
 
-  it('keeps implementing local changes when the worktree is dirty and no blockers remain', () => {
+  it('moves dirty local changes into commit-and-push when no blockers remain', () => {
     const result = determineNextAction(
       makeInput({
         git: {
@@ -197,7 +197,8 @@ describe('worker-agent next-action', () => {
       }),
     );
 
-    expect(result.action).toBe('implement-next-change');
+    expect(result.action).toBe('commit-and-push');
+    expect(result.reason).toMatch(/local modifications/i);
   });
 
   it('raises dissent when the worker has flagged a state-machine mismatch', () => {
