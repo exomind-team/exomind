@@ -56,16 +56,44 @@ export class RealGitHubAPI implements IGitHubAPI {
   }
 
   async createComment(prNumber: number, body: string): Promise<number> {
-    const result = this.gh(`pr comment ${prNumber} --body "${this.escapeBody(body)}"`);
-    const match = result.match(/\/(\d+)$/);
-    if (!match) {
-      throw new Error('Failed to extract comment ID from gh output');
+    // 使用临时文件避免 shell 转义破坏换行符
+    const fs = await import('fs');
+    const tempFile = `.exomind/temp/comment-${Date.now()}.txt`;
+    fs.writeFileSync(tempFile, body, 'utf-8');
+
+    try {
+      const result = this.gh(`pr comment ${prNumber} --body-file "${tempFile}"`);
+      const match = result.match(/\/(\d+)$/);
+      if (!match) {
+        throw new Error('Failed to extract comment ID from gh output');
+      }
+      return parseInt(match[1]);
+    } finally {
+      // 清理临时文件
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (e) {
+        // 忽略删除失败
+      }
     }
-    return parseInt(match[1]);
   }
 
   async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
-    this.gh(`api -X PATCH "/repos/${this.repo}/issues/comments/${commentId}" -f body="${this.escapeBody(body)}"`);
+    // 使用临时文件避免 shell 转义破坏换行符
+    const fs = await import('fs');
+    const tempFile = `.exomind/temp/comment-${Date.now()}.txt`;
+    fs.writeFileSync(tempFile, body, 'utf-8');
+
+    try {
+      this.gh(`api -X PATCH "/repos/${this.repo}/issues/comments/${commentId}" -F body=@"${tempFile}"`);
+    } finally {
+      // 清理临时文件
+      try {
+        fs.unlinkSync(tempFile);
+      } catch (e) {
+        // 忽略删除失败
+      }
+    }
   }
 
   async getComments(prNumber: number): Promise<Array<{ id: number; body: string; createdAt: string }>> {
@@ -84,9 +112,5 @@ export class RealGitHubAPI implements IGitHubAPI {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe']
     });
-  }
-
-  private escapeBody(body: string): string {
-    return body.replace(/"/g, '\\"').replace(/\n/g, '\\n');
   }
 }
