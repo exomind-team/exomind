@@ -28,6 +28,7 @@ export class CursorAgentService {
   }
 
   startEventLogging(): void {
+    if (this.unsubscribe) return; // already started
     this.unsubscribe = this.cursorPort.subscribe((event) => {
       void this.logEvent(event);
     });
