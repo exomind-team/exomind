@@ -53,6 +53,13 @@
 - 代码是否满足 issue 需求？
 - 是否存在明显遗漏、回归或不匹配？
 
+## CI 归因规则
+
+- review-loop 在决定 `approve` / `merge-ready` 前，必须把当前 PR 的失败检查与基分支最新检查结果对比。
+- 基分支已经同名失败的检查属于 inherited failure，本身不构成阻塞。
+- 当前 PR 新引入的失败检查、或归因不明的失败检查，属于 blocking failure。
+- 若当前 PR 直接修改了 CI workflow、构建链、依赖安装、类型检查基线或测试入口，CI 归因必须更保守；无法证明“不是本分支引入”时，按 blocking failure 处理。
+
 ## 对齐检查
 
 审阅时应明确指出：

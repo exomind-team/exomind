@@ -99,7 +99,8 @@
 
 - 当前无阻塞问题
 - 先前提出的问题均已修复
-- CI 通过
+- 不存在当前分支新引入或归因不明的 CI 失败
+- 若某个失败检查已经在基分支最新检查结果中同名失败，则它属于 inherited failure，不单独阻塞 `approve`
 - 本地验证通过
 - 当前 PR 上不存在 `🙋needs-human-test`
 - 审阅动作层显式收到 `CI = passed` 与 `local verification = passed` 的门禁输入；缺失一项也视为不满足
