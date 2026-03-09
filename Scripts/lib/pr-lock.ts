@@ -183,7 +183,9 @@ export class PRLockManager {
     };
 
     try {
-      await Bun.write(lockFile, JSON.stringify(lockState, null, 2));
+      // Node/Bun 兼容：使用 fs.writeFileSync
+      const fs = await import('fs');
+      fs.writeFileSync(lockFile, JSON.stringify(lockState, null, 2), 'utf-8');
       console.log(`[PRLock] Lock state saved to ${lockFile}`);
     } catch (e) {
       console.warn('[PRLock] Failed to save lock state:', e);
@@ -197,12 +199,14 @@ export class PRLockManager {
     const lockFile = '.exomind/lock-state.json';
 
     try {
-      const file = Bun.file(lockFile);
-      if (!(await file.exists())) {
+      // Node/Bun 兼容：使用 fs.existsSync 和 fs.readFileSync
+      const fs = await import('fs');
+      if (!fs.existsSync(lockFile)) {
         return null;
       }
 
-      const lockState = await file.json() as LockState;
+      const content = fs.readFileSync(lockFile, 'utf-8');
+      const lockState = JSON.parse(content) as LockState;
       return lockState;
     } catch (e) {
       console.warn('[PRLock] Failed to load lock state:', e);
@@ -241,7 +245,9 @@ export class PRLockManager {
 
     const lockFile = '.exomind/lock-state.json';
     try {
-      await Bun.write(lockFile, JSON.stringify(lockState, null, 2));
+      // Node/Bun 兼容：使用 fs.writeFileSync
+      const fs = await import('fs');
+      fs.writeFileSync(lockFile, JSON.stringify(lockState, null, 2), 'utf-8');
       console.log('[PRLock] Lock state updated');
     } catch (e) {
       console.warn('[PRLock] Failed to update lock state:', e);
@@ -647,7 +653,11 @@ export class PRLockManager {
       console.warn('[PRLock] Failed to create temp directory:', e);
     }
     const tmpFile = `${tempDir}/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
-    await Bun.write(tmpFile, body);
+
+    // Node/Bun 兼容：使用 fs.writeFileSync
+    const fs = await import('fs');
+    fs.writeFileSync(tmpFile, body, 'utf-8');
+
     try {
       // gh issue comment 返回评论 URL，格式：https://github.com/owner/repo/issues/123#issuecomment-456789
       const output = this.gh(`issue comment ${prNumber} --body-file ${tmpFile}`);
@@ -673,7 +683,11 @@ export class PRLockManager {
       console.warn('[PRLock] Failed to create temp directory:', e);
     }
     const tmpFile = `${tempDir}/pr-lock-comment-${Date.now()}-${Math.random().toString(36).substr(2, 9)}.md`;
-    await Bun.write(tmpFile, body);
+
+    // Node/Bun 兼容：使用 fs.writeFileSync
+    const fs = await import('fs');
+    fs.writeFileSync(tmpFile, body, 'utf-8');
+
     try {
       // 使用 -F body=@file 让 gh CLI 自动处理 JSON 封装
       execSync(`gh api repos/${this.repo}/issues/comments/${commentId} -X PATCH -F body=@${tmpFile}`, {
