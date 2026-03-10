@@ -104,6 +104,7 @@ describe('VoiceOverlayPage', () => {
           state: 'recording',
           duration: 3,
           text: longText,
+          activationMs: 420,
           isLivePreview: true,
           providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
         },
@@ -113,9 +114,12 @@ describe('VoiceOverlayPage', () => {
     expect(screen.getByText(longText)).toBeInTheDocument();
     expect(screen.getByText('火山 2.0 小时版 · 双向流式优化版（推荐）')).toBeInTheDocument();
     expect(
-      screen.getByText((_, element) => element?.textContent === '00:03实时预览 · 再按 Alt+Q 结束 · Esc 取消')
+      screen.getByText((_, element) => element?.textContent === '00:03唤起 0.42s实时预览 · 再按 Alt+Q 结束 · Esc 取消')
     ).toBeInTheDocument();
     expect(screen.getByTestId('voice-overlay-transcript')).toBeInTheDocument();
+    const styleTag = document.querySelector('style');
+    expect(styleTag?.textContent).toContain('.voice-overlay--recording .overlay-transcript .overlay-text');
+    expect(styleTag?.textContent).toContain('color: hsl(var(--brand-accent));');
   });
 
   it('shows finish and cancel shortcut hints while recognizing（识别中显示快捷键提示）', async () => {

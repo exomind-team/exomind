@@ -27,6 +27,7 @@ interface OverlayData {
   hintText?: string;
   isLivePreview?: boolean;
   providerLabel?: string;
+  activationMs?: number;
   recognitionMs?: number;
   errorMessage: string;
 }
@@ -44,6 +45,7 @@ export function VoiceOverlayPage() {
     hintText: '',
     isLivePreview: false,
     providerLabel: '',
+    activationMs: undefined,
     recognitionMs: undefined,
     errorMessage: '',
   });
@@ -170,6 +172,7 @@ export function VoiceOverlayPage() {
             hintText={data.hintText}
             isLivePreview={data.isLivePreview}
             providerLabel={data.providerLabel}
+            activationMs={data.activationMs}
             recognitionMs={data.recognitionMs}
             errorMessage={data.errorMessage}
             transcriptRef={transcriptRef}
@@ -227,6 +230,7 @@ function StatusText({
   hintText,
   isLivePreview,
   providerLabel,
+  activationMs,
   recognitionMs,
   errorMessage,
   transcriptRef,
@@ -239,6 +243,7 @@ function StatusText({
   hintText?: string;
   isLivePreview?: boolean;
   providerLabel?: string;
+  activationMs?: number;
   recognitionMs?: number;
   errorMessage: string;
   transcriptRef: RefObject<HTMLDivElement>;
@@ -279,6 +284,9 @@ function StatusText({
           </div>
           <span className="overlay-status-row overlay-text overlay-text--secondary">
             <span className="overlay-duration">{formatDuration(duration)}</span>
+            {typeof activationMs === 'number' ? (
+              <span className="overlay-activation">{`唤起 ${formatActivationMs(activationMs)}`}</span>
+            ) : null}
             <span>{`${isLivePreview ? '实时预览 · ' : ''}再按 ${shortcut} 结束 · Esc 取消`}</span>
           </span>
         </span>
@@ -342,6 +350,10 @@ function formatDuration(seconds: number): string {
 }
 
 function formatRecognitionMs(milliseconds: number): string {
+  return `${(milliseconds / 1000).toFixed(2)}s`;
+}
+
+function formatActivationMs(milliseconds: number): string {
   return `${(milliseconds / 1000).toFixed(2)}s`;
 }
 
@@ -509,9 +521,18 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css *
     font-variant-numeric: tabular-nums;
   }
 
+  .overlay-activation {
+    font-variant-numeric: tabular-nums;
+  }
+
   .overlay-text--error {
     overflow: hidden;
     text-overflow: ellipsis;
+  }
+
+  .voice-overlay--recording .overlay-transcript .overlay-text,
+  .voice-overlay--recognizing .overlay-transcript .overlay-text {
+    color: hsl(var(--brand-accent));
   }
 
   @keyframes overlay-fade-in {

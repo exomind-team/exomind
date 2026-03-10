@@ -54,6 +54,7 @@ type OverlayEventPayload = {
   hintText?: string;
   isLivePreview: boolean;
   providerLabel: string;
+  activationMs?: number;
   recognitionMs?: number;
   errorMessage: string;
 };
@@ -83,6 +84,8 @@ export class VoiceShortcutService {
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private initializing = false;
   private startPending = false;
+  private activationStartedAt: number | null = null;
+  private latestActivationMs: number | null = null;
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
   private micPrewarmEnabled = getVoiceShortcutMicPrewarmEnabled();
   private livePreviewSource: VoiceLivePreviewSource;
@@ -137,6 +140,13 @@ export class VoiceShortcutService {
         this.handleVolcanoStreamEvent(event.payload);
       });
 
+      if (typeof window !== 'undefined') {
+        window.addEventListener('focus', this.handleAppForeground);
+      }
+      if (typeof document !== 'undefined') {
+        document.addEventListener('visibilitychange', this.handleVisibilityChange);
+      }
+
       void this.prewarmResourcesForProvider();
     } finally {
       this.initializing = false;
@@ -154,6 +164,12 @@ export class VoiceShortcutService {
     this.unlistenProvider = null;
     this.unlistenMicPrewarm?.();
     this.unlistenMicPrewarm = null;
+    if (typeof window !== 'undefined') {
+      window.removeEventListener('focus', this.handleAppForeground);
+    }
+    if (typeof document !== 'undefined') {
+      document.removeEventListener('visibilitychange', this.handleVisibilityChange);
+    }
     void this.syncRecordingActive(false);
     this.stopLivePreview('abort');
     void this.cancelWarmVolcanoSession();
@@ -164,6 +180,36 @@ export class VoiceShortcutService {
 
   getState(): VoiceShortcutState {
     return this.state;
+  }
+
+  private readonly handleAppForeground = (): void => {
+    if (this.startPending || this.state === 'recording' || this.state === 'recognizing') {
+      return;
+    }
+    void this.prewarmResourcesForProvider();
+  };
+
+  private readonly handleVisibilityChange = (): void => {
+    if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
+      return;
+    }
+    this.handleAppForeground();
+  };
+
+  private beginActivationTracking(): void {
+    this.activationStartedAt = Date.now();
+    this.latestActivationMs = null;
+  }
+
+  private completeActivationTracking(): number | undefined {
+    if (this.activationStartedAt == null) {
+      return this.latestActivationMs ?? undefined;
+    }
+
+    const activationMs = Math.max(0, Date.now() - this.activationStartedAt);
+    this.activationStartedAt = null;
+    this.latestActivationMs = activationMs;
+    return activationMs;
   }
 
   private isLiveStream(stream: MediaStream | null): stream is MediaStream {
@@ -313,10 +359,18 @@ export class VoiceShortcutService {
 
     const warmKey = this.getWarmVolcanoSessionKey(config);
     if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey === warmKey) {
-      return this.warmVolcanoSessionId;
+      if (await this.doesVolcanoSessionExist(this.warmVolcanoSessionId)) {
+        return this.warmVolcanoSessionId;
+      }
+      this.clearWarmVolcanoSessionState();
     }
     if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
-      return this.warmVolcanoSessionPromise;
+      const pendingSessionId = await this.warmVolcanoSessionPromise;
+      if (pendingSessionId && await this.doesVolcanoSessionExist(pendingSessionId)) {
+        this.warmVolcanoSessionId = pendingSessionId;
+        return pendingSessionId;
+      }
+      this.clearWarmVolcanoSessionState();
     }
     if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey !== warmKey) {
       await this.cancelWarmVolcanoSession();
@@ -406,6 +460,7 @@ export class VoiceShortcutService {
     this.clearAutoHide();
     this.livePreviewText = '';
     this.startPending = true;
+    this.beginActivationTracking();
     const needsColdStart = this.shouldShowArmingState();
     this.emitOverlayState('arming', {
       duration: 0,
@@ -436,7 +491,9 @@ export class VoiceShortcutService {
       };
 
       recorder.start(100);
-      this.setState('recording');
+      this.setState('recording', {
+        activationMs: this.completeActivationTracking(),
+      });
       this.startLivePreview('zh-CN');
       void this.syncRecordingActive(true);
     } catch (error) {
@@ -563,13 +620,13 @@ export class VoiceShortcutService {
     }, AUTO_HIDE_ERROR_MS);
   }
 
-  private setState(newState: VoiceShortcutState): void {
+  private setState(newState: VoiceShortcutState, extra: Partial<OverlayEventPayload> = {}): void {
     this.state = newState;
     if (newState === 'recording') {
-      this.emitOverlayState(newState, { duration: 0 });
+      this.emitOverlayState(newState, { duration: 0, ...extra });
       return;
     }
-    this.emitOverlayState(newState);
+    this.emitOverlayState(newState, extra);
   }
 
   private emitOverlayState(state: VoiceShortcutState, extra: Partial<OverlayEventPayload> = {}): void {
@@ -652,6 +709,7 @@ export class VoiceShortcutService {
       hintText: extra.hintText,
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
       providerLabel: extra.providerLabel ?? this.getActiveProviderLabel(),
+      activationMs: extra.activationMs ?? this.latestActivationMs ?? undefined,
       recognitionMs: extra.recognitionMs,
       errorMessage: extra.errorMessage ?? '',
     };
@@ -735,7 +793,9 @@ export class VoiceShortcutService {
         onChunk: async (chunk) => this.enqueueVolcanoStreamingChunk(chunk),
       });
       await this.volcanoStreamingCapture.start();
-      this.setState('recording');
+      this.setState('recording', {
+        activationMs: this.completeActivationTracking(),
+      });
       void this.syncRecordingActive(true);
     } catch (error) {
       this.cleanupVolcanoStreamingState();
