@@ -1,5 +1,10 @@
 # Router 与重启恢复
 
+## 原则
+
+- router 的职责是根据 GitHub 当前事实决定下一步动作
+- 本地 `state/queue/backoff/cursor` 只作为恢复辅助与 continuity hint，不能充当真相缓存
+
 ## 目的
 
 人类不应判断当前该喂 discovery 还是 review。统一入口 prompt 每轮都先运行 router 脚本，再由脚本决定下一步动作。
@@ -67,7 +72,7 @@ router 只允许输出以下 `action`：
 
 - 其他失败情况一律输出 `discovery`
 
-## 原则
+## 额外约束
 
 - 人类只输入统一 prompt
 - router 是唯一阶段判断入口
