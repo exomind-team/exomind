@@ -123,6 +123,42 @@ describe('worker-agent next-action', () => {
     expect(result.blockers?.[0]?.reason).toBe('reviewer');
   });
 
+  it('waits after cursor sync marks a reviewer comment as handled', () => {
+    const reviewerComment = {
+      id: 'comment-reviewer-sync',
+      authorLogin: 'ARCJ137442',
+      body: '[Codex Reviewer]\n已审阅最新变更，未发现问题。only state synchronization, no new issues found.',
+      createdAt: '2026-03-10T08:00:30.000Z',
+    };
+
+    const beforeSync = determineNextAction(
+      makeInput({
+        pr: {
+          ...makeInput().pr,
+          comments: [reviewerComment],
+        },
+      }),
+    );
+
+    expect(beforeSync.action).toBe('reply-blocking-comment');
+
+    const afterSync = determineNextAction(
+      makeInput({
+        pr: {
+          ...makeInput().pr,
+          comments: [reviewerComment],
+        },
+        cursor: {
+          lastCommentIds: [reviewerComment.id],
+          lastReviewIds: [],
+          lastReviewThreadIds: [],
+        },
+      }),
+    );
+
+    expect(afterSync.action).toBe('wait-for-update');
+  });
+
   it('ignores a new APPROVED review when no actionable feedback exists', () => {
     const result = determineNextAction(
       makeInput({

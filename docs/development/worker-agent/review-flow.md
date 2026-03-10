@@ -35,6 +35,10 @@
 
 - 无论评论内容是否为“未发现问题/状态同步”，都必须回复。
 
+## Reply Then Cursor Sync
+
+回复 reviewer 评论后必须立即执行 `cursor sync`，否则下一轮 `next-action` 会再次把同一条评论视为阻塞项。
+
 ## No-Code-Change Response
 
 即便这轮无需改码，也要发结构化 `[Codex Worker]` 评论，说明：
