@@ -33,6 +33,10 @@ vi.mock('@/config/voice-overlay-preferences', () => ({
   subscribeVoiceOverlayOpacityChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/developer-mode', () => ({
+  getDeveloperModeEnabled: vi.fn(() => false),
+}));
+
 import { VoiceOverlayPage } from '@/pages/VoiceOverlayPage';
 
 describe('VoiceOverlayPage', () => {

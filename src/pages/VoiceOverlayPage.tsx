@@ -17,6 +17,7 @@ import {
   getVoiceOverlayOpacity,
   subscribeVoiceOverlayOpacityChanges,
 } from '@/config/voice-overlay-preferences';
+import { getDeveloperModeEnabled } from '@/config/developer-mode';
 
 export type OverlayState = 'idle' | 'arming' | 'recording' | 'recognizing' | 'done' | 'error';
 
@@ -176,7 +177,9 @@ export function VoiceOverlayPage() {
       }
       const elapsed = Math.max(0, Date.now() - data.traceStartedAtMs!);
       setFirstFrameMs(elapsed);
-      console.info('[VoiceOverlay]', `[trace ${data.debugTraceId}] first frame in ${elapsed}ms`);
+      if (getDeveloperModeEnabled()) {
+        console.info('[VoiceOverlay]', `[trace ${data.debugTraceId}] first frame in ${elapsed}ms`);
+      }
     };
 
     const useRaf = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function';

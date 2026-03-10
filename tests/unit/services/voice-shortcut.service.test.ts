@@ -26,6 +26,9 @@ const streamingCaptureStopMock = vi.fn(async () => new Uint8Array([9, 8, 7, 6]))
 const streamingCaptureCancelMock = vi.fn();
 const permissionsQueryMock = vi.fn();
 const nativeGetUserMediaMock = vi.fn();
+const runtimeFlags = {
+  developerModeEnabled: false,
+};
 
 class FakeMediaRecorder {
   state: 'inactive' | 'recording' = 'inactive';
@@ -75,6 +78,11 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@/config/voice-shortcut-hotkey', () => ({
   getVoiceShortcutHotkey: vi.fn(() => 'Ctrl+Space'),
   subscribeVoiceShortcutHotkeyChanges: (...args: unknown[]) => subscribeHotkeyMock(...args),
+}));
+
+vi.mock('@/config/developer-mode', () => ({
+  getDeveloperModeEnabled: () => runtimeFlags.developerModeEnabled,
+  subscribeDeveloperModeChanges: () => () => {},
 }));
 
 vi.mock('@/lib/adapters/asr/moss-asr', () => ({
@@ -190,6 +198,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     permissionsQueryMock.mockReset();
     permissionsQueryMock.mockResolvedValue({ state: 'prompt' });
     nativeGetUserMediaMock.mockReset();
+    runtimeFlags.developerModeEnabled = false;
 
     Object.defineProperty(window.navigator, 'permissions', {
       configurable: true,
@@ -647,6 +656,55 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     vi.useRealTimers();
   });
 
+  it('suppresses voice debug logs when developer mode is disabled（关闭开发者模式时不输出语音调试日志）', async () => {
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(infoSpy).not.toHaveBeenCalled();
+    expect(logSpy).not.toHaveBeenCalled();
+    expect(warnSpy).not.toHaveBeenCalled();
+
+    service.destroy();
+    infoSpy.mockRestore();
+    logSpy.mockRestore();
+    warnSpy.mockRestore();
+  });
+
+  it('emits voice debug logs when developer mode is enabled（开启开发者模式时输出语音调试日志）', async () => {
+    runtimeFlags.developerModeEnabled = true;
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(
+      infoSpy.mock.calls.some((call) => call.map(String).join(' ').includes('[trace voice-'))
+    ).toBe(true);
+
+    service.destroy();
+    infoSpy.mockRestore();
+  });
+
   it('rotates standby session before the idle window expires（待命会话在空闲窗口到期前主动轮换）', async () => {
     vi.useFakeTimers();
     permissionsQueryMock.mockResolvedValue({ state: 'granted' });
@@ -734,6 +792,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
   });
 
   it('logs standby lifecycle timestamps when warm session closes remotely（standby 关闭时记录创建/关闭/存活时长）', async () => {
+    runtimeFlags.developerModeEnabled = true;
     permissionsQueryMock.mockResolvedValue({ state: 'granted' });
     setVoiceShortcutAsrProvider('volcano');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
@@ -873,6 +932,9 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       }
       if (command === 'volcano_asr_stream_start') {
         return sessionIds.shift() ?? 'fallback-session';
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
       }
       if (command === 'volcano_asr_stream_push') {
         return null;

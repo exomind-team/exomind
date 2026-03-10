@@ -13,6 +13,10 @@ import {
   subscribeVoiceShortcutMicPrewarmChanges,
 } from '@/config/voice-shortcut-mic-prewarm';
 import {
+  getDeveloperModeEnabled,
+  subscribeDeveloperModeChanges,
+} from '@/config/developer-mode';
+import {
   createCompatibleMediaRecorder,
   getUserMediaWithConstraintFallback,
   DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
@@ -105,6 +109,7 @@ export class VoiceShortcutService {
   private unlistenHotkey: (() => void) | null = null;
   private unlistenProvider: (() => void) | null = null;
   private unlistenMicPrewarm: (() => void) | null = null;
+  private unlistenDeveloperMode: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private warmMaintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private warmRotateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -120,6 +125,7 @@ export class VoiceShortcutService {
   private latestSessionWarmHit: boolean | null = null;
   private latestSessionWarmReason: VolcanoSessionWarmReason | null = null;
   private latestFirstTextMs: number | null = null;
+  private developerModeEnabled = getDeveloperModeEnabled();
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
   private micPrewarmEnabled = getVoiceShortcutMicPrewarmEnabled();
   private livePreviewSource: VoiceLivePreviewSource;
@@ -139,10 +145,34 @@ export class VoiceShortcutService {
     this.livePreviewSource = livePreviewSource;
   }
 
+  private debugInfo(...args: unknown[]): void {
+    if (this.developerModeEnabled) {
+      console.info(...args);
+    }
+  }
+
+  private debugWarn(...args: unknown[]): void {
+    if (this.developerModeEnabled) {
+      console.warn(...args);
+    }
+  }
+
+  private debugError(...args: unknown[]): void {
+    if (this.developerModeEnabled) {
+      console.error(...args);
+    }
+  }
+
+  private debugLog(...args: unknown[]): void {
+    if (this.developerModeEnabled) {
+      console.log(...args);
+    }
+  }
+
   async init(): Promise<void> {
     if (this.unlisten || this.initializing) return;
     if (!isTauri()) {
-      console.warn(LOG_TAG, 'not in Tauri environment, service disabled');
+      this.debugWarn(LOG_TAG, 'not in Tauri environment, service disabled');
       return;
     }
     this.initializing = true;
@@ -152,7 +182,7 @@ export class VoiceShortcutService {
 
       this.unlistenHotkey = subscribeVoiceShortcutHotkeyChanges((hotkey) => {
         this.applyShortcut(hotkey).catch((error) => {
-          console.error(LOG_TAG, 'failed to apply updated voice shortcut:', error);
+          this.debugError(LOG_TAG, 'failed to apply updated voice shortcut:', error);
         });
       });
 
@@ -166,6 +196,10 @@ export class VoiceShortcutService {
         this.micPrewarmEnabled = enabled;
         this.syncWarmMaintenanceLoop();
         void this.prewarmResourcesForProvider();
+      });
+
+      this.unlistenDeveloperMode = subscribeDeveloperModeChanges((enabled) => {
+        this.developerModeEnabled = enabled;
       });
 
       this.unlisten = await listen<string>('voice-shortcut', (event) => {
@@ -203,6 +237,8 @@ export class VoiceShortcutService {
     this.unlistenProvider = null;
     this.unlistenMicPrewarm?.();
     this.unlistenMicPrewarm = null;
+    this.unlistenDeveloperMode?.();
+    this.unlistenDeveloperMode = null;
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', this.handleAppForeground);
     }
@@ -249,7 +285,7 @@ export class VoiceShortcutService {
     this.latestSessionWarmHit = null;
     this.latestSessionWarmReason = null;
     this.latestFirstTextMs = null;
-    console.info(LOG_TAG, `[trace ${this.currentTraceId}] shortcut pressed at ${now}`);
+    this.debugInfo(LOG_TAG, `[trace ${this.currentTraceId}] shortcut pressed at ${now}`);
   }
 
   private completeActivationTracking(): number | undefined {
@@ -261,7 +297,7 @@ export class VoiceShortcutService {
     this.activationStartedAt = null;
     this.latestActivationMs = activationMs;
     if (this.currentTraceId) {
-      console.info(LOG_TAG, `[trace ${this.currentTraceId}] entered recording in ${activationMs}ms`);
+      this.debugInfo(LOG_TAG, `[trace ${this.currentTraceId}] entered recording in ${activationMs}ms`);
     }
     return activationMs;
   }
@@ -274,7 +310,7 @@ export class VoiceShortcutService {
     const firstTextMs = Math.max(0, Date.now() - this.traceStartedAtMs);
     this.latestFirstTextMs = firstTextMs;
     if (this.currentTraceId) {
-      console.info(LOG_TAG, `[trace ${this.currentTraceId}] first text in ${firstTextMs}ms`);
+      this.debugInfo(LOG_TAG, `[trace ${this.currentTraceId}] first text in ${firstTextMs}ms`);
     }
     return firstTextMs;
   }
@@ -288,7 +324,7 @@ export class VoiceShortcutService {
     this.latestInputReadyMs = inputReadyMs;
     this.latestInputWarmHit = warmHit;
     if (this.currentTraceId) {
-      console.info(
+      this.debugInfo(
         LOG_TAG,
         `[trace ${this.currentTraceId}] input ready in ${inputReadyMs}ms (warm=${warmHit ? 'hit' : 'miss'})`,
       );
@@ -309,7 +345,7 @@ export class VoiceShortcutService {
     this.latestSessionWarmHit = warmHit;
     this.latestSessionWarmReason = warmReason;
     if (this.currentTraceId) {
-      console.info(
+      this.debugInfo(
         LOG_TAG,
         `[trace ${this.currentTraceId}] session ready in ${sessionReadyMs}ms (warm=${warmHit ? 'hit' : 'miss'}, reason=${warmReason})`,
       );
@@ -339,7 +375,7 @@ export class VoiceShortcutService {
           return;
         }
         const warmAgeMs = Math.max(0, Date.now() - createdAtMs);
-        console.info(
+        this.debugInfo(
           LOG_TAG,
           `[warm] standby exceeded short hot window (${warmAgeMs}ms), rotating in background`,
         );
@@ -418,7 +454,7 @@ export class VoiceShortcutService {
         this.warmStream = stream;
         return stream;
       } catch (error) {
-        console.warn(LOG_TAG, 'microphone prewarm skipped:', error);
+        this.debugWarn(LOG_TAG, 'microphone prewarm skipped:', error);
         return null;
       } finally {
         this.warmStreamPromise = null;
@@ -477,7 +513,7 @@ export class VoiceShortcutService {
       this.logWarmSessionClosed(snapshot, reason);
       await invoke('volcano_asr_stream_cancel', { sessionId });
     } catch (error) {
-      console.warn(LOG_TAG, 'failed to cancel warm volcano session:', error);
+      this.debugWarn(LOG_TAG, 'failed to cancel warm volcano session:', error);
     }
   }
 
@@ -496,7 +532,7 @@ export class VoiceShortcutService {
   }
 
   private logWarmSessionPrepared(sessionId: string, createdAtMs: number): void {
-    console.info(LOG_TAG, `[warm] standby prepared session=${sessionId} createdAt=${createdAtMs}`);
+    this.debugInfo(LOG_TAG, `[warm] standby prepared session=${sessionId} createdAt=${createdAtMs}`);
   }
 
   private logWarmSessionConsumed(snapshot: WarmVolcanoSessionSnapshot, consumedAtMs = Date.now()): void {
@@ -507,7 +543,7 @@ export class VoiceShortcutService {
     const lifetimeMs = typeof snapshot.createdAtMs === 'number'
       ? Math.max(0, consumedAtMs - snapshot.createdAtMs)
       : null;
-    console.info(
+    this.debugInfo(
       LOG_TAG,
       `[warm] standby consumed session=${snapshot.sessionId}`
       + ` createdAt=${snapshot.createdAtMs ?? 'unknown'}`
@@ -528,7 +564,7 @@ export class VoiceShortcutService {
     const lifetimeMs = typeof snapshot.createdAtMs === 'number'
       ? Math.max(0, closedAtMs - snapshot.createdAtMs)
       : null;
-    console.info(
+    this.debugInfo(
       LOG_TAG,
       `[warm] standby closed session=${snapshot.sessionId}`
       + ` createdAt=${snapshot.createdAtMs ?? 'unknown'}`
@@ -542,7 +578,7 @@ export class VoiceShortcutService {
     try {
       return await invoke<boolean>('volcano_asr_stream_session_exists', { sessionId });
     } catch (error) {
-      console.warn(LOG_TAG, 'failed to verify volcano session existence:', error);
+      this.debugWarn(LOG_TAG, 'failed to verify volcano session existence:', error);
       return false;
     }
   }
@@ -561,7 +597,7 @@ export class VoiceShortcutService {
       if (await this.doesVolcanoSessionExist(this.warmVolcanoSessionId)) {
         return this.warmVolcanoSessionId;
       }
-      console.info(LOG_TAG, '[warm] stale volcano session expired, rebuilding in background');
+      this.debugInfo(LOG_TAG, '[warm] stale volcano session expired, rebuilding in background');
       this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), 'stale-verification-miss');
     }
     if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
@@ -570,11 +606,11 @@ export class VoiceShortcutService {
         this.warmVolcanoSessionId = pendingSessionId;
         return pendingSessionId;
       }
-      console.info(LOG_TAG, '[warm] pending volcano prewarm became stale, rebuilding in background');
+      this.debugInfo(LOG_TAG, '[warm] pending volcano prewarm became stale, rebuilding in background');
       this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), 'pending-prewarm-stale');
     }
     if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey !== warmKey) {
-      console.info(LOG_TAG, '[warm] volcano config changed, replacing warm session');
+      this.debugInfo(LOG_TAG, '[warm] volcano config changed, replacing warm session');
       await this.cancelWarmVolcanoSession();
     }
 
@@ -589,12 +625,12 @@ export class VoiceShortcutService {
         const createdAtMs = Date.now();
         this.warmVolcanoSessionId = sessionId;
         this.warmVolcanoSessionCreatedAtMs = createdAtMs;
-        console.info(LOG_TAG, '[warm] volcano session prepared in background');
+        this.debugInfo(LOG_TAG, '[warm] volcano session prepared in background');
         this.logWarmSessionPrepared(sessionId, createdAtMs);
         this.scheduleWarmRotateTimer(sessionId, createdAtMs);
         return sessionId;
       } catch (error) {
-        console.warn(LOG_TAG, 'volcano session prewarm failed:', error);
+        this.debugWarn(LOG_TAG, 'volcano session prewarm failed:', error);
         return null;
       } finally {
         this.warmVolcanoSessionPromise = null;
@@ -642,7 +678,7 @@ export class VoiceShortcutService {
       warmReason = 'config-changed';
     }
 
-    console.info(LOG_TAG, `[warm] acquiring cold volcano session (reason=${warmReason})`);
+    this.debugInfo(LOG_TAG, `[warm] acquiring cold volcano session (reason=${warmReason})`);
 
     return {
       sessionId: await invoke<string>('volcano_asr_stream_start', { config }),
@@ -821,10 +857,10 @@ export class VoiceShortcutService {
     ]);
 
     if (clipboardResult.status === 'rejected') {
-      console.error(LOG_TAG, 'clipboard paste failed:', clipboardResult.reason);
+      this.debugError(LOG_TAG, 'clipboard paste failed:', clipboardResult.reason);
     }
     if (eventLogResult.status === 'rejected') {
-      console.error(LOG_TAG, 'eventlog write failed:', eventLogResult.reason);
+      this.debugError(LOG_TAG, 'eventlog write failed:', eventLogResult.reason);
     }
 
     this.emitOverlayState('done', {
@@ -841,7 +877,7 @@ export class VoiceShortcutService {
   }
 
   private handleError(message: string): void {
-    console.error(LOG_TAG, message);
+    this.debugError(LOG_TAG, message);
     this.stopLivePreview('abort');
     this.livePreviewText = '';
     this.releaseResources();
@@ -916,21 +952,21 @@ export class VoiceShortcutService {
     try {
       await invoke('voice_recording_set_active', { active });
     } catch (error) {
-      console.error(LOG_TAG, `failed to sync recording active=${active}:`, error);
+      this.debugError(LOG_TAG, `failed to sync recording active=${active}:`, error);
     }
   }
 
   private async applyShortcut(hotkey: VoiceShortcutHotkey): Promise<void> {
     try {
       const appliedShortcut = await invoke<string>('voice_shortcut_set', { shortcut: hotkey });
-      console.log(LOG_TAG, `voice shortcut applied: ${appliedShortcut}`);
+      this.debugLog(LOG_TAG, `voice shortcut applied: ${appliedShortcut}`);
     } catch (error) {
       const message = String(error);
       if (message.toLowerCase().includes('already registered')) {
-        console.warn(LOG_TAG, `voice shortcut "${hotkey}" already registered, skip re-register`);
+        this.debugWarn(LOG_TAG, `voice shortcut "${hotkey}" already registered, skip re-register`);
         return;
       }
-      console.error(LOG_TAG, `failed to apply voice shortcut "${hotkey}":`, error);
+      this.debugError(LOG_TAG, `failed to apply voice shortcut "${hotkey}":`, error);
     }
   }
 
@@ -966,12 +1002,12 @@ export class VoiceShortcutService {
       const session = this.livePreviewSource.createSession({
         lang,
         onUpdate: ({ text }) => this.handleLivePreviewUpdate(text),
-        onError: (error) => console.warn(LOG_TAG, 'live preview unavailable:', error),
+        onError: (error) => this.debugWarn(LOG_TAG, 'live preview unavailable:', error),
       });
       this.livePreviewSession = session;
       session.start();
     } catch (error) {
-      console.warn(LOG_TAG, 'failed to start live preview:', error);
+      this.debugWarn(LOG_TAG, 'failed to start live preview:', error);
       this.livePreviewSession = null;
     }
   }
@@ -984,7 +1020,7 @@ export class VoiceShortcutService {
       if (mode === 'stop') session.stop();
       else session.abort();
     } catch (error) {
-      console.warn(LOG_TAG, `failed to ${mode} live preview:`, error);
+      this.debugWarn(LOG_TAG, `failed to ${mode} live preview:`, error);
     }
   }
 
@@ -1112,7 +1148,7 @@ export class VoiceShortcutService {
         await invoke('volcano_asr_stream_cancel', { sessionId });
       }
     } catch (error) {
-      console.error(LOG_TAG, 'failed to cancel volcano stream:', error);
+      this.debugError(LOG_TAG, 'failed to cancel volcano stream:', error);
     } finally {
       this.cleanupVolcanoStreamingState();
       this.releaseResources();
@@ -1145,7 +1181,7 @@ export class VoiceShortcutService {
 
     if (isWarmSession) {
       if (payload.errorMessage) {
-        console.info(LOG_TAG, `[warm] standby volcano session closed, replenishing: ${payload.errorMessage}`);
+        this.debugInfo(LOG_TAG, `[warm] standby volcano session closed, replenishing: ${payload.errorMessage}`);
         this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), payload.errorMessage);
         if (this.micPrewarmEnabled && this.asrProvider === 'volcano' && !this.startPending) {
           void this.prewarmVolcanoSessionIfPossible();
