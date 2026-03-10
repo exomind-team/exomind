@@ -1039,9 +1039,24 @@ export class VoiceShortcutService {
   }
 
   private handleVolcanoStreamEvent(payload: VolcanoAsrStreamEventPayload): void {
-    if (!this.volcanoStreamSessionId || payload.sessionId !== this.volcanoStreamSessionId) {
+    const isActiveSession = Boolean(this.volcanoStreamSessionId && payload.sessionId === this.volcanoStreamSessionId);
+    const isWarmSession = Boolean(this.warmVolcanoSessionId && payload.sessionId === this.warmVolcanoSessionId);
+
+    if (!isActiveSession && !isWarmSession) {
       return;
     }
+
+    if (isWarmSession) {
+      if (payload.errorMessage) {
+        console.info(LOG_TAG, `[warm] standby volcano session closed, replenishing: ${payload.errorMessage}`);
+        this.clearWarmVolcanoSessionState();
+        if (this.micPrewarmEnabled && this.asrProvider === 'volcano' && !this.startPending) {
+          void this.prewarmVolcanoSessionIfPossible();
+        }
+      }
+      return;
+    }
+
     if (payload.errorMessage) {
       this.handleError(payload.errorMessage);
       return;

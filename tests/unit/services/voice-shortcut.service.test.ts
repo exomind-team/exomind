@@ -647,6 +647,50 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     vi.useRealTimers();
   });
 
+  it('replenishes standby session immediately when warm session closes remotely（standby 被远端关闭后立即补位）', async () => {
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    const startedSessions: string[] = [];
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        const nextSessionId = `warm-session-${startedSessions.length + 1}`;
+        startedSessions.push(nextSessionId);
+        return nextSessionId;
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
+      if (command === 'volcano_asr_stream_cancel' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    const initialSessionCount = startedSessions.length;
+    expect(initialSessionCount).toBeGreaterThanOrEqual(1);
+
+    await emitVolcanoStreamEvent({
+      sessionId: 'warm-session-1',
+      errorMessage: 'WebSocket 被服务器关闭',
+    });
+    await flushAsync();
+
+    expect(startedSessions.length).toBeGreaterThan(initialSessionCount);
+
+    service.destroy();
+  });
+
   it('recreates missing warmed volcano session before first start（warm session 已失效时首按自动重建）', async () => {
     permissionsQueryMock.mockResolvedValue({ state: 'granted' });
     setVoiceShortcutAsrProvider('volcano');
@@ -708,6 +752,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+    const sessionIds = ['warm-session-bootstrap', 'stream-session-1', 'standby-session-2'];
     let resolveFinish: ((value: {
       text: string;
       confidence: number;
@@ -720,7 +765,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         return payload?.shortcut ?? 'Alt+Q';
       }
       if (command === 'volcano_asr_stream_start') {
-        return 'stream-session-1';
+        return sessionIds.shift() ?? 'fallback-session';
       }
       if (command === 'volcano_asr_stream_push') {
         return null;
@@ -762,12 +807,12 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await streamingOnChunk?.(new Uint8Array([1, 2, 3, 4]));
     await flushAsync();
     expect(invokeMock).toHaveBeenCalledWith('volcano_asr_stream_push', {
-      sessionId: 'stream-session-1',
+      sessionId: 'warm-session-bootstrap',
       audioData: [1, 2, 3, 4],
     });
 
     await emitVolcanoStreamEvent({
-      sessionId: 'stream-session-1',
+      sessionId: 'warm-session-bootstrap',
       text: '火山实时结果',
       isFinal: false,
       isDefinite: false,
@@ -793,7 +838,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushAsync();
 
     await emitVolcanoStreamEvent({
-      sessionId: 'stream-session-1',
+      sessionId: 'warm-session-bootstrap',
       text: '收口阶段实时结果',
       isFinal: false,
       isDefinite: true,
@@ -820,7 +865,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(convertWebmBlobToWavMock).not.toHaveBeenCalled();
     expect(streamingCaptureStopMock).toHaveBeenCalledTimes(1);
     expect(invokeMock).toHaveBeenCalledWith('volcano_asr_stream_finish', {
-      sessionId: 'stream-session-1',
+      sessionId: 'warm-session-bootstrap',
       audioData: [9, 8, 7, 6],
     });
     expect(emitMock).toHaveBeenCalledWith(
