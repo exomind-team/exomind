@@ -3447,16 +3447,17 @@ export function AgentsPage() {
                               </div>
                             )}
 
-                            {/* Workspace tabs — 认知生命体 */}
-                            {runtimeNodeId && (
-                              <WorkspaceTabs agentId={runtimeNodeId} />
-                            )}
                           </>
                         )}
 
                         {/* API 返回 null */}
                         {!isDetailLoading && !agentDetail && (
                           <p className="text-xs text-muted-foreground">暂无详细数据</p>
+                        )}
+
+                        {/* Workspace tabs — 认知生命体（独立于 agentDetail） */}
+                        {!isDetailLoading && runtimeNodeId && (
+                          <WorkspaceTabs agentId={runtimeNodeId} />
                         )}
                       </div>
                     );
