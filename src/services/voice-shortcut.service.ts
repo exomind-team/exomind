@@ -55,6 +55,10 @@ type OverlayEventPayload = {
   isLivePreview: boolean;
   providerLabel: string;
   activationMs?: number;
+  inputReadyMs?: number;
+  sessionReadyMs?: number;
+  inputWarmHit?: boolean;
+  sessionWarmHit?: boolean;
   firstTextMs?: number;
   debugTraceId?: string;
   debugPressedAtMs?: number;
@@ -91,6 +95,10 @@ export class VoiceShortcutService {
   private traceStartedAtMs: number | null = null;
   private currentTraceId: string | null = null;
   private latestActivationMs: number | null = null;
+  private latestInputReadyMs: number | null = null;
+  private latestSessionReadyMs: number | null = null;
+  private latestInputWarmHit: boolean | null = null;
+  private latestSessionWarmHit: boolean | null = null;
   private latestFirstTextMs: number | null = null;
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
   private micPrewarmEnabled = getVoiceShortcutMicPrewarmEnabled();
@@ -208,6 +216,10 @@ export class VoiceShortcutService {
     this.traceStartedAtMs = now;
     this.currentTraceId = `voice-${now}`;
     this.latestActivationMs = null;
+    this.latestInputReadyMs = null;
+    this.latestSessionReadyMs = null;
+    this.latestInputWarmHit = null;
+    this.latestSessionWarmHit = null;
     this.latestFirstTextMs = null;
     console.info(LOG_TAG, `[trace ${this.currentTraceId}] shortcut pressed at ${now}`);
   }
@@ -237,6 +249,40 @@ export class VoiceShortcutService {
       console.info(LOG_TAG, `[trace ${this.currentTraceId}] first text in ${firstTextMs}ms`);
     }
     return firstTextMs;
+  }
+
+  private markInputReady(warmHit: boolean): number | undefined {
+    if (this.traceStartedAtMs == null) {
+      return this.latestInputReadyMs ?? undefined;
+    }
+
+    const inputReadyMs = Math.max(0, Date.now() - this.traceStartedAtMs);
+    this.latestInputReadyMs = inputReadyMs;
+    this.latestInputWarmHit = warmHit;
+    if (this.currentTraceId) {
+      console.info(
+        LOG_TAG,
+        `[trace ${this.currentTraceId}] input ready in ${inputReadyMs}ms (warm=${warmHit ? 'hit' : 'miss'})`,
+      );
+    }
+    return inputReadyMs;
+  }
+
+  private markSessionReady(warmHit: boolean): number | undefined {
+    if (this.traceStartedAtMs == null) {
+      return this.latestSessionReadyMs ?? undefined;
+    }
+
+    const sessionReadyMs = Math.max(0, Date.now() - this.traceStartedAtMs);
+    this.latestSessionReadyMs = sessionReadyMs;
+    this.latestSessionWarmHit = warmHit;
+    if (this.currentTraceId) {
+      console.info(
+        LOG_TAG,
+        `[trace ${this.currentTraceId}] session ready in ${sessionReadyMs}ms (warm=${warmHit ? 'hit' : 'miss'})`,
+      );
+    }
+    return sessionReadyMs;
   }
 
   private isLiveStream(stream: MediaStream | null): stream is MediaStream {
@@ -302,15 +348,15 @@ export class VoiceShortcutService {
     return this.warmStreamPromise;
   }
 
-  private async acquireInputStream(): Promise<MediaStream> {
+  private async acquireInputStream(): Promise<{ stream: MediaStream; warmHit: boolean }> {
     if (this.isLiveStream(this.warmStream)) {
-      return this.warmStream;
+      return { stream: this.warmStream, warmHit: true };
     }
 
     const pendingWarmStream = await this.warmStreamPromise;
     if (this.isLiveStream(pendingWarmStream)) {
       this.warmStream = pendingWarmStream;
-      return pendingWarmStream;
+      return { stream: pendingWarmStream, warmHit: true };
     }
 
     const stream = await getUserMediaWithConstraintFallback(
@@ -318,7 +364,7 @@ export class VoiceShortcutService {
       { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
     );
     this.warmStream = stream;
-    return stream;
+    return { stream, warmHit: false };
   }
 
   private releaseWarmStream(): void {
@@ -424,14 +470,14 @@ export class VoiceShortcutService {
     return this.warmVolcanoSessionPromise;
   }
 
-  private async acquireVolcanoSession(config: VolcanoRuntimeConfig): Promise<string> {
+  private async acquireVolcanoSession(config: VolcanoRuntimeConfig): Promise<{ sessionId: string; warmHit: boolean }> {
     const warmKey = this.getWarmVolcanoSessionKey(config);
 
     if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
       const pendingSessionId = await this.warmVolcanoSessionPromise;
       if (pendingSessionId && await this.doesVolcanoSessionExist(pendingSessionId)) {
         this.clearWarmVolcanoSessionState();
-        return pendingSessionId;
+        return { sessionId: pendingSessionId, warmHit: true };
       }
       this.clearWarmVolcanoSessionState();
     }
@@ -440,12 +486,15 @@ export class VoiceShortcutService {
       const sessionId = this.warmVolcanoSessionId;
       if (await this.doesVolcanoSessionExist(sessionId)) {
         this.clearWarmVolcanoSessionState();
-        return sessionId;
+        return { sessionId, warmHit: true };
       }
       this.clearWarmVolcanoSessionState();
     }
 
-    return invoke<string>('volcano_asr_stream_start', { config });
+    return {
+      sessionId: await invoke<string>('volcano_asr_stream_start', { config }),
+      warmHit: false,
+    };
   }
 
   private shouldShowArmingState(): boolean {
@@ -504,7 +553,9 @@ export class VoiceShortcutService {
         return;
       }
 
-      this.stream = await this.acquireInputStream();
+      const { stream, warmHit } = await this.acquireInputStream();
+      this.stream = stream;
+      const inputReadyMs = this.markInputReady(warmHit);
 
       const { recorder, mimeType } = createCompatibleMediaRecorder(this.stream);
       this.mediaRecorder = recorder;
@@ -519,6 +570,8 @@ export class VoiceShortcutService {
 
       recorder.start(100);
       this.setState('recording', {
+        inputReadyMs,
+        inputWarmHit: warmHit,
         activationMs: this.completeActivationTracking(),
       });
       this.startLivePreview('zh-CN');
@@ -737,6 +790,10 @@ export class VoiceShortcutService {
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
       providerLabel: extra.providerLabel ?? this.getActiveProviderLabel(),
       activationMs: extra.activationMs ?? this.latestActivationMs ?? undefined,
+      inputReadyMs: extra.inputReadyMs ?? this.latestInputReadyMs ?? undefined,
+      sessionReadyMs: extra.sessionReadyMs ?? this.latestSessionReadyMs ?? undefined,
+      inputWarmHit: extra.inputWarmHit ?? this.latestInputWarmHit ?? undefined,
+      sessionWarmHit: extra.sessionWarmHit ?? this.latestSessionWarmHit ?? undefined,
       firstTextMs: extra.firstTextMs ?? this.latestFirstTextMs ?? undefined,
       debugTraceId: extra.debugTraceId ?? this.currentTraceId ?? undefined,
       debugPressedAtMs: extra.debugPressedAtMs ?? this.traceStartedAtMs ?? undefined,
@@ -802,10 +859,10 @@ export class VoiceShortcutService {
       const [streamResult, sessionResult] = await Promise.allSettled([streamPromise, sessionPromise]);
       if (streamResult.status !== 'fulfilled' || sessionResult.status !== 'fulfilled') {
         if (streamResult.status === 'fulfilled') {
-          streamResult.value.getTracks().forEach((track) => track.stop());
+          streamResult.value.stream.getTracks().forEach((track) => track.stop());
         }
         if (sessionResult.status === 'fulfilled') {
-          invoke('volcano_asr_stream_cancel', { sessionId: sessionResult.value }).catch(() => {});
+          invoke('volcano_asr_stream_cancel', { sessionId: sessionResult.value.sessionId }).catch(() => {});
         }
         if (streamResult.status === 'rejected') {
           throw streamResult.reason;
@@ -816,8 +873,10 @@ export class VoiceShortcutService {
         throw new Error('volcano start failed without explicit rejection');
       }
 
-      this.stream = streamResult.value;
-      const sessionId = sessionResult.value;
+      this.stream = streamResult.value.stream;
+      const inputReadyMs = this.markInputReady(streamResult.value.warmHit);
+      const sessionReadyMs = this.markSessionReady(sessionResult.value.warmHit);
+      const sessionId = sessionResult.value.sessionId;
       this.volcanoStreamSessionId = sessionId;
       this.volcanoPushQueue = Promise.resolve();
       this.volcanoStreamingCapture = createVolcanoStreamingCapture({
@@ -826,6 +885,10 @@ export class VoiceShortcutService {
       });
       await this.volcanoStreamingCapture.start();
       this.setState('recording', {
+        inputReadyMs,
+        sessionReadyMs,
+        inputWarmHit: streamResult.value.warmHit,
+        sessionWarmHit: sessionResult.value.warmHit,
         activationMs: this.completeActivationTracking(),
       });
       void this.syncRecordingActive(true);

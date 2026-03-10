@@ -28,6 +28,10 @@ interface OverlayData {
   isLivePreview?: boolean;
   providerLabel?: string;
   activationMs?: number;
+  inputReadyMs?: number;
+  sessionReadyMs?: number;
+  inputWarmHit?: boolean;
+  sessionWarmHit?: boolean;
   firstTextMs?: number;
   debugTraceId?: string;
   debugPressedAtMs?: number;
@@ -201,6 +205,10 @@ export function VoiceOverlayPage() {
             isLivePreview={data.isLivePreview}
             providerLabel={data.providerLabel}
             activationMs={data.activationMs}
+            inputReadyMs={data.inputReadyMs}
+            sessionReadyMs={data.sessionReadyMs}
+            inputWarmHit={data.inputWarmHit}
+            sessionWarmHit={data.sessionWarmHit}
             firstTextMs={data.firstTextMs}
             firstContentMs={firstContentMs ?? undefined}
             recognitionMs={data.recognitionMs}
@@ -261,6 +269,10 @@ function StatusText({
   isLivePreview,
   providerLabel,
   activationMs,
+  inputReadyMs,
+  sessionReadyMs,
+  inputWarmHit,
+  sessionWarmHit,
   firstTextMs,
   firstContentMs,
   recognitionMs,
@@ -276,6 +288,10 @@ function StatusText({
   isLivePreview?: boolean;
   providerLabel?: string;
   activationMs?: number;
+  inputReadyMs?: number;
+  sessionReadyMs?: number;
+  inputWarmHit?: boolean;
+  sessionWarmHit?: boolean;
   firstTextMs?: number;
   firstContentMs?: number;
   recognitionMs?: number;
@@ -328,7 +344,16 @@ function StatusText({
           </span>
           {(typeof firstContentMs === 'number' || typeof firstTextMs === 'number') ? (
             <span className="overlay-text overlay-text--diagnostic">
-              {`调试 · 首帧 ${formatActivationMs(firstContentMs ?? 0)} · 首字 ${formatActivationMs(firstTextMs ?? 0)}`}
+              {[
+                `调试 · 首帧 ${formatActivationMs(firstContentMs ?? 0)}`,
+                typeof inputReadyMs === 'number'
+                  ? `流 ${formatActivationMs(inputReadyMs)}${inputWarmHit ? '·预热' : ''}`
+                  : null,
+                typeof sessionReadyMs === 'number'
+                  ? `会话 ${formatActivationMs(sessionReadyMs)}${sessionWarmHit ? '·预热' : ''}`
+                  : null,
+                typeof firstTextMs === 'number' ? `首字 ${formatActivationMs(firstTextMs)}` : null,
+              ].filter(Boolean).join(' · ')}
             </span>
           ) : null}
         </span>
