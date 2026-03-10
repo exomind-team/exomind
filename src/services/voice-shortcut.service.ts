@@ -56,6 +56,12 @@ type VolcanoSessionWarmReason =
   | 'missing'
   | 'config-changed';
 
+type WarmVolcanoSessionSnapshot = {
+  sessionId: string | null;
+  createdAtMs: number | null;
+  warmKey: string | null;
+};
+
 type OverlayEventPayload = {
   state: VoiceShortcutState;
   duration?: number;
@@ -122,6 +128,7 @@ export class VoiceShortcutService {
   private volcanoAcceptingChunks = false;
   private volcanoPushQueue: Promise<void> = Promise.resolve();
   private warmVolcanoSessionId: string | null = null;
+  private warmVolcanoSessionCreatedAtMs: number | null = null;
   private warmVolcanoSessionKey: string | null = null;
   private warmVolcanoSessionPromise: Promise<string | null> | null = null;
 
@@ -429,26 +436,75 @@ export class VoiceShortcutService {
   }
 
   private async cancelWarmVolcanoSession(): Promise<void> {
-    const sessionId = this.warmVolcanoSessionId;
-    this.warmVolcanoSessionId = null;
-    this.warmVolcanoSessionKey = null;
-    this.warmVolcanoSessionPromise = null;
+    const snapshot = this.clearWarmVolcanoSessionState();
+    const sessionId = snapshot.sessionId;
 
     if (!sessionId) {
       return;
     }
 
     try {
+      this.logWarmSessionClosed(snapshot, 'cancelled');
       await invoke('volcano_asr_stream_cancel', { sessionId });
     } catch (error) {
       console.warn(LOG_TAG, 'failed to cancel warm volcano session:', error);
     }
   }
 
-  private clearWarmVolcanoSessionState(): void {
+  private clearWarmVolcanoSessionState(): WarmVolcanoSessionSnapshot {
+    const snapshot = {
+      sessionId: this.warmVolcanoSessionId,
+      createdAtMs: this.warmVolcanoSessionCreatedAtMs,
+      warmKey: this.warmVolcanoSessionKey,
+    };
     this.warmVolcanoSessionId = null;
+    this.warmVolcanoSessionCreatedAtMs = null;
     this.warmVolcanoSessionKey = null;
     this.warmVolcanoSessionPromise = null;
+    return snapshot;
+  }
+
+  private logWarmSessionPrepared(sessionId: string, createdAtMs: number): void {
+    console.info(LOG_TAG, `[warm] standby prepared session=${sessionId} createdAt=${createdAtMs}`);
+  }
+
+  private logWarmSessionConsumed(snapshot: WarmVolcanoSessionSnapshot, consumedAtMs = Date.now()): void {
+    if (!snapshot.sessionId) {
+      return;
+    }
+
+    const lifetimeMs = typeof snapshot.createdAtMs === 'number'
+      ? Math.max(0, consumedAtMs - snapshot.createdAtMs)
+      : null;
+    console.info(
+      LOG_TAG,
+      `[warm] standby consumed session=${snapshot.sessionId}`
+      + ` createdAt=${snapshot.createdAtMs ?? 'unknown'}`
+      + ` consumedAt=${consumedAtMs}`
+      + ` lifetimeMs=${lifetimeMs ?? 'unknown'}`,
+    );
+  }
+
+  private logWarmSessionClosed(
+    snapshot: WarmVolcanoSessionSnapshot,
+    reason: string,
+    closedAtMs = Date.now(),
+  ): void {
+    if (!snapshot.sessionId) {
+      return;
+    }
+
+    const lifetimeMs = typeof snapshot.createdAtMs === 'number'
+      ? Math.max(0, closedAtMs - snapshot.createdAtMs)
+      : null;
+    console.info(
+      LOG_TAG,
+      `[warm] standby closed session=${snapshot.sessionId}`
+      + ` createdAt=${snapshot.createdAtMs ?? 'unknown'}`
+      + ` closedAt=${closedAtMs}`
+      + ` lifetimeMs=${lifetimeMs ?? 'unknown'}`
+      + ` reason=${reason}`,
+    );
   }
 
   private async doesVolcanoSessionExist(sessionId: string): Promise<boolean> {
@@ -475,7 +531,7 @@ export class VoiceShortcutService {
         return this.warmVolcanoSessionId;
       }
       console.info(LOG_TAG, '[warm] stale volcano session expired, rebuilding in background');
-      this.clearWarmVolcanoSessionState();
+      this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), 'stale-verification-miss');
     }
     if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
       const pendingSessionId = await this.warmVolcanoSessionPromise;
@@ -484,7 +540,7 @@ export class VoiceShortcutService {
         return pendingSessionId;
       }
       console.info(LOG_TAG, '[warm] pending volcano prewarm became stale, rebuilding in background');
-      this.clearWarmVolcanoSessionState();
+      this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), 'pending-prewarm-stale');
     }
     if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey !== warmKey) {
       console.info(LOG_TAG, '[warm] volcano config changed, replacing warm session');
@@ -499,8 +555,11 @@ export class VoiceShortcutService {
           invoke('volcano_asr_stream_cancel', { sessionId }).catch(() => {});
           return null;
         }
+        const createdAtMs = Date.now();
         this.warmVolcanoSessionId = sessionId;
+        this.warmVolcanoSessionCreatedAtMs = createdAtMs;
         console.info(LOG_TAG, '[warm] volcano session prepared in background');
+        this.logWarmSessionPrepared(sessionId, createdAtMs);
         return sessionId;
       } catch (error) {
         console.warn(LOG_TAG, 'volcano session prewarm failed:', error);
@@ -524,21 +583,23 @@ export class VoiceShortcutService {
     if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
       const pendingSessionId = await this.warmVolcanoSessionPromise;
       if (pendingSessionId && await this.doesVolcanoSessionExist(pendingSessionId)) {
-        this.clearWarmVolcanoSessionState();
+        const snapshot = this.clearWarmVolcanoSessionState();
+        this.logWarmSessionConsumed(snapshot);
         return { sessionId: pendingSessionId, warmHit: true, warmReason: 'pending-prewarm' };
       }
       warmReason = 'stale';
-      this.clearWarmVolcanoSessionState();
+      this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), 'pending-prewarm-stale');
     }
 
     if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey === warmKey) {
       const sessionId = this.warmVolcanoSessionId;
       if (await this.doesVolcanoSessionExist(sessionId)) {
-        this.clearWarmVolcanoSessionState();
+        const snapshot = this.clearWarmVolcanoSessionState();
+        this.logWarmSessionConsumed(snapshot);
         return { sessionId, warmHit: true, warmReason: 'prewarmed' };
       }
       warmReason = 'stale';
-      this.clearWarmVolcanoSessionState();
+      this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), 'stale-verification-miss');
     }
 
     if (
@@ -1053,7 +1114,7 @@ export class VoiceShortcutService {
     if (isWarmSession) {
       if (payload.errorMessage) {
         console.info(LOG_TAG, `[warm] standby volcano session closed, replenishing: ${payload.errorMessage}`);
-        this.clearWarmVolcanoSessionState();
+        this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), payload.errorMessage);
         if (this.micPrewarmEnabled && this.asrProvider === 'volcano' && !this.startPending) {
           void this.prewarmVolcanoSessionIfPossible();
         }

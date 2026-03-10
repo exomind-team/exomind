@@ -691,6 +691,71 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('logs standby lifecycle timestamps when warm session closes remotely（standby 关闭时记录创建/关闭/存活时长）', async () => {
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    let now = 1000;
+    const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
+
+    const startedSessions: string[] = [];
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        const nextSessionId = `warm-session-${startedSessions.length + 1}`;
+        startedSessions.push(nextSessionId);
+        return nextSessionId;
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
+      if (command === 'volcano_asr_stream_cancel' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    now = 61000;
+    await emitVolcanoStreamEvent({
+      sessionId: 'warm-session-1',
+      errorMessage: 'WebSocket 被服务器关闭',
+    });
+    await flushAsync();
+
+    const loggedMessages = infoSpy.mock.calls.map((call) => call.map(String).join(' '));
+    expect(
+      loggedMessages.some((message) =>
+        message.includes('standby prepared')
+        && message.includes('session=warm-session-1')
+        && message.includes('createdAt=1000')
+      )
+    ).toBe(true);
+    expect(
+      loggedMessages.some((message) =>
+        message.includes('standby closed')
+        && message.includes('session=warm-session-1')
+        && message.includes('createdAt=1000')
+        && message.includes('closedAt=61000')
+        && message.includes('lifetimeMs=60000')
+        && message.includes('reason=WebSocket 被服务器关闭')
+      )
+    ).toBe(true);
+
+    service.destroy();
+    nowSpy.mockRestore();
+    infoSpy.mockRestore();
+  });
+
   it('recreates missing warmed volcano session before first start（warm session 已失效时首按自动重建）', async () => {
     permissionsQueryMock.mockResolvedValue({ state: 'granted' });
     setVoiceShortcutAsrProvider('volcano');
