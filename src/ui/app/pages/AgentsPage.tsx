@@ -2348,9 +2348,14 @@ export function AgentsPage() {
 
     const client = new RuntimeClient();
     const poll = async () => {
-      const host = findPreferredRuntimeHostForAgent(runtimeHostSnapshots, runtimeEntityId, preferredHostId);
-      if (!host || disposed) return;
+      const host = findPreferredRuntimeHostForAgent(runtimeHostSnapshots, runtimeEntityId, preferredHostId)
+        ?? activeSignalRouteHost;
+      if (!host || disposed) {
+        console.log('[EnergyPoll] no host or disposed', { host: !!host, disposed });
+        return;
+      }
       const snap = await client.getAgentEnergy(host, runtimeEntityId);
+      console.log('[EnergyPoll] result:', snap ? `${snap.current}/${snap.max} (${snap.phase})` : 'null');
       if (!disposed && snap) setPanelEnergy(snap);
     };
 
@@ -2360,7 +2365,7 @@ export function AgentsPage() {
       disposed = true;
       clearInterval(timer);
     };
-  }, [rightPanel.state, rightPanel.nodeId, runtimeHostSnapshots]);
+  }, [rightPanel.state, rightPanel.nodeId, runtimeHostSnapshots, activeSignalRouteHost]);
 
   useEffect(() => {
     if (!selectedProviderProfileId) return;
@@ -2808,12 +2813,27 @@ export function AgentsPage() {
     try {
       const routeService = new SignalRouteService({ host });
       const runtimeClient = new RuntimeClient();
-      const [routes, agentsResult, historyResponse] = await Promise.all([
+      const [routes, agentsResult, historyResponse, energyResult] = await Promise.all([
         routeService.listRoutes(),
         runtimeClient.getAgents(host),
         fetch(`http://${host.host}:${host.port}/signals/history?limit=120`),
+        runtimeClient.getAllEnergy(host).catch(() => ({ ok: false as const, error: { code: 'network' as const, message: 'energy fetch failed' } })),
       ]);
-      const agents = agentsResult.ok ? mapRuntimeAgentsForHost(host, agentsResult.data) : [];
+
+      // Build energy lookup map
+      const energyMap = new Map<string, AgentEnergySnapshot>();
+      if (energyResult.ok) {
+        for (const snap of energyResult.data) {
+          energyMap.set(snap.agent_id, snap);
+        }
+      }
+
+      const agents = agentsResult.ok
+        ? mapRuntimeAgentsForHost(host, agentsResult.data).map((agent) => ({
+            ...agent,
+            energy: energyMap.get(agent.id),
+          }))
+        : [];
       const history = historyResponse.ok
         ? ((await historyResponse.json()) as SignalEvent[])
         : [];
@@ -2953,13 +2973,15 @@ export function AgentsPage() {
     const refreshInterval = setInterval(() => {
       void (async () => {
         try {
+          console.log('[8s-POLL] refreshing...');
           const nextRuntimeSnapshot = await getRuntimeManager().refreshSnapshot();
           if (disposed) return;
+          console.log('[8s-POLL] agents:', nextRuntimeSnapshot.agents.length, 'energy:', nextRuntimeSnapshot.agents.filter(a => a.energy).length);
           applyRuntimeSnapshot(nextRuntimeSnapshot);
           await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
           await fetchPtyAgentsRef.current();
-        } catch {
-          // Ignore polling errors（轮询错误不打断页面渲染）
+        } catch (err) {
+          console.error('[8s-POLL] ERROR:', err);
         }
       })();
     }, 8000);

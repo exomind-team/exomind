@@ -183,6 +183,8 @@ export class RuntimeManager {
         energyMap.set(snap.agent_id, snap);
       }
     }
+    // DEBUG: Phase 2 energy pipeline
+    console.log('[RuntimeManager] energy fetch:', energyResult.ok ? `${energyMap.size} agents` : `FAILED: ${JSON.stringify(energyResult)}`);
 
     if (!agentsResult.ok) {
       return {
