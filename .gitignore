@@ -117,7 +117,9 @@ pencil/.claude/settings.local.json
 
 # Agent 本地状态
 agent.test.local.state.json
+runtime-data/
 .claude/worktrees/
+.exomind/
 
 # 临时截图和备份
 dark-mode-*.png

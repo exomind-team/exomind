@@ -7,6 +7,7 @@ import {
   Filter,
   List,
   Mail,
+  Maximize2,
   MessageCircle,
   Monitor,
   Plus,
@@ -15,6 +16,7 @@ import {
   Send,
   Settings,
   Sparkles,
+  TerminalSquare,
   Waypoints,
   Webhook,
   X,
@@ -54,6 +56,8 @@ import {
   type RuntimeTargetMode,
 } from '@/config/runtime-target';
 import { RouteEditPanel } from '@/components/RouteEditPanel';
+import { PtyTerminal } from '../components/PtyTerminal';
+import { PtySpawnDialog } from '../components/PtySpawnDialog';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import { KNOWN_AGENT_HUB_TOPICS, VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
@@ -90,6 +94,7 @@ import {
   buildSignalGraph,
   buildSignalRouteRows,
   type SignalGraph,
+  type SignalGraphNode,
   type SignalGraphNodeType,
   type SignalRouteRow,
 } from './agents-signal-topology';
@@ -120,6 +125,10 @@ import {
   formatRuntimeEventPayload,
   getConversationMessageTestId,
 } from './agents/conversation-runtime';
+import { WorkspaceTabs } from './agents/WorkspaceTabs';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -704,7 +713,7 @@ function TopologyView({
     >
       <div
         data-testid="agent-topology-canvas"
-        className="relative h-full min-h-0 w-full overflow-hidden rounded-[22px] border border-[#EDE8E3] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]"
+        className="relative h-full min-h-0 w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#1C1917]"
       >
         <div className="pointer-events-none absolute right-3 top-3 z-10 flex flex-wrap items-center justify-end gap-2">
           <div className="pointer-events-auto flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/90 p-1 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
@@ -2111,6 +2120,8 @@ export function AgentsPage() {
   const [topologyLayoutStore, setTopologyLayoutStore] = useState<TopologyLayoutStore>(() => readTopologyLayoutStore());
   const topologyPendingStoreRef = useRef<TopologyLayoutStore | null>(null);
   const topologyWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Ref to always call the latest fetchPtyAgents from the polling interval (avoids stale closure).
+  const fetchPtyAgentsRef = useRef<() => Promise<void>>(() => Promise.resolve());
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [activeSignalRouteHost, setActiveSignalRouteHost] = useState<RuntimeHostRecord | null>(null);
@@ -2146,6 +2157,10 @@ export function AgentsPage() {
   const [isChatSending, setIsChatSending] = useState(false);
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
+  const [ptyAgents, setPtyAgents] = useState<Array<{ id: string; name: string; status: string; workdir: string }>>([]);
+  /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
+  const [activePtyId, setActivePtyId] = useState<string | null>(null);
+  const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [agentCreateKind, setAgentCreateKind] = useState<RuntimeCreateAgentRequest['kind']>('claude_cli');
   const [agentCreateError, setAgentCreateError] = useState('');
@@ -2158,9 +2173,9 @@ export function AgentsPage() {
   const [apiBaseUrlDraft, setApiBaseUrlDraft] = useState('');
   const [apiKeyDraft, setApiKeyDraft] = useState('');
 
-  const navigateToSecondaryPage = (path: string) => {
+  const navigateToSecondaryPage = (path: string, state: Record<string, unknown> = {}) => {
     if (typeof window === 'undefined' || window.location.pathname === path) return;
-    window.history.pushState({}, '', path);
+    window.history.pushState(state, '', path);
     window.dispatchEvent(new PopStateEvent('popstate'));
   };
 
@@ -2634,7 +2649,10 @@ export function AgentsPage() {
 
   const handleTabChange = (tab: AgentHubViewMode) => {
     setViewMode(tab);
-    closeRightPanel(); // 切换 Tab 时关闭右侧栏（保守策略）
+    // 保留 PTY 终端面板状态（避免切换 Tab 丢失终端会话）
+    if (rightPanel.state !== 'PTY_TERMINAL') {
+      closeRightPanel();
+    }
   };
 
   useEffect(() => {
@@ -2648,6 +2666,46 @@ export function AgentsPage() {
 
   const [sheetOpen, setSheetOpen] = useState(false);
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
+  const [showPtySpawnDialog, setShowPtySpawnDialog] = useState(false);
+
+  const openPtyTerminal = (ptyId: string) => {
+    setActivePtyId(ptyId);
+    setRightPanel({ state: 'PTY_TERMINAL', ptyId });
+  };
+
+  const handleRightPanelDragStart = (e: React.MouseEvent) => {
+    e.preventDefault();
+    const startX = e.clientX;
+    const startWidth = rightPanelWidth;
+
+    const onMouseMove = (ev: MouseEvent) => {
+      const delta = startX - ev.clientX; // Moving left increases panel width
+      const newWidth = Math.max(300, Math.min(700, startWidth + delta));
+      setRightPanelWidth(newWidth);
+    };
+
+    const onMouseUp = () => {
+      document.removeEventListener('mousemove', onMouseMove);
+      document.removeEventListener('mouseup', onMouseUp);
+    };
+
+    document.addEventListener('mousemove', onMouseMove);
+    document.addEventListener('mouseup', onMouseUp);
+  };
+
+  /** Resolve the first available RT base URL from runtime host snapshots. */
+  const resolveRtBaseUrl = (): string => {
+    const host = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+    if (host) return `http://${host.host}:${host.port}`;
+    return `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`;
+  };
+
+  /** Resolve the auth token for the currently active RT host. */
+  const resolveRtAuthToken = (): string | undefined => {
+    const activeHost = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
+    if (activeHost?.authToken) return activeHost.authToken;
+    return runtimeServiceStatus?.authSecret ?? undefined;
+  };
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
@@ -2763,10 +2821,46 @@ export function AgentsPage() {
     setFallbackRuntimeAgents([]);
   };
 
+  const fetchPtyAgents = async () => {
+    try {
+      const rtUrl = resolveRtBaseUrl();
+      const headers: Record<string, string> = {};
+      const token = resolveRtAuthToken();
+      if (token) {
+        headers['Authorization'] = `Bearer ${token}`;
+      }
+      const resp = await fetch(`${rtUrl}/pty`, { headers });
+      if (resp.ok) {
+        const data = await resp.json() as Array<{ id: string; name: string; status: string; workdir: string }>;
+        setPtyAgents(prev => {
+          if (
+            prev.length === data.length &&
+            prev.every((p, i) =>
+              p.id === data[i].id && p.name === data[i].name && p.status === data[i].status
+            )
+          ) {
+            return prev; // No change — preserve reference identity
+          }
+          return data;
+        });
+        // Clear activePtyId if the PTY agent was removed
+        setActivePtyId(prev => {
+          if (prev && !data.some(d => d.id === prev)) return null;
+          return prev;
+        });
+      }
+    } catch {
+      // PTY endpoint may not be available; silently ignore
+    }
+  };
+  // Keep ref in sync so the polling interval always calls the latest version.
+  fetchPtyAgentsRef.current = fetchPtyAgents;
+
   const refreshRuntimeSnapshot = async () => {
     const snapshot = await getRuntimeManager().refreshSnapshot();
     applyRuntimeSnapshot(snapshot);
     await refreshSignalRoutesFromSnapshot(snapshot);
+    await fetchPtyAgents();
   };
 
   useEffect(() => {
@@ -2785,6 +2879,7 @@ export function AgentsPage() {
       setRuntimeServiceStatus(nextRuntimeStatus);
       applyRuntimeSnapshot(nextRuntimeSnapshot);
       await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
+      await fetchPtyAgents();
     };
 
     const refreshInterval = setInterval(() => {
@@ -2794,6 +2889,7 @@ export function AgentsPage() {
           if (disposed) return;
           applyRuntimeSnapshot(nextRuntimeSnapshot);
           await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
+          await fetchPtyAgentsRef.current();
         } catch {
           // Ignore polling errors（轮询错误不打断页面渲染）
         }
@@ -2976,25 +3072,35 @@ export function AgentsPage() {
     }),
     [topologyDatasetKey, topologyFilterKey, topologyLayoutStore]
   );
+  const ptyGraphNodes = useMemo((): SignalGraphNode[] => {
+    return ptyAgents.map((pty, idx) => ({
+      id: `pty-${pty.id}`,
+      type: 'agent' as SignalGraphNodeType,
+      label: pty.name,
+      status: pty.status === 'running' ? 'Terminal · running' : 'Terminal · offline',
+      position: { x: 600, y: 80 + idx * 100 },
+    }));
+  }, [ptyAgents]);
+  const allGraphNodes = useMemo(
+    () => [...baseSignalGraph.nodes, ...ptyGraphNodes],
+    [baseSignalGraph.nodes, ptyGraphNodes]
+  );
   const topologyManualResult = useMemo(
     () => applyManualLayoutSnapshot({
-      nodes: baseSignalGraph.nodes,
+      nodes: allGraphNodes,
       snapshot: topologyManualSnapshot,
     }),
-    [baseSignalGraph.nodes, topologyManualSnapshot]
+    [allGraphNodes, topologyManualSnapshot]
   );
   const signalGraph = useMemo(() => {
-    if (topologyLayoutMode === 'manual') {
-      return {
-        nodes: topologyManualResult.nodes,
-        edges: baseSignalGraph.edges,
-      };
-    }
+    const nodes = topologyLayoutMode === 'manual'
+      ? topologyManualResult.nodes
+      : buildAutoFlowLayout(allGraphNodes);
     return {
-      nodes: buildAutoFlowLayout(baseSignalGraph.nodes),
+      nodes,
       edges: baseSignalGraph.edges,
     };
-  }, [baseSignalGraph.edges, baseSignalGraph.nodes, topologyLayoutMode, topologyManualResult.nodes]);
+  }, [baseSignalGraph.edges, topologyLayoutMode, topologyManualResult.nodes, allGraphNodes]);
   const manualViewport = topologyManualSnapshot?.viewport;
 
   const flushTopologyStoreWrite = () => {
@@ -3162,6 +3268,19 @@ export function AgentsPage() {
         onResetCurrentLayout={handleResetCurrentTopologyLayout}
         onClearSavedLayouts={handleClearSavedTopologyLayouts}
         onSelectNode={(nodeId) => {
+          // PTY nodes: open terminal panel or navigate on mobile
+          if (nodeId.startsWith('pty-')) {
+            const ptyId = nodeId.replace('pty-', '');
+            if (supportsInlineRightPanel) {
+              openPtyTerminal(ptyId);
+            } else {
+              const ptyParams = new URLSearchParams({ baseUrl: resolveRtBaseUrl() });
+              const tok = resolveRtAuthToken();
+              const ptyState: Record<string, unknown> = tok ? { ptyToken: tok } : {};
+              navigateToSecondaryPage(`/agents/pty/${encodeURIComponent(ptyId)}?${ptyParams.toString()}`, ptyState);
+            }
+            return;
+          }
           // 判断节点类型
           const node = signalGraph.nodes.find((n) => n.id === nodeId);
           if (node?.type === 'agent') openAgentDetail(nodeId);
@@ -3222,6 +3341,16 @@ export function AgentsPage() {
             </button>
             <button
               type="button"
+              data-testid="pty-spawn-button"
+              onClick={() => setShowPtySpawnDialog(true)}
+              className="flex h-9 items-center gap-1.5 rounded-full bg-[#0D9488] px-3 text-sm text-white"
+              aria-label="新建 Terminal"
+            >
+              <TerminalSquare size={16} />
+              <span className="hidden sm:inline">Terminal</span>
+            </button>
+            <button
+              type="button"
               data-testid="agent-add-node-button"
               onClick={() => setSheetOpen(true)}
               disabled={isAgentCreating}
@@ -3240,15 +3369,28 @@ export function AgentsPage() {
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
-        <div className="flex-1 min-h-0 overflow-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10">
+        <div className={`flex-1 min-h-0 overflow-auto ${viewMode === 'topology' ? '' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
           {content}
         </div>
 
-        {/* 右侧栏：桌面端固定 380px，CLOSED 时不渲染 */}
-        {rightPanel.state !== 'CLOSED' && (
+        {/* 右侧栏：桌面端可拖拽调整宽度。
+            当 PTY 终端活跃时，关闭面板只隐藏 aside（display:none），
+            PtyTerminal 保持挂载 → SSE 连接不断 → 终端状态持久化。 */}
+        {(rightPanel.state !== 'CLOSED' || activePtyId != null) && (
+          <>
+          {rightPanel.state !== 'CLOSED' && (
+            <div
+              className="hidden w-1 shrink-0 cursor-col-resize bg-transparent hover:bg-border-card active:bg-[#C75B3A] transition-colors lg:block"
+              onMouseDown={handleRightPanelDragStart}
+            />
+          )}
           <aside
             data-testid="agent-rightpanel-shell"
-            className="hidden w-[380px] shrink-0 border-l border-border-card bg-surface text-foreground lg:flex lg:flex-col"
+            className="hidden shrink-0 border-l border-border-card bg-surface text-foreground lg:flex lg:flex-col"
+            style={{
+              width: rightPanelWidth,
+              ...(rightPanel.state === 'CLOSED' ? { display: 'none' } : {}),
+            }}
           >
             <div className="flex items-center justify-between border-b border-border-card px-4 py-3">
               <span className="flex items-center gap-2 text-sm font-medium text-foreground">
@@ -3271,15 +3413,34 @@ export function AgentsPage() {
                 {rightPanel.state === 'ACTOR_DETAIL' && (agentDetail?.title ?? 'Actor 详情')}
                 {rightPanel.state === 'SIGNAL_DETAIL' && '信号详情'}
                 {rightPanel.state === 'AGENT_CHAT' && 'Agent 对话'}
+                {rightPanel.state === 'PTY_TERMINAL' && 'Terminal'}
               </span>
-              <button
-                type="button"
-                onClick={closeRightPanel}
-                className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
-                aria-label="关闭"
-              >
-                <X size={16} />
-              </button>
+              <div className="flex items-center gap-1">
+                {rightPanel.state === 'PTY_TERMINAL' && rightPanel.ptyId && (
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const ptyParams = new URLSearchParams({ baseUrl: resolveRtBaseUrl() });
+                      const tok = resolveRtAuthToken();
+                      const ptyState: Record<string, unknown> = tok ? { ptyToken: tok } : {};
+                      window.history.pushState(ptyState, '', `/agents/pty/${rightPanel.ptyId}?${ptyParams.toString()}`);
+                      window.dispatchEvent(new PopStateEvent('popstate'));
+                    }}
+                    className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                    aria-label="全屏"
+                  >
+                    <Maximize2 size={14} />
+                  </button>
+                )}
+                <button
+                  type="button"
+                  onClick={closeRightPanel}
+                  className="flex h-7 w-7 items-center justify-center rounded text-muted-foreground hover:text-foreground"
+                  aria-label="关闭"
+                >
+                  <X size={16} />
+                </button>
+              </div>
             </div>
             {/* 右侧栏内容 */}
             <div className="flex-1 overflow-auto">
@@ -3317,140 +3478,201 @@ export function AgentsPage() {
                     const nodeType = node?.type ?? (rightPanel.state === 'AGENT_DETAIL' ? 'agent' : 'actor');
                     const nodeLabel = node?.label ?? agentDetail?.title ?? runtimeNodeId ?? '未知节点';
 
-                    const statusColors: Record<string, string> = {
-                      online: 'bg-[#22C55E]/15 text-[#22C55E]',
-                      offline: 'bg-[#57534E]/30 text-[#78716C]',
-                      error: 'bg-[#EF4444]/15 text-[#EF4444]',
-                      busy: 'bg-[#F59E0B]/15 text-[#F59E0B]',
-                      warning: 'bg-[#F59E0B]/15 text-[#F59E0B]',
-                    };
                     const logStatusColors: Record<string, string> = {
                       online: 'text-foreground',
                       offline: 'text-muted-foreground',
-                      warning: 'text-[#F59E0B]',
-                      error: 'text-[#EF4444]',
-                      busy: 'text-[#F59E0B]',
+                      warning: 'text-warning',
+                      error: 'text-destructive',
+                      busy: 'text-warning',
+                    };
+
+                    const hasWorkspace = Boolean(runtimeNodeId);
+                    const iconToneClass = nodeType === 'agent'
+                      ? 'border border-brand-accent/20 bg-brand-accent/10 text-brand-accent'
+                      : 'border border-border-subtle bg-background text-strong';
+                    const EntityIcon = nodeType === 'agent' ? Brain : Sparkles;
+                    const detailStatus = agentDetail?.status ?? node?.status ?? 'unknown';
+                    const detailStatusClass: Record<string, string> = {
+                      online: 'border-transparent bg-success/15 text-success',
+                      available: 'border-transparent bg-success/15 text-success',
+                      running: 'border-transparent bg-success/15 text-success',
+                      offline: 'border-border-subtle bg-background text-secondary',
+                      unknown: 'border-border-subtle bg-background text-secondary',
+                      error: 'border-transparent bg-destructive/15 text-destructive',
+                      busy: 'border-transparent bg-warning/15 text-warning',
+                      warning: 'border-transparent bg-warning/15 text-warning',
                     };
 
                     return (
                       <div className="flex flex-col gap-4">
-                        {/* 头部：始终从 signalGraph 快速显示 */}
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
-                              nodeType === 'agent'
-                                ? 'bg-[#CCFBF1] dark:bg-[#0D9488]/20'
-                                : 'bg-[#FEF3C7] dark:bg-[#F59E0B]/20'
-                            }`}
-                          >
-                            <Bot
-                              size={18}
-                              className={
-                                nodeType === 'agent'
-                                  ? 'text-[#0D9488]'
-                                  : 'text-[#B45309] dark:text-[#F59E0B]'
-                              }
-                            />
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{nodeLabel}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {nodeType === 'agent' ? 'Agent' : 'Actor'} · {runtimeNodeId ?? nodeId ?? '--'}
-                            </p>
-                          </div>
-                        </div>
+                        <Card className="rounded-xl border-border-card bg-card shadow-sm">
+                          <CardContent className="space-y-4 p-4">
+                            <div className="flex items-start gap-3">
+                              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconToneClass}`}>
+                                <EntityIcon size={18} />
+                              </div>
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-semibold text-strong">{nodeLabel}</p>
+                                  <Badge variant="outline" className="border-border-subtle bg-background text-[10px] text-secondary">
+                                    {nodeType === 'agent' ? 'Agent' : 'Actor'}
+                                  </Badge>
+                                  {!isDetailLoading && (
+                                    <Badge variant="outline" className={`text-[10px] ${detailStatusClass[detailStatus] ?? detailStatusClass.unknown}`}>
+                                      {detailStatus}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="truncate text-xs text-secondary">
+                                  Runtime ID · {runtimeNodeId ?? nodeId ?? '--'}
+                                </p>
+                                {agentDetail?.description ? (
+                                  <p className="text-xs leading-5 text-secondary line-clamp-3">{agentDetail.description}</p>
+                                ) : (
+                                  <p className="text-xs leading-5 text-secondary">
+                                    {hasWorkspace
+                                      ? '该节点的基础详情暂未返回，但 workspace（工作区）内容仍可继续查看。'
+                                      : '当前节点尚未返回扩展详情数据，请稍后再试。'}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
 
-                        {rightPanel.state === 'AGENT_DETAIL' && nodeId && (
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              data-testid="agent-rightpanel-open-chat"
-                              onClick={() => {
-                                void handleOpenAgentChat(nodeId);
-                              }}
-                              className="rounded-lg bg-[#0D9488] px-3 py-1.5 text-xs font-medium text-white"
-                            >
-                              开始聊天
-                            </button>
-                            <button
-                              type="button"
-                              data-testid="agent-rightpanel-stop-agent"
-                              onClick={() => {
-                                void handleStopAgent(nodeId);
-                              }}
-                              disabled={isAgentStopping}
-                              className="rounded-lg bg-[#7F1D1D] px-3 py-1.5 text-xs font-medium text-[#FECACA] disabled:opacity-50"
-                            >
-                              {isAgentStopping ? '停止中...' : '停止 Agent'}
-                            </button>
-                          </div>
-                        )}
-
-                        {/* 加载态：骨架屏 */}
-                        {isDetailLoading && (
-                          <div className="flex flex-col gap-3">
-                            <div className="h-4 w-20 rounded bg-muted animate-pulse" />
-                            <div className="h-3 w-full rounded bg-muted animate-pulse" />
-                            <div className="h-3 w-3/4 rounded bg-muted animate-pulse" />
-                          </div>
-                        )}
-
-                        {/* 数据加载完成 */}
-                        {!isDetailLoading && agentDetail && (
-                          <>
-                            {/* 状态 badge */}
-                            <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColors[agentDetail.status] ?? statusColors.offline}`}>
-                              {agentDetail.status}
-                            </span>
-
-                            {/* 描述 */}
-                            {agentDetail.description && (
-                              <p className="text-xs text-muted-foreground line-clamp-3">{agentDetail.description}</p>
-                            )}
-
-                            {/* 统计指标 2x2 grid */}
-                            {agentDetail.stats.length > 0 && (
-                              <div className="grid grid-cols-2 gap-2">
-                                {agentDetail.stats.slice(0, 4).map((s) => (
-                                  <div key={s.label} className="rounded-lg border border-border-card bg-card px-3 py-2">
-                                    <p className="text-[10px] text-muted-foreground">{s.label}</p>
-                                    <p className="text-sm font-medium text-foreground">{s.value}</p>
-                                  </div>
-                                ))}
+                            {rightPanel.state === 'AGENT_DETAIL' && nodeId && (
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1 rounded-lg border-brand-accent bg-brand-accent text-white hover:bg-brand-accent/90 hover:text-white"
+                                  data-testid="agent-rightpanel-open-chat"
+                                  onClick={() => {
+                                    void handleOpenAgentChat(nodeId);
+                                  }}
+                                >
+                                  开始聊天
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-lg border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive"
+                                  data-testid="agent-rightpanel-stop-agent"
+                                  onClick={() => {
+                                    void handleStopAgent(nodeId);
+                                  }}
+                                  disabled={isAgentStopping}
+                                >
+                                  {isAgentStopping ? '停止中...' : '停止 Agent'}
+                                </Button>
                               </div>
                             )}
 
-                            {/* 触发规则 */}
-                            {agentDetail.triggerRules.length > 0 && (
-                              <div className="flex flex-col gap-1.5">
-                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">触发规则</p>
-                                {agentDetail.triggerRules.slice(0, 3).map((r) => (
-                                  <div key={r.key} className="flex items-baseline gap-2">
-                                    <span className="font-mono text-[10px] text-muted-foreground">{r.key}:</span>
-                                    <span className="text-xs text-foreground">{r.value}</span>
+                            {isDetailLoading && (
+                              <div className="flex flex-col gap-3">
+                                <div className="h-4 w-24 animate-pulse rounded-md bg-background" />
+                                <div className="h-16 animate-pulse rounded-xl border border-border-subtle bg-background" />
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="h-16 animate-pulse rounded-lg border border-border-subtle bg-background" />
+                                  <div className="h-16 animate-pulse rounded-lg border border-border-subtle bg-background" />
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+
+                        {!isDetailLoading && agentDetail?.stats.length ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            {agentDetail.stats.slice(0, 4).map((s) => (
+                              <Card key={s.label} className="rounded-xl border-border-card bg-card shadow-sm">
+                                <CardContent className="space-y-1 rounded-xl bg-background/70 p-4">
+                                  <p className="text-[11px] text-secondary">{s.label}</p>
+                                  <p className="text-sm font-semibold text-strong">{s.value}</p>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {!isDetailLoading && agentDetail?.triggerRules.length ? (
+                          <Card className="rounded-xl border-border-card bg-card shadow-sm">
+                            <CardContent className="space-y-3 p-4">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs font-semibold text-strong">触发规则</p>
+                                <Badge variant="outline" className="border-brand-accent/20 bg-brand-accent/10 text-[10px] text-brand-accent">
+                                  Rules
+                                </Badge>
+                              </div>
+                              <div className="space-y-2">
+                                {agentDetail.triggerRules.slice(0, 4).map((r) => (
+                                  <div key={r.key} className="flex items-start justify-between gap-3 rounded-lg border border-border-subtle bg-background px-3 py-2">
+                                    <span className="font-mono text-[10px] text-secondary">{r.key}</span>
+                                    <span className={`text-right text-xs ${r.highlight ? 'font-medium text-brand-accent' : 'text-strong'}`}>
+                                      {r.value}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
-                            )}
+                            </CardContent>
+                          </Card>
+                        ) : null}
 
-                            {/* 最近日志 */}
-                            {agentDetail.recentLogs.length > 0 && (
-                              <div className="flex flex-col gap-1.5">
-                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">最近日志</p>
+                        {!isDetailLoading && agentDetail?.recentLogs.length ? (
+                          <Card className="rounded-xl border-border-card bg-card shadow-sm">
+                            <CardContent className="space-y-3 p-4">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs font-semibold text-strong">最近日志</p>
+                                <Badge variant="outline" className="border-brand-accent/20 bg-brand-accent/10 text-[10px] text-brand-accent">
+                                  Logs
+                                </Badge>
+                              </div>
+                              <div className="space-y-3">
                                 {agentDetail.recentLogs.slice(0, 5).map((log, i) => (
-                                  <div key={i} className="flex items-baseline gap-2">
-                                    <span className="shrink-0 text-[10px] text-muted-foreground">{log.time}</span>
-                                    <span className={`text-xs truncate ${logStatusColors[log.status] ?? logStatusColors.online}`}>{log.title}</span>
+                                  <div key={i} className="flex gap-3">
+                                    <div className="flex flex-col items-center">
+                                      <span className="mt-1 h-2 w-2 rounded-full bg-brand-accent" />
+                                      {i !== Math.min(agentDetail.recentLogs.length, 5) - 1 && (
+                                        <span className="mt-1 h-full w-px bg-border-subtle" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-background px-3 py-2">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-[11px] text-secondary">{log.time}</span>
+                                        <span className={`text-[11px] ${logStatusColors[log.status] ?? logStatusColors.online}`}>
+                                          {log.status}
+                                        </span>
+                                      </div>
+                                      <p className={`mt-1 truncate text-xs ${logStatusColors[log.status] ?? logStatusColors.online}`}>
+                                        {log.title}
+                                      </p>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
-                            )}
-                          </>
+                            </CardContent>
+                          </Card>
+                        ) : null}
+
+                        {!isDetailLoading && !agentDetail && (
+                          <Card className="rounded-xl border-border-card bg-card shadow-sm">
+                            <CardContent className="space-y-2 p-4">
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle bg-background text-secondary">
+                                  <Bot size={16} />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <p className="text-sm font-semibold text-strong">详细信息暂不可用</p>
+                                  <p className="text-xs text-secondary">
+                                    {hasWorkspace
+                                      ? '基础详情接口暂未返回，但该节点的 workspace（工作区）数据仍可正常查看。'
+                                      : '当前节点尚未提供更多详情数据，请稍后再试。'}
+                                  </p>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
                         )}
 
-                        {/* API 返回 null */}
-                        {!isDetailLoading && !agentDetail && (
-                          <p className="text-xs text-muted-foreground">暂无详细数据</p>
+                        {!isDetailLoading && runtimeNodeId && (
+                          <WorkspaceTabs agentId={runtimeNodeId} />
                         )}
                       </div>
                     );
@@ -3612,10 +3834,37 @@ export function AgentsPage() {
                   </div>
                 </div>
               )}
+              {/* PTY terminal — stays mounted when activePtyId is set, hidden when panel shows other content */}
+              {activePtyId && (
+                <div
+                  className="flex h-full flex-col overflow-hidden"
+                  style={rightPanel.state !== 'PTY_TERMINAL' ? { display: 'none' } : undefined}
+                >
+                  <PtyTerminal
+                    rtBaseUrl={resolveRtBaseUrl()}
+                    ptyId={activePtyId}
+                    authToken={resolveRtAuthToken()}
+                  />
+                </div>
+              )}
             </div>
           </aside>
+          </>
         )}
       </div>
+
+      {/* PTY Spawn Dialog */}
+      <PtySpawnDialog
+        open={showPtySpawnDialog}
+        onOpenChange={setShowPtySpawnDialog}
+        rtBaseUrl={resolveRtBaseUrl()}
+        authToken={resolveRtAuthToken()}
+        defaultWorkdir={import.meta.env.VITE_PTY_DEFAULT_WORKDIR ?? ''}
+        onSpawned={(info) => {
+          openPtyTerminal(info.id);
+          void refreshRuntimeSnapshot();
+        }}
+      />
 
       {/* Sheets（移动端） */}
       {sheetOpen && (

@@ -74,6 +74,7 @@ async fn runtime_spawns_reviewer_and_classifier_with_rt_url() {
         signal_storage_path: None,
         auth_secret: None,
         enable_mdns: false,
+        data_dir: None,
     })
     .await
     .expect("runtime should start with ts agents");

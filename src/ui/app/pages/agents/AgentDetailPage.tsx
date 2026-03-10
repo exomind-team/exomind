@@ -4,6 +4,7 @@ import { getAgentHubService } from '@/lib/services';
 import type { AgentDetailData, AgentEnergySnapshot, AgentHubListItem } from '@/lib/types/agent-hub';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { WorkspaceTabs } from './WorkspaceTabs';
 
 const PHASE_LABELS: Record<string, string> = {
   normal: '正常',
@@ -212,6 +213,9 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
       </section>
 
       {energy && <EnergyBar energy={energy} />}
+
+      {/* Workspace tabs — shown for life agents (those with workspace) */}
+      <WorkspaceTabs agentId={targetId} />
 
       <section className="mt-4">
         <h3 className="text-[13px] font-semibold text-muted-foreground">触发规则</h3>

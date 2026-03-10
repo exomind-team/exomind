@@ -12,19 +12,23 @@ use tokio::sync::oneshot;
 use tokio::task::JoinHandle;
 use tower_http::cors::{Any, CorsLayer};
 
+use eventlog::EventLogStore;
 use mesh::{MeshRelayManager, MeshState};
 use signal::SignalPool;
 
 pub mod agent;
 pub mod auth;
 pub mod discovery;
+pub mod energy;
+pub mod eventlog;
 pub mod mesh;
 pub mod pairing;
 pub mod routes;
 pub mod signal;
 pub mod task;
-pub mod energy;
 pub mod tick;
+#[cfg(not(target_os = "android"))]
+pub mod pty;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_RT_PORT: u16 = 1949;
@@ -89,6 +93,8 @@ pub struct RuntimeStartOptions {
     pub auth_secret: Option<String>,
     /// enable mDNS service discovery for LAN peer auto-detection（启用 mDNS 局域网自动发现）.
     pub enable_mdns: bool,
+    /// optional data directory for agent workspaces（可选 Agent workspace 数据目录）.
+    pub data_dir: Option<PathBuf>,
 }
 
 impl Default for RuntimeStartOptions {
@@ -124,6 +130,7 @@ impl Default for RuntimeStartOptions {
                 .map(PathBuf::from),
             auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
             enable_mdns,
+            data_dir: env::var("EXOMIND_RT_DATA_DIR").ok().map(PathBuf::from),
         }
     }
 }
@@ -178,6 +185,8 @@ pub struct RuntimeHandle {
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
     ts_agents: Vec<TsAgentProcess>,
+    #[cfg(not(target_os = "android"))]
+    pty_manager: Arc<pty::PtyManager>,
     tick_cancel: Arc<std::sync::atomic::AtomicBool>,
     tick_tasks: Vec<JoinHandle<()>>,
 }
@@ -313,6 +322,9 @@ impl RuntimeHandle {
             }
         }
         self.ts_agents.clear();
+
+        #[cfg(not(target_os = "android"))]
+        self.pty_manager.shutdown().await;
 
         if let Some(mdns) = self.mdns.take() {
             mdns.shutdown();
@@ -458,6 +470,33 @@ pub async fn start_with_options(
         let heartbeat = Arc::new(agent::heartbeat::HeartbeatAgent::new("heartbeat"));
         state.registry.register(heartbeat);
         state.energy_registry.register("heartbeat", energy::AgentEnergy::new(100, 10));
+
+        // Register cognitive life agent
+        let data_dir = options
+            .data_dir
+            .clone()
+            .unwrap_or_else(|| PathBuf::from("runtime-data"));
+        match agent::workspace::AgentWorkspace::init("life-alpha", &data_dir) {
+            Ok(workspace) => {
+                let soul = workspace.load_soul().unwrap_or_default();
+                let cognition = Box::new(agent::llm_cognition::LlmCognition::new("life-alpha", soul));
+                let life_agent = Arc::new(agent::life::CognitiveLifeAgent::new(
+                    "life-alpha",
+                    "认知生命体 Alpha",
+                    workspace,
+                    cognition,
+                ));
+                state.registry.register(Arc::clone(&life_agent) as Arc<dyn agent::Agent>);
+                state.life_agents.insert("life-alpha".to_string(), life_agent);
+                state.energy_registry.register(
+                    "life-alpha",
+                    energy::AgentEnergy::new(200, 5),
+                );
+            }
+            Err(e) => {
+                tracing::warn!("failed to init life agent workspace: {e}");
+            }
+        }
     }
 
     // Start tick scheduler for all agents with tick_interval_secs > 0
@@ -470,6 +509,8 @@ pub async fn start_with_options(
         Arc::clone(&tick_cancel),
     );
 
+    #[cfg(not(target_os = "android"))]
+    let pty_manager = Arc::clone(&state.pty_manager);
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {
@@ -496,6 +537,8 @@ pub async fn start_with_options(
         server_task: Some(server_task),
         actor_tasks,
         ts_agents,
+        #[cfg(not(target_os = "android"))]
+        pty_manager,
         tick_cancel,
         tick_tasks,
     })
@@ -657,6 +700,19 @@ pub struct AppState {
     pub pairing: Arc<pairing::PairingManager>,
     pub task_store: Arc<task::TaskStore>,
     pub energy_registry: energy::EnergyRegistry,
+    /// Typed reference to CognitiveLifeAgent instances for workspace API access.
+    pub life_agents: std::collections::HashMap<String, Arc<agent::life::CognitiveLifeAgent>>,
+    pub eventlog_store: Arc<EventLogStore>,
+    #[cfg(not(target_os = "android"))]
+    pub pty_manager: Arc<pty::PtyManager>,
+}
+
+/// Resolve the runtime data directory from `EXOMIND_RT_DATA_DIR` env var,
+/// falling back to `./runtime-data`.
+fn resolve_data_dir() -> PathBuf {
+    env::var("EXOMIND_RT_DATA_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|_| PathBuf::from("./runtime-data"))
 }
 
 impl AppState {
@@ -700,6 +756,14 @@ impl AppState {
         ));
         let mesh_relay =
             enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
+        #[cfg(not(target_os = "android"))]
+        let pty_manager = Arc::new(pty::PtyManager::new(
+            Arc::clone(&signal_pool),
+            host_id.clone(),
+        ));
+
+        let data_dir = resolve_data_dir();
+        let eventlog_store = Arc::new(EventLogStore::new(data_dir));
 
         Self {
             port,
@@ -713,6 +777,10 @@ impl AppState {
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
+            life_agents: std::collections::HashMap::new(),
+            eventlog_store,
+            #[cfg(not(target_os = "android"))]
+            pty_manager,
         }
     }
 }
@@ -792,7 +860,7 @@ mod tests {
             registry,
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(mesh::MeshState::new(
-                host_id,
+                host_id.clone(),
                 Arc::clone(&signal_pool),
                 None,
             )),
@@ -802,6 +870,12 @@ mod tests {
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
+            life_agents: std::collections::HashMap::new(),
+            eventlog_store: Arc::new(eventlog::EventLogStore::new(
+                std::env::temp_dir().join("exomind-test-lib"),
+            )),
+            #[cfg(not(target_os = "android"))]
+            pty_manager: Arc::new(pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
     }
 

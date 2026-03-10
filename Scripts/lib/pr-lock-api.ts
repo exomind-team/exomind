@@ -3,8 +3,6 @@
  * 用于依赖注入和测试 mock
  */
 
-import { execSync } from 'node:child_process';
-
 export interface IGitHubAPI {
   /**
    * 添加标签到 PR
@@ -71,14 +69,12 @@ export class RealGitHubAPI implements IGitHubAPI {
     fs.writeFileSync(tempFile, body, 'utf-8');
 
     try {
-      const result = this.gh(
-        `api repos/${this.repo}/issues/${prNumber}/comments -X POST -F body=@"${tempFile}" --jq .id`,
-      ).trim();
-      const commentId = Number.parseInt(result, 10);
-      if (Number.isNaN(commentId)) {
+      const result = this.gh(`pr comment ${prNumber} --body-file "${tempFile}"`);
+      const match = result.match(/\/(\d+)$/);
+      if (!match) {
         throw new Error('Failed to extract comment ID from gh output');
       }
-      return commentId;
+      return parseInt(match[1]);
     } finally {
       // 清理临时文件
       try {
@@ -115,16 +111,17 @@ export class RealGitHubAPI implements IGitHubAPI {
   }
 
   async getComments(prNumber: number): Promise<Array<{ id: number; body: string; createdAt: string }>> {
-    const result = this.gh(`api repos/${this.repo}/issues/${prNumber}/comments --paginate`);
-    const data = JSON.parse(result) as Array<{ id: number; body: string; created_at: string }>;
-    return data.map((comment) => ({
-      id: comment.id,
-      body: comment.body,
-      createdAt: comment.created_at,
+    const result = this.gh(`pr view ${prNumber} --json comments`);
+    const data = JSON.parse(result);
+    return data.comments.map((c: any) => ({
+      id: c.id,
+      body: c.body,
+      createdAt: c.createdAt
     }));
   }
 
   private gh(command: string): string {
+    const { execSync } = require('child_process');
     // gh api 命令不接受 --repo 参数，需要在 URL 中指定 repo
     const isApiCommand = command.trim().startsWith('api ');
     const fullCommand = isApiCommand
