@@ -311,6 +311,28 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('shows arming overlay before microphone startup resolves（麦克风初始化未完成前先显示启动态）', async () => {
+    getUserMediaWithConstraintFallbackMock.mockImplementation(
+      () => new Promise(() => {})
+    );
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'arming',
+        duration: 0,
+      })
+    );
+
+    service.destroy();
+  });
+
   it('uses volcano native streaming when selected in settings（切换到火山后走原生流式链路）', async () => {
     setVoiceShortcutAsrProvider('volcano');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');

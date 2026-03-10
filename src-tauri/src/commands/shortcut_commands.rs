@@ -15,9 +15,9 @@ const VOICE_CANCEL_SHORTCUT: &str = "Escape";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_WINDOW_LABEL: &str = "voice-overlay";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const VOICE_OVERLAY_WIDTH: f64 = 220.0;
+const VOICE_OVERLAY_WIDTH: f64 = 560.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const VOICE_OVERLAY_HEIGHT: f64 = 52.0;
+const VOICE_OVERLAY_HEIGHT: f64 = 128.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_BOTTOM_MARGIN: i32 = 32;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -182,16 +182,18 @@ fn handle_shortcut_event(app: &AppHandle, event: ShortcutEvent) {
 fn register_cancel_shortcut_listener(app: &AppHandle) -> Result<(), String> {
     let _ = app.global_shortcut().unregister(VOICE_CANCEL_SHORTCUT);
     app.global_shortcut()
-        .on_shortcut(VOICE_CANCEL_SHORTCUT, |app, _shortcut, event| match event.state {
-            ShortcutState::Pressed => {
-                if VOICE_CANCEL_KEY_DOWN.swap(true, Ordering::SeqCst) {
-                    return;
+        .on_shortcut(VOICE_CANCEL_SHORTCUT, |app, _shortcut, event| {
+            match event.state {
+                ShortcutState::Pressed => {
+                    if VOICE_CANCEL_KEY_DOWN.swap(true, Ordering::SeqCst) {
+                        return;
+                    }
+                    app.emit("voice-shortcut", "cancel").ok();
+                    let _ = voice_overlay_hide_internal(app);
                 }
-                app.emit("voice-shortcut", "cancel").ok();
-                let _ = voice_overlay_hide_internal(app);
-            }
-            ShortcutState::Released => {
-                VOICE_CANCEL_KEY_DOWN.store(false, Ordering::SeqCst);
+                ShortcutState::Released => {
+                    VOICE_CANCEL_KEY_DOWN.store(false, Ordering::SeqCst);
+                }
             }
         })
         .map_err(|error| error.to_string())
@@ -386,14 +388,14 @@ mod tests {
     #[test]
     fn calculate_overlay_position_centers_bottom_on_primary_work_area() {
         let (x, y) = calculate_overlay_position(0, 0, 1920, 1080);
-        assert_eq!(x, 850);
-        assert_eq!(y, 996);
+        assert_eq!(x, 680);
+        assert_eq!(y, 920);
     }
 
     #[test]
     fn calculate_overlay_position_respects_monitor_offset() {
         let (x, y) = calculate_overlay_position(1920, 40, 1920, 1040);
-        assert_eq!(x, 2770);
-        assert_eq!(y, 996);
+        assert_eq!(x, 2600);
+        assert_eq!(y, 920);
     }
 }

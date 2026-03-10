@@ -8,7 +8,7 @@ import {
   type VoiceShortcutHotkey,
 } from '@/config/voice-shortcut-hotkey';
 
-export type OverlayState = 'idle' | 'recording' | 'recognizing' | 'done' | 'error';
+export type OverlayState = 'idle' | 'arming' | 'recording' | 'recognizing' | 'done' | 'error';
 
 interface OverlayData {
   state: OverlayState;
@@ -110,6 +110,12 @@ export function VoiceOverlayPage() {
 
 function StatusIndicator({ state }: { state: OverlayState }) {
   switch (state) {
+    case 'arming':
+      return (
+        <span className="overlay-icon overlay-icon--arming">
+          <LoaderCircle size={16} />
+        </span>
+      );
     case 'recording':
       return (
         <span className="overlay-icon overlay-icon--recording">
@@ -162,6 +168,13 @@ function StatusText({
   const providerMeta = providerLabel?.trim();
 
   switch (state) {
+    case 'arming':
+      return (
+        <span className="overlay-text-group">
+          <span className="overlay-text">{preview || '准备启动语音输入…'}</span>
+          <span className="overlay-text overlay-text--secondary">正在连接麦克风与识别链路</span>
+        </span>
+      );
     case 'recording':
       return (
         <span className="overlay-text-group">
@@ -213,15 +226,25 @@ function formatRecognitionMs(milliseconds: number): string {
 }
 
 const overlayStyles = /* css */ `
+  html, body, #root {
+    width: 100%;
+    height: 100%;
+    margin: 0;
+    background: transparent !important;
+    overflow: hidden;
+  }
+
   .voice-overlay-root {
     width: 100vw;
     height: 100vh;
     display: flex;
     align-items: center;
     justify-content: center;
+    padding: 8px;
     pointer-events: none;
     user-select: none;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: transparent;
   }
 
   .voice-overlay {
@@ -231,30 +254,23 @@ const overlayStyles = /* css */ `
     grid-template-columns: 28px minmax(0, 1fr);
     align-items: start;
     gap: 12px;
-    width: min(520px, calc(100vw - 24px));
-    min-height: 84px;
-    padding: 14px 16px;
-    border-radius: 22px;
-    backdrop-filter: blur(12px);
-    -webkit-backdrop-filter: blur(12px);
-    background:
-      linear-gradient(135deg, hsl(var(--bg-card) / 0.86), hsl(var(--bg-surface) / 0.8)),
-      linear-gradient(135deg, hsl(var(--brand-accent) / 0.14), transparent 58%);
+    width: min(560px, calc(100vw - 16px));
+    min-height: 112px;
+    padding: 16px 18px;
+    border-radius: 24px;
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    background: linear-gradient(
+      180deg,
+      hsl(var(--bg-card) / 0.62),
+      hsl(var(--bg-surface) / 0.46)
+    );
     border: none;
-    box-shadow: 0 20px 56px -30px rgba(15, 23, 42, 0.5);
+    box-shadow: 0 18px 48px -28px rgba(15, 23, 42, 0.42);
     animation: overlay-fade-in 0.15s ease-out;
-    font-size: 12px;
-    line-height: 1.2;
+    font-size: 13px;
+    line-height: 1.3;
     color: hsl(var(--text-primary));
-  }
-
-  .voice-overlay::before {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    background: linear-gradient(90deg, hsl(var(--brand-accent) / 0.14), transparent 40%);
   }
 
   .overlay-icon {
@@ -272,6 +288,11 @@ const overlayStyles = /* css */ `
 
   .overlay-icon--recording {
     animation: pulse-icon 1.2s ease-in-out infinite;
+  }
+
+  .overlay-icon--arming {
+    animation: spin-icon 1s linear infinite;
+    color: hsl(var(--brand-accent));
   }
 
   .overlay-icon--recognizing {
@@ -292,6 +313,7 @@ const overlayStyles = /* css */ `
   .overlay-content {
     min-width: 0;
     text-align: left;
+    align-self: center;
   }
 
   .overlay-meta {
@@ -305,7 +327,7 @@ const overlayStyles = /* css */ `
   .overlay-text {
     font-weight: 500;
     font-variant-numeric: tabular-nums;
-    line-height: 1.45;
+    line-height: 1.5;
     white-space: pre-wrap;
     word-break: break-word;
     overflow-wrap: anywhere;
@@ -315,7 +337,7 @@ const overlayStyles = /* css */ `
   .overlay-text-group {
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 6px;
     min-width: 0;
     max-width: 100%;
     flex: 1;

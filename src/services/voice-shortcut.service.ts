@@ -39,7 +39,7 @@ import {
   type VolcanoStreamingCapture,
 } from '@/lib/asr/volcano-streaming-capture';
 
-export type VoiceShortcutState = 'idle' | 'recording' | 'recognizing' | 'done' | 'error';
+export type VoiceShortcutState = 'idle' | 'arming' | 'recording' | 'recognizing' | 'done' | 'error';
 
 const LOG_TAG = '[VoiceShortcut]';
 const AUTO_HIDE_DONE_MS = 2000;
@@ -77,6 +77,7 @@ export class VoiceShortcutService {
   private unlistenProvider: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private initializing = false;
+  private startPending = false;
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
   private livePreviewSource: VoiceLivePreviewSource;
   private livePreviewSession: VoiceLivePreviewSession | null = null;
@@ -145,6 +146,9 @@ export class VoiceShortcutService {
   }
 
   private async handleStart(): Promise<void> {
+    if (this.startPending) {
+      return;
+    }
     if (this.state === 'recognizing') {
       return;
     }
@@ -163,6 +167,12 @@ export class VoiceShortcutService {
 
     this.clearAutoHide();
     this.livePreviewText = '';
+    this.startPending = true;
+    this.emitOverlayState('arming', {
+      duration: 0,
+      text: '准备启动语音输入…',
+      isLivePreview: false,
+    });
 
     try {
       if (this.asrProvider === 'volcano') {
@@ -187,11 +197,13 @@ export class VoiceShortcutService {
       };
 
       recorder.start(100);
-      await this.syncRecordingActive(true);
       this.setState('recording');
       this.startLivePreview('zh-CN');
+      void this.syncRecordingActive(true);
     } catch (error) {
       this.handleError(`录音失败: ${error}`);
+    } finally {
+      this.startPending = false;
     }
   }
 
@@ -446,13 +458,32 @@ export class VoiceShortcutService {
 
   private async startVolcanoStreaming(): Promise<void> {
     const config = this.getVolcanoRuntimeConfigOrThrow();
-    this.stream = await getUserMediaWithConstraintFallback(
+    const streamPromise = getUserMediaWithConstraintFallback(
       (constraints) => navigator.mediaDevices.getUserMedia(constraints),
       { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
     );
+    const sessionPromise = invoke<string>('volcano_asr_stream_start', { config });
 
     try {
-      const sessionId = await invoke<string>('volcano_asr_stream_start', { config });
+      const [streamResult, sessionResult] = await Promise.allSettled([streamPromise, sessionPromise]);
+      if (streamResult.status !== 'fulfilled' || sessionResult.status !== 'fulfilled') {
+        if (streamResult.status === 'fulfilled') {
+          streamResult.value.getTracks().forEach((track) => track.stop());
+        }
+        if (sessionResult.status === 'fulfilled') {
+          invoke('volcano_asr_stream_cancel', { sessionId: sessionResult.value }).catch(() => {});
+        }
+        if (streamResult.status === 'rejected') {
+          throw streamResult.reason;
+        }
+        if (sessionResult.status === 'rejected') {
+          throw sessionResult.reason;
+        }
+        throw new Error('volcano start failed without explicit rejection');
+      }
+
+      this.stream = streamResult.value;
+      const sessionId = sessionResult.value;
       this.volcanoStreamSessionId = sessionId;
       this.volcanoPushQueue = Promise.resolve();
       this.volcanoStreamingCapture = createVolcanoStreamingCapture({
@@ -460,8 +491,8 @@ export class VoiceShortcutService {
         onChunk: async (chunk) => this.enqueueVolcanoStreamingChunk(chunk),
       });
       await this.volcanoStreamingCapture.start();
-      await this.syncRecordingActive(true);
       this.setState('recording');
+      void this.syncRecordingActive(true);
     } catch (error) {
       this.cleanupVolcanoStreamingState();
       this.releaseResources();

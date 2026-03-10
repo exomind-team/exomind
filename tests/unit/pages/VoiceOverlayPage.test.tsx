@@ -24,7 +24,7 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
 import { VoiceOverlayPage } from '@/pages/VoiceOverlayPage';
 
 describe('VoiceOverlayPage', () => {
-  it('renders as a single left-aligned translucent card shell（单层左对齐半透明卡片）', async () => {
+  it('renders as a larger single translucent shell（更大的单层半透明壳）', async () => {
     const { container } = render(<VoiceOverlayPage />);
 
     await act(async () => {
@@ -37,10 +37,29 @@ describe('VoiceOverlayPage', () => {
     });
 
     const styleTag = container.querySelector('style');
+    expect(styleTag?.textContent).toContain('html, body, #root {');
+    expect(styleTag?.textContent).toContain('background: transparent !important;');
     expect(styleTag?.textContent).toContain('grid-template-columns: 28px minmax(0, 1fr);');
     expect(styleTag?.textContent).toContain('text-align: left;');
     expect(styleTag?.textContent).toContain('border: none;');
-    expect(styleTag?.textContent).toContain('width: min(520px, calc(100vw - 24px));');
+    expect(styleTag?.textContent).toContain('width: min(560px, calc(100vw - 16px));');
+    expect(styleTag?.textContent).toContain('min-height: 112px;');
+    expect(styleTag?.textContent).not.toContain('.voice-overlay::before');
+  });
+
+  it('shows startup hint while arming microphone and stream（启动中先显示准备提示）', async () => {
+    render(<VoiceOverlayPage />);
+
+    await act(async () => {
+      overlayListener?.({
+        payload: {
+          state: 'arming',
+        },
+      });
+    });
+
+    expect(screen.getByText('准备启动语音输入…')).toBeInTheDocument();
+    expect(screen.getByText('正在连接麦克风与识别链路')).toBeInTheDocument();
   });
 
   it('shows recognition elapsed time on done state', async () => {
