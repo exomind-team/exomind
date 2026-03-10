@@ -66,6 +66,7 @@ import type {
   AgentConversationMessage,
   AgentDetailData,
   AgentDeviceGroup,
+  AgentEnergySnapshot,
   AgentHubListItem,
   AgentHubListSection,
   AgentHubNodeStatus,
@@ -294,7 +295,18 @@ function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
   return Plus;
 }
 
-function mapRuntimeStatusToNodeStatus(status: string): AgentHubNodeStatus {
+const ENERGY_PHASE_COLORS: Record<string, string> = {
+  normal: '#22C55E',
+  slowing: '#EAB308',
+  critical: '#F97316',
+  dying: '#EF4444',
+  dormant: '#6B7280',
+};
+
+function mapRuntimeStatusToNodeStatus(status: string, energy?: { phase: string; is_dormant: boolean }): AgentHubNodeStatus {
+  if (energy?.is_dormant) return 'dormant';
+  if (energy?.phase === 'dying') return 'dying';
+  if (energy?.phase === 'critical') return 'critical';
   if (status === 'available' || status === 'running') return 'running';
   if (status === 'busy') return 'warning';
   if (status === 'error') return 'warning';
@@ -348,9 +360,10 @@ function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): A
         type: 'agent',
         name: agent.name,
         description: `来源 ${agent.sourceHostAddress}${agent.description ? ` · ${agent.description}` : ''}`,
-        status: mapRuntimeStatusToNodeStatus(agent.status),
+        status: mapRuntimeStatusToNodeStatus(agent.status, agent.energy),
         icon: 'brain',
         badgeText: agent.sourceHostName,
+        energy: agent.energy,
       })),
     };
   });
@@ -1906,11 +1919,18 @@ function NodesTabView({
               idle: '空闲',
               warning: '警告',
               offline: '离线',
+              dormant: '休眠',
+              critical: '危险',
+              dying: '濒死',
             };
+            const isDormant = item.status === 'dormant';
+            const energyPhase = item.energy?.phase ?? 'normal';
+            const energyColor = ENERGY_PHASE_COLORS[energyPhase] ?? '#6B7280';
+            const energyPercent = item.energy ? Math.round(item.energy.ratio * 100) : null;
             return (
               <div
                 key={item.id}
-                className="flex cursor-pointer items-center gap-3 bg-white px-4 py-3 transition-colors hover:bg-[#FAF7F5] dark:bg-[#0C0A09] dark:hover:bg-[#1C1917]"
+                className={`flex cursor-pointer items-center gap-3 bg-white px-4 py-3 transition-colors hover:bg-[#FAF7F5] dark:bg-[#0C0A09] dark:hover:bg-[#1C1917] ${isDormant ? 'opacity-50 grayscale' : ''}`}
                 onClick={() => onNodeClick(item)}
               >
                 {/* Icon */}
@@ -1940,16 +1960,32 @@ function NodesTabView({
                 </div>
                 {/* 内容 */}
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
-                      {item.name}
-                    </span>
-                    {item.badgeText && (
-                      <span className="shrink-0 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-                        {item.badgeText}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                        {item.name}
+                      </span>
+                      {item.badgeText && (
+                        <span className="shrink-0 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                          {item.badgeText}
+                        </span>
+                      )}
+                    </div>
+                    {energyPercent != null && (
+                      <span className="shrink-0 text-[10px] font-medium" style={{ color: energyColor }}>
+                        {energyPercent}%
                       </span>
                     )}
                   </div>
+                  {/* Mini energy bar */}
+                  {item.energy && (
+                    <div className="mt-1 h-[2px] w-full overflow-hidden rounded-full bg-[#E7E3E0] dark:bg-[#292524]">
+                      <div
+                        className="h-full rounded-full transition-all duration-700 ease-out"
+                        style={{ width: `${energyPercent ?? 0}%`, backgroundColor: energyColor }}
+                      />
+                    </div>
+                  )}
                   {item.description && (
                     <p className="mt-0.5 truncate text-xs text-[#78716C] dark:text-[#A8A29E]">
                       {item.description}
@@ -1963,9 +1999,13 @@ function NodesTabView({
                       ? 'bg-[#22C55E]/15 text-[#22C55E]'
                       : item.status === 'warning'
                         ? 'bg-[#F59E0B]/15 text-[#F59E0B]'
-                        : item.status === 'offline'
+                        : item.status === 'offline' || item.status === 'dying'
                           ? 'bg-[#EF4444]/15 text-[#EF4444]'
-                          : 'bg-[#57534E]/30 text-[#78716C]'
+                          : item.status === 'critical'
+                            ? 'bg-[#F97316]/15 text-[#F97316]'
+                            : item.status === 'dormant'
+                              ? 'bg-[#6B7280]/15 text-[#6B7280]'
+                              : 'bg-[#57534E]/30 text-[#78716C]'
                   }`}
                 >
                   {statusLabel[item.status]}
