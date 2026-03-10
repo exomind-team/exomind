@@ -120,6 +120,7 @@ import {
   formatRuntimeEventPayload,
   getConversationMessageTestId,
 } from './agents/conversation-runtime';
+import { WorkspaceTabs } from './agents/WorkspaceTabs';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -3444,6 +3445,11 @@ export function AgentsPage() {
                                   </div>
                                 ))}
                               </div>
+                            )}
+
+                            {/* Workspace tabs — 认知生命体 */}
+                            {runtimeNodeId && (
+                              <WorkspaceTabs agentId={runtimeNodeId} />
                             )}
                           </>
                         )}
