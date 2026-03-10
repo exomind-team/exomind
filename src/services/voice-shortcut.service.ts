@@ -51,6 +51,7 @@ type OverlayEventPayload = {
   state: VoiceShortcutState;
   duration?: number;
   text: string;
+  hintText?: string;
   isLivePreview: boolean;
   providerLabel: string;
   recognitionMs?: number;
@@ -405,13 +406,15 @@ export class VoiceShortcutService {
     this.clearAutoHide();
     this.livePreviewText = '';
     this.startPending = true;
-    if (this.shouldShowArmingState()) {
-      this.emitOverlayState('arming', {
-        duration: 0,
-        text: '准备启动语音输入…',
-        isLivePreview: false,
-      });
-    }
+    const needsColdStart = this.shouldShowArmingState();
+    this.emitOverlayState('arming', {
+      duration: 0,
+      text: needsColdStart ? '准备启动语音输入…' : '正在唤起语音输入…',
+      hintText: needsColdStart
+        ? '正在等待麦克风权限并连接识别链路'
+        : '麦克风与语音链路已就绪，正在激活录音',
+      isLivePreview: false,
+    });
 
     try {
       if (this.asrProvider === 'volcano') {
@@ -646,6 +649,7 @@ export class VoiceShortcutService {
       state,
       ...(typeof extra.duration === 'number' ? { duration: extra.duration } : {}),
       text: extra.text ?? fallbackText,
+      hintText: extra.hintText,
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
       providerLabel: extra.providerLabel ?? this.getActiveProviderLabel(),
       recognitionMs: extra.recognitionMs,

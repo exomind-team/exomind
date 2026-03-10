@@ -1110,7 +1110,7 @@ export function SettingsPage() {
                 </div>
                 <div className="pb-[14px] pl-[46px] pr-4">
                   <span className="text-xs text-[#A8A29E]">
-                    开启后会在权限已授予时尽量常驻预热麦克风与语音链路，换更快的唤醒速度。
+                    开启后会在权限已授予时尽量常驻预热麦克风与语音链路，独立录音的启动等待通常可缩短约 3 秒。
                   </span>
                 </div>
                 <Divider />
@@ -1602,7 +1602,7 @@ export function SettingsPage() {
             </div>
             <div className="pb-[14px] pl-[46px] pr-4">
               <span className="text-xs text-[#A8A29E]">
-                开启后会在权限已授予时尽量常驻预热麦克风与语音链路，换更快的唤醒速度。
+                开启后会在权限已授予时尽量常驻预热麦克风与语音链路，独立录音的启动等待通常可缩短约 3 秒。
               </span>
             </div>
             <Divider />
