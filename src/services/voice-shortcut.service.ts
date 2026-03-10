@@ -45,7 +45,7 @@ const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
 type OverlayEventPayload = {
   state: VoiceShortcutState;
-  duration: number;
+  duration?: number;
   text: string;
   isLivePreview: boolean;
   providerLabel: string;
@@ -617,7 +617,7 @@ export class VoiceShortcutService {
     const fallbackText = state === 'recording' || state === 'recognizing' ? this.livePreviewText : '';
     return {
       state,
-      duration: extra.duration ?? 0,
+      ...(typeof extra.duration === 'number' ? { duration: extra.duration } : {}),
       text: extra.text ?? fallbackText,
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
       providerLabel: extra.providerLabel ?? this.getActiveProviderLabel(),

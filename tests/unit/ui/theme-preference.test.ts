@@ -34,6 +34,19 @@ describe('theme preference', () => {
     unsubscribe();
   });
 
+  it('handles storage event updates（支持跨窗口 storage 事件同步）', () => {
+    const listener = vi.fn();
+    const unsubscribe = subscribeThemePreferenceChanges(listener);
+
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'exomind:themePreference',
+      newValue: 'dark',
+    }));
+
+    expect(listener).toHaveBeenCalledWith('dark');
+    unsubscribe();
+  });
+
   it('applies dark preference via html.dark and colorScheme', () => {
     expect(applyThemePreference('dark')).toBe('dark');
     expect(document.documentElement.classList.contains('dark')).toBe(true);

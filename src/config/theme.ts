@@ -88,8 +88,23 @@ export function subscribeThemePreferenceChanges(
     }
   };
 
+  const storageHandler = (event: StorageEvent) => {
+    if (event.key !== THEME_PREFERENCE_STORAGE_KEY) {
+      return;
+    }
+    if (isThemePreference(event.newValue)) {
+      listener(event.newValue);
+      return;
+    }
+    listener(getThemePreference());
+  };
+
   window.addEventListener(THEME_PREFERENCE_CHANGED_EVENT, handler);
-  return () => window.removeEventListener(THEME_PREFERENCE_CHANGED_EVENT, handler);
+  window.addEventListener('storage', storageHandler);
+  return () => {
+    window.removeEventListener(THEME_PREFERENCE_CHANGED_EVENT, handler);
+    window.removeEventListener('storage', storageHandler);
+  };
 }
 
 export function subscribeSystemThemeChanges(listener: (theme: ResolvedTheme) => void): () => void {
