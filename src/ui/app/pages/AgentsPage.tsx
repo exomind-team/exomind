@@ -121,6 +121,8 @@ import {
   getConversationMessageTestId,
 } from './agents/conversation-runtime';
 import { WorkspaceTabs } from './agents/WorkspaceTabs';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -3318,19 +3320,22 @@ export function AgentsPage() {
                     const nodeType = node?.type ?? (rightPanel.state === 'AGENT_DETAIL' ? 'agent' : 'actor');
                     const nodeLabel = node?.label ?? agentDetail?.title ?? runtimeNodeId ?? '未知节点';
 
-                    const statusColors: Record<string, string> = {
-                      online: 'bg-[#22C55E]/15 text-[#22C55E]',
-                      offline: 'bg-[#57534E]/30 text-[#78716C]',
-                      error: 'bg-[#EF4444]/15 text-[#EF4444]',
-                      busy: 'bg-[#F59E0B]/15 text-[#F59E0B]',
-                      warning: 'bg-[#F59E0B]/15 text-[#F59E0B]',
+                    const statusVariant: Record<string, 'default' | 'secondary' | 'destructive' | 'outline'> = {
+                      online: 'default',
+                      available: 'default',
+                      running: 'default',
+                      offline: 'secondary',
+                      unknown: 'secondary',
+                      error: 'destructive',
+                      busy: 'outline',
+                      warning: 'outline',
                     };
                     const logStatusColors: Record<string, string> = {
                       online: 'text-foreground',
                       offline: 'text-muted-foreground',
-                      warning: 'text-[#F59E0B]',
-                      error: 'text-[#EF4444]',
-                      busy: 'text-[#F59E0B]',
+                      warning: 'text-warning',
+                      error: 'text-destructive',
+                      busy: 'text-warning',
                     };
 
                     return (
@@ -3340,16 +3345,16 @@ export function AgentsPage() {
                           <div
                             className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
                               nodeType === 'agent'
-                                ? 'bg-[#CCFBF1] dark:bg-[#0D9488]/20'
-                                : 'bg-[#FEF3C7] dark:bg-[#F59E0B]/20'
+                                ? 'bg-brand/10'
+                                : 'bg-warning/10'
                             }`}
                           >
                             <Bot
                               size={18}
                               className={
                                 nodeType === 'agent'
-                                  ? 'text-[#0D9488]'
-                                  : 'text-[#B45309] dark:text-[#F59E0B]'
+                                  ? 'text-brand'
+                                  : 'text-warning'
                               }
                             />
                           </div>
@@ -3363,34 +3368,33 @@ export function AgentsPage() {
 
                         {/* 状态 badge（从 signalGraph 节点获取，无需 agentDetail） */}
                         {!isDetailLoading && !agentDetail && node && (
-                          <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColors[node.status] ?? statusColors.offline}`}>
+                          <Badge variant={statusVariant[node.status] ?? 'secondary'} className="w-fit">
                             {node.status}
-                          </span>
+                          </Badge>
                         )}
 
                         {rightPanel.state === 'AGENT_DETAIL' && nodeId && (
                           <div className="flex items-center gap-2">
-                            <button
-                              type="button"
+                            <Button
+                              size="sm"
                               data-testid="agent-rightpanel-open-chat"
                               onClick={() => {
                                 void handleOpenAgentChat(nodeId);
                               }}
-                              className="rounded-lg bg-[#0D9488] px-3 py-1.5 text-xs font-medium text-white"
                             >
                               开始聊天
-                            </button>
-                            <button
-                              type="button"
+                            </Button>
+                            <Button
+                              variant="destructive"
+                              size="sm"
                               data-testid="agent-rightpanel-stop-agent"
                               onClick={() => {
                                 void handleStopAgent(nodeId);
                               }}
                               disabled={isAgentStopping}
-                              className="rounded-lg bg-[#7F1D1D] px-3 py-1.5 text-xs font-medium text-[#FECACA] disabled:opacity-50"
                             >
                               {isAgentStopping ? '停止中...' : '停止 Agent'}
-                            </button>
+                            </Button>
                           </div>
                         )}
 
@@ -3407,9 +3411,9 @@ export function AgentsPage() {
                         {!isDetailLoading && agentDetail && (
                           <>
                             {/* 状态 badge */}
-                            <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColors[agentDetail.status] ?? statusColors.offline}`}>
+                            <Badge variant={statusVariant[agentDetail.status] ?? 'secondary'} className="w-fit">
                               {agentDetail.status}
-                            </span>
+                            </Badge>
 
                             {/* 描述 */}
                             {agentDetail.description && (

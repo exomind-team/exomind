@@ -173,7 +173,7 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
         </div>
         <div className="h-2 overflow-hidden rounded-full bg-muted">
           <div
-            className="h-full rounded-full bg-[#3B82F6] transition-all duration-500"
+            className="h-full rounded-full bg-brand transition-all duration-500"
             style={{ width: `${usagePercent}%` }}
           />
         </div>
@@ -265,14 +265,14 @@ function ActionsTab({ agentId }: { agentId: string }) {
                     <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
                       #{entry.tick}
                     </span>
-                    <span className="rounded-md bg-[#3B82F615] px-1.5 py-0.5 text-[10px] font-medium text-[#3B82F6]">
+                    <span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
                       {typeLabel}
                     </span>
                   </div>
                   <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
                     <span>{time}</span>
                     {energyDelta !== 0 && (
-                      <span className={energyDelta < 0 ? 'text-[#EF4444]' : 'text-[#22C55E]'}>
+                      <span className={energyDelta < 0 ? 'text-destructive' : 'text-success'}>
                         {energyDelta > 0 ? '+' : ''}{energyDelta}
                       </span>
                     )}
