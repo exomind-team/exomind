@@ -5,6 +5,7 @@ import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
+import { setVoiceOverlayOpacity } from '@/config/voice-overlay-preferences';
 import { setVolcanoResourceId } from '@/lib/asr/volcano-config';
 
 const invokeMock = vi.fn();
@@ -45,6 +46,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
     expect(screen.getByText('快捷语音引擎')).toBeInTheDocument();
+    expect(screen.getByText('悬浮窗透明度')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
   });
@@ -75,6 +77,16 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(setVolcanoResourceId('volc.bigasr.sauc.duration')).toBe('volc.bigasr.sauc.duration');
     expect(screen.getByText('当前默认资源：模型 1.0 小时版。')).toBeInTheDocument();
+  });
+
+  it('updates voice overlay opacity from input section', () => {
+    render(<SettingsPage />);
+
+    const slider = screen.getByTestId('new-settings-voice-overlay-opacity-slider');
+    fireEvent.change(slider, { target: { value: '74' } });
+
+    expect(setVoiceOverlayOpacity(74)).toBe(74);
+    expect(screen.getByText('74%')).toBeInTheDocument();
   });
 
   it('toggles voice transcript send mode from input section', () => {

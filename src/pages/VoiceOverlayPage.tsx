@@ -1,12 +1,22 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type RefObject } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { AlertCircle, Check, LoaderCircle, Mic } from 'lucide-react';
-import { trimToLatestCharacters } from '@/lib/voice/overlay-text';
 import {
   getVoiceShortcutHotkey,
   subscribeVoiceShortcutHotkeyChanges,
   type VoiceShortcutHotkey,
 } from '@/config/voice-shortcut-hotkey';
+import {
+  applyThemePreference,
+  getThemePreference,
+  subscribeSystemThemeChanges,
+  subscribeThemePreferenceChanges,
+  type ThemePreference,
+} from '@/config/theme';
+import {
+  getVoiceOverlayOpacity,
+  subscribeVoiceOverlayOpacityChanges,
+} from '@/config/voice-overlay-preferences';
 
 export type OverlayState = 'idle' | 'arming' | 'recording' | 'recognizing' | 'done' | 'error';
 
@@ -25,6 +35,7 @@ const AUTO_HIDE_ERROR_MS = 3000;
 
 export function VoiceOverlayPage() {
   const [shortcut, setShortcut] = useState<VoiceShortcutHotkey>(() => getVoiceShortcutHotkey());
+  const [overlayOpacity, setOverlayOpacity] = useState<number>(() => getVoiceOverlayOpacity());
   const [data, setData] = useState<OverlayData>({
     state: 'idle',
     duration: 0,
@@ -34,6 +45,39 @@ export function VoiceOverlayPage() {
     recognitionMs: undefined,
     errorMessage: '',
   });
+  const transcriptRef = useRef<HTMLDivElement>(null);
+  const [stickToBottom, setStickToBottom] = useState(true);
+
+  const overlayPrimaryAlpha = Math.max(0.28, Math.min(0.92, overlayOpacity / 100));
+  const overlaySecondaryAlpha = Math.max(0.16, overlayPrimaryAlpha - 0.18);
+
+  useEffect(() => {
+    const syncSystemTheme = (preference: ThemePreference): (() => void) => {
+      if (preference !== 'system') {
+        return () => {};
+      }
+
+      return subscribeSystemThemeChanges(() => {
+        applyThemePreference('system');
+      });
+    };
+
+    let preference = getThemePreference();
+    applyThemePreference(preference);
+
+    let unsubscribeSystem = syncSystemTheme(preference);
+    const unsubscribePreference = subscribeThemePreferenceChanges((nextPreference) => {
+      preference = nextPreference;
+      applyThemePreference(preference);
+      unsubscribeSystem();
+      unsubscribeSystem = syncSystemTheme(preference);
+    });
+
+    return () => {
+      unsubscribePreference();
+      unsubscribeSystem();
+    };
+  }, []);
 
   useEffect(() => {
     let cancelled = false;
@@ -60,6 +104,11 @@ export function VoiceOverlayPage() {
   }, []);
 
   useEffect(() => {
+    setOverlayOpacity(getVoiceOverlayOpacity());
+    return subscribeVoiceOverlayOpacityChanges((nextOpacity) => setOverlayOpacity(nextOpacity));
+  }, []);
+
+  useEffect(() => {
     if (data.state !== 'recording') return;
     const start = Date.now() - data.duration * 1000;
     const timer = setInterval(() => {
@@ -82,9 +131,29 @@ export function VoiceOverlayPage() {
     }
   }, [data.state]);
 
+  useEffect(() => {
+    setStickToBottom(true);
+  }, [data.state]);
+
+  useEffect(() => {
+    if (!stickToBottom || !transcriptRef.current) {
+      return;
+    }
+
+    const node = transcriptRef.current;
+    node.scrollTop = node.scrollHeight;
+  }, [data.text, data.state, stickToBottom]);
+
   if (data.state === 'idle') {
     return null;
   }
+
+  const handleTranscriptScroll = () => {
+    const node = transcriptRef.current;
+    if (!node) return;
+    const distanceToBottom = node.scrollHeight - node.clientHeight - node.scrollTop;
+    setStickToBottom(distanceToBottom <= 18);
+  };
 
   return (
     <div className="voice-overlay-root">
@@ -100,10 +169,12 @@ export function VoiceOverlayPage() {
             providerLabel={data.providerLabel}
             recognitionMs={data.recognitionMs}
             errorMessage={data.errorMessage}
+            transcriptRef={transcriptRef}
+            onTranscriptScroll={handleTranscriptScroll}
           />
         </div>
       </div>
-      <style>{overlayStyles}</style>
+      <style>{overlayStyles(overlayPrimaryAlpha, overlaySecondaryAlpha)}</style>
     </div>
   );
 }
@@ -154,6 +225,8 @@ function StatusText({
   providerLabel,
   recognitionMs,
   errorMessage,
+  transcriptRef,
+  onTranscriptScroll,
 }: {
   state: OverlayState;
   shortcut: VoiceShortcutHotkey;
@@ -163,15 +236,24 @@ function StatusText({
   providerLabel?: string;
   recognitionMs?: number;
   errorMessage: string;
+  transcriptRef: RefObject<HTMLDivElement>;
+  onTranscriptScroll: () => void;
 }) {
-  const preview = trimToLatestCharacters(text, 100);
+  const transcript = text.trim();
   const providerMeta = providerLabel?.trim();
 
   switch (state) {
     case 'arming':
       return (
         <span className="overlay-text-group">
-          <span className="overlay-text">{preview || '准备启动语音输入…'}</span>
+          <div
+            ref={transcriptRef}
+            onScroll={onTranscriptScroll}
+            data-testid="voice-overlay-transcript"
+            className="overlay-transcript"
+          >
+            <span className="overlay-text">{transcript || '准备启动语音输入…'}</span>
+          </div>
           <span className="overlay-text overlay-text--secondary">正在连接麦克风与识别链路</span>
         </span>
       );
@@ -179,7 +261,14 @@ function StatusText({
       return (
         <span className="overlay-text-group">
           {providerMeta ? <span className="overlay-meta">{providerMeta}</span> : null}
-          <span className="overlay-text">{preview || '正在听你说…'}</span>
+          <div
+            ref={transcriptRef}
+            onScroll={onTranscriptScroll}
+            data-testid="voice-overlay-transcript"
+            className="overlay-transcript"
+          >
+            <span className="overlay-text">{transcript || '正在听你说…'}</span>
+          </div>
           <span className="overlay-status-row overlay-text overlay-text--secondary">
             <span className="overlay-duration">{formatDuration(duration)}</span>
             <span>{`${isLivePreview ? '实时预览 · ' : ''}再按 ${shortcut} 结束 · Esc 取消`}</span>
@@ -190,7 +279,14 @@ function StatusText({
       return (
         <span className="overlay-text-group">
           {providerMeta ? <span className="overlay-meta">{providerMeta}</span> : null}
-          <span className="overlay-text">{preview || '识别中…'}</span>
+          <div
+            ref={transcriptRef}
+            onScroll={onTranscriptScroll}
+            data-testid="voice-overlay-transcript"
+            className="overlay-transcript"
+          >
+            <span className="overlay-text">{transcript || '识别中…'}</span>
+          </div>
           <span className="overlay-text overlay-text--secondary">{`识别中... · ${shortcut} 开始新一轮 · Esc 取消`}</span>
         </span>
       );
@@ -203,13 +299,29 @@ function StatusText({
           : providerMeta || '';
       return (
         <span className="overlay-text-group">
-          <span className="overlay-text">{preview || '完成'}</span>
+          <div
+            ref={transcriptRef}
+            onScroll={onTranscriptScroll}
+            data-testid="voice-overlay-transcript"
+            className="overlay-transcript"
+          >
+            <span className="overlay-text">{transcript || '完成'}</span>
+          </div>
           {meta ? <span className="overlay-text overlay-text--secondary">{meta}</span> : null}
         </span>
       );
     }
     case 'error':
-      return <span className="overlay-text overlay-text--error">{errorMessage || '识别失败'}</span>;
+      return (
+        <div
+          ref={transcriptRef}
+          onScroll={onTranscriptScroll}
+          data-testid="voice-overlay-transcript"
+          className="overlay-transcript"
+        >
+          <span className="overlay-text overlay-text--error">{errorMessage || '识别失败'}</span>
+        </div>
+      );
     default:
       return null;
   }
@@ -225,7 +337,7 @@ function formatRecognitionMs(milliseconds: number): string {
   return `${(milliseconds / 1000).toFixed(2)}s`;
 }
 
-const overlayStyles = /* css */ `
+const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css */ `
   html, body, #root {
     width: 100%;
     height: 100%;
@@ -252,9 +364,10 @@ const overlayStyles = /* css */ `
     pointer-events: auto;
     display: grid;
     grid-template-columns: 28px minmax(0, 1fr);
-    align-items: start;
+    align-items: stretch;
     gap: 12px;
     width: min(560px, calc(100vw - 16px));
+    height: calc(100vh - 16px);
     min-height: 112px;
     padding: 16px 18px;
     border-radius: 24px;
@@ -262,8 +375,8 @@ const overlayStyles = /* css */ `
     -webkit-backdrop-filter: blur(20px);
     background: linear-gradient(
       180deg,
-      hsl(var(--bg-card) / 0.62),
-      hsl(var(--bg-surface) / 0.46)
+      hsl(var(--bg-card) / ${primaryAlpha.toFixed(2)}),
+      hsl(var(--bg-surface) / ${secondaryAlpha.toFixed(2)})
     );
     border: none;
     box-shadow: 0 18px 48px -28px rgba(15, 23, 42, 0.42);
@@ -312,8 +425,10 @@ const overlayStyles = /* css */ `
 
   .overlay-content {
     min-width: 0;
+    min-height: 0;
+    display: flex;
     text-align: left;
-    align-self: center;
+    align-self: stretch;
   }
 
   .overlay-meta {
@@ -329,9 +444,8 @@ const overlayStyles = /* css */ `
     font-variant-numeric: tabular-nums;
     line-height: 1.5;
     white-space: pre-wrap;
-    word-break: break-word;
+    word-break: break-all;
     overflow-wrap: anywhere;
-    min-height: calc(1.45em * 2);
   }
 
   .overlay-text-group {
@@ -339,8 +453,33 @@ const overlayStyles = /* css */ `
     flex-direction: column;
     gap: 6px;
     min-width: 0;
+    min-height: 0;
     max-width: 100%;
     flex: 1;
+    justify-content: space-between;
+  }
+
+  .overlay-transcript {
+    min-height: 0;
+    flex: 1;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding-right: 6px;
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--text-muted) / 0.45) transparent;
+  }
+
+  .overlay-transcript::-webkit-scrollbar {
+    width: 6px;
+  }
+
+  .overlay-transcript::-webkit-scrollbar-thumb {
+    border-radius: 999px;
+    background: hsl(var(--text-muted) / 0.36);
+  }
+
+  .overlay-transcript::-webkit-scrollbar-track {
+    background: transparent;
   }
 
   .overlay-text--secondary {

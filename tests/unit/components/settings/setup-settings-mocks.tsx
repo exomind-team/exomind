@@ -93,6 +93,15 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/voice-overlay-preferences', () => ({
+  DEFAULT_VOICE_OVERLAY_OPACITY: 62,
+  MIN_VOICE_OVERLAY_OPACITY: 32,
+  MAX_VOICE_OVERLAY_OPACITY: 92,
+  getVoiceOverlayOpacity: vi.fn(() => 62),
+  setVoiceOverlayOpacity: vi.fn((value: number) => value),
+  subscribeVoiceOverlayOpacityChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/feedback-preferences', () => ({
   getFeedbackPreferences: vi.fn(() => ({
     timingInfoEnabled: false,
