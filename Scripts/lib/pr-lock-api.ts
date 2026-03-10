@@ -3,6 +3,9 @@
  * 用于依赖注入和测试 mock
  */
 
+import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+
 export interface IGitHubAPI {
   /**
    * 添加标签到 PR
@@ -57,28 +60,30 @@ export class RealGitHubAPI implements IGitHubAPI {
 
   async createComment(prNumber: number, body: string): Promise<number> {
     // 使用临时文件避免 shell 转义破坏换行符
-    const fs = await import('fs');
-
     // 确保临时目录存在
     const tempDir = '.exomind/temp';
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
+    if (!existsSync(tempDir)) {
+      mkdirSync(tempDir, { recursive: true });
     }
 
     const tempFile = `${tempDir}/comment-${Date.now()}.txt`;
-    fs.writeFileSync(tempFile, body, 'utf-8');
+    writeFileSync(tempFile, body, 'utf-8');
 
     try {
       const result = this.gh(`pr comment ${prNumber} --body-file "${tempFile}"`);
       const match = result.match(/\/(\d+)$/);
       if (!match) {
-        throw new Error('Failed to extract comment ID from gh output');
+        const fallbackId = this.fetchLatestCommentId(prNumber);
+        if (fallbackId === null) {
+          throw new Error('Failed to extract comment ID from gh output');
+        }
+        return fallbackId;
       }
       return parseInt(match[1]);
     } finally {
       // 清理临时文件
       try {
-        fs.unlinkSync(tempFile);
+        unlinkSync(tempFile);
       } catch (e) {
         // 忽略删除失败
       }
@@ -87,23 +92,21 @@ export class RealGitHubAPI implements IGitHubAPI {
 
   async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
     // 使用临时文件避免 shell 转义破坏换行符
-    const fs = await import('fs');
-
     // 确保临时目录存在
     const tempDir = '.exomind/temp';
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
+    if (!existsSync(tempDir)) {
+      mkdirSync(tempDir, { recursive: true });
     }
 
     const tempFile = `${tempDir}/comment-${Date.now()}.txt`;
-    fs.writeFileSync(tempFile, body, 'utf-8');
+    writeFileSync(tempFile, body, 'utf-8');
 
     try {
       this.gh(`api -X PATCH "/repos/${this.repo}/issues/comments/${commentId}" -F body=@"${tempFile}"`);
     } finally {
       // 清理临时文件
       try {
-        fs.unlinkSync(tempFile);
+        unlinkSync(tempFile);
       } catch (e) {
         // 忽略删除失败
       }
@@ -111,17 +114,25 @@ export class RealGitHubAPI implements IGitHubAPI {
   }
 
   async getComments(prNumber: number): Promise<Array<{ id: number; body: string; createdAt: string }>> {
-    const result = this.gh(`pr view ${prNumber} --json comments`);
-    const data = JSON.parse(result);
-    return data.comments.map((c: any) => ({
-      id: c.id,
+    const result = this.gh(`api repos/${this.repo}/issues/${prNumber}/comments`);
+    const trimmed = result.trim();
+    if (!trimmed) {
+      return [];
+    }
+
+    const data = JSON.parse(trimmed);
+    if (!Array.isArray(data)) {
+      return [];
+    }
+
+    return data.map((c: any) => ({
+      id: Number(c.id),
       body: c.body,
-      createdAt: c.createdAt
+      createdAt: c.created_at ?? c.createdAt
     }));
   }
 
   private gh(command: string): string {
-    const { execSync } = require('child_process');
     // gh api 命令不接受 --repo 参数，需要在 URL 中指定 repo
     const isApiCommand = command.trim().startsWith('api ');
     const fullCommand = isApiCommand
@@ -131,5 +142,26 @@ export class RealGitHubAPI implements IGitHubAPI {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe']
     });
+  }
+
+  private fetchLatestCommentId(prNumber: number): number | null {
+    const result = this.gh(`api repos/${this.repo}/issues/${prNumber}/comments`);
+    const trimmed = result.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    if (/^\d+$/.test(trimmed)) {
+      return Number(trimmed);
+    }
+
+    const data = JSON.parse(trimmed);
+    if (!Array.isArray(data) || data.length === 0) {
+      return null;
+    }
+
+    const latest = data[data.length - 1];
+    const id = Number(latest?.id);
+    return Number.isFinite(id) ? id : null;
   }
 }
