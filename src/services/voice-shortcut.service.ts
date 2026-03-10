@@ -119,6 +119,7 @@ export class VoiceShortcutService {
   private livePreviewText = '';
   private volcanoStreamingCapture: VolcanoStreamingCapture | null = null;
   private volcanoStreamSessionId: string | null = null;
+  private volcanoAcceptingChunks = false;
   private volcanoPushQueue: Promise<void> = Promise.resolve();
   private warmVolcanoSessionId: string | null = null;
   private warmVolcanoSessionKey: string | null = null;
@@ -945,6 +946,7 @@ export class VoiceShortcutService {
       const sessionReadyMs = sessionResult.value.sessionReadyMs;
       const sessionId = sessionResult.value.sessionId;
       this.volcanoStreamSessionId = sessionId;
+      this.volcanoAcceptingChunks = true;
       this.volcanoPushQueue = Promise.resolve();
       this.volcanoStreamingCapture = createVolcanoStreamingCapture({
         stream: this.stream,
@@ -982,6 +984,7 @@ export class VoiceShortcutService {
     }
 
     try {
+      this.volcanoAcceptingChunks = false;
       const trailingChunk = await capture.stop();
       this.volcanoStreamingCapture = null;
       this.releaseResources();
@@ -1009,6 +1012,7 @@ export class VoiceShortcutService {
   private async cancelVolcanoStreaming(): Promise<void> {
     const sessionId = this.volcanoStreamSessionId;
     try {
+      this.volcanoAcceptingChunks = false;
       await this.volcanoStreamingCapture?.cancel();
       await this.volcanoPushQueue;
       if (sessionId) {
@@ -1025,7 +1029,7 @@ export class VoiceShortcutService {
 
   private async enqueueVolcanoStreamingChunk(chunk: Uint8Array): Promise<void> {
     const sessionId = this.volcanoStreamSessionId;
-    if (!sessionId || chunk.length === 0) {
+    if (!sessionId || !this.volcanoAcceptingChunks || chunk.length === 0) {
       return;
     }
 
@@ -1080,6 +1084,7 @@ export class VoiceShortcutService {
   private cleanupVolcanoStreamingState(): void {
     this.volcanoStreamingCapture = null;
     this.volcanoStreamSessionId = null;
+    this.volcanoAcceptingChunks = false;
     this.volcanoPushQueue = Promise.resolve();
   }
 

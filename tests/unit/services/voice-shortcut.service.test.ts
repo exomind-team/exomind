@@ -883,6 +883,69 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('ignores late volcano chunks after stop begins（停止录音后忽略迟到 chunk，避免 finish 后继续 push）', async () => {
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    let resolveFinish: ((value: {
+      text: string;
+      confidence: number;
+      lang: string;
+      duration: number;
+    }) => void) | null = null;
+
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return 'stream-session-late';
+      }
+      if (command === 'volcano_asr_stream_push') {
+        return null;
+      }
+      if (command === 'volcano_asr_stream_finish') {
+        return await new Promise((resolve) => {
+          resolveFinish = resolve;
+        });
+      }
+      if (command === 'voice_recording_set_active' || command === 'simulate_paste') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    invokeMock.mockClear();
+    const stopPromise = emitVoiceShortcut('start');
+    await flushAsync();
+
+    await streamingOnChunk?.(new Uint8Array([7, 7, 7, 7]));
+    await flushAsync();
+
+    expect(invokeMock).not.toHaveBeenCalledWith('volcano_asr_stream_push', {
+      sessionId: 'stream-session-late',
+      audioData: [7, 7, 7, 7],
+    });
+
+    resolveFinish?.({
+      text: '停止后的最终文本',
+      confidence: 0.98,
+      lang: 'zh-CN',
+      duration: 1200,
+    });
+    await stopPromise;
+    await flushAsync();
+
+    service.destroy();
+  });
+
   it('records volcano microphone and session timings independently（火山麦克风与会话耗时独立埋点）', async () => {
     setVoiceShortcutMicPrewarmEnabled(false);
     setVoiceShortcutAsrProvider('volcano');
