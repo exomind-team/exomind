@@ -996,6 +996,14 @@ pub async fn volcano_asr_stream_cancel(
 }
 
 #[tauri::command]
+pub async fn volcano_asr_stream_session_exists(
+    session_id: String,
+    stream_state: State<'_, Arc<VolcanoAsrStreamState>>,
+) -> Result<bool, String> {
+    Ok(stream_state.get_session(&session_id).await.is_some())
+}
+
+#[tauri::command]
 pub fn volcano_asr_check_config(config: VolcanoAsrConfig) -> Result<bool, String> {
     Ok(!config.app_key.is_empty()
         && !config.access_key.is_empty()

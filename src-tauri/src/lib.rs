@@ -4,7 +4,8 @@ mod commands;
 
 use commands::asr_commands::{
     volcano_asr_check_config, volcano_asr_recognize, volcano_asr_stream_cancel,
-    volcano_asr_stream_finish, volcano_asr_stream_push, volcano_asr_stream_start,
+    volcano_asr_stream_finish, volcano_asr_stream_push, volcano_asr_stream_session_exists,
+    volcano_asr_stream_start,
     VolcanoAsrStreamState,
 };
 use commands::device_commands::get_device_id;
@@ -158,6 +159,7 @@ pub fn run() {
             volcano_asr_stream_push,
             volcano_asr_stream_finish,
             volcano_asr_stream_cancel,
+            volcano_asr_stream_session_exists,
             // Workspace 认知生命体命令
             get_agent_workspace_soul,
             get_agent_workspace_knowledge_list,
