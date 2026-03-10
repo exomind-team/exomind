@@ -203,6 +203,9 @@ fn register_cancel_shortcut_listener(app: &AppHandle) -> Result<(), String> {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn unregister_cancel_shortcut(app: &AppHandle) -> Result<(), String> {
     VOICE_CANCEL_KEY_DOWN.store(false, Ordering::SeqCst);
+    if !app.global_shortcut().is_registered(VOICE_CANCEL_SHORTCUT) {
+        return Ok(());
+    }
     app.global_shortcut()
         .unregister(VOICE_CANCEL_SHORTCUT)
         .map_err(|error| error.to_string())

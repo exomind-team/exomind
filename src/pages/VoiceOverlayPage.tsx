@@ -27,6 +27,7 @@ interface OverlayData {
   hintText?: string;
   isLivePreview?: boolean;
   providerLabel?: string;
+  traceStartedAtMs?: number;
   activationMs?: number;
   inputReadyMs?: number;
   sessionReadyMs?: number;
@@ -34,7 +35,6 @@ interface OverlayData {
   sessionWarmHit?: boolean;
   firstTextMs?: number;
   debugTraceId?: string;
-  debugPressedAtMs?: number;
   recognitionMs?: number;
   errorMessage: string;
 }
@@ -52,16 +52,16 @@ export function VoiceOverlayPage() {
     hintText: '',
     isLivePreview: false,
     providerLabel: '',
+    traceStartedAtMs: undefined,
     activationMs: undefined,
     firstTextMs: undefined,
     debugTraceId: undefined,
-    debugPressedAtMs: undefined,
     recognitionMs: undefined,
     errorMessage: '',
   });
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
-  const [firstContentMs, setFirstContentMs] = useState<number | null>(null);
+  const [firstFrameMs, setFirstFrameMs] = useState<number | null>(null);
   const seenTraceIdRef = useRef<string | null>(null);
 
   const overlayPrimaryAlpha = Math.max(0.28, Math.min(0.92, overlayOpacity / 100));
@@ -154,7 +154,7 @@ export function VoiceOverlayPage() {
   useEffect(() => {
     if (data.state === 'idle') {
       seenTraceIdRef.current = null;
-      setFirstContentMs(null);
+      setFirstFrameMs(null);
       return;
     }
 
@@ -163,13 +163,35 @@ export function VoiceOverlayPage() {
     }
 
     seenTraceIdRef.current = data.debugTraceId;
-    if (typeof data.debugPressedAtMs === 'number') {
-      const elapsed = Math.max(0, Date.now() - data.debugPressedAtMs);
-      setFirstContentMs(elapsed);
-    } else {
-      setFirstContentMs(null);
+    if (typeof data.traceStartedAtMs !== 'number') {
+      setFirstFrameMs(null);
+      return;
     }
-  }, [data.state, data.debugPressedAtMs, data.debugTraceId]);
+
+    let cancelled = false;
+    const measureFirstFrame = () => {
+      if (cancelled) {
+        return;
+      }
+      const elapsed = Math.max(0, Date.now() - data.traceStartedAtMs!);
+      setFirstFrameMs(elapsed);
+      console.info('[VoiceOverlay]', `[trace ${data.debugTraceId}] first frame in ${elapsed}ms`);
+    };
+
+    const useRaf = typeof window !== 'undefined' && typeof window.requestAnimationFrame === 'function';
+    const rafId = useRaf
+      ? window.requestAnimationFrame(() => measureFirstFrame())
+      : window.setTimeout(measureFirstFrame, 0);
+
+    return () => {
+      cancelled = true;
+      if (useRaf && typeof window !== 'undefined' && typeof window.cancelAnimationFrame === 'function') {
+        window.cancelAnimationFrame(rafId);
+        return;
+      }
+      clearTimeout(rafId);
+    };
+  }, [data.state, data.traceStartedAtMs, data.debugTraceId]);
 
   useEffect(() => {
     if (!stickToBottom || !transcriptRef.current) {
@@ -210,7 +232,7 @@ export function VoiceOverlayPage() {
             inputWarmHit={data.inputWarmHit}
             sessionWarmHit={data.sessionWarmHit}
             firstTextMs={data.firstTextMs}
-            firstContentMs={firstContentMs ?? undefined}
+            firstFrameMs={firstFrameMs ?? undefined}
             recognitionMs={data.recognitionMs}
             errorMessage={data.errorMessage}
             transcriptRef={transcriptRef}
@@ -274,7 +296,7 @@ function StatusText({
   inputWarmHit,
   sessionWarmHit,
   firstTextMs,
-  firstContentMs,
+  firstFrameMs,
   recognitionMs,
   errorMessage,
   transcriptRef,
@@ -293,7 +315,7 @@ function StatusText({
   inputWarmHit?: boolean;
   sessionWarmHit?: boolean;
   firstTextMs?: number;
-  firstContentMs?: number;
+  firstFrameMs?: number;
   recognitionMs?: number;
   errorMessage: string;
   transcriptRef: RefObject<HTMLDivElement>;
@@ -318,8 +340,8 @@ function StatusText({
           <span className="overlay-text overlay-text--secondary">
             {statusHint || '正在等待麦克风权限并连接识别链路'}
           </span>
-          {typeof firstContentMs === 'number' ? (
-            <span className="overlay-text overlay-text--diagnostic">{`调试 · 首帧 ${formatActivationMs(firstContentMs)}`}</span>
+          {typeof firstFrameMs === 'number' ? (
+            <span className="overlay-text overlay-text--diagnostic">{`调试 · 首帧 ${formatLatency(firstFrameMs)}`}</span>
           ) : null}
         </span>
       );
@@ -338,21 +360,26 @@ function StatusText({
           <span className="overlay-status-row overlay-text overlay-text--secondary">
             <span className="overlay-duration">{formatDuration(duration)}</span>
             {typeof activationMs === 'number' ? (
-              <span className="overlay-activation">{`唤起 ${formatActivationMs(activationMs)}`}</span>
+              <span className="overlay-activation">{`唤起 ${formatLatency(activationMs)}`}</span>
             ) : null}
             <span>{`${isLivePreview ? '实时预览 · ' : ''}再按 ${shortcut} 结束 · Esc 取消`}</span>
           </span>
-          {(typeof firstContentMs === 'number' || typeof firstTextMs === 'number') ? (
+          {(typeof firstFrameMs === 'number'
+            || typeof inputReadyMs === 'number'
+            || typeof sessionReadyMs === 'number'
+            || typeof activationMs === 'number'
+            || typeof firstTextMs === 'number') ? (
             <span className="overlay-text overlay-text--diagnostic">
               {[
-                `调试 · 首帧 ${formatActivationMs(firstContentMs ?? 0)}`,
+                typeof firstFrameMs === 'number' ? `调试 · 首帧 ${formatLatency(firstFrameMs)}` : null,
                 typeof inputReadyMs === 'number'
-                  ? `流 ${formatActivationMs(inputReadyMs)}${inputWarmHit ? '·预热' : ''}`
+                  ? `麦克风 ${formatLatency(inputReadyMs)}${formatWarmState(inputWarmHit)}`
                   : null,
                 typeof sessionReadyMs === 'number'
-                  ? `会话 ${formatActivationMs(sessionReadyMs)}${sessionWarmHit ? '·预热' : ''}`
+                  ? `会话 ${formatLatency(sessionReadyMs)}${formatWarmState(sessionWarmHit)}`
                   : null,
-                typeof firstTextMs === 'number' ? `首字 ${formatActivationMs(firstTextMs)}` : null,
+                typeof activationMs === 'number' ? `录音 ${formatLatency(activationMs)}` : null,
+                typeof firstTextMs === 'number' ? `首字 ${formatLatency(firstTextMs)}` : null,
               ].filter(Boolean).join(' · ')}
             </span>
           ) : null}
@@ -371,9 +398,23 @@ function StatusText({
             <span className="overlay-text">{transcript || '识别中…'}</span>
           </div>
           <span className="overlay-text overlay-text--secondary">{`识别中... · ${shortcut} 开始新一轮 · Esc 取消`}</span>
-          {(typeof firstContentMs === 'number' || typeof firstTextMs === 'number') ? (
+          {(typeof firstFrameMs === 'number'
+            || typeof inputReadyMs === 'number'
+            || typeof sessionReadyMs === 'number'
+            || typeof activationMs === 'number'
+            || typeof firstTextMs === 'number') ? (
             <span className="overlay-text overlay-text--diagnostic">
-              {`调试 · 首帧 ${formatActivationMs(firstContentMs ?? 0)} · 唤起 ${formatActivationMs(activationMs ?? 0)} · 首字 ${formatActivationMs(firstTextMs ?? 0)}`}
+              {[
+                typeof firstFrameMs === 'number' ? `调试 · 首帧 ${formatLatency(firstFrameMs)}` : null,
+                typeof inputReadyMs === 'number'
+                  ? `麦克风 ${formatLatency(inputReadyMs)}${formatWarmState(inputWarmHit)}`
+                  : null,
+                typeof sessionReadyMs === 'number'
+                  ? `会话 ${formatLatency(sessionReadyMs)}${formatWarmState(sessionWarmHit)}`
+                  : null,
+                typeof activationMs === 'number' ? `录音 ${formatLatency(activationMs)}` : null,
+                typeof firstTextMs === 'number' ? `首字 ${formatLatency(firstTextMs)}` : null,
+              ].filter(Boolean).join(' · ')}
             </span>
           ) : null}
         </span>
@@ -425,8 +466,18 @@ function formatRecognitionMs(milliseconds: number): string {
   return `${(milliseconds / 1000).toFixed(2)}s`;
 }
 
-function formatActivationMs(milliseconds: number): string {
+function formatLatency(milliseconds: number): string {
+  if (milliseconds < 1000) {
+    return `${Math.round(milliseconds)}ms`;
+  }
   return `${(milliseconds / 1000).toFixed(2)}s`;
+}
+
+function formatWarmState(warmHit?: boolean): string {
+  if (typeof warmHit !== 'boolean') {
+    return '';
+  }
+  return warmHit ? '·预热' : '·冷启';
 }
 
 const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css */ `

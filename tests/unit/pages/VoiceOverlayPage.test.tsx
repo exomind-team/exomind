@@ -1,6 +1,6 @@
 import React from 'react';
 import { act, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyThemePreference } from '@/config/theme';
 
 let overlayListener: ((event: { payload: Record<string, unknown> }) => void) | null = null;
@@ -36,6 +36,19 @@ vi.mock('@/config/voice-overlay-preferences', () => ({
 import { VoiceOverlayPage } from '@/pages/VoiceOverlayPage';
 
 describe('VoiceOverlayPage', () => {
+  beforeEach(() => {
+    vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback: FrameRequestCallback) => {
+      callback(0);
+      return 1;
+    });
+    vi.spyOn(window, 'cancelAnimationFrame').mockImplementation(() => {});
+    vi.spyOn(console, 'info').mockImplementation(() => {});
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
   it('renders as a larger single translucent shell（更大的单层半透明壳）', async () => {
     const { container } = render(<VoiceOverlayPage />);
 
@@ -63,24 +76,24 @@ describe('VoiceOverlayPage', () => {
 
   it('shows startup hint while arming microphone and stream（启动中先显示准备提示）', async () => {
     render(<VoiceOverlayPage />);
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1120);
 
     await act(async () => {
-      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1120);
       overlayListener?.({
         payload: {
           state: 'arming',
+          traceStartedAtMs: 1000,
           debugTraceId: 'trace-1',
-          debugPressedAtMs: 1000,
         },
       });
-      nowSpy.mockRestore();
     });
 
     expect(screen.getByText('准备启动语音输入…')).toBeInTheDocument();
     expect(screen.getByText('正在等待麦克风权限并连接识别链路')).toBeInTheDocument();
     expect(
-      screen.getByText((_, element) => element?.textContent?.startsWith('调试 · 首帧 ') ?? false)
+      screen.getByText('调试 · 首帧 120ms')
     ).toBeInTheDocument();
+    nowSpy.mockRestore();
   });
 
   it('shows recognition elapsed time on done state', async () => {
@@ -104,16 +117,16 @@ describe('VoiceOverlayPage', () => {
   it('shows live preview with fixed-width duration and provider meta（录音中显示实时预览、固定宽度时间与模型信息）', async () => {
     render(<VoiceOverlayPage />);
     const longText = Array.from({ length: 160 }, (_, index) => String(index % 10)).join('');
+    const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
 
     await act(async () => {
-      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
       overlayListener?.({
         payload: {
           state: 'recording',
           duration: 3,
           text: longText,
+          traceStartedAtMs: 880,
           debugTraceId: 'trace-2',
-          debugPressedAtMs: 1000,
           activationMs: 420,
           inputReadyMs: 260,
           sessionReadyMs: 310,
@@ -124,25 +137,27 @@ describe('VoiceOverlayPage', () => {
           providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
         },
       });
-      nowSpy.mockRestore();
     });
 
     expect(screen.getByText(longText)).toBeInTheDocument();
     expect(screen.getByText('火山 2.0 小时版 · 双向流式优化版（推荐）')).toBeInTheDocument();
     expect(
-      screen.getByText((_, element) => element?.textContent === '00:03唤起 0.42s实时预览 · 再按 Alt+Q 结束 · Esc 取消')
+      screen.getByText((_, element) => element?.textContent === '00:03唤起 420ms实时预览 · 再按 Alt+Q 结束 · Esc 取消')
     ).toBeInTheDocument();
     expect(
       screen.getAllByText((_, element) =>
-        element?.textContent?.includes('流 0.26s·预热') &&
-        element?.textContent?.includes('会话 0.31s') &&
-        element?.textContent?.includes('首字 0.83s')
+        element?.textContent?.includes('首帧 120ms') &&
+        element?.textContent?.includes('麦克风 260ms·预热') &&
+        element?.textContent?.includes('会话 310ms·冷启') &&
+        element?.textContent?.includes('录音 420ms') &&
+        element?.textContent?.includes('首字 830ms')
       ).length
     ).toBeGreaterThan(0);
     expect(screen.getByTestId('voice-overlay-transcript')).toBeInTheDocument();
     const styleTag = document.querySelector('style');
     expect(styleTag?.textContent).toContain('.voice-overlay--recording .overlay-transcript .overlay-text');
     expect(styleTag?.textContent).toContain('color: hsl(var(--brand-accent));');
+    nowSpy.mockRestore();
   });
 
   it('shows finish and cancel shortcut hints while recognizing（识别中显示快捷键提示）', async () => {

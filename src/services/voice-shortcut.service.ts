@@ -54,6 +54,7 @@ type OverlayEventPayload = {
   hintText?: string;
   isLivePreview: boolean;
   providerLabel: string;
+  traceStartedAtMs?: number;
   activationMs?: number;
   inputReadyMs?: number;
   sessionReadyMs?: number;
@@ -61,7 +62,6 @@ type OverlayEventPayload = {
   sessionWarmHit?: boolean;
   firstTextMs?: number;
   debugTraceId?: string;
-  debugPressedAtMs?: number;
   recognitionMs?: number;
   errorMessage: string;
 };
@@ -789,6 +789,7 @@ export class VoiceShortcutService {
       hintText: extra.hintText,
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
       providerLabel: extra.providerLabel ?? this.getActiveProviderLabel(),
+      traceStartedAtMs: extra.traceStartedAtMs ?? this.traceStartedAtMs ?? undefined,
       activationMs: extra.activationMs ?? this.latestActivationMs ?? undefined,
       inputReadyMs: extra.inputReadyMs ?? this.latestInputReadyMs ?? undefined,
       sessionReadyMs: extra.sessionReadyMs ?? this.latestSessionReadyMs ?? undefined,
@@ -796,7 +797,6 @@ export class VoiceShortcutService {
       sessionWarmHit: extra.sessionWarmHit ?? this.latestSessionWarmHit ?? undefined,
       firstTextMs: extra.firstTextMs ?? this.latestFirstTextMs ?? undefined,
       debugTraceId: extra.debugTraceId ?? this.currentTraceId ?? undefined,
-      debugPressedAtMs: extra.debugPressedAtMs ?? this.traceStartedAtMs ?? undefined,
       recognitionMs: extra.recognitionMs,
       errorMessage: extra.errorMessage ?? '',
     };
@@ -852,8 +852,14 @@ export class VoiceShortcutService {
 
   private async startVolcanoStreaming(): Promise<void> {
     const config = this.getVolcanoRuntimeConfigOrThrow();
-    const streamPromise = this.acquireInputStream();
-    const sessionPromise = this.acquireVolcanoSession(config);
+    const streamPromise = this.acquireInputStream().then((result) => ({
+      ...result,
+      inputReadyMs: this.markInputReady(result.warmHit),
+    }));
+    const sessionPromise = this.acquireVolcanoSession(config).then((result) => ({
+      ...result,
+      sessionReadyMs: this.markSessionReady(result.warmHit),
+    }));
 
     try {
       const [streamResult, sessionResult] = await Promise.allSettled([streamPromise, sessionPromise]);
@@ -874,8 +880,8 @@ export class VoiceShortcutService {
       }
 
       this.stream = streamResult.value.stream;
-      const inputReadyMs = this.markInputReady(streamResult.value.warmHit);
-      const sessionReadyMs = this.markSessionReady(sessionResult.value.warmHit);
+      const inputReadyMs = streamResult.value.inputReadyMs;
+      const sessionReadyMs = sessionResult.value.sessionReadyMs;
       const sessionId = sessionResult.value.sessionId;
       this.volcanoStreamSessionId = sessionId;
       this.volcanoPushQueue = Promise.resolve();
