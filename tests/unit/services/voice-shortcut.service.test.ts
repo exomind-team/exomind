@@ -513,10 +513,48 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushAsync();
 
     expect(getUserMediaWithConstraintFallbackMock).not.toHaveBeenCalled();
-    expect(invokeMock).not.toHaveBeenCalledWith(
-      'volcano_asr_stream_start',
-      expect.anything(),
-    );
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === 'volcano_asr_stream_start')
+    ).toHaveLength(1);
+
+    service.destroy();
+  });
+
+  it('replenishes standby volcano session immediately after consuming a warm one（消费 warm session 后立即补一个 standby）', async () => {
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    const sessionIds = ['warm-session-1', 'standby-session-2', 'standby-session-3'];
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return sessionIds.shift() ?? 'fallback-session';
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
+      if (command === 'volcano_asr_stream_push' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    invokeMock.mockClear();
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(
+      invokeMock.mock.calls.filter(([command]) => command === 'volcano_asr_stream_start')
+    ).toHaveLength(1);
 
     service.destroy();
   });
