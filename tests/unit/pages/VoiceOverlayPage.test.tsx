@@ -91,7 +91,7 @@ describe('VoiceOverlayPage', () => {
     expect(screen.getByText('准备启动语音输入…')).toBeInTheDocument();
     expect(screen.getByText('正在等待麦克风权限并连接识别链路')).toBeInTheDocument();
     expect(
-      screen.getByText((_, element) => element?.textContent?.startsWith('调试 · 首帧 ') ?? false)
+      screen.getByText('调试 · 首帧 120ms')
     ).toBeInTheDocument();
     nowSpy.mockRestore();
   });
@@ -142,15 +142,15 @@ describe('VoiceOverlayPage', () => {
     expect(screen.getByText(longText)).toBeInTheDocument();
     expect(screen.getByText('火山 2.0 小时版 · 双向流式优化版（推荐）')).toBeInTheDocument();
     expect(
-      screen.getByText((_, element) => element?.textContent === '00:03唤起 0.42s实时预览 · 再按 Alt+Q 结束 · Esc 取消')
+      screen.getByText((_, element) => element?.textContent === '00:03唤起 420ms实时预览 · 再按 Alt+Q 结束 · Esc 取消')
     ).toBeInTheDocument();
     expect(
       screen.getAllByText((_, element) =>
-        element?.textContent?.includes('首帧 0.12s') &&
-        element?.textContent?.includes('麦克风 0.26s·预热') &&
-        element?.textContent?.includes('会话 0.31s') &&
-        element?.textContent?.includes('录音 0.42s') &&
-        element?.textContent?.includes('首字 0.83s')
+        element?.textContent?.includes('首帧 120ms') &&
+        element?.textContent?.includes('麦克风 260ms·预热') &&
+        element?.textContent?.includes('会话 310ms·冷启') &&
+        element?.textContent?.includes('录音 420ms') &&
+        element?.textContent?.includes('首字 830ms')
       ).length
     ).toBeGreaterThan(0);
     expect(screen.getByTestId('voice-overlay-transcript')).toBeInTheDocument();
