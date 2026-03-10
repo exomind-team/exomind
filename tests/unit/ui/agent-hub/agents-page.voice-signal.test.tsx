@@ -234,4 +234,22 @@ describe('agents page voice signal topology（语音信号拓扑）', () => {
     expect(shell.className).toContain('text-foreground');
     expect(agentDetail.className).toContain('text-foreground');
   });
+
+  it('shows workspace-aware empty state for life agent detail when adapter returns null（life agent 详情缺失时仍应显示统一空态与工作区标签）', async () => {
+    serviceMocks.getAgentDetail.mockResolvedValueOnce(null);
+    render(<AgentsPage />);
+
+    const agentNode = await screen.findByTestId('mock-react-flow-node-agent:classifier');
+    fireEvent.click(agentNode);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-agent-detail')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('详细信息暂不可用')).toBeInTheDocument();
+    expect(screen.getByText('知识库')).toBeInTheDocument();
+    expect(screen.getByText('行动日志')).toBeInTheDocument();
+    expect(screen.getByText('身份')).toBeInTheDocument();
+    expect(screen.getByTestId('agent-rightpanel-open-chat').className).toContain('bg-brand-accent');
+  });
 });

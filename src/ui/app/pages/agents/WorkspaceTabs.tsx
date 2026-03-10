@@ -2,6 +2,9 @@ import { BookOpen, FileText, History, RefreshCw, User } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 
 // ---------------------------------------------------------------------------
@@ -127,6 +130,23 @@ const ACTION_TYPE_LABELS: Record<string, string> = {
   knowledge_delete: '记忆删除',
 };
 
+function WorkspaceStateCard({
+  title,
+  description,
+}: {
+  title: string;
+  description: string;
+}) {
+  return (
+    <Card className="rounded-xl border-border-card bg-card shadow-sm">
+      <CardContent className="flex flex-col items-center justify-center gap-1 p-6 text-center">
+        <p className="text-sm font-semibold text-strong">{title}</p>
+        <p className="text-xs leading-5 text-secondary">{description}</p>
+      </CardContent>
+    </Card>
+  );
+}
+
 // ---------------------------------------------------------------------------
 // KnowledgeTab
 // ---------------------------------------------------------------------------
@@ -156,54 +176,92 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
     return () => { cancelled = true; };
   }, [agentId, selectedFile]);
 
-  if (loading) return <div className="py-4 text-center text-xs text-muted-foreground">加载中...</div>;
-  if (!data) return <div className="py-4 text-center text-xs text-muted-foreground">无法连接到 Runtime</div>;
+  if (loading) {
+    return (
+      <Card className="rounded-xl border-border-card bg-card shadow-sm">
+        <CardContent className="space-y-3 p-4">
+          <div className="h-4 w-24 animate-pulse rounded-md bg-background" />
+          <div className="h-20 animate-pulse rounded-xl border border-border-subtle bg-background" />
+          <div className="h-11 animate-pulse rounded-lg border border-border-subtle bg-background" />
+        </CardContent>
+      </Card>
+    );
+  }
+  if (!data) {
+    return (
+      <WorkspaceStateCard
+        title="无法连接到 Runtime"
+        description="暂时无法读取 workspace（工作区）数据，请检查 Runtime 主机或稍后刷新。"
+      />
+    );
+  }
 
   const usagePercent = Math.round(data.usageRatio * 100);
   const usageKB = (data.usageBytes / 1024).toFixed(1);
   const maxKB = (data.maxBytes / 1024).toFixed(0);
 
   return (
-    <div>
-      {/* Usage bar */}
-      <div className="mb-3 rounded-xl border border-border-card bg-card p-3">
-        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-          <span>记忆使用量</span>
-          <span>{usageKB} KB / {maxKB} KB ({usagePercent}%)</span>
-        </div>
-        <div className="h-2 overflow-hidden rounded-full bg-muted">
-          <div
-            className="h-full rounded-full bg-brand transition-all duration-500"
-            style={{ width: `${usagePercent}%` }}
-          />
-        </div>
-      </div>
+    <div className="flex flex-col gap-3">
+      <Card className="rounded-xl border-border-card bg-card shadow-sm">
+        <CardHeader className="p-4 pb-3">
+          <div className="flex items-start justify-between gap-3">
+            <div className="space-y-1">
+              <CardTitle className="text-sm text-strong">知识库</CardTitle>
+              <CardDescription className="text-xs text-secondary">已归档的记忆文件与空间占用概览。</CardDescription>
+            </div>
+            <Badge variant="outline" className="border-brand-accent/20 bg-brand-accent/10 text-[10px] text-brand-accent">
+              {data.files.length} 文件
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="space-y-2 p-4 pt-0">
+          <div className="flex items-center justify-between text-xs text-secondary">
+            <span>记忆使用量</span>
+            <span>{usageKB} KB / {maxKB} KB ({usagePercent}%)</span>
+          </div>
+          <div className="h-2.5 overflow-hidden rounded-full bg-background ring-1 ring-border-subtle">
+            <div
+              className="h-full rounded-full bg-brand-accent transition-all duration-500"
+              style={{ width: `${usagePercent}%` }}
+            />
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* File list */}
       {data.files.length === 0 ? (
-        <div className="py-6 text-center text-xs text-muted-foreground">知识库为空 — Agent 尚未记录任何记忆</div>
+        <WorkspaceStateCard
+          title="知识库为空"
+          description="Agent 还没有写入任何记忆文件，稍后产生内容后会显示在这里。"
+        />
       ) : (
-        <div className="overflow-hidden rounded-xl border border-border-card bg-card">
+        <Card className="overflow-hidden rounded-xl border-border-card bg-card shadow-sm">
           {data.files.map((file, idx) => (
             <div key={file.name}>
               <button
                 type="button"
-                className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-muted/50"
+                className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-background"
                 onClick={() => setSelectedFile(selectedFile === file.name ? null : file.name)}
               >
-                <FileText size={14} className="shrink-0 text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">{file.name}</span>
-                <span className="ml-auto text-[10px] text-muted-foreground">{(file.sizeBytes / 1024).toFixed(1)} KB</span>
+                <div className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg border border-brand-accent/20 bg-brand-accent/10 text-brand-accent">
+                  <FileText size={14} />
+                </div>
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-strong">{file.name}</p>
+                  <p className="text-[11px] text-secondary">Markdown / Text</p>
+                </div>
+                <Badge variant="outline" className="border-border-subtle bg-background text-[10px] text-secondary">
+                  {(file.sizeBytes / 1024).toFixed(1)} KB
+                </Badge>
               </button>
               {selectedFile === file.name && fileContent !== null && (
-                <div className="border-t border-border bg-background px-4 py-3">
-                  <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{fileContent}</pre>
+                <div className="border-t border-border-subtle bg-background px-4 py-3">
+                  <pre className="whitespace-pre-wrap text-xs leading-5 text-secondary">{fileContent}</pre>
                 </div>
               )}
-              {idx !== data.files.length - 1 && <div className="h-px bg-border" />}
+              {idx !== data.files.length - 1 && <div className="h-px bg-border-subtle" />}
             </div>
           ))}
-        </div>
+        </Card>
       )}
     </div>
   );
@@ -232,26 +290,43 @@ function ActionsTab({ agentId }: { agentId: string }) {
     return () => clearInterval(timer);
   }, [refresh]);
 
-  if (loading && actions.length === 0) return <div className="py-4 text-center text-xs text-muted-foreground">加载中...</div>;
+  if (loading && actions.length === 0) {
+    return (
+      <Card className="rounded-xl border-border-card bg-card shadow-sm">
+        <CardContent className="space-y-3 p-4">
+          <div className="h-4 w-24 animate-pulse rounded-md bg-background" />
+          <div className="h-16 animate-pulse rounded-xl border border-border-subtle bg-background" />
+          <div className="h-16 animate-pulse rounded-xl border border-border-subtle bg-background" />
+        </CardContent>
+      </Card>
+    );
+  }
 
   if (actions.length === 0) {
-    return <div className="py-6 text-center text-xs text-muted-foreground">暂无行动记录 — Agent 尚未执行任何 tick</div>;
+    return (
+      <WorkspaceStateCard
+        title="暂无行动记录"
+        description="Agent 还没有产生 tick 行为，新的行动会按时间线方式显示在这里。"
+      />
+    );
   }
 
   return (
-    <div>
-      <div className="mb-2 flex items-center justify-between">
+    <div className="flex flex-col gap-3">
+      <div className="flex items-center justify-between">
         <span className="text-xs text-muted-foreground">最近 {actions.length} 条记录</span>
-        <button
+        <Button
           type="button"
+          variant="ghost"
+          size="sm"
           onClick={() => void refresh()}
-          className="flex items-center gap-1 rounded-md px-2 py-1 text-xs text-muted-foreground hover:bg-muted"
+          className="h-8 rounded-lg px-2 text-xs text-secondary hover:bg-background hover:text-strong"
         >
           <RefreshCw size={11} />
           刷新
-        </button>
+        </Button>
       </div>
-      <div className="overflow-hidden rounded-xl border border-border-card bg-card">
+      <Card className="overflow-hidden rounded-xl border-border-card bg-card shadow-sm">
         {[...actions].reverse().map((entry, idx) => {
           const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false });
           const typeLabel = ACTION_TYPE_LABELS[entry.actionType] ?? entry.actionType;
@@ -260,31 +335,39 @@ function ActionsTab({ agentId }: { agentId: string }) {
           return (
             <div key={`${entry.tick}-${idx}`}>
               <div className="px-4 py-3">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-2">
-                    <span className="rounded-md bg-muted px-1.5 py-0.5 text-[10px] font-mono text-muted-foreground">
-                      #{entry.tick}
-                    </span>
-                    <span className="rounded-md bg-brand/10 px-1.5 py-0.5 text-[10px] font-medium text-brand">
-                      {typeLabel}
-                    </span>
+                <div className="flex gap-3">
+                  <div className="flex flex-col items-center">
+                    <span className="mt-1 h-2 w-2 rounded-full bg-brand-accent" />
+                    {idx !== actions.length - 1 && <span className="mt-1 h-full w-px bg-border-subtle" />}
                   </div>
-                  <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
-                    <span>{time}</span>
-                    {energyDelta !== 0 && (
-                      <span className={energyDelta < 0 ? 'text-destructive' : 'text-success'}>
-                        {energyDelta > 0 ? '+' : ''}{energyDelta}
-                      </span>
-                    )}
+                  <div className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-background px-3 py-2">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        <span className="rounded-md border border-border-subtle bg-card px-1.5 py-0.5 text-[10px] font-mono text-secondary">
+                          #{entry.tick}
+                        </span>
+                        <span className="rounded-md border border-brand-accent/20 bg-brand-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-brand-accent">
+                          {typeLabel}
+                        </span>
+                      </div>
+                      <div className="flex items-center gap-2 text-[10px] text-secondary">
+                        <span>{time}</span>
+                        {energyDelta !== 0 && (
+                          <span className={energyDelta < 0 ? 'text-destructive' : 'text-success'}>
+                            {energyDelta > 0 ? '+' : ''}{energyDelta}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    <p className="mt-1 text-xs leading-5 text-secondary">{entry.description}</p>
                   </div>
                 </div>
-                <p className="mt-1 text-xs text-muted-foreground">{entry.description}</p>
               </div>
-              {idx !== actions.length - 1 && <div className="h-px bg-border" />}
+              {idx !== actions.length - 1 && <div className="h-px bg-border-subtle" />}
             </div>
           );
         })}
-      </div>
+      </Card>
     </div>
   );
 }
@@ -314,62 +397,108 @@ function IdentityTab({ agentId }: { agentId: string }) {
     return () => { cancelled = true; };
   }, [agentId]);
 
-  if (loading) return <div className="py-4 text-center text-xs text-muted-foreground">加载中...</div>;
+  if (loading) {
+    return (
+      <Card className="rounded-xl border-border-card bg-card shadow-sm">
+        <CardContent className="space-y-3 p-4">
+          <div className="h-4 w-24 animate-pulse rounded-md bg-background" />
+          <div className="grid grid-cols-2 gap-2">
+            <div className="h-16 animate-pulse rounded-lg border border-border-subtle bg-background" />
+            <div className="h-16 animate-pulse rounded-lg border border-border-subtle bg-background" />
+          </div>
+        </CardContent>
+      </Card>
+    );
+  }
 
   return (
-    <div>
-      {/* Body status */}
+    <div className="flex flex-col gap-3">
       {status && (
-        <div className="mb-3 rounded-xl border border-border-card bg-card p-4">
-          <h4 className="mb-2 text-xs font-semibold text-muted-foreground">身体状态</h4>
-          <div className="grid grid-cols-2 gap-2">
-            <div className="rounded-lg bg-background py-2 text-center">
-              <span className="text-[10px] text-muted-foreground">策略</span>
-              <p className="text-sm font-semibold text-foreground">
+        <Card className="rounded-xl border-border-card bg-card shadow-sm">
+          <CardHeader className="p-4 pb-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="space-y-1">
+                <CardTitle className="text-sm text-strong">身体状态</CardTitle>
+                <CardDescription className="text-xs text-secondary">当前策略、运行计数与记忆使用情况。</CardDescription>
+              </div>
+              <Badge variant="outline" className="border-brand-accent/20 bg-brand-accent/10 text-[10px] text-brand-accent">
                 {STRATEGY_LABELS[status.currentStrategy] ?? status.currentStrategy}
-              </p>
+              </Badge>
             </div>
-            <div className="rounded-lg bg-background py-2 text-center">
-              <span className="text-[10px] text-muted-foreground">运行 Tick</span>
-              <p className="text-sm font-semibold text-foreground">{status.uptimeTicks}</p>
+          </CardHeader>
+          <CardContent className="space-y-3 p-4 pt-0">
+            <div className="grid grid-cols-2 gap-2">
+              <div className="rounded-lg border border-border-subtle bg-background px-3 py-2">
+                <span className="text-[10px] text-secondary">策略</span>
+                <p className="mt-1 text-sm font-semibold text-strong">
+                  {STRATEGY_LABELS[status.currentStrategy] ?? status.currentStrategy}
+                </p>
+              </div>
+              <div className="rounded-lg border border-border-subtle bg-background px-3 py-2">
+                <span className="text-[10px] text-secondary">运行 Tick</span>
+                <p className="mt-1 text-sm font-semibold text-strong">{status.uptimeTicks}</p>
+              </div>
+              <div className="rounded-lg border border-border-subtle bg-background px-3 py-2">
+                <span className="text-[10px] text-secondary">总行动数</span>
+                <p className="mt-1 text-sm font-semibold text-strong">{status.totalActions}</p>
+              </div>
+              <div className="rounded-lg border border-border-subtle bg-background px-3 py-2">
+                <span className="text-[10px] text-secondary">记忆使用率</span>
+                <p className="mt-1 text-sm font-semibold text-strong">
+                  {Math.round(status.knowledgeUsageRatio * 100)}%
+                </p>
+              </div>
             </div>
-            <div className="rounded-lg bg-background py-2 text-center">
-              <span className="text-[10px] text-muted-foreground">总行动数</span>
-              <p className="text-sm font-semibold text-foreground">{status.totalActions}</p>
-            </div>
-            <div className="rounded-lg bg-background py-2 text-center">
-              <span className="text-[10px] text-muted-foreground">记忆使用率</span>
-              <p className="text-sm font-semibold text-foreground">
-                {Math.round(status.knowledgeUsageRatio * 100)}%
-              </p>
-            </div>
-          </div>
-          {status.energyMax > 0 && (
-            <div className="mt-2 rounded-lg bg-background py-2 text-center">
-              <span className="text-[10px] text-muted-foreground">能量</span>
-              <p className="text-sm font-semibold text-foreground">
-                {status.energyLevel} / {status.energyMax} ({Math.round((status.energyLevel / status.energyMax) * 100)}%)
-              </p>
-            </div>
-          )}
-        </div>
+            {status.energyMax > 0 && (
+              <div className="rounded-lg border border-border-subtle bg-background px-3 py-3">
+                <div className="flex items-center justify-between gap-2 text-xs text-secondary">
+                  <span>能量</span>
+                  <span>
+                    {status.energyLevel} / {status.energyMax} ({Math.round((status.energyLevel / status.energyMax) * 100)}%)
+                  </span>
+                </div>
+                <div className="mt-2 h-2.5 overflow-hidden rounded-full bg-card ring-1 ring-border-subtle">
+                  <div
+                    className="h-full rounded-full bg-brand-accent transition-all duration-500"
+                    style={{ width: `${Math.round((status.energyLevel / status.energyMax) * 100)}%` }}
+                  />
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
       )}
 
-      {/* Cognition engine */}
-      <div className="mb-3 rounded-xl border border-border-card bg-card p-4">
-        <h4 className="mb-1 text-xs font-semibold text-muted-foreground">认知引擎</h4>
-        <p className="text-sm text-foreground">LlmCognition v1 (规则引擎)</p>
-      </div>
+      <Card className="rounded-xl border-border-card bg-card shadow-sm">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm text-strong">认知引擎</CardTitle>
+          <CardDescription className="text-xs text-secondary">当前工作区绑定的认知执行内核。</CardDescription>
+        </CardHeader>
+        <CardContent className="p-4 pt-0">
+          <div className="rounded-lg border border-border-subtle bg-background px-3 py-3">
+            <p className="text-sm font-medium text-strong">LlmCognition v1</p>
+            <p className="mt-1 text-xs text-secondary">规则引擎 / Rule Engine（规则引擎）</p>
+          </div>
+        </CardContent>
+      </Card>
 
-      {/* SOUL.md */}
-      <div className="rounded-xl border border-border-card bg-card p-4">
-        <h4 className="mb-2 text-xs font-semibold text-muted-foreground">SOUL.md — 身份 DNA</h4>
-        {soul ? (
-          <pre className="whitespace-pre-wrap text-xs leading-relaxed text-muted-foreground">{soul}</pre>
-        ) : (
-          <p className="text-xs text-muted-foreground">无法加载 SOUL.md</p>
-        )}
-      </div>
+      <Card className="rounded-xl border-border-card bg-card shadow-sm">
+        <CardHeader className="p-4 pb-2">
+          <CardTitle className="text-sm text-strong">SOUL.md</CardTitle>
+          <CardDescription className="text-xs text-secondary">身份 DNA（identity DNA，身份 DNA）与长期行为边界。</CardDescription>
+        </CardHeader>
+        <CardContent className="p-4 pt-0">
+          {soul ? (
+            <pre className="rounded-lg border border-border-subtle bg-background px-3 py-3 whitespace-pre-wrap text-xs leading-6 text-secondary">
+              {soul}
+            </pre>
+          ) : (
+            <div className="rounded-lg border border-border-subtle bg-background px-3 py-4">
+              <p className="text-xs text-secondary">无法加载 SOUL.md</p>
+            </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -380,31 +509,31 @@ function IdentityTab({ agentId }: { agentId: string }) {
 
 export function WorkspaceTabs({ agentId }: { agentId: string }) {
   return (
-    <Tabs defaultValue="knowledge" className="mt-4">
-      <TabsList className="w-full">
-        <TabsTrigger value="knowledge" className="flex-1 gap-1">
+    <Tabs defaultValue="knowledge" className="mt-4 flex flex-col gap-3">
+      <TabsList className="grid h-auto w-full grid-cols-3 rounded-xl border border-border-card bg-card p-1 shadow-sm">
+        <TabsTrigger value="knowledge" className="h-9 flex-1 gap-1.5 rounded-lg text-xs text-secondary hover:bg-background hover:text-strong data-[state=active]:bg-background data-[state=active]:text-strong">
           <BookOpen size={13} />
           知识库
         </TabsTrigger>
-        <TabsTrigger value="actions" className="flex-1 gap-1">
+        <TabsTrigger value="actions" className="h-9 flex-1 gap-1.5 rounded-lg text-xs text-secondary hover:bg-background hover:text-strong data-[state=active]:bg-background data-[state=active]:text-strong">
           <History size={13} />
           行动日志
         </TabsTrigger>
-        <TabsTrigger value="identity" className="flex-1 gap-1">
+        <TabsTrigger value="identity" className="h-9 flex-1 gap-1.5 rounded-lg text-xs text-secondary hover:bg-background hover:text-strong data-[state=active]:bg-background data-[state=active]:text-strong">
           <User size={13} />
           身份
         </TabsTrigger>
       </TabsList>
 
-      <TabsContent value="knowledge">
+      <TabsContent value="knowledge" className="mt-0">
         <KnowledgeTab agentId={agentId} />
       </TabsContent>
 
-      <TabsContent value="actions">
+      <TabsContent value="actions" className="mt-0">
         <ActionsTab agentId={agentId} />
       </TabsContent>
 
-      <TabsContent value="identity">
+      <TabsContent value="identity" className="mt-0">
         <IdentityTab agentId={agentId} />
       </TabsContent>
     </Tabs>
