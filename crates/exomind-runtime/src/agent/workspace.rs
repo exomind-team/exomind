@@ -12,12 +12,16 @@ const DEFAULT_MAX_KNOWLEDGE_BYTES: usize = 1_048_576;
 // ---------------------------------------------------------------------------
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ActionEntry {
     pub timestamp: String,
     pub tick: u64,
+    #[serde(alias = "action_type")]
     pub action_type: String,
     pub description: String,
+    #[serde(alias = "energy_before")]
     pub energy_before: u64,
+    #[serde(alias = "energy_after")]
     pub energy_after: u64,
 }
 
@@ -267,6 +271,10 @@ impl AgentWorkspace {
 
     pub fn max_knowledge_bytes(&self) -> usize {
         self.max_knowledge_bytes
+    }
+
+    pub fn knowledge_dir(&self) -> &Path {
+        &self.knowledge_dir
     }
 }
 

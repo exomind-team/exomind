@@ -49,11 +49,14 @@ interface WorkspaceStatus {
 
 async function fetchWorkspaceKnowledgeList(agentId: string): Promise<KnowledgeListResponse | null> {
   try {
+    console.log('[WorkspaceTabs] fetchKnowledgeList', { agentId, isTauri: isTauri() });
     if (isTauri()) {
-      return await invoke<KnowledgeListResponse>('get_agent_workspace_knowledge_list', { agentId });
+      const result = await invoke<KnowledgeListResponse>('get_agent_workspace_knowledge_list', { agentId });
+      console.log('[WorkspaceTabs] knowledge result:', result);
+      return result;
     }
     return await httpGet<KnowledgeListResponse>(agentId, 'knowledge');
-  } catch { return null; }
+  } catch (e) { console.error('[WorkspaceTabs] knowledge error:', e); return null; }
 }
 
 async function fetchWorkspaceKnowledgeFile(agentId: string, filename: string): Promise<string | null> {

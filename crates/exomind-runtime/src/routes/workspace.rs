@@ -21,23 +21,43 @@ fn default_limit() -> usize {
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct KnowledgeFileInfo {
+    pub name: String,
+    pub size_bytes: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct KnowledgeListResponse {
-    pub files: Vec<String>,
+    pub files: Vec<KnowledgeFileInfo>,
     pub usage_bytes: usize,
     pub max_bytes: usize,
     pub usage_ratio: f32,
 }
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActionsListResponse {
+    pub actions: Vec<crate::agent::workspace::ActionEntry>,
+    pub total: u64,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ContentResponse {
+    pub content: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct WorkspaceStatusResponse {
     pub knowledge_usage_ratio: f32,
     pub total_actions: u64,
     pub uptime_ticks: u64,
     pub current_strategy: String,
-    pub energy_current: Option<u64>,
-    pub energy_max: Option<u64>,
-    pub energy_ratio: Option<f64>,
-    pub energy_phase: Option<String>,
+    pub energy_level: u64,
+    pub energy_max: u64,
 }
 
 #[derive(Debug, Serialize)]
@@ -87,16 +107,17 @@ fn get_life_agent(
 async fn get_soul(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
-) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ContentResponse>, (StatusCode, Json<ErrorResponse>)> {
     let agent = get_life_agent(&state, &agent_id)?;
-    agent.workspace().load_soul().map_err(|e| {
+    let content = agent.workspace().load_soul().map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
                 error: format!("failed to load SOUL.md: {e}"),
             }),
         )
-    })
+    })?;
+    Ok(Json(ContentResponse { content }))
 }
 
 async fn list_knowledge(
@@ -106,7 +127,7 @@ async fn list_knowledge(
     let agent = get_life_agent(&state, &agent_id)?;
     let ws = agent.workspace();
 
-    let files = ws.list_knowledge().map_err(|e| {
+    let filenames = ws.list_knowledge().map_err(|e| {
         (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(ErrorResponse {
@@ -114,6 +135,16 @@ async fn list_knowledge(
             }),
         )
     })?;
+
+    // Build file info with sizes
+    let mut files = Vec::with_capacity(filenames.len());
+    for name in filenames {
+        let size_bytes = ws.knowledge_dir().join(&name)
+            .metadata()
+            .map(|m| m.len())
+            .unwrap_or(0);
+        files.push(KnowledgeFileInfo { name, size_bytes });
+    }
 
     let usage_bytes = ws.knowledge_usage_bytes().unwrap_or(0);
     let usage_ratio = ws.knowledge_usage_ratio().unwrap_or(0.0);
@@ -129,9 +160,9 @@ async fn list_knowledge(
 async fn get_knowledge_file(
     State(state): State<AppState>,
     Path((agent_id, filename)): Path<(String, String)>,
-) -> Result<String, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ContentResponse>, (StatusCode, Json<ErrorResponse>)> {
     let agent = get_life_agent(&state, &agent_id)?;
-    agent.workspace().read_knowledge(&filename).map_err(|e| {
+    let content = agent.workspace().read_knowledge(&filename).map_err(|e| {
         let status = if e.kind() == std::io::ErrorKind::NotFound {
             StatusCode::NOT_FOUND
         } else {
@@ -143,14 +174,15 @@ async fn get_knowledge_file(
                 error: format!("failed to read '{filename}': {e}"),
             }),
         )
-    })
+    })?;
+    Ok(Json(ContentResponse { content }))
 }
 
 async fn get_actions(
     State(state): State<AppState>,
     Path(agent_id): Path<String>,
     Query(query): Query<ActionsQuery>,
-) -> Result<Json<Vec<crate::agent::workspace::ActionEntry>>, (StatusCode, Json<ErrorResponse>)> {
+) -> Result<Json<ActionsListResponse>, (StatusCode, Json<ErrorResponse>)> {
     let agent = get_life_agent(&state, &agent_id)?;
     let all = agent.workspace().action_log().read_all().map_err(|e| {
         (
@@ -161,9 +193,13 @@ async fn get_actions(
         )
     })?;
 
+    let total = all.len() as u64;
     // Return last N entries.
     let start = all.len().saturating_sub(query.limit);
-    Ok(Json(all[start..].to_vec()))
+    Ok(Json(ActionsListResponse {
+        actions: all[start..].to_vec(),
+        total,
+    }))
 }
 
 async fn get_state(
@@ -204,14 +240,9 @@ async fn get_status(
 
     // Merge energy info.
     let energy = state.energy_registry.get(&agent_id);
-    let (e_current, e_max, e_ratio, e_phase) = match &energy {
-        Some(e) => (
-            Some(e.current()),
-            Some(e.max()),
-            Some(e.ratio()),
-            Some(e.phase().to_string()),
-        ),
-        None => (None, None, None, None),
+    let (e_level, e_max) = match &energy {
+        Some(e) => (e.current(), e.max()),
+        None => (0, 100),
     };
 
     Ok(Json(WorkspaceStatusResponse {
@@ -219,9 +250,7 @@ async fn get_status(
         total_actions,
         uptime_ticks,
         current_strategy: strategy,
-        energy_current: e_current,
+        energy_level: e_level,
         energy_max: e_max,
-        energy_ratio: e_ratio,
-        energy_phase: e_phase,
     }))
 }
