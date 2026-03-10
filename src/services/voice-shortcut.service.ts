@@ -381,7 +381,6 @@ export class VoiceShortcutService {
       this.releaseResources();
       this.clearAutoHide();
       this.state = 'idle';
-      invoke('voice_overlay_hide').catch(() => {});
     }
 
     this.clearAutoHide();
