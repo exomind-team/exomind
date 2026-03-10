@@ -353,6 +353,26 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('does not reset duration to zero on live preview updates（实时文本刷新时不重置时长）', async () => {
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    emitMock.mockClear();
+
+    livePreviewOnUpdate?.({ text: '新的实时文本', isFinal: false });
+    await flushAsync();
+
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.not.objectContaining({
+        duration: 0,
+      }),
+    );
+
+    service.destroy();
+  });
+
   it('shows arming overlay before microphone startup resolves（麦克风初始化未完成前先显示启动态）', async () => {
     getUserMediaWithConstraintFallbackMock.mockImplementation(
       () => new Promise(() => {})

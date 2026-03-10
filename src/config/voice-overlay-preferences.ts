@@ -71,6 +71,21 @@ export function subscribeVoiceOverlayOpacityChanges(
     listener(getVoiceOverlayOpacity());
   };
 
+  const storageHandler = (event: StorageEvent) => {
+    if (event.key !== VOICE_OVERLAY_OPACITY_STORAGE_KEY) {
+      return;
+    }
+    if (typeof event.newValue === 'string') {
+      listener(clampOverlayOpacity(Number.parseInt(event.newValue, 10)));
+      return;
+    }
+    listener(getVoiceOverlayOpacity());
+  };
+
   window.addEventListener(VOICE_OVERLAY_OPACITY_CHANGED_EVENT, handler);
-  return () => window.removeEventListener(VOICE_OVERLAY_OPACITY_CHANGED_EVENT, handler);
+  window.addEventListener('storage', storageHandler);
+  return () => {
+    window.removeEventListener(VOICE_OVERLAY_OPACITY_CHANGED_EVENT, handler);
+    window.removeEventListener('storage', storageHandler);
+  };
 }
