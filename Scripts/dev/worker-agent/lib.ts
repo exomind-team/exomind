@@ -73,16 +73,6 @@ export interface WorkerTempPaths {
 
 const QUESTION_NOISE_PATTERN = /[?？]{5,}/;
 const LINKED_ISSUE_PATTERN = /(?:refs|closes|fixes)\s+#(\d+)/i;
-const NON_BLOCKING_REVIEWER_COMMENT_PATTERNS = [
-  /only state synchronization/i,
-  /no issues found/i,
-  /no new implementation delta/i,
-  /does not change scope alignment/i,
-  /已审阅最新变更，未发现问题/u,
-  /未发现新问题/u,
-  /没有新的实现增量/u,
-  /没有新增提交、测试、需求或实现范围变化/u,
-];
 
 function normalizeSectionContent(value: string): string {
   return value.trim();
@@ -332,21 +322,6 @@ export function shouldIgnoreFeedbackItem(input: {
 
 export function isNonBlockingReviewState(state: string): boolean {
   return state === 'APPROVED' || state === 'DISMISSED';
-}
-
-export function isNonBlockingReviewerComment(body: string): boolean {
-  const normalized = body
-    .split(/\r?\n/)
-    .filter((line) => !line.trimStart().startsWith('>'))
-    .join('\n')
-    .replace(REVIEWER_PREFIX, '')
-    .trim();
-
-  if (!normalized) {
-    return false;
-  }
-
-  return NON_BLOCKING_REVIEWER_COMMENT_PATTERNS.some((pattern) => pattern.test(normalized));
 }
 
 export function resolveWorkerTargetLanguage(input: {

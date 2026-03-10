@@ -102,7 +102,7 @@ describe('worker-agent next-action', () => {
     expect(result.blockers?.[0]?.reason).toBe('reviewer');
   });
 
-  it('does not treat a reviewer state-sync comment with no new issues as a blocker', () => {
+  it('treats a reviewer state-sync comment as actionable feedback', () => {
     const result = determineNextAction(
       makeInput({
         pr: {
@@ -119,7 +119,8 @@ describe('worker-agent next-action', () => {
       }),
     );
 
-    expect(result.action).toBe('wait-for-update');
+    expect(result.action).toBe('reply-blocking-comment');
+    expect(result.blockers?.[0]?.reason).toBe('reviewer');
   });
 
   it('ignores a new APPROVED review when no actionable feedback exists', () => {

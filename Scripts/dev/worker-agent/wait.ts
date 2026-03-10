@@ -3,7 +3,6 @@ import {
   hasHumanTestLabel,
   HUMAN_TEST_LABEL,
   HUMAN_TEST_REVIEW_PREFIX,
-  isNonBlockingReviewerComment,
   isNonBlockingReviewState,
   REVIEWER_PREFIX,
   shouldIgnoreFeedbackItem,
@@ -103,10 +102,6 @@ export function detectWakeEvents(input: {
     }
 
     if (comment.body.startsWith(REVIEWER_PREFIX)) {
-      if (isNonBlockingReviewerComment(comment.body)) {
-        continue;
-      }
-
       events.push({
         reason: 'reviewer',
         itemId: comment.id,

@@ -41,7 +41,7 @@ describe('worker-agent wait logic', () => {
     expect(events[0]?.itemId).toBe('comment-1');
   });
 
-  it('does not wake on a reviewer state-sync comment with no new issues', () => {
+  it('wakes on a reviewer state-sync comment so the worker can respond', () => {
     const events = detectWakeEvents({
       previous: makeSnapshot(),
       current: makeSnapshot({
@@ -60,7 +60,8 @@ describe('worker-agent wait logic', () => {
       },
     });
 
-    expect(events).toEqual([]);
+    expect(events[0]?.reason).toBe('reviewer');
+    expect(events[0]?.itemId).toBe('comment-reviewer-sync');
   });
 
   it('wakes on a new human comment and classifies it as a pending item', () => {
