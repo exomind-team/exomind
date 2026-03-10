@@ -78,6 +78,12 @@ import {
   type VoiceShortcutAsrProvider,
 } from '@/config/voice-shortcut-asr-provider';
 import {
+  DEFAULT_VOLCANO_RESOURCE_ID,
+  VOLCANO_RESOURCE_PRESETS,
+  getVolcanoResourceId,
+  setVolcanoResourceId,
+} from '@/lib/asr/volcano-config';
+import {
   getFeedbackPreferences,
   setFeedbackPreferences,
   subscribeFeedbackPreferencesChanges,
@@ -238,6 +244,7 @@ export function SettingsPage() {
   const [voiceShortcutAsrProvider, setVoiceShortcutAsrProviderState] = useState<VoiceShortcutAsrProvider>(
     () => getVoiceShortcutAsrProvider()
   );
+  const [volcanoResourceId, setVolcanoResourceIdState] = useState<string>(() => getVolcanoResourceId());
   const [feedbackPreferences, setFeedbackPreferencesState] = useState<FeedbackPreferences>(
     () => getFeedbackPreferences()
   );
@@ -504,6 +511,12 @@ export function SettingsPage() {
     clearNotice();
     setStatusMessage(`快捷语音引擎已切换为 ${getVoiceShortcutAsrProviderLabel(normalizedProvider)}`);
   };
+  const handleVolcanoResourceChange = (nextResourceId: string) => {
+    const normalizedResourceId = setVolcanoResourceId(nextResourceId || DEFAULT_VOLCANO_RESOURCE_ID);
+    setVolcanoResourceIdState(normalizedResourceId);
+    clearNotice();
+    setStatusMessage(`火山资源模型已切换为 ${VOLCANO_RESOURCE_PRESETS.find((item) => item.value === normalizedResourceId)?.label ?? normalizedResourceId}`);
+  };
   const handleFeedbackPreferenceToggle = (key: keyof FeedbackPreferences) => {
     const next = {
       ...feedbackPreferences,
@@ -679,6 +692,7 @@ export function SettingsPage() {
     : '未配置';
   const voiceTestStatusLabel = developerMode ? '可用' : '需开发者模式';
   const voiceShortcutProviderLabel = getVoiceShortcutAsrProviderLabel(voiceShortcutAsrProvider);
+  const volcanoResourceLabel = VOLCANO_RESOURCE_PRESETS.find((item) => item.value === volcanoResourceId)?.label ?? '自定义资源';
 
   const renderVoiceShortcutProviderControl = () => (
     <div
@@ -1040,6 +1054,36 @@ export function SettingsPage() {
                     影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
                   </span>
                 </div>
+                {voiceShortcutAsrProvider === 'volcano' ? (
+                  <>
+                    <Divider />
+                    <div data-testid="new-settings-volcano-resource-row">
+                      <SettingRow
+                        icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                        label="火山资源模型"
+                        right={(
+                          <label className="flex min-w-[186px] items-center gap-2">
+                            <select
+                              data-testid="new-settings-volcano-resource-select"
+                              value={volcanoResourceId}
+                              onChange={(event) => handleVolcanoResourceChange(event.target.value)}
+                              className="h-9 w-full rounded-[10px] border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] dark:border-[#44403C] dark:bg-[#292524] dark:text-[#FAFAF9]"
+                            >
+                              {VOLCANO_RESOURCE_PRESETS.map((item) => (
+                                <option key={item.value} value={item.value}>{item.label}</option>
+                              ))}
+                            </select>
+                          </label>
+                        )}
+                      />
+                    </div>
+                    <div className="pb-[14px] pl-[46px] pr-4">
+                      <span className="text-xs text-[#A8A29E]">
+                        当前默认资源：{volcanoResourceLabel}。
+                      </span>
+                    </div>
+                  </>
+                ) : null}
                 <Divider />
                 <div data-testid="new-settings-voice-token-row">
                   <SettingRow
@@ -1470,6 +1514,36 @@ export function SettingsPage() {
                 影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
               </span>
             </div>
+            {voiceShortcutAsrProvider === 'volcano' ? (
+              <>
+                <Divider />
+                <div data-testid="new-settings-volcano-resource-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="火山资源模型"
+                    right={(
+                      <label className="flex min-w-[186px] items-center gap-2">
+                        <select
+                          data-testid="new-settings-volcano-resource-select"
+                          value={volcanoResourceId}
+                          onChange={(event) => handleVolcanoResourceChange(event.target.value)}
+                          className="h-9 w-full rounded-[10px] border border-[#E7E5E4] bg-white px-3 text-xs text-[#1C1917] dark:border-[#44403C] dark:bg-[#292524] dark:text-[#FAFAF9]"
+                        >
+                          {VOLCANO_RESOURCE_PRESETS.map((item) => (
+                            <option key={item.value} value={item.value}>{item.label}</option>
+                          ))}
+                        </select>
+                      </label>
+                    )}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">
+                    当前默认资源：{volcanoResourceLabel}。
+                  </span>
+                </div>
+              </>
+            ) : null}
             <Divider />
             <div data-testid="new-settings-voice-token-row">
               <SettingRow

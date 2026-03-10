@@ -1,18 +1,3 @@
-/**
- * VoiceShortcutService - 全局语音快捷键服务
- *
- * T3: 监听 Tauri event → 录音 → ASR → 双路输出
- *
- * 流程:
- *   Alt+Q pressed(first)  → Rust emits "voice-shortcut" "start" → startRecording
- *   Alt+Q pressed(second) → Rust emits "voice-shortcut" "start" → stopRecording → ASR
- *   （保留兼容）Alt+Q released(old flow) → Rust may emit "voice-shortcut" "stop"
- *     → Path A: clipboard.writeText + simulate_paste (光标位置输出)
- *     → Path B: EventLog.addEvent (voice 标签)
- *
- * 同时通过 Tauri event "voice-overlay-state" 驱动悬浮窗状态。
- */
-
 import { listen, emit } from '@tauri-apps/api/event';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
@@ -32,19 +17,52 @@ import { convertWebmBlobToWav } from '../lib/media/wav-audio';
 import type { ASRResult } from '../lib/ports/asr-port';
 import {
   getVoiceShortcutAsrProvider,
-  getVoiceShortcutAsrProviderLabel,
   subscribeVoiceShortcutAsrProviderChanges,
   type VoiceShortcutAsrProvider,
 } from '@/config/voice-shortcut-asr-provider';
-import { getStoredVolcanoRuntimeConfig } from '@/lib/asr/volcano-config';
+import {
+  DEFAULT_VOLCANO_RESOURCE_ID,
+  VOLCANO_ENDPOINT_OPTIONS,
+  VOLCANO_RESOURCE_PRESETS,
+  findVolcanoResourcePreset,
+  getStoredVolcanoRuntimeConfig,
+  type VolcanoRuntimeConfig,
+} from '@/lib/asr/volcano-config';
+import {
+  createDefaultVoiceLivePreviewSource,
+  type VoiceLivePreviewSession,
+  type VoiceLivePreviewSource,
+} from '@/lib/asr/live-preview';
+import { trimToLatestCharacters } from '@/lib/voice/overlay-text';
+import {
+  createVolcanoStreamingCapture,
+  type VolcanoStreamingCapture,
+} from '@/lib/asr/volcano-streaming-capture';
 
 export type VoiceShortcutState = 'idle' | 'recording' | 'recognizing' | 'done' | 'error';
 
 const LOG_TAG = '[VoiceShortcut]';
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
+const LIVE_PREVIEW_TEXT_LIMIT = 100;
 
-// --- Service ---
+type OverlayEventPayload = {
+  state: VoiceShortcutState;
+  duration: number;
+  text: string;
+  isLivePreview: boolean;
+  providerLabel: string;
+  recognitionMs?: number;
+  errorMessage: string;
+};
+
+type VolcanoAsrStreamEventPayload = {
+  sessionId: string;
+  text?: string;
+  isFinal?: boolean;
+  isDefinite?: boolean;
+  errorMessage?: string;
+};
 
 export class VoiceShortcutService {
   private state: VoiceShortcutState = 'idle';
@@ -54,20 +72,26 @@ export class VoiceShortcutService {
   private mimeType: string | null = null;
   private adapter: MOSSASRAdapter;
   private unlisten: (() => void) | null = null;
+  private unlistenVolcanoStream: (() => void) | null = null;
   private unlistenHotkey: (() => void) | null = null;
   private unlistenProvider: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private initializing = false;
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
+  private livePreviewSource: VoiceLivePreviewSource;
+  private livePreviewSession: VoiceLivePreviewSession | null = null;
+  private livePreviewText = '';
+  private volcanoStreamingCapture: VolcanoStreamingCapture | null = null;
+  private volcanoStreamSessionId: string | null = null;
+  private volcanoPushQueue: Promise<void> = Promise.resolve();
 
-  constructor() {
+  constructor(livePreviewSource: VoiceLivePreviewSource = createDefaultVoiceLivePreviewSource()) {
     this.adapter = new MOSSASRAdapter();
+    this.livePreviewSource = livePreviewSource;
   }
 
   async init(): Promise<void> {
-    if (this.unlisten || this.initializing) {
-      return;
-    }
+    if (this.unlisten || this.initializing) return;
     if (!isTauri()) {
       console.warn(LOG_TAG, 'not in Tauri environment, service disabled');
       return;
@@ -82,9 +106,9 @@ export class VoiceShortcutService {
           console.error(LOG_TAG, 'failed to apply updated voice shortcut:', error);
         });
       });
+
       this.unlistenProvider = subscribeVoiceShortcutAsrProviderChanges((provider) => {
         this.asrProvider = provider;
-        console.log(LOG_TAG, `voice asr provider switched: ${provider}`);
       });
 
       this.unlisten = await listen<string>('voice-shortcut', (event) => {
@@ -93,7 +117,9 @@ export class VoiceShortcutService {
         if (event.payload === 'cancel') this.handleCancel();
       });
 
-      console.log(LOG_TAG, 'initialized');
+      this.unlistenVolcanoStream = await listen<VolcanoAsrStreamEventPayload>('volcano-asr-stream-event', (event) => {
+        this.handleVolcanoStreamEvent(event.payload);
+      });
     } finally {
       this.initializing = false;
     }
@@ -102,11 +128,14 @@ export class VoiceShortcutService {
   destroy(): void {
     this.unlisten?.();
     this.unlisten = null;
+    this.unlistenVolcanoStream?.();
+    this.unlistenVolcanoStream = null;
     this.unlistenHotkey?.();
     this.unlistenHotkey = null;
     this.unlistenProvider?.();
     this.unlistenProvider = null;
     void this.syncRecordingActive(false);
+    this.stopLivePreview('abort');
     this.releaseResources();
     this.clearAutoHide();
   }
@@ -115,12 +144,7 @@ export class VoiceShortcutService {
     return this.state;
   }
 
-  // --- Event handlers ---
-
   private async handleStart(): Promise<void> {
-    // Toggle behavior（切换模式）:
-    // - idle/error/done: start recording
-    // - recording: stop and recognize
     if (this.state === 'recognizing') {
       return;
     }
@@ -130,6 +154,7 @@ export class VoiceShortcutService {
     }
 
     if (this.state === 'done' || this.state === 'error') {
+      this.stopLivePreview('abort');
       this.releaseResources();
       this.clearAutoHide();
       this.state = 'idle';
@@ -137,10 +162,16 @@ export class VoiceShortcutService {
     }
 
     this.clearAutoHide();
+    this.livePreviewText = '';
 
     try {
+      if (this.asrProvider === 'volcano') {
+        await this.startVolcanoStreaming();
+        return;
+      }
+
       this.stream = await getUserMediaWithConstraintFallback(
-        (c) => navigator.mediaDevices.getUserMedia(c),
+        (constraints) => navigator.mediaDevices.getUserMedia(constraints),
         { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
       );
 
@@ -149,24 +180,32 @@ export class VoiceShortcutService {
       this.mimeType = mimeType;
       this.chunks = [];
 
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) this.chunks.push(e.data);
+      recorder.ondataavailable = (event) => {
+        if (event.data.size > 0) {
+          this.chunks.push(event.data);
+        }
       };
 
       recorder.start(100);
       await this.syncRecordingActive(true);
       this.setState('recording');
-    } catch (err) {
-      this.handleError(`录音失败: ${err}`);
+      this.startLivePreview('zh-CN');
+    } catch (error) {
+      this.handleError(`录音失败: ${error}`);
     }
   }
 
   private async handleStop(): Promise<void> {
     if (this.state !== 'recording') return;
+    if (this.volcanoStreamSessionId && this.volcanoStreamingCapture) {
+      await this.handleVolcanoStreamingStop();
+      return;
+    }
+
+    this.stopLivePreview('stop');
     this.setState('recognizing');
     await this.syncRecordingActive(false);
 
-    // Stop MediaRecorder
     const recorder = this.mediaRecorder;
     if (recorder && recorder.state !== 'inactive') {
       await new Promise<void>((resolve) => {
@@ -176,9 +215,8 @@ export class VoiceShortcutService {
     }
     this.mediaRecorder = null;
 
-    // Release mic immediately
     if (this.stream) {
-      this.stream.getTracks().forEach((t) => t.stop());
+      this.stream.getTracks().forEach((track) => track.stop());
       this.stream = null;
     }
 
@@ -198,44 +236,44 @@ export class VoiceShortcutService {
       const recognitionStartedAt = Date.now();
       const result = await this.transcribeWithSelectedProvider(wavData);
       const recognitionMs = Date.now() - recognitionStartedAt;
-
       if (result?.text) {
-        await this.handleResult(result, recognitionMs, getVoiceShortcutAsrProviderLabel(this.asrProvider));
+        await this.handleResult(result, recognitionMs, this.getActiveProviderLabel());
       } else {
         this.handleError('未识别到文字');
       }
-    } catch (err) {
-      this.handleError(`识别失败: ${err}`);
+    } catch (error) {
+      this.handleError(`识别失败: ${error}`);
     }
   }
 
   private async handleCancel(): Promise<void> {
-    if (this.state !== 'recording') {
+    if (this.state !== 'recording') return;
+
+    if (this.volcanoStreamSessionId) {
+      await this.syncRecordingActive(false);
+      await this.cancelVolcanoStreaming();
+      this.clearAutoHide();
+      this.setState('idle');
+      invoke('voice_overlay_hide').catch(() => {});
       return;
     }
 
     await this.syncRecordingActive(false);
+    this.stopLivePreview('abort');
+    this.livePreviewText = '';
     this.releaseResources();
     this.clearAutoHide();
     this.setState('idle');
     invoke('voice_overlay_hide').catch(() => {});
   }
 
-  // --- Dual-path output (T5 integration) ---
-
-  private async handleResult(
-    result: ASRResult,
-    recognitionMs: number,
-    providerLabel: string,
-  ): Promise<void> {
+  private async handleResult(result: ASRResult, recognitionMs: number, providerLabel: string): Promise<void> {
     const [clipboardResult, eventLogResult] = await Promise.allSettled([
-      // Path A: clipboard + paste
       (async () => {
         const writeResult = await getClipboardService().writeText(result.text);
         if (!writeResult.ok) throw new Error(writeResult.title);
         await invoke('simulate_paste');
       })(),
-      // Path B: EventLog
       getEventLogService().addEvent(result.text, new Set(['voice'])),
     ]);
 
@@ -246,7 +284,11 @@ export class VoiceShortcutService {
       console.error(LOG_TAG, 'eventlog write failed:', eventLogResult.reason);
     }
 
-    this.emitOverlayState('done', { text: result.text, recognitionMs, providerLabel });
+    this.emitOverlayState('done', {
+      text: result.text,
+      recognitionMs,
+      providerLabel,
+    });
     this.state = 'done';
 
     this.autoHideTimer = setTimeout(() => {
@@ -257,6 +299,8 @@ export class VoiceShortcutService {
 
   private handleError(message: string): void {
     console.error(LOG_TAG, message);
+    this.stopLivePreview('abort');
+    this.livePreviewText = '';
     this.releaseResources();
     this.emitOverlayState('error', { errorMessage: message });
     this.state = 'error';
@@ -267,8 +311,6 @@ export class VoiceShortcutService {
     }, AUTO_HIDE_ERROR_MS);
   }
 
-  // --- State & overlay ---
-
   private setState(newState: VoiceShortcutState): void {
     this.state = newState;
     if (newState === 'recording') {
@@ -278,21 +320,13 @@ export class VoiceShortcutService {
     this.emitOverlayState(newState);
   }
 
-  private emitOverlayState(
-    state: string,
-    extra?: Record<string, string | number>,
-  ): void {
-    emit('voice-overlay-state', { state, ...extra }).catch(() => {});
+  private emitOverlayState(state: VoiceShortcutState, extra: Partial<OverlayEventPayload> = {}): void {
+    emit('voice-overlay-state', this.buildOverlayPayload(state, extra)).catch(() => {});
   }
 
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
     if (this.asrProvider === 'volcano') {
-      const config = getStoredVolcanoRuntimeConfig(import.meta.env as Record<string, string | undefined>);
-      if (!config.appKey || !config.accessKey || !config.resourceId) {
-        throw new Error('火山配置不完整，请先到火山 ASR 测试页保存 AppKey / AccessKey / Resource ID');
-      }
-
-      // Volcano command expects PCM payload（火山命令要的是纯 PCM，不要 WAV 头）
+      const config = this.getVolcanoRuntimeConfigOrThrow();
       const pcmAudio = wavData.slice(44);
       return await invoke<ASRResult>('volcano_asr_recognize', {
         audioData: Array.from(pcmAudio),
@@ -306,18 +340,16 @@ export class VoiceShortcutService {
     });
   }
 
-  // --- Cleanup ---
-
   private releaseResources(): void {
     if (this.mediaRecorder && this.mediaRecorder.state !== 'inactive') {
       try {
         this.mediaRecorder.stop();
       } catch {
-        // Ignore stop errors during forced cleanup.
+        // ignore
       }
     }
     if (this.stream) {
-      this.stream.getTracks().forEach((t) => t.stop());
+      this.stream.getTracks().forEach((track) => track.stop());
       this.stream = null;
     }
     this.mediaRecorder = null;
@@ -346,16 +378,208 @@ export class VoiceShortcutService {
     } catch (error) {
       const message = String(error);
       if (message.toLowerCase().includes('already registered')) {
-        // Ignore duplicate registration races from dev reload / strict-mode re-init paths.
         console.warn(LOG_TAG, `voice shortcut "${hotkey}" already registered, skip re-register`);
         return;
       }
       console.error(LOG_TAG, `failed to apply voice shortcut "${hotkey}":`, error);
     }
   }
-}
 
-// --- Singleton ---
+  private buildOverlayPayload(state: VoiceShortcutState, extra: Partial<OverlayEventPayload> = {}): OverlayEventPayload {
+    const fallbackText = state === 'recording' || state === 'recognizing' ? this.livePreviewText : '';
+    return {
+      state,
+      duration: extra.duration ?? 0,
+      text: extra.text ?? fallbackText,
+      isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
+      providerLabel: extra.providerLabel ?? this.getActiveProviderLabel(),
+      recognitionMs: extra.recognitionMs,
+      errorMessage: extra.errorMessage ?? '',
+    };
+  }
+
+  private startLivePreview(lang: string): void {
+    if (this.livePreviewSession || !this.livePreviewSource.isAvailable()) {
+      return;
+    }
+
+    try {
+      const session = this.livePreviewSource.createSession({
+        lang,
+        onUpdate: ({ text }) => this.handleLivePreviewUpdate(text),
+        onError: (error) => console.warn(LOG_TAG, 'live preview unavailable:', error),
+      });
+      this.livePreviewSession = session;
+      session.start();
+    } catch (error) {
+      console.warn(LOG_TAG, 'failed to start live preview:', error);
+      this.livePreviewSession = null;
+    }
+  }
+
+  private stopLivePreview(mode: 'stop' | 'abort'): void {
+    if (!this.livePreviewSession) return;
+    const session = this.livePreviewSession;
+    this.livePreviewSession = null;
+    try {
+      if (mode === 'stop') session.stop();
+      else session.abort();
+    } catch (error) {
+      console.warn(LOG_TAG, `failed to ${mode} live preview:`, error);
+    }
+  }
+
+  private handleLivePreviewUpdate(text: string): void {
+    const nextText = trimToLatestCharacters(text, LIVE_PREVIEW_TEXT_LIMIT);
+    if (!nextText || nextText === this.livePreviewText) {
+      return;
+    }
+    this.livePreviewText = nextText;
+    if (this.state !== 'recording' && this.state !== 'recognizing') {
+      return;
+    }
+    this.emitOverlayState(this.state, {
+      text: nextText,
+      isLivePreview: true,
+    });
+  }
+
+  private async startVolcanoStreaming(): Promise<void> {
+    const config = this.getVolcanoRuntimeConfigOrThrow();
+    this.stream = await getUserMediaWithConstraintFallback(
+      (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+      { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
+    );
+
+    try {
+      const sessionId = await invoke<string>('volcano_asr_stream_start', { config });
+      this.volcanoStreamSessionId = sessionId;
+      this.volcanoPushQueue = Promise.resolve();
+      this.volcanoStreamingCapture = createVolcanoStreamingCapture({
+        stream: this.stream,
+        onChunk: async (chunk) => this.enqueueVolcanoStreamingChunk(chunk),
+      });
+      await this.volcanoStreamingCapture.start();
+      await this.syncRecordingActive(true);
+      this.setState('recording');
+    } catch (error) {
+      this.cleanupVolcanoStreamingState();
+      this.releaseResources();
+      throw error;
+    }
+  }
+
+  private async handleVolcanoStreamingStop(): Promise<void> {
+    this.setState('recognizing');
+    await this.syncRecordingActive(false);
+
+    const sessionId = this.volcanoStreamSessionId;
+    const capture = this.volcanoStreamingCapture;
+    if (!sessionId || !capture) {
+      this.handleError('火山流式会话不存在');
+      return;
+    }
+
+    try {
+      const trailingChunk = await capture.stop();
+      this.volcanoStreamingCapture = null;
+      this.releaseResources();
+      const recognitionStartedAt = Date.now();
+      await this.volcanoPushQueue;
+      const result = await invoke<ASRResult>('volcano_asr_stream_finish', {
+        sessionId,
+        audioData: Array.from(trailingChunk ?? new Uint8Array()),
+      });
+      const recognitionMs = Date.now() - recognitionStartedAt;
+      await this.handleResult(result, recognitionMs, this.getActiveProviderLabel());
+    } catch (error) {
+      this.handleError(`识别失败: ${error}`);
+    } finally {
+      this.cleanupVolcanoStreamingState();
+    }
+  }
+
+  private async cancelVolcanoStreaming(): Promise<void> {
+    const sessionId = this.volcanoStreamSessionId;
+    try {
+      await this.volcanoStreamingCapture?.cancel();
+      await this.volcanoPushQueue;
+      if (sessionId) {
+        await invoke('volcano_asr_stream_cancel', { sessionId });
+      }
+    } catch (error) {
+      console.error(LOG_TAG, 'failed to cancel volcano stream:', error);
+    } finally {
+      this.cleanupVolcanoStreamingState();
+      this.releaseResources();
+    }
+  }
+
+  private async enqueueVolcanoStreamingChunk(chunk: Uint8Array): Promise<void> {
+    const sessionId = this.volcanoStreamSessionId;
+    if (!sessionId || chunk.length === 0) {
+      return;
+    }
+
+    this.volcanoPushQueue = this.volcanoPushQueue.then(async () => {
+      await invoke('volcano_asr_stream_push', {
+        sessionId,
+        audioData: Array.from(chunk),
+      });
+    });
+    return this.volcanoPushQueue;
+  }
+
+  private handleVolcanoStreamEvent(payload: VolcanoAsrStreamEventPayload): void {
+    if (!this.volcanoStreamSessionId || payload.sessionId !== this.volcanoStreamSessionId) {
+      return;
+    }
+    if (payload.errorMessage) {
+      this.handleError(payload.errorMessage);
+      return;
+    }
+    const nextText = trimToLatestCharacters(payload.text || '', LIVE_PREVIEW_TEXT_LIMIT);
+    if (!nextText) {
+      return;
+    }
+    this.livePreviewText = nextText;
+    if (this.state !== 'recording' && this.state !== 'recognizing') {
+      return;
+    }
+    this.emitOverlayState(this.state, {
+      text: nextText,
+      isLivePreview: !payload.isFinal,
+    });
+  }
+
+  private cleanupVolcanoStreamingState(): void {
+    this.volcanoStreamingCapture = null;
+    this.volcanoStreamSessionId = null;
+    this.volcanoPushQueue = Promise.resolve();
+  }
+
+  private getVolcanoRuntimeConfigOrThrow(): VolcanoRuntimeConfig {
+    const config = getStoredVolcanoRuntimeConfig(import.meta.env as Record<string, string | undefined>);
+    if (!config.appKey || !config.accessKey || !config.resourceId) {
+      throw new Error('火山配置不完整，请先到火山 ASR 测试页保存 AppKey / AccessKey / Resource ID');
+    }
+    return config;
+  }
+
+  private getActiveProviderLabel(): string {
+    if (this.asrProvider !== 'volcano') {
+      return 'MOSS · 云端识别';
+    }
+    const config = getStoredVolcanoRuntimeConfig(import.meta.env as Record<string, string | undefined>);
+    const resourceLabel = VOLCANO_RESOURCE_PRESETS.find(
+      (item) => item.value === findVolcanoResourcePreset(config.resourceId || DEFAULT_VOLCANO_RESOURCE_ID),
+    )?.label ?? '语音识别';
+    const endpointLabel = VOLCANO_ENDPOINT_OPTIONS.find(
+      (item) => item.value === config.endpoint,
+    )?.label ?? config.endpoint;
+    return `火山 ${resourceLabel.replace('模型 ', '')} · ${endpointLabel}`;
+  }
+}
 
 let instance: VoiceShortcutService | null = null;
 
@@ -367,6 +591,5 @@ export function getVoiceShortcutService(): VoiceShortcutService {
 }
 
 export async function initVoiceShortcutService(): Promise<void> {
-  const service = getVoiceShortcutService();
-  await service.init();
+  await getVoiceShortcutService().init();
 }

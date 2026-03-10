@@ -1,62 +1,45 @@
-/**
- * VoiceOverlayPage - 语音输入迷你悬浮窗
- *
- * 由 Tauri 动态创建的透明无边框窗口承载。
- * 通过 Tauri event 接收状态变更指令，展示 4 种状态：
- *   recording  → 红色脉冲点 + "录音中..." + 时长
- *   recognizing → 转圈动画 + "识别中..."
- *   done       → 绿色勾 + 文本预览（前 20 字）
- *   error      → 红色叹号 + 错误信息
- *
- * Phase 1: 静态 UI 壳，使用本地 state 模拟状态切换。
- * Phase 2: 接入 Tauri event 驱动。
- */
+import { useEffect, useState } from 'react';
+import { listen } from '@tauri-apps/api/event';
+import { AlertCircle, Check, LoaderCircle, Mic } from 'lucide-react';
+import { trimToLatestCharacters } from '@/lib/voice/overlay-text';
+import {
+  getVoiceShortcutHotkey,
+  subscribeVoiceShortcutHotkeyChanges,
+  type VoiceShortcutHotkey,
+} from '@/config/voice-shortcut-hotkey';
 
-import { useState, useEffect } from "react";
-import { listen } from "@tauri-apps/api/event";
-import { Mic, LoaderCircle, Check, AlertCircle } from "lucide-react";
-
-// --- Types ---
-
-export type OverlayState = "idle" | "recording" | "recognizing" | "done" | "error";
+export type OverlayState = 'idle' | 'recording' | 'recognizing' | 'done' | 'error';
 
 interface OverlayData {
   state: OverlayState;
-  /** 录音时长（秒），recording 状态使用 */
   duration: number;
-  /** ASR 结果文本预览，done 状态使用 */
   text: string;
-  /** 当前使用的识别引擎标签，done 状态使用 */
+  isLivePreview?: boolean;
   providerLabel?: string;
-  /** 识别耗时（毫秒），done 状态使用 */
   recognitionMs?: number;
-  /** 错误信息，error 状态使用 */
   errorMessage: string;
 }
-
-// --- Constants ---
 
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
 
-// --- Component ---
-
 export function VoiceOverlayPage() {
+  const [shortcut, setShortcut] = useState<VoiceShortcutHotkey>(() => getVoiceShortcutHotkey());
   const [data, setData] = useState<OverlayData>({
-    state: "idle",
+    state: 'idle',
     duration: 0,
-    text: "",
-    providerLabel: "",
+    text: '',
+    isLivePreview: false,
+    providerLabel: '',
     recognitionMs: undefined,
-    errorMessage: "",
+    errorMessage: '',
   });
 
-  // Listen to Tauri event from VoiceShortcutService
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | null = null;
 
-    listen<Partial<OverlayData>>("voice-overlay-state", (event) => {
+    listen<Partial<OverlayData>>('voice-overlay-state', (event) => {
       if (!cancelled) {
         setData((prev) => ({ ...prev, ...event.payload }));
       }
@@ -71,9 +54,13 @@ export function VoiceOverlayPage() {
     };
   }, []);
 
-  // 录音计时器
   useEffect(() => {
-    if (data.state !== "recording") return;
+    setShortcut(getVoiceShortcutHotkey());
+    return subscribeVoiceShortcutHotkeyChanges((nextHotkey) => setShortcut(nextHotkey));
+  }, []);
+
+  useEffect(() => {
+    if (data.state !== 'recording') return;
     const start = Date.now() - data.duration * 1000;
     const timer = setInterval(() => {
       setData((prev) => ({
@@ -82,64 +69,66 @@ export function VoiceOverlayPage() {
       }));
     }, 100);
     return () => clearInterval(timer);
-  }, [data.state]);
+  }, [data.state, data.duration]);
 
-  // done / error 自动隐藏（Phase 2 将 emit hide event）
   useEffect(() => {
-    if (data.state === "done") {
-      const t = setTimeout(() => setData((prev) => ({ ...prev, state: "idle" })), AUTO_HIDE_DONE_MS);
-      return () => clearTimeout(t);
+    if (data.state === 'done') {
+      const timer = setTimeout(() => setData((prev) => ({ ...prev, state: 'idle' })), AUTO_HIDE_DONE_MS);
+      return () => clearTimeout(timer);
     }
-    if (data.state === "error") {
-      const t = setTimeout(() => setData((prev) => ({ ...prev, state: "idle" })), AUTO_HIDE_ERROR_MS);
-      return () => clearTimeout(t);
+    if (data.state === 'error') {
+      const timer = setTimeout(() => setData((prev) => ({ ...prev, state: 'idle' })), AUTO_HIDE_ERROR_MS);
+      return () => clearTimeout(timer);
     }
   }, [data.state]);
 
-  if (data.state === "idle") return null;
+  if (data.state === 'idle') {
+    return null;
+  }
 
   return (
     <div className="voice-overlay-root">
       <div className={`voice-overlay voice-overlay--${data.state}`}>
         <StatusIndicator state={data.state} />
-        <StatusText
-          state={data.state}
-          duration={data.duration}
-          text={data.text}
-          providerLabel={data.providerLabel}
-          recognitionMs={data.recognitionMs}
-          errorMessage={data.errorMessage}
-        />
+        <div className="overlay-content">
+          <StatusText
+            state={data.state}
+            shortcut={shortcut}
+            duration={data.duration}
+            text={data.text}
+            isLivePreview={data.isLivePreview}
+            providerLabel={data.providerLabel}
+            recognitionMs={data.recognitionMs}
+            errorMessage={data.errorMessage}
+          />
+        </div>
       </div>
-
       <style>{overlayStyles}</style>
     </div>
   );
 }
 
-// --- Sub-components ---
-
 function StatusIndicator({ state }: { state: OverlayState }) {
   switch (state) {
-    case "recording":
+    case 'recording':
       return (
         <span className="overlay-icon overlay-icon--recording">
           <Mic size={16} />
         </span>
       );
-    case "recognizing":
+    case 'recognizing':
       return (
         <span className="overlay-icon overlay-icon--recognizing">
           <LoaderCircle size={16} />
         </span>
       );
-    case "done":
+    case 'done':
       return (
         <span className="overlay-icon overlay-icon--done">
           <Check size={16} />
         </span>
       );
-    case "error":
+    case 'error':
       return (
         <span className="overlay-icon overlay-icon--error">
           <AlertCircle size={16} />
@@ -152,60 +141,76 @@ function StatusIndicator({ state }: { state: OverlayState }) {
 
 function StatusText({
   state,
+  shortcut,
   duration,
   text,
+  isLivePreview,
   providerLabel,
   recognitionMs,
   errorMessage,
 }: {
   state: OverlayState;
+  shortcut: VoiceShortcutHotkey;
   duration: number;
   text: string;
+  isLivePreview?: boolean;
   providerLabel?: string;
   recognitionMs?: number;
   errorMessage: string;
 }) {
+  const preview = trimToLatestCharacters(text, 100);
+  const providerMeta = providerLabel?.trim();
+
   switch (state) {
-    case "recording":
-      return <span className="overlay-text">{formatDuration(duration)} · 再按结束</span>;
-    case "recognizing":
-      return <span className="overlay-text overlay-text--secondary">识别中...</span>;
-    case "done": {
-      const preview = text.length > 20 ? text.slice(0, 20) + "..." : text;
-      const providerMeta = providerLabel?.trim();
-      const elapsed = typeof recognitionMs === "number" ? formatRecognitionMs(recognitionMs) : "";
+    case 'recording':
+      return (
+        <span className="overlay-text-group">
+          {providerMeta ? <span className="overlay-meta">{providerMeta}</span> : null}
+          <span className="overlay-text">{preview || '正在听你说…'}</span>
+          <span className="overlay-status-row overlay-text overlay-text--secondary">
+            <span className="overlay-duration">{formatDuration(duration)}</span>
+            <span>{`${isLivePreview ? '实时预览 · ' : ''}再按 ${shortcut} 结束 · Esc 取消`}</span>
+          </span>
+        </span>
+      );
+    case 'recognizing':
+      return (
+        <span className="overlay-text-group">
+          {providerMeta ? <span className="overlay-meta">{providerMeta}</span> : null}
+          <span className="overlay-text">{preview || '识别中…'}</span>
+          <span className="overlay-text overlay-text--secondary">{`识别中... · ${shortcut} 开始新一轮 · Esc 取消`}</span>
+        </span>
+      );
+    case 'done': {
+      const elapsed = typeof recognitionMs === 'number' ? formatRecognitionMs(recognitionMs) : '';
       const meta = providerMeta && elapsed
         ? `${providerMeta} · 识别 ${elapsed}`
         : elapsed
           ? `识别 ${elapsed}`
-          : providerMeta || "";
+          : providerMeta || '';
       return (
         <span className="overlay-text-group">
-          <span className="overlay-text">{preview || "完成"}</span>
+          <span className="overlay-text">{preview || '完成'}</span>
           {meta ? <span className="overlay-text overlay-text--secondary">{meta}</span> : null}
         </span>
       );
     }
-    case "error":
-      return <span className="overlay-text overlay-text--error">{errorMessage || "识别失败"}</span>;
+    case 'error':
+      return <span className="overlay-text overlay-text--error">{errorMessage || '识别失败'}</span>;
     default:
       return null;
   }
 }
 
-// --- Helpers ---
-
 function formatDuration(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = Math.floor(seconds % 60);
-  return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
+  const minutes = Math.floor(seconds / 60);
+  const secs = Math.floor(seconds % 60);
+  return `${minutes.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
 }
 
 function formatRecognitionMs(milliseconds: number): string {
   return `${(milliseconds / 1000).toFixed(2)}s`;
 }
-
-// --- Styles ---
 
 const overlayStyles = /* css */ `
   .voice-overlay-root {
@@ -214,81 +219,55 @@ const overlayStyles = /* css */ `
     display: flex;
     align-items: center;
     justify-content: center;
-    /* 允许鼠标穿透空白区域 */
     pointer-events: none;
     user-select: none;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
   }
 
   .voice-overlay {
+    position: relative;
     pointer-events: auto;
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 14px;
-    border-radius: 20px;
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: start;
+    gap: 12px;
+    width: min(520px, calc(100vw - 24px));
+    min-height: 84px;
+    padding: 14px 16px;
+    border-radius: 22px;
     backdrop-filter: blur(12px);
     -webkit-backdrop-filter: blur(12px);
-    box-shadow: 0 2px 12px rgba(0, 0, 0, 0.15);
+    background:
+      linear-gradient(135deg, hsl(var(--bg-card) / 0.86), hsl(var(--bg-surface) / 0.8)),
+      linear-gradient(135deg, hsl(var(--brand-accent) / 0.14), transparent 58%);
+    border: none;
+    box-shadow: 0 20px 56px -30px rgba(15, 23, 42, 0.5);
     animation: overlay-fade-in 0.15s ease-out;
-    font-size: 13px;
-    line-height: 1;
-    white-space: nowrap;
+    font-size: 12px;
+    line-height: 1.2;
+    color: hsl(var(--text-primary));
   }
 
-  /* --- State variants --- */
-
-  .voice-overlay--recording {
-    background: rgba(239, 68, 68, 0.12);
-    border: 1px solid rgba(239, 68, 68, 0.25);
-    color: #dc2626;
+  .voice-overlay::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(90deg, hsl(var(--brand-accent) / 0.14), transparent 40%);
   }
-  .dark .voice-overlay--recording {
-    background: rgba(239, 68, 68, 0.18);
-    border-color: rgba(239, 68, 68, 0.35);
-    color: #f87171;
-  }
-
-  .voice-overlay--recognizing {
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid rgba(59, 130, 246, 0.2);
-    color: #2563eb;
-  }
-  .dark .voice-overlay--recognizing {
-    background: rgba(59, 130, 246, 0.15);
-    border-color: rgba(59, 130, 246, 0.3);
-    color: #60a5fa;
-  }
-
-  .voice-overlay--done {
-    background: rgba(34, 197, 94, 0.1);
-    border: 1px solid rgba(34, 197, 94, 0.2);
-    color: #16a34a;
-  }
-  .dark .voice-overlay--done {
-    background: rgba(34, 197, 94, 0.15);
-    border-color: rgba(34, 197, 94, 0.3);
-    color: #4ade80;
-  }
-
-  .voice-overlay--error {
-    background: rgba(239, 68, 68, 0.1);
-    border: 1px solid rgba(239, 68, 68, 0.2);
-    color: #dc2626;
-  }
-  .dark .voice-overlay--error {
-    background: rgba(239, 68, 68, 0.15);
-    border-color: rgba(239, 68, 68, 0.3);
-    color: #f87171;
-  }
-
-  /* --- Icon --- */
 
   .overlay-icon {
     display: inline-flex;
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    margin-top: 2px;
+    border-radius: 999px;
+    background: hsl(var(--brand-accent) / 0.14);
+    color: hsl(var(--brand-accent));
   }
 
   .overlay-icon--recording {
@@ -297,68 +276,101 @@ const overlayStyles = /* css */ `
 
   .overlay-icon--recognizing {
     animation: spin-icon 1s linear infinite;
+    color: hsl(var(--brand));
   }
 
   .overlay-icon--done {
     animation: pop-in 0.25s ease-out;
+    color: hsl(var(--success));
   }
 
   .overlay-icon--error {
     animation: shake-icon 0.4s ease-out;
+    color: hsl(var(--destructive));
   }
 
-  /* --- Text --- */
+  .overlay-content {
+    min-width: 0;
+    text-align: left;
+  }
+
+  .overlay-meta {
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: hsl(var(--text-muted));
+  }
 
   .overlay-text {
     font-weight: 500;
     font-variant-numeric: tabular-nums;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow-wrap: anywhere;
+    min-height: calc(1.45em * 2);
   }
 
   .overlay-text-group {
-    display: inline-flex;
+    display: flex;
     flex-direction: column;
     gap: 4px;
-    max-width: 240px;
+    min-width: 0;
+    max-width: 100%;
+    flex: 1;
   }
 
   .overlay-text--secondary {
     opacity: 0.8;
+    font-size: 11px;
+    min-height: 0;
+  }
+
+  .overlay-status-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .overlay-duration {
+    min-width: 4.4em;
+    display: inline-block;
+    font-variant-numeric: tabular-nums;
   }
 
   .overlay-text--error {
-    max-width: 140px;
     overflow: hidden;
     text-overflow: ellipsis;
   }
 
-  /* --- Animations --- */
-
   @keyframes overlay-fade-in {
     from { opacity: 0; transform: translateY(4px); }
-    to   { opacity: 1; transform: translateY(0); }
+    to { opacity: 1; transform: translateY(0); }
   }
 
   @keyframes pulse-icon {
     0%, 100% { opacity: 1; transform: scale(1); }
-    50%      { opacity: 0.6; transform: scale(1.15); }
+    50% { opacity: 0.6; transform: scale(1.15); }
   }
 
   @keyframes spin-icon {
     from { transform: rotate(0deg); }
-    to   { transform: rotate(360deg); }
+    to { transform: rotate(360deg); }
   }
 
   @keyframes pop-in {
-    0%   { transform: scale(0.5); opacity: 0; }
-    70%  { transform: scale(1.15); }
+    0% { transform: scale(0.5); opacity: 0; }
+    70% { transform: scale(1.15); }
     100% { transform: scale(1); opacity: 1; }
   }
 
   @keyframes shake-icon {
     0%, 100% { transform: translateX(0); }
-    20%      { transform: translateX(-3px); }
-    40%      { transform: translateX(3px); }
-    60%      { transform: translateX(-2px); }
-    80%      { transform: translateX(2px); }
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
   }
 `;

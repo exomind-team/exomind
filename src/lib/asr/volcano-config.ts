@@ -55,12 +55,13 @@ export const VOLCANO_STORAGE_KEYS = {
   forceToSpeechTime: 'volcano_asr_force_to_speech_time',
 } as const;
 
-function getStorage(): Pick<Storage, 'getItem'> | null {
+function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   if (typeof window === 'undefined') return null;
   const localStorageLike = window.localStorage as Partial<Storage> | undefined;
   if (!localStorageLike) return null;
   if (typeof localStorageLike.getItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem'>;
+  if (typeof localStorageLike.setItem !== 'function') return null;
+  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
 }
 
 function readStoredString(key: string): string {
@@ -119,6 +120,8 @@ export const VOLCANO_RESOURCE_PRESETS = [
   { value: 'volc.seedasr.sauc.concurrent', label: '模型 2.0 并发版' },
 ] as const;
 
+export const DEFAULT_VOLCANO_RESOURCE_ID = 'volc.seedasr.sauc.duration' as const;
+
 export const VOLCANO_LANGUAGE_OPTIONS = [
   { value: 'zh-CN', label: '中文（zh-CN）' },
   { value: 'en-US', label: '英语（en-US）' },
@@ -141,6 +144,20 @@ function trimOptional(value: string | undefined): string | undefined {
 
 export function findVolcanoResourcePreset(resourceId: string): string {
   return VOLCANO_RESOURCE_PRESETS.find((item) => item.value === resourceId)?.value ?? resourceId;
+}
+
+export function getVolcanoResourceId(
+  env: Record<string, string | undefined> = import.meta.env as Record<string, string | undefined>
+): string {
+  return readStoredString(VOLCANO_STORAGE_KEYS.resourceId) || (env.VITE_VOLCANO_RESOURCE_ID || DEFAULT_VOLCANO_RESOURCE_ID);
+}
+
+export function setVolcanoResourceId(resourceId: string): string {
+  const normalized = findVolcanoResourcePreset(resourceId.trim()) || DEFAULT_VOLCANO_RESOURCE_ID;
+  const storage = getStorage();
+  if (!storage) return normalized;
+  storage.setItem(VOLCANO_STORAGE_KEYS.resourceId, normalized);
+  return normalized;
 }
 
 export function buildVolcanoRuntimeConfig(
@@ -203,7 +220,7 @@ export function getStoredVolcanoRuntimeConfig(
   const credentials: VolcanoCredentialConfig = {
     appKey: readStoredString(VOLCANO_STORAGE_KEYS.appKey) || (env.VITE_VOLCANO_APP_KEY || ''),
     accessKey: readStoredString(VOLCANO_STORAGE_KEYS.accessKey) || (env.VITE_VOLCANO_ACCESS_KEY || ''),
-    resourceId: readStoredString(VOLCANO_STORAGE_KEYS.resourceId) || (env.VITE_VOLCANO_RESOURCE_ID || 'volc.bigasr.sauc.duration'),
+    resourceId: readStoredString(VOLCANO_STORAGE_KEYS.resourceId) || (env.VITE_VOLCANO_RESOURCE_ID || DEFAULT_VOLCANO_RESOURCE_ID),
     language: readStoredString(VOLCANO_STORAGE_KEYS.language) || 'zh-CN',
   };
 

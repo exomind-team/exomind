@@ -5,6 +5,7 @@ import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
+import { setVolcanoResourceId } from '@/lib/asr/volcano-config';
 
 const invokeMock = vi.fn();
 const isTauriMock = vi.fn(() => false);
@@ -62,6 +63,18 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     fireEvent.click(mossButton);
     expect(mossButton).toHaveAttribute('aria-pressed', 'true');
     expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('allows selecting volcano resource model from input section', () => {
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
+
+    const select = screen.getByTestId('new-settings-volcano-resource-select');
+    fireEvent.change(select, { target: { value: 'volc.bigasr.sauc.duration' } });
+
+    expect(setVolcanoResourceId('volc.bigasr.sauc.duration')).toBe('volc.bigasr.sauc.duration');
+    expect(screen.getByText('当前默认资源：模型 1.0 小时版。')).toBeInTheDocument();
   });
 
   it('toggles voice transcript send mode from input section', () => {
