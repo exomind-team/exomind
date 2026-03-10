@@ -115,6 +115,10 @@ describe('VoiceOverlayPage', () => {
           debugTraceId: 'trace-2',
           debugPressedAtMs: 1000,
           activationMs: 420,
+          inputReadyMs: 260,
+          sessionReadyMs: 310,
+          inputWarmHit: true,
+          sessionWarmHit: false,
           firstTextMs: 830,
           isLivePreview: true,
           providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
@@ -129,7 +133,11 @@ describe('VoiceOverlayPage', () => {
       screen.getByText((_, element) => element?.textContent === '00:03唤起 0.42s实时预览 · 再按 Alt+Q 结束 · Esc 取消')
     ).toBeInTheDocument();
     expect(
-      screen.getAllByText((_, element) => element?.textContent?.includes('首字 0.83s') ?? false).length
+      screen.getAllByText((_, element) =>
+        element?.textContent?.includes('流 0.26s·预热') &&
+        element?.textContent?.includes('会话 0.31s') &&
+        element?.textContent?.includes('首字 0.83s')
+      ).length
     ).toBeGreaterThan(0);
     expect(screen.getByTestId('voice-overlay-transcript')).toBeInTheDocument();
     const styleTag = document.querySelector('style');

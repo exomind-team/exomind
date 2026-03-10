@@ -371,6 +371,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       expect.objectContaining({
         state: 'recording',
         text: longText,
+        inputReadyMs: expect.any(Number),
+        inputWarmHit: expect.any(Boolean),
         firstTextMs: expect.any(Number),
         debugTraceId: expect.any(String),
         debugPressedAtMs: expect.any(Number),
@@ -690,6 +692,10 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         state: 'recording',
         text: '火山实时结果',
         isLivePreview: true,
+        inputReadyMs: expect.any(Number),
+        sessionReadyMs: expect.any(Number),
+        inputWarmHit: expect.any(Boolean),
+        sessionWarmHit: expect.any(Boolean),
         providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
       })
     );
