@@ -296,7 +296,7 @@ function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
   return Plus;
 }
 
-const ENERGY_PHASE_COLORS: Record<string, string> = {
+export const ENERGY_PHASE_COLORS: Record<string, string> = {
   normal: '#22C55E',
   slowing: '#EAB308',
   critical: '#F97316',
@@ -304,7 +304,7 @@ const ENERGY_PHASE_COLORS: Record<string, string> = {
   dormant: '#6B7280',
 };
 
-function mapRuntimeStatusToNodeStatus(status: string, energy?: { phase: string; is_dormant: boolean }): AgentHubNodeStatus {
+export function mapRuntimeStatusToNodeStatus(status: string, energy?: { phase: string; is_dormant: boolean }): AgentHubNodeStatus {
   if (energy?.is_dormant) return 'dormant';
   if (energy?.phase === 'dying') return 'dying';
   if (energy?.phase === 'critical') return 'critical';
@@ -341,7 +341,7 @@ function getHostStatusBadgeClass(connectionState: RuntimeHostSnapshot['connectio
   return 'bg-[#F59E0B20] text-[#D97706]';
 }
 
-function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): AgentHubListSection[] {
+export function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): AgentHubListSection[] {
   const groupedByHost = new Map<string, RuntimeAggregatedAgent[]>();
   for (const agent of agents) {
     const key = JSON.stringify([agent.sourceHostId, agent.sourceHostName]);
