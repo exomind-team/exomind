@@ -126,6 +126,7 @@ import {
   formatRuntimeEventPayload,
   getConversationMessageTestId,
 } from './agents/conversation-runtime';
+import { EnergyBar } from './agents/AgentDetailPage';
 import { WorkspaceTabs } from './agents/WorkspaceTabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -2311,6 +2312,7 @@ export function AgentsPage() {
   // T8: AgentDetail / ActorDetail 右侧栏
   const [agentDetail, setAgentDetail] = useState<AgentDetailData | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [panelEnergy, setPanelEnergy] = useState<AgentEnergySnapshot | null>(null);
 
   useEffect(() => {
     if (rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') {
@@ -2319,6 +2321,7 @@ export function AgentsPage() {
       const runtimeEntityId = resolveRuntimeEntityId(nodeId);
       setIsDetailLoading(true);
       setAgentDetail(null);
+      setPanelEnergy(null);
       const service = getAgentHubService();
       const loader = rightPanel.state === 'AGENT_DETAIL'
         ? service.getAgentDetail(runtimeEntityId)
@@ -2331,8 +2334,33 @@ export function AgentsPage() {
       });
     } else {
       setAgentDetail(null);
+      setPanelEnergy(null);
     }
   }, [rightPanel.state, rightPanel.nodeId]);
+
+  // Energy polling for right panel (2s interval)
+  useEffect(() => {
+    if (rightPanel.state !== 'AGENT_DETAIL' || !rightPanel.nodeId) return;
+    const nodeId = rightPanel.nodeId;
+    const runtimeEntityId = resolveRuntimeEntityId(nodeId);
+    const preferredHostId = extractPreferredHostId(nodeId);
+    let disposed = false;
+
+    const client = new RuntimeClient();
+    const poll = async () => {
+      const host = findPreferredRuntimeHostForAgent(runtimeHostSnapshots, runtimeEntityId, preferredHostId);
+      if (!host || disposed) return;
+      const snap = await client.getAgentEnergy(host, runtimeEntityId);
+      if (!disposed && snap) setPanelEnergy(snap);
+    };
+
+    void poll();
+    const timer = setInterval(poll, 2000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [rightPanel.state, rightPanel.nodeId, runtimeHostSnapshots]);
 
   useEffect(() => {
     if (!selectedProviderProfileId) return;
@@ -3531,7 +3559,13 @@ export function AgentsPage() {
                       ? 'border border-brand-accent/20 bg-brand-accent/10 text-brand-accent'
                       : 'border border-border-subtle bg-background text-strong';
                     const EntityIcon = nodeType === 'agent' ? Brain : Sparkles;
-                    const detailStatus = agentDetail?.status ?? node?.status ?? 'unknown';
+                    const detailStatus = panelEnergy?.is_dormant
+                      ? 'dormant'
+                      : panelEnergy?.phase === 'dying'
+                        ? 'dying'
+                        : panelEnergy?.phase === 'critical'
+                          ? 'critical'
+                          : (agentDetail?.status ?? node?.status ?? 'unknown');
                     const detailStatusClass: Record<string, string> = {
                       online: 'border-transparent bg-success/15 text-success',
                       available: 'border-transparent bg-success/15 text-success',
@@ -3541,6 +3575,9 @@ export function AgentsPage() {
                       error: 'border-transparent bg-destructive/15 text-destructive',
                       busy: 'border-transparent bg-warning/15 text-warning',
                       warning: 'border-transparent bg-warning/15 text-warning',
+                      dormant: 'border-[#6B7280]/20 bg-[#6B7280]/10 text-[#6B7280]',
+                      critical: 'border-transparent bg-[#F97316]/15 text-[#F97316]',
+                      dying: 'border-transparent bg-destructive/15 text-destructive',
                     };
 
                     return (
@@ -3631,6 +3668,8 @@ export function AgentsPage() {
                             ))}
                           </div>
                         ) : null}
+
+                        {panelEnergy && <EnergyBar energy={panelEnergy} />}
 
                         {!isDetailLoading && agentDetail?.triggerRules.length ? (
                           <Card className="rounded-xl border-border-card bg-card shadow-sm">
