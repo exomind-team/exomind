@@ -59,8 +59,11 @@ describe('pr-lock RealGitHubAPI', () => {
         '#!/bin/sh',
         'args="$*"',
         'case "$args" in',
-        '  *"api repos/exomind-team/exomind/issues/466/comments"* )',
-        "    printf '4025911356\\n'",
+        '  *"api user"* )',
+        "    printf '{\"login\":\"codex-worker\"}'",
+        '    ;;',
+        '  *"comments?per_page=100&page=1&sort=created&direction=desc"* )',
+        "    printf '[{\"id\":4025911356,\"body\":\"[Codex Worker]\\\\n\\\\nbody\",\"created_at\":\"2099-03-10T09:25:23Z\",\"user\":{\"login\":\"codex-worker\"}}]'",
         '    ;;',
         '  *"pr comment 466"* )',
         '    # Simulate newer gh output that creates the comment but does not print a parseable numeric suffix.',
@@ -99,6 +102,68 @@ describe('pr-lock RealGitHubAPI', () => {
       ).trim();
 
       expect(output).toBe('4025911356');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('matches the created comment by author and exact body when fallback lookup is needed', () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'pr-lock-api-'));
+    const ghPath = path.join(tempDir, 'gh');
+    const scriptPath = path.join(tempDir, 'invoke-pr-lock-comment-match.mjs');
+
+    writeFileSync(
+      ghPath,
+      [
+        '#!/bin/sh',
+        'args="$*"',
+        'case "$args" in',
+        '  *"api user"* )',
+        "    printf '{\"login\":\"codex-worker\"}'",
+        '    ;;',
+        '  *"comments?per_page=1&page=1&sort=created&direction=desc"* )',
+        "    printf '[{\"id\":4027000002,\"body\":\"human comment\",\"created_at\":\"2099-03-10T13:43:42Z\",\"user\":{\"login\":\"human-reviewer\"}}]'",
+        '    ;;',
+        '  *"comments?per_page=100&page=1&sort=created&direction=desc"* )',
+        "    printf '[{\"id\":4027000002,\"body\":\"human comment\",\"created_at\":\"2099-03-10T13:43:42Z\",\"user\":{\"login\":\"human-reviewer\"}},{\"id\":4027000001,\"body\":\"[Codex Worker]\\\\n\\\\nbody\",\"created_at\":\"2099-03-10T13:43:41Z\",\"user\":{\"login\":\"codex-worker\"}}]'",
+        '    ;;',
+        '  *"pr comment 466"* )',
+        '    # Simulate newer gh output that creates the comment but does not print a parseable numeric suffix.',
+        '    ;;',
+        '  * )',
+        '    exit 1',
+        '    ;;',
+        'esac',
+      ].join('\n'),
+      { encoding: 'utf8', mode: 0o755 },
+    );
+
+    writeFileSync(
+      scriptPath,
+      [
+        `import { RealGitHubAPI } from ${JSON.stringify(pathToFileURL(path.join(process.cwd(), 'Scripts/lib/pr-lock-api.ts')).href)};`,
+        "const api = new RealGitHubAPI('exomind-team/exomind');",
+        "const id = await api.createComment(466, '[Codex Worker]\\n\\nbody');",
+        'console.log(String(id));',
+      ].join('\n'),
+      'utf8',
+    );
+
+    try {
+      const output = execFileSync(
+        'npx',
+        ['tsx', scriptPath],
+        {
+          cwd: process.cwd(),
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${tempDir}:${process.env.PATH ?? ''}`,
+          },
+        },
+      ).trim();
+
+      expect(output).toBe('4027000001');
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }

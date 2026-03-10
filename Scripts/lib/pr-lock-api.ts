@@ -70,10 +70,11 @@ export class RealGitHubAPI implements IGitHubAPI {
     writeFileSync(tempFile, body, 'utf-8');
 
     try {
+      const createdAfter = new Date(Date.now() - 5000).toISOString();
       const result = this.gh(`pr comment ${prNumber} --body-file "${tempFile}"`);
       const match = result.match(/\/(\d+)$/);
       if (!match) {
-        const fallbackId = this.fetchLatestCommentId(prNumber);
+        const fallbackId = this.findCreatedCommentId(prNumber, body, createdAfter);
         if (fallbackId === null) {
           throw new Error('Failed to extract comment ID from gh output');
         }
@@ -155,25 +156,62 @@ export class RealGitHubAPI implements IGitHubAPI {
     });
   }
 
-  private fetchLatestCommentId(prNumber: number): number | null {
-    const url = `repos/${this.repo}/issues/${prNumber}/comments?per_page=1&page=1&sort=created&direction=desc`;
-    const result = this.gh(`api '${url}'`);
+  private fetchViewerLogin(): string | null {
+    const result = this.gh('api user');
     const trimmed = result.trim();
     if (!trimmed) {
       return null;
     }
 
-    if (/^\d+$/.test(trimmed)) {
-      return Number(trimmed);
-    }
-
     const data = JSON.parse(trimmed);
-    if (!Array.isArray(data) || data.length === 0) {
-      return null;
+    return typeof data?.login === 'string' && data.login.trim() ? data.login : null;
+  }
+
+  private findCreatedCommentId(prNumber: number, body: string, createdAfter: string): number | null {
+    const viewerLogin = this.fetchViewerLogin();
+    const createdAfterTs = Date.parse(createdAfter);
+    const perPage = 100;
+
+    for (let page = 1; page <= 5; page += 1) {
+      const url = `repos/${this.repo}/issues/${prNumber}/comments?per_page=${perPage}&page=${page}&sort=created&direction=desc`;
+      const result = this.gh(`api '${url}'`);
+      const trimmed = result.trim();
+      if (!trimmed) {
+        break;
+      }
+
+      const data = JSON.parse(trimmed);
+      if (!Array.isArray(data) || data.length === 0) {
+        break;
+      }
+
+      for (const comment of data) {
+        const createdAt = comment?.created_at ?? comment?.createdAt;
+        const createdAtTs = Date.parse(createdAt);
+        if (Number.isFinite(createdAfterTs) && Number.isFinite(createdAtTs) && createdAtTs < createdAfterTs) {
+          return null;
+        }
+
+        const id = Number(comment?.id);
+        if (!Number.isFinite(id)) {
+          continue;
+        }
+
+        const authorLogin = comment?.user?.login;
+        if (viewerLogin && authorLogin !== viewerLogin) {
+          continue;
+        }
+
+        if (comment?.body === body) {
+          return id;
+        }
+      }
+
+      if (data.length < perPage) {
+        break;
+      }
     }
 
-    const latest = data[0];
-    const id = Number(latest?.id);
-    return Number.isFinite(id) ? id : null;
+    return null;
   }
 }
