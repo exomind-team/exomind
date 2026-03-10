@@ -1,7 +1,7 @@
 //! Workspace Tauri commands — proxy to the embedded runtime's workspace REST endpoints.
 //!
 //! The embedded runtime exposes workspace data under:
-//!   GET /api/agents/{agent_id}/workspace/{resource}
+//!   GET /agents/{agent_id}/workspace/{resource}
 //!
 //! These commands forward requests to those endpoints and return the JSON payloads
 //! to the frontend.  Non-life agents return 404; the command propagates that as an Err.
@@ -94,7 +94,7 @@ pub async fn get_agent_workspace_soul(
     agent_id: String,
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<String, String> {
-    let url = format!("{}/api/agents/{agent_id}/workspace/soul", base_url(&state)?);
+    let url = format!("{}/agents/{agent_id}/workspace/soul", base_url(&state)?);
     let json: serde_json::Value = get_json(&url).await?;
     Ok(json
         .get("content")
@@ -110,7 +110,7 @@ pub async fn get_agent_workspace_knowledge_list(
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<KnowledgeListResponse, String> {
     let url = format!(
-        "{}/api/agents/{agent_id}/workspace/knowledge",
+        "{}/agents/{agent_id}/workspace/knowledge",
         base_url(&state)?
     );
     get_json(&url).await
@@ -124,7 +124,7 @@ pub async fn get_agent_workspace_knowledge(
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<String, String> {
     let url = format!(
-        "{}/api/agents/{agent_id}/workspace/knowledge/{filename}",
+        "{}/agents/{agent_id}/workspace/knowledge/{filename}",
         base_url(&state)?
     );
     let json: serde_json::Value = get_json(&url).await?;
@@ -143,7 +143,7 @@ pub async fn get_agent_workspace_actions(
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<ActionsResponse, String> {
     let mut url = format!(
-        "{}/api/agents/{agent_id}/workspace/actions",
+        "{}/agents/{agent_id}/workspace/actions",
         base_url(&state)?
     );
     if let Some(n) = limit {
@@ -159,7 +159,7 @@ pub async fn get_agent_workspace_status(
     state: State<'_, Arc<RuntimeProcessState>>,
 ) -> Result<BodyStatus, String> {
     let url = format!(
-        "{}/api/agents/{agent_id}/workspace/status",
+        "{}/agents/{agent_id}/workspace/status",
         base_url(&state)?
     );
     get_json(&url).await
