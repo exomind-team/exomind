@@ -5,19 +5,24 @@ use crate::AppState;
 pub mod agents;
 pub mod energy;
 pub mod mesh;
+#[cfg(not(target_os = "android"))]
+pub mod pty;
 pub mod signals;
 pub mod tasks;
 pub mod topology;
 
 /// Build protected route tree for runtime APIs（构建 runtime API 路由树）.
 pub fn router() -> Router<AppState> {
-    Router::new()
+    let r = Router::new()
         .route("/topology", get(topology::get_topology))
         .merge(agents::router())
         .merge(energy::router())
         .merge(mesh::router())
         .merge(signals::router())
-        .merge(tasks::router())
+        .merge(tasks::router());
+    #[cfg(not(target_os = "android"))]
+    let r = r.merge(pty::router());
+    r
 }
 
 /// Build public route tree (no auth required).

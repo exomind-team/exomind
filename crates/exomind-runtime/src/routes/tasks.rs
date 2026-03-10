@@ -172,13 +172,14 @@ mod tests {
             host_id: host_id.clone(),
             registry: crate::agent::AgentRegistry::new(),
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(crate::mesh::MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(crate::mesh::MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
             energy_registry: crate::energy::EnergyRegistry::new(),
+            pty_manager: Arc::new(crate::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
     }
 

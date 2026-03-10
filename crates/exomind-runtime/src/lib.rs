@@ -25,6 +25,8 @@ pub mod signal;
 pub mod task;
 pub mod energy;
 pub mod tick;
+#[cfg(not(target_os = "android"))]
+pub mod pty;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_RT_PORT: u16 = 1949;
@@ -178,6 +180,8 @@ pub struct RuntimeHandle {
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
     ts_agents: Vec<TsAgentProcess>,
+    #[cfg(not(target_os = "android"))]
+    pty_manager: Arc<pty::PtyManager>,
     tick_cancel: Arc<std::sync::atomic::AtomicBool>,
     tick_tasks: Vec<JoinHandle<()>>,
 }
@@ -313,6 +317,9 @@ impl RuntimeHandle {
             }
         }
         self.ts_agents.clear();
+
+        #[cfg(not(target_os = "android"))]
+        self.pty_manager.shutdown().await;
 
         if let Some(mdns) = self.mdns.take() {
             mdns.shutdown();
@@ -470,6 +477,8 @@ pub async fn start_with_options(
         Arc::clone(&tick_cancel),
     );
 
+    #[cfg(not(target_os = "android"))]
+    let pty_manager = Arc::clone(&state.pty_manager);
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {
@@ -496,6 +505,8 @@ pub async fn start_with_options(
         server_task: Some(server_task),
         actor_tasks,
         ts_agents,
+        #[cfg(not(target_os = "android"))]
+        pty_manager,
         tick_cancel,
         tick_tasks,
     })
@@ -657,6 +668,8 @@ pub struct AppState {
     pub pairing: Arc<pairing::PairingManager>,
     pub task_store: Arc<task::TaskStore>,
     pub energy_registry: energy::EnergyRegistry,
+    #[cfg(not(target_os = "android"))]
+    pub pty_manager: Arc<pty::PtyManager>,
 }
 
 impl AppState {
@@ -700,6 +713,11 @@ impl AppState {
         ));
         let mesh_relay =
             enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
+        #[cfg(not(target_os = "android"))]
+        let pty_manager = Arc::new(pty::PtyManager::new(
+            Arc::clone(&signal_pool),
+            host_id.clone(),
+        ));
 
         Self {
             port,
@@ -713,6 +731,8 @@ impl AppState {
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
+            #[cfg(not(target_os = "android"))]
+            pty_manager,
         }
     }
 }
@@ -792,7 +812,7 @@ mod tests {
             registry,
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(mesh::MeshState::new(
-                host_id,
+                host_id.clone(),
                 Arc::clone(&signal_pool),
                 None,
             )),
@@ -802,6 +822,8 @@ mod tests {
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
+            #[cfg(not(target_os = "android"))]
+            pty_manager: Arc::new(pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
     }
 
