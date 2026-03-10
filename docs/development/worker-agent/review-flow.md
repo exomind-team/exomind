@@ -5,7 +5,7 @@
 下列输入都视为阻塞项：
 
 - `REQUEST_CHANGES`
-- 新的 `[Codex Reviewer]` 评论
+- 新的 `[Codex Reviewer]` 评论（不区分内容，包含“未发现问题/状态同步”）
 - 新的人类普通评论
 - `[Codex Reviewer] ❤️ 需要人类测试`
 - `🙋needs-human-test`
@@ -28,6 +28,12 @@
 3. 再决定改代码、解释原因，还是明确无需改码。
 
 这条规则同样适用于人类普通评论。
+
+## No Silent Rule
+
+工作 Agent 不允许对 `[Codex Reviewer]` 评论保持沉默。
+
+- 无论评论内容是否为“未发现问题/状态同步”，都必须回复。
 
 ## No-Code-Change Response
 

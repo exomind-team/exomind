@@ -27,6 +27,8 @@
 - `🙋needs-human-test` 标签变化
 - CI failure
 
+说明：所有 `[Codex Reviewer]` 评论都视为唤醒事件，不允许因“未发现问题/状态同步”而忽略。
+
 ## Heartbeat Output
 
 等待期间每 `60s` 打一次心跳，输出：

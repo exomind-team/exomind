@@ -26,6 +26,7 @@
 - 当前 PR 真相源优先取 `PR 锁系统`
 - 只处理自己当前持锁 PR
 - 人类普通评论也算阻塞项
+- `[Codex Reviewer]` 评论不区分内容，必须回复，不允许沉默
 - 所有 body/comment 使用 `[Codex Worker]` 前缀
 - 所有对外文本语言必须与关联 issue 的主语言一致
 - 提交前必须同步 PR body

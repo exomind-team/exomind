@@ -32,7 +32,7 @@
 - 进入等待边界
 - `🙋needs-human-test` 状态发生变化
 - 触发 Worker 执行异议
-- 处理 reviewer / human comment
+- 处理 reviewer / human comment（包含“未发现问题/状态同步”，不得沉默）
 
 ## Standard Comment Template
 
