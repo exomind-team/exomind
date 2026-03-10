@@ -248,7 +248,7 @@ describe('review-agent review loop', () => {
     ]));
   });
 
-  it('requires a blocking reason when declaring no issues in a standard comment', () => {
+  it('requires a blocking reason or progress update when declaring no issues in a standard comment', () => {
     const missingReason = validateReviewComment({
       body: '[Codex Reviewer] 已审阅最新变更，未发现问题。',
       expectedLanguage: 'zh-CN',
@@ -257,7 +257,7 @@ describe('review-agent review loop', () => {
 
     expect(missingReason.valid).toBe(false);
     expect(missingReason.errors).toEqual(expect.arrayContaining([
-      expect.stringContaining('blocking reason'),
+      expect.stringContaining('blocking reason or progress update'),
     ]));
 
     const withReason = validateReviewComment({
@@ -267,6 +267,14 @@ describe('review-agent review loop', () => {
     });
 
     expect(withReason.valid).toBe(true);
+
+    const withProgressUpdate = validateReviewComment({
+      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。最新进展：PR 已准备好，请工作 Agent 提交最后的构建日志。',
+      expectedLanguage: 'zh-CN',
+      mode: 'comment',
+    });
+
+    expect(withProgressUpdate.valid).toBe(true);
   });
 
   it('rejects suspicious full-width question-mark runs in zh-CN comments', () => {

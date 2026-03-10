@@ -90,6 +90,7 @@ const TEST_FILE_PATTERN = /(^|\/)(test|tests|__tests__)\b|\.test\.[A-Za-z0-9]+$|
 const CORE_FILE_PATTERN = /(service|controller|model)/i;
 const NO_ISSUES_PATTERN = /(未发现问题|no new issues|no issues found|no blocking issues)/i;
 const BLOCKING_REASON_PATTERN = /(阻塞点|阻塞原因|blocked by|blocking reason|blocking:|blocker)/i;
+const PROGRESS_UPDATE_PATTERN = /(进展|当前进度|最新进展|状态同步|PR 进度|progress update|status update|current status|next step|next steps)/i;
 export const HUMAN_TEST_PREFIX = `${REVIEWER_PREFIX} ❤️ 需要人类测试`;
 export const NEEDS_HUMAN_TEST_LABEL = '🙋needs-human-test';
 const COMPLETION_STATE_MAP: Record<ReviewCompletionResult, Extract<ReviewAgentStateValue, 'REVIEW_POSTED' | 'NEEDS_HUMAN_TEST' | 'APPROVE_READY' | 'MERGE_READY'>> = {
@@ -179,8 +180,9 @@ export function validateReviewComment(
     input.mode === 'comment'
     && NO_ISSUES_PATTERN.test(input.body)
     && !BLOCKING_REASON_PATTERN.test(input.body)
+    && !PROGRESS_UPDATE_PATTERN.test(input.body)
   ) {
-    errors.push('No-issue comments must include an explicit blocking reason.');
+    errors.push('No-issue comments must include an explicit blocking reason or progress update.');
   }
 
   if (/[?？]{5,}/u.test(input.body)) {
