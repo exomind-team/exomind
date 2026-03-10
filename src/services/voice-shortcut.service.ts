@@ -460,10 +460,6 @@ export class VoiceShortcutService {
   }
 
   private async prewarmVolcanoSessionIfPossible(): Promise<string | null> {
-    if (this.volcanoStreamSessionId) {
-      return null;
-    }
-
     let config: VolcanoRuntimeConfig;
     try {
       config = this.getVolcanoRuntimeConfigOrThrow();
@@ -963,6 +959,9 @@ export class VoiceShortcutService {
         sessionWarmReason: sessionResult.value.warmReason,
         activationMs: this.completeActivationTracking(),
       });
+      if (this.micPrewarmEnabled) {
+        void this.prewarmVolcanoSessionIfPossible();
+      }
       void this.syncRecordingActive(true);
     } catch (error) {
       this.cleanupVolcanoStreamingState();
