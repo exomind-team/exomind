@@ -29,6 +29,7 @@ async fn create_and_delete_runtime_agent_via_http_routes() {
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
             std::env::temp_dir().join("exomind-test-agent-lifecycle"),
         )),
@@ -110,6 +111,7 @@ async fn create_and_delete_codex_runtime_agent_via_http_routes() {
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
             std::env::temp_dir().join("exomind-test-agent-lifecycle"),
         )),
@@ -161,6 +163,7 @@ async fn create_and_delete_api_runtime_agent_via_http_routes() {
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
             std::env::temp_dir().join("exomind-test-agent-lifecycle"),
         )),
@@ -221,6 +224,7 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
             std::env::temp_dir().join("exomind-test-agent-lifecycle"),
         )),

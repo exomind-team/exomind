@@ -125,6 +125,10 @@ import {
   formatRuntimeEventPayload,
   getConversationMessageTestId,
 } from './agents/conversation-runtime';
+import { WorkspaceTabs } from './agents/WorkspaceTabs';
+import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
+import { Card, CardContent } from '@/components/ui/card';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -3474,140 +3478,201 @@ export function AgentsPage() {
                     const nodeType = node?.type ?? (rightPanel.state === 'AGENT_DETAIL' ? 'agent' : 'actor');
                     const nodeLabel = node?.label ?? agentDetail?.title ?? runtimeNodeId ?? '未知节点';
 
-                    const statusColors: Record<string, string> = {
-                      online: 'bg-[#22C55E]/15 text-[#22C55E]',
-                      offline: 'bg-[#57534E]/30 text-[#78716C]',
-                      error: 'bg-[#EF4444]/15 text-[#EF4444]',
-                      busy: 'bg-[#F59E0B]/15 text-[#F59E0B]',
-                      warning: 'bg-[#F59E0B]/15 text-[#F59E0B]',
-                    };
                     const logStatusColors: Record<string, string> = {
                       online: 'text-foreground',
                       offline: 'text-muted-foreground',
-                      warning: 'text-[#F59E0B]',
-                      error: 'text-[#EF4444]',
-                      busy: 'text-[#F59E0B]',
+                      warning: 'text-warning',
+                      error: 'text-destructive',
+                      busy: 'text-warning',
+                    };
+
+                    const hasWorkspace = Boolean(runtimeNodeId);
+                    const iconToneClass = nodeType === 'agent'
+                      ? 'border border-brand-accent/20 bg-brand-accent/10 text-brand-accent'
+                      : 'border border-border-subtle bg-background text-strong';
+                    const EntityIcon = nodeType === 'agent' ? Brain : Sparkles;
+                    const detailStatus = agentDetail?.status ?? node?.status ?? 'unknown';
+                    const detailStatusClass: Record<string, string> = {
+                      online: 'border-transparent bg-success/15 text-success',
+                      available: 'border-transparent bg-success/15 text-success',
+                      running: 'border-transparent bg-success/15 text-success',
+                      offline: 'border-border-subtle bg-background text-secondary',
+                      unknown: 'border-border-subtle bg-background text-secondary',
+                      error: 'border-transparent bg-destructive/15 text-destructive',
+                      busy: 'border-transparent bg-warning/15 text-warning',
+                      warning: 'border-transparent bg-warning/15 text-warning',
                     };
 
                     return (
                       <div className="flex flex-col gap-4">
-                        {/* 头部：始终从 signalGraph 快速显示 */}
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`flex h-10 w-10 items-center justify-center rounded-[10px] ${
-                              nodeType === 'agent'
-                                ? 'bg-[#CCFBF1] dark:bg-[#0D9488]/20'
-                                : 'bg-[#FEF3C7] dark:bg-[#F59E0B]/20'
-                            }`}
-                          >
-                            <Bot
-                              size={18}
-                              className={
-                                nodeType === 'agent'
-                                  ? 'text-[#0D9488]'
-                                  : 'text-[#B45309] dark:text-[#F59E0B]'
-                              }
-                            />
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{nodeLabel}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {nodeType === 'agent' ? 'Agent' : 'Actor'} · {runtimeNodeId ?? nodeId ?? '--'}
-                            </p>
-                          </div>
-                        </div>
+                        <Card className="rounded-xl border-border-card bg-card shadow-sm">
+                          <CardContent className="space-y-4 p-4">
+                            <div className="flex items-start gap-3">
+                              <div className={`flex h-11 w-11 shrink-0 items-center justify-center rounded-xl ${iconToneClass}`}>
+                                <EntityIcon size={18} />
+                              </div>
+                              <div className="min-w-0 flex-1 space-y-1">
+                                <div className="flex flex-wrap items-center gap-2">
+                                  <p className="truncate text-sm font-semibold text-strong">{nodeLabel}</p>
+                                  <Badge variant="outline" className="border-border-subtle bg-background text-[10px] text-secondary">
+                                    {nodeType === 'agent' ? 'Agent' : 'Actor'}
+                                  </Badge>
+                                  {!isDetailLoading && (
+                                    <Badge variant="outline" className={`text-[10px] ${detailStatusClass[detailStatus] ?? detailStatusClass.unknown}`}>
+                                      {detailStatus}
+                                    </Badge>
+                                  )}
+                                </div>
+                                <p className="truncate text-xs text-secondary">
+                                  Runtime ID · {runtimeNodeId ?? nodeId ?? '--'}
+                                </p>
+                                {agentDetail?.description ? (
+                                  <p className="text-xs leading-5 text-secondary line-clamp-3">{agentDetail.description}</p>
+                                ) : (
+                                  <p className="text-xs leading-5 text-secondary">
+                                    {hasWorkspace
+                                      ? '该节点的基础详情暂未返回，但 workspace（工作区）内容仍可继续查看。'
+                                      : '当前节点尚未返回扩展详情数据，请稍后再试。'}
+                                  </p>
+                                )}
+                              </div>
+                            </div>
 
-                        {rightPanel.state === 'AGENT_DETAIL' && nodeId && (
-                          <div className="flex items-center gap-2">
-                            <button
-                              type="button"
-                              data-testid="agent-rightpanel-open-chat"
-                              onClick={() => {
-                                void handleOpenAgentChat(nodeId);
-                              }}
-                              className="rounded-lg bg-[#0D9488] px-3 py-1.5 text-xs font-medium text-white"
-                            >
-                              开始聊天
-                            </button>
-                            <button
-                              type="button"
-                              data-testid="agent-rightpanel-stop-agent"
-                              onClick={() => {
-                                void handleStopAgent(nodeId);
-                              }}
-                              disabled={isAgentStopping}
-                              className="rounded-lg bg-[#7F1D1D] px-3 py-1.5 text-xs font-medium text-[#FECACA] disabled:opacity-50"
-                            >
-                              {isAgentStopping ? '停止中...' : '停止 Agent'}
-                            </button>
-                          </div>
-                        )}
-
-                        {/* 加载态：骨架屏 */}
-                        {isDetailLoading && (
-                          <div className="flex flex-col gap-3">
-                            <div className="h-4 w-20 rounded bg-muted animate-pulse" />
-                            <div className="h-3 w-full rounded bg-muted animate-pulse" />
-                            <div className="h-3 w-3/4 rounded bg-muted animate-pulse" />
-                          </div>
-                        )}
-
-                        {/* 数据加载完成 */}
-                        {!isDetailLoading && agentDetail && (
-                          <>
-                            {/* 状态 badge */}
-                            <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColors[agentDetail.status] ?? statusColors.offline}`}>
-                              {agentDetail.status}
-                            </span>
-
-                            {/* 描述 */}
-                            {agentDetail.description && (
-                              <p className="text-xs text-muted-foreground line-clamp-3">{agentDetail.description}</p>
-                            )}
-
-                            {/* 统计指标 2x2 grid */}
-                            {agentDetail.stats.length > 0 && (
-                              <div className="grid grid-cols-2 gap-2">
-                                {agentDetail.stats.slice(0, 4).map((s) => (
-                                  <div key={s.label} className="rounded-lg border border-border-card bg-card px-3 py-2">
-                                    <p className="text-[10px] text-muted-foreground">{s.label}</p>
-                                    <p className="text-sm font-medium text-foreground">{s.value}</p>
-                                  </div>
-                                ))}
+                            {rightPanel.state === 'AGENT_DETAIL' && nodeId && (
+                              <div className="flex items-center gap-2">
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="flex-1 rounded-lg border-brand-accent bg-brand-accent text-white hover:bg-brand-accent/90 hover:text-white"
+                                  data-testid="agent-rightpanel-open-chat"
+                                  onClick={() => {
+                                    void handleOpenAgentChat(nodeId);
+                                  }}
+                                >
+                                  开始聊天
+                                </Button>
+                                <Button
+                                  variant="outline"
+                                  size="sm"
+                                  className="rounded-lg border-destructive/30 bg-destructive/10 text-destructive hover:bg-destructive/15 hover:text-destructive"
+                                  data-testid="agent-rightpanel-stop-agent"
+                                  onClick={() => {
+                                    void handleStopAgent(nodeId);
+                                  }}
+                                  disabled={isAgentStopping}
+                                >
+                                  {isAgentStopping ? '停止中...' : '停止 Agent'}
+                                </Button>
                               </div>
                             )}
 
-                            {/* 触发规则 */}
-                            {agentDetail.triggerRules.length > 0 && (
-                              <div className="flex flex-col gap-1.5">
-                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">触发规则</p>
-                                {agentDetail.triggerRules.slice(0, 3).map((r) => (
-                                  <div key={r.key} className="flex items-baseline gap-2">
-                                    <span className="font-mono text-[10px] text-muted-foreground">{r.key}:</span>
-                                    <span className="text-xs text-foreground">{r.value}</span>
+                            {isDetailLoading && (
+                              <div className="flex flex-col gap-3">
+                                <div className="h-4 w-24 animate-pulse rounded-md bg-background" />
+                                <div className="h-16 animate-pulse rounded-xl border border-border-subtle bg-background" />
+                                <div className="grid grid-cols-2 gap-2">
+                                  <div className="h-16 animate-pulse rounded-lg border border-border-subtle bg-background" />
+                                  <div className="h-16 animate-pulse rounded-lg border border-border-subtle bg-background" />
+                                </div>
+                              </div>
+                            )}
+                          </CardContent>
+                        </Card>
+
+                        {!isDetailLoading && agentDetail?.stats.length ? (
+                          <div className="grid grid-cols-2 gap-2">
+                            {agentDetail.stats.slice(0, 4).map((s) => (
+                              <Card key={s.label} className="rounded-xl border-border-card bg-card shadow-sm">
+                                <CardContent className="space-y-1 rounded-xl bg-background/70 p-4">
+                                  <p className="text-[11px] text-secondary">{s.label}</p>
+                                  <p className="text-sm font-semibold text-strong">{s.value}</p>
+                                </CardContent>
+                              </Card>
+                            ))}
+                          </div>
+                        ) : null}
+
+                        {!isDetailLoading && agentDetail?.triggerRules.length ? (
+                          <Card className="rounded-xl border-border-card bg-card shadow-sm">
+                            <CardContent className="space-y-3 p-4">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs font-semibold text-strong">触发规则</p>
+                                <Badge variant="outline" className="border-brand-accent/20 bg-brand-accent/10 text-[10px] text-brand-accent">
+                                  Rules
+                                </Badge>
+                              </div>
+                              <div className="space-y-2">
+                                {agentDetail.triggerRules.slice(0, 4).map((r) => (
+                                  <div key={r.key} className="flex items-start justify-between gap-3 rounded-lg border border-border-subtle bg-background px-3 py-2">
+                                    <span className="font-mono text-[10px] text-secondary">{r.key}</span>
+                                    <span className={`text-right text-xs ${r.highlight ? 'font-medium text-brand-accent' : 'text-strong'}`}>
+                                      {r.value}
+                                    </span>
                                   </div>
                                 ))}
                               </div>
-                            )}
+                            </CardContent>
+                          </Card>
+                        ) : null}
 
-                            {/* 最近日志 */}
-                            {agentDetail.recentLogs.length > 0 && (
-                              <div className="flex flex-col gap-1.5">
-                                <p className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">最近日志</p>
+                        {!isDetailLoading && agentDetail?.recentLogs.length ? (
+                          <Card className="rounded-xl border-border-card bg-card shadow-sm">
+                            <CardContent className="space-y-3 p-4">
+                              <div className="flex items-center justify-between gap-2">
+                                <p className="text-xs font-semibold text-strong">最近日志</p>
+                                <Badge variant="outline" className="border-brand-accent/20 bg-brand-accent/10 text-[10px] text-brand-accent">
+                                  Logs
+                                </Badge>
+                              </div>
+                              <div className="space-y-3">
                                 {agentDetail.recentLogs.slice(0, 5).map((log, i) => (
-                                  <div key={i} className="flex items-baseline gap-2">
-                                    <span className="shrink-0 text-[10px] text-muted-foreground">{log.time}</span>
-                                    <span className={`text-xs truncate ${logStatusColors[log.status] ?? logStatusColors.online}`}>{log.title}</span>
+                                  <div key={i} className="flex gap-3">
+                                    <div className="flex flex-col items-center">
+                                      <span className="mt-1 h-2 w-2 rounded-full bg-brand-accent" />
+                                      {i !== Math.min(agentDetail.recentLogs.length, 5) - 1 && (
+                                        <span className="mt-1 h-full w-px bg-border-subtle" />
+                                      )}
+                                    </div>
+                                    <div className="min-w-0 flex-1 rounded-lg border border-border-subtle bg-background px-3 py-2">
+                                      <div className="flex items-center justify-between gap-2">
+                                        <span className="text-[11px] text-secondary">{log.time}</span>
+                                        <span className={`text-[11px] ${logStatusColors[log.status] ?? logStatusColors.online}`}>
+                                          {log.status}
+                                        </span>
+                                      </div>
+                                      <p className={`mt-1 truncate text-xs ${logStatusColors[log.status] ?? logStatusColors.online}`}>
+                                        {log.title}
+                                      </p>
+                                    </div>
                                   </div>
                                 ))}
                               </div>
-                            )}
-                          </>
+                            </CardContent>
+                          </Card>
+                        ) : null}
+
+                        {!isDetailLoading && !agentDetail && (
+                          <Card className="rounded-xl border-border-card bg-card shadow-sm">
+                            <CardContent className="space-y-2 p-4">
+                              <div className="flex items-center gap-2">
+                                <div className="flex h-8 w-8 items-center justify-center rounded-lg border border-border-subtle bg-background text-secondary">
+                                  <Bot size={16} />
+                                </div>
+                                <div className="space-y-0.5">
+                                  <p className="text-sm font-semibold text-strong">详细信息暂不可用</p>
+                                  <p className="text-xs text-secondary">
+                                    {hasWorkspace
+                                      ? '基础详情接口暂未返回，但该节点的 workspace（工作区）数据仍可正常查看。'
+                                      : '当前节点尚未提供更多详情数据，请稍后再试。'}
+                                  </p>
+                                </div>
+                              </div>
+                            </CardContent>
+                          </Card>
                         )}
 
-                        {/* API 返回 null */}
-                        {!isDetailLoading && !agentDetail && (
-                          <p className="text-xs text-muted-foreground">暂无详细数据</p>
+                        {!isDetailLoading && runtimeNodeId && (
+                          <WorkspaceTabs agentId={runtimeNodeId} />
                         )}
                       </div>
                     );
