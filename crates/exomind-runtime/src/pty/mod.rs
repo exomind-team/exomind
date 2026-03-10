@@ -1,0 +1,658 @@
+use chrono::{DateTime, Utc};
+use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::sync::Arc;
+use thiserror::Error;
+use tokio::sync::{broadcast, Mutex};
+
+use crate::signal::SignalPool;
+use crate::signal::types::SignalEvent;
+
+/// Max scrollback buffer size in bytes (256 KB).
+const MAX_OUTPUT_BUFFER: usize = 256 * 1024;
+
+// ---------------------------------------------------------------------------
+// Error type
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Error)]
+pub enum PtyError {
+    #[error("failed to spawn PTY process: {reason}")]
+    SpawnFailed { reason: String },
+
+    #[error("PTY instance not found: {id}")]
+    NotFound { id: String },
+
+    #[error("IO error: {0}")]
+    IoError(#[from] std::io::Error),
+}
+
+// ---------------------------------------------------------------------------
+// Output message broadcast type
+// ---------------------------------------------------------------------------
+
+/// Messages sent through the broadcast channel.
+#[derive(Debug, Clone)]
+pub enum PtyOutputMsg {
+    /// Raw bytes from the PTY process.
+    Data(Vec<u8>),
+    /// The PTY process has exited / reader hit EOF.
+    Eof,
+}
+
+// ---------------------------------------------------------------------------
+// Enums & public structs (serializable for HTTP API)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PtyAgentStatus {
+    Running,
+    Stopped,
+    Exited { code: i32 },
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyAgentInfo {
+    pub id: String,
+    pub name: String,
+    pub session_id: Option<String>,
+    pub workdir: String,
+    pub command: String,
+    pub status: PtyAgentStatus,
+    pub created_at: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtySpawnRequest {
+    #[serde(default)]
+    pub name: String,
+    pub workdir: Option<String>,
+    #[serde(default = "default_command")]
+    pub command: String,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default = "default_rows")]
+    pub rows: u16,
+    #[serde(default = "default_cols")]
+    pub cols: u16,
+}
+
+fn default_command() -> String {
+    "claude".to_string()
+}
+
+fn default_rows() -> u16 {
+    24
+}
+
+fn default_cols() -> u16 {
+    80
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PtyResumeRequest {
+    #[serde(default)]
+    pub name: String,
+    #[serde(default)]
+    pub workdir: Option<String>,
+    pub session_id: String,
+    #[serde(default = "default_rows")]
+    pub rows: u16,
+    #[serde(default = "default_cols")]
+    pub cols: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ClaudeSessionInfo {
+    pub session_id: String,
+    pub project_path: String,
+    pub last_modified: String,
+}
+
+// ---------------------------------------------------------------------------
+// Internal PTY instance (not serializable — holds OS resources)
+// ---------------------------------------------------------------------------
+
+struct PtyInstance {
+    info: PtyAgentInfo,
+    #[allow(dead_code)]
+    master: Box<dyn MasterPty + Send>,
+    child: Box<dyn Child + Send + Sync>,
+    writer: Arc<Mutex<Box<dyn Write + Send>>>,
+    /// Scrollback buffer — stores recent output for replay on SSE reconnect.
+    output_buffer: Arc<Mutex<Vec<u8>>>,
+    /// Broadcast sender — every SSE consumer subscribes here for live data.
+    output_tx: broadcast::Sender<PtyOutputMsg>,
+}
+
+impl Drop for PtyInstance {
+    fn drop(&mut self) {
+        // Kill the child process when the instance is dropped to prevent orphans.
+        let _ = self.child.kill();
+    }
+}
+
+// ---------------------------------------------------------------------------
+// PtyManager
+// ---------------------------------------------------------------------------
+
+pub struct PtyManager {
+    instances: Arc<Mutex<HashMap<String, PtyInstance>>>,
+    signal_pool: Arc<SignalPool>,
+    host_id: String,
+}
+
+impl PtyManager {
+    pub fn new(signal_pool: Arc<SignalPool>, host_id: String) -> Self {
+        Self {
+            instances: Arc::new(Mutex::new(HashMap::new())),
+            signal_pool,
+            host_id,
+        }
+    }
+
+    /// Spawn a new PTY process.
+    pub async fn spawn(&self, request: PtySpawnRequest) -> Result<PtyAgentInfo, PtyError> {
+        let pty_system = native_pty_system();
+
+        let size = PtySize {
+            rows: request.rows,
+            cols: request.cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        };
+
+        let pair = pty_system
+            .openpty(size)
+            .map_err(|e| PtyError::SpawnFailed {
+                reason: format!("openpty failed: {e}"),
+            })?;
+
+        let mut cmd = CommandBuilder::new(&request.command);
+        for arg in &request.args {
+            cmd.arg(arg);
+        }
+        // Auto-add --dangerously-skip-permissions for Claude to avoid interactive permission prompts
+        if request.command == "claude"
+            && !request
+                .args
+                .iter()
+                .any(|a| a.contains("dangerously-skip-permissions"))
+        {
+            cmd.arg("--dangerously-skip-permissions");
+        }
+        if let Some(ref workdir) = request.workdir {
+            cmd.cwd(workdir);
+        }
+
+        let child = pair
+            .slave
+            .spawn_command(cmd)
+            .map_err(|e| PtyError::SpawnFailed {
+                reason: format!("spawn_command failed: {e}"),
+            })?;
+
+        let reader = pair
+            .master
+            .try_clone_reader()
+            .map_err(|e| PtyError::SpawnFailed {
+                reason: format!("try_clone_reader failed: {e}"),
+            })?;
+
+        let writer = pair
+            .master
+            .take_writer()
+            .map_err(|e| PtyError::SpawnFailed {
+                reason: format!("take_writer failed: {e}"),
+            })?;
+
+        let id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+
+        // Generate a default name if none provided
+        let name = if request.name.is_empty() {
+            format!("{}-{}", request.command, &id[..8])
+        } else {
+            request.name
+        };
+
+        let info = PtyAgentInfo {
+            id: id.clone(),
+            name,
+            session_id: None,
+            workdir: request.workdir.unwrap_or_else(|| ".".to_string()),
+            command: request.command,
+            status: PtyAgentStatus::Running,
+            created_at: now.to_rfc3339(),
+        };
+
+        // Create output buffering infrastructure
+        let output_buffer = Arc::new(Mutex::new(Vec::new()));
+        let (output_tx, _) = broadcast::channel::<PtyOutputMsg>(1024);
+
+        // Spawn background reader task that reads from PTY and:
+        // 1. Appends to the scrollback buffer (capped at MAX_OUTPUT_BUFFER)
+        // 2. Broadcasts to all SSE consumers
+        let buffer_clone = Arc::clone(&output_buffer);
+        let tx_clone = output_tx.clone();
+        tokio::task::spawn_blocking(move || {
+            Self::reader_loop(reader, buffer_clone, tx_clone);
+        });
+
+        let instance = PtyInstance {
+            info: info.clone(),
+            master: pair.master,
+            child,
+            writer: Arc::new(Mutex::new(writer)),
+            output_buffer,
+            output_tx,
+        };
+
+        self.instances.lock().await.insert(id, instance);
+
+        self.publish_lifecycle_signal("pty.spawned", &info);
+
+        Ok(info)
+    }
+
+    /// Background reader loop — runs on a blocking thread.
+    fn reader_loop(
+        mut reader: Box<dyn Read + Send>,
+        buffer: Arc<Mutex<Vec<u8>>>,
+        tx: broadcast::Sender<PtyOutputMsg>,
+    ) {
+        let mut buf = [0u8; 4096];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => {
+                    // EOF
+                    let _ = tx.send(PtyOutputMsg::Eof);
+                    break;
+                }
+                Ok(n) => {
+                    let data = buf[..n].to_vec();
+                    // Append to scrollback buffer
+                    {
+                        let mut b = buffer.blocking_lock();
+                        b.extend_from_slice(&data);
+                        if b.len() > MAX_OUTPUT_BUFFER {
+                            let drain = b.len() - MAX_OUTPUT_BUFFER;
+                            b.drain(..drain);
+                        }
+                    }
+                    // Broadcast to SSE consumers (ignore if no receivers)
+                    let _ = tx.send(PtyOutputMsg::Data(data));
+                }
+                Err(_) => {
+                    let _ = tx.send(PtyOutputMsg::Eof);
+                    break;
+                }
+            }
+        }
+    }
+
+    /// Resume an existing Claude session by spawning with `--resume <session-id>`.
+    ///
+    /// Uses `--resume` (not `--continue --session-id`) because:
+    /// - `--resume <id>` directly resumes the specified session
+    /// - `--continue --session-id <id>` tries to continue the most recent session
+    ///   while forcing a specific session ID, causing "session ID already in use" errors
+    /// - `--fork-session` creates a new session ID to avoid modifying the original
+    pub async fn resume(&self, request: PtyResumeRequest) -> Result<PtyAgentInfo, PtyError> {
+        // Generate default name from session_id if not provided
+        let name = if request.name.is_empty() {
+            let len = 8.min(request.session_id.len());
+            format!("Claude-{}", &request.session_id[..len])
+        } else {
+            request.name
+        };
+
+        let spawn_request = PtySpawnRequest {
+            name,
+            workdir: request.workdir,
+            command: default_command(),
+            args: vec![
+                "--resume".to_string(),
+                request.session_id.clone(),
+            ],
+            rows: request.rows,
+            cols: request.cols,
+        };
+
+        let mut info = self.spawn(spawn_request).await?;
+        // Attach the session_id to the info and update the stored instance.
+        info.session_id = Some(request.session_id);
+        {
+            let mut instances = self.instances.lock().await;
+            if let Some(instance) = instances.get_mut(&info.id) {
+                instance.info.session_id = info.session_id.clone();
+            }
+        }
+
+        Ok(info)
+    }
+
+    /// Write raw input data to the PTY.
+    ///
+    /// Uses `spawn_blocking` to avoid blocking the tokio runtime with synchronous I/O.
+    pub async fn write_input(&self, id: &str, data: &[u8]) -> Result<(), PtyError> {
+        let writer = {
+            let instances = self.instances.lock().await;
+            let instance = instances
+                .get(id)
+                .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+            Arc::clone(&instance.writer)
+        };
+        // Release instances lock before spawning blocking task
+        let data = data.to_vec();
+        tokio::task::spawn_blocking(move || {
+            let mut w = writer.blocking_lock();
+            w.write_all(&data)?;
+            w.flush()?;
+            Ok::<(), std::io::Error>(())
+        })
+        .await
+        .map_err(|e| PtyError::SpawnFailed {
+            reason: format!("write_input task failed: {e}"),
+        })??;
+        Ok(())
+    }
+
+    /// Get the output buffer snapshot and a broadcast receiver for live output.
+    ///
+    /// The caller should:
+    /// 1. Send the buffer snapshot first (replay)
+    /// 2. Then stream from the receiver (live)
+    pub async fn subscribe_output(
+        &self,
+        id: &str,
+    ) -> Result<(Vec<u8>, broadcast::Receiver<PtyOutputMsg>), PtyError> {
+        // Extract Arc clones while holding the instances lock, then drop it
+        // before awaiting the output_buffer lock. Holding both locks across
+        // an await would make the future !Send (PtyInstance contains
+        // Box<dyn MasterPty + Send> which is !Sync).
+        let (output_buffer, rx) = {
+            let instances = self.instances.lock().await;
+            let instance = instances
+                .get(id)
+                .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+            (Arc::clone(&instance.output_buffer), instance.output_tx.subscribe())
+        };
+
+        let buffer_snapshot = output_buffer.lock().await.clone();
+        Ok((buffer_snapshot, rx))
+    }
+
+    /// Resize the PTY terminal.
+    pub async fn resize(&self, id: &str, rows: u16, cols: u16) -> Result<(), PtyError> {
+        let instances = self.instances.lock().await;
+        let instance = instances
+            .get(id)
+            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+
+        instance
+            .master
+            .resize(PtySize {
+                rows,
+                cols,
+                pixel_width: 0,
+                pixel_height: 0,
+            })
+            .map_err(|e| PtyError::SpawnFailed {
+                reason: format!("resize failed: {e}"),
+            })?;
+
+        Ok(())
+    }
+
+    /// Stop (kill) a PTY child process and update its status.
+    pub async fn stop(&self, id: &str) -> Result<PtyAgentInfo, PtyError> {
+        let mut instances = self.instances.lock().await;
+        let instance = instances
+            .get_mut(id)
+            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+
+        instance.child.kill().map_err(|e| PtyError::IoError(e))?;
+        instance.info.status = PtyAgentStatus::Stopped;
+
+        let info = instance.info.clone();
+        drop(instances);
+
+        self.publish_lifecycle_signal("pty.stopped", &info);
+
+        Ok(info)
+    }
+
+    /// Remove a PTY instance from the manager entirely.
+    pub async fn remove(&self, id: &str) -> Result<(), PtyError> {
+        let mut instances = self.instances.lock().await;
+        instances
+            .remove(id)
+            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+        Ok(())
+    }
+
+    /// List all PTY agent instances.
+    pub async fn list(&self) -> Vec<PtyAgentInfo> {
+        let instances = self.instances.lock().await;
+        instances.values().map(|i| i.info.clone()).collect()
+    }
+
+    /// Discover existing Claude CLI sessions from ~/.claude/projects/.
+    pub fn list_claude_sessions() -> Vec<ClaudeSessionInfo> {
+        match dirs_claude_projects() {
+            Some(projects_dir) => discover_claude_sessions(&projects_dir),
+            None => Vec::new(),
+        }
+    }
+
+    /// Kill all running PTY child processes and clear instances (graceful shutdown).
+    pub async fn shutdown(&self) {
+        let mut instances = self.instances.lock().await;
+        // Drop triggers PtyInstance::drop which kills the child process.
+        instances.clear();
+    }
+
+    /// Publish a lifecycle signal to the SignalPool.
+    fn publish_lifecycle_signal(&self, topic: &str, info: &PtyAgentInfo) {
+        let event = SignalEvent {
+            schema_version: 1,
+            id: uuid::Uuid::new_v4().to_string(),
+            topic: topic.to_string(),
+            ts: Utc::now().timestamp_millis() as u64,
+            source: format!("pty:{}", info.id),
+            origin_host_id: self.host_id.clone(),
+            hop: 0,
+            trace_id: None,
+            payload: serde_json::to_value(info).unwrap_or_default(),
+        };
+
+        // Publish — ignore delivery records for lifecycle signals.
+        let _rx = self.signal_pool.subscribe();
+        self.signal_pool.publish(event);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Helper functions for Claude session discovery
+// ---------------------------------------------------------------------------
+
+/// Returns the path to `~/.claude/projects/` if it exists.
+fn dirs_claude_projects() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let projects = home.join(".claude").join("projects");
+    if projects.is_dir() {
+        Some(projects)
+    } else {
+        None
+    }
+}
+
+/// Scan the Claude projects directory for session JSONL files.
+///
+/// Directory structure: `~/.claude/projects/<encoded-project-path>/<session-id>.jsonl`
+fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<ClaudeSessionInfo> {
+    let mut sessions = Vec::new();
+
+    let entries = match std::fs::read_dir(projects_dir) {
+        Ok(entries) => entries,
+        Err(_) => return sessions,
+    };
+
+    for project_entry in entries.flatten() {
+        let project_path = project_entry.path();
+        if !project_path.is_dir() {
+            continue;
+        }
+
+        // The directory name is the encoded project path.
+        let project_name = project_entry
+            .file_name()
+            .to_string_lossy()
+            .to_string();
+
+        let session_entries = match std::fs::read_dir(&project_path) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for session_entry in session_entries.flatten() {
+            let session_path = session_entry.path();
+            let file_name = session_entry.file_name().to_string_lossy().to_string();
+
+            if !file_name.ends_with(".jsonl") {
+                continue;
+            }
+
+            let session_id = file_name.trim_end_matches(".jsonl").to_string();
+
+            let last_modified = session_path
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .map(|t| {
+                    let dt: DateTime<Utc> = t.into();
+                    dt.to_rfc3339()
+                })
+                .unwrap_or_default();
+
+            sessions.push(ClaudeSessionInfo {
+                session_id,
+                project_path: project_name.clone(),
+                last_modified,
+            });
+        }
+    }
+
+    // Sort by last_modified descending (most recent first).
+    sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    sessions
+}
+
+// ---------------------------------------------------------------------------
+// Tests
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+
+    #[test]
+    fn pty_agent_status_serializes() {
+        let running = serde_json::to_string(&PtyAgentStatus::Running).unwrap();
+        assert_eq!(running, "\"running\"");
+
+        let stopped = serde_json::to_string(&PtyAgentStatus::Stopped).unwrap();
+        assert_eq!(stopped, "\"stopped\"");
+
+        let exited = serde_json::to_string(&PtyAgentStatus::Exited { code: 42 }).unwrap();
+        assert!(exited.contains("42"));
+    }
+
+    #[test]
+    fn pty_spawn_request_defaults() {
+        let json = r#"{"name": "test-agent"}"#;
+        let req: PtySpawnRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "test-agent");
+        assert_eq!(req.command, "claude");
+        assert_eq!(req.rows, 24);
+        assert_eq!(req.cols, 80);
+        assert!(req.args.is_empty());
+        assert!(req.workdir.is_none());
+    }
+
+    #[test]
+    fn pty_spawn_request_name_defaults_to_empty() {
+        let json = r#"{}"#;
+        let req: PtySpawnRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "");
+        assert_eq!(req.command, "claude");
+    }
+
+    #[test]
+    fn pty_resume_request_name_and_workdir_default() {
+        let json = r#"{"session_id": "abc-12345678-xyz"}"#;
+        let req: PtyResumeRequest = serde_json::from_str(json).unwrap();
+        assert_eq!(req.name, "");
+        assert!(req.workdir.is_none());
+        assert_eq!(req.session_id, "abc-12345678-xyz");
+        assert_eq!(req.rows, 24);
+        assert_eq!(req.cols, 80);
+    }
+
+    #[test]
+    fn pty_agent_info_round_trip() {
+        let info = PtyAgentInfo {
+            id: "abc-123".to_string(),
+            name: "dev-agent".to_string(),
+            session_id: Some("sess-456".to_string()),
+            workdir: "/tmp".to_string(),
+            command: "claude".to_string(),
+            status: PtyAgentStatus::Running,
+            created_at: "2026-03-09T00:00:00Z".to_string(),
+        };
+        let json = serde_json::to_string(&info).unwrap();
+        let deserialized: PtyAgentInfo = serde_json::from_str(&json).unwrap();
+        assert_eq!(deserialized.id, "abc-123");
+        assert_eq!(deserialized.session_id, Some("sess-456".to_string()));
+    }
+
+    #[test]
+    fn discover_claude_sessions_on_temp_dir() {
+        let dir = std::env::temp_dir().join(format!("exomind-pty-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(dir.join("project-a")).unwrap();
+        fs::write(dir.join("project-a").join("sess-1.jsonl"), "{}").unwrap();
+        fs::write(dir.join("project-a").join("sess-2.jsonl"), "{}").unwrap();
+        // Non-jsonl file should be ignored.
+        fs::write(dir.join("project-a").join("readme.txt"), "hi").unwrap();
+
+        let sessions = discover_claude_sessions(&dir);
+        assert_eq!(sessions.len(), 2);
+        assert!(sessions.iter().all(|s| s.project_path == "project-a"));
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn discover_claude_sessions_empty_dir() {
+        let dir = std::env::temp_dir().join(format!("exomind-pty-empty-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(&dir).unwrap();
+
+        let sessions = discover_claude_sessions(&dir);
+        assert!(sessions.is_empty());
+
+        fs::remove_dir_all(&dir).unwrap();
+    }
+
+    #[test]
+    fn discover_claude_sessions_nonexistent_dir() {
+        let dir = PathBuf::from("/nonexistent/path/that/does/not/exist");
+        let sessions = discover_claude_sessions(&dir);
+        assert!(sessions.is_empty());
+    }
+}

@@ -1,0 +1,40 @@
+# Issue 标题修正列表（格式：Issue号|新标题）
+395|feat(task): task-mvp/phase8 - 任务折叠交互（A→B折叠，B隐藏A）与可见性投影
+394|feat(task): task-mvp/phase7 - DAG任务图视图 + 根节点A高亮规则（首个未完成）
+374|bug(android): 结束绑定任务的时间块后任务状态未更新
+339|feat(task): task-mvp/phase6 - 集成验证 + 旧代码清理
+338|feat(task): task-mvp/phase5 - 4Tab 过滤排序规则
+337|feat(task): task-mvp/phase4 - 任务↔时间块 1:N 计时关联
+336|feat(task): task-mvp/phase3 - 父子层级 + 软硬依赖
+335|feat(task): task-mvp/phase1 - 数据模型 + 5状态机
+334|feat(task): task-mvp/phase2 - CRUD + 不可删除原则
+332|bug(security): dev最新提交已入人名，有隐私风险
+232|design(task): 确认移除 Goals Tab 并同步 Pencil 改稿（阻塞 #213）
+224|chore(ui): UI迁移审计 - 新旧UI收敛状态与旧UI退场判定（阻塞项：语音链路）
+200|feat(timeblock): 正倒计时统一为「预期时长」
+199|feat(ui): 新UI输入框功能补完，补充录音按钮
+195|feat(ui): 获取剪切板内容按钮
+186|feat(sync): 时间块多设备同步功能缺失
+175|refactor(ui): eventlog UI 重构
+168|docs: 更新v0.2.1 readme
+162|bug(desktop): 电脑端加了录音权限后启动失败
+161|bug(sync): 手机端同步电脑端数据困难
+159|bug(android): 导入 JSON 文件无效（内容无法加载）
+158|bug(android): 导出的文件没有内容
+153|bug(android): 导出失败（Export failed）专项修复与验收
+144|bug(android): 点击发送后消息不显示（EventLog 写读分裂）
+143|bug(android): 录音权限获取失败导致录音不可用
+142|bug(android): 页面与状态栏重叠导致左上角菜单不可点击
+139|feat(android): APK-only（arm64 + x86）侧载分发 + 自动检查
+132|feat(timeblock): 时间块反馈中展示「预计时长」功能
+131|bug(timeblock): 切换页面后，时间块计时状态丢失
+120|feat(ui): 交互优化 - 事件日志界面键盘快速记录事件日志、快速开始时间块
+108|bug(export): Tauri 端导出链路不可靠（设置页未走原生导出 + Markdown 导出解析脆弱）
+107|bug(web): 手机浏览器注册失败（Cannot read properties of undefined: importKey）
+106|feat(voice): 触发语音转写后直接输出到事件日志
+104|feat(sync): 多设备同步时间块状态
+101|feat(sync): 同步测试页面改进
+95|feat(timeblock): 时间块反馈报告显示
+93|feat(eventlog): markdown eventlog 内容渲染
+89|bug(ui): 输入框无法滑动问题
+88|design: 软件图标设计

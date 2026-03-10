@@ -54,7 +54,7 @@ mod tests {
             registry: crate::agent::AgentRegistry::new(),
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(crate::mesh::MeshState::new(
-                host_id,
+                host_id.clone(),
                 Arc::clone(&signal_pool),
                 None,
             )),
@@ -65,6 +65,11 @@ mod tests {
             task_store: Arc::new(crate::task::TaskStore::new()),
             energy_registry,
             life_agents: std::collections::HashMap::new(),
+            eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
+                std::env::temp_dir().join("exomind-test-energy"),
+            )),
+            #[cfg(not(target_os = "android"))]
+            pty_manager: Arc::new(crate::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
     }
 
