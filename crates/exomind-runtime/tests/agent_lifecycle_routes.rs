@@ -22,13 +22,14 @@ async fn create_and_delete_runtime_agent_via_http_routes() {
         host_id: host_id.clone(),
         registry: AgentRegistry::new(),
         signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
         mesh_relay: None,
         auth_secret: None,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
     };
     let app = routes::router().with_state(state);
 
@@ -98,13 +99,14 @@ async fn create_and_delete_codex_runtime_agent_via_http_routes() {
         host_id: host_id.clone(),
         registry: AgentRegistry::new(),
         signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
         mesh_relay: None,
         auth_secret: None,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
     };
     let app = routes::router().with_state(state);
 
@@ -144,13 +146,14 @@ async fn create_and_delete_api_runtime_agent_via_http_routes() {
         host_id: host_id.clone(),
         registry: AgentRegistry::new(),
         signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
         mesh_relay: None,
         auth_secret: None,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
     };
     let app = routes::router().with_state(state);
 
@@ -199,13 +202,14 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
         host_id: host_id.clone(),
         registry: AgentRegistry::new(),
         signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
         mesh_relay: None,
         auth_secret: None,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
     };
     let app = routes::router().with_state(state);
 
