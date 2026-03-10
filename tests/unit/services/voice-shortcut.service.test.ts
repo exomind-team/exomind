@@ -515,6 +515,49 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('rewarms resources when window regains focus（切回前台时重新预热资源）', async () => {
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    let sessionCounter = 0;
+    let sessionAlive = true;
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        sessionCounter += 1;
+        return `focus-session-${sessionCounter}`;
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return sessionAlive;
+      }
+      if (command === 'volcano_asr_stream_cancel' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+    expect(sessionCounter).toBe(1);
+
+    sessionAlive = false;
+    window.dispatchEvent(new Event('focus'));
+    await flushAsync();
+
+    expect(invokeMock).toHaveBeenCalledWith('volcano_asr_stream_session_exists', {
+      sessionId: 'focus-session-1',
+    });
+    expect(sessionCounter).toBe(2);
+
+    service.destroy();
+  });
+
   it('recreates missing warmed volcano session before first start（warm session 已失效时首按自动重建）', async () => {
     permissionsQueryMock.mockResolvedValue({ state: 'granted' });
     setVoiceShortcutAsrProvider('volcano');
