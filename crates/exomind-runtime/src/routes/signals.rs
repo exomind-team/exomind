@@ -168,7 +168,7 @@ async fn list_routes(State(state): State<AppState>) -> Json<Vec<SignalRoute>> {
 async fn create_route(
     State(state): State<AppState>,
     Json(req): Json<CreateRouteRequest>,
-) -> (StatusCode, Json<SignalRoute>) {
+) -> Result<(StatusCode, Json<SignalRoute>), StatusCode> {
     let now = chrono::Utc::now().to_rfc3339();
     let route = SignalRoute {
         id: uuid::Uuid::new_v4().to_string(),
@@ -181,12 +181,19 @@ async fn create_route(
     };
 
     let response = route.clone();
-    state.signal_pool.routes().add(route);
+    state.signal_pool.routes().add(route).map_err(|error| {
+        tracing::warn!(
+            route_id = %response.id,
+            error = %error,
+            "signal route persistence failed on create (路由持久化失败)"
+        );
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
     if let Some(mesh_relay) = &state.mesh_relay {
         mesh_relay.sync_local_interests_to_all_peers().await;
     }
 
-    (StatusCode::CREATED, Json(response))
+    Ok((StatusCode::CREATED, Json(response)))
 }
 
 /// PUT /signal-routes/{id}
@@ -195,20 +202,31 @@ async fn update_route(
     State(state): State<AppState>,
     Json(req): Json<UpdateRouteRequest>,
 ) -> Result<Json<SignalRoute>, StatusCode> {
-    let updated = state.signal_pool.routes().update(&id, |route| {
-        if let Some(topic) = &req.topic {
-            route.topic = topic.clone();
-        }
-        if let Some(target_type) = &req.target_type {
-            route.target_type = target_type.clone();
-        }
-        if let Some(target_ref) = &req.target_ref {
-            route.target_ref = target_ref.clone();
-        }
-        if let Some(enabled) = req.enabled {
-            route.enabled = enabled;
-        }
-    });
+    let updated = state
+        .signal_pool
+        .routes()
+        .update(&id, |route| {
+            if let Some(topic) = &req.topic {
+                route.topic = topic.clone();
+            }
+            if let Some(target_type) = &req.target_type {
+                route.target_type = target_type.clone();
+            }
+            if let Some(target_ref) = &req.target_ref {
+                route.target_ref = target_ref.clone();
+            }
+            if let Some(enabled) = req.enabled {
+                route.enabled = enabled;
+            }
+        })
+        .map_err(|error| {
+            tracing::warn!(
+                route_id = %id,
+                error = %error,
+                "signal route persistence failed on update (路由持久化失败)"
+            );
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
 
     if !updated {
         return Err(StatusCode::NOT_FOUND);
@@ -231,7 +249,19 @@ async fn delete_route(
     Path(id): Path<String>,
     State(state): State<AppState>,
 ) -> StatusCode {
-    if state.signal_pool.routes().delete(&id) {
+    let deleted = match state.signal_pool.routes().delete(&id) {
+        Ok(deleted) => deleted,
+        Err(error) => {
+            tracing::warn!(
+                route_id = %id,
+                error = %error,
+                "signal route persistence failed on delete (路由持久化失败)"
+            );
+            return StatusCode::INTERNAL_SERVER_ERROR;
+        }
+    };
+
+    if deleted {
         if let Some(mesh_relay) = &state.mesh_relay {
             mesh_relay.sync_local_interests_to_all_peers().await;
         }
@@ -365,7 +395,7 @@ mod tests {
             host_id: host_id.clone(),
             registry: crate::agent::AgentRegistry::new(),
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
@@ -375,6 +405,8 @@ mod tests {
             eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
                 std::env::temp_dir().join("exomind-test-signals"),
             )),
+            #[cfg(not(target_os = "android"))]
+            pty_manager: Arc::new(crate::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
     }
 
@@ -688,7 +720,8 @@ mod tests {
             target_ref: "ui".to_string(),
             created_at: now.clone(),
             updated_at: now,
-        });
+        })
+        .unwrap();
 
         assert!(
             routes_target_stream_subscriber(
@@ -712,7 +745,8 @@ mod tests {
             target_ref: "eventlog".to_string(),
             created_at: now.clone(),
             updated_at: now,
-        });
+        })
+        .unwrap();
 
         assert!(
             !routes_target_stream_subscriber(

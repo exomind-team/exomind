@@ -27,6 +27,8 @@ pub mod routes;
 pub mod signal;
 pub mod task;
 pub mod tick;
+#[cfg(not(target_os = "android"))]
+pub mod pty;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_RT_PORT: u16 = 1949;
@@ -85,6 +87,8 @@ pub struct RuntimeStartOptions {
     pub ts_agent_workdir: Option<PathBuf>,
     /// optional mesh state path（可选 peer/interest 持久化路径）.
     pub mesh_state_path: Option<PathBuf>,
+    /// optional signal sqlite path（可选 SignalPool SQLite 路径）.
+    pub signal_storage_path: Option<PathBuf>,
     /// optional bearer token secret for HTTP auth（可选 Bearer Token 鉴权密钥）.
     pub auth_secret: Option<String>,
     /// enable mDNS service discovery for LAN peer auto-detection（启用 mDNS 局域网自动发现）.
@@ -116,7 +120,12 @@ impl Default for RuntimeStartOptions {
             ts_agent_command: env::var("EXOMIND_RT_AGENT_CMD")
                 .unwrap_or_else(|_| "bun".to_string()),
             ts_agent_workdir: env::var("EXOMIND_RT_AGENT_WORKDIR").ok().map(PathBuf::from),
-            mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH").ok().map(PathBuf::from),
+            mesh_state_path: env::var("EXOMIND_RT_MESH_STATE_PATH")
+                .ok()
+                .map(PathBuf::from),
+            signal_storage_path: env::var("EXOMIND_RT_SIGNAL_SQLITE_PATH")
+                .ok()
+                .map(PathBuf::from),
             auth_secret: env::var("EXOMIND_RT_SECRET").ok(),
             enable_mdns,
         }
@@ -173,6 +182,8 @@ pub struct RuntimeHandle {
     server_task: Option<JoinHandle<std::io::Result<()>>>,
     actor_tasks: Vec<JoinHandle<()>>,
     ts_agents: Vec<TsAgentProcess>,
+    #[cfg(not(target_os = "android"))]
+    pty_manager: Arc<pty::PtyManager>,
     tick_cancel: Arc<std::sync::atomic::AtomicBool>,
     tick_tasks: Vec<JoinHandle<()>>,
 }
@@ -188,7 +199,10 @@ pub struct RuntimePublishRequest {
 }
 
 impl RuntimeHandle {
-    fn build_signal_event(default_origin_host_id: &str, request: RuntimePublishRequest) -> signal::types::SignalEvent {
+    fn build_signal_event(
+        default_origin_host_id: &str,
+        request: RuntimePublishRequest,
+    ) -> signal::types::SignalEvent {
         signal::types::SignalEvent {
             schema_version: 1,
             id: uuid::Uuid::new_v4().to_string(),
@@ -306,6 +320,9 @@ impl RuntimeHandle {
         }
         self.ts_agents.clear();
 
+        #[cfg(not(target_os = "android"))]
+        self.pty_manager.shutdown().await;
+
         if let Some(mdns) = self.mdns.take() {
             mdns.shutdown();
         }
@@ -393,6 +410,7 @@ pub async fn start_with_options(
         local_addr.port(),
         options.host_id.clone(),
         options.mesh_state_path.clone(),
+        options.signal_storage_path.clone(),
         true,
         options.auth_secret.clone(),
     );
@@ -461,6 +479,8 @@ pub async fn start_with_options(
         Arc::clone(&tick_cancel),
     );
 
+    #[cfg(not(target_os = "android"))]
+    let pty_manager = Arc::clone(&state.pty_manager);
     let app = app_with_state(state);
     let (shutdown_tx, shutdown_rx) = oneshot::channel::<()>();
     let server_task = tokio::spawn(async move {
@@ -487,6 +507,8 @@ pub async fn start_with_options(
         server_task: Some(server_task),
         actor_tasks,
         ts_agents,
+        #[cfg(not(target_os = "android"))]
+        pty_manager,
         tick_cancel,
         tick_tasks,
     })
@@ -525,7 +547,10 @@ fn resolve_project_root(options: &RuntimeStartOptions) -> PathBuf {
     resolve_project_root_from(options.ts_agent_workdir.as_deref(), current_dir.as_deref())
 }
 
-fn resolve_project_root_from(ts_agent_workdir: Option<&Path>, current_dir: Option<&Path>) -> PathBuf {
+fn resolve_project_root_from(
+    ts_agent_workdir: Option<&Path>,
+    current_dir: Option<&Path>,
+) -> PathBuf {
     const REVIEWER_ENTRY: &str = "packages/ts-agent-cli/agents/reviewer/index.ts";
     const CLASSIFIER_ENTRY: &str = "packages/ts-agent-cli/agents/classifier/index.ts";
 
@@ -619,11 +644,10 @@ pub fn app_with_state(state: AppState) -> Router {
         .allow_headers(Any);
 
     // Protected routes — auth middleware applied here.
-    let protected = routes::router()
-        .route_layer(axum::middleware::from_fn_with_state(
-            state.clone(),
-            auth::require_auth,
-        ));
+    let protected = routes::router().route_layer(axum::middleware::from_fn_with_state(
+        state.clone(),
+        auth::require_auth,
+    ));
 
     Router::new()
         .route("/health", get(health))
@@ -647,6 +671,8 @@ pub struct AppState {
     pub task_store: Arc<task::TaskStore>,
     pub energy_registry: energy::EnergyRegistry,
     pub eventlog_store: Arc<EventLogStore>,
+    #[cfg(not(target_os = "android"))]
+    pub pty_manager: Arc<pty::PtyManager>,
 }
 
 /// Resolve the runtime data directory from `EXOMIND_RT_DATA_DIR` env var,
@@ -659,13 +685,14 @@ fn resolve_data_dir() -> PathBuf {
 
 impl AppState {
     pub fn new(port: u16) -> Self {
-        Self::new_runtime(port, default_runtime_host_id(port), None, false, None)
+        Self::new_runtime(port, default_runtime_host_id(port), None, None, false, None)
     }
 
     pub fn new_runtime(
         port: u16,
         host_id: String,
         mesh_persist_path: Option<PathBuf>,
+        signal_storage_path: Option<PathBuf>,
         enable_mesh_relay: bool,
         auth_secret: Option<String>,
     ) -> Self {
@@ -675,13 +702,33 @@ impl AppState {
 
         let default_routes_path =
             resolve_default_signal_routes_path().map(|path| path.to_string_lossy().to_string());
-        let signal_pool = Arc::new(SignalPool::new(default_routes_path.as_deref()));
+        let signal_pool = Arc::new(match signal_storage_path {
+            Some(path) => match SignalPool::with_sqlite_path(default_routes_path.as_deref(), &path)
+            {
+                Ok(pool) => pool,
+                Err(error) => {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "signal sqlite init failed, falling back to in-memory pool (Signal SQLite 初始化失败，降级到内存池)"
+                    );
+                    SignalPool::new(default_routes_path.as_deref())
+                }
+            },
+            None => SignalPool::new(default_routes_path.as_deref()),
+        });
         let mesh = Arc::new(MeshState::new(
             host_id.clone(),
             Arc::clone(&signal_pool),
             mesh_persist_path,
         ));
-        let mesh_relay = enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
+        let mesh_relay =
+            enable_mesh_relay.then(|| Arc::new(MeshRelayManager::new(Arc::clone(&mesh))));
+        #[cfg(not(target_os = "android"))]
+        let pty_manager = Arc::new(pty::PtyManager::new(
+            Arc::clone(&signal_pool),
+            host_id.clone(),
+        ));
 
         let data_dir = resolve_data_dir();
         let eventlog_store = Arc::new(EventLogStore::new(data_dir));
@@ -699,6 +746,8 @@ impl AppState {
             task_store: Arc::new(task::TaskStore::new()),
             energy_registry: energy::EnergyRegistry::new(),
             eventlog_store,
+            #[cfg(not(target_os = "android"))]
+            pty_manager,
         }
     }
 }
@@ -777,7 +826,11 @@ mod tests {
             host_id: host_id.clone(),
             registry,
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(mesh::MeshState::new(host_id, Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(mesh::MeshState::new(
+                host_id.clone(),
+                Arc::clone(&signal_pool),
+                None,
+            )),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
@@ -787,6 +840,8 @@ mod tests {
             eventlog_store: Arc::new(eventlog::EventLogStore::new(
                 std::env::temp_dir().join("exomind-test-lib"),
             )),
+            #[cfg(not(target_os = "android"))]
+            pty_manager: Arc::new(pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
     }
 
@@ -1005,6 +1060,52 @@ mod tests {
                 .and_then(|value| value.to_str().ok()),
             Some("*")
         );
+    }
+
+    #[test]
+    fn new_runtime_falls_back_when_signal_sqlite_init_fails() {
+        let dir = std::env::temp_dir().join(format!(
+            "exomind-runtime-invalid-sqlite-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        let blocked_parent = dir.join("not-a-directory");
+        std::fs::write(&blocked_parent, "file blocks sqlite parent").unwrap();
+        let invalid_sqlite_path = blocked_parent.join("signal-pool.sqlite");
+
+        let runtime = std::panic::catch_unwind(|| {
+            AppState::new_runtime(
+                0,
+                "host-invalid-sqlite".to_string(),
+                None,
+                Some(invalid_sqlite_path.clone()),
+                false,
+                None,
+            )
+        })
+        .expect("runtime should degrade instead of panicking when sqlite init fails");
+
+        let initial_route_count = runtime.signal_pool.routes().get_all().len();
+        let now = chrono::Utc::now().to_rfc3339();
+        let route_id = uuid::Uuid::new_v4().to_string();
+        runtime.signal_pool.routes().add(crate::signal::SignalRoute {
+            id: route_id.clone(),
+            enabled: true,
+            topic: "runtime.fallback.topic".to_string(),
+            target_type: crate::signal::TargetType::Agent,
+            target_ref: "fallback-agent".to_string(),
+            created_at: now.clone(),
+            updated_at: now,
+        }).unwrap();
+
+        assert_eq!(
+            runtime.signal_pool.routes().get_all().len(),
+            initial_route_count + 1
+        );
+        assert!(runtime.signal_pool.routes().get_by_id(&route_id).is_some());
+
+        std::fs::remove_dir_all(&dir).unwrap();
     }
 
     #[tokio::test]
@@ -1294,7 +1395,8 @@ mod tests {
         registry.register(Arc::new(TempSessionAgent::new_with_one_session()));
         let signal_pool = Arc::new(signal::SignalPool::new(None));
 
-        let router = routes::router().with_state(app_state_with_registry(3010, registry, signal_pool));
+        let router =
+            routes::router().with_state(app_state_with_registry(3010, registry, signal_pool));
 
         let get_response = router
             .clone()
@@ -1393,10 +1495,21 @@ mod tests {
         let fake_cwd = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/non-existent-cwd");
         let resolved = resolve_default_signal_routes_path_from(Some(fake_cwd.as_path()));
 
-        assert!(resolved.is_some(), "should resolve default routes from workspace root");
+        assert!(
+            resolved.is_some(),
+            "should resolve default routes from workspace root"
+        );
         let resolved_path = resolved.expect("resolved path should exist");
-        assert!(resolved_path.exists(), "resolved path must exist: {}", resolved_path.display());
-        assert!(resolved_path.to_string_lossy().contains("config/signal-routes.default.json"));
+        assert!(
+            resolved_path.exists(),
+            "resolved path must exist: {}",
+            resolved_path.display()
+        );
+        assert!(
+            resolved_path
+                .to_string_lossy()
+                .contains("config/signal-routes.default.json")
+        );
     }
 
     #[test]

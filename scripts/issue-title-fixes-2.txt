@@ -1,0 +1,23 @@
+# Issue 标题修正列表（第二批）
+83|bug(timeblock): 现在时间块内容不能显示在时间日志里了
+82|bug(timeblock): 时间块切换标签后计时会停止
+79|feat(config): 需要配置能够环境传入的端口
+77|feat(export): 数据导入导出功能
+76|feat(timeblock): 暂停事件记录
+73|feat(timeblock): 冥想场景优化倒计时结束提示音功能
+72|feat(agent): 可视化agent插件 hook session 市场 skill管理
+68|feat(ui): 消息复制
+65|feat(ui): 消息懒加载
+64|chore(ci): 软件版本管理流程 CI/CD
+63|feat(agent): 对标hapi happy的远程多agent会话管理
+62|feat(agent): 多Agent可视化管理
+46|feat(ui): 设置页面
+42|discuss: 讨论春节前产品的最小形态
+40|feat(ui): 暗色模式
+34|discuss: 使用github管理集体任务与想法的提议与总结
+33|investigation: 调研 VCPToolBox
+29|feat(auth): 简单的多用户系统
+28|feat(agent): 连接Agent得到反馈
+27|feat(sync): 事件日志多设备同步
+24|bug(eventlog): 修复eventlog页面时间块的开始-结束-身心反馈事件无法记录Bug
+21|chore(monorepo): 迁移进展 - UI 组件迁移完成
