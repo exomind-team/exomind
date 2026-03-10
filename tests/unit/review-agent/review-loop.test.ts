@@ -268,6 +268,22 @@ describe('review-agent review loop', () => {
 
     expect(withReason.valid).toBe(true);
 
+    const withCiStatus = validateReviewComment({
+      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。CI 仍为 red。',
+      expectedLanguage: 'zh-CN',
+      mode: 'comment',
+    });
+
+    expect(withCiStatus.valid).toBe(true);
+
+    const withEnglishCiStatus = validateReviewComment({
+      body: '[Codex Reviewer] No issues found. CI still red.',
+      expectedLanguage: 'en',
+      mode: 'comment',
+    });
+
+    expect(withEnglishCiStatus.valid).toBe(true);
+
     const withProgressUpdate = validateReviewComment({
       body: '[Codex Reviewer] 已审阅最新变更，未发现问题。最新进展：PR 已准备好，请工作 Agent 提交最后的构建日志。',
       expectedLanguage: 'zh-CN',
