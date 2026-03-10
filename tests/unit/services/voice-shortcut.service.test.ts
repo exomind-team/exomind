@@ -371,6 +371,9 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       expect.objectContaining({
         state: 'recording',
         text: longText,
+        firstTextMs: expect.any(Number),
+        debugTraceId: expect.any(String),
+        debugPressedAtMs: expect.any(Number),
         isLivePreview: true,
       })
     );

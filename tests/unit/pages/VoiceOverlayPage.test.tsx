@@ -65,15 +65,22 @@ describe('VoiceOverlayPage', () => {
     render(<VoiceOverlayPage />);
 
     await act(async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1120);
       overlayListener?.({
         payload: {
           state: 'arming',
+          debugTraceId: 'trace-1',
+          debugPressedAtMs: 1000,
         },
       });
+      nowSpy.mockRestore();
     });
 
     expect(screen.getByText('准备启动语音输入…')).toBeInTheDocument();
     expect(screen.getByText('正在等待麦克风权限并连接识别链路')).toBeInTheDocument();
+    expect(
+      screen.getByText((_, element) => element?.textContent?.startsWith('调试 · 首帧 ') ?? false)
+    ).toBeInTheDocument();
   });
 
   it('shows recognition elapsed time on done state', async () => {
@@ -99,16 +106,21 @@ describe('VoiceOverlayPage', () => {
     const longText = Array.from({ length: 160 }, (_, index) => String(index % 10)).join('');
 
     await act(async () => {
+      const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
       overlayListener?.({
         payload: {
           state: 'recording',
           duration: 3,
           text: longText,
+          debugTraceId: 'trace-2',
+          debugPressedAtMs: 1000,
           activationMs: 420,
+          firstTextMs: 830,
           isLivePreview: true,
           providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
         },
       });
+      nowSpy.mockRestore();
     });
 
     expect(screen.getByText(longText)).toBeInTheDocument();
@@ -116,6 +128,9 @@ describe('VoiceOverlayPage', () => {
     expect(
       screen.getByText((_, element) => element?.textContent === '00:03唤起 0.42s实时预览 · 再按 Alt+Q 结束 · Esc 取消')
     ).toBeInTheDocument();
+    expect(
+      screen.getAllByText((_, element) => element?.textContent?.includes('首字 0.83s') ?? false).length
+    ).toBeGreaterThan(0);
     expect(screen.getByTestId('voice-overlay-transcript')).toBeInTheDocument();
     const styleTag = document.querySelector('style');
     expect(styleTag?.textContent).toContain('.voice-overlay--recording .overlay-transcript .overlay-text');
