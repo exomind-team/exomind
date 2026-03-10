@@ -137,6 +137,10 @@ export function normalizeRemoteLockMetadata(raw: RawRemoteLockMetadata | null | 
     return null;
   }
 
+  if (raw.pending) {
+    return null;
+  }
+
   const lockDurationMinutes = inferDurationMinutes(raw);
   const expiresAt = raw.expires_at ?? calculateExpiresAt(raw.acquired_at, lockDurationMinutes);
 

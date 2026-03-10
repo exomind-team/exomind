@@ -115,8 +115,11 @@ describe('pr-lock RealGitHubAPI', () => {
         '#!/bin/sh',
         'args="$*"',
         'case "$args" in',
-        '  *"api repos/exomind-team/exomind/issues/466/comments"* )',
+        '  *"api repos/exomind-team/exomind/issues/466/comments?per_page=100&page=1&sort=created&direction=asc"* )',
         "    printf '[{\"id\":4025911356,\"body\":\"body\",\"created_at\":\"2026-03-09T00:00:00Z\"}]'",
+        '    ;;',
+        '  *"api repos/exomind-team/exomind/issues/466/comments?per_page=100&page=2&sort=created&direction=asc"* )',
+        "    printf '[]'",
         '    ;;',
         '  *"pr view 466 --json comments"* )',
         "    printf '{\"comments\":[{\"id\":\"IC_kwDORHTsq87v95WK\",\"body\":\"body\",\"createdAt\":\"2026-03-09T00:00:00Z\"}]}'",
@@ -160,6 +163,69 @@ describe('pr-lock RealGitHubAPI', () => {
           body: 'body',
           createdAt: '2026-03-09T00:00:00Z',
         },
+      ]);
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('paginates issue comments to include newer pages', () => {
+    const tempDir = mkdtempSync(path.join(tmpdir(), 'pr-lock-api-'));
+    const ghPath = path.join(tempDir, 'gh');
+    const scriptPath = path.join(tempDir, 'invoke-pr-lock-comments-paged.mjs');
+
+    writeFileSync(
+      ghPath,
+      [
+        '#!/bin/sh',
+        'args="$*"',
+        'case "$args" in',
+        '  *"api repos/exomind-team/exomind/issues/466/comments?per_page=100&page=1&sort=created&direction=asc"* )',
+        "    printf '[{\"id\":1,\"body\":\"first\",\"created_at\":\"2026-03-09T00:00:00Z\"},{\"id\":2,\"body\":\"second\",\"created_at\":\"2026-03-09T01:00:00Z\"}]'",
+        '    ;;',
+        '  *"api repos/exomind-team/exomind/issues/466/comments?per_page=100&page=2&sort=created&direction=asc"* )',
+        "    printf '[{\"id\":3,\"body\":\"third\",\"created_at\":\"2026-03-09T02:00:00Z\"}]'",
+        '    ;;',
+        '  *"api repos/exomind-team/exomind/issues/466/comments?per_page=100&page=3&sort=created&direction=asc"* )',
+        "    printf '[]'",
+        '    ;;',
+        '  * )',
+        '    exit 1',
+        '    ;;',
+        'esac',
+      ].join('\n'),
+      { encoding: 'utf8', mode: 0o755 },
+    );
+
+    writeFileSync(
+      scriptPath,
+      [
+        `import { RealGitHubAPI } from ${JSON.stringify(pathToFileURL(path.join(process.cwd(), 'Scripts/lib/pr-lock-api.ts')).href)};`,
+        "const api = new RealGitHubAPI('exomind-team/exomind');",
+        'const comments = await api.getComments(466);',
+        'console.log(JSON.stringify(comments));',
+      ].join('\n'),
+      'utf8',
+    );
+
+    try {
+      const output = execFileSync(
+        'npx',
+        ['tsx', scriptPath],
+        {
+          cwd: process.cwd(),
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${tempDir}:${process.env.PATH ?? ''}`,
+          },
+        },
+      ).trim();
+
+      expect(JSON.parse(output)).toEqual([
+        { id: 1, body: 'first', createdAt: '2026-03-09T00:00:00Z' },
+        { id: 2, body: 'second', createdAt: '2026-03-09T01:00:00Z' },
+        { id: 3, body: 'third', createdAt: '2026-03-09T02:00:00Z' },
       ]);
     } finally {
       rmSync(tempDir, { recursive: true, force: true });

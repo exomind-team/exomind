@@ -63,6 +63,18 @@ describe('worker-agent lock runner', () => {
     expect(lock).toBeNull();
   });
 
+  it('ignores pending lock metadata', () => {
+    const lock = normalizeRemoteLockMetadata({
+      lock_id: 'lock-pending',
+      agent_id: 'worker-1',
+      acquired_at: '2026-03-10T00:00:00.000Z',
+      lock_duration_minutes: 15,
+      pending: true,
+    });
+
+    expect(lock).toBeNull();
+  });
+
   it('returns the newest active lock when a newer released loser comment exists', () => {
     const lock = extractLatestActiveLockFromComments([
       {

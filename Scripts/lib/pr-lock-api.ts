@@ -114,22 +114,33 @@ export class RealGitHubAPI implements IGitHubAPI {
   }
 
   async getComments(prNumber: number): Promise<Array<{ id: number; body: string; createdAt: string }>> {
-    const result = this.gh(`api repos/${this.repo}/issues/${prNumber}/comments`);
-    const trimmed = result.trim();
-    if (!trimmed) {
-      return [];
+    const comments: Array<{ id: number; body: string; createdAt: string }> = [];
+    const perPage = 100;
+
+    for (let page = 1; page <= 50; page += 1) {
+      const url = `repos/${this.repo}/issues/${prNumber}/comments?per_page=${perPage}&page=${page}&sort=created&direction=asc`;
+      const result = this.gh(`api '${url}'`);
+      const trimmed = result.trim();
+      if (!trimmed) {
+        break;
+      }
+
+      const data = JSON.parse(trimmed);
+      if (!Array.isArray(data) || data.length === 0) {
+        break;
+      }
+
+      comments.push(
+        ...data.map((c: any) => ({
+          id: Number(c.id),
+          body: c.body,
+          createdAt: c.created_at ?? c.createdAt,
+        })),
+      );
+
     }
 
-    const data = JSON.parse(trimmed);
-    if (!Array.isArray(data)) {
-      return [];
-    }
-
-    return data.map((c: any) => ({
-      id: Number(c.id),
-      body: c.body,
-      createdAt: c.created_at ?? c.createdAt
-    }));
+    return comments;
   }
 
   private gh(command: string): string {
@@ -145,7 +156,8 @@ export class RealGitHubAPI implements IGitHubAPI {
   }
 
   private fetchLatestCommentId(prNumber: number): number | null {
-    const result = this.gh(`api repos/${this.repo}/issues/${prNumber}/comments`);
+    const url = `repos/${this.repo}/issues/${prNumber}/comments?per_page=1&page=1&sort=created&direction=desc`;
+    const result = this.gh(`api '${url}'`);
     const trimmed = result.trim();
     if (!trimmed) {
       return null;
@@ -160,7 +172,7 @@ export class RealGitHubAPI implements IGitHubAPI {
       return null;
     }
 
-    const latest = data[data.length - 1];
+    const latest = data[0];
     const id = Number(latest?.id);
     return Number.isFinite(id) ? id : null;
   }
