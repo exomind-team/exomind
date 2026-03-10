@@ -132,6 +132,7 @@ describe('VoiceOverlayPage', () => {
           sessionReadyMs: 310,
           inputWarmHit: true,
           sessionWarmHit: false,
+          sessionWarmReason: 'stale',
           firstTextMs: 830,
           isLivePreview: true,
           providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
@@ -148,7 +149,7 @@ describe('VoiceOverlayPage', () => {
       screen.getAllByText((_, element) =>
         element?.textContent?.includes('首帧 120ms') &&
         element?.textContent?.includes('麦克风 260ms·预热') &&
-        element?.textContent?.includes('会话 310ms·冷启') &&
+        element?.textContent?.includes('会话 310ms·失热重建') &&
         element?.textContent?.includes('录音 420ms') &&
         element?.textContent?.includes('首字 830ms')
       ).length

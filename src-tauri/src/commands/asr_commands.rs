@@ -16,12 +16,14 @@ use futures_util::{stream::SplitSink, stream::SplitStream, SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Emitter, State};
 use tokio::sync::{mpsc, oneshot, Mutex};
+use tokio::time::{interval, Duration, MissedTickBehavior};
 use tokio_tungstenite::{connect_async, tungstenite, MaybeTlsStream, WebSocketStream};
 use tungstenite::{http::Request as HttpRequest, Message};
 
 const VOLCANO_STREAM_EVENT_NAME: &str = "volcano-asr-stream-event";
 const VOLCANO_STREAM_CANCELLED_MESSAGE: &str = "火山流式会话已取消";
 const VOLCANO_STREAM_FINISH_TIMEOUT_SECS: u64 = 30;
+const VOLCANO_STREAM_KEEPALIVE_SECS: u64 = 15;
 
 type VolcanoWsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 type VolcanoWriteHalf = SplitSink<VolcanoWsStream, Message>;
@@ -655,9 +657,17 @@ async fn run_volcano_stream_session(
     let mut latest_text = String::new();
     let mut latest_duration = None;
     let mut finish_requested = false;
+    let mut keepalive = interval(Duration::from_secs(VOLCANO_STREAM_KEEPALIVE_SECS));
+    keepalive.set_missed_tick_behavior(MissedTickBehavior::Delay);
+    keepalive.tick().await;
 
     let outcome: Result<AsrResult, String> = loop {
         tokio::select! {
+            _ = keepalive.tick(), if !finish_requested => {
+                if let Err(error) = write.send(Message::Ping(Vec::new().into())).await {
+                    break Err(format!("发送 keepalive ping 失败: {error}"));
+                }
+            }
             maybe_command = command_rx.recv() => {
                 match maybe_command {
                     Some(VolcanoStreamCommand::Push { audio_data, ack_tx }) => {
