@@ -204,6 +204,25 @@ export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregate
     });
   }
 
+  // Include standalone agents not targeted by any route
+  for (const agent of agents) {
+    const agentNodeId = targetNodeId('agent', agent.id);
+    if (!nextNodes.has(agentNodeId)) {
+      const row = rowByType.get('agent') ?? 0;
+      nextNodes.set(agentNodeId, {
+        id: agentNodeId,
+        type: 'agent',
+        label: agent.id,
+        status: statusByAgentId.get(agent.id) ?? 'unknown',
+        position: {
+          x: 120 + nodeTypeToColumn('agent') * 240,
+          y: 80 + row * 110,
+        },
+      });
+      rowByType.set('agent', row + 1);
+    }
+  }
+
   return {
     nodes: Array.from(nextNodes.values()),
     edges: Array.from(nextEdges.values()),

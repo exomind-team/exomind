@@ -64,6 +64,7 @@ mod tests {
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
             energy_registry,
+            life_agents: std::collections::HashMap::new(),
             eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
                 std::env::temp_dir().join("exomind-test-energy"),
             )),
