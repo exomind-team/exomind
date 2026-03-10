@@ -38,6 +38,10 @@ function resolveRtUrl(): string {
   return 'http://localhost:1949';
 }
 
+function resolveRtToken(): string | undefined {
+  return process.env.EXOMIND_MCP_RT_TOKEN?.trim() || undefined;
+}
+
 function normalizeBaseUrl(url: string): string {
   return url.replace(/\/+$/, '');
 }
@@ -75,11 +79,13 @@ export function createMcpEnvironment(): {
   if (mode === 'rt') {
     // Explicit RT mode — always use the Runtime HTTP backend.
     const rtUrl = resolveRtUrl();
-    eventlog = new RtEventLogPort(rtUrl, userId || 'anonymous');
+    const rtToken = resolveRtToken();
+    eventlog = new RtEventLogPort(rtUrl, userId || 'anonymous', rtToken);
   } else if (mode === 'auto' && process.env.EXOMIND_MCP_RT_URL) {
     // Auto mode with RT URL explicitly configured — prefer RT.
     const rtUrl = resolveRtUrl();
-    eventlog = new RtEventLogPort(rtUrl, userId || 'anonymous');
+    const rtToken = resolveRtToken();
+    eventlog = new RtEventLogPort(rtUrl, userId || 'anonymous', rtToken);
   } else {
     // Original remote / local / auto logic.
     const syncBaseUrl = resolveSyncServerBaseUrl();

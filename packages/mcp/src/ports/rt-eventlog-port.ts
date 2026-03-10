@@ -14,15 +14,23 @@ import type { EventData } from '../../../../src/lib/types/event';
 export class RtEventLogPort implements IEventLogPort {
   private baseUrl: string;
   private userId: string;
+  private token?: string;
 
-  constructor(rtUrl: string, userId: string = 'anonymous') {
+  constructor(rtUrl: string, userId: string = 'anonymous', token?: string) {
     this.baseUrl = rtUrl.replace(/\/+$/, '');
     this.userId = userId;
+    this.token = token;
+  }
+
+  private authHeaders(): Record<string, string> {
+    if (!this.token) return {};
+    return { Authorization: `Bearer ${this.token}` };
   }
 
   async listEvents(): Promise<EventData[]> {
     const res = await fetch(
       `${this.baseUrl}/eventlog?user_id=${encodeURIComponent(this.userId)}`,
+      { headers: { ...this.authHeaders() } },
     );
     if (!res.ok) {
       throw new Error(`Failed to list events: ${res.status} ${res.statusText}`);
@@ -35,7 +43,7 @@ export class RtEventLogPort implements IEventLogPort {
       `${this.baseUrl}/eventlog?user_id=${encodeURIComponent(this.userId)}`,
       {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', ...this.authHeaders() },
         body: JSON.stringify(event),
       },
     );
@@ -49,6 +57,7 @@ export class RtEventLogPort implements IEventLogPort {
   async getEvent(id: string): Promise<EventData | null> {
     const res = await fetch(
       `${this.baseUrl}/eventlog/events/${encodeURIComponent(id)}?user_id=${encodeURIComponent(this.userId)}`,
+      { headers: { ...this.authHeaders() } },
     );
     if (res.status === 404) return null;
     if (!res.ok) {
@@ -62,6 +71,7 @@ export class RtEventLogPort implements IEventLogPort {
       `${this.baseUrl}/eventlog?user_id=${encodeURIComponent(this.userId)}`,
       {
         method: 'DELETE',
+        headers: { ...this.authHeaders() },
       },
     );
     if (!res.ok) {
