@@ -67,6 +67,8 @@ type VolcanoAsrStreamEventPayload = {
 export class VoiceShortcutService {
   private state: VoiceShortcutState = 'idle';
   private stream: MediaStream | null = null;
+  private warmStream: MediaStream | null = null;
+  private warmStreamPromise: Promise<MediaStream | null> | null = null;
   private mediaRecorder: MediaRecorder | null = null;
   private chunks: Blob[] = [];
   private mimeType: string | null = null;
@@ -85,6 +87,9 @@ export class VoiceShortcutService {
   private volcanoStreamingCapture: VolcanoStreamingCapture | null = null;
   private volcanoStreamSessionId: string | null = null;
   private volcanoPushQueue: Promise<void> = Promise.resolve();
+  private warmVolcanoSessionId: string | null = null;
+  private warmVolcanoSessionKey: string | null = null;
+  private warmVolcanoSessionPromise: Promise<string | null> | null = null;
 
   constructor(livePreviewSource: VoiceLivePreviewSource = createDefaultVoiceLivePreviewSource()) {
     this.adapter = new MOSSASRAdapter();
@@ -110,6 +115,7 @@ export class VoiceShortcutService {
 
       this.unlistenProvider = subscribeVoiceShortcutAsrProviderChanges((provider) => {
         this.asrProvider = provider;
+        void this.prewarmResourcesForProvider();
       });
 
       this.unlisten = await listen<string>('voice-shortcut', (event) => {
@@ -121,6 +127,8 @@ export class VoiceShortcutService {
       this.unlistenVolcanoStream = await listen<VolcanoAsrStreamEventPayload>('volcano-asr-stream-event', (event) => {
         this.handleVolcanoStreamEvent(event.payload);
       });
+
+      void this.prewarmResourcesForProvider();
     } finally {
       this.initializing = false;
     }
@@ -137,12 +145,206 @@ export class VoiceShortcutService {
     this.unlistenProvider = null;
     void this.syncRecordingActive(false);
     this.stopLivePreview('abort');
+    void this.cancelWarmVolcanoSession();
+    this.releaseWarmStream();
     this.releaseResources();
     this.clearAutoHide();
   }
 
   getState(): VoiceShortcutState {
     return this.state;
+  }
+
+  private isLiveStream(stream: MediaStream | null): stream is MediaStream {
+    if (!stream) return false;
+    const tracks = stream.getTracks();
+    return tracks.length > 0 && tracks.every((track) => track.readyState === 'live');
+  }
+
+  private async prewarmResourcesForProvider(): Promise<void> {
+    await this.prewarmMicrophoneIfGranted();
+
+    if (this.asrProvider === 'volcano') {
+      await this.prewarmVolcanoSessionIfPossible();
+      return;
+    }
+
+    await this.cancelWarmVolcanoSession();
+  }
+
+  private async prewarmMicrophoneIfGranted(): Promise<MediaStream | null> {
+    if (this.isLiveStream(this.warmStream)) {
+      return this.warmStream;
+    }
+    if (this.warmStreamPromise) {
+      return this.warmStreamPromise;
+    }
+    if (typeof navigator === 'undefined' || !navigator.mediaDevices?.getUserMedia) {
+      return null;
+    }
+
+    this.warmStreamPromise = (async () => {
+      try {
+        const permissionState = await navigator.permissions?.query?.({
+          name: 'microphone' as PermissionName,
+        });
+        if (permissionState?.state !== 'granted') {
+          return null;
+        }
+
+        const stream = await getUserMediaWithConstraintFallback(
+          (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+          { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
+        );
+        this.warmStream = stream;
+        return stream;
+      } catch (error) {
+        console.warn(LOG_TAG, 'microphone prewarm skipped:', error);
+        return null;
+      } finally {
+        this.warmStreamPromise = null;
+      }
+    })();
+
+    return this.warmStreamPromise;
+  }
+
+  private async acquireInputStream(): Promise<MediaStream> {
+    if (this.isLiveStream(this.warmStream)) {
+      return this.warmStream;
+    }
+
+    const pendingWarmStream = await this.warmStreamPromise;
+    if (this.isLiveStream(pendingWarmStream)) {
+      this.warmStream = pendingWarmStream;
+      return pendingWarmStream;
+    }
+
+    const stream = await getUserMediaWithConstraintFallback(
+      (constraints) => navigator.mediaDevices.getUserMedia(constraints),
+      { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
+    );
+    this.warmStream = stream;
+    return stream;
+  }
+
+  private releaseWarmStream(): void {
+    if (!this.warmStream) {
+      return;
+    }
+    this.warmStream.getTracks().forEach((track) => track.stop());
+    this.warmStream = null;
+  }
+
+  private getWarmVolcanoSessionKey(config: VolcanoRuntimeConfig): string {
+    return JSON.stringify({
+      appKey: config.appKey,
+      accessKey: config.accessKey,
+      resourceId: config.resourceId,
+      endpoint: config.endpoint,
+      request: config.request,
+    });
+  }
+
+  private async cancelWarmVolcanoSession(): Promise<void> {
+    const sessionId = this.warmVolcanoSessionId;
+    this.warmVolcanoSessionId = null;
+    this.warmVolcanoSessionKey = null;
+    this.warmVolcanoSessionPromise = null;
+
+    if (!sessionId) {
+      return;
+    }
+
+    try {
+      await invoke('volcano_asr_stream_cancel', { sessionId });
+    } catch (error) {
+      console.warn(LOG_TAG, 'failed to cancel warm volcano session:', error);
+    }
+  }
+
+  private async prewarmVolcanoSessionIfPossible(): Promise<string | null> {
+    if (this.volcanoStreamSessionId) {
+      return null;
+    }
+
+    let config: VolcanoRuntimeConfig;
+    try {
+      config = this.getVolcanoRuntimeConfigOrThrow();
+    } catch {
+      await this.cancelWarmVolcanoSession();
+      return null;
+    }
+
+    const warmKey = this.getWarmVolcanoSessionKey(config);
+    if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey === warmKey) {
+      return this.warmVolcanoSessionId;
+    }
+    if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
+      return this.warmVolcanoSessionPromise;
+    }
+    if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey !== warmKey) {
+      await this.cancelWarmVolcanoSession();
+    }
+
+    this.warmVolcanoSessionKey = warmKey;
+    this.warmVolcanoSessionPromise = (async () => {
+      try {
+        const sessionId = await invoke<string>('volcano_asr_stream_start', { config });
+        if (this.warmVolcanoSessionKey !== warmKey) {
+          invoke('volcano_asr_stream_cancel', { sessionId }).catch(() => {});
+          return null;
+        }
+        this.warmVolcanoSessionId = sessionId;
+        return sessionId;
+      } catch (error) {
+        console.warn(LOG_TAG, 'volcano session prewarm failed:', error);
+        return null;
+      } finally {
+        this.warmVolcanoSessionPromise = null;
+      }
+    })();
+
+    return this.warmVolcanoSessionPromise;
+  }
+
+  private async acquireVolcanoSession(config: VolcanoRuntimeConfig): Promise<string> {
+    const warmKey = this.getWarmVolcanoSessionKey(config);
+
+    if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
+      const pendingSessionId = await this.warmVolcanoSessionPromise;
+      if (pendingSessionId) {
+        this.warmVolcanoSessionId = null;
+        this.warmVolcanoSessionKey = null;
+        return pendingSessionId;
+      }
+    }
+
+    if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey === warmKey) {
+      const sessionId = this.warmVolcanoSessionId;
+      this.warmVolcanoSessionId = null;
+      this.warmVolcanoSessionKey = null;
+      return sessionId;
+    }
+
+    return invoke<string>('volcano_asr_stream_start', { config });
+  }
+
+  private shouldShowArmingState(): boolean {
+    if (!this.isLiveStream(this.warmStream)) {
+      return true;
+    }
+    if (this.asrProvider !== 'volcano') {
+      return false;
+    }
+
+    try {
+      const config = this.getVolcanoRuntimeConfigOrThrow();
+      const warmKey = this.getWarmVolcanoSessionKey(config);
+      return !(this.warmVolcanoSessionId && this.warmVolcanoSessionKey === warmKey);
+    } catch {
+      return true;
+    }
   }
 
   private async handleStart(): Promise<void> {
@@ -168,11 +370,13 @@ export class VoiceShortcutService {
     this.clearAutoHide();
     this.livePreviewText = '';
     this.startPending = true;
-    this.emitOverlayState('arming', {
-      duration: 0,
-      text: '准备启动语音输入…',
-      isLivePreview: false,
-    });
+    if (this.shouldShowArmingState()) {
+      this.emitOverlayState('arming', {
+        duration: 0,
+        text: '准备启动语音输入…',
+        isLivePreview: false,
+      });
+    }
 
     try {
       if (this.asrProvider === 'volcano') {
@@ -180,10 +384,7 @@ export class VoiceShortcutService {
         return;
       }
 
-      this.stream = await getUserMediaWithConstraintFallback(
-        (constraints) => navigator.mediaDevices.getUserMedia(constraints),
-        { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
-      );
+      this.stream = await this.acquireInputStream();
 
       const { recorder, mimeType } = createCompatibleMediaRecorder(this.stream);
       this.mediaRecorder = recorder;
@@ -361,7 +562,9 @@ export class VoiceShortcutService {
       }
     }
     if (this.stream) {
-      this.stream.getTracks().forEach((track) => track.stop());
+      if (this.stream !== this.warmStream) {
+        this.stream.getTracks().forEach((track) => track.stop());
+      }
       this.stream = null;
     }
     this.mediaRecorder = null;
@@ -458,11 +661,8 @@ export class VoiceShortcutService {
 
   private async startVolcanoStreaming(): Promise<void> {
     const config = this.getVolcanoRuntimeConfigOrThrow();
-    const streamPromise = getUserMediaWithConstraintFallback(
-      (constraints) => navigator.mediaDevices.getUserMedia(constraints),
-      { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
-    );
-    const sessionPromise = invoke<string>('volcano_asr_stream_start', { config });
+    const streamPromise = this.acquireInputStream();
+    const sessionPromise = this.acquireVolcanoSession(config);
 
     try {
       const [streamResult, sessionResult] = await Promise.allSettled([streamPromise, sessionPromise]);
@@ -527,6 +727,7 @@ export class VoiceShortcutService {
       this.handleError(`识别失败: ${error}`);
     } finally {
       this.cleanupVolcanoStreamingState();
+      void this.prewarmVolcanoSessionIfPossible();
     }
   }
 
@@ -543,6 +744,7 @@ export class VoiceShortcutService {
     } finally {
       this.cleanupVolcanoStreamingState();
       this.releaseResources();
+      void this.prewarmVolcanoSessionIfPossible();
     }
   }
 

@@ -24,6 +24,8 @@ const streamingCaptureCreateMock = vi.fn();
 const streamingCaptureStartMock = vi.fn();
 const streamingCaptureStopMock = vi.fn(async () => new Uint8Array([9, 8, 7, 6]));
 const streamingCaptureCancelMock = vi.fn();
+const permissionsQueryMock = vi.fn();
+const nativeGetUserMediaMock = vi.fn();
 
 class FakeMediaRecorder {
   state: 'inactive' | 'recording' = 'inactive';
@@ -184,6 +186,22 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     streamingCaptureStopMock.mockReset();
     streamingCaptureStopMock.mockImplementation(async () => new Uint8Array([9, 8, 7, 6]));
     streamingCaptureCancelMock.mockReset();
+    permissionsQueryMock.mockReset();
+    permissionsQueryMock.mockResolvedValue({ state: 'prompt' });
+    nativeGetUserMediaMock.mockReset();
+
+    Object.defineProperty(window.navigator, 'permissions', {
+      configurable: true,
+      value: {
+        query: permissionsQueryMock,
+      },
+    });
+    Object.defineProperty(window.navigator, 'mediaDevices', {
+      configurable: true,
+      value: {
+        getUserMedia: nativeGetUserMediaMock,
+      },
+    });
 
     window.localStorage.removeItem('exomind:voiceShortcutAsrProvider');
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
@@ -191,7 +209,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.resourceId);
 
     getUserMediaWithConstraintFallbackMock.mockResolvedValue({
-      getTracks: () => [{ stop: vi.fn() }],
+      getTracks: () => [{ stop: vi.fn(), readyState: 'live' }],
     });
 
     convertWebmBlobToWavMock.mockResolvedValue(new Uint8Array([1, 2, 3, 4]));
@@ -328,6 +346,79 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         state: 'arming',
         duration: 0,
       })
+    );
+
+    service.destroy();
+  });
+
+  it('prewarms granted microphone and reuses it on start（权限已授予时预热并复用麦克风）', async () => {
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    expect(getUserMediaWithConstraintFallbackMock).toHaveBeenCalledTimes(1);
+
+    getUserMediaWithConstraintFallbackMock.mockClear();
+    emitMock.mockClear();
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(getUserMediaWithConstraintFallbackMock).not.toHaveBeenCalled();
+    expect(emitMock).not.toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({ state: 'arming' }),
+    );
+
+    service.destroy();
+  });
+
+  it('prewarms volcano session and reuses it on first start（火山模式预建 session 并在首按复用）', async () => {
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    const sessionIds = ['warm-session-1', 'warm-session-2'];
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return sessionIds.shift() ?? 'warm-session-fallback';
+      }
+      if (command === 'volcano_asr_stream_push' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    expect(invokeMock).toHaveBeenCalledWith(
+      'volcano_asr_stream_start',
+      expect.objectContaining({
+        config: expect.objectContaining({
+          appKey: 'test-app-key',
+        }),
+      }),
+    );
+
+    invokeMock.mockClear();
+    getUserMediaWithConstraintFallbackMock.mockClear();
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(getUserMediaWithConstraintFallbackMock).not.toHaveBeenCalled();
+    expect(invokeMock).not.toHaveBeenCalledWith(
+      'volcano_asr_stream_start',
+      expect.anything(),
     );
 
     service.destroy();
