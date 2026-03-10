@@ -27,8 +27,8 @@
 
 其中 review thread 回复属于可选增强信号：
 
-- 若 GraphQL 读取成功，则纳入判定
-- 若 GraphQL 读取失败，则退化为“没有 thread replies”，继续使用 comments / reviews / commits 判定
+- 若 review thread 回复读取成功，则纳入判定（分页读取，避免 100 条上限）
+- 若 thread reply 读取失败，则退化为“没有 thread replies”，继续使用 comments / reviews / commits 判定
 - 退化必须在 discovery 结果中留下 warning，便于排查
 
 服务类噪音评论也可能触发一次重新检查，但若没有代码增量，不应强制进入重度复审。

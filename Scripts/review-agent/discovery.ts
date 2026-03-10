@@ -55,28 +55,10 @@ interface GhCommit {
   committedDate?: string | null;
 }
 
-interface GhThreadReplyNode {
-  id?: string;
-  body?: string;
-  publishedAt?: string | null;
-}
-
-interface GhThreadNode {
-  comments?: {
-    nodes?: GhThreadReplyNode[];
-  };
-}
-
-interface GhReviewThreadsResponse {
-  data?: {
-    repository?: {
-      pullRequest?: {
-        reviewThreads?: {
-          nodes?: GhThreadNode[];
-        };
-      };
-    };
-  };
+interface GhReviewComment {
+  id?: number | string;
+  body?: string | null;
+  created_at?: string | null;
 }
 
 interface GhPrView {
@@ -319,48 +301,40 @@ function normalizeReviews(reviews: GhReview[] | undefined): PullRequestReview[] 
 }
 
 function fetchReviewThreadReplies(prNumber: number, repo: string): PullRequestThreadReply[] {
-  const { owner, name } = parseRepo(repo);
-  const query = [
-    'query($owner: String!, $name: String!, $number: Int!) {',
-    '  repository(owner: $owner, name: $name) {',
-    '    pullRequest(number: $number) {',
-    '      reviewThreads(first: 100) {',
-    '        nodes {',
-    '          comments(first: 100) {',
-    '            nodes {',
-    '              id',
-    '              body',
-    '              publishedAt',
-    '            }',
-    '          }',
-    '        }',
-    '      }',
-    '    }',
-    '  }',
-    '}',
-  ].join('\n');
+  const perPage = 100;
+  const replies: PullRequestThreadReply[] = [];
+  let page = 1;
 
-  const response = runGhJson<GhReviewThreadsResponse>([
-    'api',
-    'graphql',
-    '-f',
-    `query=${query}`,
-    '-F',
-    `owner=${owner}`,
-    '-F',
-    `name=${name}`,
-    '-F',
-    `number=${prNumber}`,
-  ]);
+  while (true) {
+    const pageItems = runGhJson<GhReviewComment[]>([
+      'api',
+      `repos/${repo}/pulls/${prNumber}/comments`,
+      '-F',
+      `per_page=${perPage}`,
+      '-F',
+      `page=${page}`,
+    ]);
 
-  const nodes = response.data?.repository?.pullRequest?.reviewThreads?.nodes ?? [];
-  return nodes.flatMap((thread) =>
-    (thread.comments?.nodes ?? []).map((reply) => ({
-      id: reply.id,
-      body: reply.body,
-      createdAt: reply.publishedAt ?? null,
-    })),
-  );
+    if (!Array.isArray(pageItems) || pageItems.length === 0) {
+      break;
+    }
+
+    for (const reply of pageItems) {
+      replies.push({
+        id: reply.id ? String(reply.id) : undefined,
+        body: reply.body ?? undefined,
+        createdAt: reply.created_at ?? null,
+      });
+    }
+
+    if (pageItems.length < perPage) {
+      break;
+    }
+
+    page += 1;
+  }
+
+  return replies;
 }
 
 function normalizeCommits(commits: GhCommit[] | undefined): PullRequestCommit[] {
@@ -528,15 +502,6 @@ function parseArgs(argv: string[]): CliOptions {
   }
 
   return options;
-}
-
-function parseRepo(repo: string): { owner: string; name: string } {
-  const [owner, name] = repo.split('/');
-  if (!owner || !name) {
-    throw new Error(`Invalid repo format: ${repo}`);
-  }
-
-  return { owner, name };
 }
 
 function toErrorMessage(error: unknown): string {

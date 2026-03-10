@@ -157,7 +157,7 @@ describe('review-agent discovery', () => {
     });
   });
 
-  it('degrades GraphQL thread reply failures to an empty list with a visible warning', () => {
+  it('degrades thread reply fetch failures to an empty list with a visible warning', () => {
     const result = loadThreadRepliesWithFallback(101, () => {
       throw new Error('graphql unavailable');
     });

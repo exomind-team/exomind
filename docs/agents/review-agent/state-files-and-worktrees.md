@@ -33,7 +33,7 @@ temp/
 
 - 有序的 `actionable_prs`
 - 当前 `pending_queue`
-- 本轮 discovery 的 `warnings`（例如 GraphQL thread reply 信号退化）
+- 本轮 discovery 的 `warnings`（例如 thread reply 信号退化）
 
 ### `backoff.json`
 
