@@ -38,7 +38,7 @@ export interface AgentHubRightPanelContext {
 
 // Node type（节点类型）and status（运行状态）
 export type AgentHubNodeType = 'input' | 'agent' | 'actor' | 'output';
-export type AgentHubNodeStatus = 'running' | 'idle' | 'warning' | 'offline';
+export type AgentHubNodeStatus = 'running' | 'idle' | 'warning' | 'offline' | 'dormant' | 'critical' | 'dying';
 export type AgentHubNodeLayer = 'top' | 'middle' | 'bottom';
 
 export interface AgentHubNode {
@@ -73,6 +73,7 @@ export interface AgentHubListItem {
   status: AgentHubNodeStatus;
   icon: string;
   badgeText?: string;
+  energy?: AgentEnergySnapshot;
 }
 
 export interface AgentHubListSection {
