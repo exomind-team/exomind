@@ -90,6 +90,31 @@ describe('worker-agent lib', () => {
     expect(issues.map((issue) => issue.code)).toContain('question-noise');
   });
 
+  it('flags missing required sections when validate-message --section is used', () => {
+    const issues = validateWorkerText(
+      `${WORKER_PREFIX}\n\n## Summary\nReady to ship.`,
+      { requiredSections: ['Summary', 'Scope'] },
+    );
+
+    expect(issues.map((issue) => issue.code)).toContain('missing-section');
+    expect(issues.some((issue) => issue.message.includes('Scope'))).toBe(true);
+  });
+
+  it('passes when all required sections are present', () => {
+    const body = [
+      WORKER_PREFIX,
+      '',
+      '## Summary',
+      'Ready to ship.',
+      '',
+      '## Scope',
+      '- Update worker-agent validation.',
+    ].join('\n');
+    const issues = validateWorkerText(body, { requiredSections: ['Summary', 'Scope'] });
+
+    expect(issues).toEqual([]);
+  });
+
   it('detects zh as the worker target language from issue context and ignores worker/reviewer/bot noise', () => {
     const language = resolveWorkerTargetLanguage({
       issueTitle: 'workflow: 单 Worker 锁定 issue/PR 的 Ralph 循环 Agent 流程',

@@ -492,7 +492,9 @@ export function validateWorkerText(
   options: { requiredSections?: string[] } = {},
 ): ValidationIssue[] {
   const issues: ValidationIssue[] = [];
-  void options;
+  const requiredSections = (options.requiredSections ?? [])
+    .map((section) => section.trim())
+    .filter(Boolean);
 
   if (!body.startsWith(WORKER_PREFIX)) {
     issues.push({
@@ -513,6 +515,26 @@ export function validateWorkerText(
       code: 'question-noise',
       message: 'Message contains a suspicious long question-mark sequence.',
     });
+  }
+
+  if (requiredSections.length > 0) {
+    const headingSet = new Set(
+      body
+        .split('\n')
+        .map((line) => line.trimStart().match(/^##\s+(.+)$/)?.[1]?.trim() ?? '')
+        .filter(Boolean)
+        .map((title) => title.toLowerCase()),
+    );
+
+    for (const section of requiredSections) {
+      const normalized = section.toLowerCase();
+      if (!headingSet.has(normalized)) {
+        issues.push({
+          code: 'missing-section',
+          message: `Message missing required section: ${section}.`,
+        });
+      }
+    }
   }
 
   return issues;

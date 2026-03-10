@@ -246,12 +246,23 @@ export function determineNextAction(input: NextActionInput): NextActionResult {
 
   const blockers = collectPendingFeedback(input.pr, input.cursor);
   const feedbackBlockers = blockers.filter((item) => item.reason === 'reviewer' || item.reason === 'human-comment');
+  const humanTestBlockers = blockers.filter((item) => item.reason === 'human-test');
   if (feedbackBlockers.length > 0) {
     return {
       action: 'reply-blocking-comment',
       continueAfterAction: true,
       reason: `Found ${feedbackBlockers.length} new blocking review or human feedback items.`,
       blockers: feedbackBlockers,
+      notes,
+    };
+  }
+
+  if (humanTestBlockers.length > 0) {
+    return {
+      action: 'wait-for-update',
+      continueAfterAction: false,
+      reason: `PR #${input.pr.number} has pending human-test feedback that requires manual validation.`,
+      blockers: humanTestBlockers,
       notes,
     };
   }

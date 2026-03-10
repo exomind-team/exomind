@@ -263,6 +263,27 @@ describe('worker-agent next-action', () => {
     expect(result.reason).toMatch(/human-test/i);
   });
 
+  it('waits when a human-test review comment arrives without the label', () => {
+    const result = determineNextAction(
+      makeInput({
+        pr: {
+          ...makeInput().pr,
+          comments: [
+            {
+              id: 'comment-human-test',
+              authorLogin: 'ARCJ137442',
+              body: '[Codex Reviewer] ❤️ 需要人类测试\n请进行人工验证',
+              createdAt: '2026-03-10T08:03:00.000Z',
+            },
+          ],
+        },
+      }),
+    );
+
+    expect(result.action).toBe('wait-for-update');
+    expect(result.blockers?.[0]?.reason).toBe('human-test');
+  });
+
   it('handles failing CI before resuming normal progress', () => {
     const result = determineNextAction(
       makeInput({
