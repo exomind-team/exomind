@@ -1,9 +1,10 @@
+use std::collections::HashMap;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+
 use futures_util::future::BoxFuture;
 use futures_util::stream::BoxStream;
 use serde::Serialize;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 use crate::energy::AgentEnergySnapshot;
 use crate::signal::types::SignalEvent;
@@ -11,9 +12,13 @@ use crate::signal::types::SignalEvent;
 pub mod api;
 pub mod claude;
 pub mod codex;
+pub mod cognition;
 pub mod echo;
 pub mod heartbeat;
+pub mod life;
+pub mod llm_cognition;
 pub mod runtime_event;
+pub mod workspace;
 
 pub use runtime_event::RuntimeAgentEvent;
 
