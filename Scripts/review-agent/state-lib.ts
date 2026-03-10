@@ -8,6 +8,7 @@ export type ReviewAgentStateValue =
   | 'NEEDS_HUMAN_TEST'
   | 'APPROVE_READY'
   | 'MERGE_READY'
+  | 'MERGE_BLOCKED'
   | 'FAILED_RETRYABLE';
 export type ReviewAgentPhase = 'DISCOVERY' | 'REVIEW' | 'IDLE_WAIT';
 export type ReviewAgentNextAction = 'discovery' | 'review' | 'idle-wait';

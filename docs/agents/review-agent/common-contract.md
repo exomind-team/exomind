@@ -56,6 +56,7 @@
 - `NEEDS_HUMAN_TEST`
 - `APPROVE_READY`
 - `MERGE_READY`
+- `MERGE_BLOCKED`
 - `FAILED_RETRYABLE`
 
 ## 审批边界
@@ -63,4 +64,6 @@
 - 只有在最新审阅结果干净、历史问题已修复、没有当前分支新引入的 CI 失败且本地验证通过时，`approve` 才成立。
 - 若 CI 失败已存在于基分支最新检查结果中，且当前 PR 没有把它变得更糟，则该 inherited failure 本身不阻塞 `approve`。
 - 若无法可靠归因 CI 失败来源，则按未通过处理，不得 `approve`。
-- 只有在审批就绪、所有评论均有验证结果、且没有待执行工作时，`merge` 才成立。
+- `--merge` 路径以“评论即通过”为主；best-effort `approve` 仅用于多 GitHub 账号兼容，失败不阻塞合并。
+- 只有在审批等价门禁就绪、所有评论均有验证结果、且没有待执行工作时，`merge` 才成立。
+- 若合并因权限/保护/不可合并/冲突被阻塞，记为 `MERGE_BLOCKED`，不重复尝试。

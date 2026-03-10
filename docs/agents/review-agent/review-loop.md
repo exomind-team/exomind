@@ -106,7 +106,7 @@
 
 当前 `review-loop.ts` 已承担 review 阶段的真实 GitHub 动作执行。
 
-本阶段仍不自动执行 `merge`。
+当门禁满足时允许通过 `--merge` 自动执行 `gh pr merge --squash`。
 
 支持的动作入口：
 
@@ -115,8 +115,9 @@
 - `--needs-human-test`：添加 `🙋needs-human-test` 标签，并发布人测评论
 - `--request-changes`：发布主审核评论后，再执行 `request changes`
 - `--approve`：发布主审核评论后，再执行 `approve`
-- `--ci-status <passed|failed|missing>`：为 `--approve` 显式提供 CI 门禁结果
-- `--local-verification-status <passed|failed|missing>`：为 `--approve` 显式提供本地验证门禁结果
+- `--merge`：发布“评论即通过”评论后执行 `merge`；评论本身即为审批等价门禁，脚本只会 best-effort 尝试一次 `approve` 以兼容多 GitHub 账号场景，失败不阻塞合并
+- `--ci-status <passed|failed|missing|inherited-failure>`：为 `--approve` / `--merge` 显式提供 CI 门禁结果
+- `--local-verification-status <passed|failed|missing>`：为 `--approve` / `--merge` 显式提供本地验证门禁结果
 
 约束：
 
@@ -124,9 +125,14 @@
 - 若评论发布后校验失败，后续重试必须编辑同一条评论，而不是新发第二条
 - `needs-human-test` 路径先加标签，再发评论，因为标签才是真相源
 - 只要 `🙋needs-human-test` 标签仍在，`approve` 必须被阻断并写成可重试失败
-- `approve` 只有在显式传入 `--ci-status passed` 与 `--local-verification-status passed` 时才允许执行
+- `approve` 只有在显式传入 `--ci-status passed|inherited-failure` 与 `--local-verification-status passed` 时才允许执行
 - 若任一门禁参数缺失，脚本必须按 `missing` 处理，并阻断 `approve`
 - 若任一门禁为 `failed`，脚本必须阻断 `approve`，不得写出 `APPROVE_READY`
+- `merge` 只有在 `CI = passed|inherited-failure` 且 `local verification = passed` 时才允许执行
+- `merge` 会在发布/更新通过评论后检查 `viewerCanMerge`；若为 `false`，直接落盘为 `MERGE_BLOCKED`
+- 合并失败若属于权限/保护/不可合并/冲突，落盘为 `MERGE_BLOCKED`，且评论中需写明阻塞原因；冲突必须提示“请同步目标分支后重试”
+- `merge` 门禁缺失或失败同样视为 `MERGE_BLOCKED`，记录原因后回到 discovery，不重复尝试
+- 其他合并失败按可重试失败处理，但仅交由后续恢复流程处理，不在当前轮内重复尝试
 
 ## 退出状态
 
@@ -134,6 +140,7 @@
 - `NEEDS_HUMAN_TEST`：需要人类验证
 - `APPROVE_READY`：本地审核结论干净，且门禁全部通过
 - `MERGE_READY`：所有合并条件满足
+- `MERGE_BLOCKED`：合并被阻塞且不重试
 - `FAILED_RETRYABLE`：暂时性失败，可重试
 
 ## 终态落盘

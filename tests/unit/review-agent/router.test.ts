@@ -164,7 +164,7 @@ describe('review-agent router', () => {
   });
 
   it('routes back to discovery after a review loop terminal state is persisted', () => {
-    const terminalStates = ['REVIEW_POSTED', 'NEEDS_HUMAN_TEST', 'APPROVE_READY', 'MERGE_READY'] as const;
+    const terminalStates = ['REVIEW_POSTED', 'NEEDS_HUMAN_TEST', 'APPROVE_READY', 'MERGE_READY', 'MERGE_BLOCKED'] as const;
 
     for (const terminalState of terminalStates) {
       const result = decideNextAction(

@@ -41,6 +41,23 @@
 最新进展：已同步 dev 并更新 PR 描述，准备进入 approve gate。
 ```
 
+## 通过评论（评论即通过）
+
+用于 `--merge` 的“评论即通过”路径。必须包含以下三行字段：
+
+- `结论:`
+- `门禁:`（必须包含 `CI=` 与 `本地验证=`）
+- `证据:`
+
+当 `CI=inherited-failure` 时，必须明确写出：`已忽略（inherited failure）`。
+
+合并冲突导致阻塞时，评论中必须追加“合并阻塞”说明，并提示：
+`请同步目标分支后重试`。
+
+若 `viewerCanMerge=false`，评论中也必须追加“合并阻塞”说明，明确当前账号无权合并或分支保护尚未满足。
+
+若 `approve` 失败但仍继续合并尝试，评论中需要追加说明，避免误解；这是兼容多 GitHub 账号场景的 best-effort 行为，不改变“评论即通过”的主语义。
+
 ## 需要人类测试模板
 
 使用 `[Codex Reviewer] ❤️ 需要人类测试` 作为前缀。
@@ -116,7 +133,7 @@
 - 若某个失败检查已经在基分支最新检查结果中同名失败，则它属于 inherited failure，不单独阻塞 `approve`
 - 本地验证通过
 - 当前 PR 上不存在 `🙋needs-human-test`
-- 审阅动作层显式收到 `CI = passed` 与 `local verification = passed` 的门禁输入；缺失一项也视为不满足
+- 审阅动作层显式收到 `CI = passed|inherited-failure` 与 `local verification = passed` 的门禁输入；缺失一项也视为不满足
 
 ### 合并（merge）
 

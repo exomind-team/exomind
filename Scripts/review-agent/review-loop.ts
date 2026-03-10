@@ -1,5 +1,6 @@
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 
 import {
   NEEDS_HUMAN_TEST_LABEL,
@@ -7,6 +8,7 @@ import {
   buildCompletedReviewState,
   buildRetryableReviewFailureState,
   parseLinkedIssueNumbers,
+  resolveReviewFailureCompletion,
   resolveReviewCommentLanguage,
   type ReviewApprovalGate,
   type ReviewActionMode,
@@ -22,6 +24,7 @@ import {
 } from './review-loop-runtime-lib.ts';
 import {
   QUEUE_FILE,
+  PR_MONITOR_DIR,
   STATE_FILE,
   ensurePrMonitorDir,
   readJson,
@@ -39,6 +42,7 @@ interface CliOptions {
   needsHumanTest?: boolean;
   requestChanges?: boolean;
   approve?: boolean;
+  merge?: boolean;
   ciStatus?: VerificationStatus;
   localVerificationStatus?: VerificationStatus;
 }
@@ -58,6 +62,7 @@ interface PullRequestActionView {
   title: string;
   body?: string;
   url: string;
+  viewerCanMerge?: boolean;
   labels?: Array<{ name?: string }>;
   comments?: Array<{ body?: string }>;
 }
@@ -166,7 +171,7 @@ async function runReviewAction(input: {
   });
   const body = readFileSync(input.bodyFile, 'utf8');
   const hasNeedsHumanTestLabel = (pullRequest.labels ?? []).some((label) => label.name === NEEDS_HUMAN_TEST_LABEL);
-  const approvalGate = input.actionMode === 'approve'
+  const approvalGate = input.actionMode === 'approve' || input.actionMode === 'merge'
     ? buildApprovalGate(input.options)
     : undefined;
 
@@ -177,12 +182,22 @@ async function runReviewAction(input: {
     hasNeedsHumanTestLabel,
     commentId,
     approvalGate,
+    viewerCanMerge: pullRequest.viewerCanMerge ?? null,
   }, {
-    createComment: () => createIssueComment(input.prNumber, input.repo, input.bodyFile),
-    editComment: (nextCommentId) => editIssueComment(nextCommentId, input.repo, input.bodyFile),
+    createComment: (commentBody) => createIssueComment(
+      input.prNumber,
+      input.repo,
+      writeTempBodyFile(commentBody),
+    ),
+    editComment: (nextCommentId, commentBody) => editIssueComment(
+      nextCommentId,
+      input.repo,
+      writeTempBodyFile(commentBody),
+    ),
     readComment: (nextCommentId) => viewIssueComment(nextCommentId, input.repo),
     addLabel: (label) => addPrLabel(input.prNumber, input.repo, label),
     submitReviewDecision: (decision) => submitReviewDecision(input.prNumber, input.repo, decision),
+    mergePullRequest: () => mergePullRequest(input.prNumber, input.repo),
   });
 
   if (result.status === 'completed') {
@@ -190,6 +205,9 @@ async function runReviewAction(input: {
       input.prNumber,
       result.completion,
       toReviewCommentContext(result.comment),
+      result.completion === 'merge-blocked'
+        ? result.mergeFailure ?? 'merge blocked'
+        : undefined,
     );
     console.log(JSON.stringify({
       selectedPrNumber: input.prNumber,
@@ -198,6 +216,9 @@ async function runReviewAction(input: {
       commentOperation: result.commentOperation,
       labelAdded: result.labelAdded,
       reviewDecision: result.reviewDecision,
+      approveFailure: result.approveFailure ?? null,
+      mergeFailure: result.mergeFailure ?? null,
+      mergeFailureKind: result.mergeFailureKind ?? null,
       completion: result.completion,
       persistedState: persistedState.state,
       nextAction: persistedState.nextAction,
@@ -222,6 +243,34 @@ async function runReviewAction(input: {
       labelAdded: result.labelAdded,
       validationErrors: result.validationErrors,
       error: failureState.error,
+      approveFailure: result.approveFailure ?? null,
+    }, null, 2));
+    process.exitCode = 1;
+    return;
+  }
+
+  const terminalCompletion = resolveReviewFailureCompletion({
+    actionMode: input.actionMode,
+    failedStage: result.failedStage,
+  });
+  if (terminalCompletion) {
+    const blockedState = persistCompletedReviewState(
+      input.prNumber,
+      terminalCompletion,
+      result.comment ? toReviewCommentContext(result.comment) : undefined,
+      result.error,
+    );
+    console.log(JSON.stringify({
+      selectedPrNumber: input.prNumber,
+      action: input.actionMode,
+      failedStage: result.failedStage,
+      comment: result.comment ?? null,
+      commentOperation: result.commentOperation ?? null,
+      labelAdded: result.labelAdded,
+      error: blockedState.error ?? result.error,
+      completion: terminalCompletion,
+      persistedState: blockedState.state,
+      nextAction: blockedState.nextAction,
     }, null, 2));
     process.exitCode = 1;
     return;
@@ -296,6 +345,10 @@ function parseArgs(argv: string[]): CliOptions {
       options.approve = true;
       continue;
     }
+    if (value === '--merge') {
+      options.merge = true;
+      continue;
+    }
     if (value === '--ci-status') {
       const nextValue = argv[index + 1];
       if (!isVerificationStatus(nextValue)) {
@@ -334,10 +387,11 @@ function resolveActionMode(options: CliOptions): ReviewActionMode | null {
     options.needsHumanTest ? 'needs-human-test' : null,
     options.requestChanges ? 'request-changes' : null,
     options.approve ? 'approve' : null,
+    options.merge ? 'merge' : null,
   ].filter((value): value is ReviewActionMode => value !== null);
 
   if (flaggedModes.length > 1) {
-    throw new Error('Choose only one of --needs-human-test, --request-changes, or --approve.');
+    throw new Error('Choose only one of --needs-human-test, --request-changes, --approve, or --merge.');
   }
 
   if (flaggedModes.length === 1) {
@@ -352,6 +406,14 @@ function buildApprovalGate(options: CliOptions): ReviewApprovalGate {
     ciStatus: options.ciStatus ?? 'missing',
     localVerificationStatus: options.localVerificationStatus ?? 'missing',
   };
+}
+
+function writeTempBodyFile(body: string): string {
+  ensurePrMonitorDir();
+  const fileName = `review-comment-${Date.now()}-${Math.random().toString(16).slice(2)}.md`;
+  const filePath = path.join(PR_MONITOR_DIR, fileName);
+  writeFileSync(filePath, body, 'utf8');
+  return filePath;
 }
 
 function readSelectedPrNumber(): number {
@@ -384,7 +446,7 @@ function viewPullRequestActionContext(prNumber: number, repo: string): PullReque
     '--repo',
     repo,
     '--json',
-    'number,title,body,url,labels,comments',
+    'number,title,body,url,viewerCanMerge,labels,comments',
   ]);
 }
 
@@ -473,6 +535,17 @@ function submitReviewDecision(
   ]);
 }
 
+function mergePullRequest(prNumber: number, repo: string): void {
+  runGh([
+    'pr',
+    'merge',
+    String(prNumber),
+    '--repo',
+    repo,
+    '--squash',
+  ]);
+}
+
 function normalizeIssueComment(comment: GhIssueComment): ReviewCommentRecord {
   return {
     id: String(comment.id),
@@ -556,6 +629,7 @@ function persistCompletedReviewState(
   selectedPrNumber: number,
   completion: ReviewCompletionResult,
   commentContext?: ReviewCommentContext,
+  error?: string,
 ): PersistedState {
   ensurePrMonitorDir();
   const previousState = readJson<PersistedState | null>(STATE_FILE, null);
@@ -563,6 +637,7 @@ function persistCompletedReviewState(
     completion,
     selectedPrNumber,
     previousState,
+    error,
     ...commentContext,
   });
   writeJson(STATE_FILE, nextState);
@@ -610,13 +685,15 @@ function isReviewCompletionResult(value: string | undefined): value is ReviewCom
   return value === 'review-posted'
     || value === 'needs-human-test'
     || value === 'approve-ready'
-    || value === 'merge-ready';
+    || value === 'merge-ready'
+    || value === 'merge-blocked';
 }
 
 function isVerificationStatus(value: string | undefined): value is VerificationStatus {
   return value === 'passed'
     || value === 'failed'
-    || value === 'missing';
+    || value === 'missing'
+    || value === 'inherited-failure';
 }
 
 function toErrorMessage(error: unknown): string {

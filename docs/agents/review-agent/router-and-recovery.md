@@ -53,7 +53,7 @@ router 只允许输出以下 `action`：
 
 ### 审阅已结束
 
-- 若 `state` 属于 `REVIEW_POSTED`、`NEEDS_HUMAN_TEST`、`APPROVE_READY` 或 `MERGE_READY`
+- 若 `state` 属于 `REVIEW_POSTED`、`NEEDS_HUMAN_TEST`、`APPROVE_READY`、`MERGE_READY` 或 `MERGE_BLOCKED`
 - 则输出 `discovery`
 - 因为下一轮应重新从 GitHub 当前事实发现待处理 PR，而不是盲目续接上一轮审阅上下文
 

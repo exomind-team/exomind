@@ -103,6 +103,9 @@
 - `HAS_TARGET`：本轮存在至少一个需要行动的 PR，并已选中一个目标。
 - `REVIEW_POSTED`：当前目标 PR 已完成审阅并发布评论。
 - `NEEDS_HUMAN_TEST`：当前目标 PR 需要人类验证，Agent 不应继续尝试自动收口。
+- `APPROVE_READY`：本地审核结论干净，且门禁全部通过。
+- `MERGE_READY`：已满足合并条件并完成合并。
+- `MERGE_BLOCKED`：合并被阻塞且不重试。
 - `FAILED_RETRYABLE`：本轮失败，但属于可重试失败。
 
 ## Issue 映射

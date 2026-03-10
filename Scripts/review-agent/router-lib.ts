@@ -61,6 +61,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
     || context.state.state === 'NEEDS_HUMAN_TEST'
     || context.state.state === 'APPROVE_READY'
     || context.state.state === 'MERGE_READY'
+    || context.state.state === 'MERGE_BLOCKED'
   ) {
     return {
       action: 'discovery',

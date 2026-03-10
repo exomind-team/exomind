@@ -35,16 +35,27 @@ export type ReviewCompletionResult =
   | 'review-posted'
   | 'needs-human-test'
   | 'approve-ready'
-  | 'merge-ready';
+  | 'merge-ready'
+  | 'merge-blocked';
 
 export type ReviewActionMode =
   | 'comment'
   | 'needs-human-test'
   | 'request-changes'
-  | 'approve';
+  | 'approve'
+  | 'merge';
+
+export type ReviewActionFailureStage =
+  | 'approve-blocked'
+  | 'merge-gate-blocked'
+  | 'merge-failed'
+  | 'label'
+  | 'comment-write'
+  | 'comment-read'
+  | 'review-decision';
 
 export type ReviewCommentLanguage = 'zh-CN' | 'en';
-export type VerificationStatus = 'passed' | 'failed' | 'missing';
+export type VerificationStatus = 'passed' | 'failed' | 'missing' | 'inherited-failure';
 
 export interface ReviewLanguageInput {
   title: string;
@@ -56,6 +67,7 @@ export interface ReviewCommentValidationInput {
   body: string;
   expectedLanguage: ReviewCommentLanguage | null;
   mode: ReviewActionMode;
+  approvalGate?: ReviewApprovalGate;
 }
 
 export interface ReviewCommentValidationResult {
@@ -75,6 +87,7 @@ interface BuildCompletedReviewStateInput {
   previousState: PersistedState | null;
   activeReviewCommentId?: string | null;
   activeReviewCommentUrl?: string | null;
+  error?: string;
 }
 
 interface BuildRetryableReviewFailureStateInput {
@@ -96,11 +109,13 @@ const PROGRESS_UPDATE_PATTERN = /(进展|当前进度|最新进展|状态同步|
 const PROGRESS_ACTION_PATTERN = /(已(同步|更新|推进|移动|完成|合并|修复|提交)|同步了|更新了|推进了|完成了|moved|updated|synced|advanced|progressed|ready|prepared|promoted|rebased|merged)/i;
 export const HUMAN_TEST_PREFIX = `${REVIEWER_PREFIX} ❤️ 需要人类测试`;
 export const NEEDS_HUMAN_TEST_LABEL = '🙋needs-human-test';
-const COMPLETION_STATE_MAP: Record<ReviewCompletionResult, Extract<ReviewAgentStateValue, 'REVIEW_POSTED' | 'NEEDS_HUMAN_TEST' | 'APPROVE_READY' | 'MERGE_READY'>> = {
+const INHERITED_FAILURE_MARKER = '已忽略（inherited failure）';
+const COMPLETION_STATE_MAP: Record<ReviewCompletionResult, Extract<ReviewAgentStateValue, 'REVIEW_POSTED' | 'NEEDS_HUMAN_TEST' | 'APPROVE_READY' | 'MERGE_READY' | 'MERGE_BLOCKED'>> = {
   'review-posted': 'REVIEW_POSTED',
   'needs-human-test': 'NEEDS_HUMAN_TEST',
   'approve-ready': 'APPROVE_READY',
   'merge-ready': 'MERGE_READY',
+  'merge-blocked': 'MERGE_BLOCKED',
 };
 
 export function parseLinkedIssueNumbers(text: string): number[] {
@@ -164,6 +179,12 @@ export function validateReviewComment(
 ): ReviewCommentValidationResult {
   const trimmed = input.body.trimStart();
   const errors: string[] = [];
+  const gateLineRequirements = {
+    conclusion: false,
+    gate: false,
+    evidence: false,
+  };
+  let gateLine = '';
 
   if (input.mode === 'needs-human-test') {
     if (!trimmed.startsWith(HUMAN_TEST_PREFIX)) {
@@ -201,6 +222,48 @@ export function validateReviewComment(
     }
   }
 
+  if (input.mode === 'merge') {
+    for (const line of input.body.split(/\r?\n/)) {
+      const trimmedLine = line.trim();
+      if (trimmedLine.startsWith('结论:')) {
+        gateLineRequirements.conclusion = true;
+        continue;
+      }
+      if (trimmedLine.startsWith('门禁:')) {
+        gateLineRequirements.gate = true;
+        gateLine = trimmedLine;
+        continue;
+      }
+      if (trimmedLine.startsWith('证据:')) {
+        gateLineRequirements.evidence = true;
+      }
+    }
+
+    if (!gateLineRequirements.conclusion) {
+      errors.push('Pass comments must include a 结论 line.');
+    }
+    if (!gateLineRequirements.gate) {
+      errors.push('Pass comments must include a 门禁 line.');
+    }
+    if (!gateLineRequirements.evidence) {
+      errors.push('Pass comments must include a 证据 line.');
+    }
+    if (gateLineRequirements.gate) {
+      if (!gateLine.includes('CI=')) {
+        errors.push('门禁行必须包含 CI=。');
+      }
+      if (!gateLine.includes('本地验证=')) {
+        errors.push('门禁行必须包含 本地验证=。');
+      }
+    }
+  }
+
+  const expectsInheritedMarker = input.approvalGate?.ciStatus === 'inherited-failure'
+    || /CI\s*=\s*inherited-failure/i.test(input.body);
+  if (expectsInheritedMarker && !input.body.includes(INHERITED_FAILURE_MARKER)) {
+    errors.push(`Inherited CI failures must be marked as ${INHERITED_FAILURE_MARKER}.`);
+  }
+
   if (/[?？]{5,}/u.test(input.body)) {
     errors.push('Comment contains a suspicious sequence of 5+ question marks.');
   }
@@ -210,7 +273,17 @@ export function validateReviewComment(
   }
 
   const detectedLanguage = detectLanguage(input.body);
-  if (input.expectedLanguage && detectedLanguage && input.expectedLanguage !== detectedLanguage) {
+  const ignoreLanguageMismatch = input.mode === 'merge'
+    && input.expectedLanguage === 'zh-CN'
+    && gateLineRequirements.conclusion
+    && gateLineRequirements.gate
+    && gateLineRequirements.evidence;
+  if (
+    input.expectedLanguage
+    && detectedLanguage
+    && input.expectedLanguage !== detectedLanguage
+    && !ignoreLanguageMismatch
+  ) {
     errors.push(`Comment language ${detectedLanguage} does not match PR language ${input.expectedLanguage}.`);
   }
 
@@ -221,7 +294,9 @@ export function validateReviewComment(
   };
 }
 
-export function mapActionModeToCompletion(mode: ReviewActionMode): Exclude<ReviewCompletionResult, 'merge-ready'> {
+export function mapActionModeToCompletion(
+  mode: Exclude<ReviewActionMode, 'merge'>,
+): Exclude<ReviewCompletionResult, 'merge-ready' | 'merge-blocked'> {
   if (mode === 'needs-human-test') {
     return 'needs-human-test';
   }
@@ -245,12 +320,35 @@ export function findApproveBlockingReason(input: {
     return 'Cannot approve without explicit CI and local verification results.';
   }
 
-  if (input.approvalGate.ciStatus !== 'passed') {
+  if (input.approvalGate.ciStatus !== 'passed' && input.approvalGate.ciStatus !== 'inherited-failure') {
     return `Cannot approve because CI status is ${input.approvalGate.ciStatus}.`;
   }
 
   if (input.approvalGate.localVerificationStatus !== 'passed') {
     return `Cannot approve because local verification status is ${input.approvalGate.localVerificationStatus}.`;
+  }
+
+  return null;
+}
+
+export function findMergeBlockingReason(input: {
+  hasNeedsHumanTestLabel: boolean;
+  approvalGate?: ReviewApprovalGate;
+}): string | null {
+  if (input.hasNeedsHumanTestLabel) {
+    return `Cannot merge while ${NEEDS_HUMAN_TEST_LABEL} is still present.`;
+  }
+
+  if (!input.approvalGate) {
+    return 'Cannot merge without explicit CI and local verification results.';
+  }
+
+  if (input.approvalGate.localVerificationStatus !== 'passed') {
+    return `Cannot merge because local verification status is ${input.approvalGate.localVerificationStatus}.`;
+  }
+
+  if (input.approvalGate.ciStatus !== 'passed' && input.approvalGate.ciStatus !== 'inherited-failure') {
+    return `Cannot merge because CI status is ${input.approvalGate.ciStatus}.`;
   }
 
   return null;
@@ -272,7 +370,19 @@ export function buildCompletedReviewState(input: BuildCompletedReviewStateInput)
     failureStreak: 0,
     nextSleepSeconds: input.previousState?.nextSleepSeconds ?? 180,
     updatedAt: new Date().toISOString(),
+    ...(input.error ? { error: input.error } : {}),
   };
+}
+
+export function resolveReviewFailureCompletion(input: {
+  actionMode: ReviewActionMode;
+  failedStage: ReviewActionFailureStage;
+}): Extract<ReviewCompletionResult, 'merge-blocked'> | null {
+  if (input.actionMode === 'merge' && input.failedStage === 'merge-gate-blocked') {
+    return 'merge-blocked';
+  }
+
+  return null;
 }
 
 export function buildRetryableReviewFailureState(

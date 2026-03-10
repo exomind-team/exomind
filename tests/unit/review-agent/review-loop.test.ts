@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import * as reviewLoopLib from '../../../Scripts/review-agent/review-loop-lib.ts';
 import {
   HUMAN_TEST_PREFIX,
   NEEDS_HUMAN_TEST_LABEL,
@@ -18,6 +19,22 @@ import {
   executeReviewAction,
   paginatePullFiles,
 } from '../../../Scripts/review-agent/review-loop-runtime-lib.ts';
+
+const PASS_COMMENT_BODY = [
+  '[Codex Reviewer] 已审阅最新变更，未发现问题。',
+  '结论: 通过',
+  '门禁: CI=passed 本地验证=passed',
+  '证据: npx vitest run tests/unit/review-agent/review-loop.test.ts',
+].join('\n');
+const PASS_COMMENT_BODY_INHERITED = [
+  '[Codex Reviewer] 已审阅最新变更，未发现问题。已忽略（inherited failure）。',
+  '结论: 通过',
+  '门禁: CI=inherited-failure 本地验证=passed',
+  '证据: npx vitest run tests/unit/review-agent/review-loop.test.ts',
+].join('\n');
+const MERGE_DISABLED = () => {
+  throw new Error('should not merge');
+};
 
 describe('review-agent review loop', () => {
   it('parses refs/closes/fixes issue ids and removes duplicates', () => {
@@ -93,6 +110,7 @@ describe('review-agent review loop', () => {
     ['needs-human-test', 'NEEDS_HUMAN_TEST'],
     ['approve-ready', 'APPROVE_READY'],
     ['merge-ready', 'MERGE_READY'],
+    ['merge-blocked', 'MERGE_BLOCKED'],
   ] as const)('maps %s to persisted terminal state %s', (completion, expectedState) => {
     const state = buildCompletedReviewState({
       completion: completion as ReviewCompletionResult,
@@ -126,6 +144,27 @@ describe('review-agent review loop', () => {
     expect(state.activeReviewCommentId).toBe('987');
     expect(state.activeReviewCommentUrl).toBe('https://example.com/comments/987');
     expect(state.inspectedPrCount).toBe(8);
+  });
+
+  it('preserves the blocking reason on MERGE_BLOCKED terminal states', () => {
+    const state = buildCompletedReviewState({
+      completion: 'merge-blocked',
+      selectedPrNumber: 465,
+      previousState: null,
+      error: 'viewer cannot merge',
+    });
+
+    expect(state.state).toBe('MERGE_BLOCKED');
+    expect(state.error).toBe('viewer cannot merge');
+  });
+
+  it('treats merge gate failures as terminal merge-blocked outcomes', () => {
+    const outcome = (reviewLoopLib as any).resolveReviewFailureCompletion({
+      actionMode: 'merge',
+      failedStage: 'merge-gate-blocked',
+    });
+
+    expect(outcome).toBe('merge-blocked');
   });
 
   it('collects all pull-request files by paginating until the final partial page', async () => {
@@ -308,6 +347,66 @@ describe('review-agent review loop', () => {
     expect(withProgressUpdate.valid).toBe(true);
   });
 
+  it('validates merge-ready pass comments for required fields and inherited failure markers', () => {
+    const valid = validateReviewComment({
+      body: PASS_COMMENT_BODY,
+      expectedLanguage: 'zh-CN',
+      mode: 'merge',
+      approvalGate: {
+        ciStatus: 'passed',
+        localVerificationStatus: 'passed',
+      },
+    });
+
+    expect(valid.valid).toBe(true);
+
+    const missingFields = validateReviewComment({
+      body: [
+        '[Codex Reviewer] 已审阅最新变更，未发现问题。',
+        '结论: 通过',
+        '门禁: CI=passed 本地验证=passed',
+      ].join('\n'),
+      expectedLanguage: 'zh-CN',
+      mode: 'merge',
+      approvalGate: {
+        ciStatus: 'passed',
+        localVerificationStatus: 'passed',
+      },
+    });
+
+    expect(missingFields.valid).toBe(false);
+    expect(missingFields.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('证据'),
+    ]));
+
+    const missingMarker = validateReviewComment({
+      body: PASS_COMMENT_BODY_INHERITED.replace('已忽略（inherited failure）。', ''),
+      expectedLanguage: 'zh-CN',
+      mode: 'merge',
+      approvalGate: {
+        ciStatus: 'inherited-failure',
+        localVerificationStatus: 'passed',
+      },
+    });
+
+    expect(missingMarker.valid).toBe(false);
+    expect(missingMarker.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('inherited failure'),
+    ]));
+
+    const withMarker = validateReviewComment({
+      body: PASS_COMMENT_BODY_INHERITED,
+      expectedLanguage: 'zh-CN',
+      mode: 'merge',
+      approvalGate: {
+        ciStatus: 'inherited-failure',
+        localVerificationStatus: 'passed',
+      },
+    });
+
+    expect(withMarker.valid).toBe(true);
+  });
+
   it('rejects suspicious full-width question-mark runs in zh-CN comments', () => {
     const result = validateReviewComment({
       body: '[Codex Reviewer] 已审阅最新变更，是否已完成验证？？？？？',
@@ -340,7 +439,7 @@ describe('review-agent review loop', () => {
       addLabel: () => {
         steps.push('label');
       },
-      createComment: () => {
+      createComment: (_body) => {
         steps.push('create-comment');
         return {
           id: '101',
@@ -348,7 +447,7 @@ describe('review-agent review loop', () => {
           body: 'placeholder',
         };
       },
-      editComment: () => {
+      editComment: (_commentId, _body) => {
         throw new Error('should not edit');
       },
       readComment: () => {
@@ -362,6 +461,7 @@ describe('review-agent review loop', () => {
       submitReviewDecision: () => {
         throw new Error('should not submit review decision');
       },
+      mergePullRequest: MERGE_DISABLED,
     });
 
     expect(result.status).toBe('completed');
@@ -383,10 +483,10 @@ describe('review-agent review loop', () => {
       addLabel: () => {
         throw new Error('should not add label');
       },
-      createComment: () => {
+      createComment: (_body) => {
         throw new Error('should not create comment');
       },
-      editComment: () => {
+      editComment: (_commentId, _body) => {
         throw new Error('should not edit comment');
       },
       readComment: () => {
@@ -395,6 +495,7 @@ describe('review-agent review loop', () => {
       submitReviewDecision: () => {
         throw new Error('should not submit review decision');
       },
+      mergePullRequest: MERGE_DISABLED,
     });
 
     expect(result).toMatchObject({
@@ -413,12 +514,12 @@ describe('review-agent review loop', () => {
       addLabel: () => {
         throw new Error('should not add label');
       },
-      createComment: () => ({
+      createComment: (_body) => ({
         id: '301',
         url: 'https://example.com/comments/301',
         body: 'placeholder',
       }),
-      editComment: () => {
+      editComment: (_commentId, _body) => {
         throw new Error('should not edit comment');
       },
       readComment: () => ({
@@ -429,6 +530,7 @@ describe('review-agent review loop', () => {
       submitReviewDecision: () => {
         throw new Error('should not submit review decision');
       },
+      mergePullRequest: MERGE_DISABLED,
     });
 
     expect(result).toMatchObject({
@@ -453,12 +555,12 @@ describe('review-agent review loop', () => {
       addLabel: () => {
         throw new Error('should not add label');
       },
-      createComment: () => ({
+      createComment: (_body) => ({
         id: '302',
         url: 'https://example.com/comments/302',
         body: 'placeholder',
       }),
-      editComment: () => {
+      editComment: (_commentId, _body) => {
         throw new Error('should not edit comment');
       },
       readComment: () => ({
@@ -469,6 +571,7 @@ describe('review-agent review loop', () => {
       submitReviewDecision: () => {
         throw new Error('should not submit review decision');
       },
+      mergePullRequest: MERGE_DISABLED,
     });
 
     expect(result).toMatchObject({
@@ -488,10 +591,10 @@ describe('review-agent review loop', () => {
       addLabel: () => {
         throw new Error('should not add label');
       },
-      createComment: () => {
+      createComment: (_body) => {
         throw new Error('should not create comment');
       },
-      editComment: (commentId) => ({
+      editComment: (commentId, _body) => ({
         id: commentId,
         url: `https://example.com/comments/${commentId}`,
         body: 'placeholder',
@@ -504,6 +607,7 @@ describe('review-agent review loop', () => {
       submitReviewDecision: () => {
         throw new Error('request changes failed');
       },
+      mergePullRequest: MERGE_DISABLED,
     });
 
     expect(result).toMatchObject({
@@ -514,5 +618,246 @@ describe('review-agent review loop', () => {
         id: '222',
       },
     });
+  });
+
+  it('blocks merge when CI or local verification gates are missing', async () => {
+    const result = await executeReviewAction({
+      mode: 'merge',
+      body: PASS_COMMENT_BODY,
+      expectedLanguage: 'zh-CN',
+      hasNeedsHumanTestLabel: false,
+    }, {
+      addLabel: () => {
+        throw new Error('should not add label');
+      },
+      createComment: (_body) => {
+        throw new Error('should not create comment');
+      },
+      editComment: (_commentId, _body) => {
+        throw new Error('should not edit comment');
+      },
+      readComment: () => {
+        throw new Error('should not read comment');
+      },
+      submitReviewDecision: () => {
+        throw new Error('should not submit review decision');
+      },
+      mergePullRequest: MERGE_DISABLED,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      failedStage: 'merge-gate-blocked',
+    });
+  });
+
+  it('blocks merge when CI is failed even if local verification passed', async () => {
+    const result = await executeReviewAction({
+      mode: 'merge',
+      body: PASS_COMMENT_BODY,
+      expectedLanguage: 'zh-CN',
+      hasNeedsHumanTestLabel: false,
+      approvalGate: {
+        ciStatus: 'failed',
+        localVerificationStatus: 'passed',
+      },
+    }, {
+      addLabel: () => {
+        throw new Error('should not add label');
+      },
+      createComment: (_body) => {
+        throw new Error('should not create comment');
+      },
+      editComment: (_commentId, _body) => {
+        throw new Error('should not edit comment');
+      },
+      readComment: () => {
+        throw new Error('should not read comment');
+      },
+      submitReviewDecision: () => {
+        throw new Error('should not submit review decision');
+      },
+      mergePullRequest: MERGE_DISABLED,
+    });
+
+    expect(result).toMatchObject({
+      status: 'failed',
+      failedStage: 'merge-gate-blocked',
+    });
+  });
+
+  it('records approve failures but still merges when gates pass', async () => {
+    const steps: string[] = [];
+    let writtenBody = '';
+
+    const result = await executeReviewAction({
+      mode: 'merge',
+      body: PASS_COMMENT_BODY,
+      expectedLanguage: 'zh-CN',
+      hasNeedsHumanTestLabel: false,
+      approvalGate: {
+        ciStatus: 'passed',
+        localVerificationStatus: 'passed',
+      },
+    }, {
+      addLabel: () => {
+        throw new Error('should not add label');
+      },
+      createComment: (body) => {
+        steps.push('create-comment');
+        writtenBody = body;
+        return {
+          id: '501',
+          url: 'https://example.com/comments/501',
+          body,
+        };
+      },
+      editComment: (_commentId, _body) => {
+        throw new Error('should not edit comment');
+      },
+      readComment: () => {
+        steps.push('read-comment');
+        return {
+          id: '501',
+          url: 'https://example.com/comments/501',
+          body: writtenBody,
+        };
+      },
+      submitReviewDecision: () => {
+        steps.push('approve');
+        throw new Error('approve denied');
+      },
+      mergePullRequest: () => {
+        steps.push('merge');
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.completion).toBe('merge-ready');
+      expect(result.reviewDecision).toBe('approve');
+      expect(result.approveFailure).toContain('approve denied');
+    }
+    expect(writtenBody).toContain('approve 失败');
+    expect(steps).toEqual(['approve', 'create-comment', 'read-comment', 'merge']);
+  });
+
+  it('marks merge-blocked and updates the comment when merge hits a conflict', async () => {
+    let createdBody = '';
+    let editedBody = '';
+
+    const result = await executeReviewAction({
+      mode: 'merge',
+      body: PASS_COMMENT_BODY,
+      expectedLanguage: 'zh-CN',
+      hasNeedsHumanTestLabel: false,
+      approvalGate: {
+        ciStatus: 'passed',
+        localVerificationStatus: 'passed',
+      },
+    }, {
+      addLabel: () => {
+        throw new Error('should not add label');
+      },
+      createComment: (body) => {
+        createdBody = body;
+        return {
+          id: '601',
+          url: 'https://example.com/comments/601',
+          body,
+        };
+      },
+      editComment: (commentId, body) => {
+        editedBody = body;
+        return {
+          id: commentId,
+          url: `https://example.com/comments/${commentId}`,
+          body,
+        };
+      },
+      readComment: () => ({
+        id: '601',
+        url: 'https://example.com/comments/601',
+        body: createdBody,
+      }),
+      submitReviewDecision: () => {},
+      mergePullRequest: () => {
+        throw new Error('merge conflict detected');
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.completion).toBe('merge-blocked');
+      expect(result.mergeFailureKind).toBe('blocked');
+      expect(result.mergeFailure).toContain('merge conflict');
+    }
+    expect(editedBody).toContain('合并阻塞');
+    expect(editedBody).toContain('请同步目标分支后重试');
+  });
+
+  it('marks merge-blocked without calling merge when viewerCanMerge is false', async () => {
+    let createdBody = '';
+    let editedBody = '';
+    const steps: string[] = [];
+
+    const result = await executeReviewAction({
+      mode: 'merge',
+      body: PASS_COMMENT_BODY,
+      expectedLanguage: 'zh-CN',
+      hasNeedsHumanTestLabel: false,
+      viewerCanMerge: false,
+      approvalGate: {
+        ciStatus: 'passed',
+        localVerificationStatus: 'passed',
+      },
+    }, {
+      addLabel: () => {
+        throw new Error('should not add label');
+      },
+      createComment: (body) => {
+        steps.push('create-comment');
+        createdBody = body;
+        return {
+          id: '701',
+          url: 'https://example.com/comments/701',
+          body,
+        };
+      },
+      editComment: (commentId, body) => {
+        steps.push('edit-comment');
+        editedBody = body;
+        return {
+          id: commentId,
+          url: `https://example.com/comments/${commentId}`,
+          body,
+        };
+      },
+      readComment: () => {
+        steps.push('read-comment');
+        return {
+          id: '701',
+          url: 'https://example.com/comments/701',
+          body: editedBody || createdBody,
+        };
+      },
+      submitReviewDecision: () => {
+        steps.push('approve');
+      },
+      mergePullRequest: () => {
+        steps.push('merge');
+        throw new Error('should not merge when viewerCanMerge is false');
+      },
+    });
+
+    expect(result.status).toBe('completed');
+    if (result.status === 'completed') {
+      expect(result.completion).toBe('merge-blocked');
+      expect(result.mergeFailureKind).toBe('blocked');
+      expect(result.mergeFailure).toContain('viewerCanMerge=false');
+    }
+    expect(steps).toEqual(['approve', 'create-comment', 'read-comment', 'edit-comment', 'read-comment']);
+    expect(editedBody).toContain('合并阻塞');
+    expect(editedBody).toContain('viewerCanMerge=false');
   });
 });
