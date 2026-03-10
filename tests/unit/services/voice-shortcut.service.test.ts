@@ -268,6 +268,31 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     errorSpy.mockRestore();
   });
 
+  it('keeps overlay visible when restarting immediately after done（完成后立刻重开时不应先隐藏悬浮窗）', async () => {
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    emitMock.mockClear();
+    invokeMock.mockClear();
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(invokeMock).not.toHaveBeenCalledWith('voice_overlay_hide');
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: expect.stringMatching(/arming|recording/),
+      }),
+    );
+
+    service.destroy();
+  });
+
   it('ignores duplicate stop events in same round（同轮重复 stop 事件只处理一次）', async () => {
     const service = new VoiceShortcutService();
     await service.init();
