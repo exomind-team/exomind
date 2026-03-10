@@ -28,6 +28,7 @@
 说明与假设：
 - `new-review` 依赖 review submission 事件（例如 “Start review → Submit review (COMMENTED)”）。
 - 仅有顶层 review comment 且未产生 review submission 的场景不会触发 `new-review`，且不会被当作 thread reply 计入；除非未来需要覆盖该场景，否则保持这一取舍。
+- 若后续观察到 review submission 事件缺失，可回退为“顶层 review comments 作为补充信号”，避免漏报。
 
 其中 review thread 回复属于可选增强信号：
 
