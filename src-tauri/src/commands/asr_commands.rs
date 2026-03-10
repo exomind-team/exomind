@@ -23,7 +23,7 @@ use tungstenite::{http::Request as HttpRequest, Message};
 const VOLCANO_STREAM_EVENT_NAME: &str = "volcano-asr-stream-event";
 const VOLCANO_STREAM_CANCELLED_MESSAGE: &str = "火山流式会话已取消";
 const VOLCANO_STREAM_FINISH_TIMEOUT_SECS: u64 = 30;
-const VOLCANO_STREAM_KEEPALIVE_SECS: u64 = 15;
+const VOLCANO_STREAM_KEEPALIVE_SECS: u64 = 3;
 
 type VolcanoWsStream = WebSocketStream<MaybeTlsStream<tokio::net::TcpStream>>;
 type VolcanoWriteHalf = SplitSink<VolcanoWsStream, Message>;

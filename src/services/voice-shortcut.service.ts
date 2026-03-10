@@ -47,7 +47,8 @@ export type VoiceShortcutState = 'idle' | 'arming' | 'recording' | 'recognizing'
 const LOG_TAG = '[VoiceShortcut]';
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
-const VOLCANO_WARM_MAINTENANCE_INTERVAL_MS = 15000;
+const VOLCANO_WARM_MAINTENANCE_INTERVAL_MS = 3000;
+const VOLCANO_WARM_ROTATE_AFTER_MS = 6000;
 
 type VolcanoSessionWarmReason =
   | 'prewarmed'
@@ -328,10 +329,28 @@ export class VoiceShortcutService {
     }
 
     this.warmMaintenanceTimer = setInterval(() => {
-      if (this.startPending || this.state === 'recording' || this.state === 'recognizing') {
-        return;
-      }
-      void this.prewarmVolcanoSessionIfPossible();
+      void (async () => {
+        if (this.startPending || this.state === 'recording' || this.state === 'recognizing') {
+          return;
+        }
+
+        const warmAgeMs = this.warmVolcanoSessionCreatedAtMs == null
+          ? null
+          : Math.max(0, Date.now() - this.warmVolcanoSessionCreatedAtMs);
+        if (
+          this.warmVolcanoSessionId
+          && warmAgeMs != null
+          && warmAgeMs >= VOLCANO_WARM_ROTATE_AFTER_MS
+        ) {
+          console.info(
+            LOG_TAG,
+            `[warm] standby exceeded short hot window (${warmAgeMs}ms), rotating in background`,
+          );
+          await this.cancelWarmVolcanoSession('idle-window-rotation');
+        }
+
+        await this.prewarmVolcanoSessionIfPossible();
+      })();
     }, VOLCANO_WARM_MAINTENANCE_INTERVAL_MS);
   }
 
@@ -435,7 +454,7 @@ export class VoiceShortcutService {
     });
   }
 
-  private async cancelWarmVolcanoSession(): Promise<void> {
+  private async cancelWarmVolcanoSession(reason = 'cancelled'): Promise<void> {
     const snapshot = this.clearWarmVolcanoSessionState();
     const sessionId = snapshot.sessionId;
 
@@ -444,7 +463,7 @@ export class VoiceShortcutService {
     }
 
     try {
-      this.logWarmSessionClosed(snapshot, 'cancelled');
+      this.logWarmSessionClosed(snapshot, reason);
       await invoke('volcano_asr_stream_cancel', { sessionId });
     } catch (error) {
       console.warn(LOG_TAG, 'failed to cancel warm volcano session:', error);

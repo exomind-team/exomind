@@ -647,6 +647,48 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     vi.useRealTimers();
   });
 
+  it('rotates standby session before the idle window expires（待命会话在空闲窗口到期前主动轮换）', async () => {
+    vi.useFakeTimers();
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    let sessionCounter = 0;
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        sessionCounter += 1;
+        return `rotate-session-${sessionCounter}`;
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
+      if (command === 'volcano_asr_stream_cancel' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    const initialSessionCount = sessionCounter;
+    expect(initialSessionCount).toBeGreaterThanOrEqual(1);
+
+    await vi.advanceTimersByTimeAsync(7000);
+    await flushAsync();
+
+    expect(sessionCounter).toBeGreaterThan(initialSessionCount);
+
+    service.destroy();
+    vi.useRealTimers();
+  });
+
   it('replenishes standby session immediately when warm session closes remotely（standby 被远端关闭后立即补位）', async () => {
     permissionsQueryMock.mockResolvedValue({ state: 'granted' });
     setVoiceShortcutAsrProvider('volcano');
