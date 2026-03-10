@@ -24,6 +24,7 @@ interface OverlayData {
   state: OverlayState;
   duration: number;
   text: string;
+  hintText?: string;
   isLivePreview?: boolean;
   providerLabel?: string;
   recognitionMs?: number;
@@ -40,6 +41,7 @@ export function VoiceOverlayPage() {
     state: 'idle',
     duration: 0,
     text: '',
+    hintText: '',
     isLivePreview: false,
     providerLabel: '',
     recognitionMs: undefined,
@@ -165,6 +167,7 @@ export function VoiceOverlayPage() {
             shortcut={shortcut}
             duration={data.duration}
             text={data.text}
+            hintText={data.hintText}
             isLivePreview={data.isLivePreview}
             providerLabel={data.providerLabel}
             recognitionMs={data.recognitionMs}
@@ -221,6 +224,7 @@ function StatusText({
   shortcut,
   duration,
   text,
+  hintText,
   isLivePreview,
   providerLabel,
   recognitionMs,
@@ -232,6 +236,7 @@ function StatusText({
   shortcut: VoiceShortcutHotkey;
   duration: number;
   text: string;
+  hintText?: string;
   isLivePreview?: boolean;
   providerLabel?: string;
   recognitionMs?: number;
@@ -240,6 +245,7 @@ function StatusText({
   onTranscriptScroll: () => void;
 }) {
   const transcript = text.trim();
+  const statusHint = hintText?.trim();
   const providerMeta = providerLabel?.trim();
 
   switch (state) {
@@ -254,7 +260,9 @@ function StatusText({
           >
             <span className="overlay-text">{transcript || '准备启动语音输入…'}</span>
           </div>
-          <span className="overlay-text overlay-text--secondary">正在等待麦克风权限并连接识别链路</span>
+          <span className="overlay-text overlay-text--secondary">
+            {statusHint || '正在等待麦克风权限并连接识别链路'}
+          </span>
         </span>
       );
     case 'recording':

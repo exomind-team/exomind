@@ -452,9 +452,12 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushAsync();
 
     expect(getUserMediaWithConstraintFallbackMock).not.toHaveBeenCalled();
-    expect(emitMock).not.toHaveBeenCalledWith(
+    expect(emitMock).toHaveBeenCalledWith(
       'voice-overlay-state',
-      expect.objectContaining({ state: 'arming' }),
+      expect.objectContaining({
+        state: 'arming',
+        text: '正在唤起语音输入…',
+      }),
     );
 
     service.destroy();
