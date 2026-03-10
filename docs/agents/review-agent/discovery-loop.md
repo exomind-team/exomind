@@ -22,7 +22,7 @@
 
 - PR 顶层评论
 - review 提交
-- review thread 回复
+- review thread 回复（仅统计 review comment 的回复，`in_reply_to_id` 非空）
 - 新提交
 
 其中 review thread 回复属于可选增强信号：

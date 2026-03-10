@@ -14,7 +14,7 @@
 
 - `actionable PR`：一个 open PR，从未收到过 `[Codex Reviewer]` 评论，或在最后一条该类评论之后出现了新活动。
 - `current no target`：当前轮次中不存在需要行动的 PR。
-- `review delta`：最后一条 `[Codex Reviewer]` 评论之后出现的新评论、新 review、review thread reply 或新提交。
+- `review delta`：最后一条 `[Codex Reviewer]` 评论之后出现的新评论、新 review、review thread reply（仅回复评论）或新提交。
 - `selected_pr`：当前审阅轮次中选中的那个 actionable PR。
 - `pending_queue`：选出 `selected_pr` 之后剩余的待处理 PR 队列。
 

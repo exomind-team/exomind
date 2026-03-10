@@ -14,6 +14,7 @@ import {
   loadThreadRepliesWithFallback,
   type DiscoveryWarning,
 } from './discovery-runtime-lib.ts';
+import { toThreadReplies, type ReviewCommentInput } from './review-comment-lib.ts';
 import {
   BACKOFF_FILE,
   CURSOR_FILE,
@@ -53,12 +54,6 @@ interface GhReview {
 interface GhCommit {
   oid?: string;
   committedDate?: string | null;
-}
-
-interface GhReviewComment {
-  id?: number | string;
-  body?: string | null;
-  created_at?: string | null;
 }
 
 interface GhPrView {
@@ -306,7 +301,7 @@ function fetchReviewThreadReplies(prNumber: number, repo: string): PullRequestTh
   let page = 1;
 
   while (true) {
-    const pageItems = runGhJson<GhReviewComment[]>([
+    const pageItems = runGhJson<ReviewCommentInput[]>([
       'api',
       `repos/${repo}/pulls/${prNumber}/comments`,
       '-F',
@@ -319,13 +314,7 @@ function fetchReviewThreadReplies(prNumber: number, repo: string): PullRequestTh
       break;
     }
 
-    for (const reply of pageItems) {
-      replies.push({
-        id: reply.id ? String(reply.id) : undefined,
-        body: reply.body ?? undefined,
-        createdAt: reply.created_at ?? null,
-      });
-    }
+    replies.push(...toThreadReplies(pageItems));
 
     if (pageItems.length < perPage) {
       break;

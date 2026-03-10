@@ -44,7 +44,7 @@ temp/
 
 - 每个 PR 上最后处理的 `[Codex Reviewer]` 评论时间戳
 - 每个 PR 上最后看到的 commit SHA
-- 每个 PR 上最后处理的 comment、review 或 review thread reply id
+- 每个 PR 上最后处理的 comment、review 或 review thread reply id（仅回复评论）
 
 ## 游标规则
 
