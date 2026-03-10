@@ -48,7 +48,7 @@ const LOG_TAG = '[VoiceShortcut]';
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
 const VOLCANO_WARM_MAINTENANCE_INTERVAL_MS = 3000;
-const VOLCANO_WARM_ROTATE_AFTER_MS = 6000;
+const VOLCANO_WARM_ROTATE_AFTER_MS = 5000;
 
 type VolcanoSessionWarmReason =
   | 'prewarmed'
@@ -107,6 +107,7 @@ export class VoiceShortcutService {
   private unlistenMicPrewarm: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private warmMaintenanceTimer: ReturnType<typeof setInterval> | null = null;
+  private warmRotateTimer: ReturnType<typeof setTimeout> | null = null;
   private initializing = false;
   private startPending = false;
   private activationStartedAt: number | null = null;
@@ -209,6 +210,7 @@ export class VoiceShortcutService {
       document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     }
     this.clearWarmMaintenanceLoop();
+    this.clearWarmRotateTimer();
     void this.syncRecordingActive(false);
     this.stopLivePreview('abort');
     void this.cancelWarmVolcanoSession();
@@ -322,6 +324,31 @@ export class VoiceShortcutService {
     }
   }
 
+  private clearWarmRotateTimer(): void {
+    if (this.warmRotateTimer !== null) {
+      clearTimeout(this.warmRotateTimer);
+      this.warmRotateTimer = null;
+    }
+  }
+
+  private scheduleWarmRotateTimer(sessionId: string, createdAtMs: number): void {
+    this.clearWarmRotateTimer();
+    this.warmRotateTimer = setTimeout(() => {
+      void (async () => {
+        if (this.warmVolcanoSessionId !== sessionId || this.startPending) {
+          return;
+        }
+        const warmAgeMs = Math.max(0, Date.now() - createdAtMs);
+        console.info(
+          LOG_TAG,
+          `[warm] standby exceeded short hot window (${warmAgeMs}ms), rotating in background`,
+        );
+        await this.cancelWarmVolcanoSession('idle-window-rotation');
+        await this.prewarmVolcanoSessionIfPossible();
+      })();
+    }, VOLCANO_WARM_ROTATE_AFTER_MS);
+  }
+
   private syncWarmMaintenanceLoop(): void {
     this.clearWarmMaintenanceLoop();
     if (!this.micPrewarmEnabled || this.asrProvider !== 'volcano') {
@@ -333,22 +360,6 @@ export class VoiceShortcutService {
         if (this.startPending || this.state === 'recording' || this.state === 'recognizing') {
           return;
         }
-
-        const warmAgeMs = this.warmVolcanoSessionCreatedAtMs == null
-          ? null
-          : Math.max(0, Date.now() - this.warmVolcanoSessionCreatedAtMs);
-        if (
-          this.warmVolcanoSessionId
-          && warmAgeMs != null
-          && warmAgeMs >= VOLCANO_WARM_ROTATE_AFTER_MS
-        ) {
-          console.info(
-            LOG_TAG,
-            `[warm] standby exceeded short hot window (${warmAgeMs}ms), rotating in background`,
-          );
-          await this.cancelWarmVolcanoSession('idle-window-rotation');
-        }
-
         await this.prewarmVolcanoSessionIfPossible();
       })();
     }, VOLCANO_WARM_MAINTENANCE_INTERVAL_MS);
@@ -476,6 +487,7 @@ export class VoiceShortcutService {
       createdAtMs: this.warmVolcanoSessionCreatedAtMs,
       warmKey: this.warmVolcanoSessionKey,
     };
+    this.clearWarmRotateTimer();
     this.warmVolcanoSessionId = null;
     this.warmVolcanoSessionCreatedAtMs = null;
     this.warmVolcanoSessionKey = null;
@@ -579,6 +591,7 @@ export class VoiceShortcutService {
         this.warmVolcanoSessionCreatedAtMs = createdAtMs;
         console.info(LOG_TAG, '[warm] volcano session prepared in background');
         this.logWarmSessionPrepared(sessionId, createdAtMs);
+        this.scheduleWarmRotateTimer(sessionId, createdAtMs);
         return sessionId;
       } catch (error) {
         console.warn(LOG_TAG, 'volcano session prewarm failed:', error);
