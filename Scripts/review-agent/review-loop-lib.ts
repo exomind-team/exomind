@@ -90,7 +90,10 @@ const TEST_FILE_PATTERN = /(^|\/)(test|tests|__tests__)\b|\.test\.[A-Za-z0-9]+$|
 const CORE_FILE_PATTERN = /(service|controller|model)/i;
 const NO_ISSUES_PATTERN = /(未发现问题|no new issues|no issues found|no blocking issues)/i;
 const BLOCKING_REASON_PATTERN = /(阻塞点|阻塞原因|blocked by|blocking reason|blocking:|blocker|\bCI\b[^\n]*(red|fail|failed|failing|pending|running|in progress)|\bchecks?\b[^\n]*(failed|failing|red|pending)|\b(build|tests?)\b[^\n]*(failed|failing|red|pending)|CI\s*(失败|未通过|红|卡住|阻塞)|检查\s*(未通过|失败|红)|测试\s*(未通过|失败|红))/i;
+const BLOCKING_VERIFICATION_PATTERN = /(核查方法|验证方法|复现方法|验证步骤|复现步骤|验证方式|复现方式|verification steps?|verify|verification|repro steps?|reproduce|how to verify|how to reproduce|运行命令|执行命令|run\s)/i;
+const BLOCKING_RESPONSIBILITY_PATTERN = /(责任人|责任|负责人|负责|由.*(处理|推进|确认|复核|测试)|请.*(处理|推进|确认|复核|测试)|owner|responsibility|next owner|waiting on|needs human|needs owner|needs team)/i;
 const PROGRESS_UPDATE_PATTERN = /(进展|当前进度|最新进展|状态同步|PR 进度|progress update|status update|current status|next step|next steps)/i;
+const PROGRESS_ACTION_PATTERN = /(已(同步|更新|推进|移动|完成|合并|修复|提交)|同步了|更新了|推进了|完成了|moved|updated|synced|advanced|progressed|ready|prepared|promoted|rebased|merged)/i;
 export const HUMAN_TEST_PREFIX = `${REVIEWER_PREFIX} ❤️ 需要人类测试`;
 export const NEEDS_HUMAN_TEST_LABEL = '🙋needs-human-test';
 const COMPLETION_STATE_MAP: Record<ReviewCompletionResult, Extract<ReviewAgentStateValue, 'REVIEW_POSTED' | 'NEEDS_HUMAN_TEST' | 'APPROVE_READY' | 'MERGE_READY'>> = {
@@ -176,13 +179,26 @@ export function validateReviewComment(
     errors.push(`Comment must start with ${REVIEWER_PREFIX}.`);
   }
 
-  if (
-    input.mode === 'comment'
-    && NO_ISSUES_PATTERN.test(input.body)
-    && !BLOCKING_REASON_PATTERN.test(input.body)
-    && !PROGRESS_UPDATE_PATTERN.test(input.body)
-  ) {
-    errors.push('No-issue comments must include an explicit blocking reason or progress update.');
+  if (input.mode === 'comment' && NO_ISSUES_PATTERN.test(input.body)) {
+    const hasBlockingReason = BLOCKING_REASON_PATTERN.test(input.body);
+    const hasProgressUpdate = PROGRESS_UPDATE_PATTERN.test(input.body);
+
+    if (!hasBlockingReason && !hasProgressUpdate) {
+      errors.push('No-issue comments must include an explicit blocking reason or progress update.');
+    }
+
+    if (hasBlockingReason) {
+      if (!BLOCKING_VERIFICATION_PATTERN.test(input.body)) {
+        errors.push('Blocking details must include verification steps.');
+      }
+      if (!BLOCKING_RESPONSIBILITY_PATTERN.test(input.body)) {
+        errors.push('Blocking details must include responsibility or next owner.');
+      }
+    }
+
+    if (!hasBlockingReason && hasProgressUpdate && !PROGRESS_ACTION_PATTERN.test(input.body)) {
+      errors.push('Progress updates must include a PR state change.');
+    }
   }
 
   if (/[?？]{5,}/u.test(input.body)) {

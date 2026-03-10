@@ -260,32 +260,47 @@ describe('review-agent review loop', () => {
       expect.stringContaining('blocking reason or progress update'),
     ]));
 
-    const withReason = validateReviewComment({
-      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。当前阻塞点：CI 仍为 red（inherited failure）。',
-      expectedLanguage: 'zh-CN',
-      mode: 'comment',
-    });
-
-    expect(withReason.valid).toBe(true);
-
-    const withCiStatus = validateReviewComment({
+    const missingBlockingDetails = validateReviewComment({
       body: '[Codex Reviewer] 已审阅最新变更，未发现问题。CI 仍为 red。',
       expectedLanguage: 'zh-CN',
       mode: 'comment',
     });
 
-    expect(withCiStatus.valid).toBe(true);
+    expect(missingBlockingDetails.valid).toBe(false);
+    expect(missingBlockingDetails.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('verification steps'),
+      expect.stringContaining('responsibility'),
+    ]));
 
-    const withEnglishCiStatus = validateReviewComment({
-      body: '[Codex Reviewer] No issues found. CI still red.',
+    const withBlockingDetails = validateReviewComment({
+      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。阻塞原因：CI 仍为 red。核查方法：对比基分支与当前 PR 的同名检查结果。责任/下一步：请工作 Agent 在 CI 绿或确认继承失败后推进。',
+      expectedLanguage: 'zh-CN',
+      mode: 'comment',
+    });
+
+    expect(withBlockingDetails.valid).toBe(true);
+
+    const withEnglishBlockingDetails = validateReviewComment({
+      body: '[Codex Reviewer] No issues found. Blocking reason: CI still red. Verification: compare base vs PR check-runs. Responsibility: waiting on CI owner or Worker follow-up.',
       expectedLanguage: 'en',
       mode: 'comment',
     });
 
-    expect(withEnglishCiStatus.valid).toBe(true);
+    expect(withEnglishBlockingDetails.valid).toBe(true);
+
+    const missingProgressAction = validateReviewComment({
+      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。最新进展：暂无。',
+      expectedLanguage: 'zh-CN',
+      mode: 'comment',
+    });
+
+    expect(missingProgressAction.valid).toBe(false);
+    expect(missingProgressAction.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('PR state change'),
+    ]));
 
     const withProgressUpdate = validateReviewComment({
-      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。最新进展：PR 已准备好，请工作 Agent 提交最后的构建日志。',
+      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。最新进展：已同步 dev 并更新 PR 描述，准备进入 approve gate。',
       expectedLanguage: 'zh-CN',
       mode: 'comment',
     });
