@@ -88,6 +88,8 @@ interface BuildRetryableReviewFailureStateInput {
 const ISSUE_REF_PATTERN = /\b(?:ref|refs|close|closes|fix|fixes)\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+)\b/gi;
 const TEST_FILE_PATTERN = /(^|\/)(test|tests|__tests__)\b|\.test\.[A-Za-z0-9]+$|\.spec\.[A-Za-z0-9]+$/i;
 const CORE_FILE_PATTERN = /(service|controller|model)/i;
+const NO_ISSUES_PATTERN = /(未发现问题|no new issues|no issues found|no blocking issues)/i;
+const BLOCKING_REASON_PATTERN = /(阻塞点|阻塞原因|blocked by|blocking reason|blocking:|blocker)/i;
 export const HUMAN_TEST_PREFIX = `${REVIEWER_PREFIX} ❤️ 需要人类测试`;
 export const NEEDS_HUMAN_TEST_LABEL = '🙋needs-human-test';
 const COMPLETION_STATE_MAP: Record<ReviewCompletionResult, Extract<ReviewAgentStateValue, 'REVIEW_POSTED' | 'NEEDS_HUMAN_TEST' | 'APPROVE_READY' | 'MERGE_READY'>> = {
@@ -171,6 +173,14 @@ export function validateReviewComment(
     }
   } else if (!trimmed.startsWith(REVIEWER_PREFIX)) {
     errors.push(`Comment must start with ${REVIEWER_PREFIX}.`);
+  }
+
+  if (
+    input.mode === 'comment'
+    && NO_ISSUES_PATTERN.test(input.body)
+    && !BLOCKING_REASON_PATTERN.test(input.body)
+  ) {
+    errors.push('No-issue comments must include an explicit blocking reason.');
   }
 
   if (/[?？]{5,}/u.test(input.body)) {

@@ -248,6 +248,27 @@ describe('review-agent review loop', () => {
     ]));
   });
 
+  it('requires a blocking reason when declaring no issues in a standard comment', () => {
+    const missingReason = validateReviewComment({
+      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。',
+      expectedLanguage: 'zh-CN',
+      mode: 'comment',
+    });
+
+    expect(missingReason.valid).toBe(false);
+    expect(missingReason.errors).toEqual(expect.arrayContaining([
+      expect.stringContaining('blocking reason'),
+    ]));
+
+    const withReason = validateReviewComment({
+      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。当前阻塞点：CI 仍为 red（inherited failure）。',
+      expectedLanguage: 'zh-CN',
+      mode: 'comment',
+    });
+
+    expect(withReason.valid).toBe(true);
+  });
+
   it('rejects suspicious full-width question-mark runs in zh-CN comments', () => {
     const result = validateReviewComment({
       body: '[Codex Reviewer] 已审阅最新变更，是否已完成验证？？？？？',
