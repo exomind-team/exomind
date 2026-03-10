@@ -1,69 +1,116 @@
 import { BookOpen, FileText, History, RefreshCw, User } from 'lucide-react';
 import { useCallback, useEffect, useState } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 
 // ---------------------------------------------------------------------------
-// Types matching REST API responses
+// Types — camelCase (matches Tauri command serde output)
 // ---------------------------------------------------------------------------
 
+interface KnowledgeFileInfo {
+  name: string;
+  sizeBytes: number;
+}
+
 interface KnowledgeListResponse {
-  files: string[];
-  usage_bytes: number;
-  max_bytes: number;
-  usage_ratio: number;
+  files: KnowledgeFileInfo[];
+  usageBytes: number;
+  maxBytes: number;
+  usageRatio: number;
 }
 
 interface ActionEntry {
   timestamp: string;
   tick: number;
-  action_type: string;
+  actionType: string;
   description: string;
-  energy_before: number;
-  energy_after: number;
+  energyBefore: number;
+  energyAfter: number;
+}
+
+interface ActionsResponse {
+  actions: ActionEntry[];
+  total: number;
 }
 
 interface WorkspaceStatus {
-  knowledge_usage_ratio: number;
-  total_actions: number;
-  uptime_ticks: number;
-  current_strategy: string;
-  energy_current: number | null;
-  energy_max: number | null;
-  energy_ratio: number | null;
-  energy_phase: string | null;
+  knowledgeUsageRatio: number;
+  totalActions: number;
+  uptimeTicks: number;
+  currentStrategy: string;
+  energyLevel: number;
+  energyMax: number;
 }
 
 // ---------------------------------------------------------------------------
-// Helpers
+// Helpers — Tauri invoke (desktop) with HTTP fallback (web)
 // ---------------------------------------------------------------------------
 
-async function fetchWorkspaceApi<T>(agentId: string, path: string): Promise<T | null> {
+async function fetchWorkspaceKnowledgeList(agentId: string): Promise<KnowledgeListResponse | null> {
   try {
-    const hosts = await getRuntimeHostService().listHosts();
-    if (hosts.length === 0) return null;
-    const host = hosts[0];
-    const url = `http://${host.host}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
-    if (!resp.ok) return null;
-    return await resp.json() as T;
-  } catch {
-    return null;
-  }
+    if (isTauri()) {
+      return await invoke<KnowledgeListResponse>('get_agent_workspace_knowledge_list', { agentId });
+    }
+    return await httpGet<KnowledgeListResponse>(agentId, 'knowledge');
+  } catch { return null; }
 }
 
-async function fetchWorkspaceText(agentId: string, path: string): Promise<string | null> {
+async function fetchWorkspaceKnowledgeFile(agentId: string, filename: string): Promise<string | null> {
   try {
-    const hosts = await getRuntimeHostService().listHosts();
-    if (hosts.length === 0) return null;
-    const host = hosts[0];
-    const url = `http://${host.host}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
-    const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
-    if (!resp.ok) return null;
-    return await resp.text();
-  } catch {
-    return null;
-  }
+    if (isTauri()) {
+      return await invoke<string>('get_agent_workspace_knowledge', { agentId, filename });
+    }
+    return await httpText(agentId, `knowledge/${filename}`);
+  } catch { return null; }
+}
+
+async function fetchWorkspaceActions(agentId: string, limit = 50): Promise<ActionsResponse | null> {
+  try {
+    if (isTauri()) {
+      return await invoke<ActionsResponse>('get_agent_workspace_actions', { agentId, limit });
+    }
+    return await httpGet<ActionsResponse>(agentId, `actions?limit=${limit}`);
+  } catch { return null; }
+}
+
+async function fetchWorkspaceSoul(agentId: string): Promise<string | null> {
+  try {
+    if (isTauri()) {
+      return await invoke<string>('get_agent_workspace_soul', { agentId });
+    }
+    return await httpText(agentId, 'soul');
+  } catch { return null; }
+}
+
+async function fetchWorkspaceStatus(agentId: string): Promise<WorkspaceStatus | null> {
+  try {
+    if (isTauri()) {
+      return await invoke<WorkspaceStatus>('get_agent_workspace_status', { agentId });
+    }
+    return await httpGet<WorkspaceStatus>(agentId, 'status');
+  } catch { return null; }
+}
+
+// HTTP fallback for non-Tauri (web) environments
+async function httpGet<T>(agentId: string, path: string): Promise<T | null> {
+  const hosts = await getRuntimeHostService().listHosts();
+  if (hosts.length === 0) return null;
+  const host = hosts[0];
+  const url = `http://${host.host}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+  if (!resp.ok) return null;
+  return await resp.json() as T;
+}
+
+async function httpText(agentId: string, path: string): Promise<string | null> {
+  const hosts = await getRuntimeHostService().listHosts();
+  if (hosts.length === 0) return null;
+  const host = hosts[0];
+  const url = `http://${host.host}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
+  const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
+  if (!resp.ok) return null;
+  return await resp.text();
 }
 
 const STRATEGY_LABELS: Record<string, string> = {
@@ -92,7 +139,7 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const result = await fetchWorkspaceApi<KnowledgeListResponse>(agentId, 'knowledge');
+    const result = await fetchWorkspaceKnowledgeList(agentId);
     setData(result);
     setLoading(false);
   }, [agentId]);
@@ -103,7 +150,7 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
     if (!selectedFile) { setFileContent(null); return; }
     let cancelled = false;
     void (async () => {
-      const content = await fetchWorkspaceText(agentId, `knowledge/${selectedFile}`);
+      const content = await fetchWorkspaceKnowledgeFile(agentId, selectedFile);
       if (!cancelled) setFileContent(content);
     })();
     return () => { cancelled = true; };
@@ -112,9 +159,9 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
   if (loading) return <div className="py-4 text-center text-xs text-muted-foreground">加载中...</div>;
   if (!data) return <div className="py-4 text-center text-xs text-muted-foreground">无法连接到 Runtime</div>;
 
-  const usagePercent = Math.round(data.usage_ratio * 100);
-  const usageKB = (data.usage_bytes / 1024).toFixed(1);
-  const maxKB = (data.max_bytes / 1024).toFixed(0);
+  const usagePercent = Math.round(data.usageRatio * 100);
+  const usageKB = (data.usageBytes / 1024).toFixed(1);
+  const maxKB = (data.maxBytes / 1024).toFixed(0);
 
   return (
     <div>
@@ -137,17 +184,18 @@ function KnowledgeTab({ agentId }: { agentId: string }) {
         <div className="py-6 text-center text-xs text-muted-foreground">知识库为空 — Agent 尚未记录任何记忆</div>
       ) : (
         <div className="overflow-hidden rounded-xl border border-border-card bg-card">
-          {data.files.map((filename, idx) => (
-            <div key={filename}>
+          {data.files.map((file, idx) => (
+            <div key={file.name}>
               <button
                 type="button"
                 className="flex w-full items-center gap-2 px-4 py-3 text-left hover:bg-muted/50"
-                onClick={() => setSelectedFile(selectedFile === filename ? null : filename)}
+                onClick={() => setSelectedFile(selectedFile === file.name ? null : file.name)}
               >
                 <FileText size={14} className="shrink-0 text-muted-foreground" />
-                <span className="text-sm font-medium text-foreground">{filename}</span>
+                <span className="text-sm font-medium text-foreground">{file.name}</span>
+                <span className="ml-auto text-[10px] text-muted-foreground">{(file.sizeBytes / 1024).toFixed(1)} KB</span>
               </button>
-              {selectedFile === filename && fileContent !== null && (
+              {selectedFile === file.name && fileContent !== null && (
                 <div className="border-t border-border bg-background px-4 py-3">
                   <pre className="whitespace-pre-wrap text-xs text-muted-foreground">{fileContent}</pre>
                 </div>
@@ -171,8 +219,8 @@ function ActionsTab({ agentId }: { agentId: string }) {
 
   const refresh = useCallback(async () => {
     setLoading(true);
-    const result = await fetchWorkspaceApi<ActionEntry[]>(agentId, 'actions?limit=50');
-    setActions(result ?? []);
+    const result = await fetchWorkspaceActions(agentId, 50);
+    setActions(result?.actions ?? []);
     setLoading(false);
   }, [agentId]);
 
@@ -206,8 +254,8 @@ function ActionsTab({ agentId }: { agentId: string }) {
       <div className="overflow-hidden rounded-xl border border-border-card bg-card">
         {[...actions].reverse().map((entry, idx) => {
           const time = new Date(entry.timestamp).toLocaleTimeString('zh-CN', { hour12: false });
-          const typeLabel = ACTION_TYPE_LABELS[entry.action_type] ?? entry.action_type;
-          const energyDelta = entry.energy_after - entry.energy_before;
+          const typeLabel = ACTION_TYPE_LABELS[entry.actionType] ?? entry.actionType;
+          const energyDelta = entry.energyAfter - entry.energyBefore;
 
           return (
             <div key={`${entry.tick}-${idx}`}>
@@ -254,8 +302,8 @@ function IdentityTab({ agentId }: { agentId: string }) {
     let cancelled = false;
     void (async () => {
       const [soulContent, statusData] = await Promise.all([
-        fetchWorkspaceText(agentId, 'soul'),
-        fetchWorkspaceApi<WorkspaceStatus>(agentId, 'status'),
+        fetchWorkspaceSoul(agentId),
+        fetchWorkspaceStatus(agentId),
       ]);
       if (!cancelled) {
         setSoul(soulContent);
@@ -278,29 +326,29 @@ function IdentityTab({ agentId }: { agentId: string }) {
             <div className="rounded-lg bg-background py-2 text-center">
               <span className="text-[10px] text-muted-foreground">策略</span>
               <p className="text-sm font-semibold text-foreground">
-                {STRATEGY_LABELS[status.current_strategy] ?? status.current_strategy}
+                {STRATEGY_LABELS[status.currentStrategy] ?? status.currentStrategy}
               </p>
             </div>
             <div className="rounded-lg bg-background py-2 text-center">
               <span className="text-[10px] text-muted-foreground">运行 Tick</span>
-              <p className="text-sm font-semibold text-foreground">{status.uptime_ticks}</p>
+              <p className="text-sm font-semibold text-foreground">{status.uptimeTicks}</p>
             </div>
             <div className="rounded-lg bg-background py-2 text-center">
               <span className="text-[10px] text-muted-foreground">总行动数</span>
-              <p className="text-sm font-semibold text-foreground">{status.total_actions}</p>
+              <p className="text-sm font-semibold text-foreground">{status.totalActions}</p>
             </div>
             <div className="rounded-lg bg-background py-2 text-center">
               <span className="text-[10px] text-muted-foreground">记忆使用率</span>
               <p className="text-sm font-semibold text-foreground">
-                {Math.round(status.knowledge_usage_ratio * 100)}%
+                {Math.round(status.knowledgeUsageRatio * 100)}%
               </p>
             </div>
           </div>
-          {status.energy_ratio !== null && (
+          {status.energyMax > 0 && (
             <div className="mt-2 rounded-lg bg-background py-2 text-center">
               <span className="text-[10px] text-muted-foreground">能量</span>
               <p className="text-sm font-semibold text-foreground">
-                {status.energy_current} / {status.energy_max} ({Math.round((status.energy_ratio ?? 0) * 100)}%)
+                {status.energyLevel} / {status.energyMax} ({Math.round((status.energyLevel / status.energyMax) * 100)}%)
               </p>
             </div>
           )}
