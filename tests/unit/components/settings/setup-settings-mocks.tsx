@@ -102,6 +102,12 @@ vi.mock('@/config/voice-overlay-preferences', () => ({
   subscribeVoiceOverlayOpacityChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/voice-shortcut-mic-prewarm', () => ({
+  getVoiceShortcutMicPrewarmEnabled: vi.fn(() => true),
+  setVoiceShortcutMicPrewarmEnabled: vi.fn(),
+  subscribeVoiceShortcutMicPrewarmChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/feedback-preferences', () => ({
   getFeedbackPreferences: vi.fn(() => ({
     timingInfoEnabled: false,

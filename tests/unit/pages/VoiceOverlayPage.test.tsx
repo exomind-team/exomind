@@ -73,7 +73,7 @@ describe('VoiceOverlayPage', () => {
     });
 
     expect(screen.getByText('准备启动语音输入…')).toBeInTheDocument();
-    expect(screen.getByText('正在连接麦克风与识别链路')).toBeInTheDocument();
+    expect(screen.getByText('正在等待麦克风权限并连接识别链路')).toBeInTheDocument();
   });
 
   it('shows recognition elapsed time on done state', async () => {

@@ -125,6 +125,7 @@ pub fn ensure_voice_overlay_window(app: &AppHandle) -> Result<(), String> {
     .inner_size(VOICE_OVERLAY_WIDTH, VOICE_OVERLAY_HEIGHT)
     .always_on_top(true)
     .decorations(false)
+    .shadow(false)
     .skip_taskbar(true)
     .resizable(false)
     .visible(false);

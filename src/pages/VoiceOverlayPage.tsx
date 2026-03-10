@@ -254,7 +254,7 @@ function StatusText({
           >
             <span className="overlay-text">{transcript || '准备启动语音输入…'}</span>
           </div>
-          <span className="overlay-text overlay-text--secondary">正在连接麦克风与识别链路</span>
+          <span className="overlay-text overlay-text--secondary">正在等待麦克风权限并连接识别链路</span>
         </span>
       );
     case 'recording':

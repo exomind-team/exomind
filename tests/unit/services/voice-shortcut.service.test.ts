@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
+import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
 import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
 
 const tauriEventListeners = new Map<string, (event: { payload: any }) => void | Promise<void>>();
@@ -203,6 +204,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     });
 
     window.localStorage.removeItem('exomind:voiceShortcutAsrProvider');
+    window.localStorage.removeItem('exomind:voiceShortcutMicPrewarmEnabled');
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.accessKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.resourceId);
@@ -220,6 +222,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     writeClipboardMock.mockResolvedValue({ ok: true, title: 'ok' });
     addEventMock.mockResolvedValue(undefined);
+    setVoiceShortcutMicPrewarmEnabled(true);
 
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
       if (command === 'voice_shortcut_set') {
@@ -326,6 +329,32 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('does not write empty recognition text to event log（空识别结果不写事件日志）', async () => {
+    transcribeMock.mockResolvedValue({
+      text: '   ',
+      confidence: 0.4,
+      lang: 'zh-CN',
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(addEventMock).not.toHaveBeenCalled();
+    expect(writeClipboardMock).not.toHaveBeenCalled();
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'error',
+      }),
+    );
+
+    service.destroy();
+  });
+
   it('emits full live preview text during recording（录音时发出完整实时预览文本）', async () => {
     const service = new VoiceShortcutService();
     await service.init();
@@ -391,6 +420,18 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         duration: 0,
       })
     );
+
+    service.destroy();
+  });
+
+  it('does not prewarm microphone when prewarm setting is disabled（关闭预启动后不后台预热麦克风）', async () => {
+    setVoiceShortcutMicPrewarmEnabled(false);
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    expect(getUserMediaWithConstraintFallbackMock).not.toHaveBeenCalled();
 
     service.destroy();
   });

@@ -5,6 +5,7 @@ import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
+import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
 import { setVoiceOverlayOpacity } from '@/config/voice-overlay-preferences';
 import { setVolcanoResourceId } from '@/lib/asr/volcano-config';
 
@@ -46,6 +47,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
     expect(screen.getByText('快捷语音引擎')).toBeInTheDocument();
+    expect(screen.getByText('预启动麦克风')).toBeInTheDocument();
     expect(screen.getByText('悬浮窗透明度')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
@@ -87,6 +89,15 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(setVoiceOverlayOpacity(74)).toBe(74);
     expect(screen.getByText('74%')).toBeInTheDocument();
+  });
+
+  it('toggles microphone prewarm from input section', () => {
+    render(<SettingsPage />);
+
+    const prewarmSwitch = screen.getByTestId('new-settings-voice-prewarm-switch');
+    fireEvent.click(prewarmSwitch);
+
+    expect(setVoiceShortcutMicPrewarmEnabled).toHaveBeenCalledWith(false);
   });
 
   it('toggles voice transcript send mode from input section', () => {
