@@ -99,12 +99,10 @@ pub struct RuntimeStartOptions {
 
 impl Default for RuntimeStartOptions {
     fn default() -> Self {
-        let spawn_ts_agents = env::var("EXOMIND_RT_DISABLE_TS_AGENTS")
-            .map(|value| {
-                let value = value.to_ascii_lowercase();
-                !(value == "1" || value == "true" || value == "yes")
-            })
-            .unwrap_or(true);
+        let spawn_ts_agents = spawn_ts_agents_default_for_platform(
+            cfg!(any(target_os = "android", target_os = "ios")),
+            env::var("EXOMIND_RT_DISABLE_TS_AGENTS").ok().as_deref(),
+        );
 
         let enable_mdns = env::var("EXOMIND_RT_MDNS")
             .map(|value| {
@@ -133,6 +131,26 @@ impl Default for RuntimeStartOptions {
             data_dir: env::var("EXOMIND_RT_DATA_DIR").ok().map(PathBuf::from),
         }
     }
+}
+
+/// Resolve TS agent default by platform + env（按平台 + 环境变量决定 TS Agent 默认值）.
+/// Mobile defaults to disabled because packaged Android/iOS runtimes usually have no Bun/tooling.
+/// （移动端默认关闭，因为打包后的 Android/iOS 运行时通常没有 Bun/tooling）
+pub fn spawn_ts_agents_default_for_platform(
+    is_mobile_platform: bool,
+    disable_env: Option<&str>,
+) -> bool {
+    if let Some(value) = disable_env {
+        let normalized = value.trim().to_ascii_lowercase();
+        if normalized == "1" || normalized == "true" || normalized == "yes" {
+            return false;
+        }
+        if normalized == "0" || normalized == "false" || normalized == "no" {
+            return true;
+        }
+    }
+
+    !is_mobile_platform
 }
 
 #[derive(Debug, Error)]

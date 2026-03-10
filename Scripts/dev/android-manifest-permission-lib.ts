@@ -1,4 +1,5 @@
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
+import { basename, join } from 'node:path';
 
 export const RECORD_AUDIO_PERMISSION = 'android.permission.RECORD_AUDIO';
 export const MODIFY_AUDIO_SETTINGS_PERMISSION = 'android.permission.MODIFY_AUDIO_SETTINGS';
@@ -12,6 +13,7 @@ export const REQUIRED_NETWORK_DISCOVERY_PERMISSIONS = [
   CHANGE_WIFI_MULTICAST_STATE_PERMISSION,
 ] as const;
 export const RELEASE_CLEARTEXT_PLACEHOLDER = 'manifestPlaceholders["usesCleartextTraffic"] = "true"';
+const DEBUG_KEEP_SYMBOLS_MARKER = 'jniLibs.keepDebugSymbols.add(';
 
 export type ManifestPatchResult = {
   manifestXml: string;
@@ -46,10 +48,94 @@ export type KotlinFilePatchResult =
   | { status: 'missing-file'; changed: false }
   | { status: 'invalid-activity'; changed: false };
 
+function normalizeNdkVersion(value: string | null | undefined): string | null {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : null;
+}
+
+export function resolveInstalledNdkVersion(env: NodeJS.ProcessEnv = process.env): string | null {
+  const explicit =
+    normalizeNdkVersion(env.EXOMIND_ANDROID_NDK_VERSION)
+    ?? normalizeNdkVersion(env.ANDROID_NDK_VERSION);
+  if (explicit) {
+    return explicit;
+  }
+
+  const ndkHome =
+    normalizeNdkVersion(env.NDK_HOME)
+    ?? normalizeNdkVersion(env.ANDROID_NDK_HOME);
+  if (!ndkHome) {
+    const androidSdkRoot =
+      normalizeNdkVersion(env.ANDROID_HOME)
+      ?? normalizeNdkVersion(env.ANDROID_SDK_ROOT);
+    if (!androidSdkRoot) {
+      return null;
+    }
+
+    const ndkRoot = join(androidSdkRoot, 'ndk');
+    try {
+      const versions = readdirSync(ndkRoot)
+        .filter((entry) => {
+          try {
+            return statSync(join(ndkRoot, entry)).isDirectory();
+          } catch {
+            return false;
+          }
+        })
+        .sort((left, right) => right.localeCompare(left, undefined, { numeric: true, sensitivity: 'base' }));
+
+      return normalizeNdkVersion(versions[0] ?? null);
+    } catch {
+      return null;
+    }
+  }
+
+  return normalizeNdkVersion(basename(ndkHome.replace(/[\\/]+$/, '')));
+}
+
 const MDNS_MULTICAST_LOCK_MARKER = 'createMulticastLock("exomind-mdns-lock")';
 
 function detectNewline(value: string): string {
   return value.includes('\r\n') ? '\r\n' : '\n';
+}
+
+function findGradleBlockRange(
+  source: string,
+  blockOpenPattern: RegExp
+): { start: number; end: number } | null {
+  const match = blockOpenPattern.exec(source);
+  if (!match || match.index === undefined) {
+    return null;
+  }
+
+  const braceOffset = match[0].lastIndexOf('{');
+  if (braceOffset < 0) {
+    return null;
+  }
+
+  const openBraceIndex = match.index + braceOffset;
+  let depth = 0;
+
+  for (let index = openBraceIndex; index < source.length; index += 1) {
+    const char = source[index];
+    if (char === '{') {
+      depth += 1;
+      continue;
+    }
+    if (char !== '}') {
+      continue;
+    }
+
+    depth -= 1;
+    if (depth === 0) {
+      return {
+        start: match.index,
+        end: index + 1,
+      };
+    }
+  }
+
+  return null;
 }
 
 function buildMainActivityWithMulticastLock(packageName: string, newline: string): string {
@@ -247,18 +333,85 @@ export function ensureReleaseCleartextTrafficInGradle(buildGradleKts: string): G
   return { buildGradleKts: updatedGradle, changed: updatedGradle !== buildGradleKts };
 }
 
-export function ensureReleaseCleartextTrafficInGradleFile(buildGradlePath: string): GradleFilePatchResult {
+export function ensureDebugNativeLibsAreStrippedInGradle(buildGradleKts: string): GradlePatchResult {
+  if (!buildGradleKts.includes(DEBUG_KEEP_SYMBOLS_MARKER)) {
+    return { buildGradleKts, changed: false };
+  }
+
+  const debugBlockRange = findGradleBlockRange(buildGradleKts, /getByName\("debug"\)\s*\{/);
+  if (!debugBlockRange) {
+    return { buildGradleKts, changed: false };
+  }
+
+  const newline = detectNewline(buildGradleKts);
+  const debugBlock = buildGradleKts.slice(debugBlockRange.start, debugBlockRange.end);
+  const withoutKeepSymbols = debugBlock
+    .replace(/\s*jniLibs\.keepDebugSymbols\.add\(".*?\.so"\)\s*/g, newline)
+    .replace(/\s*packaging\s*\{\s*\}/g, newline)
+    .replace(new RegExp(`${newline}{3,}`, 'g'), `${newline}${newline}`);
+
+  if (withoutKeepSymbols === debugBlock) {
+    return { buildGradleKts, changed: false };
+  }
+
+  return {
+    buildGradleKts: `${buildGradleKts.slice(0, debugBlockRange.start)}${withoutKeepSymbols}${buildGradleKts.slice(debugBlockRange.end)}`,
+    changed: true,
+  };
+}
+
+export function ensureConfiguredNdkVersionInGradle(
+  buildGradleKts: string,
+  ndkVersion: string | null | undefined
+): GradlePatchResult {
+  const normalizedNdkVersion = normalizeNdkVersion(ndkVersion);
+  if (!normalizedNdkVersion) {
+    return { buildGradleKts, changed: false };
+  }
+
+  const existingPattern = /^\s*ndkVersion\s*=\s*"[^"]+"\s*$/m;
+  if (existingPattern.test(buildGradleKts)) {
+    const updatedGradle = buildGradleKts.replace(
+      existingPattern,
+      `    ndkVersion = "${normalizedNdkVersion}"`
+    );
+    return { buildGradleKts: updatedGradle, changed: updatedGradle !== buildGradleKts };
+  }
+
+  const androidBlockPattern = /android\s*\{\s*/;
+  const match = buildGradleKts.match(androidBlockPattern);
+  if (!match) {
+    return { buildGradleKts, changed: false };
+  }
+
+  const updatedGradle = buildGradleKts.replace(
+    androidBlockPattern,
+    `android {\n    ndkVersion = "${normalizedNdkVersion}"\n    `
+  );
+  return { buildGradleKts: updatedGradle, changed: updatedGradle !== buildGradleKts };
+}
+
+export function ensureReleaseCleartextTrafficInGradleFile(
+  buildGradlePath: string,
+  desiredNdkVersion?: string | null
+): GradleFilePatchResult {
   try {
     const originalGradle = readFileSync(buildGradlePath, 'utf8');
-    const patched = ensureReleaseCleartextTrafficInGradle(originalGradle);
+    const cleartextPatched = ensureReleaseCleartextTrafficInGradle(originalGradle);
+    const patched = ensureDebugNativeLibsAreStrippedInGradle(cleartextPatched.buildGradleKts);
+    const ndkPatched = ensureConfiguredNdkVersionInGradle(patched.buildGradleKts, desiredNdkVersion);
+    const updatedGradle = ndkPatched.buildGradleKts;
+    const changed = cleartextPatched.changed || patched.changed || ndkPatched.changed;
 
-    if (!patched.changed) {
+    if (!changed) {
       return originalGradle.includes(RELEASE_CLEARTEXT_PLACEHOLDER)
+        && !originalGradle.includes(DEBUG_KEEP_SYMBOLS_MARKER)
+        && (!desiredNdkVersion || originalGradle.includes(`ndkVersion = "${desiredNdkVersion}"`))
         ? { status: 'already-present', changed: false }
         : { status: 'invalid-gradle', changed: false };
     }
 
-    writeFileSync(buildGradlePath, patched.buildGradleKts, 'utf8');
+    writeFileSync(buildGradlePath, updatedGradle, 'utf8');
     return { status: 'updated', changed: true };
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === 'ENOENT') {

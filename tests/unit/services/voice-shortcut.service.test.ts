@@ -1,8 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
+import { trimToLatestCharacters } from '@/lib/voice/overlay-text';
 
-let voiceShortcutListener: ((event: { payload: string }) => void | Promise<void>) | null = null;
+const tauriEventListeners = new Map<string, (event: { payload: any }) => void | Promise<void>>();
+let livePreviewOnUpdate: ((payload: { text: string; isFinal: boolean }) => void) | null = null;
+let streamingOnChunk: ((chunk: Uint8Array) => Promise<void>) | null = null;
 
 const emitMock = vi.fn();
 const invokeMock = vi.fn();
@@ -12,6 +15,15 @@ const writeClipboardMock = vi.fn();
 const addEventMock = vi.fn();
 const getUserMediaWithConstraintFallbackMock = vi.fn();
 const subscribeHotkeyMock = vi.fn(() => () => {});
+const livePreviewIsAvailableMock = vi.fn(() => true);
+const livePreviewCreateSessionMock = vi.fn();
+const livePreviewStartMock = vi.fn();
+const livePreviewStopMock = vi.fn();
+const livePreviewAbortMock = vi.fn();
+const streamingCaptureCreateMock = vi.fn();
+const streamingCaptureStartMock = vi.fn();
+const streamingCaptureStopMock = vi.fn(async () => new Uint8Array([9, 8, 7, 6]));
+const streamingCaptureCancelMock = vi.fn();
 
 class FakeMediaRecorder {
   state: 'inactive' | 'recording' = 'inactive';
@@ -41,12 +53,10 @@ class FakeMediaRecorder {
 }
 
 vi.mock('@tauri-apps/api/event', () => ({
-  listen: vi.fn(async (eventName: string, listener: (event: { payload: string }) => void | Promise<void>) => {
-    if (eventName === 'voice-shortcut') {
-      voiceShortcutListener = listener;
-    }
+  listen: vi.fn(async (eventName: string, listener: (event: { payload: any }) => void | Promise<void>) => {
+    tauriEventListeners.set(eventName, listener);
     return () => {
-      voiceShortcutListener = null;
+      tauriEventListeners.delete(eventName);
     };
   }),
   emit: (...args: unknown[]) => {
@@ -96,10 +106,49 @@ vi.mock('@/lib/services/eventlog.service', () => ({
   }),
 }));
 
+vi.mock('@/lib/asr/live-preview', () => ({
+  createDefaultVoiceLivePreviewSource: () => ({
+    isAvailable: (...args: unknown[]) => livePreviewIsAvailableMock(...args),
+    createSession: (...args: unknown[]) => {
+      const [options] = args as [{
+        onUpdate: (payload: { text: string; isFinal: boolean }) => void;
+      }];
+      livePreviewOnUpdate = options.onUpdate;
+      livePreviewCreateSessionMock(...args);
+      return {
+        start: () => livePreviewStartMock(),
+        stop: () => livePreviewStopMock(),
+        abort: () => livePreviewAbortMock(),
+      };
+    },
+  }),
+}));
+
+vi.mock('@/lib/asr/volcano-streaming-capture', () => ({
+  createVolcanoStreamingCapture: (...args: unknown[]) => {
+    const [options] = args as [{
+      onChunk: (chunk: Uint8Array) => Promise<void>;
+    }];
+    streamingOnChunk = options.onChunk;
+    streamingCaptureCreateMock(...args);
+    return {
+      start: () => streamingCaptureStartMock(),
+      stop: () => streamingCaptureStopMock(),
+      cancel: () => streamingCaptureCancelMock(),
+    };
+  },
+}));
+
 import { VoiceShortcutService } from '@/services/voice-shortcut.service';
 
 async function emitVoiceShortcut(payload: 'start' | 'stop' | 'cancel'): Promise<void> {
-  voiceShortcutListener?.({ payload });
+  await tauriEventListeners.get('voice-shortcut')?.({ payload });
+  await Promise.resolve();
+  await Promise.resolve();
+}
+
+async function emitVolcanoStreamEvent(payload: Record<string, unknown>): Promise<void> {
+  await tauriEventListeners.get('volcano-asr-stream-event')?.({ payload });
   await Promise.resolve();
   await Promise.resolve();
 }
@@ -112,7 +161,9 @@ async function flushAsync(times = 8): Promise<void> {
 
 describe('VoiceShortcutService（全局语音快捷键服务）', () => {
   beforeEach(() => {
-    voiceShortcutListener = null;
+    tauriEventListeners.clear();
+    livePreviewOnUpdate = null;
+    streamingOnChunk = null;
 
     emitMock.mockReset();
     invokeMock.mockReset();
@@ -122,6 +173,18 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     addEventMock.mockReset();
     getUserMediaWithConstraintFallbackMock.mockReset();
     subscribeHotkeyMock.mockClear();
+    livePreviewIsAvailableMock.mockReset();
+    livePreviewIsAvailableMock.mockReturnValue(true);
+    livePreviewCreateSessionMock.mockReset();
+    livePreviewStartMock.mockReset();
+    livePreviewStopMock.mockReset();
+    livePreviewAbortMock.mockReset();
+    streamingCaptureCreateMock.mockReset();
+    streamingCaptureStartMock.mockReset();
+    streamingCaptureStopMock.mockReset();
+    streamingCaptureStopMock.mockImplementation(async () => new Uint8Array([9, 8, 7, 6]));
+    streamingCaptureCancelMock.mockReset();
+
     window.localStorage.removeItem('exomind:voiceShortcutAsrProvider');
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.accessKey);
@@ -163,7 +226,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     const service = new VoiceShortcutService();
     await service.init();
 
-    expect(voiceShortcutListener).not.toBeNull();
+    expect(tauriEventListeners.get('voice-shortcut')).toBeTruthy();
 
     await emitVoiceShortcut('start');
     await emitVoiceShortcut('start');
@@ -193,8 +256,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     await emitVoiceShortcut('start');
 
-    voiceShortcutListener?.({ payload: 'stop' });
-    voiceShortcutListener?.({ payload: 'stop' });
+    await tauriEventListeners.get('voice-shortcut')?.({ payload: 'stop' });
+    await tauriEventListeners.get('voice-shortcut')?.({ payload: 'stop' });
     await flushAsync();
 
     expect(convertWebmBlobToWavMock).toHaveBeenCalledTimes(1);
@@ -221,40 +284,179 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
-  it('uses volcano provider when selected in settings（切换到火山提供商后走 volcano_asr_recognize）', async () => {
-    setVoiceShortcutAsrProvider('volcano');
-    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
-    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
-    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.bigasr.sauc.duration');
+  it('emits live preview text during recording and trims to latest 100 chars（录音时发出实时预览文本并裁到最新 100 字）', async () => {
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    const longText = Array.from({ length: 120 }, (_, index) => String(index % 10)).join('');
+    livePreviewOnUpdate?.({ text: longText, isFinal: false });
+    await flushAsync();
+
+    expect(livePreviewCreateSessionMock).toHaveBeenCalledTimes(1);
+    expect(livePreviewStartMock).toHaveBeenCalledTimes(1);
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'recording',
+        text: trimToLatestCharacters(longText, 100),
+        isLivePreview: true,
+      })
+    );
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+    expect(livePreviewStopMock).toHaveBeenCalledTimes(1);
+
+    service.destroy();
+  });
+
+  it('shows arming overlay before microphone startup resolves（麦克风初始化未完成前先显示启动态）', async () => {
+    getUserMediaWithConstraintFallbackMock.mockImplementation(
+      () => new Promise(() => {})
+    );
 
     const service = new VoiceShortcutService();
     await service.init();
 
     await emitVoiceShortcut('start');
-    await emitVoiceShortcut('start');
     await flushAsync();
 
-    expect(transcribeMock).not.toHaveBeenCalled();
-    expect(invokeMock).toHaveBeenCalledWith(
-      'volcano_asr_recognize',
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
       expect.objectContaining({
-        audioData: expect.any(Array),
+        state: 'arming',
+        duration: 0,
+      })
+    );
+
+    service.destroy();
+  });
+
+  it('uses volcano native streaming when selected in settings（切换到火山后走原生流式链路）', async () => {
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+    let resolveFinish: ((value: {
+      text: string;
+      confidence: number;
+      lang: string;
+      duration: number;
+    }) => void) | null = null;
+
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return 'stream-session-1';
+      }
+      if (command === 'volcano_asr_stream_push') {
+        return null;
+      }
+      if (command === 'volcano_asr_stream_finish') {
+        return await new Promise((resolve) => {
+          resolveFinish = resolve;
+        });
+      }
+      if (command === 'voice_recording_set_active' || command === 'simulate_paste') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    expect(livePreviewCreateSessionMock).not.toHaveBeenCalled();
+    expect(streamingCaptureCreateMock).toHaveBeenCalledTimes(1);
+    expect(streamingCaptureStartMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith(
+      'volcano_asr_stream_start',
+      expect.objectContaining({
         config: expect.objectContaining({
           appKey: 'test-app-key',
           accessKey: 'test-access-key',
           endpoint: 'bigmodel_async',
+          request: expect.objectContaining({
+            enable_nonstream: true,
+            show_utterances: true,
+          }),
         }),
       })
     );
+
+    await streamingOnChunk?.(new Uint8Array([1, 2, 3, 4]));
+    await flushAsync();
+    expect(invokeMock).toHaveBeenCalledWith('volcano_asr_stream_push', {
+      sessionId: 'stream-session-1',
+      audioData: [1, 2, 3, 4],
+    });
+
+    await emitVolcanoStreamEvent({
+      sessionId: 'stream-session-1',
+      text: '火山实时结果',
+      isFinal: false,
+      isDefinite: false,
+    });
+    await flushAsync();
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'recording',
+        text: '火山实时结果',
+        isLivePreview: true,
+        providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
+      })
+    );
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    await emitVolcanoStreamEvent({
+      sessionId: 'stream-session-1',
+      text: '收口阶段实时结果',
+      isFinal: false,
+      isDefinite: true,
+    });
+    await flushAsync();
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'recognizing',
+        text: '收口阶段实时结果',
+        isLivePreview: true,
+      })
+    );
+
+    resolveFinish?.({
+      text: '火山流式最终文本',
+      confidence: 0.98,
+      lang: 'zh-CN',
+      duration: 1800,
+    });
+    await flushAsync();
+
+    expect(transcribeMock).not.toHaveBeenCalled();
+    expect(convertWebmBlobToWavMock).not.toHaveBeenCalled();
+    expect(streamingCaptureStopMock).toHaveBeenCalledTimes(1);
+    expect(invokeMock).toHaveBeenCalledWith('volcano_asr_stream_finish', {
+      sessionId: 'stream-session-1',
+      audioData: [9, 8, 7, 6],
+    });
     expect(emitMock).toHaveBeenCalledWith(
       'voice-overlay-state',
       expect.objectContaining({
         state: 'done',
-        text: '火山识别文本',
-        providerLabel: '火山',
+        text: '火山流式最终文本',
+        providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
         recognitionMs: expect.any(Number),
       })
     );
+    expect(writeClipboardMock).toHaveBeenCalledWith('火山流式最终文本');
+    expect(addEventMock).toHaveBeenCalledWith('火山流式最终文本', new Set(['voice']));
 
     service.destroy();
   });

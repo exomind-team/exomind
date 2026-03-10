@@ -7,6 +7,7 @@ import { resolveDevPorts } from "./src/config/port-env";
 export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), "");
   const devPorts = resolveDevPorts(env);
+  const tauriDevHost = env.TAURI_DEV_HOST?.trim() || process.env.TAURI_DEV_HOST?.trim();
 
   return {
     plugins: [react()],
@@ -43,7 +44,7 @@ export default defineConfig(({ mode }) => {
       host: "0.0.0.0",
       hmr: {
         protocol: "ws",
-        host: "0.0.0.0",
+        ...(tauriDevHost ? { host: tauriDevHost } : {}),
         port: devPorts.hmr,
       },
       watch: {

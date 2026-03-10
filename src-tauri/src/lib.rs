@@ -2,7 +2,11 @@
 
 mod commands;
 
-use commands::asr_commands::{volcano_asr_check_config, volcano_asr_recognize};
+use commands::asr_commands::{
+    volcano_asr_check_config, volcano_asr_recognize, volcano_asr_stream_cancel,
+    volcano_asr_stream_finish, volcano_asr_stream_push, volcano_asr_stream_start,
+    VolcanoAsrStreamState,
+};
 use commands::device_commands::get_device_id;
 use commands::eventlog_commands::{
     eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
@@ -13,18 +17,19 @@ use commands::file_commands::{
     list_files, pick_json_file, read_file, read_file_binary, save_json_file, write_file,
 };
 use commands::runtime_commands::{
-    RuntimeProcessState, ensure_runtime_started, runtime_service_reachable_address,
-    runtime_service_start, runtime_service_status, runtime_service_stop, signal_publish_fast,
+    ensure_runtime_started, runtime_service_reachable_address, runtime_service_start,
+    runtime_service_status, runtime_service_stop, signal_publish_fast, RuntimeProcessState,
 };
 use commands::shortcut_commands::{
-    VoiceShortcutState, ensure_voice_overlay_window, register_voice_shortcut, simulate_paste,
-    voice_overlay_hide, voice_overlay_show, voice_shortcut_get, voice_shortcut_set,
+    ensure_voice_overlay_window, register_voice_shortcut, simulate_paste, voice_overlay_hide,
+    voice_overlay_show, voice_recording_set_active, voice_shortcut_get, voice_shortcut_set,
+    VoiceShortcutState,
 };
-use commands::ws_commands::{WsClientState, ws_connect, ws_disconnect, ws_get_state, ws_send};
 use commands::workspace_commands::{
-    get_agent_workspace_soul, get_agent_workspace_knowledge_list,
-    get_agent_workspace_knowledge, get_agent_workspace_actions, get_agent_workspace_status,
+    get_agent_workspace_actions, get_agent_workspace_knowledge, get_agent_workspace_knowledge_list,
+    get_agent_workspace_soul, get_agent_workspace_status,
 };
+use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 use tauri::Manager;
 
 #[tauri::command]
@@ -46,6 +51,7 @@ pub fn run() {
     let runtime_process_state = std::sync::Arc::new(RuntimeProcessState::new());
     let runtime_process_state_for_setup = runtime_process_state.clone();
     let voice_shortcut_state = VoiceShortcutState::new();
+    let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
 
     let mut builder = tauri::Builder::default()
         .plugin(tauri_plugin_fs::init())
@@ -55,6 +61,7 @@ pub fn run() {
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
         .manage(voice_shortcut_state)
+        .manage(volcano_asr_stream_state)
         .setup(move |app| {
             // Register global voice shortcut (toggle, 按一次开始再按一次结束) and prewarm overlay window（预热悬浮窗）.
             let voice_shortcut_state = app.state::<VoiceShortcutState>();
@@ -143,9 +150,14 @@ pub fn run() {
             voice_overlay_hide,
             voice_shortcut_set,
             voice_shortcut_get,
+            voice_recording_set_active,
             // ASR 语音识别命令
             volcano_asr_recognize,
             volcano_asr_check_config,
+            volcano_asr_stream_start,
+            volcano_asr_stream_push,
+            volcano_asr_stream_finish,
+            volcano_asr_stream_cancel,
             // Workspace 认知生命体命令
             get_agent_workspace_soul,
             get_agent_workspace_knowledge_list,

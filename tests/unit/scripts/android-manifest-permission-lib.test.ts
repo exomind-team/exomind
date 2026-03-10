@@ -1,3 +1,6 @@
+import { mkdtempSync, mkdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   ACCESS_NETWORK_STATE_PERMISSION,
@@ -6,9 +9,12 @@ import {
   MODIFY_AUDIO_SETTINGS_PERMISSION,
   RECORD_AUDIO_PERMISSION,
   RELEASE_CLEARTEXT_PLACEHOLDER,
+  ensureConfiguredNdkVersionInGradle,
+  ensureDebugNativeLibsAreStrippedInGradle,
   ensureMdnsMulticastLockInMainActivity,
   ensureReleaseCleartextTrafficInGradle,
   ensureRequiredAudioPermissionsInManifest,
+  resolveInstalledNdkVersion,
 } from '../../../Scripts/dev/android-manifest-permission-lib';
 
 describe('ensureRequiredAudioPermissionsInManifest', () => {
@@ -281,5 +287,109 @@ describe('ensureReleaseCleartextTrafficInGradle', () => {
 
     expect(result.changed).toBe(false);
     expect(result.buildGradleKts).toBe(input);
+  });
+});
+
+describe('ensureDebugNativeLibsAreStrippedInGradle', () => {
+  it('removes keepDebugSymbols from debug build to avoid huge APKs（移除 debug keepDebugSymbols 以避免 APK 过大）', () => {
+    const input = `android {
+    buildTypes {
+        getByName("debug") {
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
+            isDebuggable = true
+            isJniDebuggable = true
+            isMinifyEnabled = false
+            packaging {
+                jniLibs.keepDebugSymbols.add("*/arm64-v8a/*.so")
+                jniLibs.keepDebugSymbols.add("*/armeabi-v7a/*.so")
+                jniLibs.keepDebugSymbols.add("*/x86/*.so")
+                jniLibs.keepDebugSymbols.add("*/x86_64/*.so")
+            }
+        }
+    }
+}
+`;
+
+    const result = ensureDebugNativeLibsAreStrippedInGradle(input);
+
+    expect(result.changed).toBe(true);
+    expect(result.buildGradleKts).not.toContain('jniLibs.keepDebugSymbols.add');
+    expect(result.buildGradleKts).toContain('getByName("debug") {');
+    expect(result.buildGradleKts).toContain('isJniDebuggable = true');
+  });
+
+  it('keeps gradle unchanged when debug keepDebugSymbols is already absent（缺失时保持不变）', () => {
+    const input = `android {
+    buildTypes {
+        getByName("debug") {
+            manifestPlaceholders["usesCleartextTraffic"] = "true"
+            isDebuggable = true
+            isMinifyEnabled = false
+        }
+    }
+}
+`;
+
+    const result = ensureDebugNativeLibsAreStrippedInGradle(input);
+
+    expect(result.changed).toBe(false);
+    expect(result.buildGradleKts).toBe(input);
+  });
+});
+
+describe('ensureConfiguredNdkVersionInGradle', () => {
+  it('injects ndkVersion when missing（缺失时注入本机 NDK 版本）', () => {
+    const input = `android {
+    compileSdk = 36
+    namespace = "com.exomind.app"
+}
+`;
+
+    const result = ensureConfiguredNdkVersionInGradle(input, '29.0.14206865');
+
+    expect(result.changed).toBe(true);
+    expect(result.buildGradleKts).toContain('ndkVersion = "29.0.14206865"');
+  });
+
+  it('replaces mismatched ndkVersion when different（版本不一致时替换为本机 NDK 版本）', () => {
+    const input = `android {
+    compileSdk = 36
+    ndkVersion = "27.0.12077973"
+    namespace = "com.exomind.app"
+}
+`;
+
+    const result = ensureConfiguredNdkVersionInGradle(input, '29.0.14206865');
+
+    expect(result.changed).toBe(true);
+    expect(result.buildGradleKts).toContain('ndkVersion = "29.0.14206865"');
+    expect(result.buildGradleKts).not.toContain('27.0.12077973');
+  });
+});
+
+describe('resolveInstalledNdkVersion', () => {
+  it('prefers explicit NDK_HOME folder name（优先使用 NDK_HOME 路径中的版本号）', () => {
+    const version = resolveInstalledNdkVersion({
+      NDK_HOME: 'D:\\data\\AndroidSDK\\ndk\\29.0.14206865',
+    });
+
+    expect(version).toBe('29.0.14206865');
+  });
+
+  it('falls back to latest Android SDK ndk directory（回退到 Android SDK 中最高版本的 ndk 目录）', () => {
+    const sdkRoot = mkdtempSync(join(tmpdir(), 'android-sdk-'));
+
+    try {
+      mkdirSync(join(sdkRoot, 'ndk', '27.0.12077973'), { recursive: true });
+      mkdirSync(join(sdkRoot, 'ndk', '29.0.14206865'), { recursive: true });
+
+      const version = resolveInstalledNdkVersion({
+        ANDROID_HOME: sdkRoot,
+      });
+
+      expect(version).toBe('29.0.14206865');
+    } finally {
+      rmSync(sdkRoot, { recursive: true, force: true });
+    }
   });
 });

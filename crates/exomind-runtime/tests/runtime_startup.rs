@@ -6,7 +6,8 @@
 //! - runtime can start/stop via lib API（可通过库 API 启停）
 
 use exomind_runtime::{
-    configured_port_from_env, start_with_options, RuntimeStartOptions, DEFAULT_RT_PORT,
+    configured_port_from_env, spawn_ts_agents_default_for_platform, start_with_options,
+    RuntimeStartOptions, DEFAULT_RT_PORT,
 };
 use std::sync::Mutex;
 
@@ -33,6 +34,42 @@ fn configured_port_accepts_zero_for_random_assignment() {
     }
     let port = configured_port_from_env().expect("port should parse");
     assert_eq!(port, 0);
+}
+
+#[test]
+fn spawn_ts_agents_default_is_disabled_on_mobile_platforms() {
+    let _guard = ENV_LOCK.lock().expect("env lock should be available");
+    // SAFETY: tests guard env mutation with a global mutex（用全局锁保护环境变量修改）
+    unsafe {
+        std::env::remove_var("EXOMIND_RT_DISABLE_TS_AGENTS");
+    }
+
+    assert!(
+        !spawn_ts_agents_default_for_platform(true, None),
+        "mobile platforms should default to not spawning Bun-based TS agents"
+    );
+}
+
+#[test]
+fn spawn_ts_agents_default_stays_enabled_on_desktop_when_env_missing() {
+    let _guard = ENV_LOCK.lock().expect("env lock should be available");
+    // SAFETY: tests guard env mutation with a global mutex（用全局锁保护环境变量修改）
+    unsafe {
+        std::env::remove_var("EXOMIND_RT_DISABLE_TS_AGENTS");
+    }
+
+    assert!(
+        spawn_ts_agents_default_for_platform(false, None),
+        "desktop platforms should keep existing default behavior"
+    );
+}
+
+#[test]
+fn spawn_ts_agents_disable_flag_can_be_explicitly_cleared_on_mobile() {
+    assert!(
+        spawn_ts_agents_default_for_platform(true, Some("false")),
+        "mobile should still allow explicit opt-in for TS agents"
+    );
 }
 
 #[tokio::test]

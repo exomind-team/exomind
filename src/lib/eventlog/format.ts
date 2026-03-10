@@ -11,7 +11,14 @@ export type EventType =
   | 'device_offline'
   | 'message_send'
   | 'message_delivered'
-  | 'message_failed';
+  | 'message_failed'
+  | 'cursor.screenshot'
+  | 'cursor.moved'
+  | 'cursor.clicked'
+  | 'cursor.typed'
+  | 'cursor.mode_changed'
+  | 'cursor.session.start'
+  | 'cursor.session.end';
 
 // EventLog 接口
 export interface EventLog {

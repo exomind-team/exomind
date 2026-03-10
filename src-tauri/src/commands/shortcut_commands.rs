@@ -11,15 +11,19 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutEvent, ShortcutSta
 
 const DEFAULT_VOICE_SHORTCUT: &str = "Alt+Q";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+const VOICE_CANCEL_SHORTCUT: &str = "Escape";
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_WINDOW_LABEL: &str = "voice-overlay";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const VOICE_OVERLAY_WIDTH: f64 = 220.0;
+const VOICE_OVERLAY_WIDTH: f64 = 560.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const VOICE_OVERLAY_HEIGHT: f64 = 52.0;
+const VOICE_OVERLAY_HEIGHT: f64 = 128.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_BOTTOM_MARGIN: i32 = 32;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 static VOICE_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+static VOICE_CANCEL_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 
 /// Voice shortcut runtime state（运行时快捷键状态）.
 #[derive(Default)]
@@ -175,6 +179,45 @@ fn handle_shortcut_event(app: &AppHandle, event: ShortcutEvent) {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn register_cancel_shortcut_listener(app: &AppHandle) -> Result<(), String> {
+    let _ = app.global_shortcut().unregister(VOICE_CANCEL_SHORTCUT);
+    app.global_shortcut()
+        .on_shortcut(VOICE_CANCEL_SHORTCUT, |app, _shortcut, event| {
+            match event.state {
+                ShortcutState::Pressed => {
+                    if VOICE_CANCEL_KEY_DOWN.swap(true, Ordering::SeqCst) {
+                        return;
+                    }
+                    app.emit("voice-shortcut", "cancel").ok();
+                    let _ = voice_overlay_hide_internal(app);
+                }
+                ShortcutState::Released => {
+                    VOICE_CANCEL_KEY_DOWN.store(false, Ordering::SeqCst);
+                }
+            }
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn unregister_cancel_shortcut(app: &AppHandle) -> Result<(), String> {
+    VOICE_CANCEL_KEY_DOWN.store(false, Ordering::SeqCst);
+    app.global_shortcut()
+        .unregister(VOICE_CANCEL_SHORTCUT)
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn register_cancel_shortcut_listener(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn unregister_cancel_shortcut(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn resolve_overlay_monitor(app: &AppHandle) -> Result<Option<tauri::Monitor>, String> {
     if let Some(main_window) = app.get_webview_window("main") {
         let current_monitor = main_window
@@ -266,6 +309,19 @@ fn voice_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn voice_overlay_hide_internal(app: &AppHandle) -> Result<(), String> {
+    if let Some(window) = app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL) {
+        window.hide().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+fn voice_overlay_hide_internal(_app: &AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
 /// 显示语音悬浮窗（Tauri command，供前端调用）
 #[tauri::command]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -283,10 +339,7 @@ pub async fn voice_overlay_show(_app: AppHandle) -> Result<(), String> {
 #[tauri::command]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn voice_overlay_hide(app: AppHandle) -> Result<(), String> {
-    if let Some(window) = app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL) {
-        window.hide().map_err(|error| error.to_string())?;
-    }
-    Ok(())
+    voice_overlay_hide_internal(&app)
 }
 
 #[tauri::command]
@@ -311,6 +364,23 @@ pub async fn voice_shortcut_get(state: State<'_, VoiceShortcutState>) -> Result<
     Ok(state.get())
 }
 
+/// Sync recording lifecycle（同步录音生命周期）to arm/disarm global Esc cancel.
+#[tauri::command]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub async fn voice_recording_set_active(app: AppHandle, active: bool) -> Result<(), String> {
+    if active {
+        register_cancel_shortcut_listener(&app)
+    } else {
+        unregister_cancel_shortcut(&app)
+    }
+}
+
+#[tauri::command]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn voice_recording_set_active(_app: AppHandle, _active: bool) -> Result<(), String> {
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::calculate_overlay_position;
@@ -318,14 +388,14 @@ mod tests {
     #[test]
     fn calculate_overlay_position_centers_bottom_on_primary_work_area() {
         let (x, y) = calculate_overlay_position(0, 0, 1920, 1080);
-        assert_eq!(x, 850);
-        assert_eq!(y, 996);
+        assert_eq!(x, 680);
+        assert_eq!(y, 920);
     }
 
     #[test]
     fn calculate_overlay_position_respects_monitor_offset() {
         let (x, y) = calculate_overlay_position(1920, 40, 1920, 1040);
-        assert_eq!(x, 2770);
-        assert_eq!(y, 996);
+        assert_eq!(x, 2600);
+        assert_eq!(y, 920);
     }
 }
