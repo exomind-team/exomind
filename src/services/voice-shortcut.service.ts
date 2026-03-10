@@ -47,6 +47,15 @@ export type VoiceShortcutState = 'idle' | 'arming' | 'recording' | 'recognizing'
 const LOG_TAG = '[VoiceShortcut]';
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
+const VOLCANO_WARM_MAINTENANCE_INTERVAL_MS = 15000;
+
+type VolcanoSessionWarmReason =
+  | 'prewarmed'
+  | 'pending-prewarm'
+  | 'stale'
+  | 'missing'
+  | 'config-changed';
+
 type OverlayEventPayload = {
   state: VoiceShortcutState;
   duration?: number;
@@ -60,6 +69,7 @@ type OverlayEventPayload = {
   sessionReadyMs?: number;
   inputWarmHit?: boolean;
   sessionWarmHit?: boolean;
+  sessionWarmReason?: VolcanoSessionWarmReason;
   firstTextMs?: number;
   debugTraceId?: string;
   recognitionMs?: number;
@@ -89,6 +99,7 @@ export class VoiceShortcutService {
   private unlistenProvider: (() => void) | null = null;
   private unlistenMicPrewarm: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
+  private warmMaintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private initializing = false;
   private startPending = false;
   private activationStartedAt: number | null = null;
@@ -99,6 +110,7 @@ export class VoiceShortcutService {
   private latestSessionReadyMs: number | null = null;
   private latestInputWarmHit: boolean | null = null;
   private latestSessionWarmHit: boolean | null = null;
+  private latestSessionWarmReason: VolcanoSessionWarmReason | null = null;
   private latestFirstTextMs: number | null = null;
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
   private micPrewarmEnabled = getVoiceShortcutMicPrewarmEnabled();
@@ -136,11 +148,13 @@ export class VoiceShortcutService {
 
       this.unlistenProvider = subscribeVoiceShortcutAsrProviderChanges((provider) => {
         this.asrProvider = provider;
+        this.syncWarmMaintenanceLoop();
         void this.prewarmResourcesForProvider();
       });
 
       this.unlistenMicPrewarm = subscribeVoiceShortcutMicPrewarmChanges((enabled) => {
         this.micPrewarmEnabled = enabled;
+        this.syncWarmMaintenanceLoop();
         void this.prewarmResourcesForProvider();
       });
 
@@ -161,6 +175,7 @@ export class VoiceShortcutService {
         document.addEventListener('visibilitychange', this.handleVisibilityChange);
       }
 
+      this.syncWarmMaintenanceLoop();
       void this.prewarmResourcesForProvider();
     } finally {
       this.initializing = false;
@@ -184,6 +199,7 @@ export class VoiceShortcutService {
     if (typeof document !== 'undefined') {
       document.removeEventListener('visibilitychange', this.handleVisibilityChange);
     }
+    this.clearWarmMaintenanceLoop();
     void this.syncRecordingActive(false);
     this.stopLivePreview('abort');
     void this.cancelWarmVolcanoSession();
@@ -220,6 +236,7 @@ export class VoiceShortcutService {
     this.latestSessionReadyMs = null;
     this.latestInputWarmHit = null;
     this.latestSessionWarmHit = null;
+    this.latestSessionWarmReason = null;
     this.latestFirstTextMs = null;
     console.info(LOG_TAG, `[trace ${this.currentTraceId}] shortcut pressed at ${now}`);
   }
@@ -268,7 +285,10 @@ export class VoiceShortcutService {
     return inputReadyMs;
   }
 
-  private markSessionReady(warmHit: boolean): number | undefined {
+  private markSessionReady(
+    warmHit: boolean,
+    warmReason: VolcanoSessionWarmReason,
+  ): number | undefined {
     if (this.traceStartedAtMs == null) {
       return this.latestSessionReadyMs ?? undefined;
     }
@@ -276,13 +296,35 @@ export class VoiceShortcutService {
     const sessionReadyMs = Math.max(0, Date.now() - this.traceStartedAtMs);
     this.latestSessionReadyMs = sessionReadyMs;
     this.latestSessionWarmHit = warmHit;
+    this.latestSessionWarmReason = warmReason;
     if (this.currentTraceId) {
       console.info(
         LOG_TAG,
-        `[trace ${this.currentTraceId}] session ready in ${sessionReadyMs}ms (warm=${warmHit ? 'hit' : 'miss'})`,
+        `[trace ${this.currentTraceId}] session ready in ${sessionReadyMs}ms (warm=${warmHit ? 'hit' : 'miss'}, reason=${warmReason})`,
       );
     }
     return sessionReadyMs;
+  }
+
+  private clearWarmMaintenanceLoop(): void {
+    if (this.warmMaintenanceTimer !== null) {
+      clearInterval(this.warmMaintenanceTimer);
+      this.warmMaintenanceTimer = null;
+    }
+  }
+
+  private syncWarmMaintenanceLoop(): void {
+    this.clearWarmMaintenanceLoop();
+    if (!this.micPrewarmEnabled || this.asrProvider !== 'volcano') {
+      return;
+    }
+
+    this.warmMaintenanceTimer = setInterval(() => {
+      if (this.startPending || this.state === 'recording' || this.state === 'recognizing') {
+        return;
+      }
+      void this.prewarmVolcanoSessionIfPossible();
+    }, VOLCANO_WARM_MAINTENANCE_INTERVAL_MS);
   }
 
   private isLiveStream(stream: MediaStream | null): stream is MediaStream {
@@ -435,6 +477,7 @@ export class VoiceShortcutService {
       if (await this.doesVolcanoSessionExist(this.warmVolcanoSessionId)) {
         return this.warmVolcanoSessionId;
       }
+      console.info(LOG_TAG, '[warm] stale volcano session expired, rebuilding in background');
       this.clearWarmVolcanoSessionState();
     }
     if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
@@ -443,9 +486,11 @@ export class VoiceShortcutService {
         this.warmVolcanoSessionId = pendingSessionId;
         return pendingSessionId;
       }
+      console.info(LOG_TAG, '[warm] pending volcano prewarm became stale, rebuilding in background');
       this.clearWarmVolcanoSessionState();
     }
     if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey !== warmKey) {
+      console.info(LOG_TAG, '[warm] volcano config changed, replacing warm session');
       await this.cancelWarmVolcanoSession();
     }
 
@@ -458,6 +503,7 @@ export class VoiceShortcutService {
           return null;
         }
         this.warmVolcanoSessionId = sessionId;
+        console.info(LOG_TAG, '[warm] volcano session prepared in background');
         return sessionId;
       } catch (error) {
         console.warn(LOG_TAG, 'volcano session prewarm failed:', error);
@@ -470,15 +516,21 @@ export class VoiceShortcutService {
     return this.warmVolcanoSessionPromise;
   }
 
-  private async acquireVolcanoSession(config: VolcanoRuntimeConfig): Promise<{ sessionId: string; warmHit: boolean }> {
+  private async acquireVolcanoSession(config: VolcanoRuntimeConfig): Promise<{
+    sessionId: string;
+    warmHit: boolean;
+    warmReason: VolcanoSessionWarmReason;
+  }> {
     const warmKey = this.getWarmVolcanoSessionKey(config);
+    let warmReason: VolcanoSessionWarmReason = 'missing';
 
     if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
       const pendingSessionId = await this.warmVolcanoSessionPromise;
       if (pendingSessionId && await this.doesVolcanoSessionExist(pendingSessionId)) {
         this.clearWarmVolcanoSessionState();
-        return { sessionId: pendingSessionId, warmHit: true };
+        return { sessionId: pendingSessionId, warmHit: true, warmReason: 'pending-prewarm' };
       }
+      warmReason = 'stale';
       this.clearWarmVolcanoSessionState();
     }
 
@@ -486,14 +538,26 @@ export class VoiceShortcutService {
       const sessionId = this.warmVolcanoSessionId;
       if (await this.doesVolcanoSessionExist(sessionId)) {
         this.clearWarmVolcanoSessionState();
-        return { sessionId, warmHit: true };
+        return { sessionId, warmHit: true, warmReason: 'prewarmed' };
       }
+      warmReason = 'stale';
       this.clearWarmVolcanoSessionState();
     }
+
+    if (
+      (this.warmVolcanoSessionId || this.warmVolcanoSessionPromise)
+      && this.warmVolcanoSessionKey
+      && this.warmVolcanoSessionKey !== warmKey
+    ) {
+      warmReason = 'config-changed';
+    }
+
+    console.info(LOG_TAG, `[warm] acquiring cold volcano session (reason=${warmReason})`);
 
     return {
       sessionId: await invoke<string>('volcano_asr_stream_start', { config }),
       warmHit: false,
+      warmReason,
     };
   }
 
@@ -795,6 +859,7 @@ export class VoiceShortcutService {
       sessionReadyMs: extra.sessionReadyMs ?? this.latestSessionReadyMs ?? undefined,
       inputWarmHit: extra.inputWarmHit ?? this.latestInputWarmHit ?? undefined,
       sessionWarmHit: extra.sessionWarmHit ?? this.latestSessionWarmHit ?? undefined,
+      sessionWarmReason: extra.sessionWarmReason ?? this.latestSessionWarmReason ?? undefined,
       firstTextMs: extra.firstTextMs ?? this.latestFirstTextMs ?? undefined,
       debugTraceId: extra.debugTraceId ?? this.currentTraceId ?? undefined,
       recognitionMs: extra.recognitionMs,
@@ -858,7 +923,7 @@ export class VoiceShortcutService {
     }));
     const sessionPromise = this.acquireVolcanoSession(config).then((result) => ({
       ...result,
-      sessionReadyMs: this.markSessionReady(result.warmHit),
+      sessionReadyMs: this.markSessionReady(result.warmHit, result.warmReason),
     }));
 
     try {
@@ -895,6 +960,7 @@ export class VoiceShortcutService {
         sessionReadyMs,
         inputWarmHit: streamResult.value.warmHit,
         sessionWarmHit: sessionResult.value.warmHit,
+        sessionWarmReason: sessionResult.value.warmReason,
         activationMs: this.completeActivationTracking(),
       });
       void this.syncRecordingActive(true);

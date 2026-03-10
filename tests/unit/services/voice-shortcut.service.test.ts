@@ -163,6 +163,7 @@ async function flushAsync(times = 8): Promise<void> {
 
 describe('VoiceShortcutService（全局语音快捷键服务）', () => {
   beforeEach(() => {
+    vi.useRealTimers();
     tauriEventListeners.clear();
     livePreviewOnUpdate = null;
     streamingOnChunk = null;
@@ -564,6 +565,50 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('rewarms stale volcano session in background while idle（空闲时后台自动补热失效 session）', async () => {
+    vi.useFakeTimers();
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    let sessionCounter = 0;
+    let sessionAlive = true;
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        sessionCounter += 1;
+        return `idle-session-${sessionCounter}`;
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return sessionAlive;
+      }
+      if (command === 'volcano_asr_stream_cancel' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    const initialSessionCount = sessionCounter;
+    expect(initialSessionCount).toBeGreaterThanOrEqual(1);
+
+    sessionAlive = false;
+    await vi.advanceTimersByTimeAsync(15000);
+    await flushAsync();
+
+    expect(sessionCounter).toBeGreaterThan(initialSessionCount);
+
+    service.destroy();
+    vi.useRealTimers();
+  });
+
   it('recreates missing warmed volcano session before first start（warm session 已失效时首按自动重建）', async () => {
     permissionsQueryMock.mockResolvedValue({ state: 'granted' });
     setVoiceShortcutAsrProvider('volcano');
@@ -701,6 +746,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         sessionReadyMs: expect.any(Number),
         inputWarmHit: expect.any(Boolean),
         sessionWarmHit: expect.any(Boolean),
+        sessionWarmReason: expect.any(String),
         providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
       })
     );
@@ -814,6 +860,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       expect.objectContaining({
         state: 'recording',
         sessionReadyMs: 210,
+        sessionWarmReason: 'missing',
         inputReadyMs: 680,
         activationMs: 680,
       })

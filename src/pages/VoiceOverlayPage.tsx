@@ -33,6 +33,7 @@ interface OverlayData {
   sessionReadyMs?: number;
   inputWarmHit?: boolean;
   sessionWarmHit?: boolean;
+  sessionWarmReason?: 'prewarmed' | 'pending-prewarm' | 'stale' | 'missing' | 'config-changed';
   firstTextMs?: number;
   debugTraceId?: string;
   recognitionMs?: number;
@@ -231,6 +232,7 @@ export function VoiceOverlayPage() {
             sessionReadyMs={data.sessionReadyMs}
             inputWarmHit={data.inputWarmHit}
             sessionWarmHit={data.sessionWarmHit}
+            sessionWarmReason={data.sessionWarmReason}
             firstTextMs={data.firstTextMs}
             firstFrameMs={firstFrameMs ?? undefined}
             recognitionMs={data.recognitionMs}
@@ -295,6 +297,7 @@ function StatusText({
   sessionReadyMs,
   inputWarmHit,
   sessionWarmHit,
+  sessionWarmReason,
   firstTextMs,
   firstFrameMs,
   recognitionMs,
@@ -314,6 +317,7 @@ function StatusText({
   sessionReadyMs?: number;
   inputWarmHit?: boolean;
   sessionWarmHit?: boolean;
+  sessionWarmReason?: 'prewarmed' | 'pending-prewarm' | 'stale' | 'missing' | 'config-changed';
   firstTextMs?: number;
   firstFrameMs?: number;
   recognitionMs?: number;
@@ -376,7 +380,7 @@ function StatusText({
                   ? `麦克风 ${formatLatency(inputReadyMs)}${formatWarmState(inputWarmHit)}`
                   : null,
                 typeof sessionReadyMs === 'number'
-                  ? `会话 ${formatLatency(sessionReadyMs)}${formatWarmState(sessionWarmHit)}`
+                  ? `会话 ${formatLatency(sessionReadyMs)}${formatSessionWarmState(sessionWarmHit, sessionWarmReason)}`
                   : null,
                 typeof activationMs === 'number' ? `录音 ${formatLatency(activationMs)}` : null,
                 typeof firstTextMs === 'number' ? `首字 ${formatLatency(firstTextMs)}` : null,
@@ -410,7 +414,7 @@ function StatusText({
                   ? `麦克风 ${formatLatency(inputReadyMs)}${formatWarmState(inputWarmHit)}`
                   : null,
                 typeof sessionReadyMs === 'number'
-                  ? `会话 ${formatLatency(sessionReadyMs)}${formatWarmState(sessionWarmHit)}`
+                  ? `会话 ${formatLatency(sessionReadyMs)}${formatSessionWarmState(sessionWarmHit, sessionWarmReason)}`
                   : null,
                 typeof activationMs === 'number' ? `录音 ${formatLatency(activationMs)}` : null,
                 typeof firstTextMs === 'number' ? `首字 ${formatLatency(firstTextMs)}` : null,
@@ -478,6 +482,26 @@ function formatWarmState(warmHit?: boolean): string {
     return '';
   }
   return warmHit ? '·预热' : '·冷启';
+}
+
+function formatSessionWarmState(
+  warmHit?: boolean,
+  warmReason?: 'prewarmed' | 'pending-prewarm' | 'stale' | 'missing' | 'config-changed',
+): string {
+  if (warmHit) {
+    return '·预热';
+  }
+
+  switch (warmReason) {
+    case 'stale':
+      return '·失热重建';
+    case 'config-changed':
+      return '·配置变更';
+    case 'missing':
+      return '·未预热';
+    default:
+      return '·冷启';
+  }
 }
 
 const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css */ `
