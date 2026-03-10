@@ -263,6 +263,21 @@ export class VoiceShortcutService {
     }
   }
 
+  private clearWarmVolcanoSessionState(): void {
+    this.warmVolcanoSessionId = null;
+    this.warmVolcanoSessionKey = null;
+    this.warmVolcanoSessionPromise = null;
+  }
+
+  private async doesVolcanoSessionExist(sessionId: string): Promise<boolean> {
+    try {
+      return await invoke<boolean>('volcano_asr_stream_session_exists', { sessionId });
+    } catch (error) {
+      console.warn(LOG_TAG, 'failed to verify volcano session existence:', error);
+      return false;
+    }
+  }
+
   private async prewarmVolcanoSessionIfPossible(): Promise<string | null> {
     if (this.volcanoStreamSessionId) {
       return null;
@@ -313,18 +328,20 @@ export class VoiceShortcutService {
 
     if (this.warmVolcanoSessionPromise && this.warmVolcanoSessionKey === warmKey) {
       const pendingSessionId = await this.warmVolcanoSessionPromise;
-      if (pendingSessionId) {
-        this.warmVolcanoSessionId = null;
-        this.warmVolcanoSessionKey = null;
+      if (pendingSessionId && await this.doesVolcanoSessionExist(pendingSessionId)) {
+        this.clearWarmVolcanoSessionState();
         return pendingSessionId;
       }
+      this.clearWarmVolcanoSessionState();
     }
 
     if (this.warmVolcanoSessionId && this.warmVolcanoSessionKey === warmKey) {
       const sessionId = this.warmVolcanoSessionId;
-      this.warmVolcanoSessionId = null;
-      this.warmVolcanoSessionKey = null;
-      return sessionId;
+      if (await this.doesVolcanoSessionExist(sessionId)) {
+        this.clearWarmVolcanoSessionState();
+        return sessionId;
+      }
+      this.clearWarmVolcanoSessionState();
     }
 
     return invoke<string>('volcano_asr_stream_start', { config });

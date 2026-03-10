@@ -390,6 +390,9 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       if (command === 'volcano_asr_stream_start') {
         return sessionIds.shift() ?? 'warm-session-fallback';
       }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return true;
+      }
       if (command === 'volcano_asr_stream_push' || command === 'voice_recording_set_active') {
         return null;
       }
@@ -419,6 +422,60 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(invokeMock).not.toHaveBeenCalledWith(
       'volcano_asr_stream_start',
       expect.anything(),
+    );
+
+    service.destroy();
+  });
+
+  it('recreates missing warmed volcano session before first start（warm session 已失效时首按自动重建）', async () => {
+    permissionsQueryMock.mockResolvedValue({ state: 'granted' });
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    const startedSessions: string[] = [];
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string; sessionId?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        const nextSessionId = `warm-session-${startedSessions.length + 1}`;
+        startedSessions.push(nextSessionId);
+        return nextSessionId;
+      }
+      if (command === 'volcano_asr_stream_session_exists') {
+        return false;
+      }
+      if (command === 'volcano_asr_stream_push' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await flushAsync();
+
+    expect(startedSessions).toEqual(['warm-session-1']);
+
+    invokeMock.mockClear();
+    getUserMediaWithConstraintFallbackMock.mockClear();
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(getUserMediaWithConstraintFallbackMock).not.toHaveBeenCalled();
+    expect(invokeMock).toHaveBeenCalledWith('volcano_asr_stream_session_exists', {
+      sessionId: 'warm-session-1',
+    });
+    expect(invokeMock).toHaveBeenCalledWith(
+      'volcano_asr_stream_start',
+      expect.objectContaining({
+        config: expect.objectContaining({
+          appKey: 'test-app-key',
+        }),
+      }),
     );
 
     service.destroy();
