@@ -3361,6 +3361,13 @@ export function AgentsPage() {
                           </div>
                         </div>
 
+                        {/* 状态 badge（从 signalGraph 节点获取，无需 agentDetail） */}
+                        {!isDetailLoading && !agentDetail && node && (
+                          <span className={`inline-flex w-fit items-center rounded-full px-2 py-0.5 text-[10px] font-medium ${statusColors[node.status] ?? statusColors.offline}`}>
+                            {node.status}
+                          </span>
+                        )}
+
                         {rightPanel.state === 'AGENT_DETAIL' && nodeId && (
                           <div className="flex items-center gap-2">
                             <button
@@ -3450,8 +3457,8 @@ export function AgentsPage() {
                           </>
                         )}
 
-                        {/* API 返回 null */}
-                        {!isDetailLoading && !agentDetail && (
+                        {/* API 返回 null 且无 workspace 数据 */}
+                        {!isDetailLoading && !agentDetail && !runtimeNodeId && (
                           <p className="text-xs text-muted-foreground">暂无详细数据</p>
                         )}
 
