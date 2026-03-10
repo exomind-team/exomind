@@ -1,8 +1,24 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+const { execFileSyncMock } = vi.hoisted(() => ({
+  execFileSyncMock: vi.fn(),
+}));
+
+vi.mock('node:child_process', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('node:child_process')>();
+  return {
+    default: {
+      ...actual,
+      execFileSync: execFileSyncMock,
+    },
+    ...actual,
+    execFileSync: execFileSyncMock,
+  };
+});
 import {
   detectWakeEvents,
   summarizeWakeItems,
   type WaitSnapshot,
+  waitForUpdateLoop,
 } from '../../../Scripts/dev/worker-agent/wait.ts';
 
 function makeSnapshot(overrides: Partial<WaitSnapshot> = {}): WaitSnapshot {
@@ -17,7 +33,37 @@ function makeSnapshot(overrides: Partial<WaitSnapshot> = {}): WaitSnapshot {
   };
 }
 
+function makeGhSnapshot(snapshot: WaitSnapshot): string {
+  return JSON.stringify({
+    number: snapshot.prNumber,
+    headRefOid: snapshot.headSha,
+    comments: snapshot.comments.map((comment) => ({
+      id: comment.id,
+      author: { login: comment.authorLogin },
+      body: comment.body,
+      createdAt: comment.createdAt,
+    })),
+    reviews: snapshot.reviews.map((review) => ({
+      id: review.id,
+      author: { login: review.authorLogin },
+      body: review.body,
+      state: review.state,
+      submittedAt: review.submittedAt,
+    })),
+    labels: snapshot.labels.map((name) => ({ name })),
+    statusCheckRollup: snapshot.statusChecks.map((check) => ({
+      name: check.name,
+      status: check.status,
+      conclusion: check.conclusion,
+    })),
+  });
+}
+
 describe('worker-agent wait logic', () => {
+  beforeEach(() => {
+    execFileSyncMock.mockReset();
+  });
+
   it('wakes on new reviewer comment after the saved cursor', () => {
     const events = detectWakeEvents({
       previous: makeSnapshot(),
@@ -209,6 +255,33 @@ describe('worker-agent wait logic', () => {
     });
 
     expect(events[0]?.reason).toBe('human-test');
+  });
+
+  it('keeps waiting when the initial snapshot already has the needs-human-test label', async () => {
+    const stopWaiting = new Error('stop waiting');
+    execFileSyncMock.mockReturnValueOnce(
+      makeGhSnapshot(
+        makeSnapshot({
+          labels: ['🙋needs-human-test'],
+        }),
+      ),
+    );
+
+    await expect(
+      waitForUpdateLoop({
+        repo: 'exomind-team/exomind',
+        prNumber: 421,
+        cursor: {
+          lastCommentIds: [],
+          lastReviewIds: [],
+        },
+        pollIntervalMs: 0,
+        heartbeatMs: 60_000,
+        sleep: async () => {
+          throw stopWaiting;
+        },
+      }),
+    ).rejects.toBe(stopWaiting);
   });
 
   it('wakes when a status check turns failed', () => {

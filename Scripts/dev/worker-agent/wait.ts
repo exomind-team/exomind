@@ -59,6 +59,7 @@ export function detectWakeEvents(input: {
   previous?: WaitSnapshot | null;
   current: WaitSnapshot;
   cursor: WorkerCursor;
+  includeLabelTransitions?: boolean;
 }): WaitEvent[] {
   const previous = input.previous ?? null;
   const knownCommentIds = new Set(input.cursor.lastCommentIds ?? []);
@@ -71,7 +72,8 @@ export function detectWakeEvents(input: {
   const currentHasHumanTest = hasHumanTestLabel(currentLabels);
   const labelAdded = currentHasHumanTest && !previousHasHumanTest;
   const labelRemoved = !currentHasHumanTest && previousHasHumanTest;
-  if (labelAdded || labelRemoved) {
+  const includeLabelTransitions = input.includeLabelTransitions ?? true;
+  if (includeLabelTransitions && (labelAdded || labelRemoved)) {
     events.push({
       reason: 'human-test',
       itemId: HUMAN_TEST_LABEL,
@@ -268,6 +270,7 @@ export async function waitForUpdateLoop(input: {
     previous: null,
     current: previous,
     cursor: input.cursor,
+    includeLabelTransitions: false,
   });
   if (initialEvents.length > 0) {
     return {
