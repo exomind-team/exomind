@@ -71,6 +71,10 @@ import {
   type VoiceShortcutHotkey,
 } from '@/config/voice-shortcut-hotkey';
 import {
+  getVoiceShortcutMicPrewarmEnabled,
+  setVoiceShortcutMicPrewarmEnabled,
+} from '@/config/voice-shortcut-mic-prewarm';
+import {
   getVoiceOverlayOpacity,
   setVoiceOverlayOpacity,
 } from '@/config/voice-overlay-preferences';
@@ -247,6 +251,9 @@ export function SettingsPage() {
   );
   const [voiceShortcutAsrProvider, setVoiceShortcutAsrProviderState] = useState<VoiceShortcutAsrProvider>(
     () => getVoiceShortcutAsrProvider()
+  );
+  const [voiceShortcutMicPrewarmEnabled, setVoiceShortcutMicPrewarmEnabledState] = useState<boolean>(
+    () => getVoiceShortcutMicPrewarmEnabled()
   );
   const [voiceOverlayOpacity, setVoiceOverlayOpacityState] = useState<number>(() => getVoiceOverlayOpacity());
   const [volcanoResourceId, setVolcanoResourceIdState] = useState<string>(() => getVolcanoResourceId());
@@ -679,6 +686,11 @@ export function SettingsPage() {
     setVoiceOverlayOpacityState(normalizedValue);
   };
 
+  const handleVoiceShortcutMicPrewarmToggle = (enabled: boolean) => {
+    setVoiceShortcutMicPrewarmEnabled(enabled);
+    setVoiceShortcutMicPrewarmEnabledState(enabled);
+  };
+
   const handleSoundPresetChange = (presetId: TimerEndSoundPresetId | 'off') => {
     if (presetId === 'off') {
       setTimerPreferencesState(updateTimerPreferences({ countdownEndSoundEnabled: false }));
@@ -1080,6 +1092,25 @@ export function SettingsPage() {
                 <div className="pb-[14px] pl-[46px] pr-4">
                   <span className="text-xs text-[#A8A29E]">
                     影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
+                  </span>
+                </div>
+                <Divider />
+                <div data-testid="new-settings-voice-prewarm-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="预启动麦克风"
+                    right={(
+                      <Switch
+                        data-testid="new-settings-voice-prewarm-switch"
+                        checked={voiceShortcutMicPrewarmEnabled}
+                        onCheckedChange={handleVoiceShortcutMicPrewarmToggle}
+                      />
+                    )}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">
+                    开启后会在权限已授予时尽量常驻预热麦克风与语音链路，换更快的唤醒速度。
                   </span>
                 </div>
                 <Divider />
@@ -1553,6 +1584,25 @@ export function SettingsPage() {
             <div className="pb-[14px] pl-[46px] pr-4">
               <span className="text-xs text-[#A8A29E]">
                 影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
+              </span>
+            </div>
+            <Divider />
+            <div data-testid="new-settings-voice-prewarm-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="预启动麦克风"
+                right={(
+                  <Switch
+                    data-testid="new-settings-voice-prewarm-switch"
+                    checked={voiceShortcutMicPrewarmEnabled}
+                    onCheckedChange={handleVoiceShortcutMicPrewarmToggle}
+                  />
+                )}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">
+                开启后会在权限已授予时尽量常驻预热麦克风与语音链路，换更快的唤醒速度。
               </span>
             </div>
             <Divider />

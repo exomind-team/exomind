@@ -9,6 +9,10 @@ import {
   type VoiceShortcutHotkey,
 } from '../config/voice-shortcut-hotkey';
 import {
+  getVoiceShortcutMicPrewarmEnabled,
+  subscribeVoiceShortcutMicPrewarmChanges,
+} from '@/config/voice-shortcut-mic-prewarm';
+import {
   createCompatibleMediaRecorder,
   getUserMediaWithConstraintFallback,
   DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
@@ -74,10 +78,12 @@ export class VoiceShortcutService {
   private unlistenVolcanoStream: (() => void) | null = null;
   private unlistenHotkey: (() => void) | null = null;
   private unlistenProvider: (() => void) | null = null;
+  private unlistenMicPrewarm: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private initializing = false;
   private startPending = false;
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
+  private micPrewarmEnabled = getVoiceShortcutMicPrewarmEnabled();
   private livePreviewSource: VoiceLivePreviewSource;
   private livePreviewSession: VoiceLivePreviewSession | null = null;
   private livePreviewText = '';
@@ -115,6 +121,11 @@ export class VoiceShortcutService {
         void this.prewarmResourcesForProvider();
       });
 
+      this.unlistenMicPrewarm = subscribeVoiceShortcutMicPrewarmChanges((enabled) => {
+        this.micPrewarmEnabled = enabled;
+        void this.prewarmResourcesForProvider();
+      });
+
       this.unlisten = await listen<string>('voice-shortcut', (event) => {
         if (event.payload === 'start') this.handleStart();
         if (event.payload === 'stop') this.handleStop();
@@ -140,6 +151,8 @@ export class VoiceShortcutService {
     this.unlistenHotkey = null;
     this.unlistenProvider?.();
     this.unlistenProvider = null;
+    this.unlistenMicPrewarm?.();
+    this.unlistenMicPrewarm = null;
     void this.syncRecordingActive(false);
     this.stopLivePreview('abort');
     void this.cancelWarmVolcanoSession();
@@ -159,6 +172,12 @@ export class VoiceShortcutService {
   }
 
   private async prewarmResourcesForProvider(): Promise<void> {
+    if (!this.micPrewarmEnabled) {
+      await this.cancelWarmVolcanoSession();
+      this.releaseWarmStream();
+      return;
+    }
+
     await this.prewarmMicrophoneIfGranted();
 
     if (this.asrProvider === 'volcano') {
@@ -170,6 +189,9 @@ export class VoiceShortcutService {
   }
 
   private async prewarmMicrophoneIfGranted(): Promise<MediaStream | null> {
+    if (!this.micPrewarmEnabled) {
+      return null;
+    }
     if (this.isLiveStream(this.warmStream)) {
       return this.warmStream;
     }
@@ -462,8 +484,9 @@ export class VoiceShortcutService {
       const recognitionStartedAt = Date.now();
       const result = await this.transcribeWithSelectedProvider(wavData);
       const recognitionMs = Date.now() - recognitionStartedAt;
-      if (result?.text) {
-        await this.handleResult(result, recognitionMs, this.getActiveProviderLabel());
+      const normalizedText = this.normalizeRecognitionText(result?.text);
+      if (normalizedText) {
+        await this.handleResult({ ...result, text: normalizedText }, recognitionMs, this.getActiveProviderLabel());
       } else {
         this.handleError('未识别到文字');
       }
@@ -548,6 +571,10 @@ export class VoiceShortcutService {
 
   private emitOverlayState(state: VoiceShortcutState, extra: Partial<OverlayEventPayload> = {}): void {
     emit('voice-overlay-state', this.buildOverlayPayload(state, extra)).catch(() => {});
+  }
+
+  private normalizeRecognitionText(text: string | null | undefined): string {
+    return text?.trim() ?? '';
   }
 
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
@@ -735,7 +762,12 @@ export class VoiceShortcutService {
         audioData: Array.from(trailingChunk ?? new Uint8Array()),
       });
       const recognitionMs = Date.now() - recognitionStartedAt;
-      await this.handleResult(result, recognitionMs, this.getActiveProviderLabel());
+      const normalizedText = this.normalizeRecognitionText(result?.text);
+      if (normalizedText) {
+        await this.handleResult({ ...result, text: normalizedText }, recognitionMs, this.getActiveProviderLabel());
+      } else {
+        this.handleError('未识别到文字');
+      }
     } catch (error) {
       this.handleError(`识别失败: ${error}`);
     } finally {
