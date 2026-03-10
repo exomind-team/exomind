@@ -7,6 +7,8 @@ import {
   buildHandledCursor,
   buildRestoredContext,
   extractLinkedIssueNumber,
+  resolveTrackedAgentId,
+  resolveTrackedPrNumber,
   resolveWorkerTargetLanguage,
   renderWorkerDissentComment,
   renderWorkerDissentIssueBody,
@@ -230,6 +232,43 @@ describe('worker-agent lib', () => {
     expect(extractLinkedIssueNumber('[Codex Worker]\n\nrefs #421')).toBe(421);
     expect(extractLinkedIssueNumber('fixes #450\nrefs #451')).toBe(450);
     expect(extractLinkedIssueNumber('plain body without issue refs')).toBeNull();
+  });
+
+  it('prefers an explicit PR number over snapshot and current state', () => {
+    expect(
+      resolveTrackedPrNumber({
+        explicitPr: '466',
+        lockSnapshot: {
+          prNumber: 421,
+        },
+        currentState: {
+          prNumber: 450,
+        },
+      }),
+    ).toBe(466);
+  });
+
+  it('falls back to current state when the lock snapshot is missing', () => {
+    expect(
+      resolveTrackedPrNumber({
+        lockSnapshot: null,
+        currentState: {
+          prNumber: 466,
+        },
+      }),
+    ).toBe(466);
+  });
+
+  it('resolves agent id from current state when no lock snapshot is available', () => {
+    expect(
+      resolveTrackedAgentId({
+        lockSnapshot: null,
+        currentState: {
+          agentId: 'codex-worker@test',
+        },
+        fallback: 'codex-worker',
+      }),
+    ).toBe('codex-worker@test');
   });
 
   it('exports protocol constants used across the worker-agent flow', () => {

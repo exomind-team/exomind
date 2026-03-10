@@ -245,6 +245,54 @@ export function extractLinkedIssueNumber(body: string): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function parseTrackedNumber(value: unknown): number | null {
+  if (typeof value === 'number' && Number.isFinite(value)) {
+    return value;
+  }
+
+  if (typeof value === 'string' && value.trim()) {
+    const parsed = Number.parseInt(value.trim(), 10);
+    return Number.isFinite(parsed) ? parsed : null;
+  }
+
+  return null;
+}
+
+function parseTrackedString(value: unknown): string | null {
+  if (typeof value !== 'string') {
+    return null;
+  }
+
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+export function resolveTrackedPrNumber(input: {
+  explicitPr?: string | number | null;
+  lockSnapshot?: { prNumber?: unknown } | null;
+  currentState?: Record<string, unknown> | null;
+}): number | null {
+  return (
+    parseTrackedNumber(input.explicitPr)
+    ?? parseTrackedNumber(input.lockSnapshot?.prNumber)
+    ?? parseTrackedNumber(input.currentState?.prNumber)
+  );
+}
+
+export function resolveTrackedAgentId(input: {
+  explicitAgentId?: string | null;
+  lockSnapshot?: { agentId?: unknown } | null;
+  currentState?: Record<string, unknown> | null;
+  fallback?: string | null;
+}): string | null {
+  return (
+    parseTrackedString(input.explicitAgentId)
+    ?? parseTrackedString(input.lockSnapshot?.agentId)
+    ?? parseTrackedString(input.currentState?.agentId)
+    ?? parseTrackedString(input.fallback)
+  );
+}
+
 export function getWorkerTempPaths(tempRoot = 'temp/worker-agent'): WorkerTempPaths {
   const root = resolve(process.cwd(), tempRoot);
   const stateDir = resolve(root, 'state');

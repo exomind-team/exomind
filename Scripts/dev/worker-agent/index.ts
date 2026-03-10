@@ -9,6 +9,8 @@ import {
   extractLinkedIssueNumber,
   getWorkerTempPaths,
   readJsonFileIfExists,
+  resolveTrackedAgentId,
+  resolveTrackedPrNumber,
   resolveWorkerTargetLanguage,
   renderWorkerBody,
   renderWorkerComment,
@@ -368,6 +370,37 @@ function defaultCursor(): WorkerCursor {
   };
 }
 
+function resolveTrackedLockTarget(input: {
+  parsed: ParsedArgs;
+  currentState: Record<string, unknown>;
+  snapshot: ReturnType<typeof loadLockSnapshot>;
+  missingMessage: string;
+}): { prNumber: number; agentId: string } {
+  const prNumber = resolveTrackedPrNumber({
+    explicitPr: flagValue(input.parsed, 'pr'),
+    lockSnapshot: input.snapshot,
+    currentState: input.currentState,
+  });
+  if (!Number.isFinite(prNumber)) {
+    throw new Error(input.missingMessage);
+  }
+
+  const agentId = resolveTrackedAgentId({
+    explicitAgentId: flagValue(input.parsed, 'agent-id'),
+    lockSnapshot: input.snapshot,
+    currentState: input.currentState,
+    fallback: 'codex-worker',
+  });
+  if (!agentId) {
+    throw new Error('Unable to resolve agent id for the tracked PR lock.');
+  }
+
+  return {
+    prNumber,
+    agentId,
+  };
+}
+
 function renderAndMaybeWrite(body: string, output?: string): void {
   if (output) {
     writeTextFile(output, body);
@@ -379,39 +412,54 @@ async function runRestore(parsed: ParsedArgs): Promise<void> {
   const tempRoot = flagValue(parsed, 'temp-root', 'temp/worker-agent')!;
   const cwd = flagValue(parsed, 'cwd', process.cwd())!;
   const repo = resolveRepo(flagValue(parsed, 'repo'), cwd);
-  const agentId = flagValue(parsed, 'agent-id');
   const paths = getWorkerTempPaths(tempRoot);
   ensureWorkerTempDirs(paths);
 
+  const currentState = readJsonFileIfExists<Record<string, unknown>>(paths.currentStateFile) ?? {};
   const snapshot = loadLockSnapshot(tempRoot);
-  if (!snapshot?.prNumber) {
-    throw new Error('No current lock snapshot found. Acquire or snapshot a PR lock first.');
-  }
+  const { prNumber, agentId } = resolveTrackedLockTarget({
+    parsed,
+    currentState,
+    snapshot,
+    missingMessage:
+      'No tracked PR found. Pass --pr, run next-action to refresh current state, or acquire/snapshot a PR lock first.',
+  });
 
   const remoteLock = verifyRemoteLock({
     repo,
-    prNumber: snapshot.prNumber,
-    expectedAgentId: agentId ?? snapshot.agentId,
+    prNumber,
+    expectedAgentId: agentId,
     cwd,
   });
   if (!remoteLock) {
-    throw new Error(`Unable to verify remote PR lock for PR #${snapshot.prNumber}.`);
+    throw new Error(`Unable to verify remote PR lock for PR #${prNumber}.`);
   }
 
-  const currentState = readJsonFileIfExists<Record<string, unknown>>(paths.currentStateFile) ?? {};
+  saveLockSnapshot(
+    {
+      repo,
+      prNumber,
+      agentId: remoteLock.agent_id,
+      lockId: remoteLock.lock_id,
+      acquiredAt: remoteLock.acquired_at,
+      verifiedAt: new Date().toISOString(),
+    },
+    tempRoot,
+  );
+
   const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? defaultCursor();
   const waiting = readJsonFileIfExists<WorkerWaitingState>(paths.waitingStateFile);
-  const metadata = fetchPrMetadata(repo, snapshot.prNumber, cwd);
+  const metadata = fetchPrMetadata(repo, prNumber, cwd);
   const targetLanguage = determineTargetLanguage({
     repo,
     issueNumber: metadata.issueNumber,
-    prState: fetchPrRuntimeState(repo, snapshot.prNumber, cwd),
+    prState: fetchPrRuntimeState(repo, prNumber, cwd),
     currentState,
     cwd,
   });
 
   const context = buildRestoredContext({
-    prNumber: snapshot.prNumber,
+    prNumber,
     issueNumber: metadata.issueNumber,
     targetLanguage,
     branch: metadata.headBranch || currentBranch(cwd),
@@ -431,6 +479,7 @@ async function runRestore(parsed: ParsedArgs): Promise<void> {
     ...currentState,
     prNumber: context.prNumber,
     issueNumber: context.issueNumber,
+    agentId: remoteLock.agent_id,
     targetLanguage: context.targetLanguage,
     branch: context.branch,
     baseBranch: context.baseBranch,
@@ -775,6 +824,7 @@ async function runNextAction(parsed: ParsedArgs): Promise<void> {
     ...currentState,
     prNumber: prState?.number ?? null,
     issueNumber: prState?.issueNumber ?? null,
+    agentId,
     targetLanguage,
     branch,
     baseBranch,
@@ -813,24 +863,40 @@ async function runWaitForUpdate(parsed: ParsedArgs): Promise<void> {
   const tempRoot = flagValue(parsed, 'temp-root', 'temp/worker-agent')!;
   const cwd = flagValue(parsed, 'cwd', process.cwd())!;
   const repo = resolveRepo(flagValue(parsed, 'repo'), cwd);
-  const agentId = flagValue(parsed, 'agent-id');
   const paths = getWorkerTempPaths(tempRoot);
   ensureWorkerTempDirs(paths);
 
+  const currentState = readJsonFileIfExists<Record<string, unknown>>(paths.currentStateFile) ?? {};
   const snapshot = loadLockSnapshot(tempRoot);
-  if (!snapshot?.prNumber) {
-    throw new Error('No current lock snapshot found. Restore or acquire a lock first.');
-  }
+  const { prNumber, agentId } = resolveTrackedLockTarget({
+    parsed,
+    currentState,
+    snapshot,
+    missingMessage:
+      'No tracked PR found. Pass --pr, run next-action to refresh current state, or restore/acquire a PR lock first.',
+  });
 
   const remoteLock = verifyRemoteLock({
     repo,
-    prNumber: snapshot.prNumber,
-    expectedAgentId: agentId ?? snapshot.agentId,
+    prNumber,
+    expectedAgentId: agentId,
     cwd,
   });
   if (!remoteLock) {
-    throw new Error(`Unable to verify remote PR lock for PR #${snapshot.prNumber}.`);
+    throw new Error(`Unable to verify remote PR lock for PR #${prNumber}.`);
   }
+
+  saveLockSnapshot(
+    {
+      repo,
+      prNumber,
+      agentId: remoteLock.agent_id,
+      lockId: remoteLock.lock_id,
+      acquiredAt: remoteLock.acquired_at,
+      verifiedAt: new Date().toISOString(),
+    },
+    tempRoot,
+  );
 
   const cursor = readJsonFileIfExists<WorkerCursor>(paths.handledCursorFile) ?? defaultCursor();
 
@@ -842,7 +908,7 @@ async function runWaitForUpdate(parsed: ParsedArgs): Promise<void> {
 
   const result = await waitForUpdateLoop({
     repo,
-    prNumber: snapshot.prNumber,
+    prNumber,
     cursor,
     cwd,
     pollIntervalMs: Number.parseInt(flagValue(parsed, 'poll-seconds', '15')!, 10) * 1000,
@@ -878,7 +944,7 @@ async function runWaitForUpdate(parsed: ParsedArgs): Promise<void> {
 
 function printHelp(): void {
   console.log(`Usage:
-  worker-agent restore [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>]
+  worker-agent restore [--repo <owner/repo>] [--pr <number>] [--agent-id <id>] [--temp-root <path>]
   worker-agent next-action [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>] [--base-branch <name>]
   worker-agent cursor sync [--repo <owner/repo>] [--pr <number>] [--temp-root <path>]
   worker-agent pr sync [--repo <owner/repo>] [--base-branch <name>] [--title <text>] [--body <text> | --body-file <path>] [--temp-root <path>]
@@ -888,7 +954,7 @@ function printHelp(): void {
   worker-agent render-dissent-issue --script-conclusion <text> --actual-conclusion <text> --repro-evidence <text> --trace-process <text> --impact <text> --linked-pr <text> [--language <zh|en>] [--extra-notes <text>] [--output <path>]
   worker-agent validate-message (--file <path> | --body <text>) [--section <name>...]
   worker-agent lock <acquire|renew|release|check> --pr <number> [--repo <owner/repo>] [--agent-id <id>]
-  worker-agent wait-for-update [--repo <owner/repo>] [--agent-id <id>] [--temp-root <path>]
+  worker-agent wait-for-update [--repo <owner/repo>] [--pr <number>] [--agent-id <id>] [--temp-root <path>]
 `);
 }
 
