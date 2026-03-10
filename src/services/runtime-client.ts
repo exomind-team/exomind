@@ -504,6 +504,30 @@ export class RuntimeClient {
     };
   }
 
+  async getAllEnergy(
+    host: RuntimeHostRecord,
+  ): Promise<RuntimeClientResult<AgentEnergySnapshot[]>> {
+    const response = await this.getJson(`${buildBaseUrl(host)}/energy`);
+    if (!response.ok) {
+      return response;
+    }
+
+    if (!Array.isArray(response.data)) {
+      return {
+        ok: false,
+        error: {
+          code: 'invalid_payload',
+          message: 'invalid /energy payload（/energy 响应格式无效）',
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      data: response.data as AgentEnergySnapshot[],
+    };
+  }
+
   async getAgentEnergy(
     host: RuntimeHostRecord,
     agentId: string,

@@ -66,6 +66,7 @@ import type {
   AgentConversationMessage,
   AgentDetailData,
   AgentDeviceGroup,
+  AgentEnergySnapshot,
   AgentHubListItem,
   AgentHubListSection,
   AgentHubNodeStatus,
@@ -125,6 +126,7 @@ import {
   formatRuntimeEventPayload,
   getConversationMessageTestId,
 } from './agents/conversation-runtime';
+import { EnergyBar } from './agents/AgentDetailPage';
 import { WorkspaceTabs } from './agents/WorkspaceTabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -294,7 +296,18 @@ function getAddOptionIcon(optionId: AddNodeOption['id']): LucideIcon {
   return Plus;
 }
 
-function mapRuntimeStatusToNodeStatus(status: string): AgentHubNodeStatus {
+export const ENERGY_PHASE_COLORS: Record<string, string> = {
+  normal: '#22C55E',
+  slowing: '#EAB308',
+  critical: '#F97316',
+  dying: '#EF4444',
+  dormant: '#6B7280',
+};
+
+export function mapRuntimeStatusToNodeStatus(status: string, energy?: { phase: string; is_dormant: boolean }): AgentHubNodeStatus {
+  if (energy?.is_dormant) return 'dormant';
+  if (energy?.phase === 'dying') return 'dying';
+  if (energy?.phase === 'critical') return 'critical';
   if (status === 'available' || status === 'running') return 'running';
   if (status === 'busy') return 'warning';
   if (status === 'error') return 'warning';
@@ -328,7 +341,7 @@ function getHostStatusBadgeClass(connectionState: RuntimeHostSnapshot['connectio
   return 'bg-[#F59E0B20] text-[#D97706]';
 }
 
-function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): AgentHubListSection[] {
+export function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): AgentHubListSection[] {
   const groupedByHost = new Map<string, RuntimeAggregatedAgent[]>();
   for (const agent of agents) {
     const key = JSON.stringify([agent.sourceHostId, agent.sourceHostName]);
@@ -348,9 +361,10 @@ function buildListSectionsFromRuntimeAgents(agents: RuntimeAggregatedAgent[]): A
         type: 'agent',
         name: agent.name,
         description: `来源 ${agent.sourceHostAddress}${agent.description ? ` · ${agent.description}` : ''}`,
-        status: mapRuntimeStatusToNodeStatus(agent.status),
+        status: mapRuntimeStatusToNodeStatus(agent.status, agent.energy),
         icon: 'brain',
         badgeText: agent.sourceHostName,
+        energy: agent.energy,
       })),
     };
   });
@@ -1906,11 +1920,18 @@ function NodesTabView({
               idle: '空闲',
               warning: '警告',
               offline: '离线',
+              dormant: '休眠',
+              critical: '危险',
+              dying: '濒死',
             };
+            const isDormant = item.status === 'dormant';
+            const energyPhase = item.energy?.phase ?? 'normal';
+            const energyColor = ENERGY_PHASE_COLORS[energyPhase] ?? '#6B7280';
+            const energyPercent = item.energy ? Math.round(item.energy.ratio * 100) : null;
             return (
               <div
                 key={item.id}
-                className="flex cursor-pointer items-center gap-3 bg-white px-4 py-3 transition-colors hover:bg-[#FAF7F5] dark:bg-[#0C0A09] dark:hover:bg-[#1C1917]"
+                className={`flex cursor-pointer items-center gap-3 bg-white px-4 py-3 transition-colors hover:bg-[#FAF7F5] dark:bg-[#0C0A09] dark:hover:bg-[#1C1917] ${isDormant ? 'opacity-50 grayscale' : ''}`}
                 onClick={() => onNodeClick(item)}
               >
                 {/* Icon */}
@@ -1940,16 +1961,32 @@ function NodesTabView({
                 </div>
                 {/* 内容 */}
                 <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-2">
-                    <span className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
-                      {item.name}
-                    </span>
-                    {item.badgeText && (
-                      <span className="shrink-0 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-                        {item.badgeText}
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                        {item.name}
+                      </span>
+                      {item.badgeText && (
+                        <span className="shrink-0 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                          {item.badgeText}
+                        </span>
+                      )}
+                    </div>
+                    {energyPercent != null && (
+                      <span className="shrink-0 text-[10px] font-medium" style={{ color: energyColor }}>
+                        {energyPercent}%
                       </span>
                     )}
                   </div>
+                  {/* Mini energy bar */}
+                  {item.energy && (
+                    <div className="mt-1 h-[2px] w-full overflow-hidden rounded-full bg-[#E7E3E0] dark:bg-[#292524]">
+                      <div
+                        className="h-full rounded-full transition-all duration-700 ease-out"
+                        style={{ width: `${energyPercent ?? 0}%`, backgroundColor: energyColor }}
+                      />
+                    </div>
+                  )}
                   {item.description && (
                     <p className="mt-0.5 truncate text-xs text-[#78716C] dark:text-[#A8A29E]">
                       {item.description}
@@ -1963,9 +2000,13 @@ function NodesTabView({
                       ? 'bg-[#22C55E]/15 text-[#22C55E]'
                       : item.status === 'warning'
                         ? 'bg-[#F59E0B]/15 text-[#F59E0B]'
-                        : item.status === 'offline'
+                        : item.status === 'offline' || item.status === 'dying'
                           ? 'bg-[#EF4444]/15 text-[#EF4444]'
-                          : 'bg-[#57534E]/30 text-[#78716C]'
+                          : item.status === 'critical'
+                            ? 'bg-[#F97316]/15 text-[#F97316]'
+                            : item.status === 'dormant'
+                              ? 'bg-[#6B7280]/15 text-[#6B7280]'
+                              : 'bg-[#57534E]/30 text-[#78716C]'
                   }`}
                 >
                   {statusLabel[item.status]}
@@ -2271,6 +2312,7 @@ export function AgentsPage() {
   // T8: AgentDetail / ActorDetail 右侧栏
   const [agentDetail, setAgentDetail] = useState<AgentDetailData | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
+  const [panelEnergy, setPanelEnergy] = useState<AgentEnergySnapshot | null>(null);
 
   useEffect(() => {
     if (rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') {
@@ -2279,6 +2321,7 @@ export function AgentsPage() {
       const runtimeEntityId = resolveRuntimeEntityId(nodeId);
       setIsDetailLoading(true);
       setAgentDetail(null);
+      setPanelEnergy(null);
       const service = getAgentHubService();
       const loader = rightPanel.state === 'AGENT_DETAIL'
         ? service.getAgentDetail(runtimeEntityId)
@@ -2291,8 +2334,34 @@ export function AgentsPage() {
       });
     } else {
       setAgentDetail(null);
+      setPanelEnergy(null);
     }
   }, [rightPanel.state, rightPanel.nodeId]);
+
+  // Energy polling for right panel (2s interval)
+  useEffect(() => {
+    if (rightPanel.state !== 'AGENT_DETAIL' || !rightPanel.nodeId) return;
+    const nodeId = rightPanel.nodeId;
+    const runtimeEntityId = resolveRuntimeEntityId(nodeId);
+    const preferredHostId = extractPreferredHostId(nodeId);
+    let disposed = false;
+
+    const client = new RuntimeClient();
+    const poll = async () => {
+      const host = findPreferredRuntimeHostForAgent(runtimeHostSnapshots, runtimeEntityId, preferredHostId)
+        ?? activeSignalRouteHost;
+      if (!host || disposed) return;
+      const snap = await client.getAgentEnergy(host, runtimeEntityId);
+      if (!disposed && snap) setPanelEnergy(snap);
+    };
+
+    void poll();
+    const timer = setInterval(poll, 2000);
+    return () => {
+      disposed = true;
+      clearInterval(timer);
+    };
+  }, [rightPanel.state, rightPanel.nodeId, runtimeHostSnapshots, activeSignalRouteHost]);
 
   useEffect(() => {
     if (!selectedProviderProfileId) return;
@@ -2740,12 +2809,27 @@ export function AgentsPage() {
     try {
       const routeService = new SignalRouteService({ host });
       const runtimeClient = new RuntimeClient();
-      const [routes, agentsResult, historyResponse] = await Promise.all([
+      const [routes, agentsResult, historyResponse, energyResult] = await Promise.all([
         routeService.listRoutes(),
         runtimeClient.getAgents(host),
         fetch(`http://${host.host}:${host.port}/signals/history?limit=120`),
+        runtimeClient.getAllEnergy(host).catch(() => ({ ok: false as const, error: { code: 'network' as const, message: 'energy fetch failed' } })),
       ]);
-      const agents = agentsResult.ok ? mapRuntimeAgentsForHost(host, agentsResult.data) : [];
+
+      // Build energy lookup map
+      const energyMap = new Map<string, AgentEnergySnapshot>();
+      if (energyResult.ok) {
+        for (const snap of energyResult.data) {
+          energyMap.set(snap.agent_id, snap);
+        }
+      }
+
+      const agents = agentsResult.ok
+        ? mapRuntimeAgentsForHost(host, agentsResult.data).map((agent) => ({
+            ...agent,
+            energy: energyMap.get(agent.id),
+          }))
+        : [];
       const history = historyResponse.ok
         ? ((await historyResponse.json()) as SignalEvent[])
         : [];
@@ -3491,7 +3575,13 @@ export function AgentsPage() {
                       ? 'border border-brand-accent/20 bg-brand-accent/10 text-brand-accent'
                       : 'border border-border-subtle bg-background text-strong';
                     const EntityIcon = nodeType === 'agent' ? Brain : Sparkles;
-                    const detailStatus = agentDetail?.status ?? node?.status ?? 'unknown';
+                    const detailStatus = panelEnergy?.is_dormant
+                      ? 'dormant'
+                      : panelEnergy?.phase === 'dying'
+                        ? 'dying'
+                        : panelEnergy?.phase === 'critical'
+                          ? 'critical'
+                          : (agentDetail?.status ?? node?.status ?? 'unknown');
                     const detailStatusClass: Record<string, string> = {
                       online: 'border-transparent bg-success/15 text-success',
                       available: 'border-transparent bg-success/15 text-success',
@@ -3501,6 +3591,9 @@ export function AgentsPage() {
                       error: 'border-transparent bg-destructive/15 text-destructive',
                       busy: 'border-transparent bg-warning/15 text-warning',
                       warning: 'border-transparent bg-warning/15 text-warning',
+                      dormant: 'border-[#6B7280]/20 bg-[#6B7280]/10 text-[#6B7280]',
+                      critical: 'border-transparent bg-[#F97316]/15 text-[#F97316]',
+                      dying: 'border-transparent bg-destructive/15 text-destructive',
                     };
 
                     return (
@@ -3591,6 +3684,8 @@ export function AgentsPage() {
                             ))}
                           </div>
                         ) : null}
+
+                        {panelEnergy && <EnergyBar energy={panelEnergy} />}
 
                         {!isDetailLoading && agentDetail?.triggerRules.length ? (
                           <Card className="rounded-xl border-border-card bg-card shadow-sm">

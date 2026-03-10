@@ -1,4 +1,4 @@
-import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
+import type { AgentEnergySnapshot, RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { RuntimeTopologyResponse } from '@/lib/types/runtime-topology';
 import { DEFAULT_EXTERNAL_RUNTIME_PORT, formatRuntimeTargetAddress } from '@/config/runtime-target';
 import {
@@ -16,6 +16,7 @@ export interface RuntimeAggregatedAgent extends RuntimeAgentSummary {
   sourceHostId: string;
   sourceHostName: string;
   sourceHostAddress: string;
+  energy?: AgentEnergySnapshot;
 }
 
 export interface RuntimeHostSnapshot {
@@ -36,7 +37,7 @@ export interface RuntimeManagerSnapshot {
 export interface RuntimeManagerOptions {
   hostService?: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>
     & Partial<Pick<RuntimeHostService, 'mergeHostMetadata'>>;
-  runtimeClient?: Pick<RuntimeClient, 'getAgents' | 'getTopology'>;
+  runtimeClient?: Pick<RuntimeClient, 'getAgents' | 'getTopology' | 'getAllEnergy'>;
   runtimeMeshSyncService?: Pick<RuntimeMeshSyncService, 'ensurePeerPair'>;
   now?: () => Date;
 }
@@ -116,7 +117,7 @@ function parseHostAddress(hostAddress: string): { host: string; port: number } {
 export class RuntimeManager {
   private readonly hostService: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>
     & Partial<Pick<RuntimeHostService, 'mergeHostMetadata'>>;
-  private readonly runtimeClient: Pick<RuntimeClient, 'getAgents' | 'getTopology'>;
+  private readonly runtimeClient: Pick<RuntimeClient, 'getAgents' | 'getTopology' | 'getAllEnergy'>;
   private readonly runtimeMeshSyncService: Pick<RuntimeMeshSyncService, 'ensurePeerPair'>;
   private readonly now: () => Date;
 
@@ -165,14 +166,23 @@ export class RuntimeManager {
 
   private async buildHostSnapshot(host: RuntimeHostRecord): Promise<RuntimeHostSnapshot> {
     const topologyStartedAtMs = Date.now();
-    const [agentsResult, topologyEnvelope] = await Promise.all([
+    const [agentsResult, topologyEnvelope, energyResult] = await Promise.all([
       this.runtimeClient.getAgents(host),
       this.runtimeClient.getTopology(host).then((result) => ({
         result,
         latencyMs: Math.max(1, Date.now() - topologyStartedAtMs),
       })),
+      this.runtimeClient.getAllEnergy(host).catch(() => ({ ok: false as const, error: { code: 'network' as const, message: 'energy fetch failed' } })),
     ]);
     const topologyResult = topologyEnvelope.result;
+
+    // Build energy lookup map by agent_id
+    const energyMap = new Map<string, AgentEnergySnapshot>();
+    if (energyResult.ok) {
+      for (const snap of energyResult.data) {
+        energyMap.set(snap.agent_id, snap);
+      }
+    }
 
     if (!agentsResult.ok) {
       return {
@@ -190,6 +200,7 @@ export class RuntimeManager {
       sourceHostId: host.id,
       sourceHostName: host.name,
       sourceHostAddress: `${host.host}:${host.port}`,
+      energy: energyMap.get(agent.id),
     }));
 
     if (!topologyResult.ok) {

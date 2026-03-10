@@ -6,7 +6,7 @@ import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { WorkspaceTabs } from './WorkspaceTabs';
 
-const PHASE_LABELS: Record<string, string> = {
+export const PHASE_LABELS: Record<string, string> = {
   normal: '正常',
   slowing: '降频中',
   critical: '能量不足',
@@ -14,7 +14,7 @@ const PHASE_LABELS: Record<string, string> = {
   dormant: '休眠',
 };
 
-const PHASE_COLORS: Record<string, string> = {
+export const PHASE_COLORS: Record<string, string> = {
   normal: '#22C55E',
   slowing: '#EAB308',
   critical: '#F97316',
@@ -22,7 +22,7 @@ const PHASE_COLORS: Record<string, string> = {
   dormant: '#6B7280',
 };
 
-function EnergyBar({ energy }: { energy: AgentEnergySnapshot }) {
+export function EnergyBar({ energy }: { energy: AgentEnergySnapshot }) {
   const percent = Math.round(energy.ratio * 100);
   const color = PHASE_COLORS[energy.phase] ?? '#6B7280';
   const label = PHASE_LABELS[energy.phase] ?? energy.phase;
