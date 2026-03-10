@@ -3,6 +3,7 @@ import type { RuntimeKind } from '../../../../src/lib/environment/bootstrap';
 import { WebEventLogStorageAdapter } from '../../../../src/lib/adapters/web-eventlog-storage';
 import { NodeFileStorageAdapter } from './node-file-storage';
 import { RemoteEventLogPort } from '../ports/remote-eventlog-port';
+import { RtEventLogPort } from '../ports/rt-eventlog-port';
 
 class UnavailableAsrPort implements IASRPort {
   isAvailable(): boolean {
@@ -19,14 +20,26 @@ function resolveUserId(): string | undefined {
   return raw ? raw : undefined;
 }
 
-type EventLogMode = 'auto' | 'local' | 'remote';
+type EventLogMode = 'auto' | 'local' | 'remote' | 'rt';
 
 function resolveEventLogMode(): EventLogMode {
   const raw = process.env.EXOMIND_MCP_EVENTLOG_MODE?.trim().toLowerCase();
-  if (raw === 'local' || raw === 'remote' || raw === 'auto') {
+  if (raw === 'local' || raw === 'remote' || raw === 'auto' || raw === 'rt') {
     return raw;
   }
   return 'auto';
+}
+
+function resolveRtUrl(): string {
+  const explicit = process.env.EXOMIND_MCP_RT_URL?.trim();
+  if (explicit) {
+    return explicit.replace(/\/+$/, '');
+  }
+  return 'http://localhost:1949';
+}
+
+function resolveRtToken(): string | undefined {
+  return process.env.EXOMIND_MCP_RT_TOKEN?.trim() || undefined;
 }
 
 function normalizeBaseUrl(url: string): string {
@@ -52,7 +65,7 @@ function buildRemoteDbUrl(baseUrl: string, userId: string): string {
 export function createMcpEnvironment(): {
   asr: IASRPort;
   storage: NodeFileStorageAdapter;
-  eventlog: WebEventLogStorageAdapter | RemoteEventLogPort;
+  eventlog: WebEventLogStorageAdapter | RemoteEventLogPort | RtEventLogPort;
   runtime: RuntimeKind;
   capabilities(): Record<string, boolean>;
 } {
@@ -61,20 +74,35 @@ export function createMcpEnvironment(): {
   const userId = resolveUserId();
   const mode = resolveEventLogMode();
 
-  const syncBaseUrl = resolveSyncServerBaseUrl();
-  const remoteDbUrl = userId ? buildRemoteDbUrl(syncBaseUrl, userId) : null;
+  let eventlog: WebEventLogStorageAdapter | RemoteEventLogPort | RtEventLogPort;
 
-  const shouldUseRemote =
-    mode === 'remote' || (mode === 'auto' && Boolean(userId));
+  if (mode === 'rt') {
+    // Explicit RT mode — always use the Runtime HTTP backend.
+    const rtUrl = resolveRtUrl();
+    const rtToken = resolveRtToken();
+    eventlog = new RtEventLogPort(rtUrl, userId || 'anonymous', rtToken);
+  } else if (mode === 'auto' && process.env.EXOMIND_MCP_RT_URL) {
+    // Auto mode with RT URL explicitly configured — prefer RT.
+    const rtUrl = resolveRtUrl();
+    const rtToken = resolveRtToken();
+    eventlog = new RtEventLogPort(rtUrl, userId || 'anonymous', rtToken);
+  } else {
+    // Original remote / local / auto logic.
+    const syncBaseUrl = resolveSyncServerBaseUrl();
+    const remoteDbUrl = userId ? buildRemoteDbUrl(syncBaseUrl, userId) : null;
 
-  if (mode === 'remote' && !userId) {
-    throw new Error('EXOMIND_MCP_USER_ID is required when EXOMIND_MCP_EVENTLOG_MODE=remote');
+    const shouldUseRemote =
+      mode === 'remote' || (mode === 'auto' && Boolean(userId));
+
+    if (mode === 'remote' && !userId) {
+      throw new Error('EXOMIND_MCP_USER_ID is required when EXOMIND_MCP_EVENTLOG_MODE=remote');
+    }
+
+    eventlog =
+      shouldUseRemote && remoteDbUrl
+        ? new RemoteEventLogPort(remoteDbUrl)
+        : new WebEventLogStorageAdapter(userId);
   }
-
-  const eventlog =
-    shouldUseRemote && remoteDbUrl
-      ? new RemoteEventLogPort(remoteDbUrl)
-      : new WebEventLogStorageAdapter(userId);
 
   const env = {
     asr: new UnavailableAsrPort(),

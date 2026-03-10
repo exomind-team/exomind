@@ -64,6 +64,10 @@ mod tests {
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
             energy_registry,
+            eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
+                std::env::temp_dir().join("exomind-test-energy"),
+            )),
+            #[cfg(not(target_os = "android"))]
             pty_manager: Arc::new(crate::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
         }
     }

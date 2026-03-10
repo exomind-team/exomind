@@ -4,6 +4,7 @@ use crate::AppState;
 
 pub mod agents;
 pub mod energy;
+pub mod eventlog;
 pub mod mesh;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
@@ -17,6 +18,7 @@ pub fn router() -> Router<AppState> {
         .route("/topology", get(topology::get_topology))
         .merge(agents::router())
         .merge(energy::router())
+        .merge(eventlog::router())
         .merge(mesh::router())
         .merge(signals::router())
         .merge(tasks::router());
