@@ -33,7 +33,6 @@ import {
   type VoiceLivePreviewSession,
   type VoiceLivePreviewSource,
 } from '@/lib/asr/live-preview';
-import { trimToLatestCharacters } from '@/lib/voice/overlay-text';
 import {
   createVolcanoStreamingCapture,
   type VolcanoStreamingCapture,
@@ -44,8 +43,6 @@ export type VoiceShortcutState = 'idle' | 'arming' | 'recording' | 'recognizing'
 const LOG_TAG = '[VoiceShortcut]';
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
-const LIVE_PREVIEW_TEXT_LIMIT = 100;
-
 type OverlayEventPayload = {
   state: VoiceShortcutState;
   duration: number;
@@ -661,7 +658,7 @@ export class VoiceShortcutService {
   }
 
   private handleLivePreviewUpdate(text: string): void {
-    const nextText = trimToLatestCharacters(text, LIVE_PREVIEW_TEXT_LIMIT);
+    const nextText = text.trim();
     if (!nextText || nextText === this.livePreviewText) {
       return;
     }
@@ -787,7 +784,7 @@ export class VoiceShortcutService {
       this.handleError(payload.errorMessage);
       return;
     }
-    const nextText = trimToLatestCharacters(payload.text || '', LIVE_PREVIEW_TEXT_LIMIT);
+    const nextText = (payload.text || '').trim();
     if (!nextText) {
       return;
     }

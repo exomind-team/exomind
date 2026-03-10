@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
-import { trimToLatestCharacters } from '@/lib/voice/overlay-text';
 
 const tauriEventListeners = new Map<string, (event: { payload: any }) => void | Promise<void>>();
 let livePreviewOnUpdate: ((payload: { text: string; isFinal: boolean }) => void) | null = null;
@@ -327,7 +326,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
-  it('emits live preview text during recording and trims to latest 100 chars（录音时发出实时预览文本并裁到最新 100 字）', async () => {
+  it('emits full live preview text during recording（录音时发出完整实时预览文本）', async () => {
     const service = new VoiceShortcutService();
     await service.init();
 
@@ -342,7 +341,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       'voice-overlay-state',
       expect.objectContaining({
         state: 'recording',
-        text: trimToLatestCharacters(longText, 100),
+        text: longText,
         isLivePreview: true,
       })
     );

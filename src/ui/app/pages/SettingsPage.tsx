@@ -71,6 +71,10 @@ import {
   type VoiceShortcutHotkey,
 } from '@/config/voice-shortcut-hotkey';
 import {
+  getVoiceOverlayOpacity,
+  setVoiceOverlayOpacity,
+} from '@/config/voice-overlay-preferences';
+import {
   getVoiceShortcutAsrProvider,
   getVoiceShortcutAsrProviderLabel,
   setVoiceShortcutAsrProvider,
@@ -244,6 +248,7 @@ export function SettingsPage() {
   const [voiceShortcutAsrProvider, setVoiceShortcutAsrProviderState] = useState<VoiceShortcutAsrProvider>(
     () => getVoiceShortcutAsrProvider()
   );
+  const [voiceOverlayOpacity, setVoiceOverlayOpacityState] = useState<number>(() => getVoiceOverlayOpacity());
   const [volcanoResourceId, setVolcanoResourceIdState] = useState<string>(() => getVolcanoResourceId());
   const [feedbackPreferences, setFeedbackPreferencesState] = useState<FeedbackPreferences>(
     () => getFeedbackPreferences()
@@ -669,6 +674,11 @@ export function SettingsPage() {
     setThemePreferenceState(nextPreference);
   };
 
+  const handleVoiceOverlayOpacityChange = (nextValue: number) => {
+    const normalizedValue = setVoiceOverlayOpacity(nextValue);
+    setVoiceOverlayOpacityState(normalizedValue);
+  };
+
   const handleSoundPresetChange = (presetId: TimerEndSoundPresetId | 'off') => {
     if (presetId === 'off') {
       setTimerPreferencesState(updateTimerPreferences({ countdownEndSoundEnabled: false }));
@@ -734,6 +744,24 @@ export function SettingsPage() {
       >
         火山
       </button>
+    </div>
+  );
+
+  const renderVoiceOverlayOpacityControl = () => (
+    <div className="flex min-w-[186px] items-center gap-3">
+      <input
+        type="range"
+        min={32}
+        max={92}
+        step={1}
+        value={voiceOverlayOpacity}
+        data-testid="new-settings-voice-overlay-opacity-slider"
+        onChange={(event) => handleVoiceOverlayOpacityChange(Number(event.target.value))}
+        className="w-full accent-[#C75B3A]"
+      />
+      <span className="min-w-[44px] text-right text-xs text-[#78716C] dark:text-[#D6D3D1]">
+        {voiceOverlayOpacity}%
+      </span>
     </div>
   );
 
@@ -1052,6 +1080,19 @@ export function SettingsPage() {
                 <div className="pb-[14px] pl-[46px] pr-4">
                   <span className="text-xs text-[#A8A29E]">
                     影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
+                  </span>
+                </div>
+                <Divider />
+                <div data-testid="new-settings-voice-overlay-opacity-row">
+                  <SettingRow
+                    icon={<MoonStar className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="悬浮窗透明度"
+                    right={renderVoiceOverlayOpacityControl()}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">
+                    调整语音悬浮窗的磨砂强度，亮暗主题都会同步使用该透明度。
                   </span>
                 </div>
                 {voiceShortcutAsrProvider === 'volcano' ? (
@@ -1512,6 +1553,19 @@ export function SettingsPage() {
             <div className="pb-[14px] pl-[46px] pr-4">
               <span className="text-xs text-[#A8A29E]">
                 影响全局语音快捷键与悬浮窗识别，当前使用 {voiceShortcutProviderLabel}。
+              </span>
+            </div>
+            <Divider />
+            <div data-testid="new-settings-voice-overlay-opacity-row">
+              <SettingRow
+                icon={<MoonStar className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="悬浮窗透明度"
+                right={renderVoiceOverlayOpacityControl()}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">
+                调整语音悬浮窗的磨砂强度，亮暗主题都会同步使用该透明度。
               </span>
             </div>
             {voiceShortcutAsrProvider === 'volcano' ? (
