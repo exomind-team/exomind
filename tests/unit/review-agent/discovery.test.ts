@@ -6,6 +6,7 @@ import {
   REVIEWER_PREFIX,
   type PullRequestSnapshot,
 } from '../../../Scripts/review-agent/discovery-lib.ts';
+import * as discoveryRuntime from '../../../Scripts/review-agent/discovery-runtime-lib.ts';
 import { loadThreadRepliesWithFallback } from '../../../Scripts/review-agent/discovery-runtime-lib.ts';
 
 function makeSnapshot(overrides: Partial<PullRequestSnapshot> = {}): PullRequestSnapshot {
@@ -179,5 +180,26 @@ describe('review-agent discovery', () => {
       { id: 'thread-1', body: 'reply', createdAt: '2026-03-10T01:00:00Z' },
     ]);
     expect(result.warning).toBeUndefined();
+  });
+
+  it('builds a GET-style thread reply API request so gh api does not downgrade into POST 422s', () => {
+    const buildArgs = (
+      discoveryRuntime as {
+        buildReviewThreadReplyApiArgs?: (
+          repo: string,
+          prNumber: number,
+          page: number,
+          perPage: number,
+        ) => string[];
+      }
+    ).buildReviewThreadReplyApiArgs;
+
+    expect(buildArgs).toBeTypeOf('function');
+    expect(buildArgs?.('exomind-team/exomind', 101, 2, 100)).toEqual([
+      'api',
+      '--method',
+      'GET',
+      'repos/exomind-team/exomind/pulls/101/comments?per_page=100&page=2',
+    ]);
   });
 });

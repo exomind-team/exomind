@@ -49,10 +49,10 @@ export function decideNextAction(context: RouterContext): RouterDecision {
 
   if (context.state.state === 'NO_TARGET') {
     return {
-      action: 'idle-wait',
-      reason: 'no-target',
+      action: 'discovery',
+      reason: 'recheck-no-target',
       selectedPrNumber: null,
-      sleepSeconds: context.state.nextSleepSeconds,
+      sleepSeconds: 0,
     };
   }
 

@@ -17,7 +17,7 @@
 3. 读取路由脚本输出：
    - 若 `action = discovery`，执行 discovery 子流程
    - 若 `action = review`，执行 review 子流程
-   - 若 `action = idle-wait`，按 `sleepSeconds` 等待后再从本 prompt 顶部重新开始
+   - 若 `action = idle-wait`，按 `sleepSeconds` 等待后再从本 prompt 顶部重新开始（兼容保留；当前 `NO_TARGET` 路径不应直接依赖 router 输出等待）
 4. 若本地状态与 GitHub 当前事实冲突，以 GitHub 事实为准
 
 统一规则：
@@ -26,6 +26,7 @@
 - 不要假设当前会话连续存在
 - 不要修改仓库正式代码，除非当前任务明确要求实现 review-agent 自身代码
 - 只把 `./temp/` 用作临时状态和草稿目录
+- 当上一轮是 `NO_TARGET` 时，也必须先重跑 discovery，再由 discovery 决定是否给出 sleep 建议
 - review 子流程在完成真实 GitHub 动作后，必须补一次终态落盘，不能让 `state.json` 停留在进行中的 review 状态
 - `--merge` 路径以“评论即通过”为准：通过评论本身就是审批等价门禁
 - 兼容多 GitHub 账号场景时，Agent 可以 best-effort 执行一次 `approve`；若失败，只能写入备注，不能阻塞后续 merge 尝试

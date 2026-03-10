@@ -36,7 +36,7 @@
 审核 Agent 以统一入口 prompt + router + 两阶段状态机运行：
 
 - 统一入口：人类重复输入同一份 prompt。
-- 路由入口（`Router`）：每轮先基于持久化状态和 GitHub 当前事实决定下一步动作。
+- 路由入口（`Router`）：每轮先基于持久化状态和 GitHub 当前事实决定下一步动作；当上一轮 `NO_TARGET` 时，也必须先重新进入 discovery。
 - 阶段 A（`Discovery`）：扫描 open PR 并构建待处理队列。
 - 阶段 B（`Review`）：读取当前选中 PR 的上下文，执行审阅，并为该轮发布恰好一条审核评论。
 
@@ -62,7 +62,7 @@
 │ Router                                                              │
 │ - 读取 state / queue                                                │
 │ - 拉取当前 open PR 编号                                             │
-│ - 输出下一步动作：discovery / review / idle-wait                    │
+│ - 输出下一步动作：discovery / review / idle-wait(兼容保留)          │
 └─────────────────────────────────────────────────────────────────────┘
         |
         |
@@ -99,7 +99,7 @@
 
 ## 状态流转
 
-- `NO_TARGET`：本轮扫描未发现需要行动的 PR。
+- `NO_TARGET`：本轮扫描未发现需要行动的 PR；它只表示上一轮结果，下一轮仍需先重跑 discovery。
 - `HAS_TARGET`：本轮存在至少一个需要行动的 PR，并已选中一个目标。
 - `REVIEW_POSTED`：当前目标 PR 已完成审阅并发布评论。
 - `NEEDS_HUMAN_TEST`：当前目标 PR 需要人类验证，Agent 不应继续尝试自动收口。

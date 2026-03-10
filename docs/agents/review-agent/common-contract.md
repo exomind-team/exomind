@@ -45,7 +45,8 @@
 - 每条问题都必须附带验证方式。
 - 每条已发布评论都必须回读并校验。
 - Agent 必须保留足够的本地状态，以便中断后恢复。
-- 每次重启都必须先运行 router，再决定进入 discovery、review 或 idle-wait。
+- 每次重启都必须先运行 router，再决定进入 discovery、review 或兼容性的 idle-wait。
+- 若上一轮状态是 `NO_TARGET`，下一轮也必须先重跑 discovery，再决定是否等待；backoff 只是调度建议，不是是否重查 GitHub 的真相判断。
 - 人类始终只输入一份统一入口 prompt；discovery 与 review 文档是内部执行协议，不是给人类手动切换的 prompt。
 
 ## 合法输出状态

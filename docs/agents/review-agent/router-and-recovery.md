@@ -48,8 +48,9 @@ router 只允许输出以下 `action`：
 ### 当前无目标
 
 - 若 `state = NO_TARGET`
-- 则输出 `idle-wait`
-- 并使用 `nextSleepSeconds`
+- 则输出 `discovery`
+- 原因是 `NO_TARGET` 只是“上一轮没找到目标”，不是“这一轮无需再查 GitHub”
+- sleep 只能作为上一轮 discovery 产出的调度建议，不能替代下一轮的远端重查
 
 ### 审阅已结束
 
@@ -71,3 +72,4 @@ router 只允许输出以下 `action`：
 - 人类只输入统一 prompt
 - router 是唯一阶段判断入口
 - 只要本地状态与 GitHub 事实冲突，就以 GitHub 为准
+- `NO_TARGET` 不得直接跳过 GitHub 重查

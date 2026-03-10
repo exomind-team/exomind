@@ -39,6 +39,7 @@ temp/
 
 - 当前 sleep 秒数
 - 连续无变化轮次
+- 仅用于调度建议；不能决定是否跳过下一轮 GitHub discovery
 
 ### `cursor.json`
 
@@ -59,6 +60,7 @@ temp/
 - 连续无变化轮次时翻倍
 - 上限为 1800 秒
 - 一旦发现待处理 PR，立即重置为 180 秒
+- 即使存在 backoff，下一轮统一入口仍要先经 router/discovery 重查 GitHub 当前事实
 
 ## 工作树（Worktree）生命周期
 
@@ -102,4 +104,5 @@ temp/
 2. 读取 `state.json`、`queue.json`、`backoff.json` 与 `cursor.json`
 3. 校验 `selected_pr` 仍然处于 open 状态
 4. 校验 `pending_queue` 中的 PR 仍然处于 open 状态
-5. 基于当前 GitHub 事实恢复，而不是盲目依赖本地旧状态
+5. 若上一轮是 `NO_TARGET`，也必须重新进入 discovery，不能仅凭本地 backoff/state 直接等待
+6. 基于当前 GitHub 事实恢复，而不是盲目依赖本地旧状态

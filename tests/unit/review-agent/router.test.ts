@@ -79,7 +79,7 @@ describe('review-agent router', () => {
     expect(result.reason).toBe('stale-selected-pr');
   });
 
-  it('routes to idle-wait when state says no target', () => {
+  it('reruns discovery when state says no target so GitHub remote truth can be recomputed', () => {
     const result = decideNextAction(
       makeContext({
         state: {
@@ -100,9 +100,9 @@ describe('review-agent router', () => {
       }),
     );
 
-    expect(result.action).toBe('idle-wait');
-    expect(result.sleepSeconds).toBe(360);
-    expect(result.reason).toBe('no-target');
+    expect(result.action).toBe('discovery');
+    expect(result.sleepSeconds).toBe(0);
+    expect(result.reason).toBe('recheck-no-target');
   });
 
   it('retries review when the last retryable failure came from review and selected PR is still open', () => {

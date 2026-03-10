@@ -11,6 +11,7 @@ import {
   type PullRequestSnapshot,
 } from './discovery-lib.ts';
 import {
+  buildReviewThreadReplyApiArgs,
   loadThreadRepliesWithFallback,
   type DiscoveryWarning,
 } from './discovery-runtime-lib.ts';
@@ -301,14 +302,9 @@ function fetchReviewThreadReplies(prNumber: number, repo: string): PullRequestTh
   let page = 1;
 
   while (true) {
-    const pageItems = runGhJson<ReviewCommentInput[]>([
-      'api',
-      `repos/${repo}/pulls/${prNumber}/comments`,
-      '-F',
-      `per_page=${perPage}`,
-      '-F',
-      `page=${page}`,
-    ]);
+    const pageItems = runGhJson<ReviewCommentInput[]>(
+      buildReviewThreadReplyApiArgs(repo, prNumber, page, perPage),
+    );
 
     if (!Array.isArray(pageItems) || pageItems.length === 0) {
       break;
@@ -387,7 +383,7 @@ function persistRound(result: RoundResult): void {
     state: result.state,
     phase: result.state === 'NO_TARGET' ? 'IDLE_WAIT' : 'DISCOVERY',
     lastPhase: 'DISCOVERY',
-    nextAction: result.state === 'HAS_TARGET' ? 'review' : 'idle-wait',
+    nextAction: result.state === 'HAS_TARGET' ? 'review' : 'discovery',
     selectedPrNumber: result.selectedPr?.number ?? null,
     selectedReason: result.selectedPr?.reason ?? null,
     inspectedPrCount: result.inspectedPrCount,

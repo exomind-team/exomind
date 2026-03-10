@@ -5,7 +5,7 @@
 - 来自 `gh pr list --state open` 的当前仓库 open PR 列表
 - 每个 PR 上已有的审核评论
 - 每个 PR 上的新评论、新 review、新提交
-- 来自 `./temp/` 的本地发现状态
+- 来自 `./temp/` 的本地发现状态（仅作恢复辅助与 sleep 建议，不能压过 GitHub 当前事实）
 
 ## 扫描算法
 
@@ -32,7 +32,7 @@
 
 其中 review thread 回复属于可选增强信号：
 
-- 若 review thread 回复读取成功，则纳入判定（分页读取，避免 100 条上限）
+- 若 review thread 回复读取成功，则纳入判定（使用 GET 语义分页读取，避免 `gh api -F ...` 退化成 POST 后触发 `422`）
 - 若 thread reply 读取失败，则退化为“没有 thread replies”，继续使用 comments / reviews / commits 判定
 - 退化必须在 discovery 结果中留下 warning，便于排查
 
@@ -43,7 +43,7 @@
 - 构建一个按 PR `updatedAt` 排序的 `actionable_prs` 队列。
 - 选择队列中的第一个 PR 作为 `selected_pr`。
 - 将剩余项持久化为 `pending_queue`。
-- 若队列为空，则输出 `NO_TARGET`。
+- 若队列为空，则输出 `NO_TARGET`，并附带 sleep 建议；下一轮仍需先重新跑 discovery，再判断是否继续等待。
 
 ## 失败处理
 
