@@ -2350,12 +2350,8 @@ export function AgentsPage() {
     const poll = async () => {
       const host = findPreferredRuntimeHostForAgent(runtimeHostSnapshots, runtimeEntityId, preferredHostId)
         ?? activeSignalRouteHost;
-      if (!host || disposed) {
-        console.log('[EnergyPoll] no host or disposed', { host: !!host, disposed });
-        return;
-      }
+      if (!host || disposed) return;
       const snap = await client.getAgentEnergy(host, runtimeEntityId);
-      console.log('[EnergyPoll] result:', snap ? `${snap.current}/${snap.max} (${snap.phase})` : 'null');
       if (!disposed && snap) setPanelEnergy(snap);
     };
 
@@ -2973,15 +2969,13 @@ export function AgentsPage() {
     const refreshInterval = setInterval(() => {
       void (async () => {
         try {
-          console.log('[8s-POLL] refreshing...');
           const nextRuntimeSnapshot = await getRuntimeManager().refreshSnapshot();
           if (disposed) return;
-          console.log('[8s-POLL] agents:', nextRuntimeSnapshot.agents.length, 'energy:', nextRuntimeSnapshot.agents.filter(a => a.energy).length);
           applyRuntimeSnapshot(nextRuntimeSnapshot);
           await refreshSignalRoutesFromSnapshot(nextRuntimeSnapshot, () => disposed);
           await fetchPtyAgentsRef.current();
-        } catch (err) {
-          console.error('[8s-POLL] ERROR:', err);
+        } catch {
+          // Ignore polling errors（轮询错误不打断页面渲染）
         }
       })();
     }, 8000);
