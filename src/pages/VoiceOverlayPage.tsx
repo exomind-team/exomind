@@ -28,6 +28,9 @@ interface OverlayData {
   isLivePreview?: boolean;
   providerLabel?: string;
   activationMs?: number;
+  firstTextMs?: number;
+  debugTraceId?: string;
+  debugPressedAtMs?: number;
   recognitionMs?: number;
   errorMessage: string;
 }
@@ -46,11 +49,16 @@ export function VoiceOverlayPage() {
     isLivePreview: false,
     providerLabel: '',
     activationMs: undefined,
+    firstTextMs: undefined,
+    debugTraceId: undefined,
+    debugPressedAtMs: undefined,
     recognitionMs: undefined,
     errorMessage: '',
   });
   const transcriptRef = useRef<HTMLDivElement>(null);
   const [stickToBottom, setStickToBottom] = useState(true);
+  const [firstContentMs, setFirstContentMs] = useState<number | null>(null);
+  const seenTraceIdRef = useRef<string | null>(null);
 
   const overlayPrimaryAlpha = Math.max(0.28, Math.min(0.92, overlayOpacity / 100));
   const overlaySecondaryAlpha = Math.max(0.16, overlayPrimaryAlpha - 0.18);
@@ -140,6 +148,26 @@ export function VoiceOverlayPage() {
   }, [data.state]);
 
   useEffect(() => {
+    if (data.state === 'idle') {
+      seenTraceIdRef.current = null;
+      setFirstContentMs(null);
+      return;
+    }
+
+    if (!data.debugTraceId || seenTraceIdRef.current === data.debugTraceId) {
+      return;
+    }
+
+    seenTraceIdRef.current = data.debugTraceId;
+    if (typeof data.debugPressedAtMs === 'number') {
+      const elapsed = Math.max(0, Date.now() - data.debugPressedAtMs);
+      setFirstContentMs(elapsed);
+    } else {
+      setFirstContentMs(null);
+    }
+  }, [data.state, data.debugPressedAtMs, data.debugTraceId]);
+
+  useEffect(() => {
     if (!stickToBottom || !transcriptRef.current) {
       return;
     }
@@ -173,6 +201,8 @@ export function VoiceOverlayPage() {
             isLivePreview={data.isLivePreview}
             providerLabel={data.providerLabel}
             activationMs={data.activationMs}
+            firstTextMs={data.firstTextMs}
+            firstContentMs={firstContentMs ?? undefined}
             recognitionMs={data.recognitionMs}
             errorMessage={data.errorMessage}
             transcriptRef={transcriptRef}
@@ -231,6 +261,8 @@ function StatusText({
   isLivePreview,
   providerLabel,
   activationMs,
+  firstTextMs,
+  firstContentMs,
   recognitionMs,
   errorMessage,
   transcriptRef,
@@ -244,6 +276,8 @@ function StatusText({
   isLivePreview?: boolean;
   providerLabel?: string;
   activationMs?: number;
+  firstTextMs?: number;
+  firstContentMs?: number;
   recognitionMs?: number;
   errorMessage: string;
   transcriptRef: RefObject<HTMLDivElement>;
@@ -268,6 +302,9 @@ function StatusText({
           <span className="overlay-text overlay-text--secondary">
             {statusHint || '正在等待麦克风权限并连接识别链路'}
           </span>
+          {typeof firstContentMs === 'number' ? (
+            <span className="overlay-text overlay-text--diagnostic">{`调试 · 首帧 ${formatActivationMs(firstContentMs)}`}</span>
+          ) : null}
         </span>
       );
     case 'recording':
@@ -289,6 +326,11 @@ function StatusText({
             ) : null}
             <span>{`${isLivePreview ? '实时预览 · ' : ''}再按 ${shortcut} 结束 · Esc 取消`}</span>
           </span>
+          {(typeof firstContentMs === 'number' || typeof firstTextMs === 'number') ? (
+            <span className="overlay-text overlay-text--diagnostic">
+              {`调试 · 首帧 ${formatActivationMs(firstContentMs ?? 0)} · 首字 ${formatActivationMs(firstTextMs ?? 0)}`}
+            </span>
+          ) : null}
         </span>
       );
     case 'recognizing':
@@ -304,6 +346,11 @@ function StatusText({
             <span className="overlay-text">{transcript || '识别中…'}</span>
           </div>
           <span className="overlay-text overlay-text--secondary">{`识别中... · ${shortcut} 开始新一轮 · Esc 取消`}</span>
+          {(typeof firstContentMs === 'number' || typeof firstTextMs === 'number') ? (
+            <span className="overlay-text overlay-text--diagnostic">
+              {`调试 · 首帧 ${formatActivationMs(firstContentMs ?? 0)} · 唤起 ${formatActivationMs(activationMs ?? 0)} · 首字 ${formatActivationMs(firstTextMs ?? 0)}`}
+            </span>
+          ) : null}
         </span>
       );
     case 'done': {
@@ -506,6 +553,13 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css *
     opacity: 0.8;
     font-size: 11px;
     min-height: 0;
+  }
+
+  .overlay-text--diagnostic {
+    opacity: 0.72;
+    font-size: 10px;
+    letter-spacing: 0.01em;
+    color: hsl(var(--text-muted));
   }
 
   .overlay-status-row {

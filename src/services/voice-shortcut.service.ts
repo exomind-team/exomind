@@ -55,6 +55,9 @@ type OverlayEventPayload = {
   isLivePreview: boolean;
   providerLabel: string;
   activationMs?: number;
+  firstTextMs?: number;
+  debugTraceId?: string;
+  debugPressedAtMs?: number;
   recognitionMs?: number;
   errorMessage: string;
 };
@@ -85,7 +88,10 @@ export class VoiceShortcutService {
   private initializing = false;
   private startPending = false;
   private activationStartedAt: number | null = null;
+  private traceStartedAtMs: number | null = null;
+  private currentTraceId: string | null = null;
   private latestActivationMs: number | null = null;
+  private latestFirstTextMs: number | null = null;
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
   private micPrewarmEnabled = getVoiceShortcutMicPrewarmEnabled();
   private livePreviewSource: VoiceLivePreviewSource;
@@ -197,8 +203,13 @@ export class VoiceShortcutService {
   };
 
   private beginActivationTracking(): void {
-    this.activationStartedAt = Date.now();
+    const now = Date.now();
+    this.activationStartedAt = now;
+    this.traceStartedAtMs = now;
+    this.currentTraceId = `voice-${now}`;
     this.latestActivationMs = null;
+    this.latestFirstTextMs = null;
+    console.info(LOG_TAG, `[trace ${this.currentTraceId}] shortcut pressed at ${now}`);
   }
 
   private completeActivationTracking(): number | undefined {
@@ -209,7 +220,23 @@ export class VoiceShortcutService {
     const activationMs = Math.max(0, Date.now() - this.activationStartedAt);
     this.activationStartedAt = null;
     this.latestActivationMs = activationMs;
+    if (this.currentTraceId) {
+      console.info(LOG_TAG, `[trace ${this.currentTraceId}] entered recording in ${activationMs}ms`);
+    }
     return activationMs;
+  }
+
+  private markFirstTextSeen(): number | undefined {
+    if (this.latestFirstTextMs != null || this.traceStartedAtMs == null) {
+      return this.latestFirstTextMs ?? undefined;
+    }
+
+    const firstTextMs = Math.max(0, Date.now() - this.traceStartedAtMs);
+    this.latestFirstTextMs = firstTextMs;
+    if (this.currentTraceId) {
+      console.info(LOG_TAG, `[trace ${this.currentTraceId}] first text in ${firstTextMs}ms`);
+    }
+    return firstTextMs;
   }
 
   private isLiveStream(stream: MediaStream | null): stream is MediaStream {
@@ -710,6 +737,9 @@ export class VoiceShortcutService {
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
       providerLabel: extra.providerLabel ?? this.getActiveProviderLabel(),
       activationMs: extra.activationMs ?? this.latestActivationMs ?? undefined,
+      firstTextMs: extra.firstTextMs ?? this.latestFirstTextMs ?? undefined,
+      debugTraceId: extra.debugTraceId ?? this.currentTraceId ?? undefined,
+      debugPressedAtMs: extra.debugPressedAtMs ?? this.traceStartedAtMs ?? undefined,
       recognitionMs: extra.recognitionMs,
       errorMessage: extra.errorMessage ?? '',
     };
@@ -755,8 +785,10 @@ export class VoiceShortcutService {
     if (this.state !== 'recording' && this.state !== 'recognizing') {
       return;
     }
+    const firstTextMs = this.markFirstTextSeen();
     this.emitOverlayState(this.state, {
       text: nextText,
+      firstTextMs,
       isLivePreview: true,
     });
   }
@@ -888,8 +920,10 @@ export class VoiceShortcutService {
     if (this.state !== 'recording' && this.state !== 'recognizing') {
       return;
     }
+    const firstTextMs = this.markFirstTextSeen();
     this.emitOverlayState(this.state, {
       text: nextText,
+      firstTextMs,
       isLivePreview: !payload.isFinal,
     });
   }
