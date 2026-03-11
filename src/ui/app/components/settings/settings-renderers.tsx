@@ -465,9 +465,9 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
         <DialogContent className="rounded-2xl">
           <DialogHeader>
             <DialogTitle>{item.dialogTitle ?? item.label}</DialogTitle>
-            {item.dialogDescription ? (
-              <DialogDescription>{item.dialogDescription}</DialogDescription>
-            ) : null}
+            <DialogDescription className={item.dialogDescription ? undefined : 'sr-only'}>
+              {item.dialogDescription ?? `${item.label} 设置`}
+            </DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
             <input

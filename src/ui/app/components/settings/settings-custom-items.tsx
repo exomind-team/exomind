@@ -71,6 +71,10 @@ function useSettingValue<T>(
   return [value, setValue];
 }
 
+function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
+  return typeof value === 'object' && value !== null && typeof (value as PromiseLike<T>).then === 'function';
+}
+
 function NoticeBlock({
   message,
   tone,
@@ -442,18 +446,27 @@ export function TaskBackendStatusSetting(_props: { ctx: SettingsContext }) {
 
   useEffect(() => {
     let cancelled = false;
+    const result = getTaskBackupService().getBackendStatus();
 
-    void getTaskBackupService().getBackendStatus()
-      .then((nextStatus) => {
-        if (!cancelled) {
-          setStatus(nextStatus);
-        }
-      })
-      .catch(() => {
-        if (!cancelled) {
-          setStatus(null);
-        }
-      });
+    if (isPromiseLike<{
+      backend: string;
+      supportsJsonBackup: boolean;
+      supportsSqliteSnapshot: boolean;
+    }>(result)) {
+      void result
+        .then((nextStatus) => {
+          if (!cancelled) {
+            setStatus(nextStatus);
+          }
+        })
+        .catch(() => {
+          if (!cancelled) {
+            setStatus(null);
+          }
+        });
+    } else if (!cancelled) {
+      setStatus(result);
+    }
 
     return () => {
       cancelled = true;

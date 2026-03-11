@@ -12,6 +12,11 @@
  */
 import { vi } from 'vitest';
 
+const voiceShortcutAsrProviderState = {
+  current: 'moss' as 'moss' | 'volcano',
+  listeners: new Set<(value: 'moss' | 'volcano') => void>(),
+};
+
 vi.mock('@/lib/services', () => ({
   getEventLogService: vi.fn(() => ({
     exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
@@ -30,11 +35,11 @@ vi.mock('@/lib/services', () => ({
     }),
     importTasksFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
     importTasksFromSqliteSnapshot: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
-    getBackendStatus: vi.fn().mockResolvedValue({
+    getBackendStatus: vi.fn(() => ({
       backend: 'rt-sqlite',
       supportsJsonBackup: true,
       supportsSqliteSnapshot: true,
-    }),
+    })),
   })),
 }));
 
@@ -120,6 +125,22 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   getVoiceShortcutHotkey: vi.fn(() => 'Alt+Q'),
   setVoiceShortcutHotkey: vi.fn((value: string) => value),
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/voice-shortcut-asr-provider', () => ({
+  getVoiceShortcutAsrProvider: vi.fn(() => voiceShortcutAsrProviderState.current),
+  getVoiceShortcutAsrProviderLabel: vi.fn((provider: 'moss' | 'volcano') => provider === 'volcano' ? '火山' : 'MOSS'),
+  setVoiceShortcutAsrProvider: vi.fn((value: 'moss' | 'volcano') => {
+    voiceShortcutAsrProviderState.current = value === 'volcano' ? 'volcano' : 'moss';
+    voiceShortcutAsrProviderState.listeners.forEach((listener) => listener(voiceShortcutAsrProviderState.current));
+    return voiceShortcutAsrProviderState.current;
+  }),
+  subscribeVoiceShortcutAsrProviderChanges: vi.fn((listener: (value: 'moss' | 'volcano') => void) => {
+    voiceShortcutAsrProviderState.listeners.add(listener);
+    return () => {
+      voiceShortcutAsrProviderState.listeners.delete(listener);
+    };
+  }),
 }));
 
 vi.mock('@/config/voice-overlay-preferences', () => ({

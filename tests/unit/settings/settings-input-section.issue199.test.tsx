@@ -26,6 +26,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 describe('SettingsPage input section（输入分组语音配置）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setVoiceShortcutAsrProvider('moss');
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -63,20 +64,26 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
   });
 
-  it('switches shortcut voice provider from input section', () => {
+  it('switches shortcut voice provider from input section', async () => {
+    const setProviderMock = vi.mocked(setVoiceShortcutAsrProvider);
     render(<SettingsPage />);
 
     const volcanoButton = screen.getByTestId('new-settings-voice-provider-volcano');
     const mossButton = screen.getByTestId('new-settings-voice-provider-moss');
 
     fireEvent.click(volcanoButton);
-    expect(volcanoButton).toHaveAttribute('aria-pressed', 'true');
-    expect(mossButton).toHaveAttribute('aria-pressed', 'false');
-    expect(setVoiceShortcutAsrProvider('volcano')).toBe('volcano');
+    await waitFor(() => {
+      expect(volcanoButton).toHaveAttribute('aria-pressed', 'true');
+      expect(mossButton).toHaveAttribute('aria-pressed', 'false');
+    });
+    expect(setProviderMock).toHaveBeenCalledWith('volcano');
 
     fireEvent.click(mossButton);
-    expect(mossButton).toHaveAttribute('aria-pressed', 'true');
-    expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(() => {
+      expect(mossButton).toHaveAttribute('aria-pressed', 'true');
+      expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
+    });
+    expect(setProviderMock).toHaveBeenCalledWith('moss');
   });
 
   it('allows selecting volcano resource model from input section', () => {
