@@ -26,6 +26,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 describe('SettingsPage input section（输入分组语音配置）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setVoiceShortcutAsrProvider('moss');
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -63,20 +64,26 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
   });
 
-  it('switches shortcut voice provider from input section', () => {
+  it('switches shortcut voice provider from input section', async () => {
+    const setProviderMock = vi.mocked(setVoiceShortcutAsrProvider);
     render(<SettingsPage />);
 
     const volcanoButton = screen.getByTestId('new-settings-voice-provider-volcano');
     const mossButton = screen.getByTestId('new-settings-voice-provider-moss');
 
     fireEvent.click(volcanoButton);
-    expect(volcanoButton).toHaveAttribute('aria-pressed', 'true');
-    expect(mossButton).toHaveAttribute('aria-pressed', 'false');
-    expect(setVoiceShortcutAsrProvider('volcano')).toBe('volcano');
+    await waitFor(() => {
+      expect(volcanoButton).toHaveAttribute('aria-pressed', 'true');
+      expect(mossButton).toHaveAttribute('aria-pressed', 'false');
+    });
+    expect(setProviderMock).toHaveBeenCalledWith('volcano');
 
     fireEvent.click(mossButton);
-    expect(mossButton).toHaveAttribute('aria-pressed', 'true');
-    expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
+    await waitFor(() => {
+      expect(mossButton).toHaveAttribute('aria-pressed', 'true');
+      expect(volcanoButton).toHaveAttribute('aria-pressed', 'false');
+    });
+    expect(setProviderMock).toHaveBeenCalledWith('moss');
   });
 
   it('allows selecting volcano resource model from input section', () => {
@@ -174,6 +181,24 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
       expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
       expect(setHotkeyMock).toHaveBeenCalledWith('Alt+W');
     });
+  });
+
+  it('syncs hotkey from runtime on mount in tauri（Tauri 挂载时同步运行时快捷键）', async () => {
+    const setHotkeyMock = vi.mocked(setVoiceShortcutHotkey);
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'voice_shortcut_get') {
+        return 'Ctrl+Space';
+      }
+      return null;
+    });
+
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('voice_shortcut_get');
+    });
+    expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
   });
 
   it('reverts to runtime hotkey when tauri shortcut switch fails（Tauri 切换失败时回滚到实际快捷键）', async () => {

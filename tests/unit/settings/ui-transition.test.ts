@@ -19,7 +19,10 @@ describe('UI transition retired（旧 UI 切换已下线）', () => {
     expect(fs.existsSync(path.resolve('src/config/ui-mode.ts'))).toBe(false);
   });
 
-  it('new settings has no mode switch action（新设置页不含模式切换）', () => {
+  it('new settings page dispatches registry-driven layouts（新设置页改为 registry/layout 驱动）', () => {
+    expect(newSettingsSource).toContain('getVisibleSettings');
+    expect(newSettingsSource).toContain('DesktopSettingsLayout');
+    expect(newSettingsSource).toContain('MobileSettingsLayout');
     expect(newSettingsSource).not.toContain('旧版页面');
     expect(newSettingsSource).not.toContain('setUIMode');
   });

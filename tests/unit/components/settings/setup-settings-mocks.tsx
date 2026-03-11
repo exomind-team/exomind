@@ -12,6 +12,11 @@
  */
 import { vi } from 'vitest';
 
+const voiceShortcutAsrProviderState = {
+  current: 'moss' as 'moss' | 'volcano',
+  listeners: new Set<(value: 'moss' | 'volcano') => void>(),
+};
+
 vi.mock('@/lib/services', () => ({
   getEventLogService: vi.fn(() => ({
     exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
@@ -30,11 +35,11 @@ vi.mock('@/lib/services', () => ({
     }),
     importTasksFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
     importTasksFromSqliteSnapshot: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
-    getBackendStatus: vi.fn().mockResolvedValue({
+    getBackendStatus: vi.fn(() => ({
       backend: 'rt-sqlite',
       supportsJsonBackup: true,
       supportsSqliteSnapshot: true,
-    }),
+    })),
   })),
 }));
 
@@ -54,21 +59,25 @@ vi.mock('@/config/version-build-info', () => ({
 vi.mock('@/config/theme', () => ({
   getThemePreference: vi.fn(() => 'system'),
   setThemePreference: vi.fn(),
+  subscribeThemePreferenceChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: vi.fn(() => false),
   setDeveloperModeEnabled: vi.fn(),
+  subscribeDeveloperModeChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: vi.fn(() => false),
   setAgentPageEnabled: vi.fn(),
+  subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: vi.fn(() => true),
   setDesktopAdaptiveEnabled: vi.fn(),
+  subscribeDesktopAdaptiveChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/timer-preferences', () => ({
@@ -118,10 +127,26 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/voice-shortcut-asr-provider', () => ({
+  getVoiceShortcutAsrProvider: vi.fn(() => voiceShortcutAsrProviderState.current),
+  getVoiceShortcutAsrProviderLabel: vi.fn((provider: 'moss' | 'volcano') => provider === 'volcano' ? '火山' : 'MOSS'),
+  setVoiceShortcutAsrProvider: vi.fn((value: 'moss' | 'volcano') => {
+    voiceShortcutAsrProviderState.current = value === 'volcano' ? 'volcano' : 'moss';
+    voiceShortcutAsrProviderState.listeners.forEach((listener) => listener(voiceShortcutAsrProviderState.current));
+    return voiceShortcutAsrProviderState.current;
+  }),
+  subscribeVoiceShortcutAsrProviderChanges: vi.fn((listener: (value: 'moss' | 'volcano') => void) => {
+    voiceShortcutAsrProviderState.listeners.add(listener);
+    return () => {
+      voiceShortcutAsrProviderState.listeners.delete(listener);
+    };
+  }),
+}));
+
 vi.mock('@/config/voice-overlay-preferences', () => ({
   DEFAULT_VOICE_OVERLAY_OPACITY: 62,
-  MIN_VOICE_OVERLAY_OPACITY: 32,
-  MAX_VOICE_OVERLAY_OPACITY: 92,
+  MIN_VOICE_OVERLAY_OPACITY: 20,
+  MAX_VOICE_OVERLAY_OPACITY: 98,
   DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES: 3,
   MIN_VOICE_OVERLAY_TRANSCRIPT_LINES: 1,
   MAX_VOICE_OVERLAY_TRANSCRIPT_LINES: 5,
