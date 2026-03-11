@@ -16,4 +16,9 @@ describe('settings registry import/export entries', () => {
     expect(syncServerItem?.label).toBe('同步服务器');
     expect(syncServerItem?.type).toBe('string');
   });
+
+  it('uses generic backup filename prefix', () => {
+    expect(source).toContain('exomind-data-');
+    expect(source).not.toContain('exomind-eventlog-');
+  });
 });

@@ -81,6 +81,15 @@ const SAMPLE_AGENTS: RuntimeAggregatedAgent[] = [
     sourceHostId: 'host-a',
     sourceHostName: 'RT-A',
     sourceHostAddress: '127.0.0.1:1919',
+    energy: {
+      agent_id: 'classifier',
+      current: 180,
+      max: 200,
+      ratio: 0.9,
+      tick_cost: 5,
+      phase: 'normal',
+      is_dormant: false,
+    },
   },
   {
     id: 'reviewer',
@@ -90,6 +99,15 @@ const SAMPLE_AGENTS: RuntimeAggregatedAgent[] = [
     sourceHostId: 'host-a',
     sourceHostName: 'RT-A',
     sourceHostAddress: '127.0.0.1:1919',
+    energy: {
+      agent_id: 'reviewer',
+      current: 0,
+      max: 100,
+      ratio: 0,
+      tick_cost: 10,
+      phase: 'dormant',
+      is_dormant: true,
+    },
   },
 ];
 
@@ -151,6 +169,19 @@ describe('agents signal topology builder issue-245f（信号拓扑构建）', ()
       source: 'input:voice',
       target: 'topic:voice.input.transcript',
       topic: 'voice.input.transcript',
+    });
+  });
+
+  it('projects agent energy phase onto graph nodes（把 agent 能量阶段映射到拓扑节点）', () => {
+    const graph = buildSignalGraph(SAMPLE_ROUTES, SAMPLE_AGENTS);
+
+    expect(graph.nodes.find((node) => node.id === 'agent:classifier')).toMatchObject({
+      energyPhase: 'normal',
+      isDormant: false,
+    });
+    expect(graph.nodes.find((node) => node.id === 'agent:reviewer')).toMatchObject({
+      energyPhase: 'dormant',
+      isDormant: true,
     });
   });
 });

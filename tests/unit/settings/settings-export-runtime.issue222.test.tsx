@@ -144,7 +144,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
 
   it('uses tauri native save command for export in tauri runtime', async () => {
     mocks.isTauri.mockResolvedValue(true);
-    mocks.invoke.mockResolvedValue('/storage/emulated/0/Download/exomind-eventlog-2026-02-24.json');
+    mocks.invoke.mockResolvedValue('/storage/emulated/0/Download/exomind-data-2026-02-24.json');
 
     render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: '导出备份' }));
@@ -152,7 +152,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
     await waitFor(() => {
       expect(mocks.invoke).toHaveBeenCalledWith('save_json_file', expect.objectContaining({
         content: expect.stringContaining('"events"'),
-        defaultName: expect.stringMatching(/^exomind-eventlog-\d{4}-\d{2}-\d{2}\.json$/),
+        defaultName: expect.stringMatching(/^exomind-data-\d{4}-\d{2}-\d{2}\.json$/),
       }));
     });
 
@@ -201,7 +201,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
     });
 
     expect(mocks.importEventsFromJson).toHaveBeenCalledWith(expect.stringContaining('"version":1'), 'merge');
-    expect(screen.getByText(/导入成功：新增 1 条/)).toBeInTheDocument();
+    expect(screen.getByText(/导入成功：事件新增 1 条/)).toBeInTheDocument();
     expect(screen.getByText(/来源：content:\/\/downloads\/document\/eventlog\.json/)).toBeInTheDocument();
   });
 });

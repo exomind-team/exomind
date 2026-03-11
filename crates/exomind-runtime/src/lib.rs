@@ -23,12 +23,12 @@ pub mod energy;
 pub mod eventlog;
 pub mod mesh;
 pub mod pairing;
+#[cfg(not(target_os = "android"))]
+pub mod pty;
 pub mod routes;
 pub mod signal;
 pub mod task;
 pub mod tick;
-#[cfg(not(target_os = "android"))]
-pub mod pty;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_RT_PORT: u16 = 1949;
@@ -205,8 +205,7 @@ pub struct RuntimeHandle {
     ts_agents: Vec<TsAgentProcess>,
     #[cfg(not(target_os = "android"))]
     pty_manager: Arc<pty::PtyManager>,
-    tick_cancel: Arc<std::sync::atomic::AtomicBool>,
-    tick_tasks: Vec<JoinHandle<()>>,
+    tick_manager: Arc<tick::TickManager>,
 }
 
 /// Publish request for in-process fast path（进程内快速发布请求）.
@@ -304,11 +303,7 @@ impl RuntimeHandle {
             let _ = tx.send(());
         }
 
-        self.tick_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        for task in self.tick_tasks.drain(..) {
-            task.abort();
-            let _ = task.await;
-        }
+        self.tick_manager.stop_all().await;
 
         for task in &self.actor_tasks {
             task.abort();
@@ -383,10 +378,7 @@ impl Drop for RuntimeHandle {
         if let Some(tx) = self.shutdown_tx.take() {
             let _ = tx.send(());
         }
-        self.tick_cancel.store(true, std::sync::atomic::Ordering::Relaxed);
-        for task in self.tick_tasks.drain(..) {
-            task.abort();
-        }
+        self.tick_manager.abort_all();
         for task in self.actor_tasks.drain(..) {
             task.abort();
         }
@@ -465,9 +457,15 @@ pub async fn start_with_options(
 
     let mut actor_tasks = Vec::new();
     if options.spawn_builtin_actors {
-        actor_tasks.push(signal::actors::task_classifier_actor::spawn_task_actor(Arc::clone(
-            &state.signal_pool,
-        )));
+        actor_tasks.push(
+            signal::actors::signal_dispatcher_actor::spawn_signal_dispatcher_actor(
+                Arc::clone(&state.signal_pool),
+                state.registry.clone(),
+            ),
+        );
+        actor_tasks.push(signal::actors::task_classifier_actor::spawn_task_actor(
+            Arc::clone(&state.signal_pool),
+        ));
         actor_tasks.push(signal::actors::eventlog_actor::spawn_eventlog_actor(
             Arc::clone(&state.signal_pool),
         ));
@@ -487,7 +485,9 @@ pub async fn start_with_options(
     if options.spawn_builtin_actors {
         let heartbeat = Arc::new(agent::heartbeat::HeartbeatAgent::new("heartbeat"));
         state.registry.register(heartbeat);
-        state.energy_registry.register("heartbeat", energy::AgentEnergy::new(100, 10));
+        state
+            .energy_registry
+            .register("heartbeat", energy::AgentEnergy::new(100, 10));
 
         // Register cognitive life agent
         let data_dir = options
@@ -497,19 +497,23 @@ pub async fn start_with_options(
         match agent::workspace::AgentWorkspace::init("life-alpha", &data_dir) {
             Ok(workspace) => {
                 let soul = workspace.load_soul().unwrap_or_default();
-                let cognition = Box::new(agent::llm_cognition::LlmCognition::new("life-alpha", soul));
+                let cognition =
+                    Box::new(agent::llm_cognition::LlmCognition::new("life-alpha", soul));
                 let life_agent = Arc::new(agent::life::CognitiveLifeAgent::new(
                     "life-alpha",
                     "认知生命体 Alpha",
                     workspace,
                     cognition,
                 ));
-                state.registry.register(Arc::clone(&life_agent) as Arc<dyn agent::Agent>);
-                state.life_agents.insert("life-alpha".to_string(), life_agent);
-                state.energy_registry.register(
-                    "life-alpha",
-                    energy::AgentEnergy::new(200, 5),
-                );
+                state
+                    .registry
+                    .register(Arc::clone(&life_agent) as Arc<dyn agent::Agent>);
+                state
+                    .life_agents
+                    .insert("life-alpha".to_string(), life_agent);
+                state
+                    .energy_registry
+                    .register("life-alpha", energy::AgentEnergy::new(200, 5));
             }
             Err(e) => {
                 tracing::warn!("failed to init life agent workspace: {e}");
@@ -517,15 +521,10 @@ pub async fn start_with_options(
         }
     }
 
-    // Start tick scheduler for all agents with tick_interval_secs > 0
-    let tick_cancel = Arc::new(std::sync::atomic::AtomicBool::new(false));
-    let tick_tasks = tick::start_all_ticks(
-        &state.registry,
-        &state.energy_registry,
-        &state.signal_pool,
-        &options.host_id,
-        Arc::clone(&tick_cancel),
-    );
+    // Start tick scheduler for all agents with tick_interval_secs > 0.
+    // 启动所有启用 tick 的 agent 生命周期循环。
+    let tick_manager = Arc::clone(&state.tick_manager);
+    tick_manager.start_all_ticks();
 
     #[cfg(not(target_os = "android"))]
     let pty_manager = Arc::clone(&state.pty_manager);
@@ -557,8 +556,7 @@ pub async fn start_with_options(
         ts_agents,
         #[cfg(not(target_os = "android"))]
         pty_manager,
-        tick_cancel,
-        tick_tasks,
+        tick_manager,
     })
 }
 
@@ -718,6 +716,7 @@ pub struct AppState {
     pub pairing: Arc<pairing::PairingManager>,
     pub task_store: Arc<task::TaskStore>,
     pub energy_registry: energy::EnergyRegistry,
+    pub tick_manager: Arc<tick::TickManager>,
     /// Typed reference to CognitiveLifeAgent instances for workspace API access.
     pub life_agents: std::collections::HashMap<String, Arc<agent::life::CognitiveLifeAgent>>,
     pub eventlog_store: Arc<EventLogStore>,
@@ -796,6 +795,13 @@ impl AppState {
                 })
             })
             .unwrap_or_else(task::TaskStore::new);
+        let energy_registry = energy::EnergyRegistry::new();
+        let tick_manager = Arc::new(tick::TickManager::new(
+            host_id.clone(),
+            registry.clone(),
+            energy_registry.clone(),
+            Arc::clone(&signal_pool),
+        ));
 
         Self {
             port,
@@ -808,7 +814,8 @@ impl AppState {
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task_store),
-            energy_registry: energy::EnergyRegistry::new(),
+            energy_registry,
+            tick_manager,
             life_agents: std::collections::HashMap::new(),
             eventlog_store,
             #[cfg(not(target_os = "android"))]
@@ -886,6 +893,8 @@ mod tests {
         signal_pool: Arc<signal::SignalPool>,
     ) -> AppState {
         let host_id = format!("lib-test-{port}");
+        let registry_clone = registry.clone();
+        let energy_registry = energy::EnergyRegistry::new();
         AppState {
             port,
             host_id: host_id.clone(),
@@ -901,7 +910,13 @@ mod tests {
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
-            energy_registry: energy::EnergyRegistry::new(),
+            energy_registry: energy_registry.clone(),
+            tick_manager: Arc::new(tick::TickManager::new(
+                host_id.clone(),
+                registry_clone,
+                energy_registry,
+                Arc::clone(&signal_pool),
+            )),
             life_agents: std::collections::HashMap::new(),
             eventlog_store: Arc::new(eventlog::EventLogStore::new(
                 std::env::temp_dir().join("exomind-test-lib"),
@@ -1155,15 +1170,19 @@ mod tests {
         let initial_route_count = runtime.signal_pool.routes().get_all().len();
         let now = chrono::Utc::now().to_rfc3339();
         let route_id = uuid::Uuid::new_v4().to_string();
-        runtime.signal_pool.routes().add(crate::signal::SignalRoute {
-            id: route_id.clone(),
-            enabled: true,
-            topic: "runtime.fallback.topic".to_string(),
-            target_type: crate::signal::TargetType::Agent,
-            target_ref: "fallback-agent".to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-        }).unwrap();
+        runtime
+            .signal_pool
+            .routes()
+            .add(crate::signal::SignalRoute {
+                id: route_id.clone(),
+                enabled: true,
+                topic: "runtime.fallback.topic".to_string(),
+                target_type: crate::signal::TargetType::Agent,
+                target_ref: "fallback-agent".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
 
         assert_eq!(
             runtime.signal_pool.routes().get_all().len(),

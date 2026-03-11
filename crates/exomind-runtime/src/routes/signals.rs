@@ -3,18 +3,18 @@ use axum::http::{HeaderMap, StatusCode};
 use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post, put};
 use axum::{Json, Router};
-use futures_util::stream::{self, Stream};
 use futures_util::StreamExt;
+use futures_util::stream::{self, Stream};
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use std::pin::Pin;
 use std::task::{Context, Poll};
 use tokio::sync::broadcast;
 use tokio::time::{Duration, Instant, Interval};
-use tokio_stream::wrappers::{errors::BroadcastStreamRecvError, BroadcastStream};
+use tokio_stream::wrappers::{BroadcastStream, errors::BroadcastStreamRecvError};
 
-use crate::signal::types::{SignalEvent, SignalRoute, TargetType};
 use crate::AppState;
+use crate::signal::types::{SignalEvent, SignalRoute, TargetType};
 
 // ── Request / Response types ────────────────────────────────────
 
@@ -89,9 +89,7 @@ async fn publish_handler(
         topic: req.topic,
         ts: chrono::Utc::now().timestamp_millis() as u64,
         source: req.source.unwrap_or_else(|| "unknown".to_string()),
-        origin_host_id: req
-            .origin_host_id
-            .unwrap_or_else(|| state.host_id.clone()),
+        origin_host_id: req.origin_host_id.unwrap_or_else(|| state.host_id.clone()),
         hop: 0,
         trace_id: req.trace_id,
         payload: req.payload,
@@ -245,10 +243,7 @@ async fn update_route(
 }
 
 /// DELETE /signal-routes/{id}
-async fn delete_route(
-    Path(id): Path<String>,
-    State(state): State<AppState>,
-) -> StatusCode {
+async fn delete_route(Path(id): Path<String>, State(state): State<AppState>) -> StatusCode {
     let deleted = match state.signal_pool.routes().delete(&id) {
         Ok(deleted) => deleted,
         Err(error) => {
@@ -279,10 +274,7 @@ pub fn router() -> Router<AppState> {
         .route("/signals/stream", get(stream_handler))
         .route("/signals/history", get(history_handler))
         .route("/signal-routes", get(list_routes).post(create_route))
-        .route(
-            "/signal-routes/:id",
-            put(update_route).delete(delete_route),
-        )
+        .route("/signal-routes/:id", put(update_route).delete(delete_route))
 }
 
 // ── SSE stream implementation ───────────────────────────────────
@@ -390,24 +382,39 @@ mod tests {
     fn test_state() -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
         let host_id = "signals-test-host".to_string();
+        let registry = crate::agent::AgentRegistry::new();
+        let energy_registry = crate::energy::EnergyRegistry::new();
         AppState {
             port: 0,
             host_id: host_id.clone(),
-            registry: crate::agent::AgentRegistry::new(),
+            registry: registry.clone(),
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(MeshState::new(
+                host_id.clone(),
+                Arc::clone(&signal_pool),
+                None,
+            )),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
-            energy_registry: crate::energy::EnergyRegistry::new(),
+            energy_registry: energy_registry.clone(),
+            tick_manager: Arc::new(crate::tick::TickManager::new(
+                host_id.clone(),
+                registry,
+                energy_registry,
+                Arc::clone(&signal_pool),
+            )),
             life_agents: std::collections::HashMap::new(),
             eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
                 std::env::temp_dir().join("exomind-test-signals"),
             )),
             #[cfg(not(target_os = "android"))]
-            pty_manager: Arc::new(crate::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
+            pty_manager: Arc::new(crate::pty::PtyManager::new(
+                Arc::clone(&signal_pool),
+                host_id,
+            )),
         }
     }
 
@@ -455,9 +462,7 @@ mod tests {
                     .method("POST")
                     .uri("/signals/publish")
                     .header("content-type", "application/json")
-                    .body(Body::from(
-                        r#"{"topic":"test","payload":{}}"#,
-                    ))
+                    .body(Body::from(r#"{"topic":"test","payload":{}}"#))
                     .unwrap(),
             )
             .await
@@ -713,16 +718,18 @@ mod tests {
     fn stream_route_matching_accepts_frontend_ui_targets() {
         let signal_pool = SignalPool::new(None);
         let now = chrono::Utc::now().to_rfc3339();
-        signal_pool.routes().add(SignalRoute {
-            id: "route-ui".to_string(),
-            enabled: true,
-            topic: "eventlog.replication.appended".to_string(),
-            target_type: TargetType::Frontend,
-            target_ref: "ui".to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-        })
-        .unwrap();
+        signal_pool
+            .routes()
+            .add(SignalRoute {
+                id: "route-ui".to_string(),
+                enabled: true,
+                topic: "eventlog.replication.appended".to_string(),
+                target_type: TargetType::Frontend,
+                target_ref: "ui".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
 
         assert!(
             routes_target_stream_subscriber(
@@ -738,16 +745,18 @@ mod tests {
     fn stream_route_matching_keeps_actor_targets_out_of_sse_subscriber() {
         let signal_pool = SignalPool::new(None);
         let now = chrono::Utc::now().to_rfc3339();
-        signal_pool.routes().add(SignalRoute {
-            id: "route-actor".to_string(),
-            enabled: true,
-            topic: "eventlog.replication.appended".to_string(),
-            target_type: TargetType::Actor,
-            target_ref: "eventlog".to_string(),
-            created_at: now.clone(),
-            updated_at: now,
-        })
-        .unwrap();
+        signal_pool
+            .routes()
+            .add(SignalRoute {
+                id: "route-actor".to_string(),
+                enabled: true,
+                topic: "eventlog.replication.appended".to_string(),
+                target_type: TargetType::Actor,
+                target_ref: "eventlog".to_string(),
+                created_at: now.clone(),
+                updated_at: now,
+            })
+            .unwrap();
 
         assert!(
             !routes_target_stream_subscriber(
