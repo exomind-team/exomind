@@ -107,6 +107,30 @@ describe('review-agent review loop', () => {
     ]);
   });
 
+  it('exposes review must-read references for summary, action, and manual recovery paths', () => {
+    const buildReferences = (
+      reviewLoopLib as {
+        buildReviewReferencesMustRead?: (input?: {
+          actionMode?: 'comment' | 'needs-human-test' | 'request-changes' | 'approve' | 'merge' | null;
+          markResult?: boolean;
+        }) => string[];
+      }
+    ).buildReviewReferencesMustRead;
+
+    expect(buildReferences).toBeTypeOf('function');
+    expect(buildReferences?.()).toEqual([
+      'docs/agents/review-agent/review-loop.md',
+    ]);
+    expect(buildReferences?.({ actionMode: 'comment' })).toEqual([
+      'docs/agents/review-agent/review-loop.md',
+      'docs/agents/review-agent/comment-policy-and-templates.md',
+    ]);
+    expect(buildReferences?.({ markResult: true })).toEqual([
+      'docs/agents/review-agent/review-loop.md',
+      'docs/agents/review-agent/state-files-and-worktrees.md',
+    ]);
+  });
+
   it.each([
     ['review-posted', 'REVIEW_POSTED'],
     ['needs-human-test', 'NEEDS_HUMAN_TEST'],

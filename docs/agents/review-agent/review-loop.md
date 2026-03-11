@@ -1,5 +1,12 @@
 # 审阅循环
 
+## 读取时机
+
+- 只有当 `router.action = review`，或上一步输出的 `referencesMustRead` 包含本文档时，才读取并遵循本文
+- review 规则不再要求冷启动时预先加载 comment / state-worktree 文档
+- 当 review 动作需要发布/更新评论时，再继续读取 `comment-policy-and-templates.md`
+- 当 review 需要状态恢复或 worktree 验证时，再继续读取 `state-files-and-worktrees.md`
+
 ## 输入
 
 - 来自 discovery 阶段的 `selected_pr`

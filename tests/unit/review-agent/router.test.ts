@@ -21,6 +21,9 @@ describe('review-agent router', () => {
 
     expect(result.action).toBe('discovery');
     expect(result.reason).toBe('missing-state');
+    expect((result as { referencesMustRead?: string[] }).referencesMustRead).toEqual([
+      'docs/agents/review-agent/discovery-loop.md',
+    ]);
   });
 
   it('routes to review when state has a valid selected PR', () => {
@@ -54,6 +57,9 @@ describe('review-agent router', () => {
     expect(result.action).toBe('review');
     expect(result.selectedPrNumber).toBe(461);
     expect(result.reason).toBe('resume-selected-pr');
+    expect((result as { referencesMustRead?: string[] }).referencesMustRead).toEqual([
+      'docs/agents/review-agent/review-loop.md',
+    ]);
   });
 
   it('falls back to discovery when selected PR is no longer open', () => {

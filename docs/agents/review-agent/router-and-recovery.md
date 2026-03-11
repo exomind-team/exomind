@@ -1,5 +1,12 @@
 # Router 与重启恢复
 
+## 读取时机
+
+- 本文档描述 router 与恢复规则
+- 它是统一入口设计的参考文档，不要求每轮冷启动先全文阅读
+- 冷启动时应先遵循 `review-agent.prompt.md` 的最小启动契约并运行 router
+- 当需要解释 router 决策、恢复逻辑或本地状态与远端事实的裁决关系时，再回读本文
+
 ## 原则
 
 - router 的职责是根据 GitHub 当前事实决定下一步动作
@@ -8,6 +15,9 @@
 ## 目的
 
 人类不应判断当前该喂 discovery 还是 review。统一入口 prompt 每轮都先运行 router 脚本，再由脚本决定下一步动作。
+
+router 输出中的 `referencesMustRead` 只负责告诉 Agent：当前动作必须继续阅读哪些 phase-specific 文档。
+它不改变 router 的 action / reason / state 恢复逻辑。
 
 ## Router 职责
 

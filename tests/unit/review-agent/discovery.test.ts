@@ -202,4 +202,17 @@ describe('review-agent discovery', () => {
       'repos/exomind-team/exomind/pulls/101/comments?per_page=100&page=2',
     ]);
   });
+
+  it('exposes the discovery must-read references for phase-specific loading', () => {
+    const buildReferences = (
+      discoveryRuntime as {
+        buildDiscoveryReferencesMustRead?: () => string[];
+      }
+    ).buildDiscoveryReferencesMustRead;
+
+    expect(buildReferences).toBeTypeOf('function');
+    expect(buildReferences?.()).toEqual([
+      'docs/agents/review-agent/discovery-loop.md',
+    ]);
+  });
 });

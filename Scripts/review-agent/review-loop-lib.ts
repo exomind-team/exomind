@@ -81,6 +81,10 @@ export interface ReviewApprovalGate {
   localVerificationStatus: VerificationStatus;
 }
 
+const REVIEW_LOOP_REFERENCE = 'docs/agents/review-agent/review-loop.md';
+const COMMENT_POLICY_REFERENCE = 'docs/agents/review-agent/comment-policy-and-templates.md';
+const STATE_WORKTREE_REFERENCE = 'docs/agents/review-agent/state-files-and-worktrees.md';
+
 interface BuildCompletedReviewStateInput {
   completion: ReviewCompletionResult;
   selectedPrNumber: number;
@@ -160,6 +164,23 @@ export function buildReviewSummary(input: ReviewSummaryInput): ReviewSummary {
     reviewMode: classifyReviewMode(input),
     prioritizedFiles: prioritizeFiles(input.files),
   };
+}
+
+export function buildReviewReferencesMustRead(input?: {
+  actionMode?: ReviewActionMode | null;
+  markResult?: boolean;
+}): string[] {
+  const references = [REVIEW_LOOP_REFERENCE];
+
+  if (input?.actionMode) {
+    references.push(COMMENT_POLICY_REFERENCE);
+  }
+
+  if (input?.markResult) {
+    references.push(STATE_WORKTREE_REFERENCE);
+  }
+
+  return references;
 }
 
 export function resolveReviewCommentLanguage(input: ReviewLanguageInput): ReviewCommentLanguage | null {

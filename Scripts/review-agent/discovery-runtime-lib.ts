@@ -1,5 +1,7 @@
 import type { PullRequestThreadReply } from './discovery-lib.ts';
 
+const DISCOVERY_LOOP_REFERENCE = 'docs/agents/review-agent/discovery-loop.md';
+
 export interface DiscoveryWarning {
   prNumber: number;
   signal: 'review-thread-replies';
@@ -43,6 +45,10 @@ export function buildReviewThreadReplyApiArgs(
     'GET',
     `repos/${repo}/pulls/${prNumber}/comments?per_page=${perPage}&page=${page}`,
   ];
+}
+
+export function buildDiscoveryReferencesMustRead(): string[] {
+  return [DISCOVERY_LOOP_REFERENCE];
 }
 
 function toErrorMessage(error: unknown): string {

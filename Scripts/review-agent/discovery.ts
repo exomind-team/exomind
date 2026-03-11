@@ -11,6 +11,7 @@ import {
   type PullRequestSnapshot,
 } from './discovery-lib.ts';
 import {
+  buildDiscoveryReferencesMustRead,
   buildReviewThreadReplyApiArgs,
   loadThreadRepliesWithFallback,
   type DiscoveryWarning,
@@ -107,6 +108,7 @@ interface RoundResult {
   checkedAt: string;
   cursor: PersistedCursor;
   warnings: DiscoveryWarning[];
+  referencesMustRead: string[];
   error?: string;
 }
 
@@ -157,6 +159,7 @@ function runDiscoveryRound(
       checkedAt,
       cursor: {},
       warnings: [],
+      referencesMustRead: buildDiscoveryReferencesMustRead(),
       error: toErrorMessage(error),
     };
   }
@@ -178,6 +181,7 @@ function runDiscoveryRound(
       checkedAt,
       cursor: {},
       warnings: [],
+      referencesMustRead: buildDiscoveryReferencesMustRead(),
     };
   }
 
@@ -217,6 +221,7 @@ function runDiscoveryRound(
       checkedAt,
       cursor: {},
       warnings,
+      referencesMustRead: buildDiscoveryReferencesMustRead(),
       error: 'All PR inspections failed in this round.',
     };
   }
@@ -239,6 +244,7 @@ function runDiscoveryRound(
     checkedAt,
     cursor: buildCursor(inspectedSnapshots),
     warnings,
+    referencesMustRead: buildDiscoveryReferencesMustRead(),
   };
 }
 

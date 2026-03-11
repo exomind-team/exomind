@@ -1,5 +1,10 @@
 # 发现循环
 
+## 读取时机
+
+- 只有当 `router.action = discovery`，或上一步输出的 `referencesMustRead` 包含本文档时，才读取并遵循本文
+- discovery 规则不再要求冷启动时预先加载 review / comment / state-worktree 文档
+
 ## 输入
 
 - 来自 `gh pr list --state open` 的当前仓库 open PR 列表

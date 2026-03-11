@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   NEEDS_HUMAN_TEST_LABEL,
   buildReviewSummary,
+  buildReviewReferencesMustRead,
   buildPullRequestActionJsonFields,
   buildCompletedReviewState,
   buildRetryableReviewFailureState,
@@ -96,6 +97,7 @@ async function main(): Promise<void> {
       completion: options.markResult,
       persistedState: persistedState.state,
       nextAction: persistedState.nextAction,
+      referencesMustRead: buildReviewReferencesMustRead({ markResult: true }),
     }, null, 2));
     return;
   }
@@ -134,6 +136,7 @@ async function main(): Promise<void> {
       prioritizedFiles: reviewSummary.prioritizedFiles,
       parsedIssueRefs: parseLinkedIssueNumbers(pullRequest.body ?? ''),
       url: pullRequest.url,
+      referencesMustRead: buildReviewReferencesMustRead(),
     };
 
     persistActiveReviewState(reviewSummary.selectedPr.number);
@@ -145,6 +148,7 @@ async function main(): Promise<void> {
       state: failureState.state,
       nextAction: failureState.nextAction,
       error: failureState.error,
+      referencesMustRead: buildReviewReferencesMustRead(),
     }, null, 2));
     process.exitCode = 1;
   }
@@ -182,6 +186,7 @@ async function runReviewAction(input: {
       state: failureState.state,
       nextAction: failureState.nextAction,
       error: failureState.error,
+      referencesMustRead: buildReviewReferencesMustRead({ actionMode: input.actionMode }),
     }, null, 2));
     process.exitCode = 1;
     return;
@@ -243,6 +248,7 @@ async function runReviewAction(input: {
       completion: result.completion,
       persistedState: persistedState.state,
       nextAction: persistedState.nextAction,
+      referencesMustRead: buildReviewReferencesMustRead({ actionMode: input.actionMode }),
     }, null, 2));
     return;
   }
@@ -264,6 +270,7 @@ async function runReviewAction(input: {
       validationErrors: result.validationErrors,
       error: failureState.error,
       approveFailure: result.approveFailure ?? null,
+      referencesMustRead: buildReviewReferencesMustRead({ actionMode: input.actionMode }),
     }, null, 2));
     process.exitCode = 1;
     return;
@@ -290,6 +297,7 @@ async function runReviewAction(input: {
       completion: terminalCompletion,
       persistedState: blockedState.state,
       nextAction: blockedState.nextAction,
+      referencesMustRead: buildReviewReferencesMustRead({ actionMode: input.actionMode }),
     }, null, 2));
     process.exitCode = 1;
     return;
@@ -309,6 +317,7 @@ async function runReviewAction(input: {
     commentOperation: result.commentOperation,
     labelAdded: result.labelAdded,
     error: failureState.error,
+    referencesMustRead: buildReviewReferencesMustRead({ actionMode: input.actionMode }),
   }, null, 2));
   process.exitCode = 1;
 }

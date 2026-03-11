@@ -15,6 +15,22 @@ export interface RouterDecision {
   reason: string;
   selectedPrNumber: number | null;
   sleepSeconds: number;
+  referencesMustRead: string[];
+}
+
+const DISCOVERY_LOOP_REFERENCE = 'docs/agents/review-agent/discovery-loop.md';
+const REVIEW_LOOP_REFERENCE = 'docs/agents/review-agent/review-loop.md';
+
+function buildRouterReferencesMustRead(action: RouterDecision['action']): string[] {
+  if (action === 'review') {
+    return [REVIEW_LOOP_REFERENCE];
+  }
+
+  if (action === 'discovery') {
+    return [DISCOVERY_LOOP_REFERENCE];
+  }
+
+  return [];
 }
 
 export function decideNextAction(context: RouterContext): RouterDecision {
@@ -24,6 +40,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
       reason: 'missing-state',
       selectedPrNumber: null,
       sleepSeconds: 0,
+      referencesMustRead: buildRouterReferencesMustRead('discovery'),
     };
   }
 
@@ -38,6 +55,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
         reason: 'resume-selected-pr',
         selectedPrNumber,
         sleepSeconds: 0,
+        referencesMustRead: buildRouterReferencesMustRead('review'),
       };
     }
 
@@ -46,6 +64,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
       reason: 'stale-selected-pr',
       selectedPrNumber: null,
       sleepSeconds: 0,
+      referencesMustRead: buildRouterReferencesMustRead('discovery'),
     };
   }
 
@@ -55,6 +74,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
       reason: 'recheck-no-target',
       selectedPrNumber: null,
       sleepSeconds: 0,
+      referencesMustRead: buildRouterReferencesMustRead('discovery'),
     };
   }
 
@@ -70,6 +90,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
       reason: 'review-finished',
       selectedPrNumber: null,
       sleepSeconds: 0,
+      referencesMustRead: buildRouterReferencesMustRead('discovery'),
     };
   }
 
@@ -79,6 +100,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
       reason: 'retry-review',
       selectedPrNumber,
       sleepSeconds: 0,
+      referencesMustRead: buildRouterReferencesMustRead('review'),
     };
   }
 
@@ -87,6 +109,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
     reason: 'retry-discovery',
     selectedPrNumber: null,
     sleepSeconds: 0,
+    referencesMustRead: buildRouterReferencesMustRead('discovery'),
   };
 }
 

@@ -4,28 +4,31 @@
 
 你每一轮都必须遵循这个顺序：
 
-1. 先阅读并遵循以下文档：
+1. 先阅读并遵循：
    - `AGENTS.md`
-   - `docs/agents/review-agent/common-contract.md`
-   - `docs/agents/review-agent/router-and-recovery.md`
-   - `docs/agents/review-agent/discovery-loop.md`
-   - `docs/agents/review-agent/review-loop.md`
-   - `docs/agents/review-agent/comment-policy-and-templates.md`
-   - `docs/agents/review-agent/state-files-and-worktrees.md`
+   - 本 prompt 中的最小启动契约
 2. 立即运行路由脚本，禁止依赖自己对上轮状态的记忆：
    - `npx tsx Scripts/review-agent/router.ts`
 3. 读取路由脚本输出：
-   - 若 `action = discovery`，执行 discovery 子流程
-   - 若 `action = review`，执行 review 子流程
-   - 若 `action = idle-wait`，按 `sleepSeconds` 等待后再从本 prompt 顶部重新开始（兼容保留；当前 `NO_TARGET` 路径不应直接依赖 router 输出等待）
-4. 若本地状态与 GitHub 当前事实冲突，以 GitHub 事实为准
+   - 优先遵循输出里的 `referencesMustRead`
+   - 若 `action = discovery`，继续执行 discovery 子流程
+   - 若 `action = review`，继续执行 review 子流程
+   - 若 `action = idle-wait`，按 `sleepSeconds` 等待后再从本 prompt 顶部重新开始
+4. 只有在当前动作真的需要时，才继续读取详细协议文档：
+   - discovery：读取 `docs/agents/review-agent/discovery-loop.md`
+   - review：读取 `docs/agents/review-agent/review-loop.md`
+   - 发布/续写评论：读取 `docs/agents/review-agent/comment-policy-and-templates.md`
+   - 状态恢复 / worktree 验证：读取 `docs/agents/review-agent/state-files-and-worktrees.md`
+5. 若本地状态与 GitHub 当前事实冲突，以 GitHub 事实为准
 
-统一规则：
+最小启动契约：
 
 - 不要手动切换阶段
 - 不要假设当前会话连续存在
 - 不要修改仓库正式代码，除非当前任务明确要求实现 review-agent 自身代码
 - 只把 `./temp/` 用作临时状态和草稿目录
+- `router` 是唯一阶段判断入口；在它输出前不要自行假设当前该 discovery 还是 review
+- `common-contract.md` 与 `router-and-recovery.md` 是参考协议，不再要求每轮冷启动先打开
 - 当上一轮是 `NO_TARGET` 时，也必须先重跑 discovery，再由 discovery 决定是否给出 sleep 建议
 - review action 在发布或续写主评论前，必须先按 GitHub 远端重新识别“当前主评论”；不允许依赖本地 comment id 缓存决定编辑目标
 - review 子流程在完成真实 GitHub 动作后，必须补一次终态落盘，不能让 `state.json` 停留在进行中的 review 状态
@@ -35,7 +38,11 @@
 - CI 为红时必须先做归因；若确认是 inherited failure，才允许继续，否则必须在评论中写明阻塞原因与核查链路
 - 若 `viewerCanMerge=false` 或 merge 因权限/保护规则/冲突被阻塞，必须落盘为 `MERGE_BLOCKED` 并回到 discovery，不在当前 PR 上重复尝试
 
-子流程说明：
+按需加载说明：
 
-- discovery 子流程的执行规则以 `docs/agents/review-agent/discovery-loop.md` 为准
-- review 子流程的执行规则以 `docs/agents/review-agent/review-loop.md` 为准
+- `common-contract.md`：总契约与术语参考
+- `router-and-recovery.md`：router / 恢复规则参考
+- `discovery-loop.md`：只在当前动作是 discovery 时读取
+- `review-loop.md`：只在当前动作是 review 时读取
+- `comment-policy-and-templates.md`：只在要发布或校验评论时读取
+- `state-files-and-worktrees.md`：只在恢复状态或使用 worktree 验证时读取
