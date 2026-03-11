@@ -1,5 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
+  exportBackup,
+  importBackup,
   exportTasksJson,
   exportTasksSqlite,
   importTasksFromFile,
@@ -39,6 +41,11 @@ describe('settings-data-service', () => {
     vi.clearAllMocks();
     mocks.isTauri.mockResolvedValue(false);
     mocks.invoke.mockResolvedValue(null);
+    mocks.exportEventsAsJson.mockResolvedValue(JSON.stringify({
+      version: 1,
+      events: [{ id: 'evt-1', type: 'created' }],
+    }));
+    mocks.importEventsFromJson.mockResolvedValue({ imported: 1, skipped: 0, total: 1 });
     mocks.exportTasksAsJson.mockResolvedValue({
       fileName: 'exomind-tasks-2026-03-11.json',
       content: JSON.stringify({ version: 1, tasks: [] }),
@@ -57,6 +64,58 @@ describe('settings-data-service', () => {
       revokeObjectURL: vi.fn(),
     });
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
+  });
+
+  it('exports combined top-level backup on Tauri and includes tasks', async () => {
+    mocks.isTauri.mockResolvedValue(true);
+    mocks.exportTasksAsJson.mockResolvedValue({
+      fileName: 'exomind-tasks-2026-03-11.json',
+      content: JSON.stringify({
+        version: 1,
+        tasks: [{ id: 'task-1' }, { id: 'task-2' }],
+      }),
+      taskCount: 2,
+    });
+    mocks.invoke.mockResolvedValue('D:/Downloads/exomind-data-2026-03-11.json');
+
+    const message = await exportBackup();
+
+    expect(mocks.exportTasksAsJson).toHaveBeenCalledTimes(1);
+    expect(mocks.invoke).toHaveBeenCalledWith('save_json_file', expect.objectContaining({
+      defaultName: expect.stringMatching(/^exomind-data-\d{4}-\d{2}-\d{2}\.json$/),
+      content: expect.any(String),
+    }));
+    const [, options] = mocks.invoke.mock.calls[0] as [string, { content: string }];
+    expect(JSON.parse(options.content)).toEqual({
+      version: 2,
+      events: [{ id: 'evt-1', type: 'created' }],
+      tasks: [{ id: 'task-1' }, { id: 'task-2' }],
+    });
+    expect(message).toContain('1 条事件');
+    expect(message).toContain('2 条任务');
+  });
+
+  it('imports embedded tasks from combined top-level backup payload', async () => {
+    mocks.isTauri.mockResolvedValue(true);
+    mocks.invoke.mockResolvedValue({
+      path: 'combined-backup.json',
+      content: JSON.stringify({
+        version: 2,
+        events: [{ id: 'evt-1', type: 'created' }],
+        tasks: [{ id: 'task-1' }],
+      }),
+    });
+    mocks.importTasksFromJson.mockResolvedValue({ imported: 2, skipped: 1, total: 2 });
+
+    const message = await importBackup('merge');
+
+    expect(mocks.importEventsFromJson).toHaveBeenCalledWith(expect.stringContaining('"events"'), 'merge');
+    expect(mocks.importTasksFromJson).toHaveBeenCalledWith(
+      JSON.stringify({ version: 1, tasks: [{ id: 'task-1' }] }),
+      'merge',
+    );
+    expect(message).toContain('事件新增 1 条');
+    expect(message).toContain('任务新增 2 条，跳过 1 条');
   });
 
   it('exports task JSON on Web and returns success message', async () => {

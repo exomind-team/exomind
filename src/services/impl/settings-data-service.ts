@@ -20,6 +20,10 @@ function downloadFileFallback(content: BlobPart, mimeType: string, filename: str
   URL.revokeObjectURL(url);
 }
 
+function buildBackupFileName(): string {
+  return `exomind-data-${new Date().toISOString().slice(0, 10)}.json`;
+}
+
 export function pickFileOnWeb(accept: string): Promise<File | null> {
   return new Promise((resolve) => {
     const input = document.createElement('input');
@@ -41,22 +45,45 @@ export function pickFileOnWeb(accept: string): Promise<File | null> {
 
 export async function exportBackup(): Promise<string> {
   const service = getEventLogService();
-  const json = await service.exportEventsAsJson();
-  const payload = JSON.parse(json) as { events?: unknown[] };
-  const count = Array.isArray(payload.events) ? payload.events.length : 0;
-  const defaultName = `exomind-eventlog-${new Date().toISOString().slice(0, 10)}.json`;
+  const eventJson = await service.exportEventsAsJson();
+  const payload = JSON.parse(eventJson) as {
+    version?: number;
+    events?: unknown[];
+    tasks?: unknown[];
+  };
+  const eventCount = Array.isArray(payload.events) ? payload.events.length : 0;
+  let taskCount = 0;
+
+  try {
+    const taskResult = await getTaskBackupService().exportTasksAsJson();
+    const taskPayload = JSON.parse(taskResult.content) as { tasks?: unknown[] };
+    if (Array.isArray(taskPayload.tasks)) {
+      payload.tasks = taskPayload.tasks;
+      payload.version = 2;
+      taskCount = taskPayload.tasks.length;
+    }
+  } catch {
+    // Keep event-only export when task backup is unavailable.
+  }
+
+  const combinedJson = JSON.stringify(payload, null, 2);
+  const defaultName = buildBackupFileName();
+  const summaryParts: string[] = [];
+  if (eventCount > 0) summaryParts.push(`${eventCount} 条事件`);
+  if (taskCount > 0) summaryParts.push(`${taskCount} 条任务`);
+  const summary = summaryParts.length > 0 ? summaryParts.join('、') : '0 条记录';
 
   if (await isTauri()) {
     const savedPath = await invoke<string | null>('save_json_file', {
-      content: json,
+      content: combinedJson,
       defaultName,
     });
     if (!savedPath) return '已取消保存。';
-    return `导出成功，共 ${count} 条事件。保存路径：${savedPath}`;
+    return `导出成功，共 ${summary}。保存路径：${savedPath}`;
   }
 
-  downloadFileFallback(json, 'application/json;charset=utf-8', defaultName);
-  return `导出成功，共 ${count} 条事件。`;
+  downloadFileFallback(combinedJson, 'application/json;charset=utf-8', defaultName);
+  return `导出成功，共 ${summary}。`;
 }
 
 export async function importBackup(strategy: ImportStrategy = 'merge'): Promise<string> {
@@ -76,7 +103,20 @@ export async function importBackup(strategy: ImportStrategy = 'merge'): Promise<
   if (!picked) return '已取消导入。';
 
   const result = await getEventLogService().importEventsFromJson(picked.content, strategy);
-  return `导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。来源：${picked.path}`;
+  let taskSummary = '';
+
+  try {
+    const parsed = JSON.parse(picked.content) as { tasks?: unknown[] };
+    if (Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
+      const taskJson = JSON.stringify({ version: 1, tasks: parsed.tasks });
+      const taskResult = await getTaskBackupService().importTasksFromJson(taskJson, strategy);
+      taskSummary = `；任务新增 ${taskResult.imported} 条，跳过 ${taskResult.skipped} 条`;
+    }
+  } catch {
+    taskSummary = '；任务恢复失败';
+  }
+
+  return `导入成功：事件新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条${taskSummary}。来源：${picked.path}`;
 }
 
 export async function exportTasksJson(): Promise<string> {

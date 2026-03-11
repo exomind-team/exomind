@@ -1,8 +1,10 @@
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import * as developerModeConfig from '@/config/developer-mode';
 import * as desktopAdaptiveConfig from '@/config/desktop-adaptive';
 import * as voiceProviderConfig from '@/config/voice-shortcut-asr-provider';
+import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { UserCard } from '@/ui/app/components/UserCard';
 import { MoreSection } from '@/ui/app/components/MoreSection';
 import { AboutSection } from '@/ui/app/components/AboutSection';
@@ -78,6 +80,29 @@ export function SettingsPage() {
       if (comingSoonTimer.current) {
         clearTimeout(comingSoonTimer.current);
       }
+    };
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    void (async () => {
+      if (!await isTauri()) {
+        return;
+      }
+
+      try {
+        const runtimeHotkey = await invoke<string>('voice_shortcut_get');
+        if (!cancelled) {
+          setVoiceShortcutHotkey(runtimeHotkey);
+        }
+      } catch {
+        // Keep the locally cached hotkey if runtime sync fails.
+      }
+    })();
+
+    return () => {
+      cancelled = true;
     };
   }, []);
 

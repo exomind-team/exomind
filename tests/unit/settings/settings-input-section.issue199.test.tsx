@@ -183,6 +183,24 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     });
   });
 
+  it('syncs hotkey from runtime on mount in tauri（Tauri 挂载时同步运行时快捷键）', async () => {
+    const setHotkeyMock = vi.mocked(setVoiceShortcutHotkey);
+    isTauriMock.mockReturnValue(true);
+    invokeMock.mockImplementation(async (command: string) => {
+      if (command === 'voice_shortcut_get') {
+        return 'Ctrl+Space';
+      }
+      return null;
+    });
+
+    render(<SettingsPage />);
+
+    await waitFor(() => {
+      expect(invokeMock).toHaveBeenCalledWith('voice_shortcut_get');
+    });
+    expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
+  });
+
   it('reverts to runtime hotkey when tauri shortcut switch fails（Tauri 切换失败时回滚到实际快捷键）', async () => {
     isTauriMock.mockReturnValue(true);
     vi.mocked(getVoiceShortcutHotkey).mockReturnValue('Alt+Q');
