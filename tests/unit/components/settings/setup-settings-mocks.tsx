@@ -54,21 +54,25 @@ vi.mock('@/config/version-build-info', () => ({
 vi.mock('@/config/theme', () => ({
   getThemePreference: vi.fn(() => 'system'),
   setThemePreference: vi.fn(),
+  subscribeThemePreferenceChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: vi.fn(() => false),
   setDeveloperModeEnabled: vi.fn(),
+  subscribeDeveloperModeChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: vi.fn(() => false),
   setAgentPageEnabled: vi.fn(),
+  subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: vi.fn(() => true),
   setDesktopAdaptiveEnabled: vi.fn(),
+  subscribeDesktopAdaptiveChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/timer-preferences', () => ({
@@ -120,8 +124,8 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
 
 vi.mock('@/config/voice-overlay-preferences', () => ({
   DEFAULT_VOICE_OVERLAY_OPACITY: 62,
-  MIN_VOICE_OVERLAY_OPACITY: 32,
-  MAX_VOICE_OVERLAY_OPACITY: 92,
+  MIN_VOICE_OVERLAY_OPACITY: 20,
+  MAX_VOICE_OVERLAY_OPACITY: 98,
   DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES: 3,
   MIN_VOICE_OVERLAY_TRANSCRIPT_LINES: 1,
   MAX_VOICE_OVERLAY_TRANSCRIPT_LINES: 5,

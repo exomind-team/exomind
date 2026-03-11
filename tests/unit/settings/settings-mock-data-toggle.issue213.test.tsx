@@ -45,16 +45,19 @@ vi.mock('@/config/port-env', () => ({
 vi.mock('@/config/theme', () => ({
   getThemePreference: () => 'system',
   setThemePreference: vi.fn(),
+  subscribeThemePreferenceChanges: () => () => {},
 }));
 
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: () => true,
   setDeveloperModeEnabled: vi.fn(),
+  subscribeDeveloperModeChanges: () => () => {},
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: () => false,
   setAgentPageEnabled: vi.fn(),
+  subscribeAgentPageEnabledChanges: () => () => {},
 }));
 
 vi.mock('@/config/timer-preferences', () => ({

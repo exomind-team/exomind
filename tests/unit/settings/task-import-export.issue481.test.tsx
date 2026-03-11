@@ -45,21 +45,25 @@ vi.mock('@/config/port-env', () => ({
 vi.mock('@/config/theme', () => ({
   getThemePreference: () => 'system',
   setThemePreference: vi.fn(),
+  subscribeThemePreferenceChanges: () => () => {},
 }));
 
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: () => false,
   setDeveloperModeEnabled: vi.fn(),
+  subscribeDeveloperModeChanges: () => () => {},
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: () => false,
   setAgentPageEnabled: vi.fn(),
+  subscribeAgentPageEnabledChanges: () => () => {},
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: () => true,
   setDesktopAdaptiveEnabled: vi.fn(),
+  subscribeDesktopAdaptiveChanges: () => () => {},
 }));
 
 vi.mock('@/config/mock-data', () => ({
@@ -117,6 +121,7 @@ vi.mock('@/config/voice-shortcut-send-mode', () => ({
 vi.mock('@/config/voice-shortcut-mic-prewarm', () => ({
   getVoiceShortcutMicPrewarmEnabled: () => true,
   setVoiceShortcutMicPrewarmEnabled: vi.fn(),
+  subscribeVoiceShortcutMicPrewarmChanges: () => () => {},
 }));
 
 vi.mock('@/config/voice-overlay-preferences', () => ({
@@ -128,6 +133,7 @@ vi.mock('@/config/voice-overlay-preferences', () => ({
   MAX_VOICE_OVERLAY_OPACITY: 92,
   MIN_VOICE_OVERLAY_OPACITY: 32,
   MAX_VOICE_OVERLAY_BOTTOM_OFFSET: 160,
+  subscribeVoiceOverlayOpacityChanges: () => () => {},
   subscribeVoiceOverlayBottomOffsetChanges: () => () => {},
   subscribeVoiceOverlayShowDiagnosticsChanges: () => () => {},
   subscribeVoiceOverlayTranscriptLinesChanges: () => () => {},

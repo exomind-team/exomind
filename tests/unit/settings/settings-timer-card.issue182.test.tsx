@@ -55,11 +55,13 @@ vi.mock('@/config/theme', () => ({
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: () => false,
   setDeveloperModeEnabled: vi.fn(),
+  subscribeDeveloperModeChanges: () => () => {},
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: () => false,
   setDesktopAdaptiveEnabled: vi.fn(),
+  subscribeDesktopAdaptiveChanges: () => () => {},
 }));
 
 vi.mock('@/ui/pages/UserManagePage', () => ({
