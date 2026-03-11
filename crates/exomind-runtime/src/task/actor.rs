@@ -69,12 +69,15 @@ fn handle_auto_created(pool: &SignalPool, store: &TaskStore, event: &SignalEvent
     let task = store.create(CreateTaskInput {
         title: parsed.title,
         description: parsed.note,
+        done_condition: None,
         priority: None,
         tags: vec![],
         source: Some("classifier".to_string()),
         parent_id: None,
+        depends_on: vec![],
         due_at: None,
         estimated_minutes: None,
+        time_block_ids: vec![],
     });
 
     let created_event = SignalEvent {

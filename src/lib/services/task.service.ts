@@ -1,8 +1,6 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment'
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
-import { getTaskStorage } from '@/lib/storage/task-storage'
-import { getCurrentUserId } from '@/lib/storage/event-storage'
 
 type TaskEnvironmentLike = {
   task: ITaskPort
@@ -36,15 +34,10 @@ export interface TaskService {
 
 export class TaskServiceImpl implements TaskService {
   private readonly env: TaskEnvironmentLike
-  private syncUnsubscribe: (() => void) | null = null
   private changeListeners = new Set<() => void>()
 
   constructor(env?: TaskEnvironmentLike) {
     this.env = env ?? ExoMindEnvironment.getInstance()
-  }
-
-  private getStorage() {
-    return getTaskStorage(getCurrentUserId())
   }
 
   listTasks(includeAbandoned = false) {
@@ -60,15 +53,25 @@ export class TaskServiceImpl implements TaskService {
       const parent = await this.env.task.getTaskById(input.parentId)
       if (!parent) throw new Error(`Parent task ${input.parentId} not found`)
     }
-    return this.env.task.createTask(input)
+    const created = await this.env.task.createTask(input)
+    this.notifyChangeListeners()
+    return created
   }
 
-  updateTask(id: string, input: UpdateTaskInput) {
-    return this.env.task.updateTask(id, input)
+  async updateTask(id: string, input: UpdateTaskInput) {
+    const updated = await this.env.task.updateTask(id, input)
+    if (updated) {
+      this.notifyChangeListeners()
+    }
+    return updated
   }
 
-  abandonTask(id: string) {
-    return this.env.task.abandonTask(id)
+  async abandonTask(id: string) {
+    const task = await this.env.task.abandonTask(id)
+    if (task) {
+      this.notifyChangeListeners()
+    }
+    return task
   }
 
   async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {
@@ -80,7 +83,11 @@ export class TaskServiceImpl implements TaskService {
         throw new Error(`Cannot transition to in_progress: hard dependencies not met [${ids}]`)
       }
     }
-    return this.env.task.transitionTask(id, to)
+    const transitioned = await this.env.task.transitionTask(id, to)
+    if (transitioned) {
+      this.notifyChangeListeners()
+    }
+    return transitioned
   }
 
   getAvailableTransitions(id: string) {
@@ -110,7 +117,7 @@ export class TaskServiceImpl implements TaskService {
     if (existing) {
       if (existing.type === type) return task
       const updated = task.dependsOn.map((d) => (d.taskId === depTaskId ? { ...d, type } : d))
-      return this.env.task.updateTask(taskId, { dependsOn: updated })
+      return this.updateTask(taskId, { dependsOn: updated })
     }
 
     // 环检测
@@ -119,14 +126,14 @@ export class TaskServiceImpl implements TaskService {
     }
 
     const newDeps = [...task.dependsOn, { taskId: depTaskId, type }]
-    return this.env.task.updateTask(taskId, { dependsOn: newDeps })
+    return this.updateTask(taskId, { dependsOn: newDeps })
   }
 
   async removeDependency(taskId: string, depTaskId: string): Promise<TaskNode | null> {
     const task = await this.env.task.getTaskById(taskId)
     if (!task) return null
     const newDeps = task.dependsOn.filter((d) => d.taskId !== depTaskId)
-    return this.env.task.updateTask(taskId, { dependsOn: newDeps })
+    return this.updateTask(taskId, { dependsOn: newDeps })
   }
 
   async checkDependenciesMet(taskId: string): Promise<DependencyCheckResult> {
@@ -151,23 +158,12 @@ export class TaskServiceImpl implements TaskService {
 
   /* ── Sync ── */
 
-  async startSync(remoteUrl: string): Promise<void> {
-    const storage = this.getStorage()
-    // Subscribe to remote changes to notify UI
-    if (!this.syncUnsubscribe) {
-      this.syncUnsubscribe = storage.onRemoteChange(() => {
-        this.notifyChangeListeners()
-      })
-    }
-    await storage.syncToRemote(remoteUrl)
+  async startSync(_remoteUrl: string): Promise<void> {
+    // Legacy no-op: task data no longer depends on PouchDB live sync.
   }
 
   async stopSync(): Promise<void> {
-    if (this.syncUnsubscribe) {
-      this.syncUnsubscribe()
-      this.syncUnsubscribe = null
-    }
-    await this.getStorage().stopSync()
+    // Legacy no-op: task data no longer depends on PouchDB live sync.
   }
 
   onTaskChange(callback: () => void): () => void {

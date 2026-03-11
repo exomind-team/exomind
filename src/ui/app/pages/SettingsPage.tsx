@@ -4,7 +4,7 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { Switch } from '@/components/ui/switch';
-import { getEventLogService } from '@/lib/services';
+import { getEventLogService, getTaskBackupService } from '@/lib/services';
 import {
   getSyncServerUrlOverride,
   resolveSyncServerUrl,
@@ -309,10 +309,16 @@ export function SettingsPage() {
   const [llmBaseUrlDraft, setLlmBaseUrlDraft] = useState(() => getLLMBaseUrl());
   const [llmModelDraft, setLlmModelDraft] = useState(() => getLLMModel());
   const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const taskFileInputRef = useRef<HTMLInputElement | null>(null);
   const [importStrategy] = useState<ImportStrategy>('merge');
   const [statusMessage, setStatusMessage] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [loading, setLoading] = useState(false);
+  const [taskBackendStatus, setTaskBackendStatus] = useState<{
+    backend: string;
+    supportsJsonBackup: boolean;
+    supportsSqliteSnapshot: boolean;
+  } | null>(null);
   const [comingSoonVisible, setComingSoonVisible] = useState(false);
   const comingSoonTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const [activeDesktopTab, setActiveDesktopTab] = useState<DesktopTabKey>('theme');
@@ -397,7 +403,7 @@ export function SettingsPage() {
         return;
       }
 
-      downloadJsonFallback(json, defaultName);
+      downloadFileFallback(json, 'application/json;charset=utf-8', defaultName);
       setStatusMessage(`导出成功，共 ${count} 条事件。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
@@ -407,8 +413,8 @@ export function SettingsPage() {
     }
   };
 
-  const downloadJsonFallback = (json: string, filename: string) => {
-    const blob = new Blob([json], { type: 'application/json;charset=utf-8' });
+  const downloadFileFallback = (content: BlobPart, mimeType: string, filename: string) => {
+    const blob = new Blob([content], { type: mimeType });
     const url = URL.createObjectURL(blob);
     const anchor = document.createElement('a');
     anchor.href = url;
@@ -467,6 +473,106 @@ export function SettingsPage() {
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`导入失败：${message}`);
+    }
+  };
+
+  const handleExportTaskJson = async () => {
+    clearNotice();
+    setLoading(true);
+    try {
+      const result = await getTaskBackupService().exportTasksAsJson();
+      const isRunningInTauri = await isTauri();
+      if (isRunningInTauri) {
+        const savedPath = await invoke<string | null>('save_json_file', {
+          content: result.content,
+          defaultName: result.fileName,
+        });
+        if (!savedPath) {
+          setStatusMessage('已取消保存。');
+          return;
+        }
+        setStatusMessage(`任务导出成功（JSON），共 ${result.taskCount} 条任务。保存路径：${savedPath}`);
+        return;
+      }
+
+      downloadFileFallback(result.content, 'application/json;charset=utf-8', result.fileName);
+      setStatusMessage(`任务导出成功（JSON），共 ${result.taskCount} 条任务。`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`任务导出失败：${message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleExportTaskSqlite = async () => {
+    clearNotice();
+    setLoading(true);
+    try {
+      const result = await getTaskBackupService().exportTasksAsSqliteSnapshot();
+      const isRunningInTauri = await isTauri();
+      if (isRunningInTauri) {
+        const savedPath = await invoke<string | null>('save_binary_file', {
+          content: Array.from(result.bytes),
+          defaultName: result.fileName,
+          filters: ['sqlite', 'db'],
+        });
+        if (!savedPath) {
+          setStatusMessage('已取消保存。');
+          return;
+        }
+        setStatusMessage(`任务导出成功（SQLite），共 ${result.taskCount} 条任务。保存路径：${savedPath}`);
+        return;
+      }
+
+      downloadFileFallback(result.bytes, 'application/octet-stream', result.fileName);
+      setStatusMessage(`任务导出成功（SQLite），共 ${result.taskCount} 条任务。`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`任务导出失败：${message}`);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleImportTaskData = () => {
+    clearNotice();
+    taskFileInputRef.current?.click();
+  };
+
+  const handleTaskImportFileChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    try {
+      const lowerName = file.name.toLowerCase();
+      const backupService = getTaskBackupService();
+
+      if (lowerName.endsWith('.json')) {
+        const content = await file.text();
+        const result = await backupService.importTasksFromJson(content, importStrategy);
+        setStatusMessage(
+          `任务导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。来源：${file.name}`
+        );
+        return;
+      }
+
+      if (lowerName.endsWith('.sqlite') || lowerName.endsWith('.db')) {
+        const bytes = new Uint8Array(await file.arrayBuffer());
+        const result = await backupService.importTasksFromSqliteSnapshot(bytes, importStrategy);
+        setStatusMessage(
+          `任务导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。来源：${file.name}`
+        );
+        return;
+      }
+
+      throw new Error('仅支持 .json / .sqlite / .db 任务备份文件');
+    } catch (error) {
+      const message = error instanceof Error ? error.message : '未知错误';
+      setErrorMessage(`任务导入失败：${message}`);
+    } finally {
+      e.target.value = '';
+      setLoading(false);
     }
   };
 
@@ -728,6 +834,31 @@ export function SettingsPage() {
       setFeedbackPreferencesState(nextPreferences);
     });
   }, []);
+
+  useEffect(() => {
+    if (!developerMode) {
+      setTaskBackendStatus(null);
+      return;
+    }
+
+    let cancelled = false;
+
+    void getTaskBackupService().getBackendStatus()
+      .then((status) => {
+        if (!cancelled) {
+          setTaskBackendStatus(status);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setTaskBackendStatus(null);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [developerMode]);
 
   const handleCountdownEndModeChange = (mode: CountdownEndMode) => {
     setTimerPreferencesState(updateTimerPreferences({ countdownEndMode: mode }));
@@ -1454,6 +1585,24 @@ export function SettingsPage() {
                     onClick={() => setPairingDialogOpen(true)}
                     right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                   />
+                  {taskBackendStatus && (
+                    <>
+                      <Divider />
+                      <div className="px-4 py-[14px]">
+                        <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">任务后端：{taskBackendStatus.backend}</p>
+                        <p className="mt-1 text-xs text-[#A8A29E]">
+                          任务备份：
+                          {taskBackendStatus.supportsJsonBackup && taskBackendStatus.supportsSqliteSnapshot
+                            ? 'JSON / SQLite'
+                            : taskBackendStatus.supportsJsonBackup
+                              ? 'JSON'
+                              : taskBackendStatus.supportsSqliteSnapshot
+                                ? 'SQLite'
+                                : '不可用'}
+                        </p>
+                      </div>
+                    </>
+                  )}
                 </>
               )}
             </SectionCard>
@@ -1479,6 +1628,27 @@ export function SettingsPage() {
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
               </div>
+              <Divider />
+              <SettingRow
+                icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="导出任务 JSON"
+                onClick={handleExportTaskJson}
+                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="导出任务 SQLite"
+                onClick={handleExportTaskSqlite}
+                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+              />
+              <Divider />
+              <SettingRow
+                icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="导入任务数据"
+                onClick={handleImportTaskData}
+                right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+              />
             </SectionCard>
           </section>
 
@@ -1578,6 +1748,14 @@ export function SettingsPage() {
         accept=".json"
         className="hidden"
         onChange={handleFileInputChange}
+      />
+      <input
+        ref={taskFileInputRef}
+        data-testid="new-settings-task-import-input"
+        type="file"
+        accept=".json,.sqlite,.db"
+        className="hidden"
+        onChange={handleTaskImportFileChange}
       />
 
       {isDesktopVcLayout ? renderDesktopVcContent() : (
@@ -2075,6 +2253,27 @@ export function SettingsPage() {
               onClick={handleImportBackup}
               right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
             />
+            <Divider />
+            <SettingRow
+              icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="导出任务 JSON"
+              onClick={handleExportTaskJson}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="导出任务 SQLite"
+              onClick={handleExportTaskSqlite}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+            />
+            <Divider />
+            <SettingRow
+              icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
+              label="导入任务数据"
+              onClick={handleImportTaskData}
+              right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
+            />
           </SectionCard>
         </section>
 
@@ -2147,6 +2346,24 @@ export function SettingsPage() {
                   onClick={() => setPairingDialogOpen(true)}
                   right={<ChevronRight className="h-4 w-4 text-[#D6D3D1] dark:text-[#57534E]" />}
                 />
+                {taskBackendStatus && (
+                  <>
+                    <Divider />
+                    <div className="px-4 py-[14px]">
+                      <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">任务后端：{taskBackendStatus.backend}</p>
+                      <p className="mt-1 text-xs text-[#A8A29E]">
+                        任务备份：
+                        {taskBackendStatus.supportsJsonBackup && taskBackendStatus.supportsSqliteSnapshot
+                          ? 'JSON / SQLite'
+                          : taskBackendStatus.supportsJsonBackup
+                            ? 'JSON'
+                            : taskBackendStatus.supportsSqliteSnapshot
+                              ? 'SQLite'
+                              : '不可用'}
+                      </p>
+                    </div>
+                  </>
+                )}
               </>
             )}
           </SectionCard>

@@ -782,6 +782,20 @@ impl AppState {
 
         let data_dir = resolve_data_dir();
         let eventlog_store = Arc::new(EventLogStore::new(data_dir));
+        let task_store = env::var("EXOMIND_RT_TASK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .map(|path| {
+                task::TaskStore::with_sqlite_path(&path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "task sqlite init failed, falling back to in-memory store (Task SQLite 初始化失败，降级到内存存储)"
+                    );
+                    task::TaskStore::new()
+                })
+            })
+            .unwrap_or_else(task::TaskStore::new);
 
         Self {
             port,
@@ -793,7 +807,7 @@ impl AppState {
             auth_secret,
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
-            task_store: Arc::new(task::TaskStore::new()),
+            task_store: Arc::new(task_store),
             energy_registry: energy::EnergyRegistry::new(),
             life_agents: std::collections::HashMap::new(),
             eventlog_store,

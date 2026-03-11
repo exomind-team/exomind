@@ -1,8 +1,10 @@
 use std::collections::HashMap;
+use std::path::Path;
 use std::sync::RwLock;
 
 use thiserror::Error;
 
+use super::sqlite_store::SqliteTaskStore;
 use super::types::*;
 
 #[derive(Debug, Error)]
@@ -13,62 +15,114 @@ pub enum TaskStoreError {
     InvalidTransition { from: TaskStatus, to: TaskStatus },
     #[error("task is in terminal state: {0:?}")]
     TerminalState(TaskStatus),
+    #[error("sqlite error: {0}")]
+    Sqlite(#[from] rusqlite::Error),
+    #[error("io error: {0}")]
+    Io(#[from] std::io::Error),
+    #[error("json error: {0}")]
+    Json(#[from] serde_json::Error),
+    #[error("invalid stored task status: {0}")]
+    InvalidStoredStatus(String),
+    #[error("invalid stored task priority: {0}")]
+    InvalidStoredPriority(String),
+}
+
+enum TaskStoreBackend {
+    Memory(RwLock<HashMap<String, Task>>),
+    Sqlite(SqliteTaskStore),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum TaskStoreBackendKind {
+    Memory,
+    Sqlite,
 }
 
 pub struct TaskStore {
-    tasks: RwLock<HashMap<String, Task>>,
+    backend: TaskStoreBackend,
 }
 
 impl TaskStore {
     pub fn new() -> Self {
         Self {
-            tasks: RwLock::new(HashMap::new()),
+            backend: TaskStoreBackend::Memory(RwLock::new(HashMap::new())),
         }
     }
 
+    pub fn with_sqlite_path(path: &Path) -> Result<Self, TaskStoreError> {
+        Ok(Self {
+            backend: TaskStoreBackend::Sqlite(SqliteTaskStore::open(path)?),
+        })
+    }
+
     pub fn create(&self, input: CreateTaskInput) -> Task {
+        if let TaskStoreBackend::Sqlite(store) = &self.backend {
+            return store.create(input).expect("sqlite task creation should succeed");
+        }
+
         let now = chrono::Utc::now().timestamp_millis() as u64;
         let task = Task {
             id: uuid::Uuid::new_v4().to_string(),
             title: input.title,
             description: input.description,
+            done_condition: input.done_condition,
             status: TaskStatus::NotStarted,
             priority: input.priority.unwrap_or_default(),
             tags: input.tags,
             source: input.source,
             parent_id: input.parent_id,
+            depends_on: input.depends_on,
             due_at: input.due_at,
             estimated_minutes: input.estimated_minutes,
+            time_block_ids: input.time_block_ids,
             created_at: now,
             updated_at: now,
             completed_at: None,
         };
 
         let result = task.clone();
-        self.tasks.write().unwrap().insert(task.id.clone(), task);
+        self.memory_tasks().write().unwrap().insert(task.id.clone(), task);
         result
     }
 
     pub fn get(&self, id: &str) -> Option<Task> {
-        self.tasks.read().unwrap().get(id).cloned()
+        match &self.backend {
+            TaskStoreBackend::Memory(tasks) => tasks.read().unwrap().get(id).cloned(),
+            TaskStoreBackend::Sqlite(store) => store.get(id).expect("sqlite task lookup should succeed"),
+        }
     }
 
     pub fn list(&self) -> Vec<Task> {
-        let tasks = self.tasks.read().unwrap();
-        let mut list: Vec<Task> = tasks.values().cloned().collect();
-        list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
-        list
+        match &self.backend {
+            TaskStoreBackend::Memory(tasks) => {
+                let tasks = tasks.read().unwrap();
+                let mut list: Vec<Task> = tasks.values().cloned().collect();
+                list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+                list
+            }
+            TaskStoreBackend::Sqlite(store) => store.list().expect("sqlite task list should succeed"),
+        }
     }
 
     pub fn list_by_status(&self, status: &TaskStatus) -> Vec<Task> {
-        self.list()
-            .into_iter()
-            .filter(|t| &t.status == status)
-            .collect()
+        match &self.backend {
+            TaskStoreBackend::Memory(_) => self
+                .list()
+                .into_iter()
+                .filter(|t| &t.status == status)
+                .collect(),
+            TaskStoreBackend::Sqlite(store) => store
+                .list_by_status(status)
+                .expect("sqlite status filter should succeed"),
+        }
     }
 
     pub fn update(&self, id: &str, input: UpdateTaskInput) -> Result<Task, TaskStoreError> {
-        let mut tasks = self.tasks.write().unwrap();
+        if let TaskStoreBackend::Sqlite(store) = &self.backend {
+            return store.update(id, input);
+        }
+
+        let mut tasks = self.memory_tasks().write().unwrap();
         let task = tasks
             .get_mut(id)
             .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
@@ -83,11 +137,17 @@ impl TaskStore {
         if let Some(description) = input.description {
             task.description = Some(description);
         }
+        if let Some(done_condition) = input.done_condition {
+            task.done_condition = Some(done_condition);
+        }
         if let Some(priority) = input.priority {
             task.priority = priority;
         }
         if let Some(tags) = input.tags {
             task.tags = tags;
+        }
+        if let Some(depends_on) = input.depends_on {
+            task.depends_on = depends_on;
         }
         if let Some(due_at) = input.due_at {
             task.due_at = Some(due_at);
@@ -97,6 +157,9 @@ impl TaskStore {
         }
         if let Some(parent_id) = input.parent_id {
             task.parent_id = Some(parent_id);
+        }
+        if let Some(time_block_ids) = input.time_block_ids {
+            task.time_block_ids = time_block_ids;
         }
 
         task.updated_at = chrono::Utc::now().timestamp_millis() as u64;
@@ -109,7 +172,11 @@ impl TaskStore {
         id: &str,
         new_status: TaskStatus,
     ) -> Result<(TaskStatus, Task), TaskStoreError> {
-        let mut tasks = self.tasks.write().unwrap();
+        if let TaskStoreBackend::Sqlite(store) = &self.backend {
+            return store.transition(id, new_status);
+        }
+
+        let mut tasks = self.memory_tasks().write().unwrap();
         let task = tasks
             .get_mut(id)
             .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
@@ -135,23 +202,81 @@ impl TaskStore {
 
     /// Abandon a task (set status to Abandoned). Convenience for DELETE endpoint.
     pub fn abandon(&self, id: &str) -> Result<Task, TaskStoreError> {
+        if let TaskStoreBackend::Sqlite(store) = &self.backend {
+            return store.abandon(id);
+        }
         let (_, task) = self.transition(id, TaskStatus::Abandoned)?;
         Ok(task)
     }
 
     /// Hard remove from store. Returns the removed task if it existed.
     pub fn remove(&self, id: &str) -> Option<Task> {
-        self.tasks.write().unwrap().remove(id)
+        match &self.backend {
+            TaskStoreBackend::Memory(tasks) => tasks.write().unwrap().remove(id),
+            TaskStoreBackend::Sqlite(store) => store.remove(id).expect("sqlite task removal should succeed"),
+        }
     }
 
     pub fn len(&self) -> usize {
-        self.tasks.read().unwrap().len()
+        match &self.backend {
+            TaskStoreBackend::Memory(tasks) => tasks.read().unwrap().len(),
+            TaskStoreBackend::Sqlite(store) => store.len().expect("sqlite task len should succeed"),
+        }
+    }
+
+    pub fn upsert(&self, task: Task) -> Result<Task, TaskStoreError> {
+        match &self.backend {
+            TaskStoreBackend::Memory(tasks) => {
+                tasks.write().unwrap().insert(task.id.clone(), task.clone());
+                Ok(task)
+            }
+            TaskStoreBackend::Sqlite(store) => {
+                store.upsert(&task)?;
+                Ok(task)
+            }
+        }
+    }
+
+    pub fn replace_all(&self, tasks: &[Task]) -> Result<(), TaskStoreError> {
+        match &self.backend {
+            TaskStoreBackend::Memory(memory) => {
+                let mut guard = memory.write().unwrap();
+                guard.clear();
+                for task in tasks {
+                    guard.insert(task.id.clone(), task.clone());
+                }
+                Ok(())
+            }
+            TaskStoreBackend::Sqlite(store) => store.replace_all(tasks),
+        }
+    }
+
+    pub fn sqlite_snapshot_bytes(&self) -> Result<Option<Vec<u8>>, TaskStoreError> {
+        match &self.backend {
+            TaskStoreBackend::Memory(_) => Ok(None),
+            TaskStoreBackend::Sqlite(store) => store.snapshot_bytes().map(Some),
+        }
+    }
+
+    pub fn backend_kind(&self) -> TaskStoreBackendKind {
+        match &self.backend {
+            TaskStoreBackend::Memory(_) => TaskStoreBackendKind::Memory,
+            TaskStoreBackend::Sqlite(_) => TaskStoreBackendKind::Sqlite,
+        }
+    }
+
+    fn memory_tasks(&self) -> &RwLock<HashMap<String, Task>> {
+        match &self.backend {
+            TaskStoreBackend::Memory(tasks) => tasks,
+            TaskStoreBackend::Sqlite(_) => unreachable!("memory-only helper used on sqlite backend"),
+        }
     }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use tempfile::tempdir;
 
     fn make_store() -> TaskStore {
         TaskStore::new()
@@ -161,13 +286,82 @@ mod tests {
         CreateTaskInput {
             title: title.to_string(),
             description: None,
+            done_condition: None,
             priority: None,
             tags: vec![],
             source: None,
             parent_id: None,
+            depends_on: vec![],
             due_at: None,
             estimated_minutes: None,
+            time_block_ids: vec![],
         }
+    }
+
+    #[test]
+    fn sqlite_store_persists_tasks_across_reopen() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let created = store.create(create_input("Persist me"));
+        drop(store);
+
+        let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let loaded = reopened.get(&created.id).expect("task should persist in sqlite");
+        assert_eq!(loaded.title, "Persist me");
+        assert_eq!(reopened.len(), 1);
+    }
+
+    #[test]
+    fn sqlite_store_roundtrips_extended_task_fields() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let created = store.create(CreateTaskInput {
+            title: "Extended".to_string(),
+            description: Some("Task body".to_string()),
+            priority: Some(TaskPriority::High),
+            tags: vec!["rt".to_string(), "sqlite".to_string()],
+            source: Some("frontend:test".to_string()),
+            parent_id: Some("parent-1".to_string()),
+            due_at: Some(1_700_000_000_000),
+            estimated_minutes: Some(45),
+            done_condition: Some("all checks green".to_string()),
+            depends_on: vec![],
+            time_block_ids: vec![],
+        });
+        let updated = store
+            .update(
+                &created.id,
+                UpdateTaskInput {
+                    title: None,
+                    description: None,
+                    priority: None,
+                    tags: None,
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    done_condition: Some("ship RT sqlite".to_string()),
+                    depends_on: Some(vec![TaskDependency {
+                        task_id: "dep-1".to_string(),
+                        relation_type: TaskDependencyType::Hard,
+                    }]),
+                    time_block_ids: Some(vec!["block-1".to_string(), "block-2".to_string()]),
+                },
+            )
+            .unwrap();
+        assert_eq!(updated.done_condition.as_deref(), Some("ship RT sqlite"));
+        drop(store);
+
+        let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let loaded = reopened.get(&created.id).expect("extended task should persist");
+        assert_eq!(loaded.done_condition.as_deref(), Some("ship RT sqlite"));
+        assert_eq!(loaded.depends_on.len(), 1);
+        assert_eq!(loaded.depends_on[0].task_id, "dep-1");
+        assert_eq!(loaded.depends_on[0].relation_type, TaskDependencyType::Hard);
+        assert_eq!(loaded.time_block_ids, vec!["block-1".to_string(), "block-2".to_string()]);
     }
 
     #[test]
@@ -223,11 +417,14 @@ mod tests {
                 UpdateTaskInput {
                     title: Some("Updated".to_string()),
                     description: Some("A description".to_string()),
+                    done_condition: None,
                     priority: Some(TaskPriority::High),
                     tags: Some(vec!["urgent".to_string()]),
+                    depends_on: None,
                     due_at: None,
                     estimated_minutes: Some(60),
                     parent_id: None,
+                    time_block_ids: None,
                 },
             )
             .unwrap();
@@ -248,11 +445,14 @@ mod tests {
             UpdateTaskInput {
                 title: Some("X".to_string()),
                 description: None,
+                done_condition: None,
                 priority: None,
                 tags: None,
+                depends_on: None,
                 due_at: None,
                 estimated_minutes: None,
                 parent_id: None,
+                time_block_ids: None,
             },
         );
         assert!(matches!(result, Err(TaskStoreError::NotFound(_))));
@@ -270,11 +470,14 @@ mod tests {
             UpdateTaskInput {
                 title: Some("Try update".to_string()),
                 description: None,
+                done_condition: None,
                 priority: None,
                 tags: None,
+                depends_on: None,
                 due_at: None,
                 estimated_minutes: None,
                 parent_id: None,
+                time_block_ids: None,
             },
         );
         assert!(matches!(result, Err(TaskStoreError::TerminalState(_))));

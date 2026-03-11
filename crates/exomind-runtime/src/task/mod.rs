@@ -1,6 +1,10 @@
 pub mod actor;
+pub mod sqlite_store;
 pub mod store;
 pub mod types;
 
-pub use store::TaskStore;
-pub use types::{CreateTaskInput, Task, TaskPriority, TaskStatus, TransitionInput, UpdateTaskInput};
+pub use store::{TaskStore, TaskStoreBackendKind};
+pub use types::{
+    CreateTaskInput, Task, TaskDependency, TaskDependencyType, TaskPriority, TaskStatus,
+    TransitionInput, UpdateTaskInput,
+};

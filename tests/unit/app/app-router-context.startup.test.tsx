@@ -1,5 +1,7 @@
 import { render, screen } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
 import App from '@/App';
 
 const destroyVoiceShortcutService = vi.fn();
@@ -101,5 +103,10 @@ describe('App startup router context', () => {
 
     expect(hasRouterContextWarning(warnSpy.mock.calls)).toBe(false);
     expect(hasRouterContextWarning(errorSpy.mock.calls)).toBe(false);
+  });
+
+  it('does not mount legacy TaskSyncCoordinator after RT task cutover（任务切到 RT 后不再挂载旧同步协调器）', () => {
+    const source = fs.readFileSync(path.resolve('src/App.tsx'), 'utf-8');
+    expect(source).not.toContain('TaskSyncCoordinator');
   });
 });

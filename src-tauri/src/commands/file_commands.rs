@@ -499,6 +499,57 @@ pub fn save_json_file(
     Ok(Some(saved))
 }
 
+/// 保存二进制内容到系统文件选择路径
+#[tauri::command]
+pub fn save_binary_file(
+    app: AppHandle,
+    content: Vec<u8>,
+    default_name: String,
+    filters: Option<Vec<String>>,
+) -> FileResult<Option<String>> {
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_file_name(&default_name);
+
+    if let Some(filters) = filters.as_ref() {
+        if !filters.is_empty() {
+            let owned_filters: Vec<String> = filters
+                .iter()
+                .map(|value| value.trim().trim_start_matches('.').to_string())
+                .filter(|value| !value.is_empty())
+                .collect();
+            let filter_refs: Vec<&str> = owned_filters.iter().map(String::as_str).collect();
+            if !filter_refs.is_empty() {
+                dialog = dialog.add_filter("Binary", &filter_refs);
+            }
+        }
+    }
+
+    let file_path = dialog.blocking_save_file();
+
+    let Some(file_path) = file_path else {
+        return Ok(None);
+    };
+
+    let saved = persist_export_content_for_selected_file(
+        file_path,
+        &content,
+        |path, bytes| fs::write(path, bytes),
+        |uri_like, bytes| {
+            let mut options = OpenOptions::new();
+            options.write(true).create(true).truncate(true);
+
+            let mut file = app.fs().open(uri_like.clone(), options)?;
+            use std::io::Write;
+            file.write_all(bytes)?;
+            Ok(())
+        },
+    )?;
+
+    Ok(Some(saved))
+}
+
 /// 从系统文件选择器选择 JSON 文件并读取内容
 #[tauri::command]
 pub fn pick_json_file(app: AppHandle) -> FileResult<Option<PickedJsonFile>> {
