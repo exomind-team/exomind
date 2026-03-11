@@ -8,7 +8,7 @@ export interface EventLogTransferPayloadV1 {
   events: EventData[];
 }
 
-const TRANSFER_VERSION = 1;
+const SUPPORTED_VERSIONS = [1, 2];
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -54,7 +54,7 @@ export function parseTransferPayload(raw: string): EventLogTransferPayloadV1 {
 
   const payload = parsed as Record<string, unknown>;
 
-  if (payload.version !== TRANSFER_VERSION) {
+  if (!SUPPORTED_VERSIONS.includes(payload.version as number)) {
     throw new Error('不支持的备份版本');
   }
 
