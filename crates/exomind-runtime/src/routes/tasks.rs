@@ -5,9 +5,9 @@ use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 
+use crate::AppState;
 use crate::signal::types::SignalEvent;
 use crate::task::{CreateTaskInput, Task, TaskStatus, TransitionInput, UpdateTaskInput};
-use crate::AppState;
 
 // ── Query types ─────────────────────────────────────────────────
 
@@ -170,9 +170,7 @@ async fn delete_task(
     Ok(Json(task))
 }
 
-async fn export_tasks_json(
-    State(state): State<AppState>,
-) -> Json<TaskBackupJsonPayload> {
+async fn export_tasks_json(State(state): State<AppState>) -> Json<TaskBackupJsonPayload> {
     Json(TaskBackupJsonPayload {
         version: 1,
         tasks: state.task_store.list(),
@@ -217,23 +215,28 @@ async fn import_tasks_sqlite(
     Json(payload): Json<TaskBackupSqliteImportPayload>,
 ) -> Result<Json<TaskImportResult>, (StatusCode, String)> {
     let strategy = parse_import_strategy(query.strategy.as_deref())?;
-    let bytes = STANDARD
-        .decode(payload.content_base64)
-        .map_err(|error| (StatusCode::BAD_REQUEST, format!("invalid sqlite snapshot: {error}")))?;
+    let bytes = STANDARD.decode(payload.content_base64).map_err(|error| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("invalid sqlite snapshot: {error}"),
+        )
+    })?;
     let imported_tasks = read_tasks_from_sqlite_snapshot(&bytes)?;
     let result = apply_task_import(&state, imported_tasks, strategy)?;
     Ok(Json(result))
 }
 
-async fn task_backend_status(
-    State(state): State<AppState>,
-) -> Json<TaskBackendStatusResponse> {
+async fn task_backend_status(State(state): State<AppState>) -> Json<TaskBackendStatusResponse> {
     let supports_sqlite_snapshot = matches!(
         state.task_store.backend_kind(),
         crate::task::TaskStoreBackendKind::Sqlite
     );
     Json(TaskBackendStatusResponse {
-        backend: if supports_sqlite_snapshot { "rt-sqlite" } else { "memory" },
+        backend: if supports_sqlite_snapshot {
+            "rt-sqlite"
+        } else {
+            "memory"
+        },
         supports_json_backup: true,
         supports_sqlite_snapshot,
     })
@@ -320,7 +323,10 @@ fn apply_task_import(
 }
 
 fn read_tasks_from_sqlite_snapshot(bytes: &[u8]) -> Result<Vec<Task>, (StatusCode, String)> {
-    let temp_path = std::env::temp_dir().join(format!("exomind-task-import-{}.sqlite", uuid::Uuid::new_v4()));
+    let temp_path = std::env::temp_dir().join(format!(
+        "exomind-task-import-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
     std::fs::write(&temp_path, bytes)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
@@ -342,7 +348,10 @@ pub fn router() -> Router<AppState> {
         .route("/tasks/backup/sqlite", get(export_tasks_sqlite))
         .route("/tasks/import/json", post(import_tasks_json))
         .route("/tasks/import/sqlite", post(import_tasks_sqlite))
-        .route("/tasks/:id", get(get_task).put(update_task).delete(delete_task))
+        .route(
+            "/tasks/:id",
+            get(get_task).put(update_task).delete(delete_task),
+        )
         .route("/tasks/:id/transition", post(transition_task))
 }
 
@@ -351,11 +360,11 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::engine::general_purpose::STANDARD;
     use crate::signal::SignalPool;
     use crate::task::TaskPriority;
     use axum::body::Body;
     use axum::http::Request;
+    use base64::engine::general_purpose::STANDARD;
     use http_body_util::BodyExt;
     use serde_json::Value;
     use std::sync::Arc;
@@ -369,24 +378,39 @@ mod tests {
     fn test_state_with_task_store(task_store: Arc<crate::task::TaskStore>) -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
         let host_id = "tasks-test-host".to_string();
+        let registry = crate::agent::AgentRegistry::new();
+        let energy_registry = crate::energy::EnergyRegistry::new();
         AppState {
             port: 0,
             host_id: host_id.clone(),
-            registry: crate::agent::AgentRegistry::new(),
+            registry: registry.clone(),
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(crate::mesh::MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(crate::mesh::MeshState::new(
+                host_id.clone(),
+                Arc::clone(&signal_pool),
+                None,
+            )),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store,
-            energy_registry: crate::energy::EnergyRegistry::new(),
+            energy_registry: energy_registry.clone(),
+            tick_manager: Arc::new(crate::tick::TickManager::new(
+                host_id.clone(),
+                registry,
+                energy_registry,
+                Arc::clone(&signal_pool),
+            )),
             life_agents: std::collections::HashMap::new(),
             eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
                 std::env::temp_dir().join("exomind-test-tasks"),
             )),
             #[cfg(not(target_os = "android"))]
-            pty_manager: Arc::new(crate::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
+            pty_manager: Arc::new(crate::pty::PtyManager::new(
+                Arc::clone(&signal_pool),
+                host_id,
+            )),
         }
     }
 
@@ -611,7 +635,10 @@ mod tests {
             time_block_ids: vec![],
         });
         // Must transition to in_progress first (not_started → abandoned is invalid)
-        state.task_store.transition(&task.id, TaskStatus::InProgress).unwrap();
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap();
         let _rx = state.signal_pool.subscribe();
         let app = test_router(state);
 
@@ -660,7 +687,10 @@ mod tests {
             estimated_minutes: None,
             time_block_ids: vec![],
         });
-        state.task_store.transition(&t1.id, TaskStatus::InProgress).unwrap();
+        state
+            .task_store
+            .transition(&t1.id, TaskStatus::InProgress)
+            .unwrap();
 
         let app = test_router(state);
 
@@ -711,7 +741,10 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let payload: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload["version"], 1);
-        assert_eq!(payload["tasks"].as_array().map(|items| items.len()), Some(1));
+        assert_eq!(
+            payload["tasks"].as_array().map(|items| items.len()),
+            Some(1)
+        );
         assert_eq!(payload["tasks"][0]["done_condition"], "done");
         assert_eq!(payload["tasks"][0]["time_block_ids"][0], "block-1");
     }

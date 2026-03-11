@@ -1,4 +1,6 @@
+use std::collections::HashMap;
 use std::sync::Arc;
+use std::sync::RwLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use tokio::task::JoinHandle;
 
@@ -6,6 +8,122 @@ use crate::agent::AgentRegistry;
 use crate::energy::{AgentEnergy, EnergyRegistry};
 use crate::signal::SignalPool;
 use crate::signal::types::SignalEvent;
+
+/// TickManager holds per-agent tick tasks so routes can revive agents later.
+/// TickManager（tick 管理器）保存每个 agent 的 tick 任务，供路由层在复活时重启。
+pub struct TickManager {
+    cancel: Arc<AtomicBool>,
+    host_id: String,
+    signal_pool: Arc<SignalPool>,
+    registry: AgentRegistry,
+    energy_registry: EnergyRegistry,
+    tasks: RwLock<HashMap<String, JoinHandle<()>>>,
+}
+
+impl TickManager {
+    pub fn new(
+        host_id: String,
+        registry: AgentRegistry,
+        energy_registry: EnergyRegistry,
+        signal_pool: Arc<SignalPool>,
+    ) -> Self {
+        Self {
+            cancel: Arc::new(AtomicBool::new(false)),
+            host_id,
+            signal_pool,
+            registry,
+            energy_registry,
+            tasks: RwLock::new(HashMap::new()),
+        }
+    }
+
+    /// Spawn a tick loop for a single agent when missing or already finished.
+    /// 为单个 agent 启动 tick；若已有活跃任务则拒绝重复启动。
+    pub fn spawn_tick_for_agent(&self, agent_id: &str) -> bool {
+        if self.cancel.load(Ordering::Relaxed) {
+            return false;
+        }
+
+        let Some(agent) = self.registry.get(agent_id) else {
+            return false;
+        };
+        let interval = agent.tick_interval_secs();
+        if interval == 0 {
+            return false;
+        }
+
+        let Some(energy) = self.energy_registry.get(agent_id) else {
+            return false;
+        };
+
+        let mut tasks = self.tasks.write().unwrap();
+        if let Some(existing) = tasks.get(agent_id)
+            && !existing.is_finished()
+        {
+            return false;
+        }
+
+        let handle = spawn_agent_tick(
+            agent_id.to_string(),
+            interval,
+            energy,
+            Arc::clone(&self.signal_pool),
+            self.registry.clone(),
+            self.host_id.clone(),
+            Arc::clone(&self.cancel),
+        );
+        tasks.insert(agent_id.to_string(), handle);
+        true
+    }
+
+    /// Start ticks for all registered agents with positive intervals.
+    /// 为所有已注册且启用 tick 的 agent 启动循环。
+    pub fn start_all_ticks(&self) -> usize {
+        self.registry
+            .list()
+            .into_iter()
+            .filter(|summary| summary.tick_interval_secs > 0)
+            .filter(|summary| self.spawn_tick_for_agent(&summary.id))
+            .count()
+    }
+
+    pub fn is_tick_running(&self, agent_id: &str) -> bool {
+        self.tasks
+            .read()
+            .unwrap()
+            .get(agent_id)
+            .map(|handle| !handle.is_finished())
+            .unwrap_or(false)
+    }
+
+    /// Abort all tick tasks and permanently mark the manager as stopping.
+    /// 中止全部 tick 任务，并将管理器标记为停止中。
+    pub fn abort_all(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        let handles = {
+            let mut tasks = self.tasks.write().unwrap();
+            tasks.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
+        };
+        for handle in handles {
+            handle.abort();
+        }
+    }
+
+    /// Abort all tick tasks and wait for their shutdown.
+    /// 中止全部 tick 任务并等待退出。
+    pub async fn stop_all(&self) {
+        self.cancel.store(true, Ordering::Relaxed);
+        let handles = {
+            let mut tasks = self.tasks.write().unwrap();
+            tasks.drain().map(|(_, handle)| handle).collect::<Vec<_>>()
+        };
+
+        for handle in handles {
+            handle.abort();
+            let _ = handle.await;
+        }
+    }
+}
 
 /// Spawn a tick loop for a single agent.
 ///
@@ -95,12 +213,7 @@ pub fn spawn_agent_tick(
     })
 }
 
-fn publish_dormant(
-    agent_id: &str,
-    total_ticks: u64,
-    signal_pool: &SignalPool,
-    host_id: &str,
-) {
+fn publish_dormant(agent_id: &str, total_ticks: u64, signal_pool: &SignalPool, host_id: &str) {
     let event = SignalEvent {
         schema_version: 1,
         id: uuid::Uuid::new_v4().to_string(),
@@ -159,19 +272,50 @@ mod tests {
     use super::*;
     use crate::agent::{Agent, AgentRegistry, ChatChunk, ChatRequest};
     use crate::energy::{AgentEnergy, AgentEnergySnapshot};
-    use futures_util::stream::{self, BoxStream, StreamExt};
     use futures_util::future::BoxFuture;
+    use futures_util::stream::{self, BoxStream, StreamExt};
 
     struct TickTestAgent;
 
     impl Agent for TickTestAgent {
-        fn id(&self) -> &str { "tick-test" }
-        fn name(&self) -> &str { "Tick Test" }
-        fn description(&self) -> &str { "Test agent for tick" }
+        fn id(&self) -> &str {
+            "tick-test"
+        }
+        fn name(&self) -> &str {
+            "Tick Test"
+        }
+        fn description(&self) -> &str {
+            "Test agent for tick"
+        }
         fn chat_stream(&self, _req: ChatRequest) -> BoxStream<'static, ChatChunk> {
             stream::empty().boxed()
         }
-        fn tick_interval_secs(&self) -> u64 { 1 }
+        fn tick_interval_secs(&self) -> u64 {
+            1
+        }
+        fn on_tick(&self, _energy: &AgentEnergySnapshot) -> BoxFuture<'_, Vec<SignalEvent>> {
+            Box::pin(async { Vec::new() })
+        }
+    }
+
+    struct IdleTickAgent;
+
+    impl Agent for IdleTickAgent {
+        fn id(&self) -> &str {
+            "idle-tick"
+        }
+        fn name(&self) -> &str {
+            "Idle Tick"
+        }
+        fn description(&self) -> &str {
+            "Agent for TickManager tests"
+        }
+        fn chat_stream(&self, _req: ChatRequest) -> BoxStream<'static, ChatChunk> {
+            stream::empty().boxed()
+        }
+        fn tick_interval_secs(&self) -> u64 {
+            1
+        }
         fn on_tick(&self, _energy: &AgentEnergySnapshot) -> BoxFuture<'_, Vec<SignalEvent>> {
             Box::pin(async { Vec::new() })
         }
@@ -208,7 +352,10 @@ mod tests {
             match timeout {
                 Ok(Ok(event)) => {
                     tick_signals.push(event);
-                    if tick_signals.iter().any(|e: &SignalEvent| e.topic == "agent.dormant") {
+                    if tick_signals
+                        .iter()
+                        .any(|e: &SignalEvent| e.topic == "agent.dormant")
+                    {
                         break;
                     }
                 }
@@ -216,13 +363,59 @@ mod tests {
             }
         }
 
-        let tick_count = tick_signals.iter().filter(|e| e.topic == "agent.tick").count();
-        let dormant_count = tick_signals.iter().filter(|e| e.topic == "agent.dormant").count();
+        let tick_count = tick_signals
+            .iter()
+            .filter(|e| e.topic == "agent.tick")
+            .count();
+        let dormant_count = tick_signals
+            .iter()
+            .filter(|e| e.topic == "agent.dormant")
+            .count();
 
         assert_eq!(tick_count, 3, "should have 3 tick signals");
         assert_eq!(dormant_count, 1, "should have 1 dormant signal");
 
         let energy = energy_registry.get("tick-test").unwrap();
         assert!(energy.is_dormant());
+    }
+
+    #[tokio::test]
+    async fn tick_manager_restarts_finished_agent_tick_without_duplication() {
+        let registry = AgentRegistry::new();
+        registry.register(Arc::new(IdleTickAgent));
+
+        let energy_registry = EnergyRegistry::new();
+        energy_registry.register("idle-tick", AgentEnergy::new(10, 10));
+
+        let signal_pool = Arc::new(SignalPool::new(None));
+        let manager = TickManager::new(
+            "tick-manager-test".to_string(),
+            registry,
+            energy_registry.clone(),
+            signal_pool,
+        );
+
+        assert!(manager.spawn_tick_for_agent("idle-tick"));
+        assert!(
+            !manager.spawn_tick_for_agent("idle-tick"),
+            "manager should reject duplicate active tick（运行中任务不可重复启动）"
+        );
+
+        tokio::time::sleep(std::time::Duration::from_millis(1200)).await;
+
+        let energy = energy_registry.get("idle-tick").unwrap();
+        assert!(
+            energy.is_dormant(),
+            "agent should become dormant after one tick"
+        );
+        assert!(!manager.is_tick_running("idle-tick"));
+
+        energy.refill(10);
+        assert!(
+            manager.spawn_tick_for_agent("idle-tick"),
+            "manager should restart finished tick after refill（充能后应允许重新启动）"
+        );
+
+        manager.stop_all().await;
     }
 }
