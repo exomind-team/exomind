@@ -236,8 +236,65 @@ fn unregister_cancel_shortcut(_app: &AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Get the current cursor position in screen coordinates.
+/// Returns None on failure or on unsupported platforms.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn cursor_position() -> Option<(i32, i32)> {
+    #[cfg(target_os = "windows")]
+    {
+        // Win32 POINT: x/y are LONG (typedef long), which is always 32-bit on
+        // Windows (LLP64), so i32 is the correct Rust mapping.
+        // GetCursorPos returns BOOL (typedef int): nonzero = success.
+        #[repr(C)]
+        struct POINT {
+            x: i32,
+            y: i32,
+        }
+        extern "system" {
+            fn GetCursorPos(lp_point: *mut POINT) -> i32;
+        }
+        let mut pt = POINT { x: 0, y: 0 };
+        if unsafe { GetCursorPos(&mut pt) } != 0 {
+            return Some((pt.x, pt.y));
+        }
+        None
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        None
+    }
+}
+
+/// Returns true if the point (cx, cy) is within the monitor rect defined by
+/// (pos_x, pos_y, width, height). Right and bottom edges are exclusive,
+/// matching Windows `MonitorFromPoint` semantics.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn cursor_in_monitor(cx: i32, cy: i32, pos_x: i32, pos_y: i32, width: u32, height: u32) -> bool {
+    // width/height are u32; cast to i32 is safe for all real display sizes (<= 32767 px).
+    cx >= pos_x && cy >= pos_y && cx < pos_x + width as i32 && cy < pos_y + height as i32
+}
+
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn resolve_overlay_monitor(app: &AppHandle) -> Result<Option<tauri::Monitor>, String> {
+    // Prefer the monitor containing the cursor so the overlay appears
+    // on whichever screen the user is currently working on.
+    if let Some((cx, cy)) = cursor_position() {
+        let monitors = app.available_monitors().map_err(|e| e.to_string())?;
+        for monitor in monitors {
+            let pos = monitor.position();
+            let size = monitor.size();
+            if cursor_in_monitor(cx, cy, pos.x, pos.y, size.width, size.height) {
+                return Ok(Some(monitor));
+            }
+        }
+        // Cursor is in a gap between monitors (non-contiguous layout) or
+        // available_monitors() returned an empty list — fall through to main window.
+        eprintln!(
+            "[voice-overlay] cursor ({cx},{cy}) not within any monitor rect, falling back to main window monitor"
+        );
+    }
+
+    // Fallback: use the monitor that contains the main window.
     if let Some(main_window) = app.get_webview_window("main") {
         let current_monitor = main_window
             .current_monitor()
@@ -452,7 +509,7 @@ pub async fn voice_recording_set_active(_app: AppHandle, _active: bool) -> Resul
 
 #[cfg(test)]
 mod tests {
-    use super::calculate_overlay_position;
+    use super::{calculate_overlay_position, cursor_in_monitor};
 
     #[test]
     fn calculate_overlay_position_centers_bottom_on_primary_work_area() {
@@ -466,5 +523,68 @@ mod tests {
         let (x, y) = calculate_overlay_position(1920, 40, 1920, 1040);
         assert_eq!(x, 2600);
         assert_eq!(y, 784);
+    }
+
+    // --- cursor_in_monitor hit-test tests ---
+
+    #[test]
+    fn cursor_in_monitor_returns_true_when_cursor_is_inside() {
+        // Cursor at center of a 1920x1080 monitor starting at (0,0)
+        assert!(cursor_in_monitor(960, 540, 0, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_returns_true_at_top_left_corner() {
+        // Top-left corner is inclusive
+        assert!(cursor_in_monitor(0, 0, 0, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_returns_false_at_right_edge_exclusive() {
+        // Right edge (x == pos_x + width) is exclusive, matching Windows semantics
+        assert!(!cursor_in_monitor(1920, 540, 0, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_returns_false_at_bottom_edge_exclusive() {
+        // Bottom edge (y == pos_y + height) is exclusive
+        assert!(!cursor_in_monitor(960, 1080, 0, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_returns_true_at_last_pixel_inside() {
+        // One pixel before right/bottom edge is still inside
+        assert!(cursor_in_monitor(1919, 1079, 0, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_returns_false_when_cursor_is_to_the_left() {
+        assert!(!cursor_in_monitor(-1, 540, 0, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_returns_false_when_cursor_is_above() {
+        assert!(!cursor_in_monitor(960, -1, 0, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_handles_secondary_monitor_with_positive_offset() {
+        // Secondary monitor to the right: starts at x=1920
+        assert!(cursor_in_monitor(2400, 400, 1920, 0, 1920, 1080));
+        assert!(!cursor_in_monitor(1919, 400, 1920, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_handles_monitor_with_negative_offset() {
+        // Secondary monitor to the left of primary: starts at x=-1920
+        assert!(cursor_in_monitor(-960, 540, -1920, 0, 1920, 1080));
+        assert!(!cursor_in_monitor(0, 540, -1920, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn cursor_in_monitor_handles_monitor_with_y_offset() {
+        // Monitor with taskbar offset: work area starts at y=40
+        assert!(cursor_in_monitor(960, 100, 0, 40, 1920, 1000));
+        assert!(!cursor_in_monitor(960, 39, 0, 40, 1920, 1000));
     }
 }

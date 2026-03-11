@@ -351,17 +351,22 @@ describe('review-agent review loop', () => {
     ).rejects.toThrow('remote comment lookup failed');
   });
 
-  it('detects the dominant PR language from title/body/comments', () => {
+  it('detects the dominant PR language from title/body', () => {
     expect(resolveReviewCommentLanguage({
       title: 'Review agent reliability fixes',
       body: 'This PR updates review actions and router recovery.',
-      commentBodies: ['Please verify the retry path.'],
     })).toBe('en');
 
     expect(resolveReviewCommentLanguage({
       title: '审阅 Agent 动作层',
       body: '补齐评论校验与标签逻辑。',
-      commentBodies: ['请继续检查恢复路径。'],
+    })).toBe('zh-CN');
+  });
+
+  it('ignores comment bodies when resolving the expected PR language', () => {
+    expect(resolveReviewCommentLanguage({
+      title: '修复审阅语言判断',
+      body: '标题和描述保持中文，评论里可能有英文机器人消息。',
     })).toBe('zh-CN');
   });
 
@@ -557,7 +562,6 @@ describe('review-agent review loop', () => {
       'body',
       'url',
       'labels',
-      'comments',
     ]);
     expect(buildPullRequestActionJsonFields('approve')).toEqual([
       'number',
@@ -565,7 +569,6 @@ describe('review-agent review loop', () => {
       'body',
       'url',
       'labels',
-      'comments',
     ]);
   });
 
@@ -576,7 +579,6 @@ describe('review-agent review loop', () => {
       'body',
       'url',
       'labels',
-      'comments',
     ]);
   });
 

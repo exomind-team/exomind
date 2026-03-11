@@ -15,4 +15,9 @@ describe('SettingsPage import/export', () => {
     expect(source).toContain('同步服务器');
     expect(source).toContain('handleSaveSyncServerUrl');
   });
+
+  it('uses generic backup filename prefix', () => {
+    expect(source).toContain('exomind-data-');
+    expect(source).not.toContain('exomind-eventlog-');
+  });
 });
