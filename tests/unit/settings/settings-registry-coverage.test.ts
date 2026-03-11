@@ -55,6 +55,7 @@ const INLINE_SINGLE_ENUM_IDS = [
   'voice-shortcut-send-mode',
   'voice-shortcut-hotkey',
   'voice-shortcut-asr-provider',
+  'volcano-resource-model',
 ] as const;
 
 const DIALOG_ENUM_IDS = [
@@ -62,9 +63,7 @@ const DIALOG_ENUM_IDS = [
   'sound-preset',
 ] as const;
 
-const SELECT_ENUM_IDS = [
-  'volcano-resource-model',
-] as const;
+const SELECT_ENUM_IDS = [] as const;
 
 const MULTI_ENUM_IDS = [
   'feedback-content',
@@ -101,7 +100,6 @@ const CUSTOM_ITEM_IDS = [
   'volcano-asr-test',
   'ai-api-key',
   'import-tasks',
-  'feature-toggles',
   'device-pairing',
   'task-backend-status',
 ] as const;
@@ -202,6 +200,14 @@ describe('settings registry coverage audit', () => {
     const soundPreset = getItem('sound-preset', 'enum');
     expect(soundPreset.dialogTitle).toBe('选择提示音');
 
+    const volcanoResourceModel = getItem('volcano-resource-model', 'enum');
+    expect(volcanoResourceModel.options.map((option) => option.label)).toEqual([
+      '1.0 小时版',
+      '1.0 并发版',
+      '2.0 小时版',
+      '2.0 并发版',
+    ]);
+
     const mossApiToken = getItem('moss-api-token', 'string');
     expect(mossApiToken.stringStyle).toBe('dialog');
     expect(mossApiToken.dialogFieldKind).toBe('secret');
@@ -212,6 +218,14 @@ describe('settings registry coverage audit', () => {
     expect(syncServerUrl.stringStyle).toBe('dialog');
     expect(syncServerUrl.dialogFieldKind).toBe('plain');
     expect(syncServerUrl.dialogInputType).toBe('url');
+
+    const featureToggles = getItem('feature-toggles', 'group');
+    expect(featureToggles.groupStyle).toBe('adaptive-overlay');
+    expect(featureToggles.children.map((child) => child.id)).toEqual([
+      'agent-page-enabled',
+      'desktop-adaptive',
+      'command-palette-enabled',
+    ]);
 
     const resetAllSettings = getItem('reset-all-settings', 'action');
     expect(resetAllSettings.confirmMessage).toBe('确认恢复所有默认设置？');

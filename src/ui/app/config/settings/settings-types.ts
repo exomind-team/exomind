@@ -14,6 +14,7 @@ export type Category =
 
 export interface SettingsContext {
   isDesktop: boolean;
+  isLandscape?: boolean;
   developerMode?: boolean;
   desktopAdaptiveEnabled?: boolean;
   voiceShortcutAsrProvider?: string;
@@ -128,6 +129,9 @@ export interface ActionSettingsItem extends SettingsItemBase {
 
 export interface GroupSettingsItem extends SettingsItemBase {
   type: 'group';
+  groupStyle?: 'adaptive-overlay';
+  dialogTitle?: string;
+  dialogDescription?: string;
   children: SettingsItem[];
 }
 

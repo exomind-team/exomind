@@ -105,11 +105,19 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     fireEvent.click(screen.getByTestId('new-settings-voice-provider-volcano'));
 
-    const select = screen.getByTestId('new-settings-volcano-resource-select');
-    fireEvent.change(select, { target: { value: 'volc.bigasr.sauc.duration' } });
+    const group = screen.getByRole('group', { name: '火山资源模型' });
+    expect(screen.queryByTestId('new-settings-volcano-resource-select')).toBeNull();
+    expect(screen.queryByText('模型 1.0 小时版')).toBeNull();
+    expect(screen.getByRole('button', { name: '1.0 小时版' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '1.0 并发版' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '2.0 小时版' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '2.0 并发版' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '1.0 小时版' }));
 
     expect(setVolcanoResourceId('volc.bigasr.sauc.duration')).toBe('volc.bigasr.sauc.duration');
-    expect(screen.getByText('当前默认资源：模型 1.0 小时版。')).toBeInTheDocument();
+    expect(group).toBeInTheDocument();
+    expect(screen.getByText('当前默认资源：1.0 小时版。')).toBeInTheDocument();
   });
 
   it('updates voice overlay opacity from input section', () => {

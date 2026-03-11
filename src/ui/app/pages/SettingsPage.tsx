@@ -55,11 +55,40 @@ function useIsDesktop(minWidth = 768): boolean {
   return isDesktop;
 }
 
+function useIsLandscape(): boolean {
+  const [isLandscape, setIsLandscape] = useState(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return false;
+    }
+    return window.matchMedia('(orientation: landscape)').matches;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.matchMedia !== 'function') {
+      return;
+    }
+
+    const mediaQueryList = window.matchMedia('(orientation: landscape)');
+    const handleChange = (event: MediaQueryListEvent) => {
+      setIsLandscape(event.matches);
+    };
+
+    setIsLandscape(mediaQueryList.matches);
+    mediaQueryList.addEventListener('change', handleChange);
+    return () => {
+      mediaQueryList.removeEventListener('change', handleChange);
+    };
+  }, []);
+
+  return isLandscape;
+}
+
 export function SettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.6');
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
+  const isLandscape = useIsLandscape();
   const developerMode = useOptionalExternalValue(
     developerModeConfig.getDeveloperModeEnabled,
     developerModeConfig.subscribeDeveloperModeChanges,
@@ -108,6 +137,7 @@ export function SettingsPage() {
 
   const ctx: SettingsContext = {
     isDesktop,
+    isLandscape,
     developerMode,
     desktopAdaptiveEnabled,
     voiceShortcutAsrProvider,

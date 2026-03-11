@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { Bell, Code, Download, Key, List, Mic, Moon, MoonStar, Sun, SunMoon, Timer, Upload, Waypoints, Wifi } from 'lucide-react';
+import { Bell, Bot, Code, Command, Download, Key, List, Mic, Monitor, Moon, MoonStar, Sun, SunMoon, Timer, Upload, Waypoints, Wifi } from 'lucide-react';
 import type { SettingsContext, SettingsItem } from './settings-types';
 import {
   getSyncServerUrlOverride,
@@ -121,7 +121,6 @@ import {
 import {
   AiApiKeySetting,
   DevicePairingSetting,
-  FeatureTogglesSetting,
   MossVoiceTestSetting,
   TaskBackendStatusSetting,
   TaskImportActionSetting,
@@ -275,6 +274,45 @@ function setUseMockDataAndReload(enabled: boolean): void {
     window.location.reload();
   }
 }
+
+export const FEATURE_TOGGLE_SETTING_IDS = [
+  'agent-page-enabled',
+  'desktop-adaptive',
+  'command-palette-enabled',
+] as const;
+
+export const FEATURE_TOGGLE_SETTINGS = [
+  {
+    id: 'agent-page-enabled',
+    label: '网络页面',
+    icon: Waypoints,
+    rowTestId: 'feature-toggle-agent-page-row',
+    controlTestId: 'feature-toggle-agent-page-switch',
+    get: getAgentPageEnabled,
+    set: setAgentPageEnabled,
+    subscribe: subscribeAgentPageEnabledChanges,
+  },
+  {
+    id: 'desktop-adaptive',
+    label: '桌面端适配',
+    icon: Monitor,
+    rowTestId: 'feature-toggle-desktop-adaptive-row',
+    controlTestId: 'new-settings-desktop-adaptive-switch',
+    get: getDesktopAdaptiveEnabled,
+    set: setDesktopAdaptiveEnabled,
+    subscribe: subscribeDesktopAdaptiveChanges,
+  },
+  {
+    id: 'command-palette-enabled',
+    label: '命令面板',
+    icon: Command,
+    rowTestId: 'feature-toggle-command-palette-row',
+    controlTestId: 'feature-toggle-command-palette-switch',
+    get: getCommandPaletteEnabled,
+    set: setCommandPaletteEnabled,
+    subscribe: subscribeCommandPaletteEnabledChanges,
+  },
+] as const;
 
 export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
@@ -527,12 +565,14 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: Mic,
     category: 'input',
     rowTestId: 'new-settings-volcano-resource-row',
-    controlTestId: 'new-settings-volcano-resource-select',
     type: 'enum',
-    enumStyle: 'select',
     visible: volcanoOnly,
-    options: VOLCANO_RESOURCE_PRESETS.map((preset) => ({ label: preset.label, value: preset.value })),
-    helperText: (value: string) => `当前默认资源：${VOLCANO_RESOURCE_PRESETS.find((preset) => preset.value === value)?.label ?? value}。`,
+    options: VOLCANO_RESOURCE_PRESETS.map((preset) => ({
+      label: preset.label.replace(/^模型\s+/, ''),
+      value: preset.value,
+    })),
+    optionTestId: (value) => `new-settings-volcano-resource-${value}`,
+    helperText: (value: string) => `当前默认资源：${VOLCANO_RESOURCE_PRESETS.find((preset) => preset.value === value)?.label.replace(/^模型\s+/, '') ?? value}。`,
     get: () => getVolcanoResourceId() || DEFAULT_VOLCANO_RESOURCE_ID,
     set: (value: string) => setVolcanoResourceId(value),
   },
@@ -695,10 +735,25 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'feature-toggles',
     label: '功能开关',
+    icon: Bot,
     category: 'developer',
-    type: 'custom',
+    type: 'group',
+    groupStyle: 'adaptive-overlay',
+    dialogTitle: '功能开关',
+    dialogDescription: '启用或关闭实验性功能',
     visible: devOnly,
-    component: FeatureTogglesSetting,
+    children: FEATURE_TOGGLE_SETTINGS.map((setting) => ({
+      id: setting.id,
+      label: setting.label,
+      icon: setting.icon,
+      category: 'developer',
+      type: 'boolean' as const,
+      rowTestId: setting.rowTestId,
+      controlTestId: setting.controlTestId,
+      get: setting.get,
+      set: setting.set,
+      subscribe: setting.subscribe,
+    })),
   },
   {
     id: 'device-pairing',
@@ -742,36 +797,6 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
 export function getVisibleSettings(ctx: SettingsContext): SettingsItem[] {
   return SETTINGS_REGISTRY.filter((item) => !item.visible || item.visible(ctx));
 }
-
-export const FEATURE_TOGGLE_SETTING_IDS = [
-  'agent-page-enabled',
-  'desktop-adaptive',
-  'command-palette-enabled',
-] as const;
-
-export const FEATURE_TOGGLE_SETTINGS = [
-  {
-    id: 'agent-page-enabled',
-    label: '网络页面',
-    get: getAgentPageEnabled,
-    set: setAgentPageEnabled,
-    subscribe: subscribeAgentPageEnabledChanges,
-  },
-  {
-    id: 'desktop-adaptive',
-    label: '桌面端适配',
-    get: getDesktopAdaptiveEnabled,
-    set: setDesktopAdaptiveEnabled,
-    subscribe: subscribeDesktopAdaptiveChanges,
-  },
-  {
-    id: 'command-palette-enabled',
-    label: '命令面板',
-    get: getCommandPaletteEnabled,
-    set: setCommandPaletteEnabled,
-    subscribe: subscribeCommandPaletteEnabledChanges,
-  },
-] as const;
 
 export const DEFAULT_VOICE_OVERLAY_OFFSET = DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET;
 export const DEFAULT_LLM_API_KEY = getLLMApiKey();

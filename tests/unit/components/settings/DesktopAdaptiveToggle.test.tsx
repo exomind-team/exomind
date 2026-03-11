@@ -5,8 +5,28 @@ import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setDesktopAdaptiveEnabled } from '@/config/desktop-adaptive';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
+function mockMatchMedia({
+  isDesktop = false,
+  isLandscape = false,
+}: {
+  isDesktop?: boolean;
+  isLandscape?: boolean;
+}) {
+  window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+    matches: query.includes('min-width') ? isDesktop : query.includes('orientation: landscape') ? isLandscape : false,
+    media: query,
+    onchange: null,
+    addEventListener: vi.fn(),
+    removeEventListener: vi.fn(),
+    addListener: vi.fn(),
+    removeListener: vi.fn(),
+    dispatchEvent: vi.fn(),
+  }));
+}
+
 beforeEach(() => {
   vi.mocked(getDeveloperModeEnabled).mockReturnValue(true);
+  mockMatchMedia({ isDesktop: false, isLandscape: false });
 });
 
 describe('SettingsPage - Desktop adaptive toggle（桌面适配开关）', () => {
@@ -15,6 +35,27 @@ describe('SettingsPage - Desktop adaptive toggle（桌面适配开关）', () =>
     fireEvent.click(screen.getByText('功能开关'));
     expect(screen.getByText('桌面端适配')).toBeInTheDocument();
     expect(screen.getByTestId('new-settings-desktop-adaptive-switch')).toBeInTheDocument();
+    expect(screen.getByTestId('feature-toggle-desktop-adaptive-row').querySelector('svg')).not.toBeNull();
+  });
+
+  it('uses dialog in landscape mode and drawer in portrait mode for feature toggles group', () => {
+    mockMatchMedia({ isDesktop: true, isLandscape: true });
+
+    const { unmount } = render(<SettingsPage />);
+    fireEvent.click(screen.getByText('功能开关'));
+
+    expect(screen.getByTestId('dialog')).toBeInTheDocument();
+    expect(screen.queryByTestId('drawer')).toBeNull();
+
+    unmount();
+
+    mockMatchMedia({ isDesktop: false, isLandscape: false });
+
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByText('功能开关'));
+
+    expect(screen.getByTestId('drawer')).toBeInTheDocument();
+    expect(screen.queryByTestId('dialog')).toBeNull();
   });
 
   it('updates desktop adaptive config on toggle（切换时写入桌面适配配置）', () => {

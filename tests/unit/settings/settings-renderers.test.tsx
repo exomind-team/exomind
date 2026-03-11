@@ -7,6 +7,7 @@ import type {
   ActionSettingsItem,
   BooleanSettingsItem,
   CustomSettingsItem,
+  GroupSettingsItem,
   MultiEnumSettingsItem,
   NumberSettingsItem,
   SettingsContext,
@@ -502,6 +503,37 @@ describe('SettingsItemRenderer', () => {
     expect(onAction).toHaveBeenCalledTimes(1);
   });
 
+  it('renders group items as interactive containers that expose child settings', () => {
+    const childSet = vi.fn();
+    const item: GroupSettingsItem = {
+      id: 'feature-toggles',
+      label: '功能开关',
+      category: 'developer',
+      type: 'group',
+      groupStyle: 'adaptive-overlay',
+      dialogTitle: '功能开关',
+      dialogDescription: '启用或关闭实验性功能',
+      children: [
+        {
+          id: 'desktop-adaptive',
+          label: '桌面端适配',
+          category: 'developer',
+          type: 'boolean',
+          get: () => true,
+          set: childSet,
+        },
+      ],
+    };
+
+    render(<SettingsItemRenderer item={item} ctx={{ isDesktop: false, isLandscape: true }} />);
+
+    fireEvent.click(screen.getByRole('button', { name: /功能开关/ }));
+
+    expect(screen.getByText('启用或关闭实验性功能')).toBeInTheDocument();
+    expect(screen.getByRole('switch')).toBeInTheDocument();
+    expect(screen.getByText('桌面端适配')).toBeInTheDocument();
+  });
+
   it('keeps confirmMessage behavior for button-mode action items', () => {
     const confirmSpy = vi.fn(() => false);
     Object.defineProperty(window, 'confirm', {
@@ -530,31 +562,32 @@ describe('SettingsItemRenderer', () => {
     expect(onAction).not.toHaveBeenCalled();
   });
 
-  it('renders select enum helper text as a separate indented block', () => {
+  it('renders inline enum helper text as a separate indented block', () => {
     const item: SingleEnumSettingsItem = {
       id: 'volcano-resource-model',
       label: '火山资源模型',
       icon: Code,
       rowTestId: 'volcano-resource-row',
-      controlTestId: 'volcano-resource-select',
       category: 'input',
       type: 'enum',
-      enumStyle: 'select',
       options: [
-        { label: '默认模型', value: 'default' },
-        { label: '模型 1.0 小时版', value: 'hour' },
+        { label: '1.0 小时版', value: 'hour' },
+        { label: '2.0 小时版', value: 'seed-hour' },
       ],
       helperText: (value) => `当前默认资源：${value}`,
-      get: () => 'default',
+      get: () => 'hour',
       set: vi.fn(),
     };
 
     render(<SettingsItemRenderer item={item} ctx={ctx} />);
 
     const row = screen.getByTestId('volcano-resource-row');
-    const helper = screen.getByText('当前默认资源：default');
+    const helper = screen.getByText('当前默认资源：hour');
+    const group = screen.getByRole('group', { name: '火山资源模型' });
 
     expect(row.querySelector('svg')).not.toBeNull();
+    expect(within(group).getByRole('button', { name: '1.0 小时版' })).toBeInTheDocument();
+    expect(within(group).queryByRole('button', { name: /模型 1\.0/ })).toBeNull();
     expect(row).not.toContainElement(helper);
     expect(helper.parentElement?.className).toContain('pl-[46px]');
   });

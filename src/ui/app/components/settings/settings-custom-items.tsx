@@ -1,12 +1,10 @@
 import { useEffect, useRef, useState } from 'react';
-import type { CSSProperties, ReactNode } from 'react';
-import { Bell, Bot, Check, ChevronRight, Command, Key, Mic, Timer, Upload, Waypoints, Wifi } from 'lucide-react';
+import type { ReactNode } from 'react';
+import { Bell, Bot, Check, ChevronRight, Key, Mic, Timer, Upload, Wifi } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
-import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
-import { Switch } from '@/components/ui/switch';
 import { getTaskBackupService } from '@/lib/services';
-import { SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
+import { SettingRow } from '@/ui/app/components/settings-shared';
 import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
 import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
 import {
@@ -29,21 +27,6 @@ import {
   setLLMModel,
   subscribeLLMSettingsChanges,
 } from '@/config/llm-settings';
-import {
-  getAgentPageEnabled,
-  setAgentPageEnabled,
-  subscribeAgentPageEnabledChanges,
-} from '@/config/agent-page-enabled';
-import {
-  getDesktopAdaptiveEnabled,
-  setDesktopAdaptiveEnabled,
-  subscribeDesktopAdaptiveChanges,
-} from '@/config/desktop-adaptive';
-import {
-  getCommandPaletteEnabled,
-  setCommandPaletteEnabled,
-  subscribeCommandPaletteEnabledChanges,
-} from '@/config/command-palette-enabled';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { importTasksFromFile } from '@/services/impl/settings-data-service';
 import {
@@ -324,99 +307,6 @@ export function AiApiKeySetting(_props: { ctx: SettingsContext }) {
           </div>
         </DialogContent>
       </Dialog>
-    </>
-  );
-}
-
-export function FeatureTogglesSetting(_props: { ctx: SettingsContext }) {
-  const toneColor = useSettingsToneColor();
-  const [open, setOpen] = useState(false);
-  const [agentPageEnabled, setAgentPageEnabledState] = useSettingValue(
-    () => getAgentPageEnabled(),
-    subscribeAgentPageEnabledChanges,
-  );
-  const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useSettingValue(
-    () => getDesktopAdaptiveEnabled(),
-    subscribeDesktopAdaptiveChanges,
-  );
-  const [commandPaletteEnabled, setCommandPaletteEnabledState] = useSettingValue(
-    () => getCommandPaletteEnabled(),
-    subscribeCommandPaletteEnabledChanges,
-  );
-  const switchToneStyle = {
-    '--switch-checked-bg': 'var(--settings-tone-color, var(--settings-tone-default))',
-    ...(buildSettingsToneStyle(toneColor) ?? {}),
-  } as CSSProperties;
-
-  return (
-    <>
-      <SettingRow
-        icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
-        label="功能开关"
-        onClick={() => setOpen(true)}
-        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-      />
-      <Drawer open={open} onOpenChange={setOpen}>
-        <DrawerContent className="dark:bg-[#1C1917]">
-          <div
-            data-testid="feature-toggles-drawer-content"
-            style={buildSettingsToneStyle(toneColor)}
-            className="px-5 pb-8 pt-2"
-          >
-            <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
-              功能开关
-            </DrawerTitle>
-            <p className="mt-1 text-center text-xs text-[#A8A29E]">启用或关闭实验性功能</p>
-            <div className="mt-4 space-y-2">
-              <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3">
-                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">桌面端适配</span>
-                <Switch
-                  data-testid="new-settings-desktop-adaptive-switch"
-                  checked={desktopAdaptiveEnabled}
-                  style={switchToneStyle}
-                  onCheckedChange={(checked) => {
-                    setDesktopAdaptiveEnabledState(checked);
-                    setDesktopAdaptiveEnabled(checked);
-                  }}
-                />
-              </div>
-              <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3">
-                <div className="flex items-center gap-2">
-                  <Waypoints className="h-[16px] w-[16px] text-[#78716C]" />
-                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">网络页面</span>
-                </div>
-                <Switch
-                  data-testid="feature-toggle-agent-page-switch"
-                  checked={agentPageEnabled}
-                  style={switchToneStyle}
-                  onCheckedChange={(checked) => {
-                    setAgentPageEnabledState(checked);
-                    setAgentPageEnabled(checked);
-                  }}
-                />
-              </div>
-              <div
-                className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3"
-                data-testid="feature-toggle-command-palette-row"
-              >
-                <div className="flex items-center gap-2">
-                  <Command className="h-[16px] w-[16px] text-[#78716C]" />
-                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">命令面板</span>
-                </div>
-                <Switch
-                  data-testid="feature-toggle-command-palette-switch"
-                  checked={commandPaletteEnabled}
-                  style={switchToneStyle}
-                  onCheckedChange={(checked) => {
-                    setCommandPaletteEnabledState(checked);
-                    setCommandPaletteEnabled(checked);
-                  }}
-                />
-              </div>
-            </div>
-          </div>
-        </DrawerContent>
-      </Drawer>
     </>
   );
 }

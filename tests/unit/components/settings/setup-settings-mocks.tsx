@@ -211,7 +211,9 @@ vi.mock('@/components/ui/dialog', () => ({
 vi.mock('@/components/ui/drawer', () => ({
   Drawer: ({ children, open }: any) => open ? <div data-testid="drawer">{children}</div> : null,
   DrawerContent: ({ children }: any) => <div>{children}</div>,
+  DrawerHeader: ({ children }: any) => <div>{children}</div>,
   DrawerTitle: ({ children }: any) => <div>{children}</div>,
+  DrawerDescription: ({ children }: any) => <div>{children}</div>,
 }));
 
 vi.mock('@/components/ui/switch', () => ({

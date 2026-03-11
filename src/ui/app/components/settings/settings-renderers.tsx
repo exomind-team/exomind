@@ -2,8 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
 import { Check, ChevronRight } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { Switch } from '@/components/ui/switch';
-import { SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
+import { Divider, SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
 import type {
   ActionSettingsItem,
   BooleanSettingsItem,
@@ -1041,14 +1042,76 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
   );
 }
 
-function GroupRenderer({ item }: { item: GroupSettingsItem }) {
+function GroupRenderer({
+  item,
+  ctx,
+}: {
+  item: GroupSettingsItem;
+  ctx: SettingsContext;
+}) {
+  const toneColor = useSettingsToneColor();
+  const [open, setOpen] = useState(false);
+
+  const overlayMode = item.groupStyle ?? 'adaptive-overlay';
+  const shouldUseDialog = overlayMode === 'adaptive-overlay' && Boolean(ctx.isLandscape);
+  const contentTestId = `${item.id}-${shouldUseDialog ? 'dialog' : 'drawer'}-content`;
+  const content = (
+    <div
+      data-testid={contentTestId}
+      style={buildSettingsToneStyle(toneColor)}
+      className="px-5 pb-8 pt-2"
+    >
+      <div className="mt-4 overflow-hidden rounded-2xl border settings-tone-border bg-white dark:border-[#FFFFFF15] dark:bg-[#1C1917]">
+        {item.children.map((childItem, index) => (
+          <div key={childItem.id}>
+            <SettingsItemRenderer item={childItem} ctx={ctx} />
+            {index < item.children.length - 1 ? <Divider toneColor={toneColor} /> : null}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
   return (
-    <SettingRow
-      testId={item.rowTestId}
-      icon={renderRowIcon(item.icon)}
-      label={item.label}
-      right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
-    />
+    <div>
+      <SettingRow
+        testId={item.rowTestId}
+        icon={renderRowIcon(item.icon)}
+        label={item.label}
+        onClick={() => setOpen(true)}
+        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+      />
+      <HelperBlock message={item.description ?? null} />
+      {shouldUseDialog ? (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent className="rounded-2xl" style={buildSettingsToneStyle(toneColor)}>
+            <DialogHeader>
+              <DialogTitle>{item.dialogTitle ?? item.label}</DialogTitle>
+              <DialogDescription className={item.dialogDescription ? undefined : 'sr-only'}>
+                {item.dialogDescription ?? `${item.label} 设置`}
+              </DialogDescription>
+            </DialogHeader>
+            {content}
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <Drawer open={open} onOpenChange={setOpen}>
+          <DrawerContent className="dark:bg-[#1C1917]">
+            <DrawerHeader className="pb-0 text-center">
+              <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                {item.dialogTitle ?? item.label}
+              </DrawerTitle>
+              {item.dialogDescription ? (
+                <DrawerDescription className="text-xs text-[#A8A29E]">
+                  {item.dialogDescription}
+                </DrawerDescription>
+              ) : null}
+            </DrawerHeader>
+            {content}
+          </DrawerContent>
+        </Drawer>
+      )}
+    </div>
   );
 }
 
@@ -1082,7 +1145,7 @@ export function SettingsItemRenderer({
     case 'action':
       return <ActionRenderer item={item} />;
     case 'group':
-      return <GroupRenderer item={item} />;
+      return <GroupRenderer item={item} ctx={ctx} />;
     case 'custom':
       return <CustomRenderer item={item} ctx={ctx} />;
     default:
