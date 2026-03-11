@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type RefObject } from 'react';
 import { listen } from '@tauri-apps/api/event';
 import { AlertCircle, Check, LoaderCircle, Mic } from 'lucide-react';
 import {
@@ -29,6 +29,7 @@ interface OverlayData {
   state: OverlayState;
   duration: number;
   text: string;
+  audioLevel?: number;
   hintText?: string;
   isLivePreview?: boolean;
   providerLabel?: string;
@@ -74,6 +75,14 @@ export function VoiceOverlayPage() {
 
   const overlayPrimaryAlpha = Math.max(0.28, Math.min(0.92, overlayOpacity / 100));
   const overlaySecondaryAlpha = Math.max(0.16, overlayPrimaryAlpha - 0.18);
+  const overlayAudioLevel = data.state === 'recording'
+    ? Math.max(0, Math.min(1, data.audioLevel ?? 0))
+    : 0;
+  const overlayCardStyle = {
+    '--overlay-edge-alpha': (0.14 + overlayAudioLevel * 0.22).toFixed(2),
+    '--overlay-halo-alpha': (0.05 + overlayAudioLevel * 0.17).toFixed(2),
+    '--overlay-shadow-alpha': (0.14 + overlayAudioLevel * 0.12).toFixed(2),
+  } as CSSProperties;
 
   useEffect(() => {
     const syncSystemTheme = (preference: ThemePreference): (() => void) => {
@@ -235,7 +244,7 @@ export function VoiceOverlayPage() {
 
   return (
     <div className="voice-overlay-root">
-      <div className={`voice-overlay voice-overlay--${data.state}`}>
+      <div className={`voice-overlay voice-overlay--${data.state}`} style={overlayCardStyle}>
         <StatusIndicator state={data.state} />
         <div className="overlay-content">
           <StatusText
@@ -568,12 +577,42 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptL
       hsl(var(--bg-card) / ${primaryAlpha.toFixed(2)}),
       hsl(var(--bg-surface) / ${secondaryAlpha.toFixed(2)})
     );
-    border: none;
-    box-shadow: 0 18px 48px -28px rgba(15, 23, 42, 0.42);
+    border: 1.5px solid hsl(var(--brand-accent) / var(--overlay-edge-alpha));
+    box-shadow:
+      0 26px 64px -30px rgba(15, 23, 42, calc(0.52 + var(--overlay-shadow-alpha))),
+      0 10px 24px -18px rgba(15, 23, 42, calc(0.24 + var(--overlay-shadow-alpha) * 0.6)),
+      0 0 0 1px hsl(var(--brand-accent) / calc(var(--overlay-edge-alpha) * 0.24));
     animation: overlay-fade-in 0.15s ease-out;
     font-size: 13px;
     line-height: 1.3;
     color: hsl(var(--text-primary));
+    isolation: isolate;
+    transition: border-color 90ms linear, box-shadow 110ms linear;
+  }
+
+  .voice-overlay::before,
+  .voice-overlay::after {
+    content: "";
+    position: absolute;
+    pointer-events: none;
+    border-radius: inherit;
+  }
+
+  .voice-overlay::before {
+    inset: 1px;
+    border: 1px solid hsl(var(--text-primary) / 0.06);
+  }
+
+  .voice-overlay::after {
+    inset: -6px;
+    z-index: -1;
+    background: radial-gradient(
+      circle at center,
+      hsl(var(--brand-accent) / var(--overlay-halo-alpha)) 0%,
+      transparent 72%
+    );
+    filter: blur(16px);
+    transition: background 90ms linear;
   }
 
   .overlay-icon {
@@ -712,6 +751,14 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptL
   .voice-overlay--recording .overlay-transcript .overlay-text,
   .voice-overlay--recognizing .overlay-transcript .overlay-text {
     color: hsl(var(--brand-accent));
+    font-size: 15px;
+    font-weight: 600;
+    line-height: 1.6;
+    letter-spacing: 0.01em;
+  }
+
+  .voice-overlay--done .overlay-transcript .overlay-text {
+    color: hsl(var(--success));
   }
 
   @keyframes overlay-fade-in {

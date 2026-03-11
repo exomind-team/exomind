@@ -83,12 +83,15 @@ describe('VoiceOverlayPage', () => {
     expect(styleTag?.textContent).toContain('text-align: left;');
     expect(styleTag?.textContent).toContain('align-items: flex-end;');
     expect(styleTag?.textContent).toContain('overflow-y: auto;');
-    expect(styleTag?.textContent).toContain('border: none;');
+    expect(styleTag?.textContent).toContain('border: 1.5px solid');
+    expect(styleTag?.textContent).toContain('.voice-overlay::before');
     expect(styleTag?.textContent).toContain('width: min(560px, calc(100vw - 16px));');
     expect(styleTag?.textContent).toContain('height: auto;');
     expect(styleTag?.textContent).toContain('min-height: 112px;');
     expect(styleTag?.textContent).toContain('hsl(var(--bg-card) / 0.74)');
     expect(styleTag?.textContent).toContain('height: calc(1.5em * 3);');
+    expect(styleTag?.textContent).toContain('.voice-overlay::after');
+    expect(styleTag?.textContent).toContain('font-size: 15px;');
   });
 
   it('hides diagnostic details by default（默认隐藏诊断信息）', async () => {
@@ -112,7 +115,7 @@ describe('VoiceOverlayPage', () => {
   });
 
   it('shows recognition elapsed time on done state', async () => {
-    render(<VoiceOverlayPage />);
+    const { container } = render(<VoiceOverlayPage />);
 
     await act(async () => {
       overlayListener?.({
@@ -127,11 +130,14 @@ describe('VoiceOverlayPage', () => {
 
     expect(screen.getByText('你好世界')).toBeInTheDocument();
     expect(screen.getByText('火山 · 识别 1.23s')).toBeInTheDocument();
+    const styleTag = container.querySelector('style');
+    expect(styleTag?.textContent).toContain('.voice-overlay--done .overlay-transcript .overlay-text');
+    expect(styleTag?.textContent).toContain('color: hsl(var(--success));');
   });
 
   it('shows live preview with fixed-width duration and provider meta（录音中显示实时预览、固定宽度时间与模型信息）', async () => {
     overlayPreferenceState.showDiagnostics = true;
-    render(<VoiceOverlayPage />);
+    const { container } = render(<VoiceOverlayPage />);
     const longText = Array.from({ length: 160 }, (_, index) => String(index % 10)).join('');
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
 
@@ -151,6 +157,7 @@ describe('VoiceOverlayPage', () => {
           sessionWarmReason: 'stale',
           firstTextMs: 830,
           isLivePreview: true,
+          audioLevel: 0.72,
           providerLabel: '火山 2.0 小时版 · 双向流式优化版（推荐）',
         },
       });
@@ -174,6 +181,9 @@ describe('VoiceOverlayPage', () => {
     const styleTag = document.querySelector('style');
     expect(styleTag?.textContent).toContain('.voice-overlay--recording .overlay-transcript .overlay-text');
     expect(styleTag?.textContent).toContain('color: hsl(var(--brand-accent));');
+    const overlayCard = container.querySelector('.voice-overlay') as HTMLDivElement | null;
+    expect(overlayCard?.style.getPropertyValue('--overlay-edge-alpha')).toBe('0.30');
+    expect(overlayCard?.style.getPropertyValue('--overlay-halo-alpha')).toBe('0.17');
     nowSpy.mockRestore();
   });
 

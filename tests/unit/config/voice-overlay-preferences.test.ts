@@ -1,6 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   DEFAULT_VOICE_OVERLAY_OPACITY,
+  MAX_VOICE_OVERLAY_OPACITY,
+  MIN_VOICE_OVERLAY_OPACITY,
   getVoiceOverlayOpacity,
   setVoiceOverlayOpacity,
   subscribeVoiceOverlayOpacityChanges,
@@ -35,6 +37,11 @@ describe('voice overlay preferences（语音悬浮窗偏好）', () => {
     expect(listener).toHaveBeenCalledWith(74);
 
     unsubscribe();
+  });
+
+  it('clamps opacity into the expanded range（透明度会落在扩展后的范围内）', () => {
+    expect(setVoiceOverlayOpacity(999)).toBe(MAX_VOICE_OVERLAY_OPACITY);
+    expect(setVoiceOverlayOpacity(-1)).toBe(MIN_VOICE_OVERLAY_OPACITY);
   });
 
   it('handles storage event updates（支持跨窗口 storage 事件同步）', () => {

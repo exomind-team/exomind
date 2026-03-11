@@ -86,6 +86,8 @@ import {
   getVoiceOverlayShowDiagnostics,
   getVoiceOverlayTranscriptLines,
   getVoiceOverlayBottomOffset,
+  MAX_VOICE_OVERLAY_OPACITY,
+  MIN_VOICE_OVERLAY_OPACITY,
   MAX_VOICE_OVERLAY_BOTTOM_OFFSET,
   subscribeVoiceOverlayBottomOffsetChanges,
   subscribeVoiceOverlayShowDiagnosticsChanges,
@@ -839,8 +841,8 @@ export function SettingsPage() {
     <div className="flex min-w-[186px] items-center gap-3">
       <input
         type="range"
-        min={32}
-        max={92}
+        min={MIN_VOICE_OVERLAY_OPACITY}
+        max={MAX_VOICE_OVERLAY_OPACITY}
         step={1}
         value={voiceOverlayOpacity}
         data-testid="new-settings-voice-overlay-opacity-slider"

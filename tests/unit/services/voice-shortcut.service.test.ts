@@ -6,6 +6,7 @@ import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
 const tauriEventListeners = new Map<string, (event: { payload: any }) => void | Promise<void>>();
 let livePreviewOnUpdate: ((payload: { text: string; isFinal: boolean }) => void) | null = null;
 let streamingOnChunk: ((chunk: Uint8Array) => Promise<void>) | null = null;
+let streamingOnLevel: ((level: number) => void) | null = null;
 
 const emitMock = vi.fn();
 const invokeMock = vi.fn();
@@ -139,8 +140,10 @@ vi.mock('@/lib/asr/volcano-streaming-capture', () => ({
   createVolcanoStreamingCapture: (...args: unknown[]) => {
     const [options] = args as [{
       onChunk: (chunk: Uint8Array) => Promise<void>;
+      onLevel?: (level: number) => void;
     }];
     streamingOnChunk = options.onChunk;
+    streamingOnLevel = options.onLevel ?? null;
     streamingCaptureCreateMock(...args);
     return {
       start: () => streamingCaptureStartMock(),
@@ -176,6 +179,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     tauriEventListeners.clear();
     livePreviewOnUpdate = null;
     streamingOnChunk = null;
+    streamingOnLevel = null;
 
     emitMock.mockReset();
     invokeMock.mockReset();
@@ -1051,6 +1055,45 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     );
     expect(writeClipboardMock).toHaveBeenCalledWith('火山流式最终文本');
     expect(addEventMock).toHaveBeenCalledWith('火山流式最终文本', new Set(['voice']));
+
+    service.destroy();
+  });
+
+  it('emits overlay audio level from volcano capture（火山采集会把音量传给悬浮窗）', async () => {
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return 'stream-session-level';
+      }
+      if (command === 'volcano_asr_stream_push' || command === 'voice_recording_set_active') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    emitMock.mockClear();
+    streamingOnLevel?.(0.72);
+    await flushAsync();
+
+    expect(emitMock).toHaveBeenCalledWith(
+      'voice-overlay-state',
+      expect.objectContaining({
+        state: 'recording',
+        audioLevel: 0.72,
+      }),
+    );
 
     service.destroy();
   });

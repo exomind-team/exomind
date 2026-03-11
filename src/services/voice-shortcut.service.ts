@@ -78,6 +78,7 @@ type OverlayEventPayload = {
   state: VoiceShortcutState;
   duration?: number;
   text: string;
+  audioLevel?: number;
   hintText?: string;
   isLivePreview: boolean;
   providerLabel: string;
@@ -133,6 +134,7 @@ export class VoiceShortcutService {
   private latestSessionWarmHit: boolean | null = null;
   private latestSessionWarmReason: VolcanoSessionWarmReason | null = null;
   private latestFirstTextMs: number | null = null;
+  private latestAudioLevel = 0;
   private developerModeEnabled = getDeveloperModeEnabled();
   private asrProvider: VoiceShortcutAsrProvider = getVoiceShortcutAsrProvider();
   private micPrewarmEnabled = getVoiceShortcutMicPrewarmEnabled();
@@ -880,6 +882,7 @@ export class VoiceShortcutService {
   }
 
   private async handleResult(result: ASRResult, recognitionMs: number, providerLabel: string): Promise<void> {
+    this.latestAudioLevel = 0;
     const [clipboardResult, eventLogResult] = await Promise.allSettled([
       (async () => {
         const writeResult = await getClipboardService().writeText(result.text);
@@ -914,6 +917,7 @@ export class VoiceShortcutService {
   }
 
   private handleError(message: string): void {
+    this.latestAudioLevel = 0;
     this.debugError(LOG_TAG, message);
     this.stopLivePreview('abort');
     this.livePreviewText = '';
@@ -929,6 +933,9 @@ export class VoiceShortcutService {
 
   private setState(newState: VoiceShortcutState, extra: Partial<OverlayEventPayload> = {}): void {
     this.state = newState;
+    if (newState !== 'recording') {
+      this.latestAudioLevel = 0;
+    }
     if (newState === 'recording') {
       this.emitOverlayState(newState, { duration: 0, ...extra });
       return;
@@ -1020,6 +1027,7 @@ export class VoiceShortcutService {
       state,
       ...(typeof extra.duration === 'number' ? { duration: extra.duration } : {}),
       text: extra.text ?? fallbackText,
+      audioLevel: extra.audioLevel ?? (state === 'recording' ? this.latestAudioLevel : 0),
       hintText: extra.hintText,
       isLivePreview: extra.isLivePreview ?? Boolean(fallbackText && state !== 'done'),
       providerLabel: extra.providerLabel ?? this.getActiveProviderLabel(),
@@ -1085,6 +1093,18 @@ export class VoiceShortcutService {
     });
   }
 
+  private updateAudioLevel(level: number): void {
+    const normalizedLevel = Math.max(0, Math.min(1, Number.isFinite(level) ? level : 0));
+    if (Math.abs(normalizedLevel - this.latestAudioLevel) < 0.03) {
+      return;
+    }
+    this.latestAudioLevel = normalizedLevel;
+    if (this.state !== 'recording') {
+      return;
+    }
+    this.emitOverlayState('recording', { audioLevel: normalizedLevel });
+  }
+
   private async startVolcanoStreaming(): Promise<void> {
     const config = this.getVolcanoRuntimeConfigOrThrow();
     const streamPromise = this.acquireInputStream().then((result) => ({
@@ -1124,6 +1144,7 @@ export class VoiceShortcutService {
       this.volcanoStreamingCapture = createVolcanoStreamingCapture({
         stream: this.stream,
         onChunk: async (chunk) => this.enqueueVolcanoStreamingChunk(chunk),
+        onLevel: (level) => this.updateAudioLevel(level),
       });
       await this.volcanoStreamingCapture.start();
       this.setState('recording', {
@@ -1147,6 +1168,7 @@ export class VoiceShortcutService {
 
   private async handleVolcanoStreamingStop(): Promise<void> {
     this.setState('recognizing');
+    this.latestAudioLevel = 0;
     await this.syncRecordingActive(false);
 
     const sessionId = this.volcanoStreamSessionId;
@@ -1186,6 +1208,7 @@ export class VoiceShortcutService {
     const sessionId = this.volcanoStreamSessionId;
     try {
       this.volcanoAcceptingChunks = false;
+      this.latestAudioLevel = 0;
       await this.volcanoStreamingCapture?.cancel();
       await this.volcanoPushQueue;
       if (sessionId) {

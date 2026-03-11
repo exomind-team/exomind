@@ -38,6 +38,7 @@ export interface VolcanoStreamingCapture {
 export function createVolcanoStreamingCapture(options: {
   stream: MediaStream;
   onChunk: (chunk: Uint8Array) => Promise<void>;
+  onLevel?: (level: number) => void;
   audioContextFactory?: (options: AudioContextOptions) => AudioContext;
   samplesPerChunk?: number;
 }): VolcanoStreamingCapture {
@@ -79,7 +80,9 @@ export function createVolcanoStreamingCapture(options: {
       silentGain.connect(audioContext.destination);
 
       scriptProcessor.onaudioprocess = (event) => {
-        const chunks = accumulator.append(event.inputBuffer.getChannelData(0));
+        const channelData = event.inputBuffer.getChannelData(0);
+        options.onLevel?.(measureAudioLevel(channelData));
+        const chunks = accumulator.append(channelData);
         for (const chunk of chunks) {
           void options.onChunk(chunk);
         }
@@ -107,6 +110,20 @@ export function createVolcanoStreamingCapture(options: {
       await release();
     },
   };
+}
+
+function measureAudioLevel(samples: Float32Array): number {
+  if (samples.length === 0) {
+    return 0;
+  }
+
+  let sumSquares = 0;
+  for (const sample of samples) {
+    sumSquares += sample * sample;
+  }
+
+  const rms = Math.sqrt(sumSquares / samples.length);
+  return Math.max(0, Math.min(1, rms * 4));
 }
 
 function encodeSamplesToPcm(samples: number[]): Uint8Array {

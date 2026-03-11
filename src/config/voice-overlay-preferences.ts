@@ -7,9 +7,9 @@ export const VOICE_OVERLAY_TRANSCRIPT_LINES_CHANGED_EVENT = 'exomind:voice-overl
 export const VOICE_OVERLAY_BOTTOM_OFFSET_STORAGE_KEY = 'exomind:voiceOverlayBottomOffset';
 export const VOICE_OVERLAY_BOTTOM_OFFSET_CHANGED_EVENT = 'exomind:voice-overlay-bottom-offset-changed';
 
-export const DEFAULT_VOICE_OVERLAY_OPACITY = 62;
-export const MIN_VOICE_OVERLAY_OPACITY = 32;
-export const MAX_VOICE_OVERLAY_OPACITY = 92;
+export const DEFAULT_VOICE_OVERLAY_OPACITY = 70;
+export const MIN_VOICE_OVERLAY_OPACITY = 20;
+export const MAX_VOICE_OVERLAY_OPACITY = 98;
 export const DEFAULT_VOICE_OVERLAY_SHOW_DIAGNOSTICS = false;
 export const DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES = 3;
 export const MIN_VOICE_OVERLAY_TRANSCRIPT_LINES = 1;
