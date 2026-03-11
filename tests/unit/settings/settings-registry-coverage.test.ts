@@ -1,0 +1,284 @@
+import { describe, expect, it, vi } from 'vitest';
+
+vi.mock('@tauri-apps/api/core', () => ({
+  invoke: vi.fn(),
+  isTauri: vi.fn(async () => false),
+}));
+
+import '../components/settings/setup-settings-mocks.tsx';
+import {
+  FEATURE_TOGGLE_SETTING_IDS,
+  FEATURE_TOGGLE_SETTINGS,
+  getVisibleSettings,
+  SETTINGS_REGISTRY,
+} from '@/ui/app/config/settings/settings-registry';
+import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
+
+const AUDITED_SETTINGS_IDS = [
+  'theme',
+  'countdown-end-mode',
+  'sound-preset',
+  'feedback-content',
+  'voice-transcript-send-mode',
+  'voice-shortcut-send-mode',
+  'voice-shortcut-hotkey',
+  'voice-shortcut-asr-provider',
+  'voice-shortcut-mic-prewarm',
+  'voice-overlay-opacity',
+  'voice-overlay-show-diagnostics',
+  'voice-overlay-transcript-lines',
+  'voice-overlay-bottom-offset',
+  'volcano-resource-model',
+  'moss-api-token',
+  'moss-voice-test',
+  'volcano-asr-test',
+  'ai-api-key',
+  'sync-server-url',
+  'export-backup',
+  'import-backup',
+  'export-tasks-json',
+  'export-tasks-sqlite',
+  'import-tasks',
+  'developer-mode',
+  'use-mock-data',
+  'devtools',
+  'feature-toggles',
+  'device-pairing',
+  'task-backend-status',
+  'clear-local-cache',
+  'reset-all-settings',
+] as const;
+
+const INLINE_SINGLE_ENUM_IDS = [
+  'theme',
+  'voice-transcript-send-mode',
+  'voice-shortcut-send-mode',
+  'voice-shortcut-hotkey',
+  'voice-shortcut-asr-provider',
+] as const;
+
+const DIALOG_ENUM_IDS = [
+  'countdown-end-mode',
+  'sound-preset',
+] as const;
+
+const SELECT_ENUM_IDS = [
+  'volcano-resource-model',
+] as const;
+
+const MULTI_ENUM_IDS = [
+  'feedback-content',
+] as const;
+
+const BOOLEAN_IDS = [
+  'voice-shortcut-mic-prewarm',
+  'voice-overlay-show-diagnostics',
+  'developer-mode',
+  'use-mock-data',
+  'devtools',
+] as const;
+
+const NUMBER_IDS = [
+  'voice-overlay-opacity',
+  'voice-overlay-transcript-lines',
+  'voice-overlay-bottom-offset',
+] as const;
+
+const ROW_ACTION_IDS = [
+  'export-backup',
+  'import-backup',
+  'export-tasks-json',
+  'export-tasks-sqlite',
+] as const;
+
+const BUTTON_ACTION_IDS = [
+  'clear-local-cache',
+  'reset-all-settings',
+] as const;
+
+const CUSTOM_ITEM_IDS = [
+  'moss-voice-test',
+  'volcano-asr-test',
+  'ai-api-key',
+  'import-tasks',
+  'feature-toggles',
+  'device-pairing',
+  'task-backend-status',
+] as const;
+
+const DEV_ONLY_IDS = [
+  'moss-voice-test',
+  'volcano-asr-test',
+  'export-tasks-json',
+  'export-tasks-sqlite',
+  'import-tasks',
+  'use-mock-data',
+  'devtools',
+  'feature-toggles',
+  'device-pairing',
+  'task-backend-status',
+] as const;
+
+function getItem<T extends typeof SETTINGS_REGISTRY[number]['type']>(
+  id: string,
+  type: T,
+): Extract<(typeof SETTINGS_REGISTRY)[number], { type: T }> {
+  const item = SETTINGS_REGISTRY.find((entry) => entry.id === id);
+  expect(item, `missing settings item: ${id}`).toBeDefined();
+  expect(item?.type).toBe(type);
+  return item as Extract<(typeof SETTINGS_REGISTRY)[number], { type: T }>;
+}
+
+function getBaseCtx(): SettingsContext {
+  return {
+    isDesktop: false,
+    developerMode: false,
+    desktopAdaptiveEnabled: false,
+    voiceShortcutAsrProvider: 'moss',
+  };
+}
+
+describe('settings registry coverage audit', () => {
+  it('keeps the audited registry checklist in sync with all current settings items', () => {
+    expect(SETTINGS_REGISTRY.map((item) => item.id)).toEqual(AUDITED_SETTINGS_IDS);
+  });
+
+  it('maps every standard registry item to an audited shared renderer family', () => {
+    INLINE_SINGLE_ENUM_IDS.forEach((id) => {
+      const item = getItem(id, 'enum');
+      expect(item.multiSelect).not.toBe(true);
+      expect(item.enumStyle).toBeUndefined();
+    });
+
+    DIALOG_ENUM_IDS.forEach((id) => {
+      const item = getItem(id, 'enum');
+      expect(item.multiSelect).not.toBe(true);
+      expect(item.enumStyle).toBe('dialog');
+    });
+
+    SELECT_ENUM_IDS.forEach((id) => {
+      const item = getItem(id, 'enum');
+      expect(item.multiSelect).not.toBe(true);
+      expect(item.enumStyle).toBe('select');
+    });
+
+    MULTI_ENUM_IDS.forEach((id) => {
+      const item = getItem(id, 'enum');
+      expect(item.multiSelect).toBe(true);
+      expect(item.enumStyle).toBeUndefined();
+    });
+
+    BOOLEAN_IDS.forEach((id) => {
+      const item = getItem(id, 'boolean');
+      expect(typeof item.get).toBe('function');
+      expect(typeof item.set).toBe('function');
+    });
+
+    NUMBER_IDS.forEach((id) => {
+      const item = getItem(id, 'number');
+      expect(typeof item.min).toBe('number');
+      expect(typeof item.max).toBe('number');
+      expect(typeof item.step).toBe('number');
+    });
+
+    ROW_ACTION_IDS.forEach((id) => {
+      const item = getItem(id, 'action');
+      expect(item.actionMode ?? 'row').toBe('row');
+    });
+
+    BUTTON_ACTION_IDS.forEach((id) => {
+      const item = getItem(id, 'action');
+      expect(item.actionMode).toBe('button');
+      expect(item.buttonLabel).toBeTruthy();
+    });
+
+    const theme = getItem('theme', 'enum');
+    expect(theme.options.map((option) => option.value)).toEqual(['light', 'system', 'dark']);
+    expect(theme.options.every((option) => Boolean(option.icon))).toBe(true);
+
+    const countdownEndMode = getItem('countdown-end-mode', 'enum');
+    expect(countdownEndMode.options.every((option) => Boolean(option.description))).toBe(true);
+
+    const soundPreset = getItem('sound-preset', 'enum');
+    expect(soundPreset.dialogTitle).toBe('选择提示音');
+
+    const mossApiToken = getItem('moss-api-token', 'string');
+    expect(mossApiToken.stringStyle).toBe('dialog');
+    expect(mossApiToken.dialogFieldKind).toBe('secret');
+    expect(mossApiToken.allowClear).toBe(true);
+    expect(mossApiToken.dialogFooterStart?.type).toBe('secret-toggle');
+
+    const syncServerUrl = getItem('sync-server-url', 'string');
+    expect(syncServerUrl.stringStyle).toBe('dialog');
+    expect(syncServerUrl.dialogFieldKind).toBe('plain');
+    expect(syncServerUrl.dialogInputType).toBe('url');
+
+    const resetAllSettings = getItem('reset-all-settings', 'action');
+    expect(resetAllSettings.confirmMessage).toBe('确认恢复所有默认设置？');
+  });
+
+  it('limits custom escape hatches to the explicitly audited special entries', () => {
+    const customIds = SETTINGS_REGISTRY
+      .filter((item): item is Extract<typeof SETTINGS_REGISTRY[number], { type: 'custom' }> => item.type === 'custom')
+      .map((item) => item.id);
+
+    expect(customIds).toEqual(CUSTOM_ITEM_IDS);
+  });
+
+  it('keeps developer-only and provider-only entries behind their intended gates', () => {
+    const baseIds = getVisibleSettings(getBaseCtx()).map((item) => item.id);
+    const developerIds = getVisibleSettings({
+      ...getBaseCtx(),
+      developerMode: true,
+    }).map((item) => item.id);
+    const volcanoIds = getVisibleSettings({
+      ...getBaseCtx(),
+      developerMode: true,
+      voiceShortcutAsrProvider: 'volcano',
+    }).map((item) => item.id);
+
+    DEV_ONLY_IDS.forEach((id) => {
+      expect(baseIds).not.toContain(id);
+      expect(developerIds).toContain(id);
+    });
+
+    expect(baseIds).not.toContain('volcano-resource-model');
+    expect(developerIds).not.toContain('volcano-resource-model');
+    expect(volcanoIds).toContain('volcano-resource-model');
+  });
+
+  it('keeps every registry item reachable across supported settings contexts', () => {
+    const contexts: SettingsContext[] = [
+      getBaseCtx(),
+      {
+        ...getBaseCtx(),
+        developerMode: true,
+      },
+      {
+        ...getBaseCtx(),
+        developerMode: true,
+        voiceShortcutAsrProvider: 'volcano',
+      },
+    ];
+
+    const visibleIds = new Set(
+      contexts.flatMap((ctx) => getVisibleSettings(ctx).map((item) => item.id)),
+    );
+
+    expect(Array.from(visibleIds).sort()).toEqual([...AUDITED_SETTINGS_IDS].sort());
+  });
+
+  it('keeps the feature toggles drawer checklist in sync with its audited child settings', () => {
+    expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
+      'agent-page-enabled',
+      'desktop-adaptive',
+      'command-palette-enabled',
+    ]);
+    expect(FEATURE_TOGGLE_SETTINGS.map((item) => item.id)).toEqual(FEATURE_TOGGLE_SETTING_IDS);
+    FEATURE_TOGGLE_SETTINGS.forEach((item) => {
+      expect(typeof item.get).toBe('function');
+      expect(typeof item.set).toBe('function');
+      expect(typeof item.subscribe).toBe('function');
+    });
+  });
+});

@@ -635,6 +635,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: Download,
     category: 'data',
     type: 'action',
+    visible: devOnly,
     onAction: () => exportTasksJson(),
     errorMessagePrefix: '任务导出失败',
   },
@@ -644,6 +645,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: Download,
     category: 'data',
     type: 'action',
+    visible: devOnly,
     onAction: () => exportTasksSqlite(),
     errorMessagePrefix: '任务导出失败',
   },
@@ -652,6 +654,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: '导入任务数据',
     category: 'data',
     type: 'custom',
+    visible: devOnly,
     component: TaskImportActionSetting,
   },
   {

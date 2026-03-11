@@ -13,6 +13,10 @@ const mocks = vi.hoisted(() => ({
   invoke: vi.fn(),
 }));
 
+const developerModeState = vi.hoisted(() => ({
+  enabled: true,
+}));
+
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: mocks.isTauri,
   invoke: mocks.invoke,
@@ -49,7 +53,7 @@ vi.mock('@/config/theme', () => ({
 }));
 
 vi.mock('@/config/developer-mode', () => ({
-  getDeveloperModeEnabled: () => false,
+  getDeveloperModeEnabled: () => developerModeState.enabled,
   setDeveloperModeEnabled: vi.fn(),
   subscribeDeveloperModeChanges: () => () => {},
 }));
@@ -222,6 +226,7 @@ describe('SettingsPage task import/export (issue-481)', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    developerModeState.enabled = true;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -246,7 +251,7 @@ describe('SettingsPage task import/export (issue-481)', () => {
     });
     mocks.importTasksFromJson.mockResolvedValue({ imported: 1, skipped: 0, total: 1 });
     mocks.importTasksFromSqliteSnapshot.mockResolvedValue({ imported: 2, skipped: 0, total: 2 });
-    mocks.getTaskBackendStatus.mockResolvedValue({
+    mocks.getTaskBackendStatus.mockReturnValue({
       backend: 'rt-sqlite',
       supportsJsonBackup: true,
       supportsSqliteSnapshot: true,
@@ -359,5 +364,15 @@ describe('SettingsPage task import/export (issue-481)', () => {
       expect(mocks.importTasksFromSqliteSnapshot).toHaveBeenCalledWith(expect.any(Uint8Array), 'merge');
     });
     expect(screen.getByText(/任务导入成功：新增 2 条，跳过 0 条，当前共 2 条。来源：tasks\.sqlite/)).toBeInTheDocument();
+  });
+
+  it('hides task-only import/export entries when developer mode is disabled', () => {
+    developerModeState.enabled = false;
+
+    render(<SettingsPage />);
+
+    expect(screen.queryByText('导出任务 JSON')).not.toBeInTheDocument();
+    expect(screen.queryByText('导出任务 SQLite')).not.toBeInTheDocument();
+    expect(screen.queryByText('导入任务数据')).not.toBeInTheDocument();
   });
 });

@@ -189,6 +189,9 @@ describe('SettingsPage timer card（新设置页计时器卡片）', () => {
     expect(screen.getByText('数据')).toBeInTheDocument();
     expect(screen.getByText('导出备份')).toBeInTheDocument();
     expect(screen.getByText('导入数据')).toBeInTheDocument();
+    expect(screen.queryByText('导出任务 JSON')).not.toBeInTheDocument();
+    expect(screen.queryByText('导出任务 SQLite')).not.toBeInTheDocument();
+    expect(screen.queryByText('导入任务数据')).not.toBeInTheDocument();
   });
 
   it('removes legacy import strategy segmented controls（移除旧导入策略分段按钮）', () => {
