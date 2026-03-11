@@ -126,7 +126,7 @@ import {
   formatRuntimeEventPayload,
   getConversationMessageTestId,
 } from './agents/conversation-runtime';
-import { EnergyBar } from './agents/AgentDetailPage';
+import { EnergyBar, PHASE_LABELS } from './agents/AgentDetailPage';
 import { WorkspaceTabs } from './agents/WorkspaceTabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -489,10 +489,37 @@ function formatSignalTime(timestampMs: number): string {
   });
 }
 
+function formatRelativeSignalTime(timestampMs: number): string {
+  if (!Number.isFinite(timestampMs) || timestampMs <= 0) {
+    return '--';
+  }
+  const diffMs = Date.now() - timestampMs;
+  if (diffMs < 60_000) {
+    return `${Math.max(1, Math.floor(diffMs / 1000))} 秒前`;
+  }
+  if (diffMs < 3_600_000) {
+    return `${Math.floor(diffMs / 60_000)} 分钟前`;
+  }
+  if (diffMs < 86_400_000) {
+    return `${Math.floor(diffMs / 3_600_000)} 小时前`;
+  }
+  return `${Math.floor(diffMs / 86_400_000)} 天前`;
+}
+
+function signalTopicTint(topic: string): string {
+  if (topic.startsWith('agent.')) return '#0D9488';
+  if (topic.startsWith('task.')) return '#F59E0B';
+  if (topic.startsWith('eventlog.')) return '#1D4ED8';
+  if (topic.startsWith('voice.')) return '#7C3AED';
+  return '#C75B3A';
+}
+
 type SignalFlowNodeData = {
   label: string;
   subtitle: string;
   nodeType: SignalGraphNodeType;
+  energyPhase?: string;
+  isDormant?: boolean;
 };
 
 type SignalFlowNodeType = FlowNode<SignalFlowNodeData, SignalGraphNodeType>;
@@ -513,6 +540,7 @@ function signalNodeTypeBadgeLabel(nodeType: SignalGraphNodeType): string {
 
 function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
   const tint = nodeTypeTint(data.nodeType);
+  const lifecycleTint = data.energyPhase ? (ENERGY_PHASE_COLORS[data.energyPhase] ?? tint) : tint;
   const handleBaseStyle = {
     width: 8,
     height: 8,
@@ -526,9 +554,9 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
       <div className="relative h-[70px] w-[130px]">
         <Handle type="target" position={Position.Left} style={handleBaseStyle} />
         <Handle type="source" position={Position.Right} style={handleBaseStyle} />
-        <div
-          className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-card"
-          style={{ borderColor: `${tint}80` }}
+      <div
+        className="absolute left-1/2 top-1/2 h-[64px] w-[64px] -translate-x-1/2 -translate-y-1/2 rotate-45 rounded-md border bg-card"
+          style={{ borderColor: `${lifecycleTint}80` }}
         />
         <div className="absolute inset-0 flex flex-col items-center justify-center">
           <p className="max-w-[120px] truncate text-xs font-semibold text-foreground">{data.label}</p>
@@ -549,11 +577,16 @@ function SignalFlowNode({ data }: FlowNodeProps<SignalFlowNodeType>) {
 
   return (
     <div
-      className={`min-w-[120px] border bg-card text-center shadow-sm ${shapeClass}`}
-      style={{ borderColor: `${tint}80` }}
+      className={`relative min-w-[120px] border bg-card text-center shadow-sm ${shapeClass}`}
+      style={{ borderColor: `${lifecycleTint}80`, boxShadow: data.nodeType === 'agent' ? `0 0 0 1px ${lifecycleTint}20` : undefined }}
     >
       <Handle type="target" position={Position.Left} style={handleBaseStyle} />
       <Handle type="source" position={Position.Right} style={handleBaseStyle} />
+      {data.isDormant && (
+        <span className="absolute right-2 top-2 rounded-full bg-[#6B7280]/15 px-1.5 py-0.5 text-[9px] font-semibold text-[#6B7280]">
+          dormant
+        </span>
+      )}
       <p className="truncate text-xs font-semibold text-foreground">{data.label}</p>
       <p className="mt-1 truncate text-[10px] text-muted-foreground">{data.subtitle}</p>
     </div>
@@ -650,8 +683,15 @@ function TopologyView({
       draggable: layoutMode === 'manual',
       data: {
         label: node.label,
-        subtitle: node.status,
+        subtitle: node.type === 'agent'
+          ? [
+              node.status,
+              node.energyPhase ? (PHASE_LABELS[node.energyPhase] ?? node.energyPhase) : null,
+            ].filter(Boolean).join(' · ')
+          : node.status,
         nodeType: node.type,
+        energyPhase: node.energyPhase,
+        isDormant: node.isDormant,
       },
     }));
   }, [graph.nodes, layoutMode]);
@@ -2104,6 +2144,16 @@ function SignalHistoryTabView({
   hostLabel?: string;
   onSelectSignal: (signalId: string) => void;
 }) {
+  const [topicFilter, setTopicFilter] = useState<string>('all');
+  const topicOptions = useMemo(
+    () => ['all', ...Array.from(new Set(events.map((eventItem) => eventItem.topic))).slice(0, 8)],
+    [events],
+  );
+  const filteredEvents = useMemo(
+    () => (topicFilter === 'all' ? events : events.filter((eventItem) => eventItem.topic === topicFilter)),
+    [events, topicFilter],
+  );
+
   return (
     <section data-testid="agent-signal-history-view" className="space-y-3">
       <div className="flex items-center justify-between">
@@ -2115,37 +2165,74 @@ function SignalHistoryTabView({
             </span>
           )}
         </div>
-        <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">{events.length} 条</span>
+        <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">{filteredEvents.length} 条</span>
       </div>
 
-      {events.length === 0 ? (
+      <div className="flex flex-wrap gap-2">
+        {topicOptions.map((topic) => {
+          const active = topicFilter === topic;
+          return (
+            <button
+              key={topic}
+              type="button"
+              onClick={() => setTopicFilter(topic)}
+              className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${
+                active
+                  ? 'bg-[#C75B3A] text-white'
+                  : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'
+              }`}
+            >
+              {topic === 'all' ? '全部主题' : `主题 ${topic}`}
+            </button>
+          );
+        })}
+      </div>
+
+      {filteredEvents.length === 0 ? (
         <div className="rounded-[10px] border border-[#E7E3E0] bg-white px-4 py-8 text-center text-xs text-[#78716C] dark:border-[#292524] dark:bg-[#0C0A09] dark:text-[#A8A29E]">
           暂无信号历史
         </div>
       ) : (
         <div className="divide-y divide-[#E7E3E0] overflow-hidden rounded-[10px] border border-[#E7E3E0] bg-white dark:divide-[#292524] dark:border-[#292524] dark:bg-[#0C0A09]">
-          {events.map((eventItem) => (
-            <button
+          {filteredEvents.map((eventItem) => {
+            const payloadText = formatSignalPayload(eventItem.payload);
+            const tint = signalTopicTint(eventItem.topic);
+
+            return (
+            <div
               key={eventItem.id}
-              type="button"
-              onClick={() => onSelectSignal(`topic:${eventItem.topic}`)}
-              className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[#FAF7F5] dark:hover:bg-[#1C1917]"
+              className="overflow-hidden"
             >
-              <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-[#C75B3A]" />
-              <div className="min-w-0 flex-1">
-                <p className="truncate font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">{eventItem.topic}</p>
-                <p className="mt-1 line-clamp-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                  {formatSignalPayload(eventItem.payload)}
-                </p>
-              </div>
-              <div className="shrink-0 text-right">
-                <p className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">
-                  {formatSignalTime(eventItem.ts)}
-                </p>
-                <p className="mt-0.5 text-[10px] text-[#A8A29E] dark:text-[#78716C]">{eventItem.source}</p>
-              </div>
-            </button>
-          ))}
+              <button
+                type="button"
+                onClick={() => onSelectSignal(eventItem.id)}
+                className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[#FAF7F5] dark:hover:bg-[#1C1917]"
+              >
+                <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: tint }} />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate font-mono text-xs text-[#44403C] dark:text-[#D6D3D1]">{eventItem.topic}</p>
+                  <p className="mt-1 line-clamp-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                    {payloadText}
+                  </p>
+                </div>
+                <div className="shrink-0 text-right">
+                  <p className="text-[10px] text-[#78716C] dark:text-[#A8A29E]">
+                    {formatRelativeSignalTime(eventItem.ts)}
+                  </p>
+                  <p className="mt-0.5 text-[10px] text-[#A8A29E] dark:text-[#78716C]">{formatSignalTime(eventItem.ts)}</p>
+                  <p className="mt-0.5 text-[10px] text-[#A8A29E] dark:text-[#78716C]">{eventItem.source}</p>
+                </div>
+              </button>
+              <details className="border-t border-[#F5F0ED] px-4 py-2 dark:border-[#1C1917]">
+                <summary className="cursor-pointer text-[11px] text-[#78716C] dark:text-[#A8A29E]">
+                  展开 payload
+                </summary>
+                <pre className="mt-2 overflow-x-auto rounded-lg bg-[#FAF7F5] p-3 text-[10px] text-[#57534E] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+                  {`Payload:\n${payloadText}`}
+                </pre>
+              </details>
+            </div>
+          )})}
         </div>
       )}
     </section>
@@ -2313,6 +2400,7 @@ export function AgentsPage() {
   const [agentDetail, setAgentDetail] = useState<AgentDetailData | null>(null);
   const [isDetailLoading, setIsDetailLoading] = useState(false);
   const [panelEnergy, setPanelEnergy] = useState<AgentEnergySnapshot | null>(null);
+  const [isPanelRefilling, setIsPanelRefilling] = useState(false);
 
   useEffect(() => {
     if (rightPanel.state === 'AGENT_DETAIL' || rightPanel.state === 'ACTOR_DETAIL') {
@@ -2322,6 +2410,7 @@ export function AgentsPage() {
       setIsDetailLoading(true);
       setAgentDetail(null);
       setPanelEnergy(null);
+      setIsPanelRefilling(false);
       const service = getAgentHubService();
       const loader = rightPanel.state === 'AGENT_DETAIL'
         ? service.getAgentDetail(runtimeEntityId)
@@ -2335,6 +2424,7 @@ export function AgentsPage() {
     } else {
       setAgentDetail(null);
       setPanelEnergy(null);
+      setIsPanelRefilling(false);
     }
   }, [rightPanel.state, rightPanel.nodeId]);
 
@@ -2362,6 +2452,27 @@ export function AgentsPage() {
       clearInterval(timer);
     };
   }, [rightPanel.state, rightPanel.nodeId, runtimeHostSnapshots, activeSignalRouteHost]);
+
+  const handlePanelRefillEnergy = async () => {
+    if (rightPanel.state !== 'AGENT_DETAIL' || !rightPanel.nodeId || !panelEnergy || isPanelRefilling) return;
+    const nodeId = rightPanel.nodeId;
+    const runtimeEntityId = resolveRuntimeEntityId(nodeId);
+    const preferredHostId = extractPreferredHostId(nodeId);
+    const host = findPreferredRuntimeHostForAgent(runtimeHostSnapshots, runtimeEntityId, preferredHostId)
+      ?? activeSignalRouteHost;
+    if (!host) return;
+
+    setIsPanelRefilling(true);
+    try {
+      const client = new RuntimeClient();
+      const result = await client.refillEnergy(host, runtimeEntityId, panelEnergy.max);
+      if (result.ok) {
+        setPanelEnergy(result.data.energy);
+      }
+    } finally {
+      setIsPanelRefilling(false);
+    }
+  };
 
   useEffect(() => {
     if (!selectedProviderProfileId) return;
@@ -3685,7 +3796,13 @@ export function AgentsPage() {
                           </div>
                         ) : null}
 
-                        {panelEnergy && <EnergyBar energy={panelEnergy} />}
+                        {panelEnergy && (
+                          <EnergyBar
+                            energy={panelEnergy}
+                            onRefill={handlePanelRefillEnergy}
+                            isRefilling={isPanelRefilling}
+                          />
+                        )}
 
                         {!isDetailLoading && agentDetail?.triggerRules.length ? (
                           <Card className="rounded-xl border-border-card bg-card shadow-sm">
@@ -3778,10 +3895,11 @@ export function AgentsPage() {
                 <div data-testid="agent-rightpanel-signal-detail" className="flex flex-col gap-3 p-4 text-foreground">
                   {(() => {
                     const nodeId = rightPanel.signalId;
+                    const historyEvent = nodeId ? signalHistory.find((eventItem) => eventItem.id === nodeId) : null;
                     const normalizedNodeId = nodeId?.includes(':')
                       ? nodeId.split(':').slice(1).join(':')
                       : nodeId;
-                    const routeMatchKey = normalizedNodeId ?? nodeId ?? '';
+                    const routeMatchKey = historyEvent?.topic ?? normalizedNodeId ?? nodeId ?? '';
                     const node =
                       (nodeId ? signalGraph.nodes.find((n) => n.id === nodeId) : null) ??
                       (normalizedNodeId
@@ -3805,9 +3923,47 @@ export function AgentsPage() {
                     return (
                       <>
                         <div className="flex flex-col gap-1">
-                          <p className="text-xs font-medium text-muted-foreground">节点 ID</p>
+                          <p className="text-xs font-medium text-muted-foreground">
+                            {historyEvent ? '信号 ID' : '节点 ID'}
+                          </p>
                           <p className="font-mono text-sm text-foreground">{nodeId ?? '—'}</p>
                         </div>
+
+                        {historyEvent && (
+                          <div className="flex flex-col gap-3 rounded-xl border border-border-card bg-card p-3">
+                            <div className="flex items-center gap-2">
+                              <span
+                                className="h-2 w-2 rounded-full"
+                                style={{ backgroundColor: signalTopicTint(historyEvent.topic) }}
+                              />
+                              <p className="font-mono text-xs text-foreground">{historyEvent.topic}</p>
+                            </div>
+                            <div className="grid grid-cols-2 gap-3">
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-muted-foreground">来源</p>
+                                <p className="text-xs text-foreground">{historyEvent.source}</p>
+                              </div>
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-muted-foreground">时间</p>
+                                <p className="text-xs text-foreground">{formatSignalTime(historyEvent.ts)}</p>
+                              </div>
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-muted-foreground">主机</p>
+                                <p className="text-xs text-foreground">{historyEvent.origin_host_id}</p>
+                              </div>
+                              <div className="flex flex-col gap-0.5">
+                                <p className="text-[10px] text-muted-foreground">跳数</p>
+                                <p className="text-xs text-foreground">{historyEvent.hop}</p>
+                              </div>
+                            </div>
+                            <div className="flex flex-col gap-1">
+                              <p className="text-[10px] text-muted-foreground">Payload</p>
+                              <pre className="overflow-x-auto rounded-lg bg-background p-3 text-[10px] text-foreground">
+                                {formatSignalPayload(historyEvent.payload)}
+                              </pre>
+                            </div>
+                          </div>
+                        )}
 
                         {node && (
                           <div className="flex flex-col gap-3">

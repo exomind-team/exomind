@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { getAgentHubService } from '@/lib/services';
 import type { AgentDetailData, AgentEnergySnapshot, AgentHubListItem } from '@/lib/types/agent-hub';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
+import { RuntimeClient } from '@/services/runtime-client';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { WorkspaceTabs } from './WorkspaceTabs';
 
@@ -22,10 +23,19 @@ export const PHASE_COLORS: Record<string, string> = {
   dormant: '#6B7280',
 };
 
-export function EnergyBar({ energy }: { energy: AgentEnergySnapshot }) {
+export function EnergyBar({
+  energy,
+  onRefill,
+  isRefilling = false,
+}: {
+  energy: AgentEnergySnapshot;
+  onRefill?: () => void;
+  isRefilling?: boolean;
+}) {
   const percent = Math.round(energy.ratio * 100);
   const color = PHASE_COLORS[energy.phase] ?? '#6B7280';
   const label = PHASE_LABELS[energy.phase] ?? energy.phase;
+  const showRefillAction = energy.is_dormant && typeof onRefill === 'function';
 
   return (
     <section className="mt-4">
@@ -34,16 +44,28 @@ export function EnergyBar({ energy }: { energy: AgentEnergySnapshot }) {
         生命能量 (C1)
       </h3>
       <div className="mt-2 rounded-2xl border border-border-card bg-card p-4">
-        <div className="mb-2 flex items-center justify-between">
+        <div className="mb-2 flex items-center justify-between gap-3">
           <span className="text-xs text-muted-foreground">
             {energy.current} / {energy.max}
           </span>
-          <span
-            className="rounded-full px-2 py-0.5 text-xs font-semibold"
-            style={{ color, backgroundColor: `${color}15` }}
-          >
-            {label}
-          </span>
+          <div className="flex items-center gap-2">
+            <span
+              className="rounded-full px-2 py-0.5 text-xs font-semibold"
+              style={{ color, backgroundColor: `${color}15` }}
+            >
+              {label}
+            </span>
+            {showRefillAction && (
+              <button
+                type="button"
+                onClick={onRefill}
+                disabled={isRefilling}
+                className="rounded-full bg-[#C75B3A] px-3 py-1 text-[11px] font-semibold text-white disabled:cursor-not-allowed disabled:bg-[#C75B3A80]"
+              >
+                {isRefilling ? '充能中...' : '充能复活'}
+              </button>
+            )}
+          </div>
         </div>
         <div className="h-3 overflow-hidden rounded-full bg-muted">
           <div
@@ -77,6 +99,7 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
   const [loading, setLoading] = useState(true);
   const [energy, setEnergy] = useState<AgentEnergySnapshot | null>(null);
+  const [isRefilling, setIsRefilling] = useState(false);
   const targetId = agentId ?? '';
 
   useEffect(() => {
@@ -86,6 +109,7 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
         if (!disposed) {
           setDetail(null);
           setLoading(false);
+          setIsRefilling(false);
         }
         return;
       }
@@ -139,6 +163,23 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
       clearInterval(timer);
     };
   }, [targetId]);
+
+  const handleRefillEnergy = async () => {
+    if (!targetId || !energy || isRefilling) return;
+    setIsRefilling(true);
+    try {
+      const hosts = await getRuntimeHostService().listHosts();
+      const host = hosts[0];
+      if (!host) return;
+      const client = new RuntimeClient();
+      const result = await client.refillEnergy(host, targetId, energy.max);
+      if (result.ok) {
+        setEnergy(result.data.energy);
+      }
+    } finally {
+      setIsRefilling(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -212,7 +253,7 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
         </div>
       </section>
 
-      {energy && <EnergyBar energy={energy} />}
+      {energy && <EnergyBar energy={energy} onRefill={handleRefillEnergy} isRefilling={isRefilling} />}
 
       {/* Workspace tabs — shown for life agents (those with workspace) */}
       <WorkspaceTabs agentId={targetId} />
