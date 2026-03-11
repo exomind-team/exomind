@@ -1,0 +1,105 @@
+import { describe, expect, it, vi } from 'vitest';
+import { TaskRtAdapter } from '@/lib/adapters/task-rt-adapter';
+
+describe('TaskRtAdapter（RT 任务适配器）', () => {
+  it('maps runtime task payload to frontend TaskNode', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ([
+        {
+          id: 'task-1',
+          title: 'RT Task',
+          description: 'from runtime',
+          done_condition: 'ship feature',
+          status: 'not_started',
+          priority: 'high',
+          tags: ['rt'],
+          source: 'runtime:test',
+          parent_id: 'parent-1',
+          depends_on: [{ task_id: 'dep-1', type: 'hard' }],
+          due_at: 1700000000000,
+          estimated_minutes: 45,
+          time_block_ids: ['block-1'],
+          created_at: 1700000000001,
+          updated_at: 1700000000002,
+          completed_at: null,
+        },
+      ]),
+    }));
+
+    const adapter = new TaskRtAdapter({
+      fetchImpl,
+      resolveTarget: () => ({ mode: 'embedded', host: '127.0.0.1', port: 9124 }),
+    });
+
+    const tasks = await adapter.listTasks(true);
+
+    expect(tasks).toEqual([
+      {
+        id: 'task-1',
+        title: 'RT Task',
+        description: 'from runtime',
+        doneCondition: 'ship feature',
+        status: 'not_started',
+        priority: 'high',
+        tags: ['rt'],
+        source: 'runtime:test',
+        parentId: 'parent-1',
+        dependsOn: [{ taskId: 'dep-1', type: 'hard' }],
+        dueAt: 1700000000000,
+        estimatedMinutes: 45,
+        timeBlockIds: ['block-1'],
+        createdAt: 1700000000001,
+        updatedAt: 1700000000002,
+      },
+    ]);
+    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:9124/tasks', expect.any(Object));
+  });
+
+  it('serializes frontend task updates to runtime payload', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'task-1',
+        title: 'Updated Task',
+        description: 'from runtime',
+        done_condition: 'ship feature',
+        status: 'not_started',
+        priority: 'medium',
+        tags: ['rt'],
+        source: 'runtime:test',
+        parent_id: 'parent-1',
+        depends_on: [{ task_id: 'dep-1', type: 'soft' }],
+        due_at: null,
+        estimated_minutes: 25,
+        time_block_ids: ['block-1', 'block-2'],
+        created_at: 1700000000001,
+        updated_at: 1700000000002,
+        completed_at: null,
+      }),
+    }));
+
+    const adapter = new TaskRtAdapter({
+      fetchImpl,
+      resolveTarget: () => ({ mode: 'embedded', host: '127.0.0.1', port: 9124 }),
+    });
+
+    await adapter.updateTask('task-1', {
+      doneCondition: 'ship feature',
+      dependsOn: [{ taskId: 'dep-1', type: 'soft' }],
+      timeBlockIds: ['block-1', 'block-2'],
+      estimatedMinutes: 25,
+    });
+
+    const [, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    expect(requestInit?.method).toBe('PUT');
+    expect(JSON.parse(String(requestInit?.body))).toEqual({
+      done_condition: 'ship feature',
+      depends_on: [{ task_id: 'dep-1', type: 'soft' }],
+      time_block_ids: ['block-1', 'block-2'],
+      estimated_minutes: 25,
+    });
+  });
+});

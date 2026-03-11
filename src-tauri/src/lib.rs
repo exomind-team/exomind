@@ -15,7 +15,8 @@ use commands::eventlog_commands::{
 };
 use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
-    list_files, pick_json_file, read_file, read_file_binary, save_json_file, write_file,
+    list_files, pick_json_file, read_file, read_file_binary, save_binary_file, save_json_file,
+    write_file,
 };
 use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_reachable_address, runtime_service_start,
@@ -71,7 +72,9 @@ pub fn run() {
                 eprintln!("[tauri/setup] failed to prewarm voice overlay window: {error}");
             }
 
-            if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
+            if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
+                || std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none()
+            {
                 match app.path().app_data_dir() {
                     Ok(app_data_dir) => {
                         let runtime_dir = app_data_dir.join("runtime");
@@ -80,19 +83,28 @@ pub fn run() {
                                 "[tauri/setup] failed to create runtime data dir for signal sqlite: {error}"
                             );
                         } else {
-                            let signal_sqlite_path = runtime_dir.join("signal-pool.sqlite");
-                            // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
-                            unsafe {
-                                std::env::set_var(
-                                    "EXOMIND_RT_SIGNAL_SQLITE_PATH",
-                                    signal_sqlite_path,
-                                );
+                            if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
+                                let signal_sqlite_path = runtime_dir.join("signal-pool.sqlite");
+                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+                                unsafe {
+                                    std::env::set_var(
+                                        "EXOMIND_RT_SIGNAL_SQLITE_PATH",
+                                        signal_sqlite_path,
+                                    );
+                                }
+                            }
+                            if std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none() {
+                                let task_sqlite_path = runtime_dir.join("tasks.sqlite");
+                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+                                unsafe {
+                                    std::env::set_var("EXOMIND_RT_TASK_SQLITE_PATH", task_sqlite_path);
+                                }
                             }
                         }
                     }
                     Err(error) => {
                         eprintln!(
-                            "[tauri/setup] failed to resolve app data dir for signal sqlite: {error}"
+                            "[tauri/setup] failed to resolve app data dir for runtime sqlite files: {error}"
                         );
                     }
                 }
@@ -130,6 +142,7 @@ pub fn run() {
             append_file,
             append_to_markdown,
             export_messages_to_markdown,
+            save_binary_file,
             save_json_file,
             pick_json_file,
             get_device_id,

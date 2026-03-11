@@ -4,7 +4,6 @@ import { appRouter } from "@/routes";
 import { ThemeController } from "@/components/ThemeController";
 import { Toaster } from "@/components/ui/toaster";
 import { TimeBlockSyncCoordinator } from "@/ui/app/components/TimeBlockSyncCoordinator";
-import { TaskSyncCoordinator } from "@/ui/app/components/TaskSyncCoordinator";
 import { ReminderSyncCoordinator } from "@/ui/app/components/ReminderSyncCoordinator";
 import {
   initUpdateChecker,
@@ -34,7 +33,6 @@ function App() {
     <>
       <ThemeController />
       <TimeBlockSyncCoordinator />
-      <TaskSyncCoordinator />
       <ReminderSyncCoordinator />
       <RouterProvider router={appRouter} />
       <Toaster />

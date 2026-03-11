@@ -10,6 +10,18 @@ export type { TimeBlockService } from './timeblock.service';
 
 export { TaskServiceImpl, getTaskService } from './task.service';
 export type { TaskService } from './task.service';
+export {
+  TaskBackupServiceImpl,
+  getTaskBackupService,
+  resetTaskBackupServiceForTests,
+} from './task-backup.service';
+export type {
+  TaskBackendStatus,
+  TaskExportJsonResult,
+  TaskExportSqliteResult,
+  TaskImportResult,
+  TaskImportStrategy,
+} from './task-backup.service';
 
 export { TaskTimerServiceImpl, getTaskTimerService } from './task-timer.service';
 export type { TaskTimerService } from './task-timer.service';

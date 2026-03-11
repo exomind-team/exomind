@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const mocks = vi.hoisted(() => ({
   setUseMockDataEnabled: vi.fn(),
@@ -14,6 +14,25 @@ vi.mock('@/lib/services', () => ({
   getEventLogService: () => ({
     exportEventsAsJson: vi.fn().mockResolvedValue('{}'),
     importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+  }),
+  getTaskBackupService: () => ({
+    exportTasksAsJson: vi.fn().mockResolvedValue({
+      fileName: 'exomind-tasks.json',
+      content: '{"version":1,"tasks":[]}',
+      taskCount: 0,
+    }),
+    exportTasksAsSqliteSnapshot: vi.fn().mockResolvedValue({
+      fileName: 'exomind-tasks.sqlite',
+      bytes: new Uint8Array(),
+      taskCount: 0,
+    }),
+    importTasksFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+    importTasksFromSqliteSnapshot: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+    getBackendStatus: vi.fn().mockResolvedValue({
+      backend: 'rt-sqlite',
+      supportsJsonBackup: true,
+      supportsSqliteSnapshot: true,
+    }),
   }),
 }));
 
@@ -65,14 +84,19 @@ describe('settings mock-data toggle issue-213（设置页测试数据开关）',
     vi.clearAllMocks();
   });
 
-  it('shows use-mock-data toggle when developer mode is enabled（开发者模式显示测试数据开关）', () => {
+  it('shows use-mock-data toggle when developer mode is enabled（开发者模式显示测试数据开关）', async () => {
     render(<SettingsPage />);
-    expect(screen.getByText('使用测试数据')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText('使用测试数据')).toBeInTheDocument();
+    });
   });
 
-  it('calls setUseMockDataEnabled after toggle click（点击后更新 mock 开关）', () => {
+  it('calls setUseMockDataEnabled after toggle click（点击后更新 mock 开关）', async () => {
     const reloadSpy = vi.spyOn(window.location, 'reload').mockImplementation(() => {});
     render(<SettingsPage />);
+    await waitFor(() => {
+      expect(screen.getByText('使用测试数据')).toBeInTheDocument();
+    });
     const switchEl = screen.getByTestId('new-settings-use-mock-data-switch');
     fireEvent.click(switchEl);
     expect(mocks.setUseMockDataEnabled).toHaveBeenCalledWith(true);

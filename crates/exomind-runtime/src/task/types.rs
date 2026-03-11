@@ -47,6 +47,20 @@ impl Default for TaskPriority {
     }
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskDependencyType {
+    Soft,
+    Hard,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskDependency {
+    pub task_id: String,
+    #[serde(rename = "type")]
+    pub relation_type: TaskDependencyType,
+}
+
 /// A task in the ExoMind runtime.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Task {
@@ -54,6 +68,8 @@ pub struct Task {
     pub title: String,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub description: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub done_condition: Option<String>,
     pub status: TaskStatus,
     pub priority: TaskPriority,
     #[serde(default)]
@@ -62,10 +78,14 @@ pub struct Task {
     pub source: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub parent_id: Option<String>,
+    #[serde(default)]
+    pub depends_on: Vec<TaskDependency>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub due_at: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub estimated_minutes: Option<u32>,
+    #[serde(default)]
+    pub time_block_ids: Vec<String>,
     pub created_at: u64,
     pub updated_at: u64,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -79,6 +99,8 @@ pub struct CreateTaskInput {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub done_condition: Option<String>,
+    #[serde(default)]
     pub priority: Option<TaskPriority>,
     #[serde(default)]
     pub tags: Vec<String>,
@@ -87,9 +109,13 @@ pub struct CreateTaskInput {
     #[serde(default)]
     pub parent_id: Option<String>,
     #[serde(default)]
+    pub depends_on: Vec<TaskDependency>,
+    #[serde(default)]
     pub due_at: Option<u64>,
     #[serde(default)]
     pub estimated_minutes: Option<u32>,
+    #[serde(default)]
+    pub time_block_ids: Vec<String>,
 }
 
 /// Input for updating an existing task.
@@ -100,15 +126,21 @@ pub struct UpdateTaskInput {
     #[serde(default)]
     pub description: Option<String>,
     #[serde(default)]
+    pub done_condition: Option<String>,
+    #[serde(default)]
     pub priority: Option<TaskPriority>,
     #[serde(default)]
     pub tags: Option<Vec<String>>,
+    #[serde(default)]
+    pub depends_on: Option<Vec<TaskDependency>>,
     #[serde(default)]
     pub due_at: Option<u64>,
     #[serde(default)]
     pub estimated_minutes: Option<u32>,
     #[serde(default)]
     pub parent_id: Option<String>,
+    #[serde(default)]
+    pub time_block_ids: Option<Vec<String>>,
 }
 
 /// Input for transitioning task status.
@@ -162,13 +194,19 @@ mod tests {
             id: "t-1".to_string(),
             title: "Test".to_string(),
             description: None,
+            done_condition: Some("Definition of done".to_string()),
             status: TaskStatus::NotStarted,
             priority: TaskPriority::High,
             tags: vec!["dev".to_string()],
             source: Some("mcp".to_string()),
             parent_id: None,
+            depends_on: vec![TaskDependency {
+                task_id: "dep-1".to_string(),
+                relation_type: TaskDependencyType::Hard,
+            }],
             due_at: None,
             estimated_minutes: Some(30),
+            time_block_ids: vec!["block-1".to_string()],
             created_at: 1000,
             updated_at: 1000,
             completed_at: None,
@@ -176,8 +214,13 @@ mod tests {
         let json = serde_json::to_string(&task).unwrap();
         assert!(json.contains("\"not_started\""));
         assert!(json.contains("\"high\""));
+        assert!(json.contains("\"done_condition\":\"Definition of done\""));
+        assert!(json.contains("\"depends_on\""));
         let back: Task = serde_json::from_str(&json).unwrap();
         assert_eq!(back.status, TaskStatus::NotStarted);
         assert_eq!(back.priority, TaskPriority::High);
+        assert_eq!(back.done_condition.as_deref(), Some("Definition of done"));
+        assert_eq!(back.depends_on.len(), 1);
+        assert_eq!(back.time_block_ids, vec!["block-1".to_string()]);
     }
 }

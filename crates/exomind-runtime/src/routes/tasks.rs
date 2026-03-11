@@ -2,7 +2,8 @@ use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
-use serde::Deserialize;
+use base64::{Engine as _, engine::general_purpose::STANDARD};
+use serde::{Deserialize, Serialize};
 
 use crate::signal::types::SignalEvent;
 use crate::task::{CreateTaskInput, Task, TaskStatus, TransitionInput, UpdateTaskInput};
@@ -14,6 +15,50 @@ use crate::AppState;
 struct ListQuery {
     #[serde(default)]
     status: Option<TaskStatus>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ImportQuery {
+    #[serde(default)]
+    strategy: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+struct TaskBackupJsonPayload {
+    version: u32,
+    tasks: Vec<Task>,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskBackupSqlitePayload {
+    version: u32,
+    file_name: String,
+    content_base64: String,
+    task_count: usize,
+}
+
+#[derive(Debug, Deserialize)]
+struct TaskBackupSqliteImportPayload {
+    content_base64: String,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskImportResult {
+    imported: usize,
+    skipped: usize,
+    total: usize,
+}
+
+#[derive(Debug, Serialize)]
+struct TaskBackendStatusResponse {
+    backend: &'static str,
+    supports_json_backup: bool,
+    supports_sqlite_snapshot: bool,
+}
+
+enum TaskImportStrategy {
+    Merge,
+    Overwrite,
 }
 
 // ── Handlers ────────────────────────────────────────────────────
@@ -125,6 +170,75 @@ async fn delete_task(
     Ok(Json(task))
 }
 
+async fn export_tasks_json(
+    State(state): State<AppState>,
+) -> Json<TaskBackupJsonPayload> {
+    Json(TaskBackupJsonPayload {
+        version: 1,
+        tasks: state.task_store.list(),
+    })
+}
+
+async fn export_tasks_sqlite(
+    State(state): State<AppState>,
+) -> Result<Json<TaskBackupSqlitePayload>, (StatusCode, String)> {
+    let bytes = state
+        .task_store
+        .sqlite_snapshot_bytes()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .ok_or_else(|| {
+            (
+                StatusCode::CONFLICT,
+                "task sqlite snapshot is unavailable on non-sqlite backend".to_string(),
+            )
+        })?;
+
+    Ok(Json(TaskBackupSqlitePayload {
+        version: 1,
+        file_name: "exomind-tasks.sqlite".to_string(),
+        content_base64: STANDARD.encode(bytes),
+        task_count: state.task_store.len(),
+    }))
+}
+
+async fn import_tasks_json(
+    State(state): State<AppState>,
+    Query(query): Query<ImportQuery>,
+    Json(payload): Json<TaskBackupJsonPayload>,
+) -> Result<Json<TaskImportResult>, (StatusCode, String)> {
+    let strategy = parse_import_strategy(query.strategy.as_deref())?;
+    let result = apply_task_import(&state, payload.tasks, strategy)?;
+    Ok(Json(result))
+}
+
+async fn import_tasks_sqlite(
+    State(state): State<AppState>,
+    Query(query): Query<ImportQuery>,
+    Json(payload): Json<TaskBackupSqliteImportPayload>,
+) -> Result<Json<TaskImportResult>, (StatusCode, String)> {
+    let strategy = parse_import_strategy(query.strategy.as_deref())?;
+    let bytes = STANDARD
+        .decode(payload.content_base64)
+        .map_err(|error| (StatusCode::BAD_REQUEST, format!("invalid sqlite snapshot: {error}")))?;
+    let imported_tasks = read_tasks_from_sqlite_snapshot(&bytes)?;
+    let result = apply_task_import(&state, imported_tasks, strategy)?;
+    Ok(Json(result))
+}
+
+async fn task_backend_status(
+    State(state): State<AppState>,
+) -> Json<TaskBackendStatusResponse> {
+    let supports_sqlite_snapshot = matches!(
+        state.task_store.backend_kind(),
+        crate::task::TaskStoreBackendKind::Sqlite
+    );
+    Json(TaskBackendStatusResponse {
+        backend: if supports_sqlite_snapshot { "rt-sqlite" } else { "memory" },
+        supports_json_backup: true,
+        supports_sqlite_snapshot,
+    })
+}
+
 // ── Helpers ─────────────────────────────────────────────────────
 
 fn publish_task_signal(state: &AppState, topic: &str, task: &Task) {
@@ -142,11 +256,92 @@ fn publish_task_signal(state: &AppState, topic: &str, task: &Task) {
     state.signal_pool.publish(event);
 }
 
+fn parse_import_strategy(raw: Option<&str>) -> Result<TaskImportStrategy, (StatusCode, String)> {
+    match raw.unwrap_or("merge") {
+        "merge" => Ok(TaskImportStrategy::Merge),
+        "overwrite" => Ok(TaskImportStrategy::Overwrite),
+        value => Err((
+            StatusCode::BAD_REQUEST,
+            format!("unsupported task import strategy: {value}"),
+        )),
+    }
+}
+
+fn apply_task_import(
+    state: &AppState,
+    incoming: Vec<Task>,
+    strategy: TaskImportStrategy,
+) -> Result<TaskImportResult, (StatusCode, String)> {
+    let existing = state.task_store.list();
+    let result = match strategy {
+        TaskImportStrategy::Overwrite => {
+            state
+                .task_store
+                .replace_all(&incoming)
+                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            TaskImportResult {
+                imported: incoming.len(),
+                skipped: 0,
+                total: incoming.len(),
+            }
+        }
+        TaskImportStrategy::Merge => {
+            let mut merged = std::collections::BTreeMap::new();
+            for task in &existing {
+                merged.insert(task.id.clone(), task.clone());
+            }
+
+            let mut imported = 0usize;
+            let mut skipped = 0usize;
+            for task in incoming {
+                if merged.contains_key(&task.id) {
+                    skipped += 1;
+                } else {
+                    imported += 1;
+                }
+                merged.insert(task.id.clone(), task);
+            }
+
+            let next = merged.into_values().collect::<Vec<_>>();
+            state
+                .task_store
+                .replace_all(&next)
+                .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+            TaskImportResult {
+                imported,
+                skipped,
+                total: next.len(),
+            }
+        }
+    };
+
+    Ok(result)
+}
+
+fn read_tasks_from_sqlite_snapshot(bytes: &[u8]) -> Result<Vec<Task>, (StatusCode, String)> {
+    let temp_path = std::env::temp_dir().join(format!("exomind-task-import-{}.sqlite", uuid::Uuid::new_v4()));
+    std::fs::write(&temp_path, bytes)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+    let store = crate::task::TaskStore::with_sqlite_path(&temp_path)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let tasks = store.list();
+
+    let _ = std::fs::remove_file(&temp_path);
+    Ok(tasks)
+}
+
 // ── Router ──────────────────────────────────────────────────────
 
 pub fn router() -> Router<AppState> {
     Router::new()
         .route("/tasks", get(list_tasks).post(create_task))
+        .route("/tasks/backend/status", get(task_backend_status))
+        .route("/tasks/backup/json", get(export_tasks_json))
+        .route("/tasks/backup/sqlite", get(export_tasks_sqlite))
+        .route("/tasks/import/json", post(import_tasks_json))
+        .route("/tasks/import/sqlite", post(import_tasks_sqlite))
         .route("/tasks/:id", get(get_task).put(update_task).delete(delete_task))
         .route("/tasks/:id/transition", post(transition_task))
 }
@@ -156,15 +351,22 @@ pub fn router() -> Router<AppState> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use base64::engine::general_purpose::STANDARD;
     use crate::signal::SignalPool;
+    use crate::task::TaskPriority;
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
     use serde_json::Value;
     use std::sync::Arc;
+    use tempfile::tempdir;
     use tower::util::ServiceExt;
 
     fn test_state() -> AppState {
+        test_state_with_task_store(Arc::new(crate::task::TaskStore::new()))
+    }
+
+    fn test_state_with_task_store(task_store: Arc<crate::task::TaskStore>) -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
         let host_id = "tasks-test-host".to_string();
         AppState {
@@ -177,7 +379,7 @@ mod tests {
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
-            task_store: Arc::new(crate::task::TaskStore::new()),
+            task_store,
             energy_registry: crate::energy::EnergyRegistry::new(),
             life_agents: std::collections::HashMap::new(),
             eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
@@ -242,12 +444,15 @@ mod tests {
         let task = state.task_store.create(CreateTaskInput {
             title: "Test".to_string(),
             description: None,
+            done_condition: None,
             priority: None,
             tags: vec![],
             source: None,
             parent_id: None,
+            depends_on: vec![],
             due_at: None,
             estimated_minutes: None,
+            time_block_ids: vec![],
         });
         let app = test_router(state);
 
@@ -289,12 +494,15 @@ mod tests {
         let task = state.task_store.create(CreateTaskInput {
             title: "Original".to_string(),
             description: None,
+            done_condition: None,
             priority: None,
             tags: vec![],
             source: None,
             parent_id: None,
+            depends_on: vec![],
             due_at: None,
             estimated_minutes: None,
+            time_block_ids: vec![],
         });
         let _rx = state.signal_pool.subscribe();
         let app = test_router(state);
@@ -323,12 +531,15 @@ mod tests {
         let task = state.task_store.create(CreateTaskInput {
             title: "My task".to_string(),
             description: None,
+            done_condition: None,
             priority: None,
             tags: vec![],
             source: None,
             parent_id: None,
+            depends_on: vec![],
             due_at: None,
             estimated_minutes: None,
+            time_block_ids: vec![],
         });
         let _rx = state.signal_pool.subscribe();
         let app = test_router(state);
@@ -356,12 +567,15 @@ mod tests {
         let task = state.task_store.create(CreateTaskInput {
             title: "Task".to_string(),
             description: None,
+            done_condition: None,
             priority: None,
             tags: vec![],
             source: None,
             parent_id: None,
+            depends_on: vec![],
             due_at: None,
             estimated_minutes: None,
+            time_block_ids: vec![],
         });
         let app = test_router(state);
 
@@ -386,12 +600,15 @@ mod tests {
         let task = state.task_store.create(CreateTaskInput {
             title: "To abandon".to_string(),
             description: None,
+            done_condition: None,
             priority: None,
             tags: vec![],
             source: None,
             parent_id: None,
+            depends_on: vec![],
             due_at: None,
             estimated_minutes: None,
+            time_block_ids: vec![],
         });
         // Must transition to in_progress first (not_started → abandoned is invalid)
         state.task_store.transition(&task.id, TaskStatus::InProgress).unwrap();
@@ -420,22 +637,28 @@ mod tests {
         let t1 = state.task_store.create(CreateTaskInput {
             title: "Task 1".to_string(),
             description: None,
+            done_condition: None,
             priority: None,
             tags: vec![],
             source: None,
             parent_id: None,
+            depends_on: vec![],
             due_at: None,
             estimated_minutes: None,
+            time_block_ids: vec![],
         });
         state.task_store.create(CreateTaskInput {
             title: "Task 2".to_string(),
             description: None,
+            done_condition: None,
             priority: None,
             tags: vec![],
             source: None,
             parent_id: None,
+            depends_on: vec![],
             due_at: None,
             estimated_minutes: None,
+            time_block_ids: vec![],
         });
         state.task_store.transition(&t1.id, TaskStatus::InProgress).unwrap();
 
@@ -455,5 +678,230 @@ mod tests {
         let tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0]["title"], "Task 1");
+    }
+
+    #[tokio::test]
+    async fn exports_task_json_backup() {
+        let state = test_state();
+        state.task_store.create(CreateTaskInput {
+            title: "Backup Task".to_string(),
+            description: Some("Export me".to_string()),
+            done_condition: Some("done".to_string()),
+            priority: Some(TaskPriority::High),
+            tags: vec!["backup".to_string()],
+            source: Some("test".to_string()),
+            parent_id: None,
+            depends_on: vec![],
+            due_at: Some(1_700_000_000_000),
+            estimated_minutes: Some(25),
+            time_block_ids: vec!["block-1".to_string()],
+        });
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks/backup/json")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(payload["version"], 1);
+        assert_eq!(payload["tasks"].as_array().map(|items| items.len()), Some(1));
+        assert_eq!(payload["tasks"][0]["done_condition"], "done");
+        assert_eq!(payload["tasks"][0]["time_block_ids"][0], "block-1");
+    }
+
+    #[tokio::test]
+    async fn imports_task_json_backup_with_merge_strategy() {
+        let state = test_state();
+        let existing = state.task_store.create(CreateTaskInput {
+            title: "Existing".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let app = test_router(state.clone());
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/import/json?strategy=merge")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{
+                            "version": 1,
+                            "tasks": [
+                                {{
+                                    "id": "{}",
+                                    "title": "Existing replaced",
+                                    "description": null,
+                                    "done_condition": null,
+                                    "status": "not_started",
+                                    "priority": "medium",
+                                    "tags": [],
+                                    "source": null,
+                                    "parent_id": null,
+                                    "depends_on": [],
+                                    "due_at": null,
+                                    "estimated_minutes": null,
+                                    "time_block_ids": [],
+                                    "created_at": 1000,
+                                    "updated_at": 2000,
+                                    "completed_at": null
+                                }},
+                                {{
+                                    "id": "task-import-2",
+                                    "title": "Imported task",
+                                    "description": null,
+                                    "done_condition": "ship",
+                                    "status": "not_started",
+                                    "priority": "high",
+                                    "tags": ["rt"],
+                                    "source": "backup",
+                                    "parent_id": null,
+                                    "depends_on": [],
+                                    "due_at": null,
+                                    "estimated_minutes": 30,
+                                    "time_block_ids": ["block-9"],
+                                    "created_at": 3000,
+                                    "updated_at": 4000,
+                                    "completed_at": null
+                                }}
+                            ]
+                        }}"#,
+                        existing.id
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["imported"], 1);
+        assert_eq!(result["skipped"], 1);
+        assert_eq!(result["total"], 2);
+
+        let tasks = state.task_store.list();
+        assert_eq!(tasks.len(), 2);
+        assert!(tasks.iter().any(|task| task.title == "Imported task"));
+        assert!(tasks.iter().any(|task| task.title == "Existing replaced"));
+    }
+
+    #[tokio::test]
+    async fn exports_task_sqlite_snapshot() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        task_store.create(CreateTaskInput {
+            title: "SQLite backup".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let app = test_router(test_state_with_task_store(task_store));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks/backup/sqlite")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        let encoded = payload["content_base64"].as_str().expect("base64 snapshot");
+        let bytes = STANDARD.decode(encoded).expect("valid sqlite bytes");
+        assert!(!bytes.is_empty());
+    }
+
+    #[tokio::test]
+    async fn imports_task_sqlite_snapshot_with_overwrite_strategy() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        task_store.create(CreateTaskInput {
+            title: "Old task".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+
+        let import_dir = tempdir().unwrap();
+        let import_sqlite_path = import_dir.path().join("import.sqlite");
+        let import_store = crate::task::TaskStore::with_sqlite_path(&import_sqlite_path).unwrap();
+        import_store.create(CreateTaskInput {
+            title: "Imported sqlite task".to_string(),
+            description: Some("from snapshot".to_string()),
+            done_condition: None,
+            priority: Some(TaskPriority::High),
+            tags: vec!["sqlite".to_string()],
+            source: Some("backup".to_string()),
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: Some(50),
+            time_block_ids: vec!["block-3".to_string()],
+        });
+        let import_bytes = std::fs::read(import_sqlite_path).unwrap();
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks/import/sqlite?strategy=overwrite")
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"content_base64":"{}"}}"#,
+                        STANDARD.encode(import_bytes)
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let result: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(result["imported"], 1);
+        assert_eq!(result["skipped"], 0);
+        assert_eq!(result["total"], 1);
+        let tasks = task_store.list();
+        assert_eq!(tasks.len(), 1);
+        assert_eq!(tasks[0].title, "Imported sqlite task");
+        assert_eq!(tasks[0].time_block_ids, vec!["block-3".to_string()]);
     }
 }
