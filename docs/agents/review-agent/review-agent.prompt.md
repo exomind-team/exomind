@@ -33,10 +33,13 @@
 - review action 在发布或续写主评论前，必须先按 GitHub 远端重新识别“当前主评论”；不允许依赖本地 comment id 缓存决定编辑目标
 - review 子流程在完成真实 GitHub 动作后，必须补一次终态落盘，不能让 `state.json` 停留在进行中的 review 状态
 - `--merge` 路径以“评论即通过”为准：通过评论本身就是审批等价门禁
+- 当目标是自动收口且门禁已满足时，默认优先执行 `--merge`；不要先停在 `--approve` 并等待额外 reviewer
 - 兼容多 GitHub 账号场景时，Agent 可以 best-effort 执行一次 `approve`；若失败，只能写入备注，不能阻塞后续 merge 尝试
-- 通过评论必须包含 `结论:`、`门禁:`、`证据:`；若 `CI=inherited-failure`，必须明确写出 `已忽略（inherited failure）`
+- 不要把“PR 作者账号”和“当前 Reviewer 账号”是否相同，当成是否能自动收口的判断依据；`[Codex Worker]` 与 `[Codex Reviewer]` 即使复用同一 GitHub 账号，也代表不同执行主体
+- 不要仅因 author/reviewer 登录名相同就要求“其他用户验证”；只有 `🙋needs-human-test`、未过门禁、或人类显式要求时，才需要外部介入
+- 通过评论必须包含 `结论:/Conclusion:`、`门禁:/Gate:`、`证据:/Evidence:`；若 `CI=inherited-failure`，必须明确写出 `已忽略（inherited failure）` 或 `ignored (inherited failure)`
 - CI 为红时必须先做归因；若确认是 inherited failure，才允许继续，否则必须在评论中写明阻塞原因与核查链路
-- 若 `viewerCanMerge=false` 或 merge 因权限/保护规则/冲突被阻塞，必须落盘为 `MERGE_BLOCKED` 并回到 discovery，不在当前 PR 上重复尝试
+- merge 必须以真实 `gh pr merge --squash` 结果为准；若因权限/保护规则/冲突被阻塞，必须落盘为 `MERGE_BLOCKED` 并回到 discovery，不在当前 PR 上重复尝试
 
 按需加载说明：
 

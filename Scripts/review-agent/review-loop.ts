@@ -65,7 +65,6 @@ interface PullRequestActionView {
   title: string;
   body?: string;
   url: string;
-  viewerCanMerge?: boolean;
   labels?: Array<{ name?: string }>;
   comments?: Array<{ body?: string }>;
 }
@@ -209,7 +208,6 @@ async function runReviewAction(input: {
     hasNeedsHumanTestLabel,
     commentId,
     approvalGate,
-    viewerCanMerge: pullRequest.viewerCanMerge ?? null,
   }, {
     createComment: (commentBody) => createIssueComment(
       input.prNumber,
@@ -242,6 +240,7 @@ async function runReviewAction(input: {
       commentOperation: result.commentOperation,
       labelAdded: result.labelAdded,
       reviewDecision: result.reviewDecision,
+      reviewDecisionAttempted: result.reviewDecisionAttempted,
       approveFailure: result.approveFailure ?? null,
       mergeFailure: result.mergeFailure ?? null,
       mergeFailureKind: result.mergeFailureKind ?? null,
@@ -269,6 +268,8 @@ async function runReviewAction(input: {
       labelAdded: result.labelAdded,
       validationErrors: result.validationErrors,
       error: failureState.error,
+      reviewDecision: result.reviewDecision,
+      reviewDecisionAttempted: result.reviewDecisionAttempted,
       approveFailure: result.approveFailure ?? null,
       referencesMustRead: buildReviewReferencesMustRead({ actionMode: input.actionMode }),
     }, null, 2));
@@ -294,6 +295,9 @@ async function runReviewAction(input: {
       commentOperation: result.commentOperation ?? null,
       labelAdded: result.labelAdded,
       error: blockedState.error ?? result.error,
+      reviewDecision: result.reviewDecision,
+      reviewDecisionAttempted: result.reviewDecisionAttempted,
+      approveFailure: result.approveFailure ?? null,
       completion: terminalCompletion,
       persistedState: blockedState.state,
       nextAction: blockedState.nextAction,
@@ -317,6 +321,9 @@ async function runReviewAction(input: {
     commentOperation: result.commentOperation,
     labelAdded: result.labelAdded,
     error: failureState.error,
+    reviewDecision: result.reviewDecision,
+    reviewDecisionAttempted: result.reviewDecisionAttempted,
+    approveFailure: result.approveFailure ?? null,
     referencesMustRead: buildReviewReferencesMustRead({ actionMode: input.actionMode }),
   }, null, 2));
   process.exitCode = 1;

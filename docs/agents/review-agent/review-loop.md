@@ -137,18 +137,21 @@
 - `approve` 只有在显式传入 `--ci-status passed|inherited-failure` 与 `--local-verification-status passed` 时才允许执行
 - 若任一门禁参数缺失，脚本必须按 `missing` 处理，并阻断 `approve`
 - 若任一门禁为 `failed`，脚本必须阻断 `approve`，不得写出 `APPROVE_READY`
+- 自动收口时默认直接走 `merge`；`approve` 只保留给显式兼容场景，不应用作等待外部 reviewer 的中间站
 - `merge` 只有在 `CI = passed|inherited-failure` 且 `local verification = passed` 时才允许执行
-- `merge` 会在发布/更新通过评论后检查 `viewerCanMerge`；若为 `false`，直接落盘为 `MERGE_BLOCKED`
+- `merge` 会在发布/更新通过评论后直接执行真实 `gh pr merge --squash`；不得依赖额外的本地预检字段代替 GitHub merge 结果
 - 合并失败若属于权限/保护/不可合并/冲突，落盘为 `MERGE_BLOCKED`，且评论中需写明阻塞原因；冲突必须提示“请同步目标分支后重试”
 - `merge` 门禁缺失或失败同样视为 `MERGE_BLOCKED`，记录原因后回到 discovery，不重复尝试
 - 其他合并失败按可重试失败处理，但仅交由后续恢复流程处理，不在当前轮内重复尝试
+- merge 输出中的 `reviewDecision` 表示 formal GitHub review 是否真的落地；`reviewDecisionAttempted` 仅表示是否做过兼容性尝试，不能拿来替代真实审批结果
+- 同账号的 Worker/Reviewer 仍视为不同执行主体；当“评论即通过”门禁满足时，Agent 不应仅因账号相同就推断需要其他用户介入
 
 ## 退出状态
 
 - `REVIEW_POSTED`：审核评论已成功发布
 - `NEEDS_HUMAN_TEST`：需要人类验证
-- `APPROVE_READY`：本地审核结论干净，且门禁全部通过
-- `MERGE_READY`：所有合并条件满足
+- `APPROVE_READY`：仅显式 `--approve` 路径成功后使用；它代表 formal GitHub approve 已落地
+- `MERGE_READY`：`gh pr merge --squash` 已真实成功
 - `MERGE_BLOCKED`：合并被阻塞且不重试
 - `FAILED_RETRYABLE`：暂时性失败，可重试
 

@@ -13,6 +13,8 @@
 - 阶段 A 的核心修正是：`NO_TARGET` 也必须先重新 discovery，不能直接睡眠
 - 阶段 B1 的核心修正是：主评论先按 GitHub 远端重新识别，`selectedPrNumber` 与本地 comment id 只保留为 continuity hint
 - 阶段 B2 的核心修正是：清退最后一层主评论本地缓存，让 review-loop 完全依赖远端重新识别当前主评论
+- 阶段 C2 的核心修正是：merge 以真实 GitHub merge 结果为准，并允许中英双语 gate 模板
+- 阶段 C3 的核心修正是：同 GitHub 账号不等于同执行主体；Worker/Reviewer 角色语义必须独立于登录名
 
 ## 范围边界
 
@@ -111,8 +113,8 @@
 - `HAS_TARGET`：本轮存在至少一个需要行动的 PR，并已选中一个目标。
 - `REVIEW_POSTED`：当前目标 PR 已完成审阅并发布评论。
 - `NEEDS_HUMAN_TEST`：当前目标 PR 需要人类验证，Agent 不应继续尝试自动收口。
-- `APPROVE_READY`：本地审核结论干净，且门禁全部通过。
-- `MERGE_READY`：已满足合并条件并完成合并。
+- `APPROVE_READY`：显式 `--approve` 已真实成功。
+- `MERGE_READY`：评论即通过门禁满足，且 `gh pr merge --squash` 已真实成功。
 - `MERGE_BLOCKED`：合并被阻塞且不重试。
 - `FAILED_RETRYABLE`：本轮失败，但属于可重试失败。
 

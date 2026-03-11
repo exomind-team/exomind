@@ -38,7 +38,6 @@ export interface ExecuteReviewActionInput {
   hasNeedsHumanTestLabel: boolean;
   commentId?: string | null;
   approvalGate?: ReviewApprovalGate;
-  viewerCanMerge?: boolean | null;
 }
 
 interface ExecuteReviewActionDeps {
@@ -92,6 +91,7 @@ export type ExecuteReviewActionResult =
       completion: ReviewCompletionResult;
       labelAdded: boolean;
       reviewDecision: 'request-changes' | 'approve' | null;
+      reviewDecisionAttempted: 'request-changes' | 'approve' | null;
       approveFailure?: string | null;
       mergeFailure?: string | null;
       mergeFailureKind?: 'blocked' | 'retryable' | null;
@@ -102,6 +102,9 @@ export type ExecuteReviewActionResult =
       commentOperation: 'created' | 'edited';
       validationErrors: string[];
       labelAdded: boolean;
+      reviewDecision: 'request-changes' | 'approve' | null;
+      reviewDecisionAttempted: 'request-changes' | 'approve' | null;
+      approveFailure?: string | null;
     }
   | {
       status: 'failed';
@@ -110,6 +113,8 @@ export type ExecuteReviewActionResult =
       comment?: ReviewCommentRecord;
       commentOperation?: 'created' | 'edited';
       labelAdded: boolean;
+      reviewDecision: 'request-changes' | 'approve' | null;
+      reviewDecisionAttempted: 'request-changes' | 'approve' | null;
       approveFailure?: string | null;
     };
 
@@ -139,6 +144,8 @@ export async function executeReviewAction(
   deps: ExecuteReviewActionDeps,
 ): Promise<ExecuteReviewActionResult> {
   let approveFailure: string | null = null;
+  let reviewDecision: 'request-changes' | 'approve' | null = null;
+  let reviewDecisionAttempted: 'request-changes' | 'approve' | null = null;
 
   if (input.mode === 'approve') {
     const approveBlockingReason = findApproveBlockingReason({
@@ -151,6 +158,8 @@ export async function executeReviewAction(
         failedStage: 'approve-blocked',
         error: approveBlockingReason,
         labelAdded: false,
+        reviewDecision: null,
+        reviewDecisionAttempted: null,
       };
     }
   }
@@ -166,11 +175,15 @@ export async function executeReviewAction(
         failedStage: 'merge-gate-blocked',
         error: mergeBlockingReason,
         labelAdded: false,
+        reviewDecision: null,
+        reviewDecisionAttempted: null,
       };
     }
 
+    reviewDecisionAttempted = 'approve';
     try {
       await deps.submitReviewDecision('approve');
+      reviewDecision = 'approve';
     } catch (error) {
       approveFailure = toErrorMessage(error);
     }
@@ -187,13 +200,15 @@ export async function executeReviewAction(
         failedStage: 'label',
         error: toErrorMessage(error),
         labelAdded: false,
+        reviewDecision: null,
+        reviewDecisionAttempted: null,
       };
     }
   }
 
   const commentOperation = input.commentId ? 'edited' : 'created';
   const bodyToPublish = approveFailure
-    ? appendApproveFailureNote(input.body, approveFailure)
+    ? appendApproveFailureNote(input.body, approveFailure, input.expectedLanguage)
     : input.body;
   let writtenComment: ReviewCommentRecord;
   try {
@@ -206,6 +221,9 @@ export async function executeReviewAction(
       failedStage: 'comment-write',
       error: toErrorMessage(error),
       labelAdded,
+      reviewDecision,
+      reviewDecisionAttempted,
+      approveFailure,
     };
   }
 
@@ -220,6 +238,9 @@ export async function executeReviewAction(
       comment: writtenComment,
       commentOperation,
       labelAdded,
+      reviewDecision,
+      reviewDecisionAttempted,
+      approveFailure,
     };
   }
 
@@ -236,12 +257,17 @@ export async function executeReviewAction(
       commentOperation,
       validationErrors: validation.errors,
       labelAdded,
+      reviewDecision,
+      reviewDecisionAttempted,
+      approveFailure,
     };
   }
 
   if (input.mode === 'request-changes' || input.mode === 'approve') {
+    reviewDecisionAttempted = input.mode;
     try {
       await deps.submitReviewDecision(input.mode);
+      reviewDecision = input.mode;
     } catch (error) {
       return {
         status: 'failed',
@@ -250,6 +276,8 @@ export async function executeReviewAction(
         comment,
         commentOperation,
         labelAdded,
+        reviewDecision,
+        reviewDecisionAttempted,
       };
     }
 
@@ -259,25 +287,12 @@ export async function executeReviewAction(
       commentOperation,
       completion: mapActionModeToCompletion(input.mode),
       labelAdded,
-      reviewDecision: input.mode,
+      reviewDecision,
+      reviewDecisionAttempted,
     };
   }
 
   if (input.mode === 'merge') {
-    if (input.viewerCanMerge === false) {
-      return completeBlockedMerge({
-        comment,
-        commentOperation,
-        labelAdded,
-        approveFailure,
-        error: 'viewerCanMerge=false：当前账号无权合并或当前分支保护尚未满足。',
-        needsSync: false,
-        expectedLanguage: input.expectedLanguage,
-        approvalGate: input.approvalGate,
-        deps,
-      });
-    }
-
     try {
       await deps.mergePullRequest();
     } catch (error) {
@@ -293,6 +308,8 @@ export async function executeReviewAction(
           needsSync: classification.needsSync,
           expectedLanguage: input.expectedLanguage,
           approvalGate: input.approvalGate,
+          reviewDecision,
+          reviewDecisionAttempted,
           deps,
         });
       }
@@ -304,6 +321,8 @@ export async function executeReviewAction(
         comment,
         commentOperation,
         labelAdded,
+        reviewDecision,
+        reviewDecisionAttempted,
         approveFailure,
       };
     }
@@ -314,7 +333,8 @@ export async function executeReviewAction(
       commentOperation,
       completion: 'merge-ready',
       labelAdded,
-      reviewDecision: 'approve',
+      reviewDecision,
+      reviewDecisionAttempted,
       approveFailure,
       mergeFailure: null,
       mergeFailureKind: null,
@@ -327,7 +347,8 @@ export async function executeReviewAction(
     commentOperation,
     completion: mapActionModeToCompletion(input.mode),
     labelAdded,
-    reviewDecision: null,
+    reviewDecision,
+    reviewDecisionAttempted,
   };
 }
 
@@ -370,21 +391,36 @@ function toErrorMessage(error: unknown): string {
   return String(error);
 }
 
-function appendApproveFailureNote(body: string, error: string): string {
-  return `${body}\n\n备注：approve 失败（原因：${error}），不阻塞后续合并尝试。`;
+function appendApproveFailureNote(
+  body: string,
+  error: string,
+  language: ReviewCommentLanguage | null,
+): string {
+  if (language === 'en') {
+    return `${body}\n\nNote: formal approve failed (${error}), but merge can still continue because comment-equivalent approval already passed.`;
+  }
+
+  return `${body}\n\n备注：formal approve 失败（原因：${error}），但“评论即通过”门禁已满足，不阻塞后续合并尝试。`;
 }
 
-function appendMergeFailureNote(body: string, error: string, needsSync: boolean): string {
-  const lines = [`合并阻塞：${error}`];
+function appendMergeFailureNote(
+  body: string,
+  error: string,
+  needsSync: boolean,
+  language: ReviewCommentLanguage | null,
+): string {
+  const lines = language === 'en'
+    ? [`Merge blocked: ${error}`]
+    : [`合并阻塞：${error}`];
   if (needsSync) {
-    lines.push('请同步目标分支后重试。');
+    lines.push(language === 'en' ? 'Please sync the target branch and retry.' : '请同步目标分支后重试。');
   }
   return `${body}\n\n${lines.join('\n')}`;
 }
 
 function classifyMergeFailure(error: string): { kind: 'blocked' | 'retryable'; needsSync: boolean } {
   const normalized = error.toLowerCase();
-  const isPermission = /forbidden|not authorized|permission|access denied|insufficient/.test(normalized);
+  const isPermission = /forbidden|not authorized|permission|access denied|insufficient|resource not accessible by integration/.test(normalized);
   const isProtected = /protected branch|branch protection|required status|required review/.test(normalized);
   const isConflict = /merge conflict|conflict|not mergeable|cannot merge|mergeable/.test(normalized);
 
@@ -410,12 +446,15 @@ async function completeBlockedMerge(input: {
   needsSync: boolean;
   expectedLanguage: ReviewCommentLanguage | null;
   approvalGate?: ReviewApprovalGate;
+  reviewDecision: 'request-changes' | 'approve' | null;
+  reviewDecisionAttempted: 'request-changes' | 'approve' | null;
   deps: Pick<ExecuteReviewActionDeps, 'editComment' | 'readComment'>;
 }): Promise<ExecuteReviewActionResult> {
   const updatedBody = appendMergeFailureNote(
     input.comment.body,
     input.error,
     input.needsSync,
+    input.expectedLanguage,
   );
 
   let comment = input.comment;
@@ -430,6 +469,8 @@ async function completeBlockedMerge(input: {
       comment,
       commentOperation: input.commentOperation,
       labelAdded: input.labelAdded,
+      reviewDecision: input.reviewDecision,
+      reviewDecisionAttempted: input.reviewDecisionAttempted,
       approveFailure: input.approveFailure,
     };
   }
@@ -447,6 +488,9 @@ async function completeBlockedMerge(input: {
       commentOperation: input.commentOperation,
       validationErrors: updatedValidation.errors,
       labelAdded: input.labelAdded,
+      reviewDecision: input.reviewDecision,
+      reviewDecisionAttempted: input.reviewDecisionAttempted,
+      approveFailure: input.approveFailure,
     };
   }
 
@@ -456,7 +500,8 @@ async function completeBlockedMerge(input: {
     commentOperation: input.commentOperation,
     completion: 'merge-blocked',
     labelAdded: input.labelAdded,
-    reviewDecision: 'approve',
+    reviewDecision: input.reviewDecision,
+    reviewDecisionAttempted: input.reviewDecisionAttempted,
     approveFailure: input.approveFailure,
     mergeFailure: input.error,
     mergeFailureKind: 'blocked',

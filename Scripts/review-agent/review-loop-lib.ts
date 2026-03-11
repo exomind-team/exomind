@@ -110,6 +110,13 @@ const PROGRESS_ACTION_PATTERN = /(已(同步|更新|推进|移动|完成|合并|
 export const HUMAN_TEST_PREFIX = `${REVIEWER_PREFIX} ❤️ 需要人类测试`;
 export const NEEDS_HUMAN_TEST_LABEL = '🙋needs-human-test';
 const INHERITED_FAILURE_MARKER = '已忽略（inherited failure）';
+const INHERITED_FAILURE_MARKER_EN = 'ignored (inherited failure)';
+const PASS_COMMENT_HEADERS = {
+  conclusion: ['结论:', 'Conclusion:'],
+  gate: ['门禁:', 'Gate:'],
+  evidence: ['证据:', 'Evidence:'],
+} as const;
+const LOCAL_VERIFICATION_KEYS = ['本地验证=', 'local verification='] as const;
 const COMPLETION_STATE_MAP: Record<ReviewCompletionResult, Extract<ReviewAgentStateValue, 'REVIEW_POSTED' | 'NEEDS_HUMAN_TEST' | 'APPROVE_READY' | 'MERGE_READY' | 'MERGE_BLOCKED'>> = {
   'review-posted': 'REVIEW_POSTED',
   'needs-human-test': 'NEEDS_HUMAN_TEST',
@@ -202,6 +209,7 @@ export function validateReviewComment(
     evidence: false,
   };
   let gateLine = '';
+  const passCommentSectionLanguageHints = new Set<ReviewCommentLanguage>();
 
   if (input.mode === 'needs-human-test') {
     if (!trimmed.startsWith(HUMAN_TEST_PREFIX)) {
@@ -242,43 +250,52 @@ export function validateReviewComment(
   if (input.mode === 'merge') {
     for (const line of input.body.split(/\r?\n/)) {
       const trimmedLine = line.trim();
-      if (trimmedLine.startsWith('结论:')) {
+      if (matchesPassCommentHeader(trimmedLine, PASS_COMMENT_HEADERS.conclusion)) {
         gateLineRequirements.conclusion = true;
+        passCommentSectionLanguageHints.add(
+          trimmedLine.startsWith('结论:') ? 'zh-CN' : 'en',
+        );
         continue;
       }
-      if (trimmedLine.startsWith('门禁:')) {
+      if (matchesPassCommentHeader(trimmedLine, PASS_COMMENT_HEADERS.gate)) {
         gateLineRequirements.gate = true;
         gateLine = trimmedLine;
+        passCommentSectionLanguageHints.add(
+          trimmedLine.startsWith('门禁:') ? 'zh-CN' : 'en',
+        );
         continue;
       }
-      if (trimmedLine.startsWith('证据:')) {
+      if (matchesPassCommentHeader(trimmedLine, PASS_COMMENT_HEADERS.evidence)) {
         gateLineRequirements.evidence = true;
+        passCommentSectionLanguageHints.add(
+          trimmedLine.startsWith('证据:') ? 'zh-CN' : 'en',
+        );
       }
     }
 
     if (!gateLineRequirements.conclusion) {
-      errors.push('Pass comments must include a 结论 line.');
+      errors.push('Pass comments must include a 结论/Conclusion line.');
     }
     if (!gateLineRequirements.gate) {
-      errors.push('Pass comments must include a 门禁 line.');
+      errors.push('Pass comments must include a 门禁/Gate line.');
     }
     if (!gateLineRequirements.evidence) {
-      errors.push('Pass comments must include a 证据 line.');
+      errors.push('Pass comments must include a 证据/Evidence line.');
     }
     if (gateLineRequirements.gate) {
       if (!gateLine.includes('CI=')) {
         errors.push('门禁行必须包含 CI=。');
       }
-      if (!gateLine.includes('本地验证=')) {
-        errors.push('门禁行必须包含 本地验证=。');
+      if (!LOCAL_VERIFICATION_KEYS.some((key) => gateLine.includes(key))) {
+        errors.push('门禁行必须包含 本地验证=/local verification=。');
       }
     }
   }
 
   const expectsInheritedMarker = input.approvalGate?.ciStatus === 'inherited-failure'
     || /CI\s*=\s*inherited-failure/i.test(input.body);
-  if (expectsInheritedMarker && !input.body.includes(INHERITED_FAILURE_MARKER)) {
-    errors.push(`Inherited CI failures must be marked as ${INHERITED_FAILURE_MARKER}.`);
+  if (expectsInheritedMarker && !hasInheritedFailureMarker(input.body)) {
+    errors.push(`Inherited CI failures must be marked as ${INHERITED_FAILURE_MARKER} or ${INHERITED_FAILURE_MARKER_EN}.`);
   }
 
   if (/[?？]{5,}/u.test(input.body)) {
@@ -290,11 +307,14 @@ export function validateReviewComment(
   }
 
   const detectedLanguage = detectLanguage(input.body);
+  const passCommentSectionLanguage = passCommentSectionLanguageHints.size === 1
+    ? [...passCommentSectionLanguageHints][0] ?? null
+    : null;
   const ignoreLanguageMismatch = input.mode === 'merge'
-    && input.expectedLanguage === 'zh-CN'
     && gateLineRequirements.conclusion
     && gateLineRequirements.gate
-    && gateLineRequirements.evidence;
+    && gateLineRequirements.evidence
+    && passCommentSectionLanguage === input.expectedLanguage;
   if (
     input.expectedLanguage
     && detectedLanguage
@@ -326,7 +346,9 @@ export function mapActionModeToCompletion(
 }
 
 export function buildPullRequestActionJsonFields(mode: ReviewActionMode): string[] {
-  const fields = [
+  void mode;
+
+  return [
     'number',
     'title',
     'body',
@@ -334,12 +356,6 @@ export function buildPullRequestActionJsonFields(mode: ReviewActionMode): string
     'labels',
     'comments',
   ];
-
-  if (mode === 'merge') {
-    fields.push('viewerCanMerge');
-  }
-
-  return fields;
 }
 
 export function findApproveBlockingReason(input: {
@@ -449,6 +465,17 @@ function scoreFile(file: PullRequestFile): number {
   }
 
   return 3;
+}
+
+function matchesPassCommentHeader(
+  line: string,
+  headers: readonly string[],
+): boolean {
+  return headers.some((header) => line.startsWith(header));
+}
+
+function hasInheritedFailureMarker(body: string): boolean {
+  return body.includes(INHERITED_FAILURE_MARKER) || /\bignored\s*\(inherited failure\)/i.test(body);
 }
 
 function detectLanguage(text: string): ReviewCommentLanguage | null {

@@ -34,6 +34,18 @@ const PASS_COMMENT_BODY_INHERITED = [
   '门禁: CI=inherited-failure 本地验证=passed',
   '证据: npx vitest run tests/unit/review-agent/review-loop.test.ts',
 ].join('\n');
+const PASS_COMMENT_BODY_EN = [
+  '[Codex Reviewer] Reviewed the latest change. No blocking issues remain.',
+  'Conclusion: pass',
+  'Gate: CI=passed local verification=passed',
+  'Evidence: npx vitest run tests/unit/review-agent/review-loop.test.ts',
+].join('\n');
+const PASS_COMMENT_BODY_INHERITED_EN = [
+  '[Codex Reviewer] Reviewed the latest change. No blocking issues remain. ignored (inherited failure).',
+  'Conclusion: pass',
+  'Gate: CI=inherited-failure local verification=passed',
+  'Evidence: npx vitest run tests/unit/review-agent/review-loop.test.ts',
+].join('\n');
 const MERGE_DISABLED = () => {
   throw new Error('should not merge');
 };
@@ -426,7 +438,7 @@ describe('review-agent review loop', () => {
     ]));
 
     const withProgressUpdate = validateReviewComment({
-      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。最新进展：已同步 dev 并更新 PR 描述，准备进入 approve gate。',
+      body: '[Codex Reviewer] 已审阅最新变更，未发现问题。最新进展：已同步 dev 并更新 PR 描述，准备执行评论即通过合并。',
       expectedLanguage: 'zh-CN',
       mode: 'comment',
     });
@@ -446,6 +458,18 @@ describe('review-agent review loop', () => {
     });
 
     expect(valid.valid).toBe(true);
+
+    const englishValid = validateReviewComment({
+      body: PASS_COMMENT_BODY_EN,
+      expectedLanguage: 'en',
+      mode: 'merge',
+      approvalGate: {
+        ciStatus: 'passed',
+        localVerificationStatus: 'passed',
+      },
+    });
+
+    expect(englishValid.valid).toBe(true);
 
     const missingFields = validateReviewComment({
       body: [
@@ -492,6 +516,18 @@ describe('review-agent review loop', () => {
     });
 
     expect(withMarker.valid).toBe(true);
+
+    const withEnglishMarker = validateReviewComment({
+      body: PASS_COMMENT_BODY_INHERITED_EN,
+      expectedLanguage: 'en',
+      mode: 'merge',
+      approvalGate: {
+        ciStatus: 'inherited-failure',
+        localVerificationStatus: 'passed',
+      },
+    });
+
+    expect(withEnglishMarker.valid).toBe(true);
   });
 
   it('rejects suspicious full-width question-mark runs in zh-CN comments', () => {
@@ -533,7 +569,7 @@ describe('review-agent review loop', () => {
     ]);
   });
 
-  it('requests viewerCanMerge only for merge actions', () => {
+  it('does not request viewerCanMerge for merge actions either', () => {
     expect(buildPullRequestActionJsonFields('merge')).toEqual([
       'number',
       'title',
@@ -541,7 +577,6 @@ describe('review-agent review loop', () => {
       'url',
       'labels',
       'comments',
-      'viewerCanMerge',
     ]);
   });
 
@@ -853,7 +888,8 @@ describe('review-agent review loop', () => {
     expect(result.status).toBe('completed');
     if (result.status === 'completed') {
       expect(result.completion).toBe('merge-ready');
-      expect(result.reviewDecision).toBe('approve');
+      expect(result.reviewDecision).toBeNull();
+      expect(result.reviewDecisionAttempted).toBe('approve');
       expect(result.approveFailure).toContain('approve denied');
     }
     expect(writtenBody).toContain('approve 失败');
@@ -914,7 +950,7 @@ describe('review-agent review loop', () => {
     expect(editedBody).toContain('请同步目标分支后重试');
   });
 
-  it('marks merge-blocked without calling merge when viewerCanMerge is false', async () => {
+  it('marks merge-blocked from the actual merge result when permissions prevent merge', async () => {
     let createdBody = '';
     let editedBody = '';
     const steps: string[] = [];
@@ -924,7 +960,6 @@ describe('review-agent review loop', () => {
       body: PASS_COMMENT_BODY,
       expectedLanguage: 'zh-CN',
       hasNeedsHumanTestLabel: false,
-      viewerCanMerge: false,
       approvalGate: {
         ciStatus: 'passed',
         localVerificationStatus: 'passed',
@@ -964,7 +999,7 @@ describe('review-agent review loop', () => {
       },
       mergePullRequest: () => {
         steps.push('merge');
-        throw new Error('should not merge when viewerCanMerge is false');
+        throw new Error('GraphQL: Resource not accessible by integration');
       },
     });
 
@@ -972,10 +1007,12 @@ describe('review-agent review loop', () => {
     if (result.status === 'completed') {
       expect(result.completion).toBe('merge-blocked');
       expect(result.mergeFailureKind).toBe('blocked');
-      expect(result.mergeFailure).toContain('viewerCanMerge=false');
+      expect(result.mergeFailure).toContain('Resource not accessible');
+      expect(result.reviewDecision).toBe('approve');
+      expect(result.reviewDecisionAttempted).toBe('approve');
     }
-    expect(steps).toEqual(['approve', 'create-comment', 'read-comment', 'edit-comment', 'read-comment']);
+    expect(steps).toEqual(['approve', 'create-comment', 'read-comment', 'merge', 'edit-comment', 'read-comment']);
     expect(editedBody).toContain('合并阻塞');
-    expect(editedBody).toContain('viewerCanMerge=false');
+    expect(editedBody).toContain('Resource not accessible');
   });
 });
