@@ -28,6 +28,7 @@ const permissionsQueryMock = vi.fn();
 const nativeGetUserMediaMock = vi.fn();
 const runtimeFlags = {
   developerModeEnabled: false,
+  voiceShortcutSendMode: 'insert-only' as 'insert-only' | 'auto-enter-send',
 };
 
 class FakeMediaRecorder {
@@ -199,6 +200,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     permissionsQueryMock.mockResolvedValue({ state: 'prompt' });
     nativeGetUserMediaMock.mockReset();
     runtimeFlags.developerModeEnabled = false;
+    runtimeFlags.voiceShortcutSendMode = 'insert-only';
 
     Object.defineProperty(window.navigator, 'permissions', {
       configurable: true,
@@ -215,6 +217,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     window.localStorage.removeItem('exomind:voiceShortcutAsrProvider');
     window.localStorage.removeItem('exomind:voiceShortcutMicPrewarmEnabled');
+    window.localStorage.removeItem('exomind:voiceShortcutSendMode');
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.appKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.accessKey);
     window.localStorage.removeItem(VOLCANO_STORAGE_KEYS.resourceId);
@@ -1052,6 +1055,63 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('normalizes duplicated volcano transcript before finishing（火山重复文本在收口前会归一）', async () => {
+    setVoiceShortcutAsrProvider('volcano');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
+    window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
+
+    let resolveFinish: ((value: {
+      text: string;
+      confidence: number;
+      lang: string;
+      duration: number;
+    }) => void) | null = null;
+
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'volcano_asr_stream_start') {
+        return 'stream-session-dedup';
+      }
+      if (command === 'volcano_asr_stream_push') {
+        return null;
+      }
+      if (command === 'volcano_asr_stream_finish') {
+        return await new Promise((resolve) => {
+          resolveFinish = resolve;
+        });
+      }
+      if (command === 'voice_recording_set_active' || command === 'simulate_paste') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    resolveFinish?.({
+      text: '火山实时结果火山实时结果',
+      confidence: 0.98,
+      lang: 'zh-CN',
+      duration: 1800,
+    });
+    await flushAsync();
+
+    expect(writeClipboardMock).toHaveBeenCalledWith('火山实时结果');
+    expect(addEventMock).toHaveBeenCalledWith('火山实时结果', new Set(['voice']));
+
+    service.destroy();
+  });
+
   it('ignores late volcano chunks after stop begins（停止录音后忽略迟到 chunk，避免 finish 后继续 push）', async () => {
     setVoiceShortcutAsrProvider('volcano');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');
@@ -1183,5 +1243,57 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     service.destroy();
     nowSpy.mockRestore();
+  });
+
+  it('keeps paste-only behavior by default for external targets（默认仅插入文本，不自动回车）', async () => {
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    invokeMock.mockClear();
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('start');
+    await flushAsync();
+
+    expect(invokeMock).toHaveBeenCalledWith('simulate_paste');
+    expect(invokeMock).not.toHaveBeenCalledWith('simulate_enter');
+
+    service.destroy();
+  });
+
+  it('auto-sends after paste when external mode is auto-enter-send（外部输入开启后自动补回车发送）', async () => {
+    vi.useFakeTimers();
+    window.localStorage.setItem('exomind:voiceShortcutSendMode', 'auto-enter-send');
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    invokeMock.mockClear();
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('start');
+    await flushAsync();
+    await vi.advanceTimersByTimeAsync(120);
+    await flushAsync();
+
+    expect(invokeMock).toHaveBeenCalledWith('simulate_paste');
+    expect(invokeMock).toHaveBeenCalledWith('simulate_enter');
+
+    service.destroy();
+    vi.useRealTimers();
+  });
+
+  it('syncs overlay bottom offset changes to native window（悬浮窗底部间距变化会同步到原生窗口）', async () => {
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    invokeMock.mockClear();
+    window.dispatchEvent(new StorageEvent('storage', {
+      key: 'exomind:voiceOverlayBottomOffset',
+      newValue: '72',
+    }));
+    await flushAsync();
+
+    expect(invokeMock).toHaveBeenCalledWith('voice_overlay_set_bottom_offset', { offset: 72 });
+
+    service.destroy();
   });
 });

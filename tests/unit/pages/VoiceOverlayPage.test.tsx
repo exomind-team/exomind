@@ -4,6 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { applyThemePreference } from '@/config/theme';
 
 let overlayListener: ((event: { payload: Record<string, unknown> }) => void) | null = null;
+const overlayPreferenceState = {
+  showDiagnostics: false,
+  transcriptLines: 3,
+};
 
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async (eventName: string, listener: (event: { payload: Record<string, unknown> }) => void) => {
@@ -30,7 +34,11 @@ vi.mock('@/config/theme', () => ({
 
 vi.mock('@/config/voice-overlay-preferences', () => ({
   getVoiceOverlayOpacity: vi.fn(() => 74),
+  getVoiceOverlayShowDiagnostics: vi.fn(() => overlayPreferenceState.showDiagnostics),
+  getVoiceOverlayTranscriptLines: vi.fn(() => overlayPreferenceState.transcriptLines),
   subscribeVoiceOverlayOpacityChanges: vi.fn(() => () => {}),
+  subscribeVoiceOverlayShowDiagnosticsChanges: vi.fn(() => () => {}),
+  subscribeVoiceOverlayTranscriptLinesChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/developer-mode', () => ({
@@ -50,6 +58,8 @@ describe('VoiceOverlayPage', () => {
   });
 
   afterEach(() => {
+    overlayPreferenceState.showDiagnostics = false;
+    overlayPreferenceState.transcriptLines = 3;
     vi.restoreAllMocks();
   });
 
@@ -71,14 +81,17 @@ describe('VoiceOverlayPage', () => {
     expect(styleTag?.textContent).toContain('background: transparent !important;');
     expect(styleTag?.textContent).toContain('grid-template-columns: 28px minmax(0, 1fr);');
     expect(styleTag?.textContent).toContain('text-align: left;');
+    expect(styleTag?.textContent).toContain('align-items: flex-end;');
     expect(styleTag?.textContent).toContain('overflow-y: auto;');
     expect(styleTag?.textContent).toContain('border: none;');
     expect(styleTag?.textContent).toContain('width: min(560px, calc(100vw - 16px));');
+    expect(styleTag?.textContent).toContain('height: auto;');
     expect(styleTag?.textContent).toContain('min-height: 112px;');
     expect(styleTag?.textContent).toContain('hsl(var(--bg-card) / 0.74)');
+    expect(styleTag?.textContent).toContain('height: calc(1.5em * 3);');
   });
 
-  it('shows startup hint while arming microphone and stream（启动中先显示准备提示）', async () => {
+  it('hides diagnostic details by default（默认隐藏诊断信息）', async () => {
     render(<VoiceOverlayPage />);
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1120);
 
@@ -94,9 +107,7 @@ describe('VoiceOverlayPage', () => {
 
     expect(screen.getByText('准备启动语音输入…')).toBeInTheDocument();
     expect(screen.getByText('正在等待麦克风权限并连接识别链路')).toBeInTheDocument();
-    expect(
-      screen.getByText('调试 · 首帧 120ms')
-    ).toBeInTheDocument();
+    expect(screen.queryByText('调试 · 首帧 120ms')).not.toBeInTheDocument();
     nowSpy.mockRestore();
   });
 
@@ -119,6 +130,7 @@ describe('VoiceOverlayPage', () => {
   });
 
   it('shows live preview with fixed-width duration and provider meta（录音中显示实时预览、固定宽度时间与模型信息）', async () => {
+    overlayPreferenceState.showDiagnostics = true;
     render(<VoiceOverlayPage />);
     const longText = Array.from({ length: 160 }, (_, index) => String(index % 10)).join('');
     const nowSpy = vi.spyOn(Date, 'now').mockReturnValue(1000);
@@ -163,6 +175,43 @@ describe('VoiceOverlayPage', () => {
     expect(styleTag?.textContent).toContain('.voice-overlay--recording .overlay-transcript .overlay-text');
     expect(styleTag?.textContent).toContain('color: hsl(var(--brand-accent));');
     nowSpy.mockRestore();
+  });
+
+  it('applies configured transcript line count（按配置应用实时文本行数）', async () => {
+    overlayPreferenceState.transcriptLines = 5;
+    const { container } = render(<VoiceOverlayPage />);
+
+    await act(async () => {
+      overlayListener?.({
+        payload: {
+          state: 'recording',
+          duration: 1,
+          text: '这是一个用于验证悬浮窗多行展示的实时文本',
+        },
+      });
+    });
+
+    const styleTag = container.querySelector('style');
+    expect(styleTag?.textContent).toContain('height: calc(1.5em * 5);');
+  });
+
+  it('maps one line to exact single-line height（1 行配置对应单行高度）', async () => {
+    overlayPreferenceState.transcriptLines = 1;
+    const { container } = render(<VoiceOverlayPage />);
+
+    await act(async () => {
+      overlayListener?.({
+        payload: {
+          state: 'recording',
+          duration: 1,
+          text: '这是一个用于验证单行显示高度的实时文本',
+        },
+      });
+    });
+
+    const styleTag = container.querySelector('style');
+    expect(styleTag?.textContent).toContain('height: calc(1.5em * 1);');
+    expect(styleTag?.textContent).not.toContain('height: calc(1.5em * 1 +');
   });
 
   it('shows finish and cancel shortcut hints while recognizing（识别中显示快捷键提示）', async () => {

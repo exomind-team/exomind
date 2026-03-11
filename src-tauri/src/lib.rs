@@ -22,9 +22,9 @@ use commands::runtime_commands::{
     runtime_service_status, runtime_service_stop, signal_publish_fast, RuntimeProcessState,
 };
 use commands::shortcut_commands::{
-    ensure_voice_overlay_window, register_voice_shortcut, simulate_paste, voice_overlay_hide,
-    voice_overlay_show, voice_recording_set_active, voice_shortcut_get, voice_shortcut_set,
-    VoiceShortcutState,
+    ensure_voice_overlay_window, register_voice_shortcut, simulate_enter, simulate_paste,
+    voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
+    voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, VoiceShortcutState,
 };
 use commands::workspace_commands::{
     get_agent_workspace_actions, get_agent_workspace_knowledge, get_agent_workspace_knowledge_list,
@@ -146,9 +146,11 @@ pub fn run() {
             runtime_service_reachable_address,
             signal_publish_fast,
             // 语音快捷键 + 悬浮窗命令
+            simulate_enter,
             simulate_paste,
             voice_overlay_show,
             voice_overlay_hide,
+            voice_overlay_set_bottom_offset,
             voice_shortcut_set,
             voice_shortcut_get,
             voice_recording_set_active,

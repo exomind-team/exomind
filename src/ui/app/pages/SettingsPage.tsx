@@ -71,12 +71,32 @@ import {
   type VoiceShortcutHotkey,
 } from '@/config/voice-shortcut-hotkey';
 import {
+  getVoiceShortcutSendMode,
+  setVoiceShortcutSendMode,
+  subscribeVoiceShortcutSendModeChanges,
+  type VoiceShortcutSendMode,
+} from '@/config/voice-shortcut-send-mode';
+import {
   getVoiceShortcutMicPrewarmEnabled,
   setVoiceShortcutMicPrewarmEnabled,
 } from '@/config/voice-shortcut-mic-prewarm';
 import {
+  DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET,
   getVoiceOverlayOpacity,
+  getVoiceOverlayShowDiagnostics,
+  getVoiceOverlayTranscriptLines,
+  getVoiceOverlayBottomOffset,
+  MAX_VOICE_OVERLAY_BOTTOM_OFFSET,
+  subscribeVoiceOverlayBottomOffsetChanges,
+  subscribeVoiceOverlayShowDiagnosticsChanges,
+  subscribeVoiceOverlayTranscriptLinesChanges,
   setVoiceOverlayOpacity,
+  setVoiceOverlayShowDiagnostics,
+  setVoiceOverlayTranscriptLines,
+  setVoiceOverlayBottomOffset,
+  MAX_VOICE_OVERLAY_TRANSCRIPT_LINES,
+  MIN_VOICE_OVERLAY_BOTTOM_OFFSET,
+  MIN_VOICE_OVERLAY_TRANSCRIPT_LINES,
 } from '@/config/voice-overlay-preferences';
 import {
   getVoiceShortcutAsrProvider,
@@ -249,6 +269,9 @@ export function SettingsPage() {
   const [voiceShortcutHotkey, setVoiceShortcutHotkeyState] = useState<VoiceShortcutHotkey>(
     () => getVoiceShortcutHotkey()
   );
+  const [voiceShortcutSendMode, setVoiceShortcutSendModeState] = useState<VoiceShortcutSendMode>(
+    () => getVoiceShortcutSendMode()
+  );
   const [voiceShortcutAsrProvider, setVoiceShortcutAsrProviderState] = useState<VoiceShortcutAsrProvider>(
     () => getVoiceShortcutAsrProvider()
   );
@@ -256,6 +279,15 @@ export function SettingsPage() {
     () => getVoiceShortcutMicPrewarmEnabled()
   );
   const [voiceOverlayOpacity, setVoiceOverlayOpacityState] = useState<number>(() => getVoiceOverlayOpacity());
+  const [voiceOverlayShowDiagnostics, setVoiceOverlayShowDiagnosticsState] = useState<boolean>(
+    () => getVoiceOverlayShowDiagnostics()
+  );
+  const [voiceOverlayTranscriptLines, setVoiceOverlayTranscriptLinesState] = useState<number>(
+    () => getVoiceOverlayTranscriptLines()
+  );
+  const [voiceOverlayBottomOffset, setVoiceOverlayBottomOffsetState] = useState<number>(
+    () => getVoiceOverlayBottomOffset()
+  );
   const [volcanoResourceId, setVolcanoResourceIdState] = useState<string>(() => getVolcanoResourceId());
   const [feedbackPreferences, setFeedbackPreferencesState] = useState<FeedbackPreferences>(
     () => getFeedbackPreferences()
@@ -639,6 +671,30 @@ export function SettingsPage() {
   }, []);
 
   useEffect(() => {
+    return subscribeVoiceShortcutSendModeChanges((mode) => {
+      setVoiceShortcutSendModeState(mode);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeVoiceOverlayShowDiagnosticsChanges((enabled) => {
+      setVoiceOverlayShowDiagnosticsState(enabled);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeVoiceOverlayTranscriptLinesChanges((lines) => {
+      setVoiceOverlayTranscriptLinesState(lines);
+    });
+  }, []);
+
+  useEffect(() => {
+    return subscribeVoiceOverlayBottomOffsetChanges((offset) => {
+      setVoiceOverlayBottomOffsetState(offset);
+    });
+  }, []);
+
+  useEffect(() => {
     return subscribeVoiceShortcutAsrProviderChanges((provider) => {
       setVoiceShortcutAsrProviderState(provider);
     });
@@ -684,6 +740,26 @@ export function SettingsPage() {
   const handleVoiceOverlayOpacityChange = (nextValue: number) => {
     const normalizedValue = setVoiceOverlayOpacity(nextValue);
     setVoiceOverlayOpacityState(normalizedValue);
+  };
+
+  const handleVoiceShortcutSendModeChange = (mode: VoiceShortcutSendMode) => {
+    const normalizedMode = setVoiceShortcutSendMode(mode);
+    setVoiceShortcutSendModeState(normalizedMode);
+  };
+
+  const handleVoiceOverlayShowDiagnosticsToggle = (enabled: boolean) => {
+    const normalizedValue = setVoiceOverlayShowDiagnostics(enabled);
+    setVoiceOverlayShowDiagnosticsState(normalizedValue);
+  };
+
+  const handleVoiceOverlayTranscriptLinesChange = (nextValue: number) => {
+    const normalizedValue = setVoiceOverlayTranscriptLines(nextValue);
+    setVoiceOverlayTranscriptLinesState(normalizedValue);
+  };
+
+  const handleVoiceOverlayBottomOffsetChange = (nextValue: number) => {
+    const normalizedValue = setVoiceOverlayBottomOffset(nextValue);
+    setVoiceOverlayBottomOffsetState(normalizedValue);
   };
 
   const handleVoiceShortcutMicPrewarmToggle = (enabled: boolean) => {
@@ -773,6 +849,79 @@ export function SettingsPage() {
       />
       <span className="min-w-[44px] text-right text-xs text-[#78716C] dark:text-[#D6D3D1]">
         {voiceOverlayOpacity}%
+      </span>
+    </div>
+  );
+
+  const renderVoiceShortcutSendModeControl = () => (
+    <div
+      role="group"
+      aria-label="聊天与外部输入语音完成后"
+      className="flex items-center rounded-[10px] bg-[#F5F0ED] p-[3px] dark:bg-[#292524]"
+    >
+      <button
+        type="button"
+        data-testid="new-settings-voice-shortcut-send-mode-insert-only"
+        aria-pressed={voiceShortcutSendMode === 'insert-only'}
+        onClick={() => handleVoiceShortcutSendModeChange('insert-only')}
+        disabled={loading}
+        className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+          voiceShortcutSendMode === 'insert-only'
+            ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+            : 'text-[#A8A29E]'
+        }`}
+      >
+        仅插入文本
+      </button>
+      <button
+        type="button"
+        data-testid="new-settings-voice-shortcut-send-mode-auto-enter-send"
+        aria-pressed={voiceShortcutSendMode === 'auto-enter-send'}
+        onClick={() => handleVoiceShortcutSendModeChange('auto-enter-send')}
+        disabled={loading}
+        className={`rounded-[8px] px-2.5 py-1.5 text-xs transition-colors disabled:cursor-not-allowed ${
+          voiceShortcutSendMode === 'auto-enter-send'
+            ? 'bg-white font-medium text-[#1C1917] shadow-[0_1px_3px_rgba(0,0,0,0.08)] dark:bg-[#44403C] dark:text-[#FAFAF9]'
+            : 'text-[#A8A29E]'
+        }`}
+      >
+        自动回车发送
+      </button>
+    </div>
+  );
+
+  const renderVoiceOverlayTranscriptLinesControl = () => (
+    <div className="flex min-w-[186px] items-center gap-3">
+      <input
+        type="range"
+        min={MIN_VOICE_OVERLAY_TRANSCRIPT_LINES}
+        max={MAX_VOICE_OVERLAY_TRANSCRIPT_LINES}
+        step={1}
+        value={voiceOverlayTranscriptLines}
+        data-testid="new-settings-voice-overlay-transcript-lines-slider"
+        onChange={(event) => handleVoiceOverlayTranscriptLinesChange(Number(event.target.value))}
+        className="w-full accent-[#C75B3A]"
+      />
+      <span className="min-w-[44px] text-right text-xs text-[#78716C] dark:text-[#D6D3D1]">
+        {voiceOverlayTranscriptLines} 行
+      </span>
+    </div>
+  );
+
+  const renderVoiceOverlayBottomOffsetControl = () => (
+    <div className="flex min-w-[186px] items-center gap-3">
+      <input
+        type="range"
+        min={MIN_VOICE_OVERLAY_BOTTOM_OFFSET}
+        max={MAX_VOICE_OVERLAY_BOTTOM_OFFSET}
+        step={1}
+        value={voiceOverlayBottomOffset}
+        data-testid="new-settings-voice-overlay-bottom-offset-slider"
+        onChange={(event) => handleVoiceOverlayBottomOffsetChange(Number(event.target.value))}
+        className="w-full accent-[#C75B3A]"
+      />
+      <span className="min-w-[44px] text-right text-xs text-[#78716C] dark:text-[#D6D3D1]">
+        {voiceOverlayBottomOffset}px
       </span>
     </div>
   );
@@ -1040,6 +1189,17 @@ export function SettingsPage() {
                   <span className="text-xs text-[#A8A29E]">仅作用于「当下」页面输入框，默认插入输入框</span>
                 </div>
                 <Divider />
+                <div data-testid="new-settings-voice-shortcut-send-mode-row">
+                  <SettingRow
+                    icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="聊天与外部输入语音完成后"
+                    right={renderVoiceShortcutSendModeControl()}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">作用于 Agent 聊天与其他外部输入目标，默认仅插入文本。</span>
+                </div>
+                <Divider />
                 <div data-testid="new-settings-voice-shortcut-row">
                   <SettingRow
                     icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
@@ -1124,6 +1284,51 @@ export function SettingsPage() {
                 <div className="pb-[14px] pl-[46px] pr-4">
                   <span className="text-xs text-[#A8A29E]">
                     调整语音悬浮窗的磨砂强度，亮暗主题都会同步使用该透明度。
+                  </span>
+                </div>
+                <Divider />
+                <div data-testid="new-settings-voice-overlay-diagnostics-row">
+                  <SettingRow
+                    icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="显示语音悬浮窗诊断信息"
+                    right={(
+                      <Switch
+                        data-testid="new-settings-voice-overlay-diagnostics-switch"
+                        checked={voiceOverlayShowDiagnostics}
+                        onCheckedChange={handleVoiceOverlayShowDiagnosticsToggle}
+                      />
+                    )}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">
+                    控制是否显示首帧、麦克风、会话和首字耗时等诊断信息，默认关闭。
+                  </span>
+                </div>
+                <Divider />
+                <div data-testid="new-settings-voice-overlay-transcript-lines-row">
+                  <SettingRow
+                    icon={<List className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="悬浮窗实时文本行数"
+                    right={renderVoiceOverlayTranscriptLinesControl()}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">
+                    可选 1 到 5 行，默认 3 行，用于调节实时识别文本的可见高度。
+                  </span>
+                </div>
+                <Divider />
+                <div data-testid="new-settings-voice-overlay-bottom-offset-row">
+                  <SettingRow
+                    icon={<Waypoints className="h-[18px] w-[18px] text-[#78716C]" />}
+                    label="悬浮窗距任务栏间距"
+                    right={renderVoiceOverlayBottomOffsetControl()}
+                  />
+                </div>
+                <div className="pb-[14px] pl-[46px] pr-4">
+                  <span className="text-xs text-[#A8A29E]">
+                    调整悬浮窗距离任务栏上边缘的距离，默认 {voiceOverlayBottomOffset === DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET ? '已上移避开任务栏。' : `${voiceOverlayBottomOffset}px。`}
                   </span>
                 </div>
                 {voiceShortcutAsrProvider === 'volcano' ? (
@@ -1532,6 +1737,17 @@ export function SettingsPage() {
               <span className="text-xs text-[#A8A29E]">仅作用于「当下」页面输入框，默认插入输入框</span>
             </div>
             <Divider />
+            <div data-testid="new-settings-voice-shortcut-send-mode-row">
+              <SettingRow
+                icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="聊天与外部输入语音完成后"
+                right={renderVoiceShortcutSendModeControl()}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">作用于 Agent 聊天与其他外部输入目标，默认仅插入文本。</span>
+            </div>
+            <Divider />
             <div data-testid="new-settings-voice-shortcut-row">
               <SettingRow
                 icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />}
@@ -1616,6 +1832,51 @@ export function SettingsPage() {
             <div className="pb-[14px] pl-[46px] pr-4">
               <span className="text-xs text-[#A8A29E]">
                 调整语音悬浮窗的磨砂强度，亮暗主题都会同步使用该透明度。
+              </span>
+            </div>
+            <Divider />
+            <div data-testid="new-settings-voice-overlay-diagnostics-row">
+              <SettingRow
+                icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="显示语音悬浮窗诊断信息"
+                right={(
+                  <Switch
+                    data-testid="new-settings-voice-overlay-diagnostics-switch"
+                    checked={voiceOverlayShowDiagnostics}
+                    onCheckedChange={handleVoiceOverlayShowDiagnosticsToggle}
+                  />
+                )}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">
+                控制是否显示首帧、麦克风、会话和首字耗时等诊断信息，默认关闭。
+              </span>
+            </div>
+            <Divider />
+            <div data-testid="new-settings-voice-overlay-transcript-lines-row">
+              <SettingRow
+                icon={<List className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="悬浮窗实时文本行数"
+                right={renderVoiceOverlayTranscriptLinesControl()}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">
+                可选 1 到 5 行，默认 3 行，用于调节实时识别文本的可见高度。
+              </span>
+            </div>
+            <Divider />
+            <div data-testid="new-settings-voice-overlay-bottom-offset-row">
+              <SettingRow
+                icon={<Waypoints className="h-[18px] w-[18px] text-[#78716C]" />}
+                label="悬浮窗距任务栏间距"
+                right={renderVoiceOverlayBottomOffsetControl()}
+              />
+            </div>
+            <div className="pb-[14px] pl-[46px] pr-4">
+              <span className="text-xs text-[#A8A29E]">
+                调整悬浮窗距离任务栏上边缘的距离，默认 {voiceOverlayBottomOffset === DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET ? '已上移避开任务栏。' : `${voiceOverlayBottomOffset}px。`}
               </span>
             </div>
             {voiceShortcutAsrProvider === 'volcano' ? (

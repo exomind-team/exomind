@@ -86,6 +86,12 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/voice-shortcut-send-mode', () => ({
+  getVoiceShortcutSendMode: vi.fn(() => 'insert-only'),
+  setVoiceShortcutSendMode: vi.fn((value: string) => value),
+  subscribeVoiceShortcutSendModeChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/voice-shortcut-hotkey', () => ({
   VOICE_SHORTCUT_HOTKEY_VALUES: ['Alt+Q', 'Alt+W', 'Ctrl+Space'],
   getVoiceShortcutHotkey: vi.fn(() => 'Alt+Q'),
@@ -97,9 +103,24 @@ vi.mock('@/config/voice-overlay-preferences', () => ({
   DEFAULT_VOICE_OVERLAY_OPACITY: 62,
   MIN_VOICE_OVERLAY_OPACITY: 32,
   MAX_VOICE_OVERLAY_OPACITY: 92,
+  DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES: 3,
+  MIN_VOICE_OVERLAY_TRANSCRIPT_LINES: 1,
+  MAX_VOICE_OVERLAY_TRANSCRIPT_LINES: 5,
+  DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET: 56,
+  MIN_VOICE_OVERLAY_BOTTOM_OFFSET: 24,
+  MAX_VOICE_OVERLAY_BOTTOM_OFFSET: 160,
   getVoiceOverlayOpacity: vi.fn(() => 62),
   setVoiceOverlayOpacity: vi.fn((value: number) => value),
+  getVoiceOverlayShowDiagnostics: vi.fn(() => false),
+  setVoiceOverlayShowDiagnostics: vi.fn((value: boolean) => value),
+  getVoiceOverlayTranscriptLines: vi.fn(() => 3),
+  setVoiceOverlayTranscriptLines: vi.fn((value: number) => value),
+  getVoiceOverlayBottomOffset: vi.fn(() => 56),
+  setVoiceOverlayBottomOffset: vi.fn((value: number) => value),
   subscribeVoiceOverlayOpacityChanges: vi.fn(() => () => {}),
+  subscribeVoiceOverlayShowDiagnosticsChanges: vi.fn(() => () => {}),
+  subscribeVoiceOverlayTranscriptLinesChanges: vi.fn(() => () => {}),
+  subscribeVoiceOverlayBottomOffsetChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/voice-shortcut-mic-prewarm', () => ({

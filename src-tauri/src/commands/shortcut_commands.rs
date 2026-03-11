@@ -1,5 +1,5 @@
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, State};
@@ -17,13 +17,20 @@ const VOICE_OVERLAY_WINDOW_LABEL: &str = "voice-overlay";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_OVERLAY_WIDTH: f64 = 560.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const VOICE_OVERLAY_HEIGHT: f64 = 128.0;
+const VOICE_OVERLAY_HEIGHT: f64 = 240.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-const VOICE_OVERLAY_BOTTOM_MARGIN: i32 = 32;
+const DEFAULT_VOICE_OVERLAY_BOTTOM_MARGIN: i32 = 56;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+const MIN_VOICE_OVERLAY_BOTTOM_MARGIN: i32 = 24;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+const MAX_VOICE_OVERLAY_BOTTOM_MARGIN: i32 = 160;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 static VOICE_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 static VOICE_CANCEL_KEY_DOWN: AtomicBool = AtomicBool::new(false);
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+static VOICE_OVERLAY_BOTTOM_MARGIN: AtomicI32 =
+    AtomicI32::new(DEFAULT_VOICE_OVERLAY_BOTTOM_MARGIN);
 
 /// Voice shortcut runtime state（运行时快捷键状态）.
 #[derive(Default)]
@@ -152,6 +159,14 @@ fn normalize_shortcut(raw_shortcut: &str) -> Result<String, String> {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn clamp_overlay_bottom_margin(raw_value: i32) -> i32 {
+    raw_value.clamp(
+        MIN_VOICE_OVERLAY_BOTTOM_MARGIN,
+        MAX_VOICE_OVERLAY_BOTTOM_MARGIN,
+    )
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn register_shortcut_listener(app: &AppHandle, shortcut: &str) -> Result<(), String> {
     // Make registration idempotent（幂等）for hot-reload / duplicate init paths.
     let _ = app.global_shortcut().unregister(shortcut);
@@ -245,7 +260,10 @@ fn calculate_overlay_position(
     let width = VOICE_OVERLAY_WIDTH.round() as i32;
     let height = VOICE_OVERLAY_HEIGHT.round() as i32;
     let horizontal_center_offset = ((work_area_width as i32 - width) / 2).max(0);
-    let vertical_offset = (work_area_height as i32 - height - VOICE_OVERLAY_BOTTOM_MARGIN).max(0);
+    let bottom_margin = clamp_overlay_bottom_margin(
+        VOICE_OVERLAY_BOTTOM_MARGIN.load(Ordering::SeqCst),
+    );
+    let vertical_offset = (work_area_height as i32 - height - bottom_margin).max(0);
 
     (
         work_area_x + horizontal_center_offset,
@@ -293,6 +311,29 @@ pub async fn simulate_paste() -> Result<(), String> {
     })
     .await
     .map_err(|e| e.to_string())?
+}
+
+/// Simulate Enter key press via enigo.
+#[tauri::command]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub async fn simulate_enter() -> Result<(), String> {
+    tokio::task::spawn_blocking(|| {
+        use enigo::{Direction, Enigo, Key, Keyboard, Settings};
+        let mut enigo = Enigo::new(&Settings::default()).map_err(|e| e.to_string())?;
+        enigo
+            .key(Key::Return, Direction::Click)
+            .map_err(|e| e.to_string())?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
+/// Simulate Enter key press via enigo（移动端不支持）.
+#[tauri::command]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn simulate_enter() -> Result<(), String> {
+    Err("simulate_enter is not supported on mobile targets".to_string())
 }
 
 /// Simulate Ctrl+V paste via enigo（移动端不支持）.
@@ -352,6 +393,30 @@ pub async fn voice_overlay_hide(_app: AppHandle) -> Result<(), String> {
     Ok(())
 }
 
+/// Update voice overlay bottom offset（更新语音悬浮窗底部间距）.
+#[tauri::command]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub async fn voice_overlay_set_bottom_offset(
+    app: AppHandle,
+    offset: i32,
+) -> Result<i32, String> {
+    let normalized = clamp_overlay_bottom_margin(offset);
+    VOICE_OVERLAY_BOTTOM_MARGIN.store(normalized, Ordering::SeqCst);
+    if let Some(window) = app.get_webview_window(VOICE_OVERLAY_WINDOW_LABEL) {
+        position_voice_overlay(&app, &window)?;
+    }
+    Ok(normalized)
+}
+
+#[tauri::command]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn voice_overlay_set_bottom_offset(
+    _app: AppHandle,
+    offset: i32,
+) -> Result<i32, String> {
+    Ok(offset)
+}
+
 /// Update voice shortcut by settings page（设置页更新快捷键）.
 #[tauri::command]
 pub async fn voice_shortcut_set(
@@ -393,13 +458,13 @@ mod tests {
     fn calculate_overlay_position_centers_bottom_on_primary_work_area() {
         let (x, y) = calculate_overlay_position(0, 0, 1920, 1080);
         assert_eq!(x, 680);
-        assert_eq!(y, 920);
+        assert_eq!(y, 784);
     }
 
     #[test]
     fn calculate_overlay_position_respects_monitor_offset() {
         let (x, y) = calculate_overlay_position(1920, 40, 1920, 1040);
         assert_eq!(x, 2600);
-        assert_eq!(y, 920);
+        assert_eq!(y, 784);
     }
 }

@@ -3,10 +3,16 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
+import { setVoiceShortcutSendMode } from '@/config/voice-shortcut-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
-import { setVoiceOverlayOpacity } from '@/config/voice-overlay-preferences';
+import {
+  setVoiceOverlayOpacity,
+  setVoiceOverlayBottomOffset,
+  setVoiceOverlayShowDiagnostics,
+  setVoiceOverlayTranscriptLines,
+} from '@/config/voice-overlay-preferences';
 import { setVolcanoResourceId } from '@/lib/asr/volcano-config';
 
 const invokeMock = vi.fn();
@@ -45,10 +51,14 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
+    expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
     expect(screen.getByText('快捷语音引擎')).toBeInTheDocument();
     expect(screen.getByText('预启动麦克风')).toBeInTheDocument();
     expect(screen.getByText('悬浮窗透明度')).toBeInTheDocument();
+    expect(screen.getByText('显示语音悬浮窗诊断信息')).toBeInTheDocument();
+    expect(screen.getByText('悬浮窗实时文本行数')).toBeInTheDocument();
+    expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
   });
@@ -89,6 +99,47 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(setVoiceOverlayOpacity(74)).toBe(74);
     expect(screen.getByText('74%')).toBeInTheDocument();
+  });
+
+  it('toggles chat and external input send mode from input section', () => {
+    const setModeMock = vi.mocked(setVoiceShortcutSendMode);
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-shortcut-send-mode-auto-enter-send'));
+
+    expect(setModeMock).toHaveBeenCalledWith('auto-enter-send');
+    expect(screen.getByTestId('new-settings-voice-shortcut-send-mode-auto-enter-send')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('toggles overlay diagnostics visibility from input section', () => {
+    const setDiagnosticsMock = vi.mocked(setVoiceOverlayShowDiagnostics);
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-voice-overlay-diagnostics-switch'));
+
+    expect(setDiagnosticsMock).toHaveBeenCalledWith(true);
+  });
+
+  it('updates overlay transcript line count from input section', () => {
+    const setLinesMock = vi.mocked(setVoiceOverlayTranscriptLines);
+    render(<SettingsPage />);
+
+    const slider = screen.getByTestId('new-settings-voice-overlay-transcript-lines-slider');
+    fireEvent.change(slider, { target: { value: '5' } });
+
+    expect(setLinesMock).toHaveBeenCalledWith(5);
+    expect(screen.getByText('5 行')).toBeInTheDocument();
+  });
+
+  it('updates overlay bottom offset from input section', () => {
+    const setOffsetMock = vi.mocked(setVoiceOverlayBottomOffset);
+    render(<SettingsPage />);
+
+    const slider = screen.getByTestId('new-settings-voice-overlay-bottom-offset-slider');
+    fireEvent.change(slider, { target: { value: '72' } });
+
+    expect(setOffsetMock).toHaveBeenCalledWith(72);
+    expect(screen.getByText('72px')).toBeInTheDocument();
   });
 
   it('toggles microphone prewarm from input section', () => {
@@ -167,5 +218,25 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     fireEvent.click(screen.getByText('MOSS 语音测试'));
 
     expect(screen.getByText('请先开启开发者模式后使用语音测试')).toBeInTheDocument();
+  });
+
+  it('renders the new voice settings in desktop layout（桌面布局也包含新增语音设置项）', () => {
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    render(<SettingsPage />);
+
+    expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
+    expect(screen.getByText('显示语音悬浮窗诊断信息')).toBeInTheDocument();
+    expect(screen.getByText('悬浮窗实时文本行数')).toBeInTheDocument();
+    expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
   });
 });

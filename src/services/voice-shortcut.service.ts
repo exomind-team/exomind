@@ -8,6 +8,7 @@ import {
   subscribeVoiceShortcutHotkeyChanges,
   type VoiceShortcutHotkey,
 } from '../config/voice-shortcut-hotkey';
+import { getVoiceShortcutSendMode } from '@/config/voice-shortcut-send-mode';
 import {
   getVoiceShortcutMicPrewarmEnabled,
   subscribeVoiceShortcutMicPrewarmChanges,
@@ -45,12 +46,18 @@ import {
   createVolcanoStreamingCapture,
   type VolcanoStreamingCapture,
 } from '@/lib/asr/volcano-streaming-capture';
+import { normalizeVolcanoRecognitionText } from '@/lib/voice/recognition-text';
+import {
+  getVoiceOverlayBottomOffset,
+  subscribeVoiceOverlayBottomOffsetChanges,
+} from '@/config/voice-overlay-preferences';
 
 export type VoiceShortcutState = 'idle' | 'arming' | 'recording' | 'recognizing' | 'done' | 'error';
 
 const LOG_TAG = '[VoiceShortcut]';
 const AUTO_HIDE_DONE_MS = 2000;
 const AUTO_HIDE_ERROR_MS = 3000;
+const AUTO_ENTER_SEND_DELAY_MS = 120;
 const VOLCANO_WARM_MAINTENANCE_INTERVAL_MS = 3000;
 const VOLCANO_WARM_ROTATE_AFTER_MS = 5000;
 
@@ -110,6 +117,7 @@ export class VoiceShortcutService {
   private unlistenProvider: (() => void) | null = null;
   private unlistenMicPrewarm: (() => void) | null = null;
   private unlistenDeveloperMode: (() => void) | null = null;
+  private unlistenOverlayBottomOffset: (() => void) | null = null;
   private autoHideTimer: ReturnType<typeof setTimeout> | null = null;
   private warmMaintenanceTimer: ReturnType<typeof setInterval> | null = null;
   private warmRotateTimer: ReturnType<typeof setTimeout> | null = null;
@@ -202,6 +210,10 @@ export class VoiceShortcutService {
         this.developerModeEnabled = enabled;
       });
 
+      this.unlistenOverlayBottomOffset = subscribeVoiceOverlayBottomOffsetChanges((offset) => {
+        void this.syncVoiceOverlayBottomOffset(offset);
+      });
+
       this.unlisten = await listen<string>('voice-shortcut', (event) => {
         if (event.payload === 'start') this.handleStart();
         if (event.payload === 'stop') this.handleStop();
@@ -219,6 +231,7 @@ export class VoiceShortcutService {
         document.addEventListener('visibilitychange', this.handleVisibilityChange);
       }
 
+      await this.syncVoiceOverlayBottomOffset(getVoiceOverlayBottomOffset());
       this.syncWarmMaintenanceLoop();
       void this.prewarmResourcesForProvider();
     } finally {
@@ -239,6 +252,8 @@ export class VoiceShortcutService {
     this.unlistenMicPrewarm = null;
     this.unlistenDeveloperMode?.();
     this.unlistenDeveloperMode = null;
+    this.unlistenOverlayBottomOffset?.();
+    this.unlistenOverlayBottomOffset = null;
     if (typeof window !== 'undefined') {
       window.removeEventListener('focus', this.handleAppForeground);
     }
@@ -272,6 +287,24 @@ export class VoiceShortcutService {
     }
     this.handleAppForeground();
   };
+
+  private async syncVoiceOverlayBottomOffset(offset: number): Promise<void> {
+    if (!isTauri()) {
+      return;
+    }
+
+    try {
+      await invoke('voice_overlay_set_bottom_offset', { offset });
+    } catch (error) {
+      this.debugWarn(LOG_TAG, 'failed to sync voice overlay bottom offset:', error);
+    }
+  }
+
+  private async waitForAutoEnterSend(): Promise<void> {
+    await new Promise<void>((resolve) => {
+      window.setTimeout(resolve, AUTO_ENTER_SEND_DELAY_MS);
+    });
+  }
 
   private beginActivationTracking(): void {
     const now = Date.now();
@@ -852,6 +885,10 @@ export class VoiceShortcutService {
         const writeResult = await getClipboardService().writeText(result.text);
         if (!writeResult.ok) throw new Error(writeResult.title);
         await invoke('simulate_paste');
+        if (getVoiceShortcutSendMode() === 'auto-enter-send') {
+          await this.waitForAutoEnterSend();
+          await invoke('simulate_enter');
+        }
       })(),
       getEventLogService().addEvent(result.text, new Set(['voice'])),
     ]);
@@ -904,7 +941,14 @@ export class VoiceShortcutService {
   }
 
   private normalizeRecognitionText(text: string | null | undefined): string {
-    return text?.trim() ?? '';
+    const normalizedText = text?.trim() ?? '';
+    if (!normalizedText) {
+      return '';
+    }
+    if (this.asrProvider === 'volcano') {
+      return normalizeVolcanoRecognitionText(normalizedText);
+    }
+    return normalizedText;
   }
 
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {

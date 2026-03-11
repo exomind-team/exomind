@@ -15,7 +15,11 @@ import {
 } from '@/config/theme';
 import {
   getVoiceOverlayOpacity,
+  getVoiceOverlayShowDiagnostics,
+  getVoiceOverlayTranscriptLines,
   subscribeVoiceOverlayOpacityChanges,
+  subscribeVoiceOverlayShowDiagnosticsChanges,
+  subscribeVoiceOverlayTranscriptLinesChanges,
 } from '@/config/voice-overlay-preferences';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
 
@@ -47,6 +51,8 @@ const AUTO_HIDE_ERROR_MS = 3000;
 export function VoiceOverlayPage() {
   const [shortcut, setShortcut] = useState<VoiceShortcutHotkey>(() => getVoiceShortcutHotkey());
   const [overlayOpacity, setOverlayOpacity] = useState<number>(() => getVoiceOverlayOpacity());
+  const [showDiagnostics, setShowDiagnostics] = useState<boolean>(() => getVoiceOverlayShowDiagnostics());
+  const [transcriptLines, setTranscriptLines] = useState<number>(() => getVoiceOverlayTranscriptLines());
   const [data, setData] = useState<OverlayData>({
     state: 'idle',
     duration: 0,
@@ -124,6 +130,16 @@ export function VoiceOverlayPage() {
   useEffect(() => {
     setOverlayOpacity(getVoiceOverlayOpacity());
     return subscribeVoiceOverlayOpacityChanges((nextOpacity) => setOverlayOpacity(nextOpacity));
+  }, []);
+
+  useEffect(() => {
+    setShowDiagnostics(getVoiceOverlayShowDiagnostics());
+    return subscribeVoiceOverlayShowDiagnosticsChanges((nextValue) => setShowDiagnostics(nextValue));
+  }, []);
+
+  useEffect(() => {
+    setTranscriptLines(getVoiceOverlayTranscriptLines());
+    return subscribeVoiceOverlayTranscriptLinesChanges((nextValue) => setTranscriptLines(nextValue));
   }, []);
 
   useEffect(() => {
@@ -240,12 +256,13 @@ export function VoiceOverlayPage() {
             firstFrameMs={firstFrameMs ?? undefined}
             recognitionMs={data.recognitionMs}
             errorMessage={data.errorMessage}
+            showDiagnostics={showDiagnostics}
             transcriptRef={transcriptRef}
             onTranscriptScroll={handleTranscriptScroll}
           />
         </div>
       </div>
-      <style>{overlayStyles(overlayPrimaryAlpha, overlaySecondaryAlpha)}</style>
+      <style>{overlayStyles(overlayPrimaryAlpha, overlaySecondaryAlpha, transcriptLines)}</style>
     </div>
   );
 }
@@ -305,6 +322,7 @@ function StatusText({
   firstFrameMs,
   recognitionMs,
   errorMessage,
+  showDiagnostics,
   transcriptRef,
   onTranscriptScroll,
 }: {
@@ -325,6 +343,7 @@ function StatusText({
   firstFrameMs?: number;
   recognitionMs?: number;
   errorMessage: string;
+  showDiagnostics: boolean;
   transcriptRef: RefObject<HTMLDivElement>;
   onTranscriptScroll: () => void;
 }) {
@@ -347,7 +366,7 @@ function StatusText({
           <span className="overlay-text overlay-text--secondary">
             {statusHint || '正在等待麦克风权限并连接识别链路'}
           </span>
-          {typeof firstFrameMs === 'number' ? (
+          {showDiagnostics && typeof firstFrameMs === 'number' ? (
             <span className="overlay-text overlay-text--diagnostic">{`调试 · 首帧 ${formatLatency(firstFrameMs)}`}</span>
           ) : null}
         </span>
@@ -371,7 +390,7 @@ function StatusText({
             ) : null}
             <span>{`${isLivePreview ? '实时预览 · ' : ''}再按 ${shortcut} 结束 · Esc 取消`}</span>
           </span>
-          {(typeof firstFrameMs === 'number'
+          {showDiagnostics && (typeof firstFrameMs === 'number'
             || typeof inputReadyMs === 'number'
             || typeof sessionReadyMs === 'number'
             || typeof activationMs === 'number'
@@ -405,7 +424,7 @@ function StatusText({
             <span className="overlay-text">{transcript || '识别中…'}</span>
           </div>
           <span className="overlay-text overlay-text--secondary">{`识别中... · ${shortcut} 开始新一轮 · Esc 取消`}</span>
-          {(typeof firstFrameMs === 'number'
+          {showDiagnostics && (typeof firstFrameMs === 'number'
             || typeof inputReadyMs === 'number'
             || typeof sessionReadyMs === 'number'
             || typeof activationMs === 'number'
@@ -507,7 +526,7 @@ function formatSessionWarmState(
   }
 }
 
-const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css */ `
+const overlayStyles = (primaryAlpha: number, secondaryAlpha: number, transcriptLines: number) => /* css */ `
   html, body, #root {
     width: 100%;
     height: 100%;
@@ -520,7 +539,7 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css *
     width: 100vw;
     height: 100vh;
     display: flex;
-    align-items: center;
+    align-items: flex-end;
     justify-content: center;
     padding: 8px;
     pointer-events: none;
@@ -537,7 +556,8 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css *
     align-items: stretch;
     gap: 12px;
     width: min(560px, calc(100vw - 16px));
-    height: calc(100vh - 16px);
+    height: auto;
+    max-height: calc(100vh - 16px);
     min-height: 112px;
     padding: 16px 18px;
     border-radius: 24px;
@@ -626,12 +646,14 @@ const overlayStyles = (primaryAlpha: number, secondaryAlpha: number) => /* css *
     min-height: 0;
     max-width: 100%;
     flex: 1;
-    justify-content: space-between;
+    justify-content: flex-start;
   }
 
   .overlay-transcript {
-    min-height: 0;
-    flex: 1;
+    height: calc(1.5em * ${transcriptLines});
+    min-height: calc(1.5em * ${transcriptLines});
+    max-height: calc(1.5em * ${transcriptLines});
+    flex: 0 1 auto;
     overflow-y: auto;
     overscroll-behavior: contain;
     padding-right: 6px;
