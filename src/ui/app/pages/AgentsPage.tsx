@@ -2176,6 +2176,7 @@ function SignalHistoryTabView({
               key={topic}
               type="button"
               onClick={() => setTopicFilter(topic)}
+              data-testid={`signal-history-filter-${topic === 'all' ? 'all' : topic}`}
               className={`rounded-full px-2.5 py-1 text-[10px] font-medium ${
                 active
                   ? 'bg-[#C75B3A] text-white'
@@ -2201,11 +2202,13 @@ function SignalHistoryTabView({
             return (
             <div
               key={eventItem.id}
+              data-testid={`signal-history-item-${eventItem.id}`}
               className="overflow-hidden"
             >
               <button
                 type="button"
                 onClick={() => onSelectSignal(eventItem.id)}
+                data-testid={`signal-history-open-${eventItem.id}`}
                 className="flex w-full items-start gap-3 px-4 py-3 text-left hover:bg-[#FAF7F5] dark:hover:bg-[#1C1917]"
               >
                 <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full" style={{ backgroundColor: tint }} />
@@ -2223,7 +2226,10 @@ function SignalHistoryTabView({
                   <p className="mt-0.5 text-[10px] text-[#A8A29E] dark:text-[#78716C]">{eventItem.source}</p>
                 </div>
               </button>
-              <details className="border-t border-[#F5F0ED] px-4 py-2 dark:border-[#1C1917]">
+              <details
+                data-testid={`signal-history-payload-${eventItem.id}`}
+                className="border-t border-[#F5F0ED] px-4 py-2 dark:border-[#1C1917]"
+              >
                 <summary className="cursor-pointer text-[11px] text-[#78716C] dark:text-[#A8A29E]">
                   展开 payload
                 </summary>
