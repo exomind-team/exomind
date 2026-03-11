@@ -49,6 +49,7 @@
     --sidebar-border: 24 16% 88%;
     --sidebar-accent: 24 33% 90%;
     --sidebar-accent-foreground: 20 12% 14%;
+    --settings-tone-default: hsl(var(--brand-accent));
     --settings-tone-developer: #1C1917;
 
     /* UserCard 渐变背景和阴影 */
@@ -101,6 +102,7 @@
     --sidebar-border: 12 6% 15%;
     --sidebar-accent: 24 10% 18%;
     --sidebar-accent-foreground: 60 9% 98%;
+    --settings-tone-default: hsl(var(--brand-accent));
     --settings-tone-developer: #FAFAF9;
 
     /* UserCard 渐变背景和阴影 - 暗色 */
@@ -120,12 +122,60 @@
 
 @layer utilities {
   .settings-tone-border {
-    border-color: var(--settings-tone-color, #C75B3A);
+    border-color: var(--settings-tone-color, var(--settings-tone-default));
   }
 
   .settings-tone-fill {
-    background-color: var(--settings-tone-color, #C75B3A);
+    background-color: var(--settings-tone-color, var(--settings-tone-default));
     opacity: 0.2;
+  }
+
+  .settings-dialog-input {
+    @apply w-full rounded-xl border bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E];
+    border-color: #F0ECE8;
+  }
+
+  .settings-dialog-input:focus {
+    border-color: var(--settings-tone-color, var(--settings-tone-default));
+    box-shadow: 0 0 0 1px var(--settings-tone-color, var(--settings-tone-default));
+  }
+
+  .settings-dialog-meta-row {
+    @apply flex items-center gap-2;
+  }
+
+  .settings-dialog-meta-row[data-align='between'] {
+    @apply justify-between;
+  }
+
+  .settings-dialog-meta-row[data-align='start'] {
+    @apply justify-start;
+  }
+
+  .settings-dialog-meta-row[data-align='end'] {
+    @apply justify-end;
+  }
+
+  .settings-dialog-meta-toggle {
+    @apply text-xs text-[#78716C] underline-offset-2 hover:underline dark:text-[#A8A29E];
+  }
+
+  .settings-dialog-meta-text {
+    @apply text-xs text-[#A8A29E];
+  }
+
+  .settings-dialog-secondary-button {
+    @apply flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium text-[#78716C] transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917];
+    border-color: #F0ECE8;
+  }
+
+  .settings-dialog-primary-button {
+    @apply flex-1 rounded-xl px-4 py-2.5 text-sm font-medium text-white transition-[filter];
+    background-color: var(--settings-tone-color, var(--settings-tone-default));
+  }
+
+  .settings-dialog-primary-button:hover {
+    filter: brightness(0.92);
   }
 
   .agent-topology-controls {

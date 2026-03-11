@@ -242,8 +242,15 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
   it('saves MOSS token from input settings dialog', () => {
     render(<SettingsPage />);
 
+    const tokenRow = screen.getByTestId('new-settings-voice-token-row');
+    expect(tokenRow.querySelector('.lucide-key')).not.toBeNull();
+    expect(tokenRow.querySelector('.lucide-bot')).toBeNull();
+
     fireEvent.click(screen.getByText('MOSS API Token'));
     expect(screen.getByText('语音输入设置')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '显示 Token' })).toBeInTheDocument();
+    expect(screen.getByText('用于新 UI 语音输入转写')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '清空' })).toBeInTheDocument();
 
     const tokenInput = screen.getByPlaceholderText('输入 MOSS API Token');
     fireEvent.change(tokenInput, { target: { value: 'Bearer sk-test-123456' } });
@@ -251,6 +258,24 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(screen.getByText('MOSS API Token 已保存')).toBeInTheDocument();
     expect(screen.getByText('已配置 (sk-t***56)')).toBeInTheDocument();
+  });
+
+  it('keeps sync server dialog as plain single-value editor without secret-only footer controls', () => {
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByText('同步服务器'));
+
+    expect(screen.getByText('设置事件日志同步的服务器地址')).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: '显示 Token' })).toBeNull();
+    expect(screen.queryByRole('button', { name: '清空' })).toBeNull();
+
+    const syncInput = screen.getByPlaceholderText('http://127.0.0.1:6984');
+    expect(syncInput).toHaveAttribute('type', 'url');
+
+    const cancelButton = screen.getByRole('button', { name: '取消' });
+    const saveButton = screen.getByRole('button', { name: '保存' });
+    expect(cancelButton.className).toContain('flex-1');
+    expect(saveButton.className).toContain('flex-1');
   });
 
   it('hides voice test rows when developer mode is disabled', () => {
@@ -280,5 +305,29 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('显示语音悬浮窗诊断信息')).toBeInTheDocument();
     expect(screen.getByText('悬浮窗实时文本行数')).toBeInTheDocument();
     expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
+  });
+
+  it('uses dev dialog input classes for AI settings fields（AI 设置输入框严格复用 dev 焦点样式）', () => {
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByText('AI API Key').closest('button') as HTMLButtonElement);
+
+    const apiKeyInput = screen.getByPlaceholderText('sk-...');
+    const baseUrlInput = screen.getByPlaceholderText('https://api.openai.com/v1');
+    const modelInput = screen.getByPlaceholderText('gpt-4o');
+
+    for (const input of [apiKeyInput, baseUrlInput, modelInput]) {
+      expect(input.className).toContain('border-[#F0ECE8]');
+      expect(input.className).toContain('bg-white');
+      expect(input.className).toContain('text-[#1C1917]');
+      expect(input.className).toContain('placeholder:text-[#D6D3D1]');
+      expect(input.className).toContain('focus:border-[#C75B3A]');
+      expect(input.className).toContain('focus:ring-1');
+      expect(input.className).toContain('focus:ring-[#C75B3A]');
+      expect(input.className).toContain('dark:border-[#292524]');
+      expect(input.className).toContain('dark:bg-[#1C1917]');
+      expect(input.className).toContain('dark:text-[#FAFAF9]');
+      expect(input.className).toContain('dark:placeholder:text-[#57534E]');
+    }
   });
 });

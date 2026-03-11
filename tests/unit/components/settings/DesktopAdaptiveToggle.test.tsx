@@ -32,6 +32,8 @@ describe('SettingsPage - Desktop adaptive toggle（桌面适配开关）', () =>
     const toggle = screen.getByTestId('new-settings-desktop-adaptive-switch');
 
     expect(drawerContent.getAttribute('style') ?? '').toContain('--settings-tone-color: var(--settings-tone-developer)');
-    expect(toggle.getAttribute('style') ?? '').toContain('--switch-checked-bg: var(--settings-tone-color, #C75B3A)');
+    expect(toggle.getAttribute('style') ?? '').toContain(
+      '--switch-checked-bg: var(--settings-tone-color, var(--settings-tone-default))',
+    );
   });
 });

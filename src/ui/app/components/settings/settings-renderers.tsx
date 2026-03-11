@@ -1,6 +1,6 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { CSSProperties } from 'react';
-import { ChevronRight } from 'lucide-react';
+import { Check, ChevronRight } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
 import { SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
@@ -54,6 +54,8 @@ function formatErrorMessage(prefix: string | undefined, error: unknown): string 
 function isPromiseLike<T>(value: unknown): value is PromiseLike<T> {
   return typeof value === 'object' && value !== null && typeof (value as PromiseLike<T>).then === 'function';
 }
+
+const SETTINGS_TONE_RESOLVED_COLOR = 'var(--settings-tone-color, var(--settings-tone-default))';
 
 function NoticeBlock({
   message,
@@ -150,7 +152,7 @@ function BooleanRenderer({ item }: { item: BooleanSettingsItem }) {
             checked={value}
             onCheckedChange={handleChange}
             style={{
-              '--switch-checked-bg': 'var(--settings-tone-color, #C75B3A)',
+              '--switch-checked-bg': SETTINGS_TONE_RESOLVED_COLOR,
               ...(buildSettingsToneStyle(toneColor) ?? {}),
             } as CSSProperties}
           />
@@ -255,6 +257,35 @@ function buildInlineEnumOverlayFillStyle(toneColor: string | null): CSSPropertie
   }
 
   return buildSettingsToneStyle(toneColor);
+}
+
+function buildDialogEnumOptionCardClass(hasDescription: boolean): string {
+  return `settings-dialog-option-card relative w-full overflow-hidden rounded-xl text-left ${hasDescription ? 'px-4 py-3' : 'px-4 py-3 text-sm'}`;
+}
+
+function buildDialogEnumSelectionOverlayClass(selected: boolean): string {
+  return `pointer-events-none absolute inset-0 overflow-hidden rounded-xl border settings-tone-border transition-opacity duration-200 ease-out ${
+    selected ? 'opacity-100' : 'opacity-0'
+  }`;
+}
+
+function resolveEnumOptionSummary(option: EnumSettingsItem['options'][number]): string {
+  return option.summaryLabel ?? option.label;
+}
+
+function resolveDialogEnumSummary(item: EnumSettingsItem, value: string | string[]): string {
+  if (!item.multiSelect) {
+    return resolveEnumOptionSummary(
+      item.options.find((option) => option.value === value) ?? { label: String(value), value: String(value) },
+    );
+  }
+
+  const selectedValues = value as string[];
+  const selectedLabels = item.options
+    .filter((option) => selectedValues.includes(option.value))
+    .map((option) => resolveEnumOptionSummary(option));
+
+  return selectedLabels.length > 0 ? selectedLabels.join('、') : '未选择';
 }
 
 function renderEnumOptionContent(option: EnumSettingsItem['options'][number]) {
@@ -439,6 +470,93 @@ function MultiSelectInlineEnumButtons({
   );
 }
 
+function DialogEnumRenderer({
+  item,
+  value,
+  onSelect,
+}: {
+  item: EnumSettingsItem;
+  value: string | string[];
+  onSelect: (nextValue: string | string[]) => void;
+}) {
+  const toneColor = useSettingsToneColor();
+  const [open, setOpen] = useState(false);
+
+  return (
+    <>
+      <SettingRow
+        testId={item.rowTestId}
+        icon={renderRowIcon(item.icon)}
+        label={item.label}
+        onClick={() => setOpen(true)}
+        right={<SecondaryValue value={resolveDialogEnumSummary(item, value)} />}
+      />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="rounded-2xl" style={buildSettingsToneStyle(toneColor)}>
+          <DialogHeader>
+            <DialogTitle>{item.dialogTitle ?? item.label}</DialogTitle>
+            <DialogDescription className={item.dialogDescription ? undefined : 'sr-only'}>
+              {item.dialogDescription ?? `${item.label} 设置`}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-2">
+            {item.options.map((option) => {
+              const selected = item.multiSelect
+                ? (value as string[]).includes(option.value)
+                : value === option.value;
+
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => {
+                    const nextValue = item.multiSelect
+                      ? resolveNextEnumValue(item, value as string[], option.value, selected)
+                      : option.value;
+                    onSelect(nextValue);
+                    if (!item.multiSelect) {
+                      setOpen(false);
+                    }
+                  }}
+                  className={buildDialogEnumOptionCardClass(Boolean(option.description))}
+                >
+                  <span
+                    data-selection-overlay="true"
+                    aria-hidden
+                    className={buildDialogEnumSelectionOverlayClass(selected)}
+                    style={buildInlineEnumOverlayStyle(toneColor)}
+                  >
+                    <span
+                      data-selection-fill="true"
+                      aria-hidden
+                      className={buildInlineEnumOverlayFillClass()}
+                      style={buildInlineEnumOverlayFillStyle(toneColor)}
+                    />
+                  </span>
+                  <span className="relative z-10 flex items-center justify-between gap-3">
+                    <span className="min-w-0 flex-1">
+                      <span className="block font-medium text-[#1C1917] dark:text-[#FAFAF9]">{option.label}</span>
+                      {option.description ? (
+                        <span className="mt-0.5 block text-xs text-[#A8A29E]">{option.description}</span>
+                      ) : null}
+                    </span>
+                    {selected ? (
+                      <Check
+                        className="h-4 w-4 shrink-0"
+                        style={{ color: SETTINGS_TONE_RESOLVED_COLOR }}
+                      />
+                    ) : null}
+                  </span>
+                </button>
+              );
+            })}
+          </div>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 function EnumRenderer({ item }: { item: EnumSettingsItem }) {
   const [value, setValue, getCurrent] = useSettingState(
     item.get as () => string | string[],
@@ -480,6 +598,18 @@ function EnumRenderer({ item }: { item: EnumSettingsItem }) {
   const helperText = !item.multiSelect && item.helperText
     ? item.helperText(value as string)
     : null;
+
+  if (item.enumStyle === 'dialog') {
+    return (
+      <div>
+        <DialogEnumRenderer item={item} value={value} onSelect={handleChange} />
+        <HelperBlock message={item.description ?? null} />
+        <HelperBlock message={helperText} />
+        <NoticeBlock message={notice} tone="success" />
+        <NoticeBlock message={error} tone="error" />
+      </div>
+    );
+  }
 
   if (item.enumStyle === 'select' && !item.multiSelect) {
     return (
@@ -602,7 +732,7 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
               }}
               style={{
                 ...(buildSettingsToneStyle(toneColor) ?? {}),
-                accentColor: 'var(--settings-tone-color, #C75B3A)',
+                accentColor: SETTINGS_TONE_RESOLVED_COLOR,
               }}
               className="w-full"
             />
@@ -640,8 +770,45 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
   const [value, setValue, getCurrent] = useSettingState(item.get, item.subscribe);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
+  const [showSecret, setShowSecret] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const isSecretDialog = item.dialogFieldKind === 'secret' || item.sensitive;
+
+  const commitDialogValue = (
+    nextValue: string,
+    successMessageOverride?: string | ((value: string) => string),
+  ) => {
+    try {
+      const result = item.set(nextValue);
+      if (isPromiseLike<string | void>(result)) {
+        void result
+          .then((resolved) => {
+            const finalValue = typeof resolved === 'string' ? resolved : nextValue;
+            setValue(finalValue);
+            setDraft(finalValue);
+            setNotice(resolveMessage(successMessageOverride ?? item.successMessage, finalValue));
+            setOpen(false);
+            setShowSecret(false);
+          })
+          .catch((nextError) => {
+            setValue(getCurrent());
+            setError(formatErrorMessage(item.errorMessagePrefix, nextError));
+          });
+        return;
+      }
+
+      const finalValue = typeof result === 'string' ? result : nextValue;
+      setValue(finalValue);
+      setDraft(finalValue);
+      setNotice(resolveMessage(successMessageOverride ?? item.successMessage, finalValue));
+      setOpen(false);
+      setShowSecret(false);
+    } catch (nextError) {
+      setValue(getCurrent());
+      setError(formatErrorMessage(item.errorMessagePrefix, nextError));
+    }
+  };
 
   const handleSave = () => {
     const validationMessage = item.validate?.(draft) ?? null;
@@ -651,32 +818,12 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
     }
 
     setError(null);
+    commitDialogValue(draft);
+  };
 
-    try {
-      const result = item.set(draft);
-      if (isPromiseLike<string | void>(result)) {
-        void result
-          .then((resolved) => {
-            const finalValue = typeof resolved === 'string' ? resolved : draft;
-            setValue(finalValue);
-            setNotice(resolveMessage(item.successMessage, finalValue));
-            setOpen(false);
-          })
-          .catch((nextError) => {
-            setValue(getCurrent());
-            setError(formatErrorMessage(item.errorMessagePrefix, nextError));
-          });
-        return;
-      }
-
-      const finalValue = typeof result === 'string' ? result : draft;
-      setValue(finalValue);
-      setNotice(resolveMessage(item.successMessage, finalValue));
-      setOpen(false);
-    } catch (nextError) {
-      setValue(getCurrent());
-      setError(formatErrorMessage(item.errorMessagePrefix, nextError));
-    }
+  const handleClear = () => {
+    setError(null);
+    commitDialogValue('', item.clearSuccessMessage ?? item.successMessage);
   };
 
   if (item.stringStyle !== 'dialog') {
@@ -728,6 +875,7 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
         onClick={() => {
           setDraft(value);
           setError(null);
+          setShowSecret(false);
           setOpen(true);
         }}
         right={<SecondaryValue value={maskStringValue(item, value)} />}
@@ -746,24 +894,51 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
           <div className="space-y-4">
             <input
               data-testid={item.controlTestId}
-              type={item.sensitive ? 'password' : 'text'}
+              type={isSecretDialog ? (showSecret ? 'text' : 'password') : item.dialogInputType ?? 'text'}
               value={draft}
               placeholder={item.placeholder}
               onChange={(event) => setDraft(event.target.value)}
-              className="h-10 w-full rounded-[10px] border border-[#E7E5E4] px-3 text-sm"
+              className="settings-dialog-input"
             />
-            {error ? <div className="text-xs text-red-600">{error}</div> : null}
-            <div className="flex justify-end gap-2">
-              <button type="button" onClick={() => setOpen(false)} className="rounded-md px-3 py-1.5 text-sm">
+            {item.dialogFooterStart || item.dialogFooterEnd ? (
+              <div
+                className="settings-dialog-meta-row"
+                data-align={item.dialogFooterStart && item.dialogFooterEnd ? 'between' : item.dialogFooterEnd ? 'end' : 'start'}
+              >
+                {item.dialogFooterStart ? (
+                  item.dialogFooterStart.type === 'secret-toggle' ? (
+                    <button
+                      type="button"
+                      onClick={() => setShowSecret((current) => !current)}
+                      className="settings-dialog-meta-toggle"
+                    >
+                      {showSecret ? item.dialogFooterStart.hideLabel : item.dialogFooterStart.showLabel}
+                    </button>
+                  ) : (
+                    <span className="settings-dialog-meta-text">{item.dialogFooterStart.text}</span>
+                  )
+                ) : null}
+                {item.dialogFooterEnd ? (
+                  <span className="settings-dialog-meta-text">{item.dialogFooterEnd}</span>
+                ) : null}
+              </div>
+            ) : null}
+            {error ? <p className="text-xs text-red-500">{error}</p> : null}
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setOpen(false)} className="settings-dialog-secondary-button flex-1">
                 取消
               </button>
+              {item.allowClear ? (
+                <button type="button" onClick={handleClear} className="settings-dialog-secondary-button flex-1">
+                  清空
+                </button>
+              ) : null}
               <button
                 type="button"
                 onClick={() => {
                   handleSave();
                 }}
-                className="rounded-md px-3 py-1.5 text-sm text-white"
-                style={{ backgroundColor: 'var(--settings-tone-color, #C75B3A)' }}
+                className="settings-dialog-primary-button flex-1"
               >
                 保存
               </button>

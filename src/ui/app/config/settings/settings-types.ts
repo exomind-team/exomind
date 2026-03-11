@@ -42,11 +42,13 @@ export interface BooleanSettingsItem extends SettingsItemBase {
 export interface SingleEnumSettingsItem extends SettingsItemBase {
   type: 'enum';
   multiSelect?: false;
-  enumStyle?: 'segmented' | 'select';
+  enumStyle?: 'segmented' | 'select' | 'dialog';
   controlTestId?: string;
   optionTestId?: (value: string, index: number) => string | undefined;
   helperText?: (value: string) => string | null;
-  options: { label: string; value: string; icon?: LucideIcon }[];
+  dialogTitle?: string;
+  dialogDescription?: string;
+  options: { label: string; value: string; icon?: LucideIcon; description?: string; summaryLabel?: string }[];
   get: () => string;
   set: (value: string) => string | void | Promise<string | void>;
   subscribe?: (cb: (value: string) => void) => () => void;
@@ -57,10 +59,12 @@ export interface SingleEnumSettingsItem extends SettingsItemBase {
 export interface MultiEnumSettingsItem extends SettingsItemBase {
   type: 'enum';
   multiSelect: true;
-  enumStyle?: 'segmented' | 'select';
+  enumStyle?: 'segmented' | 'select' | 'dialog';
   controlTestId?: string;
   optionTestId?: (value: string, index: number) => string | undefined;
-  options: { label: string; value: string; icon?: LucideIcon }[];
+  dialogTitle?: string;
+  dialogDescription?: string;
+  options: { label: string; value: string; icon?: LucideIcon; description?: string; summaryLabel?: string }[];
   get: () => string[];
   set: (values: string[]) => string[] | void | Promise<string[] | void>;
   subscribe?: (cb: (value: string[]) => void) => () => void;
@@ -90,6 +94,12 @@ export interface StringSettingsItem extends SettingsItemBase {
   controlTestId?: string;
   stringStyle?: 'inline' | 'dialog';
   sensitive?: boolean;
+  dialogFieldKind?: 'plain' | 'secret';
+  dialogInputType?: 'text' | 'url';
+  dialogFooterStart?: { type: 'text'; text: string } | { type: 'secret-toggle'; showLabel: string; hideLabel: string };
+  dialogFooterEnd?: string;
+  allowClear?: boolean;
+  clearSuccessMessage?: string | ((value: string) => string);
   placeholder?: string;
   dialogTitle?: string;
   dialogDescription?: string;

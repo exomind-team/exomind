@@ -1,6 +1,6 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
-import { Code, Download } from 'lucide-react';
+import { Code, Download, Key } from 'lucide-react';
 import { SettingsItemRenderer } from '@/ui/app/components/settings/settings-renderers';
 import { SettingsToneProvider } from '@/ui/app/components/settings-shared';
 import type {
@@ -261,7 +261,9 @@ describe('SettingsItemRenderer', () => {
       </SettingsToneProvider>,
     );
 
-    expect(screen.getByRole('switch').getAttribute('style') ?? '').toContain('--switch-checked-bg: var(--settings-tone-color, #C75B3A)');
+    expect(screen.getByRole('switch').getAttribute('style') ?? '').toContain(
+      '--switch-checked-bg: var(--settings-tone-color, var(--settings-tone-default))',
+    );
   });
 
   it('uses toneColor for range controls', () => {
@@ -283,7 +285,9 @@ describe('SettingsItemRenderer', () => {
       </SettingsToneProvider>,
     );
 
-    expect(screen.getByRole('slider').getAttribute('style') ?? '').toContain('accent-color: var(--settings-tone-color, #C75B3A)');
+    expect(screen.getByRole('slider').getAttribute('style') ?? '').toContain(
+      'accent-color: var(--settings-tone-color, var(--settings-tone-default))',
+    );
   });
 
   it('renders dialog string items and saves edited values', () => {
@@ -298,7 +302,11 @@ describe('SettingsItemRenderer', () => {
       category: 'sync',
       type: 'string',
       stringStyle: 'dialog',
+      dialogFieldKind: 'plain',
+      dialogInputType: 'url',
       placeholder: 'http://127.0.0.1:6984',
+      dialogTitle: '同步服务器',
+      dialogDescription: '设置事件日志同步的服务器地址',
       get: () => currentValue,
       set: setValue,
     };
@@ -306,12 +314,150 @@ describe('SettingsItemRenderer', () => {
     render(<SettingsItemRenderer item={item} ctx={ctx} />);
 
     fireEvent.click(screen.getByRole('button', { name: /同步服务器/ }));
-    fireEvent.change(screen.getByPlaceholderText('http://127.0.0.1:6984'), {
+
+    const dialog = screen.getByRole('dialog', { name: '同步服务器' });
+    expect(within(dialog).getByText('设置事件日志同步的服务器地址')).toBeInTheDocument();
+    expect(within(dialog).queryByRole('button', { name: '显示 Token' })).toBeNull();
+    expect(within(dialog).queryByRole('button', { name: '清空' })).toBeNull();
+
+    const input = within(dialog).getByPlaceholderText('http://127.0.0.1:6984');
+    expect(input).toHaveAttribute('type', 'url');
+
+    const cancelButton = within(dialog).getByRole('button', { name: '取消' });
+    const saveButton = within(dialog).getByRole('button', { name: '保存' });
+    expect(cancelButton.className).toContain('flex-1');
+    expect(saveButton.className).toContain('flex-1');
+
+    fireEvent.change(input, {
       target: { value: 'http://localhost:6984' },
     });
-    fireEvent.click(screen.getByRole('button', { name: '保存' }));
+    fireEvent.click(saveButton);
 
     expect(setValue).toHaveBeenCalledWith('http://localhost:6984');
+  });
+
+  it('renders dialog enum items with descriptions inside a dialog picker', () => {
+    const item = {
+      id: 'countdown-end-mode',
+      label: '倒计时结束',
+      icon: Code,
+      category: 'timer',
+      type: 'enum',
+      enumStyle: 'dialog',
+      dialogTitle: '倒计时结束模式',
+      dialogDescription: '选择倒计时结束后的行为',
+      options: [
+        { label: '硬停止', value: 'hard', description: '倒计时结束后立即停止' },
+        { label: '柔和提醒', value: 'soft', description: '倒计时结束后继续计时并提醒' },
+      ],
+      get: () => 'soft',
+      set: vi.fn(),
+    } as unknown as SingleEnumSettingsItem;
+
+    render(
+      <SettingsToneProvider toneColor="var(--settings-tone-developer)">
+        <SettingsItemRenderer item={item} ctx={ctx} />
+      </SettingsToneProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /倒计时结束/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '倒计时结束模式' });
+    const selectedOption = within(dialog).getByRole('button', { name: /柔和提醒/ });
+
+    expect(within(dialog).getByText('倒计时结束后立即停止')).toBeInTheDocument();
+    expect(within(dialog).getByText('倒计时结束后继续计时并提醒')).toBeInTheDocument();
+    expect(selectedOption.className).toContain('settings-dialog-option-card');
+    expect(selectedOption.querySelector('[data-selection-overlay=\"true\"]')).not.toBeNull();
+  });
+
+  it('renders dialog enum items without descriptions using adaptive option cards', () => {
+    const item = {
+      id: 'sound-preset',
+      label: '提示音',
+      icon: Code,
+      category: 'timer',
+      type: 'enum',
+      enumStyle: 'dialog',
+      dialogTitle: '选择提示音',
+      dialogDescription: '倒计时结束时播放的提示音',
+      options: [
+        { label: '关闭提示音', value: 'off' },
+        { label: 'Ring 10', value: 'ring-10' },
+      ],
+      get: () => 'ring-10',
+      set: vi.fn(),
+    } as unknown as SingleEnumSettingsItem;
+
+    render(
+      <SettingsToneProvider toneColor="var(--settings-tone-developer)">
+        <SettingsItemRenderer item={item} ctx={ctx} />
+      </SettingsToneProvider>,
+    );
+
+    fireEvent.click(screen.getByRole('button', { name: /提示音/ }));
+
+    const dialog = screen.getByRole('dialog', { name: '选择提示音' });
+    const option = within(dialog).getByRole('button', { name: 'Ring 10' });
+
+    expect(within(dialog).getByText('倒计时结束时播放的提示音')).toBeInTheDocument();
+    expect(option.className).toContain('settings-dialog-option-card');
+    expect(option.querySelector('[data-selection-overlay=\"true\"]')).not.toBeNull();
+  });
+
+  it('renders single-value secret dialogs with footer metadata and clear action', () => {
+    let currentValue = 'sk-test-123456';
+    const setValue = vi.fn((value: string) => {
+      currentValue = value;
+      return value;
+    });
+
+    const item = {
+      id: 'moss-api-token',
+      label: 'MOSS API Token',
+      icon: Key,
+      category: 'input',
+      type: 'string',
+      stringStyle: 'dialog',
+      sensitive: true,
+      placeholder: '输入 MOSS API Token',
+      dialogTitle: '语音输入设置',
+      dialogDescription: '配置 MOSS API Token（仅保存在当前设备）',
+      dialogFieldKind: 'secret',
+      dialogFooterStart: {
+        type: 'secret-toggle',
+        showLabel: '显示 Token',
+        hideLabel: '隐藏 Token',
+      },
+      dialogFooterEnd: '用于新 UI 语音输入转写',
+      allowClear: true,
+      get: () => currentValue,
+      set: setValue,
+      mask: (value: string) => `已配置 (${value.slice(0, 4)}***${value.slice(-2)})`,
+    } as unknown as StringSettingsItem;
+
+    render(<SettingsItemRenderer item={item} ctx={ctx} />);
+
+    const row = screen.getByRole('button', { name: /MOSS API Token/ });
+    expect(row.querySelector('.lucide-key')).not.toBeNull();
+
+    fireEvent.click(row);
+
+    const dialog = screen.getByRole('dialog', { name: '语音输入设置' });
+    expect(within(dialog).getByRole('button', { name: '显示 Token' })).toBeInTheDocument();
+    expect(within(dialog).getByText('用于新 UI 语音输入转写')).toBeInTheDocument();
+
+    const cancelButton = within(dialog).getByRole('button', { name: '取消' });
+    const clearButton = within(dialog).getByRole('button', { name: '清空' });
+    const saveButton = within(dialog).getByRole('button', { name: '保存' });
+
+    expect(cancelButton.className).toContain('flex-1');
+    expect(clearButton.className).toContain('flex-1');
+    expect(saveButton.className).toContain('flex-1');
+
+    fireEvent.click(clearButton);
+
+    expect(setValue).toHaveBeenCalledWith('');
   });
 
   it('renders action items as buttons', () => {

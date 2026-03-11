@@ -260,35 +260,45 @@ export function AiApiKeySetting(_props: { ctx: SettingsContext }) {
         <DialogContent className="rounded-2xl">
           <DialogHeader>
             <DialogTitle>AI 设置</DialogTitle>
-            <DialogDescription>配置 Agent 对话使用的大语言模型</DialogDescription>
+            <DialogDescription>配置 Agent 对话使用的大语言模型（OpenAI 兼容格式）</DialogDescription>
           </DialogHeader>
           <div className="space-y-4">
-            <input
-              type="password"
-              value={apiKeyDraft}
-              onChange={(event) => setApiKeyDraft(event.target.value)}
-              placeholder="sk-..."
-              className="w-full rounded-xl border border-[#F0ECE8] px-4 py-3 text-sm"
-            />
-            <input
-              type="url"
-              value={baseUrlDraft}
-              onChange={(event) => setBaseUrlDraft(event.target.value)}
-              placeholder="https://api.openai.com/v1"
-              className="w-full rounded-xl border border-[#F0ECE8] px-4 py-3 text-sm"
-            />
-            <input
-              type="text"
-              value={modelDraft}
-              onChange={(event) => setModelDraft(event.target.value)}
-              placeholder="gpt-4o"
-              className="w-full rounded-xl border border-[#F0ECE8] px-4 py-3 text-sm"
-            />
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">API Key</label>
+              <input
+                type="password"
+                value={apiKeyDraft}
+                onChange={(event) => setApiKeyDraft(event.target.value)}
+                placeholder="sk-..."
+                className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">Base URL</label>
+              <input
+                type="url"
+                value={baseUrlDraft}
+                onChange={(event) => setBaseUrlDraft(event.target.value)}
+                placeholder="https://api.openai.com/v1"
+                className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              />
+            </div>
+            <div className="space-y-1.5">
+              <label className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">模型</label>
+              <input
+                type="text"
+                value={modelDraft}
+                onChange={(event) => setModelDraft(event.target.value)}
+                placeholder="gpt-4o"
+                className="w-full rounded-xl border border-[#F0ECE8] bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] focus:border-[#C75B3A] focus:ring-1 focus:ring-[#C75B3A] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E]"
+              />
+            </div>
+            <p className="text-xs text-[#A8A29E]">支持 OpenAI、DeepSeek、Moonshot 等兼容 API</p>
             <div className="flex gap-2">
               <button
                 type="button"
                 onClick={() => setOpen(false)}
-                className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm"
+                className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
               >
                 取消
               </button>
@@ -306,7 +316,7 @@ export function AiApiKeySetting(_props: { ctx: SettingsContext }) {
                   setNotice('AI 设置已保存');
                   setOpen(false);
                 }}
-                className="flex-1 rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm text-white"
+                className="flex-1 rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F]"
               >
                 保存
               </button>
@@ -334,7 +344,7 @@ export function FeatureTogglesSetting(_props: { ctx: SettingsContext }) {
     subscribeCommandPaletteEnabledChanges,
   );
   const switchToneStyle = {
-    '--switch-checked-bg': 'var(--settings-tone-color, #C75B3A)',
+    '--switch-checked-bg': 'var(--settings-tone-color, var(--settings-tone-default))',
     ...(buildSettingsToneStyle(toneColor) ?? {}),
   } as CSSProperties;
 

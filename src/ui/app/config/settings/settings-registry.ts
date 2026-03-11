@@ -1,5 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { Code, Download, List, Mic, MoonStar, Upload, Waypoints, Wifi, Bot } from 'lucide-react';
+import { Bell, Code, Download, Key, List, Mic, Moon, MoonStar, Sun, SunMoon, Timer, Upload, Waypoints, Wifi } from 'lucide-react';
 import type { SettingsContext, SettingsItem } from './settings-types';
 import {
   getSyncServerUrlOverride,
@@ -101,7 +101,17 @@ import {
   setFeedbackPreferences,
   subscribeFeedbackPreferencesChanges,
 } from '@/config/feedback-preferences';
+import {
+  getTimerPreferences,
+  subscribeTimerPreferencesChanges,
+  updateTimerPreferences,
+  type CountdownEndMode,
+} from '@/config/timer-preferences';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
+import {
+  TIMER_END_SOUND_PRESETS,
+  type TimerEndSoundPresetId,
+} from '@/lib/media/timer-end-sounds';
 import {
   exportBackup,
   exportTasksJson,
@@ -110,11 +120,9 @@ import {
 } from '@/services/impl/settings-data-service';
 import {
   AiApiKeySetting,
-  CountdownEndModeSetting,
   DevicePairingSetting,
   FeatureTogglesSetting,
   MossVoiceTestSetting,
-  SoundPresetSetting,
   TaskBackendStatusSetting,
   TaskImportActionSetting,
   VolcanoVoiceTestSetting,
@@ -276,9 +284,9 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'appearance',
     type: 'enum',
     options: [
-      { label: '自动', value: 'system' },
-      { label: '浅色', value: 'light' },
-      { label: '深色', value: 'dark' },
+      { label: '浅色', value: 'light', icon: Sun },
+      { label: '自动', value: 'system', icon: SunMoon },
+      { label: '深色', value: 'dark', icon: Moon },
     ],
     optionTestId: (value) => `new-settings-theme-${value}`,
     get: () => getThemePreference(),
@@ -290,16 +298,66 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'countdown-end-mode',
     label: '倒计时结束',
+    icon: Timer,
     category: 'timer',
-    type: 'custom',
-    component: CountdownEndModeSetting,
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '倒计时结束模式',
+    dialogDescription: '选择倒计时结束后的行为',
+    options: [
+      {
+        label: '硬停止',
+        value: 'hard',
+        description: '倒计时结束后立即停止',
+      },
+      {
+        label: '柔和提醒',
+        value: 'soft',
+        description: '倒计时结束后继续计时并提醒',
+      },
+    ],
+    get: () => getTimerPreferences().countdownEndMode,
+    set: (value: string) => updateTimerPreferences({ countdownEndMode: value as CountdownEndMode }).countdownEndMode,
+    subscribe: (cb: (value: string) => void) => subscribeTimerPreferencesChanges((preferences) => cb(preferences.countdownEndMode)),
   },
   {
     id: 'sound-preset',
     label: '提示音',
+    icon: Bell,
     category: 'timer',
-    type: 'custom',
-    component: SoundPresetSetting,
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '选择提示音',
+    dialogDescription: '倒计时结束时播放的提示音',
+    options: [
+      {
+        label: '关闭提示音',
+        summaryLabel: '已关闭',
+        value: 'off',
+      },
+      ...TIMER_END_SOUND_PRESETS.map((preset) => ({
+        label: preset.label,
+        value: preset.id,
+      })),
+    ],
+    get: () => {
+      const preferences = getTimerPreferences();
+      return preferences.countdownEndSoundEnabled ? preferences.countdownEndSoundPresetId : 'off';
+    },
+    set: (value: string) => {
+      if (value === 'off') {
+        updateTimerPreferences({ countdownEndSoundEnabled: false });
+        return 'off';
+      }
+
+      return updateTimerPreferences({
+        countdownEndSoundEnabled: true,
+        countdownEndSoundPresetId: value as TimerEndSoundPresetId,
+      }).countdownEndSoundPresetId;
+    },
+    subscribe: (cb: (value: string) => void) => subscribeTimerPreferencesChanges((preferences) => {
+      cb(preferences.countdownEndSoundEnabled ? preferences.countdownEndSoundPresetId : 'off');
+    }),
   },
   {
     id: 'feedback-content',
@@ -481,12 +539,20 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'moss-api-token',
     label: 'MOSS API Token',
-    icon: Bot,
+    icon: Key,
     category: 'input',
     rowTestId: 'new-settings-voice-token-row',
     type: 'string',
     stringStyle: 'dialog',
     sensitive: true,
+    dialogFieldKind: 'secret',
+    dialogFooterStart: {
+      type: 'secret-toggle',
+      showLabel: '显示 Token',
+      hideLabel: '隐藏 Token',
+    },
+    dialogFooterEnd: '用于新 UI 语音输入转写',
+    allowClear: true,
     placeholder: '输入 MOSS API Token',
     dialogTitle: '语音输入设置',
     dialogDescription: '配置 MOSS API Token（仅保存在当前设备）',
@@ -499,6 +565,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     },
     mask: (value: string) => `已配置 (${maskStoredSecret(value)})`,
     successMessage: 'MOSS API Token 已保存',
+    clearSuccessMessage: 'MOSS API Token 已清除',
   },
   {
     id: 'moss-voice-test',
@@ -530,6 +597,8 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'sync',
     type: 'string',
     stringStyle: 'dialog',
+    dialogFieldKind: 'plain',
+    dialogInputType: 'url',
     placeholder: 'http://127.0.0.1:6984',
     dialogTitle: '同步服务器',
     dialogDescription: '设置事件日志同步的服务器地址',
