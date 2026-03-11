@@ -1,41 +1,61 @@
 use axum::body::Body;
 use axum::http::Request;
+use exomind_runtime::AppState;
 use exomind_runtime::agent::AgentRegistry;
 use exomind_runtime::mesh::MeshState;
 use exomind_runtime::routes;
 use exomind_runtime::signal::SignalPool;
-use exomind_runtime::AppState;
 use http_body_util::BodyExt;
 use serde_json::Value;
-use std::sync::Mutex;
 use std::sync::Arc;
+use std::sync::Mutex;
 use tower::ServiceExt;
 
 static CODEX_ENV_LOCK: Mutex<()> = Mutex::new(());
 
-#[tokio::test]
-async fn create_and_delete_runtime_agent_via_http_routes() {
-    let signal_pool = Arc::new(SignalPool::new(None));
-    let host_id = "test-agent-lifecycle".to_string();
-    let state = AppState {
-        port: 3919,
-        host_id: host_id.clone(),
-        registry: AgentRegistry::new(),
+fn test_app_state(port: u16, host_id: &str, signal_pool: Arc<SignalPool>) -> AppState {
+    let registry = AgentRegistry::new();
+    let energy_registry = exomind_runtime::energy::EnergyRegistry::new();
+
+    AppState {
+        port,
+        host_id: host_id.to_string(),
+        registry: registry.clone(),
         signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
+        mesh: Arc::new(MeshState::new(
+            host_id.to_string(),
+            Arc::clone(&signal_pool),
+            None,
+        )),
         mesh_relay: None,
         auth_secret: None,
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
-        energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        energy_registry: energy_registry.clone(),
+        tick_manager: Arc::new(exomind_runtime::tick::TickManager::new(
+            host_id.to_string(),
+            registry,
+            energy_registry,
+            Arc::clone(&signal_pool),
+        )),
         life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
             std::env::temp_dir().join("exomind-test-agent-lifecycle"),
         )),
         #[cfg(not(target_os = "android"))]
-        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
-    };
+        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(
+            Arc::clone(&signal_pool),
+            host_id.to_string(),
+        )),
+    }
+}
+
+#[tokio::test]
+async fn create_and_delete_runtime_agent_via_http_routes() {
+    let signal_pool = Arc::new(SignalPool::new(None));
+    let host_id = "test-agent-lifecycle".to_string();
+    let state = test_app_state(3919, &host_id, signal_pool);
     let app = routes::router().with_state(state);
 
     let create_response = app
@@ -55,7 +75,12 @@ async fn create_and_delete_runtime_agent_via_http_routes() {
 
     assert_eq!(create_response.status().as_u16(), 201);
 
-    let created_body = create_response.into_body().collect().await.unwrap().to_bytes();
+    let created_body = create_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let created_payload: Value = serde_json::from_slice(&created_body).unwrap();
     assert_eq!(created_payload["id"], "echo-manual");
 
@@ -71,7 +96,12 @@ async fn create_and_delete_runtime_agent_via_http_routes() {
         .unwrap();
 
     assert_eq!(list_response.status().as_u16(), 200);
-    let list_body = list_response.into_body().collect().await.unwrap().to_bytes();
+    let list_body = list_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let list_payload: Value = serde_json::from_slice(&list_body).unwrap();
     assert_eq!(list_payload.as_array().unwrap().len(), 1);
     assert_eq!(list_payload[0]["id"], "echo-manual");
@@ -94,30 +124,15 @@ async fn create_and_delete_runtime_agent_via_http_routes() {
 async fn create_and_delete_codex_runtime_agent_via_http_routes() {
     let _guard = CODEX_ENV_LOCK.lock().unwrap();
     unsafe {
-        std::env::set_var("EXOMIND_CODEX_COMMAND", env!("CARGO_BIN_EXE_fake-codex-cli"));
+        std::env::set_var(
+            "EXOMIND_CODEX_COMMAND",
+            env!("CARGO_BIN_EXE_fake-codex-cli"),
+        );
     }
 
     let signal_pool = Arc::new(SignalPool::new(None));
     let host_id = "test-codex-lifecycle".to_string();
-    let state = AppState {
-        port: 3920,
-        host_id: host_id.clone(),
-        registry: AgentRegistry::new(),
-        signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
-        mesh_relay: None,
-        auth_secret: None,
-        mdns: None,
-        pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
-        task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
-        energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
-        life_agents: std::collections::HashMap::new(),
-        eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
-            std::env::temp_dir().join("exomind-test-agent-lifecycle"),
-        )),
-        #[cfg(not(target_os = "android"))]
-        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
-    };
+    let state = test_app_state(3920, &host_id, signal_pool);
     let app = routes::router().with_state(state);
 
     let create_response = app
@@ -141,7 +156,12 @@ async fn create_and_delete_codex_runtime_agent_via_http_routes() {
 
     assert_eq!(create_response.status().as_u16(), 201);
 
-    let created_body = create_response.into_body().collect().await.unwrap().to_bytes();
+    let created_body = create_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let created_payload: Value = serde_json::from_slice(&created_body).unwrap();
     assert_eq!(created_payload["id"], "codex-manual");
     assert_eq!(created_payload["name"], "Manual Codex");
@@ -151,25 +171,7 @@ async fn create_and_delete_codex_runtime_agent_via_http_routes() {
 async fn create_and_delete_api_runtime_agent_via_http_routes() {
     let signal_pool = Arc::new(SignalPool::new(None));
     let host_id = "test-api-lifecycle".to_string();
-    let state = AppState {
-        port: 3921,
-        host_id: host_id.clone(),
-        registry: AgentRegistry::new(),
-        signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
-        mesh_relay: None,
-        auth_secret: None,
-        mdns: None,
-        pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
-        task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
-        energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
-        life_agents: std::collections::HashMap::new(),
-        eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
-            std::env::temp_dir().join("exomind-test-agent-lifecycle"),
-        )),
-        #[cfg(not(target_os = "android"))]
-        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
-    };
+    let state = test_app_state(3921, &host_id, signal_pool);
     let app = routes::router().with_state(state);
 
     let create_response = app
@@ -207,30 +209,15 @@ async fn create_and_delete_api_runtime_agent_via_http_routes() {
 async fn codex_runtime_agent_chat_route_streams_typed_events() {
     let _guard = CODEX_ENV_LOCK.lock().unwrap();
     unsafe {
-        std::env::set_var("EXOMIND_CODEX_COMMAND", env!("CARGO_BIN_EXE_fake-codex-cli"));
+        std::env::set_var(
+            "EXOMIND_CODEX_COMMAND",
+            env!("CARGO_BIN_EXE_fake-codex-cli"),
+        );
     }
 
     let signal_pool = Arc::new(SignalPool::new(None));
     let host_id = "test-codex-chat-route".to_string();
-    let state = AppState {
-        port: 3922,
-        host_id: host_id.clone(),
-        registry: AgentRegistry::new(),
-        signal_pool: Arc::clone(&signal_pool),
-        mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
-        mesh_relay: None,
-        auth_secret: None,
-        mdns: None,
-        pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
-        task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
-        energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
-        life_agents: std::collections::HashMap::new(),
-        eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
-            std::env::temp_dir().join("exomind-test-agent-lifecycle"),
-        )),
-        #[cfg(not(target_os = "android"))]
-        pty_manager: Arc::new(exomind_runtime::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
-    };
+    let state = test_app_state(3922, &host_id, signal_pool);
     let app = routes::router().with_state(state);
 
     let _create_response = app
@@ -264,11 +251,22 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
     }
 
     assert_eq!(chat_response.status().as_u16(), 200);
-    let body_bytes = chat_response.into_body().collect().await.unwrap().to_bytes();
+    let body_bytes = chat_response
+        .into_body()
+        .collect()
+        .await
+        .unwrap()
+        .to_bytes();
     let body_text = String::from_utf8(body_bytes.to_vec()).unwrap();
 
-    assert!(body_text.contains(r#""type":"session.started""#), "{body_text}");
-    assert!(body_text.contains(r#""type":"output.delta""#), "{body_text}");
+    assert!(
+        body_text.contains(r#""type":"session.started""#),
+        "{body_text}"
+    );
+    assert!(
+        body_text.contains(r#""type":"output.delta""#),
+        "{body_text}"
+    );
     assert!(body_text.contains("xiaoming"), "{body_text}");
     assert!(body_text.contains(r#""type":"done""#), "{body_text}");
 }

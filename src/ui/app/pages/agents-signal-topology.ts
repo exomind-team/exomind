@@ -23,6 +23,9 @@ export interface SignalGraphNode {
   type: SignalGraphNodeType;
   label: string;
   status: string;
+  energyPhase?: string;
+  isDormant?: boolean;
+  energyRatio?: number;
   position: {
     x: number;
     y: number;
@@ -74,11 +77,26 @@ export function buildSignalRouteRows(routes: SignalRoute[], hostLabel?: string):
   }));
 }
 
-function getAgentStatusMap(agents: RuntimeAggregatedAgent[]): Map<string, string> {
-  const map = new Map<string, string>();
+function getAgentMetaMap(agents: RuntimeAggregatedAgent[]): Map<string, {
+  status: string;
+  energyPhase?: string;
+  isDormant?: boolean;
+  energyRatio?: number;
+}> {
+  const map = new Map<string, {
+    status: string;
+    energyPhase?: string;
+    isDormant?: boolean;
+    energyRatio?: number;
+  }>();
   for (const agent of agents) {
     if (!map.has(agent.id)) {
-      map.set(agent.id, agent.status);
+      map.set(agent.id, {
+        status: agent.status,
+        energyPhase: agent.energy?.phase,
+        isDormant: agent.energy?.is_dormant,
+        energyRatio: agent.energy?.ratio,
+      });
     }
   }
   return map;
@@ -118,7 +136,7 @@ function getInputNodeForTopic(topic: string): Pick<SignalGraphNode, 'id' | 'type
 export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregatedAgent[]): SignalGraph {
   const nextNodes = new Map<string, SignalGraphNode>();
   const nextEdges = new Map<string, SignalGraphEdge>();
-  const statusByAgentId = getAgentStatusMap(agents);
+  const metaByAgentId = getAgentMetaMap(agents);
   const rowByType = new Map<SignalGraphNodeType, number>([
     ['signal-input', 0],
     ['topic', 0],
@@ -177,12 +195,16 @@ export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregate
     if (!nextNodes.has(toNodeId)) {
       const kind = route.target_type as SignalGraphNodeType;
       const row = rowByType.get(kind) ?? 0;
-      const status = kind === 'agent' ? (statusByAgentId.get(route.target_ref) ?? 'unknown') : nodeTypeLabel(kind);
+      const agentMeta = kind === 'agent' ? metaByAgentId.get(route.target_ref) : undefined;
+      const status = kind === 'agent' ? (agentMeta?.status ?? 'unknown') : nodeTypeLabel(kind);
       nextNodes.set(toNodeId, {
         id: toNodeId,
         type: kind,
         label: route.target_ref,
         status,
+        energyPhase: agentMeta?.energyPhase,
+        isDormant: agentMeta?.isDormant,
+        energyRatio: agentMeta?.energyRatio,
         position: {
           x: 120 + nodeTypeToColumn(kind) * 240,
           y: 80 + row * 110,
@@ -209,11 +231,15 @@ export function buildSignalGraph(routes: SignalRoute[], agents: RuntimeAggregate
     const agentNodeId = targetNodeId('agent', agent.id);
     if (!nextNodes.has(agentNodeId)) {
       const row = rowByType.get('agent') ?? 0;
+      const agentMeta = metaByAgentId.get(agent.id);
       nextNodes.set(agentNodeId, {
         id: agentNodeId,
         type: 'agent',
         label: agent.id,
-        status: statusByAgentId.get(agent.id) ?? 'unknown',
+        status: agentMeta?.status ?? 'unknown',
+        energyPhase: agentMeta?.energyPhase,
+        isDormant: agentMeta?.isDormant,
+        energyRatio: agentMeta?.energyRatio,
         position: {
           x: 120 + nodeTypeToColumn('agent') * 240,
           y: 80 + row * 110,

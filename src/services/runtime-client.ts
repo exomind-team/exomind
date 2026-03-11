@@ -45,6 +45,12 @@ export interface RuntimeDeleteAgentResponse {
   id: string;
 }
 
+export interface RuntimeRefillEnergyResponse {
+  energy: AgentEnergySnapshot;
+  revived: boolean;
+  tickSpawned: boolean;
+}
+
 type RuntimeFetch = typeof fetch;
 
 export interface RuntimeClientOptions {
@@ -539,6 +545,40 @@ export class RuntimeClient {
     const data = result.data;
     if (!isObjectRecord(data)) return null;
     return data as unknown as AgentEnergySnapshot;
+  }
+
+  async refillEnergy(
+    host: RuntimeHostRecord,
+    agentId: string,
+    amount: number,
+  ): Promise<RuntimeClientResult<RuntimeRefillEnergyResponse>> {
+    const response = await this.sendJson(
+      `${buildBaseUrl(host)}/agents/${encodeURIComponent(agentId)}/energy/refill`,
+      'POST',
+      { amount },
+    );
+    if (!response.ok) {
+      return response;
+    }
+
+    if (!isObjectRecord(response.data) || !isObjectRecord(response.data.energy)) {
+      return {
+        ok: false,
+        error: {
+          code: 'invalid_payload',
+          message: 'invalid refill energy payload（充能响应格式无效）',
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      data: {
+        energy: response.data.energy as unknown as AgentEnergySnapshot,
+        revived: response.data.revived === true,
+        tickSpawned: response.data.tick_spawned === true,
+      },
+    };
   }
 
   async *streamAgentConversation(
