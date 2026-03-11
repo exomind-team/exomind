@@ -165,7 +165,7 @@ const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
 function buildBackupFileName(): string {
   const date = new Date().toISOString().slice(0, 10);
-  return `exomind-eventlog-${date}.json`;
+  return `exomind-data-${date}.json`;
 }
 
 function normalizeMossApiKey(value: string): string {
@@ -384,27 +384,52 @@ export function SettingsPage() {
     setLoading(true);
     try {
       const service = getEventLogService();
-      const json = await service.exportEventsAsJson();
-      const payload = JSON.parse(json) as { events?: unknown[] };
-      const count = Array.isArray(payload.events) ? payload.events.length : 0;
+      const eventJson = await service.exportEventsAsJson();
+      const payload = JSON.parse(eventJson) as {
+        version?: number;
+        events?: unknown[];
+        tasks?: unknown[];
+      };
+      const eventCount = Array.isArray(payload.events) ? payload.events.length : 0;
+
+      // Try to include tasks (graceful degradation if RT server unavailable)
+      let taskCount = 0;
+      try {
+        const taskResult = await getTaskBackupService().exportTasksAsJson();
+        const taskPayload = JSON.parse(taskResult.content) as { tasks?: unknown[] };
+        if (Array.isArray(taskPayload.tasks)) {
+          payload.tasks = taskPayload.tasks;
+          payload.version = 2;
+          taskCount = taskPayload.tasks.length;
+        }
+      } catch {
+        // Task server unavailable, export events only
+      }
+
+      const combinedJson = JSON.stringify(payload, null, 2);
       const defaultName = buildBackupFileName();
+
+      const parts: string[] = [];
+      if (eventCount > 0) parts.push(`${eventCount} 条事件`);
+      if (taskCount > 0) parts.push(`${taskCount} 条任务`);
+      const summary = parts.length > 0 ? parts.join('、') : '0 条记录';
 
       const isRunningInTauri = await isTauri();
       if (isRunningInTauri) {
         const savedPath = await invoke<string | null>('save_json_file', {
-          content: json,
+          content: combinedJson,
           defaultName,
         });
         if (!savedPath) {
           setStatusMessage('已取消保存。');
           return;
         }
-        setStatusMessage(`导出成功，共 ${count} 条事件。保存路径：${savedPath}`);
+        setStatusMessage(`导出成功，共 ${summary}。保存路径：${savedPath}`);
         return;
       }
 
-      downloadFileFallback(json, 'application/json;charset=utf-8', defaultName);
-      setStatusMessage(`导出成功，共 ${count} 条事件。`);
+      downloadFileFallback(combinedJson, 'application/json;charset=utf-8', defaultName);
+      setStatusMessage(`导出成功，共 ${summary}。`);
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
       setErrorMessage(`导出失败：${message}`);
@@ -467,8 +492,22 @@ export function SettingsPage() {
     try {
       const service = getEventLogService();
       const result = await service.importEventsFromJson(picked.content, importStrategy);
+
+      // Import tasks if present in v2 payload
+      let taskSummary = '';
+      try {
+        const parsed = JSON.parse(picked.content) as { tasks?: unknown[] };
+        if (Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
+          const taskJson = JSON.stringify({ version: 1, tasks: parsed.tasks });
+          const taskResult = await getTaskBackupService().importTasksFromJson(taskJson, importStrategy);
+          taskSummary = `；任务新增 ${taskResult.imported} 条，跳过 ${taskResult.skipped} 条`;
+        }
+      } catch {
+        // Task import failed or no task data, continue with event-only result
+      }
+
       setStatusMessage(
-        `导入成功：新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条。来源：${picked.path}`
+        `导入成功：事件新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条${taskSummary}。来源：${picked.path}`
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : '未知错误';
