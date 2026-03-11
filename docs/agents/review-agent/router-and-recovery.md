@@ -42,12 +42,16 @@ router 只允许输出以下 `action`：
 
 - 若 `state = HAS_TARGET`
 - 且 `selectedPrNumber` 仍然属于当前 open PR
+- 且该 PR 的远端 `updatedAt` 仍与当前 `queue.selectedPr.updatedAt` 一致
 - 则输出 `review`
+
+这里的 `selectedPrNumber` 只是 continuity hint，不是单独的真相源。
+一旦远端 `updatedAt` 已变化，就说明上一次 discovery 的队列快照已经过期，router 必须回退到 `discovery`，重新按 GitHub 当前事实判断。
 
 ### 失效目标
 
 - 若 `state = HAS_TARGET`
-- 但 `selectedPrNumber` 已关闭、已合并或不存在
+- 但 `selectedPrNumber` 已关闭、已合并、不存在，或远端 `updatedAt` 已不同于队列快照
 - 则回退到 `discovery`
 
 ### 当前无目标
@@ -68,6 +72,7 @@ router 只允许输出以下 `action`：
 - 若 `state = FAILED_RETRYABLE`
 - 且 `lastPhase = REVIEW`
 - 且 `selectedPrNumber` 仍有效
+- 且该 PR 的远端 `updatedAt` 仍与当前队列快照一致
 - 则输出 `review`
 
 - 其他失败情况一律输出 `discovery`

@@ -7,6 +7,7 @@ export interface RouterContext {
   state: PersistedState | null;
   queue: QueueState | null;
   openPrNumbers: number[];
+  selectedPrUpdatedAt: string | null;
 }
 
 export interface RouterDecision {
@@ -28,9 +29,10 @@ export function decideNextAction(context: RouterContext): RouterDecision {
 
   const selectedPrNumber = context.queue?.selectedPr?.number ?? context.state.selectedPrNumber;
   const selectedPrOpen = selectedPrNumber !== null && context.openPrNumbers.includes(selectedPrNumber);
+  const selectedPrFresh = isSelectedPrFresh(context);
 
   if (context.state.state === 'HAS_TARGET') {
-    if (selectedPrOpen) {
+    if (selectedPrOpen && selectedPrFresh) {
       return {
         action: 'review',
         reason: 'resume-selected-pr',
@@ -71,7 +73,7 @@ export function decideNextAction(context: RouterContext): RouterDecision {
     };
   }
 
-  if (context.state.lastPhase === 'REVIEW' && selectedPrOpen) {
+  if (context.state.lastPhase === 'REVIEW' && selectedPrOpen && selectedPrFresh) {
     return {
       action: 'review',
       reason: 'retry-review',
@@ -86,4 +88,13 @@ export function decideNextAction(context: RouterContext): RouterDecision {
     selectedPrNumber: null,
     sleepSeconds: 0,
   };
+}
+
+function isSelectedPrFresh(context: RouterContext): boolean {
+  const queuedUpdatedAt = context.queue?.selectedPr?.updatedAt ?? null;
+  if (!queuedUpdatedAt || !context.selectedPrUpdatedAt) {
+    return false;
+  }
+
+  return queuedUpdatedAt === context.selectedPrUpdatedAt;
 }

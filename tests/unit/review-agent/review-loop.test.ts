@@ -7,6 +7,7 @@ import {
   buildCompletedReviewState,
   buildRetryableReviewFailureState,
   classifyReviewMode,
+  buildPullRequestActionJsonFields,
   mapActionModeToCompletion,
   parseLinkedIssueNumbers,
   prioritizeFiles,
@@ -18,6 +19,7 @@ import {
 import {
   executeReviewAction,
   paginatePullFiles,
+  resolveReviewCommentTarget,
 } from '../../../Scripts/review-agent/review-loop-runtime-lib.ts';
 
 const PASS_COMMENT_BODY = [
@@ -123,7 +125,6 @@ describe('review-agent review loop', () => {
         selectedPrNumber: 450,
         selectedReason: 'new-comment',
         activeReviewCommentId: '444',
-        activeReviewCommentUrl: 'https://example.com/comments/444',
         inspectedPrCount: 8,
         skippedPrCount: 1,
         actionableCount: 2,
@@ -132,7 +133,6 @@ describe('review-agent review loop', () => {
         updatedAt: '2026-03-10T00:00:00Z',
       },
       activeReviewCommentId: '987',
-      activeReviewCommentUrl: 'https://example.com/comments/987',
     });
 
     expect(state.state).toBe(expectedState);
@@ -142,7 +142,7 @@ describe('review-agent review loop', () => {
     expect(state.selectedPrNumber).toBe(450);
     expect(state.selectedReason).toBe('new-comment');
     expect(state.activeReviewCommentId).toBe('987');
-    expect(state.activeReviewCommentUrl).toBe('https://example.com/comments/987');
+    expect(state).not.toHaveProperty('activeReviewCommentUrl');
     expect(state.inspectedPrCount).toBe(8);
   });
 
@@ -229,7 +229,6 @@ describe('review-agent review loop', () => {
         selectedPrNumber: 450,
         selectedReason: 'new-comment',
         activeReviewCommentId: '444',
-        activeReviewCommentUrl: 'https://example.com/comments/444',
         inspectedPrCount: 8,
         skippedPrCount: 1,
         actionableCount: 2,
@@ -239,7 +238,6 @@ describe('review-agent review loop', () => {
       },
       error: 'page 2 failed',
       activeReviewCommentId: '987',
-      activeReviewCommentUrl: 'https://example.com/comments/987',
     });
 
     expect(state.state).toBe('FAILED_RETRYABLE');
@@ -249,7 +247,83 @@ describe('review-agent review loop', () => {
     expect(state.selectedPrNumber).toBe(450);
     expect(state.error).toBe('page 2 failed');
     expect(state.activeReviewCommentId).toBe('987');
-    expect(state.activeReviewCommentUrl).toBe('https://example.com/comments/987');
+    expect(state).not.toHaveProperty('activeReviewCommentUrl');
+  });
+
+  it('prefers an explicit --comment-id over remote comment discovery', async () => {
+    const result = await resolveReviewCommentTarget({
+      explicitCommentId: '999',
+      persistedCommentId: '111',
+    }, {
+      listComments: () => {
+        throw new Error('should not query remote comments');
+      },
+    });
+
+    expect(result).toEqual({
+      commentId: '999',
+      source: 'explicit',
+    });
+  });
+
+  it('uses the latest remote [Codex Reviewer] top-level comment as the main comment target', async () => {
+    const result = await resolveReviewCommentTarget({
+      persistedCommentId: '111',
+    }, {
+      listComments: () => [
+        {
+          id: '101',
+          body: '[Codex Reviewer] older main comment',
+          createdAt: '2026-03-10T10:00:00Z',
+        },
+        {
+          id: '102',
+          body: '[Codex Worker] progress update',
+          createdAt: '2026-03-10T11:00:00Z',
+        },
+        {
+          id: '103',
+          body: '[Codex Reviewer] newer main comment',
+          createdAt: '2026-03-10T12:00:00Z',
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      commentId: '103',
+      source: 'remote',
+    });
+  });
+
+  it('creates a new main comment when the PR has no remote [Codex Reviewer] top-level comment', async () => {
+    const result = await resolveReviewCommentTarget({
+      persistedCommentId: '111',
+    }, {
+      listComments: () => [
+        {
+          id: '201',
+          body: '[Codex Worker] progress update',
+          createdAt: '2026-03-10T10:00:00Z',
+        },
+      ],
+    });
+
+    expect(result).toEqual({
+      commentId: null,
+      source: 'create',
+    });
+  });
+
+  it('fails instead of falling back to a persisted comment id when remote main comment lookup fails', async () => {
+    await expect(
+      resolveReviewCommentTarget({
+        persistedCommentId: '111',
+      }, {
+        listComments: () => {
+          throw new Error('remote comment lookup failed');
+        },
+      }),
+    ).rejects.toThrow('remote comment lookup failed');
   });
 
   it('detects the dominant PR language from title/body/comments', () => {
@@ -425,6 +499,37 @@ describe('review-agent review loop', () => {
     expect(mapActionModeToCompletion('request-changes')).toBe('review-posted');
     expect(mapActionModeToCompletion('needs-human-test')).toBe('needs-human-test');
     expect(mapActionModeToCompletion('approve')).toBe('approve-ready');
+  });
+
+  it('does not request viewerCanMerge for non-merge review actions', () => {
+    expect(buildPullRequestActionJsonFields('comment')).toEqual([
+      'number',
+      'title',
+      'body',
+      'url',
+      'labels',
+      'comments',
+    ]);
+    expect(buildPullRequestActionJsonFields('approve')).toEqual([
+      'number',
+      'title',
+      'body',
+      'url',
+      'labels',
+      'comments',
+    ]);
+  });
+
+  it('requests viewerCanMerge only for merge actions', () => {
+    expect(buildPullRequestActionJsonFields('merge')).toEqual([
+      'number',
+      'title',
+      'body',
+      'url',
+      'labels',
+      'comments',
+      'viewerCanMerge',
+    ]);
   });
 
   it('adds the human-test label before creating the single source-of-truth comment', async () => {

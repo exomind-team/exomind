@@ -5,6 +5,7 @@ import path from 'node:path';
 import {
   NEEDS_HUMAN_TEST_LABEL,
   buildReviewSummary,
+  buildPullRequestActionJsonFields,
   buildCompletedReviewState,
   buildRetryableReviewFailureState,
   parseLinkedIssueNumbers,
@@ -19,6 +20,7 @@ import {
 import {
   executeReviewAction,
   paginatePullFiles,
+  resolveReviewCommentTarget,
   type PullFileApiItem,
   type ReviewCommentRecord,
 } from './review-loop-runtime-lib.ts';
@@ -78,11 +80,11 @@ interface GhIssueComment {
   body?: string;
   html_url?: string;
   url?: string;
+  created_at?: string;
 }
 
 interface ReviewCommentContext {
   activeReviewCommentId?: string | null;
-  activeReviewCommentUrl?: string | null;
 }
 
 async function main(): Promise<void> {
@@ -160,10 +162,36 @@ async function runReviewAction(input: {
   explicitCommentId?: string;
   options: CliOptions;
 }): Promise<void> {
-  const pullRequest = viewPullRequestActionContext(input.prNumber, input.repo);
+  const pullRequest = viewPullRequestActionContextForMode(input.prNumber, input.repo, input.actionMode);
   const previousState = readJson<PersistedState | null>(STATE_FILE, null);
-  const commentId = input.explicitCommentId
-    ?? resolveRetryCommentId(previousState, input.prNumber);
+  let commentId: string | undefined;
+  try {
+    const target = await resolveReviewCommentTarget({
+      explicitCommentId: input.explicitCommentId,
+      persistedCommentId: previousState?.activeReviewCommentId ?? null,
+    }, {
+      listComments: () => listIssueComments(input.prNumber, input.repo).map((comment) => ({
+        id: String(comment.id),
+        body: comment.body,
+        createdAt: comment.created_at ?? null,
+      })),
+    });
+    commentId = target.commentId ?? undefined;
+  } catch (error) {
+    const failureState = persistRetryableReviewFailureState(
+      input.prNumber,
+      `Failed to resolve review comment target: ${toErrorMessage(error)}`,
+    );
+    console.log(JSON.stringify({
+      selectedPrNumber: input.prNumber,
+      action: input.actionMode,
+      state: failureState.state,
+      nextAction: failureState.nextAction,
+      error: failureState.error,
+    }, null, 2));
+    process.exitCode = 1;
+    return;
+  }
   const expectedLanguage = resolveReviewCommentLanguage({
     title: pullRequest.title,
     body: pullRequest.body ?? '',
@@ -439,6 +467,14 @@ function viewPullRequest(prNumber: number, repo: string): PullRequestView {
 }
 
 function viewPullRequestActionContext(prNumber: number, repo: string): PullRequestActionView {
+  return viewPullRequestActionContextForMode(prNumber, repo, 'comment');
+}
+
+function viewPullRequestActionContextForMode(
+  prNumber: number,
+  repo: string,
+  mode: ReviewActionMode,
+): PullRequestActionView {
   return runGhJson<PullRequestActionView>([
     'pr',
     'view',
@@ -446,7 +482,7 @@ function viewPullRequestActionContext(prNumber: number, repo: string): PullReque
     '--repo',
     repo,
     '--json',
-    'number,title,body,url,viewerCanMerge,labels,comments',
+    buildPullRequestActionJsonFields(mode).join(','),
   ]);
 }
 
@@ -503,6 +539,24 @@ function viewIssueComment(commentId: string, repo: string): ReviewCommentRecord 
     'api',
     `repos/${repo}/issues/comments/${commentId}`,
   ]));
+}
+
+function listIssueComments(prNumber: number, repo: string): GhIssueComment[] {
+  const comments: GhIssueComment[] = [];
+  const perPage = 100;
+
+  for (let page = 1; page <= 50; page += 1) {
+    const pageItems = runGhJson<GhIssueComment[]>([
+      'api',
+      `repos/${repo}/issues/${prNumber}/comments?per_page=${perPage}&page=${page}&sort=created&direction=desc`,
+    ]);
+    comments.push(...pageItems);
+    if (pageItems.length < perPage) {
+      return comments;
+    }
+  }
+
+  return comments;
 }
 
 function addPrLabel(prNumber: number, repo: string, label: string): void {
@@ -601,11 +655,9 @@ function persistActiveReviewState(selectedPrNumber: number): void {
     && previousState.selectedPrNumber === selectedPrNumber
     ? {
         activeReviewCommentId: previousState.activeReviewCommentId ?? null,
-        activeReviewCommentUrl: previousState.activeReviewCommentUrl ?? null,
       }
     : {
         activeReviewCommentId: null,
-        activeReviewCommentUrl: null,
       };
 
   writeJson(STATE_FILE, {
@@ -661,23 +713,9 @@ function persistRetryableReviewFailureState(
   return nextState;
 }
 
-function resolveRetryCommentId(previousState: PersistedState | null, prNumber: number): string | undefined {
-  if (
-    previousState?.state === 'FAILED_RETRYABLE'
-    && previousState.lastPhase === 'REVIEW'
-    && previousState.selectedPrNumber === prNumber
-    && previousState.activeReviewCommentId
-  ) {
-    return previousState.activeReviewCommentId;
-  }
-
-  return undefined;
-}
-
 function toReviewCommentContext(comment: ReviewCommentRecord): ReviewCommentContext {
   return {
     activeReviewCommentId: comment.id,
-    activeReviewCommentUrl: comment.url,
   };
 }
 

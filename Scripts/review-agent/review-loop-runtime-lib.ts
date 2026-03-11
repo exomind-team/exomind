@@ -1,3 +1,4 @@
+import { REVIEWER_PREFIX } from './discovery-lib.ts';
 import {
   NEEDS_HUMAN_TEST_LABEL,
   findApproveBlockingReason,
@@ -24,6 +25,12 @@ export interface ReviewCommentRecord {
   body: string;
 }
 
+export interface ReviewCommentTargetCandidate {
+  id: string;
+  body?: string;
+  createdAt?: string | null;
+}
+
 export interface ExecuteReviewActionInput {
   mode: ReviewActionMode;
   body: string;
@@ -41,6 +48,41 @@ interface ExecuteReviewActionDeps {
   addLabel: (label: string) => Promise<void> | void;
   submitReviewDecision: (decision: 'request-changes' | 'approve') => Promise<void> | void;
   mergePullRequest: () => Promise<void> | void;
+}
+
+interface ResolveReviewCommentTargetInput {
+  explicitCommentId?: string;
+  persistedCommentId?: string | null;
+}
+
+interface ResolveReviewCommentTargetDeps {
+  listComments: () => Promise<ReviewCommentTargetCandidate[]> | ReviewCommentTargetCandidate[];
+}
+
+export async function resolveReviewCommentTarget(
+  input: ResolveReviewCommentTargetInput,
+  deps: ResolveReviewCommentTargetDeps,
+): Promise<{ commentId: string | null; source: 'explicit' | 'remote' | 'create' }> {
+  if (input.explicitCommentId) {
+    return {
+      commentId: input.explicitCommentId,
+      source: 'explicit',
+    };
+  }
+
+  const comments = await deps.listComments();
+  const remoteComment = findLatestMainReviewComment(comments);
+  if (remoteComment) {
+    return {
+      commentId: remoteComment.id,
+      source: 'remote',
+    };
+  }
+
+  return {
+    commentId: null,
+    source: 'create',
+  };
 }
 
 export type ExecuteReviewActionResult =
@@ -288,6 +330,37 @@ export async function executeReviewAction(
     labelAdded,
     reviewDecision: null,
   };
+}
+
+function findLatestMainReviewComment(
+  comments: ReviewCommentTargetCandidate[],
+): ReviewCommentTargetCandidate | null {
+  const mainComments = comments.filter((comment) => isMainReviewComment(comment.body));
+  if (mainComments.length === 0) {
+    return null;
+  }
+
+  return [...mainComments].sort((left, right) => {
+    const timeDelta = toEpoch(right.createdAt) - toEpoch(left.createdAt);
+    if (timeDelta !== 0) {
+      return timeDelta;
+    }
+
+    return right.id.localeCompare(left.id);
+  })[0] ?? null;
+}
+
+function isMainReviewComment(body: string | undefined): boolean {
+  return (body ?? '').trimStart().startsWith(REVIEWER_PREFIX);
+}
+
+function toEpoch(value: string | null | undefined): number {
+  if (!value) {
+    return Number.NEGATIVE_INFINITY;
+  }
+
+  const epoch = Date.parse(value);
+  return Number.isNaN(epoch) ? Number.NEGATIVE_INFINITY : epoch;
 }
 
 function toErrorMessage(error: unknown): string {

@@ -111,7 +111,7 @@
 支持的动作入口：
 
 - `--body-file <path>`：发布或更新一条主审核评论
-- `--comment-id <id>`：在已知评论 id 时显式编辑同一条评论
+- `--comment-id <id>`：显式覆盖默认目标，强制编辑指定评论
 - `--needs-human-test`：添加 `🙋needs-human-test` 标签，并发布人测评论
 - `--request-changes`：发布主审核评论后，再执行 `request changes`
 - `--approve`：发布主审核评论后，再执行 `approve`
@@ -122,6 +122,8 @@
 约束：
 
 - 每次 review round 只维护一条主审核评论作为当前机器审阅真相源
+- 默认目标评论 = GitHub 远端最新一条符合协议的顶层 `[Codex Reviewer]` 主评论；若不存在，才创建新评论
+- 本地 `activeReviewCommentId` 只作为恢复 hint，不能替代远端主评论识别
 - 若评论发布后校验失败，后续重试必须编辑同一条评论，而不是新发第二条
 - `needs-human-test` 路径先加标签，再发评论，因为标签才是真相源
 - 只要 `🙋needs-human-test` 标签仍在，`approve` 必须被阻断并写成可重试失败

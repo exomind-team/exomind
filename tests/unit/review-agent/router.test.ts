@@ -10,6 +10,7 @@ function makeContext(overrides: Partial<RouterContext> = {}): RouterContext {
     state: null,
     queue: null,
     openPrNumbers: [],
+    selectedPrUpdatedAt: null,
     ...overrides,
   };
 }
@@ -40,9 +41,13 @@ describe('review-agent router', () => {
           updatedAt: '2026-03-10T01:00:00Z',
         },
         queue: {
-          selectedPr: { number: 461 },
+          selectedPr: {
+            number: 461,
+            updatedAt: '2026-03-10T02:00:00Z',
+          },
         },
         openPrNumbers: [461, 462],
+        selectedPrUpdatedAt: '2026-03-10T02:00:00Z',
       }),
     );
 
@@ -69,7 +74,10 @@ describe('review-agent router', () => {
           updatedAt: '2026-03-10T01:00:00Z',
         },
         queue: {
-          selectedPr: { number: 461 },
+          selectedPr: {
+            number: 461,
+            updatedAt: '2026-03-10T02:00:00Z',
+          },
         },
         openPrNumbers: [462],
       }),
@@ -124,9 +132,13 @@ describe('review-agent router', () => {
           error: 'temporary failure',
         },
         queue: {
-          selectedPr: { number: 461 },
+          selectedPr: {
+            number: 461,
+            updatedAt: '2026-03-10T02:00:00Z',
+          },
         },
         openPrNumbers: [461],
+        selectedPrUpdatedAt: '2026-03-10T02:00:00Z',
       }),
     );
 
@@ -153,7 +165,10 @@ describe('review-agent router', () => {
           error: 'temporary failure',
         },
         queue: {
-          selectedPr: { number: 461 },
+          selectedPr: {
+            number: 461,
+            updatedAt: '2026-03-10T02:00:00Z',
+          },
         },
         openPrNumbers: [],
       }),
@@ -184,14 +199,50 @@ describe('review-agent router', () => {
             updatedAt: '2026-03-10T01:00:00Z',
           },
           queue: {
-            selectedPr: { number: 461 },
+            selectedPr: {
+              number: 461,
+              updatedAt: '2026-03-10T02:00:00Z',
+            },
           },
           openPrNumbers: [461, 462],
+          selectedPrUpdatedAt: '2026-03-10T02:00:00Z',
         }),
       );
 
       expect(result.action).toBe('discovery');
       expect(result.reason).toBe('review-finished');
     }
+  });
+
+  it('falls back to discovery when the selected PR changed remotely after the last discovery queue snapshot', () => {
+    const result = decideNextAction(
+      makeContext({
+        state: {
+          state: 'HAS_TARGET',
+          phase: 'REVIEW',
+          lastPhase: 'DISCOVERY',
+          nextAction: 'review',
+          selectedPrNumber: 466,
+          selectedReason: 'new-comment',
+          inspectedPrCount: 9,
+          skippedPrCount: 0,
+          actionableCount: 2,
+          failureStreak: 0,
+          nextSleepSeconds: 180,
+          updatedAt: '2026-03-10T18:04:15Z',
+        },
+        queue: {
+          selectedPr: {
+            number: 466,
+            updatedAt: '2026-03-10T18:01:16Z',
+          },
+        },
+        openPrNumbers: [465, 466],
+        selectedPrUpdatedAt: '2026-03-10T18:05:05Z',
+      }),
+    );
+
+    expect(result.action).toBe('discovery');
+    expect(result.reason).toBe('stale-selected-pr');
   });
 });

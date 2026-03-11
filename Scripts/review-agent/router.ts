@@ -18,10 +18,15 @@ function main(): void {
   const state = readJson<PersistedState | null>(STATE_FILE, null);
   const queue = readJson<QueueState | null>(QUEUE_FILE, null);
   const openPrNumbers = listOpenPrNumbers(options.repo);
+  const selectedPrNumber = queue?.selectedPr?.number ?? state?.selectedPrNumber ?? null;
+  const selectedPrUpdatedAt = selectedPrNumber
+    ? viewSelectedPrUpdatedAt(selectedPrNumber, options.repo)
+    : null;
   const decision = decideNextAction({
     state,
     queue,
     openPrNumbers,
+    selectedPrUpdatedAt,
   });
 
   console.log(JSON.stringify(decision, null, 2));
@@ -56,6 +61,20 @@ function listOpenPrNumbers(repo: string | undefined): number[] {
   });
 
   return (JSON.parse(stdout) as Array<{ number: number }>).map((item) => item.number);
+}
+
+function viewSelectedPrUpdatedAt(prNumber: number, repo: string | undefined): string | null {
+  const args = ['pr', 'view', String(prNumber), '--json', 'updatedAt'];
+  if (repo) {
+    args.push('--repo', repo);
+  }
+
+  const stdout = execFileSync('gh', args, {
+    encoding: 'utf8',
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+
+  return (JSON.parse(stdout) as { updatedAt?: string | null }).updatedAt ?? null;
 }
 
 main();

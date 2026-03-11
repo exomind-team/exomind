@@ -24,6 +24,7 @@
 - `review delta`：最后一条 `[Codex Reviewer]` 评论之后出现的新评论、新 review、review thread reply（仅回复评论）或新提交。
 - `selected_pr`：当前审阅轮次中选中的那个 actionable PR。
 - `pending_queue`：选出 `selected_pr` 之后剩余的待处理 PR 队列。
+- `main review comment`：当前 PR 上最新一条符合主评论协议的顶层 `[Codex Reviewer]` 评论；其真相源是 GitHub 远端，而不是本地缓存的 comment id/url。
 
 ## 常量
 

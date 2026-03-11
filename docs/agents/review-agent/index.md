@@ -11,6 +11,7 @@
 - GitHub 远端状态 + 人类当前明确指令，优先于本地缓存
 - 本地状态只负责恢复连续性、焦点提示和调度建议
 - 阶段 A 的核心修正是：`NO_TARGET` 也必须先重新 discovery，不能直接睡眠
+- 阶段 B1 的核心修正是：主评论先按 GitHub 远端重新识别，`selectedPrNumber` 与本地 comment id 只保留为 continuity hint
 
 ## 范围边界
 

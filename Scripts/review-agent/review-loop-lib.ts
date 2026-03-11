@@ -86,7 +86,6 @@ interface BuildCompletedReviewStateInput {
   selectedPrNumber: number;
   previousState: PersistedState | null;
   activeReviewCommentId?: string | null;
-  activeReviewCommentUrl?: string | null;
   error?: string;
 }
 
@@ -95,7 +94,6 @@ interface BuildRetryableReviewFailureStateInput {
   previousState: PersistedState | null;
   error: string;
   activeReviewCommentId?: string | null;
-  activeReviewCommentUrl?: string | null;
 }
 
 const ISSUE_REF_PATTERN = /\b(?:ref|refs|close|closes|fix|fixes)\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+)\b/gi;
@@ -308,6 +306,23 @@ export function mapActionModeToCompletion(
   return 'review-posted';
 }
 
+export function buildPullRequestActionJsonFields(mode: ReviewActionMode): string[] {
+  const fields = [
+    'number',
+    'title',
+    'body',
+    'url',
+    'labels',
+    'comments',
+  ];
+
+  if (mode === 'merge') {
+    fields.push('viewerCanMerge');
+  }
+
+  return fields;
+}
+
 export function findApproveBlockingReason(input: {
   hasNeedsHumanTestLabel: boolean;
   approvalGate?: ReviewApprovalGate;
@@ -363,7 +378,6 @@ export function buildCompletedReviewState(input: BuildCompletedReviewStateInput)
     selectedPrNumber: input.selectedPrNumber,
     selectedReason: input.previousState?.selectedReason ?? null,
     activeReviewCommentId: input.activeReviewCommentId ?? input.previousState?.activeReviewCommentId ?? null,
-    activeReviewCommentUrl: input.activeReviewCommentUrl ?? input.previousState?.activeReviewCommentUrl ?? null,
     inspectedPrCount: input.previousState?.inspectedPrCount ?? 0,
     skippedPrCount: input.previousState?.skippedPrCount ?? 0,
     actionableCount: input.previousState?.actionableCount ?? 1,
@@ -396,7 +410,6 @@ export function buildRetryableReviewFailureState(
     selectedPrNumber: input.selectedPrNumber,
     selectedReason: input.previousState?.selectedReason ?? null,
     activeReviewCommentId: input.activeReviewCommentId ?? input.previousState?.activeReviewCommentId ?? null,
-    activeReviewCommentUrl: input.activeReviewCommentUrl ?? input.previousState?.activeReviewCommentUrl ?? null,
     inspectedPrCount: input.previousState?.inspectedPrCount ?? 0,
     skippedPrCount: input.previousState?.skippedPrCount ?? 0,
     actionableCount: input.previousState?.actionableCount ?? 1,

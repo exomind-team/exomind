@@ -21,7 +21,6 @@ export interface PersistedState {
   selectedPrNumber: number | null;
   selectedReason: string | null;
   activeReviewCommentId?: string | null;
-  activeReviewCommentUrl?: string | null;
   inspectedPrCount: number;
   skippedPrCount: number;
   actionableCount: number;
@@ -34,6 +33,7 @@ export interface PersistedState {
 export interface QueueState {
   selectedPr?: {
     number: number;
+    updatedAt?: string | null;
   } | null;
 }
 
