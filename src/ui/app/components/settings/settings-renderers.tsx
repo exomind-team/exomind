@@ -17,6 +17,23 @@ import type {
   StringSettingsItem,
 } from '@/ui/app/config/settings/settings-types';
 
+/*
+ * AGENT GUIDE: RENDERER SELECTION
+ *
+ * `SettingsItemRenderer` is the shared execution point for the registry families.
+ *
+ * Family selection rules:
+ * - Use inline `enum` for direct segmented selection on the row.
+ * - Use dialog `enum` / dialog `string` when the user needs a second surface for a single value.
+ * - Use `group` when the row opens an overlay that contains multiple child settings.
+ * - Use `action` for commands, not stored values.
+ * - Keep `custom` as the last resort after checking dev references and the existing families.
+ *
+ * Group overlay rule:
+ * - landscape => dialog
+ * - portrait => drawer
+ */
+
 function useSettingState<T>(
   getValue: () => T,
   subscribe?: (listener: (value: T) => void) => () => void,
@@ -1133,6 +1150,7 @@ export function SettingsItemRenderer({
   item: SettingsItem;
   ctx: SettingsContext;
 }) {
+  // AGENT GUIDE: if a new setting wants a new branch here, first ask whether an existing family can absorb it instead.
   switch (item.type) {
     case 'boolean':
       return <BooleanRenderer item={item} />;

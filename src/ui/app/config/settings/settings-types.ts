@@ -1,6 +1,23 @@
 import type { ComponentType } from 'react';
 import type { LucideIcon } from 'lucide-react';
 
+/*
+ * AGENT GUIDE: SETTINGS SYSTEM
+ *
+ * This file defines the schema for the settings UI layer.
+ *
+ * Important boundaries:
+ * - `SettingsItem` models how a setting is exposed in the settings page.
+ * - Runtime truth still lives in the underlying config/service modules that each item calls via `get` / `set` / `subscribe`.
+ * - Do not treat the registry object as a persistent store or a cross-feature read API.
+ *
+ * When adding a setting:
+ * - First choose the narrowest existing family: `boolean`, `enum`, `number`, `string`, `action`, `group`.
+ * - Use `group` when the entry opens a second surface that contains multiple child settings.
+ * - Only use `custom` when the existing families cannot express the dev-aligned UI. If you think `custom` is needed,
+ *   prove that there is no reusable dev reference first.
+ */
+
 export type Category =
   | 'appearance'
   | 'timer'
@@ -135,6 +152,7 @@ export interface GroupSettingsItem extends SettingsItemBase {
   children: SettingsItem[];
 }
 
+// AGENT GUIDE: `custom` is the escape hatch of last resort. Prefer extending the shared families above instead.
 export interface CustomSettingsItem extends SettingsItemBase {
   type: 'custom';
   component: ComponentType<{ ctx: SettingsContext }>;

@@ -127,6 +127,21 @@ import {
   VolcanoVoiceTestSetting,
 } from '@/ui/app/components/settings/settings-custom-items';
 
+/*
+ * AGENT GUIDE: ADDING SETTINGS
+ *
+ * This file is the single registry for settings-page exposure.
+ *
+ * Add a new setting by:
+ * 1. Picking an existing `SettingsItem` family from `settings-types.ts`.
+ * 2. Wiring `get` / `set` / `subscribe` to the real config/service module that owns the value.
+ * 3. Adding `visible` gating here if the item is dev-only or provider-specific.
+ * 4. Reusing existing shared renderer families before considering `custom`.
+ *
+ * Do not read settings elsewhere by importing this registry and scanning it.
+ * Product/runtime code should import the owning config/service module directly.
+ */
+
 const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
 function normalizeMossApiKey(value: string): string {
@@ -314,6 +329,15 @@ export const FEATURE_TOGGLE_SETTINGS = [
   },
 ] as const;
 
+/*
+ * AGENT GUIDE: REGISTRY RULES
+ *
+ * Notes for future agents:
+ * - IDs should stay stable because tests, analytics, and future migrations may rely on them.
+ * - `rowTestId` / `controlTestId` / `optionTestId` belong here so tests can follow the public settings schema.
+ * - If a new entry visually matches an existing setting family in dev, extend that family instead of adding a new custom shell.
+ * - `group` is preferred over `custom` for "tap row -> open overlay -> edit several child settings" flows.
+ */
 export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'theme',

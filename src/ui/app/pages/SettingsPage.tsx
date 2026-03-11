@@ -83,6 +83,18 @@ function useIsLandscape(): boolean {
   return isLandscape;
 }
 
+/*
+ * AGENT GUIDE: RUNTIME LOADING
+ *
+ * `SettingsPage` only builds `SettingsContext` and asks the registry which items are visible for the current device/runtime.
+ *
+ * For code outside the settings page:
+ * - Do not read settings by reaching into `SettingsPage` or iterating the registry.
+ * - Import the owning config/service module directly and subscribe there.
+ *
+ * The registry is a UI schema.
+ * The config/service modules remain the source of truth.
+ */
 export function SettingsPage() {
   const envMap = import.meta.env as Record<string, string | undefined>;
   const versionBuildInfo = resolveVersionBuildInfo(envMap, '0.3.6');
