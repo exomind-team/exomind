@@ -115,6 +115,15 @@ function inferDurationMinutes(raw: RawRemoteLockMetadata): number {
   throw new Error('Lock metadata is missing both lock_duration_minutes and timeout_minutes.');
 }
 
+function isExpiredLock(expiresAt: string, now = Date.now()): boolean {
+  const expiresAtMs = new Date(expiresAt).getTime();
+  if (Number.isNaN(expiresAtMs)) {
+    return false;
+  }
+
+  return expiresAtMs <= now;
+}
+
 function parseJsonFromCommandOutput<T>(raw: string): T {
   try {
     return JSON.parse(raw) as T;
@@ -143,6 +152,9 @@ export function normalizeRemoteLockMetadata(raw: RawRemoteLockMetadata | null | 
 
   const lockDurationMinutes = inferDurationMinutes(raw);
   const expiresAt = raw.expires_at ?? calculateExpiresAt(raw.acquired_at, lockDurationMinutes);
+  if (isExpiredLock(expiresAt)) {
+    return null;
+  }
 
   return {
     lock_id: raw.lock_id,

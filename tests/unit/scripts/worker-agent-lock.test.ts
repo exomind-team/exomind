@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   extractLatestActiveLockFromComments,
   normalizeRemoteLockMetadata,
@@ -6,6 +6,15 @@ import {
 } from '../../../Scripts/dev/worker-agent/lock.ts';
 
 describe('worker-agent lock runner', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    vi.setSystemTime(new Date('2026-03-10T00:10:00.000Z'));
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('falls back to npx tsx when bun is unavailable', () => {
     const runner = resolvePrLockRunner((command) => command === 'npx');
 
@@ -75,6 +84,33 @@ describe('worker-agent lock runner', () => {
     expect(lock).toBeNull();
   });
 
+  it('ignores expired lock metadata when its computed duration has elapsed', () => {
+    vi.setSystemTime(new Date('2026-03-10T00:31:00.000Z'));
+
+    const lock = normalizeRemoteLockMetadata({
+      lock_id: 'lock-expired-computed',
+      agent_id: 'worker-1',
+      acquired_at: '2026-03-10T00:00:00.000Z',
+      lock_duration_minutes: 30,
+    });
+
+    expect(lock).toBeNull();
+  });
+
+  it('ignores expired lock metadata when explicit expiry is already in the past', () => {
+    vi.setSystemTime(new Date('2026-03-10T00:16:00.000Z'));
+
+    const lock = normalizeRemoteLockMetadata({
+      lock_id: 'lock-expired-explicit',
+      agent_id: 'worker-1',
+      acquired_at: '2026-03-10T00:00:00.000Z',
+      timeout_minutes: 15,
+      expires_at: '2026-03-10T00:15:00.000Z',
+    });
+
+    expect(lock).toBeNull();
+  });
+
   it('returns the newest active lock when a newer released loser comment exists', () => {
     const lock = extractLatestActiveLockFromComments([
       {
@@ -99,5 +135,20 @@ describe('worker-agent lock runner', () => {
     ]);
 
     expect(lock?.lock_id).toBe('confirmed');
+  });
+
+  it('returns the newest unexpired lock when a newer expired comment exists', () => {
+    vi.setSystemTime(new Date('2026-03-10T00:20:00.000Z'));
+
+    const lock = extractLatestActiveLockFromComments([
+      {
+        body: '<!-- LOCK_METADATA\n{"lock_id":"active","agent_id":"worker-1","acquired_at":"2026-03-10T00:00:00.000Z","lock_duration_minutes":30}\n-->',
+      },
+      {
+        body: '<!-- LOCK_METADATA\n{"lock_id":"expired","agent_id":"worker-2","acquired_at":"2026-03-10T00:00:05.000Z","lock_duration_minutes":1}\n-->',
+      },
+    ]);
+
+    expect(lock?.lock_id).toBe('active');
   });
 });
