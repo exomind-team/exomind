@@ -60,7 +60,6 @@ export type VerificationStatus = 'passed' | 'failed' | 'missing' | 'inherited-fa
 export interface ReviewLanguageInput {
   title: string;
   body: string;
-  commentBodies: string[];
 }
 
 export interface ReviewCommentValidationInput {
@@ -194,7 +193,6 @@ export function resolveReviewCommentLanguage(input: ReviewLanguageInput): Review
   return detectLanguage([
     input.title,
     input.body,
-    ...input.commentBodies,
   ].filter(Boolean).join('\n'));
 }
 
@@ -354,7 +352,6 @@ export function buildPullRequestActionJsonFields(mode: ReviewActionMode): string
     'body',
     'url',
     'labels',
-    'comments',
   ];
 }
 

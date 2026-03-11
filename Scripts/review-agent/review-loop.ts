@@ -66,7 +66,6 @@ interface PullRequestActionView {
   body?: string;
   url: string;
   labels?: Array<{ name?: string }>;
-  comments?: Array<{ body?: string }>;
 }
 
 interface IssueView {
@@ -193,7 +192,6 @@ async function runReviewAction(input: {
   const expectedLanguage = resolveReviewCommentLanguage({
     title: pullRequest.title,
     body: pullRequest.body ?? '',
-    commentBodies: (pullRequest.comments ?? []).map((comment) => comment.body ?? ''),
   });
   const body = readFileSync(input.bodyFile, 'utf8');
   const hasNeedsHumanTestLabel = (pullRequest.labels ?? []).some((label) => label.name === NEEDS_HUMAN_TEST_LABEL);
