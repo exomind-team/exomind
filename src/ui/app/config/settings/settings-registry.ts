@@ -270,6 +270,10 @@ function volcanoOnly(ctx: SettingsContext): boolean {
   return ctx.voiceShortcutAsrProvider === 'volcano';
 }
 
+function mossOnly(ctx: SettingsContext): boolean {
+  return ctx.voiceShortcutAsrProvider === 'moss';
+}
+
 function setDeveloperModeWithSideEffects(enabled: boolean): void {
   setDeveloperModeEnabled(enabled);
   if (!enabled) {
@@ -607,6 +611,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'input',
     rowTestId: 'new-settings-voice-token-row',
     type: 'string',
+    visible: mossOnly,
     stringStyle: 'dialog',
     sensitive: true,
     dialogFieldKind: 'secret',
