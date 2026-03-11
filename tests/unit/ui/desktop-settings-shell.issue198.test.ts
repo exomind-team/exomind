@@ -11,8 +11,7 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
 
   it('adds desktop shell components（新增桌面壳层组件）', () => {
     expect(source).toContain('function DesktopSidebar');
-    // DesktopLayout is inlined into NewLayout for stable Outlet positioning
-    expect(source).toContain('showDesktopShell');
+    expect(source).toContain('function DesktopLayout');
   });
 
   it('switches desktop layout for primary app routes（主应用路由切桌面布局）', () => {
