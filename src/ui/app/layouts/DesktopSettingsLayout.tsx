@@ -2,7 +2,9 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
 import { SettingsItemRenderer } from '@/ui/app/components/settings/settings-renderers';
 import { SettingsSection } from '@/ui/app/components/settings/settings-section';
+import { Divider } from '@/ui/app/components/settings-shared';
 import { DESKTOP_TAB_CONFIG } from '@/ui/app/config/settings/desktop-tab-config';
+import { getSettingsSectionToneColor } from '@/ui/app/config/settings/settings-section-config';
 import type { SettingsContext, SettingsItem } from '@/ui/app/config/settings/settings-types';
 
 const SECTION_TEST_IDS: Record<string, string> = {
@@ -48,18 +50,23 @@ export function DesktopSettingsLayout({
     if (tabItems.length === 0) {
       return null;
     }
+    const toneColor = getSettingsSectionToneColor(tab.categories);
 
     return (
       <SettingsSection
         key={tab.key}
         title={tab.label}
         testId={SECTION_TEST_IDS[tab.key] ?? `new-settings-desktop-vc-section-${tab.key}`}
+        toneColor={toneColor}
       >
         <div ref={(node) => {
           sectionRefs.current[tab.key] = node;
         }}>
-          {tabItems.map((item) => (
-            <SettingsItemRenderer key={item.id} item={item} ctx={ctx} />
+          {tabItems.map((item, index) => (
+            <div key={item.id}>
+              <SettingsItemRenderer item={item} ctx={ctx} />
+              {index < tabItems.length - 1 ? <Divider toneColor={toneColor} /> : null}
+            </div>
           ))}
         </div>
       </SettingsSection>
@@ -67,9 +74,10 @@ export function DesktopSettingsLayout({
   };
 
   const orderedSections = tabs
-    .filter((tab) => tab.key !== 'danger')
+    .filter((tab) => tab.key !== 'developer' && tab.key !== 'danger')
     .map((tab) => renderSection(tab.key));
 
+  const developerSection = renderSection('developer');
   const dangerSection = renderSection('danger');
 
   return (
@@ -98,6 +106,7 @@ export function DesktopSettingsLayout({
             {aboutContent}
           </section>
         ) : null}
+        {developerSection}
         {dangerSection}
       </div>
     </div>

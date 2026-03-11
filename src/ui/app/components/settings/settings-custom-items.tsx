@@ -1,11 +1,12 @@
 import { useEffect, useRef, useState } from 'react';
-import { Check, ChevronRight } from 'lucide-react';
+import type { CSSProperties, ReactNode } from 'react';
+import { Bell, Bot, Check, ChevronRight, Command, Key, Mic, Timer, Upload, Waypoints, Wifi } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerTitle } from '@/components/ui/drawer';
 import { Switch } from '@/components/ui/switch';
 import { getTaskBackupService } from '@/lib/services';
-import { SettingsItemRow } from './settings-item-row';
+import { SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
 import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
 import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
 import {
@@ -43,7 +44,7 @@ import {
   setCommandPaletteEnabled,
   subscribeCommandPaletteEnabledChanges,
 } from '@/config/command-palette-enabled';
-import { getDeveloperModeEnabled } from '@/config/developer-mode';
+import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { importTasksFromFile } from '@/services/impl/settings-data-service';
 import {
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
@@ -119,10 +120,11 @@ export function CountdownEndModeSetting(_props: { ctx: SettingsContext }) {
 
   return (
     <>
-      <SettingsItemRow
+      <SettingRow
+        icon={<Timer className="h-[18px] w-[18px] text-[#78716C]" />}
         label="倒计时结束"
         onClick={() => setOpen(true)}
-        control={<SecondaryValue value={currentLabel} />}
+        right={<SecondaryValue value={currentLabel} />}
       />
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="rounded-2xl">
@@ -182,10 +184,11 @@ export function SoundPresetSetting(_props: { ctx: SettingsContext }) {
 
   return (
     <>
-      <SettingsItemRow
+      <SettingRow
+        icon={<Bell className="h-[18px] w-[18px] text-[#78716C]" />}
         label="提示音"
         onClick={() => setOpen(true)}
-        control={<SecondaryValue value={currentLabel} />}
+        right={<SecondaryValue value={currentLabel} />}
       />
       <Dialog open={open} onOpenChange={setOpen}>
         <DialogContent className="rounded-2xl">
@@ -241,7 +244,8 @@ export function AiApiKeySetting(_props: { ctx: SettingsContext }) {
 
   return (
     <>
-      <SettingsItemRow
+      <SettingRow
+        icon={<Key className="h-[18px] w-[18px] text-[#78716C]" />}
         label="AI API Key"
         onClick={() => {
           setApiKeyDraft(getLLMApiKey());
@@ -249,7 +253,7 @@ export function AiApiKeySetting(_props: { ctx: SettingsContext }) {
           setModelDraft(getLLMModel());
           setOpen(true);
         }}
-        control={<SecondaryValue value={settings.apiKey ? '已配置' : '未配置'} />}
+        right={<SecondaryValue value={settings.apiKey ? '已配置' : '未配置'} />}
       />
       <NoticeBlock message={notice} tone="success" />
       <Dialog open={open} onOpenChange={setOpen}>
@@ -315,6 +319,7 @@ export function AiApiKeySetting(_props: { ctx: SettingsContext }) {
 }
 
 export function FeatureTogglesSetting(_props: { ctx: SettingsContext }) {
+  const toneColor = useSettingsToneColor();
   const [open, setOpen] = useState(false);
   const [agentPageEnabled, setAgentPageEnabledState] = useSettingValue(
     () => getAgentPageEnabled(),
@@ -328,27 +333,37 @@ export function FeatureTogglesSetting(_props: { ctx: SettingsContext }) {
     () => getCommandPaletteEnabled(),
     subscribeCommandPaletteEnabledChanges,
   );
+  const switchToneStyle = {
+    '--switch-checked-bg': 'var(--settings-tone-color, #C75B3A)',
+    ...(buildSettingsToneStyle(toneColor) ?? {}),
+  } as CSSProperties;
 
   return (
     <>
-      <SettingsItemRow
+      <SettingRow
+        icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />}
         label="功能开关"
         onClick={() => setOpen(true)}
-        control={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
       />
       <Drawer open={open} onOpenChange={setOpen}>
         <DrawerContent className="dark:bg-[#1C1917]">
-          <div className="px-5 pb-8 pt-2">
+          <div
+            data-testid="feature-toggles-drawer-content"
+            style={buildSettingsToneStyle(toneColor)}
+            className="px-5 pb-8 pt-2"
+          >
             <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
               功能开关
             </DrawerTitle>
             <p className="mt-1 text-center text-xs text-[#A8A29E]">启用或关闭实验性功能</p>
             <div className="mt-4 space-y-2">
               <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3">
-                <span className="text-sm text-[#1C1917]">桌面端适配</span>
+                <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">桌面端适配</span>
                 <Switch
                   data-testid="new-settings-desktop-adaptive-switch"
                   checked={desktopAdaptiveEnabled}
+                  style={switchToneStyle}
                   onCheckedChange={(checked) => {
                     setDesktopAdaptiveEnabledState(checked);
                     setDesktopAdaptiveEnabled(checked);
@@ -356,10 +371,14 @@ export function FeatureTogglesSetting(_props: { ctx: SettingsContext }) {
                 />
               </div>
               <div className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3">
-                <span className="text-sm text-[#1C1917]">网络页面</span>
+                <div className="flex items-center gap-2">
+                  <Waypoints className="h-[16px] w-[16px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">网络页面</span>
+                </div>
                 <Switch
                   data-testid="feature-toggle-agent-page-switch"
                   checked={agentPageEnabled}
+                  style={switchToneStyle}
                   onCheckedChange={(checked) => {
                     setAgentPageEnabledState(checked);
                     setAgentPageEnabled(checked);
@@ -370,10 +389,14 @@ export function FeatureTogglesSetting(_props: { ctx: SettingsContext }) {
                 className="flex items-center justify-between rounded-xl border border-[#F0ECE8] px-4 py-3"
                 data-testid="feature-toggle-command-palette-row"
               >
-                <span className="text-sm text-[#1C1917]">命令面板</span>
+                <div className="flex items-center gap-2">
+                  <Command className="h-[16px] w-[16px] text-[#78716C]" />
+                  <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">命令面板</span>
+                </div>
                 <Switch
                   data-testid="feature-toggle-command-palette-switch"
                   checked={commandPaletteEnabled}
+                  style={switchToneStyle}
                   onCheckedChange={(checked) => {
                     setCommandPaletteEnabledState(checked);
                     setCommandPaletteEnabled(checked);
@@ -421,10 +444,11 @@ export function DevicePairingSetting(_props: { ctx: SettingsContext }) {
 
   return (
     <>
-      <SettingsItemRow
+      <SettingRow
+        icon={<Wifi className="h-[18px] w-[18px] text-[#78716C]" />}
         label="设备配对"
         onClick={() => setOpen(true)}
-        control={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
       />
       <PeerPairingDialog
         open={open}
@@ -487,7 +511,7 @@ export function TaskBackendStatusSetting(_props: { ctx: SettingsContext }) {
 
   return (
     <div className="px-4 py-[14px]">
-      <p className="text-sm text-[#1C1917]">任务后端：{status.backend}</p>
+      <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">任务后端：{status.backend}</p>
       <p className="mt-1 text-xs text-[#A8A29E]">任务备份：{backupLabel}</p>
     </div>
   );
@@ -500,14 +524,15 @@ export function TaskImportActionSetting(_props: { ctx: SettingsContext }) {
 
   return (
     <div>
-      <SettingsItemRow
+      <SettingRow
+        icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
         label="导入任务数据"
         onClick={() => {
           setNotice(null);
           setError(null);
           inputRef.current?.click();
         }}
-        control={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
       />
       <input
         ref={inputRef}
@@ -544,16 +569,24 @@ export function TaskImportActionSetting(_props: { ctx: SettingsContext }) {
 function VoiceTestActionRow({
   label,
   target,
+  icon,
 }: {
   label: string;
   target: '/moss-test' | '/volcano-asr-test';
+  icon: ReactNode;
 }) {
   const navigate = useNavigate();
+  const [developerMode] = useSettingValue(
+    () => getDeveloperModeEnabled(),
+    subscribeDeveloperModeChanges,
+  );
   const [error, setError] = useState<string | null>(null);
+  const statusLabel = developerMode ? '可用' : '需开发者模式';
 
   return (
     <div>
-      <SettingsItemRow
+      <SettingRow
+        icon={icon}
         label={label}
         onClick={() => {
           setError(null);
@@ -563,7 +596,7 @@ function VoiceTestActionRow({
           }
           navigate({ to: target });
         }}
-        control={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+        right={<SecondaryValue value={statusLabel} />}
       />
       <NoticeBlock message={error} tone="error" />
     </div>
@@ -571,9 +604,9 @@ function VoiceTestActionRow({
 }
 
 export function MossVoiceTestSetting(_props: { ctx: SettingsContext }) {
-  return <VoiceTestActionRow label="MOSS 语音测试" target="/moss-test" />;
+  return <VoiceTestActionRow label="MOSS 语音测试" target="/moss-test" icon={<Bot className="h-[18px] w-[18px] text-[#78716C]" />} />;
 }
 
 export function VolcanoVoiceTestSetting(_props: { ctx: SettingsContext }) {
-  return <VoiceTestActionRow label="火山引擎 ASR 测试" target="/volcano-asr-test" />;
+  return <VoiceTestActionRow label="火山引擎 ASR 测试" target="/volcano-asr-test" icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />} />;
 }

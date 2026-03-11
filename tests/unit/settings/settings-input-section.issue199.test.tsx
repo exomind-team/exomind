@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
+import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { setVoiceShortcutSendMode } from '@/config/voice-shortcut-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
@@ -61,7 +62,20 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('悬浮窗实时文本行数')).toBeInTheDocument();
     expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
+    expect(screen.getByText('仅作用于「当下」页面输入框，默认插入输入框')).toBeInTheDocument();
+    expect(screen.getByText('Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束')).toBeInTheDocument();
+    expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
+    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
+  });
+
+  it('shows voice test rows only when developer mode is enabled', () => {
+    vi.mocked(getDeveloperModeEnabled).mockReturnValue(true);
+
+    render(<SettingsPage />);
+
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
+    expect(screen.getByText('火山引擎 ASR 测试')).toBeInTheDocument();
+    expect(screen.getAllByText('可用')).toHaveLength(2);
   });
 
   it('switches shortcut voice provider from input section', async () => {
@@ -239,12 +253,13 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('已配置 (sk-t***56)')).toBeInTheDocument();
   });
 
-  it('shows guidance when voice test is clicked without developer mode', () => {
+  it('hides voice test rows when developer mode is disabled', () => {
+    vi.mocked(getDeveloperModeEnabled).mockReturnValue(false);
+
     render(<SettingsPage />);
 
-    fireEvent.click(screen.getByText('MOSS 语音测试'));
-
-    expect(screen.getByText('请先开启开发者模式后使用语音测试')).toBeInTheDocument();
+    expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
+    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
   });
 
   it('renders the new voice settings in desktop layout（桌面布局也包含新增语音设置项）', () => {

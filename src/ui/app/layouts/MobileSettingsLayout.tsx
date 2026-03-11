@@ -1,5 +1,7 @@
 import { SettingsItemRenderer } from '@/ui/app/components/settings/settings-renderers';
 import { SettingsSection } from '@/ui/app/components/settings/settings-section';
+import { Divider } from '@/ui/app/components/settings-shared';
+import { SETTINGS_CATEGORY_TONE_COLORS } from '@/ui/app/config/settings/settings-section-config';
 import type { Category, SettingsContext, SettingsItem } from '@/ui/app/config/settings/settings-types';
 
 const MOBILE_CATEGORY_ORDER: Category[] = [
@@ -18,7 +20,7 @@ const CATEGORY_LABELS: Record<Category, string> = {
   appearance: '外观',
   timer: '计时器',
   input: '输入',
-  feedback: '反馈',
+  feedback: '时间块反馈',
   ai: 'AI 设置',
   sync: '同步',
   data: '数据',
@@ -49,9 +51,13 @@ export function MobileSettingsLayout({
             key={category}
             testId={CATEGORY_TEST_IDS[category]}
             title={CATEGORY_LABELS[category]}
+            toneColor={SETTINGS_CATEGORY_TONE_COLORS[category] ?? null}
           >
-            {categoryItems.map((item) => (
-              <SettingsItemRenderer key={item.id} item={item} ctx={ctx} />
+            {categoryItems.map((item, index) => (
+              <div key={item.id}>
+                <SettingsItemRenderer item={item} ctx={ctx} />
+                {index < categoryItems.length - 1 ? <Divider toneColor={SETTINGS_CATEGORY_TONE_COLORS[category] ?? null} /> : null}
+              </div>
             ))}
           </SettingsSection>
         );

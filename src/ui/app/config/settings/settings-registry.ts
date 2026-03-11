@@ -1,4 +1,5 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { Code, Download, List, Mic, MoonStar, Upload, Waypoints, Wifi, Bot } from 'lucide-react';
 import type { SettingsContext, SettingsItem } from './settings-types';
 import {
   getSyncServerUrlOverride,
@@ -271,6 +272,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'theme',
     label: '主题',
+    icon: MoonStar,
     category: 'appearance',
     type: 'enum',
     options: [
@@ -302,7 +304,9 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'feedback-content',
     label: '反馈内容',
+    icon: List,
     category: 'feedback',
+    description: '可多选，默认仅开启快速反馈',
     rowTestId: 'new-settings-feedback-content-row',
     type: 'enum',
     multiSelect: true,
@@ -319,7 +323,9 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-transcript-send-mode',
     label: '语音转写后',
+    icon: Mic,
     category: 'input',
+    description: '仅作用于「当下」页面输入框，默认插入输入框',
     rowTestId: 'new-settings-voice-transcript-mode-row',
     type: 'enum',
     options: [
@@ -336,6 +342,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-shortcut-send-mode',
     label: '聊天与外部输入语音完成后',
+    icon: Mic,
     category: 'input',
     rowTestId: 'new-settings-voice-shortcut-send-mode-row',
     type: 'enum',
@@ -353,7 +360,9 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-shortcut-hotkey',
     label: '全局语音快捷键',
+    icon: Mic,
     category: 'input',
+    description: 'Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束',
     rowTestId: 'new-settings-voice-shortcut-row',
     type: 'enum',
     options: VOICE_SHORTCUT_HOTKEY_VALUES.map((value) => ({ label: value, value })),
@@ -368,6 +377,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-shortcut-asr-provider',
     label: '快捷语音引擎',
+    icon: Mic,
     category: 'input',
     rowTestId: 'new-settings-voice-provider-row',
     type: 'enum',
@@ -384,6 +394,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-shortcut-mic-prewarm',
     label: '预启动麦克风',
+    icon: Mic,
     category: 'input',
     rowTestId: 'new-settings-voice-prewarm-row',
     controlTestId: 'new-settings-voice-prewarm-switch',
@@ -395,6 +406,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-overlay-opacity',
     label: '悬浮窗透明度',
+    icon: MoonStar,
     category: 'input',
     rowTestId: 'new-settings-voice-overlay-opacity-row',
     controlTestId: 'new-settings-voice-overlay-opacity-slider',
@@ -410,6 +422,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-overlay-show-diagnostics',
     label: '显示语音悬浮窗诊断信息',
+    icon: Code,
     category: 'input',
     rowTestId: 'new-settings-voice-overlay-diagnostics-row',
     controlTestId: 'new-settings-voice-overlay-diagnostics-switch',
@@ -421,6 +434,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-overlay-transcript-lines',
     label: '悬浮窗实时文本行数',
+    icon: List,
     category: 'input',
     rowTestId: 'new-settings-voice-overlay-transcript-lines-row',
     controlTestId: 'new-settings-voice-overlay-transcript-lines-slider',
@@ -436,6 +450,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'voice-overlay-bottom-offset',
     label: '悬浮窗距任务栏间距',
+    icon: Waypoints,
     category: 'input',
     rowTestId: 'new-settings-voice-overlay-bottom-offset-row',
     controlTestId: 'new-settings-voice-overlay-bottom-offset-slider',
@@ -451,6 +466,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'volcano-resource-model',
     label: '火山资源模型',
+    icon: Mic,
     category: 'input',
     rowTestId: 'new-settings-volcano-resource-row',
     controlTestId: 'new-settings-volcano-resource-select',
@@ -465,6 +481,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'moss-api-token',
     label: 'MOSS API Token',
+    icon: Bot,
     category: 'input',
     rowTestId: 'new-settings-voice-token-row',
     type: 'string',
@@ -488,6 +505,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: 'MOSS 语音测试',
     category: 'input',
     type: 'custom',
+    visible: devOnly,
     component: MossVoiceTestSetting,
   },
   {
@@ -495,6 +513,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: '火山引擎 ASR 测试',
     category: 'input',
     type: 'custom',
+    visible: devOnly,
     component: VolcanoVoiceTestSetting,
   },
   {
@@ -507,6 +526,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'sync-server-url',
     label: '同步服务器',
+    icon: Wifi,
     category: 'sync',
     type: 'string',
     stringStyle: 'dialog',
@@ -525,6 +545,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'export-backup',
     label: '导出备份',
+    icon: Download,
     category: 'data',
     type: 'action',
     onAction: () => exportBackup(),
@@ -533,6 +554,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'import-backup',
     label: '导入数据',
+    icon: Upload,
     category: 'data',
     type: 'action',
     onAction: () => importBackup('merge'),
@@ -541,6 +563,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'export-tasks-json',
     label: '导出任务 JSON',
+    icon: Download,
     category: 'data',
     type: 'action',
     onAction: () => exportTasksJson(),
@@ -549,6 +572,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'export-tasks-sqlite',
     label: '导出任务 SQLite',
+    icon: Download,
     category: 'data',
     type: 'action',
     onAction: () => exportTasksSqlite(),
@@ -564,6 +588,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'developer-mode',
     label: '开发者模式',
+    icon: Code,
     category: 'developer',
     type: 'boolean',
     description: '开启后可使用语音测试等实验功能',
@@ -574,6 +599,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'use-mock-data',
     label: '使用测试数据',
+    icon: Code,
     category: 'developer',
     controlTestId: 'new-settings-use-mock-data-switch',
     type: 'boolean',
@@ -585,6 +611,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'devtools',
     label: '开发者工具',
+    icon: Code,
     category: 'developer',
     controlTestId: 'new-settings-devtools-switch',
     type: 'boolean',
@@ -620,23 +647,23 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
   {
     id: 'clear-local-cache',
     label: '清空本地缓存',
+    description: '将清除设备上的临时设置与缓存',
     category: 'danger',
     type: 'action',
-    variant: 'destructive',
-    disabled: true,
-    disabledReason: 'Coming Soon',
-    onAction: () => {},
+    actionMode: 'button',
+    buttonLabel: '立即清空',
+    onAction: () => '敬请期待',
   },
   {
     id: 'reset-all-settings',
     label: '重置所有设置',
+    description: '恢复默认配置，不影响历史事件数据',
     category: 'danger',
     type: 'action',
-    variant: 'destructive',
-    disabled: true,
-    disabledReason: 'Coming Soon',
+    actionMode: 'button',
+    buttonLabel: '恢复默认',
     confirmMessage: '确认恢复所有默认设置？',
-    onAction: () => {},
+    onAction: () => '敬请期待',
   },
 ];
 

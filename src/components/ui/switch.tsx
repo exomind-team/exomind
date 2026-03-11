@@ -9,8 +9,12 @@ const Switch = React.forwardRef<
   React.ComponentPropsWithoutRef<typeof SwitchPrimitives.Root>
 >(({ className, ...props }, ref) => (
   <SwitchPrimitives.Root
+    style={{
+      "--switch-checked-bg": "hsl(var(--brand-accent))",
+      ...(props.style ?? {}),
+    } as React.CSSProperties}
     className={cn(
-      "peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-brand-accent data-[state=unchecked]:bg-[#E7E5E4] dark:data-[state=unchecked]:bg-white/10",
+      "peer inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 focus-visible:ring-offset-background disabled:cursor-not-allowed disabled:opacity-50 data-[state=checked]:bg-[var(--switch-checked-bg)] data-[state=unchecked]:bg-[#E7E5E4] dark:data-[state=unchecked]:bg-white/10",
       className
     )}
     {...props}

@@ -105,6 +105,7 @@ export interface StringSettingsItem extends SettingsItemBase {
 
 export interface ActionSettingsItem extends SettingsItemBase {
   type: 'action';
+  actionMode?: 'row' | 'button';
   buttonLabel?: string;
   variant?: 'default' | 'destructive' | 'outline';
   disabled?: boolean | (() => boolean);

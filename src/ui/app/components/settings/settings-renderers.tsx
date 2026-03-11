@@ -1,8 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import type { CSSProperties } from 'react';
 import { ChevronRight } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Switch } from '@/components/ui/switch';
-import { SettingsItemRow } from './settings-item-row';
+import { SettingRow, buildSettingsToneStyle, useSettingsToneColor } from '@/ui/app/components/settings-shared';
 import type {
   ActionSettingsItem,
   BooleanSettingsItem,
@@ -72,7 +73,37 @@ function NoticeBlock({
   );
 }
 
+function renderRowIcon(Icon?: BooleanSettingsItem['icon']) {
+  if (!Icon) {
+    return undefined;
+  }
+
+  return <Icon className="h-[18px] w-[18px] text-[#78716C]" />;
+}
+
+function HelperBlock({ message }: { message: string | null }) {
+  if (!message) {
+    return null;
+  }
+
+  return (
+    <div className="pb-[14px] pl-[46px] pr-4">
+      <span className="text-xs text-[#A8A29E]">{message}</span>
+    </div>
+  );
+}
+
+function SecondaryValue({ value }: { value: string }) {
+  return (
+    <div className="flex items-center gap-1 text-sm text-[#A8A29E]">
+      <span>{value}</span>
+      <ChevronRight className="h-4 w-4" />
+    </div>
+  );
+}
+
 function BooleanRenderer({ item }: { item: BooleanSettingsItem }) {
+  const toneColor = useSettingsToneColor();
   const [value, setValue, getCurrent] = useSettingState(item.get, item.subscribe);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -109,53 +140,269 @@ function BooleanRenderer({ item }: { item: BooleanSettingsItem }) {
 
   return (
     <div>
-      <SettingsItemRow
+      <SettingRow
         testId={item.rowTestId}
+        icon={renderRowIcon(item.icon)}
         label={item.label}
-        description={item.description}
-        control={(
+        right={(
           <Switch
             data-testid={item.controlTestId}
             checked={value}
             onCheckedChange={handleChange}
+            style={{
+              '--switch-checked-bg': 'var(--settings-tone-color, #C75B3A)',
+              ...(buildSettingsToneStyle(toneColor) ?? {}),
+            } as CSSProperties}
           />
         )}
       />
+      <HelperBlock message={item.description ?? null} />
       <NoticeBlock message={notice} tone="success" />
       <NoticeBlock message={error} tone="error" />
     </div>
   );
 }
 
-function buildSegmentedClass(index: number, total: number, selected: boolean): string {
-  const shapeClass = index === 0
-    ? 'rounded-l-xl rounded-r-none'
-    : index === total - 1
-      ? 'rounded-r-xl rounded-l-none'
-      : 'rounded-none';
-
-  const colorClass = selected
-    ? 'border-[#C75B3A] bg-[#FFF1EB] text-[#C75B3A]'
-    : 'border-[#E7E5E4] bg-white text-[#78716C]';
-
-  return `${shapeClass} border px-2.5 py-1.5 text-xs ${colorClass}`;
+function buildInlineEnumShellClass(): string {
+  return 'relative inline-flex min-w-0 max-w-full items-center overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]';
 }
 
-function EnumButtons({
+function buildInlineEnumShapeClass(index: number, total: number): string {
+  if (total <= 1) {
+    return 'rounded-[10px]';
+  }
+
+  if (index === 0) {
+    return 'rounded-l-[9px] rounded-r-none';
+  }
+
+  if (index === total - 1) {
+    return 'rounded-r-[9px] rounded-l-none';
+  }
+
+  return 'rounded-none';
+}
+
+function buildSingleSelectInlineEnumButtonClass(selected: boolean): string {
+  return `relative z-10 flex h-8 min-w-0 items-center justify-center gap-1 whitespace-nowrap rounded-[10px] px-[8px] text-[12px] transition-colors duration-200 ${
+    selected
+      ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9]'
+      : 'text-[#78716C] hover:text-[#57534E] dark:text-[#A8A29E] dark:hover:text-[#D6D3D1]'
+  }`;
+}
+
+function buildMultiSelectInlineEnumButtonClass(selected: boolean, index: number, total: number): string {
+  return `relative z-10 flex h-8 min-w-0 items-center justify-center gap-1 whitespace-nowrap px-[8px] text-[12px] transition-colors duration-200 ${buildInlineEnumShapeClass(index, total)} ${
+    selected
+      ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9]'
+      : 'text-[#78716C] hover:text-[#57534E] dark:text-[#A8A29E] dark:hover:text-[#D6D3D1]'
+  }`;
+}
+
+function buildAdjacentSelectionShapeClass(index: number, total: number, selectedStates: boolean[]): string {
+  if (total <= 1) {
+    return 'rounded-[10px]';
+  }
+
+  const leftRounded = index === 0 || !selectedStates[index - 1];
+  const rightRounded = index === total - 1 || !selectedStates[index + 1];
+
+  if (leftRounded && rightRounded) {
+    return 'rounded-[10px]';
+  }
+
+  return `${leftRounded ? 'rounded-l-[9px]' : 'rounded-l-none'} ${rightRounded ? 'rounded-r-[9px]' : 'rounded-r-none'}`;
+}
+
+function buildAdjacentSelectionBorderClass(index: number, total: number, selectedStates: boolean[]): string {
+  if (total <= 1) {
+    return '';
+  }
+
+  const mergeLeftEdge = index > 0 && selectedStates[index - 1];
+  const mergeRightEdge = index < total - 1 && selectedStates[index + 1];
+
+  return `${mergeLeftEdge ? 'border-l-0' : ''} ${mergeRightEdge ? 'border-r-0' : ''}`;
+}
+
+function buildInlineEnumOverlayClass(
+  selected: boolean,
+  shapeClass: string,
+  borderClass = '',
+): string {
+  return `pointer-events-none absolute inset-0 overflow-hidden border settings-tone-border shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-opacity duration-200 ease-out ${shapeClass} ${borderClass} ${
+    selected ? 'opacity-100' : 'opacity-0'
+  }`;
+}
+
+function buildInlineEnumOverlayStyle(toneColor: string | null): CSSProperties | undefined {
+  if (!toneColor) {
+    return undefined;
+  }
+
+  return {
+    ...(buildSettingsToneStyle(toneColor) ?? {}),
+  };
+}
+
+function buildInlineEnumOverlayFillClass(): string {
+  return 'absolute inset-0 settings-tone-fill';
+}
+
+function buildInlineEnumOverlayFillStyle(toneColor: string | null): CSSProperties | undefined {
+  if (!toneColor) {
+    return undefined;
+  }
+
+  return buildSettingsToneStyle(toneColor);
+}
+
+function renderEnumOptionContent(option: EnumSettingsItem['options'][number]) {
+  const Icon = option.icon;
+  return (
+    <span className="relative z-10 flex items-center gap-1">
+      {Icon ? <Icon className="h-3.5 w-3.5 shrink-0" /> : null}
+      <span>{option.label}</span>
+    </span>
+  );
+}
+
+function resolveNextEnumValue(
+  item: EnumSettingsItem,
+  values: string[],
+  optionValue: string,
+  selected: boolean,
+): string | string[] {
+  if (!item.multiSelect) {
+    return optionValue;
+  }
+
+  return selected
+    ? values.filter((entry) => entry !== optionValue)
+    : item.options
+      .filter((candidate) => values.includes(candidate.value) || candidate.value === optionValue)
+      .map((candidate) => candidate.value);
+}
+
+function SingleSelectInlineEnumButtons({
   item,
   value,
   onSelect,
 }: {
   item: EnumSettingsItem;
-  value: string | string[];
-  onSelect: (nextValue: string | string[]) => void;
+  value: string;
+  onSelect: (nextValue: string) => void;
 }) {
-  const values = Array.isArray(value) ? value : [value];
+  const toneColor = useSettingsToneColor();
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  const optionRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const [indicator, setIndicator] = useState({ left: 0, width: 0, ready: false });
+
+  useLayoutEffect(() => {
+    const updateIndicator = () => {
+      const activeButton = optionRefs.current[value];
+      if (!activeButton) {
+        setIndicator((current) => (current.ready ? { left: 0, width: 0, ready: false } : current));
+        return;
+      }
+
+      setIndicator({
+        left: activeButton.offsetLeft,
+        width: activeButton.offsetWidth,
+        ready: true,
+      });
+    };
+
+    updateIndicator();
+
+    const frame = window.requestAnimationFrame(updateIndicator);
+    window.addEventListener('resize', updateIndicator);
+
+    let observer: ResizeObserver | undefined;
+    if (typeof ResizeObserver !== 'undefined' && containerRef.current) {
+      observer = new ResizeObserver(updateIndicator);
+      observer.observe(containerRef.current);
+    }
+
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', updateIndicator);
+      observer?.disconnect();
+    };
+  }, [item.options, value]);
 
   return (
-    <div role="group" aria-label={item.label} className="flex items-center gap-0">
+    <div
+      ref={containerRef}
+      role="group"
+      aria-label={item.label}
+      data-testid={item.controlTestId}
+      className={buildInlineEnumShellClass()}
+    >
+      <div
+        data-active-indicator="true"
+        aria-hidden
+        className={`pointer-events-none absolute inset-y-0 left-0 overflow-hidden rounded-[10px] border settings-tone-border shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-[transform,width,opacity] duration-200 ease-out ${
+          indicator.ready ? 'opacity-100' : 'opacity-0'
+        }`}
+        style={{
+          ...buildInlineEnumOverlayStyle(toneColor),
+          width: `${indicator.width}px`,
+          transform: `translateX(${indicator.left}px)`,
+        }}
+      >
+        <div
+          data-active-indicator-fill="true"
+          aria-hidden
+          className={buildInlineEnumOverlayFillClass()}
+          style={buildInlineEnumOverlayFillStyle(toneColor)}
+        />
+      </div>
       {item.options.map((option, index) => {
-        const selected = values.includes(option.value);
+        const selected = value === option.value;
+        return (
+          <button
+            key={option.value}
+            ref={(node) => {
+              optionRefs.current[option.value] = node;
+            }}
+            data-testid={item.optionTestId?.(option.value, index)}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => {
+              onSelect(option.value);
+            }}
+            className={buildSingleSelectInlineEnumButtonClass(selected)}
+          >
+            {renderEnumOptionContent(option)}
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+function MultiSelectInlineEnumButtons({
+  item,
+  value,
+  onSelect,
+}: {
+  item: EnumSettingsItem;
+  value: string[];
+  onSelect: (nextValue: string[]) => void;
+}) {
+  const toneColor = useSettingsToneColor();
+  const selectedStates = item.options.map((option) => value.includes(option.value));
+
+  return (
+    <div
+      role="group"
+      aria-label={item.label}
+      data-testid={item.controlTestId}
+      className={buildInlineEnumShellClass()}
+    >
+      {item.options.map((option, index) => {
+        const selected = value.includes(option.value);
         return (
           <button
             key={option.value}
@@ -163,21 +410,28 @@ function EnumButtons({
             type="button"
             aria-pressed={selected}
             onClick={() => {
-              if (item.multiSelect) {
-                const nextValues = selected
-                  ? values.filter((entry) => entry !== option.value)
-                  : item.options
-                    .filter((candidate) => values.includes(candidate.value) || candidate.value === option.value)
-                    .map((candidate) => candidate.value);
-                onSelect(nextValues);
-                return;
-              }
-
-              onSelect(option.value);
+              onSelect(resolveNextEnumValue(item, value, option.value, selected) as string[]);
             }}
-            className={buildSegmentedClass(index, item.options.length, selected)}
+            className={buildMultiSelectInlineEnumButtonClass(selected, index, item.options.length)}
           >
-            {option.label}
+            <span
+              data-selection-overlay="true"
+              aria-hidden
+              className={buildInlineEnumOverlayClass(
+                selected,
+                buildAdjacentSelectionShapeClass(index, item.options.length, selectedStates),
+                buildAdjacentSelectionBorderClass(index, item.options.length, selectedStates),
+              )}
+              style={buildInlineEnumOverlayStyle(toneColor)}
+            >
+              <span
+                data-selection-fill="true"
+                aria-hidden
+                className={buildInlineEnumOverlayFillClass()}
+                style={buildInlineEnumOverlayFillStyle(toneColor)}
+              />
+            </span>
+            {renderEnumOptionContent(option)}
           </button>
         );
       })}
@@ -230,11 +484,11 @@ function EnumRenderer({ item }: { item: EnumSettingsItem }) {
   if (item.enumStyle === 'select' && !item.multiSelect) {
     return (
       <div>
-        <SettingsItemRow
+        <SettingRow
           testId={item.rowTestId}
+          icon={renderRowIcon(item.icon)}
           label={item.label}
-          description={item.description}
-          control={(
+          right={(
             <select
               data-testid={item.controlTestId}
               aria-label={item.label}
@@ -252,7 +506,8 @@ function EnumRenderer({ item }: { item: EnumSettingsItem }) {
             </select>
           )}
         />
-        {helperText ? <div className="px-4 pb-3 text-xs text-[#78716C]">{helperText}</div> : null}
+        <HelperBlock message={item.description ?? null} />
+        <HelperBlock message={helperText} />
         <NoticeBlock message={notice} tone="success" />
         <NoticeBlock message={error} tone="error" />
       </div>
@@ -261,13 +516,28 @@ function EnumRenderer({ item }: { item: EnumSettingsItem }) {
 
   return (
     <div>
-      <SettingsItemRow
+      <SettingRow
         testId={item.rowTestId}
+        icon={renderRowIcon(item.icon)}
         label={item.label}
-        description={item.description}
-        control={<EnumButtons item={item} value={value} onSelect={(nextValue) => handleChange(nextValue)} />}
+        right={item.multiSelect
+          ? (
+              <MultiSelectInlineEnumButtons
+                item={item}
+                value={value as string[]}
+                onSelect={(nextValue) => handleChange(nextValue)}
+              />
+            )
+          : (
+              <SingleSelectInlineEnumButtons
+                item={item}
+                value={value as string}
+                onSelect={(nextValue) => handleChange(nextValue)}
+              />
+            )}
       />
-      {helperText ? <div className="px-4 pb-3 text-xs text-[#78716C]">{helperText}</div> : null}
+      <HelperBlock message={item.description ?? null} />
+      <HelperBlock message={helperText} />
       <NoticeBlock message={notice} tone="success" />
       <NoticeBlock message={error} tone="error" />
     </div>
@@ -275,6 +545,7 @@ function EnumRenderer({ item }: { item: EnumSettingsItem }) {
 }
 
 function NumberRenderer({ item }: { item: NumberSettingsItem }) {
+  const toneColor = useSettingsToneColor();
   const [value, setValue, getCurrent] = useSettingState(item.get, item.subscribe);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -313,11 +584,11 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
 
   return (
     <div>
-      <SettingsItemRow
+      <SettingRow
         testId={item.rowTestId}
+        icon={renderRowIcon(item.icon)}
         label={item.label}
-        description={item.description}
-        control={(
+        right={(
           <div className="flex min-w-[186px] items-center gap-3">
             <input
               data-testid={item.controlTestId}
@@ -329,7 +600,11 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
               onChange={(event) => {
                 handleChange(Number(event.target.value));
               }}
-              className="w-full accent-[#C75B3A]"
+              style={{
+                ...(buildSettingsToneStyle(toneColor) ?? {}),
+                accentColor: 'var(--settings-tone-color, #C75B3A)',
+              }}
+              className="w-full"
             />
             <span className="min-w-[44px] text-right text-xs text-[#78716C]">
               {renderedValue}
@@ -337,6 +612,7 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
           </div>
         )}
       />
+      <HelperBlock message={item.description ?? null} />
       <NoticeBlock message={notice} tone="success" />
       <NoticeBlock message={error} tone="error" />
     </div>
@@ -360,6 +636,7 @@ function maskStringValue(item: StringSettingsItem, value: string): string {
 }
 
 function StringRenderer({ item }: { item: StringSettingsItem }) {
+  const toneColor = useSettingsToneColor();
   const [value, setValue, getCurrent] = useSettingState(item.get, item.subscribe);
   const [open, setOpen] = useState(false);
   const [draft, setDraft] = useState(value);
@@ -405,11 +682,11 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
   if (item.stringStyle !== 'dialog') {
     return (
       <div>
-        <SettingsItemRow
+        <SettingRow
           testId={item.rowTestId}
+          icon={renderRowIcon(item.icon)}
           label={item.label}
-          description={item.description}
-          control={(
+          right={(
             <input
               data-testid={item.controlTestId}
               aria-label={item.label}
@@ -435,6 +712,7 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
             />
           )}
         />
+        <HelperBlock message={item.description ?? null} />
         <NoticeBlock message={notice} tone="success" />
         <NoticeBlock message={error} tone="error" />
       </div>
@@ -443,26 +721,22 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
 
   return (
     <div>
-      <SettingsItemRow
+      <SettingRow
         testId={item.rowTestId}
+        icon={renderRowIcon(item.icon)}
         label={item.label}
-        description={item.description}
         onClick={() => {
           setDraft(value);
           setError(null);
           setOpen(true);
         }}
-        control={(
-          <div className="flex items-center gap-1 text-sm text-[#A8A29E]">
-            <span>{maskStringValue(item, value)}</span>
-            <ChevronRight className="h-4 w-4" />
-          </div>
-        )}
+        right={<SecondaryValue value={maskStringValue(item, value)} />}
       />
+      <HelperBlock message={item.description ?? null} />
       <NoticeBlock message={notice} tone="success" />
       <NoticeBlock message={error} tone="error" />
       <Dialog open={open} onOpenChange={setOpen}>
-        <DialogContent className="rounded-2xl">
+        <DialogContent className="rounded-2xl" style={buildSettingsToneStyle(toneColor)}>
           <DialogHeader>
             <DialogTitle>{item.dialogTitle ?? item.label}</DialogTitle>
             <DialogDescription className={item.dialogDescription ? undefined : 'sr-only'}>
@@ -488,7 +762,8 @@ function StringRenderer({ item }: { item: StringSettingsItem }) {
                 onClick={() => {
                   handleSave();
                 }}
-                className="rounded-md bg-[#C75B3A] px-3 py-1.5 text-sm text-white"
+                className="rounded-md px-3 py-1.5 text-sm text-white"
+                style={{ backgroundColor: 'var(--settings-tone-color, #C75B3A)' }}
               >
                 保存
               </button>
@@ -507,7 +782,13 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
   const disabled = loading || (typeof item.disabled === 'function' ? item.disabled() : item.disabled);
 
   const handleAction = () => {
-    if (item.confirmMessage && !window.confirm(item.confirmMessage)) {
+    const confirmFn = typeof window !== 'undefined' && typeof window.confirm === 'function'
+      ? window.confirm.bind(window)
+      : typeof globalThis.confirm === 'function'
+        ? globalThis.confirm.bind(globalThis)
+        : undefined;
+
+    if (item.confirmMessage && confirmFn && !confirmFn(item.confirmMessage)) {
       return;
     }
 
@@ -536,21 +817,49 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
     }
   };
 
+  if (item.actionMode === 'button') {
+    return (
+      <div data-testid={item.rowTestId}>
+        <div className="flex items-center justify-between gap-3 px-4 py-[14px]">
+          <div className="min-w-0 flex-1">
+            <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{item.label}</p>
+            {item.description ? (
+              <p className="mt-1 text-xs text-[#A8A29E]">{item.description}</p>
+            ) : null}
+          </div>
+          <button
+            type="button"
+            disabled={disabled}
+            title={item.disabledReason}
+            onClick={() => {
+              handleAction();
+            }}
+            className="shrink-0 rounded-md px-3 py-1.5 text-xs font-medium text-white transition-opacity hover:opacity-90 disabled:cursor-not-allowed disabled:opacity-60"
+            style={{ backgroundColor: 'var(--settings-tone-color, #C75B3A)' }}
+          >
+            {item.buttonLabel ?? item.label}
+          </button>
+        </div>
+        <NoticeBlock message={notice} tone="success" />
+        <NoticeBlock message={error} tone="error" />
+      </div>
+    );
+  }
+
   return (
     <div>
-      <button
-        data-testid={item.rowTestId}
-        type="button"
-        disabled={disabled}
-        title={item.disabledReason}
+      <SettingRow
+        testId={item.rowTestId}
+        icon={renderRowIcon(item.icon)}
+        label={item.label}
         onClick={() => {
           handleAction();
         }}
-        className="flex w-full items-center justify-between px-4 py-[14px] text-left disabled:cursor-not-allowed disabled:opacity-60"
-      >
-        <span className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{item.buttonLabel ?? item.label}</span>
-        <ChevronRight className="h-4 w-4 text-[#A8A29E]" />
-      </button>
+        disabled={disabled}
+        title={item.disabledReason}
+        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+      />
+      <HelperBlock message={item.description ?? null} />
       <NoticeBlock message={notice} tone="success" />
       <NoticeBlock message={error} tone="error" />
     </div>
@@ -559,11 +868,11 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
 
 function GroupRenderer({ item }: { item: GroupSettingsItem }) {
   return (
-    <SettingsItemRow
+    <SettingRow
       testId={item.rowTestId}
+      icon={renderRowIcon(item.icon)}
       label={item.label}
-      description={item.description}
-      control={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+      right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
     />
   );
 }

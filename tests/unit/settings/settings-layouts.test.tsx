@@ -33,12 +33,18 @@ describe('settings layouts', () => {
     render(<MobileSettingsLayout items={items} ctx={ctx} />);
 
     expect(screen.getByText('外观')).toBeInTheDocument();
-    expect(screen.getByText('反馈')).toBeInTheDocument();
+    expect(screen.getByText('时间块反馈')).toBeInTheDocument();
     expect(screen.getByText('输入')).toBeInTheDocument();
     expect(screen.getByText('同步')).toBeInTheDocument();
     expect(screen.getByText('数据')).toBeInTheDocument();
     expect(screen.getByText('开发者')).toBeInTheDocument();
     expect(screen.getByText('危险区域')).toBeInTheDocument();
+
+    const dangerSection = screen.getByText('危险区域').closest('section');
+    const developerSection = screen.getByText('开发者').closest('section');
+    const relation = developerSection?.compareDocumentPosition(dangerSection as Node) ?? 0;
+
+    expect(relation & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 
   it('renders desktop tabs from desktop tab config', () => {
@@ -53,5 +59,11 @@ describe('settings layouts', () => {
     expect(screen.getByRole('button', { name: '数据' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '开发者' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '危险区域' })).toBeInTheDocument();
+
+    const tabs = screen.getAllByRole('button');
+    const developerIndex = tabs.findIndex((button) => button.textContent === '开发者');
+    const dangerIndex = tabs.findIndex((button) => button.textContent === '危险区域');
+
+    expect(dangerIndex).toBeGreaterThan(developerIndex);
   });
 });

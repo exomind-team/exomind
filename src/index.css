@@ -49,6 +49,7 @@
     --sidebar-border: 24 16% 88%;
     --sidebar-accent: 24 33% 90%;
     --sidebar-accent-foreground: 20 12% 14%;
+    --settings-tone-developer: #1C1917;
 
     /* UserCard 渐变背景和阴影 */
     --user-card-bg: radial-gradient(circle at 15% 0%, rgba(255,255,255,0.25) 0%, rgba(255,255,255,0) 60%), linear-gradient(145deg, #E8866F 0%, #D4664A 50%, #C75B3A 100%);
@@ -100,6 +101,7 @@
     --sidebar-border: 12 6% 15%;
     --sidebar-accent: 24 10% 18%;
     --sidebar-accent-foreground: 60 9% 98%;
+    --settings-tone-developer: #FAFAF9;
 
     /* UserCard 渐变背景和阴影 - 暗色 */
     --user-card-bg: radial-gradient(circle at 15% 0%, rgba(255,255,255,0.08) 0%, rgba(255,255,255,0) 50%), linear-gradient(145deg, #8B3A25 0%, #6B2E1E 50%, #4A1F14 100%);
@@ -117,6 +119,15 @@
 }
 
 @layer utilities {
+  .settings-tone-border {
+    border-color: var(--settings-tone-color, #C75B3A);
+  }
+
+  .settings-tone-fill {
+    background-color: var(--settings-tone-color, #C75B3A);
+    opacity: 0.2;
+  }
+
   .agent-topology-controls {
     @apply rounded-xl border border-border-card bg-card p-1 shadow-sm;
   }
