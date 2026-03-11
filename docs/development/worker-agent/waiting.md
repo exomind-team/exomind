@@ -1,22 +1,22 @@
-# Worker Agent Waiting Model
+# 工作 Agent 等待模型
 
-## Why Wait
+## 为什么需要等待
 
 当前设计选择“单 PR 深度推进”，所以当 PR 暂时没有可继续动作时，工作 Agent 进入阻塞等待，而不是切走别的任务。
 
-## Pre-Wait Rules
+## 进入等待前的规则
 
 进入等待前，必须满足：
 
 - 工作区干净，或所有修改已明确提交
 - 该推送的提交已经推送
-- PR body 已同步
+- PR 正文已同步
 - 本轮应发评论已发送
 - 本地状态文件已更新
-- 当前 feedback 批次已执行 `cursor sync`
+- 当前反馈批次已执行 `cursor sync`
 - 已执行一次显式 `lock renew`
 
-## Wake Events
+## 唤醒事件
 
 等待脚本只监听当前持锁 PR，且以下事件会唤醒它：
 
@@ -25,11 +25,11 @@
 - 新的人类普通评论
 - `[Codex Reviewer] ❤️ 需要人类测试`
 - `🙋needs-human-test` 标签变化
-- CI failure
+- CI 失败
 
 说明：所有 `[Codex Reviewer]` 评论都视为唤醒事件，不允许因“未发现问题/状态同步”而忽略。
 
-## Heartbeat Output
+## 心跳输出
 
 等待期间每 `60s` 打一次心跳，输出：
 
@@ -37,7 +37,7 @@
 - `pr`
 - `since`
 
-## waiting_on Vocabulary
+## `waiting_on` 取值
 
 默认细分为：
 

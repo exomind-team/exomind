@@ -1,26 +1,26 @@
-# Worker Agent Message Protocol
+# 工作 Agent 消息协议
 
-## Prefix Rules
+## 前缀规则
 
-所有由 `Worker Agent` 新建或更新的以下文本，都统一以 `[Codex Worker]` 开头：
+所有由 `工作 Agent` 新建或更新的以下文本，都统一以 `[Codex Worker]` 开头：
 
-- issue body
-- PR body
-- issue comment
-- PR comment
+- 议题正文
+- PR 正文
+- 议题评论
+- PR 评论
 
 标题不加前缀。
 
-## Language Rule
+## 语言规则
 
-所有由 `Worker Agent` 发出的对外文本，都必须跟随关联 issue 的主语言。
+所有由 `工作 Agent` 发出的对外文本，都必须跟随关联议题的主语言。
 
 - 真相源优先取 `next-action` / `restore` 输出里的 `context.targetLanguage`
 - 当前支持值为 `zh` / `en`
 - 若使用 `render-*` 命令生成草稿，需显式传入 `--language <targetLanguage>`
 - 不再把固定英文 section 名视为协议真相
 
-## Per-Round Progress Comment Rule
+## 每轮进展评论规则
 
 工作 Agent 现在按“单动作循环机”推进，因此每完成一轮关键动作，都要更新一条 `[Codex Worker]` 评论。
 
@@ -31,90 +31,90 @@
 - 完成提交/推送
 - 进入等待边界
 - `🙋needs-human-test` 状态发生变化
-- 触发 Worker 执行异议
-- 处理 reviewer / human comment（包含“未发现问题/状态同步”，不得沉默）
+- 触发工作 Agent 执行异议
+- 处理审阅者 / 人类评论（包含“未发现问题/状态同步”，不得沉默）
 
-## Standard Comment Template
+## 标准评论模板
 
 ```text
 [Codex Worker]
 > 原文关键句
 
-变更 / Change
+变更
 ...
 
-验证 / Verification
+验证
 ...
 
-结果 / Result
+结果
 ...
 ```
 
-## Body Template
+## 正文模板
 
-PR / issue body 至少包含：
+PR / 议题正文至少包含：
 
 - 摘要语义
 - 范围语义
 - 验证语义
 - 关联/引用语义
 
-section 标题语言跟随 `targetLanguage`，例如：
+段落标题语言跟随 `targetLanguage`，例如：
 
 - `zh`：`摘要` / `范围` / `验证` / `关联/引用`
 - `en`：`Summary` / `Scope` / `Verification` / `Links/Refs`
 
-## Worker Dissent Templates
+## 工作 Agent 执行异议模板
 
-### PR Comment
-
-```text
-[Codex Worker]
-
-结论 / Conclusion
-脚本 / Script: ...
-实际 / Actual: ...
-
-复现证据 / Repro Evidence
-...
-
-追踪过程 / Trace Process
-...
-
-影响 / Impact
-...
-
-关联议题 / Linked Issue
-...
-```
-
-### Issue Body
+### PR 评论
 
 ```text
 [Codex Worker]
 
-## 脚本结论 / Script Conclusion
+结论
+脚本：...
+实际：...
+
+复现证据
 ...
 
-## 实际结论 / Actual Conclusion
+追踪过程
 ...
 
-## 复现证据 / Repro Evidence
+影响
 ...
 
-## 追踪过程 / Trace Process
-...
-
-## 影响 / Impact
-...
-
-## 关联 PR / Linked PR
+关联议题
 ...
 ```
 
-允许在 issue body 末尾通过 `---` 分隔后追加自由说明。
+### Issue 正文
 
-## Validation Rules
+```text
+[Codex Worker]
+
+## 脚本结论
+...
+
+## 实际结论
+...
+
+## 复现证据
+...
+
+## 追踪过程
+...
+
+## 影响
+...
+
+## 关联 PR
+...
+```
+
+允许在议题正文末尾通过 `---` 分隔后追加自由说明。
+
+## 发布前检查规则
 
 发布前至少检查：
 

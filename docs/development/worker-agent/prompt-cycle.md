@@ -1,20 +1,20 @@
-# Worker Agent Prompt Cycle
+# 工作 Agent 提示词循环
 
 ```text
-main prompt
+主提示词
   -> next-action
-  -> do one action
-  -> cursor sync if feedback handled
-  -> renew lock
-  -> progress comment if needed
+  -> 执行一个动作
+  -> 若反馈已吸收则 cursor sync
+  -> 续锁
+  -> 必要时发进展评论
   -> next-action
   -> ...
   -> wait-for-update
-  -> wake
+  -> 被唤醒
   -> next-action
 ```
 
-## Why This Changed
+## 为什么改成这样
 
 旧设计要求用户轮流复制 `1.md -> 7.md`，这会把“当前该做什么”的判断压力放在用户身上。
 
@@ -25,7 +25,7 @@ main prompt
 - Agent 只执行这一轮动作
 - 然后重新判断
 
-## Internal Step Mapping
+## 内部步骤映射
 
 旧的 `1.md` 到 `7.md` 仍保留，但它们现在只是参考手册，用来解释：
 
@@ -39,23 +39,23 @@ main prompt
 
 用户不再需要手工判断当前应该输入哪一条。
 
-## State Machine Boundary
+## 状态机边界
 
 每轮动作完成后：
 
 - 必须重新运行 `next-action`
-- 若当前 feedback 批次已处理，先执行 `cursor sync`
+- 若当前反馈批次已处理，先执行 `cursor sync`
 - 必须显式 `lock renew`
 - 不允许把“发评论”当成续锁手段
 
-## Wait Boundary
+## 等待边界
 
 只有当 `next-action` 返回 `wait-for-update` 时，工作 Agent 才进入等待。
 
 被以下事件唤醒后，工作 Agent 不需要新的提示词变体，而是继续回到同一主提示词流程：
 
-- reviewer 评论
+- 审阅者评论
 - 人类评论
 - `REQUEST_CHANGES`
 - `🙋needs-human-test`
-- CI failure
+- CI 失败

@@ -1,48 +1,48 @@
-# Worker Agent Overview
+# 工作 Agent 总览
 
 ```text
 +-------------------+
-| user copies       |
+| 用户输入          |
 | prompts/main.md   |
 +---------+---------+
           |
           v
 +-------------------+
 | next-action       |
-| restore truth     |
+| 恢复当前真相      |
 +---------+---------+
           |
           v
 +-------------------+
-| do exactly one    |
-| highest action    |
+| 只执行一个        |
+| 最高优先级动作    |
 +---------+---------+
           |
           v
 +-------------------+
-| renew lock        |
-| post progress     |
+| 续锁              |
+| 发布进展          |
 +---------+---------+
           |
           v
 +-------------------+
-| next-action again |
-| or wait           |
+| 再次 next-action  |
+| 或进入等待        |
 +-------------------+
 ```
 
-## Overview
+## 总览
 
-`Worker Agent` 是单 PR 深度推进执行器，不负责 approve 或 merge。
+`工作 Agent` 是单 PR 深度推进执行器，不负责批准或合并。
 
 它的工作目标是围绕“当前持锁 PR”循环推进，直到：
 
 - PR 被合并
 - PR 被关闭
 - 人工明确要求放弃该 PR
-- 或进入等待状态等待下一次 reviewer / human / CI / human-test 事件
+- 或进入等待状态，等待下一次审阅者 / 人类 / CI / 人测事件
 
-## Runtime Model
+## 运行模型
 
 运行模型已经从“用户手工切换 1..7 步”收敛为：
 
@@ -50,13 +50,13 @@
 - Agent 每轮先运行 `next-action`
 - `next-action` / `restore` 会返回 `context.targetLanguage`
 - 每轮只做一个最高优先级动作
-- 若本轮已经吸收了当前 feedback 批次，先同步 handled cursor
+- 若本轮已经吸收了当前反馈批次，先同步已处理游标
 - 动作完成后显式续锁
 - 需要时发 `[Codex Worker]` 进展评论，且语言必须跟随 `targetLanguage`
 - 然后再次运行 `next-action`
 - 若结果是等待，则进入 `wait-for-update`
 
-## Priorities
+## 优先级
 
 状态机优先级固定为：
 
@@ -69,7 +69,7 @@
 7. `commit-and-push`
 8. `wait-for-update`
 
-## Script Entry Points
+## 脚本入口
 
 统一入口：
 
@@ -91,7 +91,7 @@
 - `render-dissent-issue`
 - `validate-message`
 
-## State Files Under temp/worker-agent
+## `temp/worker-agent` 下的状态文件
 
 状态目录：
 
@@ -100,7 +100,7 @@
 - `temp/worker-agent/watch/`
 - `temp/worker-agent/lock/`
 
-## Related Docs
+## 相关文档
 
 - [pr-lifecycle.md](./pr-lifecycle.md)
 - [review-flow.md](./review-flow.md)

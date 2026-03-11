@@ -1,12 +1,12 @@
-# Worker Agent Prompt Entry
+# 工作 Agent 提示词入口
 
-## Single Entry Rule
+## 单一入口规则
 
 用户实际循环输入的提示词只有一条：
 
 - `docs/worker-agent/prompts/main.md`
 
-## Reference Manual
+## 参考手册
 
 以下文件继续保留，但仅作为参考手册，不再要求用户按顺序轮流复制：
 
@@ -18,9 +18,9 @@
 - `6.md`
 - `7.md`
 
-## Command Rule
+## 命令规则
 
-脚本命令在 Termux / Node 环境优先使用：
+脚本命令在 Termux / Node 环境中优先使用：
 
 `npx tsx Scripts/dev/worker-agent/index.ts ...`
 
@@ -28,7 +28,7 @@
 
 `bun Scripts/dev/worker-agent/index.ts ...`
 
-## Related Docs
+## 相关文档
 
 - `docs/development/worker-agent/overview.md`
 - `docs/development/worker-agent/prompt-cycle.md`
