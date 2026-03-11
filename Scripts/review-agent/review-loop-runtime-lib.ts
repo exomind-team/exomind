@@ -52,7 +52,6 @@ interface ExecuteReviewActionDeps {
 
 interface ResolveReviewCommentTargetInput {
   explicitCommentId?: string;
-  persistedCommentId?: string | null;
 }
 
 interface ResolveReviewCommentTargetDeps {

@@ -85,7 +85,6 @@ interface BuildCompletedReviewStateInput {
   completion: ReviewCompletionResult;
   selectedPrNumber: number;
   previousState: PersistedState | null;
-  activeReviewCommentId?: string | null;
   error?: string;
 }
 
@@ -93,7 +92,6 @@ interface BuildRetryableReviewFailureStateInput {
   selectedPrNumber: number;
   previousState: PersistedState | null;
   error: string;
-  activeReviewCommentId?: string | null;
 }
 
 const ISSUE_REF_PATTERN = /\b(?:ref|refs|close|closes|fix|fixes)\s+(?:[A-Za-z0-9_.-]+\/[A-Za-z0-9_.-]+)?#(\d+)\b/gi;
@@ -377,7 +375,6 @@ export function buildCompletedReviewState(input: BuildCompletedReviewStateInput)
     nextAction: 'discovery',
     selectedPrNumber: input.selectedPrNumber,
     selectedReason: input.previousState?.selectedReason ?? null,
-    activeReviewCommentId: input.activeReviewCommentId ?? input.previousState?.activeReviewCommentId ?? null,
     inspectedPrCount: input.previousState?.inspectedPrCount ?? 0,
     skippedPrCount: input.previousState?.skippedPrCount ?? 0,
     actionableCount: input.previousState?.actionableCount ?? 1,
@@ -409,7 +406,6 @@ export function buildRetryableReviewFailureState(
     nextAction: 'review',
     selectedPrNumber: input.selectedPrNumber,
     selectedReason: input.previousState?.selectedReason ?? null,
-    activeReviewCommentId: input.activeReviewCommentId ?? input.previousState?.activeReviewCommentId ?? null,
     inspectedPrCount: input.previousState?.inspectedPrCount ?? 0,
     skippedPrCount: input.previousState?.skippedPrCount ?? 0,
     actionableCount: input.previousState?.actionableCount ?? 1,

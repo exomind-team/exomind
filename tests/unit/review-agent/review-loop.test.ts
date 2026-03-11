@@ -124,7 +124,6 @@ describe('review-agent review loop', () => {
         nextAction: 'review',
         selectedPrNumber: 450,
         selectedReason: 'new-comment',
-        activeReviewCommentId: '444',
         inspectedPrCount: 8,
         skippedPrCount: 1,
         actionableCount: 2,
@@ -132,7 +131,6 @@ describe('review-agent review loop', () => {
         nextSleepSeconds: 180,
         updatedAt: '2026-03-10T00:00:00Z',
       },
-      activeReviewCommentId: '987',
     });
 
     expect(state.state).toBe(expectedState);
@@ -141,7 +139,7 @@ describe('review-agent review loop', () => {
     expect(state.nextAction).toBe('discovery');
     expect(state.selectedPrNumber).toBe(450);
     expect(state.selectedReason).toBe('new-comment');
-    expect(state.activeReviewCommentId).toBe('987');
+    expect(state).not.toHaveProperty('activeReviewCommentId');
     expect(state).not.toHaveProperty('activeReviewCommentUrl');
     expect(state.inspectedPrCount).toBe(8);
   });
@@ -228,7 +226,6 @@ describe('review-agent review loop', () => {
         nextAction: 'review',
         selectedPrNumber: 450,
         selectedReason: 'new-comment',
-        activeReviewCommentId: '444',
         inspectedPrCount: 8,
         skippedPrCount: 1,
         actionableCount: 2,
@@ -237,7 +234,6 @@ describe('review-agent review loop', () => {
         updatedAt: '2026-03-10T00:00:00Z',
       },
       error: 'page 2 failed',
-      activeReviewCommentId: '987',
     });
 
     expect(state.state).toBe('FAILED_RETRYABLE');
@@ -246,14 +242,13 @@ describe('review-agent review loop', () => {
     expect(state.nextAction).toBe('review');
     expect(state.selectedPrNumber).toBe(450);
     expect(state.error).toBe('page 2 failed');
-    expect(state.activeReviewCommentId).toBe('987');
+    expect(state).not.toHaveProperty('activeReviewCommentId');
     expect(state).not.toHaveProperty('activeReviewCommentUrl');
   });
 
   it('prefers an explicit --comment-id over remote comment discovery', async () => {
     const result = await resolveReviewCommentTarget({
       explicitCommentId: '999',
-      persistedCommentId: '111',
     }, {
       listComments: () => {
         throw new Error('should not query remote comments');
@@ -267,9 +262,7 @@ describe('review-agent review loop', () => {
   });
 
   it('uses the latest remote [Codex Reviewer] top-level comment as the main comment target', async () => {
-    const result = await resolveReviewCommentTarget({
-      persistedCommentId: '111',
-    }, {
+    const result = await resolveReviewCommentTarget({}, {
       listComments: () => [
         {
           id: '101',
@@ -296,9 +289,7 @@ describe('review-agent review loop', () => {
   });
 
   it('creates a new main comment when the PR has no remote [Codex Reviewer] top-level comment', async () => {
-    const result = await resolveReviewCommentTarget({
-      persistedCommentId: '111',
-    }, {
+    const result = await resolveReviewCommentTarget({}, {
       listComments: () => [
         {
           id: '201',
@@ -316,9 +307,7 @@ describe('review-agent review loop', () => {
 
   it('fails instead of falling back to a persisted comment id when remote main comment lookup fails', async () => {
     await expect(
-      resolveReviewCommentTarget({
-        persistedCommentId: '111',
-      }, {
+      resolveReviewCommentTarget({}, {
         listComments: () => {
           throw new Error('remote comment lookup failed');
         },

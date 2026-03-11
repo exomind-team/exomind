@@ -83,10 +83,6 @@ interface GhIssueComment {
   created_at?: string;
 }
 
-interface ReviewCommentContext {
-  activeReviewCommentId?: string | null;
-}
-
 async function main(): Promise<void> {
   const options = parseArgs(process.argv.slice(2));
   const repo = resolveRepo(options.repo);
@@ -163,12 +159,10 @@ async function runReviewAction(input: {
   options: CliOptions;
 }): Promise<void> {
   const pullRequest = viewPullRequestActionContextForMode(input.prNumber, input.repo, input.actionMode);
-  const previousState = readJson<PersistedState | null>(STATE_FILE, null);
   let commentId: string | undefined;
   try {
     const target = await resolveReviewCommentTarget({
       explicitCommentId: input.explicitCommentId,
-      persistedCommentId: previousState?.activeReviewCommentId ?? null,
     }, {
       listComments: () => listIssueComments(input.prNumber, input.repo).map((comment) => ({
         id: String(comment.id),
@@ -232,7 +226,6 @@ async function runReviewAction(input: {
     const persistedState = persistCompletedReviewState(
       input.prNumber,
       result.completion,
-      toReviewCommentContext(result.comment),
       result.completion === 'merge-blocked'
         ? result.mergeFailure ?? 'merge blocked'
         : undefined,
@@ -259,7 +252,6 @@ async function runReviewAction(input: {
     const failureState = persistRetryableReviewFailureState(
       input.prNumber,
       error,
-      toReviewCommentContext(result.comment),
     );
     console.log(JSON.stringify({
       selectedPrNumber: input.prNumber,
@@ -285,7 +277,6 @@ async function runReviewAction(input: {
     const blockedState = persistCompletedReviewState(
       input.prNumber,
       terminalCompletion,
-      result.comment ? toReviewCommentContext(result.comment) : undefined,
       result.error,
     );
     console.log(JSON.stringify({
@@ -307,7 +298,6 @@ async function runReviewAction(input: {
   const failureState = persistRetryableReviewFailureState(
     input.prNumber,
     result.error,
-    result.comment ? toReviewCommentContext(result.comment) : undefined,
   );
   console.log(JSON.stringify({
     selectedPrNumber: input.prNumber,
@@ -650,15 +640,6 @@ function resolveRepo(explicitRepo: string | undefined): string {
 function persistActiveReviewState(selectedPrNumber: number): void {
   ensurePrMonitorDir();
   const previousState = readJson<PersistedState | null>(STATE_FILE, null);
-  const retryCommentContext = previousState?.state === 'FAILED_RETRYABLE'
-    && previousState.lastPhase === 'REVIEW'
-    && previousState.selectedPrNumber === selectedPrNumber
-    ? {
-        activeReviewCommentId: previousState.activeReviewCommentId ?? null,
-      }
-    : {
-        activeReviewCommentId: null,
-      };
 
   writeJson(STATE_FILE, {
     state: 'HAS_TARGET',
@@ -667,7 +648,6 @@ function persistActiveReviewState(selectedPrNumber: number): void {
     nextAction: 'review',
     selectedPrNumber,
     selectedReason: previousState?.selectedReason ?? null,
-    ...retryCommentContext,
     inspectedPrCount: previousState?.inspectedPrCount ?? 0,
     skippedPrCount: previousState?.skippedPrCount ?? 0,
     actionableCount: previousState?.actionableCount ?? 1,
@@ -680,7 +660,6 @@ function persistActiveReviewState(selectedPrNumber: number): void {
 function persistCompletedReviewState(
   selectedPrNumber: number,
   completion: ReviewCompletionResult,
-  commentContext?: ReviewCommentContext,
   error?: string,
 ): PersistedState {
   ensurePrMonitorDir();
@@ -690,7 +669,6 @@ function persistCompletedReviewState(
     selectedPrNumber,
     previousState,
     error,
-    ...commentContext,
   });
   writeJson(STATE_FILE, nextState);
   return nextState;
@@ -699,7 +677,6 @@ function persistCompletedReviewState(
 function persistRetryableReviewFailureState(
   selectedPrNumber: number,
   error: string,
-  commentContext?: ReviewCommentContext,
 ): PersistedState {
   ensurePrMonitorDir();
   const previousState = readJson<PersistedState | null>(STATE_FILE, null);
@@ -707,16 +684,9 @@ function persistRetryableReviewFailureState(
     selectedPrNumber,
     previousState,
     error,
-    ...commentContext,
   });
   writeJson(STATE_FILE, nextState);
   return nextState;
-}
-
-function toReviewCommentContext(comment: ReviewCommentRecord): ReviewCommentContext {
-  return {
-    activeReviewCommentId: comment.id,
-  };
 }
 
 function isReviewCompletionResult(value: string | undefined): value is ReviewCompletionResult {

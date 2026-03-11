@@ -20,7 +20,6 @@ export interface PersistedState {
   nextAction: ReviewAgentNextAction;
   selectedPrNumber: number | null;
   selectedReason: string | null;
-  activeReviewCommentId?: string | null;
   inspectedPrCount: number;
   skippedPrCount: number;
   actionableCount: number;

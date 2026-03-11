@@ -31,15 +31,14 @@ temp/
 - 下一步动作（`nextAction`）
 - 上一轮失败或成功前的阶段（`lastPhase`）
 - 当前选中的 PR 编号
-- 当前 round 正在保留的主审核评论 id hint（若存在）
 - 最近一次成功轮次的时间戳
 - 连续失败次数
 
 其中：
 
 - `selectedPrNumber` 只是当前焦点 hint，不是独立真相源
-- `activeReviewCommentId` 只是恢复 hint，不直接决定当前主评论身份
-- `activeReviewCommentUrl` 已删除，不再持久化
+- `state.json` 不再保存任何主评论身份信息
+- 当前主评论必须在每次 review action 前通过 GitHub 远端重新识别
 
 ### `queue.json`
 
@@ -64,7 +63,7 @@ temp/
 - 仅在成功轮次结束后更新游标。
 - 若评论发布失败，不要推进游标。
 - 必须保留足够的游标数据，以避免重启后重复发审核评论。
-- 若 review 在评论发布后、approve/request-changes 前失败，`state.json` 仍应保留该评论 id hint，便于下一轮先从远端重新识别主评论后续写同一条评论。
+- 若 review 在评论发布后、approve/request-changes 前失败，下一轮仍应先按 GitHub 远端重新识别当前主评论，而不是依赖本地 comment id。
 
 ## 退避状态
 
