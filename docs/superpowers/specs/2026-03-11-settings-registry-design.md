@@ -513,14 +513,16 @@ describe('Settings Registry Consistency', () => {
     }
   });
 
-  it('async set 的 enum 项（如 hotkey）不会阻塞渲染', async () => {
-    const asyncEnums = SETTINGS_REGISTRY.filter(
+  it('async set 的 enum 项（如 hotkey）返回 Promise 时可正常 await', async () => {
+    const hotkeyItem = SETTINGS_REGISTRY.find(
       (item): item is SingleEnumSettingsItem =>
-        item.type === 'enum' && !item.multiSelect
+        item.id === 'voice-shortcut-hotkey' && item.type === 'enum' && !item.multiSelect
     );
-    // 验证 set 返回 void 或 Promise<void>，渲染器需处理两种情况
-    for (const item of asyncEnums) {
-      expect(typeof item.set).toBe('function');
+    expect(hotkeyItem).toBeDefined();
+    // set 返回 void | Promise<void>，如果是 Promise 则 await 不应抛出
+    const result = hotkeyItem!.set(hotkeyItem!.options[0].value);
+    if (result instanceof Promise) {
+      await expect(result).resolves.toBeUndefined();
     }
   });
 });
