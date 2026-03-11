@@ -503,7 +503,7 @@ export function SettingsPage() {
           taskSummary = `；任务新增 ${taskResult.imported} 条，跳过 ${taskResult.skipped} 条`;
         }
       } catch {
-        // Task import failed or no task data, continue with event-only result
+        taskSummary = '；任务恢复失败';
       }
 
       setStatusMessage(
