@@ -4,6 +4,7 @@ import { getAgentHubService } from '@/lib/services';
 import type { AgentDetailData, AgentEnergySnapshot, AgentHubListItem } from '@/lib/types/agent-hub';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
 import { RuntimeClient } from '@/services/runtime-client';
+import { findPreferredRuntimeHostForAgent, getRuntimeManager } from '@/services/runtime-manager';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { WorkspaceTabs } from './WorkspaceTabs';
 
@@ -94,6 +95,17 @@ function getTargetIcon(target: AgentHubListItem) {
   return Sparkles;
 }
 
+async function resolveAgentRuntimeHost(agentId: string) {
+  const snapshot = await getRuntimeManager().refreshSnapshot();
+  const preferredHost = findPreferredRuntimeHostForAgent(snapshot.hosts, agentId);
+  if (preferredHost) {
+    return preferredHost;
+  }
+
+  const hosts = await getRuntimeHostService().listHosts();
+  return hosts[0] ?? null;
+}
+
 export function AgentDetailPage({ agentId }: { agentId?: string }) {
   const isDesktop = useIsDesktop();
   const [detail, setDetail] = useState<AgentDetailData | null>(null);
@@ -140,17 +152,14 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
   useEffect(() => {
     if (!targetId) return;
     let disposed = false;
+    const client = new RuntimeClient();
 
     const poll = async () => {
       try {
-        const hosts = await getRuntimeHostService().listHosts();
-        if (hosts.length === 0 || disposed) return;
-        const host = hosts[0];
-        const url = `http://${host.host}:${host.port}/agents/${encodeURIComponent(targetId)}/energy`;
-        const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
-        if (!resp.ok || disposed) return;
-        const snap: AgentEnergySnapshot = await resp.json();
-        if (!disposed) setEnergy(snap);
+        const host = await resolveAgentRuntimeHost(targetId);
+        if (!host || disposed) return;
+        const snap = await client.getAgentEnergy(host, targetId);
+        if (!disposed && snap) setEnergy(snap);
       } catch {
         // ignore polling errors
       }
@@ -168,8 +177,7 @@ export function AgentDetailPage({ agentId }: { agentId?: string }) {
     if (!targetId || !energy || isRefilling) return;
     setIsRefilling(true);
     try {
-      const hosts = await getRuntimeHostService().listHosts();
-      const host = hosts[0];
+      const host = await resolveAgentRuntimeHost(targetId);
       if (!host) return;
       const client = new RuntimeClient();
       const result = await client.refillEnergy(host, targetId, energy.max);
