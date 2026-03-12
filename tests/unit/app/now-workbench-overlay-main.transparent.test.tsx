@@ -1,4 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
 const renderMock = vi.fn();
 const createRootMock = vi.fn(() => ({
@@ -47,5 +49,14 @@ describe('now-workbench-overlay main entry（当下工作台悬浮窗入口）',
     };
 
     expect(rootElement?.props?.children?.props).toEqual({});
+  });
+
+  it('keeps a tracked html entry for the overlay window（悬浮窗必须有独立 HTML 入口且不可被忽略）', () => {
+    const htmlEntryPath = resolve(process.cwd(), 'now-workbench-overlay.html');
+    const gitignorePath = resolve(process.cwd(), '.gitignore');
+
+    expect(existsSync(htmlEntryPath)).toBe(true);
+    expect(readFileSync(htmlEntryPath, 'utf8')).toContain('/src/now-workbench-overlay-main.tsx');
+    expect(readFileSync(gitignorePath, 'utf8')).toContain('!now-workbench-overlay.html');
   });
 });

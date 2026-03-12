@@ -72,6 +72,7 @@ htmlcov/
 # === Vite Entry (required) ===
 !index.html
 !voice-overlay.html
+!now-workbench-overlay.html
 
 # === Obsidian editor config ===
 .obsidian/
