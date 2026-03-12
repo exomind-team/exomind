@@ -12,7 +12,6 @@
 import { ExoMindEnvironment } from '../environment/environment';
 import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
 import type { Event, NoteContent, Tag, EventData } from '../types/event';
-import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
 import {
@@ -38,6 +37,9 @@ export interface EventLogService {
   /** 添加普通事件 */
   addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event>;
 
+  /** 追加原始事件数据（保留外部时间戳 / 标签 / 元数据） */
+  appendEventData(event: EventData): Promise<Event>;
+
   /** 导出事件为 JSON */
   exportEventsAsJson(): Promise<string>;
 
@@ -57,7 +59,7 @@ export class EventLogServiceImpl implements EventLogService {
   private listeners: Set<(event: Event) => void> = new Set();
 
   constructor(options: EventLogServiceOptions = {}) {
-    this.port = options.port ?? new WebEventLogStorageAdapter();
+    this.port = options.port ?? ExoMindEnvironment.getInstance().eventlog;
   }
 
   async loadEvents(): Promise<Event[]> {
@@ -81,6 +83,15 @@ export class EventLogServiceImpl implements EventLogService {
     const event = this.deserializeEvent(eventData);
 
     // 通知监听者
+    this.listeners.forEach((cb) => cb(event));
+
+    return event;
+  }
+
+  async appendEventData(eventData: EventData): Promise<Event> {
+    await this.port.appendEvent(eventData);
+
+    const event = this.deserializeEvent(eventData);
     this.listeners.forEach((cb) => cb(event));
 
     return event;

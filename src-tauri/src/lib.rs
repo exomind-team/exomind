@@ -73,7 +73,9 @@ pub fn run() {
             }
 
             if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
+                || std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none()
                 || std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none()
+                || std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none()
             {
                 match app.path().app_data_dir() {
                     Ok(app_data_dir) => {
@@ -93,11 +95,28 @@ pub fn run() {
                                     );
                                 }
                             }
+                            if std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none() {
+                                let eventlog_sqlite_path = runtime_dir.join("eventlog.sqlite");
+                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+                                unsafe {
+                                    std::env::set_var(
+                                        "EXOMIND_RT_EVENTLOG_SQLITE_PATH",
+                                        eventlog_sqlite_path,
+                                    );
+                                }
+                            }
                             if std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none() {
                                 let task_sqlite_path = runtime_dir.join("tasks.sqlite");
                                 // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
                                 unsafe {
                                     std::env::set_var("EXOMIND_RT_TASK_SQLITE_PATH", task_sqlite_path);
+                                }
+                            }
+                            if std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none() {
+                                let timeblock_sqlite_path = runtime_dir.join("timeblocks.sqlite");
+                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+                                unsafe {
+                                    std::env::set_var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH", timeblock_sqlite_path);
                                 }
                             }
                         }
