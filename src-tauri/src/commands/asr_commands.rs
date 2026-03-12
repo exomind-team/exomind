@@ -110,7 +110,7 @@ struct VolcanoAudioInfo {
 struct ParsedVolcanoFrame {
     message_type: u8,
     flags: u8,
-    sequence: Option<i32>,
+    _sequence: Option<i32>,
     response: Option<VolcanoResponse>,
 }
 
@@ -291,7 +291,7 @@ fn parse_response_message(data: &[u8]) -> Result<ParsedVolcanoFrame, String> {
         return Ok(ParsedVolcanoFrame {
             message_type,
             flags,
-            sequence: None,
+            _sequence: None,
             response: Some(response),
         });
     }
@@ -336,7 +336,7 @@ fn parse_response_message(data: &[u8]) -> Result<ParsedVolcanoFrame, String> {
     Ok(ParsedVolcanoFrame {
         message_type,
         flags,
-        sequence,
+        _sequence: sequence,
         response,
     })
 }
@@ -552,6 +552,47 @@ fn build_stream_error_payload(
     }
 }
 
+fn format_stream_start_log_line(session_id: &str, endpoint: &str) -> String {
+    format!(
+        "[ASR-Rust/stream] 开始流式识别: session={} endpoint={}",
+        session_id, endpoint
+    )
+}
+
+fn format_stream_finish_log_line(
+    session_id: &str,
+    endpoint: &str,
+    outcome: &Result<AsrResult, String>,
+) -> String {
+    match outcome {
+        Ok(_) => format!(
+            "[ASR-Rust/stream] 流式识别结束: session={} endpoint={} status=ok",
+            session_id, endpoint
+        ),
+        Err(error) if error == VOLCANO_STREAM_CANCELLED_MESSAGE => format!(
+            "[ASR-Rust/stream] 流式识别结束: session={} endpoint={} status=cancelled",
+            session_id, endpoint
+        ),
+        Err(error) => format!(
+            "[ASR-Rust/stream] 流式识别结束: session={} endpoint={} status=error error={}",
+            session_id, endpoint, error
+        ),
+    }
+}
+
+fn format_recognize_finish_log_line(
+    endpoint: &str,
+    outcome: &Result<AsrResult, String>,
+) -> String {
+    match outcome {
+        Ok(_) => format!("[ASR-Rust] 识别结束: endpoint={} status=ok", endpoint),
+        Err(error) => format!(
+            "[ASR-Rust] 识别结束: endpoint={} status=error error={}",
+            endpoint, error
+        ),
+    }
+}
+
 fn build_asr_result(
     config: &VolcanoAsrConfig,
     endpoint: &str,
@@ -594,26 +635,11 @@ async fn open_configured_ws(
         .body(())
         .map_err(|error| format!("构建请求失败: {error}"))?;
 
-    let (mut ws_stream, response) =
+    let (mut ws_stream, _response) =
         tokio::time::timeout(std::time::Duration::from_secs(10), connect_async(request))
             .await
             .map_err(|_| "WebSocket 连接超时 (10s)".to_string())?
             .map_err(|error| format!("WebSocket 连接失败: {error}"))?;
-
-    if let Some(log_id) = response
-        .headers()
-        .get("X-Tt-Logid")
-        .and_then(|value| value.to_str().ok())
-    {
-        eprintln!("[ASR-Rust] Volcano X-Tt-Logid: {log_id}");
-    }
-    if let Some(server_connect_id) = response
-        .headers()
-        .get("X-Api-Connect-Id")
-        .and_then(|value| value.to_str().ok())
-    {
-        eprintln!("[ASR-Rust] Volcano X-Api-Connect-Id: {server_connect_id}");
-    }
 
     let request_payload = build_volcano_request_payload(&connect_id, &endpoint, config);
     let config_msg = build_request_message(&request_payload)?;
@@ -731,15 +757,6 @@ async fn run_volcano_stream_session(
                             update_latest_response(response, &mut latest_text, &mut latest_duration);
                         }
 
-                        eprintln!(
-                            "[ASR-Rust/stream] session={} type={} flags={} seq={:?} text=\"{}\"",
-                            session_id,
-                            frame.message_type,
-                            frame.flags,
-                            frame.sequence,
-                            latest_text
-                        );
-
                         if let Some(payload) = build_stream_event_payload(&session_id, &endpoint, &frame) {
                             app.emit(VOLCANO_STREAM_EVENT_NAME, payload).ok();
                         }
@@ -788,6 +805,10 @@ async fn run_volcano_stream_session(
 
     let _ = write.close().await;
     stream_state.remove_session(&session_id).await;
+    eprintln!(
+        "{}",
+        format_stream_finish_log_line(&session_id, &endpoint, &outcome)
+    );
 
     if let Err(error) = &outcome {
         if error != VOLCANO_STREAM_CANCELLED_MESSAGE {
@@ -818,7 +839,6 @@ pub async fn volcano_asr_recognize(
         "[ASR-Rust] 开始识别: endpoint={endpoint}, audio={} bytes",
         audio_data.len()
     );
-    eprintln!("[ASR-Rust] ResourceId: {}", config.resource_id);
 
     let chunk_size = 6400usize;
     let total_chunks = audio_data.chunks(chunk_size).len();
@@ -841,11 +861,6 @@ pub async fn volcano_asr_recognize(
                         ensure_success_response(resp)?;
                         update_latest_response(resp, &mut latest_text, &mut latest_duration);
                     }
-
-                    eprintln!(
-                        "[ASR-Rust] frame type={} flags={} seq={:?} text=\"{}\"",
-                        frame.message_type, frame.flags, frame.sequence, latest_text
-                    );
 
                     if is_final_response(&endpoint, &frame) {
                         return Ok(build_asr_result(
@@ -882,10 +897,12 @@ pub async fn volcano_asr_recognize(
         Err("WebSocket 流结束但未收到最终结果".to_string())
     })
     .await
-    .map_err(|_| "等待识别结果超时 (30s)".to_string())??;
+    .map_err(|_| "等待识别结果超时 (30s)".to_string())
+    .and_then(|result| result);
 
     let _ = write.close().await;
-    Ok(result)
+    eprintln!("{}", format_recognize_finish_log_line(&endpoint, &result));
+    result
 }
 
 #[tauri::command]
@@ -907,6 +924,8 @@ pub async fn volcano_asr_stream_start(
     stream_state
         .insert_session(session_id.clone(), Arc::clone(&session))
         .await;
+
+    eprintln!("{}", format_stream_start_log_line(&session_id, &endpoint));
 
     tokio::spawn(run_volcano_stream_session(
         app,
@@ -1028,7 +1047,7 @@ mod tests {
         ParsedVolcanoFrame {
             message_type: 9,
             flags,
-            sequence: Some(1),
+            _sequence: Some(1),
             response: Some(VolcanoResponse {
                 code: Some(20000000),
                 message: None,
@@ -1072,6 +1091,46 @@ mod tests {
         assert_eq!(final_event.text.as_deref(), Some("最终结果"));
         assert_eq!(final_event.is_final, Some(true));
         assert_eq!(final_event.is_definite, Some(true));
+    }
+
+    #[test]
+    fn volcano_stream_finish_log_line_only_reports_summary() {
+        let log_line = format_stream_finish_log_line(
+            "session-1",
+            "bigmodel_async",
+            &Ok(AsrResult {
+                text: "感觉还不错，现在的话就好很多。".to_string(),
+                confidence: 1.0,
+                lang: "zh-CN".to_string(),
+                duration: Some(1800.0),
+            }),
+        );
+
+        assert!(log_line.contains("[ASR-Rust/stream]"));
+        assert!(log_line.contains("流式识别结束"));
+        assert!(log_line.contains("session=session-1"));
+        assert!(log_line.contains("endpoint=bigmodel_async"));
+        assert!(log_line.contains("status=ok"));
+        assert!(!log_line.contains("感觉还不错，现在的话就好很多。"));
+    }
+
+    #[test]
+    fn volcano_recognize_finish_log_line_only_reports_summary() {
+        let log_line = format_recognize_finish_log_line(
+            "bigmodel_async",
+            &Ok(AsrResult {
+                text: "感觉还不错，现在的话就好很多。".to_string(),
+                confidence: 1.0,
+                lang: "zh-CN".to_string(),
+                duration: Some(1800.0),
+            }),
+        );
+
+        assert!(log_line.contains("[ASR-Rust]"));
+        assert!(log_line.contains("识别结束"));
+        assert!(log_line.contains("endpoint=bigmodel_async"));
+        assert!(log_line.contains("status=ok"));
+        assert!(!log_line.contains("感觉还不错，现在的话就好很多。"));
     }
 
     #[test]
