@@ -5,6 +5,8 @@ import path from 'node:path';
 import App from '@/App';
 
 const destroyVoiceShortcutService = vi.fn();
+const initNowWorkbenchOverlayServiceMock = vi.fn();
+const destroyNowWorkbenchOverlayServiceMock = vi.fn();
 
 vi.mock('@/routes', async () => {
   const React = await import('react');
@@ -62,6 +64,13 @@ vi.mock('@/services/voice-shortcut.service', () => ({
   })),
 }));
 
+vi.mock('@/services/now-workbench-overlay.service', () => ({
+  getNowWorkbenchOverlayService: vi.fn(() => ({
+    init: initNowWorkbenchOverlayServiceMock,
+    destroy: destroyNowWorkbenchOverlayServiceMock,
+  })),
+}));
+
 vi.mock('@/ui/stores/update-store', () => ({
   initUpdateChecker: vi.fn(),
   destroyUpdateChecker: vi.fn(),
@@ -91,6 +100,8 @@ describe('App startup router context', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     destroyVoiceShortcutService.mockReset();
+    initNowWorkbenchOverlayServiceMock.mockReset();
+    destroyNowWorkbenchOverlayServiceMock.mockReset();
   });
 
   it('renders without router-context warnings for startup overlays（启动期覆盖层不应脱离 RouterProvider）', async () => {
@@ -108,5 +119,16 @@ describe('App startup router context', () => {
   it('does not mount legacy TaskSyncCoordinator after RT task cutover（任务切到 RT 后不再挂载旧同步协调器）', () => {
     const source = fs.readFileSync(path.resolve('src/App.tsx'), 'utf-8');
     expect(source).not.toContain('TaskSyncCoordinator');
+  });
+
+  it('initializes and disposes now overlay service on startup（启动时初始化并释放当下悬浮工作台服务）', async () => {
+    initNowWorkbenchOverlayServiceMock.mockResolvedValue(undefined);
+    const { unmount } = render(<App />);
+
+    await screen.findByText('mock-home');
+    expect(initNowWorkbenchOverlayServiceMock).toHaveBeenCalledTimes(1);
+
+    unmount();
+    expect(destroyNowWorkbenchOverlayServiceMock).toHaveBeenCalled();
   });
 });

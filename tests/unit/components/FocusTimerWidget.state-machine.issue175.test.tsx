@@ -1,7 +1,7 @@
-import React from 'react';
+import React, { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
+import { FocusTimerWidget, type FocusTimerWidgetHandle } from '@/ui/app/components/FocusTimerWidget';
 
 function formatMinuteLabel(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', {
@@ -359,6 +359,18 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     expect(runningCard).toContainElement(screen.getByTestId('new-focus-running-clock'));
     expect(runningCard).toContainElement(screen.getByTestId('new-focus-pause-resume-button'));
     expect(runningCard).toContainElement(screen.getByTestId('new-focus-end-button'));
+  });
+
+  it('supports prefilling a task from external launcher and opening config（支持外部任务入口预填并打开配置）', async () => {
+    const ref = createRef<FocusTimerWidgetHandle>();
+    render(<FocusTimerWidget ref={ref} />);
+
+    await act(async () => {
+      ref.current?.openTaskConfig('来自悬浮窗的任务');
+    });
+
+    expect(screen.getByTestId('new-focus-state-config')).toBeInTheDocument();
+    expect(screen.getByTestId('new-focus-task-input')).toHaveValue('来自悬浮窗的任务');
   });
 
   it('restores countdown overtime after remount（倒计时超时在重载后可恢复）', async () => {

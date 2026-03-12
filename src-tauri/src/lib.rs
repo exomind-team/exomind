@@ -18,6 +18,11 @@ use commands::file_commands::{
     list_files, pick_json_file, read_file, read_file_binary, save_binary_file, save_json_file,
     write_file,
 };
+use commands::now_workbench_overlay_commands::{
+    ensure_now_workbench_overlay_window, now_workbench_overlay_ensure,
+    now_workbench_overlay_focus_main, now_workbench_overlay_hide,
+    now_workbench_overlay_set_position, now_workbench_overlay_show,
+};
 use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_reachable_address, runtime_service_start,
     runtime_service_status, runtime_service_stop, signal_publish_fast, RuntimeProcessState,
@@ -70,6 +75,9 @@ pub fn run() {
             register_voice_shortcut(app.handle(), &voice_shortcut_state);
             if let Err(error) = ensure_voice_overlay_window(app.handle()) {
                 eprintln!("[tauri/setup] failed to prewarm voice overlay window: {error}");
+            }
+            if let Err(error) = ensure_now_workbench_overlay_window(app.handle()) {
+                eprintln!("[tauri/setup] failed to prewarm now overlay window: {error}");
             }
 
             if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
@@ -164,6 +172,11 @@ pub fn run() {
             voice_overlay_show,
             voice_overlay_hide,
             voice_overlay_set_bottom_offset,
+            now_workbench_overlay_ensure,
+            now_workbench_overlay_show,
+            now_workbench_overlay_hide,
+            now_workbench_overlay_focus_main,
+            now_workbench_overlay_set_position,
             voice_shortcut_set,
             voice_shortcut_get,
             voice_recording_set_active,

@@ -3,6 +3,7 @@ import { EllipsisVertical } from 'lucide-react';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
+import { getNowWorkbenchOverlayService } from '@/services/now-workbench-overlay.service';
 
 interface PageMoreMenuProps {
   buttonClassName?: string;
@@ -59,6 +60,18 @@ export function PageMoreMenu({ buttonClassName, menuClassName }: PageMoreMenuPro
           className={menuClassName
             ?? 'absolute right-0 top-11 z-30 min-w-[160px] rounded-2xl border border-[#E7E5E4] bg-white p-1.5 shadow-[0_16px_34px_-20px_rgba(0,0,0,0.45)] dark:border-[#292524] dark:bg-[#1C1917]'}
         >
+          <button
+            type="button"
+            role="menuitem"
+            data-testid="page-more-menu-open-now-workbench-overlay"
+            onClick={() => {
+              void getNowWorkbenchOverlayService().reopenFromMainWindow();
+              setOpen(false);
+            }}
+            className="w-full rounded-xl px-3 py-2 text-left text-sm text-[#1C1917] hover:bg-[#F5F0ED] dark:text-[#FAFAF9] dark:hover:bg-[#292524]"
+          >
+            显示悬浮工作台
+          </button>
           {commandPaletteActive ? (
             <button
               type="button"

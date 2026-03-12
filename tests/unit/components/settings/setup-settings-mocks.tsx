@@ -12,11 +12,6 @@
  */
 import { vi } from 'vitest';
 
-const voiceShortcutAsrProviderState = {
-  current: 'moss' as 'moss' | 'volcano',
-  listeners: new Set<(value: 'moss' | 'volcano') => void>(),
-};
-
 vi.mock('@/lib/services', () => ({
   getEventLogService: vi.fn(() => ({
     exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
@@ -35,11 +30,11 @@ vi.mock('@/lib/services', () => ({
     }),
     importTasksFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
     importTasksFromSqliteSnapshot: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
-    getBackendStatus: vi.fn(() => ({
+    getBackendStatus: vi.fn().mockResolvedValue({
       backend: 'rt-sqlite',
       supportsJsonBackup: true,
       supportsSqliteSnapshot: true,
-    })),
+    }),
   })),
 }));
 
@@ -59,25 +54,21 @@ vi.mock('@/config/version-build-info', () => ({
 vi.mock('@/config/theme', () => ({
   getThemePreference: vi.fn(() => 'system'),
   setThemePreference: vi.fn(),
-  subscribeThemePreferenceChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: vi.fn(() => false),
   setDeveloperModeEnabled: vi.fn(),
-  subscribeDeveloperModeChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: vi.fn(() => false),
   setAgentPageEnabled: vi.fn(),
-  subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: vi.fn(() => true),
   setDesktopAdaptiveEnabled: vi.fn(),
-  subscribeDesktopAdaptiveChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/timer-preferences', () => ({
@@ -127,24 +118,8 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/config/voice-shortcut-asr-provider', () => ({
-  getVoiceShortcutAsrProvider: vi.fn(() => voiceShortcutAsrProviderState.current),
-  getVoiceShortcutAsrProviderLabel: vi.fn((provider: 'moss' | 'volcano') => provider === 'volcano' ? '火山' : 'MOSS'),
-  setVoiceShortcutAsrProvider: vi.fn((value: 'moss' | 'volcano') => {
-    voiceShortcutAsrProviderState.current = value === 'volcano' ? 'volcano' : 'moss';
-    voiceShortcutAsrProviderState.listeners.forEach((listener) => listener(voiceShortcutAsrProviderState.current));
-    return voiceShortcutAsrProviderState.current;
-  }),
-  subscribeVoiceShortcutAsrProviderChanges: vi.fn((listener: (value: 'moss' | 'volcano') => void) => {
-    voiceShortcutAsrProviderState.listeners.add(listener);
-    return () => {
-      voiceShortcutAsrProviderState.listeners.delete(listener);
-    };
-  }),
-}));
-
 vi.mock('@/config/voice-overlay-preferences', () => ({
-  DEFAULT_VOICE_OVERLAY_OPACITY: 62,
+  DEFAULT_VOICE_OVERLAY_OPACITY: 70,
   MIN_VOICE_OVERLAY_OPACITY: 20,
   MAX_VOICE_OVERLAY_OPACITY: 98,
   DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES: 3,
@@ -153,7 +128,7 @@ vi.mock('@/config/voice-overlay-preferences', () => ({
   DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET: 56,
   MIN_VOICE_OVERLAY_BOTTOM_OFFSET: 24,
   MAX_VOICE_OVERLAY_BOTTOM_OFFSET: 160,
-  getVoiceOverlayOpacity: vi.fn(() => 62),
+  getVoiceOverlayOpacity: vi.fn(() => 70),
   setVoiceOverlayOpacity: vi.fn((value: number) => value),
   getVoiceOverlayShowDiagnostics: vi.fn(() => false),
   setVoiceOverlayShowDiagnostics: vi.fn((value: boolean) => value),
@@ -165,6 +140,15 @@ vi.mock('@/config/voice-overlay-preferences', () => ({
   subscribeVoiceOverlayShowDiagnosticsChanges: vi.fn(() => () => {}),
   subscribeVoiceOverlayTranscriptLinesChanges: vi.fn(() => () => {}),
   subscribeVoiceOverlayBottomOffsetChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/now-workbench-overlay-preferences', () => ({
+  getNowWorkbenchOverlayEnabled: vi.fn(() => true),
+  setNowWorkbenchOverlayEnabled: vi.fn((value: boolean) => value),
+  subscribeNowWorkbenchOverlayEnabledChanges: vi.fn(() => () => {}),
+  getNowWorkbenchOverlayPosition: vi.fn(() => null),
+  setNowWorkbenchOverlayPosition: vi.fn(),
+  subscribeNowWorkbenchOverlayPositionChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/voice-shortcut-mic-prewarm', () => ({
@@ -211,9 +195,7 @@ vi.mock('@/components/ui/dialog', () => ({
 vi.mock('@/components/ui/drawer', () => ({
   Drawer: ({ children, open }: any) => open ? <div data-testid="drawer">{children}</div> : null,
   DrawerContent: ({ children }: any) => <div>{children}</div>,
-  DrawerHeader: ({ children }: any) => <div>{children}</div>,
   DrawerTitle: ({ children }: any) => <div>{children}</div>,
-  DrawerDescription: ({ children }: any) => <div>{children}</div>,
 }));
 
 vi.mock('@/components/ui/switch', () => ({
