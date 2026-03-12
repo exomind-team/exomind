@@ -311,6 +311,7 @@ describe('TimeBlockServiceImpl', () => {
     getEventStorageMock
       .mockReturnValueOnce(createStorage(startAddEventMock))
       .mockReturnValueOnce(createStorage(switchedUserAddEventMock))
+      .mockReturnValueOnce(createStorage(switchedUserAddEventMock))
       .mockReturnValueOnce(createStorage(switchedUserAddEventMock));
 
     const service = new TimeBlockServiceImpl(env as never);
@@ -318,7 +319,7 @@ describe('TimeBlockServiceImpl', () => {
     await service.markEnding();
     await service.endBlock('done');
 
-    expect(getEventStorageMock).toHaveBeenCalledTimes(3);
+    expect(getEventStorageMock).toHaveBeenCalledTimes(4);
     expect(startAddEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_start' }));
     expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({ type: 'block_end' }));
     expect(switchedUserAddEventMock).toHaveBeenCalledWith(expect.objectContaining({

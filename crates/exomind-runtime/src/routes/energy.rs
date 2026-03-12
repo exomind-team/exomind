@@ -63,6 +63,7 @@ mod tests {
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
+            timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
             energy_registry,
             life_agents: std::collections::HashMap::new(),
             eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(

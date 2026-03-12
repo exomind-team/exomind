@@ -380,6 +380,7 @@ mod tests {
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store,
+            timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
             energy_registry: crate::energy::EnergyRegistry::new(),
             life_agents: std::collections::HashMap::new(),
             eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(

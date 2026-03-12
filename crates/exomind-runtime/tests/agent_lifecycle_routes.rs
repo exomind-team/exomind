@@ -28,6 +28,7 @@ async fn create_and_delete_runtime_agent_via_http_routes() {
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
+        timeblock_store: Arc::new(exomind_runtime::timeblock::TimeBlockStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
         life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
@@ -110,6 +111,7 @@ async fn create_and_delete_codex_runtime_agent_via_http_routes() {
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
+        timeblock_store: Arc::new(exomind_runtime::timeblock::TimeBlockStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
         life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
@@ -162,6 +164,7 @@ async fn create_and_delete_api_runtime_agent_via_http_routes() {
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
+        timeblock_store: Arc::new(exomind_runtime::timeblock::TimeBlockStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
         life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
@@ -223,6 +226,7 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
+        timeblock_store: Arc::new(exomind_runtime::timeblock::TimeBlockStore::new()),
         energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
         life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
