@@ -12,6 +12,11 @@
  */
 import { vi } from 'vitest';
 
+const voiceShortcutAsrProviderState = {
+  current: 'moss' as 'moss' | 'volcano',
+  listeners: new Set<(value: 'moss' | 'volcano') => void>(),
+};
+
 vi.mock('@/lib/services', () => ({
   getEventLogService: vi.fn(() => ({
     exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
@@ -54,21 +59,35 @@ vi.mock('@/config/version-build-info', () => ({
 vi.mock('@/config/theme', () => ({
   getThemePreference: vi.fn(() => 'system'),
   setThemePreference: vi.fn(),
+  subscribeThemePreferenceChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: vi.fn(() => false),
   setDeveloperModeEnabled: vi.fn(),
+  subscribeDeveloperModeChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: vi.fn(() => false),
   setAgentPageEnabled: vi.fn(),
+  subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: vi.fn(() => true),
   setDesktopAdaptiveEnabled: vi.fn(),
+  subscribeDesktopAdaptiveChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/llm-settings', () => ({
+  getLLMApiKey: vi.fn(() => ''),
+  getLLMBaseUrl: vi.fn(() => 'https://api.openai.com/v1'),
+  getLLMModel: vi.fn(() => 'gpt-4o'),
+  setLLMApiKey: vi.fn(),
+  setLLMBaseUrl: vi.fn(),
+  setLLMModel: vi.fn(),
+  subscribeLLMSettingsChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/timer-preferences', () => ({
@@ -116,6 +135,22 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   getVoiceShortcutHotkey: vi.fn(() => 'Alt+Q'),
   setVoiceShortcutHotkey: vi.fn((value: string) => value),
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/voice-shortcut-asr-provider', () => ({
+  getVoiceShortcutAsrProvider: vi.fn(() => voiceShortcutAsrProviderState.current),
+  getVoiceShortcutAsrProviderLabel: vi.fn((provider: 'moss' | 'volcano') => provider === 'volcano' ? '火山' : 'MOSS'),
+  setVoiceShortcutAsrProvider: vi.fn((value: 'moss' | 'volcano') => {
+    voiceShortcutAsrProviderState.current = value === 'volcano' ? 'volcano' : 'moss';
+    voiceShortcutAsrProviderState.listeners.forEach((listener) => listener(voiceShortcutAsrProviderState.current));
+    return voiceShortcutAsrProviderState.current;
+  }),
+  subscribeVoiceShortcutAsrProviderChanges: vi.fn((listener: (value: 'moss' | 'volcano') => void) => {
+    voiceShortcutAsrProviderState.listeners.add(listener);
+    return () => {
+      voiceShortcutAsrProviderState.listeners.delete(listener);
+    };
+  }),
 }));
 
 vi.mock('@/config/voice-overlay-preferences', () => ({
@@ -195,7 +230,9 @@ vi.mock('@/components/ui/dialog', () => ({
 vi.mock('@/components/ui/drawer', () => ({
   Drawer: ({ children, open }: any) => open ? <div data-testid="drawer">{children}</div> : null,
   DrawerContent: ({ children }: any) => <div>{children}</div>,
+  DrawerHeader: ({ children }: any) => <div>{children}</div>,
   DrawerTitle: ({ children }: any) => <div>{children}</div>,
+  DrawerDescription: ({ children }: any) => <div>{children}</div>,
 }));
 
 vi.mock('@/components/ui/switch', () => ({

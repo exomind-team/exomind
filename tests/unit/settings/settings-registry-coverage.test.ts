@@ -28,6 +28,7 @@ const AUDITED_SETTINGS_IDS = [
   'voice-overlay-show-diagnostics',
   'voice-overlay-transcript-lines',
   'voice-overlay-bottom-offset',
+  'now-workbench-overlay-enabled',
   'volcano-resource-model',
   'moss-api-token',
   'moss-voice-test',
@@ -72,6 +73,7 @@ const MULTI_ENUM_IDS = [
 const BOOLEAN_IDS = [
   'voice-shortcut-mic-prewarm',
   'voice-overlay-show-diagnostics',
+  'now-workbench-overlay-enabled',
   'developer-mode',
   'use-mock-data',
   'devtools',

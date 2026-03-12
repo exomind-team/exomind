@@ -85,6 +85,11 @@ import {
   subscribeVoiceOverlayTranscriptLinesChanges,
 } from '@/config/voice-overlay-preferences';
 import {
+  getNowWorkbenchOverlayEnabled,
+  setNowWorkbenchOverlayEnabled,
+  subscribeNowWorkbenchOverlayEnabledChanges,
+} from '@/config/now-workbench-overlay-preferences';
+import {
   getVoiceShortcutAsrProvider,
   getVoiceShortcutAsrProviderLabel,
   setVoiceShortcutAsrProvider,
@@ -586,6 +591,19 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getVoiceOverlayBottomOffset(),
     set: setVoiceOverlayBottomOffset,
     subscribe: subscribeVoiceOverlayBottomOffsetChanges,
+  },
+  {
+    id: 'now-workbench-overlay-enabled',
+    label: '启用当下工作台悬浮窗',
+    icon: Monitor,
+    category: 'input',
+    description: '开启后会在桌面最上层显示固定尺寸的当下工作台悬浮窗，关闭后完全隐藏。',
+    rowTestId: 'new-settings-now-overlay-enabled-row',
+    controlTestId: 'new-settings-now-overlay-enabled-switch',
+    type: 'boolean',
+    get: () => getNowWorkbenchOverlayEnabled(),
+    set: setNowWorkbenchOverlayEnabled,
+    subscribe: subscribeNowWorkbenchOverlayEnabledChanges,
   },
   {
     id: 'volcano-resource-model',
