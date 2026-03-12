@@ -66,6 +66,7 @@ const ENV_DEFAULTS = {
   APP_KEY: process.env.VOLCANO_APP_KEY || process.env.VITE_VOLCANO_APP_KEY || '',
   ACCESS_KEY: process.env.VOLCANO_ACCESS_KEY || process.env.VITE_VOLCANO_ACCESS_KEY || '',
   RESOURCE_ID: process.env.VOLCANO_RESOURCE_ID || process.env.VITE_VOLCANO_RESOURCE_ID || 'volc.bigasr.sauc.duration',
+  ASR_AUTH_TOKEN: process.env.EXOMIND_ASR_AUTH_TOKEN || '',
 } as const;
 
 const CORS_POLICY: BffCorsPolicy = resolveBffCorsPolicy(
@@ -117,8 +118,8 @@ function normalizeLanguage(language: string | undefined, endpoint: VolcanoEndpoi
 function resolveRequestConfig(requestConfig?: Partial<VolcanoRuntimeConfig>): VolcanoRuntimeConfig {
   const endpoint = requestConfig?.endpoint ?? 'bigmodel_async';
   const config: VolcanoRuntimeConfig = {
-    appKey: requestConfig?.appKey?.trim() || ENV_DEFAULTS.APP_KEY,
-    accessKey: requestConfig?.accessKey?.trim() || ENV_DEFAULTS.ACCESS_KEY,
+    appKey: ENV_DEFAULTS.APP_KEY,
+    accessKey: ENV_DEFAULTS.ACCESS_KEY,
     resourceId: requestConfig?.resourceId?.trim() || ENV_DEFAULTS.RESOURCE_ID,
     language: normalizeLanguage(requestConfig?.language, endpoint),
     endpoint,
@@ -377,6 +378,16 @@ const server = Bun.serve({
     }
 
     if (url.pathname === '/api/asr' && req.method === 'POST') {
+      if (ENV_DEFAULTS.ASR_AUTH_TOKEN) {
+        const authHeader = req.headers.get('authorization');
+        if (!authHeader || authHeader !== `Bearer ${ENV_DEFAULTS.ASR_AUTH_TOKEN}`) {
+          return new Response(JSON.stringify({ error: 'Unauthorized' }), {
+            status: 401,
+            headers: { ...corsHeaders, 'Content-Type': 'application/json' },
+          });
+        }
+      }
+
       console.log('\n[请求] 收到 ASR 识别请求');
 
       try {
