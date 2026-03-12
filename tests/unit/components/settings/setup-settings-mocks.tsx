@@ -12,12 +12,31 @@
  */
 import { vi } from 'vitest';
 
-vi.mock('@/lib/services', () => ({
-  getEventLogService: vi.fn(() => ({
+export const settingsPageServiceMocks = {
+  eventLog: {
     exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
     importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0 }),
-  })),
-  getTaskBackupService: vi.fn(() => ({
+  },
+  eventlogBackup: {
+    exportEventsAsJson: vi.fn().mockResolvedValue({
+      fileName: 'exomind-eventlog.json',
+      content: '{"version":1,"events":[]}',
+      eventCount: 0,
+    }),
+    exportEventsAsSqliteSnapshot: vi.fn().mockResolvedValue({
+      fileName: 'exomind-eventlog.sqlite',
+      bytes: new Uint8Array(),
+      eventCount: 0,
+    }),
+    importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+    importEventsFromSqliteSnapshot: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+    getBackendStatus: vi.fn().mockResolvedValue({
+      backend: 'rt-sqlite',
+      supportsJsonBackup: true,
+      supportsSqliteSnapshot: true,
+    }),
+  },
+  taskBackup: {
     exportTasksAsJson: vi.fn().mockResolvedValue({
       fileName: 'exomind-tasks.json',
       content: '{"version":1,"tasks":[]}',
@@ -35,7 +54,84 @@ vi.mock('@/lib/services', () => ({
       supportsJsonBackup: true,
       supportsSqliteSnapshot: true,
     }),
+  },
+  timeblockBackup: {
+    exportTimeBlocksAsJson: vi.fn().mockResolvedValue({
+      fileName: 'exomind-timeblocks.json',
+      content: '{"version":1,"time_blocks":[],"active_block":null}',
+      timeBlockCount: 0,
+      activeBlock: null,
+    }),
+    exportTimeBlocksAsSqliteSnapshot: vi.fn().mockResolvedValue({
+      fileName: 'exomind-timeblocks.sqlite',
+      bytes: new Uint8Array(),
+      timeBlockCount: 0,
+      activeBlockPresent: false,
+    }),
+    importTimeBlocksFromJson: vi.fn().mockResolvedValue({
+      imported: 0,
+      skipped: 0,
+      total: 0,
+      activeBlockUpdated: false,
+    }),
+    importTimeBlocksFromSqliteSnapshot: vi.fn().mockResolvedValue({
+      imported: 0,
+      skipped: 0,
+      total: 0,
+      activeBlockUpdated: false,
+    }),
+    getBackendStatus: vi.fn().mockResolvedValue({
+      backend: 'rt-sqlite',
+      supportsJsonBackup: true,
+      supportsSqliteSnapshot: true,
+    }),
+  },
+};
+
+export const settingsPagePreferenceState = {
+  developerMode: false,
+  agentPageEnabled: false,
+  desktopAdaptiveEnabled: true,
+};
+
+export const settingsPageDomainBackendState = {
+  eventlog: 'rt-sqlite' as const,
+  task: 'rt-sqlite' as const,
+  timeblock: 'rt-sqlite' as const,
+};
+
+vi.mock('@/lib/services', () => ({
+  getEventLogService: vi.fn(() => ({
+    exportEventsAsJson: settingsPageServiceMocks.eventLog.exportEventsAsJson,
+    importEventsFromJson: settingsPageServiceMocks.eventLog.importEventsFromJson,
   })),
+  getEventLogBackupService: vi.fn(() => settingsPageServiceMocks.eventlogBackup),
+  getTimeBlockBackupService: vi.fn(() => settingsPageServiceMocks.timeblockBackup),
+  getTaskBackupService: vi.fn(() => ({
+    exportTasksAsJson: settingsPageServiceMocks.taskBackup.exportTasksAsJson,
+    exportTasksAsSqliteSnapshot: settingsPageServiceMocks.taskBackup.exportTasksAsSqliteSnapshot,
+    importTasksFromJson: settingsPageServiceMocks.taskBackup.importTasksFromJson,
+    importTasksFromSqliteSnapshot: settingsPageServiceMocks.taskBackup.importTasksFromSqliteSnapshot,
+    getBackendStatus: settingsPageServiceMocks.taskBackup.getBackendStatus,
+  })),
+}));
+
+vi.mock('@/config/domain-backend-mode', () => ({
+  getEventlogBackendMode: vi.fn(() => settingsPageDomainBackendState.eventlog),
+  setEventlogBackendMode: vi.fn((value: 'legacy' | 'rt-sqlite') => {
+    settingsPageDomainBackendState.eventlog = value;
+    return value;
+  }),
+  getTaskBackendMode: vi.fn(() => settingsPageDomainBackendState.task),
+  setTaskBackendMode: vi.fn((value: 'legacy' | 'rt-sqlite') => {
+    settingsPageDomainBackendState.task = value;
+    return value;
+  }),
+  getTimeblockBackendMode: vi.fn(() => settingsPageDomainBackendState.timeblock),
+  setTimeblockBackendMode: vi.fn((value: 'legacy' | 'rt-sqlite') => {
+    settingsPageDomainBackendState.timeblock = value;
+    return value;
+  }),
 }));
 
 vi.mock('@/config/port-env', () => ({
@@ -57,17 +153,17 @@ vi.mock('@/config/theme', () => ({
 }));
 
 vi.mock('@/config/developer-mode', () => ({
-  getDeveloperModeEnabled: vi.fn(() => false),
+  getDeveloperModeEnabled: vi.fn(() => settingsPagePreferenceState.developerMode),
   setDeveloperModeEnabled: vi.fn(),
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
-  getAgentPageEnabled: vi.fn(() => false),
+  getAgentPageEnabled: vi.fn(() => settingsPagePreferenceState.agentPageEnabled),
   setAgentPageEnabled: vi.fn(),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
-  getDesktopAdaptiveEnabled: vi.fn(() => true),
+  getDesktopAdaptiveEnabled: vi.fn(() => settingsPagePreferenceState.desktopAdaptiveEnabled),
   setDesktopAdaptiveEnabled: vi.fn(),
 }));
 
