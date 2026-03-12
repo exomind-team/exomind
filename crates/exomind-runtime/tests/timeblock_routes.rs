@@ -3,6 +3,7 @@ use std::sync::Arc;
 use axum::Router;
 use axum::body::Body;
 use axum::http::{Request, StatusCode};
+use base64::Engine as _;
 use exomind_runtime::AppState;
 use exomind_runtime::mesh::MeshState;
 use exomind_runtime::routes::timeblocks;
@@ -130,6 +131,15 @@ async fn exports_sqlite_snapshot_and_backend_status() {
     assert_eq!(parsed["version"], 1);
     assert_eq!(parsed["timeblock_count"], 1);
     assert!(parsed["content_base64"].as_str().is_some_and(|value| !value.is_empty()));
+
+    let bytes = base64::engine::general_purpose::STANDARD
+        .decode(parsed["content_base64"].as_str().unwrap())
+        .unwrap();
+    let import_dir = tempdir().unwrap();
+    let import_sqlite_path = import_dir.path().join("snapshot.sqlite");
+    std::fs::write(&import_sqlite_path, bytes).unwrap();
+    let imported_store = TimeBlockStore::with_sqlite_path(&import_sqlite_path).unwrap();
+    assert_eq!(imported_store.len_completed().unwrap(), 1, "sqlite snapshot should reopen with latest completed blocks");
 }
 
 #[tokio::test]

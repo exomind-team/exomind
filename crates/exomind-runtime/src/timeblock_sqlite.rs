@@ -123,7 +123,20 @@ impl SqliteTimeBlockStore {
     }
 
     pub fn snapshot_bytes(&self) -> Result<Vec<u8>, TimeBlockStoreError> {
-        std::fs::read(&self.path).map_err(TimeBlockStoreError::from)
+        let temp_root = std::env::temp_dir().join(format!("exomind-timeblocks-snapshot-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&temp_root)?;
+        let snapshot_path = temp_root.join("timeblocks-snapshot.sqlite");
+        let escaped_snapshot_path = snapshot_path.to_string_lossy().replace('\'', "''");
+
+        {
+            let connection = self.connection();
+            connection.execute_batch(&format!("VACUUM INTO '{}';", escaped_snapshot_path))?;
+        }
+
+        let bytes = std::fs::read(&snapshot_path)?;
+        let _ = std::fs::remove_file(&snapshot_path);
+        let _ = std::fs::remove_dir_all(&temp_root);
+        Ok(bytes)
     }
 
     fn init(&self) -> Result<(), TimeBlockStoreError> {

@@ -198,14 +198,11 @@ async fn export_eventlog_sqlite(
     State(state): State<AppState>,
     Query(query): Query<EventLogQuery>,
 ) -> Result<Json<EventLogBackupSqlitePayload>, (StatusCode, Json<ErrorResponse>)> {
-    let bytes = state
-        .eventlog_store
-        .sqlite_snapshot_bytes()
-        .map_err(internal_error)?
-        .ok_or_else(|| internal_error("eventlog sqlite snapshot is unavailable on non-sqlite backend".to_string()))?;
     let events = state
         .eventlog_store
         .list_events(query.user_id.as_deref())
+        .map_err(internal_error)?;
+    let bytes = build_eventlog_sqlite_snapshot_bytes(&state, query.user_id.as_deref(), &events)
         .map_err(internal_error)?;
     Ok(Json(EventLogBackupSqlitePayload {
         version: 1,
@@ -242,7 +239,8 @@ async fn import_eventlog_sqlite(
     let bytes = STANDARD
         .decode(payload.content_base64)
         .map_err(|error| internal_error(format!("invalid sqlite snapshot: {error}")))?;
-    let imported_events = read_events_from_sqlite_snapshot(&bytes).map_err(internal_error)?;
+    let imported_events = read_events_from_sqlite_snapshot(&bytes, query.user_id.as_deref())
+        .map_err(internal_error)?;
     let result = apply_event_import(
         &state,
         query.user_id.as_deref(),
@@ -341,7 +339,33 @@ fn apply_event_import(
     Ok(result)
 }
 
-fn read_events_from_sqlite_snapshot(bytes: &[u8]) -> Result<Vec<EventRecord>, String> {
+fn build_eventlog_sqlite_snapshot_bytes(
+    state: &AppState,
+    user_id: Option<&str>,
+    events: &[EventRecord],
+) -> Result<Vec<u8>, String> {
+    if user_id.is_none() {
+        return state
+            .eventlog_store
+            .sqlite_snapshot_bytes()?
+            .ok_or_else(|| "eventlog sqlite snapshot is unavailable on non-sqlite backend".to_string());
+    }
+
+    let temp_root = std::env::temp_dir().join(format!("exomind-eventlog-export-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_root)
+        .map_err(|error| format!("failed to create temp eventlog export dir: {error}"))?;
+    let sqlite_path = temp_root.join("eventlog-export.sqlite");
+    let scoped_store = crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
+    scoped_store.replace_all_events(user_id, events)?;
+    let bytes = scoped_store
+        .sqlite_snapshot_bytes()?
+        .ok_or_else(|| "failed to produce scoped sqlite snapshot".to_string())?;
+    let _ = std::fs::remove_file(&sqlite_path);
+    let _ = std::fs::remove_dir_all(&temp_root);
+    Ok(bytes)
+}
+
+fn read_events_from_sqlite_snapshot(bytes: &[u8], user_id: Option<&str>) -> Result<Vec<EventRecord>, String> {
     let temp_root = std::env::temp_dir().join(format!("exomind-eventlog-import-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&temp_root)
         .map_err(|error| format!("failed to create temp eventlog dir: {error}"))?;
@@ -349,7 +373,7 @@ fn read_events_from_sqlite_snapshot(bytes: &[u8]) -> Result<Vec<EventRecord>, St
     std::fs::write(&sqlite_path, bytes)
         .map_err(|error| format!("failed to write temp sqlite snapshot: {error}"))?;
     let store = crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
-    let events = store.list_events(None)?;
+    let events = store.list_events(user_id)?;
     let _ = std::fs::remove_file(&sqlite_path);
     let _ = std::fs::remove_dir_all(&temp_root);
     Ok(events)
@@ -754,6 +778,56 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn export_eventlog_sqlite_snapshot_honors_user_id_scope() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog-users.sqlite");
+        let store = Arc::new(EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap());
+        store.append_event(Some("user-a"), EventRecord {
+            id: "user-a-1".to_string(),
+            timestamp: 1000,
+            content: "from user a".to_string(),
+            tags: vec!["note".to_string()],
+            metadata: None,
+        }).unwrap();
+        store.append_event(Some("user-b"), EventRecord {
+            id: "user-b-1".to_string(),
+            timestamp: 2000,
+            content: "from user b".to_string(),
+            tags: vec!["note".to_string()],
+            metadata: None,
+        }).unwrap();
+
+        let app = test_router(test_state_with_eventlog(store));
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog/backup/sqlite?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let payload: Value = serde_json::from_slice(&body).unwrap();
+        let bytes = STANDARD
+            .decode(payload["content_base64"].as_str().expect("base64 snapshot"))
+            .expect("valid sqlite bytes");
+
+        let import_dir = tempdir().unwrap();
+        let import_sqlite_path = import_dir.path().join("scoped-export.sqlite");
+        std::fs::write(&import_sqlite_path, bytes).unwrap();
+        let imported_store = EventLogStore::with_sqlite_path(import_dir.path().to_path_buf(), &import_sqlite_path).unwrap();
+        let user_a_events = imported_store.list_events(Some("user-a")).unwrap();
+        let user_b_events = imported_store.list_events(Some("user-b")).unwrap();
+
+        assert_eq!(user_a_events.len(), 1);
+        assert_eq!(user_a_events[0].id, "user-a-1");
+        assert!(user_b_events.is_empty(), "scoped sqlite export should not leak other users");
+    }
+
+    #[tokio::test]
     async fn import_eventlog_json_backup_with_merge_strategy() {
         let dir = tempdir().unwrap();
         let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
@@ -814,5 +888,43 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert!(events.iter().any(|event| event.content == "existing replaced"));
         assert!(events.iter().any(|event| event.id == "incoming-2"));
+    }
+
+    #[tokio::test]
+    async fn import_eventlog_sqlite_snapshot_respects_user_id_scope() {
+        let import_dir = tempdir().unwrap();
+        let import_sqlite_path = import_dir.path().join("import-eventlog.sqlite");
+        let import_store = EventLogStore::with_sqlite_path(import_dir.path().to_path_buf(), &import_sqlite_path).unwrap();
+        import_store.append_event(Some("user-a"), EventRecord {
+            id: "user-a-import".to_string(),
+            timestamp: 1234,
+            content: "imported for user a".to_string(),
+            tags: vec!["note".to_string()],
+            metadata: None,
+        }).unwrap();
+        let import_bytes = import_store.sqlite_snapshot_bytes().unwrap().unwrap();
+
+        let target_dir = tempdir().unwrap();
+        let target_store = Arc::new(EventLogStore::with_sqlite_path(target_dir.path().to_path_buf(), &target_dir.path().join("target.sqlite")).unwrap());
+        let app = test_router(test_state_with_eventlog(target_store.clone()));
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/eventlog/import/sqlite?user_id=user-a&strategy=overwrite")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::json!({
+                        "content_base64": STANDARD.encode(import_bytes),
+                    }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let user_a_events = target_store.list_events(Some("user-a")).unwrap();
+        assert_eq!(user_a_events.len(), 1);
+        assert_eq!(user_a_events[0].id, "user-a-import");
     }
 }
