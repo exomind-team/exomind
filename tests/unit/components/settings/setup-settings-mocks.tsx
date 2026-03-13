@@ -100,6 +100,24 @@ vi.mock('@/config/timer-preferences', () => ({
   updateTimerPreferences: vi.fn((p: any) => p),
 }));
 
+vi.mock('@/config/focus-bgm-preferences', () => ({
+  getFocusBgmPreferences: vi.fn(() => ({
+    enabled: false,
+    sourceType: 'preset',
+    presetId: 'white-noise',
+    customTracks: [],
+    playbackMode: 'loop',
+    stopBehavior: 'manual-end',
+    volume: 60,
+  })),
+  subscribeFocusBgmPreferencesChanges: vi.fn(() => () => {}),
+  updateFocusBgmPreferences: vi.fn((patch: any) => patch),
+}));
+
+vi.mock('@/lib/media/focus-bgm-file-picker', () => ({
+  pickFocusBgmTracks: vi.fn().mockResolvedValue([]),
+}));
+
 vi.mock('@/config/mock-data', () => ({
   getUseMockDataEnabled: vi.fn(() => false),
   setUseMockDataEnabled: vi.fn(),
