@@ -1315,6 +1315,72 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     service.destroy();
   });
 
+  it('ignores stale foreground window result from previous round（上一轮迟到的窗口结果不会覆盖新一轮）', async () => {
+    let resolveFirstForeground: ((value: { title: string; processName: string }) => void) | null = null;
+    let secondForegroundResolved = false;
+    transcribeMock.mockResolvedValue({
+      text: '第二轮文本',
+      confidence: 0.98,
+      lang: 'zh-CN',
+      duration: 1000,
+    });
+
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'foreground_window_get') {
+        if (!resolveFirstForeground) {
+          return await new Promise((resolve) => {
+            resolveFirstForeground = resolve;
+          });
+        }
+        secondForegroundResolved = true;
+        return { title: 'Window B', processName: 'AppB.exe' };
+      }
+      if (command === 'voice_recording_set_active' || command === 'simulate_paste') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('cancel');
+    await flushAsync();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('stop');
+    await flushAsync();
+
+    expect(secondForegroundResolved).toBe(true);
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '第二轮文本' }),
+      expect.objectContaining({
+        targetScope: 'external-window',
+        window: {
+          title: 'Window B',
+          processName: 'AppB.exe',
+        },
+      }),
+    );
+
+    resolveFirstForeground?.({ title: 'Window A', processName: 'AppA.exe' });
+    await flushAsync();
+
+    const lastPublishCall = publishVoiceTranscriptSignalMock.mock.calls.at(-1);
+    expect(lastPublishCall?.[1]).toEqual(expect.objectContaining({
+      window: {
+        title: 'Window B',
+        processName: 'AppB.exe',
+      },
+    }));
+
+    service.destroy();
+  });
+
   it('ignores late volcano chunks after stop begins（停止录音后忽略迟到 chunk，避免 finish 后继续 push）', async () => {
     setVoiceShortcutAsrProvider('volcano');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.appKey, 'test-app-key');

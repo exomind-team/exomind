@@ -158,6 +158,7 @@ export class VoiceShortcutService {
   private warmVolcanoSessionPromise: Promise<string | null> | null = null;
   private frozenForegroundWindowContext: ForegroundWindowContext | null = null;
   private frozenForegroundWindowContextPromise: Promise<ForegroundWindowContext | null> | null = null;
+  private foregroundWindowCaptureToken = 0;
 
   constructor(livePreviewSource: VoiceLivePreviewSource = createDefaultVoiceLivePreviewSource()) {
     this.adapter = new MOSSASRAdapter();
@@ -278,8 +279,7 @@ export class VoiceShortcutService {
     void this.cancelWarmVolcanoSession();
     this.releaseWarmStream();
     this.releaseResources();
-    this.frozenForegroundWindowContext = null;
-    this.frozenForegroundWindowContextPromise = null;
+    this.clearFrozenForegroundWindowContext();
     this.clearAutoHide();
   }
 
@@ -880,8 +880,7 @@ export class VoiceShortcutService {
       await this.cancelVolcanoStreaming();
       this.clearAutoHide();
       this.setState('idle');
-      this.frozenForegroundWindowContext = null;
-      this.frozenForegroundWindowContextPromise = null;
+      this.clearFrozenForegroundWindowContext();
       invoke('voice_overlay_hide').catch(() => {});
       return;
     }
@@ -892,8 +891,7 @@ export class VoiceShortcutService {
     this.releaseResources();
     this.clearAutoHide();
     this.setState('idle');
-    this.frozenForegroundWindowContext = null;
-    this.frozenForegroundWindowContextPromise = null;
+    this.clearFrozenForegroundWindowContext();
     invoke('voice_overlay_hide').catch(() => {});
   }
 
@@ -963,8 +961,7 @@ export class VoiceShortcutService {
 
     this.autoHideTimer = setTimeout(() => {
       this.setState('idle');
-      this.frozenForegroundWindowContext = null;
-      this.frozenForegroundWindowContextPromise = null;
+      this.clearFrozenForegroundWindowContext();
       invoke('voice_overlay_hide').catch(() => {});
     }, AUTO_HIDE_DONE_MS);
   }
@@ -979,13 +976,24 @@ export class VoiceShortcutService {
   }
 
   private captureForegroundWindowContext(): void {
+    const captureToken = this.foregroundWindowCaptureToken + 1;
+    this.foregroundWindowCaptureToken = captureToken;
     this.frozenForegroundWindowContext = null;
     this.frozenForegroundWindowContextPromise = this.getForegroundWindowContext()
       .then((context) => {
+        if (this.foregroundWindowCaptureToken !== captureToken) {
+          return null;
+        }
         this.frozenForegroundWindowContext = context;
         return context;
       })
       .catch(() => null);
+  }
+
+  private clearFrozenForegroundWindowContext(): void {
+    this.foregroundWindowCaptureToken += 1;
+    this.frozenForegroundWindowContext = null;
+    this.frozenForegroundWindowContextPromise = null;
   }
 
   private handleError(message: string): void {
@@ -996,8 +1004,7 @@ export class VoiceShortcutService {
     this.releaseResources();
     this.emitOverlayState('error', { errorMessage: message });
     this.state = 'error';
-    this.frozenForegroundWindowContext = null;
-    this.frozenForegroundWindowContextPromise = null;
+    this.clearFrozenForegroundWindowContext();
 
     this.autoHideTimer = setTimeout(() => {
       this.setState('idle');
