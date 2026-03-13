@@ -57,4 +57,40 @@ describe('EventLogService import/export', () => {
     expect(result.skipped).toBe(1);
     expect(result.total).toBe(3);
   });
+
+  it('appends raw event data without regenerating timestamp or tags', async () => {
+    const service = new EventLogServiceImpl({ port });
+
+    const appended = await service.appendEventData({
+      id: 'evt-block-start',
+      timestamp: 1700000000000,
+      content: 'Deep Work started',
+      tags: ['block_start'],
+      metadata: {
+        source: {
+          deviceId: 'desktop-1',
+          deviceName: 'Desktop',
+          platform: 'windows',
+          app: 'ExoMind',
+        },
+      },
+    });
+
+    expect(port.appendEvent).toHaveBeenCalledWith({
+      id: 'evt-block-start',
+      timestamp: 1700000000000,
+      content: 'Deep Work started',
+      tags: ['block_start'],
+      metadata: {
+        source: {
+          deviceId: 'desktop-1',
+          deviceName: 'Desktop',
+          platform: 'windows',
+          app: 'ExoMind',
+        },
+      },
+    });
+    expect(appended.tags.has('block_start')).toBe(true);
+    expect(appended.timestamp).toBe(1700000000000);
+  });
 });

@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crate::eventlog_sqlite::SqliteEventLogStore;
+
 const EVENTLOG_DIR_NAME: &str = "eventlog";
 const MIRROR_HEADER: &str = "# EventLog Mirror\n\n";
 
@@ -21,6 +23,8 @@ pub struct EventRecord {
     pub timestamp: i64,
     pub content: String,
     pub tags: Vec<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -50,22 +54,50 @@ struct EventLogPaths {
 
 // ── Store ───────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventLogBackendKind {
+    JsonFiles,
+    Sqlite,
+}
+
+enum EventLogBackend {
+    JsonFiles,
+    Sqlite(SqliteEventLogStore),
+}
+
 pub struct EventLogStore {
     data_dir: PathBuf,
+    backend: EventLogBackend,
 }
 
 impl EventLogStore {
     pub fn new(data_dir: PathBuf) -> Self {
-        Self { data_dir }
+        Self {
+            data_dir,
+            backend: EventLogBackend::JsonFiles,
+        }
+    }
+
+    pub fn with_sqlite_path(data_dir: PathBuf, sqlite_path: &Path) -> Result<Self, String> {
+        Ok(Self {
+            data_dir,
+            backend: EventLogBackend::Sqlite(SqliteEventLogStore::open(sqlite_path)?),
+        })
     }
 
     // ── public API ──────────────────────────────────────────────
 
     pub fn list_events(&self, user_id: Option<&str>) -> Result<Vec<EventRecord>, String> {
-        let paths = self.resolve_paths(user_id)?;
-        let mut events = read_events(&paths.events)?;
-        sort_events_desc(&mut events);
-        Ok(events)
+        let normalized_user = sanitize_user_id(user_id);
+        match &self.backend {
+            EventLogBackend::JsonFiles => {
+                let paths = self.resolve_paths(user_id)?;
+                let mut events = read_events(&paths.events)?;
+                sort_events_desc(&mut events);
+                Ok(events)
+            }
+            EventLogBackend::Sqlite(store) => store.list_events(&normalized_user),
+        }
     }
 
     pub fn append_event(
@@ -73,18 +105,29 @@ impl EventLogStore {
         user_id: Option<&str>,
         event: EventRecord,
     ) -> Result<(), String> {
-        let paths = self.resolve_paths(user_id)?;
-        let mut events = read_events(&paths.events)?;
+        let normalized_user = sanitize_user_id(user_id);
+        match &self.backend {
+            EventLogBackend::JsonFiles => {
+                let paths = self.resolve_paths(user_id)?;
+                let mut events = read_events(&paths.events)?;
 
-        if let Some(existing) = events.iter_mut().find(|item| item.id == event.id) {
-            *existing = event;
-        } else {
-            events.push(event);
+                if let Some(existing) = events.iter_mut().find(|item| item.id == event.id) {
+                    *existing = event;
+                } else {
+                    events.push(event);
+                }
+
+                sort_events_desc(&mut events);
+                write_events(&paths.events, &events)?;
+                sync_markdown_mirror(&paths, &events)
+            }
+            EventLogBackend::Sqlite(store) => {
+                let paths = self.resolve_paths(user_id)?;
+                store.append_event(&normalized_user, &event)?;
+                let events = store.list_events(&normalized_user)?;
+                sync_markdown_mirror(&paths, &events)
+            }
         }
-
-        sort_events_desc(&mut events);
-        write_events(&paths.events, &events)?;
-        sync_markdown_mirror(&paths, &events)
     }
 
     pub fn get_event(
@@ -92,20 +135,36 @@ impl EventLogStore {
         user_id: Option<&str>,
         id: &str,
     ) -> Result<Option<EventRecord>, String> {
-        let paths = self.resolve_paths(user_id)?;
-        let events = read_events(&paths.events)?;
-        Ok(events.into_iter().find(|event| event.id == id))
+        let normalized_user = sanitize_user_id(user_id);
+        match &self.backend {
+            EventLogBackend::JsonFiles => {
+                let paths = self.resolve_paths(user_id)?;
+                let events = read_events(&paths.events)?;
+                Ok(events.into_iter().find(|event| event.id == id))
+            }
+            EventLogBackend::Sqlite(store) => store.get_event(&normalized_user, id),
+        }
     }
 
     pub fn clear_events(&self, user_id: Option<&str>) -> Result<(), String> {
-        let paths = self.resolve_paths(user_id)?;
-        write_events(&paths.events, &[])?;
-        sync_markdown_mirror(&paths, &[])
+        let normalized_user = sanitize_user_id(user_id);
+        match &self.backend {
+            EventLogBackend::JsonFiles => {
+                let paths = self.resolve_paths(user_id)?;
+                write_events(&paths.events, &[])?;
+                sync_markdown_mirror(&paths, &[])
+            }
+            EventLogBackend::Sqlite(store) => {
+                let paths = self.resolve_paths(user_id)?;
+                store.clear_events(&normalized_user)?;
+                sync_markdown_mirror(&paths, &[])
+            }
+        }
     }
 
     pub fn mirror_status(&self, user_id: Option<&str>) -> Result<MirrorStatus, String> {
         let paths = self.resolve_paths(user_id)?;
-        let events = read_events(&paths.events)?;
+        let events = self.list_events(user_id)?;
         let checkpoint = read_checkpoint(&paths.checkpoint)?;
         let checkpoint_event_id = checkpoint.and_then(|v| v.last_event_id);
         let mirrored_events = count_mirrored_events(&paths.mirror)?;
@@ -128,10 +187,47 @@ impl EventLogStore {
 
     pub fn rebuild_markdown(&self, user_id: Option<&str>) -> Result<MirrorStatus, String> {
         let paths = self.resolve_paths(user_id)?;
-        let events = read_events(&paths.events)?;
+        let events = self.list_events(user_id)?;
         sync_markdown_mirror(&paths, &events)?;
         // Re-compute status after rebuild.
         self.mirror_status(user_id)
+    }
+
+    pub fn replace_all_events(
+        &self,
+        user_id: Option<&str>,
+        events: &[EventRecord],
+    ) -> Result<(), String> {
+        let normalized_user = sanitize_user_id(user_id);
+        match &self.backend {
+            EventLogBackend::JsonFiles => {
+                let paths = self.resolve_paths(user_id)?;
+                let mut ordered = events.to_vec();
+                sort_events_desc(&mut ordered);
+                write_events(&paths.events, &ordered)?;
+                sync_markdown_mirror(&paths, &ordered)
+            }
+            EventLogBackend::Sqlite(store) => {
+                let paths = self.resolve_paths(user_id)?;
+                store.replace_all(&normalized_user, events)?;
+                let current = store.list_events(&normalized_user)?;
+                sync_markdown_mirror(&paths, &current)
+            }
+        }
+    }
+
+    pub fn sqlite_snapshot_bytes(&self) -> Result<Option<Vec<u8>>, String> {
+        match &self.backend {
+            EventLogBackend::JsonFiles => Ok(None),
+            EventLogBackend::Sqlite(store) => store.snapshot_bytes().map(Some),
+        }
+    }
+
+    pub fn backend_kind(&self) -> EventLogBackendKind {
+        match &self.backend {
+            EventLogBackend::JsonFiles => EventLogBackendKind::JsonFiles,
+            EventLogBackend::Sqlite(_) => EventLogBackendKind::Sqlite,
+        }
     }
 
     // ── internal helpers ────────────────────────────────────────
@@ -328,6 +424,7 @@ mod tests {
             timestamp: 1700000000000,
             content: "hello".to_string(),
             tags: vec!["note".to_string()],
+            metadata: None,
         };
 
         store.append_event(None, event.clone()).unwrap();
@@ -335,6 +432,29 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0].id, "evt-1");
         assert_eq!(events[0].content, "hello");
+    }
+
+    #[test]
+    fn sqlite_store_persists_events_across_reopen() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog.sqlite");
+
+        let store = EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
+        let event = EventRecord {
+            id: "evt-sql-1".to_string(),
+            timestamp: 1700000000000,
+            content: "persist me".to_string(),
+            tags: vec!["note".to_string()],
+            metadata: None,
+        };
+        store.append_event(None, event.clone()).unwrap();
+        drop(store);
+
+        let reopened = EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap();
+        let events = reopened.list_events(None).unwrap();
+        assert_eq!(events.len(), 1);
+        assert_eq!(events[0].id, "evt-sql-1");
+        assert_eq!(events[0].content, "persist me");
     }
 
     #[test]
@@ -350,6 +470,7 @@ mod tests {
                     timestamp: 1,
                     content: "first".to_string(),
                     tags: vec![],
+                    metadata: None,
                 },
             )
             .unwrap();
@@ -371,6 +492,7 @@ mod tests {
                     timestamp: 1,
                     content: "data".to_string(),
                     tags: vec![],
+                    metadata: None,
                 },
             )
             .unwrap();
@@ -393,6 +515,7 @@ mod tests {
                     timestamp: 100,
                     content: "original".to_string(),
                     tags: vec![],
+                    metadata: None,
                 },
             )
             .unwrap();
@@ -405,6 +528,7 @@ mod tests {
                     timestamp: 200,
                     content: "updated".to_string(),
                     tags: vec!["changed".to_string()],
+                    metadata: None,
                 },
             )
             .unwrap();
@@ -427,6 +551,7 @@ mod tests {
                     timestamp: 1000,
                     content: "mirror test".to_string(),
                     tags: vec!["note".to_string()],
+                    metadata: None,
                 },
             )
             .unwrap();
@@ -453,6 +578,7 @@ mod tests {
                     timestamp: 1,
                     content: "alice data".to_string(),
                     tags: vec![],
+                    metadata: None,
                 },
             )
             .unwrap();
@@ -465,6 +591,7 @@ mod tests {
                     timestamp: 1,
                     content: "bob data".to_string(),
                     tags: vec![],
+                    metadata: None,
                 },
             )
             .unwrap();

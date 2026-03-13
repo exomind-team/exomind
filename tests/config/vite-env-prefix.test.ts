@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import viteConfig from '../../vite.config';
 
 describe('vite env prefix config', () => {
-  async function resolveConfig() {
+  async function resolveConfig(mode = 'test') {
     return typeof viteConfig === 'function'
-      ? viteConfig({ command: 'serve', mode: 'test', isSsrBuild: false, isPreview: false })
+      ? viteConfig({ command: 'serve', mode, isSsrBuild: false, isPreview: false })
       : viteConfig;
   }
 
@@ -44,6 +44,27 @@ describe('vite env prefix config', () => {
         process.env.TAURI_DEV_HOST = originalHost;
       }
     }
+  });
+
+  it('should ignore unrelated workspace trees during dev watch（开发监听应忽略无关 worktree 与旁路子项目）', async () => {
+    const resolved = await resolveConfig();
+    const watch = typeof resolved.server === 'object' ? resolved.server?.watch : undefined;
+    const ignored = typeof watch === 'object' && watch && Array.isArray(watch.ignored)
+      ? watch.ignored
+      : [];
+
+    expect(ignored).toEqual(expect.arrayContaining([
+      '**/.worktrees/**',
+      '**/website/**',
+      '**/packages/ts-agent-cli/**',
+    ]));
+  });
+
+  it('should not inject dev instance metadata outside development mode（非 development 模式不应注入实例诊断元数据）', async () => {
+    const resolved = await resolveConfig('production');
+    const define = typeof resolved.define === 'object' && resolved.define ? resolved.define : {};
+
+    expect(Object.prototype.hasOwnProperty.call(define, 'globalThis.__EXOMIND_DEV_INSTANCE_META__')).toBe(false);
   });
 });
 

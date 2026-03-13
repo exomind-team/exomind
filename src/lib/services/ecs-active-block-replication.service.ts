@@ -1,7 +1,9 @@
+import { getTimeblockBackendMode } from '@/config/domain-backend-mode';
 import { getSelectedRuntimeTarget } from '@/config/runtime-target';
 import { getActiveBlockStorage } from '@/lib/storage/active-block-storage';
 import type { ActiveBlockData } from '@/lib/types/event';
 import { SignalStreamService } from './signal-stream.service';
+import { getTimeBlockService } from './timeblock.service';
 
 export const ACTIVE_BLOCK_REPLICATION_SNAPSHOT_TOPIC = 'active_block.replication.snapshot';
 
@@ -66,5 +68,9 @@ export async function projectActiveBlockReplicationSnapshot(
   payload: ActiveBlockReplicationSnapshotPayload,
   userId?: string,
 ): Promise<void> {
+  if (getTimeblockBackendMode() === 'rt-sqlite') {
+    await getTimeBlockService().applyReplicatedActiveBlock(payload.block);
+    return;
+  }
   await getActiveBlockStorage(userId).projectReplicatedActiveBlock(payload.block);
 }

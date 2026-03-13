@@ -125,7 +125,9 @@ import {
 } from '@/services/impl/settings-data-service';
 import {
   AiApiKeySetting,
+  DevInstanceDiagnosticsSetting,
   DevicePairingSetting,
+  FocusBgmSetting,
   MossVoiceTestSetting,
   TaskBackendStatusSetting,
   TaskImportActionSetting,
@@ -429,6 +431,13 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     subscribe: (cb: (value: string) => void) => subscribeTimerPreferencesChanges((preferences) => {
       cb(preferences.countdownEndSoundEnabled ? preferences.countdownEndSoundPresetId : 'off');
     }),
+  },
+  {
+    id: 'focus-bgm',
+    label: '专注背景音',
+    category: 'timer',
+    type: 'custom',
+    component: FocusBgmSetting,
   },
   {
     id: 'feedback-content',
@@ -801,6 +810,14 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
       set: setting.set,
       subscribe: setting.subscribe,
     })),
+  },
+  {
+    id: 'instance-diagnostics',
+    label: '实例诊断信息',
+    category: 'developer',
+    type: 'custom',
+    visible: devOnly,
+    component: DevInstanceDiagnosticsSetting,
   },
   {
     id: 'device-pairing',

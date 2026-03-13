@@ -18,6 +18,7 @@ const AUDITED_SETTINGS_IDS = [
   'theme',
   'countdown-end-mode',
   'sound-preset',
+  'focus-bgm',
   'feedback-content',
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
@@ -44,6 +45,7 @@ const AUDITED_SETTINGS_IDS = [
   'use-mock-data',
   'devtools',
   'feature-toggles',
+  'instance-diagnostics',
   'device-pairing',
   'task-backend-status',
   'clear-local-cache',
@@ -98,10 +100,12 @@ const BUTTON_ACTION_IDS = [
 ] as const;
 
 const CUSTOM_ITEM_IDS = [
+  'focus-bgm',
   'moss-voice-test',
   'volcano-asr-test',
   'ai-api-key',
   'import-tasks',
+  'instance-diagnostics',
   'device-pairing',
   'task-backend-status',
 ] as const;
@@ -115,6 +119,7 @@ const DEV_ONLY_IDS = [
   'use-mock-data',
   'devtools',
   'feature-toggles',
+  'instance-diagnostics',
   'device-pairing',
   'task-backend-status',
 ] as const;

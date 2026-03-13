@@ -3,23 +3,35 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const {
   getActiveBlockStorageMock,
   getCurrentSyncUserIdMock,
+  getTimeblockBackendModeMock,
   syncToRemoteMock,
   stopSyncMock,
   loadActiveBlockMock,
   saveActiveBlockMock,
   deleteActiveBlockMock,
   getEventStorageMock,
+  rtListCompletedBlocksMock,
+  rtReplaceCompletedBlocksMock,
+  rtGetActiveBlockMock,
+  rtPutActiveBlockMock,
+  rtDeleteActiveBlockMock,
   publishActiveBlockReplicationSnapshotMock,
   appendEventWithEcsReplicationMock,
 } = vi.hoisted(() => ({
   getActiveBlockStorageMock: vi.fn(),
   getCurrentSyncUserIdMock: vi.fn(() => 'local-user'),
+  getTimeblockBackendModeMock: vi.fn(() => 'legacy'),
   syncToRemoteMock: vi.fn(),
   stopSyncMock: vi.fn(),
   loadActiveBlockMock: vi.fn(),
   saveActiveBlockMock: vi.fn(),
   deleteActiveBlockMock: vi.fn(),
   getEventStorageMock: vi.fn(() => ({ addEvent: vi.fn() })),
+  rtListCompletedBlocksMock: vi.fn(async () => []),
+  rtReplaceCompletedBlocksMock: vi.fn(async () => undefined),
+  rtGetActiveBlockMock: vi.fn(async () => null),
+  rtPutActiveBlockMock: vi.fn(async () => undefined),
+  rtDeleteActiveBlockMock: vi.fn(async () => undefined),
   publishActiveBlockReplicationSnapshotMock: vi.fn(),
   appendEventWithEcsReplicationMock: vi.fn(async (event) => event),
 }));
@@ -54,6 +66,20 @@ vi.mock('@/lib/storage/event-storage', () => ({
   getEventStorage: getEventStorageMock,
 }));
 
+vi.mock('@/config/domain-backend-mode', () => ({
+  getTimeblockBackendMode: getTimeblockBackendModeMock,
+}));
+
+vi.mock('@/lib/adapters/timeblock-rt-adapter', () => ({
+  TimeBlockRtAdapter: class MockTimeBlockRtAdapter {
+    listCompletedBlocks = rtListCompletedBlocksMock;
+    replaceCompletedBlocks = rtReplaceCompletedBlocksMock;
+    getActiveBlock = rtGetActiveBlockMock;
+    putActiveBlock = rtPutActiveBlockMock;
+    deleteActiveBlock = rtDeleteActiveBlockMock;
+  },
+}));
+
 vi.mock('@/lib/services/ecs-active-block-replication.service', () => ({
   publishActiveBlockReplicationSnapshot: publishActiveBlockReplicationSnapshotMock,
 }));
@@ -78,6 +104,8 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     getActiveBlockStorageMock.mockReset();
     getCurrentSyncUserIdMock.mockReset();
     getCurrentSyncUserIdMock.mockReturnValue('local-user');
+    getTimeblockBackendModeMock.mockReset();
+    getTimeblockBackendModeMock.mockReturnValue('legacy');
 
     getActiveBlockStorageMock.mockImplementation((userId?: string) => {
       const id = userId ?? getCurrentSyncUserIdMock();
@@ -106,8 +134,29 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
     saveActiveBlockMock.mockReset();
     deleteActiveBlockMock.mockReset();
     getEventStorageMock.mockClear();
+    rtListCompletedBlocksMock.mockReset();
+    rtListCompletedBlocksMock.mockResolvedValue([]);
+    rtReplaceCompletedBlocksMock.mockReset();
+    rtReplaceCompletedBlocksMock.mockResolvedValue(undefined);
+    rtGetActiveBlockMock.mockReset();
+    rtGetActiveBlockMock.mockResolvedValue(null);
+    rtPutActiveBlockMock.mockReset();
+    rtPutActiveBlockMock.mockResolvedValue(undefined);
+    rtDeleteActiveBlockMock.mockReset();
+    rtDeleteActiveBlockMock.mockResolvedValue(undefined);
     publishActiveBlockReplicationSnapshotMock.mockReset();
     appendEventWithEcsReplicationMock.mockClear();
+  });
+
+  it('falls back to legacy storage outside tauri even when preference is rt-sqlite', async () => {
+    getTimeblockBackendModeMock.mockReturnValue('rt-sqlite');
+    loadActiveBlockMock.mockResolvedValueOnce(null);
+    const service = new TimeBlockServiceImpl();
+
+    await service.loadActiveBlock();
+
+    expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    expect(rtGetActiveBlockMock).not.toHaveBeenCalled();
   });
 
   it('starts and stops ECS sync mode without calling storage syncToRemote', async () => {

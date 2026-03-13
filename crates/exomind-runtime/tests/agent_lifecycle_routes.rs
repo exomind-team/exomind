@@ -32,6 +32,7 @@ fn test_app_state(port: u16, host_id: &str, signal_pool: Arc<SignalPool>) -> App
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
+        timeblock_store: Arc::new(exomind_runtime::timeblock::TimeBlockStore::new()),
         energy_registry: energy_registry.clone(),
         tick_manager: Arc::new(exomind_runtime::tick::TickManager::new(
             host_id.to_string(),

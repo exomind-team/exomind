@@ -7,6 +7,7 @@ const startDraggingMock = vi.fn();
 const onMovedMock = vi.fn();
 let movedListener: ((event: { payload: { x: number; y: number } }) => void) | null = null;
 const setNowWorkbenchOverlayPositionMock = vi.fn((value: { x: number; y: number }) => value);
+const setSizeMock = vi.fn();
 
 vi.mock('@/ui/app/components/NowInputRow', () => ({
   NowInputRow: () => <div data-testid="new-now-input-row">mock-now-input-row</div>,
@@ -19,6 +20,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     startDragging: (...args: unknown[]) => startDraggingMock(...args),
+    setSize: (...args: unknown[]) => setSizeMock(...args),
     onMoved: (...args: unknown[]) => {
       const [listener] = args as [(event: { payload: { x: number; y: number } }) => void];
       movedListener = listener;
@@ -50,6 +52,11 @@ function createModel(overrides: Partial<NowWorkbenchOverlayModel> = {}): NowWork
 }
 
 describe('NowWorkbenchOverlayPage', () => {
+  beforeEach(() => {
+    setSizeMock.mockReset();
+    setSizeMock.mockResolvedValue(undefined);
+  });
+
   it('starts native dragging from the title drag handle（按住标题拖拽柄可触发原生拖动）', async () => {
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     startDraggingMock.mockResolvedValue(undefined);
@@ -121,7 +128,7 @@ describe('NowWorkbenchOverlayPage', () => {
 
     expect(screen.getByTestId('now-overlay-drag-bar')).toBeInTheDocument();
     fireEvent.click(screen.getByRole('button', { name: '隐藏浮窗' }));
-    fireEvent.click(screen.getByRole('button', { name: '回到主程序' }));
+    fireEvent.click(screen.getByRole('button', { name: '显示主程序' }));
 
     expect(onHide).toHaveBeenCalledTimes(1);
     expect(onReturnToMain).toHaveBeenCalledTimes(1);
@@ -194,5 +201,21 @@ describe('NowWorkbenchOverlayPage', () => {
     expect(screen.getByTestId('now-overlay-empty-state')).toBeInTheDocument();
     expect(screen.queryByTestId('now-overlay-task-choice-list')).toBeNull();
     expect(screen.getByTestId('new-now-input-row')).toBeInTheDocument();
+  });
+
+  it('uses icon-only actions in collapsed and running headers（收起态与运行态头部使用图标动作）', async () => {
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+
+    render(
+      <NowWorkbenchOverlayPage
+        model={createModel({
+          mode: 'running',
+          title: '推进当下工作台',
+          statusLabel: '进行中',
+        })}
+      />,
+    );
+
+    expect(screen.getByRole('button', { name: '显示主程序' })).toBeInTheDocument();
   });
 });

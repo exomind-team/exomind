@@ -17,6 +17,7 @@
     "check:android:meta": "bun Scripts/dev/android-meta-check.ts",
     "server": "bun server/pouchdb-server.js",
     "server:dev": "bun --watch server/pouchdb-server.js",
+    "tauri:manager": "bun Scripts/dev/tauri-dev-manager.ts",
     "test:sync": "vitest run tests/sync/pouch-sync.test.ts",
     "ensure:build-deps": "bun Scripts/dev/ensure-build-deps.ts",
     "build:web": "tsc && vite build",

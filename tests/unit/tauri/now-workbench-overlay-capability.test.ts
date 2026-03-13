@@ -13,6 +13,7 @@ describe('now workbench overlay capability（当下工作台悬浮窗权限）',
     expect(capability.permissions).toContain('core:window:allow-hide');
     expect(capability.permissions).toContain('core:window:allow-show');
     expect(capability.permissions).toContain('core:window:allow-set-focus');
+    expect(capability.permissions).toContain('core:window:allow-set-size');
     expect(capability.permissions).toContain('core:window:allow-get-all-windows');
   });
 });

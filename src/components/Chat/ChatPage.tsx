@@ -23,22 +23,20 @@ import { MessageActions } from '@/components/Chat/MessageActions';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
-import { getEventStorage, type EventPageCursor, type EventStorage } from '@/lib/storage/event-storage';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
-import {
-  mergeLatestEventsAscending,
-  normalizeStorageEventsAscending,
-  prependOlderEventsAscending,
-} from './chat-event-pagination';
-import { shouldSkipSyncRefresh } from './chat-sync-change-filter';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
+const RT_REFRESH_INTERVAL_MS = 2_000;
 
 function perfNow(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
+}
+
+function sortEventsAscending(events: Event[]): Event[] {
+  return [...events].sort((a, b) => a.timestamp - b.timestamp);
 }
 
 interface ChatPageProps {
@@ -110,8 +108,9 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const [hasMore, setHasMore] = useState(false);
   const listEndRef = useRef<HTMLDivElement>(null);
   const listContainerRef = useRef<HTMLDivElement>(null);
-  const storageRef = useRef<EventStorage | null>(null);
-  const nextCursorRef = useRef<EventPageCursor | null>(null);
+  const allEventsRef = useRef<Event[]>([]);
+  const nextStartIndexRef = useRef(0);
+  const visibleCountRef = useRef(PAGE_SIZE);
   const loadingOlderRef = useRef(false);
   const shouldStickToBottomRef = useRef(true);
   const refreshInFlightRef = useRef(false);
@@ -141,49 +140,47 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     return distanceToBottom <= NEAR_BOTTOM_THRESHOLD;
   }, []);
 
-  const loadInitialEvents = useCallback(async (storage: EventStorage) => {
+  const applyVisibleWindow = useCallback((eventsAsc: Event[], requestedVisibleCount = visibleCountRef.current) => {
+    allEventsRef.current = eventsAsc;
+    const safeVisibleCount = Math.max(PAGE_SIZE, requestedVisibleCount);
+    const nextStartIndex = Math.max(0, eventsAsc.length - safeVisibleCount);
+    visibleCountRef.current = safeVisibleCount;
+    nextStartIndexRef.current = nextStartIndex;
+    setEvents(eventsAsc.slice(nextStartIndex));
+    setHasMore(nextStartIndex > 0);
+  }, []);
+
+  const loadInitialEvents = useCallback(async () => {
     setIsInitialLoading(true);
-    const page = await storage.getEventsPage({ limit: PAGE_SIZE });
-    setEvents(normalizeStorageEventsAscending(page.events));
-    setHasMore(page.hasMore);
-    nextCursorRef.current = page.nextCursor;
+    const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
     shouldStickToBottomRef.current = true;
+    applyVisibleWindow(loadedEvents, PAGE_SIZE);
 
     requestAnimationFrame(() => {
       scrollToBottom('auto');
     });
     setIsInitialLoading(false);
-  }, [scrollToBottom]);
+  }, [applyVisibleWindow, scrollToBottom]);
 
-  const refreshLatestEvents = useCallback(async (storage: EventStorage) => {
+  const refreshLatestEvents = useCallback(async (behavior: ScrollBehavior = 'smooth') => {
     const t0 = perfNow();
-    const page = await storage.getEventsPage({ limit: PAGE_SIZE });
+    const loadedEvents = sortEventsAscending(await eventLogService.current.loadEvents());
     const queryMs = Math.round(perfNow() - t0);
-    const latestAsc = normalizeStorageEventsAscending(page.events);
-
-    const mergeStart = perfNow();
-    setEvents((prev) => mergeLatestEventsAscending(prev, latestAsc));
-    const mergeMs = Math.round(perfNow() - mergeStart);
-    setHasMore((prev) => prev || page.hasMore);
-
-    if (!nextCursorRef.current) {
-      nextCursorRef.current = page.nextCursor;
-    }
+    applyVisibleWindow(loadedEvents);
 
     requestAnimationFrame(() => {
       if (shouldStickToBottomRef.current) {
-        scrollToBottom('smooth');
+        scrollToBottom(behavior);
       }
     });
     console.log('[ChatPage] refreshLatestEvents', {
-      fetched: page.events.length,
+      fetched: loadedEvents.length,
       queryMs,
-      mergeMs,
       totalMs: Math.round(perfNow() - t0),
     });
   }, [scrollToBottom]);
 
-  const scheduleLatestRefresh = useCallback((storage: EventStorage): void => {
+  const scheduleLatestRefresh = useCallback((): void => {
     if (refreshInFlightRef.current) {
       refreshQueuedRef.current = true;
       return;
@@ -194,7 +191,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       try {
         do {
           refreshQueuedRef.current = false;
-          await refreshLatestEvents(storage);
+          await refreshLatestEvents('smooth');
         } while (refreshQueuedRef.current);
       } finally {
         refreshInFlightRef.current = false;
@@ -202,11 +199,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     })();
   }, [refreshLatestEvents]);
 
-  const loadOlderEvents = useCallback(async () => {
-    const storage = storageRef.current;
-    const cursor = nextCursorRef.current;
-
-    if (!storage || !cursor || !hasMore || loadingOlderRef.current) {
+  const loadOlderEvents = useCallback(() => {
+    if (!hasMore || loadingOlderRef.current) {
       return;
     }
 
@@ -217,15 +211,8 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     setLoadingOlder(true);
 
     try {
-      const page = await storage.getEventsPage({
-        limit: PAGE_SIZE,
-        cursor,
-      });
-
-      const olderAsc = normalizeStorageEventsAscending(page.events);
-      setEvents((prev) => prependOlderEventsAscending(prev, olderAsc));
-      setHasMore(page.hasMore);
-      nextCursorRef.current = page.nextCursor;
+      const nextVisibleCount = visibleCountRef.current + PAGE_SIZE;
+      applyVisibleWindow(allEventsRef.current, nextVisibleCount);
 
       requestAnimationFrame(() => {
         const currentContainer = listContainerRef.current;
@@ -238,46 +225,39 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       loadingOlderRef.current = false;
       setLoadingOlder(false);
     }
-  }, [hasMore]);
+  }, [applyVisibleWindow, hasMore]);
 
   const handleListScroll = useCallback(() => {
     const container = listContainerRef.current;
     if (!container) return;
 
     if (container.scrollTop <= TOP_LOAD_THRESHOLD) {
-      void loadOlderEvents();
+      loadOlderEvents();
     }
   }, [loadOlderEvents]);
 
-  // 初始化 EventStorage 和加载事件
+  // 初始化 RT EventLog 读源，并用轮询补齐跨链路写入后的 UI 刷新。
   useEffect(() => {
-    const storage = getEventStorage(activeProfileId || undefined);
-    storageRef.current = storage;
-    void loadInitialEvents(storage);
+    visibleCountRef.current = PAGE_SIZE;
+    void loadInitialEvents();
 
-    const unsubscribe = storage.onRemoteChange((change: unknown) => {
-      const direction = (
-        change &&
-        typeof change === 'object' &&
-        'direction' in change &&
-        typeof (change as { direction?: unknown }).direction === 'string'
-      ) ? (change as { direction: string }).direction : 'unknown';
-      console.log('[ChatPage] onRemoteChange', { direction });
-      if (shouldSkipSyncRefresh(change)) {
-        return;
-      }
-      shouldStickToBottomRef.current = isNearBottom();
-      scheduleLatestRefresh(storage);
+    const unsubscribe = eventLogService.current.onEvent(() => {
+      shouldStickToBottomRef.current = true;
+      scheduleLatestRefresh();
     });
+    const intervalId = window.setInterval(() => {
+      shouldStickToBottomRef.current = isNearBottom();
+      scheduleLatestRefresh();
+    }, RT_REFRESH_INTERVAL_MS);
 
     return () => {
       unsubscribe();
+      window.clearInterval(intervalId);
     };
   }, [
     activeProfileId,
     isNearBottom,
     loadInitialEvents,
-    refreshLatestEvents,
     scheduleLatestRefresh,
   ]);
 
@@ -286,13 +266,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     const trimmed = content.trim();
     if (!trimmed) return;
 
-    if (storageRef.current) {
-      const t0 = perfNow();
-      shouldStickToBottomRef.current = true;
-      await eventLogService.current.addEvent(trimmed);
-      await refreshLatestEvents(storageRef.current);
-      console.log('[ChatPage] handleSend done', { totalMs: Math.round(perfNow() - t0) });
-    }
+    const t0 = perfNow();
+    shouldStickToBottomRef.current = true;
+    await eventLogService.current.addEvent(trimmed);
+    await refreshLatestEvents('smooth');
+    console.log('[ChatPage] handleSend done', { totalMs: Math.round(perfNow() - t0) });
   }, [refreshLatestEvents]);
 
   // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦

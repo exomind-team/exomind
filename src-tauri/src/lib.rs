@@ -8,6 +8,7 @@ use commands::asr_commands::{
     volcano_asr_stream_start,
     VolcanoAsrStreamState,
 };
+use commands::dev_commands::dev_instance_runtime_info;
 use commands::device_commands::get_device_id;
 use commands::eventlog_commands::{
     eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
@@ -15,8 +16,8 @@ use commands::eventlog_commands::{
 };
 use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
-    list_files, pick_json_file, read_file, read_file_binary, save_binary_file, save_json_file,
-    write_file,
+    list_files, pick_audio_files, pick_json_file, read_file, read_file_binary,
+    save_binary_file, save_json_file, write_file,
 };
 use commands::now_workbench_overlay_commands::{
     ensure_now_workbench_overlay_window, now_workbench_overlay_ensure,
@@ -83,7 +84,9 @@ pub fn run() {
             }
 
             if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
+                || std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none()
                 || std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none()
+                || std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none()
             {
                 match app.path().app_data_dir() {
                     Ok(app_data_dir) => {
@@ -103,11 +106,28 @@ pub fn run() {
                                     );
                                 }
                             }
+                            if std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none() {
+                                let eventlog_sqlite_path = runtime_dir.join("eventlog.sqlite");
+                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+                                unsafe {
+                                    std::env::set_var(
+                                        "EXOMIND_RT_EVENTLOG_SQLITE_PATH",
+                                        eventlog_sqlite_path,
+                                    );
+                                }
+                            }
                             if std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none() {
                                 let task_sqlite_path = runtime_dir.join("tasks.sqlite");
                                 // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
                                 unsafe {
                                     std::env::set_var("EXOMIND_RT_TASK_SQLITE_PATH", task_sqlite_path);
+                                }
+                            }
+                            if std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none() {
+                                let timeblock_sqlite_path = runtime_dir.join("timeblocks.sqlite");
+                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+                                unsafe {
+                                    std::env::set_var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH", timeblock_sqlite_path);
                                 }
                             }
                         }
@@ -155,6 +175,8 @@ pub fn run() {
             save_binary_file,
             save_json_file,
             pick_json_file,
+            pick_audio_files,
+            dev_instance_runtime_info,
             get_device_id,
             eventlog_list,
             eventlog_append,
@@ -176,8 +198,8 @@ pub fn run() {
             voice_overlay_set_bottom_offset,
             now_workbench_overlay_ensure,
             now_workbench_overlay_show,
-            now_workbench_overlay_hide,
             now_workbench_overlay_restore,
+            now_workbench_overlay_hide,
             now_workbench_overlay_focus_main,
             now_workbench_overlay_set_position,
             voice_shortcut_set,

@@ -397,6 +397,37 @@ pub struct PickedJsonFile {
     content: String,
 }
 
+#[derive(Debug, Serialize)]
+pub struct PickedAudioFile {
+    path: String,
+    name: String,
+}
+
+fn resolve_selected_file_path(selected: &FilePath) -> String {
+    match selected {
+        FilePath::Path(path) => path.to_string_lossy().to_string(),
+        uri_like => uri_like.to_string(),
+    }
+}
+
+fn resolve_selected_file_name(selected: &FilePath) -> String {
+    match selected {
+        FilePath::Path(path) => path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| path.to_string_lossy().to_string()),
+        uri_like => {
+            let display = uri_like.to_string();
+            display
+                .split('/')
+                .next_back()
+                .map(|value| value.to_string())
+                .unwrap_or(display)
+        }
+    }
+}
+
 fn read_import_content_from_selected_file<PR, UR>(
     selected: FilePath,
     path_reader: PR,
@@ -579,6 +610,29 @@ pub fn pick_json_file(app: AppHandle) -> FileResult<Option<PickedJsonFile>> {
     )?;
 
     Ok(Some(picked))
+}
+
+#[tauri::command]
+pub fn pick_audio_files(app: AppHandle) -> FileResult<Option<Vec<PickedAudioFile>>> {
+    let selected = app
+        .dialog()
+        .file()
+        .add_filter("Audio", &["mp3", "wav", "ogg", "m4a", "flac"])
+        .blocking_pick_files();
+
+    let Some(selected) = selected else {
+        return Ok(None);
+    };
+
+    Ok(Some(
+        selected
+            .iter()
+            .map(|file| PickedAudioFile {
+                path: resolve_selected_file_path(file),
+                name: resolve_selected_file_name(file),
+            })
+            .collect(),
+    ))
 }
 
 #[cfg(test)]

@@ -1088,13 +1088,6 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(addEventMock).toHaveBeenCalledWith(
       '火山流式最终文本',
       new Set(['voice']),
-      expect.objectContaining({
-        voiceContext: expect.objectContaining({
-          inputMode: 'voice',
-          captureSource: 'global-shortcut',
-          targetScope: 'unknown',
-        }),
-      }),
     );
 
     service.destroy();
@@ -1194,13 +1187,6 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(addEventMock).toHaveBeenCalledWith(
       '火山实时结果',
       new Set(['voice']),
-      expect.objectContaining({
-        voiceContext: expect.objectContaining({
-          inputMode: 'voice',
-          captureSource: 'global-shortcut',
-          targetScope: 'unknown',
-        }),
-      }),
     );
 
     service.destroy();
@@ -1243,16 +1229,6 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(addEventMock).toHaveBeenCalledWith(
       '连续识别文本',
       new Set(['voice']),
-      expect.objectContaining({
-        voiceContext: expect.objectContaining({
-          inputMode: 'voice',
-          captureSource: 'global-shortcut',
-          targetScope: 'agent-chat',
-          agentId: 'codex',
-          agentName: 'Codex',
-          sessionId: 'session-xyz',
-        }),
-      }),
     );
 
     service.destroy();
@@ -1303,13 +1279,6 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(addEventMock).toHaveBeenCalledWith(
       '冻结窗口测试',
       new Set(['voice']),
-      expect.objectContaining({
-        voiceContext: expect.objectContaining({
-          targetScope: 'external-window',
-          processName: 'AppA.exe',
-          windowTitle: undefined,
-        }),
-      }),
     );
 
     service.destroy();

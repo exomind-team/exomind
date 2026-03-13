@@ -28,19 +28,7 @@ describe('EventLogService port contract', () => {
     const service = new EventLogServiceImpl({ port });
 
     await service.loadEvents();
-    await service.addEvent('hello from port', undefined, {
-      voiceContext: {
-        inputMode: 'voice',
-        captureSource: 'global-shortcut',
-        traceId: 'trace-voice-001',
-        windowTitle: 'ExoMind',
-        processName: 'exomind.exe',
-        targetScope: 'agent-chat',
-        agentId: 'codex',
-        agentName: 'Codex',
-        sessionId: 'session-001',
-      },
-    });
+    await service.addEvent('hello from port');
 
     expect(port.listEvents).toHaveBeenCalled();
     expect(port.appendEvent).toHaveBeenCalledTimes(1);
@@ -50,17 +38,6 @@ describe('EventLogService port contract', () => {
       deviceId: expect.any(String),
       deviceName: expect.any(String),
       platform: expect.any(String),
-    }));
-    expect(event.metadata?.voiceContext).toEqual(expect.objectContaining({
-      inputMode: 'voice',
-      captureSource: 'global-shortcut',
-      traceId: 'trace-voice-001',
-      windowTitle: 'ExoMind',
-      processName: 'exomind.exe',
-      targetScope: 'agent-chat',
-      agentId: 'codex',
-      agentName: 'Codex',
-      sessionId: 'session-001',
     }));
   });
 

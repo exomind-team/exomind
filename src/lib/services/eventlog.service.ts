@@ -11,8 +11,7 @@
 
 import { ExoMindEnvironment } from '../environment/environment';
 import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
-import type { Event, NoteContent, Tag, EventData, EventMetadata } from '../types/event';
-import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
+import type { Event, NoteContent, Tag, EventData } from '../types/event';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
 import {
@@ -36,7 +35,10 @@ export interface EventLogService {
   loadEvents(): Promise<Event[]>;
 
   /** 添加普通事件 */
-  addEvent(content: NoteContent, tags?: Set<Tag>, metadata?: EventMetadata): Promise<Event>;
+  addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event>;
+
+  /** 追加原始事件数据（保留外部时间戳 / 标签 / 元数据） */
+  appendEventData(event: EventData): Promise<Event>;
 
   /** 导出事件为 JSON */
   exportEventsAsJson(): Promise<string>;
@@ -57,7 +59,7 @@ export class EventLogServiceImpl implements EventLogService {
   private listeners: Set<(event: Event) => void> = new Set();
 
   constructor(options: EventLogServiceOptions = {}) {
-    this.port = options.port ?? new WebEventLogStorageAdapter();
+    this.port = options.port ?? ExoMindEnvironment.getInstance().eventlog;
   }
 
   async loadEvents(): Promise<Event[]> {
@@ -65,13 +67,15 @@ export class EventLogServiceImpl implements EventLogService {
     return data.map((d) => this.deserializeEvent(d)).sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  async addEvent(content: NoteContent, tags?: Set<Tag>, metadata?: EventMetadata): Promise<Event> {
+  async addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event> {
     const eventData: EventData = {
       id: createUuidV4(),
       timestamp: Date.now(),
       content,
       tags: tags ? Array.from(tags) : [NOTE_TAG],
-      metadata: this.mergeMetadata(metadata),
+      metadata: {
+        source: getEventSourceMetadata(),
+      },
     };
 
     await this.port.appendEvent(eventData);
@@ -84,14 +88,13 @@ export class EventLogServiceImpl implements EventLogService {
     return event;
   }
 
-  private mergeMetadata(metadata?: EventMetadata): EventMetadata {
-    return {
-      ...(metadata ?? {}),
-      source: {
-        ...(metadata?.source ?? {}),
-        ...getEventSourceMetadata(),
-      },
-    };
+  async appendEventData(eventData: EventData): Promise<Event> {
+    await this.port.appendEvent(eventData);
+
+    const event = this.deserializeEvent(eventData);
+    this.listeners.forEach((cb) => cb(event));
+
+    return event;
   }
 
   async exportEventsAsJson(): Promise<string> {

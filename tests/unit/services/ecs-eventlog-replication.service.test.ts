@@ -4,12 +4,21 @@ import type { Event as StorageEvent } from '@/lib/storage/event-storage';
 const replicationMocks = vi.hoisted(() => ({
   publishMock: vi.fn(),
   projectReplicatedEventMock: vi.fn(),
+  addEventStorageMock: vi.fn(),
+  getEventStorageMock: vi.fn(),
+  getEventlogBackendModeMock: vi.fn(),
+  appendEventDataMock: vi.fn(),
+  getEventPortMock: vi.fn(),
   getSelectedRuntimeTargetMock: vi.fn(),
   signalStreamConstructorMock: vi.fn(),
 }));
 
 vi.mock('@/config/runtime-target', () => ({
   getSelectedRuntimeTarget: replicationMocks.getSelectedRuntimeTargetMock,
+}));
+
+vi.mock('@/config/domain-backend-mode', () => ({
+  getEventlogBackendMode: replicationMocks.getEventlogBackendModeMock,
 }));
 
 vi.mock('@/lib/services/signal-stream.service', () => ({
@@ -26,17 +35,33 @@ vi.mock('@/lib/storage/event-storage', async () => {
   const actual = await vi.importActual<typeof import('@/lib/storage/event-storage')>('@/lib/storage/event-storage');
   return {
     ...actual,
-    getEventStorage: vi.fn(() => ({
-      projectReplicatedEvent: replicationMocks.projectReplicatedEventMock,
-    })),
+    getEventStorage: replicationMocks.getEventStorageMock,
   };
 });
 
+vi.mock('@/lib/services/eventlog.service', () => ({
+  getEventLogService: () => ({
+    appendEventData: replicationMocks.appendEventDataMock,
+  }),
+}));
+
+vi.mock('@/lib/environment/environment', () => ({
+  ExoMindEnvironment: {
+    getInstance: () => ({
+      runtime: 'tauri',
+      eventlog: {
+        getEvent: replicationMocks.getEventPortMock,
+      },
+    }),
+  },
+}));
+
 import {
   EVENTLOG_REPLICATION_APPENDED_TOPIC,
+  appendEventWithEcsReplication,
   projectEventLogReplicationAppend,
   publishEventLogReplicationAppend,
-  type EventLogReplicationPayload,
+  type EventLogReplicationAppendedPayload,
 } from '@/lib/services/ecs-eventlog-replication.service';
 
 describe('ecs-eventlog-replication.service', () => {
@@ -61,7 +86,22 @@ describe('ecs-eventlog-replication.service', () => {
       accepted: true,
       event_id: 'signal-evt-1',
     });
+    replicationMocks.addEventStorageMock.mockReset().mockResolvedValue(undefined);
     replicationMocks.projectReplicatedEventMock.mockReset().mockResolvedValue('inserted');
+    replicationMocks.getEventPortMock.mockReset().mockResolvedValue(null);
+    replicationMocks.appendEventDataMock.mockReset().mockResolvedValue({
+      id: sampleEvent.id,
+      timestamp: Date.parse(sampleEvent.createdAt),
+      content: sampleEvent.content,
+      tags: new Set(['note']),
+      metadata: sampleEvent.metadata,
+    });
+    replicationMocks.getEventStorageMock.mockReset().mockReturnValue({
+      addEvent: replicationMocks.addEventStorageMock,
+      getEvent: vi.fn(async () => sampleEvent),
+      projectReplicatedEvent: replicationMocks.projectReplicatedEventMock,
+    });
+    replicationMocks.getEventlogBackendModeMock.mockReset().mockReturnValue('legacy');
     replicationMocks.getSelectedRuntimeTargetMock.mockReset().mockReturnValue({
       mode: 'embedded',
       host: '127.0.0.1',
@@ -77,7 +117,7 @@ describe('ecs-eventlog-replication.service', () => {
     const request = replicationMocks.publishMock.mock.calls[0]?.[0] as {
       topic: string;
       source: string;
-      payload: EventLogReplicationPayload;
+      payload: EventLogReplicationAppendedPayload;
     };
 
     expect(request.topic).toBe(EVENTLOG_REPLICATION_APPENDED_TOPIC);
@@ -93,7 +133,7 @@ describe('ecs-eventlog-replication.service', () => {
   });
 
   it('projects remote replication payload into EventStorage（远端复制信号投影到 EventStorage）', async () => {
-    const payload: EventLogReplicationPayload = {
+    const payload: EventLogReplicationAppendedPayload = {
       schemaVersion: 1,
       replicationSeq: 42,
       cursor: {
@@ -109,5 +149,40 @@ describe('ecs-eventlog-replication.service', () => {
 
     await expect(projectEventLogReplicationAppend(payload)).resolves.toBe('inserted');
     expect(replicationMocks.projectReplicatedEventMock).toHaveBeenCalledWith(payload.event);
+  });
+
+  it('appends to RT eventlog instead of Pouch EventStorage in rt-sqlite mode', async () => {
+    replicationMocks.getEventlogBackendModeMock.mockReturnValue('rt-sqlite');
+
+    await appendEventWithEcsReplication({
+      id: 'evt-block-start',
+      content: 'Focus started',
+      createdAt: '2026-03-12T08:00:00.000Z',
+      type: 'block_start',
+      metadata: {
+        source: {
+          app: 'ExoMind',
+          deviceId: 'desktop-1',
+          deviceName: 'Desktop',
+          platform: 'Windows',
+        },
+      },
+    });
+
+    expect(replicationMocks.addEventStorageMock).not.toHaveBeenCalled();
+    expect(replicationMocks.appendEventDataMock).toHaveBeenCalledWith({
+      id: 'evt-block-start',
+      timestamp: Date.parse('2026-03-12T08:00:00.000Z'),
+      content: 'Focus started',
+      tags: ['block_start'],
+      metadata: {
+        source: {
+          app: 'ExoMind',
+          deviceId: 'desktop-1',
+          deviceName: 'Desktop',
+          platform: 'Windows',
+        },
+      },
+    });
   });
 });

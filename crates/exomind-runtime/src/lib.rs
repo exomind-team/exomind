@@ -21,6 +21,7 @@ pub mod auth;
 pub mod discovery;
 pub mod energy;
 pub mod eventlog;
+pub mod eventlog_sqlite;
 pub mod mesh;
 pub mod pairing;
 #[cfg(not(target_os = "android"))]
@@ -29,6 +30,8 @@ pub mod routes;
 pub mod signal;
 pub mod task;
 pub mod tick;
+pub mod timeblock;
+pub mod timeblock_sqlite;
 
 pub const RUNTIME_VERSION: &str = env!("CARGO_PKG_VERSION");
 pub const DEFAULT_RT_PORT: u16 = 1949;
@@ -718,6 +721,7 @@ pub struct AppState {
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub pairing: Arc<pairing::PairingManager>,
     pub task_store: Arc<task::TaskStore>,
+    pub timeblock_store: Arc<timeblock::TimeBlockStore>,
     pub energy_registry: energy::EnergyRegistry,
     pub tick_manager: Arc<tick::TickManager>,
     /// Typed reference to CognitiveLifeAgent instances for workspace API access.
@@ -783,7 +787,20 @@ impl AppState {
         ));
 
         let data_dir = resolve_data_dir();
-        let eventlog_store = Arc::new(EventLogStore::new(data_dir));
+        let eventlog_store = env::var("EXOMIND_RT_EVENTLOG_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .map(|path| {
+                EventLogStore::with_sqlite_path(data_dir.clone(), &path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "eventlog sqlite init failed, falling back to json-file store (EventLog SQLite 初始化失败，降级到 JSON 文件存储)"
+                    );
+                    EventLogStore::new(data_dir.clone())
+                })
+            })
+            .unwrap_or_else(|| EventLogStore::new(data_dir));
         let task_store = env::var("EXOMIND_RT_TASK_SQLITE_PATH")
             .ok()
             .map(PathBuf::from)
@@ -798,6 +815,20 @@ impl AppState {
                 })
             })
             .unwrap_or_else(task::TaskStore::new);
+        let timeblock_store = env::var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .map(|path| {
+                timeblock::TimeBlockStore::with_sqlite_path(&path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "timeblock sqlite init failed, falling back to in-memory store (TimeBlock SQLite 初始化失败，降级到内存存储)"
+                    );
+                    timeblock::TimeBlockStore::new()
+                })
+            })
+            .unwrap_or_else(timeblock::TimeBlockStore::new);
         let energy_registry = energy::EnergyRegistry::new();
         let tick_manager = Arc::new(tick::TickManager::new(
             host_id.clone(),
@@ -817,10 +848,11 @@ impl AppState {
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task_store),
+            timeblock_store: Arc::new(timeblock_store),
             energy_registry,
             tick_manager,
             life_agents: std::collections::HashMap::new(),
-            eventlog_store,
+            eventlog_store: Arc::new(eventlog_store),
             #[cfg(not(target_os = "android"))]
             pty_manager,
         }
@@ -913,6 +945,7 @@ mod tests {
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
+            timeblock_store: Arc::new(timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(tick::TickManager::new(
                 host_id.clone(),

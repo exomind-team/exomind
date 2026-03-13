@@ -1,8 +1,27 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskRtAdapter } from '@/lib/adapters/task-rt-adapter';
+import { createLocalProfile, setProfileSession } from '@/lib/profile/profile-storage';
+
+function activateProfileScope(): string {
+  const profile = createLocalProfile({
+    slug: 'hailay',
+    displayName: 'Hailay',
+  });
+  setProfileSession({
+    version: 1,
+    activeProfileId: profile.profileId,
+    unlockedProfileIds: [profile.profileId],
+  });
+  return profile.profileId;
+}
 
 describe('TaskRtAdapter（RT 任务适配器）', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it('maps runtime task payload to frontend TaskNode', async () => {
+    const profileId = activateProfileScope();
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -54,10 +73,14 @@ describe('TaskRtAdapter（RT 任务适配器）', () => {
         updatedAt: 1700000000002,
       },
     ]);
-    expect(fetchImpl).toHaveBeenCalledWith('http://127.0.0.1:9124/tasks', expect.any(Object));
+    const [requestUrl] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const url = new URL(requestUrl);
+    expect(`${url.origin}${url.pathname}`).toBe('http://127.0.0.1:9124/tasks');
+    expect(url.searchParams.get('user_id')).toBe(profileId);
   });
 
   it('serializes frontend task updates to runtime payload', async () => {
+    const profileId = activateProfileScope();
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -93,7 +116,10 @@ describe('TaskRtAdapter（RT 任务适配器）', () => {
       estimatedMinutes: 25,
     });
 
-    const [, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [requestUrl, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const url = new URL(requestUrl);
+    expect(`${url.origin}${url.pathname}`).toBe('http://127.0.0.1:9124/tasks/task-1');
+    expect(url.searchParams.get('user_id')).toBe(profileId);
     expect(requestInit?.method).toBe('PUT');
     expect(JSON.parse(String(requestInit?.body))).toEqual({
       done_condition: 'ship feature',

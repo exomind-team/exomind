@@ -399,6 +399,7 @@ mod tests {
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
+            timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(crate::tick::TickManager::new(
                 host_id.clone(),

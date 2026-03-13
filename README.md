@@ -73,7 +73,7 @@ bun run server
 ```
 
 ```powershell
-# Tauri 桌面开发（自动探测空闲端口，无需手动配置）
+# Tauri 桌面开发（自动探测空闲端口，默认关闭 Tauri watcher 避免无关文件改动触发黑屏）
 bun run tauri dev
 
 # Tauri Android 开发
@@ -113,6 +113,7 @@ powershell -ExecutionPolicy Bypass -File .\Scripts\dev\run-test-stack.ps1
 | `bun run server`            | 启动 PouchDB 同步服务             |
 | `bun run tauri dev`         | 桌面端开发                        |
 | `bun run tauri android dev` | Android 开发                      |
+| `bun run tauri:manager -- ...` | 多实例 `tauri dev` 管理器      |
 | `bun run build`             | TypeScript + Vite 构建            |
 | `bun run test`              | Vitest 单测                       |
 | `bun run test:e2e`          | Playwright E2E                    |
@@ -145,6 +146,7 @@ Copy-Item .env.example .env
 | `EXOMIND_ASR_PORT`     | `1949`      | ASR 服务端口                                  |
 | `EXOMIND_TAURI_INSTANCE_NAME` | 空 | Tauri 开发实例名（用于派生独立构建目录） |
 | `EXOMIND_TAURI_TARGET_DIR` | 空 | 显式指定 Tauri/Cargo 开发构建目录 |
+| `EXOMIND_TAURI_ENABLE_WATCH` | 空 | 设为 `1/true` 时重新启用 Tauri watcher（Rust 热重载 / Rust hot reload） |
 | `VITE_SYNC_SERVER_URL` | 空            | 前端强制覆盖同步地址                          |
 | `VITE_ASR_SERVER_URL`  | 空            | 前端强制覆盖 ASR 地址                         |
 | `VITE_APP_VERSION`     | 自动解析      | 应用显示版本（CI 可注入）                     |
@@ -155,6 +157,7 @@ Copy-Item .env.example .env
 - 未设置 `VITE_SYNC_SERVER_URL` 时，前端会按 `当前 hostname + EXOMIND_POUCHDB_PORT` 自动拼接同步地址。
 - 局域网联调时，显式设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，并在客户端填写可达 IP。
 - `bun run tauri dev` 下若未显式设置 `CARGO_TARGET_DIR`，`Scripts/dev/tauri-wrapper.ps1` 会自动注入独立目录，避免 Windows 多开实例时多个 `cargo run` 同时争抢同一个 `target\debug\exomind.exe` 并触发 `拒绝访问 / os error 5`。
+- `bun run tauri dev` 现在默认注入 `--no-watch`，避免修改文档、测试或其它无关文件时 Tauri watcher 重建窗口导致黑屏；如需恢复 Rust watcher，可设置 `EXOMIND_TAURI_ENABLE_WATCH=1`。
 
 windows powershell指定端口启动桌面端的例子：
 
@@ -184,6 +187,28 @@ bun run tauri dev
 - 如需手动指定构建输出目录，可设置 `EXOMIND_TAURI_TARGET_DIR`；若你已自行设置 `CARGO_TARGET_DIR`，wrapper 会直接复用。
 - 若未设置 `EXOMIND_TAURI_INSTANCE_NAME`，默认会按 `EXOMIND_WEB_PORT` 生成实例目录名，例如 `web-1520`、`web-1620`，便于同时测试不同 UI 尺寸（UI sizes / 界面尺寸）。
 - 若要做局域网多机联调，建议单独启动一个同步服务终端并设置 `EXOMIND_POUCHDB_HOST=0.0.0.0`，各实例再通过 `VITE_SYNC_SERVER_URL=http://<LAN-IP>:<PORT>` 指向同一同步地址。
+
+多实例 `tauri dev` 推荐使用仓库内管理器（instance manager / 实例管理器）：
+
+```powershell
+# 启动一个受管实例（自动分配端口并记录 PID/日志）
+bun run tauri:manager -- start --name codex-main
+
+# 查看当前受管实例
+bun run tauri:manager -- list
+
+# 跟随日志（实时监听 / live tail）
+bun run tauri:manager -- logs --name codex-main --follow
+
+# 精确停止某一个实例（只杀登记的根 PID 树）
+bun run tauri:manager -- stop --name codex-main
+```
+
+说明：
+
+- 元数据与日志保存在 `.tmp/tauri-dev-instances/`。
+- `stop` 只针对该实例登记的根 PID 做树状终止，避免手工 `taskkill /T` 误伤其它实例。
+- 只有当你需要跨仓库、跨 agent、跨 IDE 统一调度时，再考虑把这层抽成 MCP；当前问题先用仓库内脚本更稳也更容易排障。
 
 ## 测试与验收（Testing / 测试）
 

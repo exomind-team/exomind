@@ -11,12 +11,13 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import { getEventStorage } from '../storage/event-storage';
 import {
   getActiveBlockStorage,
   getCurrentSyncUserId,
   type ActiveBlockStorage,
 } from '../storage/active-block-storage';
+import { getTimeblockBackendMode, type DomainBackendMode } from '@/config/domain-backend-mode';
+import { TimeBlockRtAdapter } from '@/lib/adapters/timeblock-rt-adapter';
 import type {
   TimeBlock,
   TimeBlockData,
@@ -29,6 +30,7 @@ import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-t
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
 import { appendEventWithEcsReplication } from './ecs-eventlog-replication.service';
+import { getEventLogService } from './eventlog.service';
 import { publishActiveBlockReplicationSnapshot } from './ecs-active-block-replication.service';
 import { SignalStreamService } from './signal-stream.service';
 
@@ -44,6 +46,19 @@ interface BlockPreferenceDecision {
   preferred: ActiveBlockData;
   reason: string;
   compared: 'start_time' | 'phase' | 'version' | 'transition_time' | 'actor_id' | 'fallback';
+}
+
+interface TimeBlockRtPort {
+  listCompletedBlocks(): Promise<TimeBlockData[]>;
+  replaceCompletedBlocks(blocks: TimeBlockData[]): Promise<void>;
+  getActiveBlock(): Promise<ActiveBlockData | null>;
+  putActiveBlock(block: ActiveBlockData): Promise<void>;
+  deleteActiveBlock(): Promise<void>;
+}
+
+export interface TimeBlockServiceOptions {
+  backendMode?: DomainBackendMode;
+  rtAdapter?: TimeBlockRtPort;
 }
 
 export interface TimeBlockService {
@@ -79,13 +94,18 @@ export interface TimeBlockService {
 
   /** 停止进行中时间块同步 */
   stopSync(): Promise<void>;
+
+  /** 应用来自远端复制的 active block 快照 */
+  applyReplicatedActiveBlock(block: ActiveBlockData): Promise<void>;
 }
 
 export class TimeBlockServiceImpl implements TimeBlockService {
   private env: ExoMindEnvironment;
   private activeBlockStorage: ActiveBlockStorage | null = null;
   private activeStorageUserId: string | null = null;
-  private useLegacyEnvStorage: boolean;
+  private readonly useInjectedEnvStorage: boolean;
+  private readonly backendMode: DomainBackendMode;
+  private readonly rtAdapter: TimeBlockRtPort | null;
   private listeners: Set<(block: ActiveBlockData | null) => void> = new Set();
   private syncSubscriberCount = 0;
   private activeSyncRemoteUrl: string | null = null;
@@ -95,17 +115,29 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private lastCanonicalWriteBackSignature: string | null = null;
   private readonly actorId = createUuidV4();
 
-  constructor(env?: ExoMindEnvironment) {
+  constructor(env?: ExoMindEnvironment, options: TimeBlockServiceOptions = {}) {
     this.env = env || ExoMindEnvironment.getInstance();
-    this.useLegacyEnvStorage = typeof env !== 'undefined';
-    if (!this.useLegacyEnvStorage) {
+    this.useInjectedEnvStorage = typeof env !== 'undefined';
+    this.backendMode = options.backendMode ?? this.resolveDefaultBackendMode();
+    this.rtAdapter = this.backendMode === 'rt-sqlite'
+      ? (options.rtAdapter ?? new TimeBlockRtAdapter())
+      : null;
+    if (this.backendMode === 'legacy' && !this.useInjectedEnvStorage) {
       this.switchActiveStorage();
     }
     this.attachStorageListener();
   }
 
+  private resolveDefaultBackendMode(): DomainBackendMode {
+    if (this.useInjectedEnvStorage) {
+      return 'legacy';
+    }
+
+    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'legacy';
+  }
+
   async loadTimeBlocks(): Promise<TimeBlock[]> {
-    const data = await this.env.storage.read<TimeBlockData[]>(TIME_BLOCKS_KEY);
+    const data = await this.readCompletedBlockData();
     if (!data) return [];
 
     return data.map(d => ({
@@ -383,7 +415,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       submittedAt,
     });
 
-    const storage = getEventStorage();
     const feedbackEventStart = perfNow();
     await appendEventWithEcsReplication({
       id: createUuidV4(),
@@ -420,9 +451,9 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 追加到已完成列表
     const completedWriteStart = perfNow();
-    const completed = await this.env.storage.read<TimeBlockData[]>(TIME_BLOCKS_KEY) || [];
+    const completed = await this.readCompletedBlockData();
     completed.push(timeBlock);
-    await this.env.storage.write(TIME_BLOCKS_KEY, completed);
+    await this.writeCompletedBlockData(completed);
     const completedWriteMs = Math.round(perfNow() - completedWriteStart);
 
     // 保留终态标记，防止多端并发把状态回退到进行中
@@ -448,7 +479,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.rememberAcceptedBlock(terminalBlock);
 
     // 发布 timeblock.completed 信号（fire-and-forget，失败不阻塞）
-    this.publishTimeblockCompleted(timeBlock, report, storage).catch((err) => {
+    this.publishTimeblockCompleted(timeBlock, report).catch((err) => {
       console.warn('[TimeBlockService] failed to publish timeblock.completed signal:', err);
     });
 
@@ -468,6 +499,24 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     };
   }
 
+  async applyReplicatedActiveBlock(block: ActiveBlockData): Promise<void> {
+    const normalized = this.normalizeActiveBlock(block);
+    if (this.backendMode === 'rt-sqlite') {
+      await this.rtAdapter?.putActiveBlock(normalized);
+    } else if (this.useInjectedEnvStorage) {
+      await this.env.storage.write(ACTIVE_BLOCK_KEY, normalized);
+    } else {
+      await this.getActiveStorage().projectReplicatedActiveBlock(normalized);
+    }
+
+    this.rememberAcceptedBlock(normalized);
+    if (this.isCompletedBlock(normalized)) {
+      this.notifyChange(null);
+      return;
+    }
+    this.notifyChange(normalized);
+  }
+
   async updateElapsed(_elapsed: number): Promise<void> {
     // 高频 elapsed 仅用于本地 UI 展示，不再写入同步存储。
     return;
@@ -479,7 +528,14 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async startSync(remoteUrl?: string): Promise<void> {
-    if (this.useLegacyEnvStorage) {
+    if (this.backendMode === 'rt-sqlite') {
+      this.syncSubscriberCount += 1;
+      const seededBlock = await this.loadActiveBlock();
+      this.notifyChange(seededBlock);
+      return;
+    }
+
+    if (this.useInjectedEnvStorage) {
       return;
     }
 
@@ -510,7 +566,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   async stopSync(): Promise<void> {
-    if (this.useLegacyEnvStorage) {
+    if (this.backendMode === 'rt-sqlite') {
+      this.syncSubscriberCount = Math.max(0, this.syncSubscriberCount - 1);
+      return;
+    }
+
+    if (this.useInjectedEnvStorage) {
       return;
     }
 
@@ -552,17 +613,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private async publishTimeblockCompleted(
     block: TimeBlockData,
     feedbackReport: string,
-    storage: { getEvents(): Promise<Array<{ id: string; content: string; createdAt: string }>> },
   ): Promise<void> {
     const runtimeTarget = this.resolveRuntimeTarget();
     if (!runtimeTarget) return;
 
-    // 获取最近事件作为上下文
-    const allEvents = typeof storage.getEvents === 'function' ? await storage.getEvents() : [];
-    const recentEvents = allEvents.slice(0, 20).map((e) => ({
-      text: e.content,
-      ts: new Date(e.createdAt).getTime(),
-    }));
+    // 获取当前真相源中的最近事件作为上下文，避免继续读取旧 Pouch 副本。
+    const recentEvents = (await getEventLogService().loadEvents())
+      .slice(0, 20)
+      .map((event) => ({
+        text: event.content,
+        ts: event.timestamp,
+      }));
 
     const publisher = new SignalStreamService({
       host: {
@@ -608,7 +669,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private attachStorageListener(): void {
-    if (this.useLegacyEnvStorage || this.unsubscribeStorageListener || !this.activeBlockStorage) {
+    if (this.backendMode !== 'legacy' || this.useInjectedEnvStorage || this.unsubscribeStorageListener || !this.activeBlockStorage) {
       return;
     }
 
@@ -668,7 +729,31 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private async readActiveBlock(): Promise<ActiveBlockData | null> {
-    if (this.useLegacyEnvStorage) {
+    if (this.backendMode === 'rt-sqlite') {
+      const fromRtAdapter = await this.rtAdapter?.getActiveBlock() ?? null;
+      if (fromRtAdapter) {
+        return fromRtAdapter;
+      }
+
+      const legacyData = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
+      if (legacyData) {
+        await this.rtAdapter?.putActiveBlock(legacyData);
+        await this.env.storage.delete(ACTIVE_BLOCK_KEY);
+        return legacyData;
+      }
+
+      if (!this.useInjectedEnvStorage) {
+        const fromLegacyStorage = await getActiveBlockStorage().loadActiveBlock();
+        if (fromLegacyStorage) {
+          await this.rtAdapter?.putActiveBlock(fromLegacyStorage);
+          return fromLegacyStorage;
+        }
+      }
+
+      return null;
+    }
+
+    if (this.useInjectedEnvStorage) {
       return await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
     }
 
@@ -689,7 +774,15 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private async saveActiveBlock(block: ActiveBlockData): Promise<void> {
-    if (this.useLegacyEnvStorage) {
+    if (this.backendMode === 'rt-sqlite') {
+      await this.rtAdapter?.putActiveBlock(block);
+      if (this.syncSubscriberCount > 0) {
+        void this.publishLocalActiveBlockSnapshot(block);
+      }
+      return;
+    }
+
+    if (this.useInjectedEnvStorage) {
       await this.env.storage.write(ACTIVE_BLOCK_KEY, block);
       return;
     }
@@ -697,8 +790,35 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     await this.getActiveStorage().saveActiveBlock(block);
   }
 
+  private async readCompletedBlockData(): Promise<TimeBlockData[]> {
+    if (this.backendMode === 'rt-sqlite') {
+      const fromRt = await this.rtAdapter?.listCompletedBlocks() ?? [];
+      if (fromRt.length > 0) {
+        return fromRt;
+      }
+
+      const legacyData = await this.env.storage.read<TimeBlockData[]>(TIME_BLOCKS_KEY);
+      const nextBlocks = legacyData ?? [];
+      if (nextBlocks.length > 0) {
+        await this.rtAdapter?.replaceCompletedBlocks(nextBlocks);
+      }
+      return nextBlocks;
+    }
+
+    return await this.env.storage.read<TimeBlockData[]>(TIME_BLOCKS_KEY) || [];
+  }
+
+  private async writeCompletedBlockData(blocks: TimeBlockData[]): Promise<void> {
+    if (this.backendMode === 'rt-sqlite') {
+      await this.rtAdapter?.replaceCompletedBlocks(blocks);
+      return;
+    }
+
+    await this.env.storage.write(TIME_BLOCKS_KEY, blocks);
+  }
+
   private getActiveStorage(): ActiveBlockStorage {
-    if (!this.useLegacyEnvStorage && !this.activeBlockStorage) {
+    if (this.backendMode === 'legacy' && !this.useInjectedEnvStorage && !this.activeBlockStorage) {
       this.switchActiveStorage();
     }
 
@@ -709,7 +829,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private switchActiveStorage(userId?: string): void {
-    if (this.useLegacyEnvStorage) {
+    if (this.backendMode !== 'legacy' || this.useInjectedEnvStorage) {
       return;
     }
 
@@ -1036,7 +1156,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private async seedAcceptedBlockFromStorage(): Promise<ActiveBlockData | null> {
-    if (this.useLegacyEnvStorage) {
+    if (this.backendMode !== 'legacy' || this.useInjectedEnvStorage) {
       return null;
     }
 

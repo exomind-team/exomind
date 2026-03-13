@@ -903,18 +903,6 @@ export class VoiceShortcutService {
       ?? null;
     const traceId = this.currentTraceId ?? undefined;
     const targetScope = activeInteractionContext?.targetScope ?? (foregroundWindow ? 'external-window' : 'unknown');
-    const shouldPersistExternalWindow = targetScope === 'external-window';
-    const voiceContext = {
-      inputMode: 'voice' as const,
-      captureSource: 'global-shortcut',
-      traceId,
-      targetScope,
-      windowTitle: undefined,
-      processName: shouldPersistExternalWindow ? (foregroundWindow?.processName?.trim() || undefined) : undefined,
-      agentId: activeInteractionContext?.agentContext?.agentId ?? undefined,
-      agentName: activeInteractionContext?.agentContext?.agentName ?? undefined,
-      sessionId: activeInteractionContext?.agentContext?.sessionId ?? undefined,
-    };
 
     const [clipboardResult, signalPublishResult, eventLogResult] = await Promise.allSettled([
       (async () => {
@@ -937,9 +925,7 @@ export class VoiceShortcutService {
         } : undefined,
         agentContext: activeInteractionContext?.agentContext,
       }),
-      getEventLogService().addEvent(result.text, new Set(['voice']), {
-        voiceContext,
-      }),
+      getEventLogService().addEvent(result.text, new Set(['voice'])),
     ]);
 
     if (clipboardResult.status === 'rejected') {

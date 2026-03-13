@@ -354,6 +354,56 @@ function Resolve-TauriDevTargetDir {
   Write-Host "[tauri-wrapper] Cargo target dir resolved: $resolved"
 }
 
+function Test-TruthyEnvValue {
+  param(
+    [string]$Value
+  )
+
+  if ([string]::IsNullOrWhiteSpace($Value)) {
+    return $false
+  }
+
+  $normalized = $Value.Trim().ToLowerInvariant()
+  return $normalized -eq "1" -or $normalized -eq "true" -or $normalized -eq "yes" -or $normalized -eq "on"
+}
+
+function Add-TauriDevDefaultFlags {
+  param(
+    [string[]]$CommandArgs
+  )
+
+  if (-not $CommandArgs -or $CommandArgs.Count -eq 0) {
+    return @()
+  }
+
+  $resolvedArgs = @($CommandArgs)
+  $isDesktopDev = $resolvedArgs.Count -ge 1 -and $resolvedArgs[0] -eq "dev"
+  if (-not $isDesktopDev) {
+    return $resolvedArgs
+  }
+
+  if ((Test-TruthyEnvValue -Value $env:EXOMIND_TAURI_ENABLE_WATCH) -or ($resolvedArgs -contains "--no-watch")) {
+    return $resolvedArgs
+  }
+
+  $separatorIndex = [Array]::IndexOf($resolvedArgs, "--")
+  if ($separatorIndex -lt 0) {
+    $separatorIndex = $resolvedArgs.Count
+  }
+
+  $updatedArgs = @()
+  if ($separatorIndex -gt 0) {
+    $updatedArgs += $resolvedArgs[0..($separatorIndex - 1)]
+  }
+  $updatedArgs += "--no-watch"
+  if ($separatorIndex -lt $resolvedArgs.Count) {
+    $updatedArgs += $resolvedArgs[$separatorIndex..($resolvedArgs.Count - 1)]
+  }
+
+  Write-Host "[tauri-wrapper] Disabled Tauri file watcher for dev (set EXOMIND_TAURI_ENABLE_WATCH=1 to opt in)."
+  return $updatedArgs
+}
+
 function Test-IsAndroidDevCommand {
   param(
     [Parameter(Mandatory = $true)]
@@ -609,7 +659,7 @@ $tauriOutput = @()
 try {
   $tauriCommandArgs = @()
   if ($TauriArgs -and $TauriArgs.Count -gt 0) {
-    $tauriCommandArgs = @($TauriArgs)
+    $tauriCommandArgs = Add-TauriDevDefaultFlags -CommandArgs $TauriArgs
 
     # Inject --config to override devUrl when port differs from default
     # (端口非默认值时，通过 --config 覆盖 devUrl)

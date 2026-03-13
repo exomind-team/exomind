@@ -120,6 +120,48 @@ describeWindowsOnly('tauri-wrapper', () => {
     }
   });
 
+  it('disables tauri watcher by default for dev（默认关闭 tauri watcher 避免无关改动触发黑屏重启）', () => {
+    const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-no-watch-'));
+    const fakeBinDir = join(tempDir, 'bin');
+    const fakeTauriCmd = join(fakeBinDir, 'tauri.cmd');
+    const wrapperPath = join(process.cwd(), 'Scripts', 'dev', 'tauri-wrapper.ps1');
+
+    try {
+      spawnSync('cmd.exe', ['/c', 'mkdir', fakeBinDir], { stdio: 'ignore' });
+
+      writeFileSync(
+        fakeTauriCmd,
+        [
+          '@echo off',
+          'echo ARGS=%*',
+          'exit /b 0',
+          '',
+        ].join('\r\n'),
+        'utf8',
+      );
+
+      const result = spawnSync(
+        POWERSHELL_PATH,
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', wrapperPath, 'dev'],
+        {
+          encoding: 'utf8',
+          env: {
+            ...process.env,
+            PATH: `${fakeBinDir};${process.env.PATH ?? ''}`,
+            EXOMIND_WEB_PORT: '1520',
+            EXOMIND_HMR_PORT: '1521',
+            EXOMIND_RT_PORT: '1949',
+          },
+        },
+      );
+
+      expect(result.status).toBe(0);
+      expect(result.stdout).toContain('ARGS=dev --no-watch');
+    } finally {
+      rmSync(tempDir, { recursive: true, force: true });
+    }
+  });
+
   it('does not treat tauri stderr status lines as wrapper failure（tauri stderr 状态日志不应让包装脚本失败）', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-stderr-status-'));
     const fakeBinDir = join(tempDir, 'bin');
