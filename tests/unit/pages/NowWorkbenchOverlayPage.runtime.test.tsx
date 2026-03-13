@@ -60,6 +60,7 @@ vi.mock('@/services/now-workbench-overlay.service', () => ({
 vi.mock('@/ui/app/components/NowInputRow', () => ({
   NowInputRow: ({ onSend }: { onSend: (content: string) => void }) => (
     <div data-testid="new-now-input-row">
+      <textarea data-testid="new-now-input-textarea" />
       <button type="button" onClick={() => onSend('补一条当下记录')}>发送模拟输入</button>
     </div>
   ),
@@ -364,13 +365,13 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     render(<NowWorkbenchOverlayPage />);
 
+    fireEvent.mouseEnter(await screen.findByTestId('now-overlay-idle-pill'));
     fireEvent.click(await screen.findByRole('button', { name: '显示主程序' }));
 
     await waitFor(() => {
       expect(focusMainWindowMock).toHaveBeenCalledTimes(1);
     });
     expect(overlayHideMock).not.toHaveBeenCalled();
-    expect(screen.getByTestId('now-overlay-debug-panel')).toHaveTextContent('最近动作：return-to-main:success');
   });
 
   it('opens focus config with selected task title in idle_with_tasks mode（任务态点击开始后进入当下一致的配置流）', async () => {
@@ -390,25 +391,96 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     render(<NowWorkbenchOverlayPage />);
 
+    fireEvent.mouseEnter(await screen.findByTestId('now-overlay-idle-pill'));
     fireEvent.click(await screen.findByRole('button', { name: '先补测试' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('new-focus-state-config')).toBeInTheDocument();
       expect(screen.getByTestId('new-focus-task-input')).toHaveValue('先补测试');
     });
-    expect(screen.getByTestId('now-overlay-debug-panel')).toHaveTextContent('最近动作：task-select:open-config:task-1');
+  });
+
+  it('renders idle_with_tasks as collapsed task bubble and expands on hover（任务态默认收起并在悬停时展开）', async () => {
+    runtimeStateByUser['overlay-test-user'].tasks = [
+      {
+        id: 'task-1',
+        title: '写周报',
+        status: 'not_started',
+        priority: 'high',
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 8, 0, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 8, 10, 0),
+      },
+      {
+        id: 'task-2',
+        title: '修 bug',
+        status: 'not_started',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 8, 0, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 8, 20, 0),
+      },
+    ];
+
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+    render(<NowWorkbenchOverlayPage />);
+
+    expect(await screen.findByTestId('now-overlay-idle-pill')).toBeInTheDocument();
+    expect(screen.queryByTestId('now-overlay-task-choice-list')).toBeNull();
+    expect(screen.queryByTestId('new-now-input-row')).toBeNull();
+
+    fireEvent.mouseEnter(screen.getByTestId('now-overlay-idle-pill'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('now-overlay-idle-expanded')).toBeInTheDocument();
+      expect(screen.getByTestId('now-overlay-task-choice-list')).toBeInTheDocument();
+      expect(screen.getByTestId('new-now-input-row')).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '写周报' })).toBeInTheDocument();
+    });
+    expect(overlaySetSizeMock).toHaveBeenCalled();
+  });
+
+  it('keeps idle task panel expanded while input is focused（任务态输入获焦时锁定展开）', async () => {
+    runtimeStateByUser['overlay-test-user'].tasks = [
+      {
+        id: 'task-1',
+        title: '写周报',
+        status: 'not_started',
+        priority: 'high',
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.UTC(2026, 2, 11, 8, 0, 0),
+        updatedAt: Date.UTC(2026, 2, 11, 8, 10, 0),
+      },
+    ];
+
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+    render(<NowWorkbenchOverlayPage />);
+
+    fireEvent.mouseEnter(await screen.findByTestId('now-overlay-idle-pill'));
+
+    const expanded = await screen.findByTestId('now-overlay-idle-expanded');
+    const input = screen.getByTestId('new-now-input-textarea');
+    fireEvent.focus(input);
+    fireEvent.mouseLeave(expanded);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('now-overlay-idle-expanded')).toBeInTheDocument();
+    });
   });
 
   it('writes input into event log service（输入区继续写入事件日志）', async () => {
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     render(<NowWorkbenchOverlayPage />);
 
+    fireEvent.mouseEnter(await screen.findByTestId('now-overlay-idle-pill'));
     fireEvent.click(await screen.findByRole('button', { name: '发送模拟输入' }));
 
     await waitFor(() => {
       expect(addEventMock).toHaveBeenCalledWith('补一条当下记录');
     });
-    expect(screen.getByTestId('now-overlay-debug-panel')).toHaveTextContent('最近动作：send:success');
   });
 
   it('submits overlay feedback dialog with Enter and shows compact shortcut hint（悬浮窗反馈弹窗支持回车提交且展示紧凑提示）', async () => {
@@ -469,7 +541,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     render(<NowWorkbenchOverlayPage />);
 
-    expect(await screen.findByTestId('new-focus-state-idle')).toBeInTheDocument();
+    expect(await screen.findByTestId('now-overlay-idle-pill')).toBeInTheDocument();
     expect(getEventStorageByUserMock).toHaveBeenCalledWith('overlay-test-user');
 
     currentUserState.userId = 'profile-live';

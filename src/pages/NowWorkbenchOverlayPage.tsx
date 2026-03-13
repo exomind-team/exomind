@@ -61,6 +61,8 @@ const NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE = { width: 412, height: 490 };
 const NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE = { width: 464, height: 470 };
 const NOW_WORKBENCH_OVERLAY_MINI_SIZE = { width: 248, height: 120 };
 const NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE = { width: 352, height: 200 };
+const NOW_WORKBENCH_OVERLAY_IDLE_COLLAPSED_SIZE = { width: 276, height: 156 };
+const NOW_WORKBENCH_OVERLAY_IDLE_EXPANDED_SIZE = { width: 428, height: 360 };
 
 function formatEventTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', {
@@ -327,6 +329,10 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
   const [isMiniCollapsed, setIsMiniCollapsed] = useState(false);
   const [isMiniHovered, setIsMiniHovered] = useState(false);
+  const [isIdleHovered, setIsIdleHovered] = useState(false);
+  const [isIdleInputFocused, setIsIdleInputFocused] = useState(false);
+  const [isIdleConfigVisible, setIsIdleConfigVisible] = useState(false);
+  const [pendingIdleTaskTitle, setPendingIdleTaskTitle] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isTauri()) {
@@ -372,6 +378,25 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     }
   }, [isMiniCollapsed]);
 
+  useEffect(() => {
+    if (model.mode === 'idle_with_tasks' || model.mode === 'idle_input_only') {
+      return;
+    }
+    setIsIdleHovered(false);
+    setIsIdleInputFocused(false);
+    setIsIdleConfigVisible(false);
+    setPendingIdleTaskTitle(null);
+  }, [model.mode]);
+
+  useEffect(() => {
+    if (!isIdleConfigVisible || !pendingIdleTaskTitle || !focusTimerWidgetRef.current) {
+      return;
+    }
+
+    focusTimerWidgetRef.current.openTaskConfig(pendingIdleTaskTitle);
+    setPendingIdleTaskTitle(null);
+  }, [isIdleConfigVisible, pendingIdleTaskTitle]);
+
   const handleDragBarMouseDown = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (!isTauri() || event.button !== 0) {
       return;
@@ -393,11 +418,19 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   const isLiveRunningSingleCardMode = !isStaticPreview && model.mode === 'running';
   const isLiveRunningMiniMode = isLiveRunningSingleCardMode && isMiniCollapsed;
   const isLiveRunningMiniPeekMode = isLiveRunningMiniMode && isMiniHovered;
+  const isLiveIdleBubbleMode = !isStaticPreview
+    && (model.mode === 'idle_with_tasks' || model.mode === 'idle_input_only');
+  const isIdleExpanded = isLiveIdleBubbleMode
+    && (isIdleHovered || isIdleInputFocused || isIdleConfigVisible);
   const miniClock = resolveRunningClock(model.activeBlock, now);
   const targetOverlaySize = isLiveRunningMiniPeekMode
     ? NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE
     : isLiveRunningMiniMode
       ? NOW_WORKBENCH_OVERLAY_MINI_SIZE
+      : isIdleExpanded
+        ? NOW_WORKBENCH_OVERLAY_IDLE_EXPANDED_SIZE
+        : isLiveIdleBubbleMode
+          ? NOW_WORKBENCH_OVERLAY_IDLE_COLLAPSED_SIZE
       : isLiveRunningSingleCardMode
         ? NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE
         : NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE;
@@ -468,6 +501,31 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       </DialogContent>
     </Dialog>
   );
+
+  const handleIdleExpandedFocusCapture = useCallback(() => {
+    setIsIdleInputFocused(true);
+  }, []);
+
+  const handleIdleExpandedBlurCapture = useCallback((event: React.FocusEvent<HTMLElement>) => {
+    const nextTarget = event.relatedTarget as Node | null;
+    if (nextTarget && event.currentTarget.contains(nextTarget)) {
+      return;
+    }
+    setIsIdleInputFocused(false);
+  }, []);
+
+  const handleIdleTaskStart = useCallback((task: TaskNode) => {
+    setIsIdleConfigVisible(true);
+    setPendingIdleTaskTitle(task.title);
+    onStartTask(task);
+  }, [onStartTask]);
+
+  const handleIdleCollapse = useCallback(() => {
+    setIsIdleHovered(false);
+    setIsIdleInputFocused(false);
+    setIsIdleConfigVisible(false);
+    setPendingIdleTaskTitle(null);
+  }, []);
 
   if (isLiveRunningMiniMode) {
     return (
@@ -596,6 +654,151 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               </div>
             )}
           </div>
+        </div>
+
+        {feedbackDialog}
+        <style>{overlayStyles}</style>
+      </div>
+    );
+  }
+
+  if (isLiveIdleBubbleMode) {
+    const previewTasks = model.visibleTasks.slice(0, 3);
+
+    return (
+      <div className="now-workbench-overlay-root now-workbench-overlay-root--mini">
+        <div className="now-workbench-overlay-shell now-workbench-overlay-shell--mini">
+          {isIdleExpanded ? (
+            <div
+              data-testid="now-overlay-idle-expanded"
+              onMouseEnter={() => setIsIdleHovered(true)}
+              onMouseLeave={() => setIsIdleHovered(false)}
+              onFocusCapture={handleIdleExpandedFocusCapture}
+              onBlurCapture={handleIdleExpandedBlurCapture}
+              className="w-[396px] rounded-[24px] border border-white/55 bg-[rgba(250,247,245,0.94)] px-4 py-4 text-[#1C1917] shadow-[0_20px_48px_-28px_rgba(0,0,0,0.45)] backdrop-blur-[24px] dark:border-white/10 dark:bg-[rgba(28,25,23,0.9)] dark:text-[#FAFAF9]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div
+                  data-testid="now-overlay-drag-handle"
+                  data-tauri-drag-region
+                  onMouseDown={handleDragBarMouseDown}
+                  className="min-w-0 cursor-grab select-none active:cursor-grabbing"
+                  title="按住这里拖动窗口"
+                >
+                  <div className="flex items-center gap-2" data-tauri-drag-region>
+                    <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
+                    <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
+                      待办
+                    </span>
+                  </div>
+                  <p className="mt-1 truncate text-[16px] font-semibold" data-tauri-drag-region>
+                    {model.mode === 'idle_with_tasks' ? '接下来做什么？' : '现在先记点什么'}
+                  </p>
+                </div>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={handleIdleCollapse}
+                    aria-label="收起"
+                    title="收起"
+                    className="h-8 w-8 rounded-[10px] border border-black/5 bg-white/60 p-0 text-[#57534E] hover:bg-[#F5F0ED] dark:border-white/10 dark:bg-white/10 dark:text-[#D6D3D1] dark:hover:bg-white/15"
+                  >
+                    <ChevronDown size={15} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={onReturnToMain}
+                    aria-label="显示主程序"
+                    title="显示主程序"
+                    className="h-8 w-8 rounded-[10px] border border-black/5 bg-white/60 p-0 text-[#57534E] hover:bg-[#F5F0ED] dark:border-white/10 dark:bg-white/10 dark:text-[#D6D3D1] dark:hover:bg-white/15"
+                  >
+                    <ArrowUpRight size={15} />
+                  </Button>
+                </div>
+              </div>
+
+              {model.mode === 'idle_with_tasks' && !isIdleConfigVisible ? (
+                <div className="mt-4 space-y-3">
+                  <div data-testid="now-overlay-task-choice-list" className="grid gap-2">
+                    {model.visibleTasks.map((task) => (
+                      <button
+                        key={task.id}
+                        type="button"
+                        aria-label={task.title}
+                        onClick={() => handleIdleTaskStart(task)}
+                        className="flex w-full items-center justify-between rounded-[16px] border border-[#E7E5E4] bg-white/78 px-4 py-3 text-left shadow-sm transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917]/78 dark:hover:bg-[#292524]"
+                      >
+                        <span className="truncate text-[14px] font-medium">{task.title}</span>
+                        <span className="ml-3 shrink-0 text-[11px] text-[#A8A29E] dark:text-[#78716C]">开始</span>
+                      </button>
+                    ))}
+                  </div>
+                  <section className="overflow-hidden rounded-[18px] border border-[#E7E5E4] bg-white/82 dark:border-[#292524] dark:bg-[#1C1917]/72">
+                    <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
+                  </section>
+                </div>
+              ) : null}
+
+              {model.mode === 'idle_input_only' ? (
+                <div className="mt-4 space-y-3">
+                  <section
+                    data-testid="now-overlay-empty-state"
+                    className="rounded-[18px] border border-dashed border-[#E7E5E4] bg-white/65 px-4 py-4 text-center dark:border-[#292524] dark:bg-[#1C1917]/60"
+                  >
+                    <p className="text-[14px] font-medium text-[#57534E] dark:text-[#D6D3D1]">当前没有可直接开始的任务</p>
+                    <p className="mt-1 text-[12px] text-[#A8A29E] dark:text-[#78716C]">先记一条输入，或者稍后再开始时间块。</p>
+                  </section>
+                  <section className="overflow-hidden rounded-[18px] border border-[#E7E5E4] bg-white/82 dark:border-[#292524] dark:bg-[#1C1917]/72">
+                    <NowInputRow onSend={onSend} placeholder="记录当下的事实..." />
+                  </section>
+                </div>
+              ) : null}
+
+              {isIdleConfigVisible ? (
+                <div className="mt-4 rounded-[18px] border border-[#E7E5E4] bg-white/72 px-2 py-2 dark:border-[#292524] dark:bg-[#1C1917]/68">
+                  <FocusTimerWidget ref={focusTimerWidgetRef} surface="overlay" />
+                </div>
+              ) : null}
+            </div>
+          ) : (
+            <div
+              data-testid="now-overlay-idle-pill"
+              onMouseEnter={() => setIsIdleHovered(true)}
+              className="w-[252px] rounded-[22px] border border-white/55 bg-[rgba(250,247,245,0.92)] px-4 py-3 text-[#1C1917] shadow-[0_18px_40px_-28px_rgba(0,0,0,0.45)] backdrop-blur-[22px] dark:border-white/10 dark:bg-[rgba(28,25,23,0.86)] dark:text-[#FAFAF9]"
+            >
+              <div
+                data-testid="now-overlay-drag-handle"
+                data-tauri-drag-region
+                onMouseDown={handleDragBarMouseDown}
+                className="cursor-grab select-none active:cursor-grabbing"
+                title="按住这里拖动窗口"
+              >
+                <div className="flex items-center gap-2" data-tauri-drag-region>
+                  <span className="h-2.5 w-2.5 rounded-full bg-[#A8A29E]" data-tauri-drag-region />
+                  <span className="text-[11px] font-medium uppercase tracking-[0.12em] text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
+                    待办
+                  </span>
+                </div>
+                {previewTasks.length > 0 ? (
+                  <div className="mt-2 space-y-1" data-tauri-drag-region>
+                    {previewTasks.map((task) => (
+                      <p key={task.id} className="truncate text-[13px] font-medium" data-tauri-drag-region>
+                        · {task.title}
+                      </p>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-[13px] font-medium text-[#78716C] dark:text-[#A8A29E]" data-tauri-drag-region>
+                    · 无待办
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
         </div>
 
         {feedbackDialog}
