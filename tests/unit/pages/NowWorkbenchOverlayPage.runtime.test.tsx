@@ -27,6 +27,8 @@ const loadActiveBlockMock = vi.fn();
 const onBlockChangeMock = vi.fn();
 const listTasksMock = vi.fn();
 const addEventMock = vi.fn();
+const endBlockMock = vi.fn();
+const markEndingMock = vi.fn();
 const loadEventsPageMock = vi.fn();
 const getEventStorageByUserMock = vi.fn();
 const taskStorageOnChangeMock = vi.fn();
@@ -37,6 +39,7 @@ let eventStorageListener: (() => void) | null = null;
 let focusChangedListener: ((event: { payload: boolean }) => void) | null = null;
 const overlayHideMock = vi.fn();
 const focusMainWindowMock = vi.fn();
+const overlaySetSizeMock = vi.fn();
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
@@ -73,8 +76,8 @@ vi.mock('@/lib/services', () => ({
     },
     pauseBlock: vi.fn(),
     resumeBlock: vi.fn(),
-    markEnding: vi.fn(),
-    endBlock: vi.fn(),
+    markEnding: (...args: unknown[]) => markEndingMock(...args),
+    endBlock: (...args: unknown[]) => endBlockMock(...args),
   }),
   getTaskService: () => ({
     listTasks: (...args: unknown[]) => listTasksMock(...args),
@@ -117,6 +120,7 @@ vi.mock('@/lib/storage/task-storage', () => ({
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     hide: (...args: unknown[]) => overlayHideMock(...args),
+    setSize: (...args: unknown[]) => overlaySetSizeMock(...args),
     onMoved: vi.fn(async () => () => {}),
     startDragging: vi.fn(async () => undefined),
     onFocusChanged: vi.fn(async (listener: (event: { payload: boolean }) => void) => {
@@ -158,6 +162,12 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     listTasksMock.mockImplementation(async () => runtimeStateByUser[currentUserState.userId].tasks);
     addEventMock.mockReset();
     addEventMock.mockResolvedValue(undefined);
+    markEndingMock.mockReset();
+    markEndingMock.mockResolvedValue(undefined);
+    endBlockMock.mockReset();
+    endBlockMock.mockImplementation(async () => {
+      runtimeStateByUser[currentUserState.userId].activeBlock = null;
+    });
     loadEventsPageMock.mockReset();
     loadEventsPageMock.mockImplementation(async () => ({
       events: runtimeStateByUser[currentUserState.userId].events,
@@ -177,6 +187,8 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     overlayHideMock.mockResolvedValue(undefined);
     focusMainWindowMock.mockReset();
     focusMainWindowMock.mockResolvedValue(undefined);
+    overlaySetSizeMock.mockReset();
+    overlaySetSizeMock.mockResolvedValue(undefined);
   });
 
   it('loads running state from services when no explicit model is provided（无显式 model 时从服务加载运行态）', async () => {
@@ -320,17 +332,27 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '隐藏浮窗' }));
+    fireEvent.click(screen.getByRole('button', { name: '收起' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('now-overlay-collapsed-pill')).toBeInTheDocument();
     });
 
     expect(screen.queryByTestId('new-focus-timer-widget')).toBeNull();
-    expect(screen.getByRole('button', { name: '展开浮窗' })).toBeInTheDocument();
+    expect(screen.getByTestId('now-overlay-collapsed-clock')).toHaveTextContent(/\d{2}:\d{2}/);
+    expect(screen.getByRole('button', { name: '展开' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '显示主程序' })).toBeInTheDocument();
     expect(screen.getByText('进行中')).toBeInTheDocument();
+    expect(overlaySetSizeMock).toHaveBeenCalled();
 
-    fireEvent.click(screen.getByRole('button', { name: '展开浮窗' }));
+    fireEvent.mouseEnter(screen.getByTestId('now-overlay-collapsed-pill'));
+
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: '暂停' })).toBeInTheDocument();
+      expect(screen.getByRole('button', { name: '结束' })).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '展开' }));
 
     await waitFor(() => {
       expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
@@ -342,7 +364,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     render(<NowWorkbenchOverlayPage />);
 
-    fireEvent.click(await screen.findByRole('button', { name: '回到主程序' }));
+    fireEvent.click(await screen.findByRole('button', { name: '显示主程序' }));
 
     await waitFor(() => {
       expect(focusMainWindowMock).toHaveBeenCalledTimes(1);
@@ -387,6 +409,35 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       expect(addEventMock).toHaveBeenCalledWith('补一条当下记录');
     });
     expect(screen.getByTestId('now-overlay-debug-panel')).toHaveTextContent('最近动作：send:success');
+  });
+
+  it('submits overlay feedback dialog with Enter and shows compact shortcut hint（悬浮窗反馈弹窗支持回车提交且展示紧凑提示）', async () => {
+    runtimeStateByUser['overlay-test-user'].activeBlock = {
+      startId: 'block-feedback',
+      name: '结束反馈测试',
+      mode: 'countup',
+      startTime: Date.UTC(2026, 2, 11, 9, 0, 0),
+      elapsed: 0,
+      paused: false,
+      phase: 'feedback_in_progress',
+      actionEndedAt: Date.UTC(2026, 2, 11, 9, 30, 0),
+      feedbackStartedAt: Date.UTC(2026, 2, 11, 9, 30, 0),
+    };
+
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+    render(<NowWorkbenchOverlayPage />);
+
+    const textarea = await screen.findByTestId('now-overlay-feedback-textarea');
+    expect(screen.getByTestId('now-overlay-feedback-surface')).toBeInTheDocument();
+    expect(screen.getByTestId('now-overlay-feedback-shortcut-hint')).toHaveTextContent('Enter / Ctrl+Enter 提交 · Shift+Enter 换行');
+    expect(screen.getByTestId('now-overlay-feedback-confirm')).toBeInTheDocument();
+
+    fireEvent.change(textarea, { target: { value: '悬浮窗反馈提交' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith('悬浮窗反馈提交');
+    });
   });
 
   it('refreshes against the latest current user context after prewarm（预热窗口后刷新会重新读取当前用户）', async () => {

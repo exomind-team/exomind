@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
+import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
+import { ArrowUpRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -54,6 +56,11 @@ interface NowWorkbenchOverlayPageContentProps {
   setFeedback(value: string): void;
   onConfirmEnd: () => void | Promise<void>;
 }
+
+const NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE = { width: 412, height: 490 };
+const NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE = { width: 464, height: 470 };
+const NOW_WORKBENCH_OVERLAY_MINI_SIZE = { width: 248, height: 120 };
+const NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE = { width: 352, height: 200 };
 
 function formatEventTime(timestamp: number): string {
   return new Date(timestamp).toLocaleTimeString('zh-CN', {
@@ -319,6 +326,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   const now = Date.now();
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
   const [isMiniCollapsed, setIsMiniCollapsed] = useState(false);
+  const [isMiniHovered, setIsMiniHovered] = useState(false);
 
   useEffect(() => {
     if (!isTauri()) {
@@ -354,8 +362,15 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   useEffect(() => {
     if (model.mode !== 'running') {
       setIsMiniCollapsed(false);
+      setIsMiniHovered(false);
     }
   }, [model.mode]);
+
+  useEffect(() => {
+    if (!isMiniCollapsed) {
+      setIsMiniHovered(false);
+    }
+  }, [isMiniCollapsed]);
 
   const handleDragBarMouseDown = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (!isTauri() || event.button !== 0) {
@@ -377,25 +392,74 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     && props.debugInfo.userId === 'static-preview';
   const isLiveRunningSingleCardMode = !isStaticPreview && model.mode === 'running';
   const isLiveRunningMiniMode = isLiveRunningSingleCardMode && isMiniCollapsed;
+  const isLiveRunningMiniPeekMode = isLiveRunningMiniMode && isMiniHovered;
+  const miniClock = resolveRunningClock(model.activeBlock, now);
+  const targetOverlaySize = isLiveRunningMiniPeekMode
+    ? NOW_WORKBENCH_OVERLAY_MINI_PEEK_SIZE
+    : isLiveRunningMiniMode
+      ? NOW_WORKBENCH_OVERLAY_MINI_SIZE
+      : isLiveRunningSingleCardMode
+        ? NOW_WORKBENCH_OVERLAY_RUNNING_FULL_SIZE
+        : NOW_WORKBENCH_OVERLAY_DEFAULT_SIZE;
+
+  useEffect(() => {
+    if (!isTauri()) {
+      return;
+    }
+
+    void getCurrentWindow()
+      .setSize(new LogicalSize(targetOverlaySize.width, targetOverlaySize.height))
+      .catch((error) => {
+        console.warn('[NowWorkbenchOverlay] setSize failed', error);
+      });
+  }, [targetOverlaySize.height, targetOverlaySize.width]);
+
+  const handleOverlayFeedbackKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (event.nativeEvent.isComposing) {
+      return;
+    }
+    if (event.key !== 'Enter') {
+      return;
+    }
+    if (event.shiftKey || event.altKey) {
+      return;
+    }
+
+    event.preventDefault();
+    void onConfirmEnd();
+  }, [onConfirmEnd]);
   const feedbackDialog = (
     <Dialog open={feedbackOpen} onOpenChange={() => {}}>
-      <DialogContent>
-        <DialogHeader>
-          <DialogTitle>结束专注并记录反馈</DialogTitle>
-          <DialogDescription>提交反馈后将结束当前时间块，并把结果同步回主程序。</DialogDescription>
-        </DialogHeader>
-        <Textarea
-          data-testid="now-overlay-feedback-textarea"
-          value={feedback}
-          onChange={(event) => setFeedback(event.target.value)}
-          placeholder="记录本次专注的反馈..."
-          className="min-h-[96px] resize-none"
-        />
-        <div className="flex justify-end">
+      <DialogContent
+        data-testid="now-overlay-feedback-surface"
+        className="w-[min(320px,calc(100vw-24px))] max-w-[320px] rounded-[20px] border border-white/55 bg-[linear-gradient(180deg,rgba(250,247,245,0.96)_0%,rgba(255,255,255,0.84)_100%)] p-0 shadow-[0_24px_56px_-32px_rgba(0,0,0,0.55)] backdrop-blur-[24px] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.94)_0%,rgba(12,10,9,0.86)_100%)]"
+      >
+        <div className="space-y-3 px-4 py-4">
+          <DialogHeader className="space-y-1">
+            <DialogTitle className="text-[15px]">结束专注并记录反馈</DialogTitle>
+            <DialogDescription className="text-[12px] text-[#78716C] dark:text-[#A8A29E]">
+              悬浮窗内可直接提交反馈，无需切回主程序。
+            </DialogDescription>
+          </DialogHeader>
+          <Textarea
+            autoFocus
+            data-testid="now-overlay-feedback-textarea"
+            value={feedback}
+            onChange={(event) => setFeedback(event.target.value)}
+            onKeyDown={handleOverlayFeedbackKeyDown}
+            placeholder="记录本次专注的反馈..."
+            className="min-h-[88px] rounded-[14px] border-[#E7E5E4] bg-white/80 resize-none text-[13px] dark:border-[#FFFFFF18] dark:bg-[#FFFFFF08] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
+          />
+          <div
+            data-testid="now-overlay-feedback-shortcut-hint"
+            className="text-[11px] text-[#78716C] dark:text-[#A8A29E]"
+          >
+            Enter / Ctrl+Enter 提交 · Shift+Enter 换行
+          </div>
           <Button
             type="button"
             data-testid="now-overlay-feedback-confirm"
-            className="rounded-[12px] bg-[#C75B3A] text-white hover:bg-[#B24D2F]"
+            className="h-10 w-full rounded-[12px] bg-[#C75B3A] text-white hover:bg-[#B24D2F]"
             onClick={onConfirmEnd}
           >
             提交反馈
@@ -411,42 +475,126 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
         <div className="now-workbench-overlay-shell now-workbench-overlay-shell--mini">
           <div
             data-testid="now-overlay-collapsed-pill"
-            className="flex items-center gap-3 rounded-[22px] border border-white/55 bg-[rgba(28,25,23,0.76)] px-3 py-2 text-[#FAFAF9] shadow-[0_16px_40px_-24px_rgba(0,0,0,0.55)] backdrop-blur-[20px]"
+            onMouseEnter={() => setIsMiniHovered(true)}
+            onMouseLeave={() => setIsMiniHovered(false)}
+            className={`rounded-[22px] border border-white/55 bg-[rgba(28,25,23,0.78)] text-[#FAFAF9] shadow-[0_16px_40px_-24px_rgba(0,0,0,0.55)] backdrop-blur-[20px] ${
+              isLiveRunningMiniPeekMode
+                ? 'w-[328px] px-4 py-3'
+                : 'w-[224px] px-3 py-2'
+            }`}
           >
-            <div
-              data-testid="now-overlay-drag-handle"
-              data-tauri-drag-region
-              onMouseDown={handleDragBarMouseDown}
-              className="min-w-0 cursor-grab select-none active:cursor-grabbing"
-              title="按住这里拖动窗口"
-            >
-              <p className="truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[#D6D3D1]" data-tauri-drag-region>
-                {model.statusLabel}
-              </p>
-              <p className="truncate text-[13px] font-semibold text-[#FAFAF9]" data-tauri-drag-region>
-                {model.title}
-              </p>
-            </div>
-            <div className="ml-auto flex shrink-0 items-center gap-1.5">
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => setIsMiniCollapsed(false)}
-                className="h-7 rounded-[10px] border border-white/10 bg-white/10 px-2.5 text-[11px] text-[#FAFAF9] hover:bg-white/15"
-              >
-                展开浮窗
-              </Button>
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={onReturnToMain}
-                className="h-7 rounded-[10px] border border-white/10 bg-white/10 px-2.5 text-[11px] text-[#FAFAF9] hover:bg-white/15"
-              >
-                回到主程序
-              </Button>
-            </div>
+            {isLiveRunningMiniPeekMode ? (
+              <div className="space-y-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div
+                    data-testid="now-overlay-drag-handle"
+                    data-tauri-drag-region
+                    onMouseDown={handleDragBarMouseDown}
+                    className="min-w-0 cursor-grab select-none active:cursor-grabbing"
+                    title="按住这里拖动窗口"
+                  >
+                    <p className="truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[#D6D3D1]" data-tauri-drag-region>
+                      {model.statusLabel}
+                    </p>
+                    <p className="truncate text-[14px] font-semibold text-[#FAFAF9]" data-tauri-drag-region>
+                      {model.title}
+                    </p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setIsMiniCollapsed(false)}
+                      aria-label="展开"
+                      title="展开"
+                      className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
+                    >
+                      <ChevronUp size={16} />
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={onReturnToMain}
+                      aria-label="显示主程序"
+                      title="显示主程序"
+                      className="h-8 w-8 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
+                    >
+                      <ArrowUpRight size={16} />
+                    </Button>
+                  </div>
+                </div>
+                <p
+                  data-testid="now-overlay-collapsed-clock"
+                  className="font-mono text-[34px] leading-none tracking-[0.08em] text-[#FDE4DE]"
+                >
+                  {miniClock.primaryText}
+                </p>
+                <div className="flex items-center gap-2">
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={onPauseOrResume}
+                    className="h-9 rounded-[12px] bg-white/10 px-4 text-[#FAFAF9] hover:bg-white/15"
+                  >
+                    {model.activeBlock?.paused ? '继续' : '暂停'}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="brand"
+                    onClick={onEndBlock}
+                    className="h-9 rounded-[12px] bg-[#C75B3A] px-4 text-white hover:bg-[#B24D2F]"
+                  >
+                    结束
+                  </Button>
+                </div>
+              </div>
+            ) : (
+              <div className="flex items-center gap-3">
+                <div
+                  data-testid="now-overlay-drag-handle"
+                  data-tauri-drag-region
+                  onMouseDown={handleDragBarMouseDown}
+                  className="min-w-0 flex-1 cursor-grab select-none active:cursor-grabbing"
+                  title="按住这里拖动窗口"
+                >
+                  <p className="font-mono text-[28px] leading-none tracking-[0.08em] text-[#FDE4DE]" data-testid="now-overlay-collapsed-clock" data-tauri-drag-region>
+                    {miniClock.primaryText}
+                  </p>
+                  <p className="mt-1 truncate text-[10px] font-medium uppercase tracking-[0.12em] text-[#D6D3D1]" data-tauri-drag-region>
+                    {model.statusLabel}
+                  </p>
+                  <p className="truncate text-[12px] text-[#FAFAF9]/85" data-tauri-drag-region>
+                    {model.title}
+                  </p>
+                </div>
+                <div className="ml-auto flex shrink-0 flex-col items-center gap-1.5">
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setIsMiniCollapsed(false)}
+                    aria-label="展开"
+                    title="展开"
+                    className="h-7 w-7 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
+                  >
+                    <ChevronUp size={14} />
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="sm"
+                    onClick={onReturnToMain}
+                    aria-label="显示主程序"
+                    title="显示主程序"
+                    className="h-7 w-7 rounded-[10px] border border-white/10 bg-white/10 p-0 text-[#FAFAF9] hover:bg-white/15"
+                  >
+                    <ArrowUpRight size={14} />
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         </div>
 
@@ -488,18 +636,22 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                   variant="ghost"
                   size="sm"
                   onClick={() => setIsMiniCollapsed(true)}
-                  className="h-8 rounded-[10px] border border-white/35 bg-white/45 px-2.5 text-[11px] text-[#57534E] hover:bg-[#F5F0ED] dark:border-white/10 dark:bg-white/10 dark:text-[#D6D3D1] dark:hover:bg-white/15"
+                  aria-label="收起"
+                  title="收起"
+                  className="h-8 w-8 rounded-[10px] border border-white/35 bg-white/45 p-0 text-[#57534E] hover:bg-[#F5F0ED] dark:border-white/10 dark:bg-white/10 dark:text-[#D6D3D1] dark:hover:bg-white/15"
                 >
-                  隐藏浮窗
+                  <ChevronDown size={15} />
                 </Button>
                 <Button
                   type="button"
                   variant="ghost"
                   size="sm"
                   onClick={onReturnToMain}
-                  className="h-8 rounded-[10px] border border-white/35 bg-white/45 px-2.5 text-[11px] text-[#57534E] hover:bg-[#F5F0ED] dark:border-white/10 dark:bg-white/10 dark:text-[#D6D3D1] dark:hover:bg-white/15"
+                  aria-label="显示主程序"
+                  title="显示主程序"
+                  className="h-8 w-8 rounded-[10px] border border-white/35 bg-white/45 p-0 text-[#57534E] hover:bg-[#F5F0ED] dark:border-white/10 dark:bg-white/10 dark:text-[#D6D3D1] dark:hover:bg-white/15"
                 >
-                  回到主程序
+                  <ArrowUpRight size={15} />
                 </Button>
               </div>
             </div>
@@ -558,9 +710,11 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               variant="ghost"
               size="sm"
               onClick={onReturnToMain}
-              className="rounded-[10px] text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#D6D3D1] dark:hover:bg-white/10"
+              aria-label="显示主程序"
+              title="显示主程序"
+              className="h-8 w-8 rounded-[10px] p-0 text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#D6D3D1] dark:hover:bg-white/10"
             >
-              回到主程序
+              <ArrowUpRight size={16} />
             </Button>
           </div>
         </header>
