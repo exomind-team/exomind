@@ -3401,6 +3401,8 @@ export function AgentsPage() {
     if (viewMode === 'sessions') {
       return (
         <SessionsView
+          rtBaseUrl={resolveRtBaseUrl()}
+          authToken={resolveRtAuthToken()}
           onSessionClick={(session) => {
             // If the session has a PTY, open it in the right panel
             if (session.pty_id) {

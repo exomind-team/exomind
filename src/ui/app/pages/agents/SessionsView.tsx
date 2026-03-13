@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
-import { Inbox } from 'lucide-react';
+import { Inbox, RefreshCw } from 'lucide-react';
 import type { SessionInfo } from '@/lib/types/session';
 import { getUseMockDataEnabled, MOCK_SESSIONS, subscribeUseMockDataChanges } from '@/config/mock-data';
+import { useSessionStream } from '@/hooks/useSessionStream';
 import { SessionCard } from './SessionCard';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -9,13 +10,15 @@ import { SessionCard } from './SessionCard';
 export interface SessionsViewProps {
   /** Callback when user clicks a session card */
   onSessionClick?: (session: SessionInfo) => void;
-  /** Override sessions list (for testing or real API data) */
-  sessions?: SessionInfo[];
+  /** Runtime base URL for real API data */
+  rtBaseUrl?: string;
+  /** Auth token for the runtime API */
+  authToken?: string;
 }
 
 // ── Component ──────────────────────────────────────────────────
 
-export function SessionsView({ onSessionClick, sessions: externalSessions }: SessionsViewProps) {
+export function SessionsView({ onSessionClick, rtBaseUrl, authToken }: SessionsViewProps) {
   const [useMockData, setUseMockData] = useState(getUseMockDataEnabled);
 
   // Subscribe to mock data toggle changes
@@ -23,8 +26,20 @@ export function SessionsView({ onSessionClick, sessions: externalSessions }: Ses
     return subscribeUseMockDataChanges(setUseMockData);
   }, []);
 
+  // Real-time session stream (only active when mock data is disabled)
+  const {
+    sessions: realSessions,
+    loading,
+    error,
+    refresh,
+  } = useSessionStream({
+    rtBaseUrl: rtBaseUrl ?? null,
+    authToken,
+    enabled: !useMockData && !!rtBaseUrl,
+  });
+
   // Determine which sessions to display
-  const sessions: SessionInfo[] = externalSessions ?? (useMockData ? MOCK_SESSIONS : []);
+  const sessions: SessionInfo[] = useMockData ? MOCK_SESSIONS : realSessions;
 
   // Sort: attention-needing first, then by last_active_at desc
   const sortedSessions = [...sessions].sort((a, b) => {
@@ -38,6 +53,14 @@ export function SessionsView({ onSessionClick, sessions: externalSessions }: Ses
   const activeSessions = sortedSessions.filter(
     (s) => s.status !== 'completed' && s.status !== 'archived',
   );
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <RefreshCw size={24} className="animate-spin text-[#A8A29E]" />
+      </div>
+    );
+  }
 
   if (activeSessions.length === 0) {
     return (
@@ -56,6 +79,9 @@ export function SessionsView({ onSessionClick, sessions: externalSessions }: Ses
               : '启动一个 Terminal Agent 或开启测试数据查看效果'}
           </p>
         </div>
+        {error && (
+          <p className="mt-2 text-xs text-red-400">{error}</p>
+        )}
       </div>
     );
   }
@@ -70,7 +96,24 @@ export function SessionsView({ onSessionClick, sessions: externalSessions }: Ses
             {activeSessions.length}
           </span>
         </h2>
+        {!useMockData && (
+          <button
+            type="button"
+            onClick={refresh}
+            className="flex h-7 w-7 items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
+            title="刷新"
+          >
+            <RefreshCw size={14} />
+          </button>
+        )}
       </div>
+
+      {/* Error banner */}
+      {error && (
+        <div className="rounded-lg bg-red-50 px-3 py-2 text-xs text-red-600 dark:bg-red-950/30 dark:text-red-400">
+          {error}
+        </div>
+      )}
 
       {/* Session cards grid */}
       <div className="grid gap-3 sm:grid-cols-1 md:grid-cols-2 xl:grid-cols-2">

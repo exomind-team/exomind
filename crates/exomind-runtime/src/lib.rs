@@ -27,6 +27,7 @@ pub mod pairing;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
 pub mod routes;
+pub mod session;
 pub mod signal;
 pub mod task;
 pub mod tick;
@@ -718,6 +719,8 @@ pub struct AppState {
     pub mdns: Option<Arc<discovery::MdnsDiscovery>>,
     pub pairing: Arc<pairing::PairingManager>,
     pub task_store: Arc<task::TaskStore>,
+    pub session_store: Arc<session::SessionStore>,
+    pub session_event_tx: Option<tokio::sync::broadcast::Sender<routes::sessions::SessionEvent>>,
     pub timeblock_store: Arc<timeblock::TimeBlockStore>,
     pub energy_registry: energy::EnergyRegistry,
     pub tick_manager: Arc<tick::TickManager>,
@@ -826,6 +829,20 @@ impl AppState {
                 })
             })
             .unwrap_or_else(timeblock::TimeBlockStore::new);
+        let session_store = env::var("EXOMIND_RT_SESSION_SQLITE_PATH")
+            .ok()
+            .map(PathBuf::from)
+            .map(|path| {
+                session::SessionStore::with_sqlite_path(&path).unwrap_or_else(|error| {
+                    tracing::warn!(
+                        path = %path.display(),
+                        error = %error,
+                        "session sqlite init failed, falling back to in-memory store (Session SQLite 初始化失败，降级到内存存储)"
+                    );
+                    session::SessionStore::new()
+                })
+            })
+            .unwrap_or_else(session::SessionStore::new);
         let energy_registry = energy::EnergyRegistry::new();
         let tick_manager = Arc::new(tick::TickManager::new(
             host_id.clone(),
@@ -845,6 +862,11 @@ impl AppState {
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task_store),
+            session_store: Arc::new(session_store),
+            session_event_tx: {
+                let (tx, _rx) = routes::sessions::session_event_channel();
+                Some(tx)
+            },
             timeblock_store: Arc::new(timeblock_store),
             energy_registry,
             tick_manager,
@@ -942,6 +964,8 @@ mod tests {
             mdns: None,
             pairing: Arc::new(pairing::PairingManager::new()),
             task_store: Arc::new(task::TaskStore::new()),
+            session_store: Arc::new(session::SessionStore::new()),
+            session_event_tx: None,
             timeblock_store: Arc::new(timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(tick::TickManager::new(
