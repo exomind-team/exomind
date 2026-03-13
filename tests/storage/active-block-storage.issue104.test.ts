@@ -11,6 +11,8 @@ import {
 import { createLocalProfile, setProfileSession } from '@/lib/profile/profile-storage';
 import type { ActiveBlockData } from '@/lib/types/event';
 
+const openedStorages: ActiveBlockStorage[] = [];
+
 describe('Issue #104 ActiveBlockStorage', () => {
   beforeEach(() => {
     mkdirSync('.tmp/pouchdb-active-block/', { recursive: true });
@@ -18,6 +20,7 @@ describe('Issue #104 ActiveBlockStorage', () => {
   });
 
   afterEach(async () => {
+    await Promise.allSettled(openedStorages.splice(0).map((storage) => storage.close()));
     await clearAllActiveBlockStorageInstances();
     localStorage.clear();
   });
@@ -213,6 +216,36 @@ describe('Issue #104 ActiveBlockStorage', () => {
     expect(calls).toContainEqual({
       block: expect.objectContaining({ startId: 'issue104-remote-start' }),
       source: 'sync',
+    });
+
+    unsubscribe();
+  });
+
+  it('notifies a sibling storage instance when another window writes the same local db（同库其他窗口写入时也会通知当前实例）', async () => {
+    const writer = new ActiveBlockStorage('issue104-cross-window-user');
+    const reader = new ActiveBlockStorage('issue104-cross-window-user');
+    openedStorages.push(writer, reader);
+    const onReaderChange = vi.fn();
+    const unsubscribe = reader.onBlockChange(onReaderChange);
+
+    const block: ActiveBlockData = {
+      startId: 'issue104-cross-window-start',
+      name: 'cross window block',
+      startTime: Date.now() - 10_000,
+      elapsed: 3_000,
+      mode: 'countup',
+      paused: false,
+      updatedAt: Date.now(),
+      pauseAccumulatedMs: 0,
+    };
+
+    await writer.saveActiveBlock(block);
+
+    await vi.waitFor(() => {
+      expect(onReaderChange).toHaveBeenCalledWith(
+        expect.objectContaining({ startId: 'issue104-cross-window-start' }),
+        'sync',
+      );
     });
 
     unsubscribe();

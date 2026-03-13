@@ -394,10 +394,12 @@ mod tests {
     fn test_state_with_timeblock_store(timeblock_store: Arc<crate::timeblock::TimeBlockStore>) -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
         let host_id = "timeblocks-test-host".to_string();
+        let registry = crate::agent::AgentRegistry::new();
+        let energy_registry = crate::energy::EnergyRegistry::new();
         AppState {
             port: 0,
             host_id: host_id.clone(),
-            registry: crate::agent::AgentRegistry::new(),
+            registry: registry.clone(),
             signal_pool: Arc::clone(&signal_pool),
             mesh: Arc::new(crate::mesh::MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
             mesh_relay: None,
@@ -406,7 +408,13 @@ mod tests {
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
             timeblock_store,
-            energy_registry: crate::energy::EnergyRegistry::new(),
+            energy_registry: energy_registry.clone(),
+            tick_manager: Arc::new(crate::tick::TickManager::new(
+                host_id.clone(),
+                registry,
+                energy_registry,
+                Arc::clone(&signal_pool),
+            )),
             life_agents: std::collections::HashMap::new(),
             eventlog_store: Arc::new(crate::eventlog::EventLogStore::new(
                 std::env::temp_dir().join("exomind-test-timeblocks"),

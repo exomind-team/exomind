@@ -226,4 +226,42 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
       }),
     }));
   });
+
+  it('posts refill energy request and normalizes response（POST 充能请求并解析 revive 响应）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        energy: {
+          agent_id: 'life-alpha',
+          current: 100,
+          max: 100,
+          ratio: 1,
+          tick_cost: 5,
+          phase: 'normal',
+          is_dormant: false,
+        },
+        revived: true,
+        tick_spawned: true,
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.refillEnergy(SAMPLE_HOST, 'life-alpha', 100);
+
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+
+    expect(result.data.revived).toBe(true);
+    expect(result.data.tickSpawned).toBe(true);
+    expect(result.data.energy.agent_id).toBe('life-alpha');
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:1919/agents/life-alpha/energy/refill',
+      expect.objectContaining({
+        method: 'POST',
+        body: JSON.stringify({ amount: 100 }),
+      }),
+    );
+  });
 });

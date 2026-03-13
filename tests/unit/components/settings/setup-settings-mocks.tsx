@@ -150,21 +150,25 @@ vi.mock('@/config/version-build-info', () => ({
 vi.mock('@/config/theme', () => ({
   getThemePreference: vi.fn(() => 'system'),
   setThemePreference: vi.fn(),
+  subscribeThemePreferenceChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: vi.fn(() => settingsPagePreferenceState.developerMode),
   setDeveloperModeEnabled: vi.fn(),
+  subscribeDeveloperModeChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: vi.fn(() => settingsPagePreferenceState.agentPageEnabled),
   setAgentPageEnabled: vi.fn(),
+  subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: vi.fn(() => settingsPagePreferenceState.desktopAdaptiveEnabled),
   setDesktopAdaptiveEnabled: vi.fn(),
+  subscribeDesktopAdaptiveChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/timer-preferences', () => ({
@@ -193,6 +197,16 @@ vi.mock('@/config/command-palette-enabled', () => ({
   getCommandPaletteEnabled: vi.fn(() => false),
   setCommandPaletteEnabled: vi.fn(),
   subscribeCommandPaletteEnabledChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/llm-settings', () => ({
+  getLLMApiKey: vi.fn(() => ''),
+  getLLMBaseUrl: vi.fn(() => 'https://api.openai.com/v1'),
+  getLLMModel: vi.fn(() => 'gpt-4o'),
+  setLLMApiKey: vi.fn(),
+  setLLMBaseUrl: vi.fn(),
+  setLLMModel: vi.fn(),
+  subscribeLLMSettingsChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/voice-transcript-send-mode', () => ({

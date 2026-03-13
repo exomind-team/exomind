@@ -35,10 +35,11 @@ describe('issue-198 settings desktop VC tabs（设置页桌面VC标签与跳转�
 
     expect(screen.getByRole('button', { name: '外观主题' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '专注设置' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '通知' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '输入' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '服务' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '数据' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '开发者' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '危险区域' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: '关于' })).toBeInTheDocument();
     expect(screen.getByText('导出备份')).toBeInTheDocument();
     expect(screen.getByText('导入数据')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
@@ -57,15 +58,21 @@ describe('issue-198 settings desktop VC tabs（设置页桌面VC标签与跳转�
     expect(screen.queryByText('隐私政策')).not.toBeInTheDocument();
     expect(screen.queryByText('用户协议')).not.toBeInTheDocument();
     expect(screen.queryByText('开源软件使用声明')).not.toBeInTheDocument();
+
+    const tabs = screen.getAllByRole('button');
+    const developerIndex = tabs.findIndex((button) => button.textContent === '开发者');
+    const dangerIndex = tabs.findIndex((button) => button.textContent === '危险区域');
+
+    expect(dangerIndex).toBeGreaterThan(developerIndex);
   });
 
   it('clicking tabs should jump to sections（点击顶部tab触发分段跳转）', () => {
     render(<SettingsPage />);
 
-    const aboutTab = screen.getByRole('button', { name: '关于' });
-    fireEvent.click(aboutTab);
+    const developerTab = screen.getByRole('button', { name: '开发者' });
+    fireEvent.click(developerTab);
 
-    expect(aboutTab).toHaveAttribute('aria-pressed', 'true');
+    expect(developerTab).toHaveAttribute('aria-pressed', 'true');
     expect(scrollIntoViewMock).toHaveBeenCalled();
     expect(scrollIntoViewMock).toHaveBeenLastCalledWith({ behavior: 'smooth', block: 'start' });
   });

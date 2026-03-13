@@ -55,11 +55,13 @@ vi.mock('@/config/theme', () => ({
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: () => false,
   setDeveloperModeEnabled: vi.fn(),
+  subscribeDeveloperModeChanges: () => () => {},
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: () => false,
   setDesktopAdaptiveEnabled: vi.fn(),
+  subscribeDesktopAdaptiveChanges: () => () => {},
 }));
 
 vi.mock('@/ui/pages/UserManagePage', () => ({
@@ -109,14 +111,26 @@ describe('SettingsPage timer card（新设置页计时器卡片）', () => {
     expect(within(dialog).getByText('选择倒计时结束后的行为')).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: /硬停止/ })).toBeInTheDocument();
     expect(within(dialog).getByRole('button', { name: /柔和提醒/ })).toBeInTheDocument();
+    expect(within(dialog).getByText('倒计时结束后立即停止')).toBeInTheDocument();
+    expect(within(dialog).getByText('倒计时结束后继续计时并提醒')).toBeInTheDocument();
   });
 
   it('toggles theme segmented controls and persists preference（切换主题分段按钮并持久化）', () => {
     render(<SettingsPage />);
 
+    const themeGroup = screen.getByRole('group', { name: '主题' });
     const systemButton = screen.getByTestId('new-settings-theme-system');
     const lightButton = screen.getByTestId('new-settings-theme-light');
     const darkButton = screen.getByTestId('new-settings-theme-dark');
+
+    expect(within(themeGroup).getAllByRole('button').map((button) => button.textContent?.trim())).toEqual([
+      '浅色',
+      '自动',
+      '深色',
+    ]);
+    expect(lightButton.querySelector('.lucide-sun')).not.toBeNull();
+    expect(systemButton.querySelector('.lucide-sun-moon')).not.toBeNull();
+    expect(darkButton.querySelector('.lucide-moon')).not.toBeNull();
 
     expect(systemButton).toHaveAttribute('aria-pressed', 'true');
     expect(lightButton).toHaveAttribute('aria-pressed', 'false');
@@ -163,6 +177,7 @@ describe('SettingsPage timer card（新设置页计时器卡片）', () => {
 
     const dialog = screen.getByRole('dialog', { name: '选择提示音' });
     expect(dialog).toBeInTheDocument();
+    expect(within(dialog).getByRole('button', { name: 'Ring 10' }).className).toContain('settings-dialog-option-card');
     fireEvent.click(within(dialog).getByRole('button', { name: 'Ring 10' }));
 
     expect(screen.getByText('Ring 10')).toBeInTheDocument();
@@ -174,6 +189,9 @@ describe('SettingsPage timer card（新设置页计时器卡片）', () => {
     expect(screen.getByText('数据')).toBeInTheDocument();
     expect(screen.getByText('导出备份')).toBeInTheDocument();
     expect(screen.getByText('导入数据')).toBeInTheDocument();
+    expect(screen.queryByText('导出任务 JSON')).not.toBeInTheDocument();
+    expect(screen.queryByText('导出任务 SQLite')).not.toBeInTheDocument();
+    expect(screen.queryByText('导入任务数据')).not.toBeInTheDocument();
   });
 
   it('removes legacy import strategy segmented controls（移除旧导入策略分段按钮）', () => {

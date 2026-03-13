@@ -14,15 +14,18 @@ import {
   initVoiceShortcutService,
   getVoiceShortcutService,
 } from "@/services/voice-shortcut.service";
+import { getNowWorkbenchOverlayService } from "@/services/now-workbench-overlay.service";
 import "./App.css";
 
 function App() {
   useEffect(() => {
     initUpdateChecker();
     initVoiceShortcutService();
+    void getNowWorkbenchOverlayService().init();
     return () => {
       destroyUpdateChecker();
       getVoiceShortcutService().destroy();
+      getNowWorkbenchOverlayService().destroy();
     };
   }, []);
 

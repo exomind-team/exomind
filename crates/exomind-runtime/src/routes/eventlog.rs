@@ -9,8 +9,8 @@ use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
 use serde::{Deserialize, Serialize};
 
-use crate::eventlog::{EventRecord, MirrorStatus};
 use crate::AppState;
+use crate::eventlog::{EventRecord, MirrorStatus};
 
 // ── Request / query types ───────────────────────────────────────
 
@@ -401,23 +401,38 @@ mod tests {
     fn test_state_with_eventlog(store: Arc<EventLogStore>) -> AppState {
         let signal_pool = Arc::new(SignalPool::new(None));
         let host_id = "eventlog-test".to_string();
+        let registry = crate::agent::AgentRegistry::new();
+        let energy_registry = crate::energy::EnergyRegistry::new();
         AppState {
             port: 0,
             host_id: host_id.clone(),
-            registry: crate::agent::AgentRegistry::new(),
+            registry: registry.clone(),
             signal_pool: Arc::clone(&signal_pool),
-            mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
+            mesh: Arc::new(MeshState::new(
+                host_id.clone(),
+                Arc::clone(&signal_pool),
+                None,
+            )),
             mesh_relay: None,
             auth_secret: None,
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
             timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
-            energy_registry: crate::energy::EnergyRegistry::new(),
+            energy_registry: energy_registry.clone(),
+            tick_manager: Arc::new(crate::tick::TickManager::new(
+                host_id.clone(),
+                registry,
+                energy_registry,
+                Arc::clone(&signal_pool),
+            )),
             life_agents: std::collections::HashMap::new(),
             eventlog_store: store,
             #[cfg(not(target_os = "android"))]
-            pty_manager: Arc::new(crate::pty::PtyManager::new(Arc::clone(&signal_pool), host_id)),
+            pty_manager: Arc::new(crate::pty::PtyManager::new(
+                Arc::clone(&signal_pool),
+                host_id,
+            )),
         }
     }
 

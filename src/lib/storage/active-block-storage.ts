@@ -7,6 +7,8 @@ const ACTIVE_BLOCK_DOC_ID = 'current';
 const ACTIVE_BLOCK_PREFIX_ENV = 'EXOMIND_ACTIVE_BLOCK_STORAGE_PREFIX';
 const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-active-block/';
 const MAX_SAVE_RETRY = 3;
+const ACTIVE_BLOCK_NOTIFY_EVENT = 'exomind:active-block-storage:changed';
+const ACTIVE_BLOCK_NOTIFY_PREFIX = 'exomind:active-block-storage:notify:';
 
 interface ActiveBlockDoc extends ActiveBlockData {
   _id: string;
@@ -103,14 +105,20 @@ export class ActiveBlockStorage {
   private lastSyncErrorSignature: string | null = null;
   private pruneQueue: Promise<void> = Promise.resolve();
   private pendingPruneRevs: Set<string> = new Set();
+  private readonly instanceId = createActiveBlockStorageInstanceId();
+  private readonly notificationKey: string;
+  private storageEventHandler?: (event: StorageEvent) => void;
+  private runtimeEventHandler?: EventListener;
 
   constructor(userId: string, options: ActiveBlockStorageOptions = {}) {
     const dbName = normalizeActiveBlockDbName(userId);
     const prefix = resolvePouchDbPrefix(options.pouchDbPrefix);
+    this.notificationKey = `${ACTIVE_BLOCK_NOTIFY_PREFIX}${dbName}`;
 
     this.db = prefix
       ? new PouchDB<ActiveBlockDoc>(dbName, { prefix })
       : new PouchDB<ActiveBlockDoc>(dbName);
+    this.attachCrossContextListeners();
   }
 
   async saveActiveBlock(block: ActiveBlockData): Promise<void> {
@@ -152,6 +160,7 @@ export class ActiveBlockStorage {
       try {
         await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
         this.emitChange(nextBlock, source);
+        this.broadcastExternalChange();
         return;
       } catch (error: unknown) {
         if (!this.isConflictError(error) || attempt >= MAX_SAVE_RETRY) {
@@ -169,8 +178,11 @@ export class ActiveBlockStorage {
   async deleteActiveBlock(): Promise<void> {
     try {
       const doc = await this.db.get(ACTIVE_BLOCK_DOC_ID);
-      await (this.db as unknown as { remove(doc: unknown): Promise<unknown> }).remove(doc);
+      await (this.db as unknown as {
+        remove(doc: unknown): Promise<{ rev?: string }>;
+      }).remove(doc);
       this.emitChange(null, 'local');
+      this.broadcastExternalChange();
     } catch (error: unknown) {
       if (!this.isNotFoundError(error)) {
         throw error;
@@ -235,6 +247,14 @@ export class ActiveBlockStorage {
 
   async close(): Promise<void> {
     await this.stopSync();
+    if (typeof window !== 'undefined') {
+      if (this.storageEventHandler) {
+        window.removeEventListener('storage', this.storageEventHandler);
+      }
+      if (this.runtimeEventHandler) {
+        window.removeEventListener(ACTIVE_BLOCK_NOTIFY_EVENT, this.runtimeEventHandler);
+      }
+    }
     await this.db.close();
 
     for (const [key, instance] of storageInstances.entries()) {
@@ -250,6 +270,56 @@ export class ActiveBlockStorage {
       this.emitChange(block, 'sync');
     } catch (error) {
       console.error('[ActiveBlockStorage] publish current block error:', error);
+    }
+  }
+
+  private attachCrossContextListeners(): void {
+    if (typeof window === 'undefined') {
+      return;
+    }
+
+    this.storageEventHandler = (event: StorageEvent) => {
+      if (event.key !== this.notificationKey || typeof event.newValue !== 'string') {
+        return;
+      }
+      void this.publishCurrentBlock();
+    };
+    window.addEventListener('storage', this.storageEventHandler);
+
+    this.runtimeEventHandler = (event: Event) => {
+      if (!('detail' in event)) {
+        return;
+      }
+      const detail = (event as CustomEvent<{ key?: string; instanceId?: string }>).detail;
+      if (detail?.key !== this.notificationKey || detail.instanceId === this.instanceId) {
+        return;
+      }
+      void this.publishCurrentBlock();
+    };
+    window.addEventListener(ACTIVE_BLOCK_NOTIFY_EVENT, this.runtimeEventHandler);
+  }
+
+  private broadcastExternalChange(): void {
+    if (typeof window !== 'undefined') {
+      window.dispatchEvent(new CustomEvent(ACTIVE_BLOCK_NOTIFY_EVENT, {
+        detail: {
+          key: this.notificationKey,
+          instanceId: this.instanceId,
+        },
+      }));
+    }
+
+    if (typeof localStorage === 'undefined') {
+      return;
+    }
+
+    try {
+      localStorage.setItem(this.notificationKey, JSON.stringify({
+        instanceId: this.instanceId,
+        at: Date.now(),
+      }));
+    } catch {
+      // Ignore localStorage broadcast failures（忽略广播写入失败）
     }
   }
 
@@ -489,4 +559,12 @@ export class ActiveBlockStorage {
       (error as { status?: number }).status === 409
     );
   }
+}
+
+function createActiveBlockStorageInstanceId(): string {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID();
+  }
+
+  return `active-block-storage-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
 }
