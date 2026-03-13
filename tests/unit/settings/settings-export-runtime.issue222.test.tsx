@@ -68,10 +68,12 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
   });
 
   afterEach(() => {
+    delete (window as { __TAURI__?: unknown }).__TAURI__;
     anchorClickSpy.mockRestore();
   });
 
   it('uses tauri native save command for eventlog export in tauri runtime', async () => {
+    (window as { __TAURI__?: { __VERSION__: string } }).__TAURI__ = { __VERSION__: '2.0.0' };
     tauriMocks.isTauri.mockResolvedValue(true);
     tauriMocks.invoke.mockResolvedValue('/storage/emulated/0/Download/exomind-eventlog-2026-03-11.json');
 
@@ -91,24 +93,23 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
     expect(anchorClickSpy).not.toHaveBeenCalled();
   });
 
-  it('keeps blob download fallback in web runtime', async () => {
+  it('disables unified export in web runtime without tauri shell', async () => {
     tauriMocks.isTauri.mockResolvedValue(false);
 
     render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: '导出数据' }));
     fireEvent.click(screen.getByRole('button', { name: /JSON 可读、可审查/ }));
+    expect(screen.getByText('当前环境不支持统一导入导出，请在桌面端使用。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '开始导出' })).toBeDisabled();
     fireEvent.click(screen.getByRole('button', { name: '开始导出' }));
 
-    await waitFor(() => {
-      expect(createObjectURLMock).toHaveBeenCalledTimes(1);
-    });
-
-    expect(anchorClickSpy).toHaveBeenCalledTimes(1);
+    expect(createObjectURLMock).not.toHaveBeenCalled();
+    expect(anchorClickSpy).not.toHaveBeenCalled();
     expect(tauriMocks.invoke).not.toHaveBeenCalled();
-    expect(screen.getByText('事件日志导出成功（JSON），共 1 条事件。')).toBeInTheDocument();
   });
 
   it('imports eventlog JSON through the shared file picker flow in tauri runtime', async () => {
+    (window as { __TAURI__?: { __VERSION__: string } }).__TAURI__ = { __VERSION__: '2.0.0' };
     tauriMocks.isTauri.mockResolvedValue(true);
 
     render(<SettingsPage />);

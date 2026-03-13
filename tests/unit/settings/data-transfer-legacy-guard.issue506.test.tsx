@@ -28,6 +28,7 @@ describe('SettingsPage unified data transfer legacy guard (issue-506)', () => {
     settingsPageDomainBackendState.timeblock = 'rt-sqlite';
     tauriMocks.isTauri.mockResolvedValue(false);
     tauriMocks.invoke.mockResolvedValue(null);
+    (window as { __TAURI__?: { __VERSION__: string } }).__TAURI__ = { __VERSION__: '2.0.0' };
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -38,6 +39,10 @@ describe('SettingsPage unified data transfer legacy guard (issue-506)', () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
+  });
+
+  afterEach(() => {
+    delete (window as { __TAURI__?: unknown }).__TAURI__;
   });
 
   function selectTaskDomain(): void {
@@ -68,5 +73,17 @@ describe('SettingsPage unified data transfer legacy guard (issue-506)', () => {
     fireEvent.click(screen.getByRole('button', { name: '选择文件并导入' }));
     expect(settingsPageServiceMocks.taskBackup.importTasksFromJson).not.toHaveBeenCalled();
     expect(settingsPageServiceMocks.taskBackup.importTasksFromSqliteSnapshot).not.toHaveBeenCalled();
+  });
+
+  it('disables unified export outside tauri even when backend preference is rt-sqlite', () => {
+    delete (window as { __TAURI__?: unknown }).__TAURI__;
+    settingsPageDomainBackendState.task = 'rt-sqlite';
+
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByRole('button', { name: '导出数据' }));
+    selectTaskDomain();
+
+    expect(screen.getByText('当前环境不支持统一导入导出，请在桌面端使用。')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '开始导出' })).toBeDisabled();
   });
 });

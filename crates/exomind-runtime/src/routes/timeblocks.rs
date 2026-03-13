@@ -574,4 +574,109 @@ mod tests {
         assert_eq!(timeblock_store.list_completed().unwrap().len(), 1);
         assert_eq!(timeblock_store.list_completed_in_scope(Some("profile-a")).unwrap().len(), 1);
     }
+
+    #[tokio::test]
+    async fn timeblock_routes_accept_user_id_alias_for_scoped_queries() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("timeblocks-user-id-scoped.sqlite");
+        let timeblock_store = Arc::new(crate::timeblock::TimeBlockStore::with_sqlite_path(&sqlite_path).unwrap());
+        let app = test_router(test_state_with_timeblock_store(timeblock_store.clone()));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&vec![TimeBlockData {
+                            id: "tb-user-a".to_string(),
+                            name: "User A block".to_string(),
+                            start_id: "start-user-a".to_string(),
+                            end_id: "end-user-a".to_string(),
+                            note: None,
+                            tags: vec!["focus".to_string()],
+                            start_time: 1_700_000_100_000,
+                            end_time: 1_700_000_160_000,
+                        }])
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri("/timeblocks/active?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        serde_json::to_vec(&ActiveBlockData {
+                            start_id: "active-user-a".to_string(),
+                            name: "Scoped active".to_string(),
+                            mode: "countdown".to_string(),
+                            target_minutes: Some(25),
+                            elapsed: 30_000,
+                            updated_at: Some(1_700_000_101_000),
+                            phase: Some("running".to_string()),
+                            version: Some(1),
+                            actor_id: Some("actor-a".to_string()),
+                            last_transition_at: Some(1_700_000_101_000),
+                            last_resumed_at: Some(1_700_000_101_000),
+                            accumulated_run_ms: Some(30_000),
+                            start_time: 1_700_000_100_000,
+                            action_ended_at: None,
+                            feedback_started_at: None,
+                            feedback_submitted_at: None,
+                            pause_accumulated_ms: Some(0),
+                            paused: false,
+                            paused_at: None,
+                            task_id: Some("task-user-a".to_string()),
+                        })
+                        .unwrap(),
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::NO_CONTENT);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/timeblocks?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let scoped_blocks: Vec<Value> = serde_json::from_slice(&body).unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/timeblocks/active?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let scoped_active: Value = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(scoped_blocks.len(), 1);
+        assert_eq!(scoped_blocks[0]["id"], "tb-user-a");
+        assert_eq!(scoped_active["taskId"], "task-user-a");
+        assert!(timeblock_store.list_completed().unwrap().is_empty(), "default anonymous scope should stay isolated");
+        assert_eq!(timeblock_store.list_completed_in_scope(Some("user-a")).unwrap().len(), 1);
+    }
 }

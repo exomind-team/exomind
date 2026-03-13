@@ -41,6 +41,7 @@ describe('SettingsPage timeblock import/export (issue-485)', () => {
     settingsPageDomainBackendState.eventlog = 'rt-sqlite';
     settingsPageDomainBackendState.task = 'rt-sqlite';
     settingsPageDomainBackendState.timeblock = 'rt-sqlite';
+    (window as { __TAURI__?: { __VERSION__: string } }).__TAURI__ = { __VERSION__: '2.0.0' };
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -87,6 +88,7 @@ describe('SettingsPage timeblock import/export (issue-485)', () => {
   });
 
   afterEach(() => {
+    delete (window as { __TAURI__?: unknown }).__TAURI__;
     anchorClickSpy.mockRestore();
   });
 

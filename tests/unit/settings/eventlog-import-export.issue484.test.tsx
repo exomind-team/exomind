@@ -41,6 +41,7 @@ describe('SettingsPage eventlog import/export (issue-484)', () => {
     settingsPageDomainBackendState.eventlog = 'rt-sqlite';
     settingsPageDomainBackendState.task = 'rt-sqlite';
     settingsPageDomainBackendState.timeblock = 'legacy';
+    (window as { __TAURI__?: { __VERSION__: string } }).__TAURI__ = { __VERSION__: '2.0.0' };
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
       matches: false,
       media: query,
@@ -78,6 +79,7 @@ describe('SettingsPage eventlog import/export (issue-484)', () => {
   });
 
   afterEach(() => {
+    delete (window as { __TAURI__?: unknown }).__TAURI__;
     anchorClickSpy.mockRestore();
   });
 

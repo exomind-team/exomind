@@ -1059,4 +1059,44 @@ mod tests {
             "profile scope should stay isolated in sqlite backend",
         );
     }
+
+    #[tokio::test]
+    async fn task_routes_accept_user_id_alias_for_scoped_queries() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-user-id-scoped.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks?user_id=user-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"User A task"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let scoped_tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(scoped_tasks.len(), 1);
+        assert_eq!(scoped_tasks[0]["title"], "User A task");
+        assert!(task_store.list().is_empty(), "default anonymous scope should stay isolated");
+        assert_eq!(task_store.list_in_scope(Some("user-a")).len(), 1);
+    }
 }
