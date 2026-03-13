@@ -5,6 +5,7 @@ import { ThemeController } from "@/components/ThemeController";
 import { Toaster } from "@/components/ui/toaster";
 import { TimeBlockSyncCoordinator } from "@/ui/app/components/TimeBlockSyncCoordinator";
 import { ReminderSyncCoordinator } from "@/ui/app/components/ReminderSyncCoordinator";
+import { FocusBgmCoordinator } from "@/ui/app/components/FocusBgmCoordinator";
 import {
   initUpdateChecker,
   destroyUpdateChecker,
@@ -37,6 +38,7 @@ function App() {
       <ThemeController />
       <TimeBlockSyncCoordinator />
       <ReminderSyncCoordinator />
+      <FocusBgmCoordinator />
       <RouterProvider router={appRouter} />
       <Toaster />
     </>

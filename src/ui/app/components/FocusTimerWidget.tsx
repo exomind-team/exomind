@@ -7,7 +7,7 @@ import {
   useRef,
   useState,
 } from 'react';
-import { ChevronDown, ChevronRight, NotepadText, Pause, Play, Square, Target } from 'lucide-react';
+import { ChevronDown, ChevronRight, Music4, NotepadText, Pause, Play, Square, Target } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -24,12 +24,17 @@ import {
   getTimerPreferences,
   subscribeTimerPreferencesChanges,
 } from '@/config/timer-preferences';
+import {
+  getFocusBgmPreferences,
+  subscribeFocusBgmPreferencesChanges,
+} from '@/config/focus-bgm-preferences';
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
 import { getTaskService, getTaskTimerService, getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
 import type { ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
+import { FocusBgmPanel } from '@/ui/app/components/settings/settings-custom-items';
 
 type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'abandoned';
 
@@ -122,6 +127,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const [elapsedMs, setElapsedMs] = useState(25 * 60 * 1000);
   const [countdownOvertimeMs, setCountdownOvertimeMs] = useState(0);
   const [timerPreferences, setTimerPreferences] = useState(() => getTimerPreferences());
+  const [focusBgmPreferences, setFocusBgmPreferences] = useState(() => getFocusBgmPreferences());
+  const [focusBgmDialogOpen, setFocusBgmDialogOpen] = useState(false);
 
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
@@ -214,6 +221,13 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   useEffect(() => {
     const unsubscribe = subscribeTimerPreferencesChanges((preferences) => {
       setTimerPreferences(preferences);
+    });
+    return unsubscribe;
+  }, []);
+
+  useEffect(() => {
+    const unsubscribe = subscribeFocusBgmPreferencesChanges((preferences) => {
+      setFocusBgmPreferences(preferences);
     });
     return unsubscribe;
   }, []);
@@ -520,6 +534,11 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     });
     setFeedbackOpen(true);
   }, [enqueueServiceMutation, feedbackInProgress, isRunningUi]);
+
+  const hasFocusBgmConfigured = focusBgmPreferences.enabled
+    && (focusBgmPreferences.sourceType === 'preset' || focusBgmPreferences.customTracks.length > 0);
+  const focusBgmToggleAriaLabel = '背景音设置（Background audio settings）';
+  const focusBgmToggleIcon = <Music4 size={16} />;
 
   const handleSubmitEnd = useCallback(async (feedbackText?: string) => {
     if (feedbackSubmitting) return;
@@ -860,11 +879,27 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
               data-testid="new-focus-running-task-card"
               className={`absolute left-4 right-4 top-4 flex h-[169px] flex-col gap-3 rounded-[24px] border border-[#FFFFFF80] dark:border-[#FFFFFF15] bg-[linear-gradient(180deg,rgba(255,255,255,0.64)_0%,rgba(255,255,255,0.36)_100%)] dark:[background-color:rgba(28,25,23,0.5)] dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.25)_0%,rgba(28,25,23,0)_100%)] px-5 py-4 backdrop-blur-[24px] ${glassCardShadowClass()}`}
             >
-              <div className="flex min-w-0 items-center gap-3">
-                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
-                  <Target size={20} />
+              <div className="flex min-w-0 items-center justify-between gap-3">
+                <div className="flex min-w-0 items-center gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[10px] bg-[#FEF0ED] dark:bg-[#2A1510] text-[#C75B3A] dark:text-[#E8734E]">
+                    <Target size={20} />
+                  </div>
+                  <p className="truncate text-[20px] font-semibold leading-[1.4] text-[#1C1917] dark:text-[#FAFAF9]">{taskName || '未命名任务'}</p>
                 </div>
-                <p className="truncate text-[20px] font-semibold leading-[1.4] text-[#1C1917] dark:text-[#FAFAF9]">{taskName || '未命名任务'}</p>
+                {hasFocusBgmConfigured ? (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    data-testid="new-focus-bgm-toggle-button"
+                    aria-label={focusBgmToggleAriaLabel}
+                    className="h-9 w-9 rounded-[10px] border border-[#E7E5E4] bg-white/50 p-0 text-[#C75B3A] hover:bg-white/70 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF10] dark:text-[#E8734E]"
+                    onClick={() => {
+                      setFocusBgmDialogOpen(true);
+                    }}
+                  >
+                    {focusBgmToggleIcon}
+                  </Button>
+                ) : null}
               </div>
               <div className="h-px w-full bg-[#D4785F30] dark:bg-[#D4785F20]" />
               <div className="flex items-center justify-between px-1 pt-1">
@@ -986,6 +1021,16 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
               {feedbackConfirmLabel}
             </Button>
           </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={focusBgmDialogOpen} onOpenChange={setFocusBgmDialogOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>专注背景音</DialogTitle>
+            <DialogDescription>在专注进行中调整背景音配置与音量</DialogDescription>
+          </DialogHeader>
+          <FocusBgmPanel ctx={{ isDesktop: !isOverlaySurface }} />
         </DialogContent>
       </Dialog>
     </div>

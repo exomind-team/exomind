@@ -126,6 +126,7 @@ import {
 import {
   AiApiKeySetting,
   DevicePairingSetting,
+  FocusBgmSetting,
   MossVoiceTestSetting,
   TaskBackendStatusSetting,
   TaskImportActionSetting,
@@ -429,6 +430,13 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     subscribe: (cb: (value: string) => void) => subscribeTimerPreferencesChanges((preferences) => {
       cb(preferences.countdownEndSoundEnabled ? preferences.countdownEndSoundPresetId : 'off');
     }),
+  },
+  {
+    id: 'focus-bgm',
+    label: '专注背景音',
+    category: 'timer',
+    type: 'custom',
+    component: FocusBgmSetting,
   },
   {
     id: 'feedback-content',
