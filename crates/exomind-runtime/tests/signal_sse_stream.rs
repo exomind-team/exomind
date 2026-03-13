@@ -612,7 +612,7 @@ async fn create_route_without_required_fields_returns_bad_request() {
 }
 
 #[tokio::test]
-async fn default_signal_routes_include_voice_input_transcript_route() {
+async fn default_signal_routes_include_voice_input_ingest_and_normalized_routes() {
     let app = test_app();
 
     let response = app
@@ -633,13 +633,25 @@ async fn default_signal_routes_include_voice_input_transcript_route() {
 
     let voice_route = route_list.iter().find(|route| {
         route["topic"] == "voice.input.transcript"
+            && route["target_type"] == "actor"
+            && route["target_ref"] == "input_ingest"
+            && route["enabled"] == true
+    });
+
+    assert!(
+        voice_route.is_some(),
+        "default routes should include voice.input.transcript -> input_ingest"
+    );
+
+    let normalized_route = route_list.iter().find(|route| {
+        route["topic"] == "user.input.normalized"
             && route["target_type"] == "agent"
             && route["target_ref"] == "classifier"
             && route["enabled"] == true
     });
 
     assert!(
-        voice_route.is_some(),
-        "default routes should include voice.input.transcript -> classifier"
+        normalized_route.is_some(),
+        "default routes should include user.input.normalized -> classifier"
     );
 }

@@ -32,7 +32,7 @@ describe('voice-signal.service（语音信号服务）', () => {
     signalPublishMocks.publish.mockResolvedValue({ accepted: true, event_id: 'evt-001' });
   });
 
-  it('publishes raw and normalized voice topics with shared trace context（同时发布原始与归一化语音主题，并共享 trace 上下文）', async () => {
+  it('publishes only raw voice transcript and leaves normalization to runtime（前端只发布原始语音主题，归一化交给运行时）', async () => {
     const result: ASRResult = {
       text: '你好 ExoMind',
       confidence: 0.98,
@@ -55,7 +55,7 @@ describe('voice-signal.service（语音信号服务）', () => {
       },
     });
 
-    expect(signalPublishMocks.publish).toHaveBeenCalledTimes(2);
+    expect(signalPublishMocks.publish).toHaveBeenCalledTimes(1);
     expect(signalPublishMocks.publish).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({
@@ -87,31 +87,10 @@ describe('voice-signal.service（语音信号服务）', () => {
       })
     );
 
-    const firstCall = signalPublishMocks.publish.mock.calls[0]?.[0];
-    const secondCall = signalPublishMocks.publish.mock.calls[1]?.[0];
-
-    expect(secondCall).toEqual(expect.objectContaining({
-      topic: 'user.input.normalized',
-      source: 'frontend:test-voice-button',
-      trace_id: firstCall?.trace_id,
-      payload: expect.objectContaining({
-        text: '你好 ExoMind',
-        rawText: '你好 ExoMind',
-        inputMode: 'voice',
-        captureSource: 'global-shortcut',
-        targetScope: 'agent-chat',
-        durationMs: 1200,
-        traceId: firstCall?.trace_id,
-        window: {
-          title: 'ExoMind',
-          processName: 'exomind.exe',
-        },
-        agentContext: {
-          agentId: 'codex',
-          agentName: 'Codex',
-          sessionId: 'session-001',
-        },
+    expect(signalPublishMocks.publish).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        topic: 'user.input.normalized',
       }),
-    }));
+    );
   });
 });

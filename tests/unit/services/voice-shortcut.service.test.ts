@@ -1248,11 +1248,66 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
           inputMode: 'voice',
           captureSource: 'global-shortcut',
           targetScope: 'agent-chat',
-          windowTitle: 'Cursor - ExoMind',
-          processName: 'Cursor.exe',
           agentId: 'codex',
           agentName: 'Codex',
           sessionId: 'session-xyz',
+        }),
+      }),
+    );
+
+    service.destroy();
+  });
+
+  it('freezes foreground window context at recording start（录音开始时冻结窗口上下文，避免识别结束时漂移）', async () => {
+    let foregroundReadCount = 0;
+    transcribeMock.mockResolvedValue({
+      text: '冻结窗口测试',
+      confidence: 0.98,
+      lang: 'zh-CN',
+      duration: 1000,
+    });
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') {
+        return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'foreground_window_get') {
+        foregroundReadCount += 1;
+        return foregroundReadCount === 1
+          ? { title: 'Window A', processName: 'AppA.exe' }
+          : { title: 'Window B', processName: 'AppB.exe' };
+      }
+      if (command === 'voice_recording_set_active' || command === 'simulate_paste') {
+        return null;
+      }
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('stop');
+    await flushAsync();
+
+    expect(foregroundReadCount).toBe(1);
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '冻结窗口测试' }),
+      expect.objectContaining({
+        targetScope: 'external-window',
+        window: {
+          title: 'Window A',
+          processName: 'AppA.exe',
+        },
+      }),
+    );
+    expect(addEventMock).toHaveBeenCalledWith(
+      '冻结窗口测试',
+      new Set(['voice']),
+      expect.objectContaining({
+        voiceContext: expect.objectContaining({
+          targetScope: 'external-window',
+          processName: 'AppA.exe',
+          windowTitle: undefined,
         }),
       }),
     );

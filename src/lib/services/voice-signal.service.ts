@@ -4,7 +4,6 @@ import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import type { ASRResult } from '@/lib/ports/asr-port';
 import {
   VOICE_INPUT_TRANSCRIPT_TOPIC,
-  USER_INPUT_NORMALIZED_TOPIC,
 } from '@/lib/constants/signal-topics';
 import type {
   AgentInteractionContext,
@@ -104,12 +103,5 @@ export async function publishVoiceTranscriptSignal(
     source,
     trace_id: traceId,
     payload: transcriptPayload,
-  });
-
-  await publisher.publish({
-    topic: USER_INPUT_NORMALIZED_TOPIC,
-    source,
-    trace_id: traceId,
-    payload: normalizedEnvelope,
   });
 }
