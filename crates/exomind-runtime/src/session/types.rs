@@ -127,6 +127,46 @@ pub struct AgentSession {
     pub last_output_preview: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub error_message: Option<String>,
+    /// Quick actions available when status == WaitingInput
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub quick_actions: Vec<QuickAction>,
+}
+
+/// Quick action type — what kind of quick action this is.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum QuickActionType {
+    /// A button with a predefined response
+    Button,
+    /// Free-text input field
+    TextInput,
+    /// Confirm/reject binary choice
+    Confirm,
+}
+
+/// A quick action offered when a session is in WaitingInput state.
+/// For structured mode, the agent defines these explicitly.
+/// For terminal mode, a default "手动标记" action is provided.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct QuickAction {
+    pub id: String,
+    pub label: String,
+    pub action_type: QuickActionType,
+    /// Optional predefined payload (for Button type)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub payload: Option<String>,
+    /// Optional description/hint
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub description: Option<String>,
+}
+
+/// Response to a quick action from the user.
+#[derive(Debug, Clone, Deserialize)]
+pub struct QuickActionResponse {
+    pub action_id: String,
+    /// User-provided value (for TextInput) or "true"/"false" (for Confirm)
+    #[serde(default)]
+    pub value: Option<String>,
 }
 
 /// Input for creating a new session.
@@ -162,6 +202,9 @@ pub struct UpdateSessionInput {
     pub error_message: Option<String>,
     #[serde(default)]
     pub inner_session_id: Option<String>,
+    /// Update the quick actions offered during WaitingInput
+    #[serde(default)]
+    pub quick_actions: Option<Vec<QuickAction>>,
 }
 
 #[cfg(test)]
@@ -229,6 +272,7 @@ mod tests {
             turn_count: 5,
             last_output_preview: Some("建议将 user.input 拆为三层".to_string()),
             error_message: None,
+            quick_actions: vec![],
         };
         let json = serde_json::to_string(&session).unwrap();
         assert!(json.contains("\"running\""));

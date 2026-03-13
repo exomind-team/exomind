@@ -13,7 +13,7 @@ use tokio_stream::StreamExt;
 
 use crate::AppState;
 use crate::session::{
-    AgentSession, CreateSessionInput, SessionStatus, UpdateSessionInput,
+    AgentSession, CreateSessionInput, QuickActionResponse, SessionStatus, UpdateSessionInput,
 };
 
 // ── Query types ─────────────────────────────────────────────────
@@ -181,6 +181,100 @@ async fn session_stream(
     Sse::new(stream)
 }
 
+/// POST /sessions/:id/quick-action — Submit a quick action response
+///
+/// Validates the session is in WaitingInput state and the action_id matches
+/// an available quick action, then transitions the session back to Running.
+async fn submit_quick_action(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(response): Json<QuickActionResponse>,
+) -> Result<Json<AgentSession>, (StatusCode, String)> {
+    // Get current session
+    let session = state
+        .session_store
+        .get(&id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("session not found: {id}")))?;
+
+    // Validate session is in WaitingInput
+    if session.status != SessionStatus::WaitingInput {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("session is not waiting for input (current status: {})", session.status.as_str()),
+        ));
+    }
+
+    // Validate action_id exists (if quick_actions are defined)
+    if !session.quick_actions.is_empty() {
+        let action_exists = session.quick_actions.iter().any(|a| a.id == response.action_id);
+        if !action_exists {
+            return Err((
+                StatusCode::BAD_REQUEST,
+                format!("unknown quick action: {}", response.action_id),
+            ));
+        }
+    }
+
+    // Transition to Running and clear quick_actions
+    let update = UpdateSessionInput {
+        status: Some(SessionStatus::Running),
+        quick_actions: Some(vec![]),
+        ..Default::default()
+    };
+
+    let updated = state
+        .session_store
+        .update(&id, update)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    // Broadcast update event
+    if let Some(tx) = &state.session_event_tx {
+        let _ = tx.send(SessionEvent::Updated {
+            session: updated.clone(),
+        });
+    }
+
+    Ok(Json(updated))
+}
+
+/// POST /sessions/:id/mark-waiting — Manually mark a PTY session as waiting for input
+///
+/// For terminal mode sessions where we can't auto-detect WaitingInput.
+/// The user clicks a "等待决策" button to manually mark the session.
+async fn mark_waiting(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<AgentSession>, (StatusCode, String)> {
+    let update = UpdateSessionInput {
+        status: Some(SessionStatus::WaitingInput),
+        ..Default::default()
+    };
+
+    let updated = state
+        .session_store
+        .update(&id, update)
+        .map_err(|e| {
+            let status = if e.to_string().contains("not found") {
+                StatusCode::NOT_FOUND
+            } else if e.to_string().contains("invalid transition") {
+                StatusCode::CONFLICT
+            } else {
+                StatusCode::INTERNAL_SERVER_ERROR
+            };
+            (status, e.to_string())
+        })?;
+
+    // Broadcast update event
+    if let Some(tx) = &state.session_event_tx {
+        let _ = tx.send(SessionEvent::Updated {
+            session: updated.clone(),
+        });
+    }
+
+    Ok(Json(updated))
+}
+
 // ── Router ──────────────────────────────────────────────────────
 
 pub fn router() -> Router<AppState> {
@@ -190,5 +284,7 @@ pub fn router() -> Router<AppState> {
             "/sessions/{id}",
             get(get_session).patch(update_session).delete(delete_session),
         )
+        .route("/sessions/{id}/quick-action", post(submit_quick_action))
+        .route("/sessions/{id}/mark-waiting", post(mark_waiting))
         .route("/sessions/stream", get(session_stream))
 }

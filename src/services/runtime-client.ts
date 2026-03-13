@@ -1,5 +1,5 @@
 import type { AgentEnergySnapshot, RuntimeHostRecord } from '@/lib/types/agent-hub';
-import type { SessionInfo, CreateSessionRequest, UpdateSessionRequest } from '@/lib/types/session';
+import type { SessionInfo, CreateSessionRequest, UpdateSessionRequest, QuickActionResponse } from '@/lib/types/session';
 import type { ProviderProfileSnapshot } from '@/lib/agent-provider/types';
 import type {
   RuntimeCapabilityAgentKind,
@@ -727,6 +727,32 @@ export class RuntimeClient {
     );
     if (!response.ok) return response;
     return { ok: true, data: response.data as SessionInfo };
+  }
+
+  async submitQuickAction(
+    host: RuntimeHostRecord,
+    sessionId: string,
+    response: QuickActionResponse,
+  ): Promise<RuntimeClientResult<SessionInfo>> {
+    const result = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/quick-action`,
+      'POST',
+      response,
+    );
+    if (!result.ok) return result;
+    return { ok: true, data: result.data as SessionInfo };
+  }
+
+  async markSessionWaiting(
+    host: RuntimeHostRecord,
+    sessionId: string,
+  ): Promise<RuntimeClientResult<SessionInfo>> {
+    const result = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/mark-waiting`,
+      'POST',
+    );
+    if (!result.ok) return result;
+    return { ok: true, data: result.data as SessionInfo };
   }
 
   private async getJson(url: string): Promise<RuntimeClientResult<unknown>> {

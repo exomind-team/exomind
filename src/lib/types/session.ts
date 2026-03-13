@@ -27,6 +27,24 @@ export interface WorkContext {
   labels: string[];
 }
 
+/** Quick action type */
+export type QuickActionType = 'button' | 'text_input' | 'confirm';
+
+/** A quick action offered when session is in WaitingInput state */
+export interface QuickAction {
+  id: string;
+  label: string;
+  action_type: QuickActionType;
+  payload?: string;
+  description?: string;
+}
+
+/** Response to a quick action from the user */
+export interface QuickActionResponse {
+  action_id: string;
+  value?: string;
+}
+
 /** Full session info returned from the backend or mock */
 export interface SessionInfo {
   id: string;
@@ -43,6 +61,7 @@ export interface SessionInfo {
   last_active_at: string;
   turn_count: number;
   last_output_preview?: string;
+  quick_actions?: QuickAction[];
 }
 
 /** Request body for creating a new session */

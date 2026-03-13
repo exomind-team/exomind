@@ -65,7 +65,8 @@ impl SqliteSessionStore {
                 -- History
                 turn_count        INTEGER NOT NULL DEFAULT 0,
                 last_output_preview TEXT,
-                error_message     TEXT
+                error_message     TEXT,
+                quick_actions     TEXT NOT NULL DEFAULT '[]'
             );
 
             CREATE INDEX IF NOT EXISTS idx_sessions_status ON agent_sessions(status);
@@ -98,6 +99,7 @@ impl SqliteSessionStore {
             turn_count: 0,
             last_output_preview: None,
             error_message: None,
+            quick_actions: vec![],
         };
 
         self.insert_session(&session)?;
@@ -113,7 +115,7 @@ impl SqliteSessionStore {
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
                 created_at, last_active_at,
-                turn_count, last_output_preview, error_message
+                turn_count, last_output_preview, error_message, quick_actions
              FROM agent_sessions
              WHERE id = ?1",
         )?;
@@ -132,7 +134,7 @@ impl SqliteSessionStore {
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
                 created_at, last_active_at,
-                turn_count, last_output_preview, error_message
+                turn_count, last_output_preview, error_message, quick_actions
              FROM agent_sessions
              ORDER BY last_active_at DESC",
         )?;
@@ -149,7 +151,7 @@ impl SqliteSessionStore {
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
                 created_at, last_active_at,
-                turn_count, last_output_preview, error_message
+                turn_count, last_output_preview, error_message, quick_actions
              FROM agent_sessions
              WHERE status = ?1
              ORDER BY last_active_at DESC",
@@ -189,6 +191,9 @@ impl SqliteSessionStore {
         }
         if let Some(inner_session_id) = input.inner_session_id {
             session.inner_session_id = Some(inner_session_id);
+        }
+        if let Some(quick_actions) = input.quick_actions {
+            session.quick_actions = quick_actions;
         }
 
         session.last_active_at = chrono::Utc::now().to_rfc3339();
@@ -243,8 +248,8 @@ impl SqliteSessionStore {
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
                 created_at, last_active_at,
-                turn_count, last_output_preview, error_message
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)",
+                turn_count, last_output_preview, error_message, quick_actions
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
             params![
                 session.id,
                 session.agent_kind,
@@ -266,6 +271,7 @@ impl SqliteSessionStore {
                 session.turn_count,
                 session.last_output_preview,
                 session.error_message,
+                serde_json::to_string(&session.quick_actions)?,
             ],
         )?;
         Ok(())
@@ -280,8 +286,8 @@ impl SqliteSessionStore {
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
                 created_at, last_active_at,
-                turn_count, last_output_preview, error_message
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20)
+                turn_count, last_output_preview, error_message, quick_actions
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
             ON CONFLICT(id) DO UPDATE SET
                 role = excluded.role,
                 summary = excluded.summary,
@@ -299,7 +305,8 @@ impl SqliteSessionStore {
                 last_active_at = excluded.last_active_at,
                 turn_count = excluded.turn_count,
                 last_output_preview = excluded.last_output_preview,
-                error_message = excluded.error_message",
+                error_message = excluded.error_message,
+                quick_actions = excluded.quick_actions",
             params![
                 session.id,
                 session.agent_kind,
@@ -321,6 +328,7 @@ impl SqliteSessionStore {
                 session.turn_count,
                 session.last_output_preview,
                 session.error_message,
+                serde_json::to_string(&session.quick_actions)?,
             ],
         )?;
         Ok(())
@@ -332,6 +340,7 @@ fn map_session_row(row: &rusqlite::Row) -> Result<AgentSession, rusqlite::Error>
     let interaction_str: String = row.get(5)?;
     let issue_refs_json: String = row.get(10)?;
     let labels_json: String = row.get(13)?;
+    let quick_actions_json: String = row.get(20)?;
 
     let status = SessionStatus::from_str(&status_str)
         .unwrap_or(SessionStatus::Running);
@@ -340,6 +349,8 @@ fn map_session_row(row: &rusqlite::Row) -> Result<AgentSession, rusqlite::Error>
     let issue_refs: Vec<String> = serde_json::from_str(&issue_refs_json)
         .unwrap_or_default();
     let labels: Vec<String> = serde_json::from_str(&labels_json)
+        .unwrap_or_default();
+    let quick_actions: Vec<QuickAction> = serde_json::from_str(&quick_actions_json)
         .unwrap_or_default();
 
     Ok(AgentSession {
@@ -365,5 +376,6 @@ fn map_session_row(row: &rusqlite::Row) -> Result<AgentSession, rusqlite::Error>
         turn_count: row.get(17)?,
         last_output_preview: row.get(18)?,
         error_message: row.get(19)?,
+        quick_actions,
     })
 }

@@ -74,6 +74,11 @@ export const MOCK_SESSIONS: SessionInfo[] = [
     last_active_at: new Date(Date.now() - 2 * 60_000).toISOString(),
     turn_count: 5,
     last_output_preview: '等待确认测试方案：\n  A) 只测 normalizer\n  B) 端到端含 voice→parse',
+    quick_actions: [
+      { id: 'qa-a', label: '方案 A', action_type: 'button' as const, payload: 'plan_a', description: '只测 normalizer' },
+      { id: 'qa-b', label: '方案 B', action_type: 'button' as const, payload: 'plan_b', description: '端到端含 voice→parse' },
+      { id: 'qa-custom', label: '自定义', action_type: 'text_input' as const, description: '输入你的方案...' },
+    ],
   },
   {
     id: 'mock-session-4',

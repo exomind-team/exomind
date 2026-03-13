@@ -77,6 +77,7 @@ impl SessionStore {
                     turn_count: 0,
                     last_output_preview: None,
                     error_message: None,
+                    quick_actions: vec![],
                 };
                 let result = session.clone();
                 self.with_memory_mut(|sessions| {
@@ -153,6 +154,9 @@ impl SessionStore {
                     }
                     if let Some(inner_session_id) = input.inner_session_id {
                         session.inner_session_id = Some(inner_session_id);
+                    }
+                    if let Some(quick_actions) = input.quick_actions {
+                        session.quick_actions = quick_actions;
                     }
 
                     session.last_active_at = chrono::Utc::now().to_rfc3339();

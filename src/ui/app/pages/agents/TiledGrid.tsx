@@ -23,6 +23,8 @@ import {
   formatRelativeTime,
 } from '@/lib/types/session';
 import { PtyTerminal } from '../../components/PtyTerminal';
+import { QuickActionBar } from './QuickActionBar';
+import type { QuickActionResponse } from '@/lib/types/session';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -41,6 +43,10 @@ export interface TiledGridProps {
   paneOrder?: string[];
   /** Callback when panes are reordered via drag-and-drop */
   onReorder?: (newOrder: string[]) => void;
+  /** Callback when user submits a quick action response */
+  onQuickAction?: (sessionId: string, response: QuickActionResponse) => void;
+  /** Callback when user manually marks a PTY session as waiting */
+  onMarkWaiting?: (sessionId: string) => void;
 }
 
 // ── Layout config ──────────────────────────────────────────────
@@ -64,6 +70,8 @@ export function TiledGrid({
   onSessionClick,
   paneOrder,
   onReorder,
+  onQuickAction,
+  onMarkWaiting,
 }: TiledGridProps) {
   const config = LAYOUT_CONFIG[layout];
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
@@ -142,6 +150,8 @@ export function TiledGrid({
           onDoubleClick={() => handleDoubleClick(expandedIndex)}
           onFocus={() => onFocusPane(expandedIndex)}
           onClick={() => onSessionClick?.(session)}
+          onQuickAction={onQuickAction ? (r) => onQuickAction(session.id, r) : undefined}
+          onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session.id) : undefined}
         />
       </div>
     );
@@ -169,6 +179,8 @@ export function TiledGrid({
               onDoubleClick={() => handleDoubleClick(index)}
               onFocus={() => onFocusPane(index)}
               onClick={() => onSessionClick?.(session)}
+              onQuickAction={onQuickAction ? (r) => onQuickAction(session.id, r) : undefined}
+              onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session.id) : undefined}
             />
           ))}
           {/* Empty pane placeholders */}
@@ -238,6 +250,8 @@ interface SortablePaneProps {
   onDoubleClick: () => void;
   onFocus: () => void;
   onClick?: () => void;
+  onQuickAction?: (response: QuickActionResponse) => void;
+  onMarkWaiting?: () => void;
 }
 
 function SortablePane(props: SortablePaneProps) {
@@ -280,6 +294,8 @@ interface SessionPaneProps {
   onFocus: () => void;
   onClick?: () => void;
   dragListeners?: Record<string, Function>;
+  onQuickAction?: (response: QuickActionResponse) => void;
+  onMarkWaiting?: () => void;
 }
 
 function SessionPane({
@@ -293,6 +309,8 @@ function SessionPane({
   onFocus,
   onClick,
   dragListeners,
+  onQuickAction,
+  onMarkWaiting,
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const needsAttention = sessionNeedsAttention(session.status);
@@ -405,6 +423,16 @@ function SessionPane({
           </div>
         )}
       </div>
+
+      {/* Quick action bar (only when waiting for input) */}
+      {needsAttention && session.status === 'waiting_input' && (
+        <QuickActionBar
+          actions={session.quick_actions ?? []}
+          onSubmit={(response) => onQuickAction?.(response)}
+          showMarkWaiting={session.interaction_mode === 'terminal' && !session.quick_actions?.length}
+          onMarkWaiting={() => onMarkWaiting?.()}
+        />
+      )}
 
       {/* Pane action bar (32px) */}
       <div className="flex items-center justify-between border-t border-[#292524] bg-[#1C1917] px-2 py-1">
