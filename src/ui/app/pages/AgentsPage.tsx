@@ -128,12 +128,14 @@ import {
 } from './agents/conversation-runtime';
 import { EnergyBar, PHASE_LABELS } from './agents/AgentDetailPage';
 import { WorkspaceTabs } from './agents/WorkspaceTabs';
+import { SessionsView } from './agents/SessionsView';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
+  { id: 'sessions', icon: Crosshair, label: '会话' },
   { id: 'list', icon: Bot, label: '节点' },
   { id: 'history', icon: AlarmClock, label: '信号历史' },
   { id: 'routes', icon: List, label: '路由' },
@@ -3396,6 +3398,18 @@ export function AgentsPage() {
   };
 
   const content = useMemo(() => {
+    if (viewMode === 'sessions') {
+      return (
+        <SessionsView
+          onSessionClick={(session) => {
+            // If the session has a PTY, open it in the right panel
+            if (session.pty_id) {
+              openPtyTerminal(session.pty_id);
+            }
+          }}
+        />
+      );
+    }
     if (viewMode === 'list') {
       return (
         <ListTabView
