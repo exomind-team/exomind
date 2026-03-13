@@ -199,9 +199,17 @@ describe('ChatPage 架构边界', () => {
     const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
 
     expect(source).toContain('getEventLogService');
+    expect(source).toContain('loadEvents(');
     expect(source).not.toContain('storageRef.current.addEvent(');
     expect(source).not.toContain('storageRef.current.getEvents(');
     expect(source).not.toContain('storage.getEvents(');
+  });
+
+  it('RT SQLite 模式下不应再把 ChatPage 展示读源绑到 getEventStorage', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).not.toContain('getEventStorage(');
+    expect(source).not.toContain('onRemoteChange(');
   });
 
   it('ECS 模式下不应再直连 syncToRemote / 6984（不再依赖旧同步服务器）', () => {

@@ -1,11 +1,19 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { getEventLogService, getTaskBackupService } from '@/lib/services';
+import { getEventLogService, getTaskBackupService, getTimeBlockBackupService } from '@/lib/services';
 
 export type ImportStrategy = 'merge' | 'overwrite';
 
 type PickedJsonFile = {
   path: string;
   content: string;
+};
+
+type CombinedBackupPayload = {
+  version?: number;
+  events?: unknown[];
+  tasks?: unknown[];
+  time_blocks?: unknown[];
+  active_block?: unknown | null;
 };
 
 function downloadFileFallback(content: BlobPart, mimeType: string, filename: string) {
@@ -46,13 +54,10 @@ export function pickFileOnWeb(accept: string): Promise<File | null> {
 export async function exportBackup(): Promise<string> {
   const service = getEventLogService();
   const eventJson = await service.exportEventsAsJson();
-  const payload = JSON.parse(eventJson) as {
-    version?: number;
-    events?: unknown[];
-    tasks?: unknown[];
-  };
+  const payload = JSON.parse(eventJson) as CombinedBackupPayload;
   const eventCount = Array.isArray(payload.events) ? payload.events.length : 0;
   let taskCount = 0;
+  let timeBlockCount = 0;
 
   try {
     const taskResult = await getTaskBackupService().exportTasksAsJson();
@@ -66,11 +71,28 @@ export async function exportBackup(): Promise<string> {
     // Keep event-only export when task backup is unavailable.
   }
 
+  try {
+    const timeBlockResult = await getTimeBlockBackupService().exportTimeBlocksAsJson();
+    const timeBlockPayload = JSON.parse(timeBlockResult.content) as {
+      time_blocks?: unknown[];
+      active_block?: unknown | null;
+    };
+    if (Array.isArray(timeBlockPayload.time_blocks)) {
+      payload.time_blocks = timeBlockPayload.time_blocks;
+      payload.active_block = timeBlockPayload.active_block ?? null;
+      payload.version = 3;
+      timeBlockCount = timeBlockPayload.time_blocks.length;
+    }
+  } catch {
+    // Keep event/task export when timeblock backup is unavailable.
+  }
+
   const combinedJson = JSON.stringify(payload, null, 2);
   const defaultName = buildBackupFileName();
   const summaryParts: string[] = [];
   if (eventCount > 0) summaryParts.push(`${eventCount} 条事件`);
   if (taskCount > 0) summaryParts.push(`${taskCount} 条任务`);
+  if (timeBlockCount > 0) summaryParts.push(`${timeBlockCount} 条时间块`);
   const summary = summaryParts.length > 0 ? summaryParts.join('、') : '0 条记录';
 
   if (await isTauri()) {
@@ -84,6 +106,43 @@ export async function exportBackup(): Promise<string> {
 
   downloadFileFallback(combinedJson, 'application/json;charset=utf-8', defaultName);
   return `导出成功，共 ${summary}。`;
+}
+
+export async function importBackupFromContent(
+  content: string,
+  sourcePath: string,
+  strategy: ImportStrategy = 'merge',
+): Promise<string> {
+  const parsed = JSON.parse(content) as CombinedBackupPayload;
+  const result = await getEventLogService().importEventsFromJson(content, strategy);
+  let taskSummary = '';
+  let timeBlockSummary = '';
+
+  try {
+    if (Array.isArray(parsed.tasks)) {
+      const taskJson = JSON.stringify({ version: 1, tasks: parsed.tasks });
+      const taskResult = await getTaskBackupService().importTasksFromJson(taskJson, strategy);
+      taskSummary = `；任务新增 ${taskResult.imported} 条，跳过 ${taskResult.skipped} 条`;
+    }
+  } catch {
+    taskSummary = '；任务恢复失败';
+  }
+
+  try {
+    if (Array.isArray(parsed.time_blocks) || parsed.active_block) {
+      const timeBlockJson = JSON.stringify({
+        version: 1,
+        time_blocks: Array.isArray(parsed.time_blocks) ? parsed.time_blocks : [],
+        active_block: parsed.active_block ?? null,
+      });
+      const timeBlockResult = await getTimeBlockBackupService().importTimeBlocksFromJson(timeBlockJson, strategy);
+      timeBlockSummary = `；时间块新增 ${timeBlockResult.imported} 条，跳过 ${timeBlockResult.skipped} 条`;
+    }
+  } catch {
+    timeBlockSummary = '；时间块恢复失败';
+  }
+
+  return `导入成功：事件新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条${taskSummary}${timeBlockSummary}。来源：${sourcePath}`;
 }
 
 export async function importBackup(strategy: ImportStrategy = 'merge'): Promise<string> {
@@ -102,21 +161,7 @@ export async function importBackup(strategy: ImportStrategy = 'merge'): Promise<
 
   if (!picked) return '已取消导入。';
 
-  const result = await getEventLogService().importEventsFromJson(picked.content, strategy);
-  let taskSummary = '';
-
-  try {
-    const parsed = JSON.parse(picked.content) as { tasks?: unknown[] };
-    if (Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
-      const taskJson = JSON.stringify({ version: 1, tasks: parsed.tasks });
-      const taskResult = await getTaskBackupService().importTasksFromJson(taskJson, strategy);
-      taskSummary = `；任务新增 ${taskResult.imported} 条，跳过 ${taskResult.skipped} 条`;
-    }
-  } catch {
-    taskSummary = '；任务恢复失败';
-  }
-
-  return `导入成功：事件新增 ${result.imported} 条，跳过 ${result.skipped} 条，当前共 ${result.total} 条${taskSummary}。来源：${picked.path}`;
+  return importBackupFromContent(picked.content, picked.path, strategy);
 }
 
 export async function exportTasksJson(): Promise<string> {

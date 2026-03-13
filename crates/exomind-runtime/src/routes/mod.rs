@@ -10,6 +10,7 @@ pub mod mesh;
 pub mod pty;
 pub mod signals;
 pub mod tasks;
+pub mod timeblocks;
 pub mod topology;
 pub mod workspace;
 
@@ -23,6 +24,7 @@ pub fn router() -> Router<AppState> {
         .merge(mesh::router())
         .merge(signals::router())
         .merge(tasks::router())
+        .merge(timeblocks::router())
         .merge(workspace::router());
     #[cfg(not(target_os = "android"))]
     let r = r.merge(pty::router());

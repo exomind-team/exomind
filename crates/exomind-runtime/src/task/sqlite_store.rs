@@ -6,6 +6,8 @@ use rusqlite::{Connection, OptionalExtension, params};
 use super::store::TaskStoreError;
 use super::types::{CreateTaskInput, Task, TaskDependency, TaskPriority, TaskStatus, UpdateTaskInput};
 
+const DEFAULT_SCOPE_KEY: &str = "anonymous";
+
 pub struct SqliteTaskStore {
     path: PathBuf,
     connection: Mutex<Connection>,
@@ -31,6 +33,10 @@ impl SqliteTaskStore {
     }
 
     pub fn create(&self, input: CreateTaskInput) -> Result<Task, TaskStoreError> {
+        self.create_scoped(DEFAULT_SCOPE_KEY, input)
+    }
+
+    pub fn create_scoped(&self, scope_key: &str, input: CreateTaskInput) -> Result<Task, TaskStoreError> {
         let now = chrono::Utc::now().timestamp_millis() as u64;
         let task = Task {
             id: uuid::Uuid::new_v4().to_string(),
@@ -51,12 +57,15 @@ impl SqliteTaskStore {
             completed_at: None,
         };
 
-        self.insert_task(&task)?;
-
+        self.insert_task(scope_key, &task)?;
         Ok(task)
     }
 
     pub fn get(&self, id: &str) -> Result<Option<Task>, TaskStoreError> {
+        self.get_scoped(DEFAULT_SCOPE_KEY, id)
+    }
+
+    pub fn get_scoped(&self, scope_key: &str, id: &str) -> Result<Option<Task>, TaskStoreError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT
@@ -64,16 +73,20 @@ impl SqliteTaskStore {
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
                 created_at, updated_at, completed_at
              FROM tasks
-             WHERE id = ?1",
+             WHERE scope_key = ?1 AND id = ?2",
         )?;
 
         statement
-            .query_row(params![id], map_task_row)
+            .query_row(params![normalize_scope_key(scope_key), id], map_task_row)
             .optional()
             .map_err(TaskStoreError::from)
     }
 
     pub fn list(&self) -> Result<Vec<Task>, TaskStoreError> {
+        self.list_scoped(DEFAULT_SCOPE_KEY)
+    }
+
+    pub fn list_scoped(&self, scope_key: &str) -> Result<Vec<Task>, TaskStoreError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT
@@ -81,13 +94,18 @@ impl SqliteTaskStore {
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
                 created_at, updated_at, completed_at
              FROM tasks
+             WHERE scope_key = ?1
              ORDER BY created_at DESC, id DESC",
         )?;
-        let rows = statement.query_map([], map_task_row)?;
+        let rows = statement.query_map(params![normalize_scope_key(scope_key)], map_task_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(TaskStoreError::from)
     }
 
     pub fn list_by_status(&self, status: &TaskStatus) -> Result<Vec<Task>, TaskStoreError> {
+        self.list_by_status_scoped(DEFAULT_SCOPE_KEY, status)
+    }
+
+    pub fn list_by_status_scoped(&self, scope_key: &str, status: &TaskStatus) -> Result<Vec<Task>, TaskStoreError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT
@@ -95,16 +113,20 @@ impl SqliteTaskStore {
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
                 created_at, updated_at, completed_at
              FROM tasks
-             WHERE status = ?1
+             WHERE scope_key = ?1 AND status = ?2
              ORDER BY created_at DESC, id DESC",
         )?;
-        let rows = statement.query_map(params![task_status_to_db(status)], map_task_row)?;
+        let rows = statement.query_map(params![normalize_scope_key(scope_key), task_status_to_db(status)], map_task_row)?;
         rows.collect::<Result<Vec<_>, _>>().map_err(TaskStoreError::from)
     }
 
     pub fn update(&self, id: &str, input: UpdateTaskInput) -> Result<Task, TaskStoreError> {
+        self.update_scoped(DEFAULT_SCOPE_KEY, id, input)
+    }
+
+    pub fn update_scoped(&self, scope_key: &str, id: &str, input: UpdateTaskInput) -> Result<Task, TaskStoreError> {
         let mut task = self
-            .get(id)?
+            .get_scoped(scope_key, id)?
             .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
         if task.status.is_terminal() {
@@ -143,7 +165,7 @@ impl SqliteTaskStore {
         }
         task.updated_at = chrono::Utc::now().timestamp_millis() as u64;
 
-        self.persist_task(&task)?;
+        self.persist_task(scope_key, &task)?;
         Ok(task)
     }
 
@@ -152,8 +174,17 @@ impl SqliteTaskStore {
         id: &str,
         new_status: TaskStatus,
     ) -> Result<(TaskStatus, Task), TaskStoreError> {
+        self.transition_scoped(DEFAULT_SCOPE_KEY, id, new_status)
+    }
+
+    pub fn transition_scoped(
+        &self,
+        scope_key: &str,
+        id: &str,
+        new_status: TaskStatus,
+    ) -> Result<(TaskStatus, Task), TaskStoreError> {
         let mut task = self
-            .get(id)?
+            .get_scoped(scope_key, id)?
             .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
         if !task.status.can_transition_to(&new_status) {
@@ -169,41 +200,64 @@ impl SqliteTaskStore {
         task.updated_at = now;
         task.completed_at = task.status.is_terminal().then_some(now);
 
-        self.persist_task(&task)?;
+        self.persist_task(scope_key, &task)?;
         Ok((old_status, task))
     }
 
     pub fn abandon(&self, id: &str) -> Result<Task, TaskStoreError> {
-        let (_, task) = self.transition(id, TaskStatus::Abandoned)?;
+        self.abandon_scoped(DEFAULT_SCOPE_KEY, id)
+    }
+
+    pub fn abandon_scoped(&self, scope_key: &str, id: &str) -> Result<Task, TaskStoreError> {
+        let (_, task) = self.transition_scoped(scope_key, id, TaskStatus::Abandoned)?;
         Ok(task)
     }
 
     pub fn remove(&self, id: &str) -> Result<Option<Task>, TaskStoreError> {
-        let existing = self.get(id)?;
+        self.remove_scoped(DEFAULT_SCOPE_KEY, id)
+    }
+
+    pub fn remove_scoped(&self, scope_key: &str, id: &str) -> Result<Option<Task>, TaskStoreError> {
+        let existing = self.get_scoped(scope_key, id)?;
         if existing.is_none() {
             return Ok(None);
         }
 
         let connection = self.connection();
-        connection.execute("DELETE FROM tasks WHERE id = ?1", params![id])?;
+        connection.execute(
+            "DELETE FROM tasks WHERE scope_key = ?1 AND id = ?2",
+            params![normalize_scope_key(scope_key), id],
+        )?;
         Ok(existing)
     }
 
     pub fn len(&self) -> Result<usize, TaskStoreError> {
+        self.len_scoped(DEFAULT_SCOPE_KEY)
+    }
+
+    pub fn len_scoped(&self, scope_key: &str) -> Result<usize, TaskStoreError> {
         let connection = self.connection();
-        let count: i64 = connection.query_row("SELECT COUNT(1) FROM tasks", [], |row| row.get(0))?;
+        let count: i64 = connection.query_row(
+            "SELECT COUNT(1) FROM tasks WHERE scope_key = ?1",
+            params![normalize_scope_key(scope_key)],
+            |row| row.get(0),
+        )?;
         Ok(count as usize)
     }
 
     pub fn upsert(&self, task: &Task) -> Result<(), TaskStoreError> {
+        self.upsert_scoped(DEFAULT_SCOPE_KEY, task)
+    }
+
+    pub fn upsert_scoped(&self, scope_key: &str, task: &Task) -> Result<(), TaskStoreError> {
         let connection = self.connection();
         connection.execute(
             "INSERT INTO tasks (
-                id, title, description, done_condition, status, priority, tags_json, source,
+                scope_key, id, title, description, done_condition, status, priority, tags_json, source,
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
                 created_at, updated_at, completed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)
-            ON CONFLICT(id) DO UPDATE SET
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)
+            ON CONFLICT(scope_key, id) DO UPDATE SET
                 title = excluded.title,
                 description = excluded.description,
                 done_condition = excluded.done_condition,
@@ -220,6 +274,7 @@ impl SqliteTaskStore {
                 updated_at = excluded.updated_at,
                 completed_at = excluded.completed_at",
             params![
+                normalize_scope_key(scope_key),
                 task.id,
                 task.title,
                 task.description,
@@ -242,11 +297,18 @@ impl SqliteTaskStore {
     }
 
     pub fn replace_all(&self, tasks: &[Task]) -> Result<(), TaskStoreError> {
+        self.replace_all_scoped(DEFAULT_SCOPE_KEY, tasks)
+    }
+
+    pub fn replace_all_scoped(&self, scope_key: &str, tasks: &[Task]) -> Result<(), TaskStoreError> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
-        tx.execute("DELETE FROM tasks", [])?;
+        tx.execute(
+            "DELETE FROM tasks WHERE scope_key = ?1",
+            params![normalize_scope_key(scope_key)],
+        )?;
         for task in tasks {
-            insert_task_in_transaction(&tx, task)?;
+            insert_task_in_transaction(&tx, scope_key, task)?;
         }
         tx.commit()?;
         Ok(())
@@ -258,9 +320,60 @@ impl SqliteTaskStore {
 
     fn init(&self) -> Result<(), TaskStoreError> {
         let connection = self.connection();
+        let has_tasks_table: bool = connection.query_row(
+            "SELECT COUNT(1) FROM sqlite_master WHERE type = 'table' AND name = 'tasks'",
+            [],
+            |row| Ok(row.get::<_, i64>(0)? > 0),
+        )?;
+
+        if has_tasks_table {
+            let mut statement = connection.prepare("PRAGMA table_info(tasks)")?;
+            let columns = statement
+                .query_map([], |row| row.get::<_, String>(1))?
+                .collect::<Result<Vec<_>, _>>()?;
+
+            if !columns.iter().any(|column| column == "scope_key") {
+                connection.execute_batch(
+                    "ALTER TABLE tasks RENAME TO tasks_legacy;
+                     CREATE TABLE tasks (
+                        scope_key TEXT NOT NULL,
+                        id TEXT NOT NULL,
+                        title TEXT NOT NULL,
+                        description TEXT NULL,
+                        done_condition TEXT NULL,
+                        status TEXT NOT NULL,
+                        priority TEXT NOT NULL,
+                        tags_json TEXT NOT NULL,
+                        source TEXT NULL,
+                        parent_id TEXT NULL,
+                        depends_on_json TEXT NOT NULL,
+                        due_at INTEGER NULL,
+                        estimated_minutes INTEGER NULL,
+                        time_block_ids_json TEXT NOT NULL,
+                        created_at INTEGER NOT NULL,
+                        updated_at INTEGER NOT NULL,
+                        completed_at INTEGER NULL,
+                        PRIMARY KEY (scope_key, id)
+                     );
+                     INSERT INTO tasks (
+                        scope_key, id, title, description, done_condition, status, priority, tags_json, source,
+                        parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                        created_at, updated_at, completed_at
+                     )
+                     SELECT
+                        'anonymous', id, title, description, done_condition, status, priority, tags_json, source,
+                        parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
+                        created_at, updated_at, completed_at
+                     FROM tasks_legacy;
+                     DROP TABLE tasks_legacy;",
+                )?;
+            }
+        }
+
         connection.execute_batch(
             "CREATE TABLE IF NOT EXISTS tasks (
-                id TEXT PRIMARY KEY,
+                scope_key TEXT NOT NULL,
+                id TEXT NOT NULL,
                 title TEXT NOT NULL,
                 description TEXT NULL,
                 done_condition TEXT NULL,
@@ -275,14 +388,15 @@ impl SqliteTaskStore {
                 time_block_ids_json TEXT NOT NULL,
                 created_at INTEGER NOT NULL,
                 updated_at INTEGER NOT NULL,
-                completed_at INTEGER NULL
+                completed_at INTEGER NULL,
+                PRIMARY KEY (scope_key, id)
             );",
         )?;
         Ok(())
     }
 
-    fn persist_task(&self, task: &Task) -> Result<(), TaskStoreError> {
-        self.upsert(task)
+    fn persist_task(&self, scope_key: &str, task: &Task) -> Result<(), TaskStoreError> {
+        self.upsert_scoped(scope_key, task)
     }
 
     fn connection(&self) -> std::sync::MutexGuard<'_, Connection> {
@@ -292,15 +406,16 @@ impl SqliteTaskStore {
         }
     }
 
-    fn insert_task(&self, task: &Task) -> Result<(), TaskStoreError> {
+    fn insert_task(&self, scope_key: &str, task: &Task) -> Result<(), TaskStoreError> {
         let connection = self.connection();
         connection.execute(
             "INSERT INTO tasks (
-                id, title, description, done_condition, status, priority, tags_json, source,
+                scope_key, id, title, description, done_condition, status, priority, tags_json, source,
                 parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
                 created_at, updated_at, completed_at
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
             params![
+                normalize_scope_key(scope_key),
                 task.id,
                 task.title,
                 task.description,
@@ -354,7 +469,6 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
         completed_at: row.get(15)?,
     })
 }
-
 
 fn task_status_to_db(status: &TaskStatus) -> &'static str {
     match status {
@@ -420,15 +534,17 @@ fn map_json_error(error: serde_json::Error) -> rusqlite::Error {
 
 fn insert_task_in_transaction(
     tx: &rusqlite::Transaction<'_>,
+    scope_key: &str,
     task: &Task,
 ) -> Result<(), TaskStoreError> {
     tx.execute(
         "INSERT INTO tasks (
-            id, title, description, done_condition, status, priority, tags_json, source,
+            scope_key, id, title, description, done_condition, status, priority, tags_json, source,
             parent_id, depends_on_json, due_at, estimated_minutes, time_block_ids_json,
             created_at, updated_at, completed_at
-        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16)",
+        ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17)",
         params![
+            normalize_scope_key(scope_key),
             task.id,
             task.title,
             task.description,
@@ -448,4 +564,13 @@ fn insert_task_in_transaction(
         ],
     )?;
     Ok(())
+}
+
+fn normalize_scope_key(scope_key: &str) -> &str {
+    let normalized = scope_key.trim();
+    if normalized.is_empty() {
+        DEFAULT_SCOPE_KEY
+    } else {
+        normalized
+    }
 }

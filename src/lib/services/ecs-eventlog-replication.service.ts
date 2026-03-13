@@ -1,9 +1,13 @@
+import { getEventlogBackendMode } from '@/config/domain-backend-mode';
 import { getSelectedRuntimeTarget } from '@/config/runtime-target';
+import { ExoMindEnvironment } from '@/lib/environment/environment';
 import {
   getEventStorage,
   type Event as StorageEvent,
   type ProjectReplicatedEventResult,
 } from '@/lib/storage/event-storage';
+import type { EventData } from '@/lib/types/event';
+import { getEventLogService } from './eventlog.service';
 import { SignalStreamService } from './signal-stream.service';
 
 export const EVENTLOG_REPLICATION_APPENDED_TOPIC = 'eventlog.replication.appended';
@@ -52,6 +56,17 @@ function buildReplicationPayload(event: StorageEvent): EventLogReplicationAppend
   };
 }
 
+function storageEventToEventData(event: StorageEvent): EventData {
+  const parsedTimestamp = Date.parse(event.createdAt);
+  return {
+    id: event.id,
+    timestamp: Number.isNaN(parsedTimestamp) ? Date.now() : parsedTimestamp,
+    content: event.content,
+    tags: typeof event.type === 'string' && event.type.length > 0 ? [event.type] : ['note'],
+    metadata: event.metadata,
+  };
+}
+
 export async function publishEventLogReplicationAppend(event: StorageEvent): Promise<void> {
   const signalPublisher = new SignalStreamService({
     host: buildRuntimeHostRecord(),
@@ -66,6 +81,12 @@ export async function publishEventLogReplicationAppend(event: StorageEvent): Pro
 }
 
 export async function appendEventWithEcsReplication(event: StorageEvent, userId?: string): Promise<StorageEvent> {
+  const environment = ExoMindEnvironment.getInstance();
+  if (environment.runtime === 'tauri' && getEventlogBackendMode() === 'rt-sqlite') {
+    await getEventLogService().appendEventData(storageEventToEventData(event));
+    return event;
+  }
+
   const storage = getEventStorage(userId);
   await storage.addEvent(event);
 
@@ -91,5 +112,14 @@ export async function projectEventLogReplicationAppend(
   payload: EventLogReplicationAppendedPayload,
   userId?: string,
 ): Promise<ProjectReplicatedEventResult> {
+  const environment = ExoMindEnvironment.getInstance();
+  if (environment.runtime === 'tauri' && getEventlogBackendMode() === 'rt-sqlite') {
+    const existing = await environment.eventlog.getEvent(payload.event.id);
+    if (existing) {
+      return 'duplicate';
+    }
+    await getEventLogService().appendEventData(storageEventToEventData(payload.event));
+    return 'inserted';
+  }
   return getEventStorage(userId).projectReplicatedEvent(payload.event);
 }

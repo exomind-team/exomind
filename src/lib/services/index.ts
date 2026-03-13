@@ -4,9 +4,33 @@
 
 export { EventLogServiceImpl, getEventLogService } from './eventlog.service';
 export type { EventLogService } from './eventlog.service';
+export {
+  EventLogBackupServiceImpl,
+  getEventLogBackupService,
+  resetEventLogBackupServiceForTests,
+} from './eventlog-backup.service';
+export type {
+  EventLogBackendStatus,
+  EventLogExportJsonResult,
+  EventLogExportSqliteResult,
+  EventLogImportResult,
+  EventLogImportStrategy,
+} from './eventlog-backup.service';
 
 export { TimeBlockServiceImpl, getTimeBlockService } from './timeblock.service';
 export type { TimeBlockService } from './timeblock.service';
+export {
+  TimeBlockBackupServiceImpl,
+  getTimeBlockBackupService,
+  resetTimeBlockBackupServiceForTests,
+} from './timeblock-backup.service';
+export type {
+  TimeBlockBackendStatus,
+  TimeBlockExportJsonResult,
+  TimeBlockExportSqliteResult,
+  TimeBlockImportResult,
+  TimeBlockImportStrategy,
+} from './timeblock-backup.service';
 
 export { TaskServiceImpl, getTaskService } from './task.service';
 export type { TaskService } from './task.service';

@@ -12,17 +12,35 @@
  */
 import { vi } from 'vitest';
 
-const voiceShortcutAsrProviderState = {
-  current: 'moss' as 'moss' | 'volcano',
-  listeners: new Set<(value: 'moss' | 'volcano') => void>(),
-};
-
-vi.mock('@/lib/services', () => ({
-  getEventLogService: vi.fn(() => ({
+export const settingsPageServiceMocks = {
+  dataTransfer: {
+    exportBackup: vi.fn().mockResolvedValue('全部数据导出成功。'),
+    importBackup: vi.fn().mockResolvedValue('全部数据导入成功。'),
+  },
+  eventLog: {
     exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
     importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0 }),
-  })),
-  getTaskBackupService: vi.fn(() => ({
+  },
+  eventlogBackup: {
+    exportEventsAsJson: vi.fn().mockResolvedValue({
+      fileName: 'exomind-eventlog.json',
+      content: '{"version":1,"events":[]}',
+      eventCount: 0,
+    }),
+    exportEventsAsSqliteSnapshot: vi.fn().mockResolvedValue({
+      fileName: 'exomind-eventlog.sqlite',
+      bytes: new Uint8Array(),
+      eventCount: 0,
+    }),
+    importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+    importEventsFromSqliteSnapshot: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+    getBackendStatus: vi.fn().mockResolvedValue({
+      backend: 'rt-sqlite',
+      supportsJsonBackup: true,
+      supportsSqliteSnapshot: true,
+    }),
+  },
+  taskBackup: {
     exportTasksAsJson: vi.fn().mockResolvedValue({
       fileName: 'exomind-tasks.json',
       content: '{"version":1,"tasks":[]}',
@@ -40,7 +58,84 @@ vi.mock('@/lib/services', () => ({
       supportsJsonBackup: true,
       supportsSqliteSnapshot: true,
     }),
+  },
+  timeblockBackup: {
+    exportTimeBlocksAsJson: vi.fn().mockResolvedValue({
+      fileName: 'exomind-timeblocks.json',
+      content: '{"version":1,"time_blocks":[],"active_block":null}',
+      timeBlockCount: 0,
+      activeBlock: null,
+    }),
+    exportTimeBlocksAsSqliteSnapshot: vi.fn().mockResolvedValue({
+      fileName: 'exomind-timeblocks.sqlite',
+      bytes: new Uint8Array(),
+      timeBlockCount: 0,
+      activeBlockPresent: false,
+    }),
+    importTimeBlocksFromJson: vi.fn().mockResolvedValue({
+      imported: 0,
+      skipped: 0,
+      total: 0,
+      activeBlockUpdated: false,
+    }),
+    importTimeBlocksFromSqliteSnapshot: vi.fn().mockResolvedValue({
+      imported: 0,
+      skipped: 0,
+      total: 0,
+      activeBlockUpdated: false,
+    }),
+    getBackendStatus: vi.fn().mockResolvedValue({
+      backend: 'rt-sqlite',
+      supportsJsonBackup: true,
+      supportsSqliteSnapshot: true,
+    }),
+  },
+};
+
+export const settingsPagePreferenceState = {
+  developerMode: false,
+  agentPageEnabled: false,
+  desktopAdaptiveEnabled: true,
+};
+
+export const settingsPageDomainBackendState = {
+  eventlog: 'rt-sqlite' as const,
+  task: 'rt-sqlite' as const,
+  timeblock: 'rt-sqlite' as const,
+};
+
+vi.mock('@/lib/services', () => ({
+  getEventLogService: vi.fn(() => ({
+    exportEventsAsJson: settingsPageServiceMocks.eventLog.exportEventsAsJson,
+    importEventsFromJson: settingsPageServiceMocks.eventLog.importEventsFromJson,
   })),
+  getEventLogBackupService: vi.fn(() => settingsPageServiceMocks.eventlogBackup),
+  getTimeBlockBackupService: vi.fn(() => settingsPageServiceMocks.timeblockBackup),
+  getTaskBackupService: vi.fn(() => ({
+    exportTasksAsJson: settingsPageServiceMocks.taskBackup.exportTasksAsJson,
+    exportTasksAsSqliteSnapshot: settingsPageServiceMocks.taskBackup.exportTasksAsSqliteSnapshot,
+    importTasksFromJson: settingsPageServiceMocks.taskBackup.importTasksFromJson,
+    importTasksFromSqliteSnapshot: settingsPageServiceMocks.taskBackup.importTasksFromSqliteSnapshot,
+    getBackendStatus: settingsPageServiceMocks.taskBackup.getBackendStatus,
+  })),
+}));
+
+vi.mock('@/config/domain-backend-mode', () => ({
+  getEventlogBackendMode: vi.fn(() => settingsPageDomainBackendState.eventlog),
+  setEventlogBackendMode: vi.fn((value: 'legacy' | 'rt-sqlite') => {
+    settingsPageDomainBackendState.eventlog = value;
+    return value;
+  }),
+  getTaskBackendMode: vi.fn(() => settingsPageDomainBackendState.task),
+  setTaskBackendMode: vi.fn((value: 'legacy' | 'rt-sqlite') => {
+    settingsPageDomainBackendState.task = value;
+    return value;
+  }),
+  getTimeblockBackendMode: vi.fn(() => settingsPageDomainBackendState.timeblock),
+  setTimeblockBackendMode: vi.fn((value: 'legacy' | 'rt-sqlite') => {
+    settingsPageDomainBackendState.timeblock = value;
+    return value;
+  }),
 }));
 
 vi.mock('@/config/port-env', () => ({
@@ -63,32 +158,30 @@ vi.mock('@/config/theme', () => ({
   subscribeThemePreferenceChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/services/impl/settings-data-service', () => ({
+  exportBackup: vi.fn(() => settingsPageServiceMocks.dataTransfer.exportBackup()),
+  importBackup: vi.fn((strategy: 'merge' | 'overwrite') => settingsPageServiceMocks.dataTransfer.importBackup(strategy)),
+  importBackupFromContent: vi.fn((content: string, sourcePath: string, strategy: 'merge' | 'overwrite') =>
+    settingsPageServiceMocks.dataTransfer.importBackup({ content, sourcePath, strategy })),
+  importTasksFromFile: vi.fn(),
+}));
+
 vi.mock('@/config/developer-mode', () => ({
-  getDeveloperModeEnabled: vi.fn(() => false),
+  getDeveloperModeEnabled: vi.fn(() => settingsPagePreferenceState.developerMode),
   setDeveloperModeEnabled: vi.fn(),
   subscribeDeveloperModeChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/agent-page-enabled', () => ({
-  getAgentPageEnabled: vi.fn(() => false),
+  getAgentPageEnabled: vi.fn(() => settingsPagePreferenceState.agentPageEnabled),
   setAgentPageEnabled: vi.fn(),
   subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
-  getDesktopAdaptiveEnabled: vi.fn(() => true),
+  getDesktopAdaptiveEnabled: vi.fn(() => settingsPagePreferenceState.desktopAdaptiveEnabled),
   setDesktopAdaptiveEnabled: vi.fn(),
   subscribeDesktopAdaptiveChanges: vi.fn(() => () => {}),
-}));
-
-vi.mock('@/config/llm-settings', () => ({
-  getLLMApiKey: vi.fn(() => ''),
-  getLLMBaseUrl: vi.fn(() => 'https://api.openai.com/v1'),
-  getLLMModel: vi.fn(() => 'gpt-4o'),
-  setLLMApiKey: vi.fn(),
-  setLLMBaseUrl: vi.fn(),
-  setLLMModel: vi.fn(),
-  subscribeLLMSettingsChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/timer-preferences', () => ({
@@ -137,6 +230,16 @@ vi.mock('@/config/command-palette-enabled', () => ({
   subscribeCommandPaletteEnabledChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/llm-settings', () => ({
+  getLLMApiKey: vi.fn(() => ''),
+  getLLMBaseUrl: vi.fn(() => 'https://api.openai.com/v1'),
+  getLLMModel: vi.fn(() => 'gpt-4o'),
+  setLLMApiKey: vi.fn(),
+  setLLMBaseUrl: vi.fn(),
+  setLLMModel: vi.fn(),
+  subscribeLLMSettingsChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/voice-transcript-send-mode', () => ({
   getVoiceTranscriptSendMode: vi.fn(() => 'insert'),
   setVoiceTranscriptSendMode: vi.fn(),
@@ -156,33 +259,17 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/config/voice-shortcut-asr-provider', () => ({
-  getVoiceShortcutAsrProvider: vi.fn(() => voiceShortcutAsrProviderState.current),
-  getVoiceShortcutAsrProviderLabel: vi.fn((provider: 'moss' | 'volcano') => provider === 'volcano' ? '火山' : 'MOSS'),
-  setVoiceShortcutAsrProvider: vi.fn((value: 'moss' | 'volcano') => {
-    voiceShortcutAsrProviderState.current = value === 'volcano' ? 'volcano' : 'moss';
-    voiceShortcutAsrProviderState.listeners.forEach((listener) => listener(voiceShortcutAsrProviderState.current));
-    return voiceShortcutAsrProviderState.current;
-  }),
-  subscribeVoiceShortcutAsrProviderChanges: vi.fn((listener: (value: 'moss' | 'volcano') => void) => {
-    voiceShortcutAsrProviderState.listeners.add(listener);
-    return () => {
-      voiceShortcutAsrProviderState.listeners.delete(listener);
-    };
-  }),
-}));
-
 vi.mock('@/config/voice-overlay-preferences', () => ({
-  DEFAULT_VOICE_OVERLAY_OPACITY: 70,
-  MIN_VOICE_OVERLAY_OPACITY: 20,
-  MAX_VOICE_OVERLAY_OPACITY: 98,
+  DEFAULT_VOICE_OVERLAY_OPACITY: 62,
+  MIN_VOICE_OVERLAY_OPACITY: 32,
+  MAX_VOICE_OVERLAY_OPACITY: 92,
   DEFAULT_VOICE_OVERLAY_TRANSCRIPT_LINES: 3,
   MIN_VOICE_OVERLAY_TRANSCRIPT_LINES: 1,
   MAX_VOICE_OVERLAY_TRANSCRIPT_LINES: 5,
   DEFAULT_VOICE_OVERLAY_BOTTOM_OFFSET: 56,
   MIN_VOICE_OVERLAY_BOTTOM_OFFSET: 24,
   MAX_VOICE_OVERLAY_BOTTOM_OFFSET: 160,
-  getVoiceOverlayOpacity: vi.fn(() => 70),
+  getVoiceOverlayOpacity: vi.fn(() => 62),
   setVoiceOverlayOpacity: vi.fn((value: number) => value),
   getVoiceOverlayShowDiagnostics: vi.fn(() => false),
   setVoiceOverlayShowDiagnostics: vi.fn((value: boolean) => value),
@@ -194,15 +281,6 @@ vi.mock('@/config/voice-overlay-preferences', () => ({
   subscribeVoiceOverlayShowDiagnosticsChanges: vi.fn(() => () => {}),
   subscribeVoiceOverlayTranscriptLinesChanges: vi.fn(() => () => {}),
   subscribeVoiceOverlayBottomOffsetChanges: vi.fn(() => () => {}),
-}));
-
-vi.mock('@/config/now-workbench-overlay-preferences', () => ({
-  getNowWorkbenchOverlayEnabled: vi.fn(() => true),
-  setNowWorkbenchOverlayEnabled: vi.fn((value: boolean) => value),
-  subscribeNowWorkbenchOverlayEnabledChanges: vi.fn(() => () => {}),
-  getNowWorkbenchOverlayPosition: vi.fn(() => null),
-  setNowWorkbenchOverlayPosition: vi.fn(),
-  subscribeNowWorkbenchOverlayPositionChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/voice-shortcut-mic-prewarm', () => ({
@@ -249,9 +327,7 @@ vi.mock('@/components/ui/dialog', () => ({
 vi.mock('@/components/ui/drawer', () => ({
   Drawer: ({ children, open }: any) => open ? <div data-testid="drawer">{children}</div> : null,
   DrawerContent: ({ children }: any) => <div>{children}</div>,
-  DrawerHeader: ({ children }: any) => <div>{children}</div>,
   DrawerTitle: ({ children }: any) => <div>{children}</div>,
-  DrawerDescription: ({ children }: any) => <div>{children}</div>,
 }));
 
 vi.mock('@/components/ui/switch', () => ({

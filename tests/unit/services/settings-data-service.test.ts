@@ -14,6 +14,8 @@ const mocks = vi.hoisted(() => ({
   exportTasksAsSqliteSnapshot: vi.fn(),
   importTasksFromJson: vi.fn(),
   importTasksFromSqliteSnapshot: vi.fn(),
+  exportTimeBlocksAsJson: vi.fn(),
+  importTimeBlocksFromJson: vi.fn(),
   isTauri: vi.fn(),
   invoke: vi.fn(),
 }));
@@ -33,6 +35,10 @@ vi.mock('@/lib/services', () => ({
     exportTasksAsSqliteSnapshot: mocks.exportTasksAsSqliteSnapshot,
     importTasksFromJson: mocks.importTasksFromJson,
     importTasksFromSqliteSnapshot: mocks.importTasksFromSqliteSnapshot,
+  }),
+  getTimeBlockBackupService: () => ({
+    exportTimeBlocksAsJson: mocks.exportTimeBlocksAsJson,
+    importTimeBlocksFromJson: mocks.importTimeBlocksFromJson,
   }),
 }));
 
@@ -58,6 +64,22 @@ describe('settings-data-service', () => {
     });
     mocks.importTasksFromJson.mockResolvedValue({ imported: 1, skipped: 0, total: 1 });
     mocks.importTasksFromSqliteSnapshot.mockResolvedValue({ imported: 2, skipped: 0, total: 2 });
+    mocks.exportTimeBlocksAsJson.mockResolvedValue({
+      fileName: 'exomind-timeblocks-2026-03-11.json',
+      content: JSON.stringify({
+        version: 1,
+        time_blocks: [{ id: 'tb-1' }],
+        active_block: { startId: 'active-1' },
+      }),
+      timeBlockCount: 1,
+      activeBlock: { startId: 'active-1' },
+    });
+    mocks.importTimeBlocksFromJson.mockResolvedValue({
+      imported: 1,
+      skipped: 0,
+      total: 1,
+      activeBlockUpdated: true,
+    });
 
     vi.stubGlobal('URL', {
       createObjectURL: vi.fn(() => 'blob:task-export'),
@@ -66,7 +88,7 @@ describe('settings-data-service', () => {
     vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   });
 
-  it('exports combined top-level backup on Tauri and includes tasks', async () => {
+  it('exports combined top-level backup on Tauri and includes tasks + timeblocks', async () => {
     mocks.isTauri.mockResolvedValue(true);
     mocks.exportTasksAsJson.mockResolvedValue({
       fileName: 'exomind-tasks-2026-03-11.json',
@@ -87,22 +109,27 @@ describe('settings-data-service', () => {
     }));
     const [, options] = mocks.invoke.mock.calls[0] as [string, { content: string }];
     expect(JSON.parse(options.content)).toEqual({
-      version: 2,
+      version: 3,
       events: [{ id: 'evt-1', type: 'created' }],
       tasks: [{ id: 'task-1' }, { id: 'task-2' }],
+      time_blocks: [{ id: 'tb-1' }],
+      active_block: { startId: 'active-1' },
     });
     expect(message).toContain('1 条事件');
     expect(message).toContain('2 条任务');
+    expect(message).toContain('1 条时间块');
   });
 
-  it('imports embedded tasks from combined top-level backup payload', async () => {
+  it('imports embedded tasks + timeblocks from combined top-level backup payload', async () => {
     mocks.isTauri.mockResolvedValue(true);
     mocks.invoke.mockResolvedValue({
       path: 'combined-backup.json',
       content: JSON.stringify({
-        version: 2,
+        version: 3,
         events: [{ id: 'evt-1', type: 'created' }],
         tasks: [{ id: 'task-1' }],
+        time_blocks: [{ id: 'tb-1' }],
+        active_block: { startId: 'active-1' },
       }),
     });
     mocks.importTasksFromJson.mockResolvedValue({ imported: 2, skipped: 1, total: 2 });
@@ -114,8 +141,38 @@ describe('settings-data-service', () => {
       JSON.stringify({ version: 1, tasks: [{ id: 'task-1' }] }),
       'merge',
     );
+    expect(mocks.importTimeBlocksFromJson).toHaveBeenCalledWith(
+      JSON.stringify({ version: 1, time_blocks: [{ id: 'tb-1' }], active_block: { startId: 'active-1' } }),
+      'merge',
+    );
     expect(message).toContain('事件新增 1 条');
     expect(message).toContain('任务新增 2 条，跳过 1 条');
+    expect(message).toContain('时间块新增 1 条，跳过 0 条');
+  });
+
+  it('overwrite import still clears task/timeblock domains when bundle contains empty arrays', async () => {
+    mocks.isTauri.mockResolvedValue(true);
+    mocks.invoke.mockResolvedValue({
+      path: 'combined-empty-overwrite.json',
+      content: JSON.stringify({
+        version: 3,
+        events: [],
+        tasks: [],
+        time_blocks: [],
+        active_block: null,
+      }),
+    });
+
+    await importBackup('overwrite');
+
+    expect(mocks.importTasksFromJson).toHaveBeenCalledWith(
+      JSON.stringify({ version: 1, tasks: [] }),
+      'overwrite',
+    );
+    expect(mocks.importTimeBlocksFromJson).toHaveBeenCalledWith(
+      JSON.stringify({ version: 1, time_blocks: [], active_block: null }),
+      'overwrite',
+    );
   });
 
   it('exports task JSON on Web and returns success message', async () => {
