@@ -2,7 +2,7 @@
 
 > **Issue**: #515
 > **日期**: 2026-03-13
-> **状态**: Draft — 待用户评审
+> **状态**: Draft — 用户自评审通过，关键决策已确认（D16-D20）
 > **关联**: #385 #201 #392 #470 #438 #440 #480
 
 ---
@@ -17,7 +17,7 @@
 | ---- | -------------------------------------- | --------------------- | ---------- |
 | ①   | 任务思考——评审 #511 定位与拆解       | dev                   | 规划性     |
 | ②   | PR #506 迁移 rt-sql                    | feature/pr506-...     | PR #506    |
-| ③   | 任务急浮——改页面 + overlay + 测试    | feature/...           | 多个 issue |
+| ③   | 任务规划——拆分 + 整体理解 + 测试    | feature/...           | 多个 issue |
 | ④   | 语音输入——分支创建、依赖安装、写测试 | feature/issue-511-... | #511       |
 
 **当前做法**：用截图 + 粉色标签手动标注每个终端角色，肉眼扫描判断进度。本质上**用户在人肉充当多 Agent 调度器**。
@@ -141,8 +141,8 @@ AgentSession = Agent（谁）+ Context（为什么）+ State（怎样）+ Histor
 ```
 AgentSession（ExoMind 统一抽象）
     │
-    ├── 拥有一个 Agent 实例（ClaudeAgent / CodexAgent / ApiAgent / CognitiveLifeAgent）
-    │     └── Agent 提供 chat_stream / on_tick / on_signal 能力
+    ├── 标记 Agent 类型（agent_kind: "claude" / "codex" / "api"）
+    │     └── 1:N 关系：一种 Agent 可开多个 Session（如 4 个 Claude 终端 = 4 个 Session）
     │
     ├── 可选关联一个 PTY（终端交互模式）
     │     └── PTY 是 Session 的一种 I/O 通道，不是独立实体
@@ -162,7 +162,7 @@ AgentSession（ExoMind 统一抽象）
 /// ExoMind 统一会话
 pub struct AgentSession {
     pub id: Uuid,
-    pub agent_id: String,          // 关联的 Agent 实例 ID
+    pub agent_kind: String,        // Agent 类型标识: "claude" / "codex" / "api"（1:N，一种 Agent 可开多个 Session）
 
     // ── 身份 ──
     pub role: String,              // "任务思考" / "PR迁移" / "代码审查"
@@ -222,7 +222,7 @@ pub enum InteractionMode {
 ```sql
 CREATE TABLE agent_sessions (
     id              TEXT PRIMARY KEY,     -- UUID
-    agent_id        TEXT NOT NULL,        -- 关联 AgentRegistry 中的 Agent
+    agent_kind      TEXT NOT NULL,        -- Agent 类型标识（"claude"/"codex"/"api"），1:N 关系
     role            TEXT NOT NULL DEFAULT '',
     summary         TEXT NOT NULL DEFAULT '',
     status          TEXT NOT NULL DEFAULT 'running',  -- running/waiting/completed/error/paused/archived
@@ -251,7 +251,7 @@ CREATE TABLE agent_sessions (
 );
 
 CREATE INDEX idx_sessions_status ON agent_sessions(status);
-CREATE INDEX idx_sessions_agent ON agent_sessions(agent_id);
+CREATE INDEX idx_sessions_agent ON agent_sessions(agent_kind);
 CREATE INDEX idx_sessions_active ON agent_sessions(last_active_at DESC);
 ```
 
@@ -329,7 +329,7 @@ POST   /sessions/:id/resume   恢复已暂停/归档的会话
 
 ```json
 {
-  "agent_kind": "claude_cli",
+  "agent_kind": "claude",          // Agent 类型（claude / codex / api）
   "role": "PR迁移",
   "context": {
     "git_branch": "feature/pr506-rt-sql-migration",
@@ -524,31 +524,44 @@ AgentsPage（扩展现有页面，新增 tiled 视图模式）
 **设计理念**：类似 Windows Terminal 管理多个标签页——每个 Claude/Codex 会话是一张卡片，显示会话标题、状态、对话历史摘要。现有 Terminal Agent（Claude）已成熟，但缺少会话标题和全局管理视图。
 
 **做什么**：
-- Rust: `session/` 模块最小版 — SessionStore (SQLite) + 基础 CRUD API
-- Rust: PTY spawn 时自动创建关联 Session（SessionManager 包裹 PtyManager，非侵入）
 - 前端: AgentsPage 新增 `sessions` 视图模式（全新组件，不修改现有代码避免复杂度）
-- 前端: Session 列表卡片（SessionCard）— 角色 + 分支 + 状态灯 + 最后输出摘要
+- 前端: Session 列表卡片（SessionCard）— 角色 + agent_kind 标签 + 状态灯 + 最后输出摘要
 - 前端: 点击卡片 → 打开终端详情（复用现有 PtyTerminal / AgentConversation）
-- 持久化：重启不丢（SQLite schema 使用 `PRAGMA user_version` 预留版本管理）
+- 前端: **使用 mock 数据**（`mock-data.ts` 新增 `MOCK_SESSIONS`，受设置页"使用测试数据"开关控制）
+- 后端暂不改：V1 纯前端 + mock，V2 再引入 SessionStore SQLite + CRUD API
+
+**Mock 数据样例**：
+```typescript
+MOCK_SESSIONS = [
+  { id: "mock-1", agent_kind: "claude", role: "任务思考",   status: "running",       summary: "分析 #511 拆解方案...",  git_branch: "dev" },
+  { id: "mock-2", agent_kind: "claude", role: "PR迁移",     status: "running",       summary: "bun test 7/7 passed",   git_branch: "feature/pr506", pr_ref: "#506" },
+  { id: "mock-3", agent_kind: "claude", role: "代码审查",   status: "waiting_input", summary: "等待确认测试方案 A/B",   git_branch: "dev" },
+  { id: "mock-4", agent_kind: "codex",  role: "语音输入",   status: "running",       summary: "bun install 完成",       git_branch: "feature/#511" },
+]
+```
 
 **你怎么验收**：
-打开 AgentsPage → 切到 `sessions` 视图 → 看到所有活跃 Claude/Codex 会话的卡片列表，每张卡片显示会话标题+状态+最后输出。点击卡片打开终端。关闭 app 重新打开 → Session 记录还在。
+打开 AgentsPage → 切到 `sessions` 视图 → 看到 4 张 mock Session 卡片（角色+状态+摘要）。点击卡片打开终端详情。"使用测试数据"开关关闭时 → 列表为空（V2 接入真实 API 后才有数据）。
 
 ---
 
-### V2: Session 上下文绑定 + 对话历史
+### V2: Session 真实后端 + 上下文绑定
 
-**范围**：前后端增强，Session 获得完整身份和历史。
+**范围**：后端 SessionStore + 前端接入真实 API，告别 mock 数据。
 
 **做什么**：
+- Rust: `session/` 模块 — SessionStore (SQLite) + 基础 CRUD API (`/sessions/*`)
+- Rust: SessionManager 包裹 PtyManager，PTY spawn 时**自动创建关联 Session**（D17）
 - Rust: WorkContext 绑定（git branch / issue / PR / worktree）+ SSE `/sessions/stream`
 - Rust: Session 状态自动更新（Agent 输出 → summary / last_output_preview）
+- 前端: 关闭"使用测试数据"→ SessionCard 从真实 API 获取数据
 - 前端: SessionCard 显示 branch / issue / PR 标签（ContextChips）
 - 前端: `useSessionStream` hook 实时更新卡片状态
 - 前端: 会话历史列表 — 已完成的 Session 可回顾（30-60s 缓冲后才折叠，不立即消失）
+- 持久化：SQLite schema 使用 `PRAGMA user_version` 预留版本管理
 
 **你怎么验收**：
-创建终端选角色"PR迁移" + 分支 → 卡片显示"🟢 PR迁移 · feature/pr506 · #506 · 3m ago"。Session 完成后卡片变灰保留 60 秒，可回顾最终输出。
+关闭"使用测试数据"→ 打开终端 → 自动出现 Session 卡片"🟢 未命名 · claude"。编辑角色为"PR迁移"+ 绑定分支 → 卡片变成"🟢 PR迁移 · feature/pr506 · #506 · 3m ago"。关闭 app → 重新打开 → Session 记录还在。
 
 ---
 
@@ -691,6 +704,11 @@ AgentsPage（扩展现有页面，新增 tiled 视图模式）
 | D13 | V1 就引入 SessionStore SQLite（不等 mock） | 产品评审结论：重启丢状态不可交付，持久化是基础卫生 |
 | D14 | 复用现有 PTY 终端能力，整合零散探索 | 已有对话历史保持、会话管理等能力，统一到新设计规范 |
 | D15 | AgentsPage 四种视图模式（topology/tiled/canvas/list） | 不新增路由；canvas 为远期愿景（参考 OpenCove 空间化 + claw-empire CEO desk） |
+| D16 | Session:Agent = **1:N**（`agent_kind` 类型标识，非实例 ID） | Agent 在 Registry 中是单例（"claude"/"codex"），Terminal 模式下 Session 直接持有 PTY，不需要 Agent 实例参与。agent_kind 只是类型标签 |
+| D17 | 旧入口（`/pty/spawn`）**自动创建 Session** | SessionManager 包裹 PtyManager 拦截 spawn，避免"野生终端"不出现在 Dashboard |
+| D18 | Archived Session **手动管理**，不自动清理 | SQLite 存几百条无压力；V1 不做 retention policy，历史列表默认折叠 |
+| D19 | V1 = mock 数据（开关控制），V2 = 真实 API | 现有设置页"使用测试数据"开关控制；mock-data.ts 新增 MOCK_SESSIONS；V2 接入后开关仍保留供调试 |
+| D20 | **单人开发阶段简化流程**：直接在 dev 提交，不强制 worktree/PR | 工具链未完善 + 唯一开发者，减少流程摩擦优先 |
 | D6 | WorkContext 用 JSON 存可选字段                  | 不同场景的 context 差异大，固定 schema 太僵硬                    |
 | D7 | summary 由 Agent 自动生成 + 用户可覆盖          | 降低用户手动维护成本；但保留人工修正权                           |
 
