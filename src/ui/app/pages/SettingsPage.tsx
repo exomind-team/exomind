@@ -1036,18 +1036,24 @@ export function SettingsPage() {
 
   const selectedDataDomain = DATA_TRANSFER_DOMAIN_OPTIONS.find((option) => option.value === dataTransferDomain);
   const selectedDataFormat = DATA_TRANSFER_FORMAT_OPTIONS.find((option) => option.value === dataTransferFormat);
+  const selectedDataDomainBackendMode = dataTransferDomain === 'eventlog'
+    ? eventlogBackendMode
+    : dataTransferDomain === 'task'
+      ? taskBackendMode
+      : timeblockBackendMode;
   const selectedDataDomainStatus = dataTransferDomain === 'eventlog'
     ? eventlogBackendStatus
     : dataTransferDomain === 'task'
       ? taskBackendStatus
       : timeblockBackendStatus;
-  const isDataTransferDisabled = selectedDataDomain
+  const isLegacyDataTransferMode = selectedDataDomainBackendMode === 'legacy';
+  const isDataTransferDisabled = isLegacyDataTransferMode || (selectedDataDomain
     ? (
       dataTransferFormat === 'json'
         ? selectedDataDomainStatus?.supportsJsonBackup === false
         : selectedDataDomainStatus?.supportsSqliteSnapshot === false
     )
-    : false;
+    : false);
   const dataImportAccept = dataTransferFormat === 'json' ? '.json' : '.sqlite,.db';
 
   const handleCountdownEndModeChange = (mode: CountdownEndMode) => {
@@ -2654,7 +2660,10 @@ export function SettingsPage() {
             </div>
             <div className="rounded-2xl bg-[#F5F0ED] px-4 py-3 text-xs text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]">
               <p>当前选择：{selectedDataDomain?.label ?? '未选择'} / {selectedDataFormat?.label ?? '未选择'}</p>
-              {isDataTransferDisabled && (
+              {isLegacyDataTransferMode && (
+                <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">legacy 后端暂不支持统一导入导出，请先切换到 rt-sqlite。</p>
+              )}
+              {!isLegacyDataTransferMode && isDataTransferDisabled && (
                 <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">当前后端不支持所选导出格式，请切换格式或后端。</p>
               )}
             </div>
@@ -2697,7 +2706,10 @@ export function SettingsPage() {
             <div className="rounded-2xl bg-[#F5F0ED] px-4 py-3 text-xs text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]">
               <p>当前选择：{selectedDataDomain?.label ?? '未选择'} / {selectedDataFormat?.label ?? '未选择'}</p>
               <p className="mt-1">导入策略：merge（合并）</p>
-              {isDataTransferDisabled && (
+              {isLegacyDataTransferMode && (
+                <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">legacy 后端暂不支持统一导入导出，请先切换到 rt-sqlite。</p>
+              )}
+              {!isLegacyDataTransferMode && isDataTransferDisabled && (
                 <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">当前后端不支持所选导入格式，请切换格式或后端。</p>
               )}
             </div>

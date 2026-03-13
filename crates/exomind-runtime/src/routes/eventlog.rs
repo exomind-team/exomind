@@ -360,6 +360,7 @@ fn build_eventlog_sqlite_snapshot_bytes(
     let bytes = scoped_store
         .sqlite_snapshot_bytes()?
         .ok_or_else(|| "failed to produce scoped sqlite snapshot".to_string())?;
+    drop(scoped_store);
     let _ = std::fs::remove_file(&sqlite_path);
     let _ = std::fs::remove_dir_all(&temp_root);
     Ok(bytes)
@@ -374,6 +375,7 @@ fn read_events_from_sqlite_snapshot(bytes: &[u8], user_id: Option<&str>) -> Resu
         .map_err(|error| format!("failed to write temp sqlite snapshot: {error}"))?;
     let store = crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
     let events = store.list_events(user_id)?;
+    drop(store);
     let _ = std::fs::remove_file(&sqlite_path);
     let _ = std::fs::remove_dir_all(&temp_root);
     Ok(events)
@@ -926,5 +928,92 @@ mod tests {
         let user_a_events = target_store.list_events(Some("user-a")).unwrap();
         assert_eq!(user_a_events.len(), 1);
         assert_eq!(user_a_events[0].id, "user-a-import");
+    }
+
+    fn remove_temp_dirs_with_prefix(prefix: &str) {
+        let temp_dir = std::env::temp_dir();
+        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
+            for entry in entries.flatten() {
+                let path = entry.path();
+                let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                    continue;
+                };
+                if name.starts_with(prefix) {
+                    let _ = std::fs::remove_dir_all(&path);
+                    let _ = std::fs::remove_file(&path);
+                }
+            }
+        }
+    }
+
+    fn count_temp_dirs_with_prefix(prefix: &str) -> usize {
+        let temp_dir = std::env::temp_dir();
+        std::fs::read_dir(&temp_dir)
+            .ok()
+            .into_iter()
+            .flat_map(|entries| entries.flatten())
+            .filter(|entry| {
+                entry
+                    .file_name()
+                    .to_str()
+                    .is_some_and(|name| name.starts_with(prefix))
+            })
+            .count()
+    }
+
+    #[tokio::test]
+    async fn scoped_sqlite_export_and_import_leave_no_temp_dirs() {
+        remove_temp_dirs_with_prefix("exomind-eventlog-export-");
+        remove_temp_dirs_with_prefix("exomind-eventlog-import-");
+
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("eventlog-temp-cleanup.sqlite");
+        let store = Arc::new(EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap());
+        store.append_event(Some("user-a"), EventRecord {
+            id: "cleanup-a-1".to_string(),
+            timestamp: 1111,
+            content: "cleanup export".to_string(),
+            tags: vec!["note".to_string()],
+            metadata: None,
+        }).unwrap();
+
+        let app = test_router(test_state_with_eventlog(store));
+        let export_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/eventlog/backup/sqlite?user_id=user-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(export_response.status(), StatusCode::OK);
+        let export_body = export_response.into_body().collect().await.unwrap().to_bytes();
+        let export_payload: Value = serde_json::from_slice(&export_body).unwrap();
+        let import_bytes = STANDARD
+            .decode(export_payload["content_base64"].as_str().unwrap())
+            .unwrap();
+
+        let import_dir = tempdir().unwrap();
+        let target_store = Arc::new(EventLogStore::with_sqlite_path(import_dir.path().to_path_buf(), &import_dir.path().join("target.sqlite")).unwrap());
+        let import_app = test_router(test_state_with_eventlog(target_store));
+        let import_response = import_app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/eventlog/import/sqlite?user_id=user-a&strategy=overwrite")
+                    .header("content-type", "application/json")
+                    .body(Body::from(serde_json::json!({
+                        "content_base64": STANDARD.encode(import_bytes),
+                    }).to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(import_response.status(), StatusCode::OK);
+        assert_eq!(count_temp_dirs_with_prefix("exomind-eventlog-export-"), 0);
+        assert_eq!(count_temp_dirs_with_prefix("exomind-eventlog-import-"), 0);
     }
 }

@@ -1,5 +1,6 @@
 import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
+import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
 import type { ActiveBlockData, TimeBlockData } from '@/lib/types/event';
 
 type RuntimeFetch = typeof fetch;
@@ -170,7 +171,7 @@ export class TimeBlockBackupServiceImpl {
   }
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl()}${path}`, {
+    const response = await this.fetchImpl(this.url(path), {
       ...init,
       headers: {
         Accept: 'application/json',
@@ -187,6 +188,10 @@ export class TimeBlockBackupServiceImpl {
 
   private baseUrl(): string {
     return buildBaseUrl(this.resolveTarget());
+  }
+
+  private url(path: string): string {
+    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
   }
 }
 

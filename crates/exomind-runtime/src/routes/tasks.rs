@@ -15,12 +15,28 @@ use crate::AppState;
 struct ListQuery {
     #[serde(default)]
     status: Option<TaskStatus>,
+    #[serde(default)]
+    profile_id: Option<String>,
+    #[serde(default)]
+    user_id: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
 struct ImportQuery {
     #[serde(default)]
     strategy: Option<String>,
+    #[serde(default)]
+    profile_id: Option<String>,
+    #[serde(default)]
+    user_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ScopeQuery {
+    #[serde(default)]
+    profile_id: Option<String>,
+    #[serde(default)]
+    user_id: Option<String>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -68,9 +84,10 @@ async fn list_tasks(
     State(state): State<AppState>,
     Query(query): Query<ListQuery>,
 ) -> Json<Vec<Task>> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let tasks = match &query.status {
-        Some(status) => state.task_store.list_by_status(status),
-        None => state.task_store.list(),
+        Some(status) => state.task_store.list_by_status_scoped(scope_key, status),
+        None => state.task_store.list_scoped(scope_key),
     };
     Json(tasks)
 }
@@ -79,10 +96,12 @@ async fn list_tasks(
 async fn get_task(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, StatusCode> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     state
         .task_store
-        .get(&id)
+        .get_scoped(scope_key, &id)
         .map(Json)
         .ok_or(StatusCode::NOT_FOUND)
 }
@@ -90,9 +109,11 @@ async fn get_task(
 /// POST /tasks
 async fn create_task(
     State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
     Json(input): Json<CreateTaskInput>,
 ) -> (StatusCode, Json<Task>) {
-    let task = state.task_store.create(input);
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let task = state.task_store.create_scoped(scope_key, input);
 
     publish_task_signal(&state, "task.created", &task);
 
@@ -103,11 +124,13 @@ async fn create_task(
 async fn update_task(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
     Json(input): Json<UpdateTaskInput>,
 ) -> Result<Json<Task>, StatusCode> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let task = state
         .task_store
-        .update(&id, input)
+        .update_scoped(scope_key, &id, input)
         .map_err(|_| StatusCode::NOT_FOUND)?;
 
     publish_task_signal(&state, "task.updated", &task);
@@ -119,11 +142,13 @@ async fn update_task(
 async fn transition_task(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
     Json(input): Json<TransitionInput>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let (old_status, task) = state
         .task_store
-        .transition(&id, input.status)
+        .transition_scoped(scope_key, &id, input.status)
         .map_err(|e| {
             let code = match &e {
                 crate::task::store::TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
@@ -156,8 +181,10 @@ async fn transition_task(
 async fn delete_task(
     Path(id): Path<String>,
     State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
-    let task = state.task_store.abandon(&id).map_err(|e| {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let task = state.task_store.abandon_scoped(scope_key, &id).map_err(|e| {
         let code = match &e {
             crate::task::store::TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
             _ => StatusCode::CONFLICT,
@@ -172,32 +199,28 @@ async fn delete_task(
 
 async fn export_tasks_json(
     State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
 ) -> Json<TaskBackupJsonPayload> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     Json(TaskBackupJsonPayload {
         version: 1,
-        tasks: state.task_store.list(),
+        tasks: state.task_store.list_scoped(scope_key),
     })
 }
 
 async fn export_tasks_sqlite(
     State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
 ) -> Result<Json<TaskBackupSqlitePayload>, (StatusCode, String)> {
-    let bytes = state
-        .task_store
-        .sqlite_snapshot_bytes()
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
-        .ok_or_else(|| {
-            (
-                StatusCode::CONFLICT,
-                "task sqlite snapshot is unavailable on non-sqlite backend".to_string(),
-            )
-        })?;
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let tasks = state.task_store.list_scoped(scope_key);
+    let bytes = build_task_sqlite_snapshot_bytes(scope_key, &tasks)?;
 
     Ok(Json(TaskBackupSqlitePayload {
         version: 1,
         file_name: "exomind-tasks.sqlite".to_string(),
         content_base64: STANDARD.encode(bytes),
-        task_count: state.task_store.len(),
+        task_count: tasks.len(),
     }))
 }
 
@@ -207,7 +230,8 @@ async fn import_tasks_json(
     Json(payload): Json<TaskBackupJsonPayload>,
 ) -> Result<Json<TaskImportResult>, (StatusCode, String)> {
     let strategy = parse_import_strategy(query.strategy.as_deref())?;
-    let result = apply_task_import(&state, payload.tasks, strategy)?;
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let result = apply_task_import(&state, scope_key, payload.tasks, strategy)?;
     Ok(Json(result))
 }
 
@@ -220,8 +244,9 @@ async fn import_tasks_sqlite(
     let bytes = STANDARD
         .decode(payload.content_base64)
         .map_err(|error| (StatusCode::BAD_REQUEST, format!("invalid sqlite snapshot: {error}")))?;
-    let imported_tasks = read_tasks_from_sqlite_snapshot(&bytes)?;
-    let result = apply_task_import(&state, imported_tasks, strategy)?;
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let imported_tasks = read_tasks_from_sqlite_snapshot(&bytes, scope_key)?;
+    let result = apply_task_import(&state, scope_key, imported_tasks, strategy)?;
     Ok(Json(result))
 }
 
@@ -269,15 +294,16 @@ fn parse_import_strategy(raw: Option<&str>) -> Result<TaskImportStrategy, (Statu
 
 fn apply_task_import(
     state: &AppState,
+    scope_key: Option<&str>,
     incoming: Vec<Task>,
     strategy: TaskImportStrategy,
 ) -> Result<TaskImportResult, (StatusCode, String)> {
-    let existing = state.task_store.list();
+    let existing = state.task_store.list_scoped(scope_key);
     let result = match strategy {
         TaskImportStrategy::Overwrite => {
             state
                 .task_store
-                .replace_all(&incoming)
+                .replace_all_scoped(scope_key, &incoming)
                 .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
             TaskImportResult {
                 imported: incoming.len(),
@@ -305,7 +331,7 @@ fn apply_task_import(
             let next = merged.into_values().collect::<Vec<_>>();
             state
                 .task_store
-                .replace_all(&next)
+                .replace_all_scoped(scope_key, &next)
                 .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
             TaskImportResult {
@@ -319,14 +345,39 @@ fn apply_task_import(
     Ok(result)
 }
 
-fn read_tasks_from_sqlite_snapshot(bytes: &[u8]) -> Result<Vec<Task>, (StatusCode, String)> {
+fn build_task_sqlite_snapshot_bytes(scope_key: Option<&str>, tasks: &[Task]) -> Result<Vec<u8>, (StatusCode, String)> {
+    let temp_root = std::env::temp_dir().join(format!("exomind-task-export-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_root)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create task export temp dir: {error}")))?;
+    let sqlite_path = temp_root.join("tasks-export.sqlite");
+    let store = crate::task::TaskStore::with_sqlite_path(&sqlite_path)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    store
+        .replace_all_scoped(scope_key, tasks)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+    let bytes = store
+        .sqlite_snapshot_bytes()
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+        .ok_or_else(|| {
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "failed to produce scoped task sqlite snapshot".to_string(),
+            )
+        })?;
+    drop(store);
+    let _ = std::fs::remove_file(&sqlite_path);
+    let _ = std::fs::remove_dir_all(&temp_root);
+    Ok(bytes)
+}
+
+fn read_tasks_from_sqlite_snapshot(bytes: &[u8], scope_key: Option<&str>) -> Result<Vec<Task>, (StatusCode, String)> {
     let temp_path = std::env::temp_dir().join(format!("exomind-task-import-{}.sqlite", uuid::Uuid::new_v4()));
     std::fs::write(&temp_path, bytes)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
     let store = crate::task::TaskStore::with_sqlite_path(&temp_path)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
-    let tasks = store.list();
+    let tasks = store.list_scoped(scope_key);
 
     let _ = std::fs::remove_file(&temp_path);
     Ok(tasks)
@@ -904,5 +955,79 @@ mod tests {
         assert_eq!(tasks.len(), 1);
         assert_eq!(tasks[0].title, "Imported sqlite task");
         assert_eq!(tasks[0].time_block_ids, vec!["block-3".to_string()]);
+    }
+
+    #[tokio::test]
+    async fn task_routes_isolate_profile_id_scope_and_keep_default_anonymous() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks-scoped.sqlite");
+        let task_store = Arc::new(crate::task::TaskStore::with_sqlite_path(&sqlite_path).unwrap());
+        let app = test_router(test_state_with_task_store(task_store.clone()));
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Anonymous task"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/tasks?profile_id=profile-a")
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Profile A task"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::CREATED);
+
+        let response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let anonymous_tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .uri("/tasks?profile_id=profile-a")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let profile_a_tasks: Vec<Value> = serde_json::from_slice(&body).unwrap();
+
+        assert_eq!(anonymous_tasks.len(), 1);
+        assert_eq!(anonymous_tasks[0]["title"], "Anonymous task");
+        assert_eq!(profile_a_tasks.len(), 1);
+        assert_eq!(profile_a_tasks[0]["title"], "Profile A task");
+        assert_eq!(task_store.list().len(), 1, "default access should continue using anonymous scope");
+        assert_eq!(
+            task_store.list_in_scope(Some("profile-a")).len(),
+            1,
+            "profile scope should stay isolated in sqlite backend",
+        );
     }
 }

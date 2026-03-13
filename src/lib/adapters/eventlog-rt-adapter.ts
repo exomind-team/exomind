@@ -1,6 +1,7 @@
 import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
 import type { IEventLogPort } from '@/lib/environment/interfaces/eventlog.port';
 import type { EventData } from '@/lib/types/event';
+import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
 
@@ -48,7 +49,7 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async listEvents(): Promise<EventData[]> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/eventlog`, {
+    const response = await this.fetchImpl(this.url('/eventlog'), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -60,7 +61,7 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async appendEvent(event: EventData): Promise<void> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/eventlog`, {
+    const response = await this.fetchImpl(this.url('/eventlog'), {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
@@ -80,7 +81,7 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async getEvent(id: string): Promise<EventData | null> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/eventlog/events/${encodeURIComponent(id)}`, {
+    const response = await this.fetchImpl(this.url(`/eventlog/events/${encodeURIComponent(id)}`), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -94,7 +95,7 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async clearEvents(): Promise<void> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/eventlog`, {
+    const response = await this.fetchImpl(this.url('/eventlog'), {
       method: 'DELETE',
       headers: { Accept: 'application/json' },
     });
@@ -105,5 +106,9 @@ export class EventLogRtAdapter implements IEventLogPort {
 
   private baseUrl(): string {
     return buildBaseUrl(this.resolveTarget());
+  }
+
+  private url(path: string): string {
+    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
   }
 }

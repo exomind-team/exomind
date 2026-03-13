@@ -1,5 +1,6 @@
 import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
+import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
 export type EventLogImportStrategy = 'merge' | 'overwrite';
@@ -138,7 +139,7 @@ export class EventLogBackupServiceImpl {
   }
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl()}${path}`, {
+    const response = await this.fetchImpl(this.url(path), {
       ...init,
       headers: {
         Accept: 'application/json',
@@ -155,6 +156,10 @@ export class EventLogBackupServiceImpl {
 
   private baseUrl(): string {
     return buildBaseUrl(this.resolveTarget());
+  }
+
+  private url(path: string): string {
+    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
   }
 }
 

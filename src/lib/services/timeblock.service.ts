@@ -11,7 +11,6 @@
  */
 
 import { ExoMindEnvironment } from '../environment/environment';
-import { getEventStorage } from '../storage/event-storage';
 import {
   getActiveBlockStorage,
   getCurrentSyncUserId,
@@ -31,6 +30,7 @@ import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-t
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
 import { appendEventWithEcsReplication } from './ecs-eventlog-replication.service';
+import { getEventLogService } from './eventlog.service';
 import { publishActiveBlockReplicationSnapshot } from './ecs-active-block-replication.service';
 import { SignalStreamService } from './signal-stream.service';
 
@@ -118,7 +118,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   constructor(env?: ExoMindEnvironment, options: TimeBlockServiceOptions = {}) {
     this.env = env || ExoMindEnvironment.getInstance();
     this.useInjectedEnvStorage = typeof env !== 'undefined';
-    this.backendMode = options.backendMode ?? (this.useInjectedEnvStorage ? 'legacy' : getTimeblockBackendMode());
+    this.backendMode = options.backendMode ?? this.resolveDefaultBackendMode();
     this.rtAdapter = this.backendMode === 'rt-sqlite'
       ? (options.rtAdapter ?? new TimeBlockRtAdapter())
       : null;
@@ -126,6 +126,14 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       this.switchActiveStorage();
     }
     this.attachStorageListener();
+  }
+
+  private resolveDefaultBackendMode(): DomainBackendMode {
+    if (this.useInjectedEnvStorage) {
+      return 'legacy';
+    }
+
+    return this.env.runtime === 'tauri' ? getTimeblockBackendMode() : 'legacy';
   }
 
   async loadTimeBlocks(): Promise<TimeBlock[]> {
@@ -407,7 +415,6 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       submittedAt,
     });
 
-    const storage = getEventStorage();
     const feedbackEventStart = perfNow();
     await appendEventWithEcsReplication({
       id: createUuidV4(),
@@ -472,7 +479,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.rememberAcceptedBlock(terminalBlock);
 
     // 发布 timeblock.completed 信号（fire-and-forget，失败不阻塞）
-    this.publishTimeblockCompleted(timeBlock, report, storage).catch((err) => {
+    this.publishTimeblockCompleted(timeBlock, report).catch((err) => {
       console.warn('[TimeBlockService] failed to publish timeblock.completed signal:', err);
     });
 
@@ -606,17 +613,17 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   private async publishTimeblockCompleted(
     block: TimeBlockData,
     feedbackReport: string,
-    storage: { getEvents(): Promise<Array<{ id: string; content: string; createdAt: string }>> },
   ): Promise<void> {
     const runtimeTarget = this.resolveRuntimeTarget();
     if (!runtimeTarget) return;
 
-    // 获取最近事件作为上下文
-    const allEvents = typeof storage.getEvents === 'function' ? await storage.getEvents() : [];
-    const recentEvents = allEvents.slice(0, 20).map((e) => ({
-      text: e.content,
-      ts: new Date(e.createdAt).getTime(),
-    }));
+    // 获取当前真相源中的最近事件作为上下文，避免继续读取旧 Pouch 副本。
+    const recentEvents = (await getEventLogService().loadEvents())
+      .slice(-20)
+      .map((event) => ({
+        text: event.content,
+        ts: event.timestamp,
+      }));
 
     const publisher = new SignalStreamService({
       host: {

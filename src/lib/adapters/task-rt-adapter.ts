@@ -2,6 +2,7 @@ import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-t
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port';
 import type { Dependency, TaskNode, TaskStatus } from '@/lib/types/task';
 import { canTransition } from '@/lib/types/task';
+import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
 
@@ -126,7 +127,7 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   async getTaskById(id: string): Promise<TaskNode | null> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/tasks/${encodeURIComponent(id)}`, {
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -149,7 +150,7 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   async updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/tasks/${encodeURIComponent(id)}`, {
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`), {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify(toRuntimeUpdatePayload(input)),
@@ -164,7 +165,7 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   async abandonTask(id: string): Promise<TaskNode | null> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/tasks/${encodeURIComponent(id)}`, {
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`), {
       method: 'DELETE',
       headers: { Accept: 'application/json' },
     });
@@ -178,7 +179,7 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/tasks/${encodeURIComponent(id)}/transition`, {
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}/transition`), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
       body: JSON.stringify({ status: to }),
@@ -201,7 +202,7 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl()}${path}`, {
+    const response = await this.fetchImpl(this.url(path), {
       ...init,
       headers: {
         Accept: 'application/json',
@@ -216,5 +217,9 @@ export class TaskRtAdapter implements ITaskPort {
 
   private baseUrl(): string {
     return buildBaseUrl(this.resolveTarget());
+  }
+
+  private url(path: string): string {
+    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
   }
 }

@@ -1,5 +1,6 @@
 import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
 import type { ActiveBlockData, TimeBlockData } from '@/lib/types/event';
+import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
 
@@ -33,7 +34,7 @@ export class TimeBlockRtAdapter {
   }
 
   async replaceCompletedBlocks(blocks: TimeBlockData[]): Promise<void> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/timeblocks`, {
+    const response = await this.fetchImpl(this.url('/timeblocks'), {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -47,7 +48,7 @@ export class TimeBlockRtAdapter {
   }
 
   async getActiveBlock(): Promise<ActiveBlockData | null> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/timeblocks/active`, {
+    const response = await this.fetchImpl(this.url('/timeblocks/active'), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -61,7 +62,7 @@ export class TimeBlockRtAdapter {
   }
 
   async putActiveBlock(block: ActiveBlockData): Promise<void> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/timeblocks/active`, {
+    const response = await this.fetchImpl(this.url('/timeblocks/active'), {
       method: 'PUT',
       headers: {
         'Content-Type': 'application/json',
@@ -75,7 +76,7 @@ export class TimeBlockRtAdapter {
   }
 
   async deleteActiveBlock(): Promise<void> {
-    const response = await this.fetchImpl(`${this.baseUrl()}/timeblocks/active`, {
+    const response = await this.fetchImpl(this.url('/timeblocks/active'), {
       method: 'DELETE',
       headers: { Accept: 'application/json' },
     });
@@ -85,7 +86,7 @@ export class TimeBlockRtAdapter {
   }
 
   private async requestJson<T>(path: string): Promise<T> {
-    const response = await this.fetchImpl(`${this.baseUrl()}${path}`, {
+    const response = await this.fetchImpl(this.url(path), {
       method: 'GET',
       headers: { Accept: 'application/json' },
     });
@@ -97,5 +98,9 @@ export class TimeBlockRtAdapter {
 
   private baseUrl(): string {
     return buildBaseUrl(this.resolveTarget());
+  }
+
+  private url(path: string): string {
+    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
   }
 }

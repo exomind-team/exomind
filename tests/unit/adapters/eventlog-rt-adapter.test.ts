@@ -1,8 +1,27 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { EventLogRtAdapter } from '@/lib/adapters/eventlog-rt-adapter';
+import { createLocalProfile, setProfileSession } from '@/lib/profile/profile-storage';
+
+function activateProfileScope(): string {
+  const profile = createLocalProfile({
+    slug: 'hailay',
+    displayName: 'Hailay',
+  });
+  setProfileSession({
+    version: 1,
+    activeProfileId: profile.profileId,
+    unlockedProfileIds: [profile.profileId],
+  });
+  return profile.profileId;
+}
 
 describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
+  beforeEach(() => {
+    window.localStorage.clear();
+  });
+
   it('maps runtime event payload to frontend EventData', async () => {
+    const profileId = activateProfileScope();
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 200,
@@ -47,13 +66,14 @@ describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
         },
       },
     ]);
-    expect(fetchImpl).toHaveBeenCalledWith(
-      'http://127.0.0.1:9124/eventlog',
-      expect.any(Object),
-    );
+    const [requestUrl] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const url = new URL(requestUrl);
+    expect(`${url.origin}${url.pathname}`).toBe('http://127.0.0.1:9124/eventlog');
+    expect(url.searchParams.get('user_id')).toBe(profileId);
   });
 
   it('serializes frontend EventData to runtime append payload', async () => {
+    const profileId = activateProfileScope();
     const fetchImpl = vi.fn(async () => ({
       ok: true,
       status: 201,
@@ -80,7 +100,10 @@ describe('EventLogRtAdapter（RT 事件日志适配器）', () => {
       },
     });
 
-    const [, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const [requestUrl, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const url = new URL(requestUrl);
+    expect(`${url.origin}${url.pathname}`).toBe('http://127.0.0.1:9124/eventlog');
+    expect(url.searchParams.get('user_id')).toBe(profileId);
     expect(requestInit?.method).toBe('POST');
     expect(JSON.parse(String(requestInit?.body))).toEqual({
       id: 'event-2',

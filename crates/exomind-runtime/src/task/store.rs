@@ -28,7 +28,7 @@ pub enum TaskStoreError {
 }
 
 enum TaskStoreBackend {
-    Memory(RwLock<HashMap<String, Task>>),
+    Memory(RwLock<HashMap<String, HashMap<String, Task>>>),
     Sqlite(SqliteTaskStore),
 }
 
@@ -40,6 +40,15 @@ pub enum TaskStoreBackendKind {
 
 pub struct TaskStore {
     backend: TaskStoreBackend,
+}
+
+const DEFAULT_SCOPE_KEY: &str = "anonymous";
+
+fn normalize_scope_key(scope_key: Option<&str>) -> &str {
+    scope_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_SCOPE_KEY)
 }
 
 impl TaskStore {
@@ -56,8 +65,14 @@ impl TaskStore {
     }
 
     pub fn create(&self, input: CreateTaskInput) -> Task {
+        self.create_scoped(None, input)
+    }
+
+    pub fn create_scoped(&self, scope_key: Option<&str>, input: CreateTaskInput) -> Task {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
-            return store.create(input).expect("sqlite task creation should succeed");
+            return store
+                .create_scoped(normalize_scope_key(scope_key), input)
+                .expect("sqlite task creation should succeed");
         }
 
         let now = chrono::Utc::now().timestamp_millis() as u64;
@@ -81,89 +96,123 @@ impl TaskStore {
         };
 
         let result = task.clone();
-        self.memory_tasks().write().unwrap().insert(task.id.clone(), task);
+        self.with_memory_scope_mut(scope_key, |tasks| {
+            tasks.insert(task.id.clone(), task);
+        });
         result
     }
 
+    pub fn create_in_scope(&self, scope_key: Option<&str>, input: CreateTaskInput) -> Task {
+        self.create_scoped(scope_key, input)
+    }
+
     pub fn get(&self, id: &str) -> Option<Task> {
+        self.get_scoped(None, id)
+    }
+
+    pub fn get_scoped(&self, scope_key: Option<&str>, id: &str) -> Option<Task> {
         match &self.backend {
-            TaskStoreBackend::Memory(tasks) => tasks.read().unwrap().get(id).cloned(),
-            TaskStoreBackend::Sqlite(store) => store.get(id).expect("sqlite task lookup should succeed"),
+            TaskStoreBackend::Memory(_) => self.memory_scope(scope_key).get(id).cloned(),
+            TaskStoreBackend::Sqlite(store) => store
+                .get_scoped(normalize_scope_key(scope_key), id)
+                .expect("sqlite task lookup should succeed"),
         }
+    }
+
+    pub fn get_in_scope(&self, scope_key: Option<&str>, id: &str) -> Option<Task> {
+        self.get_scoped(scope_key, id)
     }
 
     pub fn list(&self) -> Vec<Task> {
+        self.list_scoped(None)
+    }
+
+    pub fn list_scoped(&self, scope_key: Option<&str>) -> Vec<Task> {
         match &self.backend {
-            TaskStoreBackend::Memory(tasks) => {
-                let tasks = tasks.read().unwrap();
-                let mut list: Vec<Task> = tasks.values().cloned().collect();
+            TaskStoreBackend::Memory(_) => {
+                let mut list: Vec<Task> = self.memory_scope(scope_key).values().cloned().collect();
                 list.sort_by(|a, b| b.created_at.cmp(&a.created_at));
                 list
             }
-            TaskStoreBackend::Sqlite(store) => store.list().expect("sqlite task list should succeed"),
+            TaskStoreBackend::Sqlite(store) => store
+                .list_scoped(normalize_scope_key(scope_key))
+                .expect("sqlite task list should succeed"),
         }
     }
 
+    pub fn list_in_scope(&self, scope_key: Option<&str>) -> Vec<Task> {
+        self.list_scoped(scope_key)
+    }
+
     pub fn list_by_status(&self, status: &TaskStatus) -> Vec<Task> {
+        self.list_by_status_scoped(None, status)
+    }
+
+    pub fn list_by_status_scoped(&self, scope_key: Option<&str>, status: &TaskStatus) -> Vec<Task> {
         match &self.backend {
             TaskStoreBackend::Memory(_) => self
-                .list()
+                .list_scoped(scope_key)
                 .into_iter()
                 .filter(|t| &t.status == status)
                 .collect(),
             TaskStoreBackend::Sqlite(store) => store
-                .list_by_status(status)
+                .list_by_status_scoped(normalize_scope_key(scope_key), status)
                 .expect("sqlite status filter should succeed"),
         }
     }
 
     pub fn update(&self, id: &str, input: UpdateTaskInput) -> Result<Task, TaskStoreError> {
+        self.update_scoped(None, id, input)
+    }
+
+    pub fn update_scoped(&self, scope_key: Option<&str>, id: &str, input: UpdateTaskInput) -> Result<Task, TaskStoreError> {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
-            return store.update(id, input);
+            return store.update_scoped(normalize_scope_key(scope_key), id, input);
         }
 
-        let mut tasks = self.memory_tasks().write().unwrap();
-        let task = tasks
-            .get_mut(id)
-            .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
+        self.with_memory_scope_mut(scope_key, |tasks| {
+            let task = tasks
+                .get_mut(id)
+                .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
-        if task.status.is_terminal() {
-            return Err(TaskStoreError::TerminalState(task.status.clone()));
-        }
+            if task.status.is_terminal() {
+                return Err(TaskStoreError::TerminalState(task.status.clone()));
+            }
 
-        if let Some(title) = input.title {
-            task.title = title;
-        }
-        if let Some(description) = input.description {
-            task.description = Some(description);
-        }
-        if let Some(done_condition) = input.done_condition {
-            task.done_condition = Some(done_condition);
-        }
-        if let Some(priority) = input.priority {
-            task.priority = priority;
-        }
-        if let Some(tags) = input.tags {
-            task.tags = tags;
-        }
-        if let Some(depends_on) = input.depends_on {
-            task.depends_on = depends_on;
-        }
-        if let Some(due_at) = input.due_at {
-            task.due_at = Some(due_at);
-        }
-        if let Some(estimated_minutes) = input.estimated_minutes {
-            task.estimated_minutes = Some(estimated_minutes);
-        }
-        if let Some(parent_id) = input.parent_id {
-            task.parent_id = Some(parent_id);
-        }
-        if let Some(time_block_ids) = input.time_block_ids {
-            task.time_block_ids = time_block_ids;
-        }
+            if let Some(title) = input.title {
+                task.title = title;
+            }
+            if let Some(description) = input.description {
+                task.description = Some(description);
+            }
+            if let Some(done_condition) = input.done_condition {
+                task.done_condition = Some(done_condition);
+            }
+            if let Some(priority) = input.priority {
+                task.priority = priority;
+            }
+            if let Some(tags) = input.tags {
+                task.tags = tags;
+            }
+            if let Some(depends_on) = input.depends_on {
+                task.depends_on = depends_on;
+            }
+            if let Some(due_at) = input.due_at {
+                task.due_at = Some(due_at);
+            }
+            if let Some(estimated_minutes) = input.estimated_minutes {
+                task.estimated_minutes = Some(estimated_minutes);
+            }
+            if let Some(parent_id) = input.parent_id {
+                task.parent_id = Some(parent_id);
+            }
+            if let Some(time_block_ids) = input.time_block_ids {
+                task.time_block_ids = time_block_ids;
+            }
 
-        task.updated_at = chrono::Utc::now().timestamp_millis() as u64;
-        Ok(task.clone())
+            task.updated_at = chrono::Utc::now().timestamp_millis() as u64;
+            Ok(task.clone())
+        })
     }
 
     /// Transition task to a new status. Returns (old_status, updated_task).
@@ -172,82 +221,121 @@ impl TaskStore {
         id: &str,
         new_status: TaskStatus,
     ) -> Result<(TaskStatus, Task), TaskStoreError> {
+        self.transition_scoped(None, id, new_status)
+    }
+
+    pub fn transition_scoped(
+        &self,
+        scope_key: Option<&str>,
+        id: &str,
+        new_status: TaskStatus,
+    ) -> Result<(TaskStatus, Task), TaskStoreError> {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
-            return store.transition(id, new_status);
+            return store.transition_scoped(normalize_scope_key(scope_key), id, new_status);
         }
 
-        let mut tasks = self.memory_tasks().write().unwrap();
-        let task = tasks
-            .get_mut(id)
-            .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
+        self.with_memory_scope_mut(scope_key, |tasks| {
+            let task = tasks
+                .get_mut(id)
+                .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
-        if !task.status.can_transition_to(&new_status) {
-            return Err(TaskStoreError::InvalidTransition {
-                from: task.status.clone(),
-                to: new_status,
-            });
-        }
+            if !task.status.can_transition_to(&new_status) {
+                return Err(TaskStoreError::InvalidTransition {
+                    from: task.status.clone(),
+                    to: new_status,
+                });
+            }
 
-        let old_status = task.status.clone();
-        let now = chrono::Utc::now().timestamp_millis() as u64;
-        task.status = new_status.clone();
-        task.updated_at = now;
+            let old_status = task.status.clone();
+            let now = chrono::Utc::now().timestamp_millis() as u64;
+            task.status = new_status.clone();
+            task.updated_at = now;
 
-        if new_status.is_terminal() {
-            task.completed_at = Some(now);
-        }
+            if new_status.is_terminal() {
+                task.completed_at = Some(now);
+            }
 
-        Ok((old_status, task.clone()))
+            Ok((old_status, task.clone()))
+        })
     }
 
     /// Abandon a task (set status to Abandoned). Convenience for DELETE endpoint.
     pub fn abandon(&self, id: &str) -> Result<Task, TaskStoreError> {
+        self.abandon_scoped(None, id)
+    }
+
+    pub fn abandon_scoped(&self, scope_key: Option<&str>, id: &str) -> Result<Task, TaskStoreError> {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
-            return store.abandon(id);
+            return store.abandon_scoped(normalize_scope_key(scope_key), id);
         }
-        let (_, task) = self.transition(id, TaskStatus::Abandoned)?;
+        let (_, task) = self.transition_scoped(scope_key, id, TaskStatus::Abandoned)?;
         Ok(task)
     }
 
     /// Hard remove from store. Returns the removed task if it existed.
     pub fn remove(&self, id: &str) -> Option<Task> {
+        self.remove_scoped(None, id)
+    }
+
+    pub fn remove_scoped(&self, scope_key: Option<&str>, id: &str) -> Option<Task> {
         match &self.backend {
-            TaskStoreBackend::Memory(tasks) => tasks.write().unwrap().remove(id),
-            TaskStoreBackend::Sqlite(store) => store.remove(id).expect("sqlite task removal should succeed"),
+            TaskStoreBackend::Memory(_) => self.with_memory_scope_mut(scope_key, |tasks| tasks.remove(id)),
+            TaskStoreBackend::Sqlite(store) => store
+                .remove_scoped(normalize_scope_key(scope_key), id)
+                .expect("sqlite task removal should succeed"),
         }
     }
 
     pub fn len(&self) -> usize {
+        self.len_scoped(None)
+    }
+
+    pub fn len_scoped(&self, scope_key: Option<&str>) -> usize {
         match &self.backend {
-            TaskStoreBackend::Memory(tasks) => tasks.read().unwrap().len(),
-            TaskStoreBackend::Sqlite(store) => store.len().expect("sqlite task len should succeed"),
+            TaskStoreBackend::Memory(_) => self.memory_scope(scope_key).len(),
+            TaskStoreBackend::Sqlite(store) => store
+                .len_scoped(normalize_scope_key(scope_key))
+                .expect("sqlite task len should succeed"),
         }
     }
 
     pub fn upsert(&self, task: Task) -> Result<Task, TaskStoreError> {
+        self.upsert_scoped(None, task)
+    }
+
+    pub fn upsert_scoped(&self, scope_key: Option<&str>, task: Task) -> Result<Task, TaskStoreError> {
         match &self.backend {
-            TaskStoreBackend::Memory(tasks) => {
-                tasks.write().unwrap().insert(task.id.clone(), task.clone());
+            TaskStoreBackend::Memory(_) => {
+                self.with_memory_scope_mut(scope_key, |tasks| {
+                    tasks.insert(task.id.clone(), task.clone());
+                });
                 Ok(task)
             }
             TaskStoreBackend::Sqlite(store) => {
-                store.upsert(&task)?;
+                store.upsert_scoped(normalize_scope_key(scope_key), &task)?;
                 Ok(task)
             }
         }
     }
 
     pub fn replace_all(&self, tasks: &[Task]) -> Result<(), TaskStoreError> {
+        self.replace_all_scoped(None, tasks)
+    }
+
+    pub fn replace_all_scoped(&self, scope_key: Option<&str>, tasks: &[Task]) -> Result<(), TaskStoreError> {
         match &self.backend {
-            TaskStoreBackend::Memory(memory) => {
-                let mut guard = memory.write().unwrap();
-                guard.clear();
-                for task in tasks {
-                    guard.insert(task.id.clone(), task.clone());
-                }
+            TaskStoreBackend::Memory(_) => {
+                self.with_memory_scope_mut(scope_key, |guard| {
+                    guard.clear();
+                    for task in tasks {
+                        guard.insert(task.id.clone(), task.clone());
+                    }
+                });
                 Ok(())
             }
-            TaskStoreBackend::Sqlite(store) => store.replace_all(tasks),
+            TaskStoreBackend::Sqlite(store) => {
+                store.replace_all_scoped(normalize_scope_key(scope_key), tasks)
+            }
         }
     }
 
@@ -265,9 +353,31 @@ impl TaskStore {
         }
     }
 
-    fn memory_tasks(&self) -> &RwLock<HashMap<String, Task>> {
+    fn memory_scope(&self, scope_key: Option<&str>) -> HashMap<String, Task> {
+        let normalized_scope = normalize_scope_key(scope_key);
         match &self.backend {
-            TaskStoreBackend::Memory(tasks) => tasks,
+            TaskStoreBackend::Memory(tasks) => tasks
+                .read()
+                .unwrap()
+                .get(normalized_scope)
+                .cloned()
+                .unwrap_or_default(),
+            TaskStoreBackend::Sqlite(_) => unreachable!("memory-only helper used on sqlite backend"),
+        }
+    }
+
+    fn with_memory_scope_mut<R>(
+        &self,
+        scope_key: Option<&str>,
+        f: impl FnOnce(&mut HashMap<String, Task>) -> R,
+    ) -> R {
+        let normalized_scope = normalize_scope_key(scope_key).to_string();
+        match &self.backend {
+            TaskStoreBackend::Memory(tasks) => {
+                let mut guard = tasks.write().unwrap();
+                let scope_tasks = guard.entry(normalized_scope).or_default();
+                f(scope_tasks)
+            }
             TaskStoreBackend::Sqlite(_) => unreachable!("memory-only helper used on sqlite backend"),
         }
     }
@@ -311,6 +421,31 @@ mod tests {
         let loaded = reopened.get(&created.id).expect("task should persist in sqlite");
         assert_eq!(loaded.title, "Persist me");
         assert_eq!(reopened.len(), 1);
+    }
+
+    #[test]
+    fn sqlite_store_isolates_tasks_by_scope() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let anonymous = store.create(create_input("Task anonymous"));
+        let profile_a = store.create_scoped(Some("profile-a"), create_input("Task A"));
+        let profile_b = store.create_scoped(Some("profile-b"), create_input("Task B"));
+
+        let tasks_anonymous = store.list();
+        let tasks_a = store.list_scoped(Some("profile-a"));
+        let tasks_b = store.list_scoped(Some("profile-b"));
+
+        assert_eq!(tasks_anonymous.len(), 1);
+        assert_eq!(tasks_anonymous[0].id, anonymous.id);
+        assert_eq!(tasks_a.len(), 1);
+        assert_eq!(tasks_a[0].id, profile_a.id);
+        assert_eq!(tasks_b.len(), 1);
+        assert_eq!(tasks_b[0].id, profile_b.id);
+        assert!(store.get_scoped(Some("profile-a"), &profile_b.id).is_none());
+        assert!(store.get_scoped(Some("profile-b"), &profile_a.id).is_none());
+        assert!(store.get_scoped(Some("profile-a"), &anonymous.id).is_none());
     }
 
     #[test]
