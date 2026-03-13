@@ -2,7 +2,7 @@
 
 ## 读取时机
 
-- 只有当 `router.action = discovery`，或上一步输出的 `referencesMustRead` 包含本文档时，才读取并遵循本文
+- 只有当 `router.action = discovery`，或上一步输出的 `referencesMustRead` 包含本文档时，你才读取并遵循本文
 - discovery 规则不再要求冷启动时预先加载 review / comment / state-worktree 文档
 
 ## 输入
@@ -14,12 +14,12 @@
 
 ## 扫描算法
 
-1. 拉取 open PR，并按 `updatedAt` 倒序排列。
-2. 对每个 PR，找到正文以 `[Codex Reviewer]` 开头的最后一条评论。
-3. 若不存在这样的评论，则将该 PR 标记为待处理。
-4. 若存在，则比较该评论时间戳与其后的 PR 活动。
-5. 若其后存在任意新评论、新 review 活动、review thread 回复或新提交，则将该 PR 标记为待处理。
-6. 否则跳过该 PR。
+1. 你拉取 open PR，并按 `updatedAt` 倒序排列。
+2. 你对每个 PR，找到正文以 `[Codex Reviewer]` 开头的最后一条评论。
+3. 若不存在这样的评论，你将该 PR 标记为待处理。
+4. 若存在，你比较该评论时间戳与其后的 PR 活动。
+5. 若其后存在任意新评论、新 review 活动、review thread 回复或新提交，你将该 PR 标记为待处理。
+6. 否则你跳过该 PR。
 
 ## 增量规则
 
@@ -37,36 +37,36 @@
 
 其中 review thread 回复属于可选增强信号：
 
-- 若 review thread 回复读取成功，则纳入判定（使用 GET 语义分页读取，避免 `gh api -F ...` 退化成 POST 后触发 `422`）
-- 若 thread reply 读取失败，则退化为“没有 thread replies”，继续使用 comments / reviews / commits 判定
+- 若 review thread 回复读取成功，你将其纳入判定（使用 GET 语义分页读取，避免 `gh api -F ...` 退化成 POST 后触发 `422`）
+- 若 thread reply 读取失败，你退化为”没有 thread replies”，继续使用 comments / reviews / commits 判定
 - 退化必须在 discovery 结果中留下 warning，便于排查
 
-服务类噪音评论也可能触发一次重新检查，但若没有代码增量，不应强制进入重度复审。
+服务类噪音评论也可能触发一次重新检查，但若没有代码增量，你不应强制进入重度复审。
 
 ## 选择规则
 
-- 构建一个按 PR `updatedAt` 排序的 `actionable_prs` 队列。
-- 选择队列中的第一个 PR 作为 `selected_pr`。
-- 将剩余项持久化为 `pending_queue`。
-- 若队列为空，则输出 `NO_TARGET`，并附带 sleep 建议；下一轮仍需先重新跑 discovery，再判断是否继续等待。
+- 你构建一个按 PR `updatedAt` 排序的 `actionable_prs` 队列。
+- 你选择队列中的第一个 PR 作为 `selected_pr`。
+- 你将剩余项持久化为 `pending_queue`。
+- 若队列为空，你输出 `NO_TARGET`，并附带 sleep 建议；下一轮你仍需先重新跑 discovery，再判断是否继续等待。
 
 ## 失败处理
 
-- 如果单个 PR 查询失败，则跳过该 PR 并继续。
-- 如果整轮都无法有效检查任何 PR，则将 `failure_streak` 加一。
-- 连续三轮整轮失败后，sleep 300 秒，并保留失败记录。
-- 任意成功轮次都应将 `failure_streak` 重置为零。
+- 如果单个 PR 查询失败，你跳过该 PR 并继续。
+- 如果整轮都无法有效检查任何 PR，你将 `failure_streak` 加一。
+- 连续三轮整轮失败后，你 sleep 300 秒，并保留失败记录。
+- 任意成功轮次你都应将 `failure_streak` 重置为零。
 
 ## 退避策略
 
 - 基础 sleep：180 秒
-- 若连续多轮都没有变化，则将 sleep 时长翻倍
+- 若连续多轮都没有变化，你将 sleep 时长翻倍
 - 最大 sleep：1800 秒
-- 一旦出现新的待处理 PR，立即将 sleep 重置回 180 秒
+- 一旦出现新的待处理 PR，你立即将 sleep 重置回 180 秒
 
 ## 输出状态
 
-每一轮发现阶段都应产出：
+你在每一轮发现阶段都应产出：
 
 - `state`：`HAS_TARGET`、`NO_TARGET` 或 `FAILED_RETRYABLE`
 - `actionable_prs`

@@ -31,7 +31,7 @@
 
 ## 阅读顺序
 
-按以下顺序阅读：
+你按以下顺序阅读：
 
 1. `docs/agents/review-agent/common-contract.md`
 2. `docs/agents/review-agent/review-agent.prompt.md`
@@ -43,7 +43,7 @@
 
 ## 循环总览
 
-审核 Agent 以统一入口 prompt + router + 两阶段状态机运行：
+你以统一入口 prompt + router + 两阶段状态机运行：
 
 - 统一入口：人类重复输入同一份 prompt。
 - 路由入口（`Router`）：每轮先基于持久化状态和 GitHub 当前事实决定下一步动作；当上一轮 `NO_TARGET` 时，也必须先重新进入 discovery。
@@ -112,7 +112,7 @@
 - `NO_TARGET`：本轮扫描未发现需要行动的 PR；它只表示上一轮结果，下一轮仍需先重跑 discovery。
 - `HAS_TARGET`：本轮存在至少一个需要行动的 PR，并已选中一个目标。
 - `REVIEW_POSTED`：当前目标 PR 已完成审阅并发布评论。
-- `NEEDS_HUMAN_TEST`：当前目标 PR 需要人类验证，Agent 不应继续尝试自动收口。
+- `NEEDS_HUMAN_TEST`：当前目标 PR 需要人类验证，你不应继续尝试自动收口。
 - `APPROVE_READY`：显式 `--approve` 已真实成功。
 - `MERGE_READY`：评论即通过门禁满足，且 `gh pr merge --squash` 已真实成功。
 - `MERGE_BLOCKED`：合并被阻塞且不重试。
