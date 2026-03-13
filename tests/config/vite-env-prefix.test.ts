@@ -45,5 +45,19 @@ describe('vite env prefix config', () => {
       }
     }
   });
+
+  it('should ignore unrelated workspace trees during dev watch（开发监听应忽略无关 worktree 与旁路子项目）', async () => {
+    const resolved = await resolveConfig();
+    const watch = typeof resolved.server === 'object' ? resolved.server?.watch : undefined;
+    const ignored = typeof watch === 'object' && watch && Array.isArray(watch.ignored)
+      ? watch.ignored
+      : [];
+
+    expect(ignored).toEqual(expect.arrayContaining([
+      '**/.worktrees/**',
+      '**/website/**',
+      '**/packages/ts-agent-cli/**',
+    ]));
+  });
 });
 

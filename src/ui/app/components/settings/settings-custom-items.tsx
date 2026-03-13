@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Bell, Bot, Check, ChevronRight, Key, Mic, Timer, Upload, Wifi } from 'lucide-react';
+import { Bell, Bot, Check, ChevronRight, Key, Mic, Music4, Timer, Upload, Wifi } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getTaskBackupService } from '@/lib/services';
@@ -18,6 +18,20 @@ import {
   getTimerEndSoundPresetById,
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
+import {
+  getFocusBgmPreferences,
+  subscribeFocusBgmPreferencesChanges,
+  updateFocusBgmPreferences,
+  type FocusBgmPlaybackMode,
+  type FocusBgmStopBehavior,
+  type FocusBgmSourceType,
+} from '@/config/focus-bgm-preferences';
+import {
+  FOCUS_BGM_PRESETS,
+  getFocusBgmPresetById,
+  type FocusBgmPresetId,
+} from '@/lib/media/focus-bgm-presets';
+import { pickFocusBgmTracks } from '@/lib/media/focus-bgm-file-picker';
 import {
   getLLMApiKey,
   getLLMBaseUrl,
@@ -83,6 +97,282 @@ function SecondaryValue({ value }: { value: string }) {
       <span>{value}</span>
       <ChevronRight className="h-4 w-4" />
     </div>
+  );
+}
+
+function FocusBgmChoiceButton({
+  label,
+  selected,
+  onClick,
+}: {
+  label: string;
+  selected: boolean;
+  onClick: () => void;
+}) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex w-full items-center justify-between rounded-xl border px-4 py-3 text-left text-sm transition-colors ${
+        selected
+          ? 'border-[#C75B3A] bg-[#FEF0ED] text-[#1C1917] dark:border-[#E8734E] dark:bg-[#2A1510] dark:text-[#FAFAF9]'
+          : 'border-[#F0ECE8] bg-white text-[#1C1917] dark:border-[#FFFFFF15] dark:bg-[#1C1917] dark:text-[#FAFAF9]'
+      }`}
+    >
+      <span>{label}</span>
+      {selected ? <Check className="h-4 w-4 text-[#C75B3A]" /> : null}
+    </button>
+  );
+}
+
+function hasFocusBgmSourceSelection(sourceType: FocusBgmSourceType, trackCount: number): boolean {
+  return sourceType === 'preset' || trackCount > 0;
+}
+
+function formatFocusBgmSummary(preferences: ReturnType<typeof getFocusBgmPreferences>): string {
+  if (!preferences.enabled) {
+    return '已关闭';
+  }
+
+  const modeLabel = preferences.playbackMode === 'loop' ? '循环' : '顺序';
+  if (preferences.sourceType === 'preset') {
+    return `${getFocusBgmPresetById(preferences.presetId).label} · ${modeLabel}`;
+  }
+
+  if (preferences.customTracks.length > 0) {
+    return `${preferences.customTracks.length} 首本地音频 · ${modeLabel}`;
+  }
+
+  return `未选择本地音频 · ${modeLabel}`;
+}
+
+export function FocusBgmPanel(_props: { ctx: SettingsContext }) {
+  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [preferences, setPreferences] = useSettingValue(
+    () => getFocusBgmPreferences(),
+    subscribeFocusBgmPreferencesChanges,
+  );
+
+  const applyPatch = (patch: Partial<typeof preferences>) => {
+    const next = {
+      ...preferences,
+      ...updateFocusBgmPreferences(patch),
+    };
+    setPreferences(next);
+    setError(null);
+    return next;
+  };
+
+  const handleToggleEnabled = (enabled: boolean) => {
+    applyPatch({ enabled });
+  };
+
+  const handleSelectSource = (sourceType: FocusBgmSourceType) => {
+    applyPatch({ sourceType });
+  };
+
+  const handleSelectPreset = (presetId: FocusBgmPresetId) => {
+    applyPatch({ sourceType: 'preset', presetId, enabled: true });
+  };
+
+  const handleSelectPlaybackMode = (playbackMode: FocusBgmPlaybackMode) => {
+    applyPatch({ playbackMode });
+  };
+
+  const handleSelectStopBehavior = (stopBehavior: FocusBgmStopBehavior) => {
+    applyPatch({ stopBehavior });
+  };
+
+  const handleSelectLocalTracks = async () => {
+    try {
+      const tracks = await pickFocusBgmTracks();
+      if (tracks.length === 0) {
+        setNotice('未选择新的本地音频');
+        setError(null);
+        return;
+      }
+
+      applyPatch({
+        enabled: true,
+        sourceType: 'custom',
+        customTracks: tracks,
+      });
+      setNotice(`已选择 ${tracks.length} 首本地音频`);
+    } catch (selectionError) {
+      setNotice(null);
+      setError(selectionError instanceof Error ? selectionError.message : '选择本地音频失败');
+    }
+  };
+
+  const handleClearLocalTracks = () => {
+    applyPatch({ customTracks: [] });
+    setNotice('已清空本地音频列表');
+    setError(null);
+  };
+
+  return (
+    <div className="space-y-4">
+      <NoticeBlock message={notice} tone="success" />
+      <NoticeBlock message={error} tone="error" />
+      <div className="space-y-4">
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-[#78716C]">播放开关</p>
+          <div className="grid grid-cols-2 gap-2">
+            <FocusBgmChoiceButton
+              label="关闭背景音"
+              selected={!preferences.enabled}
+              onClick={() => handleToggleEnabled(false)}
+            />
+            <FocusBgmChoiceButton
+              label="开启背景音"
+              selected={preferences.enabled}
+              onClick={() => handleToggleEnabled(true)}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-[#78716C]">音源类型</p>
+          <div className="grid grid-cols-2 gap-2">
+            <FocusBgmChoiceButton
+              label="预设白噪音"
+              selected={preferences.sourceType === 'preset'}
+              onClick={() => handleSelectSource('preset')}
+            />
+            <FocusBgmChoiceButton
+              label="本地音频"
+              selected={preferences.sourceType === 'custom'}
+              onClick={() => handleSelectSource('custom')}
+            />
+          </div>
+        </div>
+
+        {preferences.sourceType === 'preset' ? (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-[#78716C]">预设选择</p>
+            {FOCUS_BGM_PRESETS.map((preset) => (
+              <FocusBgmChoiceButton
+                key={preset.id}
+                label={preset.label}
+                selected={preferences.presetId === preset.id}
+                onClick={() => handleSelectPreset(preset.id)}
+              />
+            ))}
+          </div>
+        ) : (
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-[#78716C]">本地音频</p>
+            <div className="grid grid-cols-2 gap-2">
+              <FocusBgmChoiceButton
+                label="选择本地音频"
+                selected={preferences.customTracks.length > 0}
+                onClick={() => {
+                  void handleSelectLocalTracks();
+                }}
+              />
+              <FocusBgmChoiceButton
+                label="清空本地列表"
+                selected={false}
+                onClick={handleClearLocalTracks}
+              />
+            </div>
+            <div className="rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-4 py-3 text-xs text-[#57534E] dark:border-[#FFFFFF15] dark:bg-[#1C1917] dark:text-[#D6D3D1]">
+              {preferences.customTracks.length > 0 ? (
+                <ul className="space-y-1">
+                  {preferences.customTracks.map((track) => (
+                    <li key={track.path}>{track.name}</li>
+                  ))}
+                </ul>
+              ) : (
+                <span>当前未选择本地音频</span>
+              )}
+            </div>
+          </div>
+        )}
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-[#78716C]">播放模式</p>
+          <div className="grid grid-cols-2 gap-2">
+            <FocusBgmChoiceButton
+              label="循环播放"
+              selected={preferences.playbackMode === 'loop'}
+              onClick={() => handleSelectPlaybackMode('loop')}
+            />
+            <FocusBgmChoiceButton
+              label="顺序播放"
+              selected={preferences.playbackMode === 'sequence'}
+              onClick={() => handleSelectPlaybackMode('sequence')}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <p className="text-xs font-medium text-[#78716C]">停止策略</p>
+          <div className="grid grid-cols-2 gap-2">
+            <FocusBgmChoiceButton
+              label="时间到即停"
+              selected={preferences.stopBehavior === 'timer-end'}
+              onClick={() => handleSelectStopBehavior('timer-end')}
+            />
+            <FocusBgmChoiceButton
+              label="手动结束才停"
+              selected={preferences.stopBehavior === 'manual-end'}
+              onClick={() => handleSelectStopBehavior('manual-end')}
+            />
+          </div>
+        </div>
+
+        <div className="space-y-2">
+          <div className="flex items-center justify-between text-xs font-medium text-[#78716C]">
+            <span>音量</span>
+            <span>{preferences.volume}%</span>
+          </div>
+          <input
+            type="range"
+            min={0}
+            max={100}
+            step={1}
+            value={preferences.volume}
+            onChange={(event) => applyPatch({ volume: Number(event.target.value) })}
+            className="w-full accent-[#C75B3A]"
+            aria-label="背景音音量（Background music volume）"
+          />
+        </div>
+
+        {!hasFocusBgmSourceSelection(preferences.sourceType, preferences.customTracks.length) ? (
+          <p className="text-xs text-[#A8A29E]">切换到本地音频后，请先选择至少一首音频文件。</p>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+export function FocusBgmSetting(_props: { ctx: SettingsContext }) {
+  const [open, setOpen] = useState(false);
+  const [preferences] = useSettingValue(
+    () => getFocusBgmPreferences(),
+    subscribeFocusBgmPreferencesChanges,
+  );
+
+  return (
+    <>
+      <SettingRow
+        icon={<Music4 className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="专注背景音"
+        onClick={() => setOpen(true)}
+        right={<SecondaryValue value={formatFocusBgmSummary(preferences)} />}
+      />
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>专注背景音</DialogTitle>
+            <DialogDescription>为专注过程配置白噪音或本地背景音乐</DialogDescription>
+          </DialogHeader>
+          <FocusBgmPanel ctx={_props.ctx} />
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 

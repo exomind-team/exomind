@@ -137,6 +137,30 @@ Android SDK: D:\data\AndroidStudioSDK
 .\dev\desktop.ps1 -NoInstall
 ```
 
+### dev/tauri-dev-manager.ts - 多实例桌面开发管理器
+
+推荐用这个入口管理多个 `tauri dev` 实例，而不是手工 `taskkill /T`：
+
+```powershell
+# 启动一个受管实例（自动分配端口并登记 PID / 日志）
+bun run tauri:manager -- start --name codex-main
+
+# 查看当前受管实例
+bun run tauri:manager -- list
+
+# 实时跟随日志
+bun run tauri:manager -- logs --name codex-main --follow
+
+# 精确停止某一个实例
+bun run tauri:manager -- stop --name codex-main
+```
+
+说明：
+
+- 实例元数据保存在 `.tmp\tauri-dev-instances\*.json`
+- 日志保存在 `.tmp\tauri-dev-instances\*.log`
+- `stop` 只会终止该实例登记的根进程树，避免误杀其它 `tauri dev`
+
 ### dev/android.ps1 - Android 端开发
 
 ```powershell

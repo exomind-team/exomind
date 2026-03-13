@@ -15,8 +15,8 @@ use commands::eventlog_commands::{
 };
 use commands::file_commands::{
     append_file, append_to_markdown, delete_file, export_messages_to_markdown, file_exists,
-    list_files, pick_json_file, read_file, read_file_binary, save_binary_file, save_json_file,
-    write_file,
+    list_files, pick_audio_files, pick_json_file, read_file, read_file_binary,
+    save_binary_file, save_json_file, write_file,
 };
 use commands::now_workbench_overlay_commands::{
     ensure_now_workbench_overlay_window, now_workbench_overlay_ensure,
@@ -173,6 +173,7 @@ pub fn run() {
             save_binary_file,
             save_json_file,
             pick_json_file,
+            pick_audio_files,
             get_device_id,
             eventlog_list,
             eventlog_append,
@@ -194,8 +195,8 @@ pub fn run() {
             voice_overlay_set_bottom_offset,
             now_workbench_overlay_ensure,
             now_workbench_overlay_show,
-            now_workbench_overlay_hide,
             now_workbench_overlay_restore,
+            now_workbench_overlay_hide,
             now_workbench_overlay_focus_main,
             now_workbench_overlay_set_position,
             voice_shortcut_set,
