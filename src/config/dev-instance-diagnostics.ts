@@ -32,7 +32,7 @@ const DEFAULT_DEV_INSTANCE_META: DevInstanceMeta = {
   webPort: 1420,
   hmrPort: 1421,
   rtPort: 9124,
-  mcpPort: 9223,
+  mcpPort: 9232,
   pouchdbPort: 6984,
   asrPort: 1949,
   syncServerEnvUrl: undefined,

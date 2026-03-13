@@ -11,9 +11,9 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
       webPort: 5173,
       hmrPort: 5174,
       rtPort: 6984,
-      mcpPort: 9223,
-      syncServerUrl: 'http://localhost:6984',
-      asrServerUrl: 'http://localhost:1949',
+      mcpPort: 9232,
+      syncServerEnvUrl: 'http://localhost:6984',
+      asrServerEnvUrl: 'http://localhost:1949',
       envStatus: {
         VITE_MOSS_API_KEY: { sensitive: true, configured: false },
         VITE_VOLCANO_APP_KEY: { sensitive: true, configured: true },
@@ -45,7 +45,7 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
       worktreeName: 'issue-514-instance-diagnostics',
       webPort: 5173,
       rtPort: 6984,
-      mcpPort: 9223,
+      mcpPort: 9232,
       envStatus: expect.objectContaining({
         VITE_VOLCANO_APP_KEY: expect.objectContaining({ configured: true, sensitive: true }),
         EXOMIND_RT_SECRET: expect.objectContaining({ configured: true, sensitive: true }),
@@ -69,7 +69,7 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
       webPort: 5173,
       hmrPort: 5174,
       rtPort: 6984,
-      mcpPort: 9223,
+      mcpPort: 9232,
       pouchdbPort: 6984,
       asrPort: 1949,
       syncServerEnvUrl: '',
@@ -82,5 +82,27 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
 
     expect(snapshot.syncServerUrl).toBe('http://192.168.1.88:6984');
     expect(snapshot.asrServerUrl).toBe('http://192.168.1.88:1949');
+  });
+
+  it('defaults MCP port to 9232 when no explicit MCP env is provided（未显式配置时 MCP 默认端口应为 9232）', async () => {
+    (globalThis as typeof globalThis & {
+      __EXOMIND_DEV_INSTANCE_META__?: unknown;
+    }).__EXOMIND_DEV_INSTANCE_META__ = {
+      branch: 'feature/issue-514-instance-diagnostics',
+      worktreeName: 'issue-514-instance-diagnostics',
+      webPort: 5173,
+      hmrPort: 5174,
+      rtPort: 6984,
+      pouchdbPort: 6984,
+      asrPort: 1949,
+      syncServerEnvUrl: '',
+      asrServerEnvUrl: '',
+      envStatus: {},
+    };
+
+    const module = await import('@/config/dev-instance-diagnostics');
+    const snapshot = module.getDevInstanceDiagnosticsSnapshot();
+
+    expect(snapshot.mcpPort).toBe(9232);
   });
 });

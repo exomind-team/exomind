@@ -25,7 +25,7 @@ vi.mock('@/config/dev-instance-diagnostics', () => ({
     worktreeName: 'issue-514-instance-diagnostics',
     webPort: 5173,
     rtPort: 6984,
-    mcpPort: 9223,
+    mcpPort: 9232,
     syncServerUrl: 'http://localhost:6984',
     asrServerUrl: 'http://localhost:1949',
     pid: runtime?.pid ?? null,
@@ -278,7 +278,7 @@ describe('issue-514 instance diagnostics setting（实例诊断设置项）', ()
 
     expect(screen.getByText('5173')).toBeInTheDocument();
     expect(screen.getByText('6984')).toBeInTheDocument();
-    expect(screen.getByText('9223')).toBeInTheDocument();
+    expect(screen.getByText('9232')).toBeInTheDocument();
     expect(screen.getByText('issue-514-instance-diagnostics')).toBeInTheDocument();
     await waitFor(() => expect(screen.getByText('43120')).toBeInTheDocument());
     expect(screen.getAllByText('已配置').length).toBeGreaterThan(0);

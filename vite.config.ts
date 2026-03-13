@@ -52,7 +52,7 @@ export default defineConfig(({ mode }) => {
       readEnvValue(envMap, 'EXOMIND_MCP_PORT')
       ?? readEnvValue(envMap, 'EXOMIND_MCP_BRIDGE_PORT')
       ?? readEnvValue(envMap, 'TAURI_MCP_BRIDGE_PORT'),
-      9223,
+      9232,
     ),
     pouchdbPort: parsePort(readEnvValue(envMap, 'EXOMIND_POUCHDB_PORT'), 6984),
     asrPort: parsePort(readEnvValue(envMap, 'EXOMIND_ASR_PORT'), 1949),
@@ -79,9 +79,13 @@ export default defineConfig(({ mode }) => {
 
   return {
     plugins: [react()],
-    define: {
-      "globalThis.__EXOMIND_DEV_INSTANCE_META__": JSON.stringify(devInstanceMeta),
-    },
+    ...(mode === 'development'
+      ? {
+          define: {
+            "globalThis.__EXOMIND_DEV_INSTANCE_META__": JSON.stringify(devInstanceMeta),
+          },
+        }
+      : {}),
 
     envDir: ".",
     envPrefix: ["VITE_", "EXOMIND_"],
