@@ -61,4 +61,18 @@ describe('now workbench overlay preferences（当下工作台悬浮窗偏好）'
     expect(listener).toHaveBeenCalledWith({ x: 360, y: 480 });
     unsubscribe();
   });
+
+  it('ignores Windows hidden-window sentinel position when reading（读取 Windows 隐藏窗口哨兵坐标时忽略）', async () => {
+    storage['exomind:nowWorkbenchOverlayPosition'] = '{"x":-32000,"y":-32000}';
+    const module = await import('@/config/now-workbench-overlay-preferences');
+
+    expect(module.getNowWorkbenchOverlayPosition()).toBeNull();
+  });
+
+  it('does not persist Windows hidden-window sentinel position（不持久化 Windows 隐藏窗口哨兵坐标）', async () => {
+    const module = await import('@/config/now-workbench-overlay-preferences');
+
+    expect(module.setNowWorkbenchOverlayPosition({ x: -32000, y: -32000 })).toBeNull();
+    expect(storage['exomind:nowWorkbenchOverlayPosition']).toBeUndefined();
+  });
 });

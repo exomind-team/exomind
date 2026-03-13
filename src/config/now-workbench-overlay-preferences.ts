@@ -10,6 +10,8 @@ export interface NowWorkbenchOverlayPosition {
   y: number;
 }
 
+const WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD = -30000;
+
 function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   if (typeof window === 'undefined') return null;
   const localStorageLike = window.localStorage as Partial<Storage> | undefined;
@@ -42,6 +44,15 @@ function normalizePosition(rawValue: unknown): NowWorkbenchOverlayPosition | nul
   const x = normalizeCoordinate(candidate.x);
   const y = normalizeCoordinate(candidate.y);
   if (x == null || y == null) {
+    return null;
+  }
+
+  // Windows may report hidden/minimized helper windows at (-32000, -32000).
+  // Persisting that sentinel would strand the overlay off-screen on next launch.
+  if (
+    x <= WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD
+    && y <= WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD
+  ) {
     return null;
   }
 

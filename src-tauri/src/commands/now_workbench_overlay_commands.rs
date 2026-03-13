@@ -11,6 +11,8 @@ const NOW_WORKBENCH_OVERLAY_WIDTH: f64 = 392.0;
 const NOW_WORKBENCH_OVERLAY_HEIGHT: f64 = 470.0;
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const NOW_WORKBENCH_OVERLAY_MARGIN: i32 = 24;
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+const WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD: i32 = -30000;
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn ensure_now_workbench_overlay_window(app: &AppHandle) -> Result<(), String> {
@@ -83,6 +85,12 @@ fn calculate_now_workbench_overlay_position(
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn is_windows_hidden_window_position(x: i32, y: i32) -> bool {
+    x <= WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD
+        && y <= WINDOWS_HIDDEN_WINDOW_COORDINATE_THRESHOLD
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn position_now_workbench_overlay_default(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -108,6 +116,10 @@ fn position_now_workbench_overlay_default(
 fn now_workbench_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
     ensure_now_workbench_overlay_window(app)?;
     if let Some(window) = app.get_webview_window(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL) {
+        let current_position = window.outer_position().map_err(|error| error.to_string())?;
+        if is_windows_hidden_window_position(current_position.x, current_position.y) {
+            position_now_workbench_overlay_default(app, &window)?;
+        }
         window.show().map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -188,9 +200,13 @@ pub async fn now_workbench_overlay_set_position(
 ) -> Result<(), String> {
     ensure_now_workbench_overlay_window(&app)?;
     if let Some(window) = app.get_webview_window(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL) {
-        window
-            .set_position(PhysicalPosition::new(x, y))
-            .map_err(|error| error.to_string())?;
+        if is_windows_hidden_window_position(x, y) {
+            position_now_workbench_overlay_default(&app, &window)?;
+        } else {
+            window
+                .set_position(PhysicalPosition::new(x, y))
+                .map_err(|error| error.to_string())?;
+        }
     }
     Ok(())
 }
@@ -207,7 +223,9 @@ pub async fn now_workbench_overlay_set_position(
 
 #[cfg(test)]
 mod tests {
-    use super::calculate_now_workbench_overlay_position;
+    use super::{
+        calculate_now_workbench_overlay_position, is_windows_hidden_window_position,
+    };
 
     #[test]
     fn calculate_now_workbench_overlay_position_anchors_bottom_right() {
@@ -221,5 +239,12 @@ mod tests {
         let (x, y) = calculate_now_workbench_overlay_position(1920, 40, 1920, 1040);
         assert_eq!(x, 3424);
         assert_eq!(y, 586);
+    }
+
+    #[test]
+    fn treats_windows_hidden_window_sentinel_as_invalid_position() {
+        assert!(is_windows_hidden_window_position(-32000, -32000));
+        assert!(!is_windows_hidden_window_position(-1920, 40));
+        assert!(!is_windows_hidden_window_position(3424, 586));
     }
 }
