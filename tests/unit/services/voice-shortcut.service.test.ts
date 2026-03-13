@@ -256,6 +256,12 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       if (command === 'voice_shortcut_set') {
         return payload?.shortcut ?? 'Alt+Q';
       }
+      if (command === 'foreground_window_get') {
+        return {
+          title: 'Cursor - ExoMind',
+          processName: 'Cursor.exe',
+        };
+      }
       if (command === 'volcano_asr_recognize') {
         return {
           text: '火山识别文本',
@@ -558,6 +564,12 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
       if (command === 'voice_shortcut_set') {
         return payload?.shortcut ?? 'Alt+Q';
+      }
+      if (command === 'foreground_window_get') {
+        return {
+          title: 'Cursor - ExoMind',
+          processName: 'Cursor.exe',
+        };
       }
       if (command === 'volcano_asr_stream_start') {
         return sessionIds.shift() ?? 'fallback-session';
@@ -1217,6 +1229,10 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         source: 'tauri:voice-shortcut',
         captureSource: 'global-shortcut',
         targetScope: 'agent-chat',
+        window: {
+          title: 'Cursor - ExoMind',
+          processName: 'Cursor.exe',
+        },
         agentContext: {
           agentId: 'codex',
           agentName: 'Codex',
@@ -1232,6 +1248,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
           inputMode: 'voice',
           captureSource: 'global-shortcut',
           targetScope: 'agent-chat',
+          windowTitle: 'Cursor - ExoMind',
+          processName: 'Cursor.exe',
           agentId: 'codex',
           agentName: 'Codex',
           sessionId: 'session-xyz',

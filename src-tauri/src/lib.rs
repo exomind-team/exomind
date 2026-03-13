@@ -30,6 +30,7 @@ use commands::runtime_commands::{
 };
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, register_voice_shortcut, simulate_enter, simulate_paste,
+    foreground_window_get,
     voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, VoiceShortcutState,
 };
@@ -182,6 +183,7 @@ pub fn run() {
             voice_shortcut_set,
             voice_shortcut_get,
             voice_recording_set_active,
+            foreground_window_get,
             // ASR 语音识别命令
             volcano_asr_recognize,
             volcano_asr_check_config,

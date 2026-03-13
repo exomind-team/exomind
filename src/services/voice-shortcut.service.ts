@@ -105,6 +105,11 @@ type VolcanoAsrStreamEventPayload = {
   errorMessage?: string;
 };
 
+type ForegroundWindowContext = {
+  title?: string | null;
+  processName?: string | null;
+};
+
 export class VoiceShortcutService {
   private state: VoiceShortcutState = 'idle';
   private stream: MediaStream | null = null;
@@ -886,12 +891,15 @@ export class VoiceShortcutService {
   private async handleResult(result: ASRResult, recognitionMs: number, providerLabel: string): Promise<void> {
     this.latestAudioLevel = 0;
     const activeInteractionContext = getActiveInteractionContextService().getContext();
+    const foregroundWindow = await this.getForegroundWindowContext();
     const traceId = this.currentTraceId ?? undefined;
     const voiceContext = {
       inputMode: 'voice' as const,
       captureSource: 'global-shortcut',
       traceId,
       targetScope: activeInteractionContext?.targetScope ?? 'unknown',
+      windowTitle: foregroundWindow?.title?.trim() || undefined,
+      processName: foregroundWindow?.processName?.trim() || undefined,
       agentId: activeInteractionContext?.agentContext?.agentId ?? undefined,
       agentName: activeInteractionContext?.agentContext?.agentName ?? undefined,
       sessionId: activeInteractionContext?.agentContext?.sessionId ?? undefined,
@@ -912,6 +920,10 @@ export class VoiceShortcutService {
         captureSource: 'global-shortcut',
         traceId,
         targetScope: activeInteractionContext?.targetScope ?? 'unknown',
+        window: foregroundWindow ? {
+          title: foregroundWindow.title ?? undefined,
+          processName: foregroundWindow.processName ?? undefined,
+        } : undefined,
         agentContext: activeInteractionContext?.agentContext,
       }),
       getEventLogService().addEvent(result.text, new Set(['voice']), {
@@ -940,6 +952,15 @@ export class VoiceShortcutService {
       this.setState('idle');
       invoke('voice_overlay_hide').catch(() => {});
     }, AUTO_HIDE_DONE_MS);
+  }
+
+  private async getForegroundWindowContext(): Promise<ForegroundWindowContext | null> {
+    try {
+      return await invoke<ForegroundWindowContext>('foreground_window_get');
+    } catch (error) {
+      this.debugWarn(LOG_TAG, 'failed to read foreground window context:', error);
+      return null;
+    }
   }
 
   private handleError(message: string): void {
