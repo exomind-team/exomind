@@ -93,7 +93,7 @@ describe('SettingsPage timeblock import/export (issue-485)', () => {
   });
 
   function selectTimeBlockDomain(): void {
-    fireEvent.click(screen.getByRole('button', { name: /时间块 本轮尚未迁移|时间块/ }));
+    fireEvent.click(screen.getByRole('button', { name: /时间块 导入或导出时间块与当前进行中时间块快照。/ }));
   }
 
   it('exports timeblock JSON from unified data dialog', async () => {

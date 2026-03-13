@@ -13,6 +13,10 @@
 import { vi } from 'vitest';
 
 export const settingsPageServiceMocks = {
+  dataTransfer: {
+    exportBackup: vi.fn().mockResolvedValue('全部数据导出成功。'),
+    importBackup: vi.fn().mockResolvedValue('全部数据导入成功。'),
+  },
   eventLog: {
     exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
     importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0 }),
@@ -151,6 +155,14 @@ vi.mock('@/config/theme', () => ({
   getThemePreference: vi.fn(() => 'system'),
   setThemePreference: vi.fn(),
   subscribeThemePreferenceChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/services/impl/settings-data-service', () => ({
+  exportBackup: vi.fn(() => settingsPageServiceMocks.dataTransfer.exportBackup()),
+  importBackup: vi.fn((strategy: 'merge' | 'overwrite') => settingsPageServiceMocks.dataTransfer.importBackup(strategy)),
+  importBackupFromContent: vi.fn((content: string, sourcePath: string, strategy: 'merge' | 'overwrite') =>
+    settingsPageServiceMocks.dataTransfer.importBackup({ content, sourcePath, strategy })),
+  importTasksFromFile: vi.fn(),
 }));
 
 vi.mock('@/config/developer-mode', () => ({

@@ -116,6 +116,7 @@ import {
   subscribeVoiceShortcutAsrProviderChanges,
   type VoiceShortcutAsrProvider,
 } from '@/config/voice-shortcut-asr-provider';
+import { exportBackup, importBackupFromContent } from '@/services/impl/settings-data-service';
 import {
   DEFAULT_VOLCANO_RESOURCE_ID,
   VOLCANO_RESOURCE_PRESETS,
@@ -163,7 +164,7 @@ import {
 } from 'lucide-react';
 
 type ImportStrategy = 'merge' | 'overwrite';
-type DataTransferDomain = 'eventlog' | 'task' | 'timeblock';
+type DataTransferDomain = 'all' | 'eventlog' | 'task' | 'timeblock';
 type DataTransferFormat = 'json' | 'sqlite';
 
 type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'data' | 'about' | 'danger';
@@ -171,6 +172,11 @@ type DesktopTabKey = 'theme' | 'focus' | 'notification' | 'data' | 'about' | 'da
 const MOSS_API_KEY_STORAGE_KEY = 'moss_api_key';
 
 const DATA_TRANSFER_DOMAIN_OPTIONS: Array<{ value: DataTransferDomain; label: string; description: string }> = [
+  {
+    value: 'all',
+    label: '全部数据',
+    description: '将事件日志、任务与时间块一起打包到单个文件。',
+  },
   {
     value: 'eventlog',
     label: '事件日志',
@@ -184,7 +190,7 @@ const DATA_TRANSFER_DOMAIN_OPTIONS: Array<{ value: DataTransferDomain; label: st
   {
     value: 'timeblock',
     label: '时间块',
-    description: '本轮尚未迁移，暂时只读占位。',
+    description: '导入或导出时间块与当前进行中时间块快照。',
   },
 ];
 
@@ -478,6 +484,14 @@ export function SettingsPage() {
     domain: DataTransferDomain,
     format: DataTransferFormat,
   ) => {
+    if (domain === 'all') {
+      if (format !== 'json') {
+        throw new Error('全部数据当前仅支持 JSON 打包导入导出。');
+      }
+      setStatusMessage(await exportBackup());
+      return;
+    }
+
     if (domain === 'eventlog') {
       const backupService = getEventLogBackupService();
       if (format === 'json') {
@@ -608,6 +622,15 @@ export function SettingsPage() {
     domain: DataTransferDomain,
     format: DataTransferFormat,
   ) => {
+    if (domain === 'all') {
+      if (format !== 'json') {
+        throw new Error('全部数据当前仅支持 JSON 打包导入导出。');
+      }
+      const content = await file.text();
+      setStatusMessage(await importBackupFromContent(content, file.name, importStrategy));
+      return;
+    }
+
     if (format === 'json') {
       const content = await file.text();
       if (domain === 'eventlog') {
@@ -1044,19 +1067,24 @@ export function SettingsPage() {
 
   const selectedDataDomain = DATA_TRANSFER_DOMAIN_OPTIONS.find((option) => option.value === dataTransferDomain);
   const selectedDataFormat = DATA_TRANSFER_FORMAT_OPTIONS.find((option) => option.value === dataTransferFormat);
-  const selectedDataDomainBackendMode = dataTransferDomain === 'eventlog'
+  const selectedDataDomainBackendMode = dataTransferDomain === 'all'
+    ? null
+    : dataTransferDomain === 'eventlog'
     ? eventlogBackendMode
     : dataTransferDomain === 'task'
       ? taskBackendMode
       : timeblockBackendMode;
-  const selectedDataDomainStatus = dataTransferDomain === 'eventlog'
+  const selectedDataDomainStatus = dataTransferDomain === 'all'
+    ? null
+    : dataTransferDomain === 'eventlog'
     ? eventlogBackendStatus
     : dataTransferDomain === 'task'
       ? taskBackendStatus
       : timeblockBackendStatus;
   const isRuntimeDataTransferUnsupported = !isTauriRuntimeWindow();
   const isLegacyDataTransferMode = selectedDataDomainBackendMode === 'legacy';
-  const isDataTransferDisabled = isRuntimeDataTransferUnsupported || isLegacyDataTransferMode || (selectedDataDomain
+  const isAllDataSqliteUnsupported = dataTransferDomain === 'all' && dataTransferFormat === 'sqlite';
+  const isDataTransferDisabled = isRuntimeDataTransferUnsupported || isLegacyDataTransferMode || isAllDataSqliteUnsupported || (selectedDataDomain
     ? (
       dataTransferFormat === 'json'
         ? selectedDataDomainStatus?.supportsJsonBackup === false
@@ -2675,7 +2703,10 @@ export function SettingsPage() {
               {!isRuntimeDataTransferUnsupported && isLegacyDataTransferMode && (
                 <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">legacy 后端暂不支持统一导入导出，请先切换到 rt-sqlite。</p>
               )}
-              {!isRuntimeDataTransferUnsupported && !isLegacyDataTransferMode && isDataTransferDisabled && (
+              {!isRuntimeDataTransferUnsupported && !isLegacyDataTransferMode && isAllDataSqliteUnsupported && (
+                <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">全部数据当前仅支持 JSON 打包导入导出。</p>
+              )}
+              {!isRuntimeDataTransferUnsupported && !isLegacyDataTransferMode && !isAllDataSqliteUnsupported && isDataTransferDisabled && (
                 <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">当前后端不支持所选导出格式，请切换格式或后端。</p>
               )}
             </div>
@@ -2724,7 +2755,10 @@ export function SettingsPage() {
               {!isRuntimeDataTransferUnsupported && isLegacyDataTransferMode && (
                 <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">legacy 后端暂不支持统一导入导出，请先切换到 rt-sqlite。</p>
               )}
-              {!isRuntimeDataTransferUnsupported && !isLegacyDataTransferMode && isDataTransferDisabled && (
+              {!isRuntimeDataTransferUnsupported && !isLegacyDataTransferMode && isAllDataSqliteUnsupported && (
+                <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">全部数据当前仅支持 JSON 打包导入导出。</p>
+              )}
+              {!isRuntimeDataTransferUnsupported && !isLegacyDataTransferMode && !isAllDataSqliteUnsupported && isDataTransferDisabled && (
                 <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">当前后端不支持所选导入格式，请切换格式或后端。</p>
               )}
             </div>
