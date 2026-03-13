@@ -13,7 +13,8 @@ use tokio_stream::StreamExt;
 
 use crate::AppState;
 use crate::session::{
-    AgentSession, CreateSessionInput, QuickActionResponse, SessionStatus, UpdateSessionInput,
+    AgentSession, CreateSessionInput, Participant, QuickActionResponse,
+    SendMessageInput, SessionMessage, SessionStatus, UpdateSessionInput,
 };
 
 // ── Query types ─────────────────────────────────────────────────
@@ -275,6 +276,64 @@ async fn mark_waiting(
     Ok(Json(updated))
 }
 
+/// GET /sessions/:id/children — List child sessions of a parent session
+async fn list_children(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+) -> Result<Json<Vec<AgentSession>>, (StatusCode, String)> {
+    // Verify parent exists
+    state
+        .session_store
+        .get(&id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("session not found: {id}")))?;
+
+    // List all sessions and filter children
+    let all = state
+        .session_store
+        .list()
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+
+    let children: Vec<AgentSession> = all
+        .into_iter()
+        .filter(|s| s.parent_session_id.as_deref() == Some(&id))
+        .collect();
+
+    Ok(Json(children))
+}
+
+/// POST /sessions/:id/messages — Send a message to a session
+///
+/// Creates a cross-session message. The message is stored in-memory
+/// (V6 foundation — can be persisted to SQLite later).
+async fn send_message(
+    State(state): State<AppState>,
+    Path(id): Path<String>,
+    Json(input): Json<SendMessageInput>,
+) -> Result<(StatusCode, Json<SessionMessage>), (StatusCode, String)> {
+    // Verify target session exists
+    state
+        .session_store
+        .get(&id)
+        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
+        .ok_or_else(|| (StatusCode::NOT_FOUND, format!("session not found: {id}")))?;
+
+    let message = SessionMessage {
+        id: uuid::Uuid::new_v4().to_string(),
+        from: input.from.unwrap_or(Participant::User),
+        to_session_id: id,
+        content: input.content,
+        created_at: chrono::Utc::now().to_rfc3339(),
+        reply_to: input.reply_to,
+    };
+
+    // Note: In V6 foundation, messages are fire-and-forget.
+    // A proper message queue/store can be added when cross-session
+    // communication becomes a core feature.
+
+    Ok((StatusCode::CREATED, Json(message)))
+}
+
 // ── Router ──────────────────────────────────────────────────────
 
 pub fn router() -> Router<AppState> {
@@ -286,5 +345,7 @@ pub fn router() -> Router<AppState> {
         )
         .route("/sessions/{id}/quick-action", post(submit_quick_action))
         .route("/sessions/{id}/mark-waiting", post(mark_waiting))
+        .route("/sessions/{id}/children", get(list_children))
+        .route("/sessions/{id}/messages", post(send_message))
         .route("/sessions/stream", get(session_stream))
 }

@@ -45,6 +45,28 @@ export interface QuickActionResponse {
   value?: string;
 }
 
+/** Participant identity — who sent a message (User or Agent) */
+export type Participant =
+  | { type: 'user' }
+  | { type: 'agent'; session_id: string };
+
+/** A cross-session message */
+export interface SessionMessage {
+  id: string;
+  from: Participant;
+  to_session_id: string;
+  content: string;
+  created_at: string;
+  reply_to?: string;
+}
+
+/** Input for sending a cross-session message */
+export interface SendMessageInput {
+  content: string;
+  from?: Participant;
+  reply_to?: string;
+}
+
 /** Full session info returned from the backend or mock */
 export interface SessionInfo {
   id: string;

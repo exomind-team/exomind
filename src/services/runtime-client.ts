@@ -1,5 +1,5 @@
 import type { AgentEnergySnapshot, RuntimeHostRecord } from '@/lib/types/agent-hub';
-import type { SessionInfo, CreateSessionRequest, UpdateSessionRequest, QuickActionResponse } from '@/lib/types/session';
+import type { SessionInfo, CreateSessionRequest, UpdateSessionRequest, QuickActionResponse, SessionMessage, SendMessageInput } from '@/lib/types/session';
 import type { ProviderProfileSnapshot } from '@/lib/agent-provider/types';
 import type {
   RuntimeCapabilityAgentKind,
@@ -753,6 +753,31 @@ export class RuntimeClient {
     );
     if (!result.ok) return result;
     return { ok: true, data: result.data as SessionInfo };
+  }
+
+  async listChildSessions(
+    host: RuntimeHostRecord,
+    parentSessionId: string,
+  ): Promise<RuntimeClientResult<SessionInfo[]>> {
+    const result = await this.getJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(parentSessionId)}/children`,
+    );
+    if (!result.ok) return result;
+    return { ok: true, data: result.data as SessionInfo[] };
+  }
+
+  async sendSessionMessage(
+    host: RuntimeHostRecord,
+    sessionId: string,
+    input: SendMessageInput,
+  ): Promise<RuntimeClientResult<SessionMessage>> {
+    const result = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+      'POST',
+      input,
+    );
+    if (!result.ok) return result;
+    return { ok: true, data: result.data as SessionMessage };
   }
 
   private async getJson(url: string): Promise<RuntimeClientResult<unknown>> {

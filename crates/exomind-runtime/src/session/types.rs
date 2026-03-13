@@ -169,6 +169,39 @@ pub struct QuickActionResponse {
     pub value: Option<String>,
 }
 
+/// Participant identity — who sent a message (User or Agent).
+/// Unified model for cross-session communication.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Participant {
+    User,
+    Agent { session_id: String },
+}
+
+/// A cross-session message sent between sessions or from user to session.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionMessage {
+    pub id: String,
+    pub from: Participant,
+    pub to_session_id: String,
+    pub content: String,
+    pub created_at: String,
+    /// Optional reference to a parent message (for threading)
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub reply_to: Option<String>,
+}
+
+/// Input for sending a cross-session message.
+#[derive(Debug, Clone, Deserialize)]
+pub struct SendMessageInput {
+    pub content: String,
+    /// Sender identity — defaults to User if omitted
+    #[serde(default)]
+    pub from: Option<Participant>,
+    #[serde(default)]
+    pub reply_to: Option<String>,
+}
+
 /// Input for creating a new session.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateSessionInput {
