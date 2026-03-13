@@ -61,7 +61,7 @@ describe('SettingsPage eventlog backend diagnostics (issue-484)', () => {
     });
     expect(screen.getByText('事件日志备份：JSON / SQLite')).toBeInTheDocument();
     expect(screen.getByText('任务后端：rt-sqlite')).toBeInTheDocument();
-    expect(screen.getByText('时间块后端：rt-sqlite')).toBeInTheDocument();
+    expect(screen.getByText('时间块后端：legacy')).toBeInTheDocument();
   });
 
   it('hides backend diagnostics when developer mode is off', () => {

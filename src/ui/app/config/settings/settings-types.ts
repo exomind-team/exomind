@@ -27,6 +27,8 @@ export type Category =
   | 'sync'
   | 'data'
   | 'developer'
+  | 'more'
+  | 'about'
   | 'danger';
 
 export interface SettingsContext {
@@ -139,6 +141,8 @@ export interface ActionSettingsItem extends SettingsItemBase {
   disabled?: boolean | (() => boolean);
   disabledReason?: string;
   confirmMessage?: string;
+  hideChevron?: boolean;
+  rightText?: string | (() => string);
   onAction: () => string | void | Promise<string | void>;
   successMessage?: string;
   errorMessagePrefix?: string;

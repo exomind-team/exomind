@@ -259,6 +259,12 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/voice-shortcut-asr-provider', () => ({
+  getVoiceShortcutAsrProvider: vi.fn(() => 'moss'),
+  setVoiceShortcutAsrProvider: vi.fn((value: string) => value),
+  subscribeVoiceShortcutAsrProviderChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/voice-overlay-preferences', () => ({
   DEFAULT_VOICE_OVERLAY_OPACITY: 62,
   MIN_VOICE_OVERLAY_OPACITY: 32,
@@ -327,7 +333,9 @@ vi.mock('@/components/ui/dialog', () => ({
 vi.mock('@/components/ui/drawer', () => ({
   Drawer: ({ children, open }: any) => open ? <div data-testid="drawer">{children}</div> : null,
   DrawerContent: ({ children }: any) => <div>{children}</div>,
+  DrawerHeader: ({ children }: any) => <div>{children}</div>,
   DrawerTitle: ({ children }: any) => <div>{children}</div>,
+  DrawerDescription: ({ children }: any) => <div>{children}</div>,
 }));
 
 vi.mock('@/components/ui/switch', () => ({
