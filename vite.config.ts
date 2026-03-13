@@ -33,6 +33,15 @@ export default defineConfig(({ mode }) => {
     ...Object.fromEntries(Object.entries(process.env).map(([key, value]) => [key, value ?? undefined])),
     ...env,
   } as Record<string, string | undefined>;
+  const devWatchIgnored = [
+    "**/src-tauri/**",
+    "**/target/**",
+    "**/.tmp/**",
+    "**/*.log",
+    "**/.worktrees/**",
+    "**/website/**",
+    "**/packages/ts-agent-cli/**",
+  ];
   const devInstanceMeta = {
     branch: readCurrentBranch(projectRoot),
     worktreeName: path.basename(projectRoot),
@@ -111,8 +120,8 @@ export default defineConfig(({ mode }) => {
       },
       watch: {
         // Ignore Rust/Cargo outputs to avoid FS event storms during `tauri dev`.
-        //（忽略 Rust/Cargo 产物，避免 tauri dev 时文件监听风暴拖慢首屏）
-        ignored: ["**/src-tauri/**", "**/target/**", "**/.tmp/**", "**/*.log"],
+        //（忽略 Rust/Cargo 产物与无关子项目，避免 tauri dev 时误触发整页重载）
+        ignored: devWatchIgnored,
       },
     },
   };
