@@ -129,7 +129,7 @@ import {
 import { EnergyBar, PHASE_LABELS } from './agents/AgentDetailPage';
 import { WorkspaceTabs } from './agents/WorkspaceTabs';
 import { SessionsView } from './agents/SessionsView';
-import { TiledGrid, LayoutSelector, type TiledLayout } from './agents/TiledGrid';
+import { TiledGrid, LayoutSelector, GlobalStatusIndicator, type TiledLayout } from './agents/TiledGrid';
 import { useSessionStream } from '@/hooks/useSessionStream';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
@@ -2264,6 +2264,7 @@ export function AgentsPage() {
   // ── Tiled view state ──
   const [tiledLayout, setTiledLayout] = useState<TiledLayout>('2x2');
   const [tiledFocusedIndex, setTiledFocusedIndex] = useState<number | null>(null);
+  const [tiledPaneOrder, setTiledPaneOrder] = useState<string[]>([]);
 
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
@@ -3436,9 +3437,12 @@ export function AgentsPage() {
       return (
         <div className="flex h-full flex-col gap-2">
           <div className="flex items-center justify-between">
-            <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">
-              {activeSessions.length} 个活跃会话
-            </span>
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+                {activeSessions.length} 个活跃会话
+              </span>
+              <GlobalStatusIndicator sessions={activeSessions} />
+            </div>
             <LayoutSelector value={tiledLayout} onChange={setTiledLayout} />
           </div>
           <div className="flex-1 min-h-0">
@@ -3452,6 +3456,8 @@ export function AgentsPage() {
               onSessionClick={(session) => {
                 if (session.pty_id) openPtyTerminal(session.pty_id);
               }}
+              paneOrder={tiledPaneOrder}
+              onReorder={setTiledPaneOrder}
             />
           </div>
         </div>
@@ -3585,6 +3591,7 @@ export function AgentsPage() {
     tiledLayout,
     tiledFocusedIndex,
     tiledSessions,
+    tiledPaneOrder,
   ]);
 
   return (

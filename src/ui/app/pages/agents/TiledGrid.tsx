@@ -1,5 +1,20 @@
-import { useState, useCallback } from 'react';
-import { Maximize2, Minimize2, Pause, Square } from 'lucide-react';
+import { useState, useCallback, useMemo } from 'react';
+import { Maximize2, Minimize2, Pause, Square, CheckCircle2, GripVertical } from 'lucide-react';
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from '@dnd-kit/core';
+import {
+  SortableContext,
+  useSortable,
+  rectSortingStrategy,
+  arrayMove,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 import type { SessionInfo } from '@/lib/types/session';
 import {
   SESSION_STATUS_INDICATORS,
@@ -22,6 +37,10 @@ export interface TiledGridProps {
   focusedIndex: number | null;
   onFocusPane: (index: number | null) => void;
   onSessionClick?: (session: SessionInfo) => void;
+  /** Controlled pane order (session IDs). If omitted, uses natural order. */
+  paneOrder?: string[];
+  /** Callback when panes are reordered via drag-and-drop */
+  onReorder?: (newOrder: string[]) => void;
 }
 
 // ── Layout config ──────────────────────────────────────────────
@@ -43,12 +62,63 @@ export function TiledGrid({
   focusedIndex,
   onFocusPane,
   onSessionClick,
+  paneOrder,
+  onReorder,
 }: TiledGridProps) {
   const config = LAYOUT_CONFIG[layout];
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
 
-  // Fill panes up to maxPanes
-  const panes = sessions.slice(0, config.maxPanes);
+  // Build ordered panes: respect paneOrder if provided, then fill remaining
+  const orderedPanes = useMemo(() => {
+    if (!paneOrder || paneOrder.length === 0) {
+      return sessions.slice(0, config.maxPanes);
+    }
+    const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+    const ordered: SessionInfo[] = [];
+    for (const id of paneOrder) {
+      const s = sessionMap.get(id);
+      if (s) ordered.push(s);
+    }
+    // Append any sessions not in paneOrder
+    for (const s of sessions) {
+      if (!paneOrder.includes(s.id)) ordered.push(s);
+    }
+    return ordered.slice(0, config.maxPanes);
+  }, [sessions, paneOrder, config.maxPanes]);
+
+  const paneIds = useMemo(() => orderedPanes.map((s) => s.id), [orderedPanes]);
+
+  // DnD sensors: require 8px drag distance to avoid conflicting with clicks
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 8 } }),
+  );
+
+  const handleDragEnd = useCallback(
+    (event: DragEndEvent) => {
+      const { active, over } = event;
+      if (!over || active.id === over.id) return;
+
+      const oldIndex = paneIds.indexOf(active.id as string);
+      const newIndex = paneIds.indexOf(over.id as string);
+      if (oldIndex === -1 || newIndex === -1) return;
+
+      const newOrder = arrayMove(paneIds, oldIndex, newIndex);
+      onReorder?.(newOrder);
+
+      // Update focused index to follow the dragged pane
+      if (focusedIndex === oldIndex) {
+        onFocusPane(newIndex);
+      } else if (focusedIndex !== null) {
+        // Adjust focused index if it was shifted by the drag
+        if (oldIndex < focusedIndex && newIndex >= focusedIndex) {
+          onFocusPane(focusedIndex - 1);
+        } else if (oldIndex > focusedIndex && newIndex <= focusedIndex) {
+          onFocusPane(focusedIndex + 1);
+        }
+      }
+    },
+    [paneIds, onReorder, focusedIndex, onFocusPane],
+  );
 
   const handleDoubleClick = useCallback(
     (index: number) => {
@@ -58,8 +128,8 @@ export function TiledGrid({
   );
 
   // If a pane is expanded (double-click fullscreen), show only that pane
-  if (expandedIndex !== null && panes[expandedIndex]) {
-    const session = panes[expandedIndex];
+  if (expandedIndex !== null && orderedPanes[expandedIndex]) {
+    const session = orderedPanes[expandedIndex];
     return (
       <div data-testid="tiled-grid" className="flex h-full flex-col">
         <SessionPane
@@ -68,6 +138,7 @@ export function TiledGrid({
           authToken={authToken}
           isFocused={true}
           isExpanded={true}
+          isDragging={false}
           onDoubleClick={() => handleDoubleClick(expandedIndex)}
           onFocus={() => onFocusPane(expandedIndex)}
           onClick={() => onSessionClick?.(session)}
@@ -77,38 +148,121 @@ export function TiledGrid({
   }
 
   return (
-    <div
-      data-testid="tiled-grid"
-      className="grid h-full gap-1"
-      style={{
-        gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
-        gridTemplateRows: `repeat(${config.rows}, 1fr)`,
-      }}
-    >
-      {panes.map((session, index) => (
-        <SessionPane
-          key={session.id}
-          session={session}
-          rtBaseUrl={rtBaseUrl}
-          authToken={authToken}
-          isFocused={focusedIndex === index}
-          isExpanded={false}
-          onDoubleClick={() => handleDoubleClick(index)}
-          onFocus={() => onFocusPane(index)}
-          onClick={() => onSessionClick?.(session)}
-        />
-      ))}
-      {/* Empty pane placeholders */}
-      {Array.from({ length: Math.max(0, config.maxPanes - panes.length) }).map((_, i) => (
+    <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+      <SortableContext items={paneIds} strategy={rectSortingStrategy}>
         <div
-          key={`empty-${i}`}
-          className="flex items-center justify-center rounded-lg border border-dashed border-[#E7E5E4] bg-[#FAFAF9] dark:border-[#292524] dark:bg-[#0C0A09]"
+          data-testid="tiled-grid"
+          className="grid h-full gap-1"
+          style={{
+            gridTemplateColumns: `repeat(${config.cols}, 1fr)`,
+            gridTemplateRows: `repeat(${config.rows}, 1fr)`,
+          }}
         >
-          <span className="text-xs text-[#A8A29E] dark:text-[#57534E]">
-            空窗格
-          </span>
+          {orderedPanes.map((session, index) => (
+            <SortablePane
+              key={session.id}
+              session={session}
+              rtBaseUrl={rtBaseUrl}
+              authToken={authToken}
+              isFocused={focusedIndex === index}
+              isExpanded={false}
+              onDoubleClick={() => handleDoubleClick(index)}
+              onFocus={() => onFocusPane(index)}
+              onClick={() => onSessionClick?.(session)}
+            />
+          ))}
+          {/* Empty pane placeholders */}
+          {Array.from({ length: Math.max(0, config.maxPanes - orderedPanes.length) }).map((_, i) => (
+            <div
+              key={`empty-${i}`}
+              className="flex items-center justify-center rounded-lg border border-dashed border-[#E7E5E4] bg-[#FAFAF9] dark:border-[#292524] dark:bg-[#0C0A09]"
+            >
+              <span className="text-xs text-[#A8A29E] dark:text-[#57534E]">
+                空窗格
+              </span>
+            </div>
+          ))}
         </div>
-      ))}
+      </SortableContext>
+    </DndContext>
+  );
+}
+
+// ── Global Status Indicator ─────────────────────────────────────
+
+export interface GlobalStatusProps {
+  sessions: SessionInfo[];
+}
+
+export function GlobalStatusIndicator({ sessions }: GlobalStatusProps) {
+  const activeSessions = sessions.filter(
+    (s) => s.status !== 'completed' && s.status !== 'archived',
+  );
+  const attentionCount = activeSessions.filter((s) => sessionNeedsAttention(s.status)).length;
+  const allNormal = activeSessions.length > 0 && attentionCount === 0;
+
+  if (activeSessions.length === 0) return null;
+
+  return (
+    <div
+      data-testid="global-status-indicator"
+      className={`flex items-center gap-1.5 rounded-md px-2 py-1 text-[10px] font-medium transition-colors ${
+        allNormal
+          ? 'bg-emerald-50 text-emerald-600 dark:bg-emerald-950/30 dark:text-emerald-400'
+          : 'bg-yellow-50 text-yellow-600 dark:bg-yellow-950/30 dark:text-yellow-400'
+      }`}
+    >
+      {allNormal ? (
+        <>
+          <CheckCircle2 size={12} />
+          <span>全部正常，无需介入</span>
+        </>
+      ) : (
+        <>
+          <span className="inline-block h-2 w-2 rounded-full bg-yellow-400 animate-pulse" />
+          <span>{attentionCount} 个会话需要关注</span>
+        </>
+      )}
+    </div>
+  );
+}
+
+// ── SortablePane (dnd-kit wrapper) ──────────────────────────────
+
+interface SortablePaneProps {
+  session: SessionInfo;
+  rtBaseUrl: string;
+  authToken?: string;
+  isFocused: boolean;
+  isExpanded: boolean;
+  onDoubleClick: () => void;
+  onFocus: () => void;
+  onClick?: () => void;
+}
+
+function SortablePane(props: SortablePaneProps) {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: props.session.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 50 : undefined,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style} {...attributes}>
+      <SessionPane
+        {...props}
+        isDragging={isDragging}
+        dragListeners={listeners}
+      />
     </div>
   );
 }
@@ -121,9 +275,11 @@ interface SessionPaneProps {
   authToken?: string;
   isFocused: boolean;
   isExpanded: boolean;
+  isDragging: boolean;
   onDoubleClick: () => void;
   onFocus: () => void;
   onClick?: () => void;
+  dragListeners?: Record<string, Function>;
 }
 
 function SessionPane({
@@ -132,9 +288,11 @@ function SessionPane({
   authToken,
   isFocused,
   isExpanded,
+  isDragging,
   onDoubleClick,
   onFocus,
   onClick,
+  dragListeners,
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const needsAttention = sessionNeedsAttention(session.status);
@@ -142,7 +300,8 @@ function SessionPane({
   return (
     <div
       className={`
-        flex flex-col overflow-hidden rounded-lg border transition-all
+        flex h-full flex-col overflow-hidden rounded-lg border transition-all
+        ${isDragging ? 'opacity-50 shadow-2xl ring-2 ring-[#C75B3A]/40' : ''}
         ${needsAttention
           ? 'border-yellow-400/60 shadow-[0_0_0_1px_rgba(234,179,8,0.3)] dark:border-yellow-500/40'
           : isFocused
@@ -161,9 +320,20 @@ function SessionPane({
         className="flex flex-col gap-0 border-b border-[#E7E5E4] bg-[#F5F0ED] px-2 py-1 dark:border-[#292524] dark:bg-[#1C1917]"
         onDoubleClick={onDoubleClick}
       >
-        {/* Row 1: Status + Role + Time + Expand button */}
+        {/* Row 1: Drag handle + Status + Role + Time + Expand button */}
         <div className="flex items-center justify-between gap-1">
           <div className="flex items-center gap-1.5 min-w-0">
+            {/* Drag handle */}
+            {dragListeners && (
+              <button
+                type="button"
+                className="flex-shrink-0 cursor-grab text-[#A8A29E] hover:text-[#78716C] active:cursor-grabbing dark:hover:text-[#D6D3D1]"
+                {...dragListeners}
+                onClick={(e) => e.stopPropagation()}
+              >
+                <GripVertical size={10} />
+              </button>
+            )}
             <span
               className="flex-shrink-0 text-xs"
               style={{ color: statusIndicator.color }}
