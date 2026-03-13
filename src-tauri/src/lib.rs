@@ -8,6 +8,7 @@ use commands::asr_commands::{
     volcano_asr_stream_start,
     VolcanoAsrStreamState,
 };
+use commands::dev_commands::dev_instance_runtime_info;
 use commands::device_commands::get_device_id;
 use commands::eventlog_commands::{
     eventlog_append, eventlog_clear, eventlog_get, eventlog_list, eventlog_mirror_status,
@@ -155,6 +156,7 @@ pub fn run() {
             save_json_file,
             pick_json_file,
             pick_audio_files,
+            dev_instance_runtime_info,
             get_device_id,
             eventlog_list,
             eventlog_append,

@@ -3,6 +3,7 @@ import { RouterProvider } from "@tanstack/react-router";
 import { appRouter } from "@/routes";
 import { ThemeController } from "@/components/ThemeController";
 import { Toaster } from "@/components/ui/toaster";
+import { DevInstanceTitleSync } from "@/ui/app/components/DevInstanceTitleSync";
 import { TimeBlockSyncCoordinator } from "@/ui/app/components/TimeBlockSyncCoordinator";
 import { ReminderSyncCoordinator } from "@/ui/app/components/ReminderSyncCoordinator";
 import { FocusBgmCoordinator } from "@/ui/app/components/FocusBgmCoordinator";
@@ -35,6 +36,7 @@ function App() {
 
   return (
     <>
+      <DevInstanceTitleSync />
       <ThemeController />
       <TimeBlockSyncCoordinator />
       <ReminderSyncCoordinator />

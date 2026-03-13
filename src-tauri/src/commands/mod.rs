@@ -2,6 +2,7 @@
 //! 导出所有 Tauri 命令
 
 pub mod asr_commands;
+pub mod dev_commands;
 pub mod device_commands;
 pub mod eventlog_commands;
 pub mod file_commands;

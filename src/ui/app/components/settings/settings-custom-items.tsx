@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactNode } from 'react';
-import { Bell, Bot, Check, ChevronRight, Key, Mic, Music4, Timer, Upload, Wifi } from 'lucide-react';
+import { Bell, Bot, Check, ChevronRight, Code, Key, Mic, Music4, Timer, Upload, Wifi } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
 import { getTaskBackupService } from '@/lib/services';
 import { SettingRow } from '@/ui/app/components/settings-shared';
 import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
@@ -48,6 +49,11 @@ import {
   getSelectedRuntimeTarget,
   toRuntimeBaseUrl,
 } from '@/config/runtime-target';
+import {
+  getDevInstanceDiagnosticsSnapshot,
+  type DevInstanceEnvStatus,
+} from '@/config/dev-instance-diagnostics';
+import { loadTauriRuntimeInstanceDiagnostics } from '@/lib/dev-instance-runtime';
 
 function useSettingValue<T>(
   getValue: () => T,
@@ -98,6 +104,33 @@ function SecondaryValue({ value }: { value: string }) {
       <ChevronRight className="h-4 w-4" />
     </div>
   );
+}
+
+function DiagnosticsValue({
+  label,
+  value,
+}: {
+  label: string;
+  value: string;
+}) {
+  return (
+    <div className="flex items-start justify-between gap-3 rounded-xl border border-[#F0ECE8] bg-[#FAF7F5] px-4 py-3 dark:border-[#FFFFFF15] dark:bg-[#1C1917]">
+      <span className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">{label}</span>
+      <span className="text-right text-sm text-[#1C1917] dark:text-[#FAFAF9]">{value}</span>
+    </div>
+  );
+}
+
+function renderEnvStatusText(status: DevInstanceEnvStatus): string {
+  if (!status.configured) {
+    return '未配置';
+  }
+
+  if (status.sensitive) {
+    return '已配置';
+  }
+
+  return status.value?.trim() || '已配置';
 }
 
 function FocusBgmChoiceButton({
@@ -704,6 +737,106 @@ export function TaskBackendStatusSetting(_props: { ctx: SettingsContext }) {
       <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">任务后端：{status.backend}</p>
       <p className="mt-1 text-xs text-[#A8A29E]">任务备份：{backupLabel}</p>
     </div>
+  );
+}
+
+export function DevInstanceDiagnosticsSetting(props: { ctx: SettingsContext }) {
+  const [open, setOpen] = useState(false);
+  const [runtimeInfo, setRuntimeInfo] = useState<{ pid: number | null } | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const diagnostics = getDevInstanceDiagnosticsSnapshot(runtimeInfo ?? undefined);
+  const shouldUseDialog = props.ctx.isDesktop || Boolean(props.ctx.isLandscape);
+
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    let cancelled = false;
+    void loadTauriRuntimeInstanceDiagnostics()
+      .then((nextInfo) => {
+        if (cancelled) {
+          return;
+        }
+        setRuntimeInfo(nextInfo);
+        setLoadError(null);
+      })
+      .catch((error) => {
+        if (cancelled) {
+          return;
+        }
+        setLoadError(error instanceof Error ? error.message : '加载实例诊断失败');
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open]);
+
+  const detailContent = (
+    <div className="space-y-3">
+      <DiagnosticsValue label="Branch" value={diagnostics.branch} />
+      <DiagnosticsValue label="Web Port" value={String(diagnostics.webPort)} />
+      <DiagnosticsValue label="RT Port" value={String(diagnostics.rtPort)} />
+      <DiagnosticsValue label="MCP Port" value={String(diagnostics.mcpPort)} />
+      <DiagnosticsValue label="Worktree" value={diagnostics.worktreeName} />
+      <DiagnosticsValue label="PID" value={diagnostics.pid ? String(diagnostics.pid) : 'N/A'} />
+      <DiagnosticsValue label="Sync URL" value={diagnostics.syncServerUrl} />
+      <DiagnosticsValue label="ASR URL" value={diagnostics.asrServerUrl} />
+
+      <div className="space-y-2 pt-2">
+        <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">环境变量 / 配置状态</p>
+        {Object.entries(diagnostics.envStatus).map(([key, status]) => (
+          <DiagnosticsValue
+            key={key}
+            label={key}
+            value={renderEnvStatusText(status)}
+          />
+        ))}
+      </div>
+
+      {loadError ? (
+        <p className="text-xs text-red-600">{loadError}</p>
+      ) : null}
+    </div>
+  );
+
+  return (
+    <>
+      <SettingRow
+        icon={<Code className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="实例诊断信息"
+        onClick={() => setOpen(true)}
+        right={<SecondaryValue value={`${diagnostics.branch} · Web:${diagnostics.webPort}`} />}
+      />
+      {shouldUseDialog ? (
+        <Dialog open={open} onOpenChange={setOpen}>
+          <DialogContent className="max-w-2xl rounded-2xl">
+            <DialogHeader>
+              <DialogTitle>实例诊断信息</DialogTitle>
+              <DialogDescription>查看当前开发实例的标题辨认与环境诊断信息</DialogDescription>
+            </DialogHeader>
+            {detailContent}
+          </DialogContent>
+        </Dialog>
+      ) : (
+        <Drawer open={open} onOpenChange={setOpen}>
+          <DrawerContent className="dark:bg-[#1C1917]">
+            <DrawerHeader className="pb-0 text-center">
+              <DrawerTitle className="text-center text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">
+                实例诊断信息
+              </DrawerTitle>
+              <DrawerDescription className="text-xs text-[#A8A29E]">
+                查看当前开发实例的标题辨认与环境诊断信息
+              </DrawerDescription>
+            </DrawerHeader>
+            <div className="px-5 pb-8 pt-2">
+              {detailContent}
+            </div>
+          </DrawerContent>
+        </Drawer>
+      )}
+    </>
   );
 }
 

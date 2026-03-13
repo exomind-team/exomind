@@ -125,6 +125,7 @@ import {
 } from '@/services/impl/settings-data-service';
 import {
   AiApiKeySetting,
+  DevInstanceDiagnosticsSetting,
   DevicePairingSetting,
   FocusBgmSetting,
   MossVoiceTestSetting,
@@ -809,6 +810,14 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
       set: setting.set,
       subscribe: setting.subscribe,
     })),
+  },
+  {
+    id: 'instance-diagnostics',
+    label: '实例诊断信息',
+    category: 'developer',
+    type: 'custom',
+    visible: devOnly,
+    component: DevInstanceDiagnosticsSetting,
   },
   {
     id: 'device-pairing',
