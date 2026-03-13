@@ -89,7 +89,7 @@ class NowWorkbenchOverlayServiceImpl implements NowWorkbenchOverlayService {
     if (!this.enabled) {
       return;
     }
-    await invoke('now_workbench_overlay_show');
+    await invoke('now_workbench_overlay_restore');
   }
 
   async focusMainWindow(): Promise<void> {

@@ -36,12 +36,22 @@ let taskStorageListener: (() => void) | null = null;
 let eventStorageListener: (() => void) | null = null;
 let focusChangedListener: ((event: { payload: boolean }) => void) | null = null;
 const overlayHideMock = vi.fn();
-const overlayShowMock = vi.fn();
-const overlayFocusMock = vi.fn();
-const getByLabelMock = vi.fn();
+const focusMainWindowMock = vi.fn();
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: () => true,
+}));
+
+vi.mock('@/services/now-workbench-overlay.service', () => ({
+  getNowWorkbenchOverlayService: () => ({
+    focusMainWindow: (...args: unknown[]) => focusMainWindowMock(...args),
+    hideTemporarily: vi.fn(),
+    reopenFromMainWindow: vi.fn(),
+    init: vi.fn(),
+    destroy: vi.fn(),
+    syncVisibility: vi.fn(),
+    savePosition: vi.fn(),
+  }),
 }));
 
 vi.mock('@/ui/app/components/NowInputRow', () => ({
@@ -107,8 +117,6 @@ vi.mock('@/lib/storage/task-storage', () => ({
 vi.mock('@tauri-apps/api/window', () => ({
   getCurrentWindow: () => ({
     hide: (...args: unknown[]) => overlayHideMock(...args),
-    show: (...args: unknown[]) => overlayShowMock(...args),
-    setFocus: (...args: unknown[]) => overlayFocusMock(...args),
     onMoved: vi.fn(async () => () => {}),
     startDragging: vi.fn(async () => undefined),
     onFocusChanged: vi.fn(async (listener: (event: { payload: boolean }) => void) => {
@@ -118,9 +126,6 @@ vi.mock('@tauri-apps/api/window', () => ({
       };
     }),
   }),
-  Window: {
-    getByLabel: (...args: unknown[]) => getByLabelMock(...args),
-  },
 }));
 
 describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运行时接线）', () => {
@@ -170,15 +175,8 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
     overlayHideMock.mockReset();
     overlayHideMock.mockResolvedValue(undefined);
-    overlayShowMock.mockReset();
-    overlayShowMock.mockResolvedValue(undefined);
-    overlayFocusMock.mockReset();
-    overlayFocusMock.mockResolvedValue(undefined);
-    getByLabelMock.mockReset();
-    getByLabelMock.mockResolvedValue({
-      show: overlayShowMock,
-      setFocus: overlayFocusMock,
-    });
+    focusMainWindowMock.mockReset();
+    focusMainWindowMock.mockResolvedValue(undefined);
   });
 
   it('loads running state from services when no explicit model is provided（无显式 model 时从服务加载运行态）', async () => {
@@ -339,7 +337,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
   });
 
-  it('reopens main program path by focusing main and hiding overlay（回到主程序会聚焦主窗口并隐藏浮窗）', async () => {
+  it('returns to main program without hiding overlay（回到主程序会聚焦主窗口但不隐藏浮窗）', async () => {
     runtimeStateByUser['overlay-test-user'].events = [];
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     render(<NowWorkbenchOverlayPage />);
@@ -347,11 +345,9 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     fireEvent.click(await screen.findByRole('button', { name: '回到主程序' }));
 
     await waitFor(() => {
-      expect(getByLabelMock).toHaveBeenCalledWith('main');
-      expect(overlayShowMock).toHaveBeenCalledTimes(1);
-      expect(overlayFocusMock).toHaveBeenCalledTimes(1);
-      expect(overlayHideMock).toHaveBeenCalledTimes(1);
+      expect(focusMainWindowMock).toHaveBeenCalledTimes(1);
     });
+    expect(overlayHideMock).not.toHaveBeenCalled();
     expect(screen.getByTestId('now-overlay-debug-panel')).toHaveTextContent('最近动作：return-to-main:success');
   });
 

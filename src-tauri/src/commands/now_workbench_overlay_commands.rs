@@ -91,6 +91,66 @@ fn is_windows_hidden_window_position(x: i32, y: i32) -> bool {
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn overlay_rect_intersects_monitor(
+    window_x: i32,
+    window_y: i32,
+    window_width: u32,
+    window_height: u32,
+    monitor_x: i32,
+    monitor_y: i32,
+    monitor_width: u32,
+    monitor_height: u32,
+) -> bool {
+    let window_right = window_x + window_width as i32;
+    let window_bottom = window_y + window_height as i32;
+    let monitor_right = monitor_x + monitor_width as i32;
+    let monitor_bottom = monitor_y + monitor_height as i32;
+
+    window_x < monitor_right
+        && window_right > monitor_x
+        && window_y < monitor_bottom
+        && window_bottom > monitor_y
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn overlay_position_is_visible_on_any_monitor(
+    app: &AppHandle,
+    x: i32,
+    y: i32,
+) -> Result<bool, String> {
+    if is_windows_hidden_window_position(x, y) {
+        return Ok(false);
+    }
+
+    let monitors = app.available_monitors().map_err(|error| error.to_string())?;
+    if monitors.is_empty() {
+        return Ok(true);
+    }
+
+    let overlay_width = NOW_WORKBENCH_OVERLAY_WIDTH.round() as u32;
+    let overlay_height = NOW_WORKBENCH_OVERLAY_HEIGHT.round() as u32;
+
+    for monitor in monitors {
+        let position = monitor.position();
+        let size = monitor.size();
+        if overlay_rect_intersects_monitor(
+            x,
+            y,
+            overlay_width,
+            overlay_height,
+            position.x,
+            position.y,
+            size.width,
+            size.height,
+        ) {
+            return Ok(true);
+        }
+    }
+
+    Ok(false)
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn position_now_workbench_overlay_default(
     app: &AppHandle,
     window: &WebviewWindow,
@@ -117,9 +177,19 @@ fn now_workbench_overlay_show_internal(app: &AppHandle) -> Result<(), String> {
     ensure_now_workbench_overlay_window(app)?;
     if let Some(window) = app.get_webview_window(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL) {
         let current_position = window.outer_position().map_err(|error| error.to_string())?;
-        if is_windows_hidden_window_position(current_position.x, current_position.y) {
+        if !overlay_position_is_visible_on_any_monitor(app, current_position.x, current_position.y)? {
             position_now_workbench_overlay_default(app, &window)?;
         }
+        window.show().map_err(|error| error.to_string())?;
+    }
+    Ok(())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn now_workbench_overlay_restore_internal(app: &AppHandle) -> Result<(), String> {
+    ensure_now_workbench_overlay_window(app)?;
+    if let Some(window) = app.get_webview_window(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL) {
+        position_now_workbench_overlay_default(app, &window)?;
         window.show().map_err(|error| error.to_string())?;
     }
     Ok(())
@@ -164,6 +234,18 @@ pub async fn now_workbench_overlay_show(_app: AppHandle) -> Result<(), String> {
 
 #[tauri::command]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub async fn now_workbench_overlay_restore(app: AppHandle) -> Result<(), String> {
+    now_workbench_overlay_restore_internal(&app)
+}
+
+#[tauri::command]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn now_workbench_overlay_restore(_app: AppHandle) -> Result<(), String> {
+    Ok(())
+}
+
+#[tauri::command]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn now_workbench_overlay_hide(app: AppHandle) -> Result<(), String> {
     now_workbench_overlay_hide_internal(&app)
 }
@@ -200,7 +282,7 @@ pub async fn now_workbench_overlay_set_position(
 ) -> Result<(), String> {
     ensure_now_workbench_overlay_window(&app)?;
     if let Some(window) = app.get_webview_window(NOW_WORKBENCH_OVERLAY_WINDOW_LABEL) {
-        if is_windows_hidden_window_position(x, y) {
+        if !overlay_position_is_visible_on_any_monitor(&app, x, y)? {
             position_now_workbench_overlay_default(&app, &window)?;
         } else {
             window
@@ -225,6 +307,7 @@ pub async fn now_workbench_overlay_set_position(
 mod tests {
     use super::{
         calculate_now_workbench_overlay_position, is_windows_hidden_window_position,
+        overlay_rect_intersects_monitor,
     };
 
     #[test]
@@ -246,5 +329,17 @@ mod tests {
         assert!(is_windows_hidden_window_position(-32000, -32000));
         assert!(!is_windows_hidden_window_position(-1920, 40));
         assert!(!is_windows_hidden_window_position(3424, 586));
+    }
+
+    #[test]
+    fn overlay_rect_intersects_visible_monitor_area_on_multi_screen_layout() {
+        assert!(overlay_rect_intersects_monitor(2500, 120, 392, 470, 1920, 0, 1920, 1080));
+        assert!(overlay_rect_intersects_monitor(-1600, 120, 392, 470, -1920, 0, 1920, 1080));
+    }
+
+    #[test]
+    fn overlay_rect_detects_positions_fully_outside_all_monitors() {
+        assert!(!overlay_rect_intersects_monitor(4000, 1200, 392, 470, 0, 0, 1920, 1080));
+        assert!(!overlay_rect_intersects_monitor(-5000, -2000, 392, 470, -1920, 0, 1920, 1080));
     }
 }

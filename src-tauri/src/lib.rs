@@ -21,7 +21,8 @@ use commands::file_commands::{
 use commands::now_workbench_overlay_commands::{
     ensure_now_workbench_overlay_window, now_workbench_overlay_ensure,
     now_workbench_overlay_focus_main, now_workbench_overlay_hide,
-    now_workbench_overlay_set_position, now_workbench_overlay_show,
+    now_workbench_overlay_restore, now_workbench_overlay_set_position,
+    now_workbench_overlay_show,
 };
 use commands::runtime_commands::{
     ensure_runtime_started, runtime_service_reachable_address, runtime_service_start,
@@ -175,6 +176,7 @@ pub fn run() {
             now_workbench_overlay_ensure,
             now_workbench_overlay_show,
             now_workbench_overlay_hide,
+            now_workbench_overlay_restore,
             now_workbench_overlay_focus_main,
             now_workbench_overlay_set_position,
             voice_shortcut_set,

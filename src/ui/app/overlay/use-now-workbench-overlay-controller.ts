@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { isTauri } from '@tauri-apps/api/core';
-import { getCurrentWindow, Window } from '@tauri-apps/api/window';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { getCurrentUserId, getEventStorage, type Event as StoredEvent } from '@/lib/storage/event-storage';
 import {
   getEventLogService,
@@ -274,20 +274,8 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   }, [overlayService, updateDebugInfo]);
 
   const handleReturnToMain = useCallback(async () => {
-    if (!isTauri()) {
-      await overlayService.focusMainWindow();
-      await overlayService.hideTemporarily();
-      updateDebugInfo({ lastAction: 'return-to-main:fallback-success' });
-      return;
-    }
-
     try {
-      const mainWindow = await Window.getByLabel('main');
-      if (mainWindow) {
-        await mainWindow.show();
-        await mainWindow.setFocus();
-      }
-      await getCurrentWindow().hide();
+      await overlayService.focusMainWindow();
       updateDebugInfo({ lastAction: 'return-to-main:success' });
     } catch (error) {
       updateDebugInfo({

@@ -62,7 +62,7 @@ describe('NowWorkbenchOverlayService（当下工作台悬浮窗服务）', () =>
     expect(invokeMock).not.toHaveBeenCalledWith('now_workbench_overlay_show');
   });
 
-  it('reopens overlay from main UI action（主窗口动作可重新打开悬浮窗）', async () => {
+  it('restores overlay near main window from main UI action（主窗口动作会恢复悬浮窗显示位置）', async () => {
     const { createNowWorkbenchOverlayService } = await import('@/services/now-workbench-overlay.service');
     const service = createNowWorkbenchOverlayService();
 
@@ -72,7 +72,7 @@ describe('NowWorkbenchOverlayService（当下工作台悬浮窗服务）', () =>
 
     await service.reopenFromMainWindow();
 
-    expect(invokeMock).toHaveBeenCalledWith('now_workbench_overlay_show');
+    expect(invokeMock).toHaveBeenCalledWith('now_workbench_overlay_restore');
   });
 
   it('savePosition persists position and pushes one native update（显式保存位置时推送一次原生更新）', async () => {
