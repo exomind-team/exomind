@@ -52,4 +52,35 @@ describe('dev instance diagnostics（开发态实例诊断）', () => {
       }),
     }));
   });
+
+  it('derives sync and asr urls from the runtime hostname when no explicit url is configured（未显式配置时应按运行时 hostname 推导服务地址）', async () => {
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        hostname: '192.168.1.88',
+      },
+    });
+
+    (globalThis as typeof globalThis & {
+      __EXOMIND_DEV_INSTANCE_META__?: unknown;
+    }).__EXOMIND_DEV_INSTANCE_META__ = {
+      branch: 'feature/issue-514-instance-diagnostics',
+      worktreeName: 'issue-514-instance-diagnostics',
+      webPort: 5173,
+      hmrPort: 5174,
+      rtPort: 6984,
+      mcpPort: 9223,
+      pouchdbPort: 6984,
+      asrPort: 1949,
+      syncServerEnvUrl: '',
+      asrServerEnvUrl: '',
+      envStatus: {},
+    };
+
+    const module = await import('@/config/dev-instance-diagnostics');
+    const snapshot = module.getDevInstanceDiagnosticsSnapshot();
+
+    expect(snapshot.syncServerUrl).toBe('http://192.168.1.88:6984');
+    expect(snapshot.asrServerUrl).toBe('http://192.168.1.88:1949');
+  });
 });

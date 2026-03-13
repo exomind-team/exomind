@@ -2,7 +2,7 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "path";
 import { execSync } from "node:child_process";
-import { parsePort, resolveAsrServerUrl, resolveDevPorts, resolveSyncServerUrl } from "./src/config/port-env";
+import { parsePort, resolveDevPorts } from "./src/config/port-env";
 
 function readCurrentBranch(projectRoot: string): string {
   try {
@@ -45,8 +45,10 @@ export default defineConfig(({ mode }) => {
       ?? readEnvValue(envMap, 'TAURI_MCP_BRIDGE_PORT'),
       9223,
     ),
-    syncServerUrl: resolveSyncServerUrl(envMap),
-    asrServerUrl: resolveAsrServerUrl(envMap),
+    pouchdbPort: parsePort(readEnvValue(envMap, 'EXOMIND_POUCHDB_PORT'), 6984),
+    asrPort: parsePort(readEnvValue(envMap, 'EXOMIND_ASR_PORT'), 1949),
+    syncServerEnvUrl: readEnvValue(envMap, 'VITE_SYNC_SERVER_URL') ?? '',
+    asrServerEnvUrl: readEnvValue(envMap, 'VITE_ASR_SERVER_URL') ?? '',
     envStatus: {
       VITE_MOSS_API_KEY: { sensitive: true, configured: hasEnvValue(envMap, 'VITE_MOSS_API_KEY') },
       VITE_VOLCANO_APP_KEY: { sensitive: true, configured: hasEnvValue(envMap, 'VITE_VOLCANO_APP_KEY') },

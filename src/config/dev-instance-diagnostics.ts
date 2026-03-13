@@ -1,3 +1,5 @@
+import { resolveAsrServerUrl, resolveSyncServerUrl } from '@/config/port-env';
+
 export type DevInstanceEnvStatus = {
   sensitive: boolean;
   configured: boolean;
@@ -11,12 +13,16 @@ export type DevInstanceMeta = {
   hmrPort: number;
   rtPort: number;
   mcpPort: number;
-  syncServerUrl: string;
-  asrServerUrl: string;
+  pouchdbPort: number;
+  asrPort: number;
+  syncServerEnvUrl?: string;
+  asrServerEnvUrl?: string;
   envStatus: Record<string, DevInstanceEnvStatus>;
 };
 
 export type DevInstanceDiagnosticsSnapshot = DevInstanceMeta & {
+  syncServerUrl: string;
+  asrServerUrl: string;
   pid: number | null;
 };
 
@@ -27,8 +33,10 @@ const DEFAULT_DEV_INSTANCE_META: DevInstanceMeta = {
   hmrPort: 1421,
   rtPort: 9124,
   mcpPort: 9223,
-  syncServerUrl: 'http://localhost:6984',
-  asrServerUrl: 'http://localhost:1949',
+  pouchdbPort: 6984,
+  asrPort: 1949,
+  syncServerEnvUrl: undefined,
+  asrServerEnvUrl: undefined,
   envStatus: {},
 };
 
@@ -80,10 +88,20 @@ function readInjectedMeta(): DevInstanceMeta {
     hmrPort: normalizeNumber(record.hmrPort, DEFAULT_DEV_INSTANCE_META.hmrPort),
     rtPort: normalizeNumber(record.rtPort, DEFAULT_DEV_INSTANCE_META.rtPort),
     mcpPort: normalizeNumber(record.mcpPort, DEFAULT_DEV_INSTANCE_META.mcpPort),
-    syncServerUrl: normalizeString(record.syncServerUrl, DEFAULT_DEV_INSTANCE_META.syncServerUrl),
-    asrServerUrl: normalizeString(record.asrServerUrl, DEFAULT_DEV_INSTANCE_META.asrServerUrl),
+    pouchdbPort: normalizeNumber(record.pouchdbPort, DEFAULT_DEV_INSTANCE_META.pouchdbPort),
+    asrPort: normalizeNumber(record.asrPort, DEFAULT_DEV_INSTANCE_META.asrPort),
+    syncServerEnvUrl: normalizeString(record.syncServerEnvUrl, ''),
+    asrServerEnvUrl: normalizeString(record.asrServerEnvUrl, ''),
     envStatus: normalizeEnvStatus(record.envStatus),
   };
+}
+
+function resolveRuntimeHostname(): string | undefined {
+  if (typeof window === 'undefined') {
+    return undefined;
+  }
+
+  return window.location?.hostname;
 }
 
 export function isDevInstanceDiagnosticsEnabled(): boolean {
@@ -93,8 +111,27 @@ export function isDevInstanceDiagnosticsEnabled(): boolean {
 export function getDevInstanceDiagnosticsSnapshot(
   runtime: { pid?: number | null } = {},
 ): DevInstanceDiagnosticsSnapshot {
+  const meta = readInjectedMeta();
+  const hostname = resolveRuntimeHostname();
+  const syncServerUrl = resolveSyncServerUrl(
+    {
+      VITE_SYNC_SERVER_URL: meta.syncServerEnvUrl,
+      EXOMIND_POUCHDB_PORT: String(meta.pouchdbPort),
+    },
+    { hostname },
+  );
+  const asrServerUrl = resolveAsrServerUrl(
+    {
+      VITE_ASR_SERVER_URL: meta.asrServerEnvUrl,
+      EXOMIND_ASR_PORT: String(meta.asrPort),
+    },
+    { hostname },
+  );
+
   return {
-    ...readInjectedMeta(),
+    ...meta,
+    syncServerUrl,
+    asrServerUrl,
     pid: typeof runtime.pid === 'number' ? runtime.pid : null,
   };
 }
