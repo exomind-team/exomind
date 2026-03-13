@@ -46,6 +46,7 @@ vi.mock('@/lib/services', () => ({
 vi.mock('@/config/port-env', () => ({
   getSyncServerUrlOverride: vi.fn(() => null),
   resolveSyncServerUrl: vi.fn(() => 'http://localhost:5984'),
+  resolveAsrServerUrl: vi.fn(() => 'http://localhost:1949'),
   setSyncServerUrlOverride: vi.fn(),
 }));
 

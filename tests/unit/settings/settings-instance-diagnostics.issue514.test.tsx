@@ -1,18 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 
 const developerModeState = {
   enabled: true,
 };
 
 const mocks = vi.hoisted(() => ({
-  exportEventsAsJson: vi.fn(),
-  importEventsFromJson: vi.fn(),
-  exportTasksAsJson: vi.fn(),
-  exportTasksAsSqliteSnapshot: vi.fn(),
-  importTasksFromJson: vi.fn(),
-  importTasksFromSqliteSnapshot: vi.fn(),
-  getTaskBackendStatus: vi.fn(),
   isTauri: vi.fn(),
   invoke: vi.fn(),
 }));
@@ -26,24 +19,61 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
 }));
 
+vi.mock('@/config/dev-instance-diagnostics', () => ({
+  getDevInstanceDiagnosticsSnapshot: (runtime?: { pid?: number | null }) => ({
+    branch: 'feature/issue-514-instance-diagnostics',
+    worktreeName: 'issue-514-instance-diagnostics',
+    webPort: 5173,
+    rtPort: 6984,
+    mcpPort: 9232,
+    syncServerUrl: 'http://localhost:6984',
+    asrServerUrl: 'http://localhost:1949',
+    pid: runtime?.pid ?? null,
+    envStatus: {
+      VITE_MOSS_API_KEY: { sensitive: true, configured: false },
+      VITE_VOLCANO_APP_KEY: { sensitive: true, configured: true },
+      EXOMIND_RT_SECRET: { sensitive: true, configured: true },
+      VITE_SYNC_SERVER_URL: { sensitive: false, configured: true, value: 'http://localhost:6984' },
+    },
+  }),
+  isDevInstanceDiagnosticsEnabled: () => true,
+}));
+
+vi.mock('@/lib/dev-instance-runtime', () => ({
+  loadTauriRuntimeInstanceDiagnostics: vi.fn(async () => ({
+    pid: 43120,
+  })),
+}));
+
 vi.mock('@/lib/services', () => ({
   getEventLogService: () => ({
-    exportEventsAsJson: mocks.exportEventsAsJson,
-    importEventsFromJson: mocks.importEventsFromJson,
+    exportEventsAsJson: vi.fn().mockResolvedValue('[]'),
+    importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0 }),
   }),
   getTaskBackupService: () => ({
-    exportTasksAsJson: mocks.exportTasksAsJson,
-    exportTasksAsSqliteSnapshot: mocks.exportTasksAsSqliteSnapshot,
-    importTasksFromJson: mocks.importTasksFromJson,
-    importTasksFromSqliteSnapshot: mocks.importTasksFromSqliteSnapshot,
-    getBackendStatus: mocks.getTaskBackendStatus,
+    exportTasksAsJson: vi.fn().mockResolvedValue({
+      fileName: 'exomind-tasks.json',
+      content: '{"version":1,"tasks":[]}',
+      taskCount: 0,
+    }),
+    exportTasksAsSqliteSnapshot: vi.fn().mockResolvedValue({
+      fileName: 'exomind-tasks.sqlite',
+      bytes: new Uint8Array(),
+      taskCount: 0,
+    }),
+    importTasksFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+    importTasksFromSqliteSnapshot: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
+    getBackendStatus: vi.fn().mockResolvedValue({
+      backend: 'rt-sqlite',
+      supportsJsonBackup: true,
+      supportsSqliteSnapshot: true,
+    }),
   }),
 }));
 
 vi.mock('@/config/port-env', () => ({
   getSyncServerUrlOverride: () => null,
   resolveSyncServerUrl: () => 'http://127.0.0.1:6984',
-  resolveAsrServerUrl: () => 'http://127.0.0.1:1949',
   setSyncServerUrlOverride: vi.fn(),
 }));
 
@@ -55,7 +85,7 @@ vi.mock('@/config/theme', () => ({
 
 vi.mock('@/config/developer-mode', () => ({
   getDeveloperModeEnabled: () => developerModeState.enabled,
-  setDeveloperModeEnabled: vi.fn((next: boolean) => { developerModeState.enabled = next; }),
+  setDeveloperModeEnabled: vi.fn(),
   subscribeDeveloperModeChanges: () => () => {},
 }));
 
@@ -81,15 +111,28 @@ vi.mock('@/config/timer-preferences', () => ({
   getTimerPreferences: () => ({
     countdownEndMode: 'soft',
     countdownEndSoundEnabled: false,
-    countdownEndSoundPresetId: 'timer-end-ring-10',
+    countdownEndSoundPresetId: 'ring-10',
   }),
   subscribeTimerPreferencesChanges: () => () => {},
-  updateTimerPreferences: (partial: Record<string, unknown>) => ({
-    countdownEndMode: 'soft',
-    countdownEndSoundEnabled: false,
-    countdownEndSoundPresetId: 'timer-end-ring-10',
-    ...partial,
+  updateTimerPreferences: vi.fn((patch: Record<string, unknown>) => patch),
+}));
+
+vi.mock('@/config/focus-bgm-preferences', () => ({
+  getFocusBgmPreferences: () => ({
+    enabled: false,
+    sourceType: 'preset',
+    presetId: 'white-noise',
+    customTracks: [],
+    playbackMode: 'loop',
+    stopBehavior: 'manual-end',
+    volume: 60,
   }),
+  subscribeFocusBgmPreferencesChanges: () => () => {},
+  updateFocusBgmPreferences: vi.fn((patch: Record<string, unknown>) => patch),
+}));
+
+vi.mock('@/lib/media/focus-bgm-file-picker', () => ({
+  pickFocusBgmTracks: vi.fn().mockResolvedValue([]),
 }));
 
 vi.mock('@/config/devtools-mode', () => ({
@@ -111,7 +154,7 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
 }));
 
 vi.mock('@/config/voice-shortcut-hotkey', () => ({
-  VOICE_SHORTCUT_HOTKEY_VALUES: ['Alt+Q', 'Alt+W', 'Ctrl+Space'],
+  VOICE_SHORTCUT_HOTKEY_VALUES: ['Alt+Q', 'Alt+W'],
   getVoiceShortcutHotkey: () => 'Alt+Q',
   setVoiceShortcutHotkey: vi.fn(),
   subscribeVoiceShortcutHotkeyChanges: () => () => {},
@@ -178,7 +221,7 @@ vi.mock('@/config/feedback-preferences', () => ({
 vi.mock('@/config/version-build-info', () => ({
   resolveVersionBuildInfo: () => ({
     appVersion: '0.3.6',
-    buildHash: 'issue481',
+    buildHash: 'issue514',
   }),
 }));
 
@@ -192,15 +235,11 @@ vi.mock('@/lib/media/timer-end-sounds', () => ({
 }));
 
 vi.mock('@/ui/app/components/UserCard', () => ({
-  UserCard: () => <div data-testid="mock-user-card" />,
+  UserCard: () => null,
 }));
 
 vi.mock('@/ui/app/components/MoreSection', () => ({
   MoreSection: () => null,
-}));
-
-vi.mock('@/ui/app/components/LegalSection', () => ({
-  LegalSection: () => null,
 }));
 
 vi.mock('@/ui/app/components/AboutSection', () => ({
@@ -209,11 +248,12 @@ vi.mock('@/ui/app/components/AboutSection', () => ({
 
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
-describe('SettingsPage task backend diagnostics (issue-481)', () => {
+describe('issue-514 instance diagnostics setting（实例诊断设置项）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    developerModeState.enabled = true;
     window.matchMedia = vi.fn().mockImplementation((query: string) => ({
-      matches: false,
+      matches: query.includes('min-width: 768px'),
       media: query,
       onchange: null,
       addEventListener: vi.fn(),
@@ -222,32 +262,26 @@ describe('SettingsPage task backend diagnostics (issue-481)', () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
-    mocks.exportEventsAsJson.mockResolvedValue(JSON.stringify({ events: [] }));
-    mocks.importEventsFromJson.mockResolvedValue({ imported: 0, skipped: 0, total: 0 });
-    mocks.getTaskBackendStatus.mockResolvedValue({
-      backend: 'rt-sqlite',
-      supportsJsonBackup: true,
-      supportsSqliteSnapshot: true,
-    });
-    mocks.isTauri.mockResolvedValue(false);
-    mocks.invoke.mockResolvedValue(null);
+    mocks.isTauri.mockResolvedValue(true);
+    mocks.invoke.mockResolvedValue({ pid: 43120 });
   });
 
-  it('shows task backend diagnostics in developer mode', async () => {
-    developerModeState.enabled = true;
+  it('shows the diagnostics entry in developer section and opens details（开发者分组展示实例诊断条目并可打开详情）', async () => {
     render(<SettingsPage />);
+
+    fireEvent.click(screen.getByRole('button', { name: '开发者' }));
+    fireEvent.click(screen.getByRole('button', { name: /实例诊断信息/ }));
 
     await waitFor(() => {
-      expect(screen.getByText('任务后端：rt-sqlite')).toBeInTheDocument();
+      expect(screen.getByText('feature/issue-514-instance-diagnostics')).toBeInTheDocument();
     });
-    expect(screen.getByText('任务备份：JSON / SQLite')).toBeInTheDocument();
-  });
 
-  it('hides task backend diagnostics when developer mode is off', () => {
-    developerModeState.enabled = false;
-    render(<SettingsPage />);
-
-    expect(screen.queryByText(/任务后端：/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/任务备份：/)).not.toBeInTheDocument();
+    expect(screen.getByText('5173')).toBeInTheDocument();
+    expect(screen.getByText('6984')).toBeInTheDocument();
+    expect(screen.getByText('9232')).toBeInTheDocument();
+    expect(screen.getByText('issue-514-instance-diagnostics')).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText('43120')).toBeInTheDocument());
+    expect(screen.getAllByText('已配置').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('未配置').length).toBeGreaterThan(0);
   });
 });

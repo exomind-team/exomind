@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import viteConfig from '../../vite.config';
 
 describe('vite env prefix config', () => {
-  async function resolveConfig() {
+  async function resolveConfig(mode = 'test') {
     return typeof viteConfig === 'function'
-      ? viteConfig({ command: 'serve', mode: 'test', isSsrBuild: false, isPreview: false })
+      ? viteConfig({ command: 'serve', mode, isSsrBuild: false, isPreview: false })
       : viteConfig;
   }
 
@@ -58,6 +58,13 @@ describe('vite env prefix config', () => {
       '**/website/**',
       '**/packages/ts-agent-cli/**',
     ]));
+  });
+
+  it('should not inject dev instance metadata outside development mode（非 development 模式不应注入实例诊断元数据）', async () => {
+    const resolved = await resolveConfig('production');
+    const define = typeof resolved.define === 'object' && resolved.define ? resolved.define : {};
+
+    expect(Object.prototype.hasOwnProperty.call(define, 'globalThis.__EXOMIND_DEV_INSTANCE_META__')).toBe(false);
   });
 });
 

@@ -53,6 +53,7 @@ vi.mock('@/lib/services/reminder.service', () => ({
 vi.mock('@/config/port-env', () => ({
   SYNC_SERVER_URL_CHANGED_EVENT: 'exomind:test-sync-server-url-changed',
   resolveSyncServerUrl: vi.fn(() => 'http://127.0.0.1:6984'),
+  resolveAsrServerUrl: vi.fn(() => 'http://127.0.0.1:1949'),
 }));
 
 describe('legacy sync coordinators issue-381（旧同步协调器门控）', () => {
