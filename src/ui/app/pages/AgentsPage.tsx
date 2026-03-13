@@ -60,6 +60,7 @@ import { PtyTerminal } from '../components/PtyTerminal';
 import { PtySpawnDialog } from '../components/PtySpawnDialog';
 import { getAgentHubService, SignalRouteService } from '@/lib/services';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+import { getActiveInteractionContextService } from '@/lib/services/active-interaction-context.service';
 import { KNOWN_AGENT_HUB_TOPICS, VOICE_INPUT_TRANSCRIPT_TOPIC } from '@/lib/constants/signal-topics';
 import type { SignalEvent, SignalRoute } from '@/lib/types/signal-pool';
 import type {
@@ -2576,6 +2577,29 @@ export function AgentsPage() {
       setChatError(`加载会话失败: ${message}`);
     }
   };
+
+  useEffect(() => {
+    const service = getActiveInteractionContextService();
+    const ownerId = 'agents-page:right-panel-chat';
+
+    if (rightPanel.state === 'AGENT_CHAT' && chatAgentId) {
+      service.setContext({
+        targetScope: 'agent-chat',
+        agentContext: {
+          agentId: chatAgentId,
+          sessionId: chatSessionId ?? undefined,
+        },
+      }, ownerId);
+      return () => {
+        service.clearContext(ownerId);
+      };
+    }
+
+    service.clearContext(ownerId);
+    return () => {
+      service.clearContext(ownerId);
+    };
+  }, [rightPanel.state, chatAgentId, chatSessionId]);
 
   const handleChatSend = async () => {
     const prompt = chatInput.trim();

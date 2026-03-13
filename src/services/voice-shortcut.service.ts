@@ -3,6 +3,8 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 import { getClipboardService } from '../lib/services/clipboard.service';
 import { getEventLogService } from '../lib/services/eventlog.service';
+import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
+import { getActiveInteractionContextService } from '@/lib/services/active-interaction-context.service';
 import {
   getVoiceShortcutHotkey,
   subscribeVoiceShortcutHotkeyChanges,
@@ -883,7 +885,19 @@ export class VoiceShortcutService {
 
   private async handleResult(result: ASRResult, recognitionMs: number, providerLabel: string): Promise<void> {
     this.latestAudioLevel = 0;
-    const [clipboardResult, eventLogResult] = await Promise.allSettled([
+    const activeInteractionContext = getActiveInteractionContextService().getContext();
+    const traceId = this.currentTraceId ?? undefined;
+    const voiceContext = {
+      inputMode: 'voice' as const,
+      captureSource: 'global-shortcut',
+      traceId,
+      targetScope: activeInteractionContext?.targetScope ?? 'unknown',
+      agentId: activeInteractionContext?.agentContext?.agentId ?? undefined,
+      agentName: activeInteractionContext?.agentContext?.agentName ?? undefined,
+      sessionId: activeInteractionContext?.agentContext?.sessionId ?? undefined,
+    };
+
+    const [clipboardResult, signalPublishResult, eventLogResult] = await Promise.allSettled([
       (async () => {
         const writeResult = await getClipboardService().writeText(result.text);
         if (!writeResult.ok) throw new Error(writeResult.title);
@@ -893,11 +907,23 @@ export class VoiceShortcutService {
           await invoke('simulate_enter');
         }
       })(),
-      getEventLogService().addEvent(result.text, new Set(['voice'])),
+      publishVoiceTranscriptSignal(result, {
+        source: 'tauri:voice-shortcut',
+        captureSource: 'global-shortcut',
+        traceId,
+        targetScope: activeInteractionContext?.targetScope ?? 'unknown',
+        agentContext: activeInteractionContext?.agentContext,
+      }),
+      getEventLogService().addEvent(result.text, new Set(['voice']), {
+        voiceContext,
+      }),
     ]);
 
     if (clipboardResult.status === 'rejected') {
       this.debugError(LOG_TAG, 'clipboard paste failed:', clipboardResult.reason);
+    }
+    if (signalPublishResult.status === 'rejected') {
+      this.debugError(LOG_TAG, 'voice signal publish failed:', signalPublishResult.reason);
     }
     if (eventLogResult.status === 'rejected') {
       this.debugError(LOG_TAG, 'eventlog write failed:', eventLogResult.reason);

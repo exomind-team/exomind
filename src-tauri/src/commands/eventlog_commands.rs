@@ -17,6 +17,8 @@ pub struct EventRecord {
     pub timestamp: i64,
     pub content: String,
     pub tags: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub metadata: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

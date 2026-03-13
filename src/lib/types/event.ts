@@ -4,6 +4,8 @@
  * 简化版本：使用普通对象而非类
  */
 
+import type { InputMode, TargetScope } from './normalized-input';
+
 // 基础类型
 export type UUID = string;
 export type Timestamp = number;
@@ -17,8 +19,21 @@ export interface EventSourceMetadata {
   app: 'ExoMind';
 }
 
+export interface VoiceContextMetadata {
+  inputMode?: InputMode;
+  captureSource?: string;
+  traceId?: string;
+  windowTitle?: string;
+  processName?: string;
+  targetScope?: TargetScope;
+  agentId?: string;
+  agentName?: string;
+  sessionId?: string;
+}
+
 export interface EventMetadata {
   source?: EventSourceMetadata;
+  voiceContext?: VoiceContextMetadata;
   [key: string]: unknown;
 }
 

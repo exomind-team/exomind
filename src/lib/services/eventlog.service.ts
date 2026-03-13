@@ -11,7 +11,7 @@
 
 import { ExoMindEnvironment } from '../environment/environment';
 import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
-import type { Event, NoteContent, Tag, EventData } from '../types/event';
+import type { Event, NoteContent, Tag, EventData, EventMetadata } from '../types/event';
 import { WebEventLogStorageAdapter } from '../adapters/web-eventlog-storage';
 import { createUuidV4 } from '../utils/uuid';
 import { getEventSourceMetadata } from '../eventlog/source-metadata';
@@ -36,7 +36,7 @@ export interface EventLogService {
   loadEvents(): Promise<Event[]>;
 
   /** 添加普通事件 */
-  addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event>;
+  addEvent(content: NoteContent, tags?: Set<Tag>, metadata?: EventMetadata): Promise<Event>;
 
   /** 导出事件为 JSON */
   exportEventsAsJson(): Promise<string>;
@@ -65,15 +65,13 @@ export class EventLogServiceImpl implements EventLogService {
     return data.map((d) => this.deserializeEvent(d)).sort((a, b) => b.timestamp - a.timestamp);
   }
 
-  async addEvent(content: NoteContent, tags?: Set<Tag>): Promise<Event> {
+  async addEvent(content: NoteContent, tags?: Set<Tag>, metadata?: EventMetadata): Promise<Event> {
     const eventData: EventData = {
       id: createUuidV4(),
       timestamp: Date.now(),
       content,
       tags: tags ? Array.from(tags) : [NOTE_TAG],
-      metadata: {
-        source: getEventSourceMetadata(),
-      },
+      metadata: this.mergeMetadata(metadata),
     };
 
     await this.port.appendEvent(eventData);
@@ -84,6 +82,16 @@ export class EventLogServiceImpl implements EventLogService {
     this.listeners.forEach((cb) => cb(event));
 
     return event;
+  }
+
+  private mergeMetadata(metadata?: EventMetadata): EventMetadata {
+    return {
+      ...(metadata ?? {}),
+      source: {
+        ...(metadata?.source ?? {}),
+        ...getEventSourceMetadata(),
+      },
+    };
   }
 
   async exportEventsAsJson(): Promise<string> {

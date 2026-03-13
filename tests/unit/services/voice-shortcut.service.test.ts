@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
 import { VOLCANO_STORAGE_KEYS } from '@/lib/asr/volcano-config';
+import {
+  getActiveInteractionContextService,
+  resetActiveInteractionContextServiceForTests,
+} from '@/lib/services/active-interaction-context.service';
 
 const tauriEventListeners = new Map<string, (event: { payload: any }) => void | Promise<void>>();
 let livePreviewOnUpdate: ((payload: { text: string; isFinal: boolean }) => void) | null = null;
@@ -14,6 +18,7 @@ const transcribeMock = vi.fn();
 const convertWebmBlobToWavMock = vi.fn();
 const writeClipboardMock = vi.fn();
 const addEventMock = vi.fn();
+const publishVoiceTranscriptSignalMock = vi.fn();
 const getUserMediaWithConstraintFallbackMock = vi.fn();
 const subscribeHotkeyMock = vi.fn(() => () => {});
 const livePreviewIsAvailableMock = vi.fn(() => true);
@@ -118,6 +123,10 @@ vi.mock('@/lib/services/eventlog.service', () => ({
   }),
 }));
 
+vi.mock('@/lib/services/voice-signal.service', () => ({
+  publishVoiceTranscriptSignal: (...args: unknown[]) => publishVoiceTranscriptSignalMock(...args),
+}));
+
 vi.mock('@/lib/asr/live-preview', () => ({
   createDefaultVoiceLivePreviewSource: () => ({
     isAvailable: (...args: unknown[]) => livePreviewIsAvailableMock(...args),
@@ -187,6 +196,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     convertWebmBlobToWavMock.mockReset();
     writeClipboardMock.mockReset();
     addEventMock.mockReset();
+    publishVoiceTranscriptSignalMock.mockReset();
     getUserMediaWithConstraintFallbackMock.mockReset();
     subscribeHotkeyMock.mockClear();
     livePreviewIsAvailableMock.mockReset();
@@ -205,6 +215,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     nativeGetUserMediaMock.mockReset();
     runtimeFlags.developerModeEnabled = false;
     runtimeFlags.voiceShortcutSendMode = 'insert-only';
+    resetActiveInteractionContextServiceForTests();
 
     Object.defineProperty(window.navigator, 'permissions', {
       configurable: true,
@@ -1054,7 +1065,25 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
       })
     );
     expect(writeClipboardMock).toHaveBeenCalledWith('火山流式最终文本');
-    expect(addEventMock).toHaveBeenCalledWith('火山流式最终文本', new Set(['voice']));
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '火山流式最终文本' }),
+      expect.objectContaining({
+        source: 'tauri:voice-shortcut',
+        captureSource: 'global-shortcut',
+        targetScope: 'unknown',
+      }),
+    );
+    expect(addEventMock).toHaveBeenCalledWith(
+      '火山流式最终文本',
+      new Set(['voice']),
+      expect.objectContaining({
+        voiceContext: expect.objectContaining({
+          inputMode: 'voice',
+          captureSource: 'global-shortcut',
+          targetScope: 'unknown',
+        }),
+      }),
+    );
 
     service.destroy();
   });
@@ -1150,7 +1179,65 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushAsync();
 
     expect(writeClipboardMock).toHaveBeenCalledWith('火山实时结果');
-    expect(addEventMock).toHaveBeenCalledWith('火山实时结果', new Set(['voice']));
+    expect(addEventMock).toHaveBeenCalledWith(
+      '火山实时结果',
+      new Set(['voice']),
+      expect.objectContaining({
+        voiceContext: expect.objectContaining({
+          inputMode: 'voice',
+          captureSource: 'global-shortcut',
+          targetScope: 'unknown',
+        }),
+      }),
+    );
+
+    service.destroy();
+  });
+
+  it('attaches active agent context to voice event metadata（在 Agent 对话场景附加活跃上下文）', async () => {
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    getActiveInteractionContextService().setContext({
+      targetScope: 'agent-chat',
+      agentContext: {
+        agentId: 'codex',
+        agentName: 'Codex',
+        sessionId: 'session-xyz',
+      },
+    }, 'test-owner');
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('stop');
+    await flushAsync();
+
+    expect(publishVoiceTranscriptSignalMock).toHaveBeenCalledWith(
+      expect.objectContaining({ text: '连续识别文本' }),
+      expect.objectContaining({
+        source: 'tauri:voice-shortcut',
+        captureSource: 'global-shortcut',
+        targetScope: 'agent-chat',
+        agentContext: {
+          agentId: 'codex',
+          agentName: 'Codex',
+          sessionId: 'session-xyz',
+        },
+      }),
+    );
+    expect(addEventMock).toHaveBeenCalledWith(
+      '连续识别文本',
+      new Set(['voice']),
+      expect.objectContaining({
+        voiceContext: expect.objectContaining({
+          inputMode: 'voice',
+          captureSource: 'global-shortcut',
+          targetScope: 'agent-chat',
+          agentId: 'codex',
+          agentName: 'Codex',
+          sessionId: 'session-xyz',
+        }),
+      }),
+    );
 
     service.destroy();
   });
