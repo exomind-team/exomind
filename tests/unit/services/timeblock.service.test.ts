@@ -634,4 +634,70 @@ describe('TimeBlockServiceImpl', () => {
     const body = JSON.parse(String(requestInit?.body ?? '{}')) as { trace_id?: string };
     expect(body.trace_id).toBe(`timeblock:${started.startId}:${completed?.endTime}`);
   });
+
+  it('publishes the most recent 20 events as context for timeblock.completed（recentEvents 取最新 20 条）', async () => {
+    window.localStorage.setItem('exomind:runtimeTargetMode', 'external');
+    window.localStorage.setItem('exomind:runtimeExternalAddress', '127.0.0.1:1949');
+
+    const env = createMemoryEnv();
+    const seededEvents = Array.from({ length: 25 }, (_, index) => ({
+      id: `event-${index + 1}`,
+      content: `event-${index + 1}`,
+      createdAt: new Date(index + 1).toISOString(),
+      type: 'note',
+      metadata: {},
+    }));
+    const addEvent = vi.fn();
+    const getEvents = vi.fn().mockResolvedValue(seededEvents);
+    networkMocks.fetch.mockReset();
+    networkMocks.fetch.mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({ accepted: true, event_id: 'evt-recent-20' }),
+    });
+
+    getEventStorageMock.mockReset();
+    getEventStorageMock.mockReturnValue({
+      addEvent,
+      getEvents,
+    });
+
+    const service = new TimeBlockServiceImpl(env as never);
+    await service.startBlock('recent-events', { mode: 'countup' });
+    await service.markEnding();
+    await service.endBlock('done');
+
+    for (let i = 0; i < 20 && networkMocks.fetch.mock.calls.length === 0; i += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    const [, requestInit] = networkMocks.fetch.mock.calls.at(-1) ?? [];
+    const body = JSON.parse(String(requestInit?.body ?? '{}')) as {
+      payload?: { recentEvents?: Array<{ text: string; ts: number }> };
+    };
+
+    expect(body.payload?.recentEvents).toHaveLength(20);
+    expect(body.payload?.recentEvents?.map((event) => event.text)).toEqual([
+      'event-25',
+      'event-24',
+      'event-23',
+      'event-22',
+      'event-21',
+      'event-20',
+      'event-19',
+      'event-18',
+      'event-17',
+      'event-16',
+      'event-15',
+      'event-14',
+      'event-13',
+      'event-12',
+      'event-11',
+      'event-10',
+      'event-9',
+      'event-8',
+      'event-7',
+      'event-6',
+    ]);
+  });
 });

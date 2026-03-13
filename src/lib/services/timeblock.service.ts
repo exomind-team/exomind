@@ -619,7 +619,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 获取当前真相源中的最近事件作为上下文，避免继续读取旧 Pouch 副本。
     const recentEvents = (await getEventLogService().loadEvents())
-      .slice(-20)
+      .slice(0, 20)
       .map((event) => ({
         text: event.content,
         ts: event.timestamp,

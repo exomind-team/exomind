@@ -119,7 +119,7 @@ export async function importBackupFromContent(
   let timeBlockSummary = '';
 
   try {
-    if (Array.isArray(parsed.tasks) && parsed.tasks.length > 0) {
+    if (Array.isArray(parsed.tasks)) {
       const taskJson = JSON.stringify({ version: 1, tasks: parsed.tasks });
       const taskResult = await getTaskBackupService().importTasksFromJson(taskJson, strategy);
       taskSummary = `；任务新增 ${taskResult.imported} 条，跳过 ${taskResult.skipped} 条`;
