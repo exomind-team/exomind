@@ -93,7 +93,7 @@ class FakeAgentPort implements IAgentPort {
 
 describe('agent hub type contracts issue-204（Agent Hub 类型契约）', () => {
   it('exposes runtime constants for view mode and port contract（暴露运行时常量契约）', () => {
-    expect(AGENT_HUB_VIEW_MODES).toEqual(['topology', 'list', 'history', 'routes', 'device']);
+    expect(AGENT_HUB_VIEW_MODES).toEqual(['topology', 'sessions', 'tiled', 'list', 'history', 'routes', 'device']);
     expect(AGENT_PORT_KEYWORDS).toContain('streamConversation');
   });
 
