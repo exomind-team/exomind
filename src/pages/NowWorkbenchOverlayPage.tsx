@@ -406,20 +406,9 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     }
   }, [model.recentEvents]);
 
-  const handleDragBarMouseDown = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    if (!isTauri() || event.button !== 0) {
-      return;
-    }
-
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest('button, input, textarea, [role="button"], [data-no-overlay-drag="true"]')) {
-      return;
-    }
-
-    void getCurrentWindow().startDragging().catch((error) => {
-      log.warn(`[NowWorkbenchOverlay] startDragging failed: ${error instanceof Error ? error.message : String(error)}`);
-    });
-  }, []);
+  // Drag is handled natively by data-tauri-drag-region attributes.
+  // Using startDragging() API simultaneously causes race conditions
+  // (first click fails, second click sticks without mouse button held).
 
   const isStaticPreview = props.feedbackOpen === false
     && props.feedback === ''
@@ -556,7 +545,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                   <div
                     data-testid="now-overlay-drag-handle"
                     data-tauri-drag-region
-                    onMouseDown={handleDragBarMouseDown}
+
                     className="min-w-0 cursor-grab select-none active:cursor-grabbing"
                     title="按住这里拖动窗口"
                   >
@@ -622,7 +611,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                 <div
                   data-testid="now-overlay-drag-handle"
                   data-tauri-drag-region
-                  onMouseDown={handleDragBarMouseDown}
+
                   className="min-w-0 flex-1 cursor-grab select-none active:cursor-grabbing"
                   title="按住这里拖动窗口"
                 >
@@ -690,7 +679,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                 <div
                   data-testid="now-overlay-drag-handle"
                   data-tauri-drag-region
-                  onMouseDown={handleDragBarMouseDown}
+
                   className="min-w-0 cursor-grab select-none active:cursor-grabbing"
                   title="按住这里拖动窗口"
                 >
@@ -782,7 +771,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               <div
                 data-testid="now-overlay-drag-handle"
                 data-tauri-drag-region
-                onMouseDown={handleDragBarMouseDown}
+
                 className="cursor-grab select-none active:cursor-grabbing"
                 title="按住这里拖动窗口"
               >
@@ -831,7 +820,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               <div
                 data-testid="now-overlay-drag-handle"
                 data-tauri-drag-region
-                onMouseDown={handleDragBarMouseDown}
+
                 className="min-w-0 cursor-grab select-none active:cursor-grabbing"
                 title="按住这里拖动窗口"
               >
@@ -895,7 +884,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
           <div
             data-testid="now-overlay-drag-handle"
             data-tauri-drag-region
-            onMouseDown={handleDragBarMouseDown}
+
             className="min-w-0 cursor-grab select-none rounded-[14px] px-1.5 py-1 active:cursor-grabbing hover:bg-[#F5F0ED]/80 dark:hover:bg-white/10"
             title="按住这里拖动窗口"
           >
