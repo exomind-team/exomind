@@ -1,0 +1,151 @@
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
+import type { LegacyDataSummary } from '@/lib/migration/legacy-migration-detector';
+import type { MigrationProgress } from '@/lib/migration/legacy-migration-executor';
+
+export interface MigrationDialogProps {
+  open: boolean;
+  summary: LegacyDataSummary;
+  onMigrate: () => void;
+  onSkip: () => void;
+  migrating?: boolean;
+  progress?: MigrationProgress;
+  error?: string;
+}
+
+export function MigrationDialog({
+  open,
+  summary,
+  onMigrate,
+  onSkip,
+  migrating = false,
+  progress,
+  error,
+}: MigrationDialogProps) {
+  const progressPercent =
+    progress && progress.totalSteps > 0
+      ? Math.round((progress.step / progress.totalSteps) * 100)
+      : 0;
+
+  return (
+    <Dialog open={open}>
+      <DialogContent
+        hideCloseButton
+        className="max-w-sm sm:max-w-md dark:border-[#FFFFFF15] dark:bg-[rgba(28,25,23,0.92)]"
+        onInteractOutside={(e) => e.preventDefault()}
+        onEscapeKeyDown={(e) => migrating && e.preventDefault()}
+      >
+        {/* ── Error State ── */}
+        {error ? (
+          <>
+            <DialogHeader>
+              <DialogTitle>迁移失败</DialogTitle>
+              <DialogDescription>
+                迁移过程中遇到问题，将继续使用旧版存储。
+              </DialogDescription>
+            </DialogHeader>
+
+            <div className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-800 dark:bg-red-950/30 dark:text-red-400">
+              {error}
+            </div>
+
+            <DialogFooter>
+              <button
+                type="button"
+                onClick={onSkip}
+                className="w-full rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
+              >
+                继续使用旧版存储
+              </button>
+            </DialogFooter>
+          </>
+        ) : migrating ? (
+          /* ── Migrating State ── */
+          <>
+            {/* Visually hidden title/description satisfies Radix Dialog accessibility requirement */}
+            <DialogTitle className="sr-only">正在迁移数据</DialogTitle>
+            <DialogDescription className="sr-only">数据迁移正在进行中，请稍候。</DialogDescription>
+
+            <div className="flex flex-col gap-4 py-2">
+              <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">
+                正在迁移...{' '}
+                {progress && (
+                  <span className="text-[#78716C] dark:text-[#A8A29E]">
+                    {progress.label}（{progress.step}/{progress.totalSteps}）
+                  </span>
+                )}
+              </p>
+
+              <div className="h-2 w-full overflow-hidden rounded-full bg-[#F0ECE8] dark:bg-[#292524]">
+                <div
+                  className="h-full rounded-full bg-blue-500 transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              </div>
+            </div>
+          </>
+        ) : (
+          /* ── Default State ── */
+          <>
+            <DialogHeader>
+              <DialogTitle>检测到旧版数据</DialogTitle>
+              <DialogDescription>
+                系统检测到以下旧版数据可以迁移到新的本地存储格式：
+              </DialogDescription>
+            </DialogHeader>
+
+            <ul className="space-y-1.5 rounded-lg border border-[#F0ECE8] bg-[#FAF7F5] px-4 py-3 text-sm text-[#1C1917] dark:border-[#292524] dark:bg-[#1C1917]/40 dark:text-[#FAFAF9]">
+              {summary.eventlogCount > 0 && (
+                <li>
+                  事件日志 — <span className="font-medium">{summary.eventlogCount}</span> 条
+                </li>
+              )}
+              {summary.taskCount > 0 && (
+                <li>
+                  任务 — <span className="font-medium">{summary.taskCount}</span> 个
+                </li>
+              )}
+              {(summary.timeblockCount > 0 || summary.hasActiveBlock) && (
+                <li>
+                  时间块 — <span className="font-medium">{summary.timeblockCount}</span> 个
+                  {summary.hasActiveBlock && (
+                    <span className="ml-1 text-[#78716C] dark:text-[#A8A29E]">
+                      （含进行中 1）
+                    </span>
+                  )}
+                </li>
+              )}
+            </ul>
+
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+              迁移后，数据将统一存储在本地 SQLite 数据库中，原始数据将保留作为备份。
+            </p>
+
+            <DialogFooter className="flex-col-reverse sm:flex-row sm:justify-end sm:space-x-2">
+              <button
+                type="button"
+                onClick={onSkip}
+                className="mt-2 w-full rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] sm:mt-0 sm:w-auto dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
+              >
+                暂不迁移
+              </button>
+              <button
+                type="button"
+                onClick={onMigrate}
+                className="w-full rounded-xl bg-blue-600 px-4 py-2.5 text-sm font-medium text-white hover:bg-blue-700 sm:w-auto"
+              >
+                立即迁移
+              </button>
+            </DialogFooter>
+          </>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
