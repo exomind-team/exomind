@@ -63,7 +63,7 @@ pub async fn ws_connect<R: Runtime>(
         .await
         .map_err(|e| format!("Connection failed: {}", e))?;
 
-    println!("Connected to {}, response: {:?}", url, response.status());
+    log::info!("Connected to {}, response: {:?}", url, response.status());
 
     // 保存流
     let mut stream_guard = client_state.stream.lock().await;
@@ -159,7 +159,7 @@ async fn receive_messages<R: Runtime>(app: AppHandle<R>, client_state: Arc<WsCli
     while let Some(msg_result) = ws_stream.next().await {
         match msg_result {
             Ok(Message::Text(text)) => {
-                println!("Received message: {}", text);
+                log::trace!("Received message: {}", text);
                 app.emit("ws-message", &text).ok();
 
                 if let Ok(json) = serde_json::from_str::<serde_json::Value>(&text) {
@@ -194,23 +194,23 @@ async fn receive_messages<R: Runtime>(app: AppHandle<R>, client_state: Arc<WsCli
                 }
             }
             Ok(Message::Binary(data)) => {
-                println!("Received binary data: {} bytes", data.len());
+                log::trace!("Received binary data: {} bytes", data.len());
             }
             Ok(Message::Ping(ping)) => {
-                println!("Received ping: {:?}", ping);
+                log::trace!("Received ping: {:?}", ping);
             }
             Ok(Message::Pong(pong)) => {
-                println!("Received pong: {:?}", pong);
+                log::trace!("Received pong: {:?}", pong);
             }
             Ok(Message::Close(close_frame)) => {
-                println!("Connection closed: {:?}", close_frame);
+                log::info!("Connection closed: {:?}", close_frame);
                 break;
             }
             Ok(Message::Frame(_)) => {
                 // 内部帧类型，通常不需要处理
             }
             Err(e) => {
-                println!("WebSocket error: {}", e);
+                log::warn!("WebSocket error: {}", e);
                 break;
             }
         }

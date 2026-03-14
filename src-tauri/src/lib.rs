@@ -95,10 +95,10 @@ pub fn run() {
             let voice_shortcut_state = app.state::<VoiceShortcutState>();
             register_voice_shortcut(app.handle(), &voice_shortcut_state);
             if let Err(error) = ensure_voice_overlay_window(app.handle()) {
-                eprintln!("[tauri/setup] failed to prewarm voice overlay window: {error}");
+                log::warn!("failed to prewarm voice overlay window: {error}");
             }
             if let Err(error) = ensure_now_workbench_overlay_window(app.handle()) {
-                eprintln!("[tauri/setup] failed to prewarm now overlay window: {error}");
+                log::warn!("failed to prewarm now overlay window: {error}");
             }
 
             if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
@@ -110,8 +110,8 @@ pub fn run() {
                     Ok(app_data_dir) => {
                         let runtime_dir = app_data_dir.join("runtime");
                         if let Err(error) = std::fs::create_dir_all(&runtime_dir) {
-                            eprintln!(
-                                "[tauri/setup] failed to create runtime data dir for signal sqlite: {error}"
+                            log::error!(
+                                "failed to create runtime data dir for signal sqlite: {error}"
                             );
                         } else {
                             if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
@@ -151,8 +151,8 @@ pub fn run() {
                         }
                     }
                     Err(error) => {
-                        eprintln!(
-                            "[tauri/setup] failed to resolve app data dir for runtime sqlite files: {error}"
+                        log::error!(
+                            "failed to resolve app data dir for runtime sqlite files: {error}"
                         );
                     }
                 }
@@ -165,9 +165,8 @@ pub fn run() {
                 if let Err(error) =
                     ensure_runtime_started(runtime_state, None, Some(runtime_port)).await
                 {
-                    eprintln!(
-                        "[tauri/setup] failed to auto-start embedded runtime on {}: {error}",
-                        runtime_port
+                    log::error!(
+                        "failed to auto-start embedded runtime on {runtime_port}: {error}"
                     );
                 }
             });
