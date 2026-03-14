@@ -10,30 +10,22 @@ vi.mock('@tauri-apps/api/core', () => ({
   invoke: vi.fn().mockResolvedValue(null),
 }));
 
+const backendStatusStub = { backend: 'rt-sqlite', supportsJsonBackup: true, supportsSqliteSnapshot: true };
+
 vi.mock('@/lib/services', () => ({
   getEventLogService: () => ({
     exportEventsAsJson: vi.fn().mockResolvedValue('{}'),
     importEventsFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
   }),
+  getEventLogBackupService: () => ({ getBackendStatus: vi.fn().mockResolvedValue(backendStatusStub) }),
   getTaskBackupService: () => ({
-    exportTasksAsJson: vi.fn().mockResolvedValue({
-      fileName: 'exomind-tasks.json',
-      content: '{"version":1,"tasks":[]}',
-      taskCount: 0,
-    }),
-    exportTasksAsSqliteSnapshot: vi.fn().mockResolvedValue({
-      fileName: 'exomind-tasks.sqlite',
-      bytes: new Uint8Array(),
-      taskCount: 0,
-    }),
+    exportTasksAsJson: vi.fn().mockResolvedValue({ fileName: 'exomind-tasks.json', content: '{}', taskCount: 0 }),
+    exportTasksAsSqliteSnapshot: vi.fn().mockResolvedValue({ fileName: 'exomind-tasks.sqlite', bytes: new Uint8Array(), taskCount: 0 }),
     importTasksFromJson: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
     importTasksFromSqliteSnapshot: vi.fn().mockResolvedValue({ imported: 0, skipped: 0, total: 0 }),
-    getBackendStatus: vi.fn().mockResolvedValue({
-      backend: 'rt-sqlite',
-      supportsJsonBackup: true,
-      supportsSqliteSnapshot: true,
-    }),
+    getBackendStatus: vi.fn().mockResolvedValue(backendStatusStub),
   }),
+  getTimeBlockBackupService: () => ({ getBackendStatus: vi.fn().mockResolvedValue(backendStatusStub) }),
 }));
 
 vi.mock('@/config/port-env', () => ({

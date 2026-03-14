@@ -1,10 +1,20 @@
 import { useEffect, useRef, useState } from 'react';
-import type { ReactNode } from 'react';
-import { Bell, Bot, Check, ChevronRight, Code, Key, Mic, Music4, Timer, Upload, Wifi } from 'lucide-react';
+import type { ChangeEvent, ReactNode } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
+import { Bell, Bot, Check, ChevronRight, Code, Download, Key, Mic, Music4, Timer, Upload, Wifi } from 'lucide-react';
 import { useNavigate } from '@tanstack/react-router';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { Drawer, DrawerContent, DrawerDescription, DrawerHeader, DrawerTitle } from '@/components/ui/drawer';
-import { getTaskBackupService } from '@/lib/services';
+import { getEventLogBackupService, getTaskBackupService, getTimeBlockBackupService } from '@/lib/services';
+import { exportBackup, importBackupFromContent } from '@/services/impl/settings-data-service';
+import {
+  getEventlogBackendMode,
+  setEventlogBackendMode,
+  getTaskBackendMode,
+  setTaskBackendMode,
+  getTimeblockBackendMode,
+  setTimeblockBackendMode,
+} from '@/config/domain-backend-mode';
 import { SettingRow } from '@/ui/app/components/settings-shared';
 import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
 import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
@@ -740,6 +750,98 @@ export function TaskBackendStatusSetting(_props: { ctx: SettingsContext }) {
   );
 }
 
+function DomainBackendDiagnostics({
+  domainLabel,
+  getBackendMode,
+  setBackendMode,
+  getStatus,
+}: {
+  domainLabel: string;
+  getBackendMode: () => string;
+  setBackendMode: (value: 'legacy' | 'rt-sqlite') => void;
+  getStatus: () => { backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean } | Promise<{ backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean }>;
+}) {
+  const [status, setStatus] = useState<{
+    backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean;
+  } | null>(null);
+  const currentMode = getBackendMode();
+
+  useEffect(() => {
+    let cancelled = false;
+    const result = getStatus();
+    if (isPromiseLike(result)) {
+      void result.then((s) => { if (!cancelled) setStatus(s); }).catch(() => { if (!cancelled) setStatus(null); });
+    } else if (!cancelled) {
+      setStatus(result);
+    }
+    return () => { cancelled = true; };
+  }, [getStatus]);
+
+  const backupLabel = status
+    ? (status.supportsJsonBackup && status.supportsSqliteSnapshot ? 'JSON / SQLite'
+      : status.supportsJsonBackup ? 'JSON'
+      : status.supportsSqliteSnapshot ? 'SQLite'
+      : '不可用')
+    : '加载中…';
+
+  const handleSwitch = (value: 'legacy' | 'rt-sqlite') => {
+    setBackendMode(value);
+    window.location.reload();
+  };
+
+  return (
+    <div className="px-4 py-[14px]">
+      <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{domainLabel}后端：{currentMode}</p>
+      <p className="mt-1 text-xs text-[#A8A29E]">{domainLabel}备份：{backupLabel}</p>
+      <div className="mt-2 flex gap-2">
+        {(['rt-sqlite', 'legacy'] as const).map((mode) => (
+          <button
+            key={mode}
+            type="button"
+            onClick={() => handleSwitch(mode)}
+            className={`rounded-lg px-3 py-1 text-xs ${currentMode === mode ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
+          >
+            {mode}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+export function EventlogBackendModeSetting(_props: { ctx: SettingsContext }) {
+  return (
+    <DomainBackendDiagnostics
+      domainLabel="事件日志"
+      getBackendMode={getEventlogBackendMode}
+      setBackendMode={setEventlogBackendMode}
+      getStatus={() => getEventLogBackupService().getBackendStatus()}
+    />
+  );
+}
+
+export function TaskBackendModeSetting(_props: { ctx: SettingsContext }) {
+  return (
+    <DomainBackendDiagnostics
+      domainLabel="任务"
+      getBackendMode={getTaskBackendMode}
+      setBackendMode={setTaskBackendMode}
+      getStatus={() => getTaskBackupService().getBackendStatus()}
+    />
+  );
+}
+
+export function TimeblockBackendModeSetting(_props: { ctx: SettingsContext }) {
+  return (
+    <DomainBackendDiagnostics
+      domainLabel="时间块"
+      getBackendMode={getTimeblockBackendMode}
+      setBackendMode={setTimeblockBackendMode}
+      getStatus={() => getTimeBlockBackupService().getBackendStatus()}
+    />
+  );
+}
+
 export function DevInstanceDiagnosticsSetting(props: { ctx: SettingsContext }) {
   const [open, setOpen] = useState(false);
   const [runtimeInfo, setRuntimeInfo] = useState<{ pid: number | null } | null>(null);
@@ -932,4 +1034,344 @@ export function MossVoiceTestSetting(_props: { ctx: SettingsContext }) {
 
 export function VolcanoVoiceTestSetting(_props: { ctx: SettingsContext }) {
   return <VoiceTestActionRow label="火山引擎 ASR 测试" target="/volcano-asr-test" icon={<Mic className="h-[18px] w-[18px] text-[#78716C]" />} />;
+}
+
+type DataTransferDomain = 'all' | 'eventlog' | 'task' | 'timeblock';
+type DataTransferFormat = 'json' | 'sqlite';
+
+const DATA_TRANSFER_DOMAIN_OPTIONS: Array<{ value: DataTransferDomain; label: string; description: string }> = [
+  { value: 'all', label: '全部数据', description: '将事件日志、任务与时间块一起打包到单个文件。' },
+  { value: 'eventlog', label: '事件日志', description: '导入或导出语音输入、随手记录与事件流。' },
+  { value: 'task', label: '任务', description: '导入或导出任务与其 RT SQLite 快照。' },
+  { value: 'timeblock', label: '时间块', description: '导入或导出时间块与当前进行中时间块快照。' },
+];
+
+const DATA_TRANSFER_FORMAT_OPTIONS: Array<{ value: DataTransferFormat; label: string; description: string }> = [
+  { value: 'json', label: 'JSON', description: '可读、可审查、适合外部备份交换。' },
+  { value: 'sqlite', label: 'SQLite', description: '保留本地域快照，适合完整迁移或恢复。' },
+];
+
+function isTauriRuntimeWindow(): boolean {
+  if (typeof window === 'undefined') return false;
+  return '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+}
+
+function downloadFileFallback(content: BlobPart, mimeType: string, filename: string) {
+  const blob = new Blob([content], { type: mimeType });
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.download = filename;
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  URL.revokeObjectURL(url);
+}
+
+function DataTransferChoiceList<T extends string>({
+  options,
+  currentValue,
+  onSelect,
+}: {
+  options: Array<{ value: T; label: string; description: string }>;
+  currentValue: T;
+  onSelect: (value: T) => void;
+}) {
+  return (
+    <div className="space-y-2">
+      {options.map((option) => {
+        const selected = currentValue === option.value;
+        return (
+          <button
+            key={option.value}
+            type="button"
+            aria-pressed={selected}
+            onClick={() => onSelect(option.value)}
+            className={`w-full rounded-2xl border px-4 py-3 text-left transition-colors ${
+              selected
+                ? 'border-[#1C1917] bg-[#F5F0ED] dark:border-[#FAFAF9] dark:bg-[#292524]'
+                : 'border-[#E7E5E4] bg-white dark:border-[#44403C] dark:bg-[#1C1917]'
+            }`}
+          >
+            <div className="flex items-center justify-between gap-3">
+              <span className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{option.label}</span>
+              {selected && <Check className="h-4 w-4 text-[#1C1917] dark:text-[#FAFAF9]" />}
+            </div>
+            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{option.description}</p>
+          </button>
+        );
+      })}
+    </div>
+  );
+}
+
+export function DataTransferSetting(_props: { ctx: SettingsContext }) {
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
+  const [exportDialogOpen, setExportDialogOpen] = useState(false);
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [domain, setDomain] = useState<DataTransferDomain>('eventlog');
+  const [format, setFormat] = useState<DataTransferFormat>('json');
+  const [statusMessage, setStatusMessage] = useState('');
+  const [errorMessage, setErrorMessage] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [eventlogBackendStatus, setEventlogBackendStatus] = useState<{
+    backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean;
+  } | null>(null);
+  const [taskBackendStatus, setTaskBackendStatus] = useState<{
+    backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean;
+  } | null>(null);
+  const [timeblockBackendStatus, setTimeblockBackendStatus] = useState<{
+    backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean;
+  } | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    type BackendStatus = { backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean };
+    const loadStatus = async (
+      getStatus: () => BackendStatus | Promise<BackendStatus>,
+      setter: (s: BackendStatus) => void,
+    ) => {
+      try {
+        const result = getStatus();
+        const status = isPromiseLike(result) ? await result : result;
+        if (!cancelled) setter(status);
+      } catch { /* ignore */ }
+    };
+    void loadStatus(() => getEventLogBackupService().getBackendStatus(), setEventlogBackendStatus);
+    void loadStatus(() => getTaskBackupService().getBackendStatus(), setTaskBackendStatus);
+    void loadStatus(() => getTimeBlockBackupService().getBackendStatus(), setTimeblockBackendStatus);
+    return () => { cancelled = true; };
+  }, []);
+
+  const clearNotice = () => { setStatusMessage(''); setErrorMessage(''); };
+
+  const eventlogBackendMode = getEventlogBackendMode();
+  const taskBackendMode = getTaskBackendMode();
+  const timeblockBackendMode = getTimeblockBackendMode();
+
+  const selectedDomainBackendMode = domain === 'all' ? null
+    : domain === 'eventlog' ? eventlogBackendMode
+    : domain === 'task' ? taskBackendMode
+    : timeblockBackendMode;
+  const selectedDomainStatus = domain === 'all' ? null
+    : domain === 'eventlog' ? eventlogBackendStatus
+    : domain === 'task' ? taskBackendStatus
+    : timeblockBackendStatus;
+  const isRuntimeUnsupported = !isTauriRuntimeWindow();
+  const isLegacyMode = selectedDomainBackendMode === 'legacy';
+  const isAllSqliteUnsupported = domain === 'all' && format === 'sqlite';
+  const isDisabled = isRuntimeUnsupported || isLegacyMode || isAllSqliteUnsupported || (
+    domain !== 'all' && selectedDomainStatus
+      ? (format === 'json' ? selectedDomainStatus.supportsJsonBackup === false : selectedDomainStatus.supportsSqliteSnapshot === false)
+      : false
+  );
+  const dataImportAccept = format === 'json' ? '.json' : '.sqlite,.db';
+
+  const executeExport = async () => {
+    if (domain === 'all') {
+      if (format !== 'json') throw new Error('全部数据当前仅支持 JSON 打包导入导出。');
+      setStatusMessage(await exportBackup());
+      return;
+    }
+
+    const domainMeta = {
+      eventlog: { label: '事件日志', countUnit: '条事件' },
+      task: { label: '任务', countUnit: '条任务' },
+      timeblock: { label: '时间块', countUnit: '条记录' },
+    } as const;
+    const { label: domainLabel, countUnit } = domainMeta[domain];
+
+    const saveAndNotify = async (
+      content: string | Uint8Array,
+      fileName: string,
+      count: number,
+      formatLabel: 'JSON' | 'SQLite',
+    ) => {
+      const isRunningInTauri = await isTauri();
+      if (isRunningInTauri) {
+        const savedPath = typeof content === 'string'
+          ? await invoke<string | null>('save_json_file', { content, defaultName: fileName })
+          : await invoke<string | null>('save_binary_file', { content: Array.from(content), defaultName: fileName, filters: ['sqlite', 'db'] });
+        if (!savedPath) { setStatusMessage('已取消保存。'); return; }
+        setStatusMessage(`${domainLabel}导出成功（${formatLabel}），共 ${count} ${countUnit}。保存路径：${savedPath}`);
+        return;
+      }
+      const mimeType = typeof content === 'string' ? 'application/json;charset=utf-8' : 'application/octet-stream';
+      downloadFileFallback(content, mimeType, fileName);
+      setStatusMessage(`${domainLabel}导出成功（${formatLabel}），共 ${count} ${countUnit}。`);
+    };
+
+    if (format === 'json') {
+      if (domain === 'eventlog') {
+        const r = await getEventLogBackupService().exportEventsAsJson();
+        await saveAndNotify(r.content, r.fileName, r.eventCount, 'JSON');
+      } else if (domain === 'task') {
+        const r = await getTaskBackupService().exportTasksAsJson();
+        await saveAndNotify(r.content, r.fileName, r.taskCount, 'JSON');
+      } else {
+        const r = await getTimeBlockBackupService().exportTimeBlocksAsJson();
+        await saveAndNotify(r.content, r.fileName, r.timeBlockCount, 'JSON');
+      }
+      return;
+    }
+
+    if (domain === 'eventlog') {
+      const r = await getEventLogBackupService().exportEventsAsSqliteSnapshot();
+      await saveAndNotify(r.bytes, r.fileName, r.eventCount, 'SQLite');
+    } else if (domain === 'task') {
+      const r = await getTaskBackupService().exportTasksAsSqliteSnapshot();
+      await saveAndNotify(r.bytes, r.fileName, r.taskCount, 'SQLite');
+    } else {
+      const r = await getTimeBlockBackupService().exportTimeBlocksAsSqliteSnapshot();
+      await saveAndNotify(r.bytes, r.fileName, r.timeBlockCount, 'SQLite');
+    }
+  };
+
+  const executeImport = async (file: File) => {
+    if (domain === 'all') {
+      if (format !== 'json') throw new Error('全部数据当前仅支持 JSON 打包导入导出。');
+      const content = await file.text();
+      setStatusMessage(await importBackupFromContent(content, file.name, 'merge'));
+      return;
+    }
+
+    if (format === 'json') {
+      const content = await file.text();
+      if (domain === 'eventlog') {
+        const r = await getEventLogBackupService().importEventsFromJson(content, 'merge');
+        setStatusMessage(`事件日志导入成功：新增 ${r.imported} 条，跳过 ${r.skipped} 条，当前共 ${r.total} 条。`);
+      } else if (domain === 'timeblock') {
+        const r = await getTimeBlockBackupService().importTimeBlocksFromJson(content, 'merge');
+        setStatusMessage(`时间块导入成功：新增 ${r.imported} 条，跳过 ${r.skipped} 条，当前共 ${r.total} 条。`);
+      } else {
+        const r = await getTaskBackupService().importTasksFromJson(content, 'merge');
+        setStatusMessage(`任务导入成功：新增 ${r.imported} 条，跳过 ${r.skipped} 条，当前共 ${r.total} 条。`);
+      }
+      return;
+    }
+
+    const bytes = new Uint8Array(await file.arrayBuffer());
+    if (domain === 'eventlog') {
+      const r = await getEventLogBackupService().importEventsFromSqliteSnapshot(bytes, 'merge');
+      setStatusMessage(`事件日志导入成功：新增 ${r.imported} 条，跳过 ${r.skipped} 条，当前共 ${r.total} 条。`);
+    } else if (domain === 'timeblock') {
+      const r = await getTimeBlockBackupService().importTimeBlocksFromSqliteSnapshot(bytes, 'merge');
+      setStatusMessage(`时间块导入成功：新增 ${r.imported} 条，跳过 ${r.skipped} 条，当前共 ${r.total} 条。`);
+    } else {
+      const r = await getTaskBackupService().importTasksFromSqliteSnapshot(bytes, 'merge');
+      setStatusMessage(`任务导入成功：新增 ${r.imported} 条，跳过 ${r.skipped} 条，当前共 ${r.total} 条。`);
+    }
+  };
+
+  const handleConfirmExport = async () => {
+    clearNotice();
+    setExportDialogOpen(false);
+    setLoading(true);
+    try { await executeExport(); }
+    catch (error) { setErrorMessage(`导出失败：${error instanceof Error ? error.message : '未知错误'}`); }
+    finally { setLoading(false); }
+  };
+
+  const handleConfirmImport = () => {
+    clearNotice();
+    setImportDialogOpen(false);
+    fileInputRef.current?.click();
+  };
+
+  const handleFileInputChange = async (e: ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    try { await executeImport(file); }
+    catch (error) { setErrorMessage(`导入失败：${error instanceof Error ? error.message : '未知错误'}`); }
+    finally { e.target.value = ''; setLoading(false); }
+  };
+
+  const selectedDomainLabel = DATA_TRANSFER_DOMAIN_OPTIONS.find((o) => o.value === domain)?.label ?? '未选择';
+  const selectedFormatLabel = DATA_TRANSFER_FORMAT_OPTIONS.find((o) => o.value === format)?.label ?? '未选择';
+
+  const renderDisabledHint = () => {
+    if (isRuntimeUnsupported) return <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">当前环境不支持统一导入导出，请在桌面端使用。</p>;
+    if (isLegacyMode) return <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">legacy 后端暂不支持统一导入导出，请先切换到 rt-sqlite。</p>;
+    if (isAllSqliteUnsupported) return <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">全部数据当前仅支持 JSON 打包导入导出。</p>;
+    if (isDisabled) return <p className="mt-1 text-[#B91C1C] dark:text-[#FCA5A5]">当前后端不支持所选格式，请切换格式或后端。</p>;
+    return null;
+  };
+
+  return (
+    <div>
+      <input ref={fileInputRef} type="file" accept={dataImportAccept} className="hidden" onChange={handleFileInputChange} data-testid="new-settings-data-import-input" />
+
+      <SettingRow
+        icon={<Download className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="导出数据"
+        onClick={() => { clearNotice(); setDomain('eventlog'); setFormat('json'); setExportDialogOpen(true); }}
+        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+      />
+      <SettingRow
+        icon={<Upload className="h-[18px] w-[18px] text-[#78716C]" />}
+        label="导入数据"
+        onClick={() => { clearNotice(); setDomain('eventlog'); setFormat('json'); setImportDialogOpen(true); }}
+        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+      />
+
+      {statusMessage && <NoticeBlock message={statusMessage} tone="success" />}
+      {errorMessage && <NoticeBlock message={errorMessage} tone="error" />}
+
+      <Dialog open={exportDialogOpen} onOpenChange={setExportDialogOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>导出数据</DialogTitle>
+            <DialogDescription>按域选择导出范围，再选择导出格式。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">范围</p>
+              <DataTransferChoiceList options={DATA_TRANSFER_DOMAIN_OPTIONS} currentValue={domain} onSelect={setDomain} />
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">格式</p>
+              <DataTransferChoiceList options={DATA_TRANSFER_FORMAT_OPTIONS} currentValue={format} onSelect={setFormat} />
+            </div>
+            <div className="rounded-2xl bg-[#F5F0ED] px-4 py-3 text-xs text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]">
+              <p>当前选择：{selectedDomainLabel} / {selectedFormatLabel}</p>
+              {renderDisabledHint()}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setExportDialogOpen(false)} className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]">取消</button>
+              <button type="button" onClick={() => void handleConfirmExport()} disabled={loading || isDisabled} className="flex-1 rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F] disabled:cursor-not-allowed disabled:bg-[#D6D3D1] disabled:text-[#78716C]">开始导出</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importDialogOpen} onOpenChange={setImportDialogOpen}>
+        <DialogContent className="rounded-2xl">
+          <DialogHeader>
+            <DialogTitle>导入数据</DialogTitle>
+            <DialogDescription>按域选择导入范围，再选择要导入的文件格式。</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4">
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">范围</p>
+              <DataTransferChoiceList options={DATA_TRANSFER_DOMAIN_OPTIONS} currentValue={domain} onSelect={setDomain} />
+            </div>
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-[#78716C] dark:text-[#A8A29E]">格式</p>
+              <DataTransferChoiceList options={DATA_TRANSFER_FORMAT_OPTIONS} currentValue={format} onSelect={setFormat} />
+            </div>
+            <div className="rounded-2xl bg-[#F5F0ED] px-4 py-3 text-xs text-[#57534E] dark:bg-[#292524] dark:text-[#D6D3D1]">
+              <p>当前选择：{selectedDomainLabel} / {selectedFormatLabel}</p>
+              <p className="mt-1">导入策略：merge（合并）</p>
+              {renderDisabledHint()}
+            </div>
+            <div className="flex gap-2">
+              <button type="button" onClick={() => setImportDialogOpen(false)} className="flex-1 rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]">取消</button>
+              <button type="button" onClick={handleConfirmImport} disabled={loading || isDisabled} className="flex-1 rounded-xl bg-[#C75B3A] px-4 py-2.5 text-sm font-medium text-white hover:bg-[#B5502F] disabled:cursor-not-allowed disabled:bg-[#D6D3D1] disabled:text-[#78716C]">选择文件并导入</button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
 }

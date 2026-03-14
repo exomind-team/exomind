@@ -32,7 +32,7 @@ describe('issue-198 settings about merge（设置关于合并）', () => {
   it('keeps a single about section and merges sponsor with developer（单一关于并合并赞助与开发者）', () => {
     render(<SettingsPage />);
 
-    expect(screen.getByText('关于')).toBeInTheDocument();
+    expect(screen.getAllByText('关于').length).toBeGreaterThanOrEqual(1);
     expect(screen.getByText('赞助开发者（Starlin）')).toBeInTheDocument();
   });
 

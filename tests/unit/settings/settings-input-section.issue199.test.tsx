@@ -124,8 +124,8 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     render(<SettingsPage />);
 
     const slider = screen.getByTestId('new-settings-voice-overlay-opacity-slider');
-    expect(slider).toHaveAttribute('min', '20');
-    expect(slider).toHaveAttribute('max', '98');
+    expect(slider).toHaveAttribute('min', '32');
+    expect(slider).toHaveAttribute('max', '92');
     fireEvent.change(slider, { target: { value: '74' } });
 
     expect(setVoiceOverlayOpacity(74)).toBe(74);
