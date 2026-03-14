@@ -159,6 +159,14 @@ pub fn run() {
                                 "failed to create runtime data dir for signal sqlite: {error}"
                             );
                         } else {
+                            // Set EXOMIND_RT_DATA_DIR so the EventLog JSON-files backend
+                            // and other file-based stores write inside the app sandbox
+                            // instead of the read-only CWD (critical on Android).
+                            if std::env::var_os("EXOMIND_RT_DATA_DIR").is_none() {
+                                unsafe {
+                                    std::env::set_var("EXOMIND_RT_DATA_DIR", &runtime_dir);
+                                }
+                            }
                             seed_runtime_sqlite_env_paths(&runtime_dir);
                         }
                     }
