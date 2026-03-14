@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { addLogListener, startLogStream, type LogEntry, type LogLevel } from '@/lib/logger'
+import { addLogListener, getLogHistory, startLogStream, type LogEntry, type LogLevel } from '@/lib/logger'
 
 const LEVELS: LogLevel[] = ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR']
 const LEVEL_ORDER: Record<LogLevel, number> = { TRACE: 0, DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4 }
@@ -45,6 +45,12 @@ export function LogPanel() {
   const autoScroll = useRef(true)
 
   useEffect(() => {
+    // 回放应用启动以来的历史日志
+    const past = getLogHistory()
+    if (past.length > 0) {
+      setEntries(past.slice(-MAX_ENTRIES))
+    }
+
     startLogStream()
     const removeListener = addLogListener((entry) => {
       setEntries((prev) => {

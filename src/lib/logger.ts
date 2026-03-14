@@ -33,8 +33,11 @@ const CONSOLE_METHOD: Record<LogLevel, keyof Console> = {
   ERROR: 'error',
 };
 
+const MAX_HISTORY = 1000;
+
 let detachFn: (() => void) | null = null;
 const listeners = new Set<LogListener>();
+const history: LogEntry[] = [];
 
 function emit(level: LogLevel, message: string): void {
   const entry: LogEntry = { level, message, timestamp: new Date() };
@@ -44,10 +47,19 @@ function emit(level: LogLevel, message: string): void {
   // eslint-disable-next-line no-console
   (console[method] as (...args: unknown[]) => void)(`[${level}]`, message);
 
-  // 2) In-memory listeners (LogPanel)
+  // 2) Ring buffer (survives before LogPanel opens)
+  history.push(entry);
+  if (history.length > MAX_HISTORY) history.splice(0, history.length - MAX_HISTORY);
+
+  // 3) In-memory listeners (LogPanel)
   for (const listener of listeners) {
     listener(entry);
   }
+}
+
+/** 获取自应用启动以来的全部历史日志 */
+export function getLogHistory(): readonly LogEntry[] {
+  return history;
 }
 
 /** 双写日志对象：同时输出到 console + LogPanel listeners */

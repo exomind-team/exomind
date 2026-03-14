@@ -168,7 +168,7 @@ export class VoiceShortcutService {
 
   private debugInfo(...args: unknown[]): void {
     if (this.developerModeEnabled) {
-      log.info(args.map(String).join(' '));
+      log.debug(args.map(String).join(' '));
     }
   }
 
@@ -186,7 +186,7 @@ export class VoiceShortcutService {
 
   private debugLog(...args: unknown[]): void {
     if (this.developerModeEnabled) {
-      log.info(args.map(String).join(' '));
+      log.debug(args.map(String).join(' '));
     }
   }
 

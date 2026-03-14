@@ -7,6 +7,7 @@ import * as logger from '@/lib/logger'
 vi.mock('@/lib/logger', () => ({
   startLogStream: vi.fn().mockResolvedValue(vi.fn()),
   addLogListener: vi.fn().mockReturnValue(vi.fn()),
+  getLogHistory: vi.fn().mockReturnValue([]),
 }))
 
 function emitLog(level: logger.LogLevel, message: string) {
