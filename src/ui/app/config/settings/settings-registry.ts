@@ -850,7 +850,10 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: ScrollText,
     category: 'more',
     type: 'action',
-    onAction: () => '敬请期待',
+    onAction: () => {
+      window.dispatchEvent(new CustomEvent('open-log-panel'))
+      return undefined
+    },
   },
   {
     id: 'about-website',
