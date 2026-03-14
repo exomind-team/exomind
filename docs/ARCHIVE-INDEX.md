@@ -26,9 +26,11 @@
 
 | 原路径 | 摘要 | 迁移去向 | 删除提交 |
 |--------|------|----------|----------|
-| pm/PRD.md | 产品需求文档 v2.0（生命判据、功能清单） | docs/product/PRD.md | (本次提交) |
-| pm/roadmap.md | 产品路线图 v2.0（Phase 0-5 里程碑） | docs/product/roadmap.md | (本次提交) |
-| pm/COMPLETED_FEATURES.md | 已完成特性清单（v0.1 阶段，PR #20） | docs/product/completed-features.md | (本次提交) |
+| pm/PRD.md | 产品需求文档 v2.0（生命判据、功能清单） | docs/product/PRD.md | e9d548b |
+| pm/roadmap.md | 产品路线图 v2.0（Phase 0-5 里程碑） | docs/product/roadmap.md | e9d548b |
+| pm/COMPLETED_FEATURES.md | 已完成特性清单（v0.1 阶段，PR #20） | docs/product/completed-features.md | e9d548b |
+| pm/git-spec.md | Git 工作流规范 v1.0 | MERGED → docs/development/git-spec.md | (本次提交) |
+| pm/GIT_WORKTREE_SPEC.md | Git+Worktree 整合规范 v1.0 | MERGED → docs/development/git-spec.md | (本次提交) |
 
 ## 临时文档（已删除）
 
