@@ -197,6 +197,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     writeClipboardMock.mockReset();
     addEventMock.mockReset();
     publishVoiceTranscriptSignalMock.mockReset();
+    publishVoiceTranscriptSignalMock.mockResolvedValue(undefined);
     getUserMediaWithConstraintFallbackMock.mockReset();
     subscribeHotkeyMock.mockClear();
     livePreviewIsAvailableMock.mockReset();
@@ -1302,6 +1303,40 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     );
 
     service.destroy();
+  });
+
+  it('handles double failure gracefully when both signal and fallback addEvent fail（信号和直写双重失败时不崩溃）', async () => {
+    transcribeMock.mockResolvedValue({
+      text: '双重失败测试',
+      confidence: 0.95,
+      lang: 'zh-CN',
+      duration: 500,
+    });
+    writeClipboardMock.mockResolvedValue({ ok: true, title: 'ok' });
+    publishVoiceTranscriptSignalMock.mockRejectedValue(new Error('RT unavailable'));
+    addEventMock.mockRejectedValue(new Error('storage full'));
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') return payload?.shortcut ?? 'Alt+Q';
+      return null;
+    });
+
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('stop');
+    await flushAsync();
+
+    // 双重失败不应抛异常，流程正常走到 done
+    expect(addEventMock).toHaveBeenCalledWith(
+      '双重失败测试',
+      new Set(['voice']),
+    );
+
+    service.destroy();
+    errorSpy.mockRestore();
   });
 
   it('ignores stale foreground window result from previous round（上一轮迟到的窗口结果不会覆盖新一轮）', async () => {
