@@ -90,6 +90,10 @@
 
 | 原路径 | 摘要 | 合并去向 | 删除提交 |
 |--------|------|----------|----------|
+| docs/architecture.md | 旧版架构总览 (v2) | architecture/overview.md | (本次提交) |
+| docs/architecture/UNIFIED-ARCHITECTURE-v3-DRAFT.md | 统一架构 v3 草稿（最全面） | architecture/overview.md | (本次提交) |
+| docs/architecture/MVP-ARCHITECTURE.md | MVP 架构设计 | architecture/overview.md | (本次提交) |
+| docs/architecture/MVP.md | 原始 MVP 文档 | architecture/overview.md | (本次提交) |
 
 ## 设计文档（已过时）
 
