@@ -18,9 +18,9 @@ export function LogPanelDialog() {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-4xl rounded-2xl border-[#F0ECE8] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
         <DialogHeader>
-          <DialogTitle>调试日志</DialogTitle>
+          <DialogTitle className="text-[#1C1917] dark:text-[#FAFAF9]">调试日志</DialogTitle>
         </DialogHeader>
         <LogPanel />
       </DialogContent>
