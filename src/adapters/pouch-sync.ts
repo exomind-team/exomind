@@ -23,6 +23,7 @@ import { createUuidV4 } from '@/lib/utils/uuid';
 
 // PouchDB 插件
 import pouchdbAdapterIdb from 'pouchdb-adapter-idb';
+import { log } from '@/lib/logger';
 
 // 注册 IDB 适配器（使用 IndexedDB 作为本地存储）
 PouchDB.plugin(pouchdbAdapterIdb);
@@ -189,7 +190,7 @@ export class PouchSyncAdapter implements ISyncPort {
     this.remoteDB = remoteConfig
       ? new PouchDB(remoteUrl, remoteConfig)
       : new PouchDB(remoteUrl);
-    console.log(`[Sync] 远程数据库连接: ${remoteUrl} (auth: ${authMode})`);
+    log.info(`[Sync] 远程数据库连接: ${remoteUrl} (auth: ${authMode})`);
 
     // 启动实时双向同步
     this.startRealtimeSync();
@@ -235,13 +236,13 @@ export class PouchSyncAdapter implements ISyncPort {
 
     // 监听复制错误
     this.replicationPush.on('error', (err: { message?: string }) => {
-      console.error('[Sync] 推送错误:', err);
+      log.error(`[Sync] 推送错误: ${err.message || '未知错误'}`);
       this.status.state = 'error';
       this.status.error = err.message || '未知错误';
     });
 
     this.replicationPull.on('error', (err: { message?: string }) => {
-      console.error('[Sync] 拉取错误:', err);
+      log.error(`[Sync] 拉取错误: ${err.message || '未知错误'}`);
       this.status.state = 'error';
       this.status.error = err.message || '未知错误';
     });
@@ -257,7 +258,7 @@ export class PouchSyncAdapter implements ISyncPort {
       this.status.pendingChanges = Math.max(0, this.status.pendingChanges - info.docs_written);
     }
     this.status.lastSync = Date.now();
-    console.log(`[Sync] 推送完成: ${info.docs_written || 0} 个文档`);
+    log.info(`[Sync] 推送完成: ${info.docs_written || 0} 个文档`);
   }
 
   /**
@@ -265,7 +266,7 @@ export class PouchSyncAdapter implements ISyncPort {
    */
   private onPullChange(info: { docs_written?: number }): void {
     this.status.lastSync = Date.now();
-    console.log(`[Sync] 拉取完成: ${info.docs_written || 0} 个文档`);
+    log.info(`[Sync] 拉取完成: ${info.docs_written || 0} 个文档`);
   }
 
   /**
@@ -418,7 +419,7 @@ export class PouchSyncAdapter implements ISyncPort {
         }
       }
     } catch {
-      console.error('[Sync] 获取冲突列表失败');
+      log.error('[Sync] 获取冲突列表失败');
     }
 
     this.status.conflictCount = conflicts.length;

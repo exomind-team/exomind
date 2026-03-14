@@ -25,6 +25,7 @@ import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import type { Event } from '@/lib/types/event';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
+import { log } from '@/lib/logger';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
@@ -173,11 +174,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
         scrollToBottom(behavior);
       }
     });
-    console.log('[ChatPage] refreshLatestEvents', {
-      fetched: loadedEvents.length,
-      queryMs,
-      totalMs: Math.round(perfNow() - t0),
-    });
+    log.info(`[ChatPage] refreshLatestEvents ${JSON.stringify({ fetched: loadedEvents.length, queryMs, totalMs: Math.round(perfNow() - t0) })}`);
   }, [scrollToBottom]);
 
   const scheduleLatestRefresh = useCallback((): void => {
@@ -270,7 +267,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
     shouldStickToBottomRef.current = true;
     await eventLogService.current.addEvent(trimmed);
     await refreshLatestEvents('smooth');
-    console.log('[ChatPage] handleSend done', { totalMs: Math.round(perfNow() - t0) });
+    log.info(`[ChatPage] handleSend done ${JSON.stringify({ totalMs: Math.round(perfNow() - t0) })}`);
   }, [refreshLatestEvents]);
 
   // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦

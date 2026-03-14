@@ -132,6 +132,7 @@ import { WorkspaceTabs } from './agents/WorkspaceTabs';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
+import { log } from '@/lib/logger';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
@@ -2510,7 +2511,7 @@ export function AgentsPage() {
       await refreshSignalRoutesFromSnapshot({ hosts: runtimeHostSnapshots });
       closeRightPanel();
     } catch (err) {
-      console.error('Failed to save route:', err);
+      log.error(`Failed to save route: ${err instanceof Error ? err.message : String(err)}`);
     } finally {
       setIsRouteSaving(false);
     }
@@ -2533,7 +2534,7 @@ export function AgentsPage() {
       await refreshSignalRoutesFromSnapshot({ hosts: runtimeHostSnapshots });
     } catch (err) {
       setSignalRoutes(previousRoutes);
-      console.error('Failed to toggle route:', err);
+      log.error(`Failed to toggle route: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 
@@ -2546,7 +2547,7 @@ export function AgentsPage() {
       await refreshSignalRoutesFromSnapshot({ hosts: runtimeHostSnapshots });
       closeRightPanel();
     } catch (err) {
-      console.error('Failed to delete route:', err);
+      log.error(`Failed to delete route: ${err instanceof Error ? err.message : String(err)}`);
     }
   };
 

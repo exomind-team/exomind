@@ -4,6 +4,7 @@ import { getReminderService } from '@/lib/services/reminder.service';
 import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { resolveRemoteSyncKey, useSyncStore } from '@/ui/stores/sync-store';
+import { log } from '@/lib/logger';
 
 const REMINDER_REMOTE_DB_SUFFIX = 'reminders';
 
@@ -45,7 +46,7 @@ export function ReminderSyncCoordinator(): null {
     void reminderServiceRef.current.startSync(remoteUrl).catch((error) => {
       if (cancelled) return;
       const [message, payload] = buildSyncErrorLog('ReminderSyncCoordinator', remoteUrl, error);
-      console.error(message, payload);
+      log.error(`${message} ${JSON.stringify(payload)}`);
     });
 
     return () => {

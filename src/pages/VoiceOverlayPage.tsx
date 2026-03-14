@@ -22,6 +22,7 @@ import {
   subscribeVoiceOverlayTranscriptLinesChanges,
 } from '@/config/voice-overlay-preferences';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
+import { log } from '@/lib/logger';
 
 export type OverlayState = 'idle' | 'arming' | 'recording' | 'recognizing' | 'done' | 'error';
 
@@ -203,7 +204,7 @@ export function VoiceOverlayPage() {
       const elapsed = Math.max(0, Date.now() - data.traceStartedAtMs!);
       setFirstFrameMs(elapsed);
       if (getDeveloperModeEnabled()) {
-        console.info('[VoiceOverlay]', `[trace ${data.debugTraceId}] first frame in ${elapsed}ms`);
+        log.info(`[VoiceOverlay] [trace ${data.debugTraceId}] first frame in ${elapsed}ms`);
       }
     };
 

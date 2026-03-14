@@ -9,6 +9,7 @@ import {
 import type { EventData } from '@/lib/types/event';
 import { getEventLogService } from './eventlog.service';
 import { SignalStreamService } from './signal-stream.service';
+import { log } from '@/lib/logger';
 
 export const EVENTLOG_REPLICATION_APPENDED_TOPIC = 'eventlog.replication.appended';
 
@@ -102,7 +103,7 @@ export async function appendEventWithEcsReplication(event: StorageEvent, userId?
   try {
     await publishEventLogReplicationAppend(persisted);
   } catch (error) {
-    console.warn('[EventLog ECS] publish append failed:', error);
+    log.warn(`[EventLog ECS] publish append failed: ${error instanceof Error ? error.message : String(error)}`);
   }
 
   return persisted;

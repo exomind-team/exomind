@@ -1,5 +1,6 @@
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { getDevtoolsEnabled } from '@/config/devtools-mode';
+import { log } from '@/lib/logger';
 
 type ErudaModule = typeof import('eruda');
 type ErudaInstance = ErudaModule['default'];
@@ -37,6 +38,6 @@ export async function syncDevtoolsWithSettings(): Promise<void> {
     erudaInstance.init();
     isInitialized = true;
   } catch (error) {
-    console.warn('[devtools-runtime] Failed to sync devtools:', error);
+    log.warn(`[devtools-runtime] Failed to sync devtools: ${error instanceof Error ? error.message : String(error)}`);
   }
 }

@@ -1,6 +1,7 @@
 import PouchDB from 'pouchdb';
 import { buildSyncErrorLog } from './sync-error';
 import type { Reminder, ReminderStatus } from '@/lib/types/reminder';
+import { log } from '@/lib/logger';
 
 const POUCHDB_PREFIX_ENV = 'EXOMIND_REMINDER_STORAGE_PREFIX';
 const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-reminder-storage/';
@@ -127,10 +128,10 @@ export class ReminderStorage {
           }
           this.initialized = true;
         } catch (updateError) {
-          console.warn('更新 ReminderStorage 设计文档失败:', updateError);
+          log.warn(`更新 ReminderStorage 设计文档失败: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
         }
       } else {
-        console.warn('创建 ReminderStorage 设计文档失败:', error);
+        log.warn(`创建 ReminderStorage 设计文档失败: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -267,7 +268,7 @@ export class ReminderStorage {
       try {
         listener(change);
       } catch {
-        console.error('ReminderStorage 变更监听器执行错误');
+        log.error('ReminderStorage 变更监听器执行错误');
       }
     }
   }
@@ -289,6 +290,6 @@ export class ReminderStorage {
     });
     if (signature === this.lastSyncErrorSignature) return;
     this.lastSyncErrorSignature = signature;
-    console.error(message, payload);
+    log.error(`${message} ${JSON.stringify(payload)}`);
   }
 }

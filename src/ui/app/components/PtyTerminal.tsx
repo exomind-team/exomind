@@ -3,6 +3,7 @@ import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
 import { WebLinksAddon } from '@xterm/addon-web-links';
 import '@xterm/xterm/css/xterm.css';
+import { log } from '@/lib/logger';
 
 // ── Types ──────────────────────────────────────────────────────
 
@@ -91,7 +92,7 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
         method: 'POST',
         headers: buildHeaders(),
         body: JSON.stringify({ data: encoded }),
-      }).catch(console.error);
+      }).catch((e: unknown) => log.error(`[PtyTerminal] pty input failed: ${e instanceof Error ? e.message : String(e)}`));
     };
 
     // ── Handle user input → POST to backend ──────────────────

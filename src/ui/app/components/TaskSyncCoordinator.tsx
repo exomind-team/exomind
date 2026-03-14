@@ -5,6 +5,7 @@ import { buildSyncErrorLog } from '@/lib/storage/sync-error';
 import { buildRemoteDbUrl } from '@/lib/sync/remote-db-url';
 import { resolveRemoteSyncKey, useSyncStore } from '@/ui/stores/sync-store';
 import { useState } from 'react';
+import { log } from '@/lib/logger';
 
 export function TaskSyncCoordinator(): null {
   const taskServiceRef = useRef(getTaskService());
@@ -40,7 +41,7 @@ export function TaskSyncCoordinator(): null {
     void taskServiceRef.current.startSync(remoteUrl).catch((error) => {
       if (cancelled) return;
       const [message, payload] = buildSyncErrorLog('TaskSyncCoordinator', remoteUrl, error);
-      console.error(message, payload);
+      log.error(`${message} ${JSON.stringify(payload)}`);
     });
 
     return () => {

@@ -22,6 +22,7 @@ import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-ov
 import type { ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
 import { useRef } from 'react';
+import { log } from '@/lib/logger';
 
 interface NowWorkbenchOverlayPageProps {
   model?: NowWorkbenchOverlayModel;
@@ -408,7 +409,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     }
 
     void getCurrentWindow().startDragging().catch((error) => {
-      console.warn('[NowWorkbenchOverlay] startDragging failed', error);
+      log.warn(`[NowWorkbenchOverlay] startDragging failed: ${error instanceof Error ? error.message : String(error)}`);
     });
   }, []);
 
@@ -443,7 +444,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     void getCurrentWindow()
       .setSize(new LogicalSize(targetOverlaySize.width, targetOverlaySize.height))
       .catch((error) => {
-        console.warn('[NowWorkbenchOverlay] setSize failed', error);
+        log.warn(`[NowWorkbenchOverlay] setSize failed: ${error instanceof Error ? error.message : String(error)}`);
       });
   }, [targetOverlaySize.height, targetOverlaySize.width]);
 

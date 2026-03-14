@@ -7,6 +7,7 @@
 
 import type { IStoragePort } from '../environment/interfaces/storage.port';
 import type { QueryOptions, QueryResult } from '../environment/interfaces/storage.port';
+import { log } from '@/lib/logger';
 
 /**
  * Web Storage 适配器
@@ -38,16 +39,16 @@ export class WebStorageAdapter implements IStoragePort {
    */
   async write<T>(key: string, data: T): Promise<void> {
     if (!this.isBrowser()) {
-      console.warn('[WebStorage] 非浏览器环境，跳过写入');
+      log.warn('[WebStorage] 非浏览器环境，跳过写入');
       return;
     }
 
     try {
       const serialized = JSON.stringify(data);
       localStorage.setItem(this.getKey(key), serialized);
-      console.log(`[WebStorage] 写入成功: ${key}`);
+      log.info(`[WebStorage] 写入成功: ${key}`);
     } catch (error) {
-      console.error(`[WebStorage] 写入失败: ${key}`, error);
+      log.error(`[WebStorage] 写入失败: ${key} ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }
@@ -57,7 +58,7 @@ export class WebStorageAdapter implements IStoragePort {
    */
   async read<T>(key: string): Promise<T | null> {
     if (!this.isBrowser()) {
-      console.warn('[WebStorage] 非浏览器环境，返回 null');
+      log.warn('[WebStorage] 非浏览器环境，返回 null');
       return null;
     }
 
@@ -68,7 +69,7 @@ export class WebStorageAdapter implements IStoragePort {
       }
       return JSON.parse(raw) as T;
     } catch (error) {
-      console.error(`[WebStorage] 读取失败: ${key}`, error);
+      log.error(`[WebStorage] 读取失败: ${key} ${error instanceof Error ? error.message : String(error)}`);
       return null;
     }
   }
@@ -83,9 +84,9 @@ export class WebStorageAdapter implements IStoragePort {
 
     try {
       localStorage.removeItem(this.getKey(key));
-      console.log(`[WebStorage] 删除成功: ${key}`);
+      log.info(`[WebStorage] 删除成功: ${key}`);
     } catch (error) {
-      console.error(`[WebStorage] 删除失败: ${key}`, error);
+      log.error(`[WebStorage] 删除失败: ${key} ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }
@@ -112,12 +113,12 @@ export class WebStorageAdapter implements IStoragePort {
               result.set(key, JSON.parse(raw) as T);
             }
           } catch {
-            console.warn(`[WebStorage] 解析失败: ${key}`);
+            log.warn(`[WebStorage] 解析失败: ${key}`);
           }
         }
       }
     } catch (error) {
-      console.error('[WebStorage] readAll 失败', error);
+      log.error(`[WebStorage] readAll 失败 ${error instanceof Error ? error.message : String(error)}`);
     }
 
     return result;
@@ -144,9 +145,9 @@ export class WebStorageAdapter implements IStoragePort {
       }
 
       keysToDelete.forEach(key => localStorage.removeItem(key));
-      console.log(`[WebStorage] 清空完成，删除了 ${keysToDelete.length} 条数据`);
+      log.info(`[WebStorage] 清空完成，删除了 ${keysToDelete.length} 条数据`);
     } catch (error) {
-      console.error('[WebStorage] 清空失败', error);
+      log.error(`[WebStorage] 清空失败 ${error instanceof Error ? error.message : String(error)}`);
       throw error;
     }
   }
@@ -155,7 +156,7 @@ export class WebStorageAdapter implements IStoragePort {
    * 查询数据（Web 环境暂未实现）
    */
   async query<T>(_options: QueryOptions<T>): Promise<QueryResult<T>> {
-    console.warn('[WebStorage] query 方法暂未实现');
+    log.warn('[WebStorage] query 方法暂未实现');
     return {
       items: [],
       total: 0,

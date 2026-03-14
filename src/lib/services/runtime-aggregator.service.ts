@@ -1,6 +1,7 @@
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { RuntimeTopologyResponse } from '@/lib/types/runtime-topology';
 import { getRuntimeHostService } from './runtime-host.service';
+import { log } from '@/lib/logger';
 
 export interface RuntimeAgentInfo {
   id: string;
@@ -63,7 +64,7 @@ export class RuntimeAggregatorServiceImpl implements RuntimeAggregatorService {
             topologies.set(host.id, topology);
           }
         } catch (error) {
-          console.warn(`Failed to fetch data from host ${host.name}:`, error);
+          log.warn(`Failed to fetch data from host ${host.name}: ${error instanceof Error ? error.message : String(error)}`);
         }
       })
     );

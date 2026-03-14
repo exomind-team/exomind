@@ -21,6 +21,7 @@ import {
   type VoiceTranscriptSendMode,
 } from '@/config/voice-transcript-send-mode';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
+import { log } from '@/lib/logger';
 
 interface NowInputRowProps {
   onSend: (content: string) => void;
@@ -123,10 +124,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
 
     const result = await getClipboardService().readText();
     if (!result.ok) {
-      console.warn('[clipboard] readText failed:', result.error, {
-        ...getClipboardDebugSnapshot(),
-        reason: result.reason,
-      });
+      log.warn(`[clipboard] readText failed: ${result.error instanceof Error ? result.error.message : String(result.error)} ${JSON.stringify({ ...getClipboardDebugSnapshot(), reason: result.reason })}`);
       setPasteFailureLabel(getPasteFailureLabel(result.reason));
       setPasteFeedback('error');
       pasteFeedbackTimerRef.current = setTimeout(() => {
@@ -153,7 +151,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     void publishVoiceTranscriptSignal({ text: normalized }, {
       source: 'frontend:now-input-row',
     }).catch((publishError) => {
-      console.warn('[new-now-input][voice-signal]', publishError);
+      log.warn(`[new-now-input][voice-signal] ${publishError instanceof Error ? publishError.message : String(publishError)}`);
     });
 
     if (voiceTranscriptSendMode === 'direct-send') {
@@ -165,7 +163,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   }, [onSend, voiceTranscriptSendMode]);
 
   const handleVoiceError = useCallback((error: string) => {
-    console.error('[new-now-input][voice]', error);
+    log.error(`[new-now-input][voice] ${error}`);
   }, []);
 
   const handleKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {

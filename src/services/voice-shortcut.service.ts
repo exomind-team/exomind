@@ -26,6 +26,7 @@ import {
 } from '../lib/media/microphone-capture';
 import { convertWebmBlobToWav } from '../lib/media/wav-audio';
 import type { ASRResult } from '../lib/ports/asr-port';
+import { log } from '@/lib/logger';
 import {
   getVoiceShortcutAsrProvider,
   subscribeVoiceShortcutAsrProviderChanges,
@@ -167,25 +168,25 @@ export class VoiceShortcutService {
 
   private debugInfo(...args: unknown[]): void {
     if (this.developerModeEnabled) {
-      console.info(...args);
+      log.info(args.map(String).join(' '));
     }
   }
 
   private debugWarn(...args: unknown[]): void {
     if (this.developerModeEnabled) {
-      console.warn(...args);
+      log.warn(args.map(String).join(' '));
     }
   }
 
   private debugError(...args: unknown[]): void {
     if (this.developerModeEnabled) {
-      console.error(...args);
+      log.error(args.map(String).join(' '));
     }
   }
 
   private debugLog(...args: unknown[]): void {
     if (this.developerModeEnabled) {
-      console.log(...args);
+      log.info(args.map(String).join(' '));
     }
   }
 

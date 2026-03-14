@@ -12,6 +12,7 @@ import {
   HttpSseSignalTransport,
   type SignalTransport,
 } from './signal-http-sse-transport';
+import { log } from '@/lib/logger';
 
 // ── 配置 ─────────────────────────────────────────────────────
 
@@ -111,7 +112,7 @@ export class SignalStreamService {
         const logKey = `${this.baseUrl}::${msg}`;
         if (this.lastConnectionErrorLog !== logKey) {
           // RT 未启动时属于预期重试场景，避免持续 error 污染控制台
-          console.warn(`[SignalStream] connection retry: ${msg} (target: ${this.baseUrl})`);
+          log.warn(`[SignalStream] connection retry: ${msg} (target: ${this.baseUrl})`);
           this.lastConnectionErrorLog = logKey;
         }
 
@@ -186,7 +187,7 @@ export class SignalStreamService {
         const event = JSON.parse(data) as SignalEvent;
         this.emit(event);
       } catch {
-        console.warn('[SignalStream] failed to parse signal event:', data);
+        log.warn(`[SignalStream] failed to parse signal event: ${data}`);
       }
     }
     // heartbeat / warning events are silently consumed.
@@ -197,7 +198,7 @@ export class SignalStreamService {
       try {
         cb(event);
       } catch (err) {
-        console.error('[SignalStream] listener error:', err);
+        log.error(`[SignalStream] listener error: ${err instanceof Error ? err.message : String(err)}`);
       }
     }
   }

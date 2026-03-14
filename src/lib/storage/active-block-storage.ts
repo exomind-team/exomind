@@ -2,6 +2,7 @@ import PouchDB from 'pouchdb';
 import type { ActiveBlockData } from '../types/event';
 import { getCurrentProfileOrLegacyId } from '../profile/profile-storage';
 import { buildSyncErrorLog } from './sync-error';
+import { log } from '@/lib/logger';
 
 const ACTIVE_BLOCK_DOC_ID = 'current';
 const ACTIVE_BLOCK_PREFIX_ENV = 'EXOMIND_ACTIVE_BLOCK_STORAGE_PREFIX';
@@ -269,7 +270,7 @@ export class ActiveBlockStorage {
       const block = await this.loadActiveBlock();
       this.emitChange(block, 'sync');
     } catch (error) {
-      console.error('[ActiveBlockStorage] publish current block error:', error);
+      log.error(`[ActiveBlockStorage] publish current block error: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -328,7 +329,7 @@ export class ActiveBlockStorage {
       try {
         listener(block, source);
       } catch (error) {
-        console.error('[ActiveBlockStorage] listener error:', error);
+        log.error(`[ActiveBlockStorage] listener error: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -356,7 +357,7 @@ export class ActiveBlockStorage {
       return;
     }
     this.lastSyncErrorSignature = signature;
-    console.error(message, payload);
+    log.error(`${message} ${JSON.stringify(payload)}`);
   }
 
   private async getResolvedDoc(): Promise<ActiveBlockDoc | null> {
@@ -448,7 +449,7 @@ export class ActiveBlockStorage {
         await this.db.bulkDocs(tombstones as unknown as Parameters<typeof this.db.bulkDocs>[0]);
       })
       .catch((error: unknown) => {
-        console.warn('[ActiveBlockStorage] prune conflict revisions failed:', error);
+        log.warn(`[ActiveBlockStorage] prune conflict revisions failed: ${error instanceof Error ? error.message : String(error)}`);
       });
   }
 

@@ -24,6 +24,7 @@ import {
   DEFAULT_RECORDING_AUDIO_CONSTRAINTS,
   getUserMediaWithConstraintFallback,
 } from '../lib/media/microphone-capture';
+import { log } from '@/lib/logger';
 
 // 按钮状态
 export type VoiceButtonState = 'idle' | 'recording' | 'recognizing' | 'completed';
@@ -155,8 +156,8 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // 初始化适配器
   useEffect(() => {
-    console.log('[VoiceInput] 初始化, isSecureContext:', window.isSecureContext);
-    console.log('[VoiceInput] location:', window.location.href, 'protocol:', window.location.protocol);
+    log.info(`[VoiceInput] 初始化, isSecureContext: ${window.isSecureContext}`);
+    log.info(`[VoiceInput] location: ${window.location.href} protocol: ${window.location.protocol}`);
     if (adapter) {
       adapterRef.current = adapter;
     } else {
@@ -255,7 +256,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     }
 
     if (audioContextRef.current && audioContextRef.current.state !== 'closed') {
-      audioContextRef.current.close().catch(console.error);
+      audioContextRef.current.close().catch((e: unknown) => log.error(`[VoiceInput] audioContext.close failed: ${e instanceof Error ? e.message : String(e)}`));
       audioContextRef.current = null;
     }
 
@@ -267,7 +268,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
 
   // WebM 转 WAV（与 moss-test 页面相同）
   const webmToWav = async (webmBlob: Blob): Promise<Uint8Array> => {
-    console.log('[VoiceInput] WebM 转 WAV 中...');
+    log.info('[VoiceInput] WebM 转 WAV 中...');
 
     const arrayBuffer = await webmBlob.arrayBuffer();
     const audioContext = new AudioContext();
@@ -276,7 +277,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     // 提取音频数据
     const rawData = audioBuffer.getChannelData(0);
     const sampleRate = audioBuffer.sampleRate;
-    console.log(`[VoiceInput] 原始采样率: ${sampleRate}Hz`);
+    log.info(`[VoiceInput] 原始采样率: ${sampleRate}Hz`);
 
     // 直接转换为 PCM 16bit
     const pcmData = new Int16Array(rawData.length);
@@ -289,7 +290,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     const wavData = encodeWAV(new Uint8Array(pcmData.buffer), sampleRate);
     await audioContext.close();
 
-    console.log(`[VoiceInput] WAV 转换完成: ${(wavData.length / 1024).toFixed(2)} KB`);
+    log.info(`[VoiceInput] WAV 转换完成: ${(wavData.length / 1024).toFixed(2)} KB`);
     return wavData;
   };
 
@@ -326,43 +327,43 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     const currentToken = ++operationTokenRef.current;
 
     try {
-      console.log('[VoiceInput] 开始录音流程', { state: state.state, token: currentToken });
+      log.info(`[VoiceInput] 开始录音流程 ${JSON.stringify({ state: state.state, token: currentToken })}`);
 
       // 1. 检查权限状态
       if (permissionState === 'unavailable') {
-        console.log('[VoiceInput] mediaDevices API 不可用');
+        log.info('[VoiceInput] mediaDevices API 不可用');
         throw new Error('您的浏览器不支持语音录制功能');
       }
 
       // 如果权限未授予，先请求权限
       if (permissionState !== 'granted') {
-        console.log('[VoiceInput] 权限未授予，先请求权限');
+        log.info('[VoiceInput] 权限未授予，先请求权限');
         const granted = await requestPermission();
         if (!granted) {
-          console.log('[VoiceInput] 权限请求失败');
+          log.info('[VoiceInput] 权限请求失败');
           return;
         }
         if (currentToken !== operationTokenRef.current) {
-          console.log('[VoiceInput] 操作已被取消，跳过录音');
+          log.info('[VoiceInput] 操作已被取消，跳过录音');
           return;
         }
       }
 
       // 2. 检测 mediaDevices API 可用性
       if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
-        console.log('[VoiceInput] mediaDevices API 不可用');
+        log.info('[VoiceInput] mediaDevices API 不可用');
         throw new Error('您的浏览器不支持语音录制功能');
       }
-      console.log('[VoiceInput] mediaDevices API 检查通过');
+      log.info('[VoiceInput] mediaDevices API 检查通过');
 
       // 3. 获取麦克风
-      console.log('[VoiceInput] 获取麦克风...');
+      log.info('[VoiceInput] 获取麦克风...');
       streamRef.current = await getUserMediaWithConstraintFallback(
         (constraints) => navigator.mediaDevices.getUserMedia(constraints),
         { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS }
       );
       startTimeRef.current = Date.now();
-      console.log('[VoiceInput] 麦克风获取成功');
+      log.info('[VoiceInput] 麦克风获取成功');
 
       // 4. 创建 MediaRecorder
       const { recorder: mediaRecorder, mimeType } = createCompatibleMediaRecorder(streamRef.current);
@@ -377,13 +378,13 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
             recordedMimeTypeRef.current = event.data.type;
           }
           recordedChunksRef.current.push(event.data);
-          console.log('[VoiceInput] 收到音频数据:', event.data.size, 'bytes');
+          log.info(`[VoiceInput] 收到音频数据: ${event.data.size} bytes`);
         }
       };
 
       // 6. 开始录音
       mediaRecorder.start(100); // 每 100ms 收集一次数据
-      console.log('[VoiceInput] MediaRecorder 已启动');
+      log.info('[VoiceInput] MediaRecorder 已启动');
 
       // 7. 设置波形可视化（使用 analyser）
       if (showWaveform && streamRef.current) {
@@ -404,7 +405,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       }
 
     } catch (error) {
-      console.error('[VoiceInput] 开始录音失败:', error);
+      log.error(`[VoiceInput] 开始录音失败: ${error instanceof Error ? error.message : String(error)}`);
       releaseRecordingResources();
 
       if (currentToken === operationTokenRef.current) {
@@ -417,7 +418,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
   // 停止录音并识别
   const stopRecording = useCallback(async () => {
     const operationToken = ++operationTokenRef.current;
-    console.log('[VoiceInput] 停止录音...', { token: operationToken });
+    log.info(`[VoiceInput] 停止录音... ${JSON.stringify({ token: operationToken })}`);
 
     // 停止动画
     if (animationFrameId !== null) {
@@ -432,15 +433,15 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
         recorder.addEventListener('stop', () => resolve(), { once: true });
         recorder.stop();
       });
-      console.log('[VoiceInput] MediaRecorder 已停止');
+      log.info('[VoiceInput] MediaRecorder 已停止');
     }
 
     const recDuration = Math.floor((Date.now() - startTimeRef.current) / 1000);
-    console.log(`[VoiceInput] 录音时长: ${recDuration}秒`);
+    log.info(`[VoiceInput] 录音时长: ${recDuration}秒`);
 
     // 检查是否有录音数据
     if (recordedChunksRef.current.length === 0) {
-      console.error('[VoiceInput] 没有录制到音频数据');
+      log.error('[VoiceInput] 没有录制到音频数据');
       releaseRecordingResources();
       if (operationToken === operationTokenRef.current) {
         setState({ state: 'idle', duration: 0, startTime: 0 });
@@ -452,7 +453,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
     // 获取录音 blob
     const recordedMimeType = recordedMimeTypeRef.current || 'audio/webm';
     const webmBlob = new Blob(recordedChunksRef.current, { type: recordedMimeType });
-    console.log(`[VoiceInput] 音频文件(${recordedMimeType}): ${(webmBlob.size / 1024).toFixed(2)} KB`);
+    log.info(`[VoiceInput] 音频文件(${recordedMimeType}): ${(webmBlob.size / 1024).toFixed(2)} KB`);
 
     // 释放麦克风
     if (streamRef.current) {
@@ -474,7 +475,7 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       }
 
       // 调用 ASR 识别
-      console.log('[VoiceInput] 调用 ASR 识别...');
+      log.info('[VoiceInput] 调用 ASR 识别...');
       const result = await adapterRef.current?.transcribe({
         lang: 'zh-CN',
         preRecordedAudio: wavData,
@@ -485,12 +486,12 @@ export const VoiceInputButton = React.forwardRef<VoiceInputButtonHandle, VoiceIn
       }
 
       if (result) {
-        console.log(`[VoiceInput] 识别完成: "${result.text}"`);
+        log.info(`[VoiceInput] 识别完成: "${result.text}"`);
         setState({ state: 'completed', duration: 0, startTime: 0 });
         callbacksRef.current.onResult(result.text);
       }
     } catch (error) {
-      console.error('[VoiceInput] 识别失败:', error);
+      log.error(`[VoiceInput] 识别失败: ${error instanceof Error ? error.message : String(error)}`);
       releaseRecordingResources();
       if (operationToken === operationTokenRef.current) {
         setState({ state: 'idle', duration: 0, startTime: 0 });

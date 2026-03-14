@@ -33,6 +33,7 @@ import { appendEventWithEcsReplication } from './ecs-eventlog-replication.servic
 import { getEventLogService } from './eventlog.service';
 import { publishActiveBlockReplicationSnapshot } from './ecs-active-block-replication.service';
 import { SignalStreamService } from './signal-stream.service';
+import { log } from '@/lib/logger';
 
 // 存储键
 const TIME_BLOCKS_KEY = 'time_blocks';
@@ -255,12 +256,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     await this.addBlockEvent(`${normalized.name} 暂停`, 'block_pause', new Date(now).toISOString());
     const eventMs = Math.round(perfNow() - eventStart);
     this.notifyChange(pausedBlock);
-    console.log('[TB-SVC] pauseBlock done', {
-      startId: pausedBlock.startId,
-      saveMs,
-      eventMs,
-      totalMs: Math.round(perfNow() - opStart),
-    });
+    log.info(`[TB-SVC] pauseBlock done ${JSON.stringify({ startId: pausedBlock.startId, saveMs, eventMs, totalMs: Math.round(perfNow() - opStart) })}`);
   }
 
   async resumeBlock(): Promise<void> {
@@ -299,12 +295,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     await this.addBlockEvent(`${normalized.name} 继续`, 'block_resume', new Date(now).toISOString());
     const eventMs = Math.round(perfNow() - eventStart);
     this.notifyChange(resumedBlock);
-    console.log('[TB-SVC] resumeBlock done', {
-      startId: resumedBlock.startId,
-      saveMs,
-      eventMs,
-      totalMs: Math.round(perfNow() - opStart),
-    });
+    log.info(`[TB-SVC] resumeBlock done ${JSON.stringify({ startId: resumedBlock.startId, saveMs, eventMs, totalMs: Math.round(perfNow() - opStart) })}`);
   }
 
   async markEnding(): Promise<void> {
@@ -353,12 +344,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     const saveMs = Math.round(perfNow() - saveStart);
     this.rememberAcceptedBlock(endedBlock);
     this.notifyChange(endedBlock);
-    console.log('[TB-SVC] markEnding done', {
-      startId: endedBlock.startId,
-      saveMs,
-      eventMs,
-      totalMs: Math.round(perfNow() - opStart),
-    });
+    log.info(`[TB-SVC] markEnding done ${JSON.stringify({ startId: endedBlock.startId, saveMs, eventMs, totalMs: Math.round(perfNow() - opStart) })}`);
   }
 
   async endBlock(feedback?: string): Promise<TimeBlock | null> {
@@ -480,18 +466,12 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
     // 发布 timeblock.completed 信号（fire-and-forget，失败不阻塞）
     this.publishTimeblockCompleted(timeBlock, report).catch((err) => {
-      console.warn('[TimeBlockService] failed to publish timeblock.completed signal:', err);
+      log.warn(`[TimeBlockService] failed to publish timeblock.completed signal: ${err instanceof Error ? err.message : String(err)}`);
     });
 
     // 通知变化
     this.notifyChange(null);
-    console.log('[TB-SVC] endBlock done', {
-      startId: terminalBlock.startId,
-      feedbackEventMs,
-      completedWriteMs,
-      saveTerminalMs,
-      totalMs: Math.round(perfNow() - opStart),
-    });
+    log.info(`[TB-SVC] endBlock done ${JSON.stringify({ startId: terminalBlock.startId, feedbackEventMs, completedWriteMs, saveTerminalMs, totalMs: Math.round(perfNow() - opStart) })}`);
 
     return {
       ...timeBlock,
@@ -656,7 +636,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     });
 
     if (!response.accepted) {
-      console.warn('[TimeBlockService] RT publish was not accepted');
+      log.warn('[TimeBlockService] RT publish was not accepted');
     }
   }
 
@@ -717,14 +697,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     try {
       await publishActiveBlockReplicationSnapshot(block);
     } catch (error) {
-      console.warn('[TB-SVC] publish active-block snapshot failed', {
-        storageUserId: this.activeStorageUserId,
-        remoteUrl: this.activeSyncRemoteUrl,
-        startId: block.startId,
-        phase: block.phase ?? this.resolvePhase(block),
-        version: block.version ?? null,
-        error,
-      });
+      log.warn(`[TB-SVC] publish active-block snapshot failed ${JSON.stringify({ storageUserId: this.activeStorageUserId, remoteUrl: this.activeSyncRemoteUrl, startId: block.startId, phase: block.phase ?? this.resolvePhase(block), version: block.version ?? null, error: error instanceof Error ? error.message : String(error) })}`);
     }
   }
 
@@ -829,7 +802,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
       this.pendingStorageStop = this.pendingStorageStop
         .then(() => previousStorage.stopSync())
         .catch((error) => {
-          console.error('[TB-SVC] previous storage stopSync failed', error);
+          log.error(`[TB-SVC] previous storage stopSync failed: ${error instanceof Error ? error.message : String(error)}`);
         });
     }
   }
@@ -1163,33 +1136,10 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     this.lastCanonicalWriteBackSignature = signature;
     try {
       await this.saveActiveBlock(block);
-      console.info('[TB-SVC] canonical write-back applied', {
-        trigger: context.trigger,
-        reason: context.decision?.reason ?? null,
-        compared: context.decision?.compared ?? null,
-        storageUserId: this.activeStorageUserId,
-        remoteUrl: this.activeSyncRemoteUrl,
-        incomingStartId: context.incoming?.startId ?? null,
-        targetStartId: block.startId,
-        targetPhase: block.phase ?? this.resolvePhase(block),
-        targetVersion: block.version ?? null,
-        elapsedMs: Math.round(perfNow() - startedAt),
-      });
+      log.info(`[TB-SVC] canonical write-back applied ${JSON.stringify({ trigger: context.trigger, reason: context.decision?.reason ?? null, compared: context.decision?.compared ?? null, storageUserId: this.activeStorageUserId, remoteUrl: this.activeSyncRemoteUrl, incomingStartId: context.incoming?.startId ?? null, targetStartId: block.startId, targetPhase: block.phase ?? this.resolvePhase(block), targetVersion: block.version ?? null, elapsedMs: Math.round(perfNow() - startedAt) })}`);
     } catch (error) {
       this.lastCanonicalWriteBackSignature = null;
-      console.error('[TB-SVC] canonical write-back failed', {
-        trigger: context.trigger,
-        reason: context.decision?.reason ?? null,
-        compared: context.decision?.compared ?? null,
-        storageUserId: this.activeStorageUserId,
-        remoteUrl: this.activeSyncRemoteUrl,
-        incomingStartId: context.incoming?.startId ?? null,
-        targetStartId: block.startId,
-        targetPhase: block.phase ?? this.resolvePhase(block),
-        targetVersion: block.version ?? null,
-        elapsedMs: Math.round(perfNow() - startedAt),
-        error,
-      });
+      log.error(`[TB-SVC] canonical write-back failed ${JSON.stringify({ trigger: context.trigger, reason: context.decision?.reason ?? null, compared: context.decision?.compared ?? null, storageUserId: this.activeStorageUserId, remoteUrl: this.activeSyncRemoteUrl, incomingStartId: context.incoming?.startId ?? null, targetStartId: block.startId, targetPhase: block.phase ?? this.resolvePhase(block), targetVersion: block.version ?? null, elapsedMs: Math.round(perfNow() - startedAt), error: error instanceof Error ? error.message : String(error) })}`);
     }
   }
 
@@ -1226,26 +1176,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
     preferred: ActiveBlockData,
     decision: BlockPreferenceDecision,
   ): void {
-    console.warn('[TB-SVC] rejected non-preferred sync block', {
-      reason: decision.reason,
-      compared: decision.compared,
-      storageUserId: this.activeStorageUserId,
-      remoteUrl: this.activeSyncRemoteUrl,
-      incoming: {
-        startId: incoming.startId,
-        phase: this.resolvePhase(incoming),
-        version: incoming.version ?? null,
-        actorId: incoming.actorId ?? null,
-        transitionTime: this.getBlockOrderTime(incoming),
-      },
-      preferred: {
-        startId: preferred.startId,
-        phase: this.resolvePhase(preferred),
-        version: preferred.version ?? null,
-        actorId: preferred.actorId ?? null,
-        transitionTime: this.getBlockOrderTime(preferred),
-      },
-    });
+    log.warn(`[TB-SVC] rejected non-preferred sync block ${JSON.stringify({ reason: decision.reason, compared: decision.compared, storageUserId: this.activeStorageUserId, remoteUrl: this.activeSyncRemoteUrl, incoming: { startId: incoming.startId, phase: this.resolvePhase(incoming), version: incoming.version ?? null, actorId: incoming.actorId ?? null, transitionTime: this.getBlockOrderTime(incoming) }, preferred: { startId: preferred.startId, phase: this.resolvePhase(preferred), version: preferred.version ?? null, actorId: preferred.actorId ?? null, transitionTime: this.getBlockOrderTime(preferred) } })}`);
   }
 
   private rememberAcceptedBlock(block: ActiveBlockData): void {

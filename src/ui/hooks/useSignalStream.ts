@@ -30,6 +30,7 @@ import {
   type RuntimeTarget,
 } from '@/config/runtime-target';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+import { log } from '@/lib/logger';
 
 const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
 
@@ -99,7 +100,7 @@ export function useSignalStream(): void {
             }
           } catch (error) {
             if (!loggedHydrationError) {
-              console.warn('[SignalStream] failed to hydrate embedded runtime status:', error);
+              log.warn(`[SignalStream] failed to hydrate embedded runtime status: ${error instanceof Error ? error.message : String(error)}`);
               loggedHydrationError = true;
             }
           }
@@ -163,12 +164,12 @@ export function useSignalStream(): void {
       onEventLogReplicationAppended: async (payload: EventLogReplicationAppendedPayload) => {
         const result = await projectEventLogReplicationAppend(payload);
         if (result === 'inserted') {
-          console.log('[SignalStream] eventlog.replication.appended → EventStorage');
+          log.info('[SignalStream] eventlog.replication.appended → EventStorage');
         }
       },
       onActiveBlockReplicationSnapshot: async (payload: ActiveBlockReplicationSnapshotPayload) => {
         await projectActiveBlockSnapshot(payload);
-        console.log('[SignalStream] active_block.replication.snapshot → ActiveBlockStorage');
+        log.info('[SignalStream] active_block.replication.snapshot → ActiveBlockStorage');
       },
       onReviewCompleted: async (payload) => {
         const content = formatReviewAsMarkdown(payload);
@@ -181,24 +182,24 @@ export function useSignalStream(): void {
             source: getEventSourceMetadata(),
           },
         });
-        console.log('[SignalStream] review.completed → EventStorage (agent_feedback)');
+        log.info('[SignalStream] review.completed → EventStorage (agent_feedback)');
       },
     });
 
     service.onSignal((event) => {
       handler(event).catch((err) => {
-        console.error('[SignalStream] handler error:', err);
+        log.error(`[SignalStream] handler error: ${err instanceof Error ? err.message : String(err)}`);
       });
     });
 
     service.start();
     serviceRef.current = service;
-    console.log(`[SignalStream] SSE connection started (${targetLabel})`);
+    log.info(`[SignalStream] SSE connection started (${targetLabel})`);
 
     return () => {
       service.stop();
       serviceRef.current = null;
-      console.log(`[SignalStream] SSE connection stopped (${targetLabel})`);
+      log.info(`[SignalStream] SSE connection stopped (${targetLabel})`);
     };
   }, [runtimeTarget, runtimeTargetHydrated]);
 }

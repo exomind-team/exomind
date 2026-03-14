@@ -8,6 +8,7 @@
 import PouchDB from 'pouchdb';
 import { buildSyncErrorLog } from './sync-error';
 import type { TaskNode } from '@/lib/types/task';
+import { log } from '@/lib/logger';
 
 const POUCHDB_PREFIX_ENV = 'EXOMIND_TASK_STORAGE_PREFIX';
 const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-task-storage/';
@@ -156,10 +157,10 @@ export class TaskStorage {
           }
           this.initialized = true;
         } catch (updateError) {
-          console.warn('更新 TaskStorage 设计文档失败:', updateError);
+          log.warn(`更新 TaskStorage 设计文档失败: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
         }
       } else {
-        console.warn('创建 TaskStorage 设计文档失败:', error);
+        log.warn(`创建 TaskStorage 设计文档失败: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -354,7 +355,7 @@ export class TaskStorage {
       try {
         listener(change);
       } catch {
-        console.error('TaskStorage 变更监听器执行错误');
+        log.error('TaskStorage 变更监听器执行错误');
       }
     }
   }
@@ -376,6 +377,6 @@ export class TaskStorage {
     });
     if (signature === this.lastSyncErrorSignature) return;
     this.lastSyncErrorSignature = signature;
-    console.error(message, payload);
+    log.error(`${message} ${JSON.stringify(payload)}`);
   }
 }

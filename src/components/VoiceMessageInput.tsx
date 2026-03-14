@@ -18,6 +18,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
+import { log } from '@/lib/logger';
 
 export interface VoiceMessageInputProps {
   /** 发送消息回调 */
@@ -137,7 +138,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     void publishVoiceTranscriptSignal({ text: normalized }, {
       source: 'frontend:voice-message-input',
     }).catch((publishError) => {
-      console.warn('[VoiceMessageInput] 发布语音信号失败（voice signal publish failed）:', publishError);
+      log.warn(`[VoiceMessageInput] 发布语音信号失败（voice signal publish failed）: ${publishError instanceof Error ? publishError.message : String(publishError)}`);
     });
   }, [onVoiceResult]);
 
