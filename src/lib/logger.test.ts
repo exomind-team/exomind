@@ -9,11 +9,12 @@ vi.mock('@tauri-apps/plugin-log', () => ({
   attachLogger: vi.fn().mockResolvedValue(() => {}),
 }));
 
-import { log, addLogListener, type LogEntry } from '@/lib/logger';
+import { log, addLogListener, setConsoleMinLevel, type LogEntry } from '@/lib/logger';
 
 describe('unified logger（统一日志双写）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    setConsoleMinLevel('INFO');
   });
 
   it('log.info writes to both console and listeners', () => {
@@ -61,7 +62,23 @@ describe('unified logger（统一日志双写）', () => {
     consoleSpy.mockRestore();
   });
 
-  it('log.debug writes to console.debug and listeners', () => {
+  it('log.debug skips console by default but writes to listeners', () => {
+    const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
+    const entries: LogEntry[] = [];
+    const unsub = addLogListener((entry) => entries.push(entry));
+
+    log.debug('debug msg');
+
+    expect(consoleSpy).not.toHaveBeenCalled();
+    expect(entries).toHaveLength(1);
+    expect(entries[0].level).toBe('DEBUG');
+
+    unsub();
+    consoleSpy.mockRestore();
+  });
+
+  it('log.debug writes to console when consoleMinLevel is DEBUG', () => {
+    setConsoleMinLevel('DEBUG');
     const consoleSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
     const entries: LogEntry[] = [];
     const unsub = addLogListener((entry) => entries.push(entry));

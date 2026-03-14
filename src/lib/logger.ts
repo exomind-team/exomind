@@ -33,7 +33,18 @@ const CONSOLE_METHOD: Record<LogLevel, keyof Console> = {
   ERROR: 'error',
 };
 
+const LEVEL_ORDER: Record<LogLevel, number> = {
+  TRACE: 0,
+  DEBUG: 1,
+  INFO: 2,
+  WARN: 3,
+  ERROR: 4,
+};
+
 const MAX_HISTORY = 1000;
+
+/** console 输出最低级别：默认 INFO，DEBUG/TRACE 只写入 LogPanel + Tauri 日志 */
+let consoleMinLevel: LogLevel = 'INFO';
 
 let detachFn: (() => void) | null = null;
 const listeners = new Set<LogListener>();
@@ -42,10 +53,12 @@ const history: LogEntry[] = [];
 function emit(level: LogLevel, message: string): void {
   const entry: LogEntry = { level, message, timestamp: new Date() };
 
-  // 1) Browser console
-  const method = CONSOLE_METHOD[level];
-  // eslint-disable-next-line no-console
-  (console[method] as (...args: unknown[]) => void)(`[${level}]`, message);
+  // 1) Browser console (only if level >= consoleMinLevel)
+  if (LEVEL_ORDER[level] >= LEVEL_ORDER[consoleMinLevel]) {
+    const method = CONSOLE_METHOD[level];
+    // eslint-disable-next-line no-console
+    (console[method] as (...args: unknown[]) => void)(`[${level}]`, message);
+  }
 
   // 2) Ring buffer (survives before LogPanel opens)
   history.push(entry);
@@ -55,6 +68,11 @@ function emit(level: LogLevel, message: string): void {
   for (const listener of listeners) {
     listener(entry);
   }
+}
+
+/** 设置 console 输出的最低级别（默认 INFO） */
+export function setConsoleMinLevel(level: LogLevel): void {
+  consoleMinLevel = level;
 }
 
 /** 获取自应用启动以来的全部历史日志 */
