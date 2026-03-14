@@ -96,6 +96,7 @@ export const settingsPagePreferenceState = {
   developerMode: false,
   agentPageEnabled: false,
   desktopAdaptiveEnabled: true,
+  voiceShortcutAsrProvider: 'moss' as string,
 };
 
 export const settingsPageDomainBackendState = {
@@ -259,11 +260,25 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/config/voice-shortcut-asr-provider', () => ({
-  getVoiceShortcutAsrProvider: vi.fn(() => 'moss'),
-  setVoiceShortcutAsrProvider: vi.fn((value: string) => value),
-  subscribeVoiceShortcutAsrProviderChanges: vi.fn(() => () => {}),
-}));
+vi.mock('@/config/voice-shortcut-asr-provider', () => {
+  const listeners = new Set<(value: string) => void>();
+  return {
+    getVoiceShortcutAsrProvider: vi.fn(() => settingsPagePreferenceState.voiceShortcutAsrProvider),
+    getVoiceShortcutAsrProviderLabel: vi.fn((value: string) => {
+      const labels: Record<string, string> = { moss: 'MOSS', volcano: '火山' };
+      return labels[value] ?? value;
+    }),
+    setVoiceShortcutAsrProvider: vi.fn((value: string) => {
+      settingsPagePreferenceState.voiceShortcutAsrProvider = value;
+      listeners.forEach((listener) => listener(value));
+      return value;
+    }),
+    subscribeVoiceShortcutAsrProviderChanges: vi.fn((listener: (value: string) => void) => {
+      listeners.add(listener);
+      return () => { listeners.delete(listener); };
+    }),
+  };
+});
 
 vi.mock('@/config/voice-overlay-preferences', () => ({
   DEFAULT_VOICE_OVERLAY_OPACITY: 62,
@@ -309,6 +324,15 @@ vi.mock('@/lib/debug/devtools-runtime', () => ({
   syncDevtoolsWithSettings: vi.fn().mockResolvedValue(undefined),
 }));
 
+vi.mock('@tauri-apps/plugin-log', () => ({
+  info: vi.fn(),
+  warn: vi.fn(),
+  error: vi.fn(),
+  debug: vi.fn(),
+  trace: vi.fn(),
+  attachLogger: vi.fn(),
+}));
+
 vi.mock('@/lib/media/timer-end-sounds', () => ({
   TIMER_END_SOUND_PRESETS: [],
   getTimerEndSoundPresetById: vi.fn(() => ({ label: 'Bell' })),
@@ -322,13 +346,30 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: vi.fn(() => vi.fn()),
 }));
 
-vi.mock('@/components/ui/dialog', () => ({
-  Dialog: ({ children, open }: any) => open ? <div data-testid="dialog">{children}</div> : null,
-  DialogContent: ({ children }: any) => <div>{children}</div>,
-  DialogHeader: ({ children }: any) => <div>{children}</div>,
-  DialogTitle: ({ children }: any) => <div>{children}</div>,
-  DialogDescription: ({ children }: any) => <div>{children}</div>,
-}));
+vi.mock('@/components/ui/dialog', () => {
+  let dialogTitleText = '';
+  return {
+    Dialog: ({ children, open }: any) => {
+      if (!open) return null;
+      dialogTitleText = '';
+      return <div data-testid="dialog">{children}</div>;
+    },
+    DialogContent: ({ children }: any) => {
+      const ref = (node: HTMLElement | null) => {
+        if (node && dialogTitleText) {
+          node.setAttribute('aria-label', dialogTitleText);
+        }
+      };
+      return <div role="dialog" ref={ref}>{children}</div>;
+    },
+    DialogHeader: ({ children }: any) => <div>{children}</div>,
+    DialogTitle: ({ children }: any) => {
+      dialogTitleText = String(children);
+      return <div role="heading">{children}</div>;
+    },
+    DialogDescription: ({ children, className }: any) => <div className={className}>{children}</div>,
+  };
+});
 
 vi.mock('@/components/ui/drawer', () => ({
   Drawer: ({ children, open }: any) => open ? <div data-testid="drawer">{children}</div> : null,
