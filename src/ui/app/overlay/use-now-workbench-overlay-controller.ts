@@ -33,7 +33,7 @@ interface NowWorkbenchOverlayController {
   handleOpenEndDialog(): Promise<void>;
   handleConfirmEnd(): Promise<void>;
   handleStartTask(task: TaskNode): Promise<void>;
-  handleSend(content: string): Promise<void>;
+  handleSend(content: string, tags?: string[]): Promise<void>;
 }
 
 interface NowWorkbenchOverlayDebugInfo {
@@ -339,9 +339,14 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     updateDebugInfo({ lastAction: `task-select:open-config:${task.id}` });
   }, [updateDebugInfo]);
 
-  const handleSend = useCallback(async (content: string) => {
+  const handleSend = useCallback(async (content: string, tags?: string[]) => {
     try {
-      await eventLogService.addEvent(content);
+      const tagSet = tags?.length ? new Set(tags) : undefined;
+      if (tagSet) {
+        await eventLogService.addEvent(content, tagSet);
+      } else {
+        await eventLogService.addEvent(content);
+      }
       await loadEvents();
       updateDebugInfo({ lastAction: 'send:success' });
     } catch (error) {

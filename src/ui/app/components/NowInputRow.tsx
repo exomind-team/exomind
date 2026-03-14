@@ -15,16 +15,11 @@ import { getClipboardService } from '@/lib/services';
 import type { ClipboardFailureReason } from '@/lib/services';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
-import {
-  getVoiceTranscriptSendMode,
-  subscribeVoiceTranscriptSendModeChanges,
-  type VoiceTranscriptSendMode,
-} from '@/config/voice-transcript-send-mode';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
 
 interface NowInputRowProps {
-  onSend: (content: string) => void;
+  onSend: (content: string, tags?: string[]) => void;
   placeholder?: string;
 }
 
@@ -53,9 +48,6 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const [attachmentFeedback, setAttachmentFeedback] = useState<'idle' | 'pending'>('idle');
   const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
-  const [voiceTranscriptSendMode, setVoiceTranscriptSendMode] = useState<VoiceTranscriptSendMode>(
-    () => getVoiceTranscriptSendMode()
-  );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -87,8 +79,6 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       attachmentFeedbackTimerRef.current = null;
     }
   }, []);
-
-  useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
 
   const submitInput = useCallback(() => {
     const trimmed = value.trim();
@@ -154,13 +144,9 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       log.warn(`[new-now-input][voice-signal] ${publishError instanceof Error ? publishError.message : String(publishError)}`);
     });
 
-    if (voiceTranscriptSendMode === 'direct-send') {
-      onSend(normalized);
-      return;
-    }
-
-    setValue((prev) => (prev.trim() ? `${prev} ${normalized}` : normalized));
-  }, [onSend, voiceTranscriptSendMode]);
+    // 语音输入始终直接发送到事件日志——语音是即时事件，应该立即入库
+    onSend(normalized, ['voice']);
+  }, [onSend]);
 
   const handleVoiceError = useCallback((error: string) => {
     log.error(`[new-now-input][voice] ${error}`);

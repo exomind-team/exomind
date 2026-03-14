@@ -294,8 +294,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(convertWebmBlobToWavMock).toHaveBeenCalledTimes(2);
     expect(transcribeMock).toHaveBeenCalledTimes(2);
     expect(writeClipboardMock).toHaveBeenCalledTimes(2);
-    // signal 成功时 EventLog 由 RT eventlog_actor 处理，前端不直写
-    expect(addEventMock).not.toHaveBeenCalled();
+    // 语音输入始终写入 EventLog（前端直写）
+    expect(addEventMock).toHaveBeenCalled();
 
     const hasDecodeFailureLog = errorSpy.mock.calls.some((call) =>
       call.some((item) => String(item).includes('EncodingError') || String(item).includes('识别失败'))
@@ -1087,8 +1087,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         targetScope: 'unknown',
       }),
     );
-    // signal 成功 → EventLog 由 RT actor 处理，前端不直写
-    expect(addEventMock).not.toHaveBeenCalled();
+    // 语音输入始终写入 EventLog（前端直写）
+    expect(addEventMock).toHaveBeenCalled();
 
     service.destroy();
   });
@@ -1184,7 +1184,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushAsync();
 
     expect(writeClipboardMock).toHaveBeenCalledWith('火山实时结果');
-    expect(addEventMock).not.toHaveBeenCalled();
+    // 语音输入始终写入 EventLog（前端直写）
+    expect(addEventMock).toHaveBeenCalledWith('火山实时结果', new Set(['voice']));
 
     service.destroy();
   });
@@ -1223,7 +1224,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         },
       }),
     );
-    expect(addEventMock).not.toHaveBeenCalled();
+    // 语音输入始终写入 EventLog（前端直写）
+    expect(addEventMock).toHaveBeenCalledWith('连续识别文本', new Set(['voice']));
 
     service.destroy();
   });
@@ -1270,7 +1272,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         },
       }),
     );
-    expect(addEventMock).not.toHaveBeenCalled();
+    // 语音输入始终写入 EventLog（前端直写）
+    expect(addEventMock).toHaveBeenCalledWith('冻结窗口测试', new Set(['voice']));
 
     service.destroy();
   });

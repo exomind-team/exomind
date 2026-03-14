@@ -31,7 +31,7 @@ interface NowWorkbenchOverlayPageProps {
   onPauseOrResume?: () => void;
   onEndBlock?: () => void | Promise<void>;
   onStartTask?: (task: TaskNode) => void;
-  onSend?: (content: string) => void;
+  onSend?: (content: string, tags?: string[]) => void;
 }
 
 interface NowWorkbenchOverlayPageContentProps {
@@ -51,7 +51,7 @@ interface NowWorkbenchOverlayPageContentProps {
   onPauseOrResume: () => void;
   onEndBlock: () => void | Promise<void>;
   onStartTask: (task: TaskNode) => void;
-  onSend: (content: string) => void;
+  onSend: (content: string, tags?: string[]) => void;
   feedbackOpen: boolean;
   feedback: string;
   setFeedback(value: string): void;
@@ -287,8 +287,8 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
   const onStartTask = props.onStartTask ?? ((task: TaskNode) => {
     void controller.handleStartTask(task);
   });
-  const onSend = props.onSend ?? ((content: string) => {
-    void controller.handleSend(content);
+  const onSend = props.onSend ?? ((content: string, tags?: string[]) => {
+    void controller.handleSend(content, tags);
   });
 
   return (
@@ -328,6 +328,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   } = props;
   const now = Date.now();
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
+  const recentEventsRef = useRef<HTMLElement | null>(null);
   const [isMiniCollapsed, setIsMiniCollapsed] = useState(false);
   const [isMiniHovered, setIsMiniHovered] = useState(false);
   const [isIdleHovered, setIsIdleHovered] = useState(false);
@@ -397,6 +398,13 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     focusTimerWidgetRef.current.openTaskConfig(pendingIdleTaskTitle);
     setPendingIdleTaskTitle(null);
   }, [isIdleConfigVisible, pendingIdleTaskTitle]);
+
+  // 新事件加入后自动滚到"最近事件"区域
+  useEffect(() => {
+    if (model.recentEvents.length > 0) {
+      recentEventsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }, [model.recentEvents]);
 
   const handleDragBarMouseDown = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (!isTauri() || event.button !== 0) {
@@ -979,7 +987,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               </>
             )}
 
-          <section className="rounded-[20px] border border-[#E7E5E4] bg-white/70 px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]/65">
+          <section ref={recentEventsRef} className="rounded-[20px] border border-[#E7E5E4] bg-white/70 px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]/65">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-[13px] font-semibold text-[#57534E] dark:text-[#D6D3D1]">最近事件</h2>
               <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">仅显示最新两条</span>

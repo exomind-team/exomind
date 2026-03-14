@@ -932,15 +932,16 @@ export class VoiceShortcutService {
       this.debugError(LOG_TAG, 'clipboard paste failed:', clipboardResult.reason);
     }
 
-    // EventLog 唯一真相源：RT signal 路径（voice.input.transcript → input_ingest → eventlog actor）
-    // 仅当信号发布失败时（RT 不可用），fallback 到前端直写
+    // 语音输入始终写入 EventLog（前端直写，带 voice tag）
+    // signal 路径仅用于 RT actor 协调（classifier 等），不负责持久化
+    try {
+      await getEventLogService().addEvent(result.text, new Set(['voice']));
+    } catch (err) {
+      this.debugError(LOG_TAG, 'eventlog write failed:', err);
+    }
+
     if (signalPublishResult.status === 'rejected') {
-      this.debugError(LOG_TAG, 'voice signal publish failed, fallback to direct eventlog write:', signalPublishResult.reason);
-      try {
-        await getEventLogService().addEvent(result.text, new Set(['voice']));
-      } catch (err) {
-        this.debugError(LOG_TAG, 'eventlog fallback write also failed:', err);
-      }
+      this.debugError(LOG_TAG, 'voice signal publish failed (RT may be unavailable):', signalPublishResult.reason);
     }
 
     this.emitOverlayState('done', {
