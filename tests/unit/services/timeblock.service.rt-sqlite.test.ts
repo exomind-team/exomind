@@ -109,7 +109,7 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
     });
   });
 
-  it('promotes legacy completed blocks into RT adapter on first load', async () => {
+  it('returns empty list when RT adapter has no completed blocks (no lazy migration)', async () => {
     const legacyBlocks: TimeBlockData[] = [
       {
         id: 'tb-legacy',
@@ -122,6 +122,7 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
         endTime: 1700000060000,
       },
     ];
+    // Legacy data exists in env.storage, but rt-sqlite backend should NOT read it
     const env = createMemoryEnv({ time_blocks: legacyBlocks });
     const rtAdapter = createRtAdapter();
 
@@ -132,16 +133,12 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
 
     const blocks = await service.loadTimeBlocks();
 
-    expect(rtAdapter.replaceCompletedBlocks).toHaveBeenCalledWith(legacyBlocks);
-    expect(blocks).toEqual([
-      {
-        ...legacyBlocks[0],
-        tags: new Set(['block_feedback']),
-      },
-    ]);
+    // Migration is now handled by MigrationDialog, not lazily by the service
+    expect(rtAdapter.replaceCompletedBlocks).not.toHaveBeenCalled();
+    expect(blocks).toEqual([]);
   });
 
-  it('promotes legacy active block into RT adapter on first load', async () => {
+  it('returns null when RT adapter has no active block (no lazy migration)', async () => {
     const legacyActive: ActiveBlockData = {
       startId: 'active-legacy',
       name: 'Legacy active',
@@ -151,6 +148,7 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
       paused: false,
       startTime: 1700000000000,
     };
+    // Legacy data exists in env.storage, but rt-sqlite backend should NOT read it
     const env = createMemoryEnv({ active_block: legacyActive });
     const rtAdapter = createRtAdapter();
 
@@ -161,8 +159,9 @@ describe('TimeBlockServiceImpl rt-sqlite backend', () => {
 
     const block = await service.loadActiveBlock();
 
-    expect(rtAdapter.putActiveBlock).toHaveBeenCalledWith(legacyActive);
-    expect(block).toEqual(expect.objectContaining(legacyActive));
+    // Migration is now handled by MigrationDialog, not lazily by the service
+    expect(rtAdapter.putActiveBlock).not.toHaveBeenCalled();
+    expect(block).toBeNull();
   });
 
   it('writes new active block and completed block to RT adapter when ending a block', async () => {
