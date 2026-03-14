@@ -13,6 +13,7 @@ export interface RuntimeTarget {
   mode: RuntimeTargetMode;
   host: string;
   port: number;
+  authToken?: string;
 }
 
 export interface EmbeddedRuntimeStatusSnapshot {
@@ -118,6 +119,11 @@ function resolveEmbeddedHost(): string {
 function resolveEmbeddedPort(): number {
   const cachedStatus = readEmbeddedRuntimeStatus();
   return cachedStatus?.port ?? DEFAULT_EMBEDDED_RUNTIME_PORT;
+}
+
+function resolveEmbeddedAuthToken(): string | undefined {
+  const authSecret = readEmbeddedRuntimeStatus()?.authSecret?.trim();
+  return authSecret ? authSecret : undefined;
 }
 
 export function getPreferredEmbeddedRuntimePort(): number {
@@ -274,7 +280,20 @@ export function getSelectedRuntimeTarget(): RuntimeTarget {
     mode,
     host: resolveEmbeddedHost(),
     port: resolveEmbeddedPort(),
+    authToken: resolveEmbeddedAuthToken(),
   };
+}
+
+export function buildRuntimeAuthHeaders(
+  target: Pick<RuntimeTarget, 'authToken'>,
+  headers?: HeadersInit,
+): Headers {
+  const nextHeaders = new Headers(headers);
+  const token = target.authToken?.trim();
+  if (token) {
+    nextHeaders.set('Authorization', `Bearer ${token}`);
+  }
+  return nextHeaders;
 }
 
 export function persistEmbeddedRuntimeStatus(status: EmbeddedRuntimeStatusSnapshot | null): void {

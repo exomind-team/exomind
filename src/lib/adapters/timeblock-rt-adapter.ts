@@ -1,4 +1,8 @@
-import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
+import {
+  buildRuntimeAuthHeaders,
+  getSelectedRuntimeTarget,
+  type RuntimeTarget,
+} from '@/config/runtime-target';
 import type { ActiveBlockData, TimeBlockData } from '@/lib/types/event';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
@@ -34,12 +38,13 @@ export class TimeBlockRtAdapter {
   }
 
   async replaceCompletedBlocks(blocks: TimeBlockData[]): Promise<void> {
-    const response = await this.fetchImpl(this.url('/timeblocks'), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/timeblocks', target), {
       method: 'PUT',
-      headers: {
+      headers: buildRuntimeAuthHeaders(target, {
         'Content-Type': 'application/json',
         Accept: 'application/json',
-      },
+      }),
       body: JSON.stringify(blocks),
     });
     if (!response.ok && response.status !== 204) {
@@ -48,9 +53,10 @@ export class TimeBlockRtAdapter {
   }
 
   async getActiveBlock(): Promise<ActiveBlockData | null> {
-    const response = await this.fetchImpl(this.url('/timeblocks/active'), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/timeblocks/active', target), {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (response.status === 404) {
       return null;
@@ -62,12 +68,13 @@ export class TimeBlockRtAdapter {
   }
 
   async putActiveBlock(block: ActiveBlockData): Promise<void> {
-    const response = await this.fetchImpl(this.url('/timeblocks/active'), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/timeblocks/active', target), {
       method: 'PUT',
-      headers: {
+      headers: buildRuntimeAuthHeaders(target, {
         'Content-Type': 'application/json',
         Accept: 'application/json',
-      },
+      }),
       body: JSON.stringify(block),
     });
     if (!response.ok && response.status !== 204) {
@@ -76,9 +83,10 @@ export class TimeBlockRtAdapter {
   }
 
   async deleteActiveBlock(): Promise<void> {
-    const response = await this.fetchImpl(this.url('/timeblocks/active'), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/timeblocks/active', target), {
       method: 'DELETE',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (!response.ok && response.status !== 204) {
       throw new Error(`RT timeblocks active delete failed: ${response.status}`);
@@ -86,9 +94,10 @@ export class TimeBlockRtAdapter {
   }
 
   private async requestJson<T>(path: string): Promise<T> {
-    const response = await this.fetchImpl(this.url(path), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url(path, target), {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (!response.ok) {
       throw new Error(`RT timeblocks request failed: ${response.status}`);
@@ -96,11 +105,11 @@ export class TimeBlockRtAdapter {
     return response.json() as Promise<T>;
   }
 
-  private baseUrl(): string {
-    return buildBaseUrl(this.resolveTarget());
+  private baseUrl(target = this.resolveTarget()): string {
+    return buildBaseUrl(target);
   }
 
-  private url(path: string): string {
-    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
+  private url(path: string, target = this.resolveTarget()): string {
+    return `${this.baseUrl(target)}${appendRuntimeProfileScope(path)}`;
   }
 }

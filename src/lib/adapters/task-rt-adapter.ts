@@ -1,4 +1,8 @@
-import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
+import {
+  buildRuntimeAuthHeaders,
+  getSelectedRuntimeTarget,
+  type RuntimeTarget,
+} from '@/config/runtime-target';
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port';
 import type { Dependency, TaskNode, TaskStatus } from '@/lib/types/task';
 import { canTransition } from '@/lib/types/task';
@@ -127,9 +131,10 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   async getTaskById(id: string): Promise<TaskNode | null> {
-    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`, target), {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (response.status === 404) {
       return null;
@@ -150,9 +155,10 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   async updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null> {
-    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`, target), {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { 'Content-Type': 'application/json', Accept: 'application/json' }),
       body: JSON.stringify(toRuntimeUpdatePayload(input)),
     });
     if (response.status === 404) {
@@ -165,9 +171,10 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   async abandonTask(id: string): Promise<TaskNode | null> {
-    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`, target), {
       method: 'DELETE',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (response.status === 404) {
       return null;
@@ -179,9 +186,10 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {
-    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}/transition`), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}/transition`, target), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { 'Content-Type': 'application/json', Accept: 'application/json' }),
       body: JSON.stringify({ status: to }),
     });
     if (response.status === 404) {
@@ -202,12 +210,13 @@ export class TaskRtAdapter implements ITaskPort {
   }
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetchImpl(this.url(path), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url(path, target), {
       ...init,
-      headers: {
+      headers: buildRuntimeAuthHeaders(target, {
         Accept: 'application/json',
         ...(init?.headers ?? {}),
-      },
+      }),
     });
     if (!response.ok) {
       throw new Error(`RT request failed: ${response.status}`);
@@ -215,11 +224,11 @@ export class TaskRtAdapter implements ITaskPort {
     return response.json() as Promise<T>;
   }
 
-  private baseUrl(): string {
-    return buildBaseUrl(this.resolveTarget());
+  private baseUrl(target = this.resolveTarget()): string {
+    return buildBaseUrl(target);
   }
 
-  private url(path: string): string {
-    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
+  private url(path: string, target = this.resolveTarget()): string {
+    return `${this.baseUrl(target)}${appendRuntimeProfileScope(path)}`;
   }
 }

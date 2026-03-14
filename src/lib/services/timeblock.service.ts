@@ -611,6 +611,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
         name: runtimeTarget.mode === 'embedded' ? 'Embedded Runtime（内嵌运行时）' : 'External Runtime（外部运行时）',
         host: runtimeTarget.host,
         port: runtimeTarget.port,
+        authToken: runtimeTarget.authToken,
         status: 'online',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),

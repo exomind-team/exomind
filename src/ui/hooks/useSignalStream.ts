@@ -152,6 +152,7 @@ export function useSignalStream(): void {
         name: runtimeTarget.mode === 'embedded' ? 'Embedded RT' : 'External RT',
         host: runtimeTarget.host,
         port: runtimeTarget.port,
+        authToken: runtimeTarget.authToken,
         status: 'unknown',
         createdAt: new Date().toISOString(),
         updatedAt: new Date().toISOString(),
