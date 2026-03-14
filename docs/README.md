@@ -116,6 +116,9 @@
 - [Agent Session 统一抽象](plans/2026-03-13-agent-session-unified-abstraction-design.md) -- Agent Session 统一抽象设计
 - [Focus BGM 播放器](plans/2026-03-13-issue-136-focus-bgm-player-plan.md) -- Issue #136 实现计划
 - [语音输入规范化](plans/2026-03-13-issue-511-voice-input-normalization-plan.md) -- Issue #511 实现计划
+- [Now Workbench Overlay v2](plans/2026-03-12-now-workbench-overlay-v2-design.md) -- Issue #516 双层气泡设计
+- [文档体系重组设计](plans/2026-03-14-docs-reorganization-design.md) -- Issue #529 文档重组方案
+- [文档体系重组计划](plans/2026-03-14-docs-reorganization-plan.md) -- Issue #529 实施计划
 
 ### 归档计划
 
@@ -136,6 +139,21 @@
 ## Superpowers 工具生成
 
 - [Settings Registry 设计](superpowers/specs/2026-03-11-settings-registry-design.md) -- Schema-Driven 设置项注册表设计
+- [Settings Registry 演化记录](superpowers/specs/2026-03-14-settings-registry-evolution.md) -- 注册表从设计到实现的演化差异
+
+---
+
+## 项目根目录文档
+
+> 以下文档位于项目根目录（非 docs/ 内），此处提供交叉引用。
+
+- [README.md](../README.md) -- 项目介绍、快速上手、**多实例管理器用法（tauri:manager）**
+- [CLAUDE.md](../CLAUDE.md) -- Claude Code 专用指令
+- [AGENTS.md](../AGENTS.md) -- Codex 专用指令
+- [BUILD.md](../BUILD.md) -- 构建说明（CI/CD、跨平台构建）
+- [CHANGELOG.md](../CHANGELOG.md) -- 版本历史
+- [QUICK-START.md](../QUICK-START.md) -- 快速上手指南
+- [Scripts/CLAUDE.md](../Scripts/CLAUDE.md) -- **开发脚本文档（tauri-dev-manager、端口管理）**
 
 ---
 
@@ -146,5 +164,5 @@
 
 ---
 
-> 最后更新: 2026-03-14
-> 导航版本: v4.0
+> 最后更新: 2026-03-15
+> 导航版本: v4.1

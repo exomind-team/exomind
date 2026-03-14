@@ -6,8 +6,8 @@
 
 | 原路径 | 摘要 | 关联 Issue/PR | 删除提交 |
 |--------|------|---------------|----------|
-| docs/plans/2026-03-14-unified-logger-logpanel-redesign.md | 双写日志接口 + LogPanel 新 UI 重设计 | #525, PR #526 | (本次提交) |
-| docs/plans/2026-03-14-legacy-data-migration-design.md | PouchDB → RT SQLite 迁移 Modal 设计 | PR #524 | (本次提交) |
+| docs/plans/2026-03-14-unified-logger-logpanel-redesign.md | 双写日志接口 + LogPanel 新 UI 重设计。**关键决策**: 双写模式（内存 listener + console + Tauri plugin-log），LogPanel 迁移到暖石色系设计 token | #525, PR #526 | 3998871b |
+| docs/plans/2026-03-14-legacy-data-migration-design.md | PouchDB/IndexedDB → RT SQLite 一次性迁移 Modal 设计。**关键决策**: Bootstrap 层一次性迁移（不留 fallback）、Modal 对话框提示（弹一次）、失败保守回退 legacy 模式、旧数据保留不删除、三域统一迁移（EventLog+Task+TimeBlock）、merge 策略幂等安全 | PR #524 | 3998871b |
 | docs/plans/2026-03-13-issue-514-instance-diagnostics-plan.md | Issue #514 实例诊断功能实现计划 | #514 | (本次提交) |
 | docs/plans/2026-03-13-pr-506-closeout-plan.md | PR #506 收尾验收实现计划 | PR #506 | (本次提交) |
 | docs/plans/2026-03-12-settings-inline-enum-alignment-plan.md | Settings 内联枚举对齐实现计划 | - | (本次提交) |
