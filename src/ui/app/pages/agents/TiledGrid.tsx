@@ -314,6 +314,12 @@ function SessionPane({
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const needsAttention = sessionNeedsAttention(session.status);
+  const showQuickActions =
+    session.status === 'waiting_input' && (session.quick_actions?.length ?? 0) > 0;
+  const showManualMarkWaiting =
+    session.interaction_mode === 'terminal'
+    && session.status === 'running'
+    && (session.quick_actions?.length ?? 0) === 0;
 
   return (
     <div
@@ -424,12 +430,12 @@ function SessionPane({
         )}
       </div>
 
-      {/* Quick action bar (only when waiting for input) */}
-      {needsAttention && session.status === 'waiting_input' && (
+      {/* Quick action bar / manual wait action（动作栏 / 手动等待决策） */}
+      {(showQuickActions || showManualMarkWaiting) && (
         <QuickActionBar
           actions={session.quick_actions ?? []}
           onSubmit={(response) => onQuickAction?.(response)}
-          showMarkWaiting={session.interaction_mode === 'terminal' && !session.quick_actions?.length}
+          showMarkWaiting={showManualMarkWaiting}
           onMarkWaiting={() => onMarkWaiting?.()}
         />
       )}

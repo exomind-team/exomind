@@ -84,6 +84,7 @@ import {
 } from '@/services/runtime-manager';
 import { RuntimeClient } from '@/services/runtime-client';
 import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
+import type { QuickActionResponse } from '@/lib/types/session';
 import {
   createProviderProfile,
   listProviderProfiles,
@@ -2709,6 +2710,26 @@ export function AgentsPage() {
     }
   };
 
+  const handleSessionQuickAction = async (sessionId: string, response: QuickActionResponse) => {
+    const host = resolveActiveRuntimeHost();
+    setRuntimeHostError('');
+    const runtimeClient = new RuntimeClient();
+    const result = await runtimeClient.submitQuickAction(host, sessionId, response);
+    if (!result.ok) {
+      setRuntimeHostError(`提交会话动作失败: ${result.error.message}`);
+    }
+  };
+
+  const handleSessionMarkWaiting = async (sessionId: string) => {
+    const host = resolveActiveRuntimeHost();
+    setRuntimeHostError('');
+    const runtimeClient = new RuntimeClient();
+    const result = await runtimeClient.markSessionWaiting(host, sessionId);
+    if (!result.ok) {
+      setRuntimeHostError(`标记等待决策失败: ${result.error.message}`);
+    }
+  };
+
   const handleCreateManualAgent = async () => {
     setIsAgentCreating(true);
     setAgentCreateError('');
@@ -2901,6 +2922,20 @@ export function AgentsPage() {
     const activeHost = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
     if (activeHost?.authToken) return activeHost.authToken;
     return runtimeServiceStatus?.authSecret ?? undefined;
+  };
+
+  const resolveActiveRuntimeHost = (): RuntimeHostRecord => {
+    const directHost = activeSignalRouteHost
+      ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((snapshot) => snapshot.host)?.host;
+    if (directHost) return directHost;
+
+    const resolvedUrl = new URL(resolveRtBaseUrl());
+    const fallbackPort = resolvedUrl.port
+      ? Number(resolvedUrl.port)
+      : resolvedUrl.protocol === 'https:'
+        ? 443
+        : 80;
+    return createDirectRuntimeHost(resolvedUrl.hostname, fallbackPort);
   };
 
   // ── Session stream for tiled view ──
@@ -3458,6 +3493,12 @@ export function AgentsPage() {
               }}
               paneOrder={tiledPaneOrder}
               onReorder={setTiledPaneOrder}
+              onQuickAction={(sessionId, response) => {
+                void handleSessionQuickAction(sessionId, response);
+              }}
+              onMarkWaiting={(sessionId) => {
+                void handleSessionMarkWaiting(sessionId);
+              }}
             />
           </div>
         </div>
