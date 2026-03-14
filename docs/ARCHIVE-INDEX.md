@@ -111,6 +111,9 @@
 
 | 原路径 | 摘要 | 迁移去向 | 删除提交 |
 |--------|------|----------|----------|
+| docs/overview.md | 项目概览（内容已并入 docs/README.md） | DELETED | (#529) |
+| docs/stack.md | 技术栈说明（内容已并入 docs/README.md） | DELETED | (#529) |
+| docs/quickstart.md | 快速上手指南 | docs/development/quickstart.md | (#529) |
 | pm/PRD.md | 产品需求文档 v2.0（生命判据、功能清单） | docs/product/PRD.md | e9d548b |
 | pm/roadmap.md | 产品路线图 v2.0（Phase 0-5 里程碑） | docs/product/roadmap.md | e9d548b |
 | pm/COMPLETED_FEATURES.md | 已完成特性清单（v0.1 阶段，PR #20） | docs/product/completed-features.md | e9d548b |
@@ -138,3 +141,16 @@
 
 | 原路径 | 摘要 | 删除提交 |
 |--------|------|----------|
+| docs/fixes/concurrent-lock-overwrite-fix.md | PR #436 并发锁覆盖问题修复报告（PR 特定，已合并） | (#529) |
+| docs/fixes/pr-436-merge-checklist.md | PR #436 合并检查清单（PR 特定，已合并） | (#529) |
+| docs/fixes/pr-436-status-report.md | PR #436 状态报告（PR 特定，已合并） | (#529) |
+| docs/fixes/pr-lock-renew-hint.md | PR 锁续期提示功能设计文档（PR 特定，已实现） | (#529) |
+| docs/pr/issue-205-p1-pr-body.md | Issue #205 P1 PR 描述草稿 | (#529) |
+| docs/pr/issue-205-p1-split-plan-comment.md | Issue #205 P1 拆分计划 PR 评论草稿 | (#529) |
+| docs/pr/issue-205-plan-comment.md | Issue #205 方案 PR 评论草稿 | (#529) |
+| docs/pr/issue-205-progress-comment.md | Issue #205 进度 PR 评论草稿 | (#529) |
+| docs/pr/issue-205-review-comment.md | Issue #205 Review PR 评论草稿 | (#529) |
+| docs/pr/issue-245f-m2-plan-comment.md | Issue #245 M2 方案 PR 评论草稿 | (#529) |
+| docs/pr/issue-245f-m2-pr-body.md | Issue #245 M2 PR 描述草稿 | (#529) |
+| docs/pr/issue-245f-m2-progress-comment.md | Issue #245 M2 进度 PR 评论草稿 | (#529) |
+| docs/pr/issue-245f-m2-review-comment.md | Issue #245 M2 Review PR 评论草稿 | (#529) |
