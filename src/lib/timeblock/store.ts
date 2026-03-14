@@ -16,6 +16,7 @@ import type {
   PlannedTimeBlock,
 } from './types';
 import { EventImpl, TimeBlockImpl } from './types';
+import { log } from '@/lib/logger';
 
 // ============================================================================
 // Store 接口
@@ -293,7 +294,7 @@ export const useTimeBlockStore = create<TimeBlockStore>()(
             isLoaded: true,
           });
         } catch (error) {
-          console.error('Failed to load timeblock data:', error);
+          log.error(`Failed to load timeblock data: ${error instanceof Error ? error.message : String(error)}`);
           set({ isLoaded: true });
         }
       },

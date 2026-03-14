@@ -22,6 +22,7 @@ import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-ov
 import type { ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
 import { useRef } from 'react';
+import { log } from '@/lib/logger';
 
 interface NowWorkbenchOverlayPageProps {
   model?: NowWorkbenchOverlayModel;
@@ -30,7 +31,7 @@ interface NowWorkbenchOverlayPageProps {
   onPauseOrResume?: () => void;
   onEndBlock?: () => void | Promise<void>;
   onStartTask?: (task: TaskNode) => void;
-  onSend?: (content: string) => void;
+  onSend?: (content: string, tags?: string[]) => void;
 }
 
 interface NowWorkbenchOverlayPageContentProps {
@@ -50,7 +51,7 @@ interface NowWorkbenchOverlayPageContentProps {
   onPauseOrResume: () => void;
   onEndBlock: () => void | Promise<void>;
   onStartTask: (task: TaskNode) => void;
-  onSend: (content: string) => void;
+  onSend: (content: string, tags?: string[]) => void;
   feedbackOpen: boolean;
   feedback: string;
   setFeedback(value: string): void;
@@ -286,8 +287,8 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
   const onStartTask = props.onStartTask ?? ((task: TaskNode) => {
     void controller.handleStartTask(task);
   });
-  const onSend = props.onSend ?? ((content: string) => {
-    void controller.handleSend(content);
+  const onSend = props.onSend ?? ((content: string, tags?: string[]) => {
+    void controller.handleSend(content, tags);
   });
 
   return (
@@ -327,6 +328,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   } = props;
   const now = Date.now();
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
+  const recentEventsRef = useRef<HTMLElement | null>(null);
   const [isMiniCollapsed, setIsMiniCollapsed] = useState(false);
   const [isMiniHovered, setIsMiniHovered] = useState(false);
   const [isIdleHovered, setIsIdleHovered] = useState(false);
@@ -397,20 +399,16 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     setPendingIdleTaskTitle(null);
   }, [isIdleConfigVisible, pendingIdleTaskTitle]);
 
-  const handleDragBarMouseDown = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    if (!isTauri() || event.button !== 0) {
-      return;
+  // 新事件加入后自动滚到"最近事件"区域
+  useEffect(() => {
+    if (model.recentEvents.length > 0) {
+      recentEventsRef.current?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
+  }, [model.recentEvents]);
 
-    const target = event.target instanceof HTMLElement ? event.target : null;
-    if (target?.closest('button, input, textarea, [role="button"], [data-no-overlay-drag="true"]')) {
-      return;
-    }
-
-    void getCurrentWindow().startDragging().catch((error) => {
-      console.warn('[NowWorkbenchOverlay] startDragging failed', error);
-    });
-  }, []);
+  // Drag is handled natively by data-tauri-drag-region attributes.
+  // Using startDragging() API simultaneously causes race conditions
+  // (first click fails, second click sticks without mouse button held).
 
   const isStaticPreview = props.feedbackOpen === false
     && props.feedback === ''
@@ -443,7 +441,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     void getCurrentWindow()
       .setSize(new LogicalSize(targetOverlaySize.width, targetOverlaySize.height))
       .catch((error) => {
-        console.warn('[NowWorkbenchOverlay] setSize failed', error);
+        log.warn(`[NowWorkbenchOverlay] setSize failed: ${error instanceof Error ? error.message : String(error)}`);
       });
   }, [targetOverlaySize.height, targetOverlaySize.width]);
 
@@ -547,7 +545,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                   <div
                     data-testid="now-overlay-drag-handle"
                     data-tauri-drag-region
-                    onMouseDown={handleDragBarMouseDown}
+
                     className="min-w-0 cursor-grab select-none active:cursor-grabbing"
                     title="按住这里拖动窗口"
                   >
@@ -613,7 +611,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                 <div
                   data-testid="now-overlay-drag-handle"
                   data-tauri-drag-region
-                  onMouseDown={handleDragBarMouseDown}
+
                   className="min-w-0 flex-1 cursor-grab select-none active:cursor-grabbing"
                   title="按住这里拖动窗口"
                 >
@@ -681,7 +679,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
                 <div
                   data-testid="now-overlay-drag-handle"
                   data-tauri-drag-region
-                  onMouseDown={handleDragBarMouseDown}
+
                   className="min-w-0 cursor-grab select-none active:cursor-grabbing"
                   title="按住这里拖动窗口"
                 >
@@ -773,7 +771,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               <div
                 data-testid="now-overlay-drag-handle"
                 data-tauri-drag-region
-                onMouseDown={handleDragBarMouseDown}
+
                 className="cursor-grab select-none active:cursor-grabbing"
                 title="按住这里拖动窗口"
               >
@@ -822,7 +820,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               <div
                 data-testid="now-overlay-drag-handle"
                 data-tauri-drag-region
-                onMouseDown={handleDragBarMouseDown}
+
                 className="min-w-0 cursor-grab select-none active:cursor-grabbing"
                 title="按住这里拖动窗口"
               >
@@ -886,7 +884,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
           <div
             data-testid="now-overlay-drag-handle"
             data-tauri-drag-region
-            onMouseDown={handleDragBarMouseDown}
+
             className="min-w-0 cursor-grab select-none rounded-[14px] px-1.5 py-1 active:cursor-grabbing hover:bg-[#F5F0ED]/80 dark:hover:bg-white/10"
             title="按住这里拖动窗口"
           >
@@ -978,7 +976,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
               </>
             )}
 
-          <section className="rounded-[20px] border border-[#E7E5E4] bg-white/70 px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]/65">
+          <section ref={recentEventsRef} className="rounded-[20px] border border-[#E7E5E4] bg-white/70 px-4 py-3 dark:border-[#292524] dark:bg-[#1C1917]/65">
             <div className="mb-2 flex items-center justify-between">
               <h2 className="text-[13px] font-semibold text-[#57534E] dark:text-[#D6D3D1]">最近事件</h2>
               <span className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">仅显示最新两条</span>

@@ -13,6 +13,7 @@ import type {
   CursorScrollParams,
   CursorEvent,
 } from '@/environment/interfaces/cursor.port';
+import { log } from '@/lib/logger';
 
 interface CursorHttpAdapterConfig {
   baseUrl?: string;
@@ -153,7 +154,7 @@ export class CursorHttpAdapter implements ICursorPort {
           }
         }
       } catch (e) {
-        if (!closed) console.warn('[CursorHttpAdapter] SSE disconnected', e);
+        if (!closed) log.warn(`[CursorHttpAdapter] SSE disconnected: ${e instanceof Error ? e.message : String(e)}`);
       }
     })();
 

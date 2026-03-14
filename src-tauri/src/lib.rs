@@ -31,6 +31,7 @@ use commands::runtime_commands::{
 };
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, register_voice_shortcut, simulate_enter, simulate_paste,
+    foreground_window_get,
     voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, VoiceShortcutState,
 };
@@ -40,6 +41,7 @@ use commands::workspace_commands::{
 };
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 use tauri::Manager;
+use tauri_plugin_log::{Target, TargetKind, RotationStrategy, TimezoneStrategy};
 
 fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
     if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
@@ -107,6 +109,23 @@ pub fn run() {
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
 
     let mut builder = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::Webview),
+                    Target::new(TargetKind::LogDir { file_name: Some("exomind.log".into()) }),
+                ])
+                .level(log::LevelFilter::Info)
+                .level_for("tungstenite", log::LevelFilter::Warn)
+                .level_for("tokio_tungstenite", log::LevelFilter::Warn)
+                .level_for("reqwest", log::LevelFilter::Warn)
+                .level_for("hyper", log::LevelFilter::Warn)
+                .max_file_size(5_000_000) // 5MB per file
+                .rotation_strategy(RotationStrategy::KeepSome(5))
+                .timezone_strategy(TimezoneStrategy::UseLocal)
+                .build(),
+        )
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -120,10 +139,10 @@ pub fn run() {
             let voice_shortcut_state = app.state::<VoiceShortcutState>();
             register_voice_shortcut(app.handle(), &voice_shortcut_state);
             if let Err(error) = ensure_voice_overlay_window(app.handle()) {
-                eprintln!("[tauri/setup] failed to prewarm voice overlay window: {error}");
+                log::warn!("failed to prewarm voice overlay window: {error}");
             }
             if let Err(error) = ensure_now_workbench_overlay_window(app.handle()) {
-                eprintln!("[tauri/setup] failed to prewarm now overlay window: {error}");
+                log::warn!("failed to prewarm now overlay window: {error}");
             }
 
             if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none()
@@ -136,16 +155,16 @@ pub fn run() {
                     Ok(app_data_dir) => {
                         let runtime_dir = app_data_dir.join("runtime");
                         if let Err(error) = std::fs::create_dir_all(&runtime_dir) {
-                            eprintln!(
-                                "[tauri/setup] failed to create runtime data dir for signal sqlite: {error}"
+                            log::error!(
+                                "failed to create runtime data dir for signal sqlite: {error}"
                             );
                         } else {
                             seed_runtime_sqlite_env_paths(&runtime_dir);
                         }
                     }
                     Err(error) => {
-                        eprintln!(
-                            "[tauri/setup] failed to resolve app data dir for runtime sqlite files: {error}"
+                        log::error!(
+                            "failed to resolve app data dir for runtime sqlite files: {error}"
                         );
                     }
                 }
@@ -158,9 +177,8 @@ pub fn run() {
                 if let Err(error) =
                     ensure_runtime_started(runtime_state, None, Some(runtime_port)).await
                 {
-                    eprintln!(
-                        "[tauri/setup] failed to auto-start embedded runtime on {}: {error}",
-                        runtime_port
+                    log::error!(
+                        "failed to auto-start embedded runtime on {runtime_port}: {error}"
                     );
                 }
             });
@@ -216,6 +234,7 @@ pub fn run() {
             voice_shortcut_set,
             voice_shortcut_get,
             voice_recording_set_active,
+            foreground_window_get,
             // ASR 语音识别命令
             volcano_asr_recognize,
             volcano_asr_check_config,
@@ -243,6 +262,15 @@ pub fn run() {
     }
 
     builder
+        .on_window_event(|window, event| {
+            // When the main window is closed (or destroyed), exit the entire application
+            // so that overlay windows (now-workbench-overlay, voice-overlay) don't linger.
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Destroyed = event {
+                    std::process::exit(0);
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }

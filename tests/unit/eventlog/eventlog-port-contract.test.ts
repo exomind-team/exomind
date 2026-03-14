@@ -67,4 +67,50 @@ describe('EventLogService port contract', () => {
     }));
     expect(getRandomValues).toHaveBeenCalledTimes(1);
   });
+
+  it('preserves metadata loaded from the injected port（保留 Port 读取回来的 metadata）', async () => {
+    const sample: EventData = {
+      id: 'evt-with-metadata',
+      timestamp: 1700000000000,
+      content: 'voice event with metadata',
+      tags: ['voice'],
+      metadata: {
+        source: {
+          app: 'ExoMind',
+          deviceId: 'device-001',
+          deviceName: 'Windows Device',
+          platform: 'Windows',
+        },
+        voiceContext: {
+          inputMode: 'voice',
+          captureSource: 'global-shortcut',
+          traceId: 'trace-voice-002',
+          windowTitle: 'ExoMind',
+          processName: 'exomind.exe',
+          targetScope: 'agent-chat',
+          agentId: 'codex',
+          agentName: 'Codex',
+          sessionId: 'session-002',
+        },
+      },
+    };
+
+    const port = {
+      listEvents: vi.fn<() => Promise<EventData[]>>().mockResolvedValue([sample]),
+      appendEvent: vi.fn<(_: EventData) => Promise<void>>().mockResolvedValue(undefined),
+      getEvent: vi.fn<(_: string) => Promise<EventData | null>>().mockResolvedValue(sample),
+      clearEvents: vi.fn<() => Promise<void>>().mockResolvedValue(undefined),
+    };
+
+    const service = new EventLogServiceImpl({ port });
+    const events = await service.loadEvents();
+
+    expect(events).toHaveLength(1);
+    expect(events[0]?.metadata).toEqual(sample.metadata);
+    expect(events[0]?.metadata?.voiceContext).toEqual(expect.objectContaining({
+      inputMode: 'voice',
+      agentId: 'codex',
+      sessionId: 'session-002',
+    }));
+  });
 });

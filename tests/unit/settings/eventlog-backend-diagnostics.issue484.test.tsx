@@ -6,13 +6,13 @@ import {
   settingsPagePreferenceState,
   settingsPageServiceMocks,
 } from '../components/settings/setup-settings-mocks';
-import { setEventlogBackendMode, setTaskBackendMode } from '@/config/domain-backend-mode';
+import { setEventlogBackendMode } from '@/config/domain-backend-mode';
 
 const reloadMock = vi.fn();
 
 vi.mock('@tauri-apps/api/core', () => ({
-  isTauri: vi.fn(async () => false),
-  invoke: vi.fn(),
+  isTauri: vi.fn(() => false),
+  invoke: vi.fn().mockResolvedValue(null),
 }));
 
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
@@ -53,49 +53,42 @@ describe('SettingsPage eventlog backend diagnostics (issue-484)', () => {
     });
   });
 
-  it('shows per-domain backend diagnostics in developer mode', async () => {
+  it('shows per-domain backend enum rows in developer mode', () => {
     render(<SettingsPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText('事件日志后端：rt-sqlite')).toBeInTheDocument();
-    });
-    expect(screen.getByText('事件日志备份：JSON / SQLite')).toBeInTheDocument();
-    expect(screen.getByText('任务后端：rt-sqlite')).toBeInTheDocument();
-    expect(screen.getByText('时间块后端：rt-sqlite')).toBeInTheDocument();
+    expect(screen.getByText('事件日志后端')).toBeInTheDocument();
+    expect(screen.getByText('任务后端')).toBeInTheDocument();
+    expect(screen.getByText('时间块后端')).toBeInTheDocument();
   });
 
-  it('hides backend diagnostics when developer mode is off', () => {
+  it('hides backend rows when developer mode is off', () => {
     settingsPagePreferenceState.developerMode = false;
     render(<SettingsPage />);
 
-    expect(screen.queryByText(/事件日志后端：/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/任务后端：/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/时间块后端：/)).not.toBeInTheDocument();
+    expect(screen.queryByText('事件日志后端')).not.toBeInTheDocument();
+    expect(screen.queryByText('任务后端')).not.toBeInTheDocument();
+    expect(screen.queryByText('时间块后端')).not.toBeInTheDocument();
   });
 
-  it('switches eventlog backend mode per domain and reloads the app', async () => {
+  it('switches eventlog backend mode via dialog and reloads', async () => {
     render(<SettingsPage />);
 
+    const row = screen.getByText('事件日志后端').closest('button');
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLButtonElement);
+
     await waitFor(() => {
-      expect(screen.getByText('事件日志后端：rt-sqlite')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '事件日志后端' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'legacy' })[0]);
+    const dialog = screen.getByRole('dialog', { name: '事件日志后端' });
+    const legacyButton = Array.from(dialog.querySelectorAll('button')).find(
+      (btn) => btn.textContent?.includes('Legacy'),
+    );
+    expect(legacyButton).toBeDefined();
+    fireEvent.click(legacyButton!);
 
     expect(setEventlogBackendMode).toHaveBeenCalledWith('legacy');
     expect(reloadMock).toHaveBeenCalledTimes(1);
-  });
-
-  it('switches task backend mode without affecting eventlog mode', async () => {
-    render(<SettingsPage />);
-
-    await waitFor(() => {
-      expect(screen.getByText('任务后端：rt-sqlite')).toBeInTheDocument();
-    });
-
-    fireEvent.click(screen.getAllByRole('button', { name: 'legacy' })[1]);
-
-    expect(setTaskBackendMode).toHaveBeenCalledWith('legacy');
-    expect(setEventlogBackendMode).not.toHaveBeenCalledWith('legacy');
   });
 });

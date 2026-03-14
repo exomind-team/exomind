@@ -4,6 +4,7 @@
  */
 
 import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../ports/asr-port';
+import { log } from '@/lib/logger';
 
 /**
  * Web Speech API 适配器
@@ -26,7 +27,7 @@ export class WebSpeechASRAdapter implements IASRPort {
    */
   private initRecognition(): void {
     if (typeof window === 'undefined') {
-      console.log('[ASR] 运行环境无 window，跳过初始化');
+      log.info('[ASR] 运行环境无 window，跳过初始化');
       return;
     }
 
@@ -35,14 +36,14 @@ export class WebSpeechASRAdapter implements IASRPort {
                              (window as any).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
-      console.log('[ASR] 浏览器不支持 SpeechRecognition API');
+      log.info('[ASR] 浏览器不支持 SpeechRecognition API');
       return;
     }
 
     this.recognitionClass = SpeechRecognition;
 
     // 创建实例（实际使用时才创建，避免立即报错）
-    console.log('[ASR] SpeechRecognition 初始化完成');
+    log.info('[ASR] SpeechRecognition 初始化完成');
   }
 
   /**
@@ -97,11 +98,11 @@ export class WebSpeechASRAdapter implements IASRPort {
    */
   async transcribe(input: ASRInput): Promise<ASRResult> {
     const lang = input.lang || 'zh-CN';
-    console.log('[ASR] 开始识别，语言:', lang);
+    log.info(`[ASR] 开始识别，语言: ${lang}`);
 
     // 验证输入
     if (input.stream) {
-      console.log('[ASR] 使用传入的 MediaStream');
+      log.info('[ASR] 使用传入的 MediaStream');
       // TODO: 使用传入的流进行识别
       // Web Speech API 不直接支持传入流，需要先用 MediaRecorder 录制
     }
@@ -117,8 +118,8 @@ export class WebSpeechASRAdapter implements IASRPort {
         const text = result[0].transcript;
         const confidence = result[0].confidence;
 
-        console.log('[ASR] 识别成功:', text);
-        console.log('[ASR] 置信度:', confidence.toFixed(2));
+        log.info(`[ASR] 识别成功: ${text}`);
+        log.info(`[ASR] 置信度: ${confidence.toFixed(2)}`);
 
         resolve({
           text,
@@ -129,13 +130,13 @@ export class WebSpeechASRAdapter implements IASRPort {
 
       // === 识别错误 ===
       recognition.onerror = (event: SpeechRecognitionErrorEvent) => {
-        console.error('[ASR] 识别错误:', event.error, event.message);
+        log.error(`[ASR] 识别错误: ${event.error} ${event.message}`);
         reject(new Error(`语音识别失败: ${event.error}`));
       };
 
       // === 识别结束 ===
       recognition.onend = () => {
-        console.log('[ASR] 识别结束');
+        log.info('[ASR] 识别结束');
       };
 
       // 启动识别
@@ -150,7 +151,7 @@ export class WebSpeechASRAdapter implements IASRPort {
    * 本适配器暂不支持流式，返回错误提示
    */
   async *streamTranscribe(input: ASRInput): AsyncIterable<ASRPartialResult> {
-    console.log('[ASR] 流式识别暂未实现，使用一次性识别');
+    log.info('[ASR] 流式识别暂未实现，使用一次性识别');
 
     // 暂时用一次性识别模拟
     const result = await this.transcribe(input);

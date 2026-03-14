@@ -7,6 +7,7 @@ import path from 'node:path';
 import {
   resolveManagedTauriInstancePaths,
   type ManagedTauriInstanceRecord,
+  type TauriDevTarget,
 } from './tauri-dev-manager-lib';
 
 type CommandName = 'start' | 'list' | 'status' | 'stop' | 'logs' | 'prune';
@@ -21,7 +22,7 @@ const DEFAULT_WEB_PORT = 1420;
 
 function printUsage(): never {
   console.log(`Usage:
-  bun Scripts/dev/tauri-dev-manager.ts start --name <instance> [--web-port <port>] [--hmr-port <port>] [--watch]
+  bun Scripts/dev/tauri-dev-manager.ts start --name <instance> [--target desktop|android] [--web-port <port>] [--hmr-port <port>] [--watch]
   bun Scripts/dev/tauri-dev-manager.ts list
   bun Scripts/dev/tauri-dev-manager.ts stop --name <instance>
   bun Scripts/dev/tauri-dev-manager.ts logs --name <instance> [--tail <n>] [--follow]
@@ -170,11 +171,19 @@ function escapePowerShellLiteral(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+function parseTarget(flags: Map<string, string | true>): TauriDevTarget {
+  const raw = getFlagValue(flags, '--target');
+  if (!raw) return 'desktop';
+  if (raw === 'desktop' || raw === 'android') return raw;
+  throw new Error(`invalid target: ${raw} (expected desktop or android)`);
+}
+
 async function startCommand(flags: Map<string, string | true>): Promise<void> {
+  const target = parseTarget(flags);
   const explicitWebPort = parsePortFlag(flags, '--web-port');
   const webPort = explicitWebPort ?? await findFreePort(DEFAULT_WEB_PORT);
   const hmrPort = parsePortFlag(flags, '--hmr-port') ?? await findFreePort(webPort + 1);
-  const requestedName = getFlagValue(flags, '--name') ?? `web-${webPort}`;
+  const requestedName = getFlagValue(flags, '--name') ?? `${target}-${webPort}`;
   const enableWatch = hasFlag(flags, '--watch');
 
   const paths = resolveManagedTauriInstancePaths(PROJECT_ROOT, requestedName);
@@ -198,7 +207,10 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
   };
 
   const logHandle = await open(paths.logPath, 'a');
-  const child = spawn(process.execPath, ['run', 'tauri', 'dev'], {
+  const tauriArgs = target === 'android'
+    ? ['run', 'tauri', 'android', 'dev']
+    : ['run', 'tauri', 'dev'];
+  const child = spawn(process.execPath, tauriArgs, {
     cwd: PROJECT_ROOT,
     detached: true,
     env,
@@ -218,6 +230,7 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     metaPath: paths.metaPath,
     startedAt: new Date().toISOString(),
     enableWatch,
+    target,
   };
   await writeInstanceRecord(record);
 
@@ -229,6 +242,7 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
   }
 
   console.log(`started: ${paths.name}`);
+  console.log(`target: ${target}`);
   console.log(`pid: ${record.rootPid}`);
   console.log(`web: http://localhost:${webPort}`);
   console.log(`hmr: ${hmrPort}`);
@@ -245,6 +259,7 @@ async function listCommand(): Promise<void> {
 
   const rows = records.map((record) => ({
     name: record.name,
+    target: record.target ?? 'desktop',
     pid: record.rootPid,
     status: isPidAlive(record.rootPid) ? 'running' : 'stale',
     web: `http://localhost:${record.webPort}`,

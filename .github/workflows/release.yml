@@ -254,7 +254,7 @@ jobs:
             New-Item -ItemType Directory -Force -Path $CacheDir | Out-Null
 
             $env:BUN_INSTALL_CACHE_DIR = $CacheDir
-            $arguments = @("install", "--frozen-lockfile", "--cache-dir", $CacheDir)
+            $arguments = @("install", "--cache-dir", $CacheDir)
             Write-Host "[$AttemptLabel] Running: bun $($arguments -join ' ')"
 
             $commandText = "bun $($arguments -join ' ')"

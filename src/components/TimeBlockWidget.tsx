@@ -38,6 +38,7 @@ import {
 } from '@/lib/media/timer-end-sounds';
 import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
+import { log } from '@/lib/logger';
 
 interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
@@ -239,12 +240,12 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       try {
         await execute();
       } catch (error) {
-        console.error(`[TB-UI] ${label} failed`, error);
+        log.error(`[TB-UI] ${label} failed: ${error instanceof Error ? error.message : String(error)}`);
         try {
           const block = await timeBlockService.loadActiveBlock();
           applyActiveBlock(block);
         } catch (reloadError) {
-          console.error(`[TB-UI] ${label} recover failed`, reloadError);
+          log.error(`[TB-UI] ${label} recover failed: ${reloadError instanceof Error ? reloadError.message : String(reloadError)}`);
         }
       }
     });
@@ -440,12 +441,12 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     try {
       await timeBlockService.endBlock(normalizedFeedback);
     } catch (error) {
-      console.error('[TB-UI] endBlock failed', error);
+      log.error(`[TB-UI] endBlock failed: ${error instanceof Error ? error.message : String(error)}`);
       try {
         const block = await timeBlockService.loadActiveBlock();
         applyActiveBlock(block);
       } catch (reloadError) {
-        console.error('[TB-UI] endBlock recover failed', reloadError);
+        log.error(`[TB-UI] endBlock recover failed: ${reloadError instanceof Error ? reloadError.message : String(reloadError)}`);
       }
       setFeedbackSubmitting(false);
       return;

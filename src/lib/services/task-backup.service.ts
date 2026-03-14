@@ -1,4 +1,8 @@
-import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
+import {
+  buildRuntimeAuthHeaders,
+  getSelectedRuntimeTarget,
+  type RuntimeTarget,
+} from '@/config/runtime-target';
 import { bytesToBase64 } from '@/lib/asr/volcano-config';
 import { appendRuntimeProfileScope } from '@/lib/adapters/runtime-profile-scope';
 
@@ -138,12 +142,13 @@ export class TaskBackupServiceImpl {
   }
 
   private async requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-    const response = await this.fetchImpl(this.url(path), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url(path, target), {
       ...init,
-      headers: {
+      headers: buildRuntimeAuthHeaders(target, {
         Accept: 'application/json',
         ...(init?.headers ?? {}),
-      },
+      }),
     });
 
     if (!response.ok) {
@@ -153,12 +158,12 @@ export class TaskBackupServiceImpl {
     return response.json() as Promise<T>;
   }
 
-  private baseUrl(): string {
-    return buildBaseUrl(this.resolveTarget());
+  private baseUrl(target = this.resolveTarget()): string {
+    return buildBaseUrl(target);
   }
 
-  private url(path: string): string {
-    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
+  private url(path: string, target = this.resolveTarget()): string {
+    return `${this.baseUrl(target)}${appendRuntimeProfileScope(path)}`;
   }
 }
 

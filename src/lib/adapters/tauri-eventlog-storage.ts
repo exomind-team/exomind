@@ -2,6 +2,7 @@ import type { EventData } from '../types/event';
 import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
 import { WebEventLogStorageAdapter } from './web-eventlog-storage';
 import { getCurrentUserId } from '../storage/event-storage';
+import { log } from '@/lib/logger';
 
 type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
@@ -42,7 +43,7 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
     try {
       return await invoke<EventData[]>('eventlog_list', { userId });
     } catch (error) {
-      console.warn('[TauriEventLogStorageAdapter] eventlog_list failed, fallback to web storage', error);
+      log.warn(`[TauriEventLogStorageAdapter] eventlog_list failed, fallback to web storage: ${error instanceof Error ? error.message : String(error)}`);
       return this.fallback.listEvents();
     }
   }
@@ -58,7 +59,7 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
     try {
       await invoke<void>('eventlog_append', { userId, event });
     } catch (error) {
-      console.warn('[TauriEventLogStorageAdapter] eventlog_append failed, fallback to web storage', error);
+      log.warn(`[TauriEventLogStorageAdapter] eventlog_append failed, fallback to web storage: ${error instanceof Error ? error.message : String(error)}`);
       await this.fallback.appendEvent(event);
     }
   }
@@ -73,7 +74,7 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
     try {
       return await invoke<EventData | null>('eventlog_get', { userId, id });
     } catch (error) {
-      console.warn('[TauriEventLogStorageAdapter] eventlog_get failed, fallback to web storage', error);
+      log.warn(`[TauriEventLogStorageAdapter] eventlog_get failed, fallback to web storage: ${error instanceof Error ? error.message : String(error)}`);
       return this.fallback.getEvent(id);
     }
   }
@@ -89,7 +90,7 @@ export class TauriEventLogStorageAdapter implements IEventLogPort {
     try {
       await invoke<void>('eventlog_clear', { userId });
     } catch (error) {
-      console.warn('[TauriEventLogStorageAdapter] eventlog_clear failed, fallback to web storage', error);
+      log.warn(`[TauriEventLogStorageAdapter] eventlog_clear failed, fallback to web storage: ${error instanceof Error ? error.message : String(error)}`);
       await this.fallback.clearEvents();
     }
   }

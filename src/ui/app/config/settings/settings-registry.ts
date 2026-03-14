@@ -1,5 +1,33 @@
 import { invoke, isTauri } from '@tauri-apps/api/core';
-import { Bell, Bot, Code, Command, Download, Key, List, Mic, Monitor, Moon, MoonStar, Sun, SunMoon, Timer, Upload, Waypoints, Wifi } from 'lucide-react';
+import {
+  Activity,
+  Bell,
+  Bot,
+  Bug,
+  Code,
+  Command,
+  DatabaseZap,
+  GitCommit,
+  Globe,
+  Heart,
+  Key,
+  LifeBuoy,
+  List,
+  MessageSquare,
+  Mic,
+  Monitor,
+  Moon,
+  MoonStar,
+  RefreshCw,
+  ScrollText,
+  Shield,
+  Sun,
+  SunMoon,
+  Tag,
+  Timer,
+  Waypoints,
+  Wifi,
+} from 'lucide-react';
 import type { SettingsContext, SettingsItem } from './settings-types';
 import {
   getSyncServerUrlOverride,
@@ -113,26 +141,29 @@ import {
   type CountdownEndMode,
 } from '@/config/timer-preferences';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
+import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
 import {
   TIMER_END_SOUND_PRESETS,
   type TimerEndSoundPresetId,
 } from '@/lib/media/timer-end-sounds';
-import {
-  exportBackup,
-  exportTasksJson,
-  exportTasksSqlite,
-  importBackup,
-} from '@/services/impl/settings-data-service';
+import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import {
   AiApiKeySetting,
+  DataTransferSetting,
   DevInstanceDiagnosticsSetting,
   DevicePairingSetting,
   FocusBgmSetting,
   MossVoiceTestSetting,
-  TaskBackendStatusSetting,
-  TaskImportActionSetting,
   VolcanoVoiceTestSetting,
 } from '@/ui/app/components/settings/settings-custom-items';
+import {
+  getEventlogBackendMode,
+  setEventlogBackendMode,
+  getTaskBackendMode,
+  setTaskBackendMode,
+  getTimeblockBackendMode,
+  setTimeblockBackendMode,
+} from '@/config/domain-backend-mode';
 
 /*
  * AGENT GUIDE: ADDING SETTINGS
@@ -265,6 +296,19 @@ async function setVoiceShortcutHotkeyWithRuntime(value: string): Promise<void> {
   }
 }
 
+/**
+ * 在系统浏览器中打开外部 URL。
+ * Tauri 环境优先使用 plugin-opener，Web 环境 fallback 到 window.open。
+ */
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    await openUrl(url);
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
 function formatVoiceShortcutTestId(value: string): string {
   return `new-settings-voice-shortcut-${value.toLowerCase().replace(/\+/g, '-').replace(/\s+/g, '')}`;
 }
@@ -299,6 +343,18 @@ function setUseMockDataAndReload(enabled: boolean): void {
   if (typeof window !== 'undefined' && window.location) {
     window.location.reload();
   }
+}
+
+function resolveVersionText(): string {
+  if (typeof import.meta === 'undefined') return '0.3.6';
+  const envMap = import.meta.env as Record<string, string | undefined>;
+  return resolveVersionBuildInfo(envMap, '0.3.6').appVersion;
+}
+
+function resolveBuildText(): string {
+  if (typeof import.meta === 'undefined') return 'dev';
+  const envMap = import.meta.env as Record<string, string | undefined>;
+  return resolveVersionBuildInfo(envMap, '0.3.6').buildHash || 'dev';
 }
 
 export const FEATURE_TOGGLE_SETTING_IDS = [
@@ -708,50 +764,185 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     successMessage: (value: string) => `同步服务器地址已保存：${value}`,
   },
   {
-    id: 'export-backup',
-    label: '导出备份',
-    icon: Download,
+    id: 'eventlog-backend-mode',
+    label: '事件日志后端',
+    icon: DatabaseZap,
     category: 'data',
-    type: 'action',
-    onAction: () => exportBackup(),
-    errorMessagePrefix: '导出失败',
-  },
-  {
-    id: 'import-backup',
-    label: '导入数据',
-    icon: Upload,
-    category: 'data',
-    type: 'action',
-    onAction: () => importBackup('merge'),
-    errorMessagePrefix: '导入失败',
-  },
-  {
-    id: 'export-tasks-json',
-    label: '导出任务 JSON',
-    icon: Download,
-    category: 'data',
-    type: 'action',
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '事件日志后端',
+    dialogDescription: '切换后页面将自动刷新',
     visible: devOnly,
-    onAction: () => exportTasksJson(),
-    errorMessagePrefix: '任务导出失败',
+    options: [
+      { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
+      { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
+    ],
+    get: getEventlogBackendMode,
+    set: (value: string) => { setEventlogBackendMode(value as 'legacy' | 'rt-sqlite'); window.location.reload(); },
   },
   {
-    id: 'export-tasks-sqlite',
-    label: '导出任务 SQLite',
-    icon: Download,
+    id: 'task-backend-mode',
+    label: '任务后端',
+    icon: DatabaseZap,
     category: 'data',
-    type: 'action',
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '任务后端',
+    dialogDescription: '切换后页面将自动刷新',
     visible: devOnly,
-    onAction: () => exportTasksSqlite(),
-    errorMessagePrefix: '任务导出失败',
+    options: [
+      { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
+      { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
+    ],
+    get: getTaskBackendMode,
+    set: (value: string) => { setTaskBackendMode(value as 'legacy' | 'rt-sqlite'); window.location.reload(); },
   },
   {
-    id: 'import-tasks',
-    label: '导入任务数据',
+    id: 'timeblock-backend-mode',
+    label: '时间块后端',
+    icon: DatabaseZap,
+    category: 'data',
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '时间块后端',
+    dialogDescription: '切换后页面将自动刷新',
+    visible: devOnly,
+    options: [
+      { label: 'RT SQLite', value: 'rt-sqlite', description: '推荐，使用本地 SQLite 存储' },
+      { label: 'Legacy', value: 'legacy', description: '旧版 JSON 文件存储' },
+    ],
+    get: getTimeblockBackendMode,
+    set: (value: string) => { setTimeblockBackendMode(value as 'legacy' | 'rt-sqlite'); window.location.reload(); },
+  },
+  {
+    id: 'data-transfer',
+    label: '数据迁移',
     category: 'data',
     type: 'custom',
-    visible: devOnly,
-    component: TaskImportActionSetting,
+    component: DataTransferSetting,
+  },
+  {
+    id: 'data-legacy-migration',
+    label: '迁移旧版数据',
+    description: '将旧版存储中的数据迁移到本地 SQLite',
+    category: 'data',
+    type: 'action',
+    icon: DatabaseZap,
+    visible: (ctx) => {
+      if (!ctx.isDesktop) return false;
+      try {
+        return !isMigrationCompleted();
+      } catch {
+        return false;
+      }
+    },
+    onAction: () => {
+      try {
+        clearMigrationFlags();
+        window.location.reload();
+      } catch {
+        // ignore
+      }
+    },
+  },
+  {
+    id: 'more-update',
+    label: '更新',
+    icon: RefreshCw,
+    category: 'more',
+    type: 'action',
+    onAction: () => {
+      window.location.pathname = '/update';
+    },
+  },
+  {
+    id: 'more-help-center',
+    label: '帮助中心',
+    icon: LifeBuoy,
+    category: 'more',
+    type: 'action',
+    onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/wiki'),
+  },
+  {
+    id: 'more-feedback',
+    label: '反馈建议',
+    icon: MessageSquare,
+    category: 'more',
+    type: 'action',
+    onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/issues/new?labels=feedback&template=feedback.md'),
+  },
+  {
+    id: 'more-telemetry',
+    label: '遥测',
+    icon: Activity,
+    category: 'more',
+    type: 'action',
+    onAction: () => '敬请期待',
+  },
+  {
+    id: 'more-report-bug',
+    label: '报告问题',
+    icon: Bug,
+    category: 'more',
+    type: 'action',
+    onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/issues/new?labels=bug&template=bug_report.md'),
+  },
+  {
+    id: 'more-debug-log',
+    label: '调试日志',
+    icon: ScrollText,
+    category: 'more',
+    type: 'action',
+    onAction: () => {
+      window.dispatchEvent(new CustomEvent('open-log-panel'))
+      return undefined
+    },
+  },
+  {
+    id: 'about-website',
+    label: '官网',
+    icon: Globe,
+    category: 'about',
+    type: 'action',
+    onAction: () => openExternalUrl('https://exo-mind.ai/'),
+  },
+  {
+    id: 'about-sponsor',
+    label: '赞助开发者（Starlin）',
+    icon: Heart,
+    category: 'about',
+    type: 'action',
+    onAction: () => openExternalUrl('https://exo-mind.ai/'),
+  },
+  {
+    id: 'about-legal',
+    label: '法律与支持',
+    icon: Shield,
+    category: 'about',
+    type: 'action',
+    onAction: () => {
+      window.location.pathname = '/settings/legal-support';
+    },
+  },
+  {
+    id: 'about-version',
+    label: '版本',
+    icon: Tag,
+    category: 'about',
+    type: 'action',
+    hideChevron: true,
+    rightText: resolveVersionText,
+    onAction: () => {},
+  },
+  {
+    id: 'about-build',
+    label: '构建',
+    icon: GitCommit,
+    category: 'about',
+    type: 'action',
+    hideChevron: true,
+    rightText: resolveBuildText,
+    onAction: () => {},
   },
   {
     id: 'developer-mode',
@@ -826,14 +1017,6 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     type: 'custom',
     visible: devOnly,
     component: DevicePairingSetting,
-  },
-  {
-    id: 'task-backend-status',
-    label: '任务后端状态',
-    category: 'developer',
-    type: 'custom',
-    visible: devOnly,
-    component: TaskBackendStatusSetting,
   },
   {
     id: 'clear-local-cache',

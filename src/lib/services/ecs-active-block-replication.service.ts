@@ -30,6 +30,7 @@ function buildRuntimeHostRecord() {
       : 'External Runtime（外部运行时）',
     host: runtimeTarget.host,
     port: runtimeTarget.port,
+    authToken: runtimeTarget.authToken,
     status: 'unknown' as const,
     createdAt: new Date().toISOString(),
     updatedAt: new Date().toISOString(),

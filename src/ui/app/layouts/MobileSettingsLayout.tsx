@@ -13,6 +13,8 @@ const MOBILE_CATEGORY_ORDER: Category[] = [
   'sync',
   'data',
   'developer',
+  'more',
+  'about',
   'danger',
 ];
 
@@ -25,6 +27,8 @@ const CATEGORY_LABELS: Record<Category, string> = {
   sync: '同步',
   data: '数据',
   developer: '开发者',
+  more: '更多',
+  about: '关于',
   danger: '危险区域',
 };
 

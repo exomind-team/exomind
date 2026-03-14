@@ -48,6 +48,7 @@ describe('runtime target config（Runtime 目标配置）', () => {
       JSON.stringify({
         host: '0.0.0.0',
         port: 4077,
+        authSecret: 'embedded-secret',
       }),
     );
 
@@ -55,6 +56,7 @@ describe('runtime target config（Runtime 目标配置）', () => {
       mode: 'embedded',
       host: '127.0.0.1',
       port: 4077,
+      authToken: 'embedded-secret',
     });
   });
 

@@ -9,6 +9,7 @@
 import PouchDB from 'pouchdb';
 import { getCurrentProfileOrLegacyId } from '../profile/profile-storage';
 import { buildSyncErrorLog } from './sync-error';
+import { log } from '@/lib/logger';
 
 const POUCHDB_PREFIX_ENV = 'EXOMIND_EVENT_STORAGE_PREFIX';
 const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-event-storage/';
@@ -226,10 +227,10 @@ export class EventStorage {
 
           this.initialized = true;
         } catch (updateError) {
-          console.warn('更新设计文档失败:', updateError);
+          log.warn(`更新设计文档失败: ${updateError instanceof Error ? updateError.message : String(updateError)}`);
         }
       } else {
-        console.warn('创建设计文档失败:', error);
+        log.warn(`创建设计文档失败: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
   }
@@ -482,7 +483,7 @@ export class EventStorage {
       try {
         listener(change);
       } catch {
-        console.error('变更监听器执行错误');
+        log.error('变更监听器执行错误');
       }
     }
   }
@@ -510,7 +511,7 @@ export class EventStorage {
       return;
     }
     this.lastSyncErrorSignature = signature;
-    console.error(message, payload);
+    log.error(`${message} ${JSON.stringify(payload)}`);
   }
 
   /**

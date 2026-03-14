@@ -10,6 +10,7 @@ import { Copy, Check, Quote, X } from 'lucide-react';
 import { toast } from '@/components/ui/toast-hook';
 import { getClipboardService } from '@/lib/services';
 import type { ClipboardFailureReason } from '@/lib/services';
+import { log } from '@/lib/logger';
 
 interface MessageActionsProps {
   content: string;
@@ -49,7 +50,7 @@ export function MessageActions({ content, align }: MessageActionsProps) {
       timerRef.current = setTimeout(() => {
         setCopyFailed(false);
       }, 1500);
-      console.error('[MessageActions] clipboard.writeText failed:', result.error, { reason: result.reason });
+      log.error(`[MessageActions] clipboard.writeText failed: ${result.error instanceof Error ? result.error.message : String(result.error)} ${JSON.stringify({ reason: result.reason })}`);
       toast({ title: result.title, description: result.description, variant: 'destructive' });
       return;
     }

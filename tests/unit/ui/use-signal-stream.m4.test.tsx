@@ -88,6 +88,16 @@ vi.mock('@/lib/services/runtime-control.service', () => ({
   }),
 }));
 
+vi.mock('@/lib/logger', () => ({
+  log: {
+    info: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    trace: vi.fn(),
+  },
+}));
+
 function HookHarness(): null {
   useSignalStream();
   return null;
@@ -166,6 +176,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
         host: '127.0.0.1',
         port: 48202,
         isLocal: true,
+        authToken: 'embedded-secret',
       }),
     });
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"port":48202');

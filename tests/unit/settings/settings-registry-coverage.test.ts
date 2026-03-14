@@ -36,18 +36,28 @@ const AUDITED_SETTINGS_IDS = [
   'volcano-asr-test',
   'ai-api-key',
   'sync-server-url',
-  'export-backup',
-  'import-backup',
-  'export-tasks-json',
-  'export-tasks-sqlite',
-  'import-tasks',
+  'eventlog-backend-mode',
+  'task-backend-mode',
+  'timeblock-backend-mode',
+  'data-transfer',
+  'data-legacy-migration',
+  'more-update',
+  'more-help-center',
+  'more-feedback',
+  'more-telemetry',
+  'more-report-bug',
+  'more-debug-log',
+  'about-website',
+  'about-sponsor',
+  'about-legal',
+  'about-version',
+  'about-build',
   'developer-mode',
   'use-mock-data',
   'devtools',
   'feature-toggles',
   'instance-diagnostics',
   'device-pairing',
-  'task-backend-status',
   'clear-local-cache',
   'reset-all-settings',
 ] as const;
@@ -88,10 +98,18 @@ const NUMBER_IDS = [
 ] as const;
 
 const ROW_ACTION_IDS = [
-  'export-backup',
-  'import-backup',
-  'export-tasks-json',
-  'export-tasks-sqlite',
+  'data-legacy-migration',
+  'more-update',
+  'more-help-center',
+  'more-feedback',
+  'more-telemetry',
+  'more-report-bug',
+  'more-debug-log',
+  'about-website',
+  'about-sponsor',
+  'about-legal',
+  'about-version',
+  'about-build',
 ] as const;
 
 const BUTTON_ACTION_IDS = [
@@ -104,24 +122,22 @@ const CUSTOM_ITEM_IDS = [
   'moss-voice-test',
   'volcano-asr-test',
   'ai-api-key',
-  'import-tasks',
+  'data-transfer',
   'instance-diagnostics',
   'device-pairing',
-  'task-backend-status',
 ] as const;
 
 const DEV_ONLY_IDS = [
   'moss-voice-test',
   'volcano-asr-test',
-  'export-tasks-json',
-  'export-tasks-sqlite',
-  'import-tasks',
+  'eventlog-backend-mode',
+  'task-backend-mode',
+  'timeblock-backend-mode',
   'use-mock-data',
   'devtools',
   'feature-toggles',
   'instance-diagnostics',
   'device-pairing',
-  'task-backend-status',
 ] as const;
 
 function getItem<T extends typeof SETTINGS_REGISTRY[number]['type']>(
@@ -271,6 +287,10 @@ describe('settings registry coverage audit', () => {
   it('keeps every registry item reachable across supported settings contexts', () => {
     const contexts: SettingsContext[] = [
       getBaseCtx(),
+      {
+        ...getBaseCtx(),
+        isDesktop: true,
+      },
       {
         ...getBaseCtx(),
         developerMode: true,

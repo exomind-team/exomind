@@ -20,6 +20,7 @@ import type { IStoragePort } from './interfaces/storage.port';
 import type { ITaskPort } from './interfaces/task.port';
 import { createRuntimeBootstrap, type RuntimeKind } from './bootstrap';
 import { getUseMockDataEnabled } from '@/config/mock-data';
+import { log } from '@/lib/logger';
 
 /**
  * Environment 接口
@@ -72,7 +73,7 @@ export class ExoMindEnvironment implements Environment {
     this.me = bootstrap.me;
     this.agent = bootstrap.agent;
     this.useMockDataEnabled = useMockDataEnabled;
-    console.log(`[Environment] ExoMindEnvironment 初始化完成: ${this.runtime}`);
+    log.info(`[Environment] ExoMindEnvironment 初始化完成: ${this.runtime}`);
   }
 
   // Runtime sync（运行时同步）: 切换 mock-data 开关后，刷新与数据源相关的 adapter。

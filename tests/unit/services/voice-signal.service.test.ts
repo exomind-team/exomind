@@ -32,7 +32,7 @@ describe('voice-signal.service（语音信号服务）', () => {
     signalPublishMocks.publish.mockResolvedValue({ accepted: true, event_id: 'evt-001' });
   });
 
-  it('publishes transcript only to voice topic（只发布到语音主题避免重复消费）', async () => {
+  it('publishes only raw voice transcript and leaves normalization to runtime（前端只发布原始语音主题，归一化交给运行时）', async () => {
     const result: ASRResult = {
       text: '你好 ExoMind',
       confidence: 0.98,
@@ -40,7 +40,20 @@ describe('voice-signal.service（语音信号服务）', () => {
       duration: 1200,
     };
 
-    await publishVoiceTranscriptSignal(result, { source: 'frontend:test-voice-button' });
+    await publishVoiceTranscriptSignal(result, {
+      source: 'frontend:test-voice-button',
+      captureSource: 'global-shortcut',
+      targetScope: 'agent-chat',
+      window: {
+        title: 'ExoMind',
+        processName: 'exomind.exe',
+      },
+      agentContext: {
+        agentId: 'codex',
+        agentName: 'Codex',
+        sessionId: 'session-001',
+      },
+    });
 
     expect(signalPublishMocks.publish).toHaveBeenCalledTimes(1);
     expect(signalPublishMocks.publish).toHaveBeenNthCalledWith(
@@ -48,14 +61,36 @@ describe('voice-signal.service（语音信号服务）', () => {
       expect.objectContaining({
         topic: 'voice.input.transcript',
         source: 'frontend:test-voice-button',
+        trace_id: expect.stringMatching(/^voice:/),
         payload: expect.objectContaining({
           text: '你好 ExoMind',
           transcript: '你好 ExoMind',
+          rawText: '你好 ExoMind',
           lang: 'zh-CN',
           confidence: 0.98,
           duration: 1200,
+          durationMs: 1200,
+          inputMode: 'voice',
+          captureSource: 'global-shortcut',
+          targetScope: 'agent-chat',
+          traceId: expect.stringMatching(/^voice:/),
+          window: {
+            title: 'ExoMind',
+            processName: 'exomind.exe',
+          },
+          agentContext: {
+            agentId: 'codex',
+            agentName: 'Codex',
+            sessionId: 'session-001',
+          },
         }),
       })
+    );
+
+    expect(signalPublishMocks.publish).not.toHaveBeenCalledWith(
+      expect.objectContaining({
+        topic: 'user.input.normalized',
+      }),
     );
   });
 });

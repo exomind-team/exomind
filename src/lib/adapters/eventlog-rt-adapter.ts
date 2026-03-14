@@ -1,4 +1,8 @@
-import { getSelectedRuntimeTarget, type RuntimeTarget } from '@/config/runtime-target';
+import {
+  buildRuntimeAuthHeaders,
+  getSelectedRuntimeTarget,
+  type RuntimeTarget,
+} from '@/config/runtime-target';
 import type { IEventLogPort } from '@/lib/environment/interfaces/eventlog.port';
 import type { EventData } from '@/lib/types/event';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
@@ -49,9 +53,10 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async listEvents(): Promise<EventData[]> {
-    const response = await this.fetchImpl(this.url('/eventlog'), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/eventlog', target), {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (!response.ok) {
       throw new Error(`RT eventlog list failed: ${response.status}`);
@@ -61,12 +66,13 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async appendEvent(event: EventData): Promise<void> {
-    const response = await this.fetchImpl(this.url('/eventlog'), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/eventlog', target), {
       method: 'POST',
-      headers: {
+      headers: buildRuntimeAuthHeaders(target, {
         'Content-Type': 'application/json',
         Accept: 'application/json',
-      },
+      }),
       body: JSON.stringify({
         id: event.id,
         timestamp: event.timestamp,
@@ -81,9 +87,10 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async getEvent(id: string): Promise<EventData | null> {
-    const response = await this.fetchImpl(this.url(`/eventlog/events/${encodeURIComponent(id)}`), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url(`/eventlog/events/${encodeURIComponent(id)}`, target), {
       method: 'GET',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (response.status === 404) {
       return null;
@@ -95,20 +102,21 @@ export class EventLogRtAdapter implements IEventLogPort {
   }
 
   async clearEvents(): Promise<void> {
-    const response = await this.fetchImpl(this.url('/eventlog'), {
+    const target = this.resolveTarget();
+    const response = await this.fetchImpl(this.url('/eventlog', target), {
       method: 'DELETE',
-      headers: { Accept: 'application/json' },
+      headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (!response.ok && response.status !== 204) {
       throw new Error(`RT eventlog clear failed: ${response.status}`);
     }
   }
 
-  private baseUrl(): string {
-    return buildBaseUrl(this.resolveTarget());
+  private baseUrl(target = this.resolveTarget()): string {
+    return buildBaseUrl(target);
   }
 
-  private url(path: string): string {
-    return `${this.baseUrl()}${appendRuntimeProfileScope(path)}`;
+  private url(path: string, target = this.resolveTarget()): string {
+    return `${this.baseUrl(target)}${appendRuntimeProfileScope(path)}`;
   }
 }

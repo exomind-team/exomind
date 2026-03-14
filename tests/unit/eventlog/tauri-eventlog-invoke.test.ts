@@ -31,6 +31,19 @@ describe('Tauri EventLog invoke contract', () => {
       timestamp: 1700000000000,
       content: 'hello tauri eventlog',
       tags: ['note'],
+      metadata: {
+        voiceContext: {
+          inputMode: 'voice',
+          captureSource: 'global-shortcut',
+          traceId: 'trace-voice-001',
+          windowTitle: 'ExoMind',
+          processName: 'exomind.exe',
+          targetScope: 'agent-chat',
+          agentId: 'codex',
+          agentName: 'Codex',
+          sessionId: 'session-001',
+        },
+      },
     };
 
     mockInvoke.mockImplementation((command: string) => {
@@ -58,6 +71,8 @@ describe('Tauri EventLog invoke contract', () => {
     expect(mockInvoke).toHaveBeenCalledWith('eventlog_get', { userId: 'user-a', id: sample.id });
     expect(listed).toHaveLength(1);
     expect(one?.id).toBe(sample.id);
+    expect(listed[0]?.metadata).toEqual(sample.metadata);
+    expect(one?.metadata).toEqual(sample.metadata);
   });
 
   it('uses current user from sync store when adapter userId is omitted', async () => {
@@ -85,10 +100,12 @@ describe('Tauri EventLog invoke contract', () => {
   it('registers eventlog commands in tauri backend', () => {
     const commandModule = readFileSync('src-tauri/src/commands/mod.rs', 'utf-8');
     const tauriLib = readFileSync('src-tauri/src/lib.rs', 'utf-8');
+    const eventlogCommands = readFileSync('src-tauri/src/commands/eventlog_commands.rs', 'utf-8');
 
     expect(commandModule).toContain('eventlog_commands');
     expect(tauriLib).toContain('eventlog_append');
     expect(tauriLib).toContain('eventlog_list');
     expect(tauriLib).toContain('eventlog_get');
+    expect(eventlogCommands).toContain('pub metadata');
   });
 });

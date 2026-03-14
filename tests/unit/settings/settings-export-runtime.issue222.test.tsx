@@ -62,7 +62,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
       skipped: 0,
       total: 2,
     });
-    tauriMocks.isTauri.mockResolvedValue(false);
+    tauriMocks.isTauri.mockReturnValue(false);
     tauriMocks.invoke.mockResolvedValue(null);
     anchorClickSpy = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {});
   });
@@ -74,7 +74,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
 
   it('uses tauri native save command for eventlog export in tauri runtime', async () => {
     (window as { __TAURI__?: { __VERSION__: string } }).__TAURI__ = { __VERSION__: '2.0.0' };
-    tauriMocks.isTauri.mockResolvedValue(true);
+    tauriMocks.isTauri.mockReturnValue(true);
     tauriMocks.invoke.mockResolvedValue('/storage/emulated/0/Download/exomind-eventlog-2026-03-11.json');
 
     render(<SettingsPage />);
@@ -94,7 +94,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
   });
 
   it('disables unified export in web runtime without tauri shell', async () => {
-    tauriMocks.isTauri.mockResolvedValue(false);
+    tauriMocks.isTauri.mockReturnValue(false);
 
     render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: '导出数据' }));
@@ -110,7 +110,7 @@ describe('SettingsPage export/import runtime routing (issue-222)', () => {
 
   it('imports eventlog JSON through the shared file picker flow in tauri runtime', async () => {
     (window as { __TAURI__?: { __VERSION__: string } }).__TAURI__ = { __VERSION__: '2.0.0' };
-    tauriMocks.isTauri.mockResolvedValue(true);
+    tauriMocks.isTauri.mockReturnValue(true);
 
     render(<SettingsPage />);
     fireEvent.click(screen.getByRole('button', { name: '导入数据' }));

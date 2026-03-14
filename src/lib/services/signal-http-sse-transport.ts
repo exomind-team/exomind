@@ -1,6 +1,7 @@
 import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { PublishRequest, PublishResponse, SignalEvent } from '@/lib/types/signal-pool';
 import { invoke, isTauri } from '@tauri-apps/api/core';
+import { log } from '@/lib/logger';
 
 export interface SignalStreamOpenRequest {
   agentId: string;
@@ -54,7 +55,7 @@ export class HttpSseSignalTransport implements SignalTransport {
       try {
         return await invoke<PublishResponse>('signal_publish_fast', { request });
       } catch (error) {
-        console.warn('[SignalTransport] invoke publish failed, fallback to HTTP:', error);
+        log.warn(`[SignalTransport] invoke publish failed, fallback to HTTP: ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 

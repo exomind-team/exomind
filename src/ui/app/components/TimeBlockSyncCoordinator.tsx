@@ -1,6 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { getTimeBlockService } from '@/lib/services';
 import { useSyncStore } from '@/ui/stores/sync-store';
+import { log } from '@/lib/logger';
 
 export function TimeBlockSyncCoordinator(): null {
   const timeBlockServiceRef = useRef(getTimeBlockService());
@@ -17,10 +18,7 @@ export function TimeBlockSyncCoordinator(): null {
 
     void timeBlockServiceRef.current.startSync().catch((error) => {
       if (cancelled) return;
-      console.error('[TimeBlockSyncCoordinator] ECS sync start failed', {
-        activeProfileId,
-        error,
-      });
+      log.error(`[TimeBlockSyncCoordinator] ECS sync start failed ${JSON.stringify({ activeProfileId, error: error instanceof Error ? error.message : String(error) })}`);
     });
 
     return () => {

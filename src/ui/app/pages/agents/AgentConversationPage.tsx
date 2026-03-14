@@ -7,6 +7,7 @@ import { createUuidV4 } from '@/lib/utils/uuid';
 import { RuntimeClient } from '@/services/runtime-client';
 import { findPreferredRuntimeHostForAgent, getRuntimeManager } from '@/services/runtime-manager';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
+import { getActiveInteractionContextService } from '@/lib/services/active-interaction-context.service';
 import {
   appendConversationChunk,
   appendAdjacentConversationDelta,
@@ -67,6 +68,30 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
       disposed = true;
     };
   }, [targetId]);
+
+  useEffect(() => {
+    const service = getActiveInteractionContextService();
+    const ownerId = 'agent-conversation-page';
+
+    if (!targetId) {
+      service.clearContext(ownerId);
+      return () => {
+        service.clearContext(ownerId);
+      };
+    }
+
+    service.setContext({
+      targetScope: 'agent-chat',
+      agentContext: {
+        agentId: targetId,
+        sessionId: runtimeSessionId ?? undefined,
+      },
+    }, ownerId);
+
+    return () => {
+      service.clearContext(ownerId);
+    };
+  }, [targetId, runtimeSessionId]);
 
   // Subscribe to SSE signal stream for tick/heartbeat signals
   const sseRef = useRef<EventSource | null>(null);

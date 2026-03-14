@@ -6,6 +6,7 @@
  */
 
 import { invoke } from '@tauri-apps/api/core';
+import { log } from '@/lib/logger';
 
 /**
  * 生成唯一消息 ID
@@ -138,7 +139,7 @@ class MessageQueue {
    */
   enqueue(message: WSMessage, maxRetries: number = 3): void {
     if (this.queue.length >= this.maxSize) {
-      console.warn('Message queue is full, dropping oldest message');
+      log.warn('Message queue is full, dropping oldest message');
       this.queue.shift();
     }
     this.queue.push({
@@ -396,7 +397,7 @@ export class WebSocketClient {
     try {
       await invoke('ws_disconnect');
     } catch (error) {
-      console.error('Disconnect error:', error);
+      log.error(`Disconnect error: ${error instanceof Error ? error.message : String(error)}`);
     }
 
     this.setState(WSConnectionState.Disconnected);
@@ -492,7 +493,7 @@ export class WebSocketClient {
         payload: {},
       });
     } catch (error) {
-      console.error('Ping failed:', error);
+      log.error(`Ping failed: ${error instanceof Error ? error.message : String(error)}`);
     }
   }
 
@@ -551,7 +552,7 @@ export class WebSocketClient {
         try {
           listener(payload);
         } catch (error) {
-          console.error(`WS client event listener error: ${eventType}`, error);
+          log.error(`WS client event listener error: ${eventType} ${error instanceof Error ? error.message : String(error)}`);
         }
       });
     }
@@ -576,14 +577,14 @@ export class WebSocketClient {
         try {
           handler(payload);
         } catch (error) {
-          console.error('Message handler error:', error);
+          log.error(`Message handler error: ${error instanceof Error ? error.message : String(error)}`);
         }
       });
 
       // 发送消息事件
       this.emit(WSClientEventType.Message, payload);
     } catch (error) {
-      console.error('Failed to parse message:', error);
+      log.error(`Failed to parse message: ${error instanceof Error ? error.message : String(error)}`);
       this.emit(WSClientEventType.Error, {
         error: `Failed to parse message: ${error instanceof Error ? error.message : String(error)}`,
       });
@@ -642,7 +643,7 @@ export class WebSocketClient {
     this.retryCount++;
     this.setState(WSConnectionState.Reconnecting);
 
-    console.log(`Scheduling reconnect in ${delay}ms (attempt ${this.retryCount}/${this.config.maxRetries})`);
+    log.info(`Scheduling reconnect in ${delay}ms (attempt ${this.retryCount}/${this.config.maxRetries})`);
 
     this.emit(WSClientEventType.Reconnecting, {
       attempt: this.retryCount,
@@ -702,7 +703,7 @@ export class WebSocketClient {
         const retries = this.messageQueue.incrementRetries();
         if (retries >= item.maxRetries) {
           // 超过最大重试次数，丢弃消息
-          console.warn('Message exceeded max retries, dropping:', item.message.messageId);
+          log.warn(`Message exceeded max retries, dropping: ${item.message.messageId}`);
           continue;
         }
         // 重新加入队列

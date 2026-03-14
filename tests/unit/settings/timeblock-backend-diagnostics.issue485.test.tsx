@@ -11,8 +11,8 @@ import { setTimeblockBackendMode } from '@/config/domain-backend-mode';
 const reloadMock = vi.fn();
 
 vi.mock('@tauri-apps/api/core', () => ({
-  isTauri: vi.fn(async () => false),
-  invoke: vi.fn(),
+  isTauri: vi.fn(() => false),
+  invoke: vi.fn().mockResolvedValue(null),
 }));
 
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
@@ -58,23 +58,29 @@ describe('SettingsPage timeblock backend diagnostics (issue-485)', () => {
     });
   });
 
-  it('shows timeblock backend diagnostics in developer mode', async () => {
+  it('shows timeblock backend enum row in developer mode', () => {
     render(<SettingsPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText('时间块后端：rt-sqlite')).toBeInTheDocument();
-    });
-    expect(screen.getByText('时间块备份：JSON / SQLite')).toBeInTheDocument();
+    expect(screen.getByText('时间块后端')).toBeInTheDocument();
   });
 
-  it('switches timeblock backend mode and reloads the app', async () => {
+  it('switches timeblock backend mode via dialog and reloads', async () => {
     render(<SettingsPage />);
 
+    const row = screen.getByText('时间块后端').closest('button');
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLButtonElement);
+
     await waitFor(() => {
-      expect(screen.getByText('时间块后端：rt-sqlite')).toBeInTheDocument();
+      expect(screen.getByRole('dialog', { name: '时间块后端' })).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getAllByRole('button', { name: 'legacy' })[2]);
+    const dialog = screen.getByRole('dialog', { name: '时间块后端' });
+    const legacyButton = Array.from(dialog.querySelectorAll('button')).find(
+      (btn) => btn.textContent?.includes('Legacy'),
+    );
+    expect(legacyButton).toBeDefined();
+    fireEvent.click(legacyButton!);
 
     expect(setTimeblockBackendMode).toHaveBeenCalledWith('legacy');
     expect(reloadMock).toHaveBeenCalledTimes(1);

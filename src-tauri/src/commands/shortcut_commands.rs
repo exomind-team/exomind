@@ -3,6 +3,7 @@ use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Mutex;
 
 use tauri::{AppHandle, State};
+use serde::{Deserialize, Serialize};
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, WebviewWindowBuilder};
@@ -38,6 +39,13 @@ pub struct VoiceShortcutState {
     shortcut: Mutex<String>,
 }
 
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ForegroundWindowContext {
+    pub title: Option<String>,
+    pub process_name: Option<String>,
+}
+
 impl VoiceShortcutState {
     pub fn new() -> Self {
         Self {
@@ -64,7 +72,7 @@ impl VoiceShortcutState {
 pub fn register_voice_shortcut(app: &AppHandle, state: &VoiceShortcutState) {
     let shortcut = state.get();
     if let Err(error) = register_shortcut_listener(app, &shortcut) {
-        eprintln!("[shortcut] failed to register voice shortcut {shortcut}: {error}");
+        log::warn!("failed to register voice shortcut {shortcut}: {error}");
     }
 }
 
@@ -265,6 +273,111 @@ fn cursor_position() -> Option<(i32, i32)> {
     }
 }
 
+#[cfg(target_os = "windows")]
+fn foreground_window_context() -> ForegroundWindowContext {
+    use std::ffi::OsString;
+    use std::os::windows::ffi::OsStringExt;
+    use std::path::Path;
+
+    type Hwnd = *mut std::ffi::c_void;
+    type Handle = *mut std::ffi::c_void;
+
+    const PROCESS_QUERY_LIMITED_INFORMATION: u32 = 0x1000;
+
+    #[link(name = "user32")]
+    extern "system" {
+        fn GetForegroundWindow() -> Hwnd;
+        fn GetWindowTextLengthW(h_wnd: Hwnd) -> i32;
+        fn GetWindowTextW(h_wnd: Hwnd, lp_string: *mut u16, n_max_count: i32) -> i32;
+        fn GetWindowThreadProcessId(h_wnd: Hwnd, lpdw_process_id: *mut u32) -> u32;
+    }
+
+    #[link(name = "kernel32")]
+    extern "system" {
+        fn OpenProcess(dw_desired_access: u32, b_inherit_handle: i32, dw_process_id: u32) -> Handle;
+        fn QueryFullProcessImageNameW(
+            h_process: Handle,
+            dw_flags: u32,
+            lp_exe_name: *mut u16,
+            lpdw_size: *mut u32,
+        ) -> i32;
+        fn CloseHandle(h_object: Handle) -> i32;
+    }
+
+    fn read_window_title(hwnd: Hwnd) -> Option<String> {
+        let length = unsafe { GetWindowTextLengthW(hwnd) };
+        if length <= 0 {
+            return None;
+        }
+        let mut buffer = vec![0u16; length as usize + 1];
+        let written = unsafe { GetWindowTextW(hwnd, buffer.as_mut_ptr(), buffer.len() as i32) };
+        if written <= 0 {
+            return None;
+        }
+        let os = OsString::from_wide(&buffer[..written as usize]);
+        let title = os.to_string_lossy().trim().to_string();
+        if title.is_empty() {
+            None
+        } else {
+            Some(title)
+        }
+    }
+
+    fn read_process_name(process_id: u32) -> Option<String> {
+        if process_id == 0 {
+            return None;
+        }
+
+        let handle = unsafe { OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, 0, process_id) };
+        if handle.is_null() {
+            return None;
+        }
+
+        let mut buffer = vec![0u16; 32768];
+        let mut size = buffer.len() as u32;
+        let success = unsafe {
+            QueryFullProcessImageNameW(handle, 0, buffer.as_mut_ptr(), &mut size)
+        };
+        unsafe {
+            CloseHandle(handle);
+        }
+        if success == 0 || size == 0 {
+            return None;
+        }
+
+        let os = OsString::from_wide(&buffer[..size as usize]);
+        let full_path = os.to_string_lossy().trim().to_string();
+        if full_path.is_empty() {
+            return None;
+        }
+
+        Path::new(&full_path)
+            .file_name()
+            .map(|name| name.to_string_lossy().to_string())
+            .filter(|name| !name.trim().is_empty())
+    }
+
+    let hwnd = unsafe { GetForegroundWindow() };
+    if hwnd.is_null() {
+        return ForegroundWindowContext::default();
+    }
+
+    let mut process_id = 0u32;
+    unsafe {
+        GetWindowThreadProcessId(hwnd, &mut process_id);
+    }
+
+    ForegroundWindowContext {
+        title: read_window_title(hwnd),
+        process_name: read_process_name(process_id),
+    }
+}
+
+#[cfg(all(not(target_os = "windows"), not(any(target_os = "android", target_os = "ios"))))]
+fn foreground_window_context() -> ForegroundWindowContext {
+    ForegroundWindowContext::default()
+}
+
 /// Returns true if the point (cx, cy) is within the monitor rect defined by
 /// (pos_x, pos_y, width, height). Right and bottom edges are exclusive,
 /// matching Windows `MonitorFromPoint` semantics.
@@ -289,8 +402,8 @@ fn resolve_overlay_monitor(app: &AppHandle) -> Result<Option<tauri::Monitor>, St
         }
         // Cursor is in a gap between monitors (non-contiguous layout) or
         // available_monitors() returned an empty list — fall through to main window.
-        eprintln!(
-            "[voice-overlay] cursor ({cx},{cy}) not within any monitor rect, falling back to main window monitor"
+        log::debug!(
+            "cursor ({cx},{cy}) not within any monitor rect, falling back to main window monitor"
         );
     }
 
@@ -505,6 +618,18 @@ pub async fn voice_recording_set_active(app: AppHandle, active: bool) -> Result<
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn voice_recording_set_active(_app: AppHandle, _active: bool) -> Result<(), String> {
     Ok(())
+}
+
+#[tauri::command]
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub async fn foreground_window_get() -> Result<ForegroundWindowContext, String> {
+    Ok(foreground_window_context())
+}
+
+#[tauri::command]
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub async fn foreground_window_get() -> Result<ForegroundWindowContext, String> {
+    Ok(ForegroundWindowContext::default())
 }
 
 #[cfg(test)]

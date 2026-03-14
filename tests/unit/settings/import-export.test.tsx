@@ -6,11 +6,13 @@ import { SETTINGS_REGISTRY } from '@/ui/app/config/settings/settings-registry';
 const source = readFileSync(path.resolve('src/services/impl/settings-data-service.ts'), 'utf-8');
 
 describe('settings registry import/export entries', () => {
-  it('defines backup import/export controls in the registry', () => {
-    const labels = SETTINGS_REGISTRY.map((item) => item.label);
+  it('defines unified data-transfer control in the registry', () => {
+    const ids = SETTINGS_REGISTRY.map((item) => item.id);
 
-    expect(labels).toContain('导出备份');
-    expect(labels).toContain('导入数据');
+    expect(ids).toContain('data-transfer');
+    expect(ids).toContain('eventlog-backend-mode');
+    expect(ids).toContain('task-backend-mode');
+    expect(ids).toContain('timeblock-backend-mode');
   });
 
   it('defines sync server control in the registry', () => {

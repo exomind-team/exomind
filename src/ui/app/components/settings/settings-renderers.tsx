@@ -1039,18 +1039,22 @@ function ActionRenderer({ item }: { item: ActionSettingsItem }) {
     );
   }
 
+  const resolvedRightText = typeof item.rightText === 'function' ? item.rightText() : item.rightText;
+
   return (
     <div>
       <SettingRow
         testId={item.rowTestId}
         icon={renderRowIcon(item.icon)}
         label={item.label}
-        onClick={() => {
+        onClick={item.hideChevron ? undefined : () => {
           handleAction();
         }}
         disabled={disabled}
         title={item.disabledReason}
-        right={<ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
+        right={item.hideChevron
+          ? (resolvedRightText ? <span className="text-sm text-[#A8A29E]">{resolvedRightText}</span> : null)
+          : <ChevronRight className="h-4 w-4 text-[#A8A29E]" />}
       />
       <HelperBlock message={item.description ?? null} />
       <NoticeBlock message={notice} tone="success" />

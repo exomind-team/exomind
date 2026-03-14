@@ -7,6 +7,7 @@ import { DevInstanceTitleSync } from "@/ui/app/components/DevInstanceTitleSync";
 import { TimeBlockSyncCoordinator } from "@/ui/app/components/TimeBlockSyncCoordinator";
 import { ReminderSyncCoordinator } from "@/ui/app/components/ReminderSyncCoordinator";
 import { FocusBgmCoordinator } from "@/ui/app/components/FocusBgmCoordinator";
+import { MigrationDialogController } from "@/ui/components/MigrationDialogController";
 import {
   initUpdateChecker,
   destroyUpdateChecker,
@@ -41,6 +42,7 @@ function App() {
       <TimeBlockSyncCoordinator />
       <ReminderSyncCoordinator />
       <FocusBgmCoordinator />
+      <MigrationDialogController />
       <RouterProvider router={appRouter} />
       <Toaster />
     </>
