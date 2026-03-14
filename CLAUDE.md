@@ -73,133 +73,9 @@ ExoMind 的每一条系统级约束都必须具备**双层表述**，缺一不�
 
 ## 核心架构
 
-### 分层架构模型（v4.0）
+→ 详见 [docs/architecture/overview.md](docs/architecture/overview.md)
 
-自底向上构建，每层都有运行时实体。
-
-```
-L4  UI ──────── React + zustand，只调 Service
-    │
-    │  ← Service interface（L3 向上暴露，谁提供谁定义）
-    │
-L3  Service / Actor / Agent ── 业务逻辑层
-    │
-    │  ← ActorContext interface（L3 定义自己需要的环境访问权限）
-    │
-L2  Environment ── 共享物理世界
-    │               · 持有 Port 实例（能力）
-    │               · 资源池（周期刷新型 + 总额有限型）
-    │               · 消息缓冲（短期记录，自动淘汰）
-    │               · 独占资源管理（acquire / release）
-    │
-    │  ← Port interface（L2 定义，谁消费谁定义）
-    │
-L1  Adapter ──── 具体实现，按运行时替换
-                 Web: IndexedDB, fetch, Web Speech, WebContainer
-                 Tauri: SQLite, Rust HTTP, Native Shell
-```
-
-#### 接口归属规则
-
-| 接缝 | 接口放在 | 原则 | 本质 |
-|------|----------|------|------|
-| L1 ↔ L2 | Port interface 放 L2 | 谁消费谁定义 | 类型契约 |
-| L2 ↔ L3 | ActorContext 放 L3 | 谁消费谁定义 | 权限边界 |
-| L3 ↔ L4 | Service interface 放 L3 | 谁提供谁定义 | API 暴露 |
-
-**核心逻辑**：接口永远归更稳定的一方所有。
-
-#### Port 定义
-
-| Port | 职责 | 读写 |
-|------|------|------|
-| ILLMPort | 大语言模型推理 | 双向 |
-| IASRPort | 语音识别 | 读 |
-| ITTSPort | 语音合成 | 写 |
-| IStoragePort | 持久化存储 | 双向 |
-| ITerminalPort | 终端执行 | 双向 |
-| ISandboxPort | 沙箱脚本执行 | 双向 |
-| IPlatformPort | 平台能力 | 双向 |
-| IEventBusPort | 事件总线 | 双向 |
-| ICryptoPort | 加密解密 | 双向 |
-
-#### Environment 职责
-
-1. **持有 Port 实例**（所有 Adapter 在 bootstrap 时注入）
-2. **管理资源池**：
-   - 周期刷新型（如 API 限额每 5h 刷新）
-   - 总额有限型（如预付费余额）
-3. **维护消息缓冲**（短期记忆，保留最近 5 分钟或 500 条）
-
-#### Actor / Agent 模型（Phase 4）
-
-| | Actor | Agent |
-|---|---|---|
-| 智能 | 无，机械执行 | 有，LLM 驱动 |
-| 能量单位 | CPU/内存/存储 | Token |
-| 通信 | 有界邮箱，异步消息 | 同 Actor |
-| 示例 | 通知监听、定时器 | Governor、Task System、Growth Coach |
-
-**去中心化**：没有中央路由器。每个 Agent 自己订阅信号源，自己判断是否处理。
-
-#### 渐进式实施路线
-
-| Phase | 目标 | 引入特性 |
-|-------|------|----------|
-| Phase 1 | 语音输入 → LLM → 事件日志 | Port 层、直接调用链 |
-| Phase 2 | 解耦 Service 依赖 | EventBus 发布订阅 |
-| Phase 3 | 资源管控 + 可观测性 | 资源池、消息缓冲 |
-| Phase 4 | 多 Agent 并发协作 | Actor Model、Supervisor |
-| Phase 5 | 高级生命特性 | Agent 生命周期，沙箱脚本 |
-
-#### 设计模式总览
-
-| 模式 | 应用 | 阶段 |
-|------|------|------|
-| Ports & Adapters | Port 定义能力接口 | Phase 1 |
-| Facade | Service 包装底层机制 | Phase 1 |
-| Observer | EventBus 发布订阅 | Phase 2 |
-| Decorator | EncryptedStorage 叠加加密 | Phase 2 |
-| Strategy | 邮箱策略、重启策略 | Phase 3-4 |
-| Actor Model | 有界邮箱、异步通信 | Phase 4 |
-| Supervisor Tree | 崩溃隔离、自动恢复 | Phase 4 |
-
-### 文件组织
-
-```
-src/
-├── adapters/           # L1：具体实现（llm, asr, tts, storage, terminal, crypto, platform）
-├── environment/        # L2：共享物理世界
-│   ├── interfaces/     #   Port interface 定义
-│   ├── environment.ts  #   Environment 实现
-│   ├── resource-pool.ts
-│   ├── message-buffer.ts
-│   └── bootstrap.ts    #   运行时检测 → 组装 Adapter
-├── services/           # L3
-│   ├── interfaces/     #   Service interface
-│   └── impl/           #   Service 实现
-├── actor/              # L3（Phase 4 引入）
-│   ├── interfaces/     #   ActorContext 等
-│   ├── mailbox.ts
-│   ├── supervisor.ts
-│   ├── actors/         #   具体 Actor
-│   └── agents/         #   具体 Agent（LLM 驱动）
-└── ui/                 # L4
-    ├── components/
-    ├── pages/
-    ├── stores/
-    └── providers/
-```
-
-### 核心模块状态
-
-| 模块 | 状态 | Phase |
-|------|------|-------|
-| Port 层 | 未完成 | Phase 1 |
-| Environment | 部分完成 | Phase 1-3 |
-| Service 层 | 部分完成 | Phase 1 |
-| EventBus | 部分完成 | Phase 2 |
-| Actor/Agent | 未完成 | Phase 4 |
+L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
 
 ---
 
@@ -254,7 +130,7 @@ src/
 
 ### 记忆系统 ⭐
 
-每轮有价值的内容都要归档，形成可检索的知识库。详见：[pm/memory/README.md](pm/memory/README.md)
+每轮有价值的内容都要归档，形成可检索的知识库。详见：[docs/memory/README.md](docs/memory/README.md)
 
 ---
 
@@ -285,7 +161,7 @@ src/
 **工作流程**：
 
 ```
-对话终端 ←→ pm/logs/YYYY-MM-DD.jsonl（记录想法）
+对话终端 ←→ docs/memory/logs.md（记录想法）
      ↓
 编码终端读取日志 → 执行编码任务 → Git 提交
 ```
@@ -521,9 +397,9 @@ docs/
 ├── architecture/        # 架构设计
 └── specs/               # 模块规格
 
-pm/
-├── git-spec.md          # Git 规范
-└── memory/              # 记忆系统
+docs/memory/             # 记忆系统（原 pm/memory/）
+docs/product/            # 产品文档（原 pm/PRD.md, roadmap.md）
+docs/development/        # 开发规范（含 git-spec.md）
 ```
 
 ---
@@ -605,13 +481,15 @@ pm/
 
 | 文档 | 路径 |
 |------|------|
+| 文档导航索引 | `docs/README.md` |
+| AI 通用上下文 | `docs/AI-CONTEXT.md` |
 | 架构设计 | `docs/architecture/` |
 | 模块规格 | `docs/specs/` |
-| Git 规范 | `pm/git-spec.md` |
-| 产品需求 | `pm/prd.md` |
-| 产品路线图 | `pm/roadmap.md` |
-| 执行日志 | `pm/memory/logs.md` |
-| Git工作流知识点 | `pm/memory/知识点-Git工作流.md` |
+| Git 规范 | `docs/development/git-spec.md` |
+| 产品需求 | `docs/product/PRD.md` |
+| 产品路线图 | `docs/product/roadmap.md` |
+| 执行日志 | `docs/memory/logs.md` |
+| Git工作流知识点 | `docs/memory/知识点-Git工作流.md` |
 
 ---
 
@@ -621,5 +499,5 @@ Claude Code 团队模式下的 Agent 协作实践经验，详见：[docs/develop
 
 ---
 
-*文档版本: v4.2*
-*更新: 2026-03-09*
+*文档版本: v4.3*
+*更新: 2026-03-14*

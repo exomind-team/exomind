@@ -144,9 +144,9 @@ export interface McpToolDependencies {
 - [ ] 测试 Growth Coach 场景
 
 ## 相关文档
-- [MCP 认证设计](docs/plans/2026-02-21-mcp-auth-design.md)
-- [MCP 认证实现计划](docs/plans/2026-02-21-mcp-auth-impl-plan.md)
-- [TaskService 接口](src/lib/services/task.service.ts)
+- MCP 认证设计（已归档）
+- MCP 认证实现计划（已归档）
+- [TaskService 接口](../../src/lib/services/task.service.ts)
 
 ## 不包含的范围
 - ❌ 任务导入导出（通过 Settings 页面处理）
