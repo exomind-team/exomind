@@ -100,8 +100,6 @@ export default defineConfig(({ mode }) => {
         "@": path.resolve(__dirname, "./src"),
         // Force the npm polyfill package instead of Node builtin externalization.
         events: "events/",
-        // Stub for @tauri-apps/plugin-log (only available inside Tauri runtime).
-        "@tauri-apps/plugin-log": path.resolve(__dirname, "tests/stubs/tauri-plugin-log.ts"),
       },
     },
 
