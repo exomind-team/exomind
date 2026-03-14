@@ -4,7 +4,10 @@ use exomind_runtime::{RuntimePublishRequest, RuntimeStartOptions, start_with_opt
 use futures_util::StreamExt;
 use serde_json::json;
 use std::time::Duration;
-use support::{create_peer, create_route, runtime_base_url, set_peer_interests, start_test_runtime, stop_runtime, wait_until};
+use support::{
+    create_peer, create_route, runtime_base_url, set_peer_interests, start_test_runtime,
+    stop_runtime, wait_until,
+};
 
 #[tokio::test]
 async fn relays_remote_targeted_events_between_two_runtimes() {
@@ -20,14 +23,13 @@ async fn relays_remote_targeted_events_between_two_runtimes() {
     create_route(&client, &rt_b, "mesh.test", "agent", "relay-probe").await;
     create_route(&client, &rt_a, "mesh.test", "remote", "rt-b").await;
 
-    assert!(wait_until(Duration::from_secs(3), || {
-        let interests = rt_a
-            .clone_signal_pool()
-            .window()
-            .recent(0);
-        interests.is_empty()
-    })
-    .await);
+    assert!(
+        wait_until(Duration::from_secs(3), || {
+            let interests = rt_a.clone_signal_pool().window().recent(0);
+            interests.is_empty()
+        })
+        .await
+    );
 
     let event_id = rt_a.publish_signal(RuntimePublishRequest {
         topic: "mesh.test".to_string(),
@@ -38,8 +40,7 @@ async fn relays_remote_targeted_events_between_two_runtimes() {
     });
 
     let delivered = wait_until(Duration::from_secs(5), || {
-        rt_b
-            .clone_signal_pool()
+        rt_b.clone_signal_pool()
             .window()
             .recent(20)
             .iter()
@@ -111,7 +112,9 @@ async fn mesh_stream_replays_remote_routed_events_from_last_event_id() {
     });
 
     let response = client
-        .get(format!("{a_url}/mesh/stream?peer_id=rt-b&heartbeat_interval=30"))
+        .get(format!(
+            "{a_url}/mesh/stream?peer_id=rt-b&heartbeat_interval=30"
+        ))
         .header("Last-Event-ID", first_id)
         .send()
         .await
@@ -138,4 +141,67 @@ async fn mesh_stream_replays_remote_routed_events_from_last_event_id() {
     assert!(replay_payload.contains(&second_id));
 
     rt_a.stop().await.expect("runtime A should stop");
+}
+
+#[tokio::test]
+async fn eventlog_append_route_relays_replication_signal_between_two_runtimes() {
+    let mut rt_a = start_test_runtime("rt-a-eventlog").await;
+    let mut rt_b = start_test_runtime("rt-b-eventlog").await;
+
+    let client = reqwest::Client::new();
+    let a_url = runtime_base_url(&rt_a);
+    let b_url = runtime_base_url(&rt_b);
+
+    create_peer(&client, &rt_a, "rt-b-eventlog", &b_url).await;
+    create_route(
+        &client,
+        &rt_a,
+        "eventlog.replication.appended",
+        "remote",
+        "rt-b-eventlog",
+    )
+    .await;
+
+    client
+        .post(format!("{a_url}/eventlog"))
+        .json(&json!({
+            "id": "relay-rep-1",
+            "timestamp": 1700000000000u64,
+            "content": "hello from eventlog route",
+            "tags": ["note"],
+            "metadata": {
+                "source": {
+                    "deviceId": "desktop-a"
+                }
+            }
+        }))
+        .send()
+        .await
+        .unwrap()
+        .error_for_status()
+        .unwrap();
+
+    let relayed = wait_until(Duration::from_secs(5), || {
+        rt_b.clone_signal_pool()
+            .window()
+            .recent(20)
+            .iter()
+            .any(|event| {
+                event.topic == "eventlog.replication.appended"
+                    && event.hop == 1
+                    && event.payload["event"]["id"] == json!("relay-rep-1")
+            })
+    })
+    .await;
+
+    if !relayed {
+        panic!(
+            "eventlog replication signal relay timeout\nA window: {:?}\nB window: {:?}",
+            rt_a.clone_signal_pool().window().recent(20),
+            rt_b.clone_signal_pool().window().recent(20)
+        );
+    }
+
+    stop_runtime(&mut rt_b, "B eventlog").await;
+    stop_runtime(&mut rt_a, "A eventlog").await;
 }

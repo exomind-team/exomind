@@ -7,10 +7,12 @@ use axum::http::StatusCode;
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use base64::{Engine as _, engine::general_purpose::STANDARD};
+use chrono::{TimeZone, Utc};
 use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::eventlog::{EventRecord, MirrorStatus};
+use crate::signal::types::SignalEvent;
 
 // ── Request / query types ───────────────────────────────────────
 
@@ -79,6 +81,66 @@ fn internal_error(msg: String) -> (StatusCode, Json<ErrorResponse>) {
     )
 }
 
+fn eventlog_replication_seq(event: &EventRecord) -> i64 {
+    if event.timestamp > 0 {
+        return event.timestamp;
+    }
+
+    Utc::now().timestamp_millis().max(1)
+}
+
+fn eventlog_created_at(timestamp: i64) -> String {
+    Utc.timestamp_millis_opt(timestamp)
+        .single()
+        .unwrap_or_else(Utc::now)
+        .to_rfc3339()
+}
+
+fn build_eventlog_replication_payload(event: &EventRecord) -> serde_json::Value {
+    let replication_seq = eventlog_replication_seq(event);
+    let event_type = event
+        .tags
+        .first()
+        .cloned()
+        .unwrap_or_else(|| "note".to_string());
+
+    serde_json::json!({
+        "schemaVersion": 1,
+        "replicationSeq": replication_seq,
+        "cursor": {
+            "kind": "replication_seq",
+            "value": replication_seq,
+        },
+        "event": {
+            "id": event.id,
+            "content": event.content,
+            "createdAt": eventlog_created_at(event.timestamp),
+            "type": event_type,
+            "metadata": event.metadata,
+            "replicationSeq": replication_seq,
+        }
+    })
+}
+
+async fn publish_eventlog_replication_append(state: &AppState, event: &EventRecord) {
+    let signal = SignalEvent {
+        schema_version: 1,
+        id: uuid::Uuid::new_v4().to_string(),
+        topic: "eventlog.replication.appended".to_string(),
+        ts: Utc::now().timestamp_millis() as u64,
+        source: "runtime:eventlog".to_string(),
+        origin_host_id: state.host_id.clone(),
+        hop: 0,
+        trace_id: Some(format!("eventlog:{}", event.id)),
+        payload: build_eventlog_replication_payload(event),
+    };
+
+    state.signal_pool.publish(signal.clone());
+    if let Some(mesh_relay) = &state.mesh_relay {
+        mesh_relay.forward_event_to_peers(signal).await;
+    }
+}
+
 // ── Handlers ────────────────────────────────────────────────────
 
 /// GET /eventlog — list all events (optionally filtered by user_id, limit, since_id).
@@ -116,8 +178,9 @@ async fn append_event(
 ) -> Result<StatusCode, (StatusCode, Json<ErrorResponse>)> {
     state
         .eventlog_store
-        .append_event(query.user_id.as_deref(), event)
+        .append_event(query.user_id.as_deref(), event.clone())
         .map_err(internal_error)?;
+    publish_eventlog_replication_append(&state, &event).await;
     Ok(StatusCode::CREATED)
 }
 
@@ -217,15 +280,9 @@ async fn import_eventlog_json(
     Query(query): Query<ImportQuery>,
     Json(payload): Json<EventLogBackupJsonPayload>,
 ) -> Result<Json<EventLogImportResult>, (StatusCode, Json<ErrorResponse>)> {
-    let strategy = parse_import_strategy(query.strategy.as_deref())
+    let strategy = parse_import_strategy(query.strategy.as_deref()).map_err(internal_error)?;
+    let result = apply_event_import(&state, query.user_id.as_deref(), payload.events, strategy)
         .map_err(internal_error)?;
-    let result = apply_event_import(
-        &state,
-        query.user_id.as_deref(),
-        payload.events,
-        strategy,
-    )
-    .map_err(internal_error)?;
     Ok(Json(result))
 }
 
@@ -234,20 +291,14 @@ async fn import_eventlog_sqlite(
     Query(query): Query<ImportQuery>,
     Json(payload): Json<EventLogBackupSqliteImportPayload>,
 ) -> Result<Json<EventLogImportResult>, (StatusCode, Json<ErrorResponse>)> {
-    let strategy = parse_import_strategy(query.strategy.as_deref())
-        .map_err(internal_error)?;
+    let strategy = parse_import_strategy(query.strategy.as_deref()).map_err(internal_error)?;
     let bytes = STANDARD
         .decode(payload.content_base64)
         .map_err(|error| internal_error(format!("invalid sqlite snapshot: {error}")))?;
     let imported_events = read_events_from_sqlite_snapshot(&bytes, query.user_id.as_deref())
         .map_err(internal_error)?;
-    let result = apply_event_import(
-        &state,
-        query.user_id.as_deref(),
-        imported_events,
-        strategy,
-    )
-    .map_err(internal_error)?;
+    let result = apply_event_import(&state, query.user_id.as_deref(), imported_events, strategy)
+        .map_err(internal_error)?;
     Ok(Json(result))
 }
 
@@ -259,7 +310,11 @@ async fn eventlog_backend_status(
         crate::eventlog::EventLogBackendKind::Sqlite
     );
     Json(EventLogBackendStatusResponse {
-        backend: if supports_sqlite_snapshot { "rt-sqlite" } else { "json-files" },
+        backend: if supports_sqlite_snapshot {
+            "rt-sqlite"
+        } else {
+            "json-files"
+        },
         supports_json_backup: true,
         supports_sqlite_snapshot,
     })
@@ -302,7 +357,9 @@ fn apply_event_import(
     let existing = state.eventlog_store.list_events(user_id)?;
     let result = match strategy {
         EventLogImportStrategy::Overwrite => {
-            state.eventlog_store.replace_all_events(user_id, &incoming)?;
+            state
+                .eventlog_store
+                .replace_all_events(user_id, &incoming)?;
             EventLogImportResult {
                 imported: incoming.len(),
                 skipped: 0,
@@ -348,14 +405,18 @@ fn build_eventlog_sqlite_snapshot_bytes(
         return state
             .eventlog_store
             .sqlite_snapshot_bytes()?
-            .ok_or_else(|| "eventlog sqlite snapshot is unavailable on non-sqlite backend".to_string());
+            .ok_or_else(|| {
+                "eventlog sqlite snapshot is unavailable on non-sqlite backend".to_string()
+            });
     }
 
-    let temp_root = std::env::temp_dir().join(format!("exomind-eventlog-export-{}", uuid::Uuid::new_v4()));
+    let temp_root =
+        std::env::temp_dir().join(format!("exomind-eventlog-export-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&temp_root)
         .map_err(|error| format!("failed to create temp eventlog export dir: {error}"))?;
     let sqlite_path = temp_root.join("eventlog-export.sqlite");
-    let scoped_store = crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
+    let scoped_store =
+        crate::eventlog::EventLogStore::with_sqlite_path(temp_root.clone(), &sqlite_path)?;
     scoped_store.replace_all_events(user_id, events)?;
     let bytes = scoped_store
         .sqlite_snapshot_bytes()?
@@ -366,8 +427,12 @@ fn build_eventlog_sqlite_snapshot_bytes(
     Ok(bytes)
 }
 
-fn read_events_from_sqlite_snapshot(bytes: &[u8], user_id: Option<&str>) -> Result<Vec<EventRecord>, String> {
-    let temp_root = std::env::temp_dir().join(format!("exomind-eventlog-import-{}", uuid::Uuid::new_v4()));
+fn read_events_from_sqlite_snapshot(
+    bytes: &[u8],
+    user_id: Option<&str>,
+) -> Result<Vec<EventRecord>, String> {
+    let temp_root =
+        std::env::temp_dir().join(format!("exomind-eventlog-import-{}", uuid::Uuid::new_v4()));
     std::fs::create_dir_all(&temp_root)
         .map_err(|error| format!("failed to create temp eventlog dir: {error}"))?;
     let sqlite_path = temp_root.join("eventlog-import.sqlite");
@@ -386,12 +451,12 @@ fn read_events_from_sqlite_snapshot(bytes: &[u8], user_id: Option<&str>) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use base64::engine::general_purpose::STANDARD;
     use crate::eventlog::EventLogStore;
     use crate::mesh::MeshState;
     use crate::signal::SignalPool;
     use axum::body::Body;
     use axum::http::Request;
+    use base64::engine::general_purpose::STANDARD;
     use http_body_util::BodyExt;
     use serde_json::Value;
     use std::sync::Arc;
@@ -483,6 +548,88 @@ mod tests {
         assert_eq!(events.len(), 1);
         assert_eq!(events[0]["id"], "e1");
         assert_eq!(events[0]["content"], "hello");
+    }
+
+    #[tokio::test]
+    async fn append_publishes_replication_signal() {
+        let dir = tempdir().unwrap();
+        let store = Arc::new(EventLogStore::new(dir.path().to_path_buf()));
+        let state = test_state_with_eventlog(store);
+        let app = test_router(state.clone());
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/eventlog")
+                    .header("content-type", "application/json")
+                    .body(Body::from(
+                        r#"{
+                            "id":"rep-1",
+                            "timestamp":1700000000000,
+                            "content":"hello replication",
+                            "tags":["note"],
+                            "metadata":{"source":{"deviceId":"desktop-1"}}
+                        }"#,
+                    ))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(resp.status(), StatusCode::CREATED);
+
+        let replication = state
+            .signal_pool
+            .window()
+            .recent(10)
+            .into_iter()
+            .find(|event| event.topic == "eventlog.replication.appended");
+
+        assert!(
+            replication.is_some(),
+            "POST /eventlog should publish eventlog.replication.appended"
+        );
+
+        let replication = replication.unwrap();
+        assert_eq!(replication.source, "runtime:eventlog");
+        assert_eq!(replication.trace_id.as_deref(), Some("eventlog:rep-1"));
+        assert_eq!(replication.payload["schemaVersion"], serde_json::json!(1));
+        assert_eq!(
+            replication.payload["replicationSeq"],
+            serde_json::json!(1700000000000i64)
+        );
+        assert_eq!(
+            replication.payload["cursor"]["kind"],
+            serde_json::json!("replication_seq")
+        );
+        assert_eq!(
+            replication.payload["cursor"]["value"],
+            serde_json::json!(1700000000000i64)
+        );
+        assert_eq!(
+            replication.payload["event"]["id"],
+            serde_json::json!("rep-1")
+        );
+        assert_eq!(
+            replication.payload["event"]["content"],
+            serde_json::json!("hello replication")
+        );
+        assert_eq!(
+            replication.payload["event"]["createdAt"],
+            serde_json::json!("2023-11-14T22:13:20+00:00")
+        );
+        assert_eq!(
+            replication.payload["event"]["type"],
+            serde_json::json!("note")
+        );
+        assert_eq!(
+            replication.payload["event"]["replicationSeq"],
+            serde_json::json!(1700000000000i64)
+        );
+        assert_eq!(
+            replication.payload["event"]["metadata"]["source"]["deviceId"],
+            serde_json::json!("desktop-1")
+        );
     }
 
     #[tokio::test]
@@ -757,14 +904,19 @@ mod tests {
         let payload: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(payload["version"], 1);
         assert_eq!(payload["events"][0]["id"], "backup-1");
-        assert_eq!(payload["events"][0]["metadata"]["source"]["deviceId"], "dev-1");
+        assert_eq!(
+            payload["events"][0]["metadata"]["source"]["deviceId"],
+            "dev-1"
+        );
     }
 
     #[tokio::test]
     async fn export_eventlog_sqlite_snapshot() {
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("eventlog.sqlite");
-        let store = Arc::new(EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap());
+        let store = Arc::new(
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap(),
+        );
         store
             .append_event(
                 None,
@@ -800,21 +952,33 @@ mod tests {
     async fn export_eventlog_sqlite_snapshot_honors_user_id_scope() {
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("eventlog-users.sqlite");
-        let store = Arc::new(EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap());
-        store.append_event(Some("user-a"), EventRecord {
-            id: "user-a-1".to_string(),
-            timestamp: 1000,
-            content: "from user a".to_string(),
-            tags: vec!["note".to_string()],
-            metadata: None,
-        }).unwrap();
-        store.append_event(Some("user-b"), EventRecord {
-            id: "user-b-1".to_string(),
-            timestamp: 2000,
-            content: "from user b".to_string(),
-            tags: vec!["note".to_string()],
-            metadata: None,
-        }).unwrap();
+        let store = Arc::new(
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap(),
+        );
+        store
+            .append_event(
+                Some("user-a"),
+                EventRecord {
+                    id: "user-a-1".to_string(),
+                    timestamp: 1000,
+                    content: "from user a".to_string(),
+                    tags: vec!["note".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
+        store
+            .append_event(
+                Some("user-b"),
+                EventRecord {
+                    id: "user-b-1".to_string(),
+                    timestamp: 2000,
+                    content: "from user b".to_string(),
+                    tags: vec!["note".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
 
         let app = test_router(test_state_with_eventlog(store));
         let resp = app
@@ -837,13 +1001,18 @@ mod tests {
         let import_dir = tempdir().unwrap();
         let import_sqlite_path = import_dir.path().join("scoped-export.sqlite");
         std::fs::write(&import_sqlite_path, bytes).unwrap();
-        let imported_store = EventLogStore::with_sqlite_path(import_dir.path().to_path_buf(), &import_sqlite_path).unwrap();
+        let imported_store =
+            EventLogStore::with_sqlite_path(import_dir.path().to_path_buf(), &import_sqlite_path)
+                .unwrap();
         let user_a_events = imported_store.list_events(Some("user-a")).unwrap();
         let user_b_events = imported_store.list_events(Some("user-b")).unwrap();
 
         assert_eq!(user_a_events.len(), 1);
         assert_eq!(user_a_events[0].id, "user-a-1");
-        assert!(user_b_events.is_empty(), "scoped sqlite export should not leak other users");
+        assert!(
+            user_b_events.is_empty(),
+            "scoped sqlite export should not leak other users"
+        );
     }
 
     #[tokio::test]
@@ -870,7 +1039,8 @@ mod tests {
                     .method("POST")
                     .uri("/eventlog/import/json?strategy=merge")
                     .header("content-type", "application/json")
-                    .body(Body::from(r#"{
+                    .body(Body::from(
+                        r#"{
                         "version": 1,
                         "exportedAt": "2026-03-11T00:00:00.000Z",
                         "events": [
@@ -890,7 +1060,8 @@ mod tests {
                                 }
                             }
                         ]
-                    }"#))
+                    }"#,
+                    ))
                     .unwrap(),
             )
             .await
@@ -905,7 +1076,11 @@ mod tests {
 
         let events = store.list_events(None).unwrap();
         assert_eq!(events.len(), 2);
-        assert!(events.iter().any(|event| event.content == "existing replaced"));
+        assert!(
+            events
+                .iter()
+                .any(|event| event.content == "existing replaced")
+        );
         assert!(events.iter().any(|event| event.id == "incoming-2"));
     }
 
@@ -913,18 +1088,31 @@ mod tests {
     async fn import_eventlog_sqlite_snapshot_respects_user_id_scope() {
         let import_dir = tempdir().unwrap();
         let import_sqlite_path = import_dir.path().join("import-eventlog.sqlite");
-        let import_store = EventLogStore::with_sqlite_path(import_dir.path().to_path_buf(), &import_sqlite_path).unwrap();
-        import_store.append_event(Some("user-a"), EventRecord {
-            id: "user-a-import".to_string(),
-            timestamp: 1234,
-            content: "imported for user a".to_string(),
-            tags: vec!["note".to_string()],
-            metadata: None,
-        }).unwrap();
+        let import_store =
+            EventLogStore::with_sqlite_path(import_dir.path().to_path_buf(), &import_sqlite_path)
+                .unwrap();
+        import_store
+            .append_event(
+                Some("user-a"),
+                EventRecord {
+                    id: "user-a-import".to_string(),
+                    timestamp: 1234,
+                    content: "imported for user a".to_string(),
+                    tags: vec!["note".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
         let import_bytes = import_store.sqlite_snapshot_bytes().unwrap().unwrap();
 
         let target_dir = tempdir().unwrap();
-        let target_store = Arc::new(EventLogStore::with_sqlite_path(target_dir.path().to_path_buf(), &target_dir.path().join("target.sqlite")).unwrap());
+        let target_store = Arc::new(
+            EventLogStore::with_sqlite_path(
+                target_dir.path().to_path_buf(),
+                &target_dir.path().join("target.sqlite"),
+            )
+            .unwrap(),
+        );
         let app = test_router(test_state_with_eventlog(target_store.clone()));
 
         let resp = app
@@ -933,9 +1121,12 @@ mod tests {
                     .method("POST")
                     .uri("/eventlog/import/sqlite?user_id=user-a&strategy=overwrite")
                     .header("content-type", "application/json")
-                    .body(Body::from(serde_json::json!({
-                        "content_base64": STANDARD.encode(import_bytes),
-                    }).to_string()))
+                    .body(Body::from(
+                        serde_json::json!({
+                            "content_base64": STANDARD.encode(import_bytes),
+                        })
+                        .to_string(),
+                    ))
                     .unwrap(),
             )
             .await
@@ -985,14 +1176,21 @@ mod tests {
 
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("eventlog-temp-cleanup.sqlite");
-        let store = Arc::new(EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap());
-        store.append_event(Some("user-a"), EventRecord {
-            id: "cleanup-a-1".to_string(),
-            timestamp: 1111,
-            content: "cleanup export".to_string(),
-            tags: vec!["note".to_string()],
-            metadata: None,
-        }).unwrap();
+        let store = Arc::new(
+            EventLogStore::with_sqlite_path(dir.path().to_path_buf(), &sqlite_path).unwrap(),
+        );
+        store
+            .append_event(
+                Some("user-a"),
+                EventRecord {
+                    id: "cleanup-a-1".to_string(),
+                    timestamp: 1111,
+                    content: "cleanup export".to_string(),
+                    tags: vec!["note".to_string()],
+                    metadata: None,
+                },
+            )
+            .unwrap();
 
         let app = test_router(test_state_with_eventlog(store));
         let export_response = app
@@ -1006,14 +1204,25 @@ mod tests {
             .await
             .unwrap();
         assert_eq!(export_response.status(), StatusCode::OK);
-        let export_body = export_response.into_body().collect().await.unwrap().to_bytes();
+        let export_body = export_response
+            .into_body()
+            .collect()
+            .await
+            .unwrap()
+            .to_bytes();
         let export_payload: Value = serde_json::from_slice(&export_body).unwrap();
         let import_bytes = STANDARD
             .decode(export_payload["content_base64"].as_str().unwrap())
             .unwrap();
 
         let import_dir = tempdir().unwrap();
-        let target_store = Arc::new(EventLogStore::with_sqlite_path(import_dir.path().to_path_buf(), &import_dir.path().join("target.sqlite")).unwrap());
+        let target_store = Arc::new(
+            EventLogStore::with_sqlite_path(
+                import_dir.path().to_path_buf(),
+                &import_dir.path().join("target.sqlite"),
+            )
+            .unwrap(),
+        );
         let import_app = test_router(test_state_with_eventlog(target_store));
         let import_response = import_app
             .oneshot(
@@ -1021,9 +1230,12 @@ mod tests {
                     .method("POST")
                     .uri("/eventlog/import/sqlite?user_id=user-a&strategy=overwrite")
                     .header("content-type", "application/json")
-                    .body(Body::from(serde_json::json!({
-                        "content_base64": STANDARD.encode(import_bytes),
-                    }).to_string()))
+                    .body(Body::from(
+                        serde_json::json!({
+                            "content_base64": STANDARD.encode(import_bytes),
+                        })
+                        .to_string(),
+                    ))
                     .unwrap(),
             )
             .await
