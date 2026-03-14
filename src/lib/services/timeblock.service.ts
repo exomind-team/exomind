@@ -730,27 +730,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private async readActiveBlock(): Promise<ActiveBlockData | null> {
     if (this.backendMode === 'rt-sqlite') {
-      const fromRtAdapter = await this.rtAdapter?.getActiveBlock() ?? null;
-      if (fromRtAdapter) {
-        return fromRtAdapter;
-      }
-
-      const legacyData = await this.env.storage.read<ActiveBlockData>(ACTIVE_BLOCK_KEY);
-      if (legacyData) {
-        await this.rtAdapter?.putActiveBlock(legacyData);
-        await this.env.storage.delete(ACTIVE_BLOCK_KEY);
-        return legacyData;
-      }
-
-      if (!this.useInjectedEnvStorage) {
-        const fromLegacyStorage = await getActiveBlockStorage().loadActiveBlock();
-        if (fromLegacyStorage) {
-          await this.rtAdapter?.putActiveBlock(fromLegacyStorage);
-          return fromLegacyStorage;
-        }
-      }
-
-      return null;
+      return await this.rtAdapter?.getActiveBlock() ?? null;
     }
 
     if (this.useInjectedEnvStorage) {
@@ -792,17 +772,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private async readCompletedBlockData(): Promise<TimeBlockData[]> {
     if (this.backendMode === 'rt-sqlite') {
-      const fromRt = await this.rtAdapter?.listCompletedBlocks() ?? [];
-      if (fromRt.length > 0) {
-        return fromRt;
-      }
-
-      const legacyData = await this.env.storage.read<TimeBlockData[]>(TIME_BLOCKS_KEY);
-      const nextBlocks = legacyData ?? [];
-      if (nextBlocks.length > 0) {
-        await this.rtAdapter?.replaceCompletedBlocks(nextBlocks);
-      }
-      return nextBlocks;
+      return await this.rtAdapter?.listCompletedBlocks() ?? [];
     }
 
     return await this.env.storage.read<TimeBlockData[]>(TIME_BLOCKS_KEY) || [];

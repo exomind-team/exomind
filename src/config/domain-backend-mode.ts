@@ -55,3 +55,9 @@ export function getTimeblockBackendMode(): DomainBackendMode {
 export function setTimeblockBackendMode(mode: DomainBackendMode): DomainBackendMode {
   return setMode('timeblock', mode);
 }
+
+export function setAllBackendModes(mode: DomainBackendMode): void {
+  setMode('eventlog', mode);
+  setMode('task', mode);
+  setMode('timeblock', mode);
+}

@@ -40,6 +40,7 @@ const AUDITED_SETTINGS_IDS = [
   'task-backend-mode',
   'timeblock-backend-mode',
   'data-transfer',
+  'data-legacy-migration',
   'more-update',
   'more-help-center',
   'more-feedback',
@@ -97,6 +98,7 @@ const NUMBER_IDS = [
 ] as const;
 
 const ROW_ACTION_IDS = [
+  'data-legacy-migration',
   'more-update',
   'more-help-center',
   'more-feedback',
@@ -288,6 +290,10 @@ describe('settings registry coverage audit', () => {
   it('keeps every registry item reachable across supported settings contexts', () => {
     const contexts: SettingsContext[] = [
       getBaseCtx(),
+      {
+        ...getBaseCtx(),
+        isDesktop: true,
+      },
       {
         ...getBaseCtx(),
         developerMode: true,
