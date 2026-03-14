@@ -122,7 +122,11 @@
 
 ### 归档计划
 
-- [plans/archive/](plans/archive/) -- 早期归档计划（ExoBuffer Connector、API、自主生命体规格、开发流程、通知权限守护）
+- [ExoBuffer Connector 技术需求](plans/archive/01_ExoBufferConnector技术需求报告.md) -- ExoBuffer 连接器技术需求报告
+- [API 设计](plans/archive/API.md) -- 早期 API 设计文档
+- [自主生命体规格](plans/archive/AUTONOMOUS_LIFE_SPEC.md) -- 自主生命体原始规格
+- [开发流程](plans/archive/DEVELOPMENT_PROCESS.md) -- 早期开发流程定义
+- [通知权限守护](plans/archive/ExoMind-Notification-Permission-Guard.md) -- 通知权限守护设计
 
 ---
 

@@ -75,14 +75,7 @@ ExoMind 的每一条系统级约束都必须具备**双层表述**，缺一不�
 
 → 详见 [docs/architecture/overview.md](docs/architecture/overview.md)
 
-**快速参考**：L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
-
-| 层级 | 职责 | 接口归属 |
-|------|------|----------|
-| L4 UI | React + Zustand | Service interface（L3 定义） |
-| L3 Service/Actor/Agent | 业务逻辑 | ActorContext（L3 定义） |
-| L2 Environment | 共享物理世界，持有 Port | Port interface（L2 定义） |
-| L1 Adapter | 具体实现，按运行时替换 | — |
+L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
 
 ---
 
