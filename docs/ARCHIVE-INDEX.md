@@ -11,6 +11,17 @@
 
 | 原路径 | 摘要 | 关联 Issue/PR | 删除提交 |
 |--------|------|---------------|----------|
+| docs/plans/2026-03-07-user-system-hybrid-identity-implementation-plan.md | 用户系统混合身份实现计划（方向已变更） | - | (#529) |
+| docs/plans/2026-03-06-tasks-today-timeblock-view.md | 今日任务时间块视图设计（未推进） | - | (#529) |
+| docs/plans/2026-02-27-issue-205-p1-split-plan.md | Issue #205 P1 拆分计划（已完成父 Issue） | #205 | (#529) |
+| docs/plans/2026-02-27-issue-198-settings-ia-legal-support.md | Issue #198 设置 IA 法律支持计划（已废弃） | #198 | (#529) |
+| docs/plans/2026-02-27-issue-198-settings-ia-legal-support-pr-comment.md | Issue #198 PR 评论草稿（已废弃） | #198 | (#529) |
+| docs/plans/2026-02-26-issue-205-agent-hub-backend-plan.md | Issue #205 Agent Hub 后端计划（已废弃） | #205 | (#529) |
+| docs/plans/2026-02-23-issue-215-me-ui-plan.md | Issue #215 Me UI 计划（已废弃） | #215 | (#529) |
+| docs/plans/2026-02-11-issue-25-epic-subtasks-plan.md | Issue #25 Epic 子任务分解计划（已废弃） | #25 | (#529) |
+| docs/plans/2026-02-21-user-management-ui.md | 用户管理 UI 计划（已废弃） | - | (#529) |
+| docs/plans/2026-02-21-mcp-auth-impl-plan.md | MCP 认证实现计划（已废弃，被新方案替代） | - | (#529) |
+| docs/plans/2026-01-30-ralph-loop-enhanced.md | Ralph Loop 增强计划（早期草稿，已废弃） | - | (#529) |
 
 ## 架构文档（已合并）
 
@@ -21,6 +32,13 @@
 
 | 原路径 | 摘要 | 删除提交 |
 |--------|------|----------|
+| docs/plans/2026-03-12-settings-inline-enum-alignment-design.md | 设置页 inline enum 对齐设计（功能已实现） | (#529) |
+| docs/plans/2026-03-12-settings-group-overlay-design.md | 设置页分组 overlay 设计（功能已实现） | (#529) |
+| docs/plans/2026-03-12-settings-dialog-alignment-design.md | 设置 dialog 对齐设计（功能已实现） | (#529) |
+| docs/plans/2026-03-12-settings-danger-action-design.md | 设置危险操作设计（功能已实现） | (#529) |
+| docs/plans/2026-03-10-review-agent-unified-entry-design.md | Review Agent 统一入口设计（功能已实现） | (#529) |
+| docs/plans/2026-02-21-mcp-auth-design.md | MCP 认证架构设计（已被新方案替代） | (#529) |
+| docs/plans/2026-02-05-event-log-design.md | 事件日志设计（功能已实现，早期草稿） | (#529) |
 
 ## 项目管理文档（已迁移或删除）
 
