@@ -86,7 +86,7 @@ export function MigrationDialogController() {
               method: 'GET',
               headers: { Accept: 'application/json' },
             });
-            if (!response.ok) return [];
+            if (!response.ok) throw new Error(`RT blocks unavailable: ${response.status}`);
             return response.json() as Promise<unknown[]>;
           },
           readRtActiveBlock: async () => {
@@ -97,7 +97,7 @@ export function MigrationDialogController() {
               headers: { Accept: 'application/json' },
             });
             if (response.status === 404) return null;
-            if (!response.ok) return null;
+            if (!response.ok) throw new Error(`RT active block unavailable: ${response.status}`);
             return response.json() as Promise<unknown>;
           },
         };
