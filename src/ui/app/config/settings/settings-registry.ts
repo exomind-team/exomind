@@ -880,11 +880,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: Heart,
     category: 'about',
     type: 'action',
-    onAction: () => {
-      if (typeof window !== 'undefined') {
-        window.open('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
-      }
-    },
+    onAction: () => openExternalUrl('https://exo-mind.ai/'),
   },
   {
     id: 'about-legal',
@@ -893,9 +889,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'about',
     type: 'action',
     onAction: () => {
-      if (typeof window !== 'undefined') {
-        window.location.hash = '/settings/legal-support';
-      }
+      window.location.pathname = '/settings/legal-support';
     },
   },
   {
