@@ -191,24 +191,41 @@ bun run tauri dev
 多实例 `tauri dev` 推荐使用仓库内管理器（instance manager / 实例管理器）：
 
 ```powershell
-# 启动一个受管实例（自动分配端口并记录 PID/日志）
-bun run tauri:manager -- start --name codex-main
+# 启动桌面端实例
+bun run tauri:manager -- start --name desktop
+
+# 启动 Android 端实例（需要模拟器或真机已连接）
+bun run tauri:manager -- start --name phone --target android
 
 # 查看当前受管实例
 bun run tauri:manager -- list
 
 # 跟随日志（实时监听 / live tail）
-bun run tauri:manager -- logs --name codex-main --follow
+bun run tauri:manager -- logs --name phone --follow
 
 # 精确停止某一个实例（只杀登记的根 PID 树）
-bun run tauri:manager -- stop --name codex-main
+bun run tauri:manager -- stop --name phone
+
+# 清理已退出的实例记录
+bun run tauri:manager -- prune
 ```
+
+可用参数：
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--name <name>` | 实例名称 | `<target>-<port>` |
+| `--target desktop\|android` | 构建目标平台 | `desktop` |
+| `--web-port <port>` | Vite 前端端口 | 自动分配 |
+| `--hmr-port <port>` | HMR 端口 | 自动分配 |
+| `--watch` | 启用 Tauri 文件监视 | 关闭 |
 
 说明：
 
 - 元数据与日志保存在 `.tmp/tauri-dev-instances/`。
+- `--target android` 会执行 `bun tauri android dev`，自动部署到已连接的模拟器或真机。
+- 每个实例自动分配独立的 Web/HMR 端口，避免多实例冲突。
 - `stop` 只针对该实例登记的根 PID 做树状终止，避免手工 `taskkill /T` 误伤其它实例。
-- 只有当你需要跨仓库、跨 agent、跨 IDE 统一调度时，再考虑把这层抽成 MCP；当前问题先用仓库内脚本更稳也更容易排障。
 
 ## 测试与验收（Testing / 测试）
 
