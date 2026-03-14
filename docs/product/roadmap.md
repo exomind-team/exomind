@@ -4,7 +4,7 @@
 > **版本**: 2.0
 > **创建时间**: 2026-01-29
 > **最后更新**: 2026-01-29
-> **参考**: [ExoMind 知识库](../docs/02_ExoMind-KNOWLEDGE-BASE.md)
+> **参考**: [架构概览](../architecture/overview.md)
 
 ---
 
@@ -331,7 +331,7 @@
 | **agent.md** | p1 | ralph loop 流程 |
 | **input.md** | p3 | 任务队列 |
 
-> **ralph loop 读取优先级**: `pm/input.md` > `pm/prd.md` > `pm/roadmap.md` > `pm/development.md`
+> **ralph loop 读取优先级**: `docs/product/PRD.md` > `docs/product/roadmap.md`
 
 ---
 
@@ -347,4 +347,4 @@
 *创建时间: 2026-01-29*
 *版本: 2.0*
 *下次更新: ~2026-04-29*
-*参考: [ExoMind 知识库](../docs/02_ExoMind-KNOWLEDGE-BASE.md)*
+*参考: [架构概览](../architecture/overview.md)*

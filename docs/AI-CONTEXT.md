@@ -26,12 +26,12 @@ Tauri 2.0 + React 18 + TypeScript + Rust | Zustand | Tailwind CSS + Radix UI | B
 
 ## 生命判据
 
-系统设计遵循 5 条否决式生命判据：可存活区间、边界归因、过程性存在、失败不可回滚、环境裁决。
+系统设计遵循 5 条工程否决式生命判据：可存活区间、边界归因、过程性存在、失败不可回滚、环境裁决。
 详见 CLAUDE.md "项目概述" 部分。
 
 ## 当前阶段
 
-Phase 2 完成（SignalPool L3-L5），Phase 3 进行中（资源管控 + 可观测性）。
+Phase 2 完成（SignalPool L3-L5），Phase 3 待启动（资源管控 + 可观测性）。
 
 ## 文档索引
 

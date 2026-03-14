@@ -286,16 +286,16 @@ E2E 测试脚本覆盖了 issue-27, 77, 82, 120, 198, 201, 204, 205, 213, 215, 2
 | `docs/pr/` | 8 | PR 相关文档 |
 | `docs/research/` | 1 | 技术调研 |
 
-### pm/ 目录
+### docs/ 迁移后目录（当前结构）
 
-| 文件 | 内容 |
-|------|------|
-| `PRD.md` | 产品需求文档 |
-| `roadmap.md` | 产品路线图 |
-| `git-spec.md` | Git 规范 |
-| `COMPLETED_FEATURES.md` | 已完成功能列表 |
-| `GIT_WORKTREE_SPEC.md` | Git Worktree 规范 |
-| `memory/` | 记忆系统（日报、知识点、计划等） |
+> 注：以下为迁移前的 pm/ 结构描述，文档已于 2026-03 迁移至 docs/ 目录。
+
+| 原 pm/ 路径 | 迁移后路径 |
+|------------|-----------|
+| `pm/PRD.md` | `docs/product/PRD.md` |
+| `pm/roadmap.md` | `docs/product/roadmap.md` |
+| `pm/git-spec.md` | `docs/development/git-spec.md` |
+| `pm/memory/` | `docs/memory/` |
 
 ---
 

@@ -5,7 +5,7 @@
 ## 目录结构
 
 ```
-pm/memory/
+docs/memory/
 ├── long-term.md              # 长期记忆（宏观决策、路线图）
 ├── logs.md                   # 执行日志（每轮追加，时间线）
 ├── 知识点-XXX.md              # 经验库（主题分类，快速检索）

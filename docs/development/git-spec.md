@@ -309,7 +309,7 @@ D:\project\
 └── exomind\                       ← 主仓库目录
     ├── .git\                      ← Git 数据目录
     ├── src/
-    ├── pm/
+    ├── docs/
     └── ...
 ```
 
