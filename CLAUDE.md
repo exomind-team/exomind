@@ -254,7 +254,7 @@ src/
 
 ### 记忆系统 ⭐
 
-每轮有价值的内容都要归档，形成可检索的知识库。详见：[pm/memory/README.md](pm/memory/README.md)
+每轮有价值的内容都要归档，形成可检索的知识库。详见：[docs/memory/README.md](docs/memory/README.md)
 
 ---
 
@@ -285,7 +285,7 @@ src/
 **工作流程**：
 
 ```
-对话终端 ←→ pm/logs/YYYY-MM-DD.jsonl（记录想法）
+对话终端 ←→ docs/memory/logs.md（记录想法）
      ↓
 编码终端读取日志 → 执行编码任务 → Git 提交
 ```
@@ -521,9 +521,9 @@ docs/
 ├── architecture/        # 架构设计
 └── specs/               # 模块规格
 
-pm/
-├── git-spec.md          # Git 规范
-└── memory/              # 记忆系统
+docs/memory/             # 记忆系统（原 pm/memory/）
+docs/product/            # 产品文档（原 pm/PRD.md, roadmap.md）
+docs/development/        # 开发规范（含 git-spec.md）
 ```
 
 ---
@@ -607,11 +607,11 @@ pm/
 |------|------|
 | 架构设计 | `docs/architecture/` |
 | 模块规格 | `docs/specs/` |
-| Git 规范 | `pm/git-spec.md` |
-| 产品需求 | `pm/prd.md` |
-| 产品路线图 | `pm/roadmap.md` |
-| 执行日志 | `pm/memory/logs.md` |
-| Git工作流知识点 | `pm/memory/知识点-Git工作流.md` |
+| Git 规范 | `docs/development/git-spec.md` |
+| 产品需求 | `docs/product/PRD.md` |
+| 产品路线图 | `docs/product/roadmap.md` |
+| 执行日志 | `docs/memory/logs.md` |
+| Git工作流知识点 | `docs/memory/知识点-Git工作流.md` |
 
 ---
 

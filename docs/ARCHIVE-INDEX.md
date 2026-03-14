@@ -39,7 +39,15 @@
 | pm/memory.md | 记忆系统索引 v3.0（内容已合并/重复） | DELETED | (本次提交) |
 | pm/memory/phase3-plan.md | Phase 3 计划（已过期） | DELETED | (本次提交) |
 | pm/memory/signal-pool-phase2-plan.md | SignalPool Phase 2 计划（已完成） | DELETED | (本次提交) |
-| pm/memory/日报-2026-02-09.md | 2026-02-09 日报（历史归档） | DELETED | (本次提交) |
+| pm/memory/日报-2026-02-09.md | 2026-02-09 日报（历史归档） | DELETED | f97ec04 |
+| pm/lock-mechanism-design.md | 锁机制设计（已实现，内容过期） | DELETED | (本次提交) |
+| pm/PR20-REVIEW.md | PR #20 Review 记录（已合并归档） | DELETED | (本次提交) |
+| pm/issue-120-plan.md | Issue #120 计划（已完成） | DELETED | (本次提交) |
+| pm/issue-40-dark-mode-plan.md | Issue #40 暗色模式计划（已完成） | DELETED | (本次提交) |
+| pm/issue-95-plan.md | Issue #95 计划（已完成） | DELETED | (本次提交) |
+| pm/input.md | 任务输入队列（已废弃） | DELETED | (本次提交) |
+| pm/tasks_plan.md | Phase 任务计划（已废弃） | DELETED | (本次提交) |
+| pm/plans/issue-73-meditation-countdown-end-sound.md | Issue #73 计划（已完成） | DELETED | (本次提交) |
 
 ## 临时文档（已删除）
 
