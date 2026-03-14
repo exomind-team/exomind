@@ -466,6 +466,9 @@ pub async fn start_with_options(
                 state.registry.clone(),
             ),
         );
+        actor_tasks.push(signal::actors::input_ingest_actor::spawn_input_ingest_actor(
+            Arc::clone(&state.signal_pool),
+        ));
         actor_tasks.push(signal::actors::task_classifier_actor::spawn_task_actor(
             Arc::clone(&state.signal_pool),
         ));

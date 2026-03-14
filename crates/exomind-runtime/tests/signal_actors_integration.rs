@@ -14,6 +14,7 @@
 
 use exomind_runtime::signal::types::{SignalEvent, SignalRoute, TargetType};
 use exomind_runtime::signal::SignalPool;
+use std::sync::Arc;
 use serde_json::json;
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -47,6 +48,11 @@ fn add_route(pool: &SignalPool, id: &str, topic: &str, target_type: TargetType, 
         created_at: now.clone(),
         updated_at: now,
     }).unwrap();
+}
+
+async fn yield_for_actor() {
+    tokio::task::yield_now().await;
+    tokio::task::yield_now().await;
 }
 
 // ─── Task Actor Tests ───────────────────────────────────────────
@@ -307,6 +313,49 @@ async fn full_chain_input_to_task_and_eventlog() {
     //   - eventlog.appended follows user.input.text
     //   - task.auto-created follows input.classified
     //   - No cross-contamination between actors
+}
+
+#[tokio::test]
+async fn voice_transcript_is_normalized_before_eventlog_append() {
+    let pool = Arc::new(SignalPool::new(None));
+    let _ingest = exomind_runtime::signal::actors::input_ingest_actor::spawn_input_ingest_actor(Arc::clone(&pool));
+    let _eventlog = exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(Arc::clone(&pool));
+    yield_for_actor().await;
+
+    let mut rx = pool.subscribe();
+    pool.publish(make_event(
+        "voice.input.transcript",
+        json!({
+            "text": "今天继续推进 issue 511",
+            "transcript": "今天继续推进 issue 511",
+            "inputMode": "voice",
+            "captureSource": "global-shortcut",
+            "targetScope": "agent-chat",
+        }),
+    ));
+
+    let mut topics = Vec::new();
+    for _ in 0..3 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for voice ingest chain")
+            .expect("should receive signal");
+        topics.push(event.topic.clone());
+        if event.topic == "user.input.normalized" {
+            assert_eq!(event.payload["text"], "今天继续推进 issue 511");
+            assert_eq!(event.payload["inputMode"], "voice");
+            assert_eq!(event.payload["captureSource"], "global-shortcut");
+        }
+        if event.topic == "eventlog.appended" {
+            assert_eq!(event.payload["text"], "今天继续推进 issue 511");
+            assert_eq!(event.payload["inputMode"], "voice");
+            assert_eq!(event.payload["captureSource"], "global-shortcut");
+        }
+    }
+
+    assert!(topics.iter().any(|topic| topic == "voice.input.transcript"));
+    assert!(topics.iter().any(|topic| topic == "user.input.normalized"));
+    assert!(topics.iter().any(|topic| topic == "eventlog.appended"));
 }
 
 /// Verify the session.end -> review.completed chain.

@@ -5,10 +5,20 @@ import type { ASRResult } from '@/lib/ports/asr-port';
 import {
   VOICE_INPUT_TRANSCRIPT_TOPIC,
 } from '@/lib/constants/signal-topics';
+import type {
+  AgentInteractionContext,
+  NormalizedInputEnvelope,
+  TargetScope,
+  WindowContext,
+} from '@/lib/types/normalized-input';
 
 export interface PublishVoiceTranscriptOptions {
   source?: string;
   traceId?: string;
+  captureSource?: string;
+  targetScope?: TargetScope;
+  window?: WindowContext;
+  agentContext?: AgentInteractionContext;
 }
 
 function buildRuntimeHostRecord(): RuntimeHostRecord {
@@ -34,6 +44,39 @@ function buildTraceId(traceId?: string): string {
   return `voice:${Date.now().toString(36)}:${suffix}`;
 }
 
+function normalizeOptionalString(value: string | null | undefined): string | null | undefined {
+  const trimmed = value?.trim();
+  return trimmed ? trimmed : undefined;
+}
+
+function buildNormalizedEnvelope(
+  result: Pick<ASRResult, 'text'> & Partial<Pick<ASRResult, 'lang' | 'confidence' | 'duration'>>,
+  options: PublishVoiceTranscriptOptions,
+  traceId: string,
+  source: string,
+): NormalizedInputEnvelope {
+  return {
+    traceId,
+    inputMode: 'voice',
+    captureSource: options.captureSource?.trim() || source,
+    text: result.text.trim(),
+    rawText: result.text.trim(),
+    lang: result.lang,
+    confidence: result.confidence,
+    durationMs: result.duration,
+    targetScope: options.targetScope ?? 'unknown',
+    window: options.window ? {
+      title: normalizeOptionalString(options.window.title),
+      processName: normalizeOptionalString(options.window.processName),
+    } : undefined,
+    agentContext: options.agentContext ? {
+      agentId: normalizeOptionalString(options.agentContext.agentId),
+      agentName: normalizeOptionalString(options.agentContext.agentName),
+      sessionId: normalizeOptionalString(options.agentContext.sessionId),
+    } : undefined,
+  };
+}
+
 export async function publishVoiceTranscriptSignal(
   result: Pick<ASRResult, 'text'> & Partial<Pick<ASRResult, 'lang' | 'confidence' | 'duration'>>,
   options: PublishVoiceTranscriptOptions = {},
@@ -48,19 +91,17 @@ export async function publishVoiceTranscriptSignal(
 
   const source = options.source?.trim() || 'frontend:voice-input-button';
   const traceId = buildTraceId(options.traceId);
-  const payload = {
-    text,
+  const normalizedEnvelope = buildNormalizedEnvelope(result, options, traceId, source);
+  const transcriptPayload = {
+    ...normalizedEnvelope,
     transcript: text,
-    lang: result.lang,
-    confidence: result.confidence,
     duration: result.duration,
-    inputMode: 'voice' as const,
   };
 
   await publisher.publish({
     topic: VOICE_INPUT_TRANSCRIPT_TOPIC,
     source,
     trace_id: traceId,
-    payload,
+    payload: transcriptPayload,
   });
 }

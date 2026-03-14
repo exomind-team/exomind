@@ -8,7 +8,7 @@ use crate::signal::types::SignalEvent;
 /// Spawn the EventLog Actor as a background tokio task.
 ///
 /// The actor subscribes to the SignalPool broadcast channel, filters for
-/// `user.input.text` events, and re-publishes each as an `eventlog.appended`
+/// `user.input.normalized` events, and re-publishes each as an `eventlog.appended`
 /// signal containing the extracted text and a timestamp.
 pub fn spawn_eventlog_actor(pool: Arc<SignalPool>) -> tokio::task::JoinHandle<()> {
     tokio::spawn(async move {
@@ -17,7 +17,7 @@ pub fn spawn_eventlog_actor(pool: Arc<SignalPool>) -> tokio::task::JoinHandle<()
         loop {
             match rx.recv().await {
                 Ok(event) => {
-                    if event.topic != "user.input.text" {
+                    if event.topic != "user.input.normalized" {
                         continue;
                     }
                     handle_user_input(&pool, &event);
@@ -63,6 +63,11 @@ fn handle_user_input(pool: &SignalPool, event: &SignalEvent) {
         payload: serde_json::json!({
             "text": text,
             "ts": now_ms,
+            "inputMode": event.payload.get("inputMode").cloned().unwrap_or(serde_json::Value::Null),
+            "captureSource": event.payload.get("captureSource").cloned().unwrap_or(serde_json::Value::Null),
+            "targetScope": event.payload.get("targetScope").cloned().unwrap_or(serde_json::Value::Null),
+            "window": event.payload.get("window").cloned().unwrap_or(serde_json::Value::Null),
+            "agentContext": event.payload.get("agentContext").cloned().unwrap_or(serde_json::Value::Null),
         }),
     };
 
@@ -78,13 +83,18 @@ mod tests {
         SignalEvent {
             schema_version: 1,
             id: uuid::Uuid::new_v4().to_string(),
-            topic: "user.input.text".to_string(),
+            topic: "user.input.normalized".to_string(),
             ts: chrono::Utc::now().timestamp_millis() as u64,
             source: "test".to_string(),
             origin_host_id: "host-test".to_string(),
             hop: 0,
             trace_id: Some("trace-el-1".to_string()),
-            payload: serde_json::json!({ "text": text }),
+            payload: serde_json::json!({
+                "text": text,
+                "inputMode": "voice",
+                "captureSource": "global-shortcut",
+                "targetScope": "agent-chat",
+            }),
         }
     }
 
@@ -107,7 +117,7 @@ mod tests {
         let event = make_user_input_event("hello world");
         pool.publish(event);
 
-        // 1. The original user.input.text event (broadcast)
+        // 1. The original user.input.normalized event (broadcast)
         let first = tokio::time::timeout(
             std::time::Duration::from_secs(2),
             rx.recv(),
@@ -115,7 +125,7 @@ mod tests {
         .await
         .expect("timeout waiting for original event")
         .expect("should receive original event");
-        assert_eq!(first.topic, "user.input.text");
+        assert_eq!(first.topic, "user.input.normalized");
 
         // 2. eventlog.appended
         let second = tokio::time::timeout(
@@ -129,6 +139,9 @@ mod tests {
         assert_eq!(second.source, "actor:eventlog");
         assert_eq!(second.payload["text"], "hello world");
         assert!(second.payload["ts"].is_number());
+        assert_eq!(second.payload["inputMode"], "voice");
+        assert_eq!(second.payload["captureSource"], "global-shortcut");
+        assert_eq!(second.payload["targetScope"], "agent-chat");
         assert_eq!(second.trace_id, Some("trace-el-1".to_string()));
     }
 
@@ -176,11 +189,11 @@ mod tests {
 
         let mut rx = pool.subscribe();
 
-        // Publish a user.input.text event but with no "text" field
+        // Publish a user.input.normalized event but with no "text" field
         let bad_event = SignalEvent {
             schema_version: 1,
             id: uuid::Uuid::new_v4().to_string(),
-            topic: "user.input.text".to_string(),
+            topic: "user.input.normalized".to_string(),
             ts: chrono::Utc::now().timestamp_millis() as u64,
             source: "test".to_string(),
             origin_host_id: "host-test".to_string(),
@@ -192,7 +205,7 @@ mod tests {
 
         // Should receive the original event, no panic, no extra events
         let first = rx.recv().await.expect("should receive original event");
-        assert_eq!(first.topic, "user.input.text");
+        assert_eq!(first.topic, "user.input.normalized");
 
         let result = tokio::time::timeout(
             std::time::Duration::from_millis(200),

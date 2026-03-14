@@ -3,6 +3,8 @@ import { invoke, isTauri } from '@tauri-apps/api/core';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 import { getClipboardService } from '../lib/services/clipboard.service';
 import { getEventLogService } from '../lib/services/eventlog.service';
+import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
+import { getActiveInteractionContextService } from '@/lib/services/active-interaction-context.service';
 import {
   getVoiceShortcutHotkey,
   subscribeVoiceShortcutHotkeyChanges,
@@ -103,6 +105,11 @@ type VolcanoAsrStreamEventPayload = {
   errorMessage?: string;
 };
 
+type ForegroundWindowContext = {
+  title?: string | null;
+  processName?: string | null;
+};
+
 export class VoiceShortcutService {
   private state: VoiceShortcutState = 'idle';
   private stream: MediaStream | null = null;
@@ -149,6 +156,9 @@ export class VoiceShortcutService {
   private warmVolcanoSessionCreatedAtMs: number | null = null;
   private warmVolcanoSessionKey: string | null = null;
   private warmVolcanoSessionPromise: Promise<string | null> | null = null;
+  private frozenForegroundWindowContext: ForegroundWindowContext | null = null;
+  private frozenForegroundWindowContextPromise: Promise<ForegroundWindowContext | null> | null = null;
+  private foregroundWindowCaptureToken = 0;
 
   constructor(livePreviewSource: VoiceLivePreviewSource = createDefaultVoiceLivePreviewSource()) {
     this.adapter = new MOSSASRAdapter();
@@ -269,6 +279,7 @@ export class VoiceShortcutService {
     void this.cancelWarmVolcanoSession();
     this.releaseWarmStream();
     this.releaseResources();
+    this.clearFrozenForegroundWindowContext();
     this.clearAutoHide();
   }
 
@@ -762,6 +773,7 @@ export class VoiceShortcutService {
     this.livePreviewText = '';
     this.startPending = true;
     this.beginActivationTracking();
+    this.captureForegroundWindowContext();
     const needsColdStart = this.shouldShowArmingState();
     this.emitOverlayState('arming', {
       duration: 0,
@@ -868,6 +880,7 @@ export class VoiceShortcutService {
       await this.cancelVolcanoStreaming();
       this.clearAutoHide();
       this.setState('idle');
+      this.clearFrozenForegroundWindowContext();
       invoke('voice_overlay_hide').catch(() => {});
       return;
     }
@@ -878,12 +891,20 @@ export class VoiceShortcutService {
     this.releaseResources();
     this.clearAutoHide();
     this.setState('idle');
+    this.clearFrozenForegroundWindowContext();
     invoke('voice_overlay_hide').catch(() => {});
   }
 
   private async handleResult(result: ASRResult, recognitionMs: number, providerLabel: string): Promise<void> {
     this.latestAudioLevel = 0;
-    const [clipboardResult, eventLogResult] = await Promise.allSettled([
+    const activeInteractionContext = getActiveInteractionContextService().getContext();
+    const foregroundWindow = this.frozenForegroundWindowContext
+      ?? await this.frozenForegroundWindowContextPromise
+      ?? null;
+    const traceId = this.currentTraceId ?? undefined;
+    const targetScope = activeInteractionContext?.targetScope ?? (foregroundWindow ? 'external-window' : 'unknown');
+
+    const [clipboardResult, signalPublishResult] = await Promise.allSettled([
       (async () => {
         const writeResult = await getClipboardService().writeText(result.text);
         if (!writeResult.ok) throw new Error(writeResult.title);
@@ -893,14 +914,32 @@ export class VoiceShortcutService {
           await invoke('simulate_enter');
         }
       })(),
-      getEventLogService().addEvent(result.text, new Set(['voice'])),
+      publishVoiceTranscriptSignal(result, {
+        source: 'tauri:voice-shortcut',
+        captureSource: 'global-shortcut',
+        traceId,
+        targetScope,
+        window: foregroundWindow ? {
+          title: foregroundWindow.title ?? undefined,
+          processName: foregroundWindow.processName ?? undefined,
+        } : undefined,
+        agentContext: activeInteractionContext?.agentContext,
+      }),
     ]);
 
     if (clipboardResult.status === 'rejected') {
       this.debugError(LOG_TAG, 'clipboard paste failed:', clipboardResult.reason);
     }
-    if (eventLogResult.status === 'rejected') {
-      this.debugError(LOG_TAG, 'eventlog write failed:', eventLogResult.reason);
+
+    // EventLog 唯一真相源：RT signal 路径（voice.input.transcript → input_ingest → eventlog actor）
+    // 仅当信号发布失败时（RT 不可用），fallback 到前端直写
+    if (signalPublishResult.status === 'rejected') {
+      this.debugError(LOG_TAG, 'voice signal publish failed, fallback to direct eventlog write:', signalPublishResult.reason);
+      try {
+        await getEventLogService().addEvent(result.text, new Set(['voice']));
+      } catch (err) {
+        this.debugError(LOG_TAG, 'eventlog fallback write also failed:', err);
+      }
     }
 
     this.emitOverlayState('done', {
@@ -912,8 +951,39 @@ export class VoiceShortcutService {
 
     this.autoHideTimer = setTimeout(() => {
       this.setState('idle');
+      this.clearFrozenForegroundWindowContext();
       invoke('voice_overlay_hide').catch(() => {});
     }, AUTO_HIDE_DONE_MS);
+  }
+
+  private async getForegroundWindowContext(): Promise<ForegroundWindowContext | null> {
+    try {
+      return await invoke<ForegroundWindowContext>('foreground_window_get');
+    } catch (error) {
+      this.debugWarn(LOG_TAG, 'failed to read foreground window context:', error);
+      return null;
+    }
+  }
+
+  private captureForegroundWindowContext(): void {
+    const captureToken = this.foregroundWindowCaptureToken + 1;
+    this.foregroundWindowCaptureToken = captureToken;
+    this.frozenForegroundWindowContext = null;
+    this.frozenForegroundWindowContextPromise = this.getForegroundWindowContext()
+      .then((context) => {
+        if (this.foregroundWindowCaptureToken !== captureToken) {
+          return null;
+        }
+        this.frozenForegroundWindowContext = context;
+        return context;
+      })
+      .catch(() => null);
+  }
+
+  private clearFrozenForegroundWindowContext(): void {
+    this.foregroundWindowCaptureToken += 1;
+    this.frozenForegroundWindowContext = null;
+    this.frozenForegroundWindowContextPromise = null;
   }
 
   private handleError(message: string): void {
@@ -924,6 +994,7 @@ export class VoiceShortcutService {
     this.releaseResources();
     this.emitOverlayState('error', { errorMessage: message });
     this.state = 'error';
+    this.clearFrozenForegroundWindowContext();
 
     this.autoHideTimer = setTimeout(() => {
       this.setState('idle');
