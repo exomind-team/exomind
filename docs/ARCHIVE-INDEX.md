@@ -95,6 +95,15 @@
 | docs/architecture/MVP-ARCHITECTURE.md | MVP 架构设计 | architecture/overview.md | (本次提交) |
 | docs/architecture/MVP.md | 原始 MVP 文档 | architecture/overview.md | (本次提交) |
 
+## 模块规格（已合并）
+
+| 原路径 | 摘要 | 合并去向 | 删除提交 |
+|--------|------|----------|----------|
+| docs/specs/SPEC-301-多设备数据同步.md | 多设备数据同步规格（68K） | docs/specs/sync.md | (本次提交) |
+| docs/specs/SPEC-303-sync模块架构.md | Sync 模块架构规格 | docs/specs/sync.md | (本次提交) |
+| docs/specs/SPEC-302-密码哈希模块.md | 密码哈希模块规格 | docs/specs/auth.md | (本次提交) |
+| docs/specs/SPEC-304-用户认证模块重构.md | 用户认证模块重构规格 | docs/specs/auth.md | (本次提交) |
+
 ## 设计文档（已过时）
 
 | 原路径 | 摘要 | 删除提交 |
