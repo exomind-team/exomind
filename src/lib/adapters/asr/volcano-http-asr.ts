@@ -16,6 +16,7 @@
 
 import type { IASRPort, ASRInput, ASRResult, ASRPartialResult } from '../../environment/interfaces/asr.port';
 import { resolveAsrServerUrl } from '@/config/port-env';
+import { log } from '@/lib/logger';
 
 // ========== 配置 ==========
 
@@ -38,8 +39,8 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
 
   constructor(config?: Partial<VolcanoHTTPASRConfig>) {
     this.config = { ...DEFAULT_CONFIG, ...config };
-    console.log('[ASR-HTTP] 适配器初始化');
-    console.log('[ASR-HTTP] 后端服务:', this.config.serverUrl);
+    log.info('[ASR-HTTP] 适配器初始化');
+    log.info(`[ASR-HTTP] 后端服务: ${this.config.serverUrl}`);
   }
 
   /**
@@ -49,7 +50,7 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
   isAvailable(): boolean {
     // 先检查基本配置
     if (!this.config.serverUrl) {
-      console.warn('[ASR-HTTP] 后端服务地址未配置');
+      log.warn('[ASR-HTTP] 后端服务地址未配置');
       return false;
     }
     // 异步检查会通过配置检查先返回
@@ -67,10 +68,10 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
         signal: AbortSignal.timeout(5000),
       });
       if (!response.ok) {
-        console.warn('[ASR-HTTP] 后端服务返回异常状态');
+        log.warn('[ASR-HTTP] 后端服务返回异常状态');
       }
     } catch {
-      console.warn('[ASR-HTTP] 后端服务不可用');
+      log.warn('[ASR-HTTP] 后端服务不可用');
     }
   }
 
@@ -88,7 +89,7 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
    * 4. 返回识别结果
    */
   async transcribe(input: ASRInput): Promise<ASRResult> {
-    console.log('[ASR-HTTP] 开始识别');
+    log.info('[ASR-HTTP] 开始识别');
     const startTime = Date.now();
 
     if (!input.stream) {
@@ -98,7 +99,7 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
     // 从 MediaStream 录制音频
     const audioData = await this.recordAudio(input.stream);
 
-    console.log(`[ASR-HTTP] 音频录制完成: ${audioData.length} bytes`);
+    log.info(`[ASR-HTTP] 音频录制完成: ${audioData.length} bytes`);
 
     // 发送到后端
     const response = await fetch(`${this.config.serverUrl}/api/asr`, {
@@ -112,14 +113,14 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
 
     if (!response.ok) {
       const error = await response.text();
-      console.error('[ASR-HTTP] 识别失败:', error);
+      log.error(`[ASR-HTTP] 识别失败: ${error}`);
       throw new Error(`识别失败: ${error}`);
     }
 
     const result = await response.json() as ASRResult;
     const duration = Date.now() - startTime;
 
-    console.log(`[ASR-HTTP] 识别完成: "${result.text}" (${duration}ms)`);
+    log.info(`[ASR-HTTP] 识别完成: "${result.text}" (${duration}ms)`);
 
     return result;
   }
@@ -128,7 +129,7 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
    * 保存音频文件到本地
    */
   private async saveAudioFile(audioData: Uint8Array): Promise<string> {
-    console.log(`[ASR-HTTP] 音频录制完成: ${audioData.length} bytes（由后端保存到 ~/.exomind/asr/）`);
+    log.info(`[ASR-HTTP] 音频录制完成: ${audioData.length} bytes（由后端保存到 ~/.exomind/asr/）`);
     return '';
   }
 
@@ -190,7 +191,7 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
 
         const audioBytes = new Uint8Array(pcmData.buffer);
 
-        console.log(`[ASR-HTTP] 音频转换完成: ${pcmData.length} samples`);
+        log.info(`[ASR-HTTP] 音频转换完成: ${pcmData.length} samples`);
 
         // 保存音频文件
         await this.saveAudioFile(audioBytes);
@@ -199,11 +200,11 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
       };
 
       // 开始录制
-      console.log('[ASR-HTTP] 开始录制音频...');
+      log.info('[ASR-HTTP] 开始录制音频...');
 
       // 录制 3 秒或手动停止
       const recordingTimeout = setTimeout(() => {
-        console.log('[ASR-HTTP] 录制超时，自动停止');
+        log.info('[ASR-HTTP] 录制超时，自动停止');
         stopRecording();
       }, 3000);
 
@@ -230,7 +231,7 @@ export class VolcanoHTTPASRAdapter implements IASRPort {
    */
   stopRecording(): void {
     // HTTP 模式下录制由超时控制，此方法为空
-    console.log('[ASR-HTTP] 停止录制信号（HTTP 模式由超时控制）');
+    log.info('[ASR-HTTP] 停止录制信号（HTTP 模式由超时控制）');
   }
 
   /**

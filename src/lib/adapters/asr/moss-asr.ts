@@ -16,6 +16,7 @@
  */
 
 import type { IASRPort, IASRConfig, ASRInput, ASRResult, ASRPartialResult } from '../../ports/asr-port';
+import { log } from '@/lib/logger';
 
 // ========== 配置 ==========
 
@@ -101,8 +102,8 @@ export class MOSSASRAdapter implements IASRPort {
       ...config,
     };
     this.config.apiKey = normalizeApiKey(this.config.apiKey);
-    console.log('[ASR-MOSS] 适配器初始化');
-    console.log('[ASR-MOSS] API Key:', this.config.apiKey ? `${this.config.apiKey.slice(0, 8)}***` : '未配置');
+    log.info('[ASR-MOSS] 适配器初始化');
+    log.info(`[ASR-MOSS] API Key: ${this.config.apiKey ? `${this.config.apiKey.slice(0, 8)}***` : '未配置'}`);
   }
 
   /**
@@ -215,7 +216,7 @@ export class MOSSASRAdapter implements IASRPort {
    * 4. 返回带时间戳和说话人标识的结果（包含音频数据）
    */
   async transcribe(input: MOSSASRInput): Promise<MOSSASRResult> {
-    console.log('[ASR-MOSS] 开始识别');
+    log.info('[ASR-MOSS] 开始识别');
     const startTime = Date.now();
     const apiKey = this.resolveApiKey();
 
@@ -228,11 +229,11 @@ export class MOSSASRAdapter implements IASRPort {
     if (input.preRecordedAudio) {
       // 使用预录制的音频
       audioData = input.preRecordedAudio;
-      console.log(`[ASR-MOSS] 使用预录制音频: ${audioData.length} bytes`);
+      log.info(`[ASR-MOSS] 使用预录制音频: ${audioData.length} bytes`);
     } else if (input.stream) {
       // 录制音频
       audioData = await this.recordAudio(input.stream);
-      console.log(`[ASR-MOSS] 音频录制完成: ${audioData.length} bytes`);
+      log.info(`[ASR-MOSS] 音频录制完成: ${audioData.length} bytes`);
     } else {
       throw new Error('需要传入 MediaStream 或 preRecordedAudio');
     }
@@ -244,7 +245,7 @@ export class MOSSASRAdapter implements IASRPort {
     // 转换为 Base64 (和 Python 示例一致)
     const base64Audio = this.arrayBufferToBase64(audioData);
     const audioPayload = `data:audio/wav;base64,${base64Audio}`;
-    console.log(`[ASR-MOSS] Base64 长度: ${base64Audio.length} chars`);
+    log.info(`[ASR-MOSS] Base64 长度: ${base64Audio.length} chars`);
 
     // 构建请求 (和 Python 示例一致)
     const payload = {
@@ -256,16 +257,8 @@ export class MOSSASRAdapter implements IASRPort {
       },
     };
 
-    console.log('[ASR-MOSS] 发送请求到 MOSS API...');
-    console.log('[ASR-MOSS] 请求详情:', {
-      url: this.config.apiUrl,
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${apiKey.slice(0, 8)}***`,
-      },
-      bodySize: JSON.stringify(payload).length,
-    });
+    log.info('[ASR-MOSS] 发送请求到 MOSS API...');
+    log.info(`[ASR-MOSS] 请求详情: ${JSON.stringify({ url: this.config.apiUrl, method: 'POST', headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${apiKey.slice(0, 8)}***` }, bodySize: JSON.stringify(payload).length })}`);
 
     let response: Response;
     try {
@@ -280,17 +273,11 @@ export class MOSSASRAdapter implements IASRPort {
         signal: AbortSignal.timeout(this.config.timeout || 60000),
       });
 
-      console.log(`[ASR-MOSS] 响应状态: ${response.status} ${response.statusText}`);
+      log.info(`[ASR-MOSS] 响应状态: ${response.status} ${response.statusText}`);
     } catch (networkError) {
       // 网络错误处理（Failed to fetch, CORS, 网络断开等）
       const errorMessage = networkError instanceof Error ? networkError.message : String(networkError);
-      console.error('[ASR-MOSS] 网络错误:', {
-        error: errorMessage,
-        type: networkError instanceof TypeError ? 'TypeError (可能是 CORS 或网络问题)' : 'UnknownError',
-        url: this.config.apiUrl,
-        isSecureContext: typeof window !== 'undefined' ? window.isSecureContext : 'N/A',
-        userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A',
-      });
+      log.error(`[ASR-MOSS] 网络错误: ${JSON.stringify({ error: errorMessage, type: networkError instanceof TypeError ? 'TypeError (可能是 CORS 或网络问题)' : 'UnknownError', url: this.config.apiUrl, isSecureContext: typeof window !== 'undefined' ? window.isSecureContext : 'N/A', userAgent: typeof navigator !== 'undefined' ? navigator.userAgent : 'N/A' })}`);
 
       // 提供更友好的错误提示
       if (errorMessage.includes('Failed to fetch') || errorMessage.includes('fetch')) {
@@ -307,28 +294,28 @@ export class MOSSASRAdapter implements IASRPort {
         const clonedResponse = response.clone();
         try {
           const error = await clonedResponse.json();
-          console.error('[ASR-MOSS] 错误响应:', error);
+          log.error(`[ASR-MOSS] 错误响应: ${JSON.stringify(error)}`);
           errorMsg = error.message || errorMsg;
         } catch {
           // JSON 解析失败，尝试获取文本
           const text = await clonedResponse.text();
-          console.error('[ASR-MOSS] 错误响应文本:', text);
+          log.error(`[ASR-MOSS] 错误响应文本: ${text}`);
           errorMsg = text || errorMsg;
         }
       } catch (e) {
-        console.error('[ASR-MOSS] 读取错误响应失败:', e);
+        log.error(`[ASR-MOSS] 读取错误响应失败: ${e}`);
       }
       throw new Error(`识别失败: ${errorMsg}`);
     }
 
     const mossResponse = await response.json();
-    console.log('[ASR-MOSS] 原始响应:', JSON.stringify(mossResponse, null, 2));
+    log.info(`[ASR-MOSS] 原始响应: ${JSON.stringify(mossResponse)}`);
 
     const duration = Date.now() - startTime;
 
     // 解析 MOSS 返回结果
     const result = this.parseMOSSResult(mossResponse);
-    console.log(`[ASR-MOSS] 识别完成: "${result.text}" (${duration}ms)`);
+    log.info(`[ASR-MOSS] 识别完成: "${result.text}" (${duration}ms)`);
 
     // 返回结果和音频数据
     return {
@@ -372,12 +359,7 @@ export class MOSSASRAdapter implements IASRPort {
       duration = (parseFloat(lastSegment.end_s) || 0) * 1000;
     }
 
-    console.log('[ASR-MOSS] 解析结果:', {
-      text: fullText,
-      segmentsCount: segments.length,
-      confidence,
-      duration,
-    });
+    log.info(`[ASR-MOSS] 解析结果: ${JSON.stringify({ text: fullText, segmentsCount: segments.length, confidence, duration })}`);
 
     return {
       text: fullText,
@@ -416,19 +398,19 @@ export class MOSSASRAdapter implements IASRPort {
    */
   private async recordAudio(stream: MediaStream, _stopRecording?: () => void): Promise<Uint8Array> {
     return new Promise((resolve) => {
-      console.log('[ASR-MOSS] 创建 AudioContext...');
+      log.info('[ASR-MOSS] 创建 AudioContext...');
       // 使用浏览器默认采样率（通常是 44100 或 48000）
       const audioContext = new AudioContext();
       const sourceSampleRate = audioContext.sampleRate;
-      console.log(`[ASR-MOSS] AudioContext 采样率: ${sourceSampleRate}Hz`);
+      log.info(`[ASR-MOSS] AudioContext 采样率: ${sourceSampleRate}Hz`);
 
       // 确保 AudioContext 处于 running 状态
       if (audioContext.state === 'suspended') {
-        console.log('[ASR-MOSS] AudioContext 被挂起，尝试 resume...');
+        log.info('[ASR-MOSS] AudioContext 被挂起，尝试 resume...');
         audioContext.resume().then(() => {
-          console.log('[ASR-MOSS] AudioContext 已 resume');
+          log.info('[ASR-MOSS] AudioContext 已 resume');
         }).catch(e => {
-          console.log('[ASR-MOSS] resume 失败:', e);
+          log.info(`[ASR-MOSS] resume 失败: ${e}`);
         });
       }
 
@@ -445,7 +427,7 @@ export class MOSSASRAdapter implements IASRPort {
         chunks.push(new Float32Array(inputData));
         chunkCount++;
         if (chunkCount % 10 === 0) {
-          console.log(`[ASR-MOSS] 已录制 ${chunkCount} 个音频块`);
+          log.info(`[ASR-MOSS] 已录制 ${chunkCount} 个音频块`);
         }
       };
 
@@ -461,21 +443,21 @@ export class MOSSASRAdapter implements IASRPort {
         if (isStopped) return;
         isStopped = true;
 
-        console.log(`[ASR-MOSS] 停止录制，共录制 ${chunkCount} 个块，${chunks.length} 个 chunk`);
+        log.info(`[ASR-MOSS] 停止录制，共录制 ${chunkCount} 个块，${chunks.length} 个 chunk`);
 
         try {
           scriptProcessor.disconnect();
           mediaStreamSource.disconnect();
           await audioContext.close();
         } catch (e) {
-          console.log('[ASR-MOSS] 关闭 AudioContext 时出错:', e);
+          log.info(`[ASR-MOSS] 关闭 AudioContext 时出错: ${e}`);
         }
 
         const totalLength = chunks.reduce((sum, chunk) => sum + chunk.length, 0);
-        console.log(`[ASR-MOSS] 总采样数: ${totalLength} (${sourceSampleRate}Hz)`);
+        log.info(`[ASR-MOSS] 总采样数: ${totalLength} (${sourceSampleRate}Hz)`);
 
         if (totalLength === 0) {
-          console.warn('[ASR-MOSS] 警告：没有录制到音频数据！');
+          log.warn('[ASR-MOSS] 警告：没有录制到音频数据！');
           resolve(new Uint8Array(0));
           return;
         }
@@ -501,7 +483,7 @@ export class MOSSASRAdapter implements IASRPort {
           for (let i = 0; i < targetLength; i++) {
             resampled[i] = result[Math.floor(i * ratio)];
           }
-          console.log(`[ASR-MOSS] 重采样完成: ${totalLength} → ${targetLength} 采样`);
+          log.info(`[ASR-MOSS] 重采样完成: ${totalLength} → ${targetLength} 采样`);
         }
 
         // 转换为 PCM 16bit
@@ -516,13 +498,13 @@ export class MOSSASRAdapter implements IASRPort {
 
         // 编码为 WAV（使用 16000Hz 采样率）
         const wavData = MOSSASRAdapter.encodeWAV(new Uint8Array(pcmData.buffer), targetSampleRate);
-        console.log(`[ASR-MOSS] WAV 编码完成: ${wavData.length} bytes (${targetSampleRate}Hz, ${(wavData.length / 1024).toFixed(2)}KB)`);
+        log.info(`[ASR-MOSS] WAV 编码完成: ${wavData.length} bytes (${targetSampleRate}Hz, ${(wavData.length / 1024).toFixed(2)}KB)`);
         resolve(wavData);
       };
 
       // 等待 AudioContext resume 后再开始检测停止信号
       const startListening = () => {
-        console.log('[ASR-MOSS] 开始录制音频...');
+        log.info('[ASR-MOSS] 开始录制音频...');
 
         // 等待停止信号（无限时间）
         const checkStop = setInterval(() => {
