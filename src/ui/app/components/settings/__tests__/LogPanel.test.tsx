@@ -6,7 +6,6 @@ import * as logger from '@/lib/logger'
 
 vi.mock('@/lib/logger', () => ({
   startLogStream: vi.fn().mockResolvedValue(vi.fn()),
-  stopLogStream: vi.fn(),
   addLogListener: vi.fn().mockReturnValue(vi.fn()),
 }))
 
