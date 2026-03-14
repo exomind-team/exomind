@@ -904,7 +904,7 @@ export class VoiceShortcutService {
     const traceId = this.currentTraceId ?? undefined;
     const targetScope = activeInteractionContext?.targetScope ?? (foregroundWindow ? 'external-window' : 'unknown');
 
-    const [clipboardResult, signalPublishResult, eventLogResult] = await Promise.allSettled([
+    const [clipboardResult, signalPublishResult] = await Promise.allSettled([
       (async () => {
         const writeResult = await getClipboardService().writeText(result.text);
         if (!writeResult.ok) throw new Error(writeResult.title);
@@ -925,17 +925,21 @@ export class VoiceShortcutService {
         } : undefined,
         agentContext: activeInteractionContext?.agentContext,
       }),
-      getEventLogService().addEvent(result.text, new Set(['voice'])),
     ]);
 
     if (clipboardResult.status === 'rejected') {
       this.debugError(LOG_TAG, 'clipboard paste failed:', clipboardResult.reason);
     }
+
+    // EventLog 唯一真相源：RT signal 路径（voice.input.transcript → input_ingest → eventlog actor）
+    // 仅当信号发布失败时（RT 不可用），fallback 到前端直写
     if (signalPublishResult.status === 'rejected') {
-      this.debugError(LOG_TAG, 'voice signal publish failed:', signalPublishResult.reason);
-    }
-    if (eventLogResult.status === 'rejected') {
-      this.debugError(LOG_TAG, 'eventlog write failed:', eventLogResult.reason);
+      this.debugError(LOG_TAG, 'voice signal publish failed, fallback to direct eventlog write:', signalPublishResult.reason);
+      try {
+        await getEventLogService().addEvent(result.text, new Set(['voice']));
+      } catch (err) {
+        this.debugError(LOG_TAG, 'eventlog fallback write also failed:', err);
+      }
     }
 
     this.emitOverlayState('done', {

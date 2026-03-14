@@ -293,7 +293,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     expect(convertWebmBlobToWavMock).toHaveBeenCalledTimes(2);
     expect(transcribeMock).toHaveBeenCalledTimes(2);
     expect(writeClipboardMock).toHaveBeenCalledTimes(2);
-    expect(addEventMock).toHaveBeenCalledTimes(2);
+    // signal 成功时 EventLog 由 RT eventlog_actor 处理，前端不直写
+    expect(addEventMock).not.toHaveBeenCalled();
 
     const hasDecodeFailureLog = errorSpy.mock.calls.some((call) =>
       call.some((item) => String(item).includes('EncodingError') || String(item).includes('识别失败'))
@@ -1085,10 +1086,8 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         targetScope: 'unknown',
       }),
     );
-    expect(addEventMock).toHaveBeenCalledWith(
-      '火山流式最终文本',
-      new Set(['voice']),
-    );
+    // signal 成功 → EventLog 由 RT actor 处理，前端不直写
+    expect(addEventMock).not.toHaveBeenCalled();
 
     service.destroy();
   });
@@ -1184,10 +1183,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushAsync();
 
     expect(writeClipboardMock).toHaveBeenCalledWith('火山实时结果');
-    expect(addEventMock).toHaveBeenCalledWith(
-      '火山实时结果',
-      new Set(['voice']),
-    );
+    expect(addEventMock).not.toHaveBeenCalled();
 
     service.destroy();
   });
@@ -1226,10 +1222,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         },
       }),
     );
-    expect(addEventMock).toHaveBeenCalledWith(
-      '连续识别文本',
-      new Set(['voice']),
-    );
+    expect(addEventMock).not.toHaveBeenCalled();
 
     service.destroy();
   });
@@ -1276,8 +1269,35 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
         },
       }),
     );
+    expect(addEventMock).not.toHaveBeenCalled();
+
+    service.destroy();
+  });
+
+  it('falls back to direct EventLog write when signal publish fails（信号发布失败时 fallback 到直写）', async () => {
+    transcribeMock.mockResolvedValue({
+      text: 'fallback 测试',
+      confidence: 0.95,
+      lang: 'zh-CN',
+      duration: 500,
+    });
+    writeClipboardMock.mockResolvedValue({ ok: true, title: 'ok' });
+    addEventMock.mockResolvedValue(undefined);
+    publishVoiceTranscriptSignalMock.mockRejectedValue(new Error('RT unavailable'));
+    invokeMock.mockImplementation(async (command: string, payload?: { shortcut?: string }) => {
+      if (command === 'voice_shortcut_set') return payload?.shortcut ?? 'Alt+Q';
+      return null;
+    });
+
+    const service = new VoiceShortcutService();
+    await service.init();
+
+    await emitVoiceShortcut('start');
+    await emitVoiceShortcut('stop');
+    await flushAsync();
+
     expect(addEventMock).toHaveBeenCalledWith(
-      '冻结窗口测试',
+      'fallback 测试',
       new Set(['voice']),
     );
 

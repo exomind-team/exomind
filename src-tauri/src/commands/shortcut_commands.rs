@@ -623,9 +623,6 @@ pub async fn voice_recording_set_active(_app: AppHandle, _active: bool) -> Resul
 #[tauri::command]
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn foreground_window_get() -> Result<ForegroundWindowContext, String> {
-    if !cfg!(debug_assertions) {
-        return Err("foreground_window_get is disabled outside debug builds".to_string());
-    }
     Ok(foreground_window_context())
 }
 
