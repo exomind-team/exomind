@@ -187,4 +187,26 @@ describe('detectRtIsEmpty（检测 RT 是否为空）', () => {
     const isEmpty = await detectRtIsEmpty(readers);
     expect(isEmpty).toBe(false);
   });
+
+  it('RT reader throws → treats as empty (conservative failure)（RT 读取失败视为空）', async () => {
+    const readers = makeRtReaders({
+      readRtEvents: async () => { throw new Error('network error'); },
+    });
+
+    const isEmpty = await detectRtIsEmpty(readers);
+    expect(isEmpty).toBe(true);
+  });
+
+  it('all RT readers throw → returns true（RT 全部读取失败视为空）', async () => {
+    const fail = async (): Promise<unknown[]> => { throw new Error('RT unavailable'); };
+    const readers = makeRtReaders({
+      readRtEvents: fail,
+      readRtTasks: fail,
+      readRtCompletedBlocks: fail,
+      readRtActiveBlock: async () => { throw new Error('RT unavailable'); },
+    });
+
+    const isEmpty = await detectRtIsEmpty(readers);
+    expect(isEmpty).toBe(true);
+  });
 });
