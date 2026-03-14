@@ -9,11 +9,8 @@ import { getEventLogBackupService, getTaskBackupService, getTimeBlockBackupServi
 import { exportBackup, importBackupFromContent } from '@/services/impl/settings-data-service';
 import {
   getEventlogBackendMode,
-  setEventlogBackendMode,
   getTaskBackendMode,
-  setTaskBackendMode,
   getTimeblockBackendMode,
-  setTimeblockBackendMode,
 } from '@/config/domain-backend-mode';
 import { SettingRow } from '@/ui/app/components/settings-shared';
 import { PeerPairingDialog } from '@/ui/app/components/PeerPairingDialog';
@@ -747,98 +744,6 @@ export function TaskBackendStatusSetting(_props: { ctx: SettingsContext }) {
       <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">任务后端：{status.backend}</p>
       <p className="mt-1 text-xs text-[#A8A29E]">任务备份：{backupLabel}</p>
     </div>
-  );
-}
-
-function DomainBackendDiagnostics({
-  domainLabel,
-  getBackendMode,
-  setBackendMode,
-  getStatus,
-}: {
-  domainLabel: string;
-  getBackendMode: () => string;
-  setBackendMode: (value: 'legacy' | 'rt-sqlite') => void;
-  getStatus: () => { backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean } | Promise<{ backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean }>;
-}) {
-  const [status, setStatus] = useState<{
-    backend: string; supportsJsonBackup: boolean; supportsSqliteSnapshot: boolean;
-  } | null>(null);
-  const currentMode = getBackendMode();
-
-  useEffect(() => {
-    let cancelled = false;
-    const result = getStatus();
-    if (isPromiseLike(result)) {
-      void result.then((s) => { if (!cancelled) setStatus(s); }).catch(() => { if (!cancelled) setStatus(null); });
-    } else if (!cancelled) {
-      setStatus(result);
-    }
-    return () => { cancelled = true; };
-  }, [getStatus]);
-
-  const backupLabel = status
-    ? (status.supportsJsonBackup && status.supportsSqliteSnapshot ? 'JSON / SQLite'
-      : status.supportsJsonBackup ? 'JSON'
-      : status.supportsSqliteSnapshot ? 'SQLite'
-      : '不可用')
-    : '加载中…';
-
-  const handleSwitch = (value: 'legacy' | 'rt-sqlite') => {
-    setBackendMode(value);
-    window.location.reload();
-  };
-
-  return (
-    <div className="px-4 py-[14px]">
-      <p className="text-sm text-[#1C1917] dark:text-[#FAFAF9]">{domainLabel}后端：{currentMode}</p>
-      <p className="mt-1 text-xs text-[#A8A29E]">{domainLabel}备份：{backupLabel}</p>
-      <div className="mt-2 flex gap-2">
-        {(['rt-sqlite', 'legacy'] as const).map((mode) => (
-          <button
-            key={mode}
-            type="button"
-            onClick={() => handleSwitch(mode)}
-            className={`rounded-lg px-3 py-1 text-xs ${currentMode === mode ? 'bg-[#C75B3A] text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
-          >
-            {mode}
-          </button>
-        ))}
-      </div>
-    </div>
-  );
-}
-
-export function EventlogBackendModeSetting(_props: { ctx: SettingsContext }) {
-  return (
-    <DomainBackendDiagnostics
-      domainLabel="事件日志"
-      getBackendMode={getEventlogBackendMode}
-      setBackendMode={setEventlogBackendMode}
-      getStatus={() => getEventLogBackupService().getBackendStatus()}
-    />
-  );
-}
-
-export function TaskBackendModeSetting(_props: { ctx: SettingsContext }) {
-  return (
-    <DomainBackendDiagnostics
-      domainLabel="任务"
-      getBackendMode={getTaskBackendMode}
-      setBackendMode={setTaskBackendMode}
-      getStatus={() => getTaskBackupService().getBackendStatus()}
-    />
-  );
-}
-
-export function TimeblockBackendModeSetting(_props: { ctx: SettingsContext }) {
-  return (
-    <DomainBackendDiagnostics
-      domainLabel="时间块"
-      getBackendMode={getTimeblockBackendMode}
-      setBackendMode={setTimeblockBackendMode}
-      getStatus={() => getTimeBlockBackupService().getBackendStatus()}
-    />
   );
 }
 

@@ -1,11 +1,14 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import {
   settingsPageDomainBackendState,
   settingsPagePreferenceState,
   settingsPageServiceMocks,
 } from '../components/settings/setup-settings-mocks';
+import { setTaskBackendMode } from '@/config/domain-backend-mode';
+
+const reloadMock = vi.fn();
 
 vi.mock('@tauri-apps/api/core', () => ({
   isTauri: vi.fn(() => false),
@@ -41,22 +44,47 @@ describe('SettingsPage task backend diagnostics (issue-481)', () => {
       removeListener: vi.fn(),
       dispatchEvent: vi.fn(),
     }));
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: {
+        ...window.location,
+        reload: reloadMock,
+      },
+    });
   });
 
-  it('shows task backend diagnostics in developer mode', async () => {
+  it('shows task backend enum row in developer mode', () => {
     render(<SettingsPage />);
 
-    await waitFor(() => {
-      expect(screen.getByText('任务后端：rt-sqlite')).toBeInTheDocument();
-    });
-    expect(screen.getByText('任务备份：JSON / SQLite')).toBeInTheDocument();
+    expect(screen.getByText('任务后端')).toBeInTheDocument();
   });
 
-  it('hides task backend diagnostics when developer mode is off', () => {
+  it('hides task backend row when developer mode is off', () => {
     settingsPagePreferenceState.developerMode = false;
     render(<SettingsPage />);
 
-    expect(screen.queryByText(/任务后端：/)).not.toBeInTheDocument();
-    expect(screen.queryByText(/任务备份：/)).not.toBeInTheDocument();
+    expect(screen.queryByText('任务后端')).not.toBeInTheDocument();
+  });
+
+  it('switches task backend mode via dialog and reloads', async () => {
+    render(<SettingsPage />);
+
+    const row = screen.getByText('任务后端').closest('button');
+    expect(row).not.toBeNull();
+    fireEvent.click(row as HTMLButtonElement);
+
+    await waitFor(() => {
+      expect(screen.getByRole('dialog', { name: '任务后端' })).toBeInTheDocument();
+    });
+
+    const dialog = screen.getByRole('dialog', { name: '任务后端' });
+    const legacyButton = Array.from(dialog.querySelectorAll('button')).find(
+      (btn) => btn.textContent?.includes('Legacy'),
+    );
+    expect(legacyButton).toBeDefined();
+    fireEvent.click(legacyButton!);
+
+    expect(setTaskBackendMode).toHaveBeenCalledWith('legacy');
+    expect(reloadMock).toHaveBeenCalledTimes(1);
   });
 });
