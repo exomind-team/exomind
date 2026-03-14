@@ -353,6 +353,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
       updateDebugInfo({
         lastAction: `send:error:${error instanceof Error ? error.message : String(error)}`,
       });
+      throw error;
     }
   }, [eventLogService, loadEvents, updateDebugInfo]);
 

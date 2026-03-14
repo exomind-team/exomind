@@ -265,9 +265,14 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
 
     const t0 = perfNow();
     shouldStickToBottomRef.current = true;
-    await eventLogService.current.addEvent(trimmed);
-    await refreshLatestEvents('smooth');
-    log.info(`[ChatPage] handleSend done ${JSON.stringify({ totalMs: Math.round(perfNow() - t0) })}`);
+    try {
+      await eventLogService.current.addEvent(trimmed);
+      await refreshLatestEvents('smooth');
+      log.info(`[ChatPage] handleSend done ${JSON.stringify({ totalMs: Math.round(perfNow() - t0) })}`);
+    } catch (error) {
+      log.error(`[ChatPage] handleSend failed: ${error instanceof Error ? error.message : String(error)}`);
+      throw error;
+    }
   }, [refreshLatestEvents]);
 
   // 全局快捷键：未聚焦输入框时 Enter/Shift+Enter/Ctrl+Enter 控制时间块和聚焦

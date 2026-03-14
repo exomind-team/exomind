@@ -17,12 +17,13 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
+import { toast } from '@/components/ui/toast-hook';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
 
 export interface VoiceMessageInputProps {
   /** 发送消息回调 */
-  onSend: (content: string) => void;
+  onSend: (content: string) => void | Promise<void>;
   /** 语音识别结果回调（可选，用于自定义处理） */
   onVoiceResult?: (text: string) => void;
   /** 占位符 */
@@ -98,11 +99,18 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
   }, [value, resizeTextarea]);
 
   // 发送消息
-  const handleSend = useCallback(() => {
+  const handleSend = useCallback(async () => {
     const trimmed = value.trim();
     if (trimmed) {
-      onSend(trimmed);
+      const saved = value;
       setValue('');
+      try {
+        await onSend(trimmed);
+      } catch (error) {
+        setValue(saved);
+        log.error(`[VoiceMessageInput] send failed: ${error instanceof Error ? error.message : String(error)}`);
+        toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
+      }
     }
   }, [value, onSend]);
 

@@ -288,7 +288,7 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
     void controller.handleStartTask(task);
   });
   const onSend = props.onSend ?? ((content: string, tags?: string[]) => {
-    void controller.handleSend(content, tags);
+    return controller.handleSend(content, tags);
   });
 
   return (

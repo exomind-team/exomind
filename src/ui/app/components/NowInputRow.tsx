@@ -19,7 +19,7 @@ import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.servic
 import { log } from '@/lib/logger';
 
 interface NowInputRowProps {
-  onSend: (content: string, tags?: string[]) => void;
+  onSend: (content: string, tags?: string[]) => void | Promise<void>;
   placeholder?: string;
 }
 
@@ -80,11 +80,18 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     }
   }, []);
 
-  const submitInput = useCallback(() => {
+  const submitInput = useCallback(async () => {
     const trimmed = value.trim();
     if (!trimmed) return;
-    onSend(trimmed);
+    const saved = value;
     setValue('');
+    try {
+      await onSend(trimmed);
+    } catch (error) {
+      setValue(saved);
+      log.error(`[NowInputRow] send failed: ${error instanceof Error ? error.message : String(error)}`);
+      toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
+    }
   }, [onSend, value]);
 
   const insertClipboardText = useCallback((text: string) => {
