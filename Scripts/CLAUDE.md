@@ -40,6 +40,57 @@
 → 执行 Scripts/test/all.ps1
 ```
 
+## 多实例开发管理器（tauri:manager）
+
+同时管理多个 Tauri dev 实例（桌面+Android），自动分配端口，避免冲突。
+
+### 启动
+
+```bash
+# 启动桌面端
+bun tauri:manager start --name desktop
+
+# 启动 Android 端（需要模拟器或真机已连接）
+bun tauri:manager start --name phone --target android
+
+# 指定端口
+bun tauri:manager start --name desktop --web-port 1420
+```
+
+### 管理
+
+```bash
+# 查看所有实例
+bun tauri:manager list
+
+# 查看日志
+bun tauri:manager logs --name phone --tail 20
+bun tauri:manager logs --name desktop --follow
+
+# 停止实例
+bun tauri:manager stop --name phone
+
+# 清理已退出的实例记录
+bun tauri:manager prune
+```
+
+### 参数
+
+| 参数 | 说明 | 默认值 |
+|------|------|--------|
+| `--name <name>` | 实例名称 | `<target>-<port>` |
+| `--target desktop\|android` | 构建目标 | `desktop` |
+| `--web-port <port>` | Vite 前端端口 | 自动分配 |
+| `--hmr-port <port>` | HMR 端口 | 自动分配 |
+| `--watch` | 启用文件监视 | 关闭 |
+
+### 日志与数据
+
+- 实例元数据: `.tmp/tauri-dev-instances/<name>.json`
+- 构建日志: `.tmp/tauri-dev-instances/<name>.log`
+
+---
+
 ## 开发差异说明
 
 ### Windows 桌面端开发

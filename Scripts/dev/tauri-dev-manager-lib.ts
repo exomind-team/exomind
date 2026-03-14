@@ -8,6 +8,8 @@ export type ManagedTauriInstancePaths = {
   logPath: string;
 };
 
+export type TauriDevTarget = 'desktop' | 'android';
+
 export type ManagedTauriInstanceRecord = {
   name: string;
   projectRoot: string;
@@ -18,6 +20,7 @@ export type ManagedTauriInstanceRecord = {
   metaPath: string;
   startedAt: string;
   enableWatch: boolean;
+  target: TauriDevTarget;
 };
 
 export type BuildManagedTauriCommandInput = {
