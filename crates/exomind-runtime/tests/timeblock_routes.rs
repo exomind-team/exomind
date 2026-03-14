@@ -17,10 +17,12 @@ use tower::ServiceExt;
 fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppState {
     let signal_pool = Arc::new(SignalPool::new(None));
     let host_id = "timeblocks-test-host".to_string();
+    let registry = exomind_runtime::agent::AgentRegistry::new();
+    let energy_registry = exomind_runtime::energy::EnergyRegistry::new();
     AppState {
         port: 0,
         host_id: host_id.clone(),
-        registry: exomind_runtime::agent::AgentRegistry::new(),
+        registry: registry.clone(),
         signal_pool: Arc::clone(&signal_pool),
         mesh: Arc::new(MeshState::new(host_id.clone(), Arc::clone(&signal_pool), None)),
         mesh_relay: None,
@@ -29,7 +31,13 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
         timeblock_store,
-        energy_registry: exomind_runtime::energy::EnergyRegistry::new(),
+        energy_registry: energy_registry.clone(),
+        tick_manager: Arc::new(exomind_runtime::tick::TickManager::new(
+            host_id.clone(),
+            registry,
+            energy_registry,
+            Arc::clone(&signal_pool),
+        )),
         life_agents: std::collections::HashMap::new(),
         eventlog_store: Arc::new(exomind_runtime::eventlog::EventLogStore::new(
             std::env::temp_dir().join("exomind-test-timeblocks"),
