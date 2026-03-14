@@ -783,7 +783,8 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'data',
     type: 'action',
     icon: DatabaseZap,
-    visible: () => {
+    visible: (ctx) => {
+      if (!ctx.isDesktop) return false;
       try {
         return !isMigrationCompleted();
       } catch {

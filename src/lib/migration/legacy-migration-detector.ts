@@ -83,23 +83,38 @@ export async function detectLegacyData(readers: LegacyDataReaders): Promise<Lega
 }
 
 /**
+ * RT reader 失败时视为"有数据"（返回 false），避免因 RT 不可达而误触发迁移。
+ * 与 legacy reader 的保守策略相反：legacy 失败 = 无数据；RT 失败 = 有数据。
+ */
+async function rtHasNoArrayData(fn: () => Promise<unknown[]>): Promise<boolean> {
+  try {
+    return (await fn()).length === 0;
+  } catch {
+    return false; // RT 不可达时假设有数据，不触发迁移
+  }
+}
+
+async function rtHasNoActiveBlock(fn: () => Promise<unknown | null>): Promise<boolean> {
+  try {
+    return (await fn()) === null;
+  } catch {
+    return false; // RT 不可达时假设有数据，不触发迁移
+  }
+}
+
+/**
  * detectRtIsEmpty — 检测 RT 数据库是否完全为空。
  *
  * 当所有 RT 来源均无数据时返回 true（迁移目标干净，安全迁入）。
- * Reader 失败视为空（保守策略：宁可误判为有数据，也不因读取错误误触发迁移）。
+ * RT reader 失败视为"有数据"（返回 false），避免因 RT 不可达而误触发迁移。
  */
 export async function detectRtIsEmpty(readers: RtDataReaders): Promise<boolean> {
-  const [events, tasks, completedBlocks, activeBlock] = await Promise.all([
-    safeReadArray(readers.readRtEvents),
-    safeReadArray(readers.readRtTasks),
-    safeReadArray(readers.readRtCompletedBlocks),
-    safeReadNullable(readers.readRtActiveBlock),
+  const [eventsEmpty, tasksEmpty, blocksEmpty, activeEmpty] = await Promise.all([
+    rtHasNoArrayData(readers.readRtEvents),
+    rtHasNoArrayData(readers.readRtTasks),
+    rtHasNoArrayData(readers.readRtCompletedBlocks),
+    rtHasNoActiveBlock(readers.readRtActiveBlock),
   ]);
 
-  return (
-    events.length === 0 &&
-    tasks.length === 0 &&
-    completedBlocks.length === 0 &&
-    activeBlock === null
-  );
+  return eventsEmpty && tasksEmpty && blocksEmpty && activeEmpty;
 }

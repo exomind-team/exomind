@@ -188,16 +188,16 @@ describe('detectRtIsEmpty（检测 RT 是否为空）', () => {
     expect(isEmpty).toBe(false);
   });
 
-  it('RT reader throws → treats as empty (conservative failure)（RT 读取失败视为空）', async () => {
+  it('RT reader throws → assumes not empty to prevent false migration trigger（RT 读取失败视为有数据）', async () => {
     const readers = makeRtReaders({
       readRtEvents: async () => { throw new Error('network error'); },
     });
 
     const isEmpty = await detectRtIsEmpty(readers);
-    expect(isEmpty).toBe(true);
+    expect(isEmpty).toBe(false);
   });
 
-  it('all RT readers throw → returns true（RT 全部读取失败视为空）', async () => {
+  it('all RT readers throw → returns false to prevent migration（RT 全部读取失败视为有数据）', async () => {
     const fail = async (): Promise<unknown[]> => { throw new Error('RT unavailable'); };
     const readers = makeRtReaders({
       readRtEvents: fail,
@@ -207,6 +207,6 @@ describe('detectRtIsEmpty（检测 RT 是否为空）', () => {
     });
 
     const isEmpty = await detectRtIsEmpty(readers);
-    expect(isEmpty).toBe(true);
+    expect(isEmpty).toBe(false);
   });
 });

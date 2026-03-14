@@ -121,84 +121,92 @@ export function MigrationDialogController() {
     setMigrating(true);
     setError(undefined);
 
-    const legacyEventLogAdapter = new TauriEventLogStorageAdapter();
-    const legacyTaskAdapter = new TaskPouchAdapter();
-    const legacyStorage = new WebStorageAdapter();
+    try {
+      const legacyEventLogAdapter = new TauriEventLogStorageAdapter();
+      const legacyTaskAdapter = new TaskPouchAdapter();
+      const legacyStorage = new WebStorageAdapter();
 
-    const adapters: MigrationAdapters = {
-      readLegacyEvents: () => legacyEventLogAdapter.listEvents(),
-      readLegacyTasks: () => legacyTaskAdapter.listTasks(true),
-      readLegacyCompletedBlocks: () =>
-        legacyStorage.read<unknown[]>(TIME_BLOCKS_KEY).then((v) => v ?? []),
-      readLegacyActiveBlock: () => legacyStorage.read<unknown>(ACTIVE_BLOCK_KEY),
+      // Re-read legacy data at migration time to get the most up-to-date snapshot.
+      // Detection and execution are separate reads — this is intentional (TOCTOU acknowledged).
+      const adapters: MigrationAdapters = {
+        readLegacyEvents: () => legacyEventLogAdapter.listEvents(),
+        readLegacyTasks: () => legacyTaskAdapter.listTasks(true),
+        readLegacyCompletedBlocks: () =>
+          legacyStorage.read<unknown[]>(TIME_BLOCKS_KEY).then((v) => v ?? []),
+        readLegacyActiveBlock: () => legacyStorage.read<unknown>(ACTIVE_BLOCK_KEY),
 
-      importEventsToRt: async (events) => {
-        const baseUrl = buildRtBaseUrl();
-        const url = `${baseUrl}${appendRuntimeProfileScope('/eventlog/import/json')}`;
-        const scopedUrl = new URL(url);
-        scopedUrl.searchParams.set('strategy', 'merge');
-        const response = await fetch(scopedUrl.toString(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(events),
-        });
-        if (!response.ok) {
-          throw new Error(`Import events failed: ${response.status}`);
-        }
-      },
+        importEventsToRt: async (events) => {
+          const baseUrl = buildRtBaseUrl();
+          const url = `${baseUrl}${appendRuntimeProfileScope('/eventlog/import/json')}`;
+          const scopedUrl = new URL(url);
+          scopedUrl.searchParams.set('strategy', 'merge');
+          const response = await fetch(scopedUrl.toString(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(events),
+          });
+          if (!response.ok) {
+            throw new Error(`Import events failed: ${response.status}`);
+          }
+        },
 
-      importTasksToRt: async (tasks) => {
-        const baseUrl = buildRtBaseUrl();
-        const url = `${baseUrl}${appendRuntimeProfileScope('/tasks/import/json')}`;
-        const scopedUrl = new URL(url);
-        scopedUrl.searchParams.set('strategy', 'merge');
-        const response = await fetch(scopedUrl.toString(), {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(tasks),
-        });
-        if (!response.ok) {
-          throw new Error(`Import tasks failed: ${response.status}`);
-        }
-      },
+        importTasksToRt: async (tasks) => {
+          const baseUrl = buildRtBaseUrl();
+          const url = `${baseUrl}${appendRuntimeProfileScope('/tasks/import/json')}`;
+          const scopedUrl = new URL(url);
+          scopedUrl.searchParams.set('strategy', 'merge');
+          const response = await fetch(scopedUrl.toString(), {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(tasks),
+          });
+          if (!response.ok) {
+            throw new Error(`Import tasks failed: ${response.status}`);
+          }
+        },
 
-      writeCompletedBlocksToRt: async (blocks) => {
-        const baseUrl = buildRtBaseUrl();
-        const url = `${baseUrl}${appendRuntimeProfileScope('/timeblocks')}`;
-        const response = await fetch(url, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(blocks),
-        });
-        if (!response.ok) {
-          throw new Error(`Write completed blocks failed: ${response.status}`);
-        }
-      },
+        writeCompletedBlocksToRt: async (blocks) => {
+          const baseUrl = buildRtBaseUrl();
+          const url = `${baseUrl}${appendRuntimeProfileScope('/timeblocks')}`;
+          const response = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(blocks),
+          });
+          if (!response.ok) {
+            throw new Error(`Write completed blocks failed: ${response.status}`);
+          }
+        },
 
-      writeActiveBlockToRt: async (block) => {
-        const baseUrl = buildRtBaseUrl();
-        const url = `${baseUrl}${appendRuntimeProfileScope('/timeblocks/active')}`;
-        const response = await fetch(url, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-          body: JSON.stringify(block),
-        });
-        if (!response.ok) {
-          throw new Error(`Write active block failed: ${response.status}`);
-        }
-      },
-    };
+        writeActiveBlockToRt: async (block) => {
+          const baseUrl = buildRtBaseUrl();
+          const url = `${baseUrl}${appendRuntimeProfileScope('/timeblocks/active')}`;
+          const response = await fetch(url, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+            body: JSON.stringify(block),
+          });
+          if (!response.ok) {
+            throw new Error(`Write active block failed: ${response.status}`);
+          }
+        },
+      };
 
-    const result = await executeMigration(adapters, setProgress);
+      const result = await executeMigration(adapters, setProgress);
 
-    if (result.success) {
-      setAllBackendModes('rt-sqlite');
-      markMigrationCompleted();
-      setOpen(false);
-      window.location.reload();
-    } else {
+      if (result.success) {
+        setAllBackendModes('rt-sqlite');
+        markMigrationCompleted();
+        setOpen(false);
+        window.location.reload();
+      } else {
+        setAllBackendModes('legacy');
+        setError(result.error ?? '迁移失败，请稍后重试');
+      }
+    } catch (err) {
       setAllBackendModes('legacy');
-      setError(result.error);
+      setError(err instanceof Error ? err.message : '迁移失败，请稍后重试');
+    } finally {
       setMigrating(false);
     }
   }, [summary]);
@@ -208,6 +216,13 @@ export function MigrationDialogController() {
     setAllBackendModes('legacy');
     setOpen(false);
     window.location.reload();
+  }, []);
+
+  // Error dismiss: don't mark as skipped (user didn't choose to skip, migration failed).
+  // Next launch will re-detect and offer migration again (retry on next startup).
+  const handleErrorDismiss = useCallback(() => {
+    setAllBackendModes('legacy');
+    setOpen(false);
   }, []);
 
   if (summary === null) {
@@ -220,6 +235,7 @@ export function MigrationDialogController() {
       summary={summary}
       onMigrate={() => void handleMigrate()}
       onSkip={handleSkip}
+      onErrorDismiss={handleErrorDismiss}
       migrating={migrating}
       progress={progress}
       error={error}

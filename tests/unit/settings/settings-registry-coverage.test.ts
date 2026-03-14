@@ -292,6 +292,10 @@ describe('settings registry coverage audit', () => {
       getBaseCtx(),
       {
         ...getBaseCtx(),
+        isDesktop: true,
+      },
+      {
+        ...getBaseCtx(),
         developerMode: true,
       },
       {

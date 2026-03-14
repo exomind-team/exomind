@@ -14,6 +14,7 @@ export interface MigrationDialogProps {
   summary: LegacyDataSummary;
   onMigrate: () => void;
   onSkip: () => void;
+  onErrorDismiss?: () => void;
   migrating?: boolean;
   progress?: MigrationProgress;
   error?: string;
@@ -24,6 +25,7 @@ export function MigrationDialog({
   summary,
   onMigrate,
   onSkip,
+  onErrorDismiss,
   migrating = false,
   progress,
   error,
@@ -58,7 +60,7 @@ export function MigrationDialog({
             <DialogFooter>
               <button
                 type="button"
-                onClick={onSkip}
+                onClick={onErrorDismiss ?? onSkip}
                 className="w-full rounded-xl border border-[#F0ECE8] px-4 py-2.5 text-sm font-medium text-[#78716C] hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#A8A29E] dark:hover:bg-[#1C1917]"
               >
                 继续使用旧版存储
@@ -84,6 +86,11 @@ export function MigrationDialog({
 
               <div className="h-2 w-full overflow-hidden rounded-full bg-[#F0ECE8] dark:bg-[#292524]">
                 <div
+                  role="progressbar"
+                  aria-valuenow={progressPercent}
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-label="迁移进度"
                   className="h-full rounded-full bg-blue-500 transition-all duration-300"
                   style={{ width: `${progressPercent}%` }}
                 />
