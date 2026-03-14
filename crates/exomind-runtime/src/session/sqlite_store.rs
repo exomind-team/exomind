@@ -84,14 +84,14 @@ impl SqliteSessionStore {
         let interaction = input.interaction.unwrap_or(InteractionMode::Structured);
 
         let session = AgentSession {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             agent_kind: input.agent_kind,
             role: input.role.unwrap_or_default(),
             summary: String::new(),
             status: SessionStatus::Running,
             interaction_mode: interaction,
             pty_id: input.pty_id,
-            inner_session_id: None,
+            inner_session_id: input.inner_session_id,
             context,
             parent_session_id: input.parent_session_id,
             created_at: now.clone(),
@@ -101,6 +101,10 @@ impl SqliteSessionStore {
             error_message: None,
             quick_actions: vec![],
         };
+
+        if self.get(&session.id)?.is_some() {
+            return Err(SessionStoreError::AlreadyExists(session.id));
+        }
 
         self.insert_session(&session)?;
         Ok(session)
@@ -181,7 +185,7 @@ impl SqliteSessionStore {
             session.status = status;
         }
         if let Some(context) = input.context {
-            session.context = context;
+            session.context = session.context.merge_patch(context);
         }
         if let Some(preview) = input.last_output_preview {
             session.last_output_preview = Some(preview);

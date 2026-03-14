@@ -1,12 +1,11 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
-use axum::routing::{delete, get, patch, post};
+use axum::routing::{get, post};
 use axum::{Json, Router};
 use futures_util::stream::Stream;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
-use std::sync::Arc;
 use tokio::sync::broadcast;
 use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
@@ -48,6 +47,39 @@ pub fn session_event_channel() -> (broadcast::Sender<SessionEvent>, broadcast::R
     broadcast::channel(256)
 }
 
+pub(crate) fn broadcast_session_created(
+    tx: Option<&broadcast::Sender<SessionEvent>>,
+    session: &AgentSession,
+) {
+    if let Some(tx) = tx {
+        let _ = tx.send(SessionEvent::Created {
+            session: session.clone(),
+        });
+    }
+}
+
+pub(crate) fn broadcast_session_updated(
+    tx: Option<&broadcast::Sender<SessionEvent>>,
+    session: &AgentSession,
+) {
+    if let Some(tx) = tx {
+        let _ = tx.send(SessionEvent::Updated {
+            session: session.clone(),
+        });
+    }
+}
+
+pub(crate) fn broadcast_session_deleted(
+    tx: Option<&broadcast::Sender<SessionEvent>>,
+    session_id: &str,
+) {
+    if let Some(tx) = tx {
+        let _ = tx.send(SessionEvent::Deleted {
+            session_id: session_id.to_string(),
+        });
+    }
+}
+
 // ── Handlers ────────────────────────────────────────────────────
 
 async fn create_session(
@@ -57,14 +89,16 @@ async fn create_session(
     let session = state
         .session_store
         .create(input)
-        .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+        .map_err(|e| {
+            let status = match e {
+                crate::session::SessionStoreError::AlreadyExists(_) => StatusCode::CONFLICT,
+                _ => StatusCode::INTERNAL_SERVER_ERROR,
+            };
+            (status, e.to_string())
+        })?;
 
     // Broadcast creation event
-    if let Some(tx) = &state.session_event_tx {
-        let _ = tx.send(SessionEvent::Created {
-            session: session.clone(),
-        });
-    }
+    broadcast_session_created(state.session_event_tx.as_ref(), &session);
 
     Ok((StatusCode::CREATED, Json(session)))
 }
@@ -123,11 +157,7 @@ async fn update_session(
         })?;
 
     // Broadcast update event
-    if let Some(tx) = &state.session_event_tx {
-        let _ = tx.send(SessionEvent::Updated {
-            session: session.clone(),
-        });
-    }
+    broadcast_session_updated(state.session_event_tx.as_ref(), &session);
 
     Ok(Json(session))
 }
@@ -143,11 +173,7 @@ async fn delete_session(
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("session not found: {id}")))?;
 
     // Broadcast deletion event
-    if let Some(tx) = &state.session_event_tx {
-        let _ = tx.send(SessionEvent::Deleted {
-            session_id: id,
-        });
-    }
+    broadcast_session_deleted(state.session_event_tx.as_ref(), &id);
 
     Ok(Json(session))
 }
@@ -230,11 +256,7 @@ async fn submit_quick_action(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
 
     // Broadcast update event
-    if let Some(tx) = &state.session_event_tx {
-        let _ = tx.send(SessionEvent::Updated {
-            session: updated.clone(),
-        });
-    }
+    broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
 
     Ok(Json(updated))
 }
@@ -267,11 +289,7 @@ async fn mark_waiting(
         })?;
 
     // Broadcast update event
-    if let Some(tx) = &state.session_event_tx {
-        let _ = tx.send(SessionEvent::Updated {
-            session: updated.clone(),
-        });
-    }
+    broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
 
     Ok(Json(updated))
 }

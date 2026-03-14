@@ -11,6 +11,8 @@ use super::types::*;
 pub enum SessionStoreError {
     #[error("session not found: {0}")]
     NotFound(String),
+    #[error("session already exists: {0}")]
+    AlreadyExists(String),
     #[error("invalid transition from {from:?} to {to:?}")]
     InvalidTransition {
         from: SessionStatus,
@@ -61,15 +63,16 @@ impl SessionStore {
                 let now = chrono::Utc::now().to_rfc3339();
                 let context = input.context.unwrap_or_default();
                 let interaction = input.interaction.unwrap_or(InteractionMode::Structured);
+                let id = input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
                 let session = AgentSession {
-                    id: uuid::Uuid::new_v4().to_string(),
+                    id: id.clone(),
                     agent_kind: input.agent_kind,
                     role: input.role.unwrap_or_default(),
                     summary: String::new(),
                     status: SessionStatus::Running,
                     interaction_mode: interaction,
                     pty_id: input.pty_id,
-                    inner_session_id: None,
+                    inner_session_id: input.inner_session_id,
                     context,
                     parent_session_id: input.parent_session_id,
                     created_at: now.clone(),
@@ -81,9 +84,12 @@ impl SessionStore {
                 };
                 let result = session.clone();
                 self.with_memory_mut(|sessions| {
+                    if sessions.contains_key(&id) {
+                        return Err(SessionStoreError::AlreadyExists(id));
+                    }
                     sessions.insert(session.id.clone(), session);
-                });
-                Ok(result)
+                    Ok(result)
+                })
             }
         }
     }
@@ -144,7 +150,7 @@ impl SessionStore {
                         session.status = status;
                     }
                     if let Some(context) = input.context {
-                        session.context = context;
+                        session.context = session.context.merge_patch(context);
                     }
                     if let Some(preview) = input.last_output_preview {
                         session.last_output_preview = Some(preview);
@@ -207,6 +213,7 @@ mod tests {
 
     fn create_input(agent_kind: &str, role: &str) -> CreateSessionInput {
         CreateSessionInput {
+            id: None,
             agent_kind: agent_kind.to_string(),
             role: Some(role.to_string()),
             context: Some(WorkContext {
@@ -216,6 +223,27 @@ mod tests {
             }),
             interaction: Some(InteractionMode::Terminal),
             pty_id: Some("pty-1".to_string()),
+            inner_session_id: None,
+            parent_session_id: None,
+        }
+    }
+
+    fn create_input_with_full_context(agent_kind: &str, role: &str) -> CreateSessionInput {
+        CreateSessionInput {
+            id: None,
+            agent_kind: agent_kind.to_string(),
+            role: Some(role.to_string()),
+            context: Some(WorkContext {
+                git_branch: Some("dev".to_string()),
+                worktree_path: Some("D:/project/exomind-wt-yyxw".to_string()),
+                issue_refs: vec!["#511".to_string()],
+                pr_ref: Some("523".to_string()),
+                work_dir: Some("D:/project/exomind-wt-yyxw".to_string()),
+                labels: vec!["runtime".to_string(), "review".to_string()],
+            }),
+            interaction: Some(InteractionMode::Terminal),
+            pty_id: Some("pty-1".to_string()),
+            inner_session_id: None,
             parent_session_id: None,
         }
     }
@@ -348,5 +376,109 @@ mod tests {
         assert_eq!(running.len(), 1);
         let waiting = store.list_by_status(&SessionStatus::WaitingInput).unwrap();
         assert_eq!(waiting.len(), 1);
+    }
+
+    #[test]
+    fn memory_store_update_merges_partial_context_patch() {
+        let store = SessionStore::new();
+        let session = store
+            .create(create_input_with_full_context("claude", "Patch context"))
+            .unwrap();
+
+        let updated = store
+            .update(
+                &session.id,
+                UpdateSessionInput {
+                    context: Some(WorkContextPatch {
+                        issue_refs: Some(vec!["#523".to_string()]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(updated.context.git_branch.as_deref(), Some("dev"));
+        assert_eq!(
+            updated.context.worktree_path.as_deref(),
+            Some("D:/project/exomind-wt-yyxw")
+        );
+        assert_eq!(updated.context.issue_refs, vec!["#523".to_string()]);
+        assert_eq!(updated.context.pr_ref.as_deref(), Some("523"));
+        assert_eq!(
+            updated.context.labels,
+            vec!["runtime".to_string(), "review".to_string()]
+        );
+    }
+
+    #[test]
+    fn sqlite_store_update_merges_partial_context_patch() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("sessions.sqlite");
+        let store = SessionStore::with_sqlite_path(&sqlite_path).unwrap();
+        let session = store
+            .create(create_input_with_full_context("claude", "Patch context"))
+            .unwrap();
+
+        let updated = store
+            .update(
+                &session.id,
+                UpdateSessionInput {
+                    context: Some(WorkContextPatch {
+                        issue_refs: Some(vec!["#523".to_string()]),
+                        ..Default::default()
+                    }),
+                    ..Default::default()
+                },
+            )
+            .unwrap();
+
+        assert_eq!(updated.context.git_branch.as_deref(), Some("dev"));
+        assert_eq!(
+            updated.context.worktree_path.as_deref(),
+            Some("D:/project/exomind-wt-yyxw")
+        );
+        assert_eq!(updated.context.issue_refs, vec!["#523".to_string()]);
+        assert_eq!(updated.context.pr_ref.as_deref(), Some("523"));
+        assert_eq!(
+            updated.context.labels,
+            vec!["runtime".to_string(), "review".to_string()]
+        );
+    }
+
+    #[test]
+    fn memory_store_rejects_duplicate_explicit_id() {
+        let store = SessionStore::new();
+        let input = CreateSessionInput {
+            id: Some("fixed-session-id".to_string()),
+            ..create_input("claude", "fixed")
+        };
+
+        store.create(input.clone()).unwrap();
+        let duplicate = store.create(input).unwrap_err();
+
+        assert!(matches!(
+            duplicate,
+            SessionStoreError::AlreadyExists(existing_id) if existing_id == "fixed-session-id"
+        ));
+    }
+
+    #[test]
+    fn sqlite_store_rejects_duplicate_explicit_id() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("sessions.sqlite");
+        let store = SessionStore::with_sqlite_path(&sqlite_path).unwrap();
+        let input = CreateSessionInput {
+            id: Some("fixed-session-id".to_string()),
+            ..create_input("claude", "fixed")
+        };
+
+        store.create(input.clone()).unwrap();
+        let duplicate = store.create(input).unwrap_err();
+
+        assert!(matches!(
+            duplicate,
+            SessionStoreError::AlreadyExists(existing_id) if existing_id == "fixed-session-id"
+        ));
     }
 }

@@ -104,6 +104,40 @@ pub struct WorkContext {
     pub labels: Vec<String>,
 }
 
+/// Partial context patch for PATCH /sessions（局部上下文补丁）.
+#[derive(Debug, Clone, Default, Deserialize)]
+pub struct WorkContextPatch {
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    #[serde(default)]
+    pub worktree_path: Option<String>,
+    #[serde(default)]
+    pub issue_refs: Option<Vec<String>>,
+    #[serde(default)]
+    pub pr_ref: Option<String>,
+    #[serde(default)]
+    pub work_dir: Option<String>,
+    #[serde(default)]
+    pub labels: Option<Vec<String>>,
+}
+
+impl WorkContext {
+    pub fn merge_patch(&self, patch: WorkContextPatch) -> Self {
+        Self {
+            git_branch: patch.git_branch.or_else(|| self.git_branch.clone()),
+            worktree_path: patch
+                .worktree_path
+                .or_else(|| self.worktree_path.clone()),
+            issue_refs: patch
+                .issue_refs
+                .unwrap_or_else(|| self.issue_refs.clone()),
+            pr_ref: patch.pr_ref.or_else(|| self.pr_ref.clone()),
+            work_dir: patch.work_dir.or_else(|| self.work_dir.clone()),
+            labels: patch.labels.unwrap_or_else(|| self.labels.clone()),
+        }
+    }
+}
+
 /// A unified Agent Session in ExoMind.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AgentSession {
@@ -172,7 +206,7 @@ pub struct QuickActionResponse {
 /// Participant identity — who sent a message (User or Agent).
 /// Unified model for cross-session communication.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+#[serde(tag = "type", rename_all = "snake_case")]
 pub enum Participant {
     User,
     Agent { session_id: String },
@@ -205,6 +239,8 @@ pub struct SendMessageInput {
 /// Input for creating a new session.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CreateSessionInput {
+    #[serde(default)]
+    pub id: Option<String>,
     pub agent_kind: String,
     #[serde(default)]
     pub role: Option<String>,
@@ -214,6 +250,8 @@ pub struct CreateSessionInput {
     pub interaction: Option<InteractionMode>,
     #[serde(default)]
     pub pty_id: Option<String>,
+    #[serde(default)]
+    pub inner_session_id: Option<String>,
     #[serde(default)]
     pub parent_session_id: Option<String>,
 }
@@ -228,7 +266,7 @@ pub struct UpdateSessionInput {
     #[serde(default)]
     pub status: Option<SessionStatus>,
     #[serde(default)]
-    pub context: Option<WorkContext>,
+    pub context: Option<WorkContextPatch>,
     #[serde(default)]
     pub last_output_preview: Option<String>,
     #[serde(default)]
@@ -331,5 +369,60 @@ mod tests {
             let parsed = SessionStatus::from_str(s).expect("should parse");
             assert_eq!(&parsed, status);
         }
+    }
+
+    #[test]
+    fn participant_serde_matches_ts_contract() {
+        let user = serde_json::to_value(&Participant::User).unwrap();
+        assert_eq!(user, serde_json::json!({ "type": "user" }));
+
+        let agent = serde_json::to_value(&Participant::Agent {
+            session_id: "sid-123".to_string(),
+        })
+        .unwrap();
+        assert_eq!(
+            agent,
+            serde_json::json!({
+                "type": "agent",
+                "session_id": "sid-123",
+            })
+        );
+
+        let roundtrip: Participant = serde_json::from_value(serde_json::json!({
+            "type": "agent",
+            "session_id": "sid-123",
+        }))
+        .unwrap();
+        assert_eq!(
+            roundtrip,
+            Participant::Agent {
+                session_id: "sid-123".to_string(),
+            }
+        );
+    }
+
+    #[test]
+    fn work_context_patch_merges_without_dropping_existing_fields() {
+        let original = WorkContext {
+            git_branch: Some("dev".to_string()),
+            worktree_path: Some("D:/project/exomind-wt-yyxw".to_string()),
+            issue_refs: vec!["#511".to_string()],
+            pr_ref: Some("523".to_string()),
+            work_dir: Some("D:/project/exomind-wt-yyxw".to_string()),
+            labels: vec!["runtime".to_string(), "review".to_string()],
+        };
+
+        let merged = original.merge_patch(WorkContextPatch {
+            issue_refs: Some(vec!["#523".to_string()]),
+            ..Default::default()
+        });
+
+        assert_eq!(merged.git_branch.as_deref(), Some("dev"));
+        assert_eq!(merged.issue_refs, vec!["#523".to_string()]);
+        assert_eq!(merged.pr_ref.as_deref(), Some("523"));
+        assert_eq!(
+            merged.labels,
+            vec!["runtime".to_string(), "review".to_string()]
+        );
     }
 }
