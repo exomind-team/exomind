@@ -217,7 +217,7 @@ describe('NowInputRow', () => {
       getLatestVoiceProps()?.onError?.('麦克风权限被拒绝');
     });
 
-    expect(errorSpy).toHaveBeenCalledWith('[new-now-input][voice]', '麦克风权限被拒绝');
+    expect(errorSpy).toHaveBeenCalledWith('[ERROR]', '[new-now-input][voice] 麦克风权限被拒绝');
     errorSpy.mockRestore();
   });
 

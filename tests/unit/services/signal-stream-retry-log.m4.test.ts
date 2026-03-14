@@ -47,13 +47,13 @@ describe('signal-stream m4（连接失败降噪）', () => {
     await vi.advanceTimersByTimeAsync(100);
 
     const retryWarnCalls = warnSpy.mock.calls.filter((call) =>
-      String(call[0]).includes('[SignalStream] connection retry:'),
+      String(call[1]).includes('[SignalStream] connection retry:'),
     );
 
     expect(fetchSpy).toHaveBeenCalled();
     expect(fetchSpy.mock.calls.length).toBeGreaterThanOrEqual(2);
     expect(retryWarnCalls).toHaveLength(1);
-    expect(String(retryWarnCalls[0][0])).toContain('Failed to fetch');
-    expect(String(retryWarnCalls[0][0])).toContain('127.0.0.1:4077');
+    expect(String(retryWarnCalls[0][1])).toContain('Failed to fetch');
+    expect(String(retryWarnCalls[0][1])).toContain('127.0.0.1:4077');
   });
 });

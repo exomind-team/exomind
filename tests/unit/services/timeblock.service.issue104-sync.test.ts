@@ -656,22 +656,29 @@ describe('Issue #104 TimeBlockService sync lifecycle', () => {
       expect(saveActiveBlockMock).toHaveBeenCalledTimes(1);
     });
     expect(warnSpy).toHaveBeenCalledWith(
-      '[TB-SVC] rejected non-preferred sync block',
-      expect.objectContaining({
-        reason: 'current_newer_transition',
-        compared: 'transition_time',
-        storageUserId: 'test-user',
-      }),
+      '[WARN]',
+      expect.stringContaining('"reason":"current_newer_transition"'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[WARN]',
+      expect.stringContaining('"compared":"transition_time"'),
+    );
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[WARN]',
+      expect.stringContaining('"storageUserId":"test-user"'),
     );
     await vi.waitFor(() => {
       expect(infoSpy).toHaveBeenCalledWith(
-        '[TB-SVC] canonical write-back applied',
-        expect.objectContaining({
-          trigger: 'reject_non_preferred_sync',
-          reason: 'current_newer_transition',
-          compared: 'transition_time',
-          storageUserId: 'test-user',
-        }),
+        '[INFO]',
+        expect.stringContaining('"trigger":"reject_non_preferred_sync"'),
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        '[INFO]',
+        expect.stringContaining('"reason":"current_newer_transition"'),
+      );
+      expect(infoSpy).toHaveBeenCalledWith(
+        '[INFO]',
+        expect.stringContaining('"storageUserId":"test-user"'),
       );
     });
 
