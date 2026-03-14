@@ -7,11 +7,38 @@
 use mdns_sd::{ServiceDaemon, ServiceEvent, ServiceInfo};
 use serde::Serialize;
 use std::collections::HashMap;
+use std::net::IpAddr;
 use std::sync::{Arc, RwLock};
 use std::thread;
 
 /// Service type for mDNS advertisement and browsing.
 const SERVICE_TYPE: &str = "_exomind._tcp.local.";
+
+/// Pick the best address from a set of discovered addresses.
+///
+/// Priority: IPv4 > global/ULA IPv6 > link-local IPv6.
+/// Link-local IPv6 (`fe80::`) requires a zone/scope ID to be routable,
+/// which `IpAddr` does not carry, so we avoid it when possible.
+fn pick_best_address(addrs: &std::collections::HashSet<IpAddr>) -> Option<IpAddr> {
+    let mut best: Option<IpAddr> = None;
+    for addr in addrs {
+        match addr {
+            IpAddr::V4(_) => return Some(*addr), // IPv4 is always preferred
+            IpAddr::V6(v6) => {
+                // Skip link-local (fe80::/10) if we already have something better.
+                if (v6.segments()[0] & 0xffc0) == 0xfe80 {
+                    if best.is_none() {
+                        best = Some(*addr);
+                    }
+                } else {
+                    // Global or ULA IPv6 — better than link-local.
+                    best = Some(*addr);
+                }
+            }
+        }
+    }
+    best
+}
 
 /// A peer discovered via mDNS on the local network.
 #[derive(Debug, Clone, Serialize)]
@@ -127,10 +154,10 @@ impl MdnsDiscovery {
                                 continue;
                             }
 
-                            let host = info
-                                .get_addresses()
-                                .iter()
-                                .next()
+                            // Prefer IPv4 > global IPv6 > link-local IPv6.
+                            // Link-local IPv6 (fe80::) requires a zone/scope ID
+                            // to be routable, which IpAddr doesn't carry.
+                            let host = pick_best_address(info.get_addresses())
                                 .map(|addr| addr.to_string())
                                 .unwrap_or_default();
 

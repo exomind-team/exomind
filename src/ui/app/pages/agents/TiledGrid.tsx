@@ -33,8 +33,10 @@ export type TiledLayout = '1x1' | '1x2' | '2x2' | '2x4';
 export interface TiledGridProps {
   sessions: SessionInfo[];
   layout: TiledLayout;
-  rtBaseUrl: string;
-  authToken?: string;
+  resolveSessionConnection: (session: SessionInfo) => {
+    rtBaseUrl: string;
+    authToken?: string;
+  };
   /** Currently focused pane index */
   focusedIndex: number | null;
   onFocusPane: (index: number | null) => void;
@@ -44,9 +46,9 @@ export interface TiledGridProps {
   /** Callback when panes are reordered via drag-and-drop */
   onReorder?: (newOrder: string[]) => void;
   /** Callback when user submits a quick action response */
-  onQuickAction?: (sessionId: string, response: QuickActionResponse) => void;
+  onQuickAction?: (session: SessionInfo, response: QuickActionResponse) => void;
   /** Callback when user manually marks a PTY session as waiting */
-  onMarkWaiting?: (sessionId: string) => void;
+  onMarkWaiting?: (session: SessionInfo) => void;
 }
 
 // ── Layout config ──────────────────────────────────────────────
@@ -63,8 +65,7 @@ const LAYOUT_CONFIG: Record<TiledLayout, { cols: number; rows: number; maxPanes:
 export function TiledGrid({
   sessions,
   layout,
-  rtBaseUrl,
-  authToken,
+  resolveSessionConnection,
   focusedIndex,
   onFocusPane,
   onSessionClick,
@@ -142,16 +143,15 @@ export function TiledGrid({
       <div data-testid="tiled-grid" className="flex h-full flex-col">
         <SessionPane
           session={session}
-          rtBaseUrl={rtBaseUrl}
-          authToken={authToken}
+          resolveSessionConnection={resolveSessionConnection}
           isFocused={true}
           isExpanded={true}
           isDragging={false}
           onDoubleClick={() => handleDoubleClick(expandedIndex)}
           onFocus={() => onFocusPane(expandedIndex)}
           onClick={() => onSessionClick?.(session)}
-          onQuickAction={onQuickAction ? (r) => onQuickAction(session.id, r) : undefined}
-          onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session.id) : undefined}
+          onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
+          onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
         />
       </div>
     );
@@ -172,15 +172,14 @@ export function TiledGrid({
             <SortablePane
               key={session.id}
               session={session}
-              rtBaseUrl={rtBaseUrl}
-              authToken={authToken}
+              resolveSessionConnection={resolveSessionConnection}
               isFocused={focusedIndex === index}
               isExpanded={false}
               onDoubleClick={() => handleDoubleClick(index)}
               onFocus={() => onFocusPane(index)}
               onClick={() => onSessionClick?.(session)}
-              onQuickAction={onQuickAction ? (r) => onQuickAction(session.id, r) : undefined}
-              onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session.id) : undefined}
+              onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
+              onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
             />
           ))}
           {/* Empty pane placeholders */}
@@ -243,8 +242,10 @@ export function GlobalStatusIndicator({ sessions }: GlobalStatusProps) {
 
 interface SortablePaneProps {
   session: SessionInfo;
-  rtBaseUrl: string;
-  authToken?: string;
+  resolveSessionConnection: (session: SessionInfo) => {
+    rtBaseUrl: string;
+    authToken?: string;
+  };
   isFocused: boolean;
   isExpanded: boolean;
   onDoubleClick: () => void;
@@ -285,8 +286,10 @@ function SortablePane(props: SortablePaneProps) {
 
 interface SessionPaneProps {
   session: SessionInfo;
-  rtBaseUrl: string;
-  authToken?: string;
+  resolveSessionConnection: (session: SessionInfo) => {
+    rtBaseUrl: string;
+    authToken?: string;
+  };
   isFocused: boolean;
   isExpanded: boolean;
   isDragging: boolean;
@@ -300,8 +303,7 @@ interface SessionPaneProps {
 
 function SessionPane({
   session,
-  rtBaseUrl,
-  authToken,
+  resolveSessionConnection,
   isFocused,
   isExpanded,
   isDragging,
@@ -314,6 +316,7 @@ function SessionPane({
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const needsAttention = sessionNeedsAttention(session.status);
+  const connection = resolveSessionConnection(session);
   const showQuickActions =
     session.status === 'waiting_input' && (session.quick_actions?.length ?? 0) > 0;
   const showManualMarkWaiting =
@@ -417,9 +420,9 @@ function SessionPane({
       <div className="flex-1 min-h-0 overflow-hidden bg-[#1C1917]">
         {session.interaction_mode === 'terminal' && session.pty_id ? (
           <PtyTerminal
-            rtBaseUrl={rtBaseUrl}
+            rtBaseUrl={connection.rtBaseUrl}
             ptyId={session.pty_id}
-            authToken={authToken}
+            authToken={connection.authToken}
           />
         ) : (
           <div className="h-full overflow-auto p-2">

@@ -2,6 +2,7 @@ import type { RuntimeHostRecord } from '@/lib/types/agent-hub';
 import type { PublishRequest, PublishResponse, SignalEvent } from '@/lib/types/signal-pool';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { log } from '@/lib/logger';
+import { formatHostForUrl } from '@/config/runtime-target';
 
 export interface SignalStreamOpenRequest {
   agentId: string;
@@ -21,7 +22,7 @@ export interface HttpSseSignalTransportOptions {
 }
 
 export function buildSignalBaseUrl(host: RuntimeHostRecord): string {
-  return `http://${host.host}:${host.port}`;
+  return `http://${formatHostForUrl(host.host)}:${host.port}`;
 }
 
 export function buildSignalStreamUrl(baseUrl: string, agentId: string, heartbeatInterval: number, authToken?: string): string {

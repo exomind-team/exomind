@@ -33,6 +33,7 @@ const runtimeClientMocks = vi.hoisted(() => ({
   getAllEnergy: vi.fn(),
   createAgent: vi.fn(),
   deleteAgent: vi.fn(),
+  stopPtyAgent: vi.fn(),
   submitQuickAction: vi.fn(),
   markSessionWaiting: vi.fn(),
 }));
@@ -119,6 +120,8 @@ vi.mock('@/services/runtime-client', async (importOriginal) => {
     createAgent = runtimeClientMocks.createAgent;
 
     deleteAgent = runtimeClientMocks.deleteAgent;
+
+    stopPtyAgent = runtimeClientMocks.stopPtyAgent;
 
     submitQuickAction = runtimeClientMocks.submitQuickAction;
 
@@ -228,6 +231,18 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     runtimeClientMocks.getAllEnergy.mockResolvedValue({ ok: true, data: [] });
     runtimeClientMocks.createAgent.mockResolvedValue({ ok: true, data: { id: 'agent-523' } });
     runtimeClientMocks.deleteAgent.mockResolvedValue({ ok: true, data: { status: 'stopped', id: 'agent-523' } });
+    runtimeClientMocks.stopPtyAgent.mockResolvedValue({
+      ok: true,
+      data: {
+        id: 'pty-523',
+        name: 'Terminal Agent',
+        session_id: null,
+        workdir: 'D:/project/exomind',
+        command: 'claude',
+        status: 'stopped',
+        created_at: '2026-03-14T00:00:00.000Z',
+      },
+    });
     runtimeClientMocks.submitQuickAction.mockResolvedValue({
       ok: true,
       data: buildSession({
@@ -258,6 +273,20 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
           ok: true,
           status: 200,
           json: async () => [],
+        } as Response;
+      }
+      if (url.endsWith('/pty')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              id: 'pty-523',
+              name: 'Terminal Agent',
+              status: 'running',
+              workdir: 'D:/project/exomind',
+            },
+          ],
         } as Response;
       }
 
@@ -360,6 +389,29 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         expect.objectContaining({ host: '127.0.0.1', port: 9124 }),
         'session-fallback',
         { action_id: 'continue', value: undefined },
+      );
+    });
+  });
+
+  it('stops PTY terminal agent from the right panel（右侧终端面板可真正停止 Terminal Agent）', async () => {
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-pty-pty-523')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-pty-pty-523'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-stop-pty')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'pty-523',
       );
     });
   });

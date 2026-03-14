@@ -92,6 +92,15 @@ async fn pty_spawn_and_interact() {
         linked_session.is_some(),
         "spawning a PTY should auto-create a unified session record, got {sessions_payload}"
     );
+    let linked_session = linked_session.expect("linked session should exist");
+    assert!(
+        linked_session["source_host_id"].as_str().is_some_and(|value| !value.is_empty()),
+        "spawning a PTY should stamp source_host_id, got {linked_session}"
+    );
+    assert!(
+        linked_session["agent_id"].is_null(),
+        "PTY unified session should keep agent_id empty, got {linked_session}"
+    );
 
     // Give the short-lived process a moment to register.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;

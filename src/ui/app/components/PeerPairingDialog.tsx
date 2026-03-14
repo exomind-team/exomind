@@ -7,6 +7,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { getRuntimeMeshSyncService } from '@/lib/services/runtime-mesh-sync.service';
+import { formatHostForUrl } from '@/config/runtime-target';
 import { Loader2, RefreshCw, Check, X, ChevronLeft } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -182,7 +183,7 @@ export function PeerPairingDialog({
       // Generate a per-peer inbound token for the initiator to use when calling us.
       const responderInboundToken = crypto.randomUUID();
 
-      const initiatorBaseUrl = `http://${selectedPeer.host}:${selectedPeer.port}`;
+      const initiatorBaseUrl = `http://${formatHostForUrl(selectedPeer.host)}:${selectedPeer.port}`;
       const result = await meshService.respondToPairing(
         initiatorBaseUrl,
         '', // session_id will be looked up server-side by host_id

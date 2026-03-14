@@ -279,6 +279,8 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
     let session = &sessions[0];
     assert_eq!(session.agent_kind, "codex");
     assert_eq!(session.interaction_mode.as_str(), "structured");
+    assert_eq!(session.agent_id.as_deref(), Some("codex-stream"));
+    assert_eq!(session.source_host_id.as_deref(), Some(host_id.as_str()));
     assert!(
         session.inner_session_id.is_some(),
         "runtime agent session should be linked to the unified session"

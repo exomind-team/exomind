@@ -84,6 +84,9 @@ export interface SessionInfo {
   turn_count: number;
   last_output_preview?: string;
   quick_actions?: QuickAction[];
+  source_host_id?: string;
+  source_host_name?: string;
+  source_host_address?: string;
 }
 
 /** Request body for creating a new session */

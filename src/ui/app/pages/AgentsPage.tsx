@@ -37,13 +37,18 @@ import {
   useNodesState,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { getUseMockDataEnabled } from '@/config/mock-data';
+import {
+  getUseMockDataEnabled,
+  MOCK_SESSIONS,
+  subscribeUseMockDataChanges,
+} from '@/config/mock-data';
 import { resolveLocalServiceHost } from '@/config/local-service-host';
 import {
   DEFAULT_EMBEDDED_RUNTIME_PORT,
   DEFAULT_EXTERNAL_RUNTIME_PORT,
   getEmbeddedRuntimeNetworkMode,
   getPreferredEmbeddedRuntimePort,
+  formatHostForUrl,
   formatRuntimeTargetAddress,
   getRuntimeExternalAddress,
   getSelectedRuntimeTarget,
@@ -85,7 +90,7 @@ import {
 } from '@/services/runtime-manager';
 import { RuntimeClient } from '@/services/runtime-client';
 import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
-import type { QuickActionResponse } from '@/lib/types/session';
+import type { QuickActionResponse, SessionInfo } from '@/lib/types/session';
 import {
   createProviderProfile,
   listProviderProfiles,
@@ -129,6 +134,10 @@ import {
   getConversationMessageTestId,
 } from './agents/conversation-runtime';
 import { EnergyBar, PHASE_LABELS } from './agents/AgentDetailPage';
+import {
+  readRememberedRuntimeSession,
+  rememberRuntimeSession,
+} from './agents/runtime-session-cache';
 import { WorkspaceTabs } from './agents/WorkspaceTabs';
 import { SessionsView } from './agents/SessionsView';
 import { TiledGrid, LayoutSelector, GlobalStatusIndicator, type TiledLayout } from './agents/TiledGrid';
@@ -2268,6 +2277,7 @@ export function AgentsPage() {
   const [tiledLayout, setTiledLayout] = useState<TiledLayout>('2x2');
   const [tiledFocusedIndex, setTiledFocusedIndex] = useState<number | null>(null);
   const [tiledPaneOrder, setTiledPaneOrder] = useState<string[]>([]);
+  const [useMockData, setUseMockData] = useState(getUseMockDataEnabled);
 
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
@@ -2307,6 +2317,7 @@ export function AgentsPage() {
   const [ptyAgents, setPtyAgents] = useState<Array<{ id: string; name: string; status: string; workdir: string }>>([]);
   /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
   const [activePtyId, setActivePtyId] = useState<string | null>(null);
+  const [activePtyHostId, setActivePtyHostId] = useState<string | null>(null);
   const [rightPanelWidth, setRightPanelWidth] = useState(380);
   const [agentCreateOpen, setAgentCreateOpen] = useState(false);
   const [agentCreateKind, setAgentCreateKind] = useState<RuntimeCreateAgentRequest['kind']>('claude_cli');
@@ -2325,6 +2336,8 @@ export function AgentsPage() {
     window.history.pushState(state, '', path);
     window.dispatchEvent(new PopStateEvent('popstate'));
   };
+
+  useEffect(() => subscribeUseMockDataChanges(setUseMockData), []);
 
   const openRouteEdit = (routeId: string | null = null) => {
     setRightPanel({ state: 'ROUTE_EDIT', routeId });
@@ -2565,7 +2578,6 @@ export function AgentsPage() {
   const handleOpenAgentChat = async (nodeId: string) => {
     const agentId = resolveRuntimeEntityId(nodeId);
     setChatAgentId(agentId);
-    setChatSessionId(null);
     setChatInput('');
     setChatError('');
     setRightPanel({ state: 'AGENT_CHAT', nodeId });
@@ -2577,8 +2589,15 @@ export function AgentsPage() {
     );
     if (runtimeHost) {
       setChatMessages([]);
+      setChatSessionId(readRememberedRuntimeSession({
+        agentId,
+        hostId: runtimeHost.id,
+        hostAddress: `${runtimeHost.host}:${runtimeHost.port}`,
+      }));
       return;
     }
+
+    setChatSessionId(null);
 
     try {
       const history = await getAgentHubService().getConversation(agentId);
@@ -2634,6 +2653,7 @@ export function AgentsPage() {
         : null;
 
       if (runtimeHost) {
+        const hostAddress = `${runtimeHost.host}:${runtimeHost.port}`;
         const runtimeClient = new RuntimeClient();
         for await (const chunk of runtimeClient.streamAgentConversation(runtimeHost, {
           agentId: chatAgentId,
@@ -2642,10 +2662,24 @@ export function AgentsPage() {
         })) {
           if (chunk.sessionId) {
             setChatSessionId(chunk.sessionId ?? null);
+            rememberRuntimeSession({
+              agentId: chatAgentId,
+              sessionId: chunk.sessionId,
+              hostId: runtimeHost.id,
+              hostAddress,
+            });
           }
           switch (chunk.type) {
             case 'session.started':
               setChatSessionId(chunk.sessionId ?? null);
+              if (chunk.sessionId) {
+                rememberRuntimeSession({
+                  agentId: chatAgentId,
+                  sessionId: chunk.sessionId,
+                  hostId: runtimeHost.id,
+                  hostAddress,
+                });
+              }
               break;
             case 'output.delta':
               receivedVisibleContent = true;
@@ -2735,21 +2769,21 @@ export function AgentsPage() {
     }
   };
 
-  const handleSessionQuickAction = async (sessionId: string, response: QuickActionResponse) => {
-    const host = resolveActiveRuntimeHost();
+  const handleSessionQuickAction = async (session: SessionInfo, response: QuickActionResponse) => {
+    const host = resolveRuntimeHostForSession(session);
     setRuntimeHostError('');
     const runtimeClient = new RuntimeClient();
-    const result = await runtimeClient.submitQuickAction(host, sessionId, response);
+    const result = await runtimeClient.submitQuickAction(host, session.id, response);
     if (!result.ok) {
       setRuntimeHostError(`提交会话动作失败: ${result.error.message}`);
     }
   };
 
-  const handleSessionMarkWaiting = async (sessionId: string) => {
-    const host = resolveActiveRuntimeHost();
+  const handleSessionMarkWaiting = async (session: SessionInfo) => {
+    const host = resolveRuntimeHostForSession(session);
     setRuntimeHostError('');
     const runtimeClient = new RuntimeClient();
-    const result = await runtimeClient.markSessionWaiting(host, sessionId);
+    const result = await runtimeClient.markSessionWaiting(host, session.id);
     if (!result.ok) {
       setRuntimeHostError(`标记等待决策失败: ${result.error.message}`);
     }
@@ -2910,8 +2944,9 @@ export function AgentsPage() {
   const [hostManagerOpen, setHostManagerOpen] = useState(false);
   const [showPtySpawnDialog, setShowPtySpawnDialog] = useState(false);
 
-  const openPtyTerminal = (ptyId: string) => {
+  const openPtyTerminal = (ptyId: string, hostId?: string) => {
     setActivePtyId(ptyId);
+    setActivePtyHostId(hostId ?? null);
     setRightPanel({ state: 'PTY_TERMINAL', ptyId });
   };
 
@@ -2938,7 +2973,7 @@ export function AgentsPage() {
   /** Resolve the first available RT base URL from runtime host snapshots. */
   const resolveRtBaseUrl = (): string => {
     const host = activeSignalRouteHost ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((s) => s.host)?.host;
-    if (host) return `http://${host.host}:${host.port}`;
+    if (host) return `http://${formatHostForUrl(host.host)}:${host.port}`;
     return `http://127.0.0.1:${DEFAULT_EMBEDDED_RUNTIME_PORT}`;
   };
 
@@ -2963,14 +2998,76 @@ export function AgentsPage() {
     return createDirectRuntimeHost(resolvedUrl.hostname, fallbackPort);
   };
 
-  // ── Session stream for tiled view ──
+  const resolveRuntimeHostForSession = (session: SessionInfo): RuntimeHostRecord => {
+    const hostId = session.source_host_id;
+    if (hostId) {
+      const matchedHost = runtimeHostSnapshots.find((snapshot) => snapshot.host.id === hostId)?.host;
+      if (matchedHost) return matchedHost;
+    }
+    return resolveActiveRuntimeHost();
+  };
+
+  const resolveRuntimeConnectionForSession = (session: SessionInfo) => {
+    const host = resolveRuntimeHostForSession(session);
+    return {
+      rtBaseUrl: `http://${formatHostForUrl(host.host)}:${host.port}`,
+      authToken: host.authToken ?? resolveRtAuthToken(),
+    };
+  };
+
+  const resolveRuntimeConnectionForHostId = (hostId?: string | null) => {
+    if (hostId) {
+      const matchedHost = runtimeHostSnapshots.find((snapshot) => snapshot.host.id === hostId)?.host;
+      if (matchedHost) {
+        return {
+          rtBaseUrl: `http://${formatHostForUrl(matchedHost.host)}:${matchedHost.port}`,
+          authToken: matchedHost.authToken ?? resolveRtAuthToken(),
+        };
+      }
+    }
+    return {
+      rtBaseUrl: resolveRtBaseUrl(),
+      authToken: resolveRtAuthToken(),
+    };
+  };
+
+  const sessionStreamTargets = useMemo(() => {
+    const sortedHosts = sortRouteHostsByPriority(runtimeHostSnapshots);
+    if (sortedHosts.length > 0) {
+      return sortedHosts.map((snapshot) => ({
+        id: snapshot.host.id,
+        rtBaseUrl: `http://${formatHostForUrl(snapshot.host.host)}:${snapshot.host.port}`,
+        authToken: snapshot.host.authToken,
+        hostName: snapshot.host.name,
+        hostAddress: `${snapshot.host.host}:${snapshot.host.port}`,
+      }));
+    }
+
+    const host = resolveActiveRuntimeHost();
+    return [{
+      id: host.id,
+      rtBaseUrl: `http://${formatHostForUrl(host.host)}:${host.port}`,
+      authToken: host.authToken ?? resolveRtAuthToken(),
+      hostName: host.name,
+      hostAddress: `${host.host}:${host.port}`,
+    }];
+  }, [runtimeHostSnapshots, activeSignalRouteHost, runtimeServiceStatus]);
+
   const {
-    sessions: tiledSessions,
+    sessions: liveSessions,
+    loading: sessionLoading,
+    error: sessionError,
+    refresh: refreshSessions,
   } = useSessionStream({
-    rtBaseUrl: resolveRtBaseUrl(),
-    authToken: resolveRtAuthToken(),
-    enabled: viewMode === 'tiled',
+    rtBaseUrl: null,
+    targets: sessionStreamTargets,
+    enabled: (viewMode === 'sessions' || viewMode === 'tiled') && !useMockData,
   });
+
+  const dashboardSessions = useMemo(
+    () => (useMockData ? MOCK_SESSIONS : liveSessions),
+    [liveSessions, useMockData],
+  );
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
@@ -3008,7 +3105,7 @@ export function AgentsPage() {
       const [routes, agentsResult, historyResponse, energyResult] = await Promise.all([
         routeService.listRoutes(),
         runtimeClient.getAgents(host),
-        fetch(`http://${host.host}:${host.port}/signals/history?limit=120`),
+        fetch(`http://${formatHostForUrl(host.host)}:${host.port}/signals/history?limit=120`),
         runtimeClient.getAllEnergy(host).catch(() => ({ ok: false as const, error: { code: 'network' as const, message: 'energy fetch failed' } })),
       ]);
 
@@ -3478,12 +3575,15 @@ export function AgentsPage() {
     if (viewMode === 'sessions') {
       return (
         <SessionsView
-          rtBaseUrl={resolveRtBaseUrl()}
-          authToken={resolveRtAuthToken()}
+          sessions={dashboardSessions}
+          loading={sessionLoading}
+          error={sessionError}
+          useMockData={useMockData}
+          onRefresh={refreshSessions}
           onSessionClick={(session) => {
             // If the session has a PTY, open it in the right panel
             if (session.pty_id) {
-              openPtyTerminal(session.pty_id);
+              openPtyTerminal(session.pty_id, session.source_host_id);
             }
           }}
         />
@@ -3491,7 +3591,7 @@ export function AgentsPage() {
     }
     if (viewMode === 'tiled') {
       // Filter active sessions for tiled view
-      const activeSessions = tiledSessions.filter(
+      const activeSessions = dashboardSessions.filter(
         (s) => s.status !== 'completed' && s.status !== 'archived',
       );
       return (
@@ -3509,20 +3609,19 @@ export function AgentsPage() {
             <TiledGrid
               sessions={activeSessions}
               layout={tiledLayout}
-              rtBaseUrl={resolveRtBaseUrl()}
-              authToken={resolveRtAuthToken()}
+              resolveSessionConnection={resolveRuntimeConnectionForSession}
               focusedIndex={tiledFocusedIndex}
               onFocusPane={setTiledFocusedIndex}
               onSessionClick={(session) => {
-                if (session.pty_id) openPtyTerminal(session.pty_id);
+                if (session.pty_id) openPtyTerminal(session.pty_id, session.source_host_id);
               }}
               paneOrder={tiledPaneOrder}
               onReorder={setTiledPaneOrder}
-              onQuickAction={(sessionId, response) => {
-                void handleSessionQuickAction(sessionId, response);
+              onQuickAction={(session, response) => {
+                void handleSessionQuickAction(session, response);
               }}
-              onMarkWaiting={(sessionId) => {
-                void handleSessionMarkWaiting(sessionId);
+              onMarkWaiting={(session) => {
+                void handleSessionMarkWaiting(session);
               }}
             />
           </div>
@@ -3653,11 +3752,16 @@ export function AgentsPage() {
     runtimeExternalAddressDraft,
     runtimeServiceStatus,
     nodesFilter,
+    dashboardSessions,
+    sessionLoading,
+    sessionError,
+    refreshSessions,
+    useMockData,
     viewMode,
     tiledLayout,
     tiledFocusedIndex,
-    tiledSessions,
     tiledPaneOrder,
+    resolveRuntimeConnectionForSession,
   ]);
 
   return (
@@ -4234,11 +4338,16 @@ export function AgentsPage() {
                   className="flex h-full flex-col overflow-hidden"
                   style={rightPanel.state !== 'PTY_TERMINAL' ? { display: 'none' } : undefined}
                 >
+                  {(() => {
+                    const connection = resolveRuntimeConnectionForHostId(activePtyHostId);
+                    return (
                   <PtyTerminal
-                    rtBaseUrl={resolveRtBaseUrl()}
-                    ptyId={activePtyId}
-                    authToken={resolveRtAuthToken()}
-                  />
+                        rtBaseUrl={connection.rtBaseUrl}
+                        ptyId={activePtyId}
+                        authToken={connection.authToken}
+                      />
+                    );
+                  })()}
                 </div>
               )}
             </div>

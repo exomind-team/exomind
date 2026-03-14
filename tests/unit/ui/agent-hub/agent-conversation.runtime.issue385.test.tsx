@@ -49,6 +49,8 @@ vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
 
 describe('agent conversation runtime issue-385（运行时对话页 typed event 渲染）', () => {
   beforeEach(() => {
+    localStorage.clear();
+
     serviceMocks.getConversation.mockResolvedValue([]);
     serviceMocks.streamConversation.mockImplementation(async function* () {
       yield { messageId: 'fallback-1', delta: 'fallback', done: true };
@@ -209,5 +211,63 @@ describe('agent conversation runtime issue-385（运行时对话页 typed event 
     await waitFor(() => {
       expect(screen.getByText('发送失败: runtime disconnected')).toBeInTheDocument();
     });
+  });
+
+  it('reuses remembered runtime session after remount（重新进入页面后继续复用 runtime session）', async () => {
+    runtimeClientMocks.streamAgentConversation.mockImplementation(async function* (_host, request) {
+      if (request.message === '第一条消息') {
+        yield { type: 'session.started', sessionId: 'session-385-remount' };
+        yield { type: 'output.delta', content: '首轮输出' };
+        yield { type: 'done' };
+        return;
+      }
+
+      yield { type: 'output.delta', content: `resume:${request.sessionId ?? 'missing'}` };
+      yield { type: 'done' };
+    });
+
+    const firstRender = render(<AgentConversationPage agentId="codex" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-conversation-page')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('agent-chat-input'), {
+      target: { value: '第一条消息' },
+    });
+    fireEvent.click(screen.getByTestId('agent-chat-send-button'));
+
+    await waitFor(() => {
+      expect(screen.getByText('首轮输出')).toBeInTheDocument();
+    });
+
+    firstRender.unmount();
+
+    render(<AgentConversationPage agentId="codex" />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-conversation-page')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('agent-chat-input'), {
+      target: { value: '第二条消息' },
+    });
+    fireEvent.click(screen.getByTestId('agent-chat-send-button'));
+
+    await waitFor(() => {
+      expect(screen.getByText('resume:session-385-remount')).toBeInTheDocument();
+    });
+
+    expect(runtimeClientMocks.streamAgentConversation).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        host: '127.0.0.1',
+        port: 1919,
+      }),
+      expect.objectContaining({
+        agentId: 'codex',
+        message: '第二条消息',
+        sessionId: 'session-385-remount',
+      }),
+    );
   });
 });

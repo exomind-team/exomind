@@ -10,11 +10,12 @@ import type {
   CreateRouteRequest,
   UpdateRouteRequest,
 } from '@/lib/types/signal-pool';
+import { formatHostForUrl } from '@/config/runtime-target';
 
 // ── 工具函数 ──────────────────────────────────────────────────
 
 function buildBaseUrl(host: RuntimeHostRecord): string {
-  return `http://${host.host}:${host.port}`;
+  return `http://${formatHostForUrl(host.host)}:${host.port}`;
 }
 
 // ── Service ──────────────────────────────────────────────────

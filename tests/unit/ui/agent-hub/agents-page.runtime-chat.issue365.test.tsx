@@ -129,6 +129,8 @@ const SAMPLE_SIGNAL_ROUTES: SignalRoute[] = [
 
 describe('agents page runtime chat issue-365（运行时 Agent 对话）', () => {
   beforeEach(() => {
+    localStorage.clear();
+
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: true,
       host: '127.0.0.1',
@@ -273,5 +275,87 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
       }),
     );
     expect(serviceMocks.streamConversation).not.toHaveBeenCalled();
+  });
+
+  it('reuses runtime session after closing and reopening chat（关闭后重新打开仍应续上同一会话）', async () => {
+    runtimeClientMocks.streamAgentConversation.mockImplementation(async function* (_host, request) {
+      if (request.message === '第一轮消息') {
+        yield { type: 'session.started', sessionId: 'sid-365-reopen' };
+        yield { type: 'output.delta', content: '首轮回复' };
+        yield { type: 'done' };
+        return;
+      }
+
+      yield { type: 'output.delta', content: `resume:${request.sessionId ?? 'missing'}` };
+      yield { type: 'done' };
+    });
+
+    render(<AgentsPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-topology-view')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '节点' }));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-list-view')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByText('Claude Agent'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-open-chat')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-open-chat'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-chat-panel')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('agent-rightpanel-chat-input'), {
+      target: { value: '第一轮消息' },
+    });
+    fireEvent.click(screen.getByTestId('agent-rightpanel-chat-send'));
+
+    await waitFor(() => {
+      expect(screen.getByText('首轮回复')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '关闭' }));
+
+    fireEvent.click(screen.getByText('Claude Agent'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-open-chat')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('agent-rightpanel-open-chat'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('agent-rightpanel-chat-panel')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('agent-rightpanel-chat-input'), {
+      target: { value: '第二轮消息' },
+    });
+    fireEvent.click(screen.getByTestId('agent-rightpanel-chat-send'));
+
+    await waitFor(() => {
+      expect(screen.getByText('resume:sid-365-reopen')).toBeInTheDocument();
+    });
+
+    expect(runtimeClientMocks.streamAgentConversation).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        host: '127.0.0.1',
+        port: 1919,
+      }),
+      expect.objectContaining({
+        agentId: 'claude',
+        message: '第二轮消息',
+        sessionId: 'sid-365-reopen',
+      }),
+    );
   });
 });

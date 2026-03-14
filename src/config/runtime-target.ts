@@ -59,7 +59,7 @@ function formatHostForAddress(host: string): string {
   return host;
 }
 
-function formatHostForUrl(host: string): string {
+export function formatHostForUrl(host: string): string {
   if (host.includes(':') && !host.startsWith('[')) {
     return `[${host}]`;
   }

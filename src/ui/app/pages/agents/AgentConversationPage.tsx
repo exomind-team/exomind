@@ -7,7 +7,12 @@ import { createUuidV4 } from '@/lib/utils/uuid';
 import { RuntimeClient } from '@/services/runtime-client';
 import { findPreferredRuntimeHostForAgent, getRuntimeManager } from '@/services/runtime-manager';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
+import { formatHostForUrl } from '@/config/runtime-target';
 import { getActiveInteractionContextService } from '@/lib/services/active-interaction-context.service';
+import {
+  readRememberedRuntimeSession,
+  rememberRuntimeSession,
+} from './runtime-session-cache';
 import {
   appendConversationChunk,
   appendAdjacentConversationDelta,
@@ -43,7 +48,11 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
           if (!disposed) {
             setMessages([]);
             setChatError('');
-            setRuntimeSessionId(null);
+            setRuntimeSessionId(readRememberedRuntimeSession({
+              agentId: targetId,
+              hostId: runtimeHost.id,
+              hostAddress: `${runtimeHost.host}:${runtimeHost.port}`,
+            }));
           }
           return;
         }
@@ -104,7 +113,7 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
         const hosts = await getRuntimeHostService().listHosts();
         if (hosts.length === 0 || disposed) return;
         const host = hosts[0];
-        const url = `http://${host.host}:${host.port}/signals/stream?agent_id=${encodeURIComponent(targetId)}&heartbeat_interval=30`;
+        const url = `http://${formatHostForUrl(host.host)}:${host.port}/signals/stream?agent_id=${encodeURIComponent(targetId)}&heartbeat_interval=30`;
         const es = new EventSource(url);
         sseRef.current = es;
 
@@ -186,6 +195,7 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
       let receivedRenderableEvent = false;
 
       if (runtimeHost) {
+        const hostAddress = `${runtimeHost.host}:${runtimeHost.port}`;
         const runtimeClient = new RuntimeClient();
         for await (const chunk of runtimeClient.streamAgentConversation(runtimeHost, {
           agentId: targetId,
@@ -194,11 +204,25 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
         })) {
           if (chunk.sessionId) {
             setRuntimeSessionId(chunk.sessionId);
+            rememberRuntimeSession({
+              agentId: targetId,
+              sessionId: chunk.sessionId,
+              hostId: runtimeHost.id,
+              hostAddress,
+            });
           }
 
           switch (chunk.type) {
             case 'session.started':
               setRuntimeSessionId(chunk.sessionId ?? null);
+              if (chunk.sessionId) {
+                rememberRuntimeSession({
+                  agentId: targetId,
+                  sessionId: chunk.sessionId,
+                  hostId: runtimeHost.id,
+                  hostAddress,
+                });
+              }
               break;
             case 'output.delta':
               receivedRenderableEvent = true;

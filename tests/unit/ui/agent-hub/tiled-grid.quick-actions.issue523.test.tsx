@@ -34,7 +34,9 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
           }),
         ]}
         layout="1x1"
-        rtBaseUrl="http://127.0.0.1:1949"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
         focusedIndex={0}
         onFocusPane={vi.fn()}
       />,
@@ -54,7 +56,9 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
           }),
         ]}
         layout="1x1"
-        rtBaseUrl="http://127.0.0.1:1949"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
         focusedIndex={0}
         onFocusPane={vi.fn()}
       />,

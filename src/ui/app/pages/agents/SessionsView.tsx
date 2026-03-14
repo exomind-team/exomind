@@ -1,46 +1,29 @@
-import { useEffect, useState } from 'react';
 import { Inbox, RefreshCw } from 'lucide-react';
 import type { SessionInfo } from '@/lib/types/session';
-import { getUseMockDataEnabled, MOCK_SESSIONS, subscribeUseMockDataChanges } from '@/config/mock-data';
-import { useSessionStream } from '@/hooks/useSessionStream';
 import { SessionCard } from './SessionCard';
 
 // ── Types ──────────────────────────────────────────────────────
 
 export interface SessionsViewProps {
+  sessions: SessionInfo[];
+  loading: boolean;
+  error: string | null;
+  useMockData: boolean;
+  onRefresh?: () => void;
   /** Callback when user clicks a session card */
   onSessionClick?: (session: SessionInfo) => void;
-  /** Runtime base URL for real API data */
-  rtBaseUrl?: string;
-  /** Auth token for the runtime API */
-  authToken?: string;
 }
 
 // ── Component ──────────────────────────────────────────────────
 
-export function SessionsView({ onSessionClick, rtBaseUrl, authToken }: SessionsViewProps) {
-  const [useMockData, setUseMockData] = useState(getUseMockDataEnabled);
-
-  // Subscribe to mock data toggle changes
-  useEffect(() => {
-    return subscribeUseMockDataChanges(setUseMockData);
-  }, []);
-
-  // Real-time session stream (only active when mock data is disabled)
-  const {
-    sessions: realSessions,
-    loading,
-    error,
-    refresh,
-  } = useSessionStream({
-    rtBaseUrl: rtBaseUrl ?? null,
-    authToken,
-    enabled: !useMockData && !!rtBaseUrl,
-  });
-
-  // Determine which sessions to display
-  const sessions: SessionInfo[] = useMockData ? MOCK_SESSIONS : realSessions;
-
+export function SessionsView({
+  sessions,
+  loading,
+  error,
+  useMockData,
+  onRefresh,
+  onSessionClick,
+}: SessionsViewProps) {
   // Sort: attention-needing first, then by last_active_at desc
   const sortedSessions = [...sessions].sort((a, b) => {
     const aNeeds = a.status === 'waiting_input' || a.status === 'error';
@@ -54,7 +37,7 @@ export function SessionsView({ onSessionClick, rtBaseUrl, authToken }: SessionsV
     (s) => s.status !== 'completed' && s.status !== 'archived',
   );
 
-  if (loading) {
+  if (loading && sessions.length === 0) {
     return (
       <div className="flex items-center justify-center py-20">
         <RefreshCw size={24} className="animate-spin text-[#A8A29E]" />
@@ -99,7 +82,7 @@ export function SessionsView({ onSessionClick, rtBaseUrl, authToken }: SessionsV
         {!useMockData && (
           <button
             type="button"
-            onClick={refresh}
+            onClick={onRefresh}
             className="flex h-7 w-7 items-center justify-center rounded text-[#A8A29E] hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
             title="刷新"
           >

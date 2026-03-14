@@ -481,4 +481,39 @@ mod tests {
             SessionStoreError::AlreadyExists(existing_id) if existing_id == "fixed-session-id"
         ));
     }
+
+    #[test]
+    fn memory_store_persists_agent_id_and_source_host_id() {
+        let store = SessionStore::new();
+        let session = store
+            .create(CreateSessionInput {
+                agent_id: Some("codex-runtime-1".to_string()),
+                source_host_id: Some("host-logic-1".to_string()),
+                ..create_input("codex", "Runtime Codex")
+            })
+            .unwrap();
+
+        assert_eq!(session.agent_id.as_deref(), Some("codex-runtime-1"));
+        assert_eq!(session.source_host_id.as_deref(), Some("host-logic-1"));
+    }
+
+    #[test]
+    fn sqlite_store_persists_agent_id_and_source_host_id() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("sessions.sqlite");
+        let store = SessionStore::with_sqlite_path(&sqlite_path).unwrap();
+        let created = store
+            .create(CreateSessionInput {
+                agent_id: Some("claude-runtime-1".to_string()),
+                source_host_id: Some("desktop-host".to_string()),
+                ..create_input("claude", "Runtime Claude")
+            })
+            .unwrap();
+        drop(store);
+
+        let reopened = SessionStore::with_sqlite_path(&sqlite_path).unwrap();
+        let loaded = reopened.get(&created.id).unwrap().expect("session should persist");
+        assert_eq!(loaded.agent_id.as_deref(), Some("claude-runtime-1"));
+        assert_eq!(loaded.source_host_id.as_deref(), Some("desktop-host"));
+    }
 }

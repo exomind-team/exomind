@@ -7,6 +7,7 @@ import type {
   RuntimeTopologyCapabilities,
   RuntimeTopologyResponse,
 } from '@/lib/types/runtime-topology';
+import { formatHostForUrl } from '@/config/runtime-target';
 
 export type RuntimeClientErrorCode = 'timeout' | 'network' | 'http' | 'invalid_payload';
 
@@ -86,7 +87,7 @@ export interface RuntimeAgentConversationChunk {
 const DEFAULT_TIMEOUT_MS = 3500;
 
 function buildBaseUrl(host: RuntimeHostRecord): string {
-  return `http://${host.host}:${host.port}`;
+  return `http://${formatHostForUrl(host.host)}:${host.port}`;
 }
 
 function buildAgentChatUrl(host: RuntimeHostRecord, agentId: string): string {

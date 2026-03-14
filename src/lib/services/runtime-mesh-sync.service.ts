@@ -1,5 +1,6 @@
 import { getRuntimeControlService, type RuntimeReachableAddress } from '@/lib/services/runtime-control.service';
 import type { RuntimeHostRecord, RuntimeServiceStatus } from '@/lib/types/agent-hub';
+import { formatHostForUrl } from '@/config/runtime-target';
 
 type RuntimeFetch = typeof fetch;
 
@@ -66,14 +67,14 @@ function resolveRemotePeerBaseUrl(host: RuntimeHostRecord): string | null {
     return toBaseUrl(host.manualOverride);
   }
   if (host.host && host.port) {
-    return `http://${host.host}:${host.port}`;
+    return `http://${formatHostForUrl(host.host)}:${host.port}`;
   }
   return null;
 }
 
 function resolveLocalRuntimeBaseUrl(status: RuntimeServiceStatus): string {
   const host = status.host === '0.0.0.0' ? '127.0.0.1' : status.host;
-  return `http://${host}:${status.port}`;
+  return `http://${formatHostForUrl(host)}:${status.port}`;
 }
 
 /** Build headers with optional Bearer auth token for local runtime calls. */
@@ -139,7 +140,7 @@ export class RuntimeMeshSyncService {
 
     await this.upsertPeer(remoteBaseUrl, {
       id: reachableAddress.hostId,
-      base_url: `http://${reachableAddress.host}:${reachableAddress.port}`,
+      base_url: `http://${formatHostForUrl(reachableAddress.host)}:${reachableAddress.port}`,
       enabled: true,
       capabilities: [],
     });

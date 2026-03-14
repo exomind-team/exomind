@@ -264,4 +264,31 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
       }),
     );
   });
+
+  it('posts stop request for PTY agent（向 PTY stop 路由发送停止请求）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'pty-123',
+        name: 'Terminal Agent',
+        session_id: null,
+        workdir: 'D:/project/exomind',
+        command: 'claude',
+        status: 'stopped',
+        created_at: '2026-03-15T00:00:00.000Z',
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.stopPtyAgent(SAMPLE_HOST, 'pty-123');
+
+    expect(result.ok).toBe(true);
+    expect(fetchImpl).toHaveBeenCalledWith(
+      'http://127.0.0.1:1919/pty/pty-123/stop',
+      expect.objectContaining({
+        method: 'POST',
+      }),
+    );
+  });
 });

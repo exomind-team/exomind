@@ -1,0 +1,7 @@
+Write a file D:/project/exomind/req.json with this exact content (one line):
+{"model":"gpt-4o-mini","input":"hi","max_output_tokens":10}
+
+Then run:
+curl -s -i -X POST http://127.0.0.1:15721/v1/responses -H "Content-Type: application/json" -H "Authorization: Bearer test" -d @D:/project/exomind/req.json
+
+Output all response headers and body. Then delete both temp files.

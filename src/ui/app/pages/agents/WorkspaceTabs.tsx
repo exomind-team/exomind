@@ -6,6 +6,7 @@ import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { getRuntimeHostService } from '@/lib/services/runtime-host.service';
+import { formatHostForUrl } from '@/config/runtime-target';
 
 // ---------------------------------------------------------------------------
 // Types — camelCase (matches Tauri command serde output)
@@ -100,7 +101,7 @@ async function httpGet<T>(agentId: string, path: string): Promise<T | null> {
   const hosts = await getRuntimeHostService().listHosts();
   if (hosts.length === 0) return null;
   const host = hosts[0];
-  const url = `http://${host.host}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
+  const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
   const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
   if (!resp.ok) return null;
   return await resp.json() as T;
@@ -110,7 +111,7 @@ async function httpText(agentId: string, path: string): Promise<string | null> {
   const hosts = await getRuntimeHostService().listHosts();
   if (hosts.length === 0) return null;
   const host = hosts[0];
-  const url = `http://${host.host}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
+  const url = `http://${formatHostForUrl(host.host)}:${host.port}/agents/${encodeURIComponent(agentId)}/workspace/${path}`;
   const resp = await fetch(url, { signal: AbortSignal.timeout(3000) });
   if (!resp.ok) return null;
   return await resp.text();

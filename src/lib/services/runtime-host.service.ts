@@ -1,6 +1,6 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment';
 import type { IStoragePort } from '@/lib/environment/interfaces/storage.port';
-import { DEFAULT_EXTERNAL_RUNTIME_PORT } from '@/config/runtime-target';
+import { DEFAULT_EXTERNAL_RUNTIME_PORT, formatHostForUrl } from '@/config/runtime-target';
 import type { RuntimeHostRecord, RuntimeHostStatus, RuntimeHostTrustState } from '@/lib/types/agent-hub';
 import { createUuidV4 } from '@/lib/utils/uuid';
 
@@ -299,7 +299,7 @@ export class RuntimeHostServiceImpl implements RuntimeHostService {
       : null;
 
     try {
-      const response = await this.fetchImpl(`http://${host}:${port}/health`, {
+      const response = await this.fetchImpl(`http://${formatHostForUrl(host)}:${port}/health`, {
         method: 'GET',
         signal: controller?.signal,
       });
