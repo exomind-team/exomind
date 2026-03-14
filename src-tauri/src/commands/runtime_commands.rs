@@ -300,10 +300,7 @@ pub async fn ensure_runtime_started(
                 return mark_external_runtime_running(&state, &options.bind_host, options.port);
             }
             if i == 0 {
-                eprintln!(
-                    "[tauri/setup] port {} busy, waiting for release...",
-                    options.port
-                );
+                log::info!("port {} busy, waiting for release...", options.port);
             }
             sleep(Duration::from_millis(100)).await;
         }

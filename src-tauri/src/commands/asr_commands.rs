@@ -805,10 +805,13 @@ async fn run_volcano_stream_session(
 
     let _ = write.close().await;
     stream_state.remove_session(&session_id).await;
-    eprintln!(
-        "{}",
-        format_stream_finish_log_line(&session_id, &endpoint, &outcome)
-    );
+    match &outcome {
+        Ok(_) => log::info!("{}", format_stream_finish_log_line(&session_id, &endpoint, &outcome)),
+        Err(error) if error == VOLCANO_STREAM_CANCELLED_MESSAGE => {
+            log::debug!("{}", format_stream_finish_log_line(&session_id, &endpoint, &outcome))
+        }
+        Err(_) => log::warn!("{}", format_stream_finish_log_line(&session_id, &endpoint, &outcome)),
+    }
 
     if let Err(error) = &outcome {
         if error != VOLCANO_STREAM_CANCELLED_MESSAGE {
@@ -835,10 +838,7 @@ pub async fn volcano_asr_recognize(
     let (ws_stream, endpoint) = open_configured_ws(&config).await?;
     let (mut write, mut read): (VolcanoWriteHalf, VolcanoReadHalf) = ws_stream.split();
 
-    eprintln!(
-        "[ASR-Rust] 开始识别: endpoint={endpoint}, audio={} bytes",
-        audio_data.len()
-    );
+    log::debug!("[ASR] 开始识别: endpoint={endpoint}, audio={} bytes", audio_data.len());
 
     let chunk_size = 6400usize;
     let total_chunks = audio_data.chunks(chunk_size).len();
@@ -901,7 +901,10 @@ pub async fn volcano_asr_recognize(
     .and_then(|result| result);
 
     let _ = write.close().await;
-    eprintln!("{}", format_recognize_finish_log_line(&endpoint, &result));
+    match &result {
+        Ok(_) => log::info!("{}", format_recognize_finish_log_line(&endpoint, &result)),
+        Err(_) => log::warn!("{}", format_recognize_finish_log_line(&endpoint, &result)),
+    }
     result
 }
 
@@ -925,7 +928,7 @@ pub async fn volcano_asr_stream_start(
         .insert_session(session_id.clone(), Arc::clone(&session))
         .await;
 
-    eprintln!("{}", format_stream_start_log_line(&session_id, &endpoint));
+    log::debug!("{}", format_stream_start_log_line(&session_id, &endpoint));
 
     tokio::spawn(run_volcano_stream_session(
         app,

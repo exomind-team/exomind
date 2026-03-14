@@ -72,7 +72,7 @@ impl VoiceShortcutState {
 pub fn register_voice_shortcut(app: &AppHandle, state: &VoiceShortcutState) {
     let shortcut = state.get();
     if let Err(error) = register_shortcut_listener(app, &shortcut) {
-        eprintln!("[shortcut] failed to register voice shortcut {shortcut}: {error}");
+        log::warn!("failed to register voice shortcut {shortcut}: {error}");
     }
 }
 
@@ -402,8 +402,8 @@ fn resolve_overlay_monitor(app: &AppHandle) -> Result<Option<tauri::Monitor>, St
         }
         // Cursor is in a gap between monitors (non-contiguous layout) or
         // available_monitors() returned an empty list — fall through to main window.
-        eprintln!(
-            "[voice-overlay] cursor ({cx},{cy}) not within any monitor rect, falling back to main window monitor"
+        log::debug!(
+            "cursor ({cx},{cy}) not within any monitor rect, falling back to main window monitor"
         );
     }
 
