@@ -238,6 +238,10 @@ vi.mock('@/ui/app/components/AboutSection', () => ({
   AboutSection: () => null,
 }));
 
+vi.mock('@/ui/app/config/settings/LogPanelDialog', () => ({
+  LogPanelDialog: () => null,
+}));
+
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
 describe('issue-514 instance diagnostics setting（实例诊断设置项）', () => {

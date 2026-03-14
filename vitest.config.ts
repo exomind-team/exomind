@@ -12,6 +12,7 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),
+      '@tauri-apps/plugin-log': path.resolve(__dirname, './tests/stubs/tauri-plugin-log.ts'),
     },
   },
   test: {

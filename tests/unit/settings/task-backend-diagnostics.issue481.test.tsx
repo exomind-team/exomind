@@ -8,8 +8,8 @@ import {
 } from '../components/settings/setup-settings-mocks';
 
 vi.mock('@tauri-apps/api/core', () => ({
-  isTauri: vi.fn(async () => false),
-  invoke: vi.fn(),
+  isTauri: vi.fn(() => false),
+  invoke: vi.fn().mockResolvedValue(null),
 }));
 
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';

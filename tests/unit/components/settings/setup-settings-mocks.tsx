@@ -259,11 +259,26 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
 }));
 
-vi.mock('@/config/voice-shortcut-asr-provider', () => ({
-  getVoiceShortcutAsrProvider: vi.fn(() => 'moss'),
-  setVoiceShortcutAsrProvider: vi.fn((value: string) => value),
-  subscribeVoiceShortcutAsrProviderChanges: vi.fn(() => () => {}),
-}));
+vi.mock('@/config/voice-shortcut-asr-provider', () => {
+  let currentProvider = 'moss';
+  const subscribers: Array<(value: string) => void> = [];
+  return {
+    getVoiceShortcutAsrProvider: vi.fn(() => currentProvider),
+    getVoiceShortcutAsrProviderLabel: vi.fn((provider: string) => provider === 'volcano' ? '火山' : 'MOSS'),
+    setVoiceShortcutAsrProvider: vi.fn((value: string) => {
+      currentProvider = value;
+      for (const cb of subscribers) cb(value);
+      return value;
+    }),
+    subscribeVoiceShortcutAsrProviderChanges: vi.fn((cb: (value: string) => void) => {
+      subscribers.push(cb);
+      return () => {
+        const idx = subscribers.indexOf(cb);
+        if (idx >= 0) subscribers.splice(idx, 1);
+      };
+    }),
+  };
+});
 
 vi.mock('@/config/voice-overlay-preferences', () => ({
   DEFAULT_VOICE_OVERLAY_OPACITY: 62,
@@ -316,6 +331,10 @@ vi.mock('@/lib/media/timer-end-sounds', () => ({
 
 vi.mock('@/ui/app/components/UserCard', () => ({
   UserCard: () => null,
+}));
+
+vi.mock('@/ui/app/config/settings/LogPanelDialog', () => ({
+  LogPanelDialog: () => null,
 }));
 
 vi.mock('@tanstack/react-router', () => ({

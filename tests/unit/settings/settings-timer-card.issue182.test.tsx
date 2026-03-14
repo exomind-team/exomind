@@ -69,6 +69,10 @@ vi.mock('@/ui/pages/UserManagePage', () => ({
   UserManagePage: () => <div data-testid="user-manage-page-mock">UserManagePage</div>,
 }));
 
+vi.mock('@/ui/app/config/settings/LogPanelDialog', () => ({
+  LogPanelDialog: () => null,
+}));
+
 vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
 }));
@@ -188,7 +192,7 @@ describe('SettingsPage timer card（新设置页计时器卡片）', () => {
     render(<SettingsPage />);
 
     expect(screen.getByText('数据')).toBeInTheDocument();
-    expect(screen.getByText('导出备份')).toBeInTheDocument();
+    expect(screen.getByText('导出数据')).toBeInTheDocument();
     expect(screen.getByText('导入数据')).toBeInTheDocument();
     expect(screen.queryByText('导出任务 JSON')).not.toBeInTheDocument();
     expect(screen.queryByText('导出任务 SQLite')).not.toBeInTheDocument();

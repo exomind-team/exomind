@@ -19,7 +19,7 @@ describe('new ui dark mode palette issue-179（新UI暗色配色）', () => {
   });
 
   it('applies dark switch tokens from settings pencil（Switch 应匹配设置页暗色令牌）', () => {
-    expect(switchSource).toContain('data-[state=checked]:bg-brand-accent');
+    expect(switchSource).toContain('data-[state=checked]:bg-[var(--switch-checked-bg)]');
     expect(switchSource).toContain('dark:data-[state=unchecked]:bg-white/10');
     expect(switchSource).toContain('dark:bg-[#0A0A0A]');
   });

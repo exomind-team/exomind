@@ -1,7 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
+import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges } from '@/config/voice-shortcut-asr-provider';
+import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { UserCard } from '@/ui/app/components/UserCard';
 import { DesktopSettingsLayout } from '@/ui/app/layouts/DesktopSettingsLayout';
 import { MobileSettingsLayout } from '@/ui/app/layouts/MobileSettingsLayout';
@@ -46,6 +48,13 @@ export function SettingsPage() {
   const desktopAdaptiveEnabled = useSubscribed(getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges);
   const isDesktopVcLayout = isDesktop && desktopAdaptiveEnabled;
   const items = useMemo(() => getVisibleSettings(ctx), [ctx]);
+
+  useEffect(() => {
+    if (!isTauri()) return;
+    invoke<string>('voice_shortcut_get')
+      .then((hotkey) => { if (hotkey) setVoiceShortcutHotkey(hotkey); })
+      .catch(() => {});
+  }, []);
 
   if (isDesktopVcLayout) {
     return (

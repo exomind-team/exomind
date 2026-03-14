@@ -73,6 +73,10 @@ vi.mock('@tanstack/react-router', () => ({
   useNavigate: () => vi.fn(),
 }));
 
+vi.mock('@/ui/app/config/settings/LogPanelDialog', () => ({
+  LogPanelDialog: () => null,
+}));
+
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
 describe('settings mock-data toggle issue-213（设置页测试数据开关）', () => {
