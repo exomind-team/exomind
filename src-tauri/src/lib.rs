@@ -41,6 +41,7 @@ use commands::workspace_commands::{
 };
 use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, WsClientState};
 use tauri::Manager;
+use tauri_plugin_log::{Target, TargetKind, RotationStrategy, TimezoneStrategy};
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -64,6 +65,23 @@ pub fn run() {
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
 
     let mut builder = tauri::Builder::default()
+        .plugin(
+            tauri_plugin_log::Builder::new()
+                .targets([
+                    Target::new(TargetKind::Stdout),
+                    Target::new(TargetKind::Webview),
+                    Target::new(TargetKind::LogDir { file_name: Some("exomind.log".into()) }),
+                ])
+                .level(log::LevelFilter::Info)
+                .level_for("tungstenite", log::LevelFilter::Warn)
+                .level_for("tokio_tungstenite", log::LevelFilter::Warn)
+                .level_for("reqwest", log::LevelFilter::Warn)
+                .level_for("hyper", log::LevelFilter::Warn)
+                .max_file_size(5_000_000) // 5MB per file
+                .rotation_strategy(RotationStrategy::KeepSome(5))
+                .timezone_strategy(TimezoneStrategy::UseLocal)
+                .build(),
+        )
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

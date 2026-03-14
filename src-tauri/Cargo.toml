@@ -50,3 +50,5 @@ exomind-runtime = { path = "../crates/exomind-runtime" }
 reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
 tauri-plugin-global-shortcut = "2"
 enigo = { version = "0.3", features = ["serde"] }
+log = "0.4"
+tauri-plugin-log = "2"
