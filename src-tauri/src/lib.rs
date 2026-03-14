@@ -250,6 +250,15 @@ pub fn run() {
     }
 
     builder
+        .on_window_event(|window, event| {
+            // When the main window is closed (or destroyed), exit the entire application
+            // so that overlay windows (now-workbench-overlay, voice-overlay) don't linger.
+            if window.label() == "main" {
+                if let tauri::WindowEvent::Destroyed = event {
+                    std::process::exit(0);
+                }
+            }
+        })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
 }
