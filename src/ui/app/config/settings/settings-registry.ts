@@ -6,6 +6,7 @@ import {
   Bug,
   Code,
   Command,
+  DatabaseZap,
   GitCommit,
   Globe,
   Heart,
@@ -140,6 +141,7 @@ import {
   type CountdownEndMode,
 } from '@/config/timer-preferences';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
+import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
 import {
   TIMER_END_SOUND_PRESETS,
   type TimerEndSoundPresetId,
@@ -773,6 +775,29 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'data',
     type: 'custom',
     component: DataTransferSetting,
+  },
+  {
+    id: 'data-legacy-migration',
+    label: '迁移旧版数据',
+    description: '将旧版存储中的数据迁移到本地 SQLite',
+    category: 'data',
+    type: 'action',
+    icon: DatabaseZap,
+    visible: () => {
+      try {
+        return !isMigrationCompleted();
+      } catch {
+        return false;
+      }
+    },
+    onAction: () => {
+      try {
+        clearMigrationFlags();
+        window.location.reload();
+      } catch {
+        // ignore
+      }
+    },
   },
   {
     id: 'more-update',
