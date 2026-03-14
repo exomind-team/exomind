@@ -3,7 +3,8 @@ use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{delete, get, post};
 use axum::{Json, Router};
-use futures_util::stream::{self, StreamExt};
+use async_stream::stream;
+use futures_util::StreamExt;
 use serde::{Deserialize, Serialize};
 use serde_json::Value as JsonValue;
 use std::convert::Infallible;
@@ -11,7 +12,9 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 use crate::AppState;
+use crate::routes::sessions::{broadcast_session_created, broadcast_session_updated};
 use crate::agent::{self, Agent, AgentSummary, ChatChunk, ChatRequest, RuntimeAgentEvent, SessionInfo};
+use crate::session::{CreateSessionInput, InteractionMode, UpdateSessionInput, WorkContext};
 
 #[derive(Debug, Deserialize)]
 struct ChatRequestPayload {
@@ -116,6 +119,98 @@ fn map_chat_chunk_to_runtime_events(chunk: ChatChunk) -> Vec<RuntimeAgentEvent> 
     }
 
     events
+}
+
+fn resolve_agent_session_kind(agent_id: &str) -> String {
+    let normalized = agent_id.trim().to_ascii_lowercase();
+    if normalized.contains("codex") {
+        "codex".to_string()
+    } else if normalized.contains("claude") {
+        "claude".to_string()
+    } else {
+        "api".to_string()
+    }
+}
+
+fn truncate_output_preview(preview: &str) -> String {
+    const MAX_CHARS: usize = 240;
+    let chars: Vec<char> = preview.chars().collect();
+    if chars.len() <= MAX_CHARS {
+        return preview.to_string();
+    }
+    chars[chars.len() - MAX_CHARS..].iter().collect()
+}
+
+fn ensure_runtime_agent_session(
+    state: &AppState,
+    session_id: &str,
+    agent_id: &str,
+    agent_name: &str,
+    agent_description: &str,
+) -> Result<(), String> {
+    if let Some(existing) = state
+        .session_store
+        .get(session_id)
+        .map_err(|error| error.to_string())?
+    {
+        let status = if existing.status != crate::session::SessionStatus::Running
+            && existing
+                .status
+                .can_transition_to(&crate::session::SessionStatus::Running)
+        {
+            Some(crate::session::SessionStatus::Running)
+        } else {
+            None
+        };
+        let updated = state
+            .session_store
+            .update(
+                session_id,
+                UpdateSessionInput {
+                    role: Some(agent_name.to_string()),
+                    summary: (!agent_description.trim().is_empty())
+                        .then(|| agent_description.trim().to_string()),
+                    status,
+                    inner_session_id: Some(session_id.to_string()),
+                    ..Default::default()
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+        return Ok(());
+    }
+
+    let session = state
+        .session_store
+        .create(CreateSessionInput {
+            id: Some(session_id.to_string()),
+            agent_kind: resolve_agent_session_kind(agent_id),
+            role: Some(agent_name.to_string()),
+            context: Some(WorkContext::default()),
+            interaction: Some(InteractionMode::Structured),
+            pty_id: None,
+            inner_session_id: Some(session_id.to_string()),
+            parent_session_id: None,
+        })
+        .map_err(|error| error.to_string())?;
+
+    let session = if !agent_description.trim().is_empty() {
+        state
+            .session_store
+            .update(
+                session_id,
+                UpdateSessionInput {
+                    summary: Some(agent_description.trim().to_string()),
+                    ..Default::default()
+                },
+            )
+            .map_err(|error| error.to_string())?
+    } else {
+        session
+    };
+
+    broadcast_session_created(state.session_event_tx.as_ref(), &session);
+    Ok(())
 }
 
 fn create_echo_agent(payload: CreateAgentPayload) -> Result<Arc<dyn Agent>, StatusCode> {
@@ -261,21 +356,65 @@ async fn chat_with_agent(
             .map(|session| session.trim().to_string())
             .filter(|session| !session.is_empty()),
     };
+    let requested_session_id = request.session_id.clone();
+    let agent_name = agent.name().to_string();
+    let agent_description = agent.description().to_string();
 
-    let data_stream = agent.chat_stream(request).flat_map(|chunk: ChatChunk| {
-        let events = map_chat_chunk_to_runtime_events(chunk)
-            .into_iter()
-            .map(|event| Ok::<Event, Infallible>(encode_runtime_event(event)))
-            .collect::<Vec<_>>();
-        stream::iter(events)
-    });
+    if let Some(session_id) = requested_session_id.as_deref() {
+        ensure_runtime_agent_session(&state, session_id, &id, &agent_name, &agent_description)
+            .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    }
 
-    let done_stream = stream::iter(vec![
-        Ok::<Event, Infallible>(encode_runtime_event(RuntimeAgentEvent::done(Some("stop")))),
-        Ok::<Event, Infallible>(Event::default().data("[DONE]")),
-    ]);
+    let mut chat_stream = agent.chat_stream(request);
+    let stream = stream! {
+        let mut active_session_id = requested_session_id;
+        let mut preview = String::new();
 
-    let stream = data_stream.chain(done_stream);
+        while let Some(chunk) = chat_stream.next().await {
+            if let Some(session_id) = chunk.session_id.clone() {
+                if active_session_id.as_deref() != Some(session_id.as_str()) {
+                    preview.clear();
+                }
+                active_session_id = Some(session_id.clone());
+                if let Err(error) = ensure_runtime_agent_session(
+                    &state,
+                    &session_id,
+                    &id,
+                    &agent_name,
+                    &agent_description,
+                ) {
+                    yield Ok::<Event, Infallible>(encode_runtime_event(RuntimeAgentEvent::error(
+                        format!("failed to sync unified session: {error}"),
+                    )));
+                    yield Ok::<Event, Infallible>(encode_runtime_event(RuntimeAgentEvent::done(Some("error"))));
+                    yield Ok::<Event, Infallible>(Event::default().data("[DONE]"));
+                    return;
+                }
+            }
+
+            if !chunk.content.is_empty() {
+                preview.push_str(&chunk.content);
+                if let Some(session_id) = active_session_id.as_deref() {
+                    if let Ok(updated) = state.session_store.update(
+                        session_id,
+                        UpdateSessionInput {
+                            last_output_preview: Some(truncate_output_preview(&preview)),
+                            ..Default::default()
+                        },
+                    ) {
+                        broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+                    }
+                }
+            }
+
+            for event in map_chat_chunk_to_runtime_events(chunk) {
+                yield Ok::<Event, Infallible>(encode_runtime_event(event));
+            }
+        }
+
+        yield Ok::<Event, Infallible>(encode_runtime_event(RuntimeAgentEvent::done(Some("stop"))));
+        yield Ok::<Event, Infallible>(Event::default().data("[DONE]"));
+    };
 
     Ok(Sse::new(stream))
 }

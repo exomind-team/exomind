@@ -29,6 +29,7 @@ const runtimeClientMocks = vi.hoisted(() => ({
   streamAgentConversation: vi.fn(),
   createAgent: vi.fn(),
   deleteAgent: vi.fn(),
+  getAgentEnergy: vi.fn(),
 }));
 
 vi.mock('@xyflow/react', () => ({
@@ -104,6 +105,8 @@ vi.mock('@/services/runtime-client', async (importOriginal) => {
     createAgent = runtimeClientMocks.createAgent;
 
     deleteAgent = runtimeClientMocks.deleteAgent;
+
+    getAgentEnergy = runtimeClientMocks.getAgentEnergy;
   }
 
   return {
@@ -199,6 +202,7 @@ describe('agents page runtime chat issue-365（运行时 Agent 对话）', () =>
       yield { type: 'output.delta', content: '真实回复' };
       yield { type: 'done' };
     });
+    runtimeClientMocks.getAgentEnergy.mockResolvedValue(null);
 
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);

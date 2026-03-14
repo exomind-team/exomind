@@ -8,6 +8,7 @@ pub mod eventlog;
 pub mod mesh;
 #[cfg(not(target_os = "android"))]
 pub mod pty;
+pub mod sessions;
 pub mod signals;
 pub mod tasks;
 pub mod timeblocks;
@@ -22,6 +23,7 @@ pub fn router() -> Router<AppState> {
         .merge(energy::router())
         .merge(eventlog::router())
         .merge(mesh::router())
+        .merge(sessions::router())
         .merge(signals::router())
         .merge(tasks::router())
         .merge(timeblocks::router())

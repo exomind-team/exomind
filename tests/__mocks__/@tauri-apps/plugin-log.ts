@@ -1,6 +1,6 @@
-export const info = () => {};
-export const warn = () => {};
-export const error = () => {};
-export const debug = () => {};
-export const trace = () => {};
-export const attachLogger = () => {};
+export const info = () => Promise.resolve();
+export const warn = () => Promise.resolve();
+export const error = () => Promise.resolve();
+export const debug = () => Promise.resolve();
+export const trace = () => Promise.resolve();
+export const attachLogger = () => Promise.resolve(() => {});

@@ -418,6 +418,8 @@ mod tests {
             mdns: None,
             pairing: Arc::new(crate::pairing::PairingManager::new()),
             task_store: Arc::new(crate::task::TaskStore::new()),
+            session_store: Arc::new(crate::session::SessionStore::new()),
+            session_event_tx: None,
             timeblock_store: Arc::new(crate::timeblock::TimeBlockStore::new()),
             energy_registry: energy_registry.clone(),
             tick_manager: Arc::new(crate::tick::TickManager::new(

@@ -30,6 +30,8 @@ fn test_state_with_timeblock_store(timeblock_store: Arc<TimeBlockStore>) -> AppS
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
+        session_store: Arc::new(exomind_runtime::session::SessionStore::new()),
+        session_event_tx: None,
         timeblock_store,
         energy_registry: energy_registry.clone(),
         tick_manager: Arc::new(exomind_runtime::tick::TickManager::new(

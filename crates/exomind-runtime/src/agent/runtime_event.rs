@@ -1,7 +1,9 @@
 use serde::Serialize;
 
+use crate::session::types::QuickAction;
+
 /// Runtime agent stream event（运行时 Agent 流事件）.
-#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "type")]
 pub enum RuntimeAgentEvent {
     #[serde(rename = "session.started")]
@@ -19,6 +21,16 @@ pub enum RuntimeAgentEvent {
         content: String,
         #[serde(skip_serializing_if = "Option::is_none")]
         session_id: Option<String>,
+    },
+    #[serde(rename = "waiting_input")]
+    WaitingInput {
+        session_id: String,
+        /// Prompt message to display to the user
+        #[serde(skip_serializing_if = "Option::is_none")]
+        prompt: Option<String>,
+        /// Quick actions available for the user
+        #[serde(default, skip_serializing_if = "Vec::is_empty")]
+        quick_actions: Vec<QuickAction>,
     },
     #[serde(rename = "error")]
     Error {
@@ -55,6 +67,18 @@ impl RuntimeAgentEvent {
         Self::ThinkingDelta {
             content: content.into(),
             session_id: None,
+        }
+    }
+
+    pub fn waiting_input(
+        session_id: impl Into<String>,
+        prompt: Option<String>,
+        quick_actions: Vec<QuickAction>,
+    ) -> Self {
+        Self::WaitingInput {
+            session_id: session_id.into(),
+            prompt,
+            quick_actions,
         }
     }
 

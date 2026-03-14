@@ -1,4 +1,5 @@
 import type { AgentEnergySnapshot, RuntimeHostRecord } from '@/lib/types/agent-hub';
+import type { SessionInfo, CreateSessionRequest, UpdateSessionRequest, QuickActionResponse, SessionMessage, SendMessageInput } from '@/lib/types/session';
 import type { ProviderProfileSnapshot } from '@/lib/agent-provider/types';
 import type {
   RuntimeCapabilityAgentKind,
@@ -660,13 +661,132 @@ export class RuntimeClient {
     }
   }
 
+  // ── Session CRUD API ─────────────────────────────────────────
+
+  async listSessions(
+    host: RuntimeHostRecord,
+    status?: string,
+  ): Promise<RuntimeClientResult<SessionInfo[]>> {
+    const params = status ? `?status=${encodeURIComponent(status)}` : '';
+    const response = await this.getJson(`${buildBaseUrl(host)}/sessions${params}`);
+    if (!response.ok) return response;
+    if (!Array.isArray(response.data)) {
+      return {
+        ok: false,
+        error: { code: 'invalid_payload', message: 'invalid /sessions payload' },
+      };
+    }
+    return { ok: true, data: response.data as SessionInfo[] };
+  }
+
+  async getSession(
+    host: RuntimeHostRecord,
+    sessionId: string,
+  ): Promise<RuntimeClientResult<SessionInfo>> {
+    const response = await this.getJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}`,
+    );
+    if (!response.ok) return response;
+    return { ok: true, data: response.data as SessionInfo };
+  }
+
+  async createSession(
+    host: RuntimeHostRecord,
+    request: CreateSessionRequest,
+  ): Promise<RuntimeClientResult<SessionInfo>> {
+    const response = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions`,
+      'POST',
+      request,
+    );
+    if (!response.ok) return response;
+    return { ok: true, data: response.data as SessionInfo };
+  }
+
+  async updateSession(
+    host: RuntimeHostRecord,
+    sessionId: string,
+    request: UpdateSessionRequest,
+  ): Promise<RuntimeClientResult<SessionInfo>> {
+    const response = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}`,
+      'PATCH',
+      request,
+    );
+    if (!response.ok) return response;
+    return { ok: true, data: response.data as SessionInfo };
+  }
+
+  async deleteSession(
+    host: RuntimeHostRecord,
+    sessionId: string,
+  ): Promise<RuntimeClientResult<SessionInfo>> {
+    const response = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}`,
+      'DELETE',
+    );
+    if (!response.ok) return response;
+    return { ok: true, data: response.data as SessionInfo };
+  }
+
+  async submitQuickAction(
+    host: RuntimeHostRecord,
+    sessionId: string,
+    response: QuickActionResponse,
+  ): Promise<RuntimeClientResult<SessionInfo>> {
+    const result = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/quick-action`,
+      'POST',
+      response,
+    );
+    if (!result.ok) return result;
+    return { ok: true, data: result.data as SessionInfo };
+  }
+
+  async markSessionWaiting(
+    host: RuntimeHostRecord,
+    sessionId: string,
+  ): Promise<RuntimeClientResult<SessionInfo>> {
+    const result = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/mark-waiting`,
+      'POST',
+    );
+    if (!result.ok) return result;
+    return { ok: true, data: result.data as SessionInfo };
+  }
+
+  async listChildSessions(
+    host: RuntimeHostRecord,
+    parentSessionId: string,
+  ): Promise<RuntimeClientResult<SessionInfo[]>> {
+    const result = await this.getJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(parentSessionId)}/children`,
+    );
+    if (!result.ok) return result;
+    return { ok: true, data: result.data as SessionInfo[] };
+  }
+
+  async sendSessionMessage(
+    host: RuntimeHostRecord,
+    sessionId: string,
+    input: SendMessageInput,
+  ): Promise<RuntimeClientResult<SessionMessage>> {
+    const result = await this.sendJson(
+      `${buildBaseUrl(host)}/sessions/${encodeURIComponent(sessionId)}/messages`,
+      'POST',
+      input,
+    );
+    if (!result.ok) return result;
+    return { ok: true, data: result.data as SessionMessage };
+  }
+
   private async getJson(url: string): Promise<RuntimeClientResult<unknown>> {
     return this.sendJson(url, 'GET');
   }
 
   private async sendJson(
     url: string,
-    method: 'GET' | 'POST' | 'DELETE',
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE',
     payload?: unknown,
   ): Promise<RuntimeClientResult<unknown>> {
     const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;

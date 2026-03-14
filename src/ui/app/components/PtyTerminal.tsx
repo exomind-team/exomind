@@ -133,6 +133,15 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       if (target?.tagName === 'INPUT' || target?.tagName === 'TEXTAREA') return;
       if (!container.offsetParent) return; // hidden (display:none)
 
+      // Multi-instance fix: only handle paste if this terminal's container
+      // contains the active element (has focus), or if paste target is
+      // inside our container. This prevents all PtyTerminal instances from
+      // receiving the same paste event simultaneously.
+      const activeEl = document.activeElement;
+      const hasContainerFocus = activeEl && container.contains(activeEl);
+      const isTargetInContainer = target && container.contains(target);
+      if (!hasContainerFocus && !isTargetInContainer) return;
+
       e.preventDefault();
       const text = e.clipboardData?.getData('text');
       if (text) {

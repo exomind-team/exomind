@@ -32,6 +32,8 @@ fn test_app_state(port: u16, host_id: &str, signal_pool: Arc<SignalPool>) -> App
         mdns: None,
         pairing: Arc::new(exomind_runtime::pairing::PairingManager::new()),
         task_store: Arc::new(exomind_runtime::task::TaskStore::new()),
+        session_store: Arc::new(exomind_runtime::session::SessionStore::new()),
+        session_event_tx: None,
         timeblock_store: Arc::new(exomind_runtime::timeblock::TimeBlockStore::new()),
         energy_registry: energy_registry.clone(),
         tick_manager: Arc::new(exomind_runtime::tick::TickManager::new(
@@ -219,6 +221,7 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
     let signal_pool = Arc::new(SignalPool::new(None));
     let host_id = "test-codex-chat-route".to_string();
     let state = test_app_state(3922, &host_id, signal_pool);
+    let session_store = Arc::clone(&state.session_store);
     let app = routes::router().with_state(state);
 
     let _create_response = app
@@ -270,4 +273,22 @@ async fn codex_runtime_agent_chat_route_streams_typed_events() {
     );
     assert!(body_text.contains("xiaoming"), "{body_text}");
     assert!(body_text.contains(r#""type":"done""#), "{body_text}");
+
+    let sessions = session_store.list().unwrap();
+    assert_eq!(sessions.len(), 1, "agent chat should register a unified session");
+    let session = &sessions[0];
+    assert_eq!(session.agent_kind, "codex");
+    assert_eq!(session.interaction_mode.as_str(), "structured");
+    assert!(
+        session.inner_session_id.is_some(),
+        "runtime agent session should be linked to the unified session"
+    );
+    assert!(
+        session
+            .last_output_preview
+            .as_deref()
+            .unwrap_or_default()
+            .contains("xiaoming"),
+        "latest output preview should track the streamed assistant text"
+    );
 }

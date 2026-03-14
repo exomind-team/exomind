@@ -31,6 +31,7 @@ const runtimeClientMocks = vi.hoisted(() => ({
   getTopology: vi.fn(),
   createAgent: vi.fn(),
   deleteAgent: vi.fn(),
+  getAgentEnergy: vi.fn(),
 }));
 
 vi.mock('@xyflow/react', () => ({
@@ -98,6 +99,8 @@ vi.mock('@/services/runtime-client', async (importOriginal) => {
     createAgent = runtimeClientMocks.createAgent;
 
     deleteAgent = runtimeClientMocks.deleteAgent;
+
+    getAgentEnergy = runtimeClientMocks.getAgentEnergy;
   }
 
   return {
@@ -223,6 +226,7 @@ describe('agents page create flow issue-385（Agent Hub 创建流）', () => {
         status: 'available',
       },
     });
+    runtimeClientMocks.getAgentEnergy.mockResolvedValue(null);
     runtimeClientMocks.getTopology.mockResolvedValue({
       ok: true,
       data: buildRuntimeSnapshot().hosts[0].topology,

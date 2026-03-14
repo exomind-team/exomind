@@ -72,6 +72,27 @@ async fn pty_spawn_and_interact() {
         "initial status should be 'running'"
     );
 
+    let sessions_resp = client
+        .get(format!("{base_url}/sessions"))
+        .send()
+        .await
+        .expect("sessions request should succeed");
+    assert_eq!(sessions_resp.status().as_u16(), 200);
+    let sessions_payload: Value = sessions_resp
+        .json()
+        .await
+        .expect("sessions response should be JSON");
+    let sessions = sessions_payload
+        .as_array()
+        .expect("sessions response should be an array");
+    let linked_session = sessions.iter().find(|session| {
+        session["pty_id"].as_str() == Some(pty_id)
+    });
+    assert!(
+        linked_session.is_some(),
+        "spawning a PTY should auto-create a unified session record, got {sessions_payload}"
+    );
+
     // Give the short-lived process a moment to register.
     tokio::time::sleep(std::time::Duration::from_millis(100)).await;
 
@@ -109,6 +130,20 @@ async fn pty_spawn_and_interact() {
         "POST /pty/{{id}}/stop should return 200 or 500 (if already exited), got {stop_status}"
     );
 
+    let sessions_after_stop: Value = client
+        .get(format!("{base_url}/sessions"))
+        .send()
+        .await
+        .expect("sessions after stop should succeed")
+        .json()
+        .await
+        .expect("sessions after stop should be JSON");
+    let completed_after_stop = sessions_after_stop
+        .as_array()
+        .and_then(|sessions| sessions.iter().find(|session| session["id"].as_str() == Some(pty_id)))
+        .expect("session should still exist after stop");
+    assert_eq!(completed_after_stop["status"], "completed");
+
     // ── 4. DELETE /pty/{id} — remove record ─────────────────────
     let delete_resp = client
         .delete(format!("{base_url}/pty/{pty_id}"))
@@ -128,6 +163,20 @@ async fn pty_spawn_and_interact() {
         .expect("delete response should be JSON");
     assert_eq!(delete_payload["status"], "removed");
     assert_eq!(delete_payload["id"], pty_id);
+
+    let sessions_after_delete: Value = client
+        .get(format!("{base_url}/sessions"))
+        .send()
+        .await
+        .expect("sessions after delete should succeed")
+        .json()
+        .await
+        .expect("sessions after delete should be JSON");
+    let completed_after_delete = sessions_after_delete
+        .as_array()
+        .and_then(|sessions| sessions.iter().find(|session| session["id"].as_str() == Some(pty_id)))
+        .expect("session history should remain after deleting PTY record");
+    assert_eq!(completed_after_delete["status"], "completed");
 
     // ── 5. Verify it's gone ─────────────────────────────────────
     let list_after = client

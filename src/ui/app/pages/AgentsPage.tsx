@@ -85,6 +85,7 @@ import {
 } from '@/services/runtime-manager';
 import { RuntimeClient } from '@/services/runtime-client';
 import type { RuntimeCreateAgentRequest } from '@/services/runtime-client';
+import type { QuickActionResponse } from '@/lib/types/session';
 import {
   createProviderProfile,
   listProviderProfiles,
@@ -129,6 +130,9 @@ import {
 } from './agents/conversation-runtime';
 import { EnergyBar, PHASE_LABELS } from './agents/AgentDetailPage';
 import { WorkspaceTabs } from './agents/WorkspaceTabs';
+import { SessionsView } from './agents/SessionsView';
+import { TiledGrid, LayoutSelector, GlobalStatusIndicator, type TiledLayout } from './agents/TiledGrid';
+import { useSessionStream } from '@/hooks/useSessionStream';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Card, CardContent } from '@/components/ui/card';
@@ -136,6 +140,8 @@ import { log } from '@/lib/logger';
 
 const VIEW_ITEMS: Array<{ id: AgentHubViewMode; icon: LucideIcon; label: string }> = [
   { id: 'topology', icon: Waypoints, label: '拓扑图' },
+  { id: 'sessions', icon: Crosshair, label: '会话' },
+  { id: 'tiled', icon: Rocket, label: '平铺' },
   { id: 'list', icon: Bot, label: '节点' },
   { id: 'history', icon: AlarmClock, label: '信号历史' },
   { id: 'routes', icon: List, label: '路由' },
@@ -2258,6 +2264,11 @@ export function AgentsPage() {
   const topologyWriteTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Ref to always call the latest fetchPtyAgents from the polling interval (avoids stale closure).
   const fetchPtyAgentsRef = useRef<() => Promise<void>>(() => Promise.resolve());
+  // ── Tiled view state ──
+  const [tiledLayout, setTiledLayout] = useState<TiledLayout>('2x2');
+  const [tiledFocusedIndex, setTiledFocusedIndex] = useState<number | null>(null);
+  const [tiledPaneOrder, setTiledPaneOrder] = useState<string[]>([]);
+
   const [signalRoutes, setSignalRoutes] = useState<SignalRoute[]>([]);
   const [signalRouteHostLabel, setSignalRouteHostLabel] = useState<string>('');
   const [activeSignalRouteHost, setActiveSignalRouteHost] = useState<RuntimeHostRecord | null>(null);
@@ -2724,6 +2735,26 @@ export function AgentsPage() {
     }
   };
 
+  const handleSessionQuickAction = async (sessionId: string, response: QuickActionResponse) => {
+    const host = resolveActiveRuntimeHost();
+    setRuntimeHostError('');
+    const runtimeClient = new RuntimeClient();
+    const result = await runtimeClient.submitQuickAction(host, sessionId, response);
+    if (!result.ok) {
+      setRuntimeHostError(`提交会话动作失败: ${result.error.message}`);
+    }
+  };
+
+  const handleSessionMarkWaiting = async (sessionId: string) => {
+    const host = resolveActiveRuntimeHost();
+    setRuntimeHostError('');
+    const runtimeClient = new RuntimeClient();
+    const result = await runtimeClient.markSessionWaiting(host, sessionId);
+    if (!result.ok) {
+      setRuntimeHostError(`标记等待决策失败: ${result.error.message}`);
+    }
+  };
+
   const handleCreateManualAgent = async () => {
     setIsAgentCreating(true);
     setAgentCreateError('');
@@ -2917,6 +2948,29 @@ export function AgentsPage() {
     if (activeHost?.authToken) return activeHost.authToken;
     return runtimeServiceStatus?.authSecret ?? undefined;
   };
+
+  const resolveActiveRuntimeHost = (): RuntimeHostRecord => {
+    const directHost = activeSignalRouteHost
+      ?? sortRouteHostsByPriority(runtimeHostSnapshots).find((snapshot) => snapshot.host)?.host;
+    if (directHost) return directHost;
+
+    const resolvedUrl = new URL(resolveRtBaseUrl());
+    const fallbackPort = resolvedUrl.port
+      ? Number(resolvedUrl.port)
+      : resolvedUrl.protocol === 'https:'
+        ? 443
+        : 80;
+    return createDirectRuntimeHost(resolvedUrl.hostname, fallbackPort);
+  };
+
+  // ── Session stream for tiled view ──
+  const {
+    sessions: tiledSessions,
+  } = useSessionStream({
+    rtBaseUrl: resolveRtBaseUrl(),
+    authToken: resolveRtAuthToken(),
+    enabled: viewMode === 'tiled',
+  });
 
   const applyRuntimeSnapshot = (snapshot: { hosts: RuntimeHostSnapshot[]; agents: RuntimeAggregatedAgent[] }) => {
     setRuntimeHostSnapshots(snapshot.hosts);
@@ -3421,6 +3475,60 @@ export function AgentsPage() {
   };
 
   const content = useMemo(() => {
+    if (viewMode === 'sessions') {
+      return (
+        <SessionsView
+          rtBaseUrl={resolveRtBaseUrl()}
+          authToken={resolveRtAuthToken()}
+          onSessionClick={(session) => {
+            // If the session has a PTY, open it in the right panel
+            if (session.pty_id) {
+              openPtyTerminal(session.pty_id);
+            }
+          }}
+        />
+      );
+    }
+    if (viewMode === 'tiled') {
+      // Filter active sessions for tiled view
+      const activeSessions = tiledSessions.filter(
+        (s) => s.status !== 'completed' && s.status !== 'archived',
+      );
+      return (
+        <div className="flex h-full flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <span className="text-xs text-[#78716C] dark:text-[#A8A29E]">
+                {activeSessions.length} 个活跃会话
+              </span>
+              <GlobalStatusIndicator sessions={activeSessions} />
+            </div>
+            <LayoutSelector value={tiledLayout} onChange={setTiledLayout} />
+          </div>
+          <div className="flex-1 min-h-0">
+            <TiledGrid
+              sessions={activeSessions}
+              layout={tiledLayout}
+              rtBaseUrl={resolveRtBaseUrl()}
+              authToken={resolveRtAuthToken()}
+              focusedIndex={tiledFocusedIndex}
+              onFocusPane={setTiledFocusedIndex}
+              onSessionClick={(session) => {
+                if (session.pty_id) openPtyTerminal(session.pty_id);
+              }}
+              paneOrder={tiledPaneOrder}
+              onReorder={setTiledPaneOrder}
+              onQuickAction={(sessionId, response) => {
+                void handleSessionQuickAction(sessionId, response);
+              }}
+              onMarkWaiting={(sessionId) => {
+                void handleSessionMarkWaiting(sessionId);
+              }}
+            />
+          </div>
+        </div>
+      );
+    }
     if (viewMode === 'list') {
       return (
         <ListTabView
@@ -3546,6 +3654,10 @@ export function AgentsPage() {
     runtimeServiceStatus,
     nodesFilter,
     viewMode,
+    tiledLayout,
+    tiledFocusedIndex,
+    tiledSessions,
+    tiledPaneOrder,
   ]);
 
   return (
@@ -3595,7 +3707,7 @@ export function AgentsPage() {
       {/* 主内容区：桌面端三栏（内容区 + 右侧栏），移动端单栏 */}
       <div className="flex flex-1 overflow-hidden">
         {/* 内容区 */}
-        <div className={`flex-1 min-h-0 overflow-auto ${viewMode === 'topology' ? '' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
+        <div className={`flex-1 min-h-0 ${viewMode === 'topology' || viewMode === 'tiled' ? 'overflow-hidden' : 'overflow-auto'} ${viewMode === 'topology' ? '' : viewMode === 'tiled' ? 'px-2 py-2' : 'px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-6 lg:px-10'}`}>
           {content}
         </div>
 

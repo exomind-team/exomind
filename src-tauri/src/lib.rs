@@ -43,6 +43,50 @@ use commands::ws_commands::{ws_connect, ws_disconnect, ws_get_state, ws_send, Ws
 use tauri::Manager;
 use tauri_plugin_log::{Target, TargetKind, RotationStrategy, TimezoneStrategy};
 
+fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
+    if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
+        let signal_sqlite_path = runtime_dir.join("signal-pool.sqlite");
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var(
+                "EXOMIND_RT_SIGNAL_SQLITE_PATH",
+                signal_sqlite_path,
+            );
+        }
+    }
+    if std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none() {
+        let eventlog_sqlite_path = runtime_dir.join("eventlog.sqlite");
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var(
+                "EXOMIND_RT_EVENTLOG_SQLITE_PATH",
+                eventlog_sqlite_path,
+            );
+        }
+    }
+    if std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none() {
+        let task_sqlite_path = runtime_dir.join("tasks.sqlite");
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_TASK_SQLITE_PATH", task_sqlite_path);
+        }
+    }
+    if std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none() {
+        let timeblock_sqlite_path = runtime_dir.join("timeblocks.sqlite");
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH", timeblock_sqlite_path);
+        }
+    }
+    if std::env::var_os("EXOMIND_RT_SESSION_SQLITE_PATH").is_none() {
+        let session_sqlite_path = runtime_dir.join("sessions.sqlite");
+        // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
+        unsafe {
+            std::env::set_var("EXOMIND_RT_SESSION_SQLITE_PATH", session_sqlite_path);
+        }
+    }
+}
+
 #[tauri::command]
 fn greet(name: &str) -> String {
     format!("Hello, {}! You've been greeted from Rust!", name)
@@ -105,6 +149,7 @@ pub fn run() {
                 || std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none()
                 || std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none()
                 || std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none()
+                || std::env::var_os("EXOMIND_RT_SESSION_SQLITE_PATH").is_none()
             {
                 match app.path().app_data_dir() {
                     Ok(app_data_dir) => {
@@ -114,40 +159,7 @@ pub fn run() {
                                 "failed to create runtime data dir for signal sqlite: {error}"
                             );
                         } else {
-                            if std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH").is_none() {
-                                let signal_sqlite_path = runtime_dir.join("signal-pool.sqlite");
-                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
-                                unsafe {
-                                    std::env::set_var(
-                                        "EXOMIND_RT_SIGNAL_SQLITE_PATH",
-                                        signal_sqlite_path,
-                                    );
-                                }
-                            }
-                            if std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH").is_none() {
-                                let eventlog_sqlite_path = runtime_dir.join("eventlog.sqlite");
-                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
-                                unsafe {
-                                    std::env::set_var(
-                                        "EXOMIND_RT_EVENTLOG_SQLITE_PATH",
-                                        eventlog_sqlite_path,
-                                    );
-                                }
-                            }
-                            if std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH").is_none() {
-                                let task_sqlite_path = runtime_dir.join("tasks.sqlite");
-                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
-                                unsafe {
-                                    std::env::set_var("EXOMIND_RT_TASK_SQLITE_PATH", task_sqlite_path);
-                                }
-                            }
-                            if std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH").is_none() {
-                                let timeblock_sqlite_path = runtime_dir.join("timeblocks.sqlite");
-                                // SAFETY: setup runs before the embedded runtime starts and before worker threads read this env var.
-                                unsafe {
-                                    std::env::set_var("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH", timeblock_sqlite_path);
-                                }
-                            }
+                            seed_runtime_sqlite_env_paths(&runtime_dir);
                         }
                     }
                     Err(error) => {
@@ -261,4 +273,55 @@ pub fn run() {
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::seed_runtime_sqlite_env_paths;
+
+    fn clear_runtime_sqlite_envs() {
+        for key in [
+            "EXOMIND_RT_SIGNAL_SQLITE_PATH",
+            "EXOMIND_RT_EVENTLOG_SQLITE_PATH",
+            "EXOMIND_RT_TASK_SQLITE_PATH",
+            "EXOMIND_RT_TIMEBLOCK_SQLITE_PATH",
+            "EXOMIND_RT_SESSION_SQLITE_PATH",
+        ] {
+            // SAFETY: tests mutate process env in a controlled single-threaded scope.
+            unsafe {
+                std::env::remove_var(key);
+            }
+        }
+    }
+
+    #[test]
+    fn seed_runtime_sqlite_env_paths_sets_all_runtime_databases() {
+        let runtime_dir = std::env::temp_dir().join("exomind-tauri-runtime-env-test");
+        clear_runtime_sqlite_envs();
+
+        seed_runtime_sqlite_env_paths(&runtime_dir);
+
+        assert_eq!(
+            std::env::var_os("EXOMIND_RT_SIGNAL_SQLITE_PATH"),
+            Some(runtime_dir.join("signal-pool.sqlite").into_os_string())
+        );
+        assert_eq!(
+            std::env::var_os("EXOMIND_RT_EVENTLOG_SQLITE_PATH"),
+            Some(runtime_dir.join("eventlog.sqlite").into_os_string())
+        );
+        assert_eq!(
+            std::env::var_os("EXOMIND_RT_TASK_SQLITE_PATH"),
+            Some(runtime_dir.join("tasks.sqlite").into_os_string())
+        );
+        assert_eq!(
+            std::env::var_os("EXOMIND_RT_TIMEBLOCK_SQLITE_PATH"),
+            Some(runtime_dir.join("timeblocks.sqlite").into_os_string())
+        );
+        assert_eq!(
+            std::env::var_os("EXOMIND_RT_SESSION_SQLITE_PATH"),
+            Some(runtime_dir.join("sessions.sqlite").into_os_string())
+        );
+
+        clear_runtime_sqlite_envs();
+    }
 }

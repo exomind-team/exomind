@@ -9,9 +9,13 @@ use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
 use tokio_stream::wrappers::ReceiverStream;
 
+use crate::routes::sessions::{
+    broadcast_session_created, broadcast_session_updated,
+};
 use crate::pty::{
     ClaudeSessionInfo, PtyAgentInfo, PtyError, PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
 };
+use crate::session::{CreateSessionInput, InteractionMode, SessionStatus, UpdateSessionInput, WorkContext};
 use crate::AppState;
 
 // ── Request / Response types ────────────────────────────────────
@@ -42,6 +46,91 @@ fn map_pty_error(err: PtyError) -> (StatusCode, String) {
     }
 }
 
+fn resolve_session_agent_kind(command: &str) -> String {
+    let normalized = command.trim().to_ascii_lowercase();
+    if normalized.contains("codex") {
+        "codex".to_string()
+    } else if normalized.contains("claude") {
+        "claude".to_string()
+    } else {
+        "api".to_string()
+    }
+}
+
+fn build_pty_context(info: &PtyAgentInfo) -> WorkContext {
+    WorkContext {
+        worktree_path: Some(info.workdir.clone()),
+        work_dir: Some(info.workdir.clone()),
+        ..Default::default()
+    }
+}
+
+fn register_pty_session(
+    state: &AppState,
+    info: &PtyAgentInfo,
+) -> Result<(), (StatusCode, String)> {
+    let session = state
+        .session_store
+        .create(CreateSessionInput {
+            id: Some(info.id.clone()),
+            agent_kind: resolve_session_agent_kind(&info.command),
+            role: Some(info.name.clone()),
+            context: Some(build_pty_context(info)),
+            interaction: Some(InteractionMode::Terminal),
+            pty_id: Some(info.id.clone()),
+            inner_session_id: info.session_id.clone(),
+            parent_session_id: None,
+        })
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+
+    broadcast_session_created(state.session_event_tx.as_ref(), &session);
+    Ok(())
+}
+
+fn complete_pty_session(
+    state: &AppState,
+    id: &str,
+) -> Result<Option<crate::session::AgentSession>, (StatusCode, String)> {
+    let mut session = match state
+        .session_store
+        .get(id)
+        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?
+    {
+        Some(session) => session,
+        None => return Ok(None),
+    };
+
+    loop {
+        match session.status {
+            SessionStatus::Completed | SessionStatus::Archived => return Ok(Some(session)),
+            SessionStatus::Running => {
+                session = state
+                    .session_store
+                    .update(
+                        id,
+                        UpdateSessionInput {
+                            status: Some(SessionStatus::Completed),
+                            ..Default::default()
+                        },
+                    )
+                    .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            }
+            SessionStatus::WaitingInput | SessionStatus::Paused | SessionStatus::Error => {
+                session = state
+                    .session_store
+                    .update(
+                        id,
+                        UpdateSessionInput {
+                            status: Some(SessionStatus::Running),
+                            ..Default::default()
+                        },
+                    )
+                    .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
+            }
+        }
+    }
+}
+
 // ── Handlers ────────────────────────────────────────────────────
 
 /// GET /pty — List all PTY agents.
@@ -55,6 +144,10 @@ async fn spawn_pty_agent(
     Json(req): Json<PtySpawnRequest>,
 ) -> Result<(StatusCode, Json<PtyAgentInfo>), (StatusCode, String)> {
     let info = state.pty_manager.spawn(req).await.map_err(map_pty_error)?;
+    if let Err(error) = register_pty_session(&state, &info) {
+        let _ = state.pty_manager.remove(&info.id).await;
+        return Err(error);
+    }
     Ok((StatusCode::CREATED, Json(info)))
 }
 
@@ -64,6 +157,10 @@ async fn resume_pty_agent(
     Json(req): Json<PtyResumeRequest>,
 ) -> Result<(StatusCode, Json<PtyAgentInfo>), (StatusCode, String)> {
     let info = state.pty_manager.resume(req).await.map_err(map_pty_error)?;
+    if let Err(error) = register_pty_session(&state, &info) {
+        let _ = state.pty_manager.remove(&info.id).await;
+        return Err(error);
+    }
     Ok((StatusCode::CREATED, Json(info)))
 }
 
@@ -193,6 +290,11 @@ async fn stop_pty_agent(
     State(state): State<AppState>,
 ) -> Result<Json<PtyAgentInfo>, (StatusCode, String)> {
     let info = state.pty_manager.stop(&id).await.map_err(map_pty_error)?;
+
+    if let Some(updated) = complete_pty_session(&state, &id)? {
+        broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+    }
+
     Ok(Json(info))
 }
 
@@ -206,6 +308,10 @@ async fn remove_pty_agent(
         .remove(&id)
         .await
         .map_err(map_pty_error)?;
+
+    if let Some(updated) = complete_pty_session(&state, &id)? {
+        broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+    }
 
     Ok(Json(PtyRemoveResponse {
         status: "removed".to_string(),
