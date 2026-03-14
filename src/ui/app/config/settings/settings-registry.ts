@@ -291,6 +291,19 @@ async function setVoiceShortcutHotkeyWithRuntime(value: string): Promise<void> {
   }
 }
 
+/**
+ * 在系统浏览器中打开外部 URL。
+ * Tauri 环境优先使用 plugin-opener，Web 环境 fallback 到 window.open。
+ */
+async function openExternalUrl(url: string): Promise<void> {
+  try {
+    const { openUrl } = await import('@tauri-apps/plugin-opener');
+    await openUrl(url);
+  } catch {
+    window.open(url, '_blank', 'noopener,noreferrer');
+  }
+}
+
 function formatVoiceShortcutTestId(value: string): string {
   return `new-settings-voice-shortcut-${value.toLowerCase().replace(/\+/g, '-').replace(/\s+/g, '')}`;
 }
@@ -807,9 +820,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     category: 'more',
     type: 'action',
     onAction: () => {
-      if (typeof window !== 'undefined') {
-        window.location.hash = '/update';
-      }
+      window.location.pathname = '/update';
     },
   },
   {
@@ -818,7 +829,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: LifeBuoy,
     category: 'more',
     type: 'action',
-    onAction: () => '敬请期待',
+    onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/wiki'),
   },
   {
     id: 'more-feedback',
@@ -826,7 +837,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: MessageSquare,
     category: 'more',
     type: 'action',
-    onAction: () => '敬请期待',
+    onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/issues/new?labels=feedback&template=feedback.md'),
   },
   {
     id: 'more-telemetry',
@@ -842,7 +853,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: Bug,
     category: 'more',
     type: 'action',
-    onAction: () => '敬请期待',
+    onAction: () => openExternalUrl('https://github.com/exomind-team/exomind/issues/new?labels=bug&template=bug_report.md'),
   },
   {
     id: 'more-debug-log',
@@ -861,11 +872,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     icon: Globe,
     category: 'about',
     type: 'action',
-    onAction: () => {
-      if (typeof window !== 'undefined') {
-        window.open('https://exo-mind.ai/', '_blank', 'noopener,noreferrer');
-      }
-    },
+    onAction: () => openExternalUrl('https://exo-mind.ai/'),
   },
   {
     id: 'about-sponsor',
