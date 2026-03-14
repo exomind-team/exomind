@@ -19,6 +19,7 @@ import type { ASRResult } from '../environment/interfaces/asr.port';
 import { VolcanoHTTPASRAdapter } from '../adapters/asr/volcano-http-asr';
 import { VolcanoEngineASRAdapter } from '../adapters/asr/volcano-engine-asr';
 import { MOSSASRAdapter } from '../adapters/asr/moss-asr';
+import { log } from '@/lib/logger';
 
 // Adapter 类型
 export type ASRAdapterType = 'http' | 'websocket' | 'moss';
@@ -81,7 +82,7 @@ export class VoiceChatService implements IVoiceChatService {
     if (mossAvailable) {
       this.isAvailable = true;
       this.adapterType = 'moss';
-      console.log('[VoiceChatService] 使用 MOSS Adapter (推荐，最简单)');
+      log.info('[VoiceChatService] 使用 MOSS Adapter (推荐，最简单)');
       return;
     }
 
@@ -91,18 +92,18 @@ export class VoiceChatService implements IVoiceChatService {
     if (httpAvailable) {
       this.isAvailable = true;
       this.adapterType = 'http';
-      console.log('[VoiceChatService] 使用 HTTP Adapter (通过 Bun 后端)');
+      log.info('[VoiceChatService] 使用 HTTP Adapter (通过 Bun 后端)');
     } else if (this.wsAdapter.isAvailable()) {
       this.isAvailable = true;
       this.adapterType = 'websocket';
-      console.log('[VoiceChatService] ⚠️ 使用 WebSocket Adapter (浏览器受限，可能失败)');
-      console.log('[VoiceChatService] 建议：配置 MOSS API Key 以获得最佳体验');
+      log.info('[VoiceChatService] ⚠️ 使用 WebSocket Adapter (浏览器受限，可能失败)');
+      log.info('[VoiceChatService] 建议：配置 MOSS API Key 以获得最佳体验');
     } else {
       this.isAvailable = false;
-      console.warn('[VoiceChatService] 所有 ASR 适配器都不可用');
-      console.warn('[VoiceChatService] 请配置 MOSS API Key:');
-      console.warn('  1. 在 .env 文件中添加: VITE_MOSS_API_KEY=your_api_key');
-      console.warn('  2. 申请地址: https://studio.mosi.cn/');
+      log.warn('[VoiceChatService] 所有 ASR 适配器都不可用');
+      log.warn('[VoiceChatService] 请配置 MOSS API Key:');
+      log.warn('[VoiceChatService]   1. 在 .env 文件中添加: VITE_MOSS_API_KEY=your_api_key');
+      log.warn('[VoiceChatService]   2. 申请地址: https://studio.mosi.cn/');
     }
   }
 
@@ -120,7 +121,7 @@ export class VoiceChatService implements IVoiceChatService {
    * 开始录音
    */
   async startRecording(): Promise<void> {
-    console.log('[VoiceChatService] 开始录音...');
+    log.info('[VoiceChatService] 开始录音...');
 
     if (!this.isAvailable) {
       throw new Error('语音识别不可用，请启动 Bun 后端服务');
@@ -140,7 +141,7 @@ export class VoiceChatService implements IVoiceChatService {
 
     if (this.adapterType === 'http') {
       // HTTP 模式：启动录制，3秒后自动停止并识别
-      console.log('[VoiceChatService] HTTP 模式：3秒后自动识别');
+      log.info('[VoiceChatService] HTTP 模式：3秒后自动识别');
 
       // 标记录制状态
       (window as any).__asrRecordingActive = true;
@@ -149,10 +150,10 @@ export class VoiceChatService implements IVoiceChatService {
         lang: 'zh-CN',
         stream: this.stream,
       }).then((result) => {
-        console.log('[VoiceChatService] 识别结果:', result.text);
+        log.info(`[VoiceChatService] 识别结果: ${result.text}`);
         this.lastResult = result;
       }).catch((error) => {
-        console.error('[VoiceChatService] 识别失败:', error);
+        log.error(`[VoiceChatService] 识别失败: ${error instanceof Error ? error.message : String(error)}`);
         this.lastResult = null;
       });
 
@@ -166,23 +167,23 @@ export class VoiceChatService implements IVoiceChatService {
         lang: 'zh-CN',
         stream: this.stream,
       }).then((result) => {
-        console.log('[VoiceChatService] 识别结果:', result.text);
+        log.info(`[VoiceChatService] 识别结果: ${result.text}`);
         this.lastResult = result;
       }).catch((error) => {
-        console.error('[VoiceChatService] 识别失败:', error);
+        log.error(`[VoiceChatService] 识别失败: ${error instanceof Error ? error.message : String(error)}`);
         this.lastResult = null;
       });
     }
 
     this.isRecording = true;
-    console.log('[VoiceChatService] 录音已开始');
+    log.info('[VoiceChatService] 录音已开始');
   }
 
   /**
    * 停止录音并识别
    */
   async stopRecording(): Promise<ASRResult | null> {
-    console.log('[VoiceChatService] 停止录音...');
+    log.info('[VoiceChatService] 停止录音...');
 
     // 停止计时器
     if (this.durationInterval) {
@@ -207,9 +208,9 @@ export class VoiceChatService implements IVoiceChatService {
 
     // 计算实际录音时长
     const recordingDuration = Math.floor((Date.now() - this.recordingStartTime) / 1000);
-    console.log(`[VoiceChatService] 录音时长: ${recordingDuration}秒`);
+    log.info(`[VoiceChatService] 录音时长: ${recordingDuration}秒`);
 
-    console.log('[VoiceChatService] 录音已停止');
+    log.info('[VoiceChatService] 录音已停止');
     return this.lastResult;
   }
 
@@ -242,10 +243,10 @@ export function setASRAdapterType(type: ASRAdapterType): void {
   service.adapterType = type;
 
   if (type === 'http') {
-    console.log('[VoiceChatService] Switched to HTTP Adapter');
+    log.info('[VoiceChatService] Switched to HTTP Adapter');
   } else if (type === 'moss') {
-    console.log('[VoiceChatService] Switched to MOSS Adapter');
+    log.info('[VoiceChatService] Switched to MOSS Adapter');
   } else {
-    console.log('[VoiceChatService] Switched to WebSocket Adapter');
+    log.info('[VoiceChatService] Switched to WebSocket Adapter');
   }
 }

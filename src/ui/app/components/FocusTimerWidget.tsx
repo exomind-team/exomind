@@ -29,6 +29,7 @@ import {
   subscribeFocusBgmPreferencesChanges,
 } from '@/config/focus-bgm-preferences';
 import { getTimerEndSoundPresetById } from '@/lib/media/timer-end-sounds';
+import { log } from '@/lib/logger';
 import { getTaskService, getTaskTimerService, getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
@@ -483,12 +484,12 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       try {
         await execute();
       } catch (error) {
-        console.error(`[TB-UI] ${label} failed`, error);
+        log.error(`[TB-UI] ${label} failed ${error instanceof Error ? error.message : String(error)}`);
         try {
           const block = await timeBlockServiceRef.current.loadActiveBlock();
           applyActiveBlock(block);
         } catch (reloadError) {
-          console.error(`[TB-UI] ${label} recover failed`, reloadError);
+          log.error(`[TB-UI] ${label} recover failed ${reloadError instanceof Error ? reloadError.message : String(reloadError)}`);
         }
       }
     });
@@ -500,21 +501,21 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
     if (runningSubState === 'running') {
       const t0 = perfNow();
-      console.log('[TB-UI] click pause -> pauseBlock start');
+      log.info('[TB-UI] click pause -> pauseBlock start');
       setRunningSubState('paused');
       enqueueServiceMutation('pauseBlock', async () => {
         await timeBlockServiceRef.current.pauseBlock();
-        console.log('[TB-UI] click pause -> pauseBlock done', { elapsedMs: Math.round(perfNow() - t0) });
+        log.info(`[TB-UI] click pause -> pauseBlock done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`);
       });
       return;
     }
 
     const t0 = perfNow();
-    console.log('[TB-UI] click resume -> resumeBlock start');
+    log.info('[TB-UI] click resume -> resumeBlock start');
     setRunningSubState('running');
     enqueueServiceMutation('resumeBlock', async () => {
       await timeBlockServiceRef.current.resumeBlock();
-      console.log('[TB-UI] click resume -> resumeBlock done', { elapsedMs: Math.round(perfNow() - t0) });
+      log.info(`[TB-UI] click resume -> resumeBlock done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`);
     });
   }, [enqueueServiceMutation, feedbackInProgress, isRunningUi, runningSubState]);
 
@@ -525,12 +526,12 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       return;
     }
     const t0 = perfNow();
-    console.log('[TB-UI] click end -> markEnding start');
+    log.info('[TB-UI] click end -> markEnding start');
     setRunningSubState('paused');
     setFeedbackInProgress(true);
     enqueueServiceMutation('markEnding', async () => {
       await timeBlockServiceRef.current.markEnding();
-      console.log('[TB-UI] click end -> markEnding done', { elapsedMs: Math.round(perfNow() - t0) });
+      log.info(`[TB-UI] click end -> markEnding done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`);
     });
     setFeedbackOpen(true);
   }, [enqueueServiceMutation, feedbackInProgress, isRunningUi]);
@@ -559,24 +560,24 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     setFeedbackSubmitting(true);
 
     const t0 = perfNow();
-    console.log('[TB-UI] click submit-end -> endBlock start');
+    log.info('[TB-UI] click submit-end -> endBlock start');
 
     try {
       await mutationQueueRef.current;
       await timeBlockServiceRef.current.endBlock(trimmedFeedback || undefined);
     } catch (error) {
-      console.error('[TB-UI] endBlock failed', error);
+      log.error(`[TB-UI] endBlock failed ${error instanceof Error ? error.message : String(error)}`);
       try {
         const block = await timeBlockServiceRef.current.loadActiveBlock();
         applyActiveBlock(block);
       } catch (reloadError) {
-        console.error('[TB-UI] endBlock recover failed', reloadError);
+        log.error(`[TB-UI] endBlock recover failed ${reloadError instanceof Error ? reloadError.message : String(reloadError)}`);
       }
       setFeedbackSubmitting(false);
       return;
     }
 
-    console.log('[TB-UI] click submit-end -> endBlock done', { elapsedMs: Math.round(perfNow() - t0) });
+    log.info(`[TB-UI] click submit-end -> endBlock done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`);
 
     // Record block association and apply task status transition
     if (blockDataSnapshot?.taskId) {
@@ -586,7 +587,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
           await getTaskService().transitionTask(blockDataSnapshot.taskId, taskStatusChoiceSnapshot as TaskStatus);
         }
       } catch (error) {
-        console.error('[TB-UI] task status update failed', error);
+        log.error(`[TB-UI] task status update failed ${error instanceof Error ? error.message : String(error)}`);
       }
     }
 
