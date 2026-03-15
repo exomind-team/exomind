@@ -167,6 +167,8 @@ fn ensure_runtime_agent_session(
             .update(
                 session_id,
                 UpdateSessionInput {
+                    agent_id: Some(agent_id.to_string()),
+                    source_host_id: Some(state.host_id.clone()),
                     role: Some(agent_name.to_string()),
                     summary: (!agent_description.trim().is_empty())
                         .then(|| agent_description.trim().to_string()),
@@ -185,6 +187,8 @@ fn ensure_runtime_agent_session(
         .create(CreateSessionInput {
             id: Some(session_id.to_string()),
             agent_kind: resolve_agent_session_kind(agent_id),
+            agent_id: Some(agent_id.to_string()),
+            source_host_id: Some(state.host_id.clone()),
             role: Some(agent_name.to_string()),
             context: Some(WorkContext::default()),
             interaction: Some(InteractionMode::Structured),

@@ -40,6 +40,8 @@ impl SqliteSessionStore {
             "CREATE TABLE IF NOT EXISTS agent_sessions (
                 id                TEXT PRIMARY KEY,
                 agent_kind        TEXT NOT NULL,
+                agent_id          TEXT,
+                source_host_id    TEXT,
                 role              TEXT NOT NULL DEFAULT '',
                 summary           TEXT NOT NULL DEFAULT '',
                 status            TEXT NOT NULL DEFAULT 'running',
@@ -72,9 +74,11 @@ impl SqliteSessionStore {
             CREATE INDEX IF NOT EXISTS idx_sessions_status ON agent_sessions(status);
             CREATE INDEX IF NOT EXISTS idx_sessions_agent ON agent_sessions(agent_kind);
             CREATE INDEX IF NOT EXISTS idx_sessions_active ON agent_sessions(last_active_at DESC);
-
-            PRAGMA user_version = 1;",
+            ",
         )?;
+        ensure_optional_column(&conn, "agent_sessions", "agent_id", "TEXT")?;
+        ensure_optional_column(&conn, "agent_sessions", "source_host_id", "TEXT")?;
+        conn.execute_batch("PRAGMA user_version = 2;")?;
         Ok(())
     }
 
@@ -86,6 +90,8 @@ impl SqliteSessionStore {
         let session = AgentSession {
             id: input.id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string()),
             agent_kind: input.agent_kind,
+            agent_id: input.agent_id,
+            source_host_id: input.source_host_id,
             role: input.role.unwrap_or_default(),
             summary: String::new(),
             status: SessionStatus::Running,
@@ -114,7 +120,7 @@ impl SqliteSessionStore {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT
-                id, agent_kind, role, summary, status, interaction_mode,
+                id, agent_kind, agent_id, source_host_id, role, summary, status, interaction_mode,
                 pty_id, inner_session_id,
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
@@ -133,7 +139,7 @@ impl SqliteSessionStore {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT
-                id, agent_kind, role, summary, status, interaction_mode,
+                id, agent_kind, agent_id, source_host_id, role, summary, status, interaction_mode,
                 pty_id, inner_session_id,
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
@@ -150,7 +156,7 @@ impl SqliteSessionStore {
         let conn = self.connection();
         let mut stmt = conn.prepare(
             "SELECT
-                id, agent_kind, role, summary, status, interaction_mode,
+                id, agent_kind, agent_id, source_host_id, role, summary, status, interaction_mode,
                 pty_id, inner_session_id,
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
@@ -171,6 +177,12 @@ impl SqliteSessionStore {
 
         if let Some(role) = input.role {
             session.role = role;
+        }
+        if let Some(agent_id) = input.agent_id {
+            session.agent_id = Some(agent_id);
+        }
+        if let Some(source_host_id) = input.source_host_id {
+            session.source_host_id = Some(source_host_id);
         }
         if let Some(summary) = input.summary {
             session.summary = summary;
@@ -247,16 +259,18 @@ impl SqliteSessionStore {
         let conn = self.connection();
         conn.execute(
             "INSERT INTO agent_sessions (
-                id, agent_kind, role, summary, status, interaction_mode,
+                id, agent_kind, agent_id, source_host_id, role, summary, status, interaction_mode,
                 pty_id, inner_session_id,
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
                 created_at, last_active_at,
                 turn_count, last_output_preview, error_message, quick_actions
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)",
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)",
             params![
                 session.id,
                 session.agent_kind,
+                session.agent_id,
+                session.source_host_id,
                 session.role,
                 session.summary,
                 session.status.as_str(),
@@ -285,14 +299,16 @@ impl SqliteSessionStore {
         let conn = self.connection();
         conn.execute(
             "INSERT INTO agent_sessions (
-                id, agent_kind, role, summary, status, interaction_mode,
+                id, agent_kind, agent_id, source_host_id, role, summary, status, interaction_mode,
                 pty_id, inner_session_id,
                 git_branch, worktree_path, issue_refs, pr_ref, work_dir, labels,
                 parent_session_id,
                 created_at, last_active_at,
                 turn_count, last_output_preview, error_message, quick_actions
-            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21)
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23)
             ON CONFLICT(id) DO UPDATE SET
+                agent_id = excluded.agent_id,
+                source_host_id = excluded.source_host_id,
                 role = excluded.role,
                 summary = excluded.summary,
                 status = excluded.status,
@@ -314,6 +330,8 @@ impl SqliteSessionStore {
             params![
                 session.id,
                 session.agent_kind,
+                session.agent_id,
+                session.source_host_id,
                 session.role,
                 session.summary,
                 session.status.as_str(),
@@ -340,11 +358,11 @@ impl SqliteSessionStore {
 }
 
 fn map_session_row(row: &rusqlite::Row) -> Result<AgentSession, rusqlite::Error> {
-    let status_str: String = row.get(4)?;
-    let interaction_str: String = row.get(5)?;
-    let issue_refs_json: String = row.get(10)?;
-    let labels_json: String = row.get(13)?;
-    let quick_actions_json: String = row.get(20)?;
+    let status_str: String = row.get(6)?;
+    let interaction_str: String = row.get(7)?;
+    let issue_refs_json: String = row.get(12)?;
+    let labels_json: String = row.get(15)?;
+    let quick_actions_json: String = row.get(22)?;
 
     let status = SessionStatus::from_str(&status_str)
         .unwrap_or(SessionStatus::Running);
@@ -360,26 +378,48 @@ fn map_session_row(row: &rusqlite::Row) -> Result<AgentSession, rusqlite::Error>
     Ok(AgentSession {
         id: row.get(0)?,
         agent_kind: row.get(1)?,
-        role: row.get(2)?,
-        summary: row.get(3)?,
+        agent_id: row.get(2)?,
+        source_host_id: row.get(3)?,
+        role: row.get(4)?,
+        summary: row.get(5)?,
         status,
         interaction_mode,
-        pty_id: row.get(6)?,
-        inner_session_id: row.get(7)?,
+        pty_id: row.get(8)?,
+        inner_session_id: row.get(9)?,
         context: WorkContext {
-            git_branch: row.get(8)?,
-            worktree_path: row.get(9)?,
+            git_branch: row.get(10)?,
+            worktree_path: row.get(11)?,
             issue_refs,
-            pr_ref: row.get(11)?,
-            work_dir: row.get(12)?,
+            pr_ref: row.get(13)?,
+            work_dir: row.get(14)?,
             labels,
         },
-        parent_session_id: row.get(14)?,
-        created_at: row.get(15)?,
-        last_active_at: row.get(16)?,
-        turn_count: row.get(17)?,
-        last_output_preview: row.get(18)?,
-        error_message: row.get(19)?,
+        parent_session_id: row.get(16)?,
+        created_at: row.get(17)?,
+        last_active_at: row.get(18)?,
+        turn_count: row.get(19)?,
+        last_output_preview: row.get(20)?,
+        error_message: row.get(21)?,
         quick_actions,
     })
+}
+
+fn ensure_optional_column(
+    conn: &Connection,
+    table_name: &str,
+    column_name: &str,
+    column_definition: &str,
+) -> Result<(), SessionStoreError> {
+    let mut stmt = conn.prepare(&format!("PRAGMA table_info({table_name})"))?;
+    let rows = stmt.query_map([], |row| row.get::<_, String>(1))?;
+    let existing_columns = rows.collect::<Result<Vec<_>, _>>()?;
+    if existing_columns.iter().any(|name| name == column_name) {
+        return Ok(());
+    }
+
+    conn.execute(
+        &format!("ALTER TABLE {table_name} ADD COLUMN {column_name} {column_definition}"),
+        [],
+    )?;
+    Ok(())
 }

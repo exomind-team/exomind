@@ -2314,6 +2314,7 @@ export function AgentsPage() {
   const [isChatSending, setIsChatSending] = useState(false);
   const [isAgentCreating, setIsAgentCreating] = useState(false);
   const [isAgentStopping, setIsAgentStopping] = useState(false);
+  const [isPtyStopping, setIsPtyStopping] = useState(false);
   const [ptyAgents, setPtyAgents] = useState<Array<{ id: string; name: string; status: string; workdir: string }>>([]);
   /** The currently active PTY — persists across panel close/open to keep the terminal mounted. */
   const [activePtyId, setActivePtyId] = useState<string | null>(null);
@@ -2591,7 +2592,7 @@ export function AgentsPage() {
       setChatMessages([]);
       setChatSessionId(readRememberedRuntimeSession({
         agentId,
-        hostId: runtimeHost.id,
+        hostId: runtimeHost.hostId ?? runtimeHost.id,
         hostAddress: `${runtimeHost.host}:${runtimeHost.port}`,
       }));
       return;
@@ -2665,7 +2666,7 @@ export function AgentsPage() {
             rememberRuntimeSession({
               agentId: chatAgentId,
               sessionId: chunk.sessionId,
-              hostId: runtimeHost.id,
+              hostId: runtimeHost.hostId ?? runtimeHost.id,
               hostAddress,
             });
           }
@@ -2676,7 +2677,7 @@ export function AgentsPage() {
                 rememberRuntimeSession({
                   agentId: chatAgentId,
                   sessionId: chunk.sessionId,
-                  hostId: runtimeHost.id,
+                  hostId: runtimeHost.hostId ?? runtimeHost.id,
                   hostAddress,
                 });
               }
@@ -2786,6 +2787,29 @@ export function AgentsPage() {
     const result = await runtimeClient.markSessionWaiting(host, session.id);
     if (!result.ok) {
       setRuntimeHostError(`标记等待决策失败: ${result.error.message}`);
+    }
+  };
+
+  const handleStopPtyAgent = async (ptyId: string, sourceHostId?: string | null) => {
+    const host = resolveRuntimeHostBySourceHostId(sourceHostId) ?? resolveActiveRuntimeHost();
+    setRuntimeHostError('');
+    setIsPtyStopping(true);
+    try {
+      const runtimeClient = new RuntimeClient();
+      const result = await runtimeClient.stopPtyAgent(host, ptyId);
+      if (!result.ok) {
+        setRuntimeHostError(`停止 Terminal Agent 失败: ${result.error.message}`);
+        return;
+      }
+      if (activePtyId === ptyId) {
+        setActivePtyId(null);
+        setActivePtyHostId(null);
+      }
+      closeRightPanel();
+      await fetchPtyAgents();
+      refreshSessions();
+    } finally {
+      setIsPtyStopping(false);
     }
   };
 
@@ -2998,12 +3022,19 @@ export function AgentsPage() {
     return createDirectRuntimeHost(resolvedUrl.hostname, fallbackPort);
   };
 
+  const resolveRuntimeHostBySourceHostId = (sourceHostId?: string | null): RuntimeHostRecord | null => {
+    if (!sourceHostId) return null;
+    const matchedHost = runtimeHostSnapshots.find((snapshot) => (
+      snapshot.host.hostId === sourceHostId
+      || snapshot.host.id === sourceHostId
+      || snapshot.topology?.host_id === sourceHostId
+    ))?.host;
+    return matchedHost ?? null;
+  };
+
   const resolveRuntimeHostForSession = (session: SessionInfo): RuntimeHostRecord => {
-    const hostId = session.source_host_id;
-    if (hostId) {
-      const matchedHost = runtimeHostSnapshots.find((snapshot) => snapshot.host.id === hostId)?.host;
-      if (matchedHost) return matchedHost;
-    }
+    const matchedHost = resolveRuntimeHostBySourceHostId(session.source_host_id);
+    if (matchedHost) return matchedHost;
     return resolveActiveRuntimeHost();
   };
 
@@ -3016,14 +3047,12 @@ export function AgentsPage() {
   };
 
   const resolveRuntimeConnectionForHostId = (hostId?: string | null) => {
-    if (hostId) {
-      const matchedHost = runtimeHostSnapshots.find((snapshot) => snapshot.host.id === hostId)?.host;
-      if (matchedHost) {
-        return {
-          rtBaseUrl: `http://${formatHostForUrl(matchedHost.host)}:${matchedHost.port}`,
-          authToken: matchedHost.authToken ?? resolveRtAuthToken(),
-        };
-      }
+    const matchedHost = resolveRuntimeHostBySourceHostId(hostId);
+    if (matchedHost) {
+      return {
+        rtBaseUrl: `http://${formatHostForUrl(matchedHost.host)}:${matchedHost.port}`,
+        authToken: matchedHost.authToken ?? resolveRtAuthToken(),
+      };
     }
     return {
       rtBaseUrl: resolveRtBaseUrl(),
@@ -3035,7 +3064,7 @@ export function AgentsPage() {
     const sortedHosts = sortRouteHostsByPriority(runtimeHostSnapshots);
     if (sortedHosts.length > 0) {
       return sortedHosts.map((snapshot) => ({
-        id: snapshot.host.id,
+        id: snapshot.host.hostId ?? snapshot.topology?.host_id ?? snapshot.host.id,
         rtBaseUrl: `http://${formatHostForUrl(snapshot.host.host)}:${snapshot.host.port}`,
         authToken: snapshot.host.authToken,
         hostName: snapshot.host.name,
@@ -3223,6 +3252,10 @@ export function AgentsPage() {
         // Clear activePtyId if the PTY agent was removed
         setActivePtyId(prev => {
           if (prev && !data.some(d => d.id === prev)) return null;
+          return prev;
+        });
+        setActivePtyHostId(prev => {
+          if (activePtyId && prev && !data.some(d => d.id === activePtyId)) return null;
           return prev;
         });
       }
@@ -3623,6 +3656,10 @@ export function AgentsPage() {
               onMarkWaiting={(session) => {
                 void handleSessionMarkWaiting(session);
               }}
+              onStopSession={(session) => {
+                if (!session.pty_id) return;
+                void handleStopPtyAgent(session.pty_id, session.source_host_id);
+              }}
             />
           </div>
         </div>
@@ -3862,8 +3899,9 @@ export function AgentsPage() {
                   <button
                     type="button"
                     onClick={() => {
-                      const ptyParams = new URLSearchParams({ baseUrl: resolveRtBaseUrl() });
-                      const tok = resolveRtAuthToken();
+                      const connection = resolveRuntimeConnectionForHostId(activePtyHostId);
+                      const ptyParams = new URLSearchParams({ baseUrl: connection.rtBaseUrl });
+                      const tok = connection.authToken;
                       const ptyState: Record<string, unknown> = tok ? { ptyToken: tok } : {};
                       window.history.pushState(ptyState, '', `/agents/pty/${rightPanel.ptyId}?${ptyParams.toString()}`);
                       window.dispatchEvent(new PopStateEvent('popstate'));
@@ -3872,6 +3910,20 @@ export function AgentsPage() {
                     aria-label="全屏"
                   >
                     <Maximize2 size={14} />
+                  </button>
+                )}
+                {rightPanel.state === 'PTY_TERMINAL' && rightPanel.ptyId && (
+                  <button
+                    type="button"
+                    data-testid="agent-rightpanel-stop-pty"
+                    onClick={() => {
+                      void handleStopPtyAgent(rightPanel.ptyId!, activePtyHostId);
+                    }}
+                    disabled={isPtyStopping}
+                    className="flex h-7 items-center justify-center rounded px-2 text-xs text-destructive hover:text-destructive/80 disabled:opacity-60"
+                    aria-label="结束 Terminal Agent"
+                  >
+                    {isPtyStopping ? '停止中' : '结束'}
                   </button>
                 )}
                 <button
@@ -4335,6 +4387,7 @@ export function AgentsPage() {
               {/* PTY terminal — stays mounted when activePtyId is set, hidden when panel shows other content */}
               {activePtyId && (
                 <div
+                  data-testid="agent-rightpanel-pty-terminal"
                   className="flex h-full flex-col overflow-hidden"
                   style={rightPanel.state !== 'PTY_TERMINAL' ? { display: 'none' } : undefined}
                 >

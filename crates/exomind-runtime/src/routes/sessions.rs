@@ -80,12 +80,24 @@ pub(crate) fn broadcast_session_deleted(
     }
 }
 
+fn fill_source_host_id(mut session: AgentSession, host_id: &str) -> AgentSession {
+    // 补齐 source_host_id（默认本机 host id）
+    if session.source_host_id.is_none() {
+        session.source_host_id = Some(host_id.to_string());
+    }
+    session
+}
+
 // ── Handlers ────────────────────────────────────────────────────
 
 async fn create_session(
     State(state): State<AppState>,
     Json(input): Json<CreateSessionInput>,
 ) -> Result<(StatusCode, Json<AgentSession>), (StatusCode, String)> {
+    let mut input = input;
+    if input.source_host_id.is_none() {
+        input.source_host_id = Some(state.host_id.clone());
+    }
     let session = state
         .session_store
         .create(input)
@@ -96,6 +108,7 @@ async fn create_session(
             };
             (status, e.to_string())
         })?;
+    let session = fill_source_host_id(session, &state.host_id);
 
     // Broadcast creation event
     broadcast_session_created(state.session_event_tx.as_ref(), &session);
@@ -121,6 +134,11 @@ async fn list_sessions(
             .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
     };
 
+    let host_id = &state.host_id;
+    let sessions = sessions
+        .into_iter()
+        .map(|session| fill_source_host_id(session, host_id))
+        .collect();
     Ok(Json(sessions))
 }
 
@@ -134,7 +152,7 @@ async fn get_session(
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("session not found: {id}")))?;
 
-    Ok(Json(session))
+    Ok(Json(fill_source_host_id(session, &state.host_id)))
 }
 
 async fn update_session(
@@ -155,6 +173,7 @@ async fn update_session(
             };
             (status, e.to_string())
         })?;
+    let session = fill_source_host_id(session, &state.host_id);
 
     // Broadcast update event
     broadcast_session_updated(state.session_event_tx.as_ref(), &session);
@@ -171,6 +190,7 @@ async fn delete_session(
         .delete(&id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
         .ok_or_else(|| (StatusCode::NOT_FOUND, format!("session not found: {id}")))?;
+    let session = fill_source_host_id(session, &state.host_id);
 
     // Broadcast deletion event
     broadcast_session_deleted(state.session_event_tx.as_ref(), &id);
@@ -254,6 +274,7 @@ async fn submit_quick_action(
         .session_store
         .update(&id, update)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
+    let updated = fill_source_host_id(updated, &state.host_id);
 
     // Broadcast update event
     broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
@@ -287,6 +308,7 @@ async fn mark_waiting(
             };
             (status, e.to_string())
         })?;
+    let updated = fill_source_host_id(updated, &state.host_id);
 
     // Broadcast update event
     broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
@@ -314,6 +336,7 @@ async fn list_children(
 
     let children: Vec<AgentSession> = all
         .into_iter()
+        .map(|session| fill_source_host_id(session, &state.host_id))
         .filter(|s| s.parent_session_id.as_deref() == Some(&id))
         .collect();
 
@@ -366,4 +389,83 @@ pub fn router() -> Router<AppState> {
         .route("/sessions/{id}/children", get(list_children))
         .route("/sessions/{id}/messages", post(send_message))
         .route("/sessions/stream", get(session_stream))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::body::Body;
+    use axum::http::Request;
+    use http_body_util::BodyExt;
+    use tower::ServiceExt;
+
+    fn test_state(host_id: &str) -> AppState {
+        AppState::new_runtime(0, host_id.to_string(), None, None, false, None)
+    }
+
+    #[tokio::test]
+    async fn create_session_defaults_source_host_id() {
+        let state = test_state("session-host-1");
+        let app = router().with_state(state);
+        let payload = serde_json::json!({
+            "agent_kind": "claude",
+        });
+
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri("/sessions")
+                    .header("content-type", "application/json")
+                    .body(Body::from(payload.to_string()))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::CREATED);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let session: AgentSession = serde_json::from_slice(&body).unwrap();
+        assert_eq!(session.source_host_id.as_deref(), Some("session-host-1"));
+    }
+
+    #[tokio::test]
+    async fn list_sessions_fills_missing_source_host_id() {
+        let state = test_state("session-host-2");
+        state
+            .session_store
+            .create(CreateSessionInput {
+                id: Some("sid-123".to_string()),
+                agent_kind: "claude".to_string(),
+                agent_id: None,
+                source_host_id: None,
+                role: Some("test".to_string()),
+                context: None,
+                interaction: None,
+                pty_id: None,
+                inner_session_id: None,
+                parent_session_id: None,
+            })
+            .unwrap();
+
+        let app = router().with_state(state);
+        let resp = app
+            .oneshot(
+                Request::builder()
+                    .uri("/sessions")
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(resp.status(), StatusCode::OK);
+        let body = resp.into_body().collect().await.unwrap().to_bytes();
+        let sessions: Vec<AgentSession> = serde_json::from_slice(&body).unwrap();
+        let found = sessions
+            .into_iter()
+            .find(|session| session.id == "sid-123")
+            .expect("session should exist");
+        assert_eq!(found.source_host_id.as_deref(), Some("session-host-2"));
+    }
 }

@@ -143,6 +143,10 @@ impl WorkContext {
 pub struct AgentSession {
     pub id: String,
     pub agent_kind: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_id: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source_host_id: Option<String>,
     pub role: String,
     pub summary: String,
     pub status: SessionStatus,
@@ -243,6 +247,10 @@ pub struct CreateSessionInput {
     pub id: Option<String>,
     pub agent_kind: String,
     #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub source_host_id: Option<String>,
+    #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
     pub context: Option<WorkContext>,
@@ -259,6 +267,10 @@ pub struct CreateSessionInput {
 /// Input for updating an existing session.
 #[derive(Debug, Clone, Default, Deserialize)]
 pub struct UpdateSessionInput {
+    #[serde(default)]
+    pub agent_id: Option<String>,
+    #[serde(default)]
+    pub source_host_id: Option<String>,
     #[serde(default)]
     pub role: Option<String>,
     #[serde(default)]
@@ -326,6 +338,8 @@ mod tests {
         let session = AgentSession {
             id: "test-1".to_string(),
             agent_kind: "claude".to_string(),
+            agent_id: Some("claude".to_string()),
+            source_host_id: Some("desktop-host".to_string()),
             role: "任务思考".to_string(),
             summary: "分析 #511".to_string(),
             status: SessionStatus::Running,
@@ -351,6 +365,8 @@ mod tests {
         let back: AgentSession = serde_json::from_str(&json).unwrap();
         assert_eq!(back.id, "test-1");
         assert_eq!(back.agent_kind, "claude");
+        assert_eq!(back.agent_id.as_deref(), Some("claude"));
+        assert_eq!(back.source_host_id.as_deref(), Some("desktop-host"));
         assert_eq!(back.context.git_branch.as_deref(), Some("dev"));
     }
 

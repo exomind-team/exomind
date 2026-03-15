@@ -47,6 +47,16 @@ export interface RuntimeDeleteAgentResponse {
   id: string;
 }
 
+export interface RuntimePtyAgentInfo {
+  id: string;
+  name: string;
+  session_id?: string | null;
+  workdir: string;
+  command: string;
+  status: string;
+  created_at: string;
+}
+
 export interface RuntimeRefillEnergyResponse {
   energy: AgentEnergySnapshot;
   revived: boolean;
@@ -133,6 +143,42 @@ function parseRuntimeAgentSummary(value: unknown): RuntimeAgentSummary | null {
     description: typeof value.description === 'string' ? value.description : '',
     status: typeof value.status === 'string' ? value.status : 'unknown',
   };
+}
+
+function parseRuntimePtyAgentInfo(value: unknown): RuntimePtyAgentInfo | null {
+  if (!isObjectRecord(value)) return null;
+
+  const id = readOptionalString(value, 'id');
+  const name = readOptionalString(value, 'name');
+  const workdir = readOptionalString(value, 'workdir', 'work_dir');
+  const command = readOptionalString(value, 'command');
+  const status = readOptionalString(value, 'status');
+  const createdAt = readOptionalString(value, 'created_at', 'createdAt');
+  if (!id || !name || !workdir || !command || !status || !createdAt) {
+    return null;
+  }
+
+  const sessionRaw = value.session_id ?? value.sessionId;
+  if (sessionRaw !== undefined && sessionRaw !== null && typeof sessionRaw !== 'string') {
+    return null;
+  }
+
+  const parsed: RuntimePtyAgentInfo = {
+    id,
+    name,
+    workdir,
+    command,
+    status,
+    created_at: createdAt,
+  };
+
+  if (sessionRaw === null) {
+    parsed.session_id = null;
+  } else if (typeof sessionRaw === 'string' && sessionRaw.trim().length > 0) {
+    parsed.session_id = sessionRaw;
+  }
+
+  return parsed;
 }
 
 function readOptionalString(
@@ -509,6 +555,35 @@ export class RuntimeClient {
     return {
       ok: true,
       data: { status, id },
+    };
+  }
+
+  async stopPtyAgent(
+    host: RuntimeHostRecord,
+    ptyId: string,
+  ): Promise<RuntimeClientResult<RuntimePtyAgentInfo>> {
+    const response = await this.sendJson(
+      `${buildBaseUrl(host)}/pty/${encodeURIComponent(ptyId)}/stop`,
+      'POST',
+    );
+    if (!response.ok) {
+      return response;
+    }
+
+    const parsed = parseRuntimePtyAgentInfo(response.data);
+    if (!parsed) {
+      return {
+        ok: false,
+        error: {
+          code: 'invalid_payload',
+          message: 'invalid stop pty payload（停止 PTY 响应格式无效）',
+        },
+      };
+    }
+
+    return {
+      ok: true,
+      data: parsed,
     };
   }
 

@@ -291,4 +291,26 @@ describe('runtime client issue-201（Runtime HTTP 客户端）', () => {
       }),
     );
   });
+
+  it('returns invalid payload when stop PTY response misses required fields（stop PTY 缺少必填字段时返回 invalid_payload）', async () => {
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'pty-123',
+        name: 'Terminal Agent',
+        workdir: 'D:/project/exomind',
+        status: 'stopped',
+        created_at: '2026-03-15T00:00:00.000Z',
+      }),
+    }));
+
+    const client = new RuntimeClient({ fetchImpl });
+    const result = await client.stopPtyAgent(SAMPLE_HOST, 'pty-123');
+
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+
+    expect(result.error.code).toBe('invalid_payload');
+  });
 });

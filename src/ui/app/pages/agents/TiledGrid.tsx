@@ -49,6 +49,8 @@ export interface TiledGridProps {
   onQuickAction?: (session: SessionInfo, response: QuickActionResponse) => void;
   /** Callback when user manually marks a PTY session as waiting */
   onMarkWaiting?: (session: SessionInfo) => void;
+  /** Callback when user stops a terminal session */
+  onStopSession?: (session: SessionInfo) => void;
 }
 
 // ── Layout config ──────────────────────────────────────────────
@@ -73,6 +75,7 @@ export function TiledGrid({
   onReorder,
   onQuickAction,
   onMarkWaiting,
+  onStopSession,
 }: TiledGridProps) {
   const config = LAYOUT_CONFIG[layout];
   const [expandedIndex, setExpandedIndex] = useState<number | null>(null);
@@ -152,6 +155,7 @@ export function TiledGrid({
           onClick={() => onSessionClick?.(session)}
           onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
           onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
+          onStop={() => onStopSession?.(session)}
         />
       </div>
     );
@@ -180,6 +184,7 @@ export function TiledGrid({
               onClick={() => onSessionClick?.(session)}
               onQuickAction={onQuickAction ? (r) => onQuickAction(session, r) : undefined}
               onMarkWaiting={onMarkWaiting ? () => onMarkWaiting(session) : undefined}
+              onStop={() => onStopSession?.(session)}
             />
           ))}
           {/* Empty pane placeholders */}
@@ -253,6 +258,7 @@ interface SortablePaneProps {
   onClick?: () => void;
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
+  onStop?: () => void;
 }
 
 function SortablePane(props: SortablePaneProps) {
@@ -299,6 +305,7 @@ interface SessionPaneProps {
   dragListeners?: Record<string, Function>;
   onQuickAction?: (response: QuickActionResponse) => void;
   onMarkWaiting?: () => void;
+  onStop?: () => void;
 }
 
 function SessionPane({
@@ -313,6 +320,7 @@ function SessionPane({
   dragListeners,
   onQuickAction,
   onMarkWaiting,
+  onStop,
 }: SessionPaneProps) {
   const statusIndicator = SESSION_STATUS_INDICATORS[session.status];
   const needsAttention = sessionNeedsAttention(session.status);
@@ -323,6 +331,8 @@ function SessionPane({
     session.interaction_mode === 'terminal'
     && session.status === 'running'
     && (session.quick_actions?.length ?? 0) === 0;
+  // Stop PTY session（停止 PTY 会话）
+  const canStopPty = session.interaction_mode === 'terminal' && !!session.pty_id;
 
   return (
     <div
@@ -464,7 +474,15 @@ function SessionPane({
           </button>
           <button
             type="button"
-            className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E]"
+            onClick={(event) => {
+              event.stopPropagation();
+              if (!canStopPty) return;
+              onStop?.();
+            }}
+            data-testid={`tiled-grid-stop-${session.id}`}
+            aria-label="停止"
+            disabled={!canStopPty || !onStop}
+            className="flex h-5 w-5 items-center justify-center rounded text-[#57534E] hover:text-[#A8A29E] disabled:opacity-50 disabled:hover:text-[#57534E]"
             title="停止"
           >
             <Square size={10} />

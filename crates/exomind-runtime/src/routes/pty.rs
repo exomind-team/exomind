@@ -74,6 +74,10 @@ fn register_pty_session(
         .create(CreateSessionInput {
             id: Some(info.id.clone()),
             agent_kind: resolve_session_agent_kind(&info.command),
+            // PTY unified session tracks the terminal process via `pty_id`;
+            // `agent_id` is reserved for runtime agents such as codex/claude.
+            agent_id: None,
+            source_host_id: Some(state.host_id.clone()),
             role: Some(info.name.clone()),
             context: Some(build_pty_context(info)),
             interaction: Some(InteractionMode::Terminal),

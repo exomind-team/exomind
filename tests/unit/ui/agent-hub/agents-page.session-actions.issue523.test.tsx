@@ -200,10 +200,21 @@ function buildRuntimeSnapshot() {
   };
 }
 
+class MockEventSource {
+  constructor(_url: string) {}
+
+  addEventListener() {}
+
+  removeEventListener() {}
+
+  close() {}
+}
+
 describe('agents page session actions issue-523（会话动作接线）', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     localStorage.clear();
+    vi.stubGlobal('EventSource', MockEventSource as unknown as typeof EventSource);
 
     runtimeControlMocks.getStatus.mockResolvedValue({
       running: true,
@@ -405,6 +416,7 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     await waitFor(() => {
       expect(screen.getByTestId('agent-rightpanel-stop-pty')).toBeInTheDocument();
     });
+    expect(screen.getByTestId('agent-rightpanel-pty-terminal')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('agent-rightpanel-stop-pty'));
 
@@ -413,6 +425,9 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
         expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
         'pty-523',
       );
+    });
+    await waitFor(() => {
+      expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
     });
   });
 });

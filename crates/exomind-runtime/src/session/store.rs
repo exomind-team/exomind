@@ -67,6 +67,8 @@ impl SessionStore {
                 let session = AgentSession {
                     id: id.clone(),
                     agent_kind: input.agent_kind,
+                    agent_id: input.agent_id,
+                    source_host_id: input.source_host_id,
                     role: input.role.unwrap_or_default(),
                     summary: String::new(),
                     status: SessionStatus::Running,
@@ -136,6 +138,12 @@ impl SessionStore {
 
                     if let Some(role) = input.role {
                         session.role = role;
+                    }
+                    if input.agent_id.is_some() {
+                        session.agent_id = input.agent_id;
+                    }
+                    if input.source_host_id.is_some() {
+                        session.source_host_id = input.source_host_id;
                     }
                     if let Some(summary) = input.summary {
                         session.summary = summary;
@@ -225,6 +233,8 @@ mod tests {
             pty_id: Some("pty-1".to_string()),
             inner_session_id: None,
             parent_session_id: None,
+            agent_id: None,
+            source_host_id: None,
         }
     }
 
@@ -245,6 +255,8 @@ mod tests {
             pty_id: Some("pty-1".to_string()),
             inner_session_id: None,
             parent_session_id: None,
+            agent_id: None,
+            source_host_id: None,
         }
     }
 
@@ -515,5 +527,20 @@ mod tests {
         let loaded = reopened.get(&created.id).unwrap().expect("session should persist");
         assert_eq!(loaded.agent_id.as_deref(), Some("claude-runtime-1"));
         assert_eq!(loaded.source_host_id.as_deref(), Some("desktop-host"));
+
+        // Test updating these fields
+        let updated = reopened.update(&created.id, UpdateSessionInput {
+            agent_id: Some("claude-runtime-updated".to_string()),
+            source_host_id: Some("server-host-updated".to_string()),
+            ..Default::default()
+        }).unwrap();
+        assert_eq!(updated.agent_id.as_deref(), Some("claude-runtime-updated"));
+        assert_eq!(updated.source_host_id.as_deref(), Some("server-host-updated"));
+
+        drop(reopened);
+        let reopened_again = SessionStore::with_sqlite_path(&sqlite_path).unwrap();
+        let loaded_again = reopened_again.get(&created.id).unwrap().expect("session should persist after update");
+        assert_eq!(loaded_again.agent_id.as_deref(), Some("claude-runtime-updated"));
+        assert_eq!(loaded_again.source_host_id.as_deref(), Some("server-host-updated"));
     }
 }

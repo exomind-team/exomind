@@ -66,4 +66,31 @@ describe('tiled grid quick actions issue-523（平铺会话动作栏）', () => 
 
     expect(screen.queryByRole('button', { name: '等待决策' })).not.toBeInTheDocument();
   });
+
+  it('calls stop handler for terminal PTY sessions（终端 PTY 会话点击停止应触发回调）', () => {
+    const onStopSession = vi.fn();
+    const session = buildSession({
+      id: 'terminal-pty',
+      interaction_mode: 'terminal',
+      pty_id: 'pty-523',
+    });
+
+    render(
+      <TiledGrid
+        sessions={[session]}
+        layout="1x1"
+        resolveSessionConnection={() => ({
+          rtBaseUrl: 'http://127.0.0.1:1949',
+        })}
+        focusedIndex={0}
+        onFocusPane={vi.fn()}
+        onStopSession={onStopSession}
+      />,
+    );
+
+    // stop button exists via title text（通过 title 文案定位停止按钮）
+    screen.getByTitle('停止').click();
+
+    expect(onStopSession).toHaveBeenCalledWith(session);
+  });
 });

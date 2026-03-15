@@ -50,7 +50,7 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
             setChatError('');
             setRuntimeSessionId(readRememberedRuntimeSession({
               agentId: targetId,
-              hostId: runtimeHost.id,
+              hostId: runtimeHost.hostId ?? runtimeHost.id,
               hostAddress: `${runtimeHost.host}:${runtimeHost.port}`,
             }));
           }
@@ -207,7 +207,7 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
             rememberRuntimeSession({
               agentId: targetId,
               sessionId: chunk.sessionId,
-              hostId: runtimeHost.id,
+              hostId: runtimeHost.hostId ?? runtimeHost.id,
               hostAddress,
             });
           }
@@ -219,7 +219,7 @@ export function AgentConversationPage({ agentId }: { agentId?: string }) {
                 rememberRuntimeSession({
                   agentId: targetId,
                   sessionId: chunk.sessionId,
-                  hostId: runtimeHost.id,
+                  hostId: runtimeHost.hostId ?? runtimeHost.id,
                   hostAddress,
                 });
               }

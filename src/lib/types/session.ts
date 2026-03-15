@@ -71,6 +71,7 @@ export interface SendMessageInput {
 export interface SessionInfo {
   id: string;
   agent_kind: AgentKind;
+  agent_id?: string;
   role: string;
   summary: string;
   status: SessionStatus;
@@ -92,6 +93,8 @@ export interface SessionInfo {
 /** Request body for creating a new session */
 export interface CreateSessionRequest {
   agent_kind: AgentKind;
+  agent_id?: string;
+  source_host_id?: string;
   role?: string;
   context?: Partial<WorkContext>;
   interaction?: InteractionMode;
@@ -100,6 +103,8 @@ export interface CreateSessionRequest {
 
 /** Request body for updating a session */
 export interface UpdateSessionRequest {
+  agent_id?: string;
+  source_host_id?: string;
   role?: string;
   summary?: string;
   status?: SessionStatus;
