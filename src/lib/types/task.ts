@@ -43,14 +43,9 @@ export function normalizeTaskStatus(status: CompatibleTaskStatus): TaskStatus {
 }
 
 export function toStoredTaskStatus(status: TaskStatus): CompatibleTaskStatus {
-  switch (status) {
-    case 'pending':
-      return 'not_started'
-    case 'cancelled':
-      return 'abandoned'
-    default:
-      return status
-  }
+  // Stage-2: Persist canonical wire format to storage.
+  // Legacy values are still accepted via `normalizeTaskStatus()` for backward compatibility.
+  return status
 }
 
 export function normalizeTaskNode(task: TaskNodeLike): TaskNode {

@@ -38,7 +38,10 @@ const BY_CREATED_AT_MAP = `function(doc) {
 
 const BY_STATUS_MAP = `function(doc) {
   if (doc._id && doc._id.startsWith('task:')) {
-    emit(doc.status, null);
+    var status = doc.status;
+    if (status === 'not_started') status = 'pending';
+    if (status === 'abandoned') status = 'cancelled';
+    emit(status, null);
   }
 }`;
 
@@ -120,7 +123,6 @@ export class TaskStorage {
     this.db = prefix
       ? new PouchDB<TaskDoc>(dbName, { prefix })
       : new PouchDB<TaskDoc>(dbName);
-    this.initializeDesignDoc();
   }
 
   /* ── Design doc ── */
@@ -139,6 +141,11 @@ export class TaskStorage {
 
     try {
       await (this.db as unknown as { put(doc: unknown): Promise<unknown> }).put(designDoc);
+      try {
+        await this.migrateTaskStatusWireFormatV2();
+      } catch (migrationError) {
+        log.warn(`TaskStorage 状态迁移失败: ${migrationError instanceof Error ? migrationError.message : String(migrationError)}`);
+      }
       this.initialized = true;
     } catch (error: unknown) {
       if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 409) {
@@ -162,6 +169,11 @@ export class TaskStorage {
               ...designDoc,
               _rev: existing._rev,
             });
+          }
+          try {
+            await this.migrateTaskStatusWireFormatV2();
+          } catch (migrationError) {
+            log.warn(`TaskStorage 状态迁移失败: ${migrationError instanceof Error ? migrationError.message : String(migrationError)}`);
           }
           this.initialized = true;
         } catch (updateError) {
@@ -203,13 +215,15 @@ export class TaskStorage {
 
   async getTasksByStatus(status: string): Promise<TaskNode[]> {
     await this.initializeDesignDoc();
+    const normalized = normalizeTaskStatus(status as CompatibleTaskStatus);
+    const legacyKey = normalized === 'pending'
+      ? 'not_started'
+      : normalized === 'cancelled'
+        ? 'abandoned'
+        : normalized;
     const result = await this.db.query<TaskDoc>('tasks/by_status', {
       include_docs: true,
-      key: normalizeTaskStatus(status as CompatibleTaskStatus) === 'pending'
-        ? 'not_started'
-        : normalizeTaskStatus(status as CompatibleTaskStatus) === 'cancelled'
-          ? 'abandoned'
-          : status,
+      keys: normalized === legacyKey ? [normalized] : [normalized, legacyKey],
     });
     return result.rows.filter((row) => row.doc).map((row) => this.toTaskNode(row.doc!));
   }
@@ -383,6 +397,64 @@ export class TaskStorage {
       ...updates,
       status: toStoredTaskStatus(updates.status),
     };
+  }
+
+  private async migrateTaskStatusWireFormatV2(): Promise<number> {
+    const metaId = '_local/task-status-wireformat-v2';
+
+    try {
+      await this.db.get(metaId);
+      return 0;
+    } catch (error) {
+      // not migrated yet
+      if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status !== 404) {
+        throw error;
+      }
+    }
+
+    const result = await this.db.allDocs<{ status?: CompatibleTaskStatus }>({
+      include_docs: true,
+    });
+
+    const docsToUpdate: TaskDoc[] = [];
+
+    for (const row of result.rows) {
+      const doc = row.doc as TaskDoc | undefined;
+      if (!doc || typeof doc._id !== 'string' || !doc._id.startsWith('task:')) {
+        continue;
+      }
+
+      const nextStatus = normalizeTaskStatus(doc.status as CompatibleTaskStatus);
+      if (doc.status === nextStatus) {
+        continue;
+      }
+
+      docsToUpdate.push({
+        ...doc,
+        status: nextStatus,
+      });
+    }
+
+    if (docsToUpdate.length > 0) {
+      await this.db.bulkDocs(docsToUpdate as unknown as Parameters<typeof this.db.bulkDocs>[0]);
+    }
+
+    try {
+      await (this.db as unknown as { put(doc: unknown): Promise<unknown> }).put({
+        _id: metaId,
+        migratedAt: Date.now(),
+        updatedCount: docsToUpdate.length,
+      });
+    } catch (error) {
+      // If multiple instances run the migration concurrently, the meta doc can conflict.
+      // Treat it as success: someone else recorded the migration already.
+      if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 409) {
+        return docsToUpdate.length;
+      }
+      throw error;
+    }
+
+    return docsToUpdate.length;
   }
 
   private notifyChangeListeners(change: unknown): void {

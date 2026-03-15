@@ -416,6 +416,17 @@ impl SqliteTaskStore {
                 PRIMARY KEY (scope_key, id)
             );",
         )?;
+
+        // Stage-2 wire format migration:
+        // normalize stored status values to canonical strings.
+        connection.execute(
+            "UPDATE tasks SET status = 'pending' WHERE status = 'not_started'",
+            [],
+        )?;
+        connection.execute(
+            "UPDATE tasks SET status = 'cancelled' WHERE status = 'abandoned'",
+            [],
+        )?;
         Ok(())
     }
 
@@ -496,11 +507,11 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 
 fn task_status_to_db(status: &TaskStatus) -> &'static str {
     match status {
-        TaskStatus::Pending => "not_started",
+        TaskStatus::Pending => "pending",
         TaskStatus::InProgress => "in_progress",
         TaskStatus::Suspended => "suspended",
         TaskStatus::Completed => "completed",
-        TaskStatus::Cancelled => "abandoned",
+        TaskStatus::Cancelled => "cancelled",
     }
 }
 
