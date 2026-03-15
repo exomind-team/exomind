@@ -8,6 +8,7 @@ import {
 } from '@/components/ui/dialog';
 import { getRuntimeMeshSyncService } from '@/lib/services/runtime-mesh-sync.service';
 import { formatHostForUrl } from '@/config/runtime-target';
+import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
 import { Loader2, RefreshCw, Check, X, ChevronLeft } from 'lucide-react';
 
 // ── Types ──────────────────────────────────────────────────────
@@ -114,6 +115,29 @@ export function PeerPairingDialog({
       setSessionId(result.session_id);
       setPin(result.pin);
       setStatus('waiting');
+
+      // Start polling for pairing completion
+      const initialPeers = await meshService.listMeshPeers(runtimeBaseUrl, localAuthToken).catch(() => []);
+      const initialPeerIds = new Set(initialPeers.map((p: { id: string }) => p.id));
+
+      if (pollTimerRef.current) {
+        clearInterval(pollTimerRef.current);
+      }
+      pollTimerRef.current = setInterval(async () => {
+        try {
+          const currentPeers = await meshService.listMeshPeers(runtimeBaseUrl, localAuthToken);
+          const newPeer = currentPeers.find((p: { id: string }) => !initialPeerIds.has(p.id));
+          if (newPeer) {
+            if (pollTimerRef.current) {
+              clearInterval(pollTimerRef.current);
+              pollTimerRef.current = null;
+            }
+            setStatus('success');
+          }
+        } catch {
+          // Silently retry
+        }
+      }, 2000);
     } catch (err) {
       setErrorMessage(
         buildInitiatorDiagnosticMessage(runtimeBaseUrl, localHostId, localAuthToken, err),
@@ -184,12 +208,27 @@ export function PeerPairingDialog({
       const responderInboundToken = crypto.randomUUID();
 
       const initiatorBaseUrl = `http://${formatHostForUrl(selectedPeer.host)}:${selectedPeer.port}`;
+
+      // Determine our externally-reachable address (what the initiator should use to call us)
+      let responderBaseUrl = runtimeBaseUrl;
+      try {
+        const reachable = await getRuntimeControlService().getReachableAddress(
+          selectedPeer.host,
+          selectedPeer.port,
+        );
+        if (reachable.host) {
+          responderBaseUrl = `http://${formatHostForUrl(reachable.host)}:${reachable.port}`;
+        }
+      } catch {
+        // Fall back to runtimeBaseUrl if reachable address resolution fails
+      }
+
       const result = await meshService.respondToPairing(
         initiatorBaseUrl,
         '', // session_id will be looked up server-side by host_id
         pinInput,
         localHostId,
-        runtimeBaseUrl,
+        responderBaseUrl,
         responderInboundToken,
       );
       if (result.paired) {
@@ -436,8 +475,8 @@ export function PeerPairingDialog({
           </div>
         )}
 
-        {/* ── Responder: Success ── */}
-        {mode === 'responder' && status === 'success' && (
+        {/* ── Success (both modes) ── */}
+        {status === 'success' && (
           <div className="flex flex-col items-center gap-4 py-4">
             <Check className="h-10 w-10 text-green-500" />
             <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">配对成功</p>
