@@ -1,4 +1,4 @@
-import { Plus, SlidersHorizontal, Waypoints } from 'lucide-react';
+﻿import { Plus, SlidersHorizontal, Waypoints } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
@@ -22,19 +22,19 @@ const TAB_ITEMS: Array<{ id: TaskTab; label: string }> = [
 ];
 
 const STATUS_DOT: Record<string, string> = {
-  not_started: 'bg-[#A8A29E]',
+  pending: 'bg-[#A8A29E]',
   in_progress: 'bg-[#16A34A]',
   suspended: 'bg-[#EAB308]',
   completed: 'bg-[#3B82F6]',
-  abandoned: 'bg-[#EF4444]',
+  cancelled: 'bg-[#EF4444]',
 };
 
 const STATUS_LABEL: Record<string, string> = {
-  not_started: '未开始',
+  pending: '待办',
   in_progress: '进行中',
   suspended: '已挂起',
   completed: '已完成',
-  abandoned: '已放弃',
+  cancelled: '已取消',
 };
 
 const TAB_EMPTY_TEXT: Record<TaskTab, string> = {

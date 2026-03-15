@@ -4,8 +4,8 @@ import {
   type RuntimeTarget,
 } from '@/config/runtime-target';
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port';
-import type { Dependency, TaskNode, TaskStatus } from '@/lib/types/task';
-import { canTransition } from '@/lib/types/task';
+import type { Dependency, LegacyTaskStatus, TaskNode, TaskNodeLike, TaskStatus } from '@/lib/types/task';
+import { canTransition, normalizeTaskNode } from '@/lib/types/task';
 import { appendRuntimeProfileScope } from './runtime-profile-scope';
 
 type RuntimeFetch = typeof fetch;
@@ -20,7 +20,7 @@ interface RuntimeTaskPayload {
   title: string;
   description?: string | null;
   done_condition?: string | null;
-  status: TaskStatus;
+  status: TaskStatus | LegacyTaskStatus;
   priority: 'low' | 'medium' | 'high';
   tags?: string[];
   source?: string | null;
@@ -39,7 +39,7 @@ export interface TaskRtAdapterOptions {
   resolveTarget?: () => RuntimeTarget;
 }
 
-const ALL_STATUSES: TaskStatus[] = ['not_started', 'in_progress', 'suspended', 'completed', 'abandoned'];
+const ALL_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'suspended', 'completed', 'cancelled'];
 
 function formatHostForUrl(host: string): string {
   if (host.includes(':') && !host.startsWith('[')) {
@@ -60,7 +60,7 @@ function toRuntimeDependency(dependency: Dependency): RuntimeTaskDependencyPaylo
 }
 
 function toRuntimeTaskNode(task: RuntimeTaskPayload): TaskNode {
-  return {
+  return normalizeTaskNode({
     id: task.id,
     title: task.title,
     description: task.description ?? undefined,
@@ -80,7 +80,7 @@ function toRuntimeTaskNode(task: RuntimeTaskPayload): TaskNode {
     createdAt: task.created_at,
     updatedAt: task.updated_at,
     completedAt: task.completed_at ?? undefined,
-  };
+  } satisfies TaskNodeLike);
 }
 
 function toRuntimeCreatePayload(input: CreateTaskInput): Record<string, unknown> {
@@ -124,10 +124,10 @@ export class TaskRtAdapter implements ITaskPort {
     this.resolveTarget = options.resolveTarget ?? (() => getSelectedRuntimeTarget());
   }
 
-  async listTasks(includeAbandoned = false): Promise<TaskNode[]> {
+  async listTasks(includeCancelled = false): Promise<TaskNode[]> {
     const tasks = await this.requestJson<RuntimeTaskPayload[]>('/tasks');
     const mapped = tasks.map(toRuntimeTaskNode);
-    return includeAbandoned ? mapped : mapped.filter((task) => task.status !== 'abandoned');
+    return includeCancelled ? mapped : mapped.filter((task) => task.status !== 'cancelled');
   }
 
   async getTaskById(id: string): Promise<TaskNode | null> {
@@ -170,17 +170,17 @@ export class TaskRtAdapter implements ITaskPort {
     return toRuntimeTaskNode(await response.json() as RuntimeTaskPayload);
   }
 
-  async abandonTask(id: string): Promise<TaskNode | null> {
+  async cancelTask(id: string): Promise<TaskNode | null> {
     const target = this.resolveTarget();
-    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}`, target), {
-      method: 'DELETE',
+    const response = await this.fetchImpl(this.url(`/tasks/${encodeURIComponent(id)}/cancel`, target), {
+      method: 'POST',
       headers: buildRuntimeAuthHeaders(target, { Accept: 'application/json' }),
     });
     if (response.status === 404) {
       return null;
     }
     if (!response.ok) {
-      throw new Error(`RT abandon task failed: ${response.status}`);
+      throw new Error(`RT cancel task failed: ${response.status}`);
     }
     return toRuntimeTaskNode(await response.json() as RuntimeTaskPayload);
   }

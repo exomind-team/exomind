@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-overlay-model';
@@ -153,7 +153,7 @@ describe('NowWorkbenchOverlayPage', () => {
     expect(screen.getByTestId('new-now-input-row')).toBeInTheDocument();
   });
 
-  it('shows task choices when idle_with_tasks（有任务但未开始时显示任务入口）', async () => {
+  it('shows task choices when idle_with_tasks（有任务但待办时显示任务入口）', async () => {
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
 
     render(
@@ -161,7 +161,7 @@ describe('NowWorkbenchOverlayPage', () => {
         model={createModel({
           mode: 'idle_with_tasks',
           title: '先补测试',
-          statusLabel: '未开始',
+          statusLabel: '待办',
           visibleTasks: [
             {
               id: 'task-1',
@@ -176,7 +176,7 @@ describe('NowWorkbenchOverlayPage', () => {
             {
               id: 'task-2',
               title: '整理输入区',
-              status: 'not_started',
+              status: 'pending',
               priority: 'medium',
               dependsOn: [],
               tags: [],

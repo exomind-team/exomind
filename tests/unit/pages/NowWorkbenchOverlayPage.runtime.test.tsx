@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
@@ -379,7 +379,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       {
         id: 'task-1',
         title: '先补测试',
-        status: 'not_started',
+        status: 'pending',
         priority: 'high',
         dependsOn: [],
         tags: [],
@@ -405,7 +405,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       {
         id: 'task-1',
         title: '写周报',
-        status: 'not_started',
+        status: 'pending',
         priority: 'high',
         dependsOn: [],
         tags: [],
@@ -415,7 +415,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       {
         id: 'task-2',
         title: '修 bug',
-        status: 'not_started',
+        status: 'pending',
         priority: 'medium',
         dependsOn: [],
         tags: [],
@@ -447,7 +447,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       {
         id: 'task-1',
         title: '写周报',
-        status: 'not_started',
+        status: 'pending',
         priority: 'high',
         dependsOn: [],
         tags: [],

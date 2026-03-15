@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
@@ -14,7 +14,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
     id: overrides.id,
     title: overrides.title,
     description: undefined,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -88,7 +88,7 @@ describe('TaskCurrentRootCard issue-411（当前根节点按未阻塞判定）',
     const softSource = makeTask({
       id: 'soft-source',
       title: '软依赖前置',
-      status: 'not_started',
+      status: 'pending',
       createdAt: 10,
       updatedAt: 10,
     });

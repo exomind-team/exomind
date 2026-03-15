@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TaskDetailPage } from '@/ui/app/pages/TaskDetailPage';
@@ -23,7 +23,7 @@ const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>(async (id) =
   return cloneTask(tasksState.find((task) => task.id === id) ?? null);
 });
 
-const listTasksMock = vi.fn<(includeAbandoned?: boolean) => Promise<TaskNode[]>>(async () => {
+const listTasksMock = vi.fn<(includeCancelled?: boolean) => Promise<TaskNode[]>>(async () => {
   return cloneTasks(tasksState);
 });
 
@@ -87,7 +87,7 @@ vi.mock('@/lib/services', () => ({
     checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
     transitionTask: vi.fn(),
     updateTask: vi.fn(),
-    abandonTask: vi.fn(),
+    cancelTask: vi.fn(),
   }),
   getTimeBlockService: () => ({
     loadTimeBlocks: loadTimeBlocksMock,
@@ -128,7 +128,7 @@ function makeTask(overrides: Partial<TaskNode> = {}): TaskNode {
     id: 'task-1',
     title: '任务详情：依赖关系 MVP',
     description: '在详情页增加依赖关系卡片',
-    status: 'not_started',
+    status: 'pending',
     priority: 'high',
     dependsOn: [],
     tags: ['issue-398'],
@@ -249,17 +249,17 @@ describe('TaskDetailPage dependencies issue #398 P0', () => {
     tasksState.push(makeTask({
       id: 'task-4',
       title: '归档旧方案',
-      status: 'abandoned',
+      status: 'cancelled',
       timeBlockIds: [],
     }));
     renderPage();
 
     const taskSelect = await screen.findByTestId('dependency-add-task-select');
 
-    expect(within(taskSelect).queryByRole('option', { name: '实现依赖关系卡片 · 未开始' })).not.toBeInTheDocument();
+    expect(within(taskSelect).queryByRole('option', { name: '实现依赖关系卡片 · 待办' })).not.toBeInTheDocument();
     expect(within(taskSelect).getByRole('option', { name: '补 task.service 单测 · 进行中' })).not.toBeDisabled();
     expect(within(taskSelect).getByRole('option', { name: '联调任务详情页 · 已完成 · 会形成循环依赖' })).toBeDisabled();
-    expect(within(taskSelect).getByRole('option', { name: '归档旧方案 · 已放弃 · 任务已放弃' })).toBeDisabled();
+    expect(within(taskSelect).getByRole('option', { name: '归档旧方案 · 已取消 · 任务已取消' })).toBeDisabled();
 
     fireEvent.change(taskSelect, { target: { value: 'task-3' } });
 

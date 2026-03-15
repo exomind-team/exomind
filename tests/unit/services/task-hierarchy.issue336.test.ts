@@ -1,4 +1,4 @@
-/**
+﻿/**
  * Phase3 (#336) 父子层级 + 软硬依赖 单元测试
  *
  * 覆盖 TaskServiceImpl 的层级查询、依赖管理、环检测、依赖感知状态转换。
@@ -20,7 +20,7 @@ function makeTask(overrides: Partial<TaskNode> = {}): TaskNode {
   return {
     id: `t${idSeq}`,
     title: `Task ${idSeq}`,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -48,10 +48,10 @@ function createMockPort(tasks: TaskNode[]): ITaskPort {
       store.set(id, updated)
       return updated
     }),
-    abandonTask: vi.fn(async (id: string) => {
+    cancelTask: vi.fn(async (id: string) => {
       const t = store.get(id)
       if (!t) return null
-      t.status = 'abandoned'
+      t.status = 'cancelled'
       t.completedAt = Date.now()
       return t
     }),
@@ -60,7 +60,7 @@ function createMockPort(tasks: TaskNode[]): ITaskPort {
       if (!t) return null
       t.status = to
       t.updatedAt = Date.now()
-      if (to === 'completed' || to === 'abandoned') t.completedAt = Date.now()
+      if (to === 'completed' || to === 'cancelled') t.completedAt = Date.now()
       return t
     }),
     getAvailableTransitions: vi.fn(async () => []),
@@ -299,8 +299,8 @@ describe('TaskService Phase3: dependency-aware transitions', () => {
     idSeq = 0
   })
 
-  it('transitionTask to in_progress blocked by hard dep (not_started)', async () => {
-    const dep = makeTask({ id: 'dep', status: 'not_started' })
+  it('transitionTask to in_progress blocked by hard dep (pending)', async () => {
+    const dep = makeTask({ id: 'dep', status: 'pending' })
     const task = makeTask({ id: 'task', dependsOn: [{ taskId: 'dep', type: 'hard' }] })
     port = createMockPort([dep, task])
     service = new TaskServiceImpl({ task: port })
@@ -332,20 +332,20 @@ describe('TaskService Phase3: dependency-aware transitions', () => {
     expect(result!.status).toBe('in_progress')
   })
 
-  it('soft dep blocks only when not_started', async () => {
-    const dep = makeTask({ id: 'dep', status: 'not_started' })
+  it('soft dep blocks only when pending', async () => {
+    const dep = makeTask({ id: 'dep', status: 'pending' })
     const task = makeTask({ id: 'task', dependsOn: [{ taskId: 'dep', type: 'soft' }] })
     port = createMockPort([dep, task])
     service = new TaskServiceImpl({ task: port })
 
-    // Soft dep is not_started → blocking but NOT hard, so transition allowed
+    // Soft dep is pending → blocking but NOT hard, so transition allowed
     const result = await service.transitionTask('task', 'in_progress')
     expect(result).not.toBeNull()
     expect(result!.status).toBe('in_progress')
   })
 
   it('transitionTask to non-in_progress skips dep check', async () => {
-    const dep = makeTask({ id: 'dep', status: 'not_started' })
+    const dep = makeTask({ id: 'dep', status: 'pending' })
     const task = makeTask({
       id: 'task',
       status: 'in_progress',
@@ -401,8 +401,8 @@ describe('TaskService Phase3: checkDependenciesMet', () => {
     expect(result.blocking[0]).toEqual({ taskId: 'dep', type: 'hard', status: 'in_progress' })
   })
 
-  it('soft dep not_started → blocking', async () => {
-    const dep = makeTask({ id: 'dep', status: 'not_started' })
+  it('soft dep pending → blocking', async () => {
+    const dep = makeTask({ id: 'dep', status: 'pending' })
     const task = makeTask({ id: 'task', dependsOn: [{ taskId: 'dep', type: 'soft' }] })
     port = createMockPort([dep, task])
     service = new TaskServiceImpl({ task: port })

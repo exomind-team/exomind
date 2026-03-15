@@ -7,7 +7,7 @@ function makeTask(overrides: Partial<TaskNode> & Pick<TaskNode, 'id' | 'title'>)
     id: overrides.id,
     title: overrides.title,
     description: '',
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],

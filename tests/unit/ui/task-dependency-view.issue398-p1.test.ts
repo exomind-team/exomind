@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import type { TaskNode } from '@/lib/types/task';
 import { buildTaskDependencyView } from '@/ui/app/pages/task-dependency-view';
 
@@ -7,7 +7,7 @@ function makeTask(overrides: Partial<TaskNode> & Pick<TaskNode, 'id' | 'title'>)
     id: overrides.id,
     title: overrides.title,
     description: '',
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -42,21 +42,21 @@ describe('buildTaskDependencyView issue #398 P1', () => {
     expect(view.candidates.map((candidate) => candidate.id)).toEqual(['task-3']);
   });
 
-  it('marks abandoned tasks as disabled（已放弃任务标记禁用）', () => {
+  it('marks cancelled tasks as disabled（已取消任务标记禁用）', () => {
     const currentTask = makeTask({ id: 'task-1', title: '当前任务' });
-    const abandonedTask = makeTask({
+    const cancelledTask = makeTask({
       id: 'task-2',
-      title: '已放弃任务',
-      status: 'abandoned',
+      title: '已取消任务',
+      status: 'cancelled',
     });
 
-    const view = buildTaskDependencyView(currentTask, [currentTask, abandonedTask]);
+    const view = buildTaskDependencyView(currentTask, [currentTask, cancelledTask]);
     const candidate = view.candidates.find((item) => item.id === 'task-2');
 
     expect(candidate).toMatchObject({
       id: 'task-2',
       disabled: true,
-      disabledReason: '任务已放弃',
+      disabledReason: '任务已取消',
     });
   });
 

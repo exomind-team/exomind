@@ -1,14 +1,14 @@
-import { Link } from '@tanstack/react-router';
+﻿import { Link } from '@tanstack/react-router';
 import type { TaskGraph } from '@/lib/task/task-dag-graph';
 import type { TaskNode } from '@/lib/types/task';
 import { cn } from '@/lib/utils';
 
 const STATUS_LABEL: Record<TaskNode['status'], string> = {
-  not_started: '未开始',
+  pending: '待办',
   in_progress: '进行中',
   suspended: '已挂起',
   completed: '已完成',
-  abandoned: '已放弃',
+  cancelled: '已取消',
 };
 
 function resolveExecutionHint(status: TaskNode['status'], isExecutable: boolean, isBlocked: boolean): string {

@@ -1,4 +1,4 @@
-import { MarkerType, Position, type Edge, type Node } from '@xyflow/react';
+﻿import { MarkerType, Position, type Edge, type Node } from '@xyflow/react';
 import type { TaskGraph } from '@/lib/task/task-dag-graph';
 import type { TaskNode } from '@/lib/types/task';
 
@@ -9,11 +9,11 @@ const COLUMN_GAP = 320;
 const ROW_GAP = 180;
 
 const STATUS_LABEL: Record<TaskNode['status'], string> = {
-  not_started: '未开始',
+  pending: '待办',
   in_progress: '进行中',
   suspended: '已挂起',
   completed: '已完成',
-  abandoned: '已放弃',
+  cancelled: '已取消',
 };
 
 const PRIORITY_LABEL: Record<TaskNode['priority'], string> = {

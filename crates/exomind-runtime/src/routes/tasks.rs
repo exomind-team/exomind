@@ -177,22 +177,44 @@ async fn transition_task(
     Ok(Json(task))
 }
 
-/// DELETE /tasks/:id — abandon task (set status to abandoned)
+fn cancel_task_in_scope(
+    state: &AppState,
+    scope_key: Option<&str>,
+    id: &str,
+) -> Result<Task, (StatusCode, String)> {
+    state.task_store.cancel_scoped(scope_key, id).map_err(|e| {
+        let code = match &e {
+            crate::task::store::TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+            _ => StatusCode::CONFLICT,
+        };
+        (code, e.to_string())
+    })
+}
+
+/// POST /tasks/:id/cancel — cancel task (set status to cancelled)
+async fn cancel_task(
+    Path(id): Path<String>,
+    State(state): State<AppState>,
+    Query(query): Query<ScopeQuery>,
+) -> Result<Json<Task>, (StatusCode, String)> {
+    let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
+    let task = cancel_task_in_scope(&state, scope_key, &id)?;
+
+    publish_task_signal(&state, "task.cancelled", &task);
+
+    Ok(Json(task))
+}
+
+/// DELETE /tasks/:id — compatibility alias for cancel
 async fn delete_task(
     Path(id): Path<String>,
     State(state): State<AppState>,
     Query(query): Query<ScopeQuery>,
 ) -> Result<Json<Task>, (StatusCode, String)> {
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
-    let task = state.task_store.abandon_scoped(scope_key, &id).map_err(|e| {
-        let code = match &e {
-            crate::task::store::TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
-            _ => StatusCode::CONFLICT,
-        };
-        (code, e.to_string())
-    })?;
+    let task = cancel_task_in_scope(&state, scope_key, &id)?;
 
-    publish_task_signal(&state, "task.deleted", &task);
+    publish_task_signal(&state, "task.cancelled", &task);
 
     Ok(Json(task))
 }
@@ -241,9 +263,12 @@ async fn import_tasks_sqlite(
     Json(payload): Json<TaskBackupSqliteImportPayload>,
 ) -> Result<Json<TaskImportResult>, (StatusCode, String)> {
     let strategy = parse_import_strategy(query.strategy.as_deref())?;
-    let bytes = STANDARD
-        .decode(payload.content_base64)
-        .map_err(|error| (StatusCode::BAD_REQUEST, format!("invalid sqlite snapshot: {error}")))?;
+    let bytes = STANDARD.decode(payload.content_base64).map_err(|error| {
+        (
+            StatusCode::BAD_REQUEST,
+            format!("invalid sqlite snapshot: {error}"),
+        )
+    })?;
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     let imported_tasks = read_tasks_from_sqlite_snapshot(&bytes, scope_key)?;
     let result = apply_task_import(&state, scope_key, imported_tasks, strategy)?;
@@ -347,10 +372,18 @@ fn apply_task_import(
     Ok(result)
 }
 
-fn build_task_sqlite_snapshot_bytes(scope_key: Option<&str>, tasks: &[Task]) -> Result<Vec<u8>, (StatusCode, String)> {
-    let temp_root = std::env::temp_dir().join(format!("exomind-task-export-{}", uuid::Uuid::new_v4()));
-    std::fs::create_dir_all(&temp_root)
-        .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, format!("failed to create task export temp dir: {error}")))?;
+fn build_task_sqlite_snapshot_bytes(
+    scope_key: Option<&str>,
+    tasks: &[Task],
+) -> Result<Vec<u8>, (StatusCode, String)> {
+    let temp_root =
+        std::env::temp_dir().join(format!("exomind-task-export-{}", uuid::Uuid::new_v4()));
+    std::fs::create_dir_all(&temp_root).map_err(|error| {
+        (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            format!("failed to create task export temp dir: {error}"),
+        )
+    })?;
     let sqlite_path = temp_root.join("tasks-export.sqlite");
     let store = crate::task::TaskStore::with_sqlite_path(&sqlite_path)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
@@ -372,8 +405,14 @@ fn build_task_sqlite_snapshot_bytes(scope_key: Option<&str>, tasks: &[Task]) -> 
     Ok(bytes)
 }
 
-fn read_tasks_from_sqlite_snapshot(bytes: &[u8], scope_key: Option<&str>) -> Result<Vec<Task>, (StatusCode, String)> {
-    let temp_path = std::env::temp_dir().join(format!("exomind-task-import-{}.sqlite", uuid::Uuid::new_v4()));
+fn read_tasks_from_sqlite_snapshot(
+    bytes: &[u8],
+    scope_key: Option<&str>,
+) -> Result<Vec<Task>, (StatusCode, String)> {
+    let temp_path = std::env::temp_dir().join(format!(
+        "exomind-task-import-{}.sqlite",
+        uuid::Uuid::new_v4()
+    ));
     std::fs::write(&temp_path, bytes)
         .map_err(|error| (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()))?;
 
@@ -395,6 +434,7 @@ pub fn router() -> Router<AppState> {
         .route("/tasks/backup/sqlite", get(export_tasks_sqlite))
         .route("/tasks/import/json", post(import_tasks_json))
         .route("/tasks/import/sqlite", post(import_tasks_sqlite))
+        .route("/tasks/:id/cancel", post(cancel_task))
         .route(
             "/tasks/:id",
             get(get_task).put(update_task).delete(delete_task),
@@ -491,7 +531,7 @@ mod tests {
         let body = response.into_body().collect().await.unwrap().to_bytes();
         let created: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(created["title"], "Buy milk");
-        assert_eq!(created["status"], "not_started");
+        assert_eq!(created["status"], "pending");
         assert_eq!(created["priority"], "medium");
         assert_eq!(created["tags"][0], "shopping");
 
@@ -653,7 +693,7 @@ mod tests {
         });
         let app = test_router(state);
 
-        // not_started → completed is invalid
+        // pending → completed is invalid
         let response = app
             .oneshot(
                 Request::builder()
@@ -669,10 +709,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delete_abandons_task() {
+    async fn cancel_route_cancels_task() {
         let state = test_state();
         let task = state.task_store.create(CreateTaskInput {
-            title: "To abandon".to_string(),
+            title: "To cancel".to_string(),
             description: None,
             done_condition: None,
             priority: None,
@@ -684,12 +724,50 @@ mod tests {
             estimated_minutes: None,
             time_block_ids: vec![],
         });
-        // Must transition to in_progress first (not_started → abandoned is invalid)
+        // Must transition to in_progress first (pending → cancelled is invalid)
         state
             .task_store
             .transition(&task.id, TaskStatus::InProgress)
             .unwrap();
         let _rx = state.signal_pool.subscribe();
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("POST")
+                    .uri(format!("/tasks/{}/cancel", task.id))
+                    .body(Body::empty())
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let cancelled: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
+    }
+
+    #[tokio::test]
+    async fn delete_route_remains_cancel_alias_for_compatibility() {
+        let state = test_state();
+        let task = state.task_store.create(CreateTaskInput {
+            title: "Delete alias".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap();
         let app = test_router(state);
 
         let response = app
@@ -702,10 +780,11 @@ mod tests {
             )
             .await
             .unwrap();
+
         assert_eq!(response.status(), StatusCode::OK);
         let body = response.into_body().collect().await.unwrap().to_bytes();
-        let deleted: Value = serde_json::from_slice(&body).unwrap();
-        assert_eq!(deleted["status"], "abandoned");
+        let cancelled: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(cancelled["status"], "cancelled");
     }
 
     #[tokio::test]
@@ -832,7 +911,7 @@ mod tests {
                                     "title": "Existing replaced",
                                     "description": null,
                                     "done_condition": null,
-                                    "status": "not_started",
+                                    "status": "pending",
                                     "priority": "medium",
                                     "tags": [],
                                     "source": null,
@@ -1054,7 +1133,11 @@ mod tests {
         assert_eq!(anonymous_tasks[0]["title"], "Anonymous task");
         assert_eq!(profile_a_tasks.len(), 1);
         assert_eq!(profile_a_tasks[0]["title"], "Profile A task");
-        assert_eq!(task_store.list().len(), 1, "default access should continue using anonymous scope");
+        assert_eq!(
+            task_store.list().len(),
+            1,
+            "default access should continue using anonymous scope"
+        );
         assert_eq!(
             task_store.list_in_scope(Some("profile-a")).len(),
             1,
@@ -1098,7 +1181,10 @@ mod tests {
 
         assert_eq!(scoped_tasks.len(), 1);
         assert_eq!(scoped_tasks[0]["title"], "User A task");
-        assert!(task_store.list().is_empty(), "default anonymous scope should stay isolated");
+        assert!(
+            task_store.list().is_empty(),
+            "default anonymous scope should stay isolated"
+        );
         assert_eq!(task_store.list_in_scope(Some("user-a")).len(), 1);
     }
 }

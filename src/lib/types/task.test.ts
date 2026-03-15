@@ -1,4 +1,4 @@
-import { describe, it, expect, vi } from 'vitest'
+﻿import { describe, it, expect, vi } from 'vitest'
 import {
   canTransition,
   transition,
@@ -27,8 +27,8 @@ function makeTask(status: TaskStatus): TaskNode {
 // canTransition: 合法路径
 // ────────────────────────────────────────────────────────────
 describe('canTransition - valid transitions', () => {
-  it('not_started → in_progress 合法', () => {
-    expect(canTransition('not_started', 'in_progress')).toBe(true)
+  it('pending → in_progress 合法', () => {
+    expect(canTransition('pending', 'in_progress')).toBe(true)
   })
 
   it('in_progress → suspended 合法', () => {
@@ -39,8 +39,8 @@ describe('canTransition - valid transitions', () => {
     expect(canTransition('in_progress', 'completed')).toBe(true)
   })
 
-  it('in_progress → abandoned 合法', () => {
-    expect(canTransition('in_progress', 'abandoned')).toBe(true)
+  it('in_progress → cancelled 合法', () => {
+    expect(canTransition('in_progress', 'cancelled')).toBe(true)
   })
 
   it('suspended → in_progress 合法', () => {
@@ -51,8 +51,8 @@ describe('canTransition - valid transitions', () => {
     expect(canTransition('suspended', 'completed')).toBe(true)
   })
 
-  it('suspended → abandoned 合法', () => {
-    expect(canTransition('suspended', 'abandoned')).toBe(true)
+  it('suspended → cancelled 合法', () => {
+    expect(canTransition('suspended', 'cancelled')).toBe(true)
   })
 })
 
@@ -60,24 +60,24 @@ describe('canTransition - valid transitions', () => {
 // canTransition: 非法路径
 // ────────────────────────────────────────────────────────────
 describe('canTransition - invalid transitions', () => {
-  it('not_started → suspended 非法', () => {
-    expect(canTransition('not_started', 'suspended')).toBe(false)
+  it('pending → suspended 非法', () => {
+    expect(canTransition('pending', 'suspended')).toBe(false)
   })
 
-  it('not_started → completed 非法（不可直接完成）', () => {
-    expect(canTransition('not_started', 'completed')).toBe(false)
+  it('pending → completed 非法（不可直接完成）', () => {
+    expect(canTransition('pending', 'completed')).toBe(false)
   })
 
-  it('not_started → abandoned 非法', () => {
-    expect(canTransition('not_started', 'abandoned')).toBe(false)
+  it('pending → cancelled 非法', () => {
+    expect(canTransition('pending', 'cancelled')).toBe(false)
   })
 
-  it('in_progress → not_started 非法（不可回退）', () => {
-    expect(canTransition('in_progress', 'not_started')).toBe(false)
+  it('in_progress → pending 非法（不可回退）', () => {
+    expect(canTransition('in_progress', 'pending')).toBe(false)
   })
 
-  it('suspended → not_started 非法', () => {
-    expect(canTransition('suspended', 'not_started')).toBe(false)
+  it('suspended → pending 非法', () => {
+    expect(canTransition('suspended', 'pending')).toBe(false)
   })
 
   it('completed → in_progress 非法（终态不可转换）', () => {
@@ -88,16 +88,16 @@ describe('canTransition - invalid transitions', () => {
     expect(canTransition('completed', 'suspended')).toBe(false)
   })
 
-  it('completed → abandoned 非法（终态不可转换）', () => {
-    expect(canTransition('completed', 'abandoned')).toBe(false)
+  it('completed → cancelled 非法（终态不可转换）', () => {
+    expect(canTransition('completed', 'cancelled')).toBe(false)
   })
 
-  it('abandoned → in_progress 非法（终态不可转换）', () => {
-    expect(canTransition('abandoned', 'in_progress')).toBe(false)
+  it('cancelled → in_progress 非法（终态不可转换）', () => {
+    expect(canTransition('cancelled', 'in_progress')).toBe(false)
   })
 
-  it('abandoned → completed 非法（终态不可转换）', () => {
-    expect(canTransition('abandoned', 'completed')).toBe(false)
+  it('cancelled → completed 非法（终态不可转换）', () => {
+    expect(canTransition('cancelled', 'completed')).toBe(false)
   })
 
   it('in_progress → in_progress 自转换非法', () => {
@@ -114,11 +114,11 @@ describe('canTransition - invalid transitions', () => {
 // ────────────────────────────────────────────────────────────
 describe('transition - immutability', () => {
   it('合法转换返回新对象，原对象不变', () => {
-    const original = makeTask('not_started')
+    const original = makeTask('pending')
     const next = transition(original, 'in_progress')
 
     expect(next).not.toBe(original)          // 新对象
-    expect(original.status).toBe('not_started') // 原对象未被修改
+    expect(original.status).toBe('pending') // 原对象未被修改
     expect(next.status).toBe('in_progress')
   })
 
@@ -138,8 +138,8 @@ describe('transition - immutability', () => {
 // transition: 非法转换抛出 Error
 // ────────────────────────────────────────────────────────────
 describe('transition - invalid throws Error', () => {
-  it('not_started → completed 抛出 Error', () => {
-    const task = makeTask('not_started')
+  it('pending → completed 抛出 Error', () => {
+    const task = makeTask('pending')
     expect(() => transition(task, 'completed')).toThrow(Error)
   })
 
@@ -148,8 +148,8 @@ describe('transition - invalid throws Error', () => {
     expect(() => transition(task, 'in_progress')).toThrow(Error)
   })
 
-  it('abandoned → suspended 抛出 Error（终态）', () => {
-    const task = makeTask('abandoned')
+  it('cancelled → suspended 抛出 Error（终态）', () => {
+    const task = makeTask('cancelled')
     expect(() => transition(task, 'suspended')).toThrow(Error)
   })
 })
@@ -167,17 +167,17 @@ describe('transition - completedAt on terminal states', () => {
     expect(next.completedAt!).toBeGreaterThanOrEqual(before)
   })
 
-  it('转换到 abandoned 时设置 completedAt', () => {
+  it('转换到 cancelled 时设置 completedAt', () => {
     const before = Date.now()
     const task = makeTask('suspended')
-    const next = transition(task, 'abandoned')
+    const next = transition(task, 'cancelled')
 
     expect(next.completedAt).toBeDefined()
     expect(next.completedAt!).toBeGreaterThanOrEqual(before)
   })
 
   it('非终态转换不设置 completedAt', () => {
-    const task = makeTask('not_started')
+    const task = makeTask('pending')
     const next = transition(task, 'in_progress')
 
     expect(next.completedAt).toBeUndefined()

@@ -1,4 +1,4 @@
-import type { TaskNode } from '@/lib/types/task'
+﻿import type { TaskNode } from '@/lib/types/task'
 
 const BASE_TS = new Date('2026-02-23T09:00:00.000Z').getTime()
 
@@ -29,7 +29,7 @@ export const MOCK_TASK_NODES_FIXTURE: TaskNode[] = [
   {
     id: 'node-003',
     title: '编写单元测试',
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [{ taskId: 'node-002', type: 'soft' }],
     tags: ['test'],

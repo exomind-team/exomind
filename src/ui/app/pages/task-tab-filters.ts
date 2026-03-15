@@ -15,9 +15,9 @@ export function sortByDue(tasks: TaskNode[]): TaskNode[] {
   });
 }
 
-/** Check if a not_started task has all hard dependencies completed */
+/** Check if a pending task has all hard dependencies completed */
 export function isExecutable(task: TaskNode, allTasks: TaskNode[]): boolean {
-  if (task.status !== 'not_started') return false;
+  if (task.status !== 'pending') return false;
   const hardDeps = task.dependsOn.filter((d) => d.type === 'hard');
   if (hardDeps.length === 0) return true;
   return hardDeps.every((dep) => {
@@ -26,14 +26,14 @@ export function isExecutable(task: TaskNode, allTasks: TaskNode[]): boolean {
   });
 }
 
-/** Exclude abandoned tasks (archived) */
-function excludeAbandoned(tasks: TaskNode[]): TaskNode[] {
-  return tasks.filter((t) => t.status !== 'abandoned');
+/** Exclude cancelled tasks (archived) */
+function excludeCancelled(tasks: TaskNode[]): TaskNode[] {
+  return tasks.filter((t) => t.status !== 'cancelled');
 }
 
-/** "当下" tab: show all non-abandoned tasks, in_progress pinned to top, rest sorted by due */
+/** "当下" tab: show all non-cancelled tasks, in_progress pinned to top, rest sorted by due */
 export function filterNow(tasks: TaskNode[]): TaskNode[] {
-  const pool = excludeAbandoned(tasks);
+  const pool = excludeCancelled(tasks);
   const inProgress = pool.filter((t) => t.status === 'in_progress');
   const rest = pool.filter((t) => t.status !== 'in_progress');
   return [...inProgress, ...sortByDue(rest)];
@@ -41,7 +41,7 @@ export function filterNow(tasks: TaskNode[]): TaskNode[] {
 
 /** "今日" tab: dueAt today OR in_progress with updatedAt today */
 export function filterToday(tasks: TaskNode[], now: Date): TaskNode[] {
-  const pool = excludeAbandoned(tasks);
+  const pool = excludeCancelled(tasks);
   const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime();
   const todayEnd = todayStart + 86_400_000;
   const filtered = pool.filter(
@@ -54,7 +54,7 @@ export function filterToday(tasks: TaskNode[], now: Date): TaskNode[] {
 
 /** "一周" tab: dueAt within 7 days OR in_progress */
 export function filterWeek(tasks: TaskNode[], now: Date): TaskNode[] {
-  const pool = excludeAbandoned(tasks);
+  const pool = excludeCancelled(tasks);
   const weekEnd = now.getTime() + 7 * 86_400_000;
   const filtered = pool.filter(
     (t) => t.status === 'in_progress' || (t.dueAt !== undefined && t.dueAt <= weekEnd),
@@ -64,7 +64,7 @@ export function filterWeek(tasks: TaskNode[], now: Date): TaskNode[] {
 
 /** "月" tab: dueAt in current month OR in_progress */
 export function filterMonth(tasks: TaskNode[], now: Date): TaskNode[] {
-  const pool = excludeAbandoned(tasks);
+  const pool = excludeCancelled(tasks);
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime();
   const filtered = pool.filter(

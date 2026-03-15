@@ -21,7 +21,7 @@ const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>(async (id) =
   return cloneTask(tasksState.find((task) => task.id === id) ?? null);
 });
 
-const listTasksMock = vi.fn<(includeAbandoned?: boolean) => Promise<TaskNode[]>>(async () => {
+const listTasksMock = vi.fn<(includeCancelled?: boolean) => Promise<TaskNode[]>>(async () => {
   return cloneTasks(tasksState);
 });
 
@@ -76,7 +76,7 @@ vi.mock('@/lib/services', () => ({
     checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
     transitionTask: vi.fn(),
     updateTask: vi.fn(),
-    abandonTask: vi.fn(),
+    cancelTask: vi.fn(),
   }),
   getTimeBlockService: () => ({
     loadTimeBlocks: loadTimeBlocksMock,
@@ -117,7 +117,7 @@ function makeTask(overrides: Partial<TaskNode> & Pick<TaskNode, 'id' | 'title'>)
     id: overrides.id,
     title: overrides.title,
     description: '',
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],

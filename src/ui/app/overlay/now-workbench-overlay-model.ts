@@ -1,4 +1,4 @@
-import type { ActiveBlockData, Event } from '@/lib/types/event';
+﻿import type { ActiveBlockData, Event } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 import { filterNow } from '@/ui/app/pages/task-tab-filters';
 
@@ -75,7 +75,7 @@ export function buildNowWorkbenchOverlayModel(
     return {
       mode: 'idle_with_tasks',
       title: visibleTasks[0]?.title || '当下工作台',
-      statusLabel: '未开始',
+      statusLabel: '待办',
       activeBlock: null,
       visibleTasks,
       recentEvents,

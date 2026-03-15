@@ -1,26 +1,38 @@
 use serde::{Deserialize, Serialize};
 
 /// 5-state machine matching front-end TaskStatus.
-/// not_started → in_progress ⇌ suspended → completed / abandoned
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
+/// pending → in_progress ⇌ suspended → completed / cancelled
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TaskStatus {
-    NotStarted,
+    #[serde(rename = "pending", alias = "not_started")]
+    Pending,
+    #[serde(rename = "in_progress")]
     InProgress,
+    #[serde(rename = "suspended")]
     Suspended,
+    #[serde(rename = "completed")]
     Completed,
-    Abandoned,
+    #[serde(rename = "cancelled", alias = "abandoned")]
+    Cancelled,
 }
 
 impl TaskStatus {
     /// Valid transitions from this status.
     pub fn valid_transitions(&self) -> &[TaskStatus] {
         match self {
-            TaskStatus::NotStarted => &[TaskStatus::InProgress],
-            TaskStatus::InProgress => &[TaskStatus::Suspended, TaskStatus::Completed, TaskStatus::Abandoned],
-            TaskStatus::Suspended => &[TaskStatus::InProgress, TaskStatus::Completed, TaskStatus::Abandoned],
+            TaskStatus::Pending => &[TaskStatus::InProgress],
+            TaskStatus::InProgress => &[
+                TaskStatus::Suspended,
+                TaskStatus::Completed,
+                TaskStatus::Cancelled,
+            ],
+            TaskStatus::Suspended => &[
+                TaskStatus::InProgress,
+                TaskStatus::Completed,
+                TaskStatus::Cancelled,
+            ],
             TaskStatus::Completed => &[],
-            TaskStatus::Abandoned => &[],
+            TaskStatus::Cancelled => &[],
         }
     }
 
@@ -29,7 +41,7 @@ impl TaskStatus {
     }
 
     pub fn is_terminal(&self) -> bool {
-        matches!(self, TaskStatus::Completed | TaskStatus::Abandoned)
+        matches!(self, TaskStatus::Completed | TaskStatus::Cancelled)
     }
 }
 
@@ -154,11 +166,11 @@ mod tests {
     use super::*;
 
     #[test]
-    fn not_started_can_only_go_to_in_progress() {
-        let s = TaskStatus::NotStarted;
+    fn pending_can_only_go_to_in_progress() {
+        let s = TaskStatus::Pending;
         assert!(s.can_transition_to(&TaskStatus::InProgress));
         assert!(!s.can_transition_to(&TaskStatus::Completed));
-        assert!(!s.can_transition_to(&TaskStatus::Abandoned));
+        assert!(!s.can_transition_to(&TaskStatus::Cancelled));
         assert!(!s.can_transition_to(&TaskStatus::Suspended));
     }
 
@@ -167,8 +179,8 @@ mod tests {
         let s = TaskStatus::InProgress;
         assert!(s.can_transition_to(&TaskStatus::Suspended));
         assert!(s.can_transition_to(&TaskStatus::Completed));
-        assert!(s.can_transition_to(&TaskStatus::Abandoned));
-        assert!(!s.can_transition_to(&TaskStatus::NotStarted));
+        assert!(s.can_transition_to(&TaskStatus::Cancelled));
+        assert!(!s.can_transition_to(&TaskStatus::Pending));
     }
 
     #[test]
@@ -176,16 +188,16 @@ mod tests {
         let s = TaskStatus::Suspended;
         assert!(s.can_transition_to(&TaskStatus::InProgress));
         assert!(s.can_transition_to(&TaskStatus::Completed));
-        assert!(s.can_transition_to(&TaskStatus::Abandoned));
-        assert!(!s.can_transition_to(&TaskStatus::NotStarted));
+        assert!(s.can_transition_to(&TaskStatus::Cancelled));
+        assert!(!s.can_transition_to(&TaskStatus::Pending));
     }
 
     #[test]
     fn terminal_states_have_no_transitions() {
         assert!(TaskStatus::Completed.is_terminal());
-        assert!(TaskStatus::Abandoned.is_terminal());
+        assert!(TaskStatus::Cancelled.is_terminal());
         assert!(TaskStatus::Completed.valid_transitions().is_empty());
-        assert!(TaskStatus::Abandoned.valid_transitions().is_empty());
+        assert!(TaskStatus::Cancelled.valid_transitions().is_empty());
     }
 
     #[test]
@@ -195,7 +207,7 @@ mod tests {
             title: "Test".to_string(),
             description: None,
             done_condition: Some("Definition of done".to_string()),
-            status: TaskStatus::NotStarted,
+            status: TaskStatus::Pending,
             priority: TaskPriority::High,
             tags: vec!["dev".to_string()],
             source: Some("mcp".to_string()),
@@ -212,15 +224,24 @@ mod tests {
             completed_at: None,
         };
         let json = serde_json::to_string(&task).unwrap();
-        assert!(json.contains("\"not_started\""));
+        assert!(json.contains("\"pending\""));
         assert!(json.contains("\"high\""));
         assert!(json.contains("\"done_condition\":\"Definition of done\""));
         assert!(json.contains("\"depends_on\""));
         let back: Task = serde_json::from_str(&json).unwrap();
-        assert_eq!(back.status, TaskStatus::NotStarted);
+        assert_eq!(back.status, TaskStatus::Pending);
         assert_eq!(back.priority, TaskPriority::High);
         assert_eq!(back.done_condition.as_deref(), Some("Definition of done"));
         assert_eq!(back.depends_on.len(), 1);
         assert_eq!(back.time_block_ids, vec!["block-1".to_string()]);
+    }
+
+    #[test]
+    fn serde_accepts_legacy_status_aliases() {
+        let pending: TaskStatus = serde_json::from_str(r#""not_started""#).unwrap();
+        let cancelled: TaskStatus = serde_json::from_str(r#""abandoned""#).unwrap();
+
+        assert_eq!(pending, TaskStatus::Pending);
+        assert_eq!(cancelled, TaskStatus::Cancelled);
     }
 }

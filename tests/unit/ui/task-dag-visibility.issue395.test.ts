@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import type { TaskNode } from '@/lib/types/task'
 import { buildTaskGraph } from '@/lib/task/task-dag-graph'
 import { projectVisibleTaskGraph } from '@/lib/task/task-dag-visibility'
@@ -7,7 +7,7 @@ function makeTask(overrides: Partial<TaskNode> & Pick<TaskNode, 'id' | 'title'>)
   return {
     id: overrides.id,
     title: overrides.title,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -157,7 +157,7 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     const softSource = makeTask({
       id: 'soft-source',
       title: 'Soft Source',
-      status: 'not_started',
+      status: 'pending',
       createdAt: 20,
       updatedAt: 20,
     })

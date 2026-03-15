@@ -73,7 +73,7 @@ packages/mcp/src/tools/
 - 原因：保留 `transitionTask` 的依赖检查逻辑
 
 ### 3. 查询和过滤
-- MVP: 简单的 `listTasks(includeAbandoned)`
+- MVP: 简单的 `listTasks(includeCancelled)`
 - 后续: 扩展多维度过滤能力
 
 ### 4. 返回值格式

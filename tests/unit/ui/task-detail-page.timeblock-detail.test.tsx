@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TaskDetailPage } from '@/ui/app/pages/TaskDetailPage';
@@ -8,7 +8,7 @@ import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 const navigateMock = vi.fn();
 
 const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>();
-const listTasksMock = vi.fn<(includeAbandoned?: boolean) => Promise<TaskNode[]>>();
+const listTasksMock = vi.fn<(includeCancelled?: boolean) => Promise<TaskNode[]>>();
 const addDependencyMock = vi.fn<(taskId: string, depTaskId: string, type: 'soft' | 'hard') => Promise<TaskNode | null>>();
 const removeDependencyMock = vi.fn<(taskId: string, depTaskId: string) => Promise<TaskNode | null>>();
 const getAvailableTransitionsMock = vi.fn<(id: string) => Promise<Array<TaskNode['status']>>>();
@@ -47,7 +47,7 @@ vi.mock('@/lib/services', () => ({
     onTaskChange: onTaskChangeMock,
     transitionTask: vi.fn(),
     updateTask: vi.fn(),
-    abandonTask: vi.fn(),
+    cancelTask: vi.fn(),
   }),
   getTimeBlockService: () => ({
     loadTimeBlocks: loadTimeBlocksMock,
@@ -128,7 +128,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
           id: 'task-2',
           title: '切换后的任务 B',
           estimatedMinutes: 30,
-          status: 'not_started',
+          status: 'pending',
           createdAt: 30,
           updatedAt: 30,
         });
@@ -140,7 +140,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
       makeTask({
         id: 'task-root',
         title: '优先收口 DAG 根节点',
-        status: 'not_started',
+        status: 'pending',
         createdAt: 10,
         updatedAt: 10,
       }),
@@ -155,7 +155,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
         id: 'task-2',
         title: '切换后的任务 B',
         estimatedMinutes: 30,
-        status: 'not_started',
+        status: 'pending',
         createdAt: 30,
         updatedAt: 30,
       }),
@@ -279,7 +279,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
           id: 'task-2',
           title: '切换后的任务 B',
           estimatedMinutes: 30,
-          status: 'not_started',
+          status: 'pending',
           createdAt: 30,
           updatedAt: 30,
         });

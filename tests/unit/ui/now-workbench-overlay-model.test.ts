@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import type { Event, ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
@@ -88,13 +88,13 @@ describe('now workbench overlay model（当下工作台悬浮窗视图模型）'
         createTask({
           id: 'task-due-first',
           title: '补模型',
-          status: 'not_started',
+          status: 'pending',
           dueAt: Date.UTC(2026, 2, 11, 10, 0, 0),
         }),
         createTask({
           id: 'task-no-due',
           title: '整理文档',
-          status: 'not_started',
+          status: 'pending',
           updatedAt: Date.UTC(2026, 2, 11, 8, 0, 0),
         }),
       ],
@@ -103,7 +103,7 @@ describe('now workbench overlay model（当下工作台悬浮窗视图模型）'
     });
 
     expect(model.mode).toBe('idle_with_tasks');
-    expect(model.statusLabel).toBe('未开始');
+    expect(model.statusLabel).toBe('待办');
     expect(model.visibleTasks.map((task) => task.id)).toEqual([
       'task-in-progress',
       'task-due-first',
@@ -117,9 +117,9 @@ describe('now workbench overlay model（当下工作台悬浮窗视图模型）'
       activeBlock: null,
       tasks: [
         createTask({
-          id: 'task-abandoned',
-          title: '放弃的任务',
-          status: 'abandoned',
+          id: 'task-cancelled',
+          title: '取消的任务',
+          status: 'cancelled',
         }),
       ],
       events: [],

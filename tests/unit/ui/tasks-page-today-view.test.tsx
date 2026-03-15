@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TasksPage } from '@/ui/app/pages/TasksPage';
@@ -19,7 +19,7 @@ vi.mock('@/lib/services', () => ({
     createTask: vi.fn(),
     getTask: vi.fn(),
     updateTask: vi.fn(),
-    abandonTask: vi.fn(),
+    cancelTask: vi.fn(),
     transitionTask: vi.fn(),
     getAvailableTransitions: vi.fn(async () => []),
     getChildTasks: vi.fn(async () => []),
@@ -42,7 +42,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
     id: overrides.id,
     title: overrides.title,
     description: undefined,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -89,7 +89,7 @@ describe('TasksPage today view（任务页今日时间块视图）', () => {
       makeTask({
         id: 'task-2',
         title: '实现下午编码任务',
-        status: 'not_started',
+        status: 'pending',
         dueAt: afternoon,
         createdAt: 100,
         updatedAt: afternoon,

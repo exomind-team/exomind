@@ -7,11 +7,11 @@ import {
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
-  not_started: '未开始',
+  pending: '待办',
   in_progress: '进行中',
   suspended: '已挂起',
   completed: '已完成',
-  abandoned: '已放弃',
+  cancelled: '已取消',
 };
 
 const EDGE_TYPE_LABELS: Record<TaskGraphEdge['type'], string> = {

@@ -45,10 +45,10 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     if (!task) return null
 
     // 终态任务不允许启动计时
-    if (task.status === 'completed' || task.status === 'abandoned') return null
+    if (task.status === 'completed' || task.status === 'cancelled') return null
 
     // 如果任务非 in_progress，先转换状态
-    if (task.status === 'not_started') {
+    if (task.status === 'pending') {
       await this.taskSvc.transitionTask(taskId, 'in_progress')
     } else if (task.status === 'suspended') {
       await this.taskSvc.transitionTask(taskId, 'in_progress')

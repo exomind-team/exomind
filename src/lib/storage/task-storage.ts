@@ -7,7 +7,14 @@
 
 import PouchDB from 'pouchdb';
 import { buildSyncErrorLog } from './sync-error';
-import type { TaskNode } from '@/lib/types/task';
+import {
+  normalizeTaskNode,
+  normalizeTaskStatus,
+  toStoredTaskStatus,
+  type CompatibleTaskStatus,
+  type TaskNode,
+  type TaskNodeLike,
+} from '@/lib/types/task';
 import { log } from '@/lib/logger';
 
 const POUCHDB_PREFIX_ENV = 'EXOMIND_TASK_STORAGE_PREFIX';
@@ -15,7 +22,8 @@ const DEFAULT_TEST_POUCHDB_PREFIX = '.tmp/pouchdb-task-storage/';
 const OLD_STORAGE_KEY = 'task_nodes_v2';
 
 /** Internal PouchDB document type */
-interface TaskDoc extends TaskNode {
+interface TaskDoc extends Omit<TaskNode, 'status'> {
+  status: CompatibleTaskStatus;
   _id: string;
   _rev?: string;
 }
@@ -100,7 +108,7 @@ export function clearAllTaskStorageInstances(): void {
 /* ── TaskStorage class ── */
 
 export class TaskStorage {
-  private db: PouchDB.Database<TaskNode>;
+  private db: PouchDB.Database<TaskDoc>;
   private initialized = false;
   private syncReplication: PouchDB.Replication.Sync<TaskNode> | null = null;
   private changeListeners: Array<(change: unknown) => void> = [];
@@ -110,8 +118,8 @@ export class TaskStorage {
     const dbName = `tasks_${userId}`;
     const prefix = resolvePouchDbPrefix(options.pouchDbPrefix);
     this.db = prefix
-      ? new PouchDB<TaskNode>(dbName, { prefix })
-      : new PouchDB<TaskNode>(dbName);
+      ? new PouchDB<TaskDoc>(dbName, { prefix })
+      : new PouchDB<TaskDoc>(dbName);
     this.initializeDesignDoc();
   }
 
@@ -167,9 +175,9 @@ export class TaskStorage {
 
   /* ── CRUD ── */
 
-  async addTask(task: TaskNode): Promise<void> {
+  async addTask(task: TaskNodeLike): Promise<void> {
     await this.initializeDesignDoc();
-    const doc: TaskDoc = { ...task, _id: `task:${task.id}` };
+    const doc: TaskDoc = { ...this.toTaskDoc(task), _id: `task:${task.id}` };
     await this.db.put(doc as unknown as Parameters<typeof this.db.put>[0]);
     this.notifyChangeListeners({ type: 'local', doc });
   }
@@ -177,8 +185,8 @@ export class TaskStorage {
   async getTask(id: string): Promise<TaskNode | undefined> {
     await this.initializeDesignDoc();
     try {
-      const doc = await this.db.get<TaskNode>(`task:${id}`);
-      return this.toTaskNode(doc as unknown as TaskDoc);
+      const doc = await this.db.get<TaskDoc>(`task:${id}`);
+      return this.toTaskNode(doc);
     } catch {
       return undefined;
     }
@@ -197,7 +205,11 @@ export class TaskStorage {
     await this.initializeDesignDoc();
     const result = await this.db.query<TaskDoc>('tasks/by_status', {
       include_docs: true,
-      key: status,
+      key: normalizeTaskStatus(status as CompatibleTaskStatus) === 'pending'
+        ? 'not_started'
+        : normalizeTaskStatus(status as CompatibleTaskStatus) === 'cancelled'
+          ? 'abandoned'
+          : status,
     });
     return result.rows.filter((row) => row.doc).map((row) => this.toTaskNode(row.doc!));
   }
@@ -214,11 +226,15 @@ export class TaskStorage {
   async updateTask(id: string, updates: Partial<TaskNode>): Promise<TaskNode | undefined> {
     await this.initializeDesignDoc();
     try {
-      const doc = await this.db.get<TaskNode>(`task:${id}`);
-      const updated = { ...doc, ...updates, updatedAt: Date.now() };
+      const doc = await this.db.get<TaskDoc>(`task:${id}`);
+      const updated: TaskDoc = {
+        ...doc,
+        ...this.toTaskDocUpdates(updates),
+        updatedAt: Date.now(),
+      };
       await this.db.put(updated as unknown as Parameters<typeof this.db.put>[0]);
       this.notifyChangeListeners({ type: 'local', doc: updated });
-      return this.toTaskNode(updated as unknown as TaskDoc);
+      return this.toTaskNode(updated);
     } catch {
       return undefined;
     }
@@ -227,7 +243,7 @@ export class TaskStorage {
   async deleteDoc(id: string): Promise<void> {
     await this.initializeDesignDoc();
     try {
-      const doc = await this.db.get<TaskNode>(`task:${id}`);
+      const doc = await this.db.get<TaskDoc>(`task:${id}`);
       await (this.db as unknown as { remove(doc: unknown): Promise<unknown> }).remove(doc);
     } catch {
       // not found, ignore
@@ -302,7 +318,7 @@ export class TaskStorage {
     const raw = localStorage.getItem(OLD_STORAGE_KEY);
     if (!raw) return 0;
 
-    let tasks: TaskNode[];
+    let tasks: TaskNodeLike[];
     try {
       tasks = JSON.parse(raw);
       if (!Array.isArray(tasks)) return 0;
@@ -347,7 +363,26 @@ export class TaskStorage {
     delete obj._id;
     delete obj._rev;
     delete obj._conflicts;
-    return obj as unknown as TaskNode;
+    return normalizeTaskNode(obj as unknown as TaskNodeLike);
+  }
+
+  private toTaskDoc(task: TaskNodeLike): Omit<TaskDoc, '_id' | '_rev'> {
+    const normalizedTask = normalizeTaskNode(task);
+    return {
+      ...normalizedTask,
+      status: toStoredTaskStatus(normalizedTask.status),
+    };
+  }
+
+  private toTaskDocUpdates(updates: Partial<TaskNode>): Partial<TaskDoc> {
+    if (updates.status === undefined) {
+      return updates;
+    }
+
+    return {
+      ...updates,
+      status: toStoredTaskStatus(updates.status),
+    };
   }
 
   private notifyChangeListeners(change: unknown): void {

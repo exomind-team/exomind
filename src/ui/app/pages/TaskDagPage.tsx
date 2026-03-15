@@ -203,7 +203,7 @@ export function TaskDagPage() {
               </div>
               <div data-testid="task-dag-legend-soft" className="flex items-center gap-2">
                 <span className="h-px w-8 border-t-2 border-dashed border-[#78716C]" />
-                <span>软依赖：前置未开始会提示阻塞，但仍可直接开工</span>
+                <span>软依赖：前置待办会提示阻塞，但仍可直接开工</span>
               </div>
             </div>
           </section>

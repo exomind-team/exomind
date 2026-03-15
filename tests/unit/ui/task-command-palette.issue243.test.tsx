@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TasksPage } from '@/ui/app/pages/TasksPage';
 
@@ -16,7 +16,7 @@ vi.mock('@/lib/services', () => ({
     createTask: vi.fn(),
     getTask: vi.fn(),
     updateTask: vi.fn(),
-    abandonTask: vi.fn(),
+    cancelTask: vi.fn(),
     transitionTask: vi.fn(),
     getAvailableTransitions: vi.fn(async () => []),
     getChildTasks: vi.fn(async () => []),

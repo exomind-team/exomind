@@ -1,4 +1,4 @@
-import {
+﻿import {
   forwardRef,
   type KeyboardEvent,
   useCallback,
@@ -37,7 +37,7 @@ import type { ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { FocusBgmPanel } from '@/ui/app/components/settings/settings-custom-items';
 
-type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'abandoned';
+type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'cancelled';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
@@ -989,7 +989,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
                     { key: 'suspended' as TaskStatusChoice, label: '挂起' },
                     { key: 'continue' as TaskStatusChoice, label: '继续' },
                     { key: 'completed' as TaskStatusChoice, label: '完成' },
-                    { key: 'abandoned' as TaskStatusChoice, label: '放弃' },
+                    { key: 'cancelled' as TaskStatusChoice, label: '取消' },
                   ] as const).map(({ key, label }) => (
                     <button
                       key={key}

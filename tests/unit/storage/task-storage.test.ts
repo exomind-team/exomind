@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TaskStorage 单元测试
  *
  * 测试 PouchDB 存储层的 CRUD、索引查询、数据迁移。
@@ -12,7 +12,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string }): TaskNode {
   const now = Date.now();
   return {
     title: overrides.id,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -43,7 +43,7 @@ describe('TaskStorage CRUD', () => {
     expect(retrieved).toBeDefined();
     expect(retrieved!.id).toBe('task-1');
     expect(retrieved!.title).toBe('测试任务');
-    expect(retrieved!.status).toBe('not_started');
+    expect(retrieved!.status).toBe('pending');
   });
 
   it('getTask returns undefined for missing id', async () => {
@@ -125,7 +125,7 @@ describe('TaskStorage index queries', () => {
 
   it('getTasksByStatus filters correctly', async () => {
     await storage.addTask(makeTask({ id: 's1', status: 'in_progress' }));
-    await storage.addTask(makeTask({ id: 's2', status: 'not_started' }));
+    await storage.addTask(makeTask({ id: 's2', status: 'pending' }));
     await storage.addTask(makeTask({ id: 's3', status: 'in_progress' }));
 
     const inProgress = await storage.getTasksByStatus('in_progress');

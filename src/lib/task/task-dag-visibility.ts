@@ -1,4 +1,4 @@
-import type { TaskGraph, TaskGraphEdge, TaskGraphNode } from '@/lib/task/task-dag-graph'
+﻿import type { TaskGraph, TaskGraphEdge, TaskGraphNode } from '@/lib/task/task-dag-graph'
 
 export interface TaskDagVisibilityState {
   collapsedUpstreamOf: string[]
@@ -26,7 +26,7 @@ export const EMPTY_TASK_DAG_VISIBILITY_STATE: TaskDagVisibilityState = {
 }
 
 function isTerminalStatus(status: TaskGraphNode['status']): boolean {
-  return status === 'completed' || status === 'abandoned'
+  return status === 'completed' || status === 'cancelled'
 }
 
 function buildTopologicalIndex(graph: TaskGraph): Map<string, number> {
