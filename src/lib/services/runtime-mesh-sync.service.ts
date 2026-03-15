@@ -236,6 +236,24 @@ export class RuntimeMeshSyncService {
     return (await response.json()) as Array<{ host_id: string; host: string; port: number }>;
   }
 
+  /** List registered mesh peers (calls local runtime, requires auth). */
+  async listMeshPeers(
+    runtimeBaseUrl: string,
+    localAuthToken?: string,
+  ): Promise<Array<{ id: string; base_url: string; enabled: boolean }>> {
+    const url = `${runtimeBaseUrl}/mesh/peers`;
+    const response = await this.fetchImpl(url, {
+      method: 'GET',
+      headers: authHeaders('application/json', localAuthToken),
+    });
+    if (!response.ok) {
+      throw await buildHttpError('listMeshPeers', 'GET', url, response as Response, {
+        authState: localAuthToken ? 'present' : 'missing',
+      });
+    }
+    return (await response.json()) as Array<{ id: string; base_url: string; enabled: boolean }>;
+  }
+
   // ── Peer Upsert ────────────────────────────────────────────────
 
   private async upsertPeer(
