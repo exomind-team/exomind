@@ -90,7 +90,7 @@ ExoMind（外心）是一个**个人/集体的生命成长助手**，探索人�
 |------|------|
 | Focus（专注） | `ui/app/pages/FocusPage.tsx` |
 | Tasks（任务） | `ui/app/pages/TasksPage.tsx` + TaskDetailPage + TaskDagPage |
-| Agents（Agent 集市） | `ui/app/pages/AgentsPage.tsx` |
+| Agents（Agent 集市） | `ui/app/pages/AgentsPage.tsx` (2393 行，协调入口) + 子模块 `ui/app/pages/agents/`：`agents-utils.ts`, `SignalFlowNode.tsx`, `TopologyView.tsx`, `DeviceView.tsx`, `agents-sheets.tsx`, `RoutesTabView.tsx`, `NodesTabView.tsx`, `SignalHistoryTabView.tsx` |
 | Me（我的） | `ui/app/pages/MePage.tsx` |
 | Settings（设置） | `ui/app/pages/SettingsPage.tsx` |
 | Reminders（提醒） | `ui/app/pages/RemindersPage.tsx` |
@@ -121,11 +121,12 @@ ExoMind（外心）是一个**个人/集体的生命成长助手**，探索人�
 
 | Store | 位置 |
 |-------|------|
-| chat-store | `lib/stores/chat-store.ts` |
-| timeblock-store | `lib/stores/timeblock-store.ts` |
+| timeblock store（当前） | `lib/timeblock/store.ts` |
 | reminder-ui-store | `ui/stores/reminder-ui-store.ts` |
 | sync-store | `ui/stores/sync-store.ts` |
 | update-store | `ui/stores/update-store.ts` |
+
+> 注：`lib/stores/chat-store.ts` 和 `lib/stores/timeblock-store.ts` 已删除（后者已废弃，由 `lib/timeblock/store.ts` 替代）。
 
 ---
 
