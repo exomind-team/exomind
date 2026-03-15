@@ -8,14 +8,14 @@ function deepClone<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-const ALL_STATUSES: TaskStatus[] = ['not_started', 'in_progress', 'suspended', 'completed', 'abandoned']
+const ALL_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'suspended', 'completed', 'cancelled']
 
 export class TaskMockAdapter implements ITaskPort {
   private tasks: TaskNode[] = deepClone(MOCK_TASK_NODES_FIXTURE)
 
-  async listTasks(includeAbandoned = false): Promise<TaskNode[]> {
+  async listTasks(includeCancelled = false): Promise<TaskNode[]> {
     const all = deepClone(this.tasks)
-    return includeAbandoned ? all : all.filter(t => t.status !== 'abandoned')
+    return includeCancelled ? all : all.filter(t => t.status !== 'cancelled')
   }
 
   async getTaskById(id: string): Promise<TaskNode | null> {
@@ -30,7 +30,7 @@ export class TaskMockAdapter implements ITaskPort {
       title: input.title.trim(),
       description: input.description,
       doneCondition: input.doneCondition,
-      status: 'not_started',
+      status: 'pending',
       priority: input.priority ?? 'medium',
       dueAt: input.dueAt,
       source: input.source,
@@ -56,12 +56,12 @@ export class TaskMockAdapter implements ITaskPort {
     return deepClone(updated)
   }
 
-  async abandonTask(id: string): Promise<TaskNode | null> {
+  async cancelTask(id: string): Promise<TaskNode | null> {
     const task = this.tasks.find(t => t.id === id)
     if (!task) return null
-    const abandoned = transition(task, 'abandoned')
-    this.tasks = this.tasks.map(t => t.id === id ? abandoned : t)
-    return deepClone(abandoned)
+    const cancelled = transition(task, 'cancelled')
+    this.tasks = this.tasks.map(t => t.id === id ? cancelled : t)
+    return deepClone(cancelled)
   }
 
   async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {

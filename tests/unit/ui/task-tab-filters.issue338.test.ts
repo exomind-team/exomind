@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import type { TaskNode } from '@/lib/types/task';
 import {
   filterMonth,
@@ -15,7 +15,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string }): TaskNode {
   return {
     title: overrides.id,
     description: undefined,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -68,8 +68,8 @@ describe('sortByDue（排序契约）', () => {
 /* ── isExecutable ── */
 
 describe('isExecutable（可执行判定）', () => {
-  it('not_started with no deps is executable', () => {
-    const task = makeTask({ id: 'a', status: 'not_started', dependsOn: [] });
+  it('pending with no deps is executable', () => {
+    const task = makeTask({ id: 'a', status: 'pending', dependsOn: [] });
     expect(isExecutable(task, [task])).toBe(true);
   });
 
@@ -78,21 +78,21 @@ describe('isExecutable（可执行判定）', () => {
     expect(isExecutable(task, [task])).toBe(false);
   });
 
-  it('not_started with completed hard dep is executable', () => {
+  it('pending with completed hard dep is executable', () => {
     const dep = makeTask({ id: 'dep', status: 'completed' });
-    const task = makeTask({ id: 'a', status: 'not_started', dependsOn: [{ taskId: 'dep', type: 'hard' }] });
+    const task = makeTask({ id: 'a', status: 'pending', dependsOn: [{ taskId: 'dep', type: 'hard' }] });
     expect(isExecutable(task, [dep, task])).toBe(true);
   });
 
-  it('not_started with incomplete hard dep is not executable', () => {
+  it('pending with incomplete hard dep is not executable', () => {
     const dep = makeTask({ id: 'dep', status: 'in_progress' });
-    const task = makeTask({ id: 'a', status: 'not_started', dependsOn: [{ taskId: 'dep', type: 'hard' }] });
+    const task = makeTask({ id: 'a', status: 'pending', dependsOn: [{ taskId: 'dep', type: 'hard' }] });
     expect(isExecutable(task, [dep, task])).toBe(false);
   });
 
   it('soft deps do not block execution', () => {
-    const dep = makeTask({ id: 'dep', status: 'not_started' });
-    const task = makeTask({ id: 'a', status: 'not_started', dependsOn: [{ taskId: 'dep', type: 'soft' }] });
+    const dep = makeTask({ id: 'dep', status: 'pending' });
+    const task = makeTask({ id: 'a', status: 'pending', dependsOn: [{ taskId: 'dep', type: 'soft' }] });
     expect(isExecutable(task, [dep, task])).toBe(true);
   });
 });
@@ -102,34 +102,34 @@ describe('isExecutable（可执行判定）', () => {
 describe('filterNow（"当下" tab）', () => {
   it('pins in_progress tasks to top', () => {
     const active = makeTask({ id: 'a', status: 'in_progress', updatedAt: 1 });
-    const idle = makeTask({ id: 'b', status: 'not_started', updatedAt: 2 });
+    const idle = makeTask({ id: 'b', status: 'pending', updatedAt: 2 });
     const result = filterNow([idle, active]);
     expect(result[0].id).toBe('a');
   });
 
-  it('shows all non-abandoned tasks', () => {
-    const t1 = makeTask({ id: 't1', status: 'not_started', updatedAt: 1 });
-    const t2 = makeTask({ id: 't2', status: 'not_started', updatedAt: 2 });
+  it('shows all non-cancelled tasks', () => {
+    const t1 = makeTask({ id: 't1', status: 'pending', updatedAt: 1 });
+    const t2 = makeTask({ id: 't2', status: 'pending', updatedAt: 2 });
     const t3 = makeTask({ id: 't3', status: 'suspended', updatedAt: 3 });
     expect(filterNow([t1, t2, t3]).length).toBe(3);
   });
 
   it('sorts non-in_progress tasks by due date', () => {
-    const withDue = makeTask({ id: 'a', status: 'not_started', dueAt: 100, updatedAt: 1 });
-    const noDue = makeTask({ id: 'b', status: 'not_started', updatedAt: 999 });
+    const withDue = makeTask({ id: 'a', status: 'pending', dueAt: 100, updatedAt: 1 });
+    const noDue = makeTask({ id: 'b', status: 'pending', updatedAt: 999 });
     const result = filterNow([noDue, withDue]);
     expect(result.map((t) => t.id)).toEqual(['a', 'b']);
   });
 
-  it('excludes abandoned tasks', () => {
-    const abandoned = makeTask({ id: 'x', status: 'abandoned' });
+  it('excludes cancelled tasks', () => {
+    const cancelled = makeTask({ id: 'x', status: 'cancelled' });
     const ok = makeTask({ id: 'y', status: 'in_progress' });
-    expect(filterNow([abandoned, ok]).map((t) => t.id)).toEqual(['y']);
+    expect(filterNow([cancelled, ok]).map((t) => t.id)).toEqual(['y']);
   });
 
   it('no limit on total tasks shown', () => {
     const tasks = Array.from({ length: 10 }, (_, i) =>
-      makeTask({ id: `t${i}`, status: 'not_started', updatedAt: i }),
+      makeTask({ id: `t${i}`, status: 'pending', updatedAt: i }),
     );
     expect(filterNow(tasks).length).toBe(10);
   });
@@ -165,8 +165,8 @@ describe('filterToday（"今日" tab）', () => {
     expect(result).toEqual([]);
   });
 
-  it('excludes abandoned tasks', () => {
-    const task = makeTask({ id: 'a', status: 'abandoned', dueAt: todayStart + 1000, updatedAt: todayStart });
+  it('excludes cancelled tasks', () => {
+    const task = makeTask({ id: 'a', status: 'cancelled', dueAt: todayStart + 1000, updatedAt: todayStart });
     expect(filterToday([task], today)).toEqual([]);
   });
 
@@ -200,8 +200,8 @@ describe('filterWeek（"一周" tab）', () => {
     expect(filterWeek([task], now).map((t) => t.id)).toEqual(['a']);
   });
 
-  it('excludes abandoned tasks', () => {
-    const task = makeTask({ id: 'a', status: 'abandoned', dueAt: nowMs + 1000, updatedAt: nowMs });
+  it('excludes cancelled tasks', () => {
+    const task = makeTask({ id: 'a', status: 'cancelled', dueAt: nowMs + 1000, updatedAt: nowMs });
     expect(filterWeek([task], now)).toEqual([]);
   });
 
@@ -241,8 +241,8 @@ describe('filterMonth（"月" tab）', () => {
     expect(filterMonth([task], now).map((t) => t.id)).toEqual(['a']);
   });
 
-  it('excludes abandoned tasks', () => {
-    const task = makeTask({ id: 'a', status: 'abandoned', dueAt: monthStart + 1000, updatedAt: monthStart });
+  it('excludes cancelled tasks', () => {
+    const task = makeTask({ id: 'a', status: 'cancelled', dueAt: monthStart + 1000, updatedAt: monthStart });
     expect(filterMonth([task], now)).toEqual([]);
   });
 });

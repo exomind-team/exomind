@@ -3,8 +3,10 @@ export interface Dependency {
   type: 'soft' | 'hard'
 }
 
-/** 5 状态机：not_started → in_progress ⇌ suspended → completed / abandoned */
-export type TaskStatus = 'not_started' | 'in_progress' | 'suspended' | 'completed' | 'abandoned'
+/** 5 状态机：pending → in_progress ⇌ suspended → completed / cancelled */
+export type TaskStatus = 'pending' | 'in_progress' | 'suspended' | 'completed' | 'cancelled'
+export type LegacyTaskStatus = 'not_started' | 'abandoned'
+export type CompatibleTaskStatus = TaskStatus | LegacyTaskStatus
 
 export type TaskPriority = 'low' | 'medium' | 'high'
 
@@ -27,13 +29,44 @@ export interface TaskNode {
   completedAt?: number
 }
 
+export type TaskNodeLike = Omit<TaskNode, 'status'> & { status: CompatibleTaskStatus }
+
+export function normalizeTaskStatus(status: CompatibleTaskStatus): TaskStatus {
+  switch (status) {
+    case 'not_started':
+      return 'pending'
+    case 'abandoned':
+      return 'cancelled'
+    default:
+      return status
+  }
+}
+
+export function toStoredTaskStatus(status: TaskStatus): CompatibleTaskStatus {
+  // Stage-2: Persist canonical wire format to storage.
+  // Legacy values are still accepted via `normalizeTaskStatus()` for backward compatibility.
+  return status
+}
+
+export function normalizeTaskNode(task: TaskNodeLike): TaskNode {
+  return {
+    ...task,
+    status: normalizeTaskStatus(task.status),
+  }
+}
+
+export function isTerminalTaskStatus(status: CompatibleTaskStatus): boolean {
+  const normalized = normalizeTaskStatus(status)
+  return normalized === 'completed' || normalized === 'cancelled'
+}
+
 // 合法状态转换表
 const VALID_TRANSITIONS: Record<TaskStatus, TaskStatus[]> = {
-  not_started: ['in_progress'],
-  in_progress: ['suspended', 'completed', 'abandoned'],
-  suspended:   ['in_progress', 'completed', 'abandoned'],
+  pending: ['in_progress'],
+  in_progress: ['suspended', 'completed', 'cancelled'],
+  suspended:   ['in_progress', 'completed', 'cancelled'],
   completed:   [],
-  abandoned:   [],
+  cancelled:   [],
 }
 
 /** 检查状态转换是否合法 */
@@ -44,19 +77,20 @@ export function canTransition(from: TaskStatus, to: TaskStatus): boolean {
 /**
  * 执行状态转换，返回新的 TaskNode（不可变）。
  * 非法转换时抛出 Error。
- * 转换到 completed / abandoned 时同时设置 completedAt。
+ * 转换到 completed / cancelled 时同时设置 completedAt。
  */
-export function transition(task: TaskNode, to: TaskStatus): TaskNode {
-  if (!canTransition(task.status, to)) {
+export function transition(task: TaskNodeLike, to: TaskStatus): TaskNode {
+  const normalizedTask = normalizeTaskNode(task)
+  if (!canTransition(normalizedTask.status, to)) {
     throw new Error(
-      `Invalid transition: ${task.status} → ${to}`
+      `Invalid transition: ${normalizedTask.status} → ${to}`
     )
   }
   const now = Date.now()
   return {
-    ...task,
+    ...normalizedTask,
     status: to,
     updatedAt: now,
-    ...(to === 'completed' || to === 'abandoned' ? { completedAt: now } : {}),
+    ...(to === 'completed' || to === 'cancelled' ? { completedAt: now } : {}),
   }
 }

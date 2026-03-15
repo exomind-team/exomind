@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { TaskNode } from '@/lib/types/task';
 import { EstimatedTimeEditor } from '@/ui/app/components/EstimatedTimeEditor';
@@ -15,7 +15,7 @@ function makeTask(overrides: Partial<TaskNode> = {}): TaskNode {
   return {
     id: 'task-1',
     title: '补 EstimatedTimeEditor',
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: ['issue-384'],

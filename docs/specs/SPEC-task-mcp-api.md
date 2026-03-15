@@ -190,7 +190,7 @@ const result = await mcp.callTool("exomind_create_task", {
     id: string
     title: string
     description: string
-    status: "pending" | "in_progress" | "completed" | "cancelled"
+    status: "pending" | "in_progress" | "suspended" | "completed" | "cancelled"
     parentId: string | null
     estimatedMinutes: number | null
     dueAt: string | null
@@ -234,7 +234,7 @@ if (result.success && result.task.status === "in_progress") {
 
 ```typescript
 {
-  includeAbandoned?: boolean  // 可选，是否包含已放弃的任务，默认 false
+  includeCancelled?: boolean  // 可选，是否包含已取消的任务，默认 false
 }
 ```
 
@@ -244,9 +244,9 @@ if (result.success && result.task.status === "in_progress") {
 {
   "type": "object",
   "properties": {
-    "includeAbandoned": {
+    "includeCancelled": {
       "type": "boolean",
-      "description": "是否包含已放弃的任务",
+      "description": "是否包含已取消的任务",
       "default": false
     }
   },
@@ -264,7 +264,7 @@ if (result.success && result.task.status === "in_progress") {
     id: string
     title: string
     description: string
-    status: "pending" | "in_progress" | "completed" | "cancelled"
+    status: "pending" | "in_progress" | "suspended" | "completed" | "cancelled"
     parentId: string | null
     estimatedMinutes: number | null
     dueAt: string | null
@@ -288,7 +288,7 @@ if (result.success && result.task.status === "in_progress") {
 ```typescript
 // Growth Coach 分析最近活跃的任务
 const result = await mcp.callTool("exomind_list_tasks", {
-  includeAbandoned: false
+  includeCancelled: false
 });
 
 const recentTasks = result.tasks.slice(0, 10);
@@ -393,7 +393,7 @@ const result = await mcp.callTool("exomind_update_task", {
 
 ### 5. exomind_start_task
 
-开始任务（状态变更：pending → in_progress）。
+开始或恢复任务（状态变更：pending / suspended → in_progress）。
 
 **业务规则**: 如果任务有未完成的 hard 依赖，则无法开始。
 
@@ -441,7 +441,7 @@ const result = await mcp.callTool("exomind_update_task", {
   blocking: Array<{
     taskId: string
     type: "hard"
-    status: "pending" | "in_progress"
+    status: "pending" | "in_progress" | "suspended" | "cancelled"
     title: string
   }>
 }
@@ -473,7 +473,7 @@ if (!result.success && result.blocking) {
 
 ### 6. exomind_complete_task
 
-完成任务（状态变更：in_progress → completed）。
+完成任务（状态变更：in_progress / suspended → completed）。
 
 #### 输入参数
 
@@ -515,7 +515,7 @@ if (!result.success && result.blocking) {
 | 错误 | 原因 | 返回值 |
 |------|------|--------|
 | 任务不存在 | taskId 不存在 | `{ success: false, error: "Task {id} not found" }` |
-| 状态不允许 | 任务未开始或已取消 | `{ success: false, error: "Cannot transition from {status} to completed" }` |
+| 状态不允许 | 任务不处于进行中或挂起态 | `{ success: false, error: "Cannot transition from {status} to completed" }` |
 
 #### 使用示例
 
@@ -530,7 +530,7 @@ const result = await mcp.callTool("exomind_complete_task", {
 
 ### 7. exomind_cancel_task
 
-取消任务（状态变更：任意状态 → cancelled）。
+取消任务（状态变更：in_progress / suspended → cancelled）。
 
 #### 输入参数
 
@@ -572,6 +572,7 @@ const result = await mcp.callTool("exomind_complete_task", {
 | 错误 | 原因 | 返回值 |
 |------|------|--------|
 | 任务不存在 | taskId 不存在 | `{ success: false, error: "Task {id} not found" }` |
+| 状态不允许 | 任务不处于进行中或挂起态 | `{ success: false, error: "Cannot transition from {status} to cancelled" }` |
 
 #### 使用示例
 
@@ -603,7 +604,7 @@ interface TaskNode {
   dependencies: TaskDependency[]
 }
 
-type TaskStatus = "pending" | "in_progress" | "completed" | "cancelled"
+type TaskStatus = "pending" | "in_progress" | "suspended" | "completed" | "cancelled"
 
 interface TaskDependency {
   taskId: string
@@ -617,9 +618,13 @@ interface TaskDependency {
 
 ```
 pending ──────> in_progress ──────> completed
-   │                 │
-   │                 │
-   └─────────────────┴──────────> cancelled
+                  │    ▲
+                  │    │
+                  ▼    │
+              suspended
+                  │
+                  ├──────────────> completed
+                  └──────────────> cancelled
 ```
 
 ### 转换约束
@@ -627,8 +632,8 @@ pending ──────> in_progress ──────> completed
 | 从 | 到 | 约束 |
 |----|----|----|
 | pending | in_progress | hard 依赖必须已完成 |
-| in_progress | completed | 无约束 |
-| 任意状态 | cancelled | 无约束 |
+| in_progress | suspended / completed / cancelled | 无约束 |
+| suspended | in_progress / completed / cancelled | 无约束 |
 
 ---
 
@@ -685,8 +690,8 @@ dueAt: task.dueAt?.toISOString() ?? null
 - [ ] 创建任务（父任务不存在，应失败）
 - [ ] 获取任务（存在）
 - [ ] 获取任务（不存在，应失败）
-- [ ] 列出任务（默认不包含已放弃）
-- [ ] 列出任务（包含已放弃）
+- [ ] 列出任务（默认不包含已取消）
+- [ ] 列出任务（包含已取消）
 - [ ] 更新任务（修改标题）
 - [ ] 更新任务（修改多个字段）
 - [ ] 开始任务（无依赖）

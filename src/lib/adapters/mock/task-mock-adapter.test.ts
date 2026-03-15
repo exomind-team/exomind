@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+﻿import { describe, it, expect, beforeEach } from 'vitest'
 import { TaskMockAdapter } from './task-mock-adapter'
 
 describe('TaskMockAdapter', () => {
@@ -8,29 +8,29 @@ describe('TaskMockAdapter', () => {
     adapter = new TaskMockAdapter()
   })
 
-  it('listTasks() 默认不返回 abandoned 任务', async () => {
-    const created = await adapter.createTask({ title: '待放弃任务' })
+  it('listTasks() 默认不返回 cancelled 任务', async () => {
+    const created = await adapter.createTask({ title: '待取消任务' })
     await adapter.transitionTask(created.id, 'in_progress')
-    await adapter.abandonTask(created.id)
+    await adapter.cancelTask(created.id)
 
     const tasks = await adapter.listTasks()
-    expect(tasks.every(t => t.status !== 'abandoned')).toBe(true)
+    expect(tasks.every(t => t.status !== 'cancelled')).toBe(true)
   })
 
-  it('listTasks(true) 包含 abandoned 任务', async () => {
-    const created = await adapter.createTask({ title: '待放弃任务2' })
+  it('listTasks(true) 包含 cancelled 任务', async () => {
+    const created = await adapter.createTask({ title: '待取消任务2' })
     await adapter.transitionTask(created.id, 'in_progress')
-    await adapter.abandonTask(created.id)
+    await adapter.cancelTask(created.id)
 
     const tasks = await adapter.listTasks(true)
-    const abandonedTasks = tasks.filter(t => t.status === 'abandoned')
-    expect(abandonedTasks.length).toBeGreaterThan(0)
+    const cancelledTasks = tasks.filter(t => t.status === 'cancelled')
+    expect(cancelledTasks.length).toBeGreaterThan(0)
   })
 
-  it('createTask 创建后 status 为 not_started，id 非空', async () => {
+  it('createTask 创建后 status 为 pending，id 非空', async () => {
     const task = await adapter.createTask({ title: '新任务' })
     expect(task.id).toBeTruthy()
-    expect(task.status).toBe('not_started')
+    expect(task.status).toBe('pending')
   })
 
   it('updateTask 更新字段，updatedAt 变大', async () => {
@@ -46,13 +46,13 @@ describe('TaskMockAdapter', () => {
     expect(updated!.updatedAt).toBeGreaterThan(originalUpdatedAt)
   })
 
-  it('abandonTask 后任务 status 为 abandoned，且从 listTasks() 中消失', async () => {
-    const created = await adapter.createTask({ title: '要放弃的任务' })
+  it('cancelTask 后任务 status 为 cancelled，且从 listTasks() 中消失', async () => {
+    const created = await adapter.createTask({ title: '要取消的任务' })
     await adapter.transitionTask(created.id, 'in_progress')
-    const abandoned = await adapter.abandonTask(created.id)
+    const cancelled = await adapter.cancelTask(created.id)
 
-    expect(abandoned).not.toBeNull()
-    expect(abandoned!.status).toBe('abandoned')
+    expect(cancelled).not.toBeNull()
+    expect(cancelled!.status).toBe('cancelled')
 
     const tasks = await adapter.listTasks()
     expect(tasks.find(t => t.id === created.id)).toBeUndefined()
@@ -68,11 +68,11 @@ describe('TaskMockAdapter', () => {
 
   it('transitionTask 非法转换抛出 Error', async () => {
     const created = await adapter.createTask({ title: '非法转换测试' })
-    // not_started → completed 是非法转换（必须先经过 in_progress）
+    // pending → completed 是非法转换（必须先经过 in_progress）
     await expect(adapter.transitionTask(created.id, 'completed')).rejects.toThrow()
   })
 
-  it('getAvailableTransitions 对 not_started 任务返回 [\'in_progress\']', async () => {
+  it('getAvailableTransitions 对 pending 任务返回 [\'in_progress\']', async () => {
     const created = await adapter.createTask({ title: '可用转换测试' })
     const transitions = await adapter.getAvailableTransitions(created.id)
     expect(transitions).toEqual(['in_progress'])

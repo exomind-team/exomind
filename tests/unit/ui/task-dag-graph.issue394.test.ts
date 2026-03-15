@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest'
+﻿import { describe, expect, it } from 'vitest'
 import type { TaskNode } from '@/lib/types/task'
 import { buildTaskGraph } from '@/lib/task/task-dag-graph'
 
@@ -6,7 +6,7 @@ function makeTask(overrides: Partial<TaskNode> & Pick<TaskNode, 'id' | 'title'>)
   return {
     id: overrides.id,
     title: overrides.title,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -73,7 +73,7 @@ describe('buildTaskGraph issue-394（任务 DAG 图基础层）', () => {
     ])
   })
 
-  it('skips completed and abandoned roots when selecting the current root node', () => {
+  it('skips completed and cancelled roots when selecting the current root node', () => {
     const completedRoot = makeTask({
       id: 'done',
       title: 'Completed Root',
@@ -81,16 +81,16 @@ describe('buildTaskGraph issue-394（任务 DAG 图基础层）', () => {
       createdAt: 10,
       updatedAt: 10,
     })
-    const abandonedRoot = makeTask({
-      id: 'gone',
-      title: 'Abandoned Root',
-      status: 'abandoned',
-      createdAt: 20,
-      updatedAt: 20,
-    })
+	    const cancelledRoot = makeTask({
+	      id: 'gone',
+	      title: 'Cancelled Root',
+	      status: 'cancelled',
+	      createdAt: 20,
+	      updatedAt: 20,
+	    })
     const activeRoot = makeTask({ id: 'live', title: 'Live Root', createdAt: 30, updatedAt: 30 })
 
-    const graph = buildTaskGraph([activeRoot, abandonedRoot, completedRoot])
+    const graph = buildTaskGraph([activeRoot, cancelledRoot, completedRoot])
 
     expect(graph.rootNodeIds).toEqual(['done', 'gone', 'live'])
     expect(graph.currentRootNodeId).toBe('live')
@@ -147,7 +147,7 @@ describe('buildTaskGraph issue-394（任务 DAG 图基础层）', () => {
     const softSource = makeTask({
       id: 'soft-source',
       title: 'Soft Source',
-      status: 'not_started',
+      status: 'pending',
       createdAt: 20,
       updatedAt: 20,
     })

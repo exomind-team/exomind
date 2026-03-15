@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TaskDagPage } from '@/ui/app/pages/TaskDagPage';
@@ -74,7 +74,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
     id: overrides.id,
     title: overrides.title,
     description: undefined,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],

@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+﻿import type { ReactNode } from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { TaskDetailPage } from '@/ui/app/pages/TaskDetailPage';
@@ -9,7 +9,7 @@ let routeTaskId = 'task-1';
 
 const navigateMock = vi.fn();
 const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>();
-const listTasksMock = vi.fn<(includeAbandoned?: boolean) => Promise<TaskNode[]>>();
+const listTasksMock = vi.fn<(includeCancelled?: boolean) => Promise<TaskNode[]>>();
 const updateTaskMock = vi.fn<(id: string, input: { estimatedMinutes?: number }) => Promise<TaskNode | null>>();
 const onTaskChangeMock = vi.fn(() => () => {});
 
@@ -39,7 +39,7 @@ vi.mock('@/lib/services', () => ({
     onTaskChange: onTaskChangeMock,
     transitionTask: vi.fn(),
     updateTask: updateTaskMock,
-    abandonTask: vi.fn(),
+    cancelTask: vi.fn(),
   }),
   getTimeBlockService: () => ({
     loadTimeBlocks: loadTimeBlocksMock,

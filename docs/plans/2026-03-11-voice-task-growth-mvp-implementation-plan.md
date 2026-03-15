@@ -379,7 +379,7 @@ cargo test -p exomind-runtime signal_actors_integration -- --nocapture
 **Step 3: Implement minimal suggestion actor**
 
 Heuristics can be simple:
-- exclude done / abandoned
+- exclude done / cancelled
 - prefer in-progress or small, ready tasks
 - keep list short
 - no complex prioritization engine yet

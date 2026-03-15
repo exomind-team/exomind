@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+﻿import { describe, expect, it } from 'vitest';
 import type { TaskNode } from '@/lib/types/task';
 import type { TimeBlock } from '@/lib/types/event';
 import { buildTasksTodayViewModel } from '@/ui/app/pages/tasks-today-view';
@@ -8,7 +8,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
     id: overrides.id,
     title: overrides.title,
     description: undefined,
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -60,7 +60,7 @@ describe('buildTasksTodayViewModel（任务页 today 时间块视图模型）', 
       tasks: [
         makeTask({ id: 'task-1', title: '完成 Task List 视图设计', status: 'in_progress', updatedAt: morning }),
         makeTask({ id: 'task-2', title: '实现 Today 时间块卡片', status: 'in_progress', updatedAt: afternoon }),
-        makeTask({ id: 'task-3', title: '补充回归测试', status: 'not_started', dueAt: night, updatedAt: night }),
+        makeTask({ id: 'task-3', title: '补充回归测试', status: 'pending', dueAt: night, updatedAt: night }),
       ],
       blocks: [],
       now: today,

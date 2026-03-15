@@ -12,12 +12,12 @@ export interface DependencyCheckResult {
 }
 
 export interface TaskService {
-  listTasks(includeAbandoned?: boolean): Promise<TaskNode[]>
+  listTasks(includeCancelled?: boolean): Promise<TaskNode[]>
   getTask(id: string): Promise<TaskNode | null>
   createTask(input: CreateTaskInput): Promise<TaskNode>
   updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null>
-  // 行为语义：删除=放弃
-  abandonTask(id: string): Promise<TaskNode | null>
+  // 行为语义：删除=取消
+  cancelTask(id: string): Promise<TaskNode | null>
   transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null>
   getAvailableTransitions(id: string): Promise<TaskStatus[]>
   // Phase3: 父子层级
@@ -40,8 +40,8 @@ export class TaskServiceImpl implements TaskService {
     this.env = env ?? ExoMindEnvironment.getInstance()
   }
 
-  listTasks(includeAbandoned = false) {
-    return this.env.task.listTasks(includeAbandoned)
+  listTasks(includeCancelled = false) {
+    return this.env.task.listTasks(includeCancelled)
   }
 
   getTask(id: string) {
@@ -66,8 +66,8 @@ export class TaskServiceImpl implements TaskService {
     return updated
   }
 
-  async abandonTask(id: string) {
-    const task = await this.env.task.abandonTask(id)
+  async cancelTask(id: string) {
+    const task = await this.env.task.cancelTask(id)
     if (task) {
       this.notifyChangeListeners()
     }
@@ -148,7 +148,7 @@ export class TaskServiceImpl implements TaskService {
 
       if (dep.type === 'hard' && depTask.status !== 'completed') {
         blocking.push({ taskId: dep.taskId, type: dep.type, status: depTask.status })
-      } else if (dep.type === 'soft' && depTask.status === 'not_started') {
+      } else if (dep.type === 'soft' && depTask.status === 'pending') {
         blocking.push({ taskId: dep.taskId, type: dep.type, status: depTask.status })
       }
     }

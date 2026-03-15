@@ -81,7 +81,7 @@ impl TaskStore {
             title: input.title,
             description: input.description,
             done_condition: input.done_condition,
-            status: TaskStatus::NotStarted,
+            status: TaskStatus::Pending,
             priority: input.priority.unwrap_or_default(),
             tags: input.tags,
             source: input.source,
@@ -165,7 +165,12 @@ impl TaskStore {
         self.update_scoped(None, id, input)
     }
 
-    pub fn update_scoped(&self, scope_key: Option<&str>, id: &str, input: UpdateTaskInput) -> Result<Task, TaskStoreError> {
+    pub fn update_scoped(
+        &self,
+        scope_key: Option<&str>,
+        id: &str,
+        input: UpdateTaskInput,
+    ) -> Result<Task, TaskStoreError> {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
             return store.update_scoped(normalize_scope_key(scope_key), id, input);
         }
@@ -259,16 +264,16 @@ impl TaskStore {
         })
     }
 
-    /// Abandon a task (set status to Abandoned). Convenience for DELETE endpoint.
-    pub fn abandon(&self, id: &str) -> Result<Task, TaskStoreError> {
-        self.abandon_scoped(None, id)
+    /// Cancel a task (set status to Cancelled). Used by the HTTP cancel endpoint.
+    pub fn cancel(&self, id: &str) -> Result<Task, TaskStoreError> {
+        self.cancel_scoped(None, id)
     }
 
-    pub fn abandon_scoped(&self, scope_key: Option<&str>, id: &str) -> Result<Task, TaskStoreError> {
+    pub fn cancel_scoped(&self, scope_key: Option<&str>, id: &str) -> Result<Task, TaskStoreError> {
         if let TaskStoreBackend::Sqlite(store) = &self.backend {
-            return store.abandon_scoped(normalize_scope_key(scope_key), id);
+            return store.cancel_scoped(normalize_scope_key(scope_key), id);
         }
-        let (_, task) = self.transition_scoped(scope_key, id, TaskStatus::Abandoned)?;
+        let (_, task) = self.transition_scoped(scope_key, id, TaskStatus::Cancelled)?;
         Ok(task)
     }
 
@@ -279,7 +284,9 @@ impl TaskStore {
 
     pub fn remove_scoped(&self, scope_key: Option<&str>, id: &str) -> Option<Task> {
         match &self.backend {
-            TaskStoreBackend::Memory(_) => self.with_memory_scope_mut(scope_key, |tasks| tasks.remove(id)),
+            TaskStoreBackend::Memory(_) => {
+                self.with_memory_scope_mut(scope_key, |tasks| tasks.remove(id))
+            }
             TaskStoreBackend::Sqlite(store) => store
                 .remove_scoped(normalize_scope_key(scope_key), id)
                 .expect("sqlite task removal should succeed"),
@@ -303,7 +310,11 @@ impl TaskStore {
         self.upsert_scoped(None, task)
     }
 
-    pub fn upsert_scoped(&self, scope_key: Option<&str>, task: Task) -> Result<Task, TaskStoreError> {
+    pub fn upsert_scoped(
+        &self,
+        scope_key: Option<&str>,
+        task: Task,
+    ) -> Result<Task, TaskStoreError> {
         match &self.backend {
             TaskStoreBackend::Memory(_) => {
                 self.with_memory_scope_mut(scope_key, |tasks| {
@@ -322,7 +333,11 @@ impl TaskStore {
         self.replace_all_scoped(None, tasks)
     }
 
-    pub fn replace_all_scoped(&self, scope_key: Option<&str>, tasks: &[Task]) -> Result<(), TaskStoreError> {
+    pub fn replace_all_scoped(
+        &self,
+        scope_key: Option<&str>,
+        tasks: &[Task],
+    ) -> Result<(), TaskStoreError> {
         match &self.backend {
             TaskStoreBackend::Memory(_) => {
                 self.with_memory_scope_mut(scope_key, |guard| {
@@ -362,7 +377,9 @@ impl TaskStore {
                 .get(normalized_scope)
                 .cloned()
                 .unwrap_or_default(),
-            TaskStoreBackend::Sqlite(_) => unreachable!("memory-only helper used on sqlite backend"),
+            TaskStoreBackend::Sqlite(_) => {
+                unreachable!("memory-only helper used on sqlite backend")
+            }
         }
     }
 
@@ -378,7 +395,9 @@ impl TaskStore {
                 let scope_tasks = guard.entry(normalized_scope).or_default();
                 f(scope_tasks)
             }
-            TaskStoreBackend::Sqlite(_) => unreachable!("memory-only helper used on sqlite backend"),
+            TaskStoreBackend::Sqlite(_) => {
+                unreachable!("memory-only helper used on sqlite backend")
+            }
         }
     }
 }
@@ -386,6 +405,7 @@ impl TaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
     use tempfile::tempdir;
 
     fn make_store() -> TaskStore {
@@ -418,9 +438,68 @@ mod tests {
         drop(store);
 
         let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
-        let loaded = reopened.get(&created.id).expect("task should persist in sqlite");
+        let loaded = reopened
+            .get(&created.id)
+            .expect("task should persist in sqlite");
         assert_eq!(loaded.title, "Persist me");
         assert_eq!(reopened.len(), 1);
+    }
+
+    #[test]
+    fn sqlite_store_migrates_legacy_status_values_on_open() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let legacy_pending = store.create(create_input("Legacy pending"));
+        let legacy_cancelled = store.create(create_input("Legacy cancelled"));
+        store
+            .transition(&legacy_cancelled.id, TaskStatus::InProgress)
+            .unwrap();
+        store.cancel(&legacy_cancelled.id).unwrap();
+        drop(store);
+
+        {
+            let conn = Connection::open(&sqlite_path).unwrap();
+            conn.execute(
+                "UPDATE tasks SET status = 'not_started' WHERE id = ?1",
+                [&legacy_pending.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE tasks SET status = 'abandoned' WHERE id = ?1",
+                [&legacy_cancelled.id],
+            )
+            .unwrap();
+        }
+
+        let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        assert_eq!(
+            reopened.get(&legacy_pending.id).unwrap().status,
+            TaskStatus::Pending
+        );
+        assert_eq!(
+            reopened.get(&legacy_cancelled.id).unwrap().status,
+            TaskStatus::Cancelled
+        );
+
+        let conn = Connection::open(&sqlite_path).unwrap();
+        let pending_status: String = conn
+            .query_row(
+                "SELECT status FROM tasks WHERE id = ?1",
+                [&legacy_pending.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let cancelled_status: String = conn
+            .query_row(
+                "SELECT status FROM tasks WHERE id = ?1",
+                [&legacy_cancelled.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending_status, "pending");
+        assert_eq!(cancelled_status, "cancelled");
     }
 
     #[test]
@@ -491,12 +570,17 @@ mod tests {
         drop(store);
 
         let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
-        let loaded = reopened.get(&created.id).expect("extended task should persist");
+        let loaded = reopened
+            .get(&created.id)
+            .expect("extended task should persist");
         assert_eq!(loaded.done_condition.as_deref(), Some("ship RT sqlite"));
         assert_eq!(loaded.depends_on.len(), 1);
         assert_eq!(loaded.depends_on[0].task_id, "dep-1");
         assert_eq!(loaded.depends_on[0].relation_type, TaskDependencyType::Hard);
-        assert_eq!(loaded.time_block_ids, vec!["block-1".to_string(), "block-2".to_string()]);
+        assert_eq!(
+            loaded.time_block_ids,
+            vec!["block-1".to_string(), "block-2".to_string()]
+        );
     }
 
     #[test]
@@ -504,7 +588,7 @@ mod tests {
         let store = make_store();
         let task = store.create(create_input("Buy milk"));
         assert_eq!(task.title, "Buy milk");
-        assert_eq!(task.status, TaskStatus::NotStarted);
+        assert_eq!(task.status, TaskStatus::Pending);
         assert_eq!(task.priority, TaskPriority::Medium);
 
         let fetched = store.get(&task.id).unwrap();
@@ -537,8 +621,8 @@ mod tests {
         assert_eq!(in_progress.len(), 1);
         assert_eq!(in_progress[0].id, t1.id);
 
-        let not_started = store.list_by_status(&TaskStatus::NotStarted);
-        assert_eq!(not_started.len(), 1);
+        let pending = store.list_by_status(&TaskStatus::Pending);
+        assert_eq!(pending.len(), 1);
     }
 
     #[test]
@@ -624,7 +708,7 @@ mod tests {
         let task = store.create(create_input("My task"));
 
         let (old, updated) = store.transition(&task.id, TaskStatus::InProgress).unwrap();
-        assert_eq!(old, TaskStatus::NotStarted);
+        assert_eq!(old, TaskStatus::Pending);
         assert_eq!(updated.status, TaskStatus::InProgress);
         assert!(updated.completed_at.is_none());
 
@@ -647,14 +731,14 @@ mod tests {
     }
 
     #[test]
-    fn abandon() {
+    fn cancel() {
         let store = make_store();
         let task = store.create(create_input("Task"));
         store.transition(&task.id, TaskStatus::InProgress).unwrap();
 
-        let abandoned = store.abandon(&task.id).unwrap();
-        assert_eq!(abandoned.status, TaskStatus::Abandoned);
-        assert!(abandoned.completed_at.is_some());
+        let cancelled = store.cancel(&task.id).unwrap();
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+        assert!(cancelled.completed_at.is_some());
     }
 
     #[test]

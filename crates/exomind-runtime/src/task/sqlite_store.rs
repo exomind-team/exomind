@@ -1,10 +1,12 @@
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
-use rusqlite::{Connection, OptionalExtension, params};
+use rusqlite::{params, Connection, OptionalExtension};
 
 use super::store::TaskStoreError;
-use super::types::{CreateTaskInput, Task, TaskDependency, TaskPriority, TaskStatus, UpdateTaskInput};
+use super::types::{
+    CreateTaskInput, Task, TaskDependency, TaskPriority, TaskStatus, UpdateTaskInput,
+};
 
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
 
@@ -36,14 +38,18 @@ impl SqliteTaskStore {
         self.create_scoped(DEFAULT_SCOPE_KEY, input)
     }
 
-    pub fn create_scoped(&self, scope_key: &str, input: CreateTaskInput) -> Result<Task, TaskStoreError> {
+    pub fn create_scoped(
+        &self,
+        scope_key: &str,
+        input: CreateTaskInput,
+    ) -> Result<Task, TaskStoreError> {
         let now = chrono::Utc::now().timestamp_millis() as u64;
         let task = Task {
             id: uuid::Uuid::new_v4().to_string(),
             title: input.title,
             description: input.description,
             done_condition: input.done_condition,
-            status: TaskStatus::NotStarted,
+            status: TaskStatus::Pending,
             priority: input.priority.unwrap_or_default(),
             tags: input.tags,
             source: input.source,
@@ -98,14 +104,19 @@ impl SqliteTaskStore {
              ORDER BY created_at DESC, id DESC",
         )?;
         let rows = statement.query_map(params![normalize_scope_key(scope_key)], map_task_row)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(TaskStoreError::from)
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(TaskStoreError::from)
     }
 
     pub fn list_by_status(&self, status: &TaskStatus) -> Result<Vec<Task>, TaskStoreError> {
         self.list_by_status_scoped(DEFAULT_SCOPE_KEY, status)
     }
 
-    pub fn list_by_status_scoped(&self, scope_key: &str, status: &TaskStatus) -> Result<Vec<Task>, TaskStoreError> {
+    pub fn list_by_status_scoped(
+        &self,
+        scope_key: &str,
+        status: &TaskStatus,
+    ) -> Result<Vec<Task>, TaskStoreError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
             "SELECT
@@ -116,15 +127,24 @@ impl SqliteTaskStore {
              WHERE scope_key = ?1 AND status = ?2
              ORDER BY created_at DESC, id DESC",
         )?;
-        let rows = statement.query_map(params![normalize_scope_key(scope_key), task_status_to_db(status)], map_task_row)?;
-        rows.collect::<Result<Vec<_>, _>>().map_err(TaskStoreError::from)
+        let rows = statement.query_map(
+            params![normalize_scope_key(scope_key), task_status_to_db(status)],
+            map_task_row,
+        )?;
+        rows.collect::<Result<Vec<_>, _>>()
+            .map_err(TaskStoreError::from)
     }
 
     pub fn update(&self, id: &str, input: UpdateTaskInput) -> Result<Task, TaskStoreError> {
         self.update_scoped(DEFAULT_SCOPE_KEY, id, input)
     }
 
-    pub fn update_scoped(&self, scope_key: &str, id: &str, input: UpdateTaskInput) -> Result<Task, TaskStoreError> {
+    pub fn update_scoped(
+        &self,
+        scope_key: &str,
+        id: &str,
+        input: UpdateTaskInput,
+    ) -> Result<Task, TaskStoreError> {
         let mut task = self
             .get_scoped(scope_key, id)?
             .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
@@ -204,12 +224,12 @@ impl SqliteTaskStore {
         Ok((old_status, task))
     }
 
-    pub fn abandon(&self, id: &str) -> Result<Task, TaskStoreError> {
-        self.abandon_scoped(DEFAULT_SCOPE_KEY, id)
+    pub fn cancel(&self, id: &str) -> Result<Task, TaskStoreError> {
+        self.cancel_scoped(DEFAULT_SCOPE_KEY, id)
     }
 
-    pub fn abandon_scoped(&self, scope_key: &str, id: &str) -> Result<Task, TaskStoreError> {
-        let (_, task) = self.transition_scoped(scope_key, id, TaskStatus::Abandoned)?;
+    pub fn cancel_scoped(&self, scope_key: &str, id: &str) -> Result<Task, TaskStoreError> {
+        let (_, task) = self.transition_scoped(scope_key, id, TaskStatus::Cancelled)?;
         Ok(task)
     }
 
@@ -300,7 +320,11 @@ impl SqliteTaskStore {
         self.replace_all_scoped(DEFAULT_SCOPE_KEY, tasks)
     }
 
-    pub fn replace_all_scoped(&self, scope_key: &str, tasks: &[Task]) -> Result<(), TaskStoreError> {
+    pub fn replace_all_scoped(
+        &self,
+        scope_key: &str,
+        tasks: &[Task],
+    ) -> Result<(), TaskStoreError> {
         let mut connection = self.connection();
         let tx = connection.transaction()?;
         tx.execute(
@@ -392,6 +416,17 @@ impl SqliteTaskStore {
                 PRIMARY KEY (scope_key, id)
             );",
         )?;
+
+        // Stage-2 wire format migration:
+        // normalize stored status values to canonical strings.
+        connection.execute(
+            "UPDATE tasks SET status = 'pending' WHERE status = 'not_started'",
+            [],
+        )?;
+        connection.execute(
+            "UPDATE tasks SET status = 'cancelled' WHERE status = 'abandoned'",
+            [],
+        )?;
         Ok(())
     }
 
@@ -472,21 +507,21 @@ fn map_task_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<Task> {
 
 fn task_status_to_db(status: &TaskStatus) -> &'static str {
     match status {
-        TaskStatus::NotStarted => "not_started",
+        TaskStatus::Pending => "pending",
         TaskStatus::InProgress => "in_progress",
         TaskStatus::Suspended => "suspended",
         TaskStatus::Completed => "completed",
-        TaskStatus::Abandoned => "abandoned",
+        TaskStatus::Cancelled => "cancelled",
     }
 }
 
 fn parse_task_status(value: &str) -> Result<TaskStatus, TaskStoreError> {
     match value {
-        "not_started" => Ok(TaskStatus::NotStarted),
+        "pending" | "not_started" => Ok(TaskStatus::Pending),
         "in_progress" => Ok(TaskStatus::InProgress),
         "suspended" => Ok(TaskStatus::Suspended),
         "completed" => Ok(TaskStatus::Completed),
-        "abandoned" => Ok(TaskStatus::Abandoned),
+        "cancelled" | "abandoned" => Ok(TaskStatus::Cancelled),
         _ => Err(TaskStoreError::InvalidStoredStatus(value.to_string())),
     }
 }
@@ -509,27 +544,15 @@ fn parse_task_priority(value: &str) -> Result<TaskPriority, TaskStoreError> {
 }
 
 fn map_task_status_error(error: TaskStoreError) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        0,
-        rusqlite::types::Type::Text,
-        Box::new(error),
-    )
+    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
 }
 
 fn map_task_priority_error(error: TaskStoreError) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        0,
-        rusqlite::types::Type::Text,
-        Box::new(error),
-    )
+    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
 }
 
 fn map_json_error(error: serde_json::Error) -> rusqlite::Error {
-    rusqlite::Error::FromSqlConversionFailure(
-        0,
-        rusqlite::types::Type::Text,
-        Box::new(error),
-    )
+    rusqlite::Error::FromSqlConversionFailure(0, rusqlite::types::Type::Text, Box::new(error))
 }
 
 fn insert_task_in_transaction(

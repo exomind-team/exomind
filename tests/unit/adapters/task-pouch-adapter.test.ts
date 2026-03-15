@@ -1,4 +1,4 @@
-/**
+﻿/**
  * TaskPouchAdapter 单元测试
  *
  * 通过 ITaskPort 接口测试 PouchDB 适配器。
@@ -30,30 +30,30 @@ describe('TaskPouchAdapter (ITaskPort)', () => {
     const task = await adapter.createTask({ title: '新任务' });
     expect(task.id).toBeDefined();
     expect(task.title).toBe('新任务');
-    expect(task.status).toBe('not_started');
+    expect(task.status).toBe('pending');
     expect(task.priority).toBe('medium');
     expect(task.dependsOn).toEqual([]);
     expect(task.tags).toEqual([]);
   });
 
-  it('listTasks excludes abandoned by default', async () => {
+  it('listTasks excludes cancelled by default', async () => {
     const t1 = await adapter.createTask({ title: 't1' });
     await adapter.createTask({ title: 't2' });
 
-    // Transition t1 to in_progress then abandoned
+    // Transition t1 to in_progress then cancelled
     await adapter.transitionTask(t1.id, 'in_progress');
-    await adapter.transitionTask(t1.id, 'abandoned');
+    await adapter.transitionTask(t1.id, 'cancelled');
 
     const tasks = await adapter.listTasks();
-    expect(tasks.every((t) => t.status !== 'abandoned')).toBe(true);
+    expect(tasks.every((t) => t.status !== 'cancelled')).toBe(true);
     expect(tasks).toHaveLength(1);
   });
 
-  it('listTasks with includeAbandoned=true returns all', async () => {
+  it('listTasks with includeCancelled=true returns all', async () => {
     const t1 = await adapter.createTask({ title: 't1' });
     await adapter.createTask({ title: 't2' });
     await adapter.transitionTask(t1.id, 'in_progress');
-    await adapter.transitionTask(t1.id, 'abandoned');
+    await adapter.transitionTask(t1.id, 'cancelled');
 
     const tasks = await adapter.listTasks(true);
     expect(tasks).toHaveLength(2);
@@ -84,7 +84,7 @@ describe('TaskPouchAdapter (ITaskPort)', () => {
 
   it('transitionTask changes status via state machine', async () => {
     const task = await adapter.createTask({ title: '状态转换' });
-    expect(task.status).toBe('not_started');
+    expect(task.status).toBe('pending');
 
     const inProgress = await adapter.transitionTask(task.id, 'in_progress');
     expect(inProgress!.status).toBe('in_progress');
@@ -96,20 +96,20 @@ describe('TaskPouchAdapter (ITaskPort)', () => {
 
   it('transitionTask throws on invalid transition', async () => {
     const task = await adapter.createTask({ title: '非法转换' });
-    // not_started -> completed is invalid
+    // pending -> completed is invalid
     await expect(adapter.transitionTask(task.id, 'completed')).rejects.toThrow();
   });
 
-  it('abandonTask sets status to abandoned with completedAt', async () => {
-    const task = await adapter.createTask({ title: '放弃测试' });
+  it('cancelTask sets status to cancelled with completedAt', async () => {
+    const task = await adapter.createTask({ title: '取消测试' });
     await adapter.transitionTask(task.id, 'in_progress');
-    const abandoned = await adapter.abandonTask(task.id);
-    expect(abandoned!.status).toBe('abandoned');
-    expect(abandoned!.completedAt).toBeDefined();
+    const cancelled = await adapter.cancelTask(task.id);
+    expect(cancelled!.status).toBe('cancelled');
+    expect(cancelled!.completedAt).toBeDefined();
   });
 
-  it('abandonTask returns null for missing', async () => {
-    expect(await adapter.abandonTask('nope')).toBeNull();
+  it('cancelTask returns null for missing', async () => {
+    expect(await adapter.cancelTask('nope')).toBeNull();
   });
 
   it('getAvailableTransitions returns valid next states', async () => {
@@ -121,7 +121,7 @@ describe('TaskPouchAdapter (ITaskPort)', () => {
     const next = await adapter.getAvailableTransitions(task.id);
     expect(next).toContain('suspended');
     expect(next).toContain('completed');
-    expect(next).toContain('abandoned');
+    expect(next).toContain('cancelled');
   });
 
   it('getAvailableTransitions returns empty for missing', async () => {

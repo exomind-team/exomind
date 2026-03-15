@@ -1,4 +1,4 @@
-import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
+﻿import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
 export type TimeblockBadgeTone = 'neutral' | 'success' | 'warning' | 'danger';
@@ -96,11 +96,11 @@ export interface BuildTaskTimeblockDetailViewModelInput {
 }
 
 const STATUS_BADGE_LABEL: Record<TaskNode['status'], string> = {
-  not_started: '未开始',
+  pending: '待办',
   in_progress: '进行中',
   suspended: '已挂起',
   completed: '已完成',
-  abandoned: '已放弃',
+  cancelled: '已取消',
 };
 
 function formatClock(timestamp: number): string {
@@ -390,7 +390,7 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
   const scheduleBadge = resolveScheduleBadge(input.task.estimatedMinutes, actualMinutes);
   const statusBadge: TimeblockBadge = {
     label: STATUS_BADGE_LABEL[input.task.status],
-    tone: input.task.status === 'completed' ? 'success' : input.task.status === 'abandoned' ? 'danger' : 'neutral',
+    tone: input.task.status === 'completed' ? 'success' : input.task.status === 'cancelled' ? 'danger' : 'neutral',
   };
   const aiSummary = buildAiSummary(block.name, input.reviewMarkdown);
   const timeline = useMockData

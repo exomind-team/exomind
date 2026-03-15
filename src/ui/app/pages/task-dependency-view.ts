@@ -1,4 +1,4 @@
-import type { TaskNode, TaskStatus } from '@/lib/types/task';
+﻿import type { TaskNode, TaskStatus } from '@/lib/types/task';
 
 type DependencyType = 'soft' | 'hard';
 type DependencyAction = 'load' | 'add' | 'update' | 'remove';
@@ -27,11 +27,11 @@ export interface TaskDependencyViewModel {
 }
 
 const STATUS_LABELS: Record<TaskStatus, string> = {
-  not_started: '未开始',
+  pending: '待办',
   in_progress: '进行中',
   suspended: '已挂起',
   completed: '已完成',
-  abandoned: '已放弃',
+  cancelled: '已取消',
 };
 
 const TYPE_LABELS: Record<DependencyType, string> = {
@@ -110,8 +110,8 @@ export function buildTaskDependencyView(task: TaskNode, allTasks: TaskNode[]): T
     candidates: allTasks
       .filter((candidate) => candidate.id !== task.id && !existingDependencyIds.has(candidate.id))
       .map((candidate) => {
-        const disabledReason = candidate.status === 'abandoned'
-          ? '任务已放弃'
+        const disabledReason = candidate.status === 'cancelled'
+          ? '任务已取消'
           : wouldCreateDependencyCycle(task.id, candidate.id, taskMap)
             ? '会形成循环依赖'
             : undefined;

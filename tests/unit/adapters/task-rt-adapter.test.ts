@@ -31,7 +31,7 @@ describe('TaskRtAdapter（RT 任务适配器）', () => {
           title: 'RT Task',
           description: 'from runtime',
           done_condition: 'ship feature',
-          status: 'not_started',
+          status: 'pending',
           priority: 'high',
           tags: ['rt'],
           source: 'runtime:test',
@@ -60,7 +60,7 @@ describe('TaskRtAdapter（RT 任务适配器）', () => {
         title: 'RT Task',
         description: 'from runtime',
         doneCondition: 'ship feature',
-        status: 'not_started',
+        status: 'pending',
         priority: 'high',
         tags: ['rt'],
         source: 'runtime:test',
@@ -89,7 +89,7 @@ describe('TaskRtAdapter（RT 任务适配器）', () => {
         title: 'Updated Task',
         description: 'from runtime',
         done_condition: 'ship feature',
-        status: 'not_started',
+        status: 'pending',
         priority: 'medium',
         tags: ['rt'],
         source: 'runtime:test',
@@ -127,5 +127,39 @@ describe('TaskRtAdapter（RT 任务适配器）', () => {
       time_block_ids: ['block-1', 'block-2'],
       estimated_minutes: 25,
     });
+  });
+
+  it('uses the cancel endpoint and normalizes legacy runtime status aliases', async () => {
+    const profileId = activateProfileScope();
+    const fetchImpl = vi.fn(async () => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        id: 'task-2',
+        title: 'Cancelled Task',
+        status: 'abandoned',
+        priority: 'medium',
+        tags: [],
+        depends_on: [],
+        time_block_ids: [],
+        created_at: 1700000000100,
+        updated_at: 1700000000200,
+        completed_at: 1700000000200,
+      }),
+    }));
+
+    const adapter = new TaskRtAdapter({
+      fetchImpl,
+      resolveTarget: () => ({ mode: 'embedded', host: '127.0.0.1', port: 9124 }),
+    });
+
+    const task = await adapter.cancelTask('task-2');
+
+    expect(task?.status).toBe('cancelled');
+    const [requestUrl, requestInit] = fetchImpl.mock.calls[0] as [string, RequestInit];
+    const url = new URL(requestUrl);
+    expect(`${url.origin}${url.pathname}`).toBe('http://127.0.0.1:9124/tasks/task-2/cancel');
+    expect(url.searchParams.get('user_id')).toBe(profileId);
+    expect(requestInit?.method).toBe('POST');
   });
 });

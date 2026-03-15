@@ -27,12 +27,12 @@ export interface UpdateTaskInput {
 }
 
 export interface ITaskPort {
-  listTasks(includeAbandoned?: boolean): Promise<TaskNode[]>
+  listTasks(includeCancelled?: boolean): Promise<TaskNode[]>
   getTaskById(id: string): Promise<TaskNode | null>
   createTask(input: CreateTaskInput): Promise<TaskNode>
   updateTask(id: string, input: UpdateTaskInput): Promise<TaskNode | null>
-  // 行为语义：删除=放弃 / 不变量：不可删除原则
-  abandonTask(id: string): Promise<TaskNode | null>
+  // 行为语义：删除=取消 / 不变量：不可删除原则
+  cancelTask(id: string): Promise<TaskNode | null>
   transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null>
   getAvailableTransitions(id: string): Promise<TaskStatus[]>
 }

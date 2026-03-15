@@ -12,7 +12,7 @@ import { getTaskStorage } from '@/lib/storage/task-storage';
 import { getCurrentUserId } from '@/lib/storage/event-storage';
 import { createUuidV4 } from '@/lib/utils/uuid';
 
-const ALL_STATUSES: TaskStatus[] = ['not_started', 'in_progress', 'suspended', 'completed', 'abandoned'];
+const ALL_STATUSES: TaskStatus[] = ['pending', 'in_progress', 'suspended', 'completed', 'cancelled'];
 
 export class TaskPouchAdapter implements ITaskPort {
   constructor(private readonly userId?: string) {}
@@ -21,9 +21,9 @@ export class TaskPouchAdapter implements ITaskPort {
     return getTaskStorage(this.userId || getCurrentUserId());
   }
 
-  async listTasks(includeAbandoned = false): Promise<TaskNode[]> {
+  async listTasks(includeCancelled = false): Promise<TaskNode[]> {
     const tasks = await this.storage.getTasks();
-    return includeAbandoned ? tasks : tasks.filter((t) => t.status !== 'abandoned');
+    return includeCancelled ? tasks : tasks.filter((t) => t.status !== 'cancelled');
   }
 
   async getTaskById(id: string): Promise<TaskNode | null> {
@@ -38,7 +38,7 @@ export class TaskPouchAdapter implements ITaskPort {
       title: input.title.trim(),
       description: input.description,
       doneCondition: input.doneCondition,
-      status: 'not_started',
+      status: 'pending',
       priority: input.priority ?? 'medium',
       dueAt: input.dueAt,
       source: input.source,
@@ -58,16 +58,16 @@ export class TaskPouchAdapter implements ITaskPort {
     return result ?? null;
   }
 
-  async abandonTask(id: string): Promise<TaskNode | null> {
+  async cancelTask(id: string): Promise<TaskNode | null> {
     const task = await this.storage.getTask(id);
     if (!task) return null;
-    const abandoned = transition(task, 'abandoned');
+    const cancelled = transition(task, 'cancelled');
     await this.storage.updateTask(id, {
-      status: abandoned.status,
-      updatedAt: abandoned.updatedAt,
-      completedAt: abandoned.completedAt,
+      status: cancelled.status,
+      updatedAt: cancelled.updatedAt,
+      completedAt: cancelled.completedAt,
     });
-    return abandoned;
+    return cancelled;
   }
 
   async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {

@@ -1,4 +1,4 @@
-import type { TaskNode } from '@/lib/types/task'
+﻿import type { TaskNode } from '@/lib/types/task'
 
 export interface TaskGraphNode {
   id: string
@@ -39,7 +39,7 @@ function compareTasksForGraphOrder(left: TaskNode, right: TaskNode): number {
 }
 
 function isTerminalStatus(status: TaskNode['status']): boolean {
-  return status === 'completed' || status === 'abandoned'
+  return status === 'completed' || status === 'cancelled'
 }
 
 function isDependencyBlocking(task: TaskNode, taskById: Map<string, TaskNode>): boolean {
@@ -57,12 +57,12 @@ function isDependencyBlocking(task: TaskNode, taskById: Map<string, TaskNode>): 
       return predecessor.status !== 'completed'
     }
 
-    return predecessor.status === 'not_started'
+    return predecessor.status === 'pending'
   })
 }
 
 function isTaskExecutable(task: TaskNode, taskById: Map<string, TaskNode>): boolean {
-  if (task.status !== 'not_started') {
+  if (task.status !== 'pending') {
     return false
   }
 

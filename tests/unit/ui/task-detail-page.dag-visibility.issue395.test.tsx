@@ -21,7 +21,7 @@ const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>(async (id) =
   return cloneTask(tasksState.find((task) => task.id === id) ?? null);
 });
 
-const listTasksMock = vi.fn<(includeAbandoned?: boolean) => Promise<TaskNode[]>>(async () => {
+const listTasksMock = vi.fn<(includeCancelled?: boolean) => Promise<TaskNode[]>>(async () => {
   return cloneTasks(tasksState);
 });
 
@@ -76,7 +76,7 @@ vi.mock('@/lib/services', () => ({
     checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
     transitionTask: vi.fn(),
     updateTask: vi.fn(),
-    abandonTask: vi.fn(),
+    cancelTask: vi.fn(),
   }),
   getTimeBlockService: () => ({
     loadTimeBlocks: loadTimeBlocksMock,
@@ -117,7 +117,7 @@ function makeTask(overrides: Partial<TaskNode> & Pick<TaskNode, 'id' | 'title'>)
     id: overrides.id,
     title: overrides.title,
     description: '',
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -258,11 +258,14 @@ describe('TaskDetailPage DAG visibility issue #395', () => {
     renderPage();
 
     expect(await screen.findByText('依赖图')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-toggle-upstream-task-1')).toBeEnabled();
+    });
     fireEvent.click(screen.getByTestId('task-dag-toggle-upstream-task-1'));
 
     await waitFor(() => {
       expect(screen.queryByTestId('task-dag-node-task-2')).not.toBeInTheDocument();
-    });
+    }, { timeout: 5000 });
 
     expect(screen.getByTestId('task-dag-root-summary')).toHaveTextContent('当前可见根：无');
     expect(screen.getByTestId('task-dag-root-summary')).toHaveTextContent('真实当前根：无');

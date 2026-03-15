@@ -1,9 +1,9 @@
-/**
+﻿/**
  * Phase4 (#337) 任务↔时间块 1:N 计时关联 单元测试
  *
  * 覆盖 TaskTimerServiceImpl：
  * - startBlockForTask 创建时间块并关联到任务
- * - startBlockForTask 自动将 not_started 转为 in_progress
+ * - startBlockForTask 自动将 pending 转为 in_progress
  * - onBlockEndForTask 追加 blockId 到 timeBlockIds
  * - getBlockIdsForTask 返回已关联的时间块列表
  * - calculateSpentMinutes 正确累计
@@ -24,7 +24,7 @@ function makeTask(overrides: Partial<TaskNode> = {}): TaskNode {
   return {
     id: 'task-1',
     title: 'Test Task',
-    status: 'not_started',
+    status: 'pending',
     priority: 'medium',
     dependsOn: [],
     tags: [],
@@ -79,7 +79,7 @@ function createMockTaskService(tasks: Map<string, TaskNode>): TaskService {
       tasks.set(id, updated)
       return updated
     }),
-    abandonTask: vi.fn(async () => null),
+    cancelTask: vi.fn(async () => null),
     transitionTask: vi.fn(async (id: string, to) => {
       const t = tasks.get(id)
       if (!t) return null
@@ -134,8 +134,8 @@ describe('TaskTimerService: startBlockForTask', () => {
     })
   })
 
-  it('auto-transitions not_started to in_progress', async () => {
-    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'not_started' })]])
+  it('auto-transitions pending to in_progress', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'pending' })]])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
@@ -177,8 +177,8 @@ describe('TaskTimerService: startBlockForTask', () => {
     expect(tbSvc.startBlock).not.toHaveBeenCalled()
   })
 
-  it('returns null for abandoned task', async () => {
-    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'abandoned' })]])
+  it('returns null for cancelled task', async () => {
+    const tasks = new Map([['t1', makeTask({ id: 't1', status: 'cancelled' })]])
     const taskSvc = createMockTaskService(tasks)
     const tbSvc = createMockTBService()
     const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
