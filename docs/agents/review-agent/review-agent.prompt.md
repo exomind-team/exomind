@@ -13,7 +13,7 @@
    - 优先遵循输出里的 `referencesMustRead`
    - 若 `action = discovery`，继续执行 discovery 子流程
    - 若 `action = review`，继续执行 review 子流程
-   - 若 `action = idle-wait`，按 `sleepSeconds` 等待后再从本 prompt 顶部重新开始
+   - 若 `action = idle-wait`，**必须**在前台执行 `sleep <sleepSeconds>` 并等待结束后再从本 prompt 顶部重新开始；不得只输出“等待”字样
 4. 只有在当前动作真的需要时，才继续读取详细协议文档：
    - discovery：读取 `docs/agents/review-agent/discovery-loop.md`
    - review：读取 `docs/agents/review-agent/review-loop.md`
