@@ -13,7 +13,11 @@
    - 优先遵循输出里的 `referencesMustRead`
    - 若 `action = discovery`，继续执行 discovery 子流程
    - 若 `action = review`，继续执行 review 子流程
-   - 若 `action = idle-wait`，**必须**在前台执行 `sleep <sleepSeconds>` 并等待结束后再从本 prompt 顶部重新开始；不得只输出“等待”字样
+   - 若 `action = idle-wait`，**必须**在前台执行等待命令并等待结束后再从本 prompt 顶部重新开始；不得只输出“等待”字样
+     - 优先：`sleep <sleepSeconds>`
+     - 若 `sleep` 不可用：在 Windows 上改用 `timeout /t <sleepSeconds> /nobreak`
+     - 若仍不可用：尝试 `powershell -Command "Start-Sleep -Seconds <sleepSeconds>"`
+     - 若全部不可用：必须明确报告无法执行等待命令的原因与环境限制
 4. 只有在当前动作真的需要时，才继续读取详细协议文档：
    - discovery：读取 `docs/agents/review-agent/discovery-loop.md`
    - review：读取 `docs/agents/review-agent/review-loop.md`
