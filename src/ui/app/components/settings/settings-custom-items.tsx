@@ -54,6 +54,7 @@ import { importTasksFromFile } from '@/services/impl/settings-data-service';
 import {
   EMBEDDED_RUNTIME_STATUS_STORAGE_KEY,
   getSelectedRuntimeTarget,
+  isTauriWindow,
   toRuntimeBaseUrl,
 } from '@/config/runtime-target';
 import {
@@ -956,11 +957,6 @@ const DATA_TRANSFER_FORMAT_OPTIONS: Array<{ value: DataTransferFormat; label: st
   { value: 'sqlite', label: 'SQLite', description: '保留本地域快照，适合完整迁移或恢复。' },
 ];
 
-function isTauriRuntimeWindow(): boolean {
-  if (typeof window === 'undefined') return false;
-  return '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
-}
-
 function downloadFileFallback(content: BlobPart, mimeType: string, filename: string) {
   const blob = new Blob([content], { type: mimeType });
   const url = URL.createObjectURL(blob);
@@ -1062,7 +1058,7 @@ export function DataTransferSetting(_props: { ctx: SettingsContext }) {
     : domain === 'eventlog' ? eventlogBackendStatus
     : domain === 'task' ? taskBackendStatus
     : timeblockBackendStatus;
-  const isRuntimeUnsupported = !isTauriRuntimeWindow();
+  const isRuntimeUnsupported = !isTauriWindow();
   const isLegacyMode = selectedDomainBackendMode === 'legacy';
   const isAllSqliteUnsupported = domain === 'all' && format === 'sqlite';
   const isDisabled = isRuntimeUnsupported || isLegacyMode || isAllSqliteUnsupported || (

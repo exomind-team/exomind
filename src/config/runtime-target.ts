@@ -92,12 +92,12 @@ function readEmbeddedRuntimeStatus(): EmbeddedRuntimeStatusSnapshot | null {
   }
 }
 
-function isTauriWindow(): boolean {
+export function isTauriWindow(): boolean {
   if (typeof window === 'undefined') {
     return false;
   }
 
-  return '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
+  return '__TAURI_INTERNALS__' in window;
 }
 
 function resolveEmbeddedHost(): string {

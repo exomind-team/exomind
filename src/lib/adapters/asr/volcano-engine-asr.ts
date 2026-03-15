@@ -24,6 +24,7 @@
 import type { IASRPort, ASRInput, ASRResult, ASRPartialResult } from '../../environment/interfaces/asr.port';
 import { createUuidV4 } from '../../utils/uuid';
 import { log } from '@/lib/logger';
+import { isTauriWindow } from '@/config/runtime-target';
 
 // ========== 配置 ==========
 
@@ -214,7 +215,7 @@ export class VolcanoEngineASRAdapter implements IASRPort {
     log.info('[ASR-Volcano] 准备连接 WebSocket...');
 
     // 检查是否为 Tauri 环境（可以使用原生 HTTP）
-    const isTauri = !!(window as any).__TAURI__;
+    const isTauri = isTauriWindow();
 
     if (isTauri) {
       log.info('[ASR-Volcano] 检测到 Tauri 环境，可以使用原生 HTTP');

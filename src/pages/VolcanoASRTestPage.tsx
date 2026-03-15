@@ -24,6 +24,7 @@ import {
   findVolcanoResourcePreset,
   type VolcanoEndpoint,
 } from '@/lib/asr/volcano-config';
+import { isTauriWindow } from '@/config/runtime-target';
 
 type RecordingState = 'idle' | 'recording' | 'recognizing';
 
@@ -118,7 +119,7 @@ export function VolcanoASRTestPage() {
   const timerRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const startTimeRef = useRef(0);
 
-  const isTauri = !!(window as any).__TAURI__;
+  const isTauri = isTauriWindow();
   const isConfigured = !!(appKey && accessKey && resourceId);
   const endpointMeta = useMemo(
     () => VOLCANO_ENDPOINT_OPTIONS.find((item) => item.value === endpoint),

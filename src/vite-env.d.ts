@@ -13,6 +13,9 @@ interface Window {
   __TAURI__: {
     [key: string]: unknown;
   };
+  __TAURI_INTERNALS__: {
+    [key: string]: unknown;
+  };
   SpeechRecognition: typeof SpeechRecognition;
   webkitSpeechRecognition: typeof SpeechRecognition;
 }

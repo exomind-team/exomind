@@ -7,16 +7,16 @@
 import { invoke } from '@tauri-apps/api/core';
 import type { EventLog } from '../eventlog/format';
 import { log } from '@/lib/logger';
+import { isTauriWindow } from '@/config/runtime-target';
 
 // Detect environment more reliably - wrap in typeof check to avoid SSR errors
-const isTauri = typeof window !== 'undefined' && window.__TAURI__ !== undefined;
+const isTauri = isTauriWindow();
 
 // Only log in browser/tauri environment, not during SSR/build
 if (typeof window !== 'undefined') {
   log.info(`[MessageStorage] Environment detection: ${JSON.stringify({
     isTauri,
     hasWindow: typeof window !== 'undefined',
-    hasTauri: window.__TAURI__ !== undefined,
   })}`);
 }
 

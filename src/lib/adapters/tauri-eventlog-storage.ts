@@ -3,11 +3,12 @@ import type { IEventLogPort } from '../environment/interfaces/eventlog.port';
 import { WebEventLogStorageAdapter } from './web-eventlog-storage';
 import { getCurrentUserId } from '../storage/event-storage';
 import { log } from '@/lib/logger';
+import { isTauriWindow } from '@/config/runtime-target';
 
 type TauriInvoke = <T>(command: string, args?: Record<string, unknown>) => Promise<T>;
 
 async function getTauriInvoke(): Promise<TauriInvoke | null> {
-  if (typeof window === 'undefined' || window.__TAURI__ === undefined) {
+  if (!isTauriWindow()) {
     return null;
   }
 
