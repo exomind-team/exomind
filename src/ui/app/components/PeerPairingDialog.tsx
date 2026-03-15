@@ -132,7 +132,6 @@ export function PeerPairingDialog({
               clearInterval(pollTimerRef.current);
               pollTimerRef.current = null;
             }
-            setPeerToken('paired-via-initiator');
             setStatus('success');
           }
         } catch {
