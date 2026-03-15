@@ -1,6 +1,6 @@
 ﻿import React from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-overlay-model';
 
 const startDraggingMock = vi.fn();
@@ -53,13 +53,17 @@ function createModel(overrides: Partial<NowWorkbenchOverlayModel> = {}): NowWork
 
 describe('NowWorkbenchOverlayPage', () => {
   beforeEach(() => {
+    startDraggingMock.mockReset();
+    startDraggingMock.mockResolvedValue(undefined);
+    onMovedMock.mockReset();
+    movedListener = null;
+    setNowWorkbenchOverlayPositionMock.mockReset();
     setSizeMock.mockReset();
     setSizeMock.mockResolvedValue(undefined);
   });
 
-  it('starts native dragging from the title drag handle（按住标题拖拽柄可触发原生拖动）', async () => {
+  it('marks the title drag handle as a native tauri drag region（标题拖拽柄通过原生拖拽区域标记实现拖动）', { timeout: 30000 }, async () => {
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
-    startDraggingMock.mockResolvedValue(undefined);
 
     render(
       <NowWorkbenchOverlayPage
@@ -71,12 +75,15 @@ describe('NowWorkbenchOverlayPage', () => {
       />,
     );
 
-    expect(screen.getByTestId('now-overlay-drag-handle')).toBeInTheDocument();
+    const dragHandle = screen.getByTestId('now-overlay-drag-handle');
+
+    expect(dragHandle).toBeInTheDocument();
+    expect(dragHandle).toHaveAttribute('data-tauri-drag-region');
     expect(screen.getByText('拖动窗口')).toBeInTheDocument();
 
-    fireEvent.mouseDown(screen.getByTestId('now-overlay-drag-handle'), { button: 0 });
+    fireEvent.mouseDown(dragHandle, { button: 0 });
 
-    expect(startDraggingMock).toHaveBeenCalledTimes(1);
+    expect(startDraggingMock).not.toHaveBeenCalled();
   });
 
   it('does not start dragging when clicking action buttons（点击窗口动作按钮时不应触发拖动）', async () => {

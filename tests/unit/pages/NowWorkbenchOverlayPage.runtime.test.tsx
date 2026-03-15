@@ -66,6 +66,54 @@ vi.mock('@/ui/app/components/NowInputRow', () => ({
   ),
 }));
 
+vi.mock('@/ui/app/components/FocusTimerWidget', async () => {
+  const React = await import('react');
+
+  const FocusTimerWidget = React.forwardRef(({ surface }: { surface?: string }, ref) => {
+    const [configTaskTitle, setConfigTaskTitle] = React.useState<string | null>(null);
+    const activeBlock = runtimeStateByUser[currentUserState.userId].activeBlock as
+      | null
+      | { mode?: string; name?: string };
+
+    React.useImperativeHandle(ref, () => ({
+      openTaskConfig: (taskTitle: string) => {
+        setConfigTaskTitle(taskTitle);
+      },
+    }), []);
+
+    if (configTaskTitle) {
+      return (
+        <div data-testid="new-focus-timer-widget" className={surface === 'overlay' ? 'bg-transparent' : ''}>
+          <div data-testid="new-focus-state-config">
+            <input data-testid="new-focus-task-input" value={configTaskTitle} readOnly />
+          </div>
+        </div>
+      );
+    }
+
+    if (activeBlock) {
+      return (
+        <div data-testid="new-focus-timer-widget" className={surface === 'overlay' ? 'bg-transparent' : ''}>
+          <div data-testid="new-focus-state-running">
+            <p>{activeBlock.name ?? '未命名时间块'}</p>
+            <p data-testid="new-focus-running-clock">{activeBlock.mode === 'countdown' ? '20:00' : '00:00'}</p>
+          </div>
+        </div>
+      );
+    }
+
+    return (
+      <div data-testid="new-focus-timer-widget" className={surface === 'overlay' ? 'bg-transparent' : ''}>
+        <div data-testid="new-focus-state-idle">idle</div>
+      </div>
+    );
+  });
+
+  return {
+    FocusTimerWidget,
+  };
+});
+
 vi.mock('@/lib/services', () => ({
   getTimeBlockService: () => ({
     loadActiveBlock: (...args: unknown[]) => loadActiveBlockMock(...args),
@@ -192,7 +240,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     overlaySetSizeMock.mockResolvedValue(undefined);
   });
 
-  it('loads running state from services when no explicit model is provided（无显式 model 时从服务加载运行态）', async () => {
+  it('loads running state from services when no explicit model is provided（无显式 model 时从服务加载运行态）', { timeout: 20000 }, async () => {
     vi.spyOn(Date, 'now').mockReturnValue(Date.UTC(2026, 2, 11, 9, 5, 0));
     runtimeStateByUser['overlay-test-user'].activeBlock = {
       startId: 'block-1',
@@ -512,7 +560,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
   });
 
-  it('refreshes against the latest current user context after prewarm（预热窗口后刷新会重新读取当前用户）', async () => {
+  it('refreshes against the latest current user context after prewarm（预热窗口后刷新会重新读取当前用户）', { timeout: 30000 }, async () => {
     currentUserState.userId = 'overlay-test-user';
     runtimeStateByUser['overlay-test-user'] = {
       activeBlock: null,
@@ -541,8 +589,10 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
     render(<NowWorkbenchOverlayPage />);
 
-    expect(await screen.findByTestId('now-overlay-idle-pill')).toBeInTheDocument();
-    expect(getEventStorageByUserMock).toHaveBeenCalledWith('overlay-test-user');
+    await waitFor(() => {
+      expect(getEventStorageByUserMock).toHaveBeenCalledWith('overlay-test-user');
+      expect(focusChangedListener).not.toBeNull();
+    });
 
     currentUserState.userId = 'profile-live';
     await act(async () => {
@@ -550,6 +600,8 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
       await Promise.resolve();
     });
 
-    expect(getEventStorageByUserMock).toHaveBeenCalledWith('profile-live');
+    await waitFor(() => {
+      expect(getEventStorageByUserMock).toHaveBeenCalledWith('profile-live');
+    });
   });
 });

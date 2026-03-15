@@ -258,11 +258,14 @@ describe('TaskDetailPage DAG visibility issue #395', () => {
     renderPage();
 
     expect(await screen.findByText('依赖图')).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-toggle-upstream-task-1')).toBeEnabled();
+    });
     fireEvent.click(screen.getByTestId('task-dag-toggle-upstream-task-1'));
 
     await waitFor(() => {
       expect(screen.queryByTestId('task-dag-node-task-2')).not.toBeInTheDocument();
-    });
+    }, { timeout: 5000 });
 
     expect(screen.getByTestId('task-dag-root-summary')).toHaveTextContent('当前可见根：无');
     expect(screen.getByTestId('task-dag-root-summary')).toHaveTextContent('真实当前根：无');

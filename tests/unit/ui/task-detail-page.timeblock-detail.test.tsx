@@ -232,7 +232,9 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
 
     await screen.findByText('时间块详情');
 
-    expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('120m');
+    await waitFor(() => {
+      expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('120m');
+    });
 
     fireEvent.click(screen.getByText('开始计时'));
 

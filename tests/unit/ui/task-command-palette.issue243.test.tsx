@@ -1,5 +1,6 @@
 ﻿import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import type { ReactNode } from 'react';
 import { TasksPage } from '@/ui/app/pages/TasksPage';
 
 const openPaletteMock = vi.fn();
@@ -8,6 +9,10 @@ const listTasksMock = vi.fn();
 const runtimeFlags = vi.hoisted(() => ({
   developerModeEnabled: true,
   commandPaletteEnabled: true,
+}));
+
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
 }));
 
 vi.mock('@/lib/services', () => ({
