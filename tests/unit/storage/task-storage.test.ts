@@ -4,6 +4,7 @@
  * 测试 PouchDB 存储层的 CRUD、索引查询、数据迁移。
  */
 
+import PouchDB from 'pouchdb';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { TaskStorage } from '@/lib/storage/task-storage';
 import type { TaskNode } from '@/lib/types/task';
@@ -141,5 +142,65 @@ describe('TaskStorage index queries', () => {
     const rootChildren = await storage.getTasksByParent('root');
     expect(rootChildren).toHaveLength(2);
     expect(rootChildren.every((t) => t.parentId === 'root')).toBe(true);
+  });
+});
+
+describe('TaskStorage wire format migration', () => {
+  it('migrates legacy status values to canonical values on init', async () => {
+    const userId = `task-mig-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const prefix = `.tmp/pouchdb-task-mig-${Date.now()}-${Math.random().toString(36).slice(2, 8)}/`;
+    const dbName = `tasks_${userId}`;
+
+    {
+      const seedDb = new PouchDB(dbName, { prefix });
+      const now = Date.now();
+
+      await seedDb.put({
+        _id: 'task:legacy-pending',
+        id: 'legacy-pending',
+        title: 'Legacy Pending',
+        status: 'not_started',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: now,
+        updatedAt: now,
+      } as unknown as PouchDB.Core.PutDocument<unknown>);
+
+      await seedDb.put({
+        _id: 'task:legacy-cancelled',
+        id: 'legacy-cancelled',
+        title: 'Legacy Cancelled',
+        status: 'abandoned',
+        priority: 'medium',
+        dependsOn: [],
+        tags: [],
+        createdAt: now,
+        updatedAt: now,
+      } as unknown as PouchDB.Core.PutDocument<unknown>);
+
+      await seedDb.close();
+    }
+
+    const storage = new TaskStorage(userId, { pouchDbPrefix: prefix });
+    const pendingTasks = await storage.getTasksByStatus('pending');
+    const cancelledTasks = await storage.getTasksByStatus('cancelled');
+    expect(pendingTasks.map((t) => t.id)).toContain('legacy-pending');
+    expect(cancelledTasks.map((t) => t.id)).toContain('legacy-cancelled');
+    expect(pendingTasks.find((t) => t.id === 'legacy-pending')?.status).toBe('pending');
+    expect(cancelledTasks.find((t) => t.id === 'legacy-cancelled')?.status).toBe('cancelled');
+    await storage.close();
+
+    {
+      const verifyDb = new PouchDB<{ status: unknown; updatedCount?: unknown }>(dbName, { prefix });
+      const pendingDoc = await verifyDb.get<{ status: unknown }>('task:legacy-pending');
+      const cancelledDoc = await verifyDb.get<{ status: unknown }>('task:legacy-cancelled');
+      expect(pendingDoc.status).toBe('pending');
+      expect(cancelledDoc.status).toBe('cancelled');
+
+      const meta = await verifyDb.get<{ updatedCount?: unknown }>('_local/task-status-wireformat-v2');
+      expect(meta.updatedCount).toBe(2);
+      await verifyDb.destroy();
+    }
   });
 });

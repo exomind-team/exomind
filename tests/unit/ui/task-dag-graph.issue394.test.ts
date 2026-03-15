@@ -81,13 +81,13 @@ describe('buildTaskGraph issue-394（任务 DAG 图基础层）', () => {
       createdAt: 10,
       updatedAt: 10,
     })
-    const cancelledRoot = makeTask({
-      id: 'gone',
-      title: 'Abandoned Root',
-      status: 'cancelled',
-      createdAt: 20,
-      updatedAt: 20,
-    })
+	    const cancelledRoot = makeTask({
+	      id: 'gone',
+	      title: 'Cancelled Root',
+	      status: 'cancelled',
+	      createdAt: 20,
+	      updatedAt: 20,
+	    })
     const activeRoot = makeTask({ id: 'live', title: 'Live Root', createdAt: 30, updatedAt: 30 })
 
     const graph = buildTaskGraph([activeRoot, cancelledRoot, completedRoot])

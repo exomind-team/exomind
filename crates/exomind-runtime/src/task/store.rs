@@ -405,6 +405,7 @@ impl TaskStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use rusqlite::Connection;
     use tempfile::tempdir;
 
     fn make_store() -> TaskStore {
@@ -442,6 +443,63 @@ mod tests {
             .expect("task should persist in sqlite");
         assert_eq!(loaded.title, "Persist me");
         assert_eq!(reopened.len(), 1);
+    }
+
+    #[test]
+    fn sqlite_store_migrates_legacy_status_values_on_open() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let legacy_pending = store.create(create_input("Legacy pending"));
+        let legacy_cancelled = store.create(create_input("Legacy cancelled"));
+        store
+            .transition(&legacy_cancelled.id, TaskStatus::InProgress)
+            .unwrap();
+        store.cancel(&legacy_cancelled.id).unwrap();
+        drop(store);
+
+        {
+            let conn = Connection::open(&sqlite_path).unwrap();
+            conn.execute(
+                "UPDATE tasks SET status = 'not_started' WHERE id = ?1",
+                [&legacy_pending.id],
+            )
+            .unwrap();
+            conn.execute(
+                "UPDATE tasks SET status = 'abandoned' WHERE id = ?1",
+                [&legacy_cancelled.id],
+            )
+            .unwrap();
+        }
+
+        let reopened = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        assert_eq!(
+            reopened.get(&legacy_pending.id).unwrap().status,
+            TaskStatus::Pending
+        );
+        assert_eq!(
+            reopened.get(&legacy_cancelled.id).unwrap().status,
+            TaskStatus::Cancelled
+        );
+
+        let conn = Connection::open(&sqlite_path).unwrap();
+        let pending_status: String = conn
+            .query_row(
+                "SELECT status FROM tasks WHERE id = ?1",
+                [&legacy_pending.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let cancelled_status: String = conn
+            .query_row(
+                "SELECT status FROM tasks WHERE id = ?1",
+                [&legacy_cancelled.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(pending_status, "pending");
+        assert_eq!(cancelled_status, "cancelled");
     }
 
     #[test]
