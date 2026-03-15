@@ -40,18 +40,71 @@ gh issue list --state open --limit 500 --json number,title,labels,createdAt --jq
 
 ## 第三步：逐段治理
 
-对每段 issue 执行以下五种操作。具体的评论模板、合并判据和执行步骤，参照 `AGENTS.md` 中的详细说明。
+对每段 issue，你需要先**检索聚类**，再**逐组操作**。检索方法详见 `AGENTS.md` 的「Issue 检索方法论」章节，以下是关键模式：
+
+### 检索第一步：领域聚类
+
+在操作之前，先对当段 issue 按领域做一轮聚类扫描，找出"同一话题"的 issue 群：
+
+```bash
+# 按标题关键词聚类（中英文都搜，加 "i" 忽略大小写）
+gh issue list --state open --limit 500 --json number,title \
+  --jq '.[] | select(.title | test("关键词1|关键词2"; "i")) | "\(.number) \(.title[:65])"'
+
+# 按标题前缀看有哪些领域
+gh issue list --state open --limit 500 --json title \
+  --jq '.[].title' | grep -oP '^[a-z]+\(' | sort | uniq -c | sort -rn
+```
+
+常用的聚类关键词组合（根据项目实际调整）：
+- 任务系统：`task|任务|DAG|时间块|timeblock|timer|计时`
+- 语音：`voice|语音|asr|tts|录音`
+- 信号/同步：`signal|信号|ecs|mesh|sync|同步`
+- Agent：`agent-hub|拓扑|topology|Agent`
+- MCP：`mcp|MCP`
+- CI/发布：`ci|release|build|deploy|runner`
+- 设置：`settings|设置`
+
+### 检索第二步：验证已实现
+
+对每个可能已实现的 issue，用两步验证——找 PR + 查代码：
+
+```bash
+# 找相关 PR
+gh pr list --state merged --limit 100 --json number,title \
+  --jq '.[] | select(.title | test("issue-NNN|功能关键词")) | "\(.number) \(.title[:60])"'
+
+# 查代码是否存在且启用
+grep -rn "组件名\|函数名" src/ --include="*.ts" --include="*.tsx" | head -10
+```
+
+**代码存在 ≠ 功能完成**——还要检查是否被调用、默认启用、有路由入口。
+
+### 检索第三步：发现合并候选
+
+按目标组件/文件聚类，找出改同一段代码的 issue：
+
+```bash
+# 按组件名聚类
+gh issue list --state open --limit 500 --json number,title \
+  --jq '.[] | select(.title | test("NowInputRow|TaskDetailPage|AgentsPage"; "i")) | "\(.number) \(.title[:65])"'
+```
+
+聚类结果中，如果多个 issue 指向同一个组件/文件，就是合并候选。
+
+---
+
+完成检索聚类后，对每个聚类组执行以下五种操作。评论模板和合并判据参照 `AGENTS.md`。
 
 ### A. 关闭已实现的 issue
 
-- 搜索相关 PR：`gh pr list --state merged --json number,title --jq '...'`
-- 检查代码：`grep -r "关键词" src/`
-- 确认功能存在后关闭，评论指向 PR 编号
+- 用上面的两步验证确认功能存在
+- 关闭并评论指向 PR 编号
 - **明确已实现的直接执行，不需要逐个确认用户**
 
 ### B. 关闭已被新 issue 覆盖的
 
-- 搜索相似标题/领域的新 issue
+- 在聚类结果中对比新旧 issue 的功能范围
 - 确认新 issue 完全覆盖旧 issue 的范围
 - 关闭旧 issue，评论指向新 issue
 - **同样可直接执行**

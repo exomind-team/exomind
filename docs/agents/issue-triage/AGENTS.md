@@ -192,6 +192,148 @@ echo "P2: $(gh issue list --state open --limit 500 --json labels --jq '[.[] | se
 
 ---
 
+## Issue 检索方法论
+
+Issue 池超过 100 条后，线性浏览不可行。以下是经过实践验证的检索模式，按使用场景分类。
+
+### 场景 1：按领域聚类——找出"同一个话题"的所有 issue
+
+**目的**：识别重叠、覆盖关系和合并候选。
+
+```bash
+# 方法 A：标题关键词搜索（最常用）
+gh issue list --state open --limit 500 --json number,title \
+  --jq '.[] | select(.title | test("关键词1|关键词2|关键词3"; "i")) | "\(.number) \(.title[:70])"'
+
+# 示例：找所有与"MCP"相关的 issue
+gh issue list --state open --limit 500 --json number,title \
+  --jq '.[] | select(.title | test("[Mm][Cc][Pp]|mcp")) | "\(.number) \(.title[:70])"'
+
+# 方法 B：标题前缀分类——看有哪些领域
+gh issue list --state open --limit 500 --json title \
+  --jq '.[].title' | grep -oP '^[a-z]+\(' | sort | uniq -c | sort -rn
+
+# 方法 C：全量导出后本地 grep（跨字段搜索）
+gh issue list --state open --limit 500 --json number,title,labels \
+  --jq '.[] | "\(.number)|\(.title)|\([.labels[].name] | join(","))"' \
+  | sort -t'|' -k1 -n > /tmp/issues.txt
+grep -i "语音\|voice\|asr\|tts" /tmp/issues.txt
+```
+
+**实践经验**：
+- 中文和英文关键词都要搜（如 `语音|voice|asr`）
+- `test()` 函数默认区分大小写，加 `"i"` 标志忽略大小写
+- 全量导出到本地文件后用 grep 更灵活，可做多轮筛选
+
+### 场景 2：检查功能是否已实现——关联 PR 和代码
+
+**目的**：判断一个 issue 是否应该关闭。
+
+```bash
+# 步骤 1：搜索相关 PR（按标题关键词）
+gh pr list --state merged --limit 100 --json number,title \
+  --jq '.[] | select(.title | test("issue-NNN|关键词")) | "\(.number) \(.title[:70])"'
+
+# 步骤 2：检查代码中是否存在对应功能
+# -- 搜索组件/函数名
+grep -rn "ComponentName\|functionName" src/ --include="*.ts" --include="*.tsx" | head -10
+# -- 搜索路由端点
+grep -rn "routePath\|/api/endpoint" src/ crates/ --include="*.rs" --include="*.ts" | head -10
+# -- 搜索配置项
+grep -rn "configKey\|settingName" src/config/ src/ui/app/config/ | head -5
+
+# 步骤 3：检查默认值/启用状态（确认功能真的在用，不只是代码存在）
+# 示例：检查 RT SQLite 是否默认启用
+grep -n "default\|DEFAULTS" src/config/domain-backend-mode.ts
+```
+
+**实践经验**：
+- 搜 PR 时用 `issue-NNN` 格式能精确匹配，但很多 PR 标题不含 issue 号，需要同时按功能关键词搜
+- 代码存在 ≠ 功能已完成。必须检查功能是否被调用、默认启用、有路由入口
+- Rust 代码在 `crates/` 目录，前端在 `src/`，都要搜
+
+### 场景 3：找覆盖关系——"这个旧 issue 是否被新 issue 取代了"
+
+**目的**：判断一个旧 issue 是否已被更具体/更新的 issue 覆盖。
+
+```bash
+# 方法 A：在同领域内按编号排序，对比新旧
+gh issue list --state open --limit 500 --json number,title \
+  --jq '.[] | select(.title | test("任务|task|DAG"; "i")) | "\(.number) \(.title[:65])"' \
+  | sort -t'|' -k1 -n
+
+# 方法 B：查看一个 issue 是否有"子 issue"或"后继 issue"
+# GitHub API 不支持直接查子 issue，但可以搜索 body 中引用了该编号的 issue
+gh issue list --state open --limit 500 --json number,title,body \
+  --jq '.[] | select(.body | test("#旧编号")) | "\(.number) \(.title[:60])"'
+
+# 方法 C：查 epic 类 issue 的子任务列表
+gh issue view EPIC编号 --json body --jq '.body' | head -50
+```
+
+**实践经验**：
+- 覆盖关系不总是显式标注的，需要人工判断功能范围
+- Epic issue 的 body 中通常列出子 issue，是找覆盖关系的最佳入口
+- 如果旧 issue 的功能是新 issue 的子集，就是被覆盖了
+
+### 场景 4：合并候选发现——"哪些 issue 改同一段代码"
+
+**目的**：找到实现重叠的 issue，作为合并候选。
+
+```bash
+# 方法 A：按目标组件/文件聚类
+# 找出标题中提到同一个组件的 issue
+gh issue list --state open --limit 500 --json number,title \
+  --jq '.[] | select(.title | test("NowInputRow|TaskInput|输入框"; "i")) | "\(.number) \(.title[:65])"'
+
+# 方法 B：按标题前缀的细分领域聚类
+gh issue list --state open --limit 500 --json number,title \
+  --jq '.[] | select(.title | test("^(feat|bug)\\(task-input\\)")) | "\(.number) \(.title[:65])"'
+
+# 方法 C：对于 UI 类 issue，按页面聚类
+gh issue list --state open --limit 500 --json number,title \
+  --jq '.[] | select(.title | test("TaskDetail|任务详情|task-detail"; "i")) | "\(.number) \(.title[:65])"'
+```
+
+**实践经验**：
+- 最有效的信号是"标题提到同一个组件名"（如 NowInputRow、TaskDetailPage、AgentsPage）
+- UI 类 issue 按页面聚类最有效
+- 后端 issue 按模块/路由聚类最有效（如 `/eventlog`、`SignalPool`、`ECS`）
+
+### 场景 5：批量操作——高效执行治理决策
+
+```bash
+# 批量打标签
+for n in 100 101 102 103; do
+  gh issue edit $n --add-label "P2" 2>/dev/null
+done
+
+# 批量关闭（附评论）
+for n in 100 101 102; do
+  gh issue close $n --comment "关闭：[原因]" 2>&1
+done
+
+# 读取 issue 的 body 前 N 字符（快速扫读，不需要看完整 body）
+gh issue view 123 --json body --jq '.body[:300]'
+
+# 批量读取多个 issue 的标题和状态
+for n in 100 101 102 103; do
+  gh issue view $n --json number,title,state --jq '"\(.number) [\(.state)] \(.title[:50])"'
+done
+```
+
+### 检索注意事项
+
+| 事项 | 说明 |
+|------|------|
+| **总是加 `--limit 500`** | 默认只返回 30 条，会遗漏大量 issue |
+| **总是加 `--state open`** | 不加会混入已关闭的 issue，干扰计数 |
+| **jq `test()` 加 `"i"` 标志** | 中英混合场景下忽略大小写更安全 |
+| **搜索结果排序** | 用 `sort -t'\|' -k1 -n` 按编号排序，方便对比新旧 |
+| **网络超时重试** | Termux 环境下 gh 命令偶尔超时，失败时重试一次 |
+
+---
+
 ## 与用户的协作模式
 
 治理过程中涉及大量判断。Agent 应主动使用 `AskUserQuestion` 工具：
