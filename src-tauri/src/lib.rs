@@ -87,11 +87,6 @@ fn seed_runtime_sqlite_env_paths(runtime_dir: &std::path::Path) {
     }
 }
 
-#[tauri::command]
-fn greet(name: &str) -> String {
-    format!("Hello, {}! You've been greeted from Rust!", name)
-}
-
 fn resolve_embedded_runtime_port() -> u16 {
     std::env::var("EXOMIND_RT_PORT")
         .ok()
@@ -193,7 +188,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            greet,
             // WebSocket 客户端命令
             ws_connect,
             ws_disconnect,

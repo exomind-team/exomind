@@ -1,5 +1,8 @@
 // signal-route.service.test.ts — SignalRoute 前端服务测试
 //
+// @ghost-test 所有 it() 断言仅为 `expect(fetchImpl).toBeDefined()`，实际覆盖率为 0。
+// 需要实现真正的断言后移除此标注。 See #534
+//
 // 测试目标:
 //   1. Route CRUD 操作（list, create, update, delete）
 //   2. HTTP 错误处理
