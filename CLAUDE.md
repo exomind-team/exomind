@@ -128,6 +128,85 @@ L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
 
 ---
 
+### GitHub Issue 依赖管理 ⭐
+
+**必须使用 GitHub GraphQL API 管理 Issue 之间的依赖关系。** 不要用评论或 body 文本模拟依赖——GitHub 原生支持 `blockedBy/blocking` 和 `subIssue` 关系。
+
+#### 阻塞关系（blocked by）
+
+```bash
+# 查询 issue 的阻塞关系
+gh api graphql -f query='
+{
+  repository(owner: "exomind-team", name: "exomind") {
+    issue(number: 123) {
+      blockedBy(first: 10) { nodes { number title state } }
+      blocking(first: 10) { nodes { number title state } }
+    }
+  }
+}'
+
+# 添加阻塞：issue A 被 issue B 阻塞（B 不完成则 A 无法开始）
+gh api graphql -f query='
+mutation {
+  addBlockedBy(input: {issueId: "ISSUE_A_NODE_ID", blockingIssueId: "ISSUE_B_NODE_ID"}) {
+    clientMutationId
+  }
+}'
+
+# 移除阻塞
+gh api graphql -f query='
+mutation {
+  removeBlockedBy(input: {issueId: "ISSUE_A_NODE_ID", blockingIssueId: "ISSUE_B_NODE_ID"}) {
+    clientMutationId
+  }
+}'
+```
+
+#### 父子关系（sub-issue）
+
+```bash
+# 查询 sub-issues
+gh api graphql -f query='
+{
+  repository(owner: "exomind-team", name: "exomind") {
+    issue(number: 366) {
+      subIssues(first: 20) { nodes { number title state } }
+    }
+  }
+}'
+
+# 添加子 issue
+gh api graphql -f query='
+mutation {
+  addSubIssue(input: {issueId: "PARENT_NODE_ID", subIssueId: "CHILD_NODE_ID"}) {
+    clientMutationId
+  }
+}'
+```
+
+#### 获取 issue 的 Node ID
+
+GraphQL mutation 需要 Node ID（非编号），批量获取：
+
+```bash
+gh api graphql -f query='
+{
+  repository(owner: "exomind-team", name: "exomind") {
+    i123: issue(number: 123) { id }
+    i456: issue(number: 456) { id }
+  }
+}'
+```
+
+#### 注意事项
+
+- 关闭 issue 时检查是否还在阻塞其他 issue，及时 `removeBlockedBy`
+- 不要用评论或 body 模拟依赖关系，**始终用 GraphQL API**
+- GitHub 会自动检测循环依赖并拒绝
+
+---
+
 ### 记忆系统 ⭐
 
 每轮有价值的内容都要归档，形成可检索的知识库。详见：[docs/memory/README.md](docs/memory/README.md)
