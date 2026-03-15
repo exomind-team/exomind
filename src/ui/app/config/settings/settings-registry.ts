@@ -724,7 +724,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: 'MOSS 语音测试',
     category: 'input',
     type: 'custom',
-    visible: devOnly,
+    visible: (ctx) => devOnly(ctx) && mossOnly(ctx),
     component: MossVoiceTestSetting,
   },
   {
@@ -732,7 +732,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: '火山引擎 ASR 测试',
     category: 'input',
     type: 'custom',
-    visible: devOnly,
+    visible: (ctx) => devOnly(ctx) && volcanoOnly(ctx),
     component: VolcanoVoiceTestSetting,
   },
   {

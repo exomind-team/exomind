@@ -128,8 +128,6 @@ const CUSTOM_ITEM_IDS = [
 ] as const;
 
 const DEV_ONLY_IDS = [
-  'moss-voice-test',
-  'volcano-asr-test',
   'eventlog-backend-mode',
   'task-backend-mode',
   'timeblock-backend-mode',
@@ -278,6 +276,15 @@ describe('settings registry coverage audit', () => {
       expect(baseIds).not.toContain(id);
       expect(developerIds).toContain(id);
     });
+
+    // moss-voice-test: dev + moss provider
+    expect(baseIds).not.toContain('moss-voice-test');
+    expect(developerIds).toContain('moss-voice-test');
+    expect(volcanoIds).not.toContain('moss-voice-test');
+    // volcano-asr-test: dev + volcano provider
+    expect(baseIds).not.toContain('volcano-asr-test');
+    expect(developerIds).not.toContain('volcano-asr-test');
+    expect(volcanoIds).toContain('volcano-asr-test');
 
     expect(baseIds).not.toContain('volcano-resource-model');
     expect(developerIds).not.toContain('volcano-resource-model');
