@@ -6,6 +6,7 @@ export const DESKTOP_TAB_CONFIG: Array<{
   categories: Category[];
 }> = [
   { key: 'appearance', label: '外观主题', categories: ['appearance'] },
+  { key: 'task', label: '任务', categories: ['task'] },
   { key: 'focus', label: '专注设置', categories: ['timer', 'feedback'] },
   { key: 'input', label: '输入', categories: ['input'] },
   { key: 'services', label: '服务', categories: ['ai', 'sync'] },

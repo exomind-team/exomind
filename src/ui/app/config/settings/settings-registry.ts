@@ -164,6 +164,11 @@ import {
   getTimeblockBackendMode,
   setTimeblockBackendMode,
 } from '@/config/domain-backend-mode';
+import {
+  getTasksDefaultTab,
+  setTasksDefaultTab,
+  type TasksDefaultTab,
+} from '@/config/tasks-default-tab';
 
 /*
  * AGENT GUIDE: ADDING SETTINGS
@@ -423,6 +428,27 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
       setThemePreference(value as 'system' | 'light' | 'dark');
     },
     subscribe: subscribeThemePreferenceChanges,
+  },
+  {
+    id: 'tasks-default-view',
+    label: '默认任务视图',
+    icon: List,
+    category: 'task',
+    type: 'enum',
+    enumStyle: 'dialog',
+    dialogTitle: '默认任务视图',
+    dialogDescription: '打开任务页面时默认显示的视图',
+    options: [
+      { label: '当下', value: 'now' },
+      { label: '今日', value: 'today' },
+      { label: '一周', value: 'week' },
+      { label: '月', value: 'month' },
+      { label: 'DAG 视图', value: 'dag' },
+    ],
+    get: () => getTasksDefaultTab() ?? 'now',
+    set: (value: string) => {
+      setTasksDefaultTab(value as TasksDefaultTab);
+    },
   },
   {
     id: 'countdown-end-mode',

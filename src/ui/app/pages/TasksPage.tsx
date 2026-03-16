@@ -1,10 +1,10 @@
 ﻿import { Plus, SlidersHorizontal, Waypoints } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
-import { consumeTasksDefaultTab } from '@/config/tasks-default-tab';
+import { getTasksDefaultTab } from '@/config/tasks-default-tab';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import { filterMonth, filterNow, filterToday, filterWeek } from './task-tab-filters';
 import { buildTasksTodayViewModel } from './tasks-today-view';
@@ -129,32 +129,45 @@ function resolveToneClasses(tone: 'green' | 'orange' | 'blue' | 'red' | 'stone')
   };
 }
 
-function resolveInitialTaskTab(): TaskTab {
-  const preferredTab = consumeTasksDefaultTab();
-  if (preferredTab && TAB_ITEMS.some((tab) => tab.id === preferredTab)) {
-    return preferredTab as TaskTab;
+function resolveInitialTaskTab(): { tab: TaskTab; redirectDag: boolean } {
+  const preferredTab = getTasksDefaultTab();
+
+  if (preferredTab === 'dag') {
+    return { tab: 'now', redirectDag: true };
+  }
+
+  if (preferredTab && TAB_ITEMS.some((t) => t.id === preferredTab)) {
+    return { tab: preferredTab as TaskTab, redirectDag: false };
   }
 
   if (typeof window === 'undefined') {
-    return 'now';
+    return { tab: 'now', redirectDag: false };
   }
 
   const urlTab = new URLSearchParams(window.location.search).get('tab');
-  if (urlTab && TAB_ITEMS.some((tab) => tab.id === urlTab)) {
-    return urlTab as TaskTab;
+  if (urlTab && TAB_ITEMS.some((t) => t.id === urlTab)) {
+    return { tab: urlTab as TaskTab, redirectDag: false };
   }
 
-  return 'now';
+  return { tab: 'now', redirectDag: false };
 }
 
 export function TasksPage() {
   const isDesktop = useIsDesktop();
-  const [activeTab, setActiveTab] = useState<TaskTab>(() => resolveInitialTaskTab());
+  const navigate = useNavigate();
+  const [initialResolution] = useState(() => resolveInitialTaskTab());
+  const [activeTab, setActiveTab] = useState<TaskTab>(initialResolution.tab);
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [quickInput, setQuickInput] = useState('');
   const quickInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (initialResolution.redirectDag) {
+      void navigate({ to: '/tasks/dag' });
+    }
+  }, [initialResolution.redirectDag, navigate]);
 
   useEffect(() => {
     let disposed = false;

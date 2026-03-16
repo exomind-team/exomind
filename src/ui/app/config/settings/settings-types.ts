@@ -20,6 +20,7 @@ import type { LucideIcon } from 'lucide-react';
 
 export type Category =
   | 'appearance'
+  | 'task'
   | 'timer'
   | 'input'
   | 'feedback'
