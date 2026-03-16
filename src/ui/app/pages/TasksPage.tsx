@@ -158,6 +158,18 @@ export function TasksPage() {
     sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
   }, [location.pathname, location.searchStr]);
 
+  // Auto-focus input on Enter key when nothing is focused
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Enter' && document.activeElement === document.body) {
+        e.preventDefault();
+        inputRef.current?.focusText();
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, []);
+
   useEffect(() => {
     let disposed = false;
     const svc = getTaskService();
