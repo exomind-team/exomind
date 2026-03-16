@@ -207,7 +207,10 @@ describe('timeblock detail back link issue #406', () => {
       expect(loadTimeBlocksMock).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText('任务 > 今日 > 任务详情')).toBeInTheDocument();
+    const breadcrumb = await screen.findByText((_content, element) =>
+      element?.tagName === 'P' && element.textContent === '任务 > 今日 > 任务详情',
+    );
+    expect(breadcrumb).toBeInTheDocument();
     const backLink = screen.getByTestId('timeblock-back-link-desktop');
     expect(backLink).toHaveTextContent('← 返回今日');
     expect(backLink).toHaveAttribute('href', '/tasks?tab=today');
