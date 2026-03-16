@@ -590,7 +590,8 @@ function MobileTimeblockDetail({
           {task.description ? (
             <p className="mt-2 whitespace-pre-wrap text-xs text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>
           ) : null}
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          <h3 className="mt-4 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信息面板</h3>
+          <div className="mt-2 grid grid-cols-2 gap-2">
             {model.summary.metrics.map((metric) => (
               <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
                 <p className="text-[11px] text-[#A8A29E]">{metric.label}</p>
@@ -806,7 +807,8 @@ function DesktopTimeblockDetail({
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <section className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-          <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信息面板</h3>
+          <div className="mt-3 grid grid-cols-2 gap-3 xl:grid-cols-3">
             {model.summary.metrics.map((metric) => (
               <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
                 <p className="text-xs text-[#A8A29E]">{metric.label}</p>

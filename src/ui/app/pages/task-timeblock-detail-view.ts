@@ -9,7 +9,7 @@ export interface TimeblockBadge {
 }
 
 export interface TimeblockSummaryMetric {
-  key: 'start' | 'end' | 'duration' | 'expected' | 'event_count';
+  key: 'start' | 'end' | 'duration' | 'expected' | 'event_count' | 'blockCount';
   label: string;
   value: string;
 }
@@ -393,11 +393,14 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     : buildRealTimeline(block, input.eventLogs ?? []);
 
   const badges = scheduleBadge ? [statusBadge, scheduleBadge] : [statusBadge];
+  const taskBlockIds = new Set((input.task.timeBlockIds ?? []).map((v) => v.trim()));
+  const blockCount = input.blocks.filter((b) => taskBlockIds.has(b.startId) || taskBlockIds.has(b.id)).length;
   const metrics: TimeblockSummaryMetric[] = [
     { key: 'start', label: '开始', value: formatClock(block.startTime) },
     { key: 'end', label: '结束', value: formatClock(block.endTime) },
     { key: 'duration', label: '时长', value: formatMinutes(actualMinutes) },
     { key: 'event_count', label: '事件数', value: `${timeline.items.length}` },
+    { key: 'blockCount', label: '时间块数', value: String(blockCount) },
   ];
   const actions: TimeblockActionItem[] = [
     { id: 'open-task', label: '查看关联任务', to: `/tasks/${input.task.id}` },
