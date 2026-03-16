@@ -1,10 +1,9 @@
 ﻿import { SlidersHorizontal, Waypoints } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate, useLocation } from '@tanstack/react-router';
+import { Link, useLocation } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
-import { getTasksDefaultTab } from '@/config/tasks-default-tab';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
@@ -130,36 +129,24 @@ function resolveToneClasses(tone: 'green' | 'orange' | 'blue' | 'red' | 'stone')
   };
 }
 
-function resolveInitialTaskTab(): { tab: TaskTab; redirectDag: boolean } {
-  const preferredTab = getTasksDefaultTab();
-
-  if (preferredTab === 'dag') {
-    return { tab: 'now', redirectDag: true };
-  }
-
-  if (preferredTab && TAB_ITEMS.some((t) => t.id === preferredTab)) {
-    return { tab: preferredTab as TaskTab, redirectDag: false };
-  }
-
+function resolveInitialTaskTab(): TaskTab {
   if (typeof window === 'undefined') {
-    return { tab: 'now', redirectDag: false };
+    return 'now';
   }
 
   const urlTab = new URLSearchParams(window.location.search).get('tab');
   if (urlTab && TAB_ITEMS.some((t) => t.id === urlTab)) {
-    return { tab: urlTab as TaskTab, redirectDag: false };
+    return urlTab as TaskTab;
   }
 
-  return { tab: 'now', redirectDag: false };
+  return 'now';
 }
 
 export const TASKS_LAST_PATH_KEY = 'exomind:last-tasks-path';
 
 export function TasksPage() {
-  const navigate = useNavigate();
   const location = useLocation();
-  const [initialResolution] = useState(() => resolveInitialTaskTab());
-  const [activeTab, setActiveTab] = useState<TaskTab>(initialResolution.tab);
+  const [activeTab, setActiveTab] = useState<TaskTab>(() => resolveInitialTaskTab());
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
@@ -170,12 +157,6 @@ export function TasksPage() {
     const fullPath = location.pathname + (location.searchStr || '');
     sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
   }, [location.pathname, location.searchStr]);
-
-  useEffect(() => {
-    if (initialResolution.redirectDag) {
-      void navigate({ to: '/tasks/dag' });
-    }
-  }, [initialResolution.redirectDag, navigate]);
 
   useEffect(() => {
     let disposed = false;

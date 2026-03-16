@@ -1,4 +1,3 @@
-import { setTasksDefaultTab } from '@/config/tasks-default-tab';
 import type { CommandDefinition } from '@/lib/types/command-palette';
 
 export type CoreNavigationPath = '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/me' | '/agents';
@@ -135,7 +134,6 @@ export function createCoreNavigationCommands(
       aliases: ['目标', 'goals', '长期'],
       keywords: ['长期任务', 'strategy'],
       async execute() {
-        setTasksDefaultTab('now');
         await options.navigate('/tasks');
         return { ok: true };
       },

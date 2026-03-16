@@ -6,7 +6,6 @@ import type { Category, SettingsContext, SettingsItem } from '@/ui/app/config/se
 
 const MOBILE_CATEGORY_ORDER: Category[] = [
   'appearance',
-  'task',
   'timer',
   'input',
   'feedback',
@@ -21,7 +20,6 @@ const MOBILE_CATEGORY_ORDER: Category[] = [
 
 const CATEGORY_LABELS: Record<Category, string> = {
   appearance: '外观',
-  task: '任务',
   timer: '计时器',
   input: '输入',
   feedback: '时间块反馈',
