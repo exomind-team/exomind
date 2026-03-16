@@ -31,6 +31,9 @@ import { TimerConfigPanel } from '@/ui/app/components/TimerConfigPanel';
 import { useTimerConfig } from '@/ui/app/hooks/useTimerConfig';
 import { Pencil } from 'lucide-react';
 import { Textarea } from '@/components/ui/textarea';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 
 type DependencyType = 'soft' | 'hard';
 type TimeblockSourceTab = 'now' | 'today' | 'week' | 'month';
@@ -881,7 +884,9 @@ function DesktopTimeblockDetail({
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">洞察</h3>
             <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{task.title}</p>
             {task.description ? (
-              <p className="mt-2 whitespace-pre-wrap text-xs text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>
+              <div className="mt-2 prose prose-xs dark:prose-invert max-w-none text-xs text-[#78716C] dark:text-[#A8A29E] prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-headings:my-0.5 prose-a:text-[#C75B3A]">
+                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{task.description}</ReactMarkdown>
+              </div>
             ) : null}
           </section>
 
@@ -1289,7 +1294,9 @@ export function TaskDetailPage() {
         </div>
       ) : task.description ? (
         <div className="mt-3 flex items-start justify-between gap-3">
-          <p className="whitespace-pre-wrap text-sm text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>
+          <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-[#78716C] dark:text-[#A8A29E] prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-1 prose-headings:text-[#44403C] dark:prose-headings:text-[#D6D3D1] prose-a:text-[#C75B3A] prose-code:text-[#78716C] dark:prose-code:text-[#A8A29E] prose-pre:bg-[#F5F0ED] dark:prose-pre:bg-[#292524]">
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{task.description}</ReactMarkdown>
+          </div>
           {!isTerminalTaskStatus(task.status) && (
             <button type="button" onClick={() => { setDescriptionDraft(task.description ?? ''); setIsEditingDescription(true); }} className="shrink-0 rounded-lg p-1.5 text-[#A8A29E] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">
               <Pencil size={14} />
