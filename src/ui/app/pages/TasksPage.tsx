@@ -293,6 +293,9 @@ export function TasksPage() {
                               <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
                               <CurrentRootBadge taskId={task.id} currentRootNodeId={taskGraph.currentRootNodeId} />
                             </div>
+                            {task.description && (
+                              <p className="mt-1 line-clamp-2 text-xs text-[#78716C] dark:text-[#A8A29E]">{task.description.slice(0, 100)}</p>
+                            )}
                             <p className="mt-1 text-xs text-[#A8A29E]">{formatSpentMeta(task)}</p>
                           </div>
                         </div>
@@ -398,6 +401,9 @@ export function TasksPage() {
                         </span>
                       </span>
                     </div>
+                    {task.description && (
+                      <p className="mt-1 line-clamp-2 text-xs text-[#78716C] dark:text-[#A8A29E]">{task.description.slice(0, 100)}</p>
+                    )}
                     <p className="mt-1 text-xs text-[#A8A29E]">{formatTaskMeta(task)}</p>
                   </div>
                 </article>
