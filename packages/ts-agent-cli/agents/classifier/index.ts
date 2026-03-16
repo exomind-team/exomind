@@ -2,19 +2,22 @@
  * Classifier Agent
  *
  * Listens for `user.input.text` signals from the RT, classifies the input
- * using Claude CLI, and publishes `input.classified` with structured results.
+ * using LLM API, and publishes `input.classified` with structured results.
  *
  * Usage:
  *   bun run packages/ts-agent-cli/agents/classifier/index.ts
  *
  * Environment variables:
- *   EXOMIND_RT_URL    - RT address (default http://localhost:1949)
- *   CLASSIFIER_AGENT_ID - Agent ID (default classifier)
+ *   EXOMIND_RT_URL        - RT address (default http://localhost:1949)
+ *   CLASSIFIER_AGENT_ID   - Agent ID (default classifier)
+ *   EXOMIND_LLM_BASE_URL  - OpenAI-compatible API base URL
+ *   EXOMIND_LLM_API_KEY   - API key
+ *   EXOMIND_LLM_MODEL     - Model name
  */
 
-import { execFileSync } from "node:child_process";
 import { SignalClient } from "../../src/sse/signal-client.js";
 import type { SignalEvent } from "../../src/sse/signal-types.js";
+import { chatCompletion } from "../../src/llm/openai-chat.js";
 import { CLASSIFIER_SYSTEM_PROMPT, CLASSIFIER_USER_PROMPT } from "./prompt.js";
 
 const RT_URL = process.env["EXOMIND_RT_URL"] ?? "http://localhost:1949";
@@ -29,33 +32,27 @@ const client = new SignalClient({
 });
 
 /**
- * Call Claude CLI to classify the input text.
+ * Call LLM API to classify the input text.
  * Returns the parsed JSON classification result.
  */
-function classifyWithClaude(text: string): {
+async function classifyWithLLM(text: string): Promise<{
   type: string;
   items: unknown[];
-} | null {
+} | null> {
   const userPrompt = CLASSIFIER_USER_PROMPT(text);
 
   try {
-    const result = execFileSync(
-      "claude",
-      ["--print", "--system-prompt", CLASSIFIER_SYSTEM_PROMPT, userPrompt],
-      {
-        encoding: "utf-8",
-        timeout: 60_000,
-        stdio: ["pipe", "pipe", "pipe"],
-        windowsHide: true,
-      },
-    );
+    const result = await chatCompletion({
+      systemPrompt: CLASSIFIER_SYSTEM_PROMPT,
+      userPrompt,
+    });
 
-    // Try to extract JSON from the response (Claude may add text around it)
+    // Try to extract JSON from the response (LLM may add text around it)
     const trimmed = result.trim();
     const jsonMatch = trimmed.match(/\{[\s\S]*\}/);
     if (!jsonMatch) {
       console.error(
-        `[Classifier] no JSON found in Claude response: ${trimmed.slice(0, 200)}`,
+        `[Classifier] no JSON found in LLM response: ${trimmed.slice(0, 200)}`,
       );
       return null;
     }
@@ -71,7 +68,7 @@ function classifyWithClaude(text: string): {
     return parsed as { type: string; items: unknown[] };
   } catch (error) {
     const msg = error instanceof Error ? error.message : String(error);
-    console.error(`[Classifier] Claude CLI call failed: ${msg}`);
+    console.error(`[Classifier] LLM API call failed: ${msg}`);
     return null;
   }
 }
@@ -97,7 +94,7 @@ async function handleSignal(event: SignalEvent): Promise<void> {
 
   console.log(`[Classifier] classifying: "${text.slice(0, 100)}..."`);
 
-  const classification = classifyWithClaude(text);
+  const classification = await classifyWithLLM(text);
   if (!classification) {
     console.error(`[Classifier] classification failed for event ${event.id}`);
     return;
