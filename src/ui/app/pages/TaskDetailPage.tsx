@@ -145,16 +145,14 @@ function buildVirtualTaskFromBlock(block: TimeBlock): TaskNode {
 
 function DetailActionsCard({
   model,
-  onRestart,
   onCopySummary,
 }: {
   model: TaskTimeblockDetailViewModel;
-  onRestart: () => void;
   onCopySummary: () => void;
 }) {
   return (
     <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-      <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">操作</h3>
+      <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">其他操作</h3>
       <div className="mt-3 space-y-2">
         {model.actions.map((action) => {
           if (action.id === 'open-task') {
@@ -175,11 +173,11 @@ function DetailActionsCard({
             <button
               key={action.id}
               type="button"
-              onClick={action.id === 'restart' ? onRestart : onCopySummary}
+              onClick={onCopySummary}
               className="flex w-full items-center justify-between rounded-xl border border-[#E7E5E4] px-3 py-2 text-left text-sm text-[#44403C] transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#E7E5E4] dark:hover:bg-[#292524]"
             >
               <span>{action.label}</span>
-              <span className="text-xs text-[#A8A29E]">{action.id === 'restart' ? '执行' : '复制'}</span>
+              <span className="text-xs text-[#A8A29E]">复制</span>
             </button>
           );
         })}
@@ -669,7 +667,6 @@ function MobileTimeblockDetail({
 
         <DetailActionsCard
           model={model}
-          onRestart={onStartTimer}
           onCopySummary={onCopySummary}
         />
 
@@ -912,7 +909,6 @@ function DesktopTimeblockDetail({
 
           <DetailActionsCard
             model={model}
-            onRestart={onStartTimer}
             onCopySummary={onCopySummary}
           />
         </aside>

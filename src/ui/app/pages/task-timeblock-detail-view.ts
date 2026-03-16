@@ -57,7 +57,7 @@ export interface TimeblockAiSummary {
 }
 
 export interface TimeblockActionItem {
-  id: 'open-task' | 'restart' | 'copy-summary';
+  id: 'open-task' | 'copy-summary';
   label: string;
   to?: string;
   search?: Record<string, string>;
@@ -404,7 +404,6 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
   ];
   const actions: TimeblockActionItem[] = [
     { id: 'open-task', label: '查看关联任务', to: `/tasks/${input.task.id}` },
-    { id: 'restart', label: '再来一个时间块' },
     { id: 'copy-summary', label: '复制总结' },
   ];
 
