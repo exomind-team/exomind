@@ -271,7 +271,9 @@ export function TasksPage() {
           })}
         </div>
 
-        <TaskCurrentRootCard graph={taskGraph} taskById={taskById} className="mb-4" />
+        {activeTab === 'now' && (
+          <TaskCurrentRootCard graph={taskGraph} taskById={taskById} className="mb-4" />
+        )}
 
         {activeTab === 'today' ? (
           <div className="space-y-4">
