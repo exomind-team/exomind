@@ -90,11 +90,18 @@ const TASK_DAG_NODE_TYPES = {
 } satisfies NodeTypes;
 
 export function TaskDagPage() {
+  const location = useLocation();
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(EMPTY_TASK_DAG_VISIBILITY_STATE);
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
+
+  // Persist current tasks sub-path for nav tab memory
+  useEffect(() => {
+    const fullPath = location.pathname + (location.searchStr || '');
+    sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+  }, [location.pathname, location.searchStr]);
 
   useEffect(() => {
     let disposed = false;
@@ -176,9 +183,6 @@ export function TaskDagPage() {
             </span>
           </div>
           <h1 className="mt-2 text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务依赖 DAG</h1>
-          <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
-            基于 `dependsOn` 的只读执行图，不把 `parentId` 并入 DAG 边。
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
