@@ -201,6 +201,9 @@ export function TasksPage() {
     };
   }, []);
 
+  const taskGraph = useMemo(() => buildTaskGraph(tasks), [tasks]);
+  const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+
   const visibleTasks = useMemo(() => {
     const now = new Date();
     if (activeTab === 'now') return filterNow(tasks, taskGraph);
@@ -208,7 +211,7 @@ export function TasksPage() {
     if (activeTab === 'week') return filterWeek(tasks, now);
     if (activeTab === 'month') return filterMonth(tasks, now);
     return tasks;
-  }, [activeTab, tasks]);
+  }, [activeTab, tasks, taskGraph]);
 
   const todayViewModel = useMemo(() => buildTasksTodayViewModel({
     tasks: visibleTasks,
@@ -216,9 +219,6 @@ export function TasksPage() {
     now: new Date(),
     activeBlock,
   }), [activeBlock, timeBlocks, visibleTasks]);
-
-  const taskGraph = useMemo(() => buildTaskGraph(tasks), [tasks]);
-  const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
 
   const handleQuickAdd = useCallback(async (content: string) => {
     const lines = content.trim().split('\n');
