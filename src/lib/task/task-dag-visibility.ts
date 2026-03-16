@@ -69,7 +69,27 @@ function normalizeTaskDagVisibilityState(
   }
 }
 
-function collectUpstreamNodeIds(
+/**
+ * Build outgoing (children) edge map: nodeId → edges where nodeId is source.
+ */
+function buildOutgoingEdgeMap(graph: TaskGraph): Map<string, TaskGraphEdge[]> {
+  const outgoing = new Map<string, TaskGraphEdge[]>()
+  for (const edge of graph.edges) {
+    const list = outgoing.get(edge.source)
+    if (list) {
+      list.push(edge)
+    } else {
+      outgoing.set(edge.source, [edge])
+    }
+  }
+  return outgoing
+}
+
+/**
+ * Collect ALL upstream ancestor IDs (for hiddenUpstreamCount display).
+ * This is the simple transitive closure — no leak check.
+ */
+function collectAllUpstreamNodeIds(
   nodeId: string,
   incomingEdgesByTarget: Map<string, TaskGraphEdge[]>,
 ): Set<string> {
@@ -92,6 +112,47 @@ function collectUpstreamNodeIds(
   return upstreamNodeIds
 }
 
+/**
+ * Calculate the safe collapsible upstream set using the no-leak constraint.
+ *
+ * Algorithm (from #424):
+ * BFS upward from anchor. A candidate node is safe to collapse ONLY if
+ * ALL its children (outgoing edges) point to nodes already in the collapsed set.
+ * The anchor itself is exempt (it's allowed to have external outputs).
+ */
+function calculateSafeCollapseScope(
+  anchorId: string,
+  incomingEdgesByTarget: Map<string, TaskGraphEdge[]>,
+  outgoingEdgesBySource: Map<string, TaskGraphEdge[]>,
+): Set<string> {
+  const collapsedSet = new Set<string>([anchorId])
+  const visited = new Set<string>([anchorId])
+  const queue: string[] = (incomingEdgesByTarget.get(anchorId) ?? []).map((e) => e.source)
+
+  while (queue.length > 0) {
+    const candidate = queue.shift()!
+    if (visited.has(candidate)) continue
+    visited.add(candidate)
+
+    // No-leak check: ALL children of candidate must be in collapsedSet
+    const children = (outgoingEdgesBySource.get(candidate) ?? []).map((e) => e.target)
+    const isSafe = children.every((child) => collapsedSet.has(child))
+
+    if (isSafe) {
+      collapsedSet.add(candidate)
+      // Continue exploring upstream
+      for (const edge of incomingEdgesByTarget.get(candidate) ?? []) {
+        if (!visited.has(edge.source)) {
+          queue.push(edge.source)
+        }
+      }
+    }
+    // If not safe, skip — this blocks upstream exploration through this path
+  }
+
+  return collapsedSet
+}
+
 export function projectVisibleTaskGraph(
   graph: TaskGraph,
   state: TaskDagVisibilityState = EMPTY_TASK_DAG_VISIBILITY_STATE,
@@ -99,28 +160,26 @@ export function projectVisibleTaskGraph(
   const normalizedState = normalizeTaskDagVisibilityState(graph, state)
   const topologicalIndex = buildTopologicalIndex(graph)
   const incomingEdgesByTarget = buildIncomingEdgeMap(graph)
+  const outgoingEdgesBySource = buildOutgoingEdgeMap(graph)
   const collapsedTargetIdSet = new Set(normalizedState.collapsedUpstreamOf)
   const hiddenNodeIdSet = new Set<string>()
-  const upstreamNodeIdsByNodeId = new Map<string, Set<string>>()
+  const allUpstreamCache = new Map<string, Set<string>>()
 
-  const getUpstreamNodeIds = (nodeId: string): Set<string> => {
-    const cachedUpstreamNodeIds = upstreamNodeIdsByNodeId.get(nodeId)
-    if (cachedUpstreamNodeIds) {
-      return cachedUpstreamNodeIds
-    }
-
-    const upstreamNodeIds = collectUpstreamNodeIds(nodeId, incomingEdgesByTarget)
-    upstreamNodeIdsByNodeId.set(nodeId, upstreamNodeIds)
-    return upstreamNodeIds
+  const getAllUpstreamNodeIds = (nodeId: string): Set<string> => {
+    const cached = allUpstreamCache.get(nodeId)
+    if (cached) return cached
+    const result = collectAllUpstreamNodeIds(nodeId, incomingEdgesByTarget)
+    allUpstreamCache.set(nodeId, result)
+    return result
   }
 
-  for (const nodeId of normalizedState.collapsedUpstreamOf) {
-    for (const upstreamNodeId of getUpstreamNodeIds(nodeId)) {
-      if (collapsedTargetIdSet.has(upstreamNodeId)) {
-        continue
+  // For each collapse target, compute safe scope using no-leak algorithm (#424)
+  for (const anchorId of normalizedState.collapsedUpstreamOf) {
+    const safeScope = calculateSafeCollapseScope(anchorId, incomingEdgesByTarget, outgoingEdgesBySource)
+    for (const nodeId of safeScope) {
+      if (nodeId !== anchorId && !collapsedTargetIdSet.has(nodeId)) {
+        hiddenNodeIdSet.add(nodeId)
       }
-
-      hiddenNodeIdSet.add(upstreamNodeId)
     }
   }
 
@@ -136,7 +195,7 @@ export function projectVisibleTaskGraph(
     .map((node) => {
       let hiddenUpstreamCount = 0
 
-      for (const upstreamNodeId of getUpstreamNodeIds(node.id)) {
+      for (const upstreamNodeId of getAllUpstreamNodeIds(node.id)) {
         if (hiddenNodeIdSet.has(upstreamNodeId)) {
           hiddenUpstreamCount += 1
         }
