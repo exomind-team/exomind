@@ -1,4 +1,4 @@
-﻿import { Plus, SlidersHorizontal, Waypoints } from 'lucide-react';
+﻿import { CornerDownLeft, Plus, SlidersHorizontal, Waypoints } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
@@ -164,7 +164,21 @@ export function TasksPage() {
   const [quickInput, setQuickInput] = useState(() => {
     try { return localStorage.getItem(DRAFT_KEY) ?? ''; } catch { return ''; }
   });
-  const quickInputRef = useRef<HTMLInputElement>(null);
+  const quickInputRef = useRef<HTMLTextAreaElement>(null);
+
+  const SEND_MODE_KEY = 'exomind:task-input-send-mode';
+  type SendMode = 'enter' | 'ctrl-enter';
+  const [sendMode, setSendMode] = useState<SendMode>(() => {
+    try {
+      const stored = localStorage.getItem(SEND_MODE_KEY);
+      return stored === 'ctrl-enter' ? 'ctrl-enter' : 'enter';
+    } catch { return 'enter'; }
+  });
+  const toggleSendMode = () => {
+    const next: SendMode = sendMode === 'enter' ? 'ctrl-enter' : 'enter';
+    setSendMode(next);
+    try { localStorage.setItem(SEND_MODE_KEY, next); } catch { /* ignore */ }
+  };
 
   useEffect(() => {
     if (initialResolution.redirectDag) {
@@ -443,25 +457,38 @@ export function TasksPage() {
           </div>
         )}
         <div className="flex items-center gap-2 rounded-[24px] border border-[#E7E5E4] bg-white px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
-          <input
+          <textarea
             ref={quickInputRef}
             value={quickInput}
+            rows={1}
             onChange={(event) => handleQuickInputChange(event.target.value)}
             onKeyDown={(event) => {
-              if (event.key === 'Enter') {
+              if (sendMode === 'enter' && event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                void handleQuickAdd();
+              } else if (sendMode === 'ctrl-enter' && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
                 void handleQuickAdd();
               }
             }}
             placeholder="快速添加任务..."
-            className="flex-1 bg-transparent text-sm text-[#44403C] outline-none placeholder:text-[#A8A29E] dark:text-[#E7E5E4] dark:placeholder:text-[#78716C]"
+            className="max-h-20 flex-1 resize-none bg-transparent text-sm text-[#44403C] outline-none placeholder:text-[#A8A29E] dark:text-[#E7E5E4] dark:placeholder:text-[#78716C]"
           />
+          <button
+            type="button"
+            onClick={toggleSendMode}
+            title={sendMode === 'enter' ? '当前：Enter 发送（点击切换为 Ctrl+Enter）' : '当前：Ctrl+Enter 发送（点击切换为 Enter）'}
+            className="flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[10px] font-medium text-[#A8A29E] transition-colors hover:bg-[#F5F0ED] hover:text-[#78716C] dark:hover:bg-[#292524] dark:hover:text-[#D6D3D1]"
+          >
+            <CornerDownLeft size={12} />
+            <span>{sendMode === 'enter' ? '↵' : '⌃↵'}</span>
+          </button>
           <button
             type="button"
             onClick={() => {
               void handleQuickAdd();
             }}
-            className="flex h-9 w-9 items-center justify-center rounded-full bg-[#C75B3A] text-white"
+            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#C75B3A] text-white"
             aria-label="添加任务（Add Task）"
           >
             <Plus size={18} />
