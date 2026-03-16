@@ -192,7 +192,10 @@ export function projectVisibleTaskGraph(
     const otherTargets = new Set(normalizedState.collapsedUpstreamOf.filter((id) => id !== anchorId))
     const safeScope = calculateSafeCollapseScope(anchorId, incomingEdgesByTarget, outgoingEdgesBySource, otherTargets)
     for (const nodeId of safeScope) {
-      if (nodeId !== anchorId && !collapsedTargetIdSet.has(nodeId)) {
+      // Hide all nodes in scope except the anchor itself.
+      // Other collapse targets that fall within this scope ARE hidden
+      // (nested folding: upstream fold target gets absorbed by downstream fold).
+      if (nodeId !== anchorId) {
         hiddenNodeIdSet.add(nodeId)
       }
     }
