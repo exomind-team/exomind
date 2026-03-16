@@ -247,6 +247,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   }, [timerPreferences.countdownEndSoundEnabled, timerPreferences.countdownEndSoundPresetId]);
 
   const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
+    console.log('[FocusTimer] applyActiveBlock', block ? { startId: block.startId, mode: block.mode, phase: block.phase, paused: block.paused, taskId: block.taskId, feedbackSubmittedAt: block.feedbackSubmittedAt } : 'NULL', new Error().stack?.split('\n').slice(1, 4).join(' <- '));
     activeBlockDataRef.current = block;
     if (!block) {
       taskStatusChoiceBlockRef.current = null;
@@ -306,13 +307,16 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
   useEffect(() => {
     let cancelled = false;
+    console.log('[FocusTimer] useEffect: subscribing to onBlockChange');
     const unsubscribe = timeBlockServiceRef.current.onBlockChange((block) => {
-      if (cancelled) return;
+      console.log('[FocusTimer] onBlockChange fired', block ? { startId: block.startId, mode: block.mode, phase: block.phase, paused: block.paused, feedbackSubmittedAt: block.feedbackSubmittedAt } : 'NULL');
+      if (cancelled) { console.log('[FocusTimer] onBlockChange: cancelled, skipping'); return; }
       applyActiveBlock(block);
     });
 
     const load = async () => {
       const block = await timeBlockServiceRef.current.loadActiveBlock();
+      console.log('[FocusTimer] loadActiveBlock on mount', block ? { startId: block.startId, mode: block.mode, phase: block.phase } : 'NULL');
       if (cancelled) return;
       if (block) {
         applyActiveBlock(block);
@@ -321,6 +325,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
     void load();
     return () => {
+      console.log('[FocusTimer] useEffect cleanup: unsubscribing');
       cancelled = true;
       unsubscribe();
     };
