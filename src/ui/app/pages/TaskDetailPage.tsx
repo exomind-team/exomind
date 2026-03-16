@@ -1,6 +1,7 @@
 import { ArrowLeft, Ellipsis, NotepadText, Target, Play } from 'lucide-react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { Link, useNavigate, useParams, useLocation } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
+import { TASKS_LAST_PATH_KEY } from './TasksPage';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { isTerminalTaskStatus } from '@/lib/types/task';
 import type { TaskNode } from '@/lib/types/task';
@@ -920,9 +921,16 @@ function DesktopTimeblockDetail({
 export function TaskDetailPage() {
   const { taskId, blockId: blockIdParam } = useParams({ strict: false }) as { taskId?: string; blockId?: string };
   const navigate = useNavigate();
+  const location = useLocation();
   const isDesktop = useIsDesktop();
   const preferredBlockId = blockIdParam || resolvePreferredBlockId();
   const backLink = resolveTimeblockSourceBackLink();
+
+  // Persist current tasks sub-path for nav tab memory
+  useEffect(() => {
+    const fullPath = location.pathname + (location.searchStr || '');
+    sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+  }, [location.pathname, location.searchStr]);
 
   const [task, setTask] = useState<TaskNode | null>(null);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);

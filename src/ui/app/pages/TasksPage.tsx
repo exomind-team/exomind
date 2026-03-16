@@ -1,6 +1,6 @@
 ﻿import { SlidersHorizontal, Waypoints } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useNavigate } from '@tanstack/react-router';
+import { Link, useNavigate, useLocation } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
@@ -153,14 +153,23 @@ function resolveInitialTaskTab(): { tab: TaskTab; redirectDag: boolean } {
   return { tab: 'now', redirectDag: false };
 }
 
+export const TASKS_LAST_PATH_KEY = 'exomind:last-tasks-path';
+
 export function TasksPage() {
   const navigate = useNavigate();
+  const location = useLocation();
   const [initialResolution] = useState(() => resolveInitialTaskTab());
   const [activeTab, setActiveTab] = useState<TaskTab>(initialResolution.tab);
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const inputRef = useRef<VoiceMessageInputHandle>(null);
+
+  // Persist current tasks sub-path for nav tab memory
+  useEffect(() => {
+    const fullPath = location.pathname + (location.searchStr || '');
+    sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+  }, [location.pathname, location.searchStr]);
 
   useEffect(() => {
     if (initialResolution.redirectDag) {

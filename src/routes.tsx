@@ -514,10 +514,22 @@ const newEventlogRoute = createRoute({
   },
 });
 
+const TASKS_LAST_PATH_KEY = 'exomind:last-tasks-path';
+
 const newTasksRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks',
   component: function NewTasks() {
+    const navigate = useNavigate();
+
+    // Redirect to the last visited tasks sub-path (e.g. /tasks/dag, /tasks/:id)
+    useEffect(() => {
+      const saved = sessionStorage.getItem(TASKS_LAST_PATH_KEY);
+      if (saved && saved !== '/tasks' && saved.startsWith('/tasks')) {
+        void navigate({ to: saved, replace: true });
+      }
+    }, [navigate]);
+
     return (
       <LazyPage>
         <TasksPage />
