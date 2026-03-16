@@ -74,10 +74,10 @@ export function EstimatedTimeEditor({
   }, [isCustomEditing]);
 
   const activeIndex = minutes === undefined
-    ? null
+    ? 0
     : isPresetEstimatedMinutes(minutes)
-      ? PRESET_ESTIMATED_MINUTES.indexOf(minutes as (typeof PRESET_ESTIMATED_MINUTES)[number])
-      : PRESET_ESTIMATED_MINUTES.length;
+      ? PRESET_ESTIMATED_MINUTES.indexOf(minutes as (typeof PRESET_ESTIMATED_MINUTES)[number]) + 1
+      : PRESET_ESTIMATED_MINUTES.length + 1;
   const isCustomSelected = minutes !== undefined && !isPresetEstimatedMinutes(minutes);
 
   async function persistMinutes(nextMinutes: number | undefined): Promise<void> {
@@ -179,15 +179,25 @@ export function EstimatedTimeEditor({
         className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
         data-testid="estimated-time-selector"
       >
-        {activeIndex !== null ? (
-          <div
-            data-testid="estimated-time-active-indicator"
-            className="pointer-events-none absolute inset-y-0 left-0 w-1/5 rounded-[8px] border border-[#FFFFFFCC] bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out dark:border-[#FFFFFF66] dark:bg-[#FFFFFF14]"
-            style={{ transform: `translateX(${activeIndex * 100}%)` }}
-          />
-        ) : null}
+        <div
+          data-testid="estimated-time-active-indicator"
+          className="pointer-events-none absolute inset-y-0 left-0 rounded-[8px] border border-[#FFFFFFCC] bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out dark:border-[#FFFFFF66] dark:bg-[#FFFFFF14]"
+          style={{ width: `${100 / 6}%`, transform: `translateX(${activeIndex * 100}%)` }}
+        />
 
-        <div className="relative z-10 grid min-w-0 grid-cols-5 gap-0">
+        <div className="relative z-10 grid min-w-0 grid-cols-6 gap-0">
+          <button
+            type="button"
+            data-testid="estimated-time-preset-none"
+            aria-pressed={minutes === undefined}
+            disabled={disabled || isSaving}
+            onClick={() => {
+              void persistMinutes(undefined);
+            }}
+            className={expectedOptionClass(minutes === undefined)}
+          >
+            无
+          </button>
           {PRESET_ESTIMATED_MINUTES.map((preset) => (
             <button
               key={preset}
