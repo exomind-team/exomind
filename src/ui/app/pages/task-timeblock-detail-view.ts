@@ -397,7 +397,6 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     { key: 'start', label: '开始', value: formatClock(block.startTime) },
     { key: 'end', label: '结束', value: formatClock(block.endTime) },
     { key: 'duration', label: '时长', value: formatMinutes(actualMinutes) },
-    { key: 'expected', label: '预期', value: input.task.estimatedMinutes ? formatMinutes(input.task.estimatedMinutes) : '未估时' },
     { key: 'event_count', label: '事件数', value: `${timeline.items.length}` },
   ];
   const actions: TimeblockActionItem[] = [

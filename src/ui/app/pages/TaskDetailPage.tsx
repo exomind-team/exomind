@@ -29,6 +29,8 @@ import {
 import type { TaskDagVisibilityState } from '@/lib/task/task-dag-visibility';
 import { TimerConfigPanel } from '@/ui/app/components/TimerConfigPanel';
 import { useTimerConfig } from '@/ui/app/hooks/useTimerConfig';
+import { Pencil } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
 
 type DependencyType = 'soft' | 'hard';
 type TimeblockSourceTab = 'now' | 'today' | 'week' | 'month';
@@ -496,6 +498,7 @@ function DependencyCard({
 }
 
 function MobileTimeblockDetail({
+  descriptionBlock,
   task,
   model,
   backLink,
@@ -521,6 +524,7 @@ function MobileTimeblockDetail({
   onRemoveDependency,
   onToggleCollapseUpstream,
 }: {
+  descriptionBlock: ReactNode;
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
   backLink: TimeblockSourceBackLink;
@@ -570,6 +574,8 @@ function MobileTimeblockDetail({
         </button>
       </header>
 
+      <div className="px-4 pt-3">{descriptionBlock}</div>
+
       <div className="space-y-3 px-4 pt-3">
         <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
           <div className="flex flex-wrap items-center gap-2">
@@ -583,13 +589,6 @@ function MobileTimeblockDetail({
           <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联任务：{task.title}</p>
           {task.description ? (
             <p className="mt-2 whitespace-pre-wrap text-xs text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>
-          ) : null}
-          {canEditEstimatedTime ? (
-            <EstimatedTimeEditor
-              taskId={task.id}
-              currentMinutes={task.estimatedMinutes}
-              onUpdate={onEstimatedMinutesUpdate}
-            />
           ) : null}
           <div className="mt-3 grid grid-cols-2 gap-2">
             {model.summary.metrics.map((metric) => (
@@ -679,7 +678,24 @@ function MobileTimeblockDetail({
           className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
         >
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
-          {timerControls}
+          {canEditEstimatedTime ? (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">估计时长</p>
+              <div className="mt-1">
+                <EstimatedTimeEditor
+                  taskId={task.id}
+                  currentMinutes={task.estimatedMinutes}
+                  onUpdate={onEstimatedMinutesUpdate}
+                />
+              </div>
+            </div>
+          ) : null}
+          <div className="mt-3">
+            <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</p>
+            <div className="mt-1">
+              {timerControls}
+            </div>
+          </div>
           <div className="mt-3 flex gap-2">
             <button
               type="button"
@@ -707,6 +723,7 @@ function MobileTimeblockDetail({
 }
 
 function DesktopTimeblockDetail({
+  descriptionBlock,
   task,
   model,
   backLink,
@@ -732,6 +749,7 @@ function DesktopTimeblockDetail({
   onRemoveDependency,
   onToggleCollapseUpstream,
 }: {
+  descriptionBlock: ReactNode;
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
   backLink: TimeblockSourceBackLink;
@@ -784,6 +802,8 @@ function DesktopTimeblockDetail({
         </div>
       </header>
 
+      {descriptionBlock}
+
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <section className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
           <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
@@ -794,13 +814,6 @@ function DesktopTimeblockDetail({
               </div>
             ))}
           </div>
-          {canEditEstimatedTime ? (
-            <EstimatedTimeEditor
-              taskId={task.id}
-              currentMinutes={task.estimatedMinutes}
-              onUpdate={onEstimatedMinutesUpdate}
-            />
-          ) : null}
         </section>
 
         <section
@@ -808,7 +821,24 @@ function DesktopTimeblockDetail({
           className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]"
         >
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
-          {timerControls}
+          {canEditEstimatedTime ? (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">估计时长</p>
+              <div className="mt-1">
+                <EstimatedTimeEditor
+                  taskId={task.id}
+                  currentMinutes={task.estimatedMinutes}
+                  onUpdate={onEstimatedMinutesUpdate}
+                />
+              </div>
+            </div>
+          ) : null}
+          <div className="mt-3">
+            <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</p>
+            <div className="mt-1">
+              {timerControls}
+            </div>
+          </div>
           <div className="mt-3 flex gap-2">
             <button
               type="button"
@@ -927,6 +957,8 @@ export function TaskDetailPage() {
   const [dependencyActionError, setDependencyActionError] = useState<string | null>(null);
   const [isDependencySaving, setIsDependencySaving] = useState(false);
   const [dependencyReloadKey, setDependencyReloadKey] = useState(0);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState('');
   const timerResetKey = taskId ?? preferredBlockId ?? task?.id;
   const timerInitialMinutes = taskId
     ? task?.id === taskId ? task.estimatedMinutes : undefined
@@ -1220,6 +1252,14 @@ export function TaskDetailPage() {
     )));
   }, [task?.id]);
 
+  const handleSaveDescription = useCallback(async () => {
+    if (!task?.id) return;
+    const trimmed = descriptionDraft.trim() || undefined;
+    setIsEditingDescription(false);
+    setTask((current) => current ? { ...current, description: trimmed } : current);
+    await getTaskService().updateTask(task.id, { description: trimmed ?? '' });
+  }, [task?.id, descriptionDraft]);
+
   if (isLoading) {
     return (
       <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
@@ -1240,9 +1280,45 @@ export function TaskDetailPage() {
     );
   }
 
+  const descriptionBlock = (
+    <>
+      {isEditingDescription ? (
+        <div className="mt-3 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+          <Textarea
+            autoFocus
+            value={descriptionDraft}
+            onChange={(e) => setDescriptionDraft(e.target.value)}
+            placeholder="输入任务描述..."
+            className="min-h-[120px] border-none bg-transparent p-0 text-sm text-[#1C1917] shadow-none focus-visible:ring-0 dark:text-[#FAFAF9]"
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <button type="button" onClick={() => setIsEditingDescription(false)} className="rounded-lg px-3 py-1 text-xs text-[#78716C] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">取消</button>
+            <button type="button" onClick={handleSaveDescription} className="rounded-lg bg-[#1C1917] px-3 py-1 text-xs text-white dark:bg-[#FAFAF9] dark:text-[#1C1917]">保存</button>
+          </div>
+        </div>
+      ) : task.description ? (
+        <div className="mt-3 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+          <div className="flex items-start justify-between gap-3">
+            <p className="whitespace-pre-wrap text-sm text-[#1C1917] dark:text-[#FAFAF9]">{task.description}</p>
+            {!isTerminalTaskStatus(task.status) && (
+              <button type="button" onClick={() => { setDescriptionDraft(task.description ?? ''); setIsEditingDescription(true); }} className="shrink-0 rounded-lg p-1.5 text-[#A8A29E] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">
+                <Pencil size={14} />
+              </button>
+            )}
+          </div>
+        </div>
+      ) : !isTerminalTaskStatus(task.status) ? (
+        <button type="button" onClick={() => { setDescriptionDraft(''); setIsEditingDescription(true); }} className="mt-3 w-full rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-6 py-3 text-left text-sm text-[#A8A29E] hover:bg-[#F5F0ED] dark:border-[#3A3432] dark:bg-[#1C1917] dark:hover:bg-[#292524]">
+          + 添加任务描述
+        </button>
+      ) : null}
+    </>
+  );
+
   if (isDesktop) {
     return (
       <DesktopTimeblockDetail
+        descriptionBlock={descriptionBlock}
         task={task}
         model={viewModel}
         backLink={backLink}
@@ -1273,6 +1349,7 @@ export function TaskDetailPage() {
 
   return (
     <MobileTimeblockDetail
+      descriptionBlock={descriptionBlock}
       task={task}
       model={viewModel}
       backLink={backLink}
