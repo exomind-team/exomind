@@ -791,23 +791,53 @@ function DesktopTimeblockDetail({
         </div>
       </header>
 
-      <section className="mt-4 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <div className="grid grid-cols-5 gap-3">
-          {model.summary.metrics.map((metric) => (
-            <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
-              <p className="text-xs text-[#A8A29E]">{metric.label}</p>
-              <p className="mt-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
-            </div>
-          ))}
-        </div>
-        {canEditEstimatedTime ? (
-          <EstimatedTimeEditor
-            taskId={task.id}
-            currentMinutes={task.estimatedMinutes}
-            onUpdate={onEstimatedMinutesUpdate}
-          />
-        ) : null}
-      </section>
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <section className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+          <div className="grid grid-cols-2 gap-3 xl:grid-cols-3">
+            {model.summary.metrics.map((metric) => (
+              <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
+                <p className="text-xs text-[#A8A29E]">{metric.label}</p>
+                <p className="mt-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
+              </div>
+            ))}
+          </div>
+          {canEditEstimatedTime ? (
+            <EstimatedTimeEditor
+              taskId={task.id}
+              currentMinutes={task.estimatedMinutes}
+              onUpdate={onEstimatedMinutesUpdate}
+            />
+          ) : null}
+        </section>
+
+        <section
+          data-testid="task-timer-card"
+          className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
+          {timerControls}
+          <div className="mt-3 flex gap-2">
+            <button
+              type="button"
+              onClick={onStartTimer}
+              disabled={hasOtherActiveBlock}
+              className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+            >
+              <Play size={14} />
+              开始计时
+            </button>
+            <button
+              type="button"
+              data-testid="task-pause-button"
+              onClick={onPauseAndGoEventlog}
+              className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+            >
+              <Pause size={14} />
+              {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
+            </button>
+          </div>
+        </section>
+      </div>
 
       <section className="mt-4 grid grid-cols-[minmax(0,1fr)_340px] gap-4">
         <div className="space-y-3">
@@ -873,34 +903,6 @@ function DesktopTimeblockDetail({
             onRestart={onStartTimer}
             onCopySummary={onCopySummary}
           />
-
-          <section
-            data-testid="task-timer-card"
-            className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
-          >
-            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
-            {timerControls}
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={onStartTimer}
-                disabled={hasOtherActiveBlock}
-                className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
-              >
-                <Play size={14} />
-                开始计时
-              </button>
-              <button
-                type="button"
-                data-testid="task-pause-button"
-                onClick={onPauseAndGoEventlog}
-                className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-              >
-                <Pause size={14} />
-                {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
-              </button>
-            </div>
-          </section>
         </aside>
       </section>
     </div>
