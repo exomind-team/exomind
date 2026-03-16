@@ -1278,6 +1278,12 @@ export function TaskDetailPage() {
             autoFocus
             value={descriptionDraft}
             onChange={(e) => setDescriptionDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                void handleSaveDescription();
+              }
+            }}
             placeholder="输入任务描述..."
             className="min-h-[120px] border-none bg-transparent p-0 text-sm text-[#1C1917] shadow-none focus-visible:ring-0 dark:text-[#FAFAF9]"
           />
