@@ -17,6 +17,7 @@ import {
   type TimeblockEventLog,
   type TaskTimeblockDetailViewModel,
   type TimeblockBadge,
+  type LinkedBlockItem,
 } from './task-timeblock-detail-view';
 import {
   buildTaskDependencyView,
@@ -187,6 +188,49 @@ function DetailActionsCard({
   );
 }
 
+function LinkedBlocksCard({
+  linkedBlocks,
+  taskId,
+}: {
+  linkedBlocks: LinkedBlockItem[];
+  taskId: string;
+}) {
+  if (linkedBlocks.length === 0) {
+    return (
+      <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">关联时间块</h3>
+        <p className="mt-2 text-xs text-[#A8A29E]">暂无关联时间块，开始计时后会自动出现。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+      <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">关联时间块</h3>
+      <div className="mt-3 space-y-2">
+        {linkedBlocks.map((item) => (
+          <Link
+            key={item.startId}
+            to={`/tasks/${taskId}`}
+            search={{ blockId: item.startId }}
+            className="block rounded-xl border border-[#E7E5E4] px-3 py-2 transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#292524]"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</span>
+              {item.isActive ? (
+                <span className="shrink-0 rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[11px] font-semibold text-[#15803D]">进行中</span>
+              ) : (
+                <span className="shrink-0 text-xs text-[#A8A29E]">{item.durationLabel}</span>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-[#A8A29E]">{item.startLabel} ~ {item.endLabel}</p>
+          </Link>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 function DependencyCard({
   dependencyView,
   taskDagView,
@@ -194,6 +238,7 @@ function DependencyCard({
   selectedType,
   errorMessage,
   isSaving,
+  hideAddDependency,
   onSelectedTaskChange,
   onSelectedTypeChange,
   onAddDependency,
@@ -207,6 +252,7 @@ function DependencyCard({
   selectedType: DependencyType;
   errorMessage: string | null;
   isSaving: boolean;
+  hideAddDependency?: boolean;
   onSelectedTaskChange: (value: string) => void;
   onSelectedTypeChange: (value: DependencyType) => void;
   onAddDependency: () => void;
@@ -411,6 +457,7 @@ function DependencyCard({
           </div>
         </div>
 
+        {!hideAddDependency && (
         <div className="rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
           <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">新增依赖</h4>
           <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
@@ -467,6 +514,8 @@ function DependencyCard({
             </div>
           </div>
         </div>
+        )}
+
 
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">谁依赖我</h4>
@@ -513,6 +562,7 @@ function MobileTimeblockDetail({
   timerControls,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
+  hardBlockingReason,
   onStartTimer,
   onPauseAndGoEventlog,
   onCopySummary,
@@ -539,6 +589,7 @@ function MobileTimeblockDetail({
   timerControls: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
+  hardBlockingReason: string | null;
   onStartTimer: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
@@ -641,6 +692,8 @@ function MobileTimeblockDetail({
           </div>
         </section>
 
+        <LinkedBlocksCard linkedBlocks={model.linkedBlocks} taskId={task.id} />
+
         <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">AI 总结</h3>
           <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.aiSummary.summaryText}</p>
@@ -658,6 +711,7 @@ function MobileTimeblockDetail({
           selectedType={dependencySelectedType}
           errorMessage={dependencyError}
           isSaving={isDependencySaving}
+          hideAddDependency={isTerminalTaskStatus(task.status)}
           onSelectedTaskChange={onDependencySelectedTaskChange}
           onSelectedTypeChange={onDependencySelectedTypeChange}
           onAddDependency={onAddDependency}
@@ -671,6 +725,7 @@ function MobileTimeblockDetail({
           onCopySummary={onCopySummary}
         />
 
+        {!isTerminalTaskStatus(task.status) && (
         <section
           data-testid="task-timer-card"
           className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
@@ -712,6 +767,7 @@ function MobileTimeblockDetail({
             </button>
           </div>
         </section>
+        )}
       </div>
     </div>
   );
@@ -818,6 +874,7 @@ function DesktopTimeblockDetail({
           </div>
         </section>
 
+        {!isTerminalTaskStatus(task.status) && (
         <section
           data-testid="task-timer-card"
           className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]"
@@ -859,6 +916,7 @@ function DesktopTimeblockDetail({
             </button>
           </div>
         </section>
+        )}
       </div>
 
       <section className="mt-4 grid grid-cols-[minmax(0,1fr)_340px] gap-4">
@@ -892,6 +950,7 @@ function DesktopTimeblockDetail({
             selectedType={dependencySelectedType}
             errorMessage={dependencyError}
             isSaving={isDependencySaving}
+            hideAddDependency={isTerminalTaskStatus(task.status)}
             onSelectedTaskChange={onDependencySelectedTaskChange}
             onSelectedTypeChange={onDependencySelectedTypeChange}
             onAddDependency={onAddDependency}
@@ -1089,6 +1148,19 @@ export function TaskDetailPage() {
     () => (task ? allTasks.some((candidate) => candidate.id === task.id) && !isTerminalTaskStatus(task.status) : false),
     [allTasks, task],
   );
+  const hardBlockingReason = useMemo(() => {
+    if (!task) return null;
+    const incompleteHardDeps = task.dependsOn
+      .filter((dep) => dep.type === 'hard')
+      .map((dep) => {
+        const predecessor = taskById.get(dep.taskId);
+        if (!predecessor || predecessor.status === 'completed') return null;
+        return predecessor.title;
+      })
+      .filter((title): title is string => title !== null);
+    if (incompleteHardDeps.length === 0) return null;
+    return `硬依赖未完成：${incompleteHardDeps.join('、')}`;
+  }, [task, taskById]);
   const timerControls = (
     <TimerConfigPanel
       timerMode={timerMode}
@@ -1201,9 +1273,13 @@ export function TaskDetailPage() {
   };
 
   const handleStartTimer = () => {
-    if (!taskId) return;
-    void getTaskTimerService().startBlockForTask(taskId, timerConfig).then(() => {
+    if (!taskId) { console.error('[TaskDetail] handleStartTimer: no taskId'); return; }
+    console.log('[TaskDetail] handleStartTimer', { taskId, timerConfig, timerMode, countdownMinutes });
+    void getTaskTimerService().startBlockForTask(taskId, timerConfig).then((block) => {
+      console.log('[TaskDetail] startBlockForTask OK', block ? { startId: block.startId, mode: block.mode, phase: block.phase, taskId: block.taskId, paused: block.paused, elapsed: block.elapsed } : 'NULL');
       void navigate({ to: '/eventlog' });
+    }).catch((err) => {
+      console.error('[TaskDetail] startBlockForTask FAILED', err);
     });
   };
 
