@@ -70,6 +70,15 @@ export interface TimeblockEventLog {
   type?: string;
 }
 
+export interface LinkedBlockItem {
+  startId: string;
+  name: string;
+  startLabel: string;
+  endLabel: string;
+  durationLabel: string;
+  isActive: boolean;
+}
+
 export interface TaskTimeblockDetailViewModel {
   summary: TimeblockSummary;
   anchors: TimeblockAnchorItem[];
@@ -77,6 +86,7 @@ export interface TaskTimeblockDetailViewModel {
   timeline: TimeblockTimeline;
   aiSummary: TimeblockAiSummary;
   actions: TimeblockActionItem[];
+  linkedBlocks: LinkedBlockItem[];
 }
 
 export interface BuildTaskTimeblockDetailViewModelInput {
@@ -394,7 +404,32 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
 
   const badges = scheduleBadge ? [statusBadge, scheduleBadge] : [statusBadge];
   const taskBlockIds = new Set((input.task.timeBlockIds ?? []).map((v) => v.trim()));
-  const blockCount = input.blocks.filter((b) => taskBlockIds.has(b.startId) || taskBlockIds.has(b.id)).length;
+  const completedLinked = input.blocks
+    .filter((b) => taskBlockIds.has(b.startId) || taskBlockIds.has(b.id))
+    .sort((a, b) => b.endTime - a.endTime);
+  const blockCount = completedLinked.length;
+
+  const linkedBlocks: LinkedBlockItem[] = completedLinked.map((b) => ({
+    startId: b.startId,
+    name: b.name,
+    startLabel: formatDateTime(b.startTime),
+    endLabel: formatDateTime(b.endTime),
+    durationLabel: formatMinutes(resolveDurationMinutes(b)),
+    isActive: false,
+  }));
+
+  if (input.activeBlock && input.activeBlock.taskId === input.task.id) {
+    const ab = input.activeBlock;
+    linkedBlocks.unshift({
+      startId: ab.startId,
+      name: ab.name,
+      startLabel: formatDateTime(ab.startTime),
+      endLabel: '进行中',
+      durationLabel: formatMinutes(Math.max(0, Math.round((nowTs - ab.startTime) / 60_000))),
+      isActive: true,
+    });
+  }
+
   const metrics: TimeblockSummaryMetric[] = [
     { key: 'start', label: '开始', value: formatClock(block.startTime) },
     { key: 'end', label: '结束', value: formatClock(block.endTime) },
@@ -424,5 +459,6 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     timeline,
     aiSummary,
     actions,
+    linkedBlocks,
   };
 }
