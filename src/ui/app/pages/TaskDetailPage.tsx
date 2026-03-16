@@ -692,10 +692,7 @@ function MobileTimeblockDetail({
             </div>
           ) : null}
           <div className="mt-3">
-            <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</p>
-            <div className="mt-1">
-              {timerControls}
-            </div>
+            {timerControls}
           </div>
           <div className="mt-3 flex gap-2">
             <button
@@ -836,10 +833,7 @@ function DesktopTimeblockDetail({
             </div>
           ) : null}
           <div className="mt-3">
-            <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</p>
-            <div className="mt-1">
-              {timerControls}
-            </div>
+            {timerControls}
           </div>
           <div className="mt-3 flex gap-2">
             <button
