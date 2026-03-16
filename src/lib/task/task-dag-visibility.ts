@@ -119,11 +119,17 @@ function collectAllUpstreamNodeIds(
  * BFS upward from anchor. A candidate node is safe to collapse ONLY if
  * ALL its children (outgoing edges) point to nodes already in the collapsed set.
  * The anchor itself is exempt (it's allowed to have external outputs).
+ *
+ * Nested folding: when encountering a node that is itself a collapse target
+ * for another fold, treat it as an atomic/opaque node — include it in the
+ * collapsed set but do NOT expand its parents (they belong to that node's
+ * own fold scope).
  */
 function calculateSafeCollapseScope(
   anchorId: string,
   incomingEdgesByTarget: Map<string, TaskGraphEdge[]>,
   outgoingEdgesBySource: Map<string, TaskGraphEdge[]>,
+  otherCollapseTargets: Set<string>,
 ): Set<string> {
   const collapsedSet = new Set<string>([anchorId])
   const visited = new Set<string>([anchorId])
@@ -140,6 +146,13 @@ function calculateSafeCollapseScope(
 
     if (isSafe) {
       collapsedSet.add(candidate)
+
+      // Nested folding boundary: if this candidate is itself a collapse target,
+      // treat it as atomic — don't expand its parents (they're its own fold scope).
+      if (otherCollapseTargets.has(candidate)) {
+        continue
+      }
+
       // Continue exploring upstream
       for (const edge of incomingEdgesByTarget.get(candidate) ?? []) {
         if (!visited.has(edge.source)) {
@@ -175,7 +188,9 @@ export function projectVisibleTaskGraph(
 
   // For each collapse target, compute safe scope using no-leak algorithm (#424)
   for (const anchorId of normalizedState.collapsedUpstreamOf) {
-    const safeScope = calculateSafeCollapseScope(anchorId, incomingEdgesByTarget, outgoingEdgesBySource)
+    // Pass other collapse targets so nested folds are treated as atomic boundaries
+    const otherTargets = new Set(normalizedState.collapsedUpstreamOf.filter((id) => id !== anchorId))
+    const safeScope = calculateSafeCollapseScope(anchorId, incomingEdgesByTarget, outgoingEdgesBySource, otherTargets)
     for (const nodeId of safeScope) {
       if (nodeId !== anchorId && !collapsedTargetIdSet.has(nodeId)) {
         hiddenNodeIdSet.add(nodeId)
