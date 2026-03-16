@@ -773,14 +773,6 @@ function DesktopTimeblockDetail({
         <div className="mt-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
-            <Link
-              to={backLink.to}
-              search={backLink.search}
-              className="mt-2 inline-flex text-sm font-medium text-[#78716C] underline-offset-2 hover:underline dark:text-[#A8A29E]"
-              data-testid="timeblock-back-link-desktop"
-            >
-              {backLink.label}
-            </Link>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {model.summary.badges.map((badge) => (
