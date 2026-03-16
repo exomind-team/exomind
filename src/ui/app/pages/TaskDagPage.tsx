@@ -1,6 +1,7 @@
 import { ArrowLeft, Crosshair, Waypoints } from 'lucide-react';
-import { Link } from '@tanstack/react-router';
+import { Link, useLocation } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { TASKS_LAST_PATH_KEY } from './TasksPage';
 import {
   Background,
   Controls,
@@ -166,7 +167,7 @@ export function TaskDagPage() {
           <div className="inline-flex items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
             <Link to="/tasks" className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
               <ArrowLeft size={14} />
-              返回任务
+              任务
             </Link>
             <span>/</span>
             <span className="inline-flex items-center gap-1">
