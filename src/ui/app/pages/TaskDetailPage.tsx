@@ -1,4 +1,4 @@
-import { ArrowLeft, Ellipsis, Pause, Play } from 'lucide-react';
+import { ArrowLeft, Ellipsis, Target, Play } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
@@ -154,7 +154,7 @@ function DetailActionsCard({
       <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">操作</h3>
       <div className="mt-3 space-y-2">
         {model.actions.map((action) => {
-          if (action.id === 'open-task' || action.id === 'open-eventlog') {
+          if (action.id === 'open-task') {
             return (
               <Link
                 key={action.id}
@@ -712,7 +712,7 @@ function MobileTimeblockDetail({
               onClick={onPauseAndGoEventlog}
               className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
             >
-              <Pause size={14} />
+              <Target size={14} />
               {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
             </button>
           </div>
@@ -855,7 +855,7 @@ function DesktopTimeblockDetail({
               onClick={onPauseAndGoEventlog}
               className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
             >
-              <Pause size={14} />
+              <Target size={14} />
               {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
             </button>
           </div>
