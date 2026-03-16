@@ -49,7 +49,7 @@ import {
   createVolcanoStreamingCapture,
   type VolcanoStreamingCapture,
 } from '@/lib/asr/volcano-streaming-capture';
-import { normalizeVolcanoRecognitionText } from '@/lib/voice/recognition-text';
+import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 import {
   getVoiceOverlayBottomOffset,
   subscribeVoiceOverlayBottomOffsetChanges,
@@ -862,7 +862,7 @@ export class VoiceShortcutService {
       const recognitionStartedAt = Date.now();
       const result = await this.transcribeWithSelectedProvider(wavData);
       const recognitionMs = Date.now() - recognitionStartedAt;
-      const normalizedText = this.normalizeRecognitionText(result?.text);
+      const normalizedText = this.normalizeText(result?.text);
       if (normalizedText) {
         await this.handleResult({ ...result, text: normalizedText }, recognitionMs, this.getActiveProviderLabel());
       } else {
@@ -1020,15 +1020,8 @@ export class VoiceShortcutService {
     emit('voice-overlay-state', this.buildOverlayPayload(state, extra)).catch(() => {});
   }
 
-  private normalizeRecognitionText(text: string | null | undefined): string {
-    const normalizedText = text?.trim() ?? '';
-    if (!normalizedText) {
-      return '';
-    }
-    if (this.asrProvider === 'volcano') {
-      return normalizeVolcanoRecognitionText(normalizedText);
-    }
-    return normalizedText;
+  private normalizeText(text: string | null | undefined): string {
+    return normalizeRecognitionText(text?.trim() ?? '');
   }
 
   private async transcribeWithSelectedProvider(wavData: Uint8Array): Promise<ASRResult> {
@@ -1263,7 +1256,7 @@ export class VoiceShortcutService {
         audioData: Array.from(trailingChunk ?? new Uint8Array()),
       });
       const recognitionMs = Date.now() - recognitionStartedAt;
-      const normalizedText = this.normalizeRecognitionText(result?.text);
+      const normalizedText = this.normalizeText(result?.text);
       if (normalizedText) {
         await this.handleResult({ ...result, text: normalizedText }, recognitionMs, this.getActiveProviderLabel());
       } else {
