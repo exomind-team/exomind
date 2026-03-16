@@ -286,7 +286,7 @@ export function TaskDagPage() {
             }}
           >
             <Background gap={20} color="#E7E5E4" />
-            <Controls />
+            <Controls className="!rounded-lg !border-[#E7E3E0] !bg-white/90 !shadow-sm dark:!border-[#3C3836] dark:!bg-[#1C1917]/90 [&>button]:!border-[#E7E3E0] [&>button]:!bg-transparent [&>button]:!fill-[#57534E] dark:[&>button]:!border-[#3C3836] dark:[&>button]:!fill-[#A8A29E] [&>button:hover]:!bg-[#F5F0ED] dark:[&>button:hover]:!bg-[#292524]" />
             <TaskDagControlPanel
               onFitView={() => { void flowInstanceRef.current?.fitView({ padding: 0.2 }); }}
               onJumpToCurrentRoot={graph.currentRootNodeId ? () => {

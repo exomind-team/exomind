@@ -585,6 +585,9 @@ function MobileTimeblockDetail({
           </div>
           <h2 className="mt-3 text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h2>
           <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联任务：{task.title}</p>
+          {task.description ? (
+            <p className="mt-2 whitespace-pre-wrap text-xs text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>
+          ) : null}
           {canEditEstimatedTime ? (
             <EstimatedTimeEditor
               taskId={task.id}
@@ -859,6 +862,9 @@ function DesktopTimeblockDetail({
           <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
             <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">洞察</h3>
             <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{task.title}</p>
+            {task.description ? (
+              <p className="mt-2 whitespace-pre-wrap text-xs text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>
+            ) : null}
           </section>
 
           <DependencyCard

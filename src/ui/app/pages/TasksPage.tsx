@@ -223,10 +223,13 @@ export function TasksPage() {
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
 
   const handleQuickAdd = useCallback(async (content: string) => {
-    const title = content.trim();
+    const lines = content.trim().split('\n');
+    const title = lines[0].trim();
+    const description = lines.slice(1).join('\n').trim() || undefined;
     if (!title) return;
     const created = await getTaskService().createTask({
       title,
+      description,
       estimatedMinutes: 25,
     });
     setTasks((prev) => [created, ...prev]);
