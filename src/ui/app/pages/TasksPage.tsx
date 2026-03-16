@@ -10,7 +10,6 @@ import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { filterMonth, filterNow, filterToday, filterWeek } from './task-tab-filters';
 import { buildTasksTodayViewModel } from './tasks-today-view';
-import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
 
@@ -155,7 +154,6 @@ function resolveInitialTaskTab(): { tab: TaskTab; redirectDag: boolean } {
 }
 
 export function TasksPage() {
-  const isDesktop = useIsDesktop();
   const navigate = useNavigate();
   const [initialResolution] = useState(() => resolveInitialTaskTab());
   const [activeTab, setActiveTab] = useState<TaskTab>(initialResolution.tab);
@@ -417,13 +415,11 @@ export function TasksPage() {
         )}
       </div>
 
-      <div className={`sticky px-4 pb-2 md:px-8 lg:px-10 ${isDesktop ? 'bottom-4' : 'bottom-[calc(env(safe-area-inset-bottom,0px)+62px)]'}`}>
-        <NowInputRow
-          ref={inputRef}
-          onSend={handleQuickAdd}
-          placeholder="添加新任务..."
-        />
-      </div>
+      <NowInputRow
+        ref={inputRef}
+        onSend={handleQuickAdd}
+        placeholder="添加新任务..."
+      />
     </div>
   );
 }

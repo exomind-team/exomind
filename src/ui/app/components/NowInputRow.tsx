@@ -200,7 +200,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   }), []);
 
   return (
-    <div className="mb-2 shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]" data-testid="new-now-input-row">
+    <div className="shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]" data-testid="new-now-input-row">
       <div className="px-4 py-2">
         <div className="flex items-center gap-2">
           <button
