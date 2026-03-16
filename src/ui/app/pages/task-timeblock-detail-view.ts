@@ -366,7 +366,7 @@ function buildPlanActual(task: TaskNode, block: TimeBlock, scheduleBadge: Timebl
 
   return {
     planContent: `计划：${task.title}${planDuration}`,
-    actualContent: `实际：${block.name}（耗时 ${formatMinutes(actualDuration)}）${block.note ? `；备注：${block.note}` : ''}`,
+    actualContent: `实际：${block.name}（耗时 ${formatMinutes(actualDuration)}）`,
     diffReason,
   };
 }
