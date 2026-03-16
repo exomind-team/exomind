@@ -1,11 +1,13 @@
-﻿import { CornerDownLeft, Plus, SlidersHorizontal, Waypoints } from 'lucide-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+﻿import { SlidersHorizontal, Waypoints } from 'lucide-react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import { getTasksDefaultTab } from '@/config/tasks-default-tab';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
+import { NowInputRow } from '@/ui/app/components/NowInputRow';
+import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { filterMonth, filterNow, filterToday, filterWeek } from './task-tab-filters';
 import { buildTasksTodayViewModel } from './tasks-today-view';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
@@ -160,25 +162,7 @@ export function TasksPage() {
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
-  const DRAFT_KEY = 'exomind:task-quick-add-draft';
-  const [quickInput, setQuickInput] = useState(() => {
-    try { return localStorage.getItem(DRAFT_KEY) ?? ''; } catch { return ''; }
-  });
-  const quickInputRef = useRef<HTMLTextAreaElement>(null);
-
-  const SEND_MODE_KEY = 'exomind:task-input-send-mode';
-  type SendMode = 'enter' | 'ctrl-enter';
-  const [sendMode, setSendMode] = useState<SendMode>(() => {
-    try {
-      const stored = localStorage.getItem(SEND_MODE_KEY);
-      return stored === 'ctrl-enter' ? 'ctrl-enter' : 'enter';
-    } catch { return 'enter'; }
-  });
-  const toggleSendMode = () => {
-    const next: SendMode = sendMode === 'enter' ? 'ctrl-enter' : 'enter';
-    setSendMode(next);
-    try { localStorage.setItem(SEND_MODE_KEY, next); } catch { /* ignore */ }
-  };
+  const inputRef = useRef<VoiceMessageInputHandle>(null);
 
   useEffect(() => {
     if (initialResolution.redirectDag) {
@@ -238,32 +222,15 @@ export function TasksPage() {
   const taskGraph = useMemo(() => buildTaskGraph(tasks), [tasks]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
 
-  const duplicateCandidates = useMemo(() => {
-    const q = quickInput.toLowerCase().trim();
-    if (q.length < 2) return [];
-    return tasks.filter((t) => t.title.toLowerCase().includes(q));
-  }, [quickInput, tasks]);
-
-  const handleQuickInputChange = (value: string) => {
-    setQuickInput(value);
-    try { localStorage.setItem(DRAFT_KEY, value); } catch { /* ignore */ }
-  };
-
-  const handleQuickAdd = async () => {
-    const title = quickInput.trim();
-    if (!title) {
-      quickInputRef.current?.focus();
-      return;
-    }
+  const handleQuickAdd = useCallback(async (content: string) => {
+    const title = content.trim();
+    if (!title) return;
     const created = await getTaskService().createTask({
       title,
       estimatedMinutes: 25,
     });
     setTasks((prev) => [created, ...prev]);
-    setQuickInput('');
-    try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
-    quickInputRef.current?.focus();
-  };
+  }, []);
 
   return (
     <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-tasks-page">
@@ -448,52 +415,11 @@ export function TasksPage() {
       </div>
 
       <div className={`sticky px-4 pb-2 md:px-8 lg:px-10 ${isDesktop ? 'bottom-4' : 'bottom-[calc(env(safe-area-inset-bottom,0px)+62px)]'}`}>
-        {duplicateCandidates.length > 0 && (
-          <div className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
-            <span className="font-medium">可能重复：</span>
-            {duplicateCandidates.slice(0, 3).map(t => (
-              <span key={t.id} className="ml-1">「{t.title}」</span>
-            ))}
-          </div>
-        )}
-        <div className="flex items-center gap-2 rounded-[24px] border border-[#E7E5E4] bg-white px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
-          <textarea
-            ref={quickInputRef}
-            value={quickInput}
-            rows={1}
-            onChange={(event) => handleQuickInputChange(event.target.value)}
-            onKeyDown={(event) => {
-              if (sendMode === 'enter' && event.key === 'Enter' && !event.shiftKey) {
-                event.preventDefault();
-                void handleQuickAdd();
-              } else if (sendMode === 'ctrl-enter' && event.key === 'Enter' && (event.ctrlKey || event.metaKey)) {
-                event.preventDefault();
-                void handleQuickAdd();
-              }
-            }}
-            placeholder="快速添加任务..."
-            className="max-h-20 flex-1 resize-none bg-transparent text-sm text-[#44403C] outline-none placeholder:text-[#A8A29E] dark:text-[#E7E5E4] dark:placeholder:text-[#78716C]"
-          />
-          <button
-            type="button"
-            onClick={toggleSendMode}
-            title={sendMode === 'enter' ? '当前：Enter 发送（点击切换为 Ctrl+Enter）' : '当前：Ctrl+Enter 发送（点击切换为 Enter）'}
-            className="flex h-7 shrink-0 items-center gap-0.5 rounded-full px-1.5 text-[10px] font-medium text-[#A8A29E] transition-colors hover:bg-[#F5F0ED] hover:text-[#78716C] dark:hover:bg-[#292524] dark:hover:text-[#D6D3D1]"
-          >
-            <CornerDownLeft size={12} />
-            <span>{sendMode === 'enter' ? '↵' : '⌃↵'}</span>
-          </button>
-          <button
-            type="button"
-            onClick={() => {
-              void handleQuickAdd();
-            }}
-            className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-[#C75B3A] text-white"
-            aria-label="添加任务（Add Task）"
-          >
-            <Plus size={18} />
-          </button>
-        </div>
+        <NowInputRow
+          ref={inputRef}
+          onSend={handleQuickAdd}
+          placeholder="添加新任务..."
+        />
       </div>
     </div>
   );
