@@ -213,7 +213,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
     expect(screen.getByText('操作')).toBeInTheDocument();
   });
 
-  it('renders current root guidance with DAG link（详情页复用当前根节点规则）', async () => {
+  it('renders current root guidance without DAG link（详情页复用当前根节点规则，#496 移除 DAG 链接）', async () => {
     mockMatchMedia(true);
     render(<TaskDetailPage />);
 
@@ -223,7 +223,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
 
     expect(await screen.findByTestId('task-current-root-card')).toHaveTextContent('优先收口 DAG 根节点');
     expect(screen.getByTestId('task-current-root-link')).toBeInTheDocument();
-    expect(screen.getByTestId('task-current-root-dag-link')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-current-root-dag-link')).toBeNull();
   });
 
   it('starts countdown with task estimated minutes instead of hardcoded 25（开始计时时使用任务预估分钟数）', async () => {

@@ -51,9 +51,10 @@ export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseT
       return;
     }
 
+    setTimerModeState(initialMinutes ? 'countdown' : 'countup');
     setCountdownMinutesState(normalizedInitialMinutes);
     setCustomDurationDraftState(String(normalizedInitialMinutes));
-  }, [normalizedInitialMinutes]);
+  }, [initialMinutes, normalizedInitialMinutes]);
 
   const setTimerMode = (mode: TimerMode) => {
     hasUserConfiguredRef.current = true;
