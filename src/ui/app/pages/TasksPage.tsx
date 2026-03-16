@@ -160,7 +160,10 @@ export function TasksPage() {
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
-  const [quickInput, setQuickInput] = useState('');
+  const DRAFT_KEY = 'exomind:task-quick-add-draft';
+  const [quickInput, setQuickInput] = useState(() => {
+    try { return localStorage.getItem(DRAFT_KEY) ?? ''; } catch { return ''; }
+  });
   const quickInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
@@ -221,6 +224,11 @@ export function TasksPage() {
   const taskGraph = useMemo(() => buildTaskGraph(tasks), [tasks]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
 
+  const handleQuickInputChange = (value: string) => {
+    setQuickInput(value);
+    try { localStorage.setItem(DRAFT_KEY, value); } catch { /* ignore */ }
+  };
+
   const handleQuickAdd = async () => {
     const title = quickInput.trim();
     if (!title) {
@@ -233,6 +241,8 @@ export function TasksPage() {
     });
     setTasks((prev) => [created, ...prev]);
     setQuickInput('');
+    try { localStorage.removeItem(DRAFT_KEY); } catch { /* ignore */ }
+    quickInputRef.current?.focus();
   };
 
   return (
@@ -422,7 +432,7 @@ export function TasksPage() {
           <input
             ref={quickInputRef}
             value={quickInput}
-            onChange={(event) => setQuickInput(event.target.value)}
+            onChange={(event) => handleQuickInputChange(event.target.value)}
             onKeyDown={(event) => {
               if (event.key === 'Enter') {
                 event.preventDefault();
