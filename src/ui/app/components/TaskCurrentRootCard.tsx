@@ -72,7 +72,7 @@ export function TaskCurrentRootCard({
 
 const STATUS_DOT: Record<string, string> = {
   pending: 'bg-[#A8A29E]',
-  in_progress: 'bg-[#C75B3A]',
+  in_progress: 'bg-[#22C55E]',
   suspended: 'bg-[#D97706]',
   completed: 'bg-[#16A34A]',
   cancelled: 'bg-[#6B7280]',
