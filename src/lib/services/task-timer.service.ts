@@ -26,6 +26,9 @@ export interface TaskTimerService {
 
   /** 计算任务已花费总时间（从关联时间块累计） */
   calculateSpentMinutes(taskId: string): Promise<number>
+
+  /** 计算剩余预期分钟数（至少 1 分钟） */
+  calculateRemainingMinutes(estimatedMinutes: number, spentMinutes: number): number
 }
 
 export class TaskTimerServiceImpl implements TaskTimerService {
@@ -88,6 +91,10 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     const task = await this.taskSvc.getTask(taskId)
     if (!task) return []
     return task.timeBlockIds ?? []
+  }
+
+  calculateRemainingMinutes(estimatedMinutes: number, spentMinutes: number): number {
+    return Math.max(1, Math.round(estimatedMinutes - spentMinutes));
   }
 
   async calculateSpentMinutes(taskId: string): Promise<number> {

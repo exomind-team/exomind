@@ -30,6 +30,8 @@ interface TimerConfigPanelProps {
   customDurationDraft: string;
   setCustomDurationDraft: (draft: string) => void;
   commitCustomDuration: () => void;
+  estimatedMinutes?: number;
+  spentMinutes?: number;
 }
 
 export function TimerConfigPanel({
@@ -40,6 +42,8 @@ export function TimerConfigPanel({
   customDurationDraft,
   setCustomDurationDraft,
   commitCustomDuration,
+  estimatedMinutes,
+  spentMinutes,
 }: TimerConfigPanelProps) {
   const customDurationInputRef = useRef<HTMLInputElement | null>(null);
   const [isCustomDurationEditing, setIsCustomDurationEditing] = useState(false);
@@ -109,6 +113,17 @@ export function TimerConfigPanel({
           正计时
         </button>
       </div>
+
+      {estimatedMinutes != null && spentMinutes != null && estimatedMinutes > spentMinutes && (
+        <button
+          type="button"
+          data-testid="task-countdown-auto-remaining"
+          onClick={() => setCountdownMinutes(Math.max(1, Math.round(estimatedMinutes - spentMinutes)))}
+          className="mt-2 rounded-xl px-3 py-1.5 text-xs bg-[#F5F0ED] text-[#78716C] hover:text-[#57534E] dark:bg-[#292524] dark:text-[#A8A29E] dark:hover:text-[#D6D3D1]"
+        >
+          自动：剩余 {Math.max(1, Math.round(estimatedMinutes - spentMinutes))}min
+        </button>
+      )}
 
       {timerMode === 'countdown' ? (
         <div className="mt-3 flex min-w-0 flex-col gap-1.5">
