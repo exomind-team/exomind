@@ -30,6 +30,15 @@ import {
   type TaskDagFlowNode,
   type TaskDagFlowNodeData,
 } from './task-dag-flow';
+import type { TaskStatus } from '@/lib/types/task';
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  pending: '待办',
+  in_progress: '进行中',
+  suspended: '已挂起',
+  completed: '已完成',
+  cancelled: '已取消',
+};
 
 function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
   const nodeData = data as TaskDagFlowNodeData;
@@ -245,7 +254,7 @@ export function TaskDagPage() {
             {selectedTask && selectedNode ? (
               <>
                 <p className="mt-3 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{selectedTask.title}</p>
-                <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">状态：{selectedNode.status}</p>
+                <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">状态：{STATUS_LABELS[selectedNode.status] ?? selectedNode.status}</p>
                 <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
                   {selectedNode.isExecutable ? '可执行' : '不可直接执行'}
                   {selectedNode.isBlocked ? ' · 有阻塞提醒' : ''}
