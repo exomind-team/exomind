@@ -3,7 +3,6 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
-  Controls,
   Handle,
   Position,
   ReactFlow,
@@ -12,6 +11,7 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { getTaskService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
@@ -258,7 +258,16 @@ export function TaskDagPage() {
             }}
           >
             <Background gap={20} color="#E7E5E4" />
-            <Controls />
+            <TaskDagControlPanel
+              onFitView={() => { void flowInstanceRef.current?.fitView({ padding: 0.2 }); }}
+              onJumpToCurrentRoot={graph.currentRootNodeId ? () => {
+                const node = flowInstanceRef.current?.getNode(graph.currentRootNodeId!);
+                if (node) {
+                  void flowInstanceRef.current?.fitView({ nodes: [node], padding: 0.5, duration: 300 });
+                }
+              } : undefined}
+              hasCurrentRoot={Boolean(graph.currentRootNodeId)}
+            />
           </ReactFlow>
         </div>
       </section>
