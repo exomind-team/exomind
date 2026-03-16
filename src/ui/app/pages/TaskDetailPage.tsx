@@ -1201,8 +1201,12 @@ export function TaskDetailPage() {
 
   const handleStartTimer = () => {
     if (!taskId) return;
-    void getTaskTimerService().startBlockForTask(taskId, timerConfig).then(() => {
+    console.log('[TaskDetail] handleStartTimer', { taskId, timerConfig, timerMode, countdownMinutes });
+    void getTaskTimerService().startBlockForTask(taskId, timerConfig).then((block) => {
+      console.log('[TaskDetail] startBlockForTask result', { block: block ? { startId: block.startId, mode: block.mode, phase: block.phase } : null });
       void navigate({ to: '/eventlog' });
+    }).catch((err) => {
+      console.error('[TaskDetail] startBlockForTask failed', err);
     });
   };
 
