@@ -2,6 +2,7 @@ import { ArrowLeft, Ellipsis, Pause, Play } from 'lucide-react';
 import { Link, useNavigate, useParams } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
+import { isTerminalTaskStatus } from '@/lib/types/task';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import { getEventStorage } from '@/lib/storage/event-storage';
@@ -1063,7 +1064,7 @@ export function TaskDetailPage() {
     <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
   ), [task?.id, taskById, taskGraph]);
   const canEditEstimatedTime = useMemo(
-    () => (task ? allTasks.some((candidate) => candidate.id === task.id) : false),
+    () => (task ? allTasks.some((candidate) => candidate.id === task.id) && !isTerminalTaskStatus(task.status) : false),
     [allTasks, task],
   );
   const timerControls = (

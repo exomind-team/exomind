@@ -33,12 +33,14 @@ function formatCurrentMinutes(minutes: number | undefined): string {
 export interface EstimatedTimeEditorProps {
   taskId: string;
   currentMinutes?: number;
+  disabled?: boolean;
   onUpdate?: (minutes: number | undefined) => void;
 }
 
 export function EstimatedTimeEditor({
   taskId,
   currentMinutes,
+  disabled = false,
   onUpdate,
 }: EstimatedTimeEditorProps) {
   const activeTaskIdRef = useRef(taskId);
@@ -143,7 +145,7 @@ export function EstimatedTimeEditor({
   }
 
   return (
-    <div className="mt-3 flex min-w-0 flex-col gap-2" data-testid="estimated-time-editor">
+    <div className={`mt-3 flex min-w-0 flex-col gap-2${disabled ? ' opacity-50 cursor-not-allowed' : ''}`} data-testid="estimated-time-editor">
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="min-w-0">
           <p className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">任务估时</p>
@@ -159,7 +161,7 @@ export function EstimatedTimeEditor({
           type="button"
           data-testid="estimated-time-clear"
           aria-pressed={minutes === undefined}
-          disabled={isSaving}
+          disabled={disabled || isSaving}
           onClick={() => {
             void persistMinutes(undefined);
           }}
@@ -192,7 +194,7 @@ export function EstimatedTimeEditor({
               type="button"
               data-testid={`estimated-time-preset-${preset}`}
               aria-pressed={minutes === preset}
-              disabled={isSaving}
+              disabled={disabled || isSaving}
               onClick={() => {
                 void persistMinutes(preset);
               }}
@@ -207,7 +209,7 @@ export function EstimatedTimeEditor({
               ref={customInputRef}
               data-testid="estimated-time-custom-input"
               value={customDraft}
-              disabled={isSaving}
+              disabled={disabled || isSaving}
               onChange={(event) => {
                 setCustomDraft(event.target.value.replace(/[^\d]/g, ''));
               }}
@@ -222,7 +224,7 @@ export function EstimatedTimeEditor({
               type="button"
               data-testid="estimated-time-custom-trigger"
               aria-pressed={isCustomSelected}
-              disabled={isSaving}
+              disabled={disabled || isSaving}
               onClick={openCustomEditor}
               className={`relative z-10 flex h-8 w-full items-center justify-center gap-1 whitespace-nowrap rounded-[8px] px-[8px] text-[12px] transition-colors duration-200 ${
                 isCustomSelected
@@ -243,6 +245,7 @@ export function EstimatedTimeEditor({
           {errorMessage}
         </p>
       ) : null}
+      {disabled ? <p className="text-xs text-[#A8A29E]">终态任务不可编辑</p> : null}
     </div>
   );
 }
