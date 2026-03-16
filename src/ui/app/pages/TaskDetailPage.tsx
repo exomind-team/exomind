@@ -104,7 +104,7 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
     return {
       to: '/tasks',
       label: '← 返回任务',
-      breadcrumb: '任务 > 时间块详情',
+      breadcrumb: '任务 > 任务详情',
       sourceLabel: '任务',
     };
   }
@@ -118,7 +118,7 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
     to: '/tasks',
     search: sourceTab ? { tab: sourceTab } : undefined,
     label: `← 返回${sourceLabel}`,
-    breadcrumb: sourceTab ? `任务 > ${sourceLabel} > 时间块详情` : '任务 > 时间块详情',
+    breadcrumb: sourceTab ? `任务 > ${sourceLabel} > 任务详情` : '任务 > 任务详情',
     sourceLabel,
   };
 }
@@ -558,19 +558,12 @@ function MobileTimeblockDetail({
           search={backLink.search}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
           aria-label={`返回${backLink.sourceLabel}`}
+          data-testid="timeblock-back-link-mobile"
         >
           <ArrowLeft size={16} />
         </Link>
         <div className="min-w-0 flex-1 pt-0.5">
-          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">时间块详情</h1>
-          <Link
-            to={backLink.to}
-            search={backLink.search}
-            className="mt-1 inline-flex text-xs font-medium text-[#78716C] underline-offset-2 hover:underline dark:text-[#A8A29E]"
-            data-testid="timeblock-back-link-mobile"
-          >
-            {backLink.label}
-          </Link>
+          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务详情</h1>
         </div>
         <button
           type="button"

@@ -87,7 +87,7 @@ function makeTask(overrides: Partial<TaskNode> = {}): TaskNode {
   return {
     id: 'task-1',
     title: '深度工作：EventLog 模块实现',
-    description: '实现时间块详情页首版',
+    description: '实现任务详情页首版',
     status: 'completed',
     priority: 'high',
     dependsOn: [],
@@ -116,7 +116,7 @@ function makeBlock(overrides: Partial<TimeBlock> = {}): TimeBlock {
   };
 }
 
-describe('TaskDetailPage timeblock detail layout（时间块详情布局）', () => {
+describe('TaskDetailPage timeblock detail layout（任务详情布局）', () => {
   beforeEach(() => {
     currentTaskId = 'task-1';
     navigateMock.mockReset();
@@ -186,7 +186,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
       expect(getTaskMock).toHaveBeenCalledWith('task-1');
     });
 
-    expect(await screen.findByText('时间块详情')).toBeInTheDocument();
+    expect(await screen.findByText('任务详情')).toBeInTheDocument();
     expect(screen.getByText('概览')).toBeInTheDocument();
     expect(screen.getByText('时间线')).toBeInTheDocument();
     expect(screen.getAllByText('AI 总结').length).toBeGreaterThan(0);
@@ -197,7 +197,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
     expect(screen.getByTestId('task-pause-button')).toBeInTheDocument();
   });
 
-  it('renders desktop two-column timeblock detail（桌面端双列时间块详情）', async () => {
+  it('renders desktop two-column timeblock detail（桌面端双列任务详情）', async () => {
     window.history.replaceState({}, '', '/tasks/block/block-1?from=today');
     mockMatchMedia(true);
     render(<TaskDetailPage />);
@@ -206,7 +206,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
       expect(loadTimeBlocksMock).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText('任务 > 今日 > 时间块详情')).toBeInTheDocument();
+    expect(await screen.findByText('任务 > 今日 > 任务详情')).toBeInTheDocument();
     expect(screen.getAllByText('深度工作：EventLog 模块实现').length).toBeGreaterThan(0);
     expect(screen.getByText('事件时间线')).toBeInTheDocument();
     expect(screen.getByText('洞察')).toBeInTheDocument();
@@ -230,7 +230,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('时间块详情');
+    await screen.findByText('任务详情');
 
     await waitFor(() => {
       expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('120m');
@@ -247,7 +247,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
     mockMatchMedia(false);
     const { rerender } = render(<TaskDetailPage />);
 
-    await screen.findByText('时间块详情');
+    await screen.findByText('任务详情');
 
     fireEvent.click(screen.getByTestId('task-mode-countup'));
     expect(screen.getByTestId('task-mode-countup')).toHaveAttribute('aria-pressed', 'true');
@@ -292,7 +292,7 @@ describe('TaskDetailPage timeblock detail layout（时间块详情布局）', ()
 
     const { rerender } = render(<TaskDetailPage />);
 
-    await screen.findByText('时间块详情');
+    await screen.findByText('任务详情');
     fireEvent.click(screen.getByTestId('task-mode-countup'));
 
     currentTaskId = 'task-2';

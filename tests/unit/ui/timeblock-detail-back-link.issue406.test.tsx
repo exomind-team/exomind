@@ -172,7 +172,7 @@ describe('timeblock detail back link issue #406', () => {
     });
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
-    expect(backLink).toHaveTextContent(`← 返回${label}`);
+    expect(backLink).toHaveAttribute('aria-label', `返回${label}`);
     expect(backLink).toHaveAttribute('href', `/tasks?tab=${from}`);
   });
 
@@ -184,7 +184,7 @@ describe('timeblock detail back link issue #406', () => {
     });
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
-    expect(backLink).toHaveTextContent('← 返回任务');
+    expect(backLink).toHaveAttribute('aria-label', '返回任务');
     expect(backLink).toHaveAttribute('href', '/tasks');
   });
 
@@ -196,7 +196,7 @@ describe('timeblock detail back link issue #406', () => {
     });
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
-    expect(backLink).toHaveTextContent('← 返回任务');
+    expect(backLink).toHaveAttribute('aria-label', '返回任务');
     expect(backLink).toHaveAttribute('href', '/tasks');
   });
 
@@ -207,7 +207,7 @@ describe('timeblock detail back link issue #406', () => {
       expect(loadTimeBlocksMock).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText('任务 > 今日 > 时间块详情')).toBeInTheDocument();
+    expect(await screen.findByText('任务 > 今日 > 任务详情')).toBeInTheDocument();
     const backLink = screen.getByTestId('timeblock-back-link-desktop');
     expect(backLink).toHaveTextContent('← 返回今日');
     expect(backLink).toHaveAttribute('href', '/tasks?tab=today');
