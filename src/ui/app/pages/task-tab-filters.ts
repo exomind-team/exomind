@@ -1,5 +1,6 @@
 import { isTerminalTaskStatus } from '@/lib/types/task';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
+import type { TaskGraph } from '@/lib/task/task-dag-graph';
 
 /** Sort contract: dueAt asc (tasks with due date first), no-due at bottom, tiebreak by updatedAt desc */
 export function sortByDue(tasks: TaskNode[]): TaskNode[] {
@@ -32,12 +33,26 @@ function excludeCancelled(tasks: TaskNode[]): TaskNode[] {
   return tasks.filter((t) => t.status !== 'cancelled');
 }
 
-/** "当下" tab: show all non-terminal tasks, in_progress pinned to top, rest sorted by due */
-export function filterNow(tasks: TaskNode[]): TaskNode[] {
+/**
+ * "当下" tab: show all non-terminal tasks.
+ * Sort order: in_progress first, then unblocked (BFS order), then blocked.
+ * Within each group, sort by updatedAt desc.
+ */
+export function filterNow(tasks: TaskNode[], graph?: TaskGraph): TaskNode[] {
   const pool = tasks.filter((t) => !isTerminalTaskStatus(t.status));
+  const unblockedSet = new Set(graph?.currentRootCandidateNodeIds ?? []);
+
   const inProgress = pool.filter((t) => t.status === 'in_progress');
   const rest = pool.filter((t) => t.status !== 'in_progress');
-  return [...inProgress, ...sortByDue(rest)];
+  const unblocked = rest.filter((t) => unblockedSet.has(t.id));
+  const blocked = rest.filter((t) => !unblockedSet.has(t.id));
+
+  const byUpdatedDesc = (a: TaskNode, b: TaskNode) => b.updatedAt - a.updatedAt;
+  return [
+    ...inProgress.sort(byUpdatedDesc),
+    ...unblocked.sort(byUpdatedDesc),
+    ...blocked.sort(byUpdatedDesc),
+  ];
 }
 
 const STATUS_SORT_ORDER: Record<TaskStatus, number> = {

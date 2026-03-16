@@ -203,7 +203,7 @@ export function TasksPage() {
 
   const visibleTasks = useMemo(() => {
     const now = new Date();
-    if (activeTab === 'now') return filterNow(tasks);
+    if (activeTab === 'now') return filterNow(tasks, taskGraph);
     if (activeTab === 'today') return filterToday(tasks, now);
     if (activeTab === 'week') return filterWeek(tasks, now);
     if (activeTab === 'month') return filterMonth(tasks, now);
