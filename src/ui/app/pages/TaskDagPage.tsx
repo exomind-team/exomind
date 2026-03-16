@@ -13,10 +13,15 @@ import {
 import '@xyflow/react/dist/style.css';
 import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
+import {
+  type TaskDagVisibilityState,
+  EMPTY_TASK_DAG_VISIBILITY_STATE,
+  projectVisibleTaskGraph,
+} from '@/lib/task/task-dag-visibility';
 import { getTaskService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import {
-  buildTaskDagFlow,
+  buildVisibleTaskDagFlow,
   TASK_DAG_NODE_HEIGHT,
   TASK_DAG_NODE_WIDTH,
   type TaskDagFlowEdge,
@@ -61,6 +66,14 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
         <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
           {nodeData.statusLabel}
         </span>
+        {nodeData.hiddenUpstreamCount > 0 && (
+          <span
+            data-testid={`task-dag-hidden-upstream-badge-${id}`}
+            className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
+          >
+            {`+${nodeData.hiddenUpstreamCount} 已折叠`}
+          </span>
+        )}
       </div>
 
       <p className="mt-3 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{nodeData.title}</p>
@@ -77,6 +90,8 @@ const TASK_DAG_NODE_TYPES = {
 export function TaskDagPage() {
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(EMPTY_TASK_DAG_VISIBILITY_STATE);
+  const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
 
   useEffect(() => {
@@ -102,8 +117,9 @@ export function TaskDagPage() {
   }, []);
 
   const graph = useMemo(() => buildTaskGraph(tasks), [tasks]);
+  const visibleGraph = useMemo(() => projectVisibleTaskGraph(graph, dagVisibility), [graph, dagVisibility]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
-  const flowGraph = useMemo(() => buildTaskDagFlow(graph), [graph]);
+  const flowGraph = useMemo(() => buildVisibleTaskDagFlow(visibleGraph), [visibleGraph]);
 
   useEffect(() => {
     if (graph.currentRootNodeId && !selectedTaskId) {
@@ -115,6 +131,13 @@ export function TaskDagPage() {
       setSelectedTaskId(graph.currentRootNodeId ?? graph.topologicalOrder[0] ?? null);
     }
   }, [graph.currentRootNodeId, graph.topologicalOrder, selectedTaskId, tasks]);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [contextMenu]);
 
   const currentRootTask = graph.currentRootNodeId ? taskById.get(graph.currentRootNodeId) ?? null : null;
   const selectedTask = selectedTaskId ? taskById.get(selectedTaskId) ?? null : null;
@@ -256,6 +279,10 @@ export function TaskDagPage() {
             onNodeClick={(_event, node) => {
               setSelectedTaskId(node.id);
             }}
+            onNodeContextMenu={(event, node) => {
+              event.preventDefault();
+              setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+            }}
           >
             <Background gap={20} color="#E7E5E4" />
             <TaskDagControlPanel
@@ -271,6 +298,28 @@ export function TaskDagPage() {
           </ReactFlow>
         </div>
       </section>
+
+      {contextMenu && (
+        <div
+          className="fixed z-50 rounded-lg border border-[#E7E5E4] bg-white py-1 shadow-lg dark:border-[#292524] dark:bg-[#1C1917]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            type="button"
+            className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+            onClick={() => {
+              setDagVisibility((prev) => ({
+                collapsedUpstreamOf: prev.collapsedUpstreamOf.includes(contextMenu.nodeId)
+                  ? prev.collapsedUpstreamOf.filter((id) => id !== contextMenu.nodeId)
+                  : [...prev.collapsedUpstreamOf, contextMenu.nodeId],
+              }));
+              setContextMenu(null);
+            }}
+          >
+            {dagVisibility.collapsedUpstreamOf.includes(contextMenu.nodeId) ? '展开上游' : '折叠上游'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

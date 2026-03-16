@@ -1,5 +1,6 @@
 ﻿import { MarkerType, Position, type Edge, type Node } from '@xyflow/react';
 import type { TaskGraph } from '@/lib/task/task-dag-graph';
+import type { VisibleTaskGraph } from '@/lib/task/task-dag-visibility';
 import type { TaskNode } from '@/lib/types/task';
 
 export const TASK_DAG_NODE_WIDTH = 256;
@@ -39,6 +40,7 @@ export type TaskDagFlowNodeData = {
   isCurrentRoot: boolean;
   isBlocked: boolean;
   isExecutable: boolean;
+  hiddenUpstreamCount: number;
 };
 
 export type TaskDagFlowNode = Node<TaskDagFlowNodeData, 'taskDag'>;
@@ -94,11 +96,90 @@ export function buildTaskDagFlow(graph: TaskGraph): {
           isCurrentRoot: node.id === graph.currentRootNodeId,
           isBlocked: node.isBlocked,
           isExecutable: node.isExecutable,
+          hiddenUpstreamCount: 0,
         },
       } satisfies TaskDagFlowNode;
     });
 
   const edges = graph.edges.map((edge) => {
+    const hardEdge = edge.type === 'hard';
+    return {
+      id: edge.id,
+      source: edge.source,
+      target: edge.target,
+      type: 'smoothstep',
+      animated: false,
+      selectable: false,
+      style: hardEdge
+        ? { stroke: '#C75B3A', strokeWidth: 2.25 }
+        : { stroke: '#78716C', strokeWidth: 1.75, strokeDasharray: '7 5' },
+      markerEnd: {
+        type: MarkerType.ArrowClosed,
+        color: hardEdge ? '#C75B3A' : '#78716C',
+      },
+    } satisfies TaskDagFlowEdge;
+  });
+
+  return { nodes, edges };
+}
+
+export function buildVisibleTaskDagFlow(visibleGraph: VisibleTaskGraph): {
+  nodes: TaskDagFlowNode[];
+  edges: TaskDagFlowEdge[];
+} {
+  const nodeById = new Map(visibleGraph.nodes.map((node) => [node.id, node]));
+  const topologicalOrder = visibleGraph.nodes.map((node) => node.id);
+  const incomingByTarget = new Map<string, string[]>();
+  const depthById = new Map<string, number>();
+  const rowsByDepth = new Map<number, string[]>();
+
+  for (const edge of visibleGraph.edges) {
+    const incoming = incomingByTarget.get(edge.target) ?? [];
+    incoming.push(edge.source);
+    incomingByTarget.set(edge.target, incoming);
+  }
+
+  for (const taskId of topologicalOrder) {
+    const incomingDepths = (incomingByTarget.get(taskId) ?? [])
+      .map((sourceId) => depthById.get(sourceId))
+      .filter((depth): depth is number => depth !== undefined);
+    const depth = incomingDepths.length > 0 ? Math.max(...incomingDepths) + 1 : 0;
+    depthById.set(taskId, depth);
+    const rows = rowsByDepth.get(depth) ?? [];
+    rows.push(taskId);
+    rowsByDepth.set(depth, rows);
+  }
+
+  const nodes = topologicalOrder
+    .map((taskId) => nodeById.get(taskId))
+    .filter((node): node is VisibleTaskGraph['nodes'][number] => Boolean(node))
+    .map((node) => {
+      const depth = depthById.get(node.id) ?? 0;
+      const row = rowsByDepth.get(depth)?.indexOf(node.id) ?? 0;
+      return {
+        id: node.id,
+        type: 'taskDag',
+        position: {
+          x: depth * COLUMN_GAP,
+          y: row * ROW_GAP,
+        },
+        sourcePosition: Position.Right,
+        targetPosition: Position.Left,
+        draggable: false,
+        data: {
+          title: node.title,
+          statusLabel: STATUS_LABEL[node.status],
+          priorityLabel: PRIORITY_LABEL[node.priority],
+          executionLabel: resolveExecutionLabel(node),
+          isCurrentRoot: node.id === visibleGraph.visibleCurrentRootNodeId,
+          isBlocked: node.isBlocked,
+          isExecutable: node.isExecutable,
+          hiddenUpstreamCount: node.hiddenUpstreamCount,
+        },
+      } satisfies TaskDagFlowNode;
+    });
+
+  const edges = visibleGraph.edges.map((edge) => {
     const hardEdge = edge.type === 'hard';
     return {
       id: edge.id,
