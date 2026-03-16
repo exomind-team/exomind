@@ -27,8 +27,10 @@ export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseT
   const normalizedInitialMinutes = normalizeCountdownMinutes(initialMinutes);
   const hasUserConfiguredRef = useRef(false);
   const lastResetKeyRef = useRef(resetKey);
+  const initialMinutesRef = useRef(initialMinutes);
+  initialMinutesRef.current = initialMinutes;
 
-  const [timerMode, setTimerModeState] = useState<TimerMode>('countdown');
+  const [timerMode, setTimerModeState] = useState<TimerMode>(initialMinutes ? 'countdown' : 'countup');
   const [countdownMinutes, setCountdownMinutesState] = useState(normalizedInitialMinutes);
   const [customDurationDraft, setCustomDurationDraftState] = useState(String(normalizedInitialMinutes));
 
@@ -39,7 +41,7 @@ export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseT
 
     lastResetKeyRef.current = resetKey;
     hasUserConfiguredRef.current = false;
-    setTimerModeState('countdown');
+    setTimerModeState(initialMinutesRef.current ? 'countdown' : 'countup');
     setCountdownMinutesState(normalizedInitialMinutes);
     setCustomDurationDraftState(String(normalizedInitialMinutes));
   }, [normalizedInitialMinutes, resetKey]);
