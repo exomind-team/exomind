@@ -256,8 +256,13 @@ export function TaskDagPage() {
                 <p className="mt-3 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{selectedTask.title}</p>
                 <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">状态：{STATUS_LABELS[selectedNode.status] ?? selectedNode.status}</p>
                 <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                  {selectedNode.isExecutable ? '可执行' : '不可直接执行'}
-                  {selectedNode.isBlocked ? ' · 有阻塞提醒' : ''}
+                  {selectedNode.isExecutable && !selectedNode.isBlocked
+                    ? '可直接执行'
+                    : selectedNode.isExecutable && selectedNode.isBlocked
+                      ? '可执行（软阻塞提醒）'
+                      : selectedNode.isBlocked
+                        ? '不可直接执行 · 有阻塞依赖'
+                        : '待处理'}
                 </p>
                 <Link
                   data-testid="task-dag-selected-link"
