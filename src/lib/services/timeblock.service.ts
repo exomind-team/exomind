@@ -583,6 +583,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
   }
 
   private notifyChange(block: ActiveBlockData | null): void {
+    console.log('[TB-SVC] notifyChange', block ? { startId: block.startId, phase: block.phase, paused: block.paused, feedbackSubmittedAt: block.feedbackSubmittedAt } : 'NULL', new Error().stack?.split('\n').slice(1, 4).join(' <- '));
     this.listeners.forEach(cb => cb(block));
   }
 
@@ -754,6 +755,7 @@ export class TimeBlockServiceImpl implements TimeBlockService {
 
   private async writeCompletedBlockData(blocks: TimeBlockData[]): Promise<void> {
     if (this.backendMode === 'rt-sqlite') {
+      console.log('[TB-SVC] writeCompletedBlockData', { count: blocks.length, payload: JSON.stringify(blocks).slice(0, 1000) });
       await this.rtAdapter?.replaceCompletedBlocks(blocks);
       return;
     }

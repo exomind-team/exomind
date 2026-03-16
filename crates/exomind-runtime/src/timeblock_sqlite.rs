@@ -71,7 +71,7 @@ impl SqliteTimeBlockStore {
         )?;
         for block in blocks {
             tx.execute(
-                "INSERT INTO completed_timeblocks (
+                "INSERT OR REPLACE INTO completed_timeblocks (
                     scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time
                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
