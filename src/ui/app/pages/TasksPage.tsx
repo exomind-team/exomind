@@ -152,11 +152,8 @@ export function TasksPage() {
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const inputRef = useRef<VoiceMessageInputHandle>(null);
 
-  // Persist current tasks sub-path for nav tab memory
-  useEffect(() => {
-    const fullPath = location.pathname + (location.searchStr || '');
-    sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
-  }, [location.pathname, location.searchStr]);
+  // Note: do NOT clear sessionStorage here — the /tasks route's redirect
+  // reads it before this component mounts. Clearing would race with redirect.
 
   // Auto-focus input on Enter key when nothing is focused
   useEffect(() => {

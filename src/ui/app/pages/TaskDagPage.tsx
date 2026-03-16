@@ -99,6 +99,7 @@ const TASK_DAG_NODE_TYPES = {
 } satisfies NodeTypes;
 
 export function TaskDagPage() {
+  console.log('[DAG] TaskDagPage rendered, pathname:', window.location.pathname);
   const location = useLocation();
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -109,7 +110,11 @@ export function TaskDagPage() {
   // Persist current tasks sub-path for nav tab memory
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
-    sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+    // Only save task-related paths; useLocation fires with the NEW target path before unmount
+    if (fullPath.startsWith('/tasks/')) {
+      console.log('[DAG] saving path to sessionStorage:', fullPath);
+      sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+    }
   }, [location.pathname, location.searchStr]);
 
   useEffect(() => {

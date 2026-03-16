@@ -525,8 +525,12 @@ const newTasksRoute = createRoute({
     // Redirect to the last visited tasks sub-path (e.g. /tasks/dag, /tasks/:id)
     useEffect(() => {
       const saved = sessionStorage.getItem(TASKS_LAST_PATH_KEY);
-      if (saved && saved !== '/tasks' && saved.startsWith('/tasks/')) {
+      console.log('[Routes] /tasks mount, saved:', saved, 'current:', window.location.pathname);
+      if (saved && saved.startsWith('/tasks/')) {
+        console.log('[Routes] redirecting to', saved);
         void navigate({ to: saved, replace: true });
+      } else {
+        console.log('[Routes] no redirect, showing default');
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [navigate]);

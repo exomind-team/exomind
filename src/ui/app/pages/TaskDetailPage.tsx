@@ -1009,7 +1009,9 @@ export function TaskDetailPage() {
   // Persist current tasks sub-path for nav tab memory
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
-    sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+    if (fullPath.startsWith('/tasks/')) {
+      sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+    }
   }, [location.pathname, location.searchStr]);
 
   const [task, setTask] = useState<TaskNode | null>(null);
