@@ -272,6 +272,7 @@ export function TaskDagPage() {
             nodes={flowGraph.nodes}
             edges={flowGraph.edges}
             nodeTypes={TASK_DAG_NODE_TYPES}
+            proOptions={{ hideAttribution: true }}
             fitView
             fitViewOptions={{ padding: 0.2 }}
             nodesDraggable={false}
