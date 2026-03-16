@@ -186,7 +186,7 @@ export function TaskDagPage() {
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
           <div className="inline-flex items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-            <Link to="/tasks" className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
+            <Link to="/tasks" onClick={() => sessionStorage.removeItem(TASKS_LAST_PATH_KEY)} className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
               <ArrowLeft size={14} />
               任务
             </Link>

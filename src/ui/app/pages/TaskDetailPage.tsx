@@ -609,6 +609,7 @@ function MobileTimeblockDetail({
         <Link
           to={backLink.to}
           search={backLink.search}
+          onClick={() => sessionStorage.removeItem(TASKS_LAST_PATH_KEY)}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
           aria-label={`返回${backLink.sourceLabel}`}
           data-testid="timeblock-back-link-mobile"
@@ -837,7 +838,7 @@ function DesktopTimeblockDetail({
     <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
       <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
         <div className="inline-flex select-none items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-          <Link to="/tasks" className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
+          <Link to="/tasks" onClick={() => sessionStorage.removeItem(TASKS_LAST_PATH_KEY)} className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
             <ArrowLeft size={14} />
             任务
           </Link>
