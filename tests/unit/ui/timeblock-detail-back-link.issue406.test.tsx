@@ -213,23 +213,13 @@ describe('timeblock detail back link issue #406', () => {
     expect(backLink).toHaveAttribute('href', '/tasks?tab=today');
   });
 
-  it('adds a back action into the view model actions list', () => {
+  it('does not include a back-source action in the view model (navigation via breadcrumb)', () => {
     const model = buildTaskTimeblockDetailViewModel({
       task: makeTask(),
       blocks: [makeBlock()],
       useMockData: true,
-      backAction: {
-        label: '← 返回今日',
-        to: '/tasks',
-        search: { tab: 'today' },
-      },
     });
 
-    expect(model.actions[0]).toEqual({
-      id: 'back-source',
-      label: '← 返回今日',
-      to: '/tasks',
-      search: { tab: 'today' },
-    });
+    expect(model.actions.every((a) => a.id !== 'back-source')).toBe(true);
   });
 });
