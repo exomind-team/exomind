@@ -206,7 +206,7 @@ impl TaskStore {
                 task.due_at = Some(due_at);
             }
             if let Some(estimated_minutes) = input.estimated_minutes {
-                task.estimated_minutes = Some(estimated_minutes);
+                task.estimated_minutes = estimated_minutes;
             }
             if let Some(parent_id) = input.parent_id {
                 task.parent_id = Some(parent_id);
@@ -641,7 +641,7 @@ mod tests {
                     tags: Some(vec!["urgent".to_string()]),
                     depends_on: None,
                     due_at: None,
-                    estimated_minutes: Some(60),
+                    estimated_minutes: Some(Some(60)),
                     parent_id: None,
                     time_block_ids: None,
                 },

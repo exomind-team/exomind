@@ -1,4 +1,16 @@
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize};
+
+/// Deserialize a JSON field into `Option<Option<T>>`:
+/// - absent → `None` (don't change)
+/// - `null` → `Some(None)` (clear)
+/// - value → `Some(Some(value))` (set)
+fn deserialize_nullable<'de, D, T>(deserializer: D) -> Result<Option<Option<T>>, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de>,
+{
+    Ok(Some(Option::deserialize(deserializer)?))
+}
 
 /// 5-state machine matching front-end TaskStatus.
 /// pending → in_progress ⇌ suspended → completed / cancelled
@@ -147,8 +159,8 @@ pub struct UpdateTaskInput {
     pub depends_on: Option<Vec<TaskDependency>>,
     #[serde(default)]
     pub due_at: Option<u64>,
-    #[serde(default)]
-    pub estimated_minutes: Option<u32>,
+    #[serde(default, deserialize_with = "deserialize_nullable")]
+    pub estimated_minutes: Option<Option<u32>>,
     #[serde(default)]
     pub parent_id: Option<String>,
     #[serde(default)]

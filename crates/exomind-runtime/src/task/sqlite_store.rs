@@ -175,7 +175,7 @@ impl SqliteTaskStore {
             task.due_at = Some(due_at);
         }
         if let Some(estimated_minutes) = input.estimated_minutes {
-            task.estimated_minutes = Some(estimated_minutes);
+            task.estimated_minutes = estimated_minutes;
         }
         if let Some(parent_id) = input.parent_id {
             task.parent_id = Some(parent_id);
