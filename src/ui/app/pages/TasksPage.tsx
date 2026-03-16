@@ -224,6 +224,12 @@ export function TasksPage() {
   const taskGraph = useMemo(() => buildTaskGraph(tasks), [tasks]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
 
+  const duplicateCandidates = useMemo(() => {
+    const q = quickInput.toLowerCase().trim();
+    if (q.length < 2) return [];
+    return tasks.filter((t) => t.title.toLowerCase().includes(q));
+  }, [quickInput, tasks]);
+
   const handleQuickInputChange = (value: string) => {
     setQuickInput(value);
     try { localStorage.setItem(DRAFT_KEY, value); } catch { /* ignore */ }
@@ -428,6 +434,14 @@ export function TasksPage() {
       </div>
 
       <div className={`sticky px-4 pb-2 md:px-8 lg:px-10 ${isDesktop ? 'bottom-4' : 'bottom-[calc(env(safe-area-inset-bottom,0px)+62px)]'}`}>
+        {duplicateCandidates.length > 0 && (
+          <div className="mx-4 mb-2 rounded-lg border border-amber-200 bg-amber-50 p-2 text-xs text-amber-700 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-300">
+            <span className="font-medium">可能重复：</span>
+            {duplicateCandidates.slice(0, 3).map(t => (
+              <span key={t.id} className="ml-1">「{t.title}」</span>
+            ))}
+          </div>
+        )}
         <div className="flex items-center gap-2 rounded-[24px] border border-[#E7E5E4] bg-white px-3 py-2 dark:border-[#292524] dark:bg-[#1C1917]">
           <input
             ref={quickInputRef}
