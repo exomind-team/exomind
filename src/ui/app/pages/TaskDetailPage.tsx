@@ -1077,6 +1077,8 @@ export function TaskDetailPage() {
       customDurationDraft={customDurationDraft}
       setCustomDurationDraft={setCustomDurationDraft}
       commitCustomDuration={commitCustomDuration}
+      showCountupOption
+      onSelectCountup={() => setTimerMode('countup')}
     />
   );
 
