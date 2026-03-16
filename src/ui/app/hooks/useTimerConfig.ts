@@ -52,8 +52,14 @@ export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseT
     }
 
     setTimerModeState(initialMinutes ? 'countdown' : 'countup');
-    setCountdownMinutesState(normalizedInitialMinutes);
-    setCustomDurationDraftState(String(normalizedInitialMinutes));
+    // Only update countdown display when initialMinutes is a real number.
+    // When undefined (countup / no estimation), keep the current countdown value
+    // instead of resetting to the DEFAULT_COUNTDOWN_MINUTES fallback, which would
+    // cause a spurious state change and potential re-render cascade.
+    if (initialMinutes) {
+      setCountdownMinutesState(normalizedInitialMinutes);
+      setCustomDurationDraftState(String(normalizedInitialMinutes));
+    }
   }, [initialMinutes, normalizedInitialMinutes]);
 
   const setTimerMode = (mode: TimerMode) => {
