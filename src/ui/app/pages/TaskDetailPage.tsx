@@ -880,16 +880,6 @@ function DesktopTimeblockDetail({
         <aside className="space-y-3">
           {rootGuidance}
 
-          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">洞察</h3>
-            <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{task.title}</p>
-            {task.description ? (
-              <div className="mt-2 prose prose-xs dark:prose-invert max-w-none text-xs text-[#78716C] dark:text-[#A8A29E] prose-p:my-0.5 prose-ul:my-0.5 prose-ol:my-0.5 prose-li:my-0 prose-headings:my-0.5 prose-a:text-[#C75B3A]">
-                <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{task.description}</ReactMarkdown>
-              </div>
-            ) : null}
-          </section>
-
           <DependencyCard
             dependencyView={dependencyView}
             taskDagView={taskDagView}
