@@ -3,6 +3,7 @@ import { Link } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
+  Controls,
   Handle,
   Position,
   ReactFlow,
@@ -285,6 +286,7 @@ export function TaskDagPage() {
             }}
           >
             <Background gap={20} color="#E7E5E4" />
+            <Controls />
             <TaskDagControlPanel
               onFitView={() => { void flowInstanceRef.current?.fitView({ padding: 0.2 }); }}
               onJumpToCurrentRoot={graph.currentRootNodeId ? () => {
