@@ -168,10 +168,38 @@ export function useSignalStream(): void {
           log.info('[SignalStream] eventlog.replication.appended → EventStorage');
         }
       },
-      onActiveBlockReplicationSnapshot: async (payload: ActiveBlockReplicationSnapshotPayload) => {
-        await projectActiveBlockSnapshot(payload);
-        log.info('[SignalStream] active_block.replication.snapshot → ActiveBlockStorage');
-      },
+      // Throttle: RT dispatches active_block.replication.snapshot at high frequency
+      // (dozens per second), causing UI state overwrites. Cap at 1s. See #554.
+      onActiveBlockReplicationSnapshot: (() => {
+        let lastProcessedAt = 0;
+        let pendingPayload: ActiveBlockReplicationSnapshotPayload | null = null;
+        let pendingTimer: ReturnType<typeof setTimeout> | null = null;
+
+        return async (payload: ActiveBlockReplicationSnapshotPayload) => {
+          const now = Date.now();
+          const elapsed = now - lastProcessedAt;
+
+          if (elapsed >= 1000) {
+            lastProcessedAt = now;
+            await projectActiveBlockSnapshot(payload);
+            return;
+          }
+
+          // Throttle: queue the latest payload and process after cooldown
+          pendingPayload = payload;
+          if (!pendingTimer) {
+            pendingTimer = setTimeout(async () => {
+              pendingTimer = null;
+              if (pendingPayload) {
+                lastProcessedAt = Date.now();
+                const p = pendingPayload;
+                pendingPayload = null;
+                await projectActiveBlockSnapshot(p);
+              }
+            }, 1000 - elapsed);
+          }
+        };
+      })(),
       onReviewCompleted: async (payload) => {
         const content = formatReviewAsMarkdown(payload);
         await appendEventWithEcsReplication({

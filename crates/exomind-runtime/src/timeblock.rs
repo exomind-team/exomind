@@ -14,7 +14,9 @@ pub struct TimeBlockData {
     pub name: String,
     pub start_id: String,
     pub end_id: String,
+    #[serde(default)]
     pub note: Option<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
     pub start_time: u64,
     pub end_time: u64,
