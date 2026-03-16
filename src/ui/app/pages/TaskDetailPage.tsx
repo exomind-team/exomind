@@ -574,8 +574,6 @@ function MobileTimeblockDetail({
         </button>
       </header>
 
-      <div className="px-4 pt-3">{descriptionBlock}</div>
-
       <div className="space-y-3 px-4 pt-3">
         <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
           <div className="flex flex-wrap items-center gap-2">
@@ -587,9 +585,7 @@ function MobileTimeblockDetail({
           </div>
           <h2 className="mt-3 text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h2>
           <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联任务：{task.title}</p>
-          {task.description ? (
-            <p className="mt-2 whitespace-pre-wrap text-xs text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>
-          ) : null}
+          {descriptionBlock}
           <h3 className="mt-4 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信息面板</h3>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {model.summary.metrics.map((metric) => (
@@ -798,9 +794,8 @@ function DesktopTimeblockDetail({
             ))}
           </div>
         </div>
+        {descriptionBlock}
       </header>
-
-      {descriptionBlock}
 
       <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
         <section className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
@@ -1279,7 +1274,7 @@ export function TaskDetailPage() {
   const descriptionBlock = (
     <>
       {isEditingDescription ? (
-        <div className="mt-3 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <div className="mt-3">
           <Textarea
             autoFocus
             value={descriptionDraft}
@@ -1293,18 +1288,16 @@ export function TaskDetailPage() {
           </div>
         </div>
       ) : task.description ? (
-        <div className="mt-3 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-          <div className="flex items-start justify-between gap-3">
-            <p className="whitespace-pre-wrap text-sm text-[#1C1917] dark:text-[#FAFAF9]">{task.description}</p>
-            {!isTerminalTaskStatus(task.status) && (
-              <button type="button" onClick={() => { setDescriptionDraft(task.description ?? ''); setIsEditingDescription(true); }} className="shrink-0 rounded-lg p-1.5 text-[#A8A29E] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">
-                <Pencil size={14} />
-              </button>
-            )}
-          </div>
+        <div className="mt-3 flex items-start justify-between gap-3">
+          <p className="whitespace-pre-wrap text-sm text-[#78716C] dark:text-[#A8A29E]">{task.description}</p>
+          {!isTerminalTaskStatus(task.status) && (
+            <button type="button" onClick={() => { setDescriptionDraft(task.description ?? ''); setIsEditingDescription(true); }} className="shrink-0 rounded-lg p-1.5 text-[#A8A29E] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">
+              <Pencil size={14} />
+            </button>
+          )}
         </div>
       ) : !isTerminalTaskStatus(task.status) ? (
-        <button type="button" onClick={() => { setDescriptionDraft(''); setIsEditingDescription(true); }} className="mt-3 w-full rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-6 py-3 text-left text-sm text-[#A8A29E] hover:bg-[#F5F0ED] dark:border-[#3A3432] dark:bg-[#1C1917] dark:hover:bg-[#292524]">
+        <button type="button" onClick={() => { setDescriptionDraft(''); setIsEditingDescription(true); }} className="mt-3 text-sm text-[#A8A29E] hover:text-[#78716C] dark:hover:text-[#D6D3D1]">
           + 添加任务描述
         </button>
       ) : null}
