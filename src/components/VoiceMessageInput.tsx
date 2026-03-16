@@ -20,6 +20,7 @@ import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
 import { toast } from '@/components/ui/toast-hook';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
+import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 
 export interface VoiceMessageInputProps {
   /** 发送消息回调 */
@@ -136,7 +137,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
 
   // 语音识别结果
   const handleVoiceResult = useCallback((text: string) => {
-    const normalized = text.trim();
+    const normalized = normalizeRecognitionText(text);
     if (!normalized) return;
 
     // 追加到输入框
