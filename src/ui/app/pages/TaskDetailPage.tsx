@@ -773,16 +773,23 @@ function DesktopTimeblockDetail({
   return (
     <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
       <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <p className="inline-flex select-none items-center gap-1 text-xs text-[#A8A29E]">
-          <Link to="/tasks" className="inline-flex items-center gap-1 hover:text-[#78716C] dark:hover:text-[#D6D3D1]"><ArrowLeft size={12} />任务</Link>
+        <div className="inline-flex select-none items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+          <Link to="/tasks" className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
+            <ArrowLeft size={14} />
+            任务
+          </Link>
           {backLink.sourceLabel !== '任务' && (
             <>
-              <span> &gt; </span>
-              <Link to={backLink.to} search={backLink.search} className="hover:text-[#78716C] dark:hover:text-[#D6D3D1]">{backLink.sourceLabel}</Link>
+              <span>/</span>
+              <Link to={backLink.to} search={backLink.search} className="hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">{backLink.sourceLabel}</Link>
             </>
           )}
-          <span className="inline-flex items-center gap-1"> &gt; <NotepadText size={12} />任务详情</span>
-        </p>
+          <span>/</span>
+          <span className="inline-flex items-center gap-1">
+            <NotepadText size={14} />
+            任务详情
+          </span>
+        </div>
         <div className="mt-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
