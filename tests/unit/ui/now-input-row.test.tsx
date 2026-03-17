@@ -143,6 +143,16 @@ describe('NowInputRow', () => {
     expect((textarea as HTMLTextAreaElement).value).toBe('');
   });
 
+  it('reports value changes through optional callback', () => {
+    const onValueChange = vi.fn();
+    render(<NowInputRow onSend={vi.fn()} onValueChange={onValueChange} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    fireEvent.change(textarea, { target: { value: '同步外部搜索态' } });
+
+    expect(onValueChange).toHaveBeenLastCalledWith('同步外部搜索态');
+  });
+
   it('renders voice button and starts voice recording by ref handle', () => {
     const ref = React.createRef<{ startVoiceRecording: () => void }>();
     render(<NowInputRow ref={ref} onSend={vi.fn()} placeholder="输入内容记录事件..." />);

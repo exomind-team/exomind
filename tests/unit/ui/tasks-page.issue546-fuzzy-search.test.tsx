@@ -1,0 +1,223 @@
+import type { ReactNode } from 'react';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { TasksPage } from '@/ui/app/pages/TasksPage';
+import type { TaskNode } from '@/lib/types/task';
+
+const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
+
+const fuzzySearchState = vi.hoisted(() => {
+  let enabled = true;
+  let listeners: Array<(value: boolean) => void> = [];
+  return {
+    reset: () => {
+      enabled = true;
+      listeners = [];
+    },
+    getEnabled: () => enabled,
+    subscribe: (listener: (value: boolean) => void) => {
+      listeners.push(listener);
+      return () => {
+        listeners = listeners.filter((item) => item !== listener);
+      };
+    },
+    emit: (value: boolean) => {
+      enabled = value;
+      listeners.forEach((listener) => listener(value));
+      return value;
+    },
+  };
+});
+
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
+}));
+
+vi.mock('@/lib/services', () => ({
+  getTaskService: () => ({
+    listTasks: listTasksMock,
+    createTask: vi.fn(),
+    getTask: vi.fn(),
+    updateTask: vi.fn(),
+    cancelTask: vi.fn(),
+    transitionTask: vi.fn(async () => null),
+    getAvailableTransitions: vi.fn(async () => []),
+    getChildTasks: vi.fn(async () => []),
+    addDependency: vi.fn(),
+    removeDependency: vi.fn(),
+    checkDependenciesMet: vi.fn(async () => ({ met: true, blocking: [] })),
+    startSync: vi.fn(async () => {}),
+    stopSync: vi.fn(async () => {}),
+    onTaskChange: vi.fn(() => () => {}),
+  }),
+}));
+
+vi.mock('@/config/task-page-fuzzy-search', () => ({
+  getTaskPageFuzzySearchEnabled: vi.fn(() => fuzzySearchState.getEnabled()),
+  setTaskPageFuzzySearchEnabled: vi.fn((value: boolean) => fuzzySearchState.emit(value)),
+  subscribeTaskPageFuzzySearchChanges: vi.fn((listener: (value: boolean) => void) => fuzzySearchState.subscribe(listener)),
+}));
+
+vi.mock('@/ui/app/components/PageMoreMenu', () => ({
+  PageMoreMenu: () => <div data-testid="page-more-menu" />,
+}));
+
+vi.mock('@/ui/app/components/TaskCurrentRootCard', () => ({
+  TaskCurrentRootCard: () => <div data-testid="task-current-root-card" />,
+}));
+
+vi.mock('@/ui/app/components/NowInputRow', async () => {
+  const React = await import('react');
+  return {
+    NowInputRow: React.forwardRef(function MockNowInputRow(props: any, ref: any) {
+      const [value, setValue] = React.useState('');
+      React.useImperativeHandle(ref, () => ({
+        focusText: vi.fn(),
+        startVoiceRecording: vi.fn(),
+      }));
+
+      return (
+        <div data-testid="task-search-input-row">
+          <textarea
+            data-testid="task-search-input"
+            value={value}
+            onChange={(event) => {
+              setValue(event.target.value);
+              props.onValueChange?.(event.target.value);
+            }}
+          />
+          <button
+            type="button"
+            data-testid="task-search-send"
+            onClick={() => {
+              void props.onSend(value);
+              setValue('');
+              props.onValueChange?.('');
+            }}
+          >
+            send
+          </button>
+        </div>
+      );
+    }),
+  };
+});
+
+function makeTask(overrides: Partial<TaskNode> & { id: string; title: string; updatedAt: number }): TaskNode {
+  return {
+    id: overrides.id,
+    title: overrides.title,
+    description: undefined,
+    status: 'pending',
+    priority: 'medium',
+    dependsOn: [],
+    tags: [],
+    createdAt: overrides.updatedAt,
+    updatedAt: overrides.updatedAt,
+    ...overrides,
+  };
+}
+
+function visibleTaskOrder(): string[] {
+  return screen
+    .queryAllByTestId(/tasks-page-task-link-/)
+    .map((node) => node.getAttribute('data-testid') ?? '');
+}
+
+async function flushLoad(): Promise<void> {
+  await act(async () => {
+    await Promise.resolve();
+  });
+}
+
+describe('TasksPage issue-546 fuzzy search', () => {
+  beforeEach(() => {
+    vi.useFakeTimers();
+    fuzzySearchState.reset();
+    listTasksMock.mockReset();
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-1', title: 'aba', updatedAt: 10 }),
+      makeTask({ id: 'task-2', title: 'baaab', updatedAt: 20 }),
+      makeTask({ id: 'task-3', title: 'delta', updatedAt: 30 }),
+      makeTask({ id: 'task-4', title: 'abacus', updatedAt: 40 }),
+    ]);
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('debounces search, matches only the first line, and sorts by fuzzy score', async () => {
+    render(<TasksPage />);
+
+    await flushLoad();
+    expect(listTasksMock).toHaveBeenCalledWith(true);
+
+    expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-4',
+      'tasks-page-task-link-task-3',
+      'tasks-page-task-link-task-2',
+      'tasks-page-task-link-task-1',
+    ]);
+
+    fireEvent.change(screen.getByTestId('task-search-input'), {
+      target: { value: 'ab\nzzz' },
+    });
+
+    expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-4',
+      'tasks-page-task-link-task-3',
+      'tasks-page-task-link-task-2',
+      'tasks-page-task-link-task-1',
+    ]);
+
+    await act(async () => {
+      vi.advanceTimersByTime(179);
+    });
+
+    expect(visibleTaskOrder()).toHaveLength(4);
+
+    await act(async () => {
+      vi.advanceTimersByTime(1);
+    });
+
+    expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-2',
+      'tasks-page-task-link-task-1',
+      'tasks-page-task-link-task-4',
+    ]);
+    expect(screen.queryByTestId('tasks-page-task-link-task-3')).not.toBeInTheDocument();
+  });
+
+  it('restores the full list immediately when fuzzy search is turned off', async () => {
+    render(<TasksPage />);
+
+    await flushLoad();
+    expect(listTasksMock).toHaveBeenCalledWith(true);
+
+    fireEvent.change(screen.getByTestId('task-search-input'), {
+      target: { value: 'ab' },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(180);
+    });
+
+    expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-2',
+      'tasks-page-task-link-task-1',
+      'tasks-page-task-link-task-4',
+    ]);
+
+    await act(async () => {
+      fuzzySearchState.emit(false);
+    });
+
+    expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-4',
+      'tasks-page-task-link-task-3',
+      'tasks-page-task-link-task-2',
+      'tasks-page-task-link-task-1',
+    ]);
+  });
+});

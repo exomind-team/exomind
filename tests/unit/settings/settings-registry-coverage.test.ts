@@ -21,6 +21,7 @@ const AUDITED_SETTINGS_IDS = [
   'focus-bgm',
   'feedback-content',
   'input-send-mode',
+  'task-page-fuzzy-search',
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
   'voice-shortcut-hotkey',
@@ -86,6 +87,7 @@ const MULTI_ENUM_IDS = [
 
 const BOOLEAN_IDS = [
   'voice-shortcut-mic-prewarm',
+  'task-page-fuzzy-search',
   'voice-overlay-show-diagnostics',
   'now-workbench-overlay-enabled',
   'developer-mode',

@@ -4,6 +4,7 @@ import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setInputSendMode } from '@/config/input-send-mode';
+import { setTaskPageFuzzySearchEnabled } from '@/config/task-page-fuzzy-search';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { setVoiceShortcutSendMode } from '@/config/voice-shortcut-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
@@ -54,6 +55,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
     expect(screen.getByText('输入框发送方式')).toBeInTheDocument();
+    expect(screen.getByText('任务页输入框模糊搜索')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
@@ -65,6 +67,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('统一控制「任务 / 当下」输入框使用 Enter 发送还是 Ctrl/Cmd+Enter 发送')).toBeInTheDocument();
+    expect(screen.getByText('仅作用于任务页；开启后会用输入框第一行对任务标题做防抖模糊过滤')).toBeInTheDocument();
     expect(screen.getByText('仅作用于「当下」页面输入框，默认插入输入框')).toBeInTheDocument();
     expect(screen.getByText('Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束')).toBeInTheDocument();
     expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
@@ -153,6 +156,15 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(setModeMock).toHaveBeenCalledWith('enter-send');
     expect(screen.getByTestId('new-settings-input-send-mode-enter-send')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('toggles task page fuzzy search from input section', () => {
+    const setEnabledMock = vi.mocked(setTaskPageFuzzySearchEnabled);
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-task-page-fuzzy-search-switch'));
+
+    expect(setEnabledMock).toHaveBeenCalledWith(false);
   });
 
   it('toggles overlay diagnostics visibility from input section', () => {

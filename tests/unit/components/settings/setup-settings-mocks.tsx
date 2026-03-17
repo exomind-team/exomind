@@ -260,6 +260,12 @@ vi.mock('@/config/input-send-mode', () => ({
   subscribeInputSendModeChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/task-page-fuzzy-search', () => ({
+  getTaskPageFuzzySearchEnabled: vi.fn(() => true),
+  setTaskPageFuzzySearchEnabled: vi.fn((value: boolean) => value),
+  subscribeTaskPageFuzzySearchChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/voice-shortcut-send-mode', () => ({
   getVoiceShortcutSendMode: vi.fn(() => 'insert-only'),
   setVoiceShortcutSendMode: vi.fn((value: string) => value),

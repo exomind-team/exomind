@@ -18,6 +18,7 @@ import {
   Monitor,
   Moon,
   MoonStar,
+  Search,
   RefreshCw,
   ScrollText,
   Shield,
@@ -86,6 +87,11 @@ import {
   setInputSendMode,
   subscribeInputSendModeChanges,
 } from '@/config/input-send-mode';
+import {
+  getTaskPageFuzzySearchEnabled,
+  setTaskPageFuzzySearchEnabled,
+  subscribeTaskPageFuzzySearchChanges,
+} from '@/config/task-page-fuzzy-search';
 import {
   getVoiceShortcutHotkey,
   setVoiceShortcutHotkey,
@@ -554,6 +560,19 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
       setInputSendMode(value as 'enter-send' | 'ctrl-enter-send');
     },
     subscribe: subscribeInputSendModeChanges,
+  },
+  {
+    id: 'task-page-fuzzy-search',
+    label: '任务页输入框模糊搜索',
+    icon: Search,
+    category: 'input',
+    description: '仅作用于任务页；开启后会用输入框第一行对任务标题做防抖模糊过滤',
+    rowTestId: 'new-settings-task-page-fuzzy-search-row',
+    controlTestId: 'new-settings-task-page-fuzzy-search-switch',
+    type: 'boolean',
+    get: () => getTaskPageFuzzySearchEnabled(),
+    set: (value: boolean) => setTaskPageFuzzySearchEnabled(value),
+    subscribe: subscribeTaskPageFuzzySearchChanges,
   },
   {
     id: 'voice-transcript-send-mode',

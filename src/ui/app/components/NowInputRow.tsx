@@ -31,6 +31,7 @@ import {
 
 interface NowInputRowProps {
   onSend: (content: string, tags?: string[]) => void | Promise<void>;
+  onValueChange?: (value: string) => void;
   placeholder?: string;
   draftStorageKey?: string | null;
   draftDebounceMs?: number;
@@ -100,6 +101,7 @@ function focusTextarea(textarea: HTMLTextAreaElement | null): void {
 
 export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>(function NowInputRow({
   onSend,
+  onValueChange,
   placeholder = '记录当下的事实...',
   draftStorageKey,
   draftDebounceMs = 300,
@@ -132,6 +134,10 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   useEffect(() => {
     resizeTextarea();
   }, [value, resizeTextarea]);
+
+  useEffect(() => {
+    onValueChange?.(value);
+  }, [onValueChange, value]);
 
   useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
 

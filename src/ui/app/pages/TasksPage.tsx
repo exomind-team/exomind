@@ -9,6 +9,14 @@ import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { filterNow } from './task-tab-filters';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
+import {
+  getTaskPageFuzzySearchEnabled,
+  subscribeTaskPageFuzzySearchChanges,
+} from '@/config/task-page-fuzzy-search';
+import {
+  extractTaskTitleSearchQuery,
+  filterTasksByTitleFuzzySearch,
+} from './task-title-fuzzy-search';
 
 const STATUS_DOT: Record<string, string> = {
   pending: 'bg-[#A8A29E]',
@@ -27,7 +35,9 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const EMPTY_TEXT = '当前没有进行中的任务，开始一个吧。';
+const EMPTY_SEARCH_TEXT = '没有匹配标题的任务，可继续输入后直接创建。';
 export const TASKS_QUICK_ADD_DRAFT_KEY = 'exomind:draft:task-quick-add';
+const TASKS_QUICK_ADD_SEARCH_DEBOUNCE_MS = 180;
 
 function formatTaskMeta(task: TaskNode): string {
   return task.estimatedMinutes ? `预计 ${task.estimatedMinutes}min` : '未估时';
@@ -56,6 +66,9 @@ function CurrentRootBadge({
 
 export function TasksPage() {
   const [tasks, setTasks] = useState<TaskNode[]>([]);
+  const [quickAddValue, setQuickAddValue] = useState('');
+  const [debouncedQuickAddValue, setDebouncedQuickAddValue] = useState('');
+  const [taskPageFuzzySearchEnabled, setTaskPageFuzzySearchEnabled] = useState<boolean>(() => getTaskPageFuzzySearchEnabled());
   const inputRef = useRef<VoiceMessageInputHandle>(null);
 
   // Auto-focus input on Enter key when nothing is focused
@@ -93,8 +106,32 @@ export function TasksPage() {
 
   const taskGraph = useMemo(() => buildTaskGraph(tasks), [tasks]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
+  const taskTitleSearchQuery = useMemo(() => extractTaskTitleSearchQuery(debouncedQuickAddValue), [debouncedQuickAddValue]);
 
-  const visibleTasks = useMemo(() => filterNow(tasks, taskGraph), [tasks, taskGraph]);
+  useEffect(() => subscribeTaskPageFuzzySearchChanges(setTaskPageFuzzySearchEnabled), []);
+
+  useEffect(() => {
+    if (!taskPageFuzzySearchEnabled) {
+      setDebouncedQuickAddValue('');
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      setDebouncedQuickAddValue(quickAddValue);
+    }, TASKS_QUICK_ADD_SEARCH_DEBOUNCE_MS);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [quickAddValue, taskPageFuzzySearchEnabled]);
+
+  const visibleTasks = useMemo(() => {
+    const baseTasks = filterNow(tasks, taskGraph);
+    if (!taskPageFuzzySearchEnabled) {
+      return baseTasks;
+    }
+    return filterTasksByTitleFuzzySearch(baseTasks, taskTitleSearchQuery);
+  }, [taskPageFuzzySearchEnabled, taskGraph, taskTitleSearchQuery, tasks]);
 
   const handleQuickAdd = useCallback(async (content: string) => {
     const lines = content.trim().split('\n');
@@ -107,6 +144,8 @@ export function TasksPage() {
     });
     setTasks((prev) => [created, ...prev]);
   }, []);
+
+  const emptyText = taskPageFuzzySearchEnabled && taskTitleSearchQuery ? EMPTY_SEARCH_TEXT : EMPTY_TEXT;
 
   return (
     <div className="flex h-full min-h-full flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="new-tasks-page">
@@ -137,7 +176,13 @@ export function TasksPage() {
         <div className="space-y-3">
           {visibleTasks.length > 0 ? (
             visibleTasks.map((task) => (
-              <Link key={task.id} to="/tasks/$taskId" params={{ taskId: task.id }} className="block">
+              <Link
+                key={task.id}
+                to="/tasks/$taskId"
+                params={{ taskId: task.id }}
+                className="block"
+                data-testid={`tasks-page-task-link-${task.id}`}
+              >
                 <article className="flex overflow-hidden rounded-2xl border border-[#E7E5E4] bg-white dark:border-[#292524] dark:bg-[#1C1917]">
                   <div className={`w-[3px] shrink-0 self-stretch ${STATUS_DOT[task.status] ?? 'bg-[#A8A29E]'}`} />
                   <div className="flex-1 px-4 py-3">
@@ -166,7 +211,7 @@ export function TasksPage() {
               data-testid="tasks-tab-empty"
               className="rounded-2xl border border-dashed border-[#D6D3D1] bg-[#FAF7F5] px-4 py-5 text-center text-sm text-[#A8A29E] dark:border-[#3A3432] dark:bg-[#1C1917] dark:text-[#B8B1AC]"
             >
-              {EMPTY_TEXT}
+              {emptyText}
             </p>
           )}
         </div>
@@ -175,6 +220,7 @@ export function TasksPage() {
       <NowInputRow
         ref={inputRef}
         onSend={handleQuickAdd}
+        onValueChange={setQuickAddValue}
         placeholder="添加任务与描述..."
         draftStorageKey={TASKS_QUICK_ADD_DRAFT_KEY}
       />
