@@ -762,27 +762,41 @@ function MobileTimeblockDetail({
           </div>
           <div className="mt-3 flex flex-col gap-2">
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={onStartTimer}
-                disabled={hasOtherActiveBlock || Boolean(blockingReason)}
-                className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
-              >
-                <Play size={14} />
-                开始计时
-              </button>
-              <button
-                type="button"
-                data-testid="task-pause-button"
-                onClick={onPauseAndGoEventlog}
-                className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-              >
-                <Target size={14} />
-                {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
-              </button>
+              {hasActiveBlockOnTask ? (
+                <button
+                  type="button"
+                  onClick={onPauseAndGoEventlog}
+                  className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                >
+                  <Target size={14} />
+                  前往当下
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={onStartTimer}
+                    disabled={hasOtherActiveBlock || Boolean(blockingReason)}
+                    className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+                  >
+                    <Play size={14} />
+                    开始计时
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onPauseAndGoEventlog}
+                    className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    <Target size={14} />
+                    前往当下
+                  </button>
+                </>
+              )}
             </div>
             {blockingReason ? (
               <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
+            ) : hasOtherActiveBlock ? (
+              <p className="text-xs text-[#A8A29E]">其他任务正在计时中</p>
             ) : null}
           </div>
         </section>
@@ -905,27 +919,41 @@ function DesktopTimeblockDetail({
           </div>
           <div className="mt-3 flex flex-col gap-2">
             <div className="flex gap-2">
-              <button
-                type="button"
-                onClick={onStartTimer}
-                disabled={hasOtherActiveBlock || Boolean(blockingReason)}
-                className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
-              >
-                <Play size={14} />
-                开始计时
-              </button>
-              <button
-                type="button"
-                data-testid="task-pause-button"
-                onClick={onPauseAndGoEventlog}
-                className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-              >
-                <Target size={14} />
-                {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
-              </button>
+              {hasActiveBlockOnTask ? (
+                <button
+                  type="button"
+                  onClick={onPauseAndGoEventlog}
+                  className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                >
+                  <Target size={14} />
+                  前往当下
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={onStartTimer}
+                    disabled={hasOtherActiveBlock || Boolean(blockingReason)}
+                    className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+                  >
+                    <Play size={14} />
+                    开始计时
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onPauseAndGoEventlog}
+                    className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    <Target size={14} />
+                    前往当下
+                  </button>
+                </>
+              )}
             </div>
             {blockingReason ? (
               <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
+            ) : hasOtherActiveBlock ? (
+              <p className="text-xs text-[#A8A29E]">其他任务正在计时中</p>
             ) : null}
           </div>
         </section>
