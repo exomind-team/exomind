@@ -41,4 +41,32 @@ describe('task title fuzzy search issue-546（任务页标题模糊搜索）', (
       'task-4',
     ]);
   });
+
+  it('requires repeated query characters to appear at least as many times in the title', () => {
+    const tasks = [
+      makeTask('task-1', '55'),
+      makeTask('task-2', '1555 bug'),
+      makeTask('task-3', '50505'),
+    ];
+
+    expect(getTaskTitleFuzzyScore('55', '555')).toBeNull();
+    expect(filterTasksByTitleFuzzySearch(tasks, '555').map((task) => task.id)).toEqual([
+      'task-2',
+      'task-3',
+    ]);
+  });
+
+  it('prioritizes longer continuous matches before total character frequency', () => {
+    const tasks = [
+      makeTask('task-1', 'Hub 123 Git'),
+      makeTask('task-2', 'GitHub issue#455'),
+      makeTask('task-3', 'Git-X-Hub notes'),
+    ];
+
+    expect(filterTasksByTitleFuzzySearch(tasks, 'GitHub').map((task) => task.id)).toEqual([
+      'task-2',
+      'task-3',
+      'task-1',
+    ]);
+  });
 });
