@@ -39,18 +39,10 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 
 type DependencyType = 'soft' | 'hard';
-type TimeblockSourceTab = 'now' | 'today' | 'week' | 'month';
-
-const TIMEBLOCK_SOURCE_LABEL: Record<TimeblockSourceTab, string> = {
-  now: '当下',
-  today: '今日',
-  week: '一周',
-  month: '本月',
+const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
+  dag: { label: 'DAG', to: '/tasks/dag' },
+  timeblocks: { label: '时间块', to: '/tasks/timeblocks' },
 };
-
-function isTimeblockSourceTab(value: string): value is TimeblockSourceTab {
-  return Object.prototype.hasOwnProperty.call(TIMEBLOCK_SOURCE_LABEL, value);
-}
 
 interface TimeblockSourceBackLink {
   to: string;
@@ -117,14 +109,12 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
 
   const searchParams = new URLSearchParams(window.location.search);
   const from = searchParams.get('from')?.trim();
-  const sourceTab = from && isTimeblockSourceTab(from) ? from : undefined;
-  const sourceLabel = sourceTab ? TIMEBLOCK_SOURCE_LABEL[sourceTab] : '任务';
+  const sourceConfig = from ? SOURCE_CONFIG[from] : undefined;
 
   return {
-    to: '/tasks',
-    search: sourceTab ? { tab: sourceTab } : undefined,
-    label: `← 返回${sourceLabel}`,
-    sourceLabel,
+    to: sourceConfig?.to ?? '/tasks',
+    label: `← 返回${sourceConfig?.label ?? '任务'}`,
+    sourceLabel: sourceConfig?.label ?? '任务',
   };
 }
 

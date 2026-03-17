@@ -207,6 +207,7 @@ export function TaskDagPage() {
             <Link
               to="/tasks/$taskId"
               params={{ taskId: graph.currentRootNodeId }}
+              search={{ from: 'dag' }}
               className="inline-flex items-center rounded-full border border-[#E7E5E4] px-4 py-2 text-sm font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
             >
               打开当前根节点
@@ -267,6 +268,7 @@ export function TaskDagPage() {
                   data-testid="task-dag-selected-link"
                   to="/tasks/$taskId"
                   params={{ taskId: selectedTask.id }}
+                  search={{ from: 'dag' }}
                   className="mt-3 inline-flex items-center rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
                 >
                   打开任务详情
