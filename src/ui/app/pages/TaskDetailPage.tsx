@@ -853,12 +853,12 @@ function DesktopTimeblockDetail({
 }) {
   return (
     <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
-      <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <TaskBreadcrumb
-          segments={buildDetailBreadcrumbSegments(backLink)}
-          current={{ label: '任务详情', icon: NotepadText }}
-        />
-        <div className="mt-2 flex items-center justify-between gap-3">
+      <TaskBreadcrumb
+        segments={buildDetailBreadcrumbSegments(backLink)}
+        current={{ label: '任务详情', icon: NotepadText }}
+      />
+      <header className="mt-3 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
           </div>
