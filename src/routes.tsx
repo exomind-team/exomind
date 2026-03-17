@@ -101,6 +101,11 @@ const ActorDetailPage = lazy(async () => {
   return { default: module.ActorDetailPage };
 });
 
+const SignalDetailPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/agents/SignalDetailPage');
+  return { default: module.SignalDetailPage };
+});
+
 const AgentConversationPage = lazy(async () => {
   const module = await import('@/ui/app/pages/agents/AgentConversationPage');
   return { default: module.AgentConversationPage };
@@ -742,6 +747,18 @@ const newActorDetailRoute = createRoute({
   },
 });
 
+const newSignalDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/signal/$signalId',
+  component: function NewSignalDetail() {
+    return (
+      <LazyPage>
+        <SignalDetailPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newAgentConversationRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents/chat/$agentId',
@@ -788,6 +805,7 @@ const newRouteTree = newRootRoute.addChildren([
   newUpdateRoute,
   newAgentDetailRoute,
   newActorDetailRoute,
+  newSignalDetailRoute,
   newAgentConversationRoute,
   newAgentMarketRoute,
 ]);

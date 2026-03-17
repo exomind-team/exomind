@@ -268,6 +268,10 @@ export function AgentsPage() {
     setRightPanel({ state: 'ACTOR_DETAIL', nodeId });
   };
   const openSignalDetail = (signalId: string) => {
+    if (!supportsInlineRightPanel) {
+      navigateToSecondaryPage(`/agents/signal/${encodeURIComponent(signalId)}`);
+      return;
+    }
     setRightPanel({ state: 'SIGNAL_DETAIL', signalId });
   };
   const closeRightPanel = () => {
