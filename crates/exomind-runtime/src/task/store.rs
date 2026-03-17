@@ -15,6 +15,11 @@ pub enum TaskStoreError {
     InvalidTransition { from: TaskStatus, to: TaskStatus },
     #[error("task is in terminal state: {0:?}")]
     TerminalState(TaskStatus),
+    #[error("field `{field}` is immutable once task is terminal: {status:?}")]
+    TerminalFieldImmutable {
+        status: TaskStatus,
+        field: &'static str,
+    },
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
     #[error("io error: {0}")]
@@ -43,12 +48,39 @@ pub struct TaskStore {
 }
 
 const DEFAULT_SCOPE_KEY: &str = "anonymous";
+pub(crate) const TASK_FIELD_DEPENDS_ON: &str = "depends_on";
+pub(crate) const TASK_FIELD_ESTIMATED_MINUTES: &str = "estimated_minutes";
 
 fn normalize_scope_key(scope_key: Option<&str>) -> &str {
     scope_key
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .unwrap_or(DEFAULT_SCOPE_KEY)
+}
+
+pub(crate) fn validate_terminal_task_update(
+    status: TaskStatus,
+    input: &UpdateTaskInput,
+) -> Result<(), TaskStoreError> {
+    if !status.is_terminal() {
+        return Ok(());
+    }
+
+    if input.depends_on.is_some() {
+        return Err(TaskStoreError::TerminalFieldImmutable {
+            status,
+            field: TASK_FIELD_DEPENDS_ON,
+        });
+    }
+
+    if input.estimated_minutes.is_some() {
+        return Err(TaskStoreError::TerminalFieldImmutable {
+            status,
+            field: TASK_FIELD_ESTIMATED_MINUTES,
+        });
+    }
+
+    Ok(())
 }
 
 impl TaskStore {
@@ -180,9 +212,7 @@ impl TaskStore {
                 .get_mut(id)
                 .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
-            if task.status.is_terminal() {
-                return Err(TaskStoreError::TerminalState(task.status.clone()));
-            }
+            validate_terminal_task_update(task.status, &input)?;
 
             if let Some(title) = input.title {
                 task.title = title;
@@ -678,8 +708,39 @@ mod tests {
     }
 
     #[test]
-    fn update_terminal_task_fails() {
+    fn update_terminal_task_allows_non_frozen_updates() {
         let store = make_store();
+        let task = store.create(create_input("Done task"));
+        store.transition(&task.id, TaskStatus::InProgress).unwrap();
+        store.transition(&task.id, TaskStatus::Completed).unwrap();
+
+        let updated = store
+            .update(
+                &task.id,
+                UpdateTaskInput {
+                    title: Some("Retitled".to_string()),
+                    description: Some("Still editable".to_string()),
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: None,
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(updated.title, "Retitled");
+        assert_eq!(updated.description.as_deref(), Some("Still editable"));
+        assert_eq!(updated.status, TaskStatus::Completed);
+    }
+
+    #[test]
+    fn update_terminal_task_rejects_dependency_changes() {
+        let store = make_store();
+        let upstream = store.create(create_input("Upstream"));
         let task = store.create(create_input("Done task"));
         store.transition(&task.id, TaskStatus::InProgress).unwrap();
         store.transition(&task.id, TaskStatus::Completed).unwrap();
@@ -692,14 +753,170 @@ mod tests {
                 done_condition: None,
                 priority: None,
                 tags: None,
-                depends_on: None,
+                depends_on: Some(vec![TaskDependency {
+                    task_id: upstream.id,
+                    relation_type: TaskDependencyType::Hard,
+                }]),
                 due_at: None,
                 estimated_minutes: None,
                 parent_id: None,
                 time_block_ids: None,
             },
         );
-        assert!(matches!(result, Err(TaskStoreError::TerminalState(_))));
+        assert!(matches!(
+            result,
+            Err(TaskStoreError::TerminalFieldImmutable {
+                field: TASK_FIELD_DEPENDS_ON,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn update_terminal_task_rejects_estimated_minutes_changes() {
+        let store = make_store();
+        let task = store.create(create_input("Done task"));
+        store.transition(&task.id, TaskStatus::InProgress).unwrap();
+        store.transition(&task.id, TaskStatus::Completed).unwrap();
+
+        let result = store.update(
+            &task.id,
+            UpdateTaskInput {
+                title: None,
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: None,
+                due_at: None,
+                estimated_minutes: Some(Some(25)),
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
+        assert!(matches!(
+            result,
+            Err(TaskStoreError::TerminalFieldImmutable {
+                field: TASK_FIELD_ESTIMATED_MINUTES,
+                ..
+            })
+        ));
+    }
+
+    #[test]
+    fn active_task_can_depend_on_terminal_upstream() {
+        let store = make_store();
+        let upstream = store.create(create_input("Finished upstream"));
+        let downstream = store.create(create_input("Still active"));
+        store
+            .transition(&upstream.id, TaskStatus::InProgress)
+            .unwrap();
+        store
+            .transition(&upstream.id, TaskStatus::Completed)
+            .unwrap();
+
+        let updated = store
+            .update(
+                &downstream.id,
+                UpdateTaskInput {
+                    title: None,
+                    description: None,
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: Some(vec![TaskDependency {
+                        task_id: upstream.id.clone(),
+                        relation_type: TaskDependencyType::Hard,
+                    }]),
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+
+        assert_eq!(updated.depends_on.len(), 1);
+        assert_eq!(updated.depends_on[0].task_id, upstream.id);
+    }
+
+    #[test]
+    fn sqlite_terminal_task_update_closure_matches_memory() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let upstream = store.create(create_input("Upstream"));
+        let task = store.create(create_input("Done task"));
+        store.transition(&task.id, TaskStatus::InProgress).unwrap();
+        store.transition(&task.id, TaskStatus::Completed).unwrap();
+
+        let allowed = store
+            .update(
+                &task.id,
+                UpdateTaskInput {
+                    title: Some("Retitled".to_string()),
+                    description: Some("Still editable".to_string()),
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: None,
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+        assert_eq!(allowed.title, "Retitled");
+
+        let dependency_result = store.update(
+            &task.id,
+            UpdateTaskInput {
+                title: None,
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: Some(vec![TaskDependency {
+                    task_id: upstream.id,
+                    relation_type: TaskDependencyType::Hard,
+                }]),
+                due_at: None,
+                estimated_minutes: None,
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
+        assert!(matches!(
+            dependency_result,
+            Err(TaskStoreError::TerminalFieldImmutable {
+                field: TASK_FIELD_DEPENDS_ON,
+                ..
+            })
+        ));
+
+        let estimate_result = store.update(
+            &task.id,
+            UpdateTaskInput {
+                title: None,
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: None,
+                due_at: None,
+                estimated_minutes: Some(Some(25)),
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
+        assert!(matches!(
+            estimate_result,
+            Err(TaskStoreError::TerminalFieldImmutable {
+                field: TASK_FIELD_ESTIMATED_MINUTES,
+                ..
+            })
+        ));
     }
 
     #[test]

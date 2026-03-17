@@ -7,6 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::AppState;
 use crate::signal::types::SignalEvent;
+use crate::task::store::TaskStoreError;
 use crate::task::{CreateTaskInput, Task, TaskStatus, TransitionInput, UpdateTaskInput};
 
 // ── Query types ─────────────────────────────────────────────────
@@ -131,7 +132,10 @@ async fn update_task(
     let task = state
         .task_store
         .update_scoped(scope_key, &id, input)
-        .map_err(|_| StatusCode::NOT_FOUND)?;
+        .map_err(|error| match error {
+            TaskStoreError::NotFound(_) => StatusCode::NOT_FOUND,
+            _ => StatusCode::CONFLICT,
+        })?;
 
     publish_task_signal(&state, "task.updated", &task);
 
@@ -637,6 +641,122 @@ mod tests {
         let updated: Value = serde_json::from_slice(&body).unwrap();
         assert_eq!(updated["title"], "Updated");
         assert_eq!(updated["priority"], "high");
+    }
+
+    #[tokio::test]
+    async fn update_terminal_task_allows_non_frozen_fields() {
+        let state = test_state();
+        let task = state.task_store.create(CreateTaskInput {
+            title: "Original".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: Some(30),
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap();
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::Completed)
+            .unwrap();
+        let app = test_router(state);
+
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/tasks/{}", task.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"title":"Renamed after completion"}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = response.into_body().collect().await.unwrap().to_bytes();
+        let updated: Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(updated["title"], "Renamed after completion");
+        assert_eq!(updated["estimated_minutes"], 30);
+        assert_eq!(updated["status"], "completed");
+    }
+
+    #[tokio::test]
+    async fn update_terminal_task_frozen_fields_return_conflict() {
+        let state = test_state();
+        let upstream = state.task_store.create(CreateTaskInput {
+            title: "Upstream".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let task = state.task_store.create(CreateTaskInput {
+            title: "Original".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: Some(30),
+            time_block_ids: vec![],
+        });
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::InProgress)
+            .unwrap();
+        state
+            .task_store
+            .transition(&task.id, TaskStatus::Completed)
+            .unwrap();
+        let app = test_router(state.clone());
+
+        let estimate_response = app
+            .clone()
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/tasks/{}", task.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(r#"{"estimated_minutes":45}"#))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(estimate_response.status(), StatusCode::CONFLICT);
+
+        let dependency_response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/tasks/{}", task.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"depends_on":[{{"task_id":"{}","type":"hard"}}]}}"#,
+                        upstream.id
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+        assert_eq!(dependency_response.status(), StatusCode::CONFLICT);
     }
 
     #[tokio::test]
