@@ -24,11 +24,12 @@ const PRIORITY_LABEL: Record<TaskNode['priority'], string> = {
 };
 
 function resolveExecutionLabel(node: TaskGraph['nodes'][number]): string {
+  if (node.status === 'completed') return '已完成';
+  if (node.status === 'cancelled') return '已取消';
   if (node.status === 'in_progress') return '进行中';
   if (node.status === 'suspended') return '已挂起';
-  if (node.isExecutable && node.isBlocked) return '可执行（软阻塞提醒）';
-  if (node.isExecutable) return '可执行';
   if (node.isBlocked) return '受阻';
+  if (node.isExecutable) return '可执行';
   return '待处理';
 }
 
