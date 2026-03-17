@@ -1,4 +1,4 @@
-# ExoMind 治理
+# ExoMind 治理（草案）
 
 ## 治理原则
 

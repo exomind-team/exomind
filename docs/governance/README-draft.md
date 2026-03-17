@@ -69,7 +69,7 @@ L4  ExoMind     你 + 你的 Agent + 你的设备   认知主权回归你自己
 
 ```bash
 # 克隆仓库
-git clone https://github.com/user/exomind.git
+git clone https://github.com/exomind-team/exomind.git
 cd exomind
 
 # 安装依赖
@@ -190,6 +190,6 @@ Community Member  →  Contributor  →  Reviewer  →  Maintainer
 
 ## 联系
 
-- 社区讨论: [GitHub Discussions](link)
+- 社区讨论: [GitHub Discussions](https://github.com/exomind-team/exomind/discussions)
 
 > *"你的大脑不应该运行在别人的服务器上。"*

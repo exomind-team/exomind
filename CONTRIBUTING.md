@@ -1,4 +1,4 @@
-# 参与贡献
+# 参与贡献（草案）
 
 ExoMind 是一个集体共建的项目。每一份贡献——无论是一行代码、一个 bug 报告、还是一段文档——都是集体财富的一部分。
 
@@ -18,10 +18,10 @@ ExoMind 是一个集体共建的项目。每一份贡献——无论是一行代
 
 | 方式 | 适合谁 | 入口 |
 |------|--------|------|
-| 💬 **Discussions** | 想聊想法、提问、建议的人 | [Discussions](link) |
-| 🐛 **Issues** | 发现 bug 或有功能需求的用户 | [Issues](link) |
+| 💬 **Discussions** | 想聊想法、提问、建议的人 | [Discussions](https://github.com/exomind-team/exomind/discussions) |
+| 🐛 **Issues** | 发现 bug 或有功能需求的用户 | [Issues](https://github.com/exomind-team/exomind/issues) |
 | 🔧 **Pull Requests** | 想贡献代码或文档的开发者 | 本文档 |
-| 📖 **翻译** | 想帮助更多人理解的人 | [翻译指南](link) |
+| 📖 **翻译** | 想帮助更多人理解的人 | 翻译指南（待完善） |
 | 💰 **资金** | 想支持项目基础设施的人 | [透明财务](./FINANCES.md) |
 
 不知道从哪开始？看看标记了 `good first issue` 的 Issue。
@@ -101,7 +101,7 @@ ExoMind 是一个集体共建的项目。每一份贡献——无论是一行代
 
 ```bash
 # 克隆仓库
-git clone https://github.com/user/exomind.git
+git clone https://github.com/exomind-team/exomind.git
 cd exomind
 
 # 安装前端依赖
@@ -230,4 +230,4 @@ ExoMind 遵循 **ExoMind Public License (EPL-1.0)**。
 - 你的 Agent 数据：永远归你个人所有
 - 项目收益：按贡献透明分配
 
-详见 [LICENSE](./LICENSE) 和 [OWNERSHIP.md](./OWNERSHIP.md)。
+详见 [LICENSE](./docs/governance/LICENSE-draft.txt) 和 [OWNERSHIP.md](./OWNERSHIP.md)。
