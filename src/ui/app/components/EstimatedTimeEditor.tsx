@@ -149,7 +149,7 @@ export function EstimatedTimeEditor({
       >
         <div
           data-testid="estimated-time-active-indicator"
-          className="pointer-events-none absolute inset-y-0 left-0 rounded-[8px] border border-[#FFFFFFCC] bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out dark:border-[#FFFFFF66] dark:bg-[#FFFFFF14]"
+          className="pointer-events-none absolute inset-y-0 left-0 rounded-[8px] border border-brand-accent/40 bg-brand-accent/15 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out"
           style={{ width: `${100 / 6}%`, transform: `translateX(${activeIndex * 100}%)` }}
         />
 
