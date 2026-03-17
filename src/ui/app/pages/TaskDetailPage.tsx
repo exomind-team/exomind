@@ -3,11 +3,10 @@ import { Link, useNavigate, useParams, useLocation } from '@tanstack/react-route
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { TASKS_LAST_PATH_KEY } from './TasksPage';
 import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/TaskBreadcrumb';
-import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
+import { getEventLogService, getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { isTerminalTaskStatus } from '@/lib/types/task';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
-import { getEventStorage } from '@/lib/storage/event-storage';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { getUseMockDataEnabled } from '@/config/mock-data';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
@@ -51,6 +50,25 @@ interface TimeblockSourceBackLink {
   sourceLabel: string;
 }
 
+const MOBILE_ANCHOR_TARGETS = {
+  overview: 'task-detail-overview',
+  info: 'task-detail-info',
+  timer: 'task-detail-timer',
+  root: 'task-detail-root-guidance',
+  linked: 'task-detail-linked-blocks',
+  timeline: 'task-detail-timeline',
+  'ai-summary': 'task-detail-ai-summary',
+  plan: 'task-detail-plan-actual',
+  dependency: 'task-detail-dependency',
+  actions: 'task-detail-actions',
+} as const;
+
+type MobileAnchorId = keyof typeof MOBILE_ANCHOR_TARGETS;
+type MobileSectionAnchor = {
+  id: MobileAnchorId;
+  label: string;
+};
+
 function badgeClassName(badge: TimeblockBadge): string {
   if (badge.tone === 'success') return 'bg-[#DCFCE7] text-[#15803D]';
   if (badge.tone === 'warning') return 'bg-[#FFF7ED] text-[#C75B3A]';
@@ -83,6 +101,94 @@ function selectReviewMarkdown(task: TaskNode, blockName: string, events: Array<{
 
   const preferred = feedbackEvents.find((event) => event.content.includes(task.title) || event.content.includes(blockName));
   return preferred?.content ?? feedbackEvents[0].content;
+}
+
+const EVENT_TYPE_PRIORITY = [
+  'block_start',
+  'block_pause',
+  'block_resume',
+  'block_end',
+  'block_feedback',
+  'agent_feedback',
+  'error',
+];
+
+function resolveEventTypeFromTags(tags?: Set<string>): string | undefined {
+  if (!tags || tags.size === 0) return undefined;
+  for (const type of EVENT_TYPE_PRIORITY) {
+    if (tags.has(type)) return type;
+  }
+  return undefined;
+}
+
+function resolveEventCreatedAt(timestamp: number): string {
+  if (!Number.isFinite(timestamp)) {
+    return new Date().toISOString();
+  }
+  return new Date(timestamp).toISOString();
+}
+
+function scrollToMobileAnchor(anchorId: MobileAnchorId): void {
+  if (typeof document === 'undefined') return;
+  const target = document.getElementById(MOBILE_ANCHOR_TARGETS[anchorId]);
+  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function resolveActiveMobileAnchor(): MobileAnchorId {
+  if (typeof document === 'undefined') return 'overview';
+  const offset = 132;
+  let active: MobileAnchorId = 'overview';
+  for (const anchorId of Object.keys(MOBILE_ANCHOR_TARGETS) as MobileAnchorId[]) {
+    const element = document.getElementById(MOBILE_ANCHOR_TARGETS[anchorId]);
+    if (!element) continue;
+    const rect = element.getBoundingClientRect();
+    const hasLayout = rect.height > 0 || rect.bottom > rect.top;
+    if (!hasLayout) continue;
+    if (rect.top <= offset && rect.bottom >= offset) {
+      return anchorId;
+    }
+    if (rect.top <= offset) {
+      active = anchorId;
+    }
+  }
+  return active;
+}
+
+function MobileSectionTabs({
+  anchors,
+  activeAnchorId,
+  onSelect,
+}: {
+  anchors: MobileSectionAnchor[];
+  activeAnchorId: MobileAnchorId;
+  onSelect: (anchorId: MobileAnchorId) => void;
+}) {
+  return (
+    <div
+      data-testid="task-mobile-section-tabs"
+      className="sticky top-[57px] z-[9] border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-4 py-2 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95"
+    >
+      <div role="tablist" aria-label="任务详情分区导航" className="scrollbar-none flex gap-2 overflow-x-auto">
+        {anchors.map((anchor) => (
+          <button
+            key={anchor.id}
+            type="button"
+            role="tab"
+            aria-selected={activeAnchorId === anchor.id}
+            aria-controls={MOBILE_ANCHOR_TARGETS[anchor.id]}
+            onClick={() => onSelect(anchor.id)}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-xs transition-colors ${
+              activeAnchorId === anchor.id
+                ? 'bg-[#C75B3A] font-semibold text-white'
+                : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'
+            }`}
+          >
+            {anchor.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
 }
 
 function resolvePreferredBlockId(): string | undefined {
@@ -606,8 +712,58 @@ function MobileTimeblockDetail({
   onRemoveDependency: (taskId: string) => void;
   onToggleCollapseUpstream: (taskId: string) => void;
 }) {
+  const [activeAnchorId, setActiveAnchorId] = useState<MobileAnchorId>('overview');
+  const showTimerCard = !isTerminalTaskStatus(task.status);
+  const mobileAnchors = useMemo<MobileSectionAnchor[]>(() => {
+    const anchors: MobileSectionAnchor[] = [
+      { id: 'overview', label: '概览' },
+      { id: 'info', label: '信息面板' },
+    ];
+
+    if (showTimerCard) {
+      anchors.push({ id: 'timer', label: '计时控制' });
+    }
+
+    anchors.push(
+      { id: 'root', label: '未阻塞节点' },
+      { id: 'linked', label: '关联时间块' },
+      { id: 'timeline', label: '事件时间线' },
+      { id: 'ai-summary', label: 'AI 总结' },
+      { id: 'plan', label: '计划 vs 实际' },
+      { id: 'dependency', label: '依赖关系' },
+      { id: 'actions', label: '操作' },
+    );
+
+    return anchors;
+  }, [showTimerCard]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const syncActiveAnchor = () => {
+      setActiveAnchorId(resolveActiveMobileAnchor());
+    };
+
+    syncActiveAnchor();
+    window.addEventListener('scroll', syncActiveAnchor, { passive: true });
+    window.addEventListener('resize', syncActiveAnchor);
+    return () => {
+      window.removeEventListener('scroll', syncActiveAnchor);
+      window.removeEventListener('resize', syncActiveAnchor);
+    };
+  }, []);
+
+  useEffect(() => {
+    setActiveAnchorId('overview');
+  }, [task.id]);
+
+  const handleSelectAnchor = useCallback((anchorId: MobileAnchorId) => {
+    setActiveAnchorId(anchorId);
+    scrollToMobileAnchor(anchorId);
+  }, []);
+
   return (
-    <div className="min-h-full bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
+    <div className="scrollbar-none h-full overflow-y-auto bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
       <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-4 py-3 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95">
         <Link
           to={backLink.to}
@@ -631,8 +787,17 @@ function MobileTimeblockDetail({
         </button>
       </header>
 
+      <MobileSectionTabs
+        anchors={mobileAnchors}
+        activeAnchorId={activeAnchorId}
+        onSelect={handleSelectAnchor}
+      />
+
       <div className="space-y-3 px-4 pt-3">
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <section
+          id={MOBILE_ANCHOR_TARGETS.overview}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
           <div className="flex flex-wrap items-center gap-2">
             {model.summary.badges.map((badge) => (
               <span key={badge.label} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClassName(badge)}`}>
@@ -643,7 +808,13 @@ function MobileTimeblockDetail({
           <h2 className="mt-3 text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h2>
           <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联任务：{task.title}</p>
           {descriptionBlock}
-          <h3 className="mt-4 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信息面板</h3>
+        </section>
+
+        <section
+          id={MOBILE_ANCHOR_TARGETS.info}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信息面板</h3>
           <div className="mt-2 grid grid-cols-2 gap-2">
             {model.summary.metrics.map((metric) => (
               <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
@@ -654,90 +825,16 @@ function MobileTimeblockDetail({
           </div>
         </section>
 
-        {rootGuidance}
-
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-2 dark:border-[#292524] dark:bg-[#1C1917]">
-          <div className="flex gap-1 overflow-x-auto">
-            {model.anchors.map((anchor) => (
-              <button
-                key={anchor.id}
-                type="button"
-                className={`shrink-0 rounded-xl px-3 py-1.5 text-xs ${anchor.active ? 'bg-[#C75B3A] font-semibold text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
-              >
-                {anchor.label}
-              </button>
-            ))}
-          </div>
-        </section>
-
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计划 vs 实际</h3>
-          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.planContent}</p>
-          <p className="mt-1 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.actualContent}</p>
-          <p className="mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">{model.planActual.diffReason}</p>
-        </section>
-
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h3>
-          <div className="mt-3 space-y-3">
-            {model.timeline.items.map((item) => (
-              <article key={item.id} className="flex gap-3">
-                <div className="mt-1 flex flex-col items-center">
-                  <span className={`h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
-                  <span className="mt-1 h-full w-px bg-[#E7E5E4] dark:bg-[#292524]" />
-                </div>
-                <div className="min-w-0 flex-1 pb-2">
-                  <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
-                  <p className="mt-1 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                  <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.description}</p>
-                </div>
-              </article>
-            ))}
-          </div>
-        </section>
-
-        <LinkedBlocksCard linkedBlocks={model.linkedBlocks} taskId={task.id} />
-
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">AI 总结</h3>
-          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.aiSummary.summaryText}</p>
-          <div className="mt-3 space-y-2 rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
-            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">关键产出：{model.aiSummary.keyOutput}</p>
-            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">阻塞点：{model.aiSummary.blocker}</p>
-            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">建议：{model.aiSummary.suggestion}</p>
-          </div>
-        </section>
-
-        <DependencyCard
-          dependencyView={dependencyView}
-          taskDagView={taskDagView}
-          selectedTaskId={dependencySelectedTaskId}
-          selectedType={dependencySelectedType}
-          errorMessage={dependencyError}
-          isSaving={isDependencySaving}
-          hideAddDependency={isTerminalTaskStatus(task.status)}
-          onSelectedTaskChange={onDependencySelectedTaskChange}
-          onSelectedTypeChange={onDependencySelectedTypeChange}
-          onAddDependency={onAddDependency}
-          onChangeDependencyType={onChangeDependencyType}
-          onRemoveDependency={onRemoveDependency}
-          onToggleCollapseUpstream={onToggleCollapseUpstream}
-        />
-
-        <DetailActionsCard
-          model={model}
-          onCopySummary={onCopySummary}
-        />
-
-        {!isTerminalTaskStatus(task.status) && (
+        {showTimerCard && (
         <section
+          id={MOBILE_ANCHOR_TARGETS.timer}
           data-testid="task-timer-card"
           className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
         >
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
           {canEditEstimatedTime ? (
             <div className="mt-3">
-              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">估计时长</p>
+              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">任务估时</p>
               <div className="mt-1">
                 <EstimatedTimeEditor
                   taskId={task.id}
@@ -756,6 +853,7 @@ function MobileTimeblockDetail({
                 <button
                   type="button"
                   onClick={onPauseAndGoEventlog}
+                  data-testid="task-pause-button"
                   className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
                 >
                   <Target size={14} />
@@ -775,6 +873,7 @@ function MobileTimeblockDetail({
                   <button
                     type="button"
                     onClick={onPauseAndGoEventlog}
+                    data-testid="task-pause-button"
                     className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
                   >
                     <Target size={14} />
@@ -791,6 +890,106 @@ function MobileTimeblockDetail({
           </div>
         </section>
         )}
+
+        <div id={MOBILE_ANCHOR_TARGETS.root}>
+          {rootGuidance}
+        </div>
+
+        <div id={MOBILE_ANCHOR_TARGETS.linked}>
+          <LinkedBlocksCard linkedBlocks={model.linkedBlocks} taskId={task.id} />
+        </div>
+
+        <section
+          id={MOBILE_ANCHOR_TARGETS.timeline}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h3>
+          {model.timeline.items.length === 0 && (task.timeBlockIds ?? []).length === 0 && model.linkedBlocks.length === 0 ? (
+            <p className="mt-2 text-xs text-[#A8A29E]">暂无关联时间块，开始一个时间块后即可在此查看事件。</p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {model.timeline.items.map((item) => (
+                <article key={item.id} className="flex gap-3">
+                  <div className="mt-1 flex flex-col items-center">
+                    <span className={`h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
+                    <span className="mt-1 h-full w-px bg-[#E7E5E4] dark:bg-[#292524]" />
+                  </div>
+                  <div className="min-w-0 flex-1 pb-2">
+                    <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
+                    <p className="mt-1 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                    <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkBreaks]}
+                        components={{
+                          p: ({ ...props }) => <p className="m-0" {...props} />,
+                          ul: ({ ...props }) => <ul className="my-1 list-disc pl-4" {...props} />,
+                          ol: ({ ...props }) => <ol className="my-1 list-decimal pl-4" {...props} />,
+                          li: ({ ...props }) => <li className="my-0" {...props} />,
+                          code: ({ className, ...props }) => (
+                            <code
+                              className={`rounded bg-[#F5F0ED] px-1 py-0.5 dark:bg-[#292524] ${className ?? ''}`}
+                              {...props}
+                            />
+                          ),
+                        }}
+                      >
+                        {item.description}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
+        </section>
+
+        <section
+          id={MOBILE_ANCHOR_TARGETS['ai-summary']}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">AI 总结</h3>
+          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.aiSummary.summaryText}</p>
+          <div className="mt-3 space-y-2 rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">关键产出：{model.aiSummary.keyOutput}</p>
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">阻塞点：{model.aiSummary.blocker}</p>
+            <p className="text-xs text-[#78716C] dark:text-[#A8A29E]">建议：{model.aiSummary.suggestion}</p>
+          </div>
+        </section>
+
+        <section
+          id={MOBILE_ANCHOR_TARGETS.plan}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计划 vs 实际</h3>
+          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.planContent}</p>
+          <p className="mt-1 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.actualContent}</p>
+          <p className="mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">{model.planActual.diffReason}</p>
+        </section>
+
+        <div id={MOBILE_ANCHOR_TARGETS.dependency}>
+          <DependencyCard
+            dependencyView={dependencyView}
+            taskDagView={taskDagView}
+            selectedTaskId={dependencySelectedTaskId}
+            selectedType={dependencySelectedType}
+            errorMessage={dependencyError}
+            isSaving={isDependencySaving}
+            hideAddDependency={isTerminalTaskStatus(task.status)}
+            onSelectedTaskChange={onDependencySelectedTaskChange}
+            onSelectedTypeChange={onDependencySelectedTypeChange}
+            onAddDependency={onAddDependency}
+            onChangeDependencyType={onChangeDependencyType}
+            onRemoveDependency={onRemoveDependency}
+            onToggleCollapseUpstream={onToggleCollapseUpstream}
+          />
+        </div>
+
+        <div id={MOBILE_ANCHOR_TARGETS.actions}>
+          <DetailActionsCard
+            model={model}
+            onCopySummary={onCopySummary}
+          />
+        </div>
       </div>
     </div>
   );
@@ -852,7 +1051,7 @@ function DesktopTimeblockDetail({
   onToggleCollapseUpstream: (taskId: string) => void;
 }) {
   return (
-    <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
+    <div className="scrollbar-none h-full overflow-y-auto bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
       <TaskBreadcrumb
         segments={buildDetailBreadcrumbSegments(backLink)}
         current={{ label: '任务详情', icon: NotepadText }}
@@ -894,7 +1093,7 @@ function DesktopTimeblockDetail({
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
           {canEditEstimatedTime ? (
             <div className="mt-3">
-              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">估计时长</p>
+              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">任务估时</p>
               <div className="mt-1">
                 <EstimatedTimeEditor
                   taskId={task.id}
@@ -913,6 +1112,7 @@ function DesktopTimeblockDetail({
                 <button
                   type="button"
                   onClick={onPauseAndGoEventlog}
+                  data-testid="task-pause-button"
                   className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
                 >
                   <Target size={14} />
@@ -932,6 +1132,7 @@ function DesktopTimeblockDetail({
                   <button
                     type="button"
                     onClick={onPauseAndGoEventlog}
+                    data-testid="task-pause-button"
                     className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
                   >
                     <Target size={14} />
@@ -952,25 +1153,47 @@ function DesktopTimeblockDetail({
 
       <section className="mt-4 grid grid-cols-[minmax(0,1fr)_340px] gap-4">
         <div className="space-y-3">
-          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">
-            <h2 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h2>
-            <div className="mt-4 space-y-3">
-              {model.timeline.items.map((item) => (
-                <article key={item.id} className="flex gap-3">
-                  <span className={`mt-1 h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                      <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
-                    </div>
-                    <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.description}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
-          </section>
-
           <LinkedBlocksCard linkedBlocks={model.linkedBlocks} taskId={task.id} />
+
+          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h3>
+            {model.timeline.items.length === 0 && (task.timeBlockIds ?? []).length === 0 && model.linkedBlocks.length === 0 ? (
+              <p className="mt-2 text-xs text-[#A8A29E]">暂无关联时间块，开始一个时间块后即可在此查看事件。</p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {model.timeline.items.map((item) => (
+                  <article key={item.id} className="flex gap-3">
+                    <span className={`mt-1 h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                        <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
+                      </div>
+                      <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm, remarkBreaks]}
+                          components={{
+                            p: ({ ...props }) => <p className="m-0" {...props} />,
+                            ul: ({ ...props }) => <ul className="my-1 list-disc pl-4" {...props} />,
+                            ol: ({ ...props }) => <ol className="my-1 list-decimal pl-4" {...props} />,
+                            li: ({ ...props }) => <li className="my-0" {...props} />,
+                            code: ({ className, ...props }) => (
+                              <code
+                                className={`rounded bg-[#F5F0ED] px-1 py-0.5 dark:bg-[#292524] ${className ?? ''}`}
+                                {...props}
+                              />
+                            ),
+                          }}
+                        >
+                          {item.description}
+                        </ReactMarkdown>
+                      </div>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
+          </section>
         </div>
 
         <aside className="space-y-3">
@@ -1126,18 +1349,19 @@ export function TaskDetailPage() {
       setHasOtherActiveBlock(Boolean(currentBlock && nextTask && currentBlock.taskId !== nextTask.id));
 
       if (nextTask) {
-        const events = await getEventStorage().getEvents();
+        const events = await getEventLogService().loadEvents();
         const matchedBlockName = preferredBlockId
           ? blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId)?.name
           : undefined;
         if (!disposed) {
-          setEventLogs(events.map((event) => ({
+          const normalizedEvents = events.map((event) => ({
             id: event.id,
-            createdAt: event.createdAt,
+            createdAt: resolveEventCreatedAt(event.timestamp),
             content: event.content,
-            type: event.type,
-          })));
-          setReviewMarkdown(selectReviewMarkdown(nextTask, matchedBlockName ?? nextTask.title, events));
+            type: resolveEventTypeFromTags(event.tags),
+          }));
+          setEventLogs(normalizedEvents);
+          setReviewMarkdown(selectReviewMarkdown(nextTask, matchedBlockName ?? nextTask.title, normalizedEvents));
         }
       } else {
         setEventLogs([]);
@@ -1220,8 +1444,6 @@ export function TaskDetailPage() {
       customDurationDraft={customDurationDraft}
       setCustomDurationDraft={setCustomDurationDraft}
       commitCustomDuration={commitCustomDuration}
-      showCountupOption
-      onSelectCountup={() => setTimerMode('countup')}
     />
   );
 

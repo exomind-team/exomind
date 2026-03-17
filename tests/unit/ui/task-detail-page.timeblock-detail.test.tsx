@@ -6,6 +6,7 @@ import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 
 const navigateMock = vi.fn();
+const scrollIntoViewMock = vi.fn();
 
 const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>();
 const listTasksMock = vi.fn<(includeCancelled?: boolean) => Promise<TaskNode[]>>();
@@ -24,8 +25,8 @@ const pauseBlockMock = vi.fn<() => Promise<void>>();
 const calculateSpentMinutesMock = vi.fn<(taskId: string) => Promise<number>>();
 const startBlockForTaskMock = vi.fn();
 
-const getEventsMock = vi.fn<
-  () => Promise<Array<{ id: string; content: string; createdAt: string; type?: string }>>
+const loadEventsMock = vi.fn<
+  () => Promise<Array<{ id: string; content: string; timestamp: number; tags: Set<string> }>>
 >();
 let currentTaskId = 'task-1';
 
@@ -33,6 +34,7 @@ vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
   useParams: () => ({ taskId: currentTaskId }),
   useNavigate: () => navigateMock,
+  useLocation: () => ({ pathname: window.location.pathname, searchStr: window.location.search }),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -55,15 +57,12 @@ vi.mock('@/lib/services', () => ({
     onBlockChange: onBlockChangeMock,
     pauseBlock: pauseBlockMock,
   }),
+  getEventLogService: () => ({
+    loadEvents: loadEventsMock,
+  }),
   getTaskTimerService: () => ({
     calculateSpentMinutes: calculateSpentMinutesMock,
     startBlockForTask: startBlockForTaskMock,
-  }),
-}));
-
-vi.mock('@/lib/storage/event-storage', () => ({
-  getEventStorage: () => ({
-    getEvents: getEventsMock,
   }),
 }));
 
@@ -119,7 +118,13 @@ function makeBlock(overrides: Partial<TimeBlock> = {}): TimeBlock {
 describe('TaskDetailPage timeblock detail layout（任务详情布局）', () => {
   beforeEach(() => {
     currentTaskId = 'task-1';
+    window.history.replaceState({}, '', '/tasks/task-1');
     navigateMock.mockReset();
+    scrollIntoViewMock.mockReset();
+    Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
+      configurable: true,
+      value: scrollIntoViewMock,
+    });
     startBlockForTaskMock.mockReset();
     startBlockForTaskMock.mockResolvedValue(null);
     getTaskMock.mockImplementation(async (id: string) => {
@@ -168,12 +173,12 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     loadTimeBlocksMock.mockResolvedValue([makeBlock()]);
     loadActiveBlockMock.mockResolvedValue(null);
     calculateSpentMinutesMock.mockResolvedValue(90);
-    getEventsMock.mockResolvedValue([
+    loadEventsMock.mockResolvedValue([
       {
         id: 'event-1',
-        createdAt: new Date('2026-03-06T10:31:00+08:00').toISOString(),
-        type: 'agent_feedback',
+        timestamp: new Date('2026-03-06T10:31:00+08:00').getTime(),
         content: '## AI 反馈：深度工作：EventLog 模块实现\n\n**做得好的** 主流程完成清晰\n\n**卡住的地方** 依赖冲突\n\n**建议** 拆分组件并补测试',
+        tags: new Set(['agent_feedback']),
       },
     ]);
   });
@@ -188,13 +193,63 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     expect(await screen.findByText('任务详情')).toBeInTheDocument();
     expect(screen.getByText('概览')).toBeInTheDocument();
-    expect(screen.getByText('时间线')).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '信息面板' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '计时控制' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '事件时间线' })).toBeInTheDocument();
+    expect(screen.getByRole('tab', { name: '依赖关系' })).toBeInTheDocument();
     expect(screen.getAllByText('AI 总结').length).toBeGreaterThan(0);
-    expect(screen.getByText('计划 vs 实际')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '计划 vs 实际' })).toBeInTheDocument();
     expect(screen.getByTestId('task-timer-card')).toBeInTheDocument();
     expect(screen.getByTestId('task-mode-countup')).toBeInTheDocument();
     expect(screen.getByTestId('task-mode-countdown')).toBeInTheDocument();
     expect(screen.getByTestId('task-pause-button')).toBeInTheDocument();
+  });
+
+  it('orders portrait cards with info and timer before linked content（竖屏卡片顺序正确）', async () => {
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    const infoTitle = screen.getByRole('heading', { name: '信息面板' });
+    const timerTitle = screen.getByRole('heading', { name: '计时控制' });
+    const rootGuidance = screen.getByTestId('task-current-root-card');
+    const linkedTitle = screen.getByRole('heading', { name: '关联时间块' });
+    const timelineTitle = screen.getByRole('heading', { name: '事件时间线' });
+    const aiSummaryTitle = screen.getByRole('heading', { name: 'AI 总结' });
+    const actionsTitle = screen.getByRole('heading', { name: '其他操作' });
+
+    expect(infoTitle.compareDocumentPosition(timerTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(timerTitle.compareDocumentPosition(rootGuidance) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(rootGuidance.compareDocumentPosition(linkedTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(linkedTitle.compareDocumentPosition(timelineTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(timelineTitle.compareDocumentPosition(aiSummaryTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(aiSummaryTitle.compareDocumentPosition(actionsTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('scrolls to anchored mobile sections from top tabs（移动端顶部 tab 导航可滚动到分区）', async () => {
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByTestId('task-mobile-section-tabs')).toBeInTheDocument();
+    expect(screen.getAllByRole('tab')).toHaveLength(10);
+
+    fireEvent.click(screen.getByRole('tab', { name: '依赖关系' }));
+
+    expect(document.getElementById('task-detail-dependency')).not.toBeNull();
+    expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  });
+
+  it('hides task detail scrollbars while preserving scroll containers（任务详情隐藏滚动条）', async () => {
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByTestId('new-task-detail-page')).toHaveClass('scrollbar-none');
+    expect(screen.getByTestId('task-mobile-section-tabs').firstElementChild).toHaveClass('scrollbar-none');
   });
 
   it('renders desktop two-column timeblock detail（桌面端双列任务详情）', async () => {
@@ -206,11 +261,40 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
       expect(loadTimeBlocksMock).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText('任务 > 今日 > 任务详情')).toBeInTheDocument();
+    expect(await screen.findByText('任务')).toBeInTheDocument();
+    expect(screen.getByText('任务详情')).toBeInTheDocument();
     expect(screen.getAllByText('深度工作：EventLog 模块实现').length).toBeGreaterThan(0);
     expect(screen.getByText('事件时间线')).toBeInTheDocument();
-    expect(screen.getByText('洞察')).toBeInTheDocument();
-    expect(screen.getByText('操作')).toBeInTheDocument();
+    expect(screen.getByText('AI 总结')).toBeInTheDocument();
+    expect(screen.getByText('其他操作')).toBeInTheDocument();
+  });
+
+  it('places linked blocks above timeline on desktop（关联时间块在事件时间线上方）', async () => {
+    window.history.replaceState({}, '', '/tasks/block/block-1?from=today');
+    mockMatchMedia(true);
+    render(<TaskDetailPage />);
+
+    await waitFor(() => {
+      expect(loadTimeBlocksMock).toHaveBeenCalled();
+    });
+
+    const linkedTitle = await screen.findByText('关联时间块');
+    const timelineTitle = screen.getByText('事件时间线');
+    expect(linkedTitle.compareDocumentPosition(timelineTitle) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+
+  it('shows empty timeline hint when no linked blocks（无关联时间块时显示空态提示）', async () => {
+    mockMatchMedia(false);
+    const emptyTask = makeTask({ timeBlockIds: [] });
+    getTaskMock.mockResolvedValue(emptyTask);
+    listTasksMock.mockResolvedValue([emptyTask]);
+    loadTimeBlocksMock.mockResolvedValue([]);
+    loadEventsMock.mockResolvedValue([]);
+
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+    expect(screen.getByText('暂无关联时间块，开始一个时间块后即可在此查看事件。')).toBeInTheDocument();
   });
 
   it('renders current root guidance without DAG link（详情页复用当前根节点规则，#496 移除 DAG 链接）', async () => {
@@ -222,7 +306,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     });
 
     expect(await screen.findByTestId('task-current-root-card')).toHaveTextContent('优先收口 DAG 根节点');
-    expect(screen.getByTestId('task-current-root-link')).toBeInTheDocument();
+    expect(screen.getByText('优先收口 DAG 根节点')).toBeInTheDocument();
     expect(screen.queryByTestId('task-current-root-dag-link')).toBeNull();
   });
 

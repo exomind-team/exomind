@@ -138,13 +138,13 @@ function resolveBlockForTask(
   activeBlock: ActiveBlockData | null | undefined,
   preferredBlockId: string | undefined,
   nowTs: number,
-): TimeBlock {
+): TimeBlock | null {
   if (preferredBlockId) {
     const preferred = blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId);
     if (preferred) return preferred;
   }
 
-  const taskBlockIds = new Set((task.timeBlockIds ?? []).map((value) => value.trim()));
+  const taskBlockIds = new Set((task.timeBlockIds ?? []).map((value) => value.trim()).filter(Boolean));
   const linkedBlocks = blocks.filter((block) => taskBlockIds.has(block.startId) || taskBlockIds.has(block.id));
   const sortedLinkedBlocks = linkedBlocks.sort((left, right) => right.endTime - left.endTime);
   const latestLinked = sortedLinkedBlocks[0];
@@ -163,20 +163,11 @@ function resolveBlockForTask(
     };
   }
 
-  const fallbackTs = task.updatedAt || nowTs;
-  return {
-    id: `task-${task.id}-fallback`,
-    startId: `task-${task.id}-fallback`,
-    endId: `task-${task.id}-fallback-end`,
-    name: task.title,
-    note: task.description,
-    tags: new Set(['block_feedback']),
-    startTime: fallbackTs,
-    endTime: fallbackTs,
-  };
+  return null;
 }
 
-function resolveDurationMinutes(block: TimeBlock): number {
+function resolveDurationMinutes(block: TimeBlock | null): number {
+  if (!block) return 0;
   return Math.max(0, Math.round((block.endTime - block.startTime) / 60_000));
 }
 
@@ -321,12 +312,21 @@ function resolveEventTone(type: string | undefined): TimeblockEventTone {
   return 'neutral';
 }
 
-function buildRealTimeline(block: TimeBlock, eventLogs: TimeblockEventLog[]): TimeblockTimeline {
+type TimeRange = { startTime: number; endTime: number };
+
+function buildRealTimeline(ranges: TimeRange[], eventLogs: TimeblockEventLog[]): TimeblockTimeline {
+  if (ranges.length === 0) {
+    return {
+      sectionTitle: '事件时间线',
+      items: [],
+    };
+  }
+
   const items = eventLogs
     .map((event) => {
       const timestamp = parseEventTimestamp(event.createdAt);
       if (timestamp === null) return null;
-      if (timestamp < block.startTime || timestamp > block.endTime) return null;
+      if (!ranges.some((range) => timestamp >= range.startTime && timestamp <= range.endTime)) return null;
 
       return {
         id: event.id,
@@ -349,9 +349,9 @@ function buildRealTimeline(block: TimeBlock, eventLogs: TimeblockEventLog[]): Ti
       sectionTitle: '事件时间线',
       items: [
         {
-          id: `${block.startId}-empty`,
+          id: 'timeline-empty',
           title: '暂无事件记录',
-          timeLabel: formatDateTime(block.startTime),
+          timeLabel: '—',
           description: '该时间块范围内未检索到事件日志。',
           tone: 'neutral',
         },
@@ -365,18 +365,20 @@ function buildRealTimeline(block: TimeBlock, eventLogs: TimeblockEventLog[]): Ti
   };
 }
 
-function buildPlanActual(task: TaskNode, block: TimeBlock, scheduleBadge: TimeblockBadge | null): TimeblockPlanActual {
+function buildPlanActual(task: TaskNode, block: TimeBlock | null, scheduleBadge: TimeblockBadge | null): TimeblockPlanActual {
   const planDuration = task.estimatedMinutes ? `（预计 ${formatMinutes(task.estimatedMinutes)}）` : '';
   const actualDuration = resolveDurationMinutes(block);
-  const diffReason = scheduleBadge
-    ? `与计划对比：${scheduleBadge.label}。`
-    : hasBlockerHint(block.note)
-      ? '执行中出现阻塞，已在时间块内处理并恢复。'
-      : '执行与计划基本一致。';
+  const diffReason = block
+    ? scheduleBadge
+      ? `与计划对比：${scheduleBadge.label}。`
+      : hasBlockerHint(block.note)
+        ? '执行中出现阻塞，已在时间块内处理并恢复。'
+        : '执行与计划基本一致。'
+    : '开始时间块后可生成实际记录。';
 
   return {
     planContent: `计划：${task.title}${planDuration}`,
-    actualContent: `实际：${block.name}（耗时 ${formatMinutes(actualDuration)}）`,
+    actualContent: block ? `实际：${block.name}（耗时 ${formatMinutes(actualDuration)}）` : '实际：暂无时间块记录',
     diffReason,
   };
 }
@@ -392,21 +394,43 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     nowTs,
   );
   const actualMinutes = resolveDurationMinutes(block);
-  const scheduleBadge = resolveScheduleBadge(input.task.estimatedMinutes, actualMinutes);
+  const scheduleBadge = block ? resolveScheduleBadge(input.task.estimatedMinutes, actualMinutes) : null;
   const statusBadge: TimeblockBadge = {
     label: STATUS_BADGE_LABEL[input.task.status],
     tone: input.task.status === 'completed' ? 'success' : input.task.status === 'cancelled' ? 'danger' : 'neutral',
   };
-  const aiSummary = buildAiSummary(block.name, input.reviewMarkdown);
-  const timeline = useMockData
-    ? buildMockTimeline(block, aiSummary, nowTs)
-    : buildRealTimeline(block, input.eventLogs ?? []);
+  const summaryBlockName = block?.name ?? input.task.title;
+  const aiSummary = buildAiSummary(summaryBlockName, input.reviewMarkdown);
 
-  const badges = scheduleBadge ? [statusBadge, scheduleBadge] : [statusBadge];
-  const taskBlockIds = new Set((input.task.timeBlockIds ?? []).map((v) => v.trim()));
+  const taskBlockIds = new Set((input.task.timeBlockIds ?? []).map((v) => v.trim()).filter(Boolean));
   const completedLinked = input.blocks
     .filter((b) => taskBlockIds.has(b.startId) || taskBlockIds.has(b.id))
     .sort((a, b) => b.endTime - a.endTime);
+  const timelineRanges: TimeRange[] = completedLinked.map((linked) => ({
+    startTime: linked.startTime,
+    endTime: linked.endTime,
+  }));
+  if (input.activeBlock && input.activeBlock.taskId === input.task.id) {
+    timelineRanges.push({ startTime: input.activeBlock.startTime, endTime: nowTs });
+  }
+
+  const mockBlock: TimeBlock = block ?? {
+    id: `task-${input.task.id}-mock`,
+    startId: `task-${input.task.id}-mock`,
+    endId: `task-${input.task.id}-mock`,
+    name: summaryBlockName,
+    note: input.task.description,
+    tags: new Set(['block_feedback']),
+    startTime: nowTs,
+    endTime: nowTs,
+  };
+  const timeline = useMockData
+    ? timelineRanges.length > 0
+      ? buildMockTimeline(mockBlock, aiSummary, nowTs)
+      : { sectionTitle: '事件时间线', items: [] }
+    : buildRealTimeline(timelineRanges, input.eventLogs ?? []);
+
+  const badges = scheduleBadge ? [statusBadge, scheduleBadge] : [statusBadge];
   const blockCount = completedLinked.length;
 
   const linkedBlocks: LinkedBlockItem[] = completedLinked.map((b) => ({
@@ -431,8 +455,8 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
   }
 
   const metrics: TimeblockSummaryMetric[] = [
-    { key: 'start', label: '开始', value: formatClock(block.startTime) },
-    { key: 'end', label: '结束', value: formatClock(block.endTime) },
+    { key: 'start', label: '开始', value: block ? formatClock(block.startTime) : '—' },
+    { key: 'end', label: '结束', value: block ? formatClock(block.endTime) : '—' },
     { key: 'expected', label: '预期', value: input.task.estimatedMinutes ? formatMinutes(input.task.estimatedMinutes) : '正计时' },
     { key: 'duration', label: '时长', value: formatMinutes(actualMinutes) },
     { key: 'event_count', label: '事件数', value: `${timeline.items.length}` },
@@ -445,7 +469,7 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
 
   return {
     summary: {
-      blockName: block.name,
+      blockName: summaryBlockName,
       badges,
       taskLinkLabel: input.task.title,
       metrics,
