@@ -47,6 +47,7 @@ interface ChatPageProps {
 
 const UNKNOWN_DEVICE_LABEL = '未知设备';
 const UNKNOWN_PLATFORM_LABEL = '未知平台';
+const CLOSED_PROFILE_EVENTLOG_NAME = '未名';
 
 function resolvePlatformLabel(platform?: string): string {
   if (!platform) {
@@ -66,6 +67,15 @@ function resolveAvatarInitial(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return '我';
   return trimmed.charAt(0).toUpperCase();
+}
+
+function resolveEventLogUserDisplayName(currentUser?: string | null): string {
+  if (typeof currentUser !== 'string') {
+    return CLOSED_PROFILE_EVENTLOG_NAME;
+  }
+
+  const trimmed = currentUser.trim();
+  return trimmed.length > 0 ? trimmed : CLOSED_PROFILE_EVENTLOG_NAME;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -124,7 +134,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
   const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
-  const userDisplayName = currentUser || 'Hailay';
+  const userDisplayName = useMemo(() => resolveEventLogUserDisplayName(currentUser), [currentUser]);
   const userAvatarInitial = useMemo(() => resolveAvatarInitial(userDisplayName), [userDisplayName]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
