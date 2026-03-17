@@ -194,7 +194,7 @@ export function TimerConfigPanel({
 
       {showCountupOption ? (
         <div className="mt-3 flex min-w-0 flex-col gap-1.5">
-          <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</span>
+          <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">计时时长</span>
           <div className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]">
             <div
               data-testid="task-countdown-active-indicator"
@@ -224,7 +224,7 @@ export function TimerConfigPanel({
         </div>
       ) : timerMode === 'countdown' ? (
         <div className="mt-3 flex min-w-0 flex-col gap-1.5">
-          <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</span>
+          <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">计时时长</span>
           <div className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]">
             <div
               data-testid="task-countdown-active-indicator"
