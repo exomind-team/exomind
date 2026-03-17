@@ -9,6 +9,7 @@ import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from 
 import { getCommandRegistryService } from '@/lib/services/command-registry.service';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
+import { useTauriFullscreenShortcut } from '@/ui/app/hooks/useTauriFullscreenShortcut';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
@@ -328,6 +329,7 @@ function DesktopLayout({ activePath, agentPageEnabled }: { activePath: string; a
 
 function NewLayout() {
   const location = useLocation();
+  useTauriFullscreenShortcut();
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
 
