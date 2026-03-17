@@ -188,7 +188,7 @@ describe('NowInputRow', () => {
     expect(onSend).toHaveBeenCalledWith('Ctrl+Enter 发送');
   });
 
-  it('does not submit when pressing Enter without Ctrl', () => {
+  it('inserts newline when pressing Enter without Ctrl', () => {
     const onSend = vi.fn();
     render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
 
@@ -198,6 +198,7 @@ describe('NowInputRow', () => {
 
     expect(onSend).not.toHaveBeenCalled();
     expect(startVoiceSpy).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue('仅回车不发送\n');
   });
 
   it('submits text when pressing Enter in auto-enter-send mode', () => {
@@ -222,6 +223,35 @@ describe('NowInputRow', () => {
     fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: true });
 
     expect(onSend).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue('保留换行\n');
+  });
+
+  it('inserts newline on Ctrl+Enter in auto-enter-send mode', () => {
+    const onSend = vi.fn();
+    emitInputSendMode('enter-send');
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    fireEvent.change(textarea, { target: { value: 'Enter 模式不认 Ctrl+Enter' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(startVoiceSpy).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue('Enter 模式不认 Ctrl+Enter\n');
+  });
+
+  it('does not submit on Cmd+Enter in auto-enter-send mode', () => {
+    const onSend = vi.fn();
+    emitInputSendMode('enter-send');
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    fireEvent.change(textarea, { target: { value: 'Enter 模式不认 Cmd+Enter' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', metaKey: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+    expect(startVoiceSpy).not.toHaveBeenCalled();
+    expect(textarea).toHaveValue('Enter 模式不认 Cmd+Enter\n');
   });
 
   it('inserts voice transcript into textarea', () => {

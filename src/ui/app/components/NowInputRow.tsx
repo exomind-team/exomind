@@ -64,7 +64,7 @@ function shouldSendOnEnter(mode: InputSendMode, event: KeyboardEvent<HTMLTextAre
   if (event.altKey) return false;
 
   if (mode === 'enter-send') {
-    return !event.shiftKey || event.ctrlKey || event.metaKey;
+    return !event.shiftKey && !event.ctrlKey && !event.metaKey;
   }
 
   if (event.shiftKey) return false;
@@ -75,6 +75,20 @@ function mergeTranscriptText(currentValue: string, transcript: string): string {
   const trimmedCurrent = currentValue.trim();
   if (!trimmedCurrent) return transcript;
   return `${trimmedCurrent} ${transcript}`;
+}
+
+function insertTextareaNewline(textarea: HTMLTextAreaElement, onChangeValue: (nextValue: string) => void): void {
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  const nextValue = `${textarea.value.slice(0, start)}\n${textarea.value.slice(end)}`;
+  const nextCursor = start + 1;
+
+  onChangeValue(nextValue);
+  requestAnimationFrame(() => {
+    textarea.selectionStart = nextCursor;
+    textarea.selectionEnd = nextCursor;
+    textarea.focus();
+  });
 }
 
 function focusTextarea(textarea: HTMLTextAreaElement | null): void {
@@ -285,16 +299,29 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       textareaRef.current?.blur();
       return;
     }
-    if (!shouldSendOnEnter(inputSendMode, event)) return;
+
+    if (event.key !== 'Enter' || event.altKey) return;
+
+    if (shouldSendOnEnter(inputSendMode, event)) {
+      event.preventDefault();
+      if (value.trim()) {
+        void submitInput();
+      } else if (inputSendMode === 'ctrl-enter-send' && (event.ctrlKey || event.metaKey)) {
+        textareaRef.current?.blur();
+        voiceButtonRef.current?.start();
+      }
+      return;
+    }
+
+    const textarea = textareaRef.current;
+    if (!textarea) return;
 
     event.preventDefault();
-    if (value.trim()) {
-      void submitInput();
-    } else if (inputSendMode === 'ctrl-enter-send' && (event.ctrlKey || event.metaKey)) {
-      textareaRef.current?.blur();
-      voiceButtonRef.current?.start();
-    }
-  }, [inputSendMode, submitInput, value]);
+    insertTextareaNewline(textarea, (nextValue) => {
+      setValue(nextValue);
+      resizeTextarea(textarea);
+    });
+  }, [inputSendMode, resizeTextarea, submitInput, value]);
 
   const handleAttachmentClick = useCallback(() => {
     if (attachmentFeedbackTimerRef.current) {
