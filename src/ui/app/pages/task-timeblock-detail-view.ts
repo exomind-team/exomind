@@ -433,6 +433,7 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
   const metrics: TimeblockSummaryMetric[] = [
     { key: 'start', label: '开始', value: formatClock(block.startTime) },
     { key: 'end', label: '结束', value: formatClock(block.endTime) },
+    { key: 'expected', label: '预期', value: input.task.estimatedMinutes ? formatMinutes(input.task.estimatedMinutes) : '正计时' },
     { key: 'duration', label: '时长', value: formatMinutes(actualMinutes) },
     { key: 'event_count', label: '事件数', value: `${timeline.items.length}` },
     { key: 'blockCount', label: '时间块数', value: String(blockCount) },
