@@ -1,11 +1,21 @@
 export type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'cancelled';
 
+const LINKED_TASK_TITLE_MAX_CHARS = 100;
+
 const STATUS_OPTIONS: readonly { key: TaskStatusChoice; label: string }[] = [
   { key: 'suspended', label: '挂起' },
   { key: 'continue', label: '继续' },
   { key: 'completed', label: '完成' },
   { key: 'cancelled', label: '取消' },
 ] as const;
+
+function formatLinkedTaskTitle(title: string): string {
+  const chars = Array.from(title);
+  if (chars.length <= LINKED_TASK_TITLE_MAX_CHARS) {
+    return title;
+  }
+  return `${chars.slice(0, LINKED_TASK_TITLE_MAX_CHARS).join('')}...`;
+}
 
 interface TaskStatusSelectorProps {
   value: TaskStatusChoice;
@@ -20,12 +30,20 @@ export function TaskStatusSelector({
   linkedTaskTitle,
   'data-testid': testId = 'feedback-task-status-selector',
 }: TaskStatusSelectorProps) {
+  const displayLinkedTaskTitle = linkedTaskTitle ? formatLinkedTaskTitle(linkedTaskTitle) : null;
+
   return (
     <div data-testid="feedback-task-status-section" className="flex flex-col gap-1.5">
-      {linkedTaskTitle && (
-        <div className="flex items-center gap-2">
-          <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">关联任务</span>
-          <span className="truncate text-[12px] text-[#1C1917] dark:text-[#FAFAF9]">{linkedTaskTitle}</span>
+      {linkedTaskTitle && displayLinkedTaskTitle && (
+        <div className="flex items-start gap-2">
+          <span className="shrink-0 text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">关联任务</span>
+          <span
+            data-testid="feedback-task-linked-title"
+            title={linkedTaskTitle}
+            className="min-w-0 flex-1 whitespace-normal break-all text-[12px] leading-5 text-[#1C1917] dark:text-[#FAFAF9]"
+          >
+            {displayLinkedTaskTitle}
+          </span>
         </div>
       )}
       <div
