@@ -776,12 +776,12 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</span>
                 <div
-                  className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#FFFFFF60] bg-white/35 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
+                  className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
                   data-testid="new-focus-expected-time-row"
                 >
                   <div
                     data-testid="new-focus-expected-active-indicator"
-                    className="pointer-events-none absolute inset-y-0 left-0 w-1/5 rounded-[8px] border border-[#FFFFFFCC] bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out dark:border-[#FFFFFF66] dark:bg-[#FFFFFF14]"
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1/5 rounded-[8px] border border-brand-accent/40 bg-brand-accent/15 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out"
                     style={{ transform: `translateX(${activeExpectedIndex * 100}%)` }}
                   />
                   <div className="relative z-10 grid min-w-0 grid-cols-5 gap-0">
@@ -993,7 +993,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
               onClick={() => {
                 void handleConfirmEnd();
               }}
-              className="dark:rounded-[10px] dark:bg-[#C75B3A] dark:text-white dark:hover:bg-[#B24D2F]"
+              className="rounded-[10px] bg-brand-accent text-white hover:bg-brand-accent/90"
             >
               {feedbackConfirmLabel}
             </Button>

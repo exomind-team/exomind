@@ -59,7 +59,7 @@ export function TaskStatusSelector({
               onClick={() => onChange(key)}
               className={`relative z-10 h-8 w-full whitespace-nowrap rounded-[8px] px-[8px] text-center text-[12px] transition-colors duration-200 ${
                 value === key
-                  ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9] bg-white/55 dark:bg-[#FFFFFF14] border border-[#FFFFFFCC] dark:border-[#FFFFFF66] shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
+                  ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9] bg-brand-accent/15 border border-brand-accent/40 shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
                   : 'text-[#78716C] hover:text-[#57534E] dark:hover:text-[#D6D3D1]'
               }`}
             >
