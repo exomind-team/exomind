@@ -256,13 +256,11 @@ export function TaskDagPage() {
                 <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">状态：{STATUS_LABELS[selectedNode.status] ?? selectedNode.status}</p>
                 {selectedNode.status !== 'completed' && selectedNode.status !== 'cancelled' && (
                   <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                    {selectedNode.isExecutable && !selectedNode.isBlocked
-                      ? '可直接执行'
-                      : selectedNode.isExecutable && selectedNode.isBlocked
-                        ? '可执行（软阻塞提醒）'
-                        : selectedNode.isBlocked
-                          ? '不可直接执行 · 有阻塞依赖'
-                          : '待处理'}
+                    {selectedNode.isBlocked
+                      ? '受阻 · 有未满足的依赖'
+                      : selectedNode.isExecutable
+                        ? '可直接执行'
+                        : '待处理'}
                   </p>
                 )}
                 <Link
