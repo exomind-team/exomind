@@ -130,22 +130,102 @@
     opacity: 0.2;
   }
 
+  .settings-range {
+    --settings-range-track-height: 8px;
+    --settings-range-thumb-size: 18px;
+    --settings-range-track-color: hsl(var(--border-card));
+    --settings-range-active-color: var(--settings-tone-color, var(--settings-tone-default));
+    --settings-range-thumb-fill: hsl(var(--bg-card));
+    --settings-range-thumb-shadow:
+      0 1px 2px rgba(28, 25, 23, 0.18),
+      0 6px 18px rgba(28, 25, 23, 0.14);
+    -webkit-appearance: none;
+    appearance: none;
+    height: var(--settings-range-thumb-size);
+    background: transparent;
+    border: 0;
+    padding: 0;
+    cursor: pointer;
+  }
+
+  .settings-range:focus {
+    outline: none;
+  }
+
   .settings-range::-webkit-slider-runnable-track {
+    height: var(--settings-range-track-height);
+    border-radius: 999px;
     background: linear-gradient(
       to right,
-      var(--settings-tone-color, var(--settings-tone-default)) 0%,
-      var(--settings-tone-color, var(--settings-tone-default)) var(--settings-range-progress, 0%),
-      hsl(var(--border-card)) var(--settings-range-progress, 0%),
-      hsl(var(--border-card)) 100%
+      var(--settings-range-active-color) 0,
+      var(--settings-range-active-color) var(--settings-range-progress, 0%),
+      var(--settings-range-track-color) var(--settings-range-progress, 0%),
+      var(--settings-range-track-color) 100%
     );
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--settings-range-track-color) 88%, white 12%);
+  }
+
+  .settings-range::-webkit-slider-thumb {
+    -webkit-appearance: none;
+    appearance: none;
+    width: var(--settings-range-thumb-size);
+    height: var(--settings-range-thumb-size);
+    margin-top: calc((var(--settings-range-track-height) - var(--settings-range-thumb-size)) / 2);
+    border-radius: 999px;
+    border: 2px solid var(--settings-range-active-color);
+    background: var(--settings-range-thumb-fill);
+    box-shadow: var(--settings-range-thumb-shadow);
+    transition:
+      transform 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .settings-range:hover::-webkit-slider-thumb {
+    transform: scale(1.04);
+    box-shadow:
+      0 2px 4px rgba(28, 25, 23, 0.18),
+      0 8px 22px rgba(28, 25, 23, 0.18);
+  }
+
+  .settings-range:active::-webkit-slider-thumb {
+    transform: scale(1.08);
   }
 
   .settings-range::-moz-range-track {
-    background-color: hsl(var(--border-card));
+    height: var(--settings-range-track-height);
+    border: 0;
+    border-radius: 999px;
+    background: var(--settings-range-track-color);
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--settings-range-track-color) 88%, white 12%);
   }
 
   .settings-range::-moz-range-progress {
-    background-color: var(--settings-tone-color, var(--settings-tone-default));
+    height: var(--settings-range-track-height);
+    border-radius: 999px;
+    background: var(--settings-range-active-color);
+  }
+
+  .settings-range::-moz-range-thumb {
+    width: var(--settings-range-thumb-size);
+    height: var(--settings-range-thumb-size);
+    border: 2px solid var(--settings-range-active-color);
+    border-radius: 999px;
+    background: var(--settings-range-thumb-fill);
+    box-shadow: var(--settings-range-thumb-shadow);
+    transition:
+      transform 120ms ease,
+      box-shadow 120ms ease;
+  }
+
+  .settings-range:hover::-moz-range-thumb {
+    transform: scale(1.04);
+    box-shadow:
+      0 2px 4px rgba(28, 25, 23, 0.18),
+      0 8px 22px rgba(28, 25, 23, 0.18);
+  }
+
+  .settings-range:active::-moz-range-thumb {
+    transform: scale(1.08);
   }
 
   .settings-dialog-input {

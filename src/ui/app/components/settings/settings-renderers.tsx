@@ -697,12 +697,12 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
   const [value, setValue, getCurrent] = useSettingState(item.get, item.subscribe);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const progressPercent = (() => {
-    if (item.max === item.min) return '0%';
-    const progress = ((value - item.min) / (item.max - item.min)) * 100;
-    const clamped = Math.min(100, Math.max(0, progress));
-    return `${clamped.toFixed(2)}%`;
+  const progressRatio = (() => {
+    if (item.max === item.min) return 0;
+    const progress = (value - item.min) / (item.max - item.min);
+    return Math.min(1, Math.max(0, progress));
   })();
+  const progressPercent = `${(progressRatio * 100).toFixed(2)}%`;
 
   const handleChange = (nextValue: number) => {
     setNotice(null);
@@ -744,23 +744,28 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
         label={item.label}
         right={(
           <div className="flex min-w-[186px] items-center gap-3">
-            <input
-              data-testid={item.controlTestId}
-              type="range"
-              min={item.min}
-              max={item.max}
-              step={item.step}
-              value={value}
-              onChange={(event) => {
-                handleChange(Number(event.target.value));
-              }}
-              style={{
-                ...(buildSettingsToneStyle(toneColor) ?? {}),
-                accentColor: SETTINGS_TONE_RESOLVED_COLOR,
-                '--settings-range-progress': progressPercent,
-              } as CSSProperties & { '--settings-range-progress': string }}
-              className="w-full settings-range"
-            />
+            <div className="min-w-0 flex-1 px-[9px]">
+              <input
+                data-testid={item.controlTestId}
+                type="range"
+                min={item.min}
+                max={item.max}
+                step={item.step}
+                value={value}
+                onChange={(event) => {
+                  handleChange(Number(event.target.value));
+                }}
+                style={{
+                  ...(buildSettingsToneStyle(toneColor) ?? {}),
+                  '--settings-range-progress': progressPercent,
+                  '--settings-range-progress-ratio': progressRatio.toFixed(4),
+                } as CSSProperties & {
+                  '--settings-range-progress': string;
+                  '--settings-range-progress-ratio': string;
+                }}
+                className="block w-full settings-range"
+              />
+            </div>
             <span className="min-w-[44px] text-right text-xs text-[#78716C]">
               {renderedValue}
             </span>
