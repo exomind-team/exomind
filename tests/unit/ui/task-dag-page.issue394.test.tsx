@@ -10,10 +10,14 @@ const onTaskChangeMock = vi.fn(() => () => {});
 const flowApiMocks = vi.hoisted(() => ({
   setCenter: vi.fn(),
   fitView: vi.fn(),
+  getViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 0.12 })),
+  getNode: vi.fn(),
+  lastProps: null as null | Record<string, unknown>,
 }));
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
+  useLocation: () => ({ pathname: '/tasks/dag', searchStr: '' }),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -31,14 +35,22 @@ vi.mock('@xyflow/react', () => ({
     onNodeClick,
     nodeTypes,
     onInit,
+    ...props
   }: {
     nodes?: Array<{ id: string; type?: string; data?: Record<string, unknown> }>;
     edges?: Array<{ id: string }>;
     children?: ReactNode;
     onNodeClick?: (_event: unknown, node: { id: string; data?: Record<string, unknown> }) => void;
     nodeTypes?: Record<string, (props: { id: string; data: Record<string, unknown> }) => JSX.Element>;
-    onInit?: (instance: { setCenter: typeof flowApiMocks.setCenter; fitView: typeof flowApiMocks.fitView }) => void;
+    onInit?: (instance: {
+      setCenter: typeof flowApiMocks.setCenter;
+      fitView: typeof flowApiMocks.fitView;
+      getViewport: typeof flowApiMocks.getViewport;
+      getNode: typeof flowApiMocks.getNode;
+    }) => void;
+    [key: string]: unknown;
   }) => {
+    flowApiMocks.lastProps = props;
     onInit?.(flowApiMocks);
     return (
       <div data-testid="mock-react-flow">
@@ -88,6 +100,10 @@ describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
   beforeEach(() => {
     flowApiMocks.setCenter.mockReset();
     flowApiMocks.fitView.mockReset();
+    flowApiMocks.getViewport.mockClear();
+    flowApiMocks.getViewport.mockReturnValue({ x: 0, y: 0, zoom: 0.12 });
+    flowApiMocks.getNode.mockReset();
+    flowApiMocks.lastProps = null;
     listTasksMock.mockReset();
     onTaskChangeMock.mockClear();
 
@@ -124,7 +140,31 @@ describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
     expect(screen.getByTestId('task-dag-legend-soft')).toHaveTextContent('软依赖');
 
     fireEvent.click(screen.getByTestId('task-dag-current-root-jump'));
-    expect(flowApiMocks.setCenter).toHaveBeenCalled();
+    expect(flowApiMocks.setCenter).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
+      duration: 250,
+      zoom: 0.12,
+    });
+  });
+
+  it('allows fit view to zoom out below the old lower bound', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledWith(true);
+    });
+
+    expect(flowApiMocks.lastProps).toMatchObject({
+      fitView: true,
+      minZoom: 0.01,
+      fitViewOptions: {
+        padding: 0.2,
+        minZoom: 0.01,
+      },
+    });
+    expect(flowApiMocks.fitView).toHaveBeenCalledWith({
+      padding: 0.2,
+      minZoom: 0.01,
+    });
   });
 
   it('uses unblocked unfinished node as current root when structural roots are terminal', async () => {

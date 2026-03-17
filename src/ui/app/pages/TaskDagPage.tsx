@@ -99,6 +99,9 @@ const TASK_DAG_NODE_TYPES = {
   taskDag: TaskDagNode,
 } satisfies NodeTypes;
 
+const TASK_DAG_MIN_ZOOM = 0.01;
+const TASK_DAG_FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: TASK_DAG_MIN_ZOOM } as const;
+
 export function TaskDagPage() {
   console.log('[DAG] TaskDagPage rendered, pathname:', window.location.pathname);
   const location = useLocation();
@@ -175,10 +178,11 @@ export function TaskDagPage() {
     if (!currentRootNode) return;
 
     setSelectedTaskId(graph.currentRootNodeId);
+    const currentZoom = flowInstanceRef.current?.getViewport().zoom ?? 1;
     flowInstanceRef.current?.setCenter(
       currentRootNode.position.x + TASK_DAG_NODE_WIDTH / 2,
       currentRootNode.position.y + TASK_DAG_NODE_HEIGHT / 2,
-      { zoom: 1, duration: 250 },
+      { zoom: currentZoom, duration: 250 },
     );
   };
 
@@ -289,14 +293,15 @@ export function TaskDagPage() {
             nodeTypes={TASK_DAG_NODE_TYPES}
             proOptions={{ hideAttribution: true }}
             fitView
-            fitViewOptions={{ padding: 0.2 }}
+            minZoom={TASK_DAG_MIN_ZOOM}
+            fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}
             nodesDraggable={false}
             nodesConnectable={false}
             elementsSelectable
             zoomOnDoubleClick={false}
             onInit={(instance) => {
               flowInstanceRef.current = instance;
-              void instance.fitView({ padding: 0.2 });
+              void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
             }}
             onNodeClick={(_event, node) => {
               setSelectedTaskId(node.id);
@@ -309,11 +314,16 @@ export function TaskDagPage() {
             <Background gap={20} color="#E7E5E4" />
             <Controls className="!rounded-lg !border-[#E7E3E0] !bg-white/90 !shadow-sm dark:!border-[#3C3836] dark:!bg-[#1C1917]/90 [&>button]:!border-[#E7E3E0] [&>button]:!bg-transparent [&>button]:!fill-[#57534E] dark:[&>button]:!border-[#3C3836] dark:[&>button]:!fill-[#A8A29E] [&>button:hover]:!bg-[#F5F0ED] dark:[&>button:hover]:!bg-[#292524]" />
             <TaskDagControlPanel
-              onFitView={() => { void flowInstanceRef.current?.fitView({ padding: 0.2 }); }}
+              onFitView={() => { void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS); }}
               onJumpToCurrentRoot={graph.currentRootNodeId ? () => {
                 const node = flowInstanceRef.current?.getNode(graph.currentRootNodeId!);
                 if (node) {
-                  void flowInstanceRef.current?.fitView({ nodes: [node], padding: 0.5, duration: 300 });
+                  void flowInstanceRef.current?.fitView({
+                    ...TASK_DAG_FIT_VIEW_OPTIONS,
+                    nodes: [node],
+                    padding: 0.5,
+                    duration: 300,
+                  });
                 }
               } : undefined}
               hasCurrentRoot={Boolean(graph.currentRootNodeId)}
