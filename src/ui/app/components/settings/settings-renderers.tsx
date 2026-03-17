@@ -758,7 +758,7 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
                 ...(buildSettingsToneStyle(toneColor) ?? {}),
                 accentColor: SETTINGS_TONE_RESOLVED_COLOR,
                 '--settings-range-progress': progressPercent,
-              }}
+              } as CSSProperties & { '--settings-range-progress': string }}
               className="w-full settings-range"
             />
             <span className="min-w-[44px] text-right text-xs text-[#78716C]">
