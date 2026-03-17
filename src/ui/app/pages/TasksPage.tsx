@@ -1,4 +1,4 @@
-﻿import { Clock, Waypoints } from 'lucide-react';
+import { Clock, Waypoints } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { getTaskService } from '@/lib/services';
@@ -27,6 +27,7 @@ const STATUS_LABEL: Record<string, string> = {
 };
 
 const EMPTY_TEXT = '当前没有进行中的任务，开始一个吧。';
+export const TASKS_QUICK_ADD_DRAFT_KEY = 'exomind:draft:task-quick-add';
 
 function formatTaskMeta(task: TaskNode): string {
   return task.estimatedMinutes ? `预计 ${task.estimatedMinutes}min` : '未估时';
@@ -105,7 +106,6 @@ export function TasksPage() {
     const created = await getTaskService().createTask({
       title,
       description,
-      estimatedMinutes: 25,
     });
     setTasks((prev) => [created, ...prev]);
   }, []);
@@ -178,6 +178,7 @@ export function TasksPage() {
         ref={inputRef}
         onSend={handleQuickAdd}
         placeholder="添加任务与描述..."
+        draftStorageKey={TASKS_QUICK_ADD_DRAFT_KEY}
       />
     </div>
   );

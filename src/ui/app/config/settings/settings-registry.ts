@@ -82,6 +82,11 @@ import {
   subscribeVoiceTranscriptSendModeChanges,
 } from '@/config/voice-transcript-send-mode';
 import {
+  getInputSendMode,
+  setInputSendMode,
+  subscribeInputSendModeChanges,
+} from '@/config/input-send-mode';
+import {
   getVoiceShortcutHotkey,
   setVoiceShortcutHotkey,
   subscribeVoiceShortcutHotkeyChanges,
@@ -530,6 +535,25 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: getFeedbackContentSelection,
     set: setFeedbackContentSelection,
     subscribe: (cb) => subscribeFeedbackPreferencesChanges(() => cb(getFeedbackContentSelection())),
+  },
+  {
+    id: 'input-send-mode',
+    label: '输入框发送方式',
+    icon: Key,
+    category: 'input',
+    description: '统一控制「任务 / 当下」输入框使用 Enter 发送还是 Ctrl/Cmd+Enter 发送',
+    rowTestId: 'new-settings-input-send-mode-row',
+    type: 'enum',
+    options: [
+      { label: 'Enter 发送', value: 'enter-send' },
+      { label: 'Ctrl+Enter 发送', value: 'ctrl-enter-send' },
+    ],
+    optionTestId: (value) => `new-settings-input-send-mode-${value}`,
+    get: () => getInputSendMode(),
+    set: (value: string) => {
+      setInputSendMode(value as 'enter-send' | 'ctrl-enter-send');
+    },
+    subscribe: subscribeInputSendModeChanges,
   },
   {
     id: 'voice-transcript-send-mode',

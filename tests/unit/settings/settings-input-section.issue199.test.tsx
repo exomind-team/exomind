@@ -3,6 +3,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
+import { setInputSendMode } from '@/config/input-send-mode';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { setVoiceShortcutSendMode } from '@/config/voice-shortcut-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
@@ -52,6 +53,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     render(<SettingsPage />);
 
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
+    expect(screen.getByText('输入框发送方式')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
@@ -62,6 +64,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('悬浮窗实时文本行数')).toBeInTheDocument();
     expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
+    expect(screen.getByText('统一控制「任务 / 当下」输入框使用 Enter 发送还是 Ctrl/Cmd+Enter 发送')).toBeInTheDocument();
     expect(screen.getByText('仅作用于「当下」页面输入框，默认插入输入框')).toBeInTheDocument();
     expect(screen.getByText('Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束')).toBeInTheDocument();
     expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
@@ -140,6 +143,16 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
 
     expect(setModeMock).toHaveBeenCalledWith('auto-enter-send');
     expect(screen.getByTestId('new-settings-voice-shortcut-send-mode-auto-enter-send')).toHaveAttribute('aria-pressed', 'true');
+  });
+
+  it('toggles keyboard input send mode from input section', () => {
+    const setModeMock = vi.mocked(setInputSendMode);
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-input-send-mode-enter-send'));
+
+    expect(setModeMock).toHaveBeenCalledWith('enter-send');
+    expect(screen.getByTestId('new-settings-input-send-mode-enter-send')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('toggles overlay diagnostics visibility from input section', () => {

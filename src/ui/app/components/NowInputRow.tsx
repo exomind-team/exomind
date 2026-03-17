@@ -17,10 +17,29 @@ import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/Voic
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
+import { clearInputDraft, readInputDraft, writeInputDraft } from '@/lib/storage/input-draft-storage';
+import {
+  getVoiceTranscriptSendMode,
+  subscribeVoiceTranscriptSendModeChanges,
+  type VoiceTranscriptSendMode,
+} from '@/config/voice-transcript-send-mode';
+import {
+  getInputSendMode,
+  subscribeInputSendModeChanges,
+  type InputSendMode,
+} from '@/config/input-send-mode';
 
 interface NowInputRowProps {
   onSend: (content: string, tags?: string[]) => void | Promise<void>;
   placeholder?: string;
+  draftStorageKey?: string | null;
+  draftDebounceMs?: number;
+}
+
+function buildAutoDraftStorageKey(placeholder: string): string {
+  const pathname = typeof window !== 'undefined' ? window.location.pathname || '/' : '/';
+  const normalizedPlaceholder = placeholder.trim() || 'default';
+  return `exomind:draft:now-input:${pathname}:${normalizedPlaceholder}`;
 }
 
 const getClipboardDebugSnapshot = () => {
@@ -40,11 +59,41 @@ function getPasteFailureLabel(reason: ClipboardFailureReason): string {
   return '未粘贴';
 }
 
+function shouldSendOnEnter(mode: InputSendMode, event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  if (event.key !== 'Enter') return false;
+  if (event.altKey) return false;
+
+  if (mode === 'enter-send') {
+    return !event.shiftKey || event.ctrlKey || event.metaKey;
+  }
+
+  if (event.shiftKey) return false;
+  return event.ctrlKey || event.metaKey;
+}
+
+function mergeTranscriptText(currentValue: string, transcript: string): string {
+  const trimmedCurrent = currentValue.trim();
+  if (!trimmedCurrent) return transcript;
+  return `${trimmedCurrent} ${transcript}`;
+}
+
+function focusTextarea(textarea: HTMLTextAreaElement | null): void {
+  textarea?.focus();
+  requestAnimationFrame(() => {
+    textarea?.focus();
+  });
+}
+
 export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>(function NowInputRow({
   onSend,
   placeholder = '记录当下的事实...',
+  draftStorageKey,
+  draftDebounceMs = 300,
 }, ref) {
+  const effectiveDraftStorageKey = draftStorageKey === null ? null : draftStorageKey ?? buildAutoDraftStorageKey(placeholder);
   const [value, setValue] = useState('');
+  const [voiceTranscriptSendMode, setVoiceTranscriptSendMode] = useState<VoiceTranscriptSendMode>(() => getVoiceTranscriptSendMode());
+  const [inputSendMode, setInputSendMode] = useState<InputSendMode>(() => getInputSendMode());
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const [attachmentFeedback, setAttachmentFeedback] = useState<'idle' | 'pending'>('idle');
   const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
@@ -52,6 +101,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attachmentFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -69,6 +119,10 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     resizeTextarea();
   }, [value, resizeTextarea]);
 
+  useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
+
+  useEffect(() => subscribeInputSendModeChanges(setInputSendMode), []);
+
   useEffect(() => () => {
     if (pasteFeedbackTimerRef.current) {
       clearTimeout(pasteFeedbackTimerRef.current);
@@ -78,7 +132,45 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       clearTimeout(attachmentFeedbackTimerRef.current);
       attachmentFeedbackTimerRef.current = null;
     }
+    if (draftPersistTimerRef.current) {
+      clearTimeout(draftPersistTimerRef.current);
+      draftPersistTimerRef.current = null;
+    }
   }, []);
+
+  useEffect(() => {
+    if (!effectiveDraftStorageKey) return;
+
+    const savedDraft = readInputDraft(effectiveDraftStorageKey);
+    if (savedDraft !== null) {
+      setValue(savedDraft);
+    }
+  }, [effectiveDraftStorageKey]);
+
+  useEffect(() => {
+    if (!effectiveDraftStorageKey) return;
+
+    if (draftPersistTimerRef.current) {
+      clearTimeout(draftPersistTimerRef.current);
+      draftPersistTimerRef.current = null;
+    }
+
+    draftPersistTimerRef.current = setTimeout(() => {
+      if (!value.trim()) {
+        clearInputDraft(effectiveDraftStorageKey);
+      } else {
+        writeInputDraft(effectiveDraftStorageKey, value);
+      }
+      draftPersistTimerRef.current = null;
+    }, draftDebounceMs);
+
+    return () => {
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+    };
+  }, [draftDebounceMs, effectiveDraftStorageKey, value]);
 
   const submitInput = useCallback(async () => {
     const trimmed = value.trim();
@@ -87,12 +179,28 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     setValue('');
     try {
       await onSend(trimmed);
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+      if (effectiveDraftStorageKey) {
+        clearInputDraft(effectiveDraftStorageKey);
+      }
+      focusTextarea(textareaRef.current);
     } catch (error) {
       setValue(saved);
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+      if (effectiveDraftStorageKey) {
+        writeInputDraft(effectiveDraftStorageKey, saved);
+      }
+      focusTextarea(textareaRef.current);
       log.error(`[NowInputRow] send failed: ${error instanceof Error ? error.message : String(error)}`);
       toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
     }
-  }, [onSend, value]);
+  }, [effectiveDraftStorageKey, onSend, value]);
 
   const insertClipboardText = useCallback((text: string) => {
     if (!text) return;
@@ -151,9 +259,22 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       log.warn(`[new-now-input][voice-signal] ${publishError instanceof Error ? publishError.message : String(publishError)}`);
     });
 
-    // 语音输入始终直接发送到事件日志——语音是即时事件，应该立即入库
-    onSend(normalized, ['voice']);
-  }, [onSend]);
+    if (voiceTranscriptSendMode === 'direct-send') {
+      onSend(normalized, ['voice']);
+      return;
+    }
+
+    setValue((prev) => mergeTranscriptText(prev, normalized));
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const nextValue = textareaRef.current?.value ?? '';
+      const end = nextValue.length;
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = end;
+        textareaRef.current.selectionEnd = end;
+      }
+    });
+  }, [onSend, voiceTranscriptSendMode]);
 
   const handleVoiceError = useCallback((error: string) => {
     log.error(`[new-now-input][voice] ${error}`);
@@ -164,18 +285,16 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       textareaRef.current?.blur();
       return;
     }
-    if (event.key !== 'Enter') return;
-    if (!(event.ctrlKey || event.metaKey)) return;
-    if (event.altKey || event.shiftKey) return;
+    if (!shouldSendOnEnter(inputSendMode, event)) return;
 
     event.preventDefault();
     if (value.trim()) {
-      submitInput();
-    } else {
+      void submitInput();
+    } else if (inputSendMode === 'ctrl-enter-send' && (event.ctrlKey || event.metaKey)) {
       textareaRef.current?.blur();
       voiceButtonRef.current?.start();
     }
-  }, [submitInput, value]);
+  }, [inputSendMode, submitInput, value]);
 
   const handleAttachmentClick = useCallback(() => {
     if (attachmentFeedbackTimerRef.current) {

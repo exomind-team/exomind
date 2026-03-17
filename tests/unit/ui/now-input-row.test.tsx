@@ -11,13 +11,19 @@ const {
   getLatestVoiceProps,
   getVoiceTranscriptSendMode,
   subscribeVoiceTranscriptSendModeChanges,
+  getInputSendMode,
+  subscribeInputSendModeChanges,
   resetVoiceTranscriptMode,
   emitVoiceTranscriptMode,
+  resetInputSendMode,
+  emitInputSendMode,
   mockPublishVoiceTranscriptSignal,
 } = vi.hoisted(() => {
   let latestVoiceProps: any = null;
-  let mode: 'insert' | 'direct-send' = 'insert';
-  let listeners: Array<(nextMode: 'insert' | 'direct-send') => void> = [];
+  let transcriptMode: 'insert' | 'direct-send' = 'insert';
+  let transcriptListeners: Array<(nextMode: 'insert' | 'direct-send') => void> = [];
+  let inputSendMode: 'enter-send' | 'ctrl-enter-send' = 'ctrl-enter-send';
+  let inputSendListeners: Array<(nextMode: 'enter-send' | 'ctrl-enter-send') => void> = [];
   return {
     mockReadClipboardText: vi.fn(),
     mockToast: vi.fn(),
@@ -26,21 +32,36 @@ const {
       latestVoiceProps = props;
     },
     getLatestVoiceProps: () => latestVoiceProps,
-    getVoiceTranscriptSendMode: vi.fn(() => mode),
+    getVoiceTranscriptSendMode: vi.fn(() => transcriptMode),
     subscribeVoiceTranscriptSendModeChanges: vi.fn((listener: (nextMode: 'insert' | 'direct-send') => void) => {
-      listeners.push(listener);
+      transcriptListeners.push(listener);
       return () => {
-        listeners = listeners.filter((item) => item !== listener);
+        transcriptListeners = transcriptListeners.filter((item) => item !== listener);
+      };
+    }),
+    getInputSendMode: vi.fn(() => inputSendMode),
+    subscribeInputSendModeChanges: vi.fn((listener: (nextMode: 'enter-send' | 'ctrl-enter-send') => void) => {
+      inputSendListeners.push(listener);
+      return () => {
+        inputSendListeners = inputSendListeners.filter((item) => item !== listener);
       };
     }),
     mockPublishVoiceTranscriptSignal: vi.fn(),
     resetVoiceTranscriptMode: () => {
-      mode = 'insert';
-      listeners = [];
+      transcriptMode = 'insert';
+      transcriptListeners = [];
+    },
+    resetInputSendMode: () => {
+      inputSendMode = 'ctrl-enter-send';
+      inputSendListeners = [];
     },
     emitVoiceTranscriptMode: (nextMode: 'insert' | 'direct-send') => {
-      mode = nextMode;
-      listeners.forEach((listener) => listener(nextMode));
+      transcriptMode = nextMode;
+      transcriptListeners.forEach((listener) => listener(nextMode));
+    },
+    emitInputSendMode: (nextMode: 'enter-send' | 'ctrl-enter-send') => {
+      inputSendMode = nextMode;
+      inputSendListeners.forEach((listener) => listener(nextMode));
     },
   };
 });
@@ -74,6 +95,11 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges,
 }));
 
+vi.mock('@/config/input-send-mode', () => ({
+  getInputSendMode,
+  subscribeInputSendModeChanges,
+}));
+
 vi.mock('@/lib/services/voice-signal.service', () => ({
   publishVoiceTranscriptSignal: mockPublishVoiceTranscriptSignal,
 }));
@@ -81,14 +107,18 @@ vi.mock('@/lib/services/voice-signal.service', () => ({
 describe('NowInputRow', () => {
   beforeEach(() => {
     vi.useFakeTimers();
+    localStorage.clear();
     mockReadClipboardText.mockReset();
     mockToast.mockReset();
     startVoiceSpy.mockReset();
     getVoiceTranscriptSendMode.mockClear();
     subscribeVoiceTranscriptSendModeChanges.mockClear();
+    getInputSendMode.mockClear();
+    subscribeInputSendModeChanges.mockClear();
     mockPublishVoiceTranscriptSignal.mockReset();
     mockPublishVoiceTranscriptSignal.mockResolvedValue(undefined);
     resetVoiceTranscriptMode();
+    resetInputSendMode();
     setLatestVoiceProps(null);
   });
 
@@ -170,6 +200,30 @@ describe('NowInputRow', () => {
     expect(startVoiceSpy).not.toHaveBeenCalled();
   });
 
+  it('submits text when pressing Enter in auto-enter-send mode', () => {
+    const onSend = vi.fn();
+    emitInputSendMode('enter-send');
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    fireEvent.change(textarea, { target: { value: '直接回车发送' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+
+    expect(onSend).toHaveBeenCalledWith('直接回车发送');
+  });
+
+  it('keeps Shift+Enter as newline in auto-enter-send mode', () => {
+    const onSend = vi.fn();
+    emitInputSendMode('enter-send');
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    fireEvent.change(textarea, { target: { value: '保留换行' } });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', shiftKey: true });
+
+    expect(onSend).not.toHaveBeenCalled();
+  });
+
   it('inserts voice transcript into textarea', () => {
     render(<NowInputRow onSend={vi.fn()} placeholder="输入内容记录事件..." />);
     const textarea = screen.getByTestId('new-now-input-textarea');
@@ -192,8 +246,28 @@ describe('NowInputRow', () => {
       getLatestVoiceProps()?.onResult?.('  直接发送内容  ');
     });
 
-    expect(onSend).toHaveBeenCalledWith('直接发送内容');
+    expect(onSend).toHaveBeenCalledWith('直接发送内容', ['voice']);
     expect((textarea as HTMLTextAreaElement).value).toBe('');
+  });
+
+  it('refocuses textarea after clicking send', async () => {
+    const onSend = vi.fn().mockResolvedValue(undefined);
+    render(<NowInputRow onSend={onSend} placeholder="输入内容记录事件..." />);
+
+    const textarea = screen.getByTestId('new-now-input-textarea');
+    const sendButton = screen.getByTestId('new-now-send-button');
+    fireEvent.change(textarea, { target: { value: '发送后回焦' } });
+
+    sendButton.focus();
+    expect(sendButton).toHaveFocus();
+
+    await act(async () => {
+      fireEvent.click(sendButton);
+      vi.advanceTimersByTime(20);
+    });
+
+    expect(onSend).toHaveBeenCalledWith('发送后回焦');
+    expect(textarea).toHaveFocus();
   });
 
   it('publishes voice transcript signal when ASR returns text（语音结果会发布信号）', () => {

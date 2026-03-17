@@ -254,6 +254,12 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/input-send-mode', () => ({
+  getInputSendMode: vi.fn(() => 'ctrl-enter-send'),
+  setInputSendMode: vi.fn((value: string) => value),
+  subscribeInputSendModeChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/voice-shortcut-send-mode', () => ({
   getVoiceShortcutSendMode: vi.fn(() => 'insert-only'),
   setVoiceShortcutSendMode: vi.fn((value: string) => value),
