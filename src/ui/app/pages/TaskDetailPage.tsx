@@ -562,7 +562,7 @@ function MobileTimeblockDetail({
   timerControls,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
-  hardBlockingReason,
+  blockingReason,
   onStartTimer,
   onPauseAndGoEventlog,
   onCopySummary,
@@ -589,7 +589,7 @@ function MobileTimeblockDetail({
   timerControls: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
-  hardBlockingReason: string | null;
+  blockingReason: string | null;
   onStartTimer: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
@@ -752,7 +752,7 @@ function MobileTimeblockDetail({
               <button
                 type="button"
                 onClick={onStartTimer}
-                disabled={hasOtherActiveBlock || Boolean(hardBlockingReason)}
+                disabled={hasOtherActiveBlock || Boolean(blockingReason)}
                 className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
               >
                 <Play size={14} />
@@ -768,8 +768,8 @@ function MobileTimeblockDetail({
                 {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
               </button>
             </div>
-            {hardBlockingReason ? (
-              <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{hardBlockingReason}</p>
+            {blockingReason ? (
+              <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
             ) : null}
           </div>
         </section>
@@ -793,7 +793,7 @@ function DesktopTimeblockDetail({
   timerControls,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
-  hardBlockingReason,
+  blockingReason,
   onStartTimer,
   onPauseAndGoEventlog,
   onCopySummary,
@@ -820,7 +820,7 @@ function DesktopTimeblockDetail({
   timerControls: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
-  hardBlockingReason: string | null;
+  blockingReason: string | null;
   onStartTimer: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
@@ -908,7 +908,7 @@ function DesktopTimeblockDetail({
               <button
                 type="button"
                 onClick={onStartTimer}
-                disabled={hasOtherActiveBlock || Boolean(hardBlockingReason)}
+                disabled={hasOtherActiveBlock || Boolean(blockingReason)}
                 className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
               >
                 <Play size={14} />
@@ -924,8 +924,8 @@ function DesktopTimeblockDetail({
                 {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
               </button>
             </div>
-            {hardBlockingReason ? (
-              <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{hardBlockingReason}</p>
+            {blockingReason ? (
+              <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
             ) : null}
           </div>
         </section>
@@ -1165,8 +1165,9 @@ export function TaskDetailPage() {
     () => (task ? allTasks.some((candidate) => candidate.id === task.id) && !isTerminalTaskStatus(task.status) : false),
     [allTasks, task],
   );
-  const hardBlockingReason = useMemo(() => {
+  const blockingReason = useMemo(() => {
     if (!task) return null;
+    const reasons: string[] = [];
     const incompleteHardDeps = task.dependsOn
       .filter((dep) => dep.type === 'hard')
       .map((dep) => {
@@ -1175,8 +1176,22 @@ export function TaskDetailPage() {
         return predecessor.title;
       })
       .filter((title): title is string => title !== null);
-    if (incompleteHardDeps.length === 0) return null;
-    return `硬依赖未完成：${incompleteHardDeps.join('、')}`;
+    if (incompleteHardDeps.length > 0) {
+      reasons.push(`硬依赖未完成：${incompleteHardDeps.join('、')}`);
+    }
+    const pendingSoftDeps = task.dependsOn
+      .filter((dep) => dep.type === 'soft')
+      .map((dep) => {
+        const predecessor = taskById.get(dep.taskId);
+        if (!predecessor || predecessor.status !== 'pending') return null;
+        return predecessor.title;
+      })
+      .filter((title): title is string => title !== null);
+    if (pendingSoftDeps.length > 0) {
+      reasons.push(pendingSoftDeps.map((title) => `软依赖「${title}」尚未开始`).join('、'));
+    }
+    if (reasons.length === 0) return null;
+    return reasons.join('；');
   }, [task, taskById]);
   const timerControls = (
     <TimerConfigPanel
@@ -1427,7 +1442,7 @@ export function TaskDetailPage() {
         timerControls={timerControls}
         hasOtherActiveBlock={hasOtherActiveBlock}
         hasActiveBlockOnTask={Boolean(activeBlock)}
-        hardBlockingReason={hardBlockingReason}
+        blockingReason={blockingReason}
         onStartTimer={handleStartTimer}
         onPauseAndGoEventlog={handlePauseAndGoEventlog}
         onCopySummary={handleCopySummary}
@@ -1459,7 +1474,7 @@ export function TaskDetailPage() {
       timerControls={timerControls}
       hasOtherActiveBlock={hasOtherActiveBlock}
       hasActiveBlockOnTask={Boolean(activeBlock)}
-      hardBlockingReason={hardBlockingReason}
+      blockingReason={blockingReason}
       onStartTimer={handleStartTimer}
       onPauseAndGoEventlog={handlePauseAndGoEventlog}
       onCopySummary={handleCopySummary}
