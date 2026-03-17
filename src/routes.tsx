@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
@@ -9,7 +9,6 @@ import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from 
 import { getCommandRegistryService } from '@/lib/services/command-registry.service';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
-import { useTauriFullscreenShortcut } from '@/ui/app/hooks/useTauriFullscreenShortcut';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
@@ -251,7 +250,17 @@ function MobileShell({
   );
 }
 
-function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
+function DesktopSidebar({
+  activePath,
+  agentPageEnabled,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  activePath: string;
+  agentPageEnabled: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
@@ -269,18 +278,50 @@ function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; 
   return (
     <aside
       data-testid="desktop-sidebar"
-      className="flex h-full w-64 shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))]"
+      data-state={collapsed ? 'collapsed' : 'expanded'}
+      className={cn(
+        'flex h-full shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] transition-[width] duration-200 ease-out',
+        collapsed ? 'w-16' : 'w-64',
+      )}
     >
-      <div className="border-b border-[hsl(var(--sidebar-border))] p-3">
-        <div className="flex items-center gap-3 rounded-md px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
-            <Brain size={16} />
+      <div className={cn('border-b border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
+        {collapsed ? (
+          <div className="flex flex-col items-center gap-2 rounded-md py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
+              <Brain size={16} />
+            </div>
+            <button
+              type="button"
+              data-testid="desktop-sidebar-toggle"
+              aria-label="展开侧边栏"
+              aria-expanded="false"
+              onClick={onToggleCollapsed}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[hsl(var(--sidebar-border))] text-[hsl(var(--sidebar-muted))] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]"
+            >
+              <PanelLeftOpen size={16} />
+            </button>
           </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">ExoMind</p>
-            <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">外心</p>
+        ) : (
+          <div className="flex items-center gap-3 rounded-md px-2 py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
+              <Brain size={16} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">ExoMind</p>
+              <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">外心</p>
+            </div>
+            <button
+              type="button"
+              data-testid="desktop-sidebar-toggle"
+              aria-label="收起侧边栏"
+              aria-expanded="true"
+              onClick={onToggleCollapsed}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--sidebar-border))] text-[hsl(var(--sidebar-muted))] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]"
+            >
+              <PanelLeftClose size={16} />
+            </button>
           </div>
-        </div>
+        )}
       </div>
 
       <nav className="flex-1 space-y-1 p-2">
@@ -288,7 +329,8 @@ function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; 
           const Icon = item.icon;
           const active = item.match(activePath);
           const itemClassName = cn(
-            'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+            'flex w-full items-center rounded-md text-sm transition-colors',
+            collapsed ? 'justify-center px-0 py-3' : 'gap-2 px-3 py-2',
             active
               ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
               : 'text-[hsl(var(--sidebar-foreground))]'
@@ -298,27 +340,44 @@ function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; 
               key={item.path}
               to={item.path}
               data-testid={`desktop-sidebar-item-${item.key}`}
+              aria-label={item.title}
+              title={item.title}
               className={itemClassName}
             >
               <Icon size={16} />
-              <span>{item.title}</span>
+              {collapsed ? <span className="sr-only">{item.title}</span> : <span>{item.title}</span>}
             </Link>
           );
         })}
       </nav>
 
-      <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
-        <DesktopSidebarAccountEntry />
+      <div className={cn('border-t border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
+        <DesktopSidebarAccountEntry collapsed={collapsed} />
       </div>
     </aside>
   );
 }
 
-function DesktopLayout({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
+function DesktopLayout({
+  activePath,
+  agentPageEnabled,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  activePath: string;
+  agentPageEnabled: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
   return (
     <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
       <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
-        <DesktopSidebar activePath={activePath} agentPageEnabled={agentPageEnabled} />
+        <DesktopSidebar
+          activePath={activePath}
+          agentPageEnabled={agentPageEnabled}
+          collapsed={collapsed}
+          onToggleCollapsed={onToggleCollapsed}
+        />
         <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
           <Outlet />
         </main>
@@ -329,11 +388,11 @@ function DesktopLayout({ activePath, agentPageEnabled }: { activePath: string; a
 
 function NewLayout() {
   const location = useLocation();
-  useTauriFullscreenShortcut();
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
@@ -427,7 +486,12 @@ function NewLayout() {
   if (isDesktop && desktopAdaptiveEnabled && isDesktopAdaptiveRoute) {
     return (
       <>
-        <DesktopLayout activePath={location.pathname} agentPageEnabled={agentPageEnabled} />
+        <DesktopLayout
+          activePath={location.pathname}
+          agentPageEnabled={agentPageEnabled}
+          collapsed={desktopSidebarCollapsed}
+          onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
+        />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
         <ReminderNotifier />
       </>
