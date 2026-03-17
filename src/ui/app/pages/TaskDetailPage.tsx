@@ -2,6 +2,7 @@ import { ArrowLeft, Ellipsis, NotepadText, Target, Play } from 'lucide-react';
 import { Link, useNavigate, useParams, useLocation } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
 import { TASKS_LAST_PATH_KEY } from './TasksPage';
+import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/TaskBreadcrumb';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { isTerminalTaskStatus } from '@/lib/types/task';
 import type { TaskNode } from '@/lib/types/task';
@@ -125,6 +126,18 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
     label: `← 返回${sourceLabel}`,
     sourceLabel,
   };
+}
+
+function buildDetailBreadcrumbSegments(backLink: TimeblockSourceBackLink): TaskBreadcrumbSegment[] {
+  const segments: TaskBreadcrumbSegment[] = [{ label: '任务', to: '/tasks' }];
+  if (backLink.sourceLabel !== '任务') {
+    segments.push({
+      label: backLink.sourceLabel,
+      to: backLink.to,
+      search: backLink.search,
+    });
+  }
+  return segments;
 }
 
 function buildVirtualTaskFromBlock(block: TimeBlock): TaskNode {
@@ -837,23 +850,10 @@ function DesktopTimeblockDetail({
   return (
     <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
       <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <div className="inline-flex select-none items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-          <Link to="/tasks" onClick={() => sessionStorage.removeItem(TASKS_LAST_PATH_KEY)} className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
-            <ArrowLeft size={14} />
-            任务
-          </Link>
-          {backLink.sourceLabel !== '任务' && (
-            <>
-              <span>/</span>
-              <Link to={backLink.to} search={backLink.search} className="hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">{backLink.sourceLabel}</Link>
-            </>
-          )}
-          <span>/</span>
-          <span className="inline-flex items-center gap-1">
-            <NotepadText size={14} />
-            任务详情
-          </span>
-        </div>
+        <TaskBreadcrumb
+          segments={buildDetailBreadcrumbSegments(backLink)}
+          current={{ label: '任务详情', icon: NotepadText }}
+        />
         <div className="mt-2 flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
