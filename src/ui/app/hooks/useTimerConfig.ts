@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { TimerMode } from '@/lib/services';
 
 const DEFAULT_COUNTDOWN_MINUTES = 25;
@@ -17,6 +17,7 @@ export interface UseTimerConfigResult {
   countdownMinutes: number;
   setTimerMode: (mode: 'countup' | 'countdown') => void;
   setCountdownMinutes: (minutes: number) => void;
+  syncTimerConfig: (config: { mode: 'countup' } | { mode: 'countdown'; minutes: number }) => void;
   customDurationDraft: string;
   setCustomDurationDraft: (draft: string) => void;
   commitCustomDuration: () => void;
@@ -33,6 +34,22 @@ export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseT
   const [timerMode, setTimerModeState] = useState<TimerMode>(initialMinutes ? 'countdown' : 'countup');
   const [countdownMinutes, setCountdownMinutesState] = useState(normalizedInitialMinutes);
   const [customDurationDraft, setCustomDurationDraftState] = useState(String(normalizedInitialMinutes));
+
+  const applyTimerConfig = useCallback((
+    config: { mode: 'countup' } | { mode: 'countdown'; minutes: number },
+    markUserConfigured: boolean,
+  ) => {
+    if (markUserConfigured) {
+      hasUserConfiguredRef.current = true;
+    }
+
+    setTimerModeState(config.mode);
+    if (config.mode === 'countdown') {
+      const safeMinutes = normalizeCountdownMinutes(config.minutes);
+      setCountdownMinutesState(safeMinutes);
+      setCustomDurationDraftState(String(safeMinutes));
+    }
+  }, []);
 
   useEffect(() => {
     if (lastResetKeyRef.current === resetKey) {
@@ -62,25 +79,29 @@ export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseT
     }
   }, [initialMinutes, normalizedInitialMinutes]);
 
-  const setTimerMode = (mode: TimerMode) => {
-    hasUserConfiguredRef.current = true;
-    setTimerModeState(mode);
-  };
+  const setTimerMode = useCallback((mode: TimerMode) => {
+    if (mode === 'countdown') {
+      applyTimerConfig({ mode: 'countdown', minutes: countdownMinutes }, true);
+      return;
+    }
 
-  const setCountdownMinutes = (minutes: number) => {
-    const safeMinutes = normalizeCountdownMinutes(minutes);
-    hasUserConfiguredRef.current = true;
-    setTimerModeState('countdown');
-    setCountdownMinutesState(safeMinutes);
-    setCustomDurationDraftState(String(safeMinutes));
-  };
+    applyTimerConfig({ mode: 'countup' }, true);
+  }, [applyTimerConfig, countdownMinutes]);
 
-  const setCustomDurationDraft = (draft: string) => {
+  const setCountdownMinutes = useCallback((minutes: number) => {
+    applyTimerConfig({ mode: 'countdown', minutes }, true);
+  }, [applyTimerConfig]);
+
+  const syncTimerConfig = useCallback((config: { mode: 'countup' } | { mode: 'countdown'; minutes: number }) => {
+    applyTimerConfig(config, false);
+  }, [applyTimerConfig]);
+
+  const setCustomDurationDraft = useCallback((draft: string) => {
     hasUserConfiguredRef.current = true;
     setCustomDurationDraftState(draft);
-  };
+  }, []);
 
-  const commitCustomDuration = () => {
+  const commitCustomDuration = useCallback(() => {
     const parsedValue = Number.parseInt(customDurationDraft.trim(), 10);
     if (Number.isFinite(parsedValue)) {
       setCountdownMinutes(parsedValue);
@@ -88,7 +109,7 @@ export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseT
     }
 
     setCustomDurationDraftState(String(countdownMinutes));
-  };
+  }, [countdownMinutes, customDurationDraft, setCountdownMinutes]);
 
   const timerConfig = useMemo<UseTimerConfigResult['timerConfig']>(() => {
     if (timerMode === 'countdown') {
@@ -103,6 +124,7 @@ export function useTimerConfig(initialMinutes?: number, resetKey?: string): UseT
     countdownMinutes,
     setTimerMode,
     setCountdownMinutes,
+    syncTimerConfig,
     customDurationDraft,
     setCustomDurationDraft,
     commitCustomDuration,

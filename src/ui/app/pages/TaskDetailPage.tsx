@@ -12,6 +12,7 @@ import { getUseMockDataEnabled } from '@/config/mock-data';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
 import { EstimatedTimeEditor } from '@/ui/app/components/EstimatedTimeEditor';
+import { Switch } from '@/components/ui/switch';
 import {
   buildTaskTimeblockDetailViewModel,
   type TimeblockEventLog,
@@ -42,12 +43,49 @@ const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
   dag: { label: 'DAG', to: '/tasks/dag' },
   timeblocks: { label: '时间块', to: '/tasks/timeblocks' },
 };
+const TASK_TIMER_AUTO_FILL_STORAGE_KEY = 'exomind:task-timer:auto-fill';
 
 interface TimeblockSourceBackLink {
   to: string;
   search?: Record<string, string>;
   label: string;
   sourceLabel: string;
+}
+
+function readTaskTimerAutoFillEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(TASK_TIMER_AUTO_FILL_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeTaskTimerAutoFillEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(TASK_TIMER_AUTO_FILL_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    // Ignore storage failures and keep the preference in-memory only.
+  }
+}
+
+function resolveAutoTimerConfig(
+  estimatedMinutes?: number,
+  spentMinutes?: number,
+): { mode: 'countup' } | { mode: 'countdown'; minutes: number } | null {
+  if (estimatedMinutes == null || spentMinutes == null) {
+    return null;
+  }
+
+  const remainingMinutes = Math.round(estimatedMinutes - spentMinutes);
+  if (remainingMinutes > 0) {
+    return { mode: 'countdown', minutes: remainingMinutes };
+  }
+
+  return { mode: 'countup' };
 }
 
 const MOBILE_ANCHOR_TARGETS = {
@@ -669,6 +707,7 @@ function MobileTimeblockDetail({
   dependencyError,
   isDependencySaving,
   timerControls,
+  autoTimerToggle,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
   blockingReason,
@@ -696,6 +735,7 @@ function MobileTimeblockDetail({
   dependencyError: string | null;
   isDependencySaving: boolean;
   timerControls: ReactNode;
+  autoTimerToggle: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
   blockingReason: string | null;
@@ -848,39 +888,42 @@ function MobileTimeblockDetail({
             {timerControls}
           </div>
           <div className="mt-3 flex flex-col gap-2">
-            <div className="flex gap-2">
-              {hasActiveBlockOnTask ? (
-                <button
-                  type="button"
-                  onClick={onPauseAndGoEventlog}
-                  data-testid="task-pause-button"
-                  className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
-                >
-                  <Target size={14} />
-                  前往当下
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={onStartTimer}
-                    disabled={hasOtherActiveBlock || Boolean(blockingReason)}
-                    className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
-                  >
-                    <Play size={14} />
-                    开始计时
-                  </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-2">
+                {hasActiveBlockOnTask ? (
                   <button
                     type="button"
                     onClick={onPauseAndGoEventlog}
                     data-testid="task-pause-button"
-                    className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                    className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
                   >
                     <Target size={14} />
                     前往当下
                   </button>
-                </>
-              )}
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onStartTimer}
+                      disabled={hasOtherActiveBlock || Boolean(blockingReason)}
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+                    >
+                      <Play size={14} />
+                      开始计时
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onPauseAndGoEventlog}
+                      data-testid="task-pause-button"
+                      className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                    >
+                      <Target size={14} />
+                      前往当下
+                    </button>
+                  </>
+                )}
+              </div>
+              {autoTimerToggle}
             </div>
             {blockingReason ? (
               <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
@@ -1007,6 +1050,7 @@ function DesktopTimeblockDetail({
   dependencyError,
   isDependencySaving,
   timerControls,
+  autoTimerToggle,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
   blockingReason,
@@ -1034,6 +1078,7 @@ function DesktopTimeblockDetail({
   dependencyError: string | null;
   isDependencySaving: boolean;
   timerControls: ReactNode;
+  autoTimerToggle: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
   blockingReason: string | null;
@@ -1107,39 +1152,42 @@ function DesktopTimeblockDetail({
             {timerControls}
           </div>
           <div className="mt-3 flex flex-col gap-2">
-            <div className="flex gap-2">
-              {hasActiveBlockOnTask ? (
-                <button
-                  type="button"
-                  onClick={onPauseAndGoEventlog}
-                  data-testid="task-pause-button"
-                  className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
-                >
-                  <Target size={14} />
-                  前往当下
-                </button>
-              ) : (
-                <>
-                  <button
-                    type="button"
-                    onClick={onStartTimer}
-                    disabled={hasOtherActiveBlock || Boolean(blockingReason)}
-                    className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
-                  >
-                    <Play size={14} />
-                    开始计时
-                  </button>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-2">
+                {hasActiveBlockOnTask ? (
                   <button
                     type="button"
                     onClick={onPauseAndGoEventlog}
                     data-testid="task-pause-button"
-                    className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                    className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
                   >
                     <Target size={14} />
                     前往当下
                   </button>
-                </>
-              )}
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onStartTimer}
+                      disabled={hasOtherActiveBlock || Boolean(blockingReason)}
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+                    >
+                      <Play size={14} />
+                      开始计时
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onPauseAndGoEventlog}
+                      data-testid="task-pause-button"
+                      className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                    >
+                      <Target size={14} />
+                      前往当下
+                    </button>
+                  </>
+                )}
+              </div>
+              {autoTimerToggle}
             </div>
             {blockingReason ? (
               <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
@@ -1274,20 +1322,51 @@ export function TaskDetailPage() {
   const [dependencyReloadKey, setDependencyReloadKey] = useState(0);
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [isTimerAutoFillEnabled, setIsTimerAutoFillEnabled] = useState(() => readTaskTimerAutoFillEnabled());
   const timerResetKey = taskId ?? preferredBlockId ?? task?.id;
-  const timerInitialMinutes = taskId
+  const taskEstimatedMinutes = taskId
     ? task?.id === taskId ? task.estimatedMinutes : undefined
     : task?.estimatedMinutes;
+  const autoTimerConfig = useMemo(
+    () => resolveAutoTimerConfig(taskEstimatedMinutes, spentMinutes),
+    [spentMinutes, taskEstimatedMinutes],
+  );
+  const timerInitialMinutes = useMemo(() => {
+    if (isTimerAutoFillEnabled) {
+      if (autoTimerConfig?.mode === 'countdown') {
+        return autoTimerConfig.minutes;
+      }
+
+      if (autoTimerConfig?.mode === 'countup') {
+        return undefined;
+      }
+    }
+
+    return taskEstimatedMinutes;
+  }, [autoTimerConfig, isTimerAutoFillEnabled, taskEstimatedMinutes]);
   const {
     timerMode,
     countdownMinutes,
     setTimerMode,
     setCountdownMinutes,
+    syncTimerConfig,
     customDurationDraft,
     setCustomDurationDraft,
     commitCustomDuration,
     timerConfig,
   } = useTimerConfig(timerInitialMinutes, timerResetKey);
+
+  useEffect(() => {
+    writeTaskTimerAutoFillEnabled(isTimerAutoFillEnabled);
+  }, [isTimerAutoFillEnabled]);
+
+  useEffect(() => {
+    if (!isTimerAutoFillEnabled || !autoTimerConfig) {
+      return;
+    }
+
+    syncTimerConfig(autoTimerConfig);
+  }, [autoTimerConfig, isTimerAutoFillEnabled, syncTimerConfig]);
 
   useLayoutEffect(() => {
     setIsLoading(true);
@@ -1451,10 +1530,35 @@ export function TaskDetailPage() {
       customDurationDraft={customDurationDraft}
       setCustomDurationDraft={setCustomDurationDraft}
       commitCustomDuration={commitCustomDuration}
-      estimatedMinutes={task?.estimatedMinutes}
-      spentMinutes={spentMinutes}
       showCountupOption
     />
+  );
+  const autoTimerStatusText = taskEstimatedMinutes == null
+    ? '未设估时'
+    : spentMinutes == null
+      ? '等待时间块统计'
+      : autoTimerConfig?.mode === 'countdown'
+        ? `剩余 ${autoTimerConfig.minutes}min`
+        : '已超预期，自动正计时';
+  const autoTimerToggle = (
+    <label
+      data-testid="task-countdown-auto-fill-toggle"
+      className="ml-auto inline-flex items-center gap-2 rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#0C0A09]"
+    >
+      <div className="text-right">
+        <p className="text-[11px] font-medium text-[#57534E] dark:text-[#D6D3D1]">自动补全</p>
+        <p data-testid="task-countdown-auto-fill-status" className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
+          {autoTimerStatusText}
+        </p>
+      </div>
+      <Switch
+        checked={isTimerAutoFillEnabled}
+        onCheckedChange={setIsTimerAutoFillEnabled}
+        disabled={taskEstimatedMinutes == null || spentMinutes == null}
+        aria-label="自动补全计时时长"
+        data-testid="task-countdown-auto-fill-switch"
+      />
+    </label>
   );
 
   const dependencyView = useMemo(() => {
@@ -1588,7 +1692,10 @@ export function TaskDetailPage() {
     if (!sourceTaskId) return;
 
     const updatedAt = Date.now();
-    if (minutes == null) {
+    const nextAutoTimerConfig = resolveAutoTimerConfig(minutes, spentMinutes);
+    if (isTimerAutoFillEnabled && nextAutoTimerConfig) {
+      syncTimerConfig(nextAutoTimerConfig);
+    } else if (minutes == null) {
       setTimerMode('countup');
     } else {
       setCountdownMinutes(minutes);
@@ -1610,7 +1717,7 @@ export function TaskDetailPage() {
           }
         : candidate
     )));
-  }, [setCountdownMinutes, setTimerMode, task?.id]);
+  }, [isTimerAutoFillEnabled, setCountdownMinutes, setTimerMode, spentMinutes, syncTimerConfig, task?.id]);
 
   const handleSaveDescription = useCallback(async () => {
     if (!task?.id) return;
@@ -1699,6 +1806,7 @@ export function TaskDetailPage() {
         dependencyError={dependencyError}
         isDependencySaving={isDependencySaving}
         timerControls={timerControls}
+        autoTimerToggle={autoTimerToggle}
         hasOtherActiveBlock={hasOtherActiveBlock}
         hasActiveBlockOnTask={Boolean(activeBlock)}
         blockingReason={blockingReason}
@@ -1731,6 +1839,7 @@ export function TaskDetailPage() {
       dependencyError={dependencyError}
       isDependencySaving={isDependencySaving}
       timerControls={timerControls}
+      autoTimerToggle={autoTimerToggle}
       hasOtherActiveBlock={hasOtherActiveBlock}
       hasActiveBlockOnTask={Boolean(activeBlock)}
       blockingReason={blockingReason}

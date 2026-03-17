@@ -120,6 +120,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
   beforeEach(() => {
     currentTaskId = 'task-1';
     window.history.replaceState({}, '', '/tasks/task-1');
+    window.localStorage.clear();
     navigateMock.mockReset();
     scrollIntoViewMock.mockReset();
     Object.defineProperty(HTMLElement.prototype, 'scrollIntoView', {
@@ -346,9 +347,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
       expect(updateTaskMock).toHaveBeenCalledWith('task-1', expect.objectContaining({ estimatedMinutes: 60 }));
     });
 
-    await waitFor(() => {
-      expect(screen.queryByTestId('task-countdown-auto-remaining')).toBeNull();
-    });
+    expect(screen.getByTestId('task-countdown-auto-fill-switch')).toHaveAttribute('aria-checked', 'false');
 
     fireEvent.click(screen.getByText('开始计时'));
 
@@ -357,18 +356,59 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     });
   });
 
-  it('shows remaining-time shortcut from estimated and spent minutes（展示基于任务估时与已耗时的剩余时长快捷按钮）', async () => {
+  it('persists auto-fill switch and reapplies remaining minutes after remount（自动补全开关持久化并在回页后重新应用）', async () => {
+    mockMatchMedia(false);
+    const view = render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByTestId('task-countdown-auto-fill-status')).toHaveTextContent('剩余 30min');
+    fireEvent.click(screen.getByTestId('task-countdown-auto-fill-switch'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-countdown-auto-fill-switch')).toHaveAttribute('aria-checked', 'true');
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('30m');
+    });
+
+    view.unmount();
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+    expect(screen.getByTestId('task-countdown-auto-fill-switch')).toHaveAttribute('aria-checked', 'true');
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('30m');
+    });
+  });
+
+  it('routes estimated-time changes through remaining time while auto-fill is enabled（自动补全开启时按剩余时长路由任务估时变化）', async () => {
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
     await screen.findByText('任务详情');
 
-    expect(await screen.findByTestId('task-countdown-auto-remaining')).toHaveTextContent('自动：剩余 30min');
+    fireEvent.click(screen.getByTestId('task-countdown-auto-fill-switch'));
+    await waitFor(() => {
+      expect(screen.getByTestId('task-countdown-auto-fill-switch')).toHaveAttribute('aria-checked', 'true');
+    });
 
-    fireEvent.click(screen.getByTestId('task-countdown-auto-remaining'));
+    fireEvent.click(screen.getByTestId('estimated-time-preset-60'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('30m');
+      expect(updateTaskMock).toHaveBeenCalledWith('task-1', expect.objectContaining({ estimatedMinutes: 60 }));
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-mode-countup')).toHaveAttribute('aria-pressed', 'true');
+    });
+
+    fireEvent.click(screen.getByText('开始计时'));
+
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countup' });
     });
   });
 
