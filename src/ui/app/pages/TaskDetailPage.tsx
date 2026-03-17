@@ -392,6 +392,7 @@ function DependencyCard({
   onChangeDependencyType,
   onRemoveDependency,
   onToggleCollapseUpstream,
+  onToggleCollapseDownstream,
 }: {
   dependencyView: TaskDependencyViewModel;
   taskDagView: TaskDagDetailView | null;
@@ -406,6 +407,7 @@ function DependencyCard({
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
   onToggleCollapseUpstream: (taskId: string) => void;
+  onToggleCollapseDownstream: (taskId: string) => void;
 }) {
   const selectedCandidate = dependencyView.candidates.find((candidate) => candidate.id === selectedTaskId) ?? null;
 
@@ -446,7 +448,7 @@ function DependencyCard({
 
             {taskDagView.hiddenNodeCount > 0 ? (
               <p className="mt-2 text-xs text-[#C75B3A] dark:text-[#FDBA74]">
-                当前折叠共隐藏 {taskDagView.hiddenNodeCount} 个上游节点。
+                当前折叠共隐藏 {taskDagView.hiddenNodeCount} 个相关节点。
               </p>
             ) : null}
 
@@ -461,7 +463,11 @@ function DependencyCard({
                 <article
                   key={node.id}
                   data-testid={`task-dag-node-${node.id}`}
-                  className="rounded-xl border border-[#E7E5E4] bg-white px-3 py-3 dark:border-[#3F3F46] dark:bg-[#1C1917]"
+                  className={`rounded-xl bg-white px-3 py-3 dark:bg-[#1C1917] ${
+                    node.isCollapsedTarget
+                      ? 'border-2 border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
+                      : 'border border-[#E7E5E4] dark:border-[#3F3F46]'
+                  }`}
                 >
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
@@ -498,7 +504,9 @@ function DependencyCard({
 
                       <div className="mt-2 flex flex-wrap gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
                         <span>上游节点：{node.upstreamNodeCount}</span>
-                        {node.isCollapsedTarget ? <span>已折叠上游</span> : null}
+                        <span>下游节点：{node.downstreamNodeCount}</span>
+                        {node.isCollapsedUpstreamTarget ? <span>已折叠上游</span> : null}
+                        {node.isCollapsedDownstreamTarget ? <span>已折叠下游</span> : null}
                       </div>
 
                       {node.hiddenUpstreamCount > 0 ? (
@@ -509,17 +517,36 @@ function DependencyCard({
                           已隐藏 {node.hiddenUpstreamCount} 项
                         </p>
                       ) : null}
+                      {node.hiddenDownstreamCount > 0 ? (
+                        <p
+                          data-testid={`task-dag-hidden-downstream-summary-${node.id}`}
+                          className="mt-2 rounded-lg bg-[#ECFDF5] px-2.5 py-1.5 text-xs text-[#047857] dark:bg-[#052E2B] dark:text-[#6EE7B7]"
+                        >
+                          下游已隐藏 {node.hiddenDownstreamCount} 项
+                        </p>
+                      ) : null}
                     </div>
 
-                    <button
-                      type="button"
-                      data-testid={`task-dag-toggle-upstream-${node.id}`}
-                      disabled={!node.canCollapseUpstream}
-                      onClick={() => onToggleCollapseUpstream(node.id)}
-                      className="rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#57534E] transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
-                    >
-                      {node.isCollapsedTarget ? '展开上游' : '折叠上游'}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        data-testid={`task-dag-toggle-upstream-${node.id}`}
+                        disabled={!node.canCollapseUpstream}
+                        onClick={() => onToggleCollapseUpstream(node.id)}
+                        className="rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#57534E] transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
+                      >
+                        {node.isCollapsedUpstreamTarget ? '展开上游' : '折叠上游'}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`task-dag-toggle-downstream-${node.id}`}
+                        disabled={!node.canCollapseDownstream}
+                        onClick={() => onToggleCollapseDownstream(node.id)}
+                        className="rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#57534E] transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
+                      >
+                        {node.isCollapsedDownstreamTarget ? '展开下游' : '折叠下游'}
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -723,6 +750,7 @@ function MobileTimeblockDetail({
   onChangeDependencyType,
   onRemoveDependency,
   onToggleCollapseUpstream,
+  onToggleCollapseDownstream,
 }: {
   descriptionBlock: ReactNode;
   task: TaskNode;
@@ -751,6 +779,7 @@ function MobileTimeblockDetail({
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
   onToggleCollapseUpstream: (taskId: string) => void;
+  onToggleCollapseDownstream: (taskId: string) => void;
 }) {
   const [activeAnchorId, setActiveAnchorId] = useState<MobileAnchorId>('overview');
   const showTimerCard = !isTerminalTaskStatus(task.status);
@@ -1024,6 +1053,7 @@ function MobileTimeblockDetail({
             onChangeDependencyType={onChangeDependencyType}
             onRemoveDependency={onRemoveDependency}
             onToggleCollapseUpstream={onToggleCollapseUpstream}
+            onToggleCollapseDownstream={onToggleCollapseDownstream}
           />
         </div>
 
@@ -1066,6 +1096,7 @@ function DesktopTimeblockDetail({
   onChangeDependencyType,
   onRemoveDependency,
   onToggleCollapseUpstream,
+  onToggleCollapseDownstream,
 }: {
   descriptionBlock: ReactNode;
   task: TaskNode;
@@ -1094,6 +1125,7 @@ function DesktopTimeblockDetail({
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
   onToggleCollapseUpstream: (taskId: string) => void;
+  onToggleCollapseDownstream: (taskId: string) => void;
 }) {
   return (
     <div className="scrollbar-none h-full overflow-y-auto bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
@@ -1261,6 +1293,7 @@ function DesktopTimeblockDetail({
             onChangeDependencyType={onChangeDependencyType}
             onRemoveDependency={onRemoveDependency}
             onToggleCollapseUpstream={onToggleCollapseUpstream}
+            onToggleCollapseDownstream={onToggleCollapseDownstream}
           />
 
           <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
@@ -1315,7 +1348,10 @@ export function TaskDetailPage() {
   const [allTasks, setAllTasks] = useState<TaskNode[]>([]);
   const [dependencySelectedTaskId, setDependencySelectedTaskId] = useState('');
   const [dependencySelectedType, setDependencySelectedType] = useState<DependencyType>('soft');
-  const [dagVisibilityState, setDagVisibilityState] = useState<TaskDagVisibilityState>({ collapsedUpstreamOf: [] });
+  const [dagVisibilityState, setDagVisibilityState] = useState<TaskDagVisibilityState>({
+    collapsedUpstreamOf: [],
+    collapsedDownstreamOf: [],
+  });
   const [dependencyLoadError, setDependencyLoadError] = useState<string | null>(null);
   const [dependencyActionError, setDependencyActionError] = useState<string | null>(null);
   const [isDependencySaving, setIsDependencySaving] = useState(false);
@@ -1379,7 +1415,10 @@ export function TaskDetailPage() {
   }, [dependencyReloadKey, preferredBlockId, taskId]);
 
   useEffect(() => {
-    setDagVisibilityState({ collapsedUpstreamOf: [] });
+    setDagVisibilityState({
+      collapsedUpstreamOf: [],
+      collapsedDownstreamOf: [],
+    });
   }, [task?.id]);
 
   useEffect(() => {
@@ -1579,9 +1618,19 @@ export function TaskDetailPage() {
 
   const handleToggleCollapseUpstream = (targetTaskId: string) => {
     setDagVisibilityState((currentState) => ({
+      ...currentState,
       collapsedUpstreamOf: currentState.collapsedUpstreamOf.includes(targetTaskId)
         ? currentState.collapsedUpstreamOf.filter((taskId) => taskId !== targetTaskId)
         : [...currentState.collapsedUpstreamOf, targetTaskId],
+    }));
+  };
+
+  const handleToggleCollapseDownstream = (targetTaskId: string) => {
+    setDagVisibilityState((currentState) => ({
+      ...currentState,
+      collapsedDownstreamOf: currentState.collapsedDownstreamOf.includes(targetTaskId)
+        ? currentState.collapsedDownstreamOf.filter((taskId) => taskId !== targetTaskId)
+        : [...currentState.collapsedDownstreamOf, targetTaskId],
     }));
   };
 
@@ -1822,6 +1871,7 @@ export function TaskDetailPage() {
         onChangeDependencyType={handleChangeDependencyType}
         onRemoveDependency={handleRemoveDependency}
         onToggleCollapseUpstream={handleToggleCollapseUpstream}
+        onToggleCollapseDownstream={handleToggleCollapseDownstream}
       />
     );
   }
@@ -1855,6 +1905,7 @@ export function TaskDetailPage() {
       onChangeDependencyType={handleChangeDependencyType}
       onRemoveDependency={handleRemoveDependency}
       onToggleCollapseUpstream={handleToggleCollapseUpstream}
+      onToggleCollapseDownstream={handleToggleCollapseDownstream}
     />
   );
 }

@@ -39,9 +39,13 @@ export type TaskDagFlowNodeData = {
   priorityLabel: string;
   executionLabel: string;
   isCurrentRoot: boolean;
+  isCollapsedTarget: boolean;
+  isCollapsedUpstreamTarget: boolean;
+  isCollapsedDownstreamTarget: boolean;
   isBlocked: boolean;
   isExecutable: boolean;
   hiddenUpstreamCount: number;
+  hiddenDownstreamCount: number;
 };
 
 export type TaskDagFlowNode = Node<TaskDagFlowNodeData, 'taskDag'>;
@@ -95,9 +99,13 @@ export function buildTaskDagFlow(graph: TaskGraph): {
           priorityLabel: PRIORITY_LABEL[node.priority],
           executionLabel: resolveExecutionLabel(node),
           isCurrentRoot: node.id === graph.currentRootNodeId,
+          isCollapsedTarget: false,
+          isCollapsedUpstreamTarget: false,
+          isCollapsedDownstreamTarget: false,
           isBlocked: node.isBlocked,
           isExecutable: node.isExecutable,
           hiddenUpstreamCount: 0,
+          hiddenDownstreamCount: 0,
         },
       } satisfies TaskDagFlowNode;
     });
@@ -173,9 +181,13 @@ export function buildVisibleTaskDagFlow(visibleGraph: VisibleTaskGraph): {
           priorityLabel: PRIORITY_LABEL[node.priority],
           executionLabel: resolveExecutionLabel(node),
           isCurrentRoot: node.id === visibleGraph.visibleCurrentRootNodeId,
+          isCollapsedTarget: node.isCollapsedTarget,
+          isCollapsedUpstreamTarget: node.isCollapsedUpstreamTarget,
+          isCollapsedDownstreamTarget: node.isCollapsedDownstreamTarget,
           isBlocked: node.isBlocked,
           isExecutable: node.isExecutable,
           hiddenUpstreamCount: node.hiddenUpstreamCount,
+          hiddenDownstreamCount: node.hiddenDownstreamCount,
         },
       } satisfies TaskDagFlowNode;
     });

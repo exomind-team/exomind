@@ -2,10 +2,14 @@
 
 export interface TaskDagVisibilityState {
   collapsedUpstreamOf: string[]
+  collapsedDownstreamOf: string[]
 }
 
 export interface VisibleTaskGraphNode extends TaskGraphNode {
   hiddenUpstreamCount: number
+  hiddenDownstreamCount: number
+  isCollapsedUpstreamTarget: boolean
+  isCollapsedDownstreamTarget: boolean
   isCollapsedTarget: boolean
 }
 
@@ -23,6 +27,7 @@ export interface VisibleTaskGraph {
 
 export const EMPTY_TASK_DAG_VISIBILITY_STATE: TaskDagVisibilityState = {
   collapsedUpstreamOf: [],
+  collapsedDownstreamOf: [],
 }
 
 function isTerminalStatus(status: TaskGraphNode['status']): boolean {
@@ -54,8 +59,8 @@ function normalizeTaskDagVisibilityState(
   state: TaskDagVisibilityState | undefined,
 ): TaskDagVisibilityState {
   const topologicalIndex = buildTopologicalIndex(graph)
-  const normalizedCollapsedUpstreamOf = Array.from(
-    new Set((state?.collapsedUpstreamOf ?? []).filter((nodeId) => topologicalIndex.has(nodeId))),
+  const sortNodeIds = (nodeIds: string[]) => Array.from(
+    new Set(nodeIds.filter((nodeId) => topologicalIndex.has(nodeId))),
   ).sort((leftNodeId, rightNodeId) => {
     const orderDiff = (topologicalIndex.get(leftNodeId) ?? Number.MAX_SAFE_INTEGER)
       - (topologicalIndex.get(rightNodeId) ?? Number.MAX_SAFE_INTEGER)
@@ -65,7 +70,8 @@ function normalizeTaskDagVisibilityState(
   })
 
   return {
-    collapsedUpstreamOf: normalizedCollapsedUpstreamOf,
+    collapsedUpstreamOf: sortNodeIds(state?.collapsedUpstreamOf ?? []),
+    collapsedDownstreamOf: sortNodeIds(state?.collapsedDownstreamOf ?? []),
   }
 }
 
@@ -112,6 +118,29 @@ function collectAllUpstreamNodeIds(
   return upstreamNodeIds
 }
 
+function collectAllDownstreamNodeIds(
+  nodeId: string,
+  outgoingEdgesBySource: Map<string, TaskGraphEdge[]>,
+): Set<string> {
+  const downstreamNodeIds = new Set<string>()
+  const pendingNodeIds = (outgoingEdgesBySource.get(nodeId) ?? []).map((edge) => edge.target)
+
+  while (pendingNodeIds.length > 0) {
+    const currentNodeId = pendingNodeIds.pop()
+    if (!currentNodeId || downstreamNodeIds.has(currentNodeId)) {
+      continue
+    }
+
+    downstreamNodeIds.add(currentNodeId)
+
+    for (const edge of outgoingEdgesBySource.get(currentNodeId) ?? []) {
+      pendingNodeIds.push(edge.target)
+    }
+  }
+
+  return downstreamNodeIds
+}
+
 /**
  * Calculate the safe collapsible upstream set using the no-leak constraint.
  *
@@ -125,7 +154,7 @@ function collectAllUpstreamNodeIds(
  * collapsed set but do NOT expand its parents (they belong to that node's
  * own fold scope).
  */
-function calculateSafeCollapseScope(
+function calculateSafeUpstreamCollapseScope(
   anchorId: string,
   incomingEdgesByTarget: Map<string, TaskGraphEdge[]>,
   outgoingEdgesBySource: Map<string, TaskGraphEdge[]>,
@@ -166,6 +195,73 @@ function calculateSafeCollapseScope(
   return collapsedSet
 }
 
+function calculateSafeDownstreamCollapseScope(
+  anchorId: string,
+  incomingEdgesByTarget: Map<string, TaskGraphEdge[]>,
+  outgoingEdgesBySource: Map<string, TaskGraphEdge[]>,
+  otherCollapseTargets: Set<string>,
+): Set<string> {
+  const collapsedSet = new Set<string>([anchorId])
+  const visited = new Set<string>([anchorId])
+  const queue: string[] = (outgoingEdgesBySource.get(anchorId) ?? []).map((e) => e.target)
+
+  while (queue.length > 0) {
+    const candidate = queue.shift()!
+    if (visited.has(candidate)) continue
+    visited.add(candidate)
+
+    // No-contamination check: ALL parents of candidate must be in collapsedSet.
+    const parents = (incomingEdgesByTarget.get(candidate) ?? []).map((e) => e.source)
+    const isSafe = parents.every((parent) => collapsedSet.has(parent))
+
+    if (isSafe) {
+      collapsedSet.add(candidate)
+
+      if (otherCollapseTargets.has(candidate)) {
+        continue
+      }
+
+      for (const edge of outgoingEdgesBySource.get(candidate) ?? []) {
+        if (!visited.has(edge.target)) {
+          queue.push(edge.target)
+        }
+      }
+    }
+  }
+
+  return collapsedSet
+}
+
+export type TaskDagCollapseDirection = 'upstream' | 'downstream'
+
+export function calculateTaskDagCollapseScope(
+  graph: TaskGraph,
+  state: TaskDagVisibilityState,
+  direction: TaskDagCollapseDirection,
+  anchorId: string,
+): Set<string> {
+  const normalizedState = normalizeTaskDagVisibilityState(graph, state)
+  const topologicalIndex = buildTopologicalIndex(graph)
+  if (!topologicalIndex.has(anchorId)) {
+    return new Set()
+  }
+
+  const incomingEdgesByTarget = buildIncomingEdgeMap(graph)
+  const outgoingEdgesBySource = buildOutgoingEdgeMap(graph)
+  const otherCollapseTargets = new Set(
+    [
+      ...normalizedState.collapsedUpstreamOf,
+      ...normalizedState.collapsedDownstreamOf,
+    ].filter((nodeId) => nodeId !== anchorId),
+  )
+
+  if (direction === 'upstream') {
+    return calculateSafeUpstreamCollapseScope(anchorId, incomingEdgesByTarget, outgoingEdgesBySource, otherCollapseTargets)
+  }
+
+  return calculateSafeDownstreamCollapseScope(anchorId, incomingEdgesByTarget, outgoingEdgesBySource, otherCollapseTargets)
+}
+
 export function projectVisibleTaskGraph(
   graph: TaskGraph,
   state: TaskDagVisibilityState = EMPTY_TASK_DAG_VISIBILITY_STATE,
@@ -175,8 +271,15 @@ export function projectVisibleTaskGraph(
   const incomingEdgesByTarget = buildIncomingEdgeMap(graph)
   const outgoingEdgesBySource = buildOutgoingEdgeMap(graph)
   const collapsedTargetIdSet = new Set(normalizedState.collapsedUpstreamOf)
+  const collapsedDownstreamTargetIdSet = new Set(normalizedState.collapsedDownstreamOf)
+  const collapsedTargetIdUnion = new Set([
+    ...normalizedState.collapsedUpstreamOf,
+    ...normalizedState.collapsedDownstreamOf,
+  ])
   const hiddenNodeIdSet = new Set<string>()
+  const hiddenNodeDownstreamOwnerById = new Map<string, string>()
   const allUpstreamCache = new Map<string, Set<string>>()
+  const allDownstreamCache = new Map<string, Set<string>>()
 
   const getAllUpstreamNodeIds = (nodeId: string): Set<string> => {
     const cached = allUpstreamCache.get(nodeId)
@@ -186,11 +289,17 @@ export function projectVisibleTaskGraph(
     return result
   }
 
+  const getAllDownstreamNodeIds = (nodeId: string): Set<string> => {
+    const cached = allDownstreamCache.get(nodeId)
+    if (cached) return cached
+    const result = collectAllDownstreamNodeIds(nodeId, outgoingEdgesBySource)
+    allDownstreamCache.set(nodeId, result)
+    return result
+  }
+
   // For each collapse target, compute safe scope using no-leak algorithm (#424)
   for (const anchorId of normalizedState.collapsedUpstreamOf) {
-    // Pass other collapse targets so nested folds are treated as atomic boundaries
-    const otherTargets = new Set(normalizedState.collapsedUpstreamOf.filter((id) => id !== anchorId))
-    const safeScope = calculateSafeCollapseScope(anchorId, incomingEdgesByTarget, outgoingEdgesBySource, otherTargets)
+    const safeScope = calculateTaskDagCollapseScope(graph, normalizedState, 'upstream', anchorId)
     for (const nodeId of safeScope) {
       // Hide all nodes in scope except the anchor itself.
       // Other collapse targets that fall within this scope ARE hidden
@@ -201,11 +310,54 @@ export function projectVisibleTaskGraph(
     }
   }
 
+  for (const anchorId of normalizedState.collapsedDownstreamOf) {
+    const safeScope = calculateTaskDagCollapseScope(graph, normalizedState, 'downstream', anchorId)
+    for (const nodeId of safeScope) {
+      if (nodeId !== anchorId) {
+        hiddenNodeIdSet.add(nodeId)
+        if (!hiddenNodeDownstreamOwnerById.has(nodeId)) {
+          hiddenNodeDownstreamOwnerById.set(nodeId, anchorId)
+        }
+      }
+    }
+  }
+
   const hiddenNodeIds = graph.topologicalOrder.filter((nodeId) => hiddenNodeIdSet.has(nodeId))
   const visibleNodeIdSet = new Set(graph.topologicalOrder.filter((nodeId) => !hiddenNodeIdSet.has(nodeId)))
+  const visibleEdgeByKey = new Map<string, TaskGraphEdge>()
+  const addVisibleEdge = (edge: TaskGraphEdge) => {
+    const key = `${edge.source}|${edge.target}|${edge.type}`
+    if (!visibleEdgeByKey.has(key)) {
+      visibleEdgeByKey.set(key, edge)
+    }
+  }
 
-  const visibleEdges = graph.edges.filter((edge) => (
-    visibleNodeIdSet.has(edge.source) && visibleNodeIdSet.has(edge.target)
+  for (const edge of graph.edges) {
+    if (visibleNodeIdSet.has(edge.source) && visibleNodeIdSet.has(edge.target)) {
+      addVisibleEdge(edge)
+    }
+  }
+
+  for (const edge of graph.edges) {
+    if (!hiddenNodeIdSet.has(edge.source) || !visibleNodeIdSet.has(edge.target)) {
+      continue
+    }
+
+    const downstreamAnchorId = hiddenNodeDownstreamOwnerById.get(edge.source)
+    if (!downstreamAnchorId || !visibleNodeIdSet.has(downstreamAnchorId) || downstreamAnchorId === edge.target) {
+      continue
+    }
+
+    addVisibleEdge({
+      id: `edge:${downstreamAnchorId}->${edge.target}:${edge.type}:collapsed-downstream`,
+      source: downstreamAnchorId,
+      target: edge.target,
+      type: edge.type,
+    })
+  }
+
+  const visibleEdges = graph.topologicalOrder.flatMap((sourceId) => (
+    [...visibleEdgeByKey.values()].filter((edge) => edge.source === sourceId)
   ))
 
   const visibleNodes = graph.nodes
@@ -219,10 +371,20 @@ export function projectVisibleTaskGraph(
         }
       }
 
+      let hiddenDownstreamCount = 0
+      for (const downstreamNodeId of getAllDownstreamNodeIds(node.id)) {
+        if (hiddenNodeIdSet.has(downstreamNodeId)) {
+          hiddenDownstreamCount += 1
+        }
+      }
+
       return {
         ...node,
         hiddenUpstreamCount,
-        isCollapsedTarget: collapsedTargetIdSet.has(node.id),
+        hiddenDownstreamCount,
+        isCollapsedUpstreamTarget: collapsedTargetIdSet.has(node.id),
+        isCollapsedDownstreamTarget: collapsedDownstreamTargetIdSet.has(node.id),
+        isCollapsedTarget: collapsedTargetIdUnion.has(node.id),
       }
     })
     .sort((leftNode, rightNode) => {

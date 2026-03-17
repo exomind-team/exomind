@@ -17,6 +17,7 @@ import '@xyflow/react/dist/style.css';
 import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import {
+  calculateTaskDagCollapseScope,
   type TaskDagVisibilityState,
   EMPTY_TASK_DAG_VISIBILITY_STATE,
   projectVisibleTaskGraph,
@@ -58,6 +59,8 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
         'w-64 rounded-2xl border bg-white px-4 py-3 text-left shadow-sm dark:bg-[#1C1917]',
         nodeData.isCurrentRoot
           ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
+          : nodeData.isCollapsedTarget
+            ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
           : nodeData.isBlocked
             ? 'border-[#EAB308]/60'
             : 'border-[#E7E5E4] dark:border-[#292524]',
@@ -75,6 +78,16 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
             当前根节点
           </span>
         ) : null}
+        {nodeData.isCollapsedUpstreamTarget ? (
+          <span className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A]">
+            已折叠上游
+          </span>
+        ) : null}
+        {nodeData.isCollapsedDownstreamTarget ? (
+          <span className="rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10px] font-medium text-[#047857]">
+            已折叠下游
+          </span>
+        ) : null}
         <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
           {nodeData.statusLabel}
         </span>
@@ -84,6 +97,14 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
             className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
           >
             {`+${nodeData.hiddenUpstreamCount} 已折叠`}
+          </span>
+        )}
+        {nodeData.hiddenDownstreamCount > 0 && (
+          <span
+            data-testid={`task-dag-hidden-downstream-badge-${id}`}
+            className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-medium text-[#15803D] dark:bg-[#14532D] dark:text-[#BBF7D0]"
+          >
+            {`+${nodeData.hiddenDownstreamCount} 下游已折叠`}
           </span>
         )}
       </div>
@@ -171,6 +192,36 @@ export function TaskDagPage() {
   const selectedNode = selectedTaskId
     ? graph.nodes.find((node) => node.id === selectedTaskId) ?? null
     : null;
+  const selectedCollapseScope = useMemo(() => {
+    if (!selectedTaskId) {
+      return { upstreamSize: 0, downstreamSize: 0 };
+    }
+
+    return {
+      upstreamSize: calculateTaskDagCollapseScope(graph, dagVisibility, 'upstream', selectedTaskId).size,
+      downstreamSize: calculateTaskDagCollapseScope(graph, dagVisibility, 'downstream', selectedTaskId).size,
+    };
+  }, [dagVisibility, graph, selectedTaskId]);
+
+  const toggleCollapse = (direction: 'upstream' | 'downstream', nodeId: string) => {
+    setDagVisibility((prev) => {
+      if (direction === 'upstream') {
+        return {
+          ...prev,
+          collapsedUpstreamOf: prev.collapsedUpstreamOf.includes(nodeId)
+            ? prev.collapsedUpstreamOf.filter((id) => id !== nodeId)
+            : [...prev.collapsedUpstreamOf, nodeId],
+        };
+      }
+
+      return {
+        ...prev,
+        collapsedDownstreamOf: prev.collapsedDownstreamOf.includes(nodeId)
+          ? prev.collapsedDownstreamOf.filter((id) => id !== nodeId)
+          : [...prev.collapsedDownstreamOf, nodeId],
+      };
+    });
+  };
 
   const handleJumpToCurrentRoot = () => {
     if (!graph.currentRootNodeId) return;
@@ -277,6 +328,26 @@ export function TaskDagPage() {
                 >
                   打开任务详情
                 </Link>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    data-testid="task-dag-selected-toggle-upstream"
+                    disabled={selectedCollapseScope.upstreamSize <= 1 && !dagVisibility.collapsedUpstreamOf.includes(selectedTask.id)}
+                    onClick={() => toggleCollapse('upstream', selectedTask.id)}
+                    className="inline-flex items-center rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    {dagVisibility.collapsedUpstreamOf.includes(selectedTask.id) ? '展开上游' : '折叠上游'}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="task-dag-selected-toggle-downstream"
+                    disabled={selectedCollapseScope.downstreamSize <= 1 && !dagVisibility.collapsedDownstreamOf.includes(selectedTask.id)}
+                    onClick={() => toggleCollapse('downstream', selectedTask.id)}
+                    className="inline-flex items-center rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    {dagVisibility.collapsedDownstreamOf.includes(selectedTask.id) ? '展开下游' : '折叠下游'}
+                  </button>
+                </div>
               </>
             ) : (
               <p className="mt-3 text-xs text-[#78716C] dark:text-[#A8A29E]">点击节点可查看详情。</p>
@@ -339,17 +410,33 @@ export function TaskDagPage() {
         >
           <button
             type="button"
-            className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+            data-testid="task-dag-context-toggle-upstream"
+            className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#A8A29E] dark:hover:bg-[#292524]"
             onClick={() => {
-              setDagVisibility((prev) => ({
-                collapsedUpstreamOf: prev.collapsedUpstreamOf.includes(contextMenu.nodeId)
-                  ? prev.collapsedUpstreamOf.filter((id) => id !== contextMenu.nodeId)
-                  : [...prev.collapsedUpstreamOf, contextMenu.nodeId],
-              }));
+              toggleCollapse('upstream', contextMenu.nodeId);
               setContextMenu(null);
             }}
+            disabled={
+              calculateTaskDagCollapseScope(graph, dagVisibility, 'upstream', contextMenu.nodeId).size <= 1
+              && !dagVisibility.collapsedUpstreamOf.includes(contextMenu.nodeId)
+            }
           >
             {dagVisibility.collapsedUpstreamOf.includes(contextMenu.nodeId) ? '展开上游' : '折叠上游'}
+          </button>
+          <button
+            type="button"
+            data-testid="task-dag-context-toggle-downstream"
+            className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+            onClick={() => {
+              toggleCollapse('downstream', contextMenu.nodeId);
+              setContextMenu(null);
+            }}
+            disabled={
+              calculateTaskDagCollapseScope(graph, dagVisibility, 'downstream', contextMenu.nodeId).size <= 1
+              && !dagVisibility.collapsedDownstreamOf.includes(contextMenu.nodeId)
+            }
+          >
+            {dagVisibility.collapsedDownstreamOf.includes(contextMenu.nodeId) ? '展开下游' : '折叠下游'}
           </button>
         </div>
       )}
