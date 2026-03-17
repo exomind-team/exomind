@@ -41,6 +41,11 @@ const TaskDagPage = lazy(async () => {
   return { default: module.TaskDagPage };
 });
 
+const TaskTimeblocksPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskTimeblocksPage');
+  return { default: module.TaskTimeblocksPage };
+});
+
 const RemindersPage = lazy(async () => {
   const module = await import('@/ui/app/pages/RemindersPage');
   return { default: module.RemindersPage };
@@ -567,6 +572,18 @@ const newTaskDagRoute = createRoute({
   },
 });
 
+const newTaskTimeblocksRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/timeblocks',
+  component: function NewTaskTimeblocks() {
+    return (
+      <LazyPage>
+        <TaskTimeblocksPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newTaskDetailRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks/$taskId',
@@ -756,6 +773,7 @@ const newRouteTree = newRootRoute.addChildren([
   newEventlogRoute,
   newTasksRoute,
   newTaskDagRoute,
+  newTaskTimeblocksRoute,
   newRemindersRoute,
   newTimeblockDetailRoute,
   newTaskDetailRoute,
