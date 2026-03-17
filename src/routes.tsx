@@ -17,6 +17,11 @@ import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
 import { UpdateToast } from '@/ui/components/UpdateToast';
 import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
+import {
+  TASKS_LAST_PATH_KEY,
+  resolveTasksRestorePath,
+  shouldForceTasksMain,
+} from '@/ui/app/pages/task-route-memory';
 
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
@@ -638,8 +643,6 @@ const newEventlogRoute = createRoute({
   },
 });
 
-const TASKS_LAST_PATH_KEY = 'exomind:last-tasks-path';
-
 const newTasksRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks',
@@ -648,13 +651,18 @@ const newTasksRoute = createRoute({
 
     // Redirect to the last visited tasks sub-path (e.g. /tasks/dag, /tasks/:id)
     useEffect(() => {
+      const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
       const saved = sessionStorage.getItem(TASKS_LAST_PATH_KEY);
-      console.log('[Routes] /tasks mount, saved:', saved, 'current:', window.location.pathname);
-      if (saved && saved.startsWith('/tasks/')) {
-        console.log('[Routes] redirecting to', saved);
-        void navigate({ to: saved, replace: true });
-      } else {
-        console.log('[Routes] no redirect, showing default');
+
+      if (shouldForceTasksMain(currentSearch)) {
+        sessionStorage.removeItem(TASKS_LAST_PATH_KEY);
+        void navigate({ to: '/tasks', replace: true });
+        return;
+      }
+
+      const restorePath = resolveTasksRestorePath(saved, currentSearch);
+      if (restorePath) {
+        void navigate({ to: restorePath, replace: true });
       }
     // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [navigate]);

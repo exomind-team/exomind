@@ -1,6 +1,6 @@
 import { ArrowLeft, type LucideIcon } from 'lucide-react';
 import { Link } from '@tanstack/react-router';
-import { TASKS_LAST_PATH_KEY } from '@/ui/app/pages/TasksPage';
+import { TASKS_LAST_PATH_KEY, buildTasksMainSearch } from '@/ui/app/pages/task-route-memory';
 
 export interface TaskBreadcrumbSegment {
   label: string;
@@ -18,6 +18,14 @@ function clearTaskPathMemory() {
   sessionStorage.removeItem(TASKS_LAST_PATH_KEY);
 }
 
+function resolveSegmentSearch(segment: TaskBreadcrumbSegment): Record<string, string> | undefined {
+  if (segment.to !== '/tasks') {
+    return segment.search;
+  }
+
+  return buildTasksMainSearch(segment.search);
+}
+
 export function TaskBreadcrumb({ segments, current }: TaskBreadcrumbProps) {
   return (
     <div className="inline-flex select-none items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
@@ -25,8 +33,8 @@ export function TaskBreadcrumb({ segments, current }: TaskBreadcrumbProps) {
         <span key={segment.to} className="contents">
           <Link
             to={segment.to}
-            search={segment.search}
-            onClick={clearTaskPathMemory}
+            search={resolveSegmentSearch(segment)}
+            onClick={segment.to === '/tasks' ? clearTaskPathMemory : undefined}
             className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
           >
             {index === 0 ? <ArrowLeft size={14} /> : null}

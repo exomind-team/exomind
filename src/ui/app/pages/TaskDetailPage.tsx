@@ -1,7 +1,7 @@
 import { ArrowLeft, Ellipsis, NotepadText, Target, Play } from 'lucide-react';
 import { Link, useNavigate, useParams, useLocation } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
-import { TASKS_LAST_PATH_KEY } from './TasksPage';
+import { TASKS_LAST_PATH_KEY, buildTasksMainSearch } from './task-route-memory';
 import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/TaskBreadcrumb';
 import { getEventLogService, getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { isTerminalTaskStatus } from '@/lib/types/task';
@@ -767,7 +767,7 @@ function MobileTimeblockDetail({
       <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-4 py-3 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95">
         <Link
           to={backLink.to}
-          search={backLink.search}
+          search={backLink.to === '/tasks' ? buildTasksMainSearch(backLink.search) : backLink.search}
           onClick={() => sessionStorage.removeItem(TASKS_LAST_PATH_KEY)}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
           aria-label={`返回${backLink.sourceLabel}`}
@@ -1631,7 +1631,11 @@ export function TaskDetailPage() {
   if (!task || !viewModel || !dependencyView) {
     return (
       <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
-        <Link to={backLink.to} search={backLink.search} className="inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
+        <Link
+          to={backLink.to}
+          search={backLink.to === '/tasks' ? buildTasksMainSearch(backLink.search) : backLink.search}
+          className="inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]"
+        >
           <ArrowLeft size={16} />
           {backLink.label.replace('← ', '')}
         </Link>

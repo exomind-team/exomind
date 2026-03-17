@@ -54,8 +54,6 @@ function CurrentRootBadge({
   );
 }
 
-export const TASKS_LAST_PATH_KEY = 'exomind:last-tasks-path';
-
 export function TasksPage() {
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const inputRef = useRef<VoiceMessageInputHandle>(null);

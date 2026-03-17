@@ -3,7 +3,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { getTimeBlockService } from '@/lib/services';
 import type { TimeBlock } from '@/lib/types/event';
-import { TASKS_LAST_PATH_KEY } from './TasksPage';
+import { TASKS_LAST_PATH_KEY, buildTasksMainSearch } from './task-route-memory';
 
 interface DaySection {
   dateKey: string;
@@ -125,6 +125,7 @@ export function TaskTimeblocksPage() {
         <div className="inline-flex select-none items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
           <Link
             to="/tasks"
+            search={buildTasksMainSearch()}
             onClick={() => sessionStorage.removeItem(TASKS_LAST_PATH_KEY)}
             className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]"
           >

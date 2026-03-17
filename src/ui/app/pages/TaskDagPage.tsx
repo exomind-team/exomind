@@ -1,7 +1,7 @@
 import { Crosshair, Waypoints } from 'lucide-react';
 import { Link, useLocation } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { TASKS_LAST_PATH_KEY } from './TasksPage';
+import { TASKS_LAST_PATH_KEY } from './task-route-memory';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import {
   Background,
