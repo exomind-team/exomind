@@ -760,6 +760,113 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn update_task_dependency_cycle_returns_conflict() {
+        let state = test_state();
+        let task_a = state.task_store.create(CreateTaskInput {
+            title: "A".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let task_b = state.task_store.create(CreateTaskInput {
+            title: "B".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+        let task_c = state.task_store.create(CreateTaskInput {
+            title: "C".to_string(),
+            description: None,
+            done_condition: None,
+            priority: None,
+            tags: vec![],
+            source: None,
+            parent_id: None,
+            depends_on: vec![],
+            due_at: None,
+            estimated_minutes: None,
+            time_block_ids: vec![],
+        });
+
+        state
+            .task_store
+            .update_scoped(
+                None,
+                &task_a.id,
+                UpdateTaskInput {
+                    title: None,
+                    description: None,
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: Some(vec![crate::task::TaskDependency {
+                        task_id: task_b.id.clone(),
+                        relation_type: crate::task::TaskDependencyType::Hard,
+                    }]),
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+        state
+            .task_store
+            .update_scoped(
+                None,
+                &task_b.id,
+                UpdateTaskInput {
+                    title: None,
+                    description: None,
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: Some(vec![crate::task::TaskDependency {
+                        task_id: task_c.id.clone(),
+                        relation_type: crate::task::TaskDependencyType::Hard,
+                    }]),
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+
+        let app = test_router(state);
+        let response = app
+            .oneshot(
+                Request::builder()
+                    .method("PUT")
+                    .uri(format!("/tasks/{}", task_c.id))
+                    .header("content-type", "application/json")
+                    .body(Body::from(format!(
+                        r#"{{"depends_on":[{{"task_id":"{}","type":"hard"}}]}}"#,
+                        task_a.id
+                    )))
+                    .unwrap(),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(response.status(), StatusCode::CONFLICT);
+    }
+
+    #[tokio::test]
     async fn transition_task_status() {
         let state = test_state();
         let task = state.task_store.create(CreateTaskInput {

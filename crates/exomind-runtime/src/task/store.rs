@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 use std::sync::RwLock;
 
@@ -19,6 +19,11 @@ pub enum TaskStoreError {
     TerminalFieldImmutable {
         status: TaskStatus,
         field: &'static str,
+    },
+    #[error("dependency update would create a cycle for task `{task_id}` via `{dependency_id}`")]
+    DependencyCycle {
+        task_id: String,
+        dependency_id: String,
     },
     #[error("sqlite error: {0}")]
     Sqlite(#[from] rusqlite::Error),
@@ -81,6 +86,61 @@ pub(crate) fn validate_terminal_task_update(
     }
 
     Ok(())
+}
+
+pub(crate) fn validate_dependency_update<'a>(
+    task_id: &str,
+    depends_on: &[TaskDependency],
+    tasks: impl IntoIterator<Item = &'a Task>,
+) -> Result<(), TaskStoreError> {
+    let adjacency = tasks
+        .into_iter()
+        .map(|task| {
+            (
+                task.id.clone(),
+                task.depends_on
+                    .iter()
+                    .map(|dependency| dependency.task_id.clone())
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .collect::<HashMap<_, _>>();
+
+    for dependency in depends_on {
+        if dependency.task_id == task_id
+            || dependency_reaches_task(&adjacency, &dependency.task_id, task_id)
+        {
+            return Err(TaskStoreError::DependencyCycle {
+                task_id: task_id.to_string(),
+                dependency_id: dependency.task_id.clone(),
+            });
+        }
+    }
+
+    Ok(())
+}
+
+fn dependency_reaches_task(
+    adjacency: &HashMap<String, Vec<String>>,
+    start_id: &str,
+    target_id: &str,
+) -> bool {
+    let mut stack = vec![start_id.to_string()];
+    let mut visited = HashSet::new();
+
+    while let Some(current) = stack.pop() {
+        if current == target_id {
+            return true;
+        }
+        if !visited.insert(current.clone()) {
+            continue;
+        }
+        if let Some(next) = adjacency.get(&current) {
+            stack.extend(next.iter().cloned());
+        }
+    }
+
+    false
 }
 
 impl TaskStore {
@@ -208,11 +268,18 @@ impl TaskStore {
         }
 
         self.with_memory_scope_mut(scope_key, |tasks| {
+            let current = tasks
+                .get(id)
+                .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
+
+            validate_terminal_task_update(current.status, &input)?;
+            if let Some(depends_on) = input.depends_on.as_ref() {
+                validate_dependency_update(id, depends_on, tasks.values())?;
+            }
+
             let task = tasks
                 .get_mut(id)
                 .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
-
-            validate_terminal_task_update(task.status, &input)?;
 
             if let Some(title) = input.title {
                 task.title = title;
@@ -841,6 +908,112 @@ mod tests {
     }
 
     #[test]
+    fn update_rejects_direct_self_dependency_cycle() {
+        let store = make_store();
+        let task = store.create(create_input("Self"));
+
+        let result = store.update(
+            &task.id,
+            UpdateTaskInput {
+                title: None,
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: Some(vec![TaskDependency {
+                    task_id: task.id.clone(),
+                    relation_type: TaskDependencyType::Hard,
+                }]),
+                due_at: None,
+                estimated_minutes: None,
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(TaskStoreError::DependencyCycle { .. })
+        ));
+    }
+
+    #[test]
+    fn update_rejects_indirect_dependency_cycle() {
+        let store = make_store();
+        let task_a = store.create(create_input("A"));
+        let task_b = store.create(create_input("B"));
+        let task_c = store.create(create_input("C"));
+
+        store
+            .update(
+                &task_a.id,
+                UpdateTaskInput {
+                    title: None,
+                    description: None,
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: Some(vec![TaskDependency {
+                        task_id: task_b.id.clone(),
+                        relation_type: TaskDependencyType::Hard,
+                    }]),
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+        store
+            .update(
+                &task_b.id,
+                UpdateTaskInput {
+                    title: None,
+                    description: None,
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: Some(vec![TaskDependency {
+                        task_id: task_c.id.clone(),
+                        relation_type: TaskDependencyType::Hard,
+                    }]),
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+
+        let result = store.update(
+            &task_c.id,
+            UpdateTaskInput {
+                title: None,
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: Some(vec![TaskDependency {
+                    task_id: task_a.id.clone(),
+                    relation_type: TaskDependencyType::Hard,
+                }]),
+                due_at: None,
+                estimated_minutes: None,
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(TaskStoreError::DependencyCycle {
+                task_id,
+                dependency_id,
+            }) if task_id == task_c.id && dependency_id == task_a.id
+        ));
+    }
+
+    #[test]
     fn sqlite_terminal_task_update_closure_matches_memory() {
         let dir = tempdir().unwrap();
         let sqlite_path = dir.path().join("tasks.sqlite");
@@ -916,6 +1089,84 @@ mod tests {
                 field: TASK_FIELD_ESTIMATED_MINUTES,
                 ..
             })
+        ));
+    }
+
+    #[test]
+    fn sqlite_update_rejects_indirect_dependency_cycle() {
+        let dir = tempdir().unwrap();
+        let sqlite_path = dir.path().join("tasks.sqlite");
+        let store = TaskStore::with_sqlite_path(&sqlite_path).unwrap();
+        let task_a = store.create(create_input("A"));
+        let task_b = store.create(create_input("B"));
+        let task_c = store.create(create_input("C"));
+
+        store
+            .update(
+                &task_a.id,
+                UpdateTaskInput {
+                    title: None,
+                    description: None,
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: Some(vec![TaskDependency {
+                        task_id: task_b.id.clone(),
+                        relation_type: TaskDependencyType::Hard,
+                    }]),
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+        store
+            .update(
+                &task_b.id,
+                UpdateTaskInput {
+                    title: None,
+                    description: None,
+                    done_condition: None,
+                    priority: None,
+                    tags: None,
+                    depends_on: Some(vec![TaskDependency {
+                        task_id: task_c.id.clone(),
+                        relation_type: TaskDependencyType::Hard,
+                    }]),
+                    due_at: None,
+                    estimated_minutes: None,
+                    parent_id: None,
+                    time_block_ids: None,
+                },
+            )
+            .unwrap();
+
+        let result = store.update(
+            &task_c.id,
+            UpdateTaskInput {
+                title: None,
+                description: None,
+                done_condition: None,
+                priority: None,
+                tags: None,
+                depends_on: Some(vec![TaskDependency {
+                    task_id: task_a.id.clone(),
+                    relation_type: TaskDependencyType::Hard,
+                }]),
+                due_at: None,
+                estimated_minutes: None,
+                parent_id: None,
+                time_block_ids: None,
+            },
+        );
+
+        assert!(matches!(
+            result,
+            Err(TaskStoreError::DependencyCycle {
+                task_id,
+                dependency_id,
+            }) if task_id == task_c.id && dependency_id == task_a.id
         ));
     }
 
