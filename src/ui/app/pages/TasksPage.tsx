@@ -177,7 +177,7 @@ export function TasksPage() {
       <NowInputRow
         ref={inputRef}
         onSend={handleQuickAdd}
-        placeholder="添加新任务..."
+        placeholder="添加任务与描述..."
       />
     </div>
   );
