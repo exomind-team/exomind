@@ -204,10 +204,16 @@ export function TimerConfigPanel({
                 transform: `translateX(${activeUnifiedOptionIndex * 100}%)`,
               }}
             />
-            <div className="relative z-10 grid min-w-0 gap-0" style={{ gridTemplateColumns: `repeat(${totalUnifiedColumns}, minmax(0, 1fr))` }}>
+            <div
+              data-testid="task-mode-countdown"
+              aria-pressed={timerMode === 'countdown'}
+              className="relative z-10 grid min-w-0 gap-0"
+              style={{ gridTemplateColumns: `repeat(${totalUnifiedColumns}, minmax(0, 1fr))` }}
+            >
               <button
                 type="button"
                 data-testid="task-mode-countup"
+                aria-pressed={timerMode === 'countup'}
                 onClick={() => {
                   closeCustomDurationEditor();
                   setTimerMode('countup');

@@ -1260,6 +1260,7 @@ export function TaskDetailPage() {
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [hasOtherActiveBlock, setHasOtherActiveBlock] = useState(false);
+  const [spentMinutes, setSpentMinutes] = useState<number | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [reviewMarkdown, setReviewMarkdown] = useState('');
   const [eventLogs, setEventLogs] = useState<TimeblockEventLog[]>([]);
@@ -1293,6 +1294,7 @@ export function TaskDetailPage() {
     setTask(null);
     setActiveBlock(null);
     setHasOtherActiveBlock(false);
+    setSpentMinutes(undefined);
     setEventLogs([]);
     setReviewMarkdown('');
   }, [dependencyReloadKey, preferredBlockId, taskId]);
@@ -1349,7 +1351,10 @@ export function TaskDetailPage() {
       setHasOtherActiveBlock(Boolean(currentBlock && nextTask && currentBlock.taskId !== nextTask.id));
 
       if (nextTask) {
-        const events = await getEventLogService().loadEvents();
+        const [events, calculatedSpentMinutes] = await Promise.all([
+          getEventLogService().loadEvents(),
+          getTaskTimerService().calculateSpentMinutes(nextTask.id).catch(() => 0),
+        ]);
         const matchedBlockName = preferredBlockId
           ? blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId)?.name
           : undefined;
@@ -1360,10 +1365,12 @@ export function TaskDetailPage() {
             content: event.content,
             type: resolveEventTypeFromTags(event.tags),
           }));
+          setSpentMinutes(calculatedSpentMinutes);
           setEventLogs(normalizedEvents);
           setReviewMarkdown(selectReviewMarkdown(nextTask, matchedBlockName ?? nextTask.title, normalizedEvents));
         }
       } else {
+        setSpentMinutes(undefined);
         setEventLogs([]);
         setReviewMarkdown('');
       }
@@ -1444,6 +1451,8 @@ export function TaskDetailPage() {
       customDurationDraft={customDurationDraft}
       setCustomDurationDraft={setCustomDurationDraft}
       commitCustomDuration={commitCustomDuration}
+      estimatedMinutes={task?.estimatedMinutes}
+      spentMinutes={spentMinutes}
       showCountupOption
     />
   );
@@ -1579,6 +1588,11 @@ export function TaskDetailPage() {
     if (!sourceTaskId) return;
 
     const updatedAt = Date.now();
+    if (minutes == null) {
+      setTimerMode('countup');
+    } else {
+      setCountdownMinutes(minutes);
+    }
     setTask((current) => {
       if (!current || current.id !== sourceTaskId) return current;
       return {
@@ -1596,7 +1610,7 @@ export function TaskDetailPage() {
           }
         : candidate
     )));
-  }, [task?.id]);
+  }, [setCountdownMinutes, setTimerMode, task?.id]);
 
   const handleSaveDescription = useCallback(async () => {
     if (!task?.id) return;

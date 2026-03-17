@@ -10,6 +10,7 @@ const scrollIntoViewMock = vi.fn();
 
 const getTaskMock = vi.fn<(id: string) => Promise<TaskNode | null>>();
 const listTasksMock = vi.fn<(includeCancelled?: boolean) => Promise<TaskNode[]>>();
+const updateTaskMock = vi.fn<(id: string, input: Partial<TaskNode>) => Promise<TaskNode | null>>();
 const addDependencyMock = vi.fn<(taskId: string, depTaskId: string, type: 'soft' | 'hard') => Promise<TaskNode | null>>();
 const removeDependencyMock = vi.fn<(taskId: string, depTaskId: string) => Promise<TaskNode | null>>();
 const getAvailableTransitionsMock = vi.fn<(id: string) => Promise<Array<TaskNode['status']>>>();
@@ -48,7 +49,7 @@ vi.mock('@/lib/services', () => ({
     checkDependenciesMet: checkDependenciesMetMock,
     onTaskChange: onTaskChangeMock,
     transitionTask: vi.fn(),
-    updateTask: vi.fn(),
+    updateTask: updateTaskMock,
     cancelTask: vi.fn(),
   }),
   getTimeBlockService: () => ({
@@ -127,6 +128,12 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     });
     startBlockForTaskMock.mockReset();
     startBlockForTaskMock.mockResolvedValue(null);
+    updateTaskMock.mockReset();
+    updateTaskMock.mockImplementation(async (id, input) => makeTask({
+      id,
+      ...input,
+      updatedAt: Date.now(),
+    }));
     getTaskMock.mockImplementation(async (id: string) => {
       if (id === 'task-2') {
         return makeTask({
@@ -324,6 +331,44 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 120 });
+    });
+  });
+
+  it('syncs task estimated minutes into expected duration before manual timer override（任务估时会同步到预期时长）', async () => {
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    fireEvent.click(screen.getByTestId('estimated-time-preset-60'));
+
+    await waitFor(() => {
+      expect(updateTaskMock).toHaveBeenCalledWith('task-1', expect.objectContaining({ estimatedMinutes: 60 }));
+    });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-countdown-auto-remaining')).toBeNull();
+    });
+
+    fireEvent.click(screen.getByText('开始计时'));
+
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 60 });
+    });
+  });
+
+  it('shows remaining-time shortcut from estimated and spent minutes（展示基于任务估时与已耗时的剩余时长快捷按钮）', async () => {
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(await screen.findByTestId('task-countdown-auto-remaining')).toHaveTextContent('自动：剩余 30min');
+
+    fireEvent.click(screen.getByTestId('task-countdown-auto-remaining'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-countdown-custom-trigger')).toHaveTextContent('30m');
     });
   });
 
