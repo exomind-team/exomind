@@ -1,7 +1,8 @@
-import { ArrowLeft, Crosshair, Waypoints } from 'lucide-react';
+import { Crosshair, Waypoints } from 'lucide-react';
 import { Link, useLocation } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { TASKS_LAST_PATH_KEY } from './TasksPage';
+import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import {
   Background,
   Controls,
@@ -185,17 +186,10 @@ export function TaskDagPage() {
     <div className="min-h-full bg-[#FAF7F5] px-5 py-4 dark:bg-[#0C0A09] md:px-8 lg:px-10" data-testid="task-dag-page">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="inline-flex items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-            <Link to="/tasks" onClick={() => sessionStorage.removeItem(TASKS_LAST_PATH_KEY)} className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
-              <ArrowLeft size={14} />
-              任务
-            </Link>
-            <span>/</span>
-            <span className="inline-flex items-center gap-1">
-              <Waypoints size={14} />
-              DAG 视图
-            </span>
-          </div>
+          <TaskBreadcrumb
+            segments={[{ label: '任务', to: '/tasks' }]}
+            current={{ label: 'DAG 视图', icon: Waypoints }}
+          />
           <h1 className="mt-2 text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务依赖 DAG</h1>
         </div>
         <div className="flex flex-wrap gap-2">
@@ -260,15 +254,17 @@ export function TaskDagPage() {
               <>
                 <p className="mt-3 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{selectedTask.title}</p>
                 <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">状态：{STATUS_LABELS[selectedNode.status] ?? selectedNode.status}</p>
-                <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                  {selectedNode.isExecutable && !selectedNode.isBlocked
-                    ? '可直接执行'
-                    : selectedNode.isExecutable && selectedNode.isBlocked
-                      ? '可执行（软阻塞提醒）'
-                      : selectedNode.isBlocked
-                        ? '不可直接执行 · 有阻塞依赖'
-                        : '待处理'}
-                </p>
+                {selectedNode.status !== 'completed' && selectedNode.status !== 'cancelled' && (
+                  <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                    {selectedNode.isExecutable && !selectedNode.isBlocked
+                      ? '可直接执行'
+                      : selectedNode.isExecutable && selectedNode.isBlocked
+                        ? '可执行（软阻塞提醒）'
+                        : selectedNode.isBlocked
+                          ? '不可直接执行 · 有阻塞依赖'
+                          : '待处理'}
+                  </p>
+                )}
                 <Link
                   data-testid="task-dag-selected-link"
                   to="/tasks/$taskId"
