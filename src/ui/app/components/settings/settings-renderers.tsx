@@ -697,6 +697,12 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
   const [value, setValue, getCurrent] = useSettingState(item.get, item.subscribe);
   const [notice, setNotice] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const progressPercent = (() => {
+    if (item.max === item.min) return '0%';
+    const progress = ((value - item.min) / (item.max - item.min)) * 100;
+    const clamped = Math.min(100, Math.max(0, progress));
+    return `${clamped.toFixed(2)}%`;
+  })();
 
   const handleChange = (nextValue: number) => {
     setNotice(null);
@@ -751,8 +757,9 @@ function NumberRenderer({ item }: { item: NumberSettingsItem }) {
               style={{
                 ...(buildSettingsToneStyle(toneColor) ?? {}),
                 accentColor: SETTINGS_TONE_RESOLVED_COLOR,
+                '--settings-range-progress': progressPercent,
               }}
-              className="w-full"
+              className="w-full settings-range"
             />
             <span className="min-w-[44px] text-right text-xs text-[#78716C]">
               {renderedValue}

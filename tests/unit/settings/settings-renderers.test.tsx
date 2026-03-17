@@ -286,9 +286,13 @@ describe('SettingsItemRenderer', () => {
       </SettingsToneProvider>,
     );
 
-    expect(screen.getByRole('slider').getAttribute('style') ?? '').toContain(
+    const slider = screen.getByRole('slider');
+
+    expect(slider.className).toContain('settings-range');
+    expect(slider.getAttribute('style') ?? '').toContain(
       'accent-color: var(--settings-tone-color, var(--settings-tone-default))',
     );
+    expect(slider.getAttribute('style') ?? '').toContain('--settings-range-progress: 53.85%');
   });
 
   it('renders dialog string items and saves edited values', () => {

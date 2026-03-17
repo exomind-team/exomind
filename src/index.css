@@ -130,6 +130,24 @@
     opacity: 0.2;
   }
 
+  .settings-range::-webkit-slider-runnable-track {
+    background: linear-gradient(
+      to right,
+      var(--settings-tone-color, var(--settings-tone-default)) 0%,
+      var(--settings-tone-color, var(--settings-tone-default)) var(--settings-range-progress, 0%),
+      hsl(var(--border-card)) var(--settings-range-progress, 0%),
+      hsl(var(--border-card)) 100%
+    );
+  }
+
+  .settings-range::-moz-range-track {
+    background-color: hsl(var(--border-card));
+  }
+
+  .settings-range::-moz-range-progress {
+    background-color: var(--settings-tone-color, var(--settings-tone-default));
+  }
+
   .settings-dialog-input {
     @apply w-full rounded-xl border bg-white px-4 py-3 text-sm text-[#1C1917] outline-none placeholder:text-[#D6D3D1] dark:border-[#292524] dark:bg-[#1C1917] dark:text-[#FAFAF9] dark:placeholder:text-[#57534E];
     border-color: #F0ECE8;
