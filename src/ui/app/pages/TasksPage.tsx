@@ -171,7 +171,13 @@ export function TasksPage() {
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-5 pb-[calc(env(safe-area-inset-bottom,0px)+108px)] pt-3 md:px-8 md:pb-24 lg:px-10">
-        <TaskCurrentRootCard graph={taskGraph} taskById={taskById} className="mb-4" />
+        <TaskCurrentRootCard
+          graph={taskGraph}
+          taskById={taskById}
+          className="mb-4"
+          searchQuery={taskPageFuzzySearchEnabled ? taskTitleSearchQuery : ''}
+          collapsible={true}
+        />
 
         <div className="space-y-3">
           {visibleTasks.length > 0 ? (

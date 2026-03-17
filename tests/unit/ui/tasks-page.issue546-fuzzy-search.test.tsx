@@ -5,6 +5,13 @@ import { TasksPage } from '@/ui/app/pages/TasksPage';
 import type { TaskNode } from '@/lib/types/task';
 
 const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
+const taskCurrentRootCardMock = vi.fn((props: Record<string, unknown>) => (
+  <div
+    data-testid="task-current-root-card"
+    data-search-query={String(props.searchQuery ?? '')}
+    data-collapsible={String(Boolean(props.collapsible))}
+  />
+));
 
 const fuzzySearchState = vi.hoisted(() => {
   let enabled = true;
@@ -63,7 +70,7 @@ vi.mock('@/ui/app/components/PageMoreMenu', () => ({
 }));
 
 vi.mock('@/ui/app/components/TaskCurrentRootCard', () => ({
-  TaskCurrentRootCard: () => <div data-testid="task-current-root-card" />,
+  TaskCurrentRootCard: (props: Record<string, unknown>) => taskCurrentRootCardMock(props),
 }));
 
 vi.mock('@/ui/app/components/NowInputRow', async () => {
@@ -135,6 +142,7 @@ describe('TasksPage issue-546 fuzzy search', () => {
     vi.useFakeTimers();
     fuzzySearchState.reset();
     listTasksMock.mockReset();
+    taskCurrentRootCardMock.mockClear();
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-1', title: 'aba', updatedAt: 10 }),
       makeTask({ id: 'task-2', title: 'baaab', updatedAt: 20 }),
@@ -159,6 +167,8 @@ describe('TasksPage issue-546 fuzzy search', () => {
       'tasks-page-task-link-task-2',
       'tasks-page-task-link-task-1',
     ]);
+    expect(screen.getByTestId('task-current-root-card')).toHaveAttribute('data-search-query', '');
+    expect(screen.getByTestId('task-current-root-card')).toHaveAttribute('data-collapsible', 'true');
 
     fireEvent.change(screen.getByTestId('task-search-input'), {
       target: { value: 'ab\nzzz' },
@@ -187,6 +197,7 @@ describe('TasksPage issue-546 fuzzy search', () => {
       'tasks-page-task-link-task-4',
     ]);
     expect(screen.queryByTestId('tasks-page-task-link-task-3')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-current-root-card')).toHaveAttribute('data-search-query', 'ab');
   });
 
   it('restores the full list immediately when fuzzy search is turned off', async () => {
@@ -219,5 +230,6 @@ describe('TasksPage issue-546 fuzzy search', () => {
       'tasks-page-task-link-task-2',
       'tasks-page-task-link-task-1',
     ]);
+    expect(screen.getByTestId('task-current-root-card')).toHaveAttribute('data-search-query', '');
   });
 });
