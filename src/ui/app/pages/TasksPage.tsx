@@ -126,7 +126,8 @@ export function TasksPage() {
   }, [quickAddValue, taskPageFuzzySearchEnabled]);
 
   const visibleTasks = useMemo(() => {
-    const baseTasks = filterNow(tasks, taskGraph);
+    const isSearching = taskPageFuzzySearchEnabled && Boolean(taskTitleSearchQuery);
+    const baseTasks = isSearching ? tasks : filterNow(tasks, taskGraph);
     if (!taskPageFuzzySearchEnabled) {
       return baseTasks;
     }

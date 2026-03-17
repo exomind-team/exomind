@@ -232,4 +232,48 @@ describe('TasksPage issue-546 fuzzy search', () => {
     ]);
     expect(screen.getByTestId('task-current-root-card')).toHaveAttribute('data-search-query', '');
   });
+
+  it('includes terminal tasks in results while an active title search is running', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-1', title: 'Active alpha', updatedAt: 10, status: 'pending' }),
+      makeTask({ id: 'task-2', title: 'Archived alpha', updatedAt: 20, status: 'completed' }),
+      makeTask({ id: 'task-3', title: 'Cancelled alpha', updatedAt: 30, status: 'cancelled' }),
+      makeTask({ id: 'task-4', title: 'delta', updatedAt: 40, status: 'pending' }),
+    ]);
+
+    render(<TasksPage />);
+
+    await flushLoad();
+
+    expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-4',
+      'tasks-page-task-link-task-1',
+    ]);
+
+    fireEvent.change(screen.getByTestId('task-search-input'), {
+      target: { value: 'alpha' },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(180);
+    });
+
+    expect(screen.getByTestId('tasks-page-task-link-task-1')).toBeInTheDocument();
+    expect(screen.getByTestId('tasks-page-task-link-task-2')).toBeInTheDocument();
+    expect(screen.getByTestId('tasks-page-task-link-task-3')).toBeInTheDocument();
+    expect(screen.queryByTestId('tasks-page-task-link-task-4')).not.toBeInTheDocument();
+
+    fireEvent.change(screen.getByTestId('task-search-input'), {
+      target: { value: '' },
+    });
+
+    await act(async () => {
+      vi.advanceTimersByTime(180);
+    });
+
+    expect(visibleTaskOrder()).toEqual([
+      'tasks-page-task-link-task-4',
+      'tasks-page-task-link-task-1',
+    ]);
+  });
 });
