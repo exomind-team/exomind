@@ -27,10 +27,12 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
     expect(source).toContain("location.pathname === '/agents'");
   });
 
-  it('uses five desktop nav items including me entry（桌面导航5项且包含 Me 入口）', () => {
+  it('keeps me entry behind feature flag in desktop nav（桌面导航中的 Me 入口受功能开关控制）', () => {
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
     expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
-    expect(desktopNavBlock).toContain("title: 'Me', path: '/me'");
+    expect(desktopNavBlock).toContain('...(mePageEnabled ? [{');
+    expect(desktopNavBlock).toContain("title: 'Me'");
+    expect(desktopNavBlock).toContain("path: '/me'");
     expect(desktopNavBlock).toContain("icon: UserRound");
     expect(desktopNavBlock).toContain("key: 'agents'");
     expect(desktopNavBlock).toContain("title: '网络'");

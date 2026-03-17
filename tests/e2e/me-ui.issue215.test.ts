@@ -4,6 +4,7 @@ async function setupIssue215Flags(page: Page) {
   await page.addInitScript(() => {
     localStorage.setItem('exomind:uiMode', 'new');
     localStorage.setItem('exomind:useMockData', 'true');
+    localStorage.setItem('exomind:mePageEnabled', 'true');
   });
 }
 
@@ -14,7 +15,6 @@ test.describe('Issue #215 Me UI（Me 三视图）', () => {
 
   test('默认展示状态视图并可切换学习/内隐（status -> learn -> implicit）', async ({ page }) => {
     await page.goto('/me');
-    await page.waitForLoadState('networkidle');
 
     await expect(page.getByTestId('new-me-page')).toBeVisible();
     await expect(page.getByRole('heading', { name: 'Me' })).toBeVisible();
@@ -33,8 +33,9 @@ test.describe('Issue #215 Me UI（Me 三视图）', () => {
   });
 
   test('底部导航可进入 Me（bottom nav to me）', async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
     await page.goto('/tasks');
-    await page.waitForLoadState('networkidle');
+    await expect(page.getByTestId('mobile-bottom-tab')).toBeVisible();
 
     await page.getByRole('link', { name: 'Me' }).click();
     await expect(page).toHaveURL(/\/me$/);

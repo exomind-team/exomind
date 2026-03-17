@@ -243,6 +243,7 @@ describe('settings registry coverage audit', () => {
     const featureToggles = getItem('feature-toggles', 'group');
     expect(featureToggles.groupStyle).toBe('adaptive-overlay');
     expect(featureToggles.children.map((child) => child.id)).toEqual([
+      'me-page-enabled',
       'agent-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
@@ -318,6 +319,7 @@ describe('settings registry coverage audit', () => {
 
   it('keeps the feature toggles drawer checklist in sync with its audited child settings', () => {
     expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
+      'me-page-enabled',
       'agent-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',

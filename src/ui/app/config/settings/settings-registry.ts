@@ -25,6 +25,7 @@ import {
   SunMoon,
   Tag,
   Timer,
+  UserRound,
   Waypoints,
   Wifi,
 } from 'lucide-react';
@@ -49,6 +50,11 @@ import {
   setAgentPageEnabled,
   subscribeAgentPageEnabledChanges,
 } from '@/config/agent-page-enabled';
+import {
+  getMePageEnabled,
+  setMePageEnabled,
+  subscribeMePageEnabledChanges,
+} from '@/config/me-page-enabled';
 import {
   getDesktopAdaptiveEnabled,
   setDesktopAdaptiveEnabled,
@@ -358,12 +364,23 @@ function resolveBuildText(): string {
 }
 
 export const FEATURE_TOGGLE_SETTING_IDS = [
+  'me-page-enabled',
   'agent-page-enabled',
   'desktop-adaptive',
   'command-palette-enabled',
 ] as const;
 
 export const FEATURE_TOGGLE_SETTINGS = [
+  {
+    id: 'me-page-enabled',
+    label: 'Me 页面',
+    icon: UserRound,
+    rowTestId: 'feature-toggle-me-page-row',
+    controlTestId: 'feature-toggle-me-page-switch',
+    get: getMePageEnabled,
+    set: setMePageEnabled,
+    subscribe: subscribeMePageEnabledChanges,
+  },
   {
     id: 'agent-page-enabled',
     label: '网络页面',

@@ -3,6 +3,7 @@ import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
 import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
+import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
@@ -253,18 +254,26 @@ function MobileShell({
 function DesktopSidebar({
   activePath,
   agentPageEnabled,
+  mePageEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
   activePath: string;
   agentPageEnabled: boolean;
+  mePageEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
-    { key: 'me', title: 'Me', path: '/me', icon: UserRound, match: (path: string) => path === '/me' || path.startsWith('/me/') },
+    ...(mePageEnabled ? [{
+      key: 'me',
+      title: 'Me',
+      path: '/me',
+      icon: UserRound,
+      match: (path: string) => path === '/me' || path.startsWith('/me/'),
+    }] : []),
     ...(agentPageEnabled ? [{
       key: 'agents',
       title: '网络',
@@ -361,11 +370,13 @@ function DesktopSidebar({
 function DesktopLayout({
   activePath,
   agentPageEnabled,
+  mePageEnabled,
   collapsed,
   onToggleCollapsed,
 }: {
   activePath: string;
   agentPageEnabled: boolean;
+  mePageEnabled: boolean;
   collapsed: boolean;
   onToggleCollapsed: () => void;
 }) {
@@ -375,6 +386,7 @@ function DesktopLayout({
         <DesktopSidebar
           activePath={activePath}
           agentPageEnabled={agentPageEnabled}
+          mePageEnabled={mePageEnabled}
           collapsed={collapsed}
           onToggleCollapsed={onToggleCollapsed}
         />
@@ -386,12 +398,38 @@ function DesktopLayout({
   );
 }
 
+function MeRouteGate() {
+  const navigate = useNavigate();
+  const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
+
+  useEffect(() => {
+    return subscribeMePageEnabledChanges(setMePageEnabled);
+  }, []);
+
+  useEffect(() => {
+    if (!mePageEnabled) {
+      void navigate({ to: '/settings', replace: true });
+    }
+  }, [mePageEnabled, navigate]);
+
+  if (!mePageEnabled) {
+    return <PageFallback />;
+  }
+
+  return (
+    <LazyPage>
+      <MePage />
+    </LazyPage>
+  );
+}
+
 function NewLayout() {
   const location = useLocation();
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
+  const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
   const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
@@ -402,6 +440,9 @@ function NewLayout() {
 
   useEffect(() => {
     return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeMePageEnabledChanges(setMePageEnabled);
   }, []);
   useEffect(() => {
     return subscribeDesktopAdaptiveChanges(setDesktopAdaptiveEnabledState);
@@ -421,12 +462,15 @@ function NewLayout() {
     registryService.setCommands('core-navigation', createCoreNavigationCommands({
       navigate: navigateTo,
       openReminderComposer: requestReminderCompose,
+      featureFlags: {
+        mePageEnabled,
+      },
     }));
 
     return () => {
       registryService.removeScope('core-navigation');
     };
-  }, [navigate, registryService]);
+  }, [mePageEnabled, navigate, registryService]);
 
   useEffect(() => {
     if (!commandPaletteActive) {
@@ -456,15 +500,16 @@ function NewLayout() {
     developerModeEnabled,
     commandPaletteEnabled: commandPaletteActive,
     featureFlags: {
+      mePageEnabled,
       agentPageEnabled,
       goalsV2Enabled: false,
     },
-  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname]);
+  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname, mePageEnabled]);
 
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
-    { title: 'Me', path: '/me', icon: UserRound },
+    ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
@@ -489,6 +534,7 @@ function NewLayout() {
         <DesktopLayout
           activePath={location.pathname}
           agentPageEnabled={agentPageEnabled}
+          mePageEnabled={mePageEnabled}
           collapsed={desktopSidebarCollapsed}
           onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
         />
@@ -683,11 +729,7 @@ const newMeRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/me',
   component: function NewMe() {
-    return (
-      <LazyPage>
-        <MePage />
-      </LazyPage>
-    );
+    return <MeRouteGate />;
   },
 });
 

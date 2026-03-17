@@ -5,6 +5,7 @@ async function setupIssue198Flags(page: Page) {
     localStorage.setItem('exomind:uiMode', 'new');
     localStorage.setItem('exomind:developerMode', 'true');
     localStorage.setItem('exomind:agentPageEnabled', 'true');
+    localStorage.setItem('exomind:mePageEnabled', 'true');
     localStorage.setItem('exomind:desktopAdaptiveEnabled', 'true');
   });
 }

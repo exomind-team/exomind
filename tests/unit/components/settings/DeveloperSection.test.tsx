@@ -9,6 +9,7 @@ import './setup-settings-mocks.tsx';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setDevtoolsEnabled } from '@/config/devtools-mode';
 import { setCommandPaletteEnabled } from '@/config/command-palette-enabled';
+import { setMePageEnabled } from '@/config/me-page-enabled';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 
@@ -26,6 +27,7 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     render(<SettingsPage />);
     const row = screen.getByText('功能开关');
     fireEvent.click(row);
+    expect(screen.getByText('Me 页面')).toBeInTheDocument();
     expect(screen.getByText('网络页面')).toBeInTheDocument();
     expect(screen.getByText('命令面板')).toBeInTheDocument();
   });
@@ -56,5 +58,15 @@ describe('SettingsPage - Developer Section (developerMode=true)', () => {
     fireEvent.click(toggle);
 
     expect(vi.mocked(setCommandPaletteEnabled)).toHaveBeenCalledWith(true);
+  });
+
+  it('updates me page state inside feature toggles drawer', () => {
+    render(<SettingsPage />);
+    fireEvent.click(screen.getByText('功能开关'));
+
+    const toggle = screen.getByTestId('feature-toggle-me-page-switch');
+    fireEvent.click(toggle);
+
+    expect(vi.mocked(setMePageEnabled)).toHaveBeenCalledWith(true);
   });
 });

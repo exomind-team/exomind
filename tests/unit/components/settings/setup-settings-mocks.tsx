@@ -95,6 +95,7 @@ export const settingsPageServiceMocks = {
 export const settingsPagePreferenceState = {
   developerMode: false,
   agentPageEnabled: false,
+  mePageEnabled: false,
   desktopAdaptiveEnabled: true,
   voiceShortcutAsrProvider: 'moss' as string,
 };
@@ -177,6 +178,12 @@ vi.mock('@/config/agent-page-enabled', () => ({
   getAgentPageEnabled: vi.fn(() => settingsPagePreferenceState.agentPageEnabled),
   setAgentPageEnabled: vi.fn(),
   subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/me-page-enabled', () => ({
+  getMePageEnabled: vi.fn(() => settingsPagePreferenceState.mePageEnabled),
+  setMePageEnabled: vi.fn(),
+  subscribeMePageEnabledChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/desktop-adaptive', () => ({
