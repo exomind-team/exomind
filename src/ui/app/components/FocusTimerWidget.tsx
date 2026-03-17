@@ -655,7 +655,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const endActionTitle = feedbackInProgress ? '反馈中' : '结束';
   const endActionButtonClass = feedbackInProgress
     ? 'h-11 w-11 rounded-[12px] bg-brand p-0 text-white hover:bg-brand/90 hover:text-white'
-    : 'h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#C75B3A] p-0 text-[#C75B3A] dark:text-[#FAFAF9] hover:bg-[#F8DED9] dark:hover:bg-[#B24D2F]';
+    : 'h-11 w-11 rounded-[12px] bg-[#C75B3A] p-0 text-white hover:bg-[#B24D2F] hover:text-white';
   const endActionIcon = feedbackInProgress
     ? <NotepadText size={18} className="text-white" />
     : <Square size={18} />;
