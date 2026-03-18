@@ -470,6 +470,17 @@ pub async fn start_with_options(
         actor_tasks.push(signal::actors::input_ingest_actor::spawn_input_ingest_actor(
             Arc::clone(&state.signal_pool),
         ));
+        actor_tasks.push(
+            signal::actors::external_input_actor::spawn_external_input_actor(Arc::clone(
+                &state.signal_pool,
+            )),
+        );
+        actor_tasks.push(
+            signal::actors::external_source_actor::spawn_external_source_actor(
+                Arc::clone(&state.signal_pool),
+                signal::actors::external_source_actor::ExternalSourceConfig::default(),
+            ),
+        );
         actor_tasks.push(signal::actors::task_classifier_actor::spawn_task_actor(
             Arc::clone(&state.signal_pool),
         ));
