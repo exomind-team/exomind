@@ -214,4 +214,46 @@ mod tests {
         .await;
         assert!(result.is_err(), "should not receive any more events");
     }
+
+    #[tokio::test]
+    async fn identical_inputs_within_window_are_not_skipped() {
+        let pool = Arc::new(SignalPool::new(None));
+
+        let _handle = spawn_eventlog_actor(Arc::clone(&pool));
+        yield_for_actor().await;
+
+        let mut rx = pool.subscribe();
+
+        // Publish the same text twice in quick succession
+        let event1 = make_user_input_event("duplicate text");
+        let event2 = make_user_input_event("duplicate text");
+        pool.publish(event1);
+        pool.publish(event2);
+
+        // We should see: user.input.normalized, eventlog.appended,
+        //                user.input.normalized, eventlog.appended
+        let mut appended_count = 0;
+        let mut total = 0;
+        loop {
+            let result = tokio::time::timeout(
+                std::time::Duration::from_millis(500),
+                rx.recv(),
+            )
+            .await;
+            match result {
+                Ok(Ok(ev)) => {
+                    total += 1;
+                    if ev.topic == "eventlog.appended" {
+                        appended_count += 1;
+                    }
+                }
+                _ => break,
+            }
+        }
+        assert_eq!(
+            appended_count,
+            2,
+            "identical inputs should remain appendable, got {appended_count} appended events (total events: {total})"
+        );
+    }
 }
