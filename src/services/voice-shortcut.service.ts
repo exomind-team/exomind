@@ -2,7 +2,7 @@ import { listen, emit } from '@tauri-apps/api/event';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { MOSSASRAdapter } from '../lib/adapters/asr/moss-asr';
 import { getClipboardService } from '../lib/services/clipboard.service';
-import { getEventLogService } from '../lib/services/eventlog.service';
+import { appendEventWithEcsReplication } from '@/lib/services/ecs-eventlog-replication.service';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { getActiveInteractionContextService } from '@/lib/services/active-interaction-context.service';
 import {
@@ -54,6 +54,7 @@ import {
   getVoiceOverlayBottomOffset,
   subscribeVoiceOverlayBottomOffsetChanges,
 } from '@/config/voice-overlay-preferences';
+import { buildVoiceShortcutStorageEvent } from '@/services/voice-shortcut-eventlog';
 
 export type VoiceShortcutState = 'idle' | 'arming' | 'recording' | 'recognizing' | 'done' | 'error';
 
@@ -904,8 +905,18 @@ export class VoiceShortcutService {
       ?? null;
     const traceId = this.currentTraceId ?? undefined;
     const targetScope = activeInteractionContext?.targetScope ?? (foregroundWindow ? 'external-window' : 'unknown');
+    const storageEvent = await buildVoiceShortcutStorageEvent({
+      text: result.text,
+      startedAtMs: this.traceStartedAtMs ?? Date.now(),
+      targetScope,
+      window: foregroundWindow ? {
+        title: foregroundWindow.title ?? undefined,
+        processName: foregroundWindow.processName ?? undefined,
+      } : undefined,
+      agentContext: activeInteractionContext?.agentContext,
+    });
 
-    const [clipboardResult, signalPublishResult] = await Promise.allSettled([
+    const [clipboardResult, signalPublishResult, eventlogAppendResult] = await Promise.allSettled([
       (async () => {
         const writeResult = await getClipboardService().writeText(result.text);
         if (!writeResult.ok) throw new Error(writeResult.title);
@@ -926,18 +937,15 @@ export class VoiceShortcutService {
         } : undefined,
         agentContext: activeInteractionContext?.agentContext,
       }),
+      appendEventWithEcsReplication(storageEvent),
     ]);
 
     if (clipboardResult.status === 'rejected') {
       this.debugError(LOG_TAG, 'clipboard paste failed:', clipboardResult.reason);
     }
 
-    // 语音输入始终写入 EventLog（前端直写，带 voice tag）
-    // signal 路径仅用于 RT actor 协调（classifier 等），不负责持久化
-    try {
-      await getEventLogService().addEvent(result.text, new Set(['voice']));
-    } catch (err) {
-      this.debugError(LOG_TAG, 'eventlog write failed:', err);
+    if (eventlogAppendResult.status === 'rejected') {
+      this.debugError(LOG_TAG, 'eventlog append failed:', eventlogAppendResult.reason);
     }
 
     if (signalPublishResult.status === 'rejected') {
