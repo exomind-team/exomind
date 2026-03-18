@@ -8,9 +8,10 @@ describe('eventlog sync remote url wiring', () => {
   const chatPage = readFileSync(chatPagePath, 'utf-8');
   const adapter = readFileSync(adapterPath, 'utf-8');
 
-  it('ChatPage should use shared remote DB URL builder', () => {
-    expect(chatPage).toContain("from '@/lib/sync/remote-db-url'");
-    expect(chatPage).toContain('buildRemoteDbUrl(');
+  it('ChatPage should read/write events through EventLogService', () => {
+    expect(chatPage).toContain("from '@/lib/services/eventlog.service'");
+    expect(chatPage).toContain('getEventLogService()');
+    expect(chatPage).toContain('loadEvents()');
   });
 
   it('PouchSyncAdapter should use shared remote DB URL builder', () => {
@@ -18,8 +19,10 @@ describe('eventlog sync remote url wiring', () => {
     expect(adapter).toContain('buildRemoteDbUrl(');
   });
 
-  it('ChatPage should not use legacy /database path prefix', () => {
+  it('ChatPage should not wire UI directly to legacy sync URL builders', () => {
     expect(chatPage).not.toContain('/database/');
+    expect(chatPage).not.toContain('buildRemoteDbUrl(');
+    expect(chatPage).not.toContain('resolveSyncServerUrl(');
   });
 
   it('PouchSyncAdapter should not use legacy /database path prefix', () => {

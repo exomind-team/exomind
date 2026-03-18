@@ -250,9 +250,17 @@ export const useSyncStore = create<SyncState>()(
       ensureProfileStorageMigrated();
       const initialSession = getProfileSession();
       const initialActiveProfile = getActiveProfile();
+      const initialIsLoggedIn = Boolean(
+        initialSession.activeProfileId
+        && initialSession.unlockedProfileIds.includes(initialSession.activeProfileId)
+        && initialActiveProfile
+      );
       migrateLegacySyncCredentialsToIdentityLink(initialActiveProfile);
-      const initialCredentials = initialActiveProfile
+      const initialCredentials = initialIsLoggedIn && initialActiveProfile
         ? buildCredentialsFromLinkedIdentity(initialActiveProfile.profileId, initialActiveProfile.slug)
+        : null;
+      const initialCurrentUser = initialIsLoggedIn
+        ? initialActiveProfile?.displayName || initialActiveProfile?.slug || null
         : null;
       clearLegacySyncStorePersist();
 
@@ -267,12 +275,9 @@ export const useSyncStore = create<SyncState>()(
         pollInterval: 5,
       },
       credentials: initialCredentials,
-      isLoggedIn: Boolean(
-        initialSession.activeProfileId
-        && initialSession.unlockedProfileIds.includes(initialSession.activeProfileId)
-      ),
-      currentUser: initialActiveProfile?.displayName || initialActiveProfile?.slug || null,
-      activeProfileId: initialSession.activeProfileId,
+      isLoggedIn: initialIsLoggedIn,
+      currentUser: initialCurrentUser,
+      activeProfileId: initialIsLoggedIn ? initialSession.activeProfileId : null,
       conflicts: [],
 
       // 更新状态

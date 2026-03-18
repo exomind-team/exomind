@@ -48,7 +48,9 @@ export class TimeBlockRtAdapter {
       body: JSON.stringify(blocks),
     });
     if (!response.ok && response.status !== 204) {
-      throw new Error(`RT timeblocks replace failed: ${response.status}`);
+      const body = await response.text().catch(() => '(no body)');
+      console.error('[TB-RT] replaceCompletedBlocks failed', { status: response.status, body, blockCount: blocks.length, payload: JSON.stringify(blocks).slice(0, 500) });
+      throw new Error(`RT timeblocks replace failed: ${response.status} — ${body}`);
     }
   }
 

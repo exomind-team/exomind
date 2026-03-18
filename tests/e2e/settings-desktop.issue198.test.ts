@@ -5,8 +5,13 @@ async function setupIssue198Flags(page: Page) {
     localStorage.setItem('exomind:uiMode', 'new');
     localStorage.setItem('exomind:developerMode', 'true');
     localStorage.setItem('exomind:agentPageEnabled', 'true');
+    localStorage.setItem('exomind:mePageEnabled', 'true');
     localStorage.setItem('exomind:desktopAdaptiveEnabled', 'true');
   });
+}
+
+async function getTestIdWidth(page: Page, testId: string): Promise<number> {
+  return page.getByTestId(testId).evaluate((node) => Math.round(node.getBoundingClientRect().width));
 }
 
 async function seedLoggedInDesktopProfile(page: Page) {
@@ -101,6 +106,45 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('desktop-sidebar-item-dashboard')).toHaveCount(0);
     await expect(page.locator('[data-testid^="desktop-sidebar-item-"]')).toHaveCount(5);
     await expect(page.getByTestId('mobile-bottom-tab')).toBeHidden();
+  });
+
+  test('desktop sidebar can collapse and expand with wider content（桌面侧栏可收起展开且内容区变宽）', async ({ page }) => {
+    await page.goto('/settings');
+    await expect(page.getByTestId('desktop-sidebar')).toBeVisible();
+
+    const sidebarWidthExpanded = await getTestIdWidth(page, 'desktop-sidebar');
+    const contentWidthExpanded = await getTestIdWidth(page, 'desktop-settings-content');
+
+    const toggle = page.getByTestId('desktop-sidebar-toggle');
+    await expect(toggle).toHaveAttribute('aria-label', '收起侧边栏');
+    await toggle.click();
+    await expect(page.getByTestId('desktop-sidebar')).toHaveAttribute('data-state', 'collapsed');
+    await expect(toggle).toHaveAttribute('aria-label', '展开侧边栏');
+    await page.waitForTimeout(250);
+
+    const sidebarWidthCollapsed = await getTestIdWidth(page, 'desktop-sidebar');
+    const contentWidthCollapsed = await getTestIdWidth(page, 'desktop-settings-content');
+
+    expect(sidebarWidthCollapsed).toBeLessThan(sidebarWidthExpanded);
+    expect(contentWidthCollapsed).toBeGreaterThan(contentWidthExpanded + 100);
+
+    await toggle.click();
+    await expect(page.getByTestId('desktop-sidebar')).toHaveAttribute('data-state', 'expanded');
+    await expect(toggle).toHaveAttribute('aria-label', '收起侧边栏');
+  });
+
+  test('desktop sidebar collapse persists across desktop routes（桌面侧栏收起状态在桌面路由切换间保持）', async ({ page }) => {
+    await page.goto('/settings');
+    await page.getByTestId('desktop-sidebar-toggle').click();
+    await expect(page.getByTestId('desktop-sidebar')).toHaveAttribute('data-state', 'collapsed');
+
+    await page.getByTestId('desktop-sidebar-item-now').click();
+    await expect(page).toHaveURL(/\/eventlog$/);
+    await expect(page.getByTestId('desktop-sidebar')).toHaveAttribute('data-state', 'collapsed');
+
+    await page.getByTestId('desktop-sidebar-item-settings').click();
+    await expect(page).toHaveURL(/\/settings$/);
+    await expect(page.getByTestId('desktop-sidebar')).toHaveAttribute('data-state', 'collapsed');
   });
 
   test('desktop agents route uses desktop shell（桌面端 Agent 页面走桌面壳层）', async ({ page }) => {

@@ -1,7 +1,10 @@
-﻿import { Link } from '@tanstack/react-router';
+import { Link } from '@tanstack/react-router';
+import { ChevronDown, ChevronUp } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
 import type { TaskGraph } from '@/lib/task/task-dag-graph';
 import type { TaskNode } from '@/lib/types/task';
 import { cn } from '@/lib/utils';
+import { filterTasksByTitleFuzzySearch } from '@/ui/app/pages/task-title-fuzzy-search';
 
 const STATUS_LABEL: Record<TaskNode['status'], string> = {
   pending: '待办',
@@ -11,32 +14,47 @@ const STATUS_LABEL: Record<TaskNode['status'], string> = {
   cancelled: '已取消',
 };
 
-function resolveExecutionHint(status: TaskNode['status'], isExecutable: boolean, isBlocked: boolean): string {
-  if (status === 'in_progress') return '进行中';
-  if (status === 'suspended') return '已挂起';
-  if (isExecutable && isBlocked) return '可执行（软阻塞提醒）';
-  if (isExecutable) return '可直接开始';
-  if (isBlocked) return '受阻';
-  return '待处理';
-}
+const STATUS_DOT: Record<string, string> = {
+  pending: 'bg-[#A8A29E]',
+  in_progress: 'bg-[#22C55E]',
+  suspended: 'bg-[#D97706]',
+  completed: 'bg-[#16A34A]',
+  cancelled: 'bg-[#6B7280]',
+};
 
 export function TaskCurrentRootCard({
   graph,
   taskById,
   currentTaskId,
   className,
+  searchQuery,
+  collapsible = false,
+  collapsedVisibleCount = 3,
 }: {
   graph: TaskGraph;
   taskById: Map<string, TaskNode>;
   currentTaskId?: string;
   className?: string;
+  searchQuery?: string;
+  collapsible?: boolean;
+  collapsedVisibleCount?: number;
 }) {
-  const currentRootTask = graph.currentRootNodeId ? taskById.get(graph.currentRootNodeId) ?? null : null;
-  const currentRootNode = graph.currentRootNodeId
-    ? graph.nodes.find((node) => node.id === graph.currentRootNodeId) ?? null
-    : null;
-  const isViewingCurrentRoot = Boolean(currentRootTask && currentTaskId === currentRootTask.id);
-  const currentRootOrder = currentRootTask ? graph.currentRootCandidateNodeIds.indexOf(currentRootTask.id) + 1 : 0;
+  const [collapsed, setCollapsed] = useState(true);
+  const unblockedTasks = useMemo(() => graph.currentRootCandidateNodeIds
+    .map((id) => taskById.get(id))
+    .filter((task): task is TaskNode => task != null), [graph.currentRootCandidateNodeIds, taskById]);
+  const filteredTasks = useMemo(
+    () => filterTasksByTitleFuzzySearch(unblockedTasks, searchQuery ?? ''),
+    [searchQuery, unblockedTasks],
+  );
+  const shouldCollapse = collapsible && filteredTasks.length > collapsedVisibleCount;
+  const visibleTasks = shouldCollapse && collapsed
+    ? filteredTasks.slice(0, collapsedVisibleCount)
+    : filteredTasks;
+
+  useEffect(() => {
+    setCollapsed(true);
+  }, [collapsedVisibleCount, searchQuery]);
 
   return (
     <section
@@ -46,59 +64,55 @@ export function TaskCurrentRootCard({
         className,
       )}
     >
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div className="min-w-0 flex-1">
-          <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">当前根节点</p>
-          {currentRootTask && currentRootNode ? (
-            <>
-              <div className="mt-2 flex flex-wrap items-center gap-2">
-                {isViewingCurrentRoot ? (
-                  <span className="rounded-full bg-[#FEF3C7] px-2.5 py-1 text-[10px] font-semibold text-[#B45309]">
-                    当前查看中
-                  </span>
-                ) : null}
-                <span className="rounded-full bg-[#F5F0ED] px-2.5 py-1 text-[10px] font-semibold text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
-                  {STATUS_LABEL[currentRootTask.status]}
-                </span>
-                <span className="rounded-full bg-[#EFF6FF] px-2.5 py-1 text-[10px] font-semibold text-[#2563EB] dark:bg-[#1E293B] dark:text-[#93C5FD]">
-                  {resolveExecutionHint(currentRootNode.status, currentRootNode.isExecutable, currentRootNode.isBlocked)}
-                </span>
-              </div>
-              <p className="mt-3 truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{currentRootTask.title}</p>
-              <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                {`共 ${graph.currentRootCandidateNodeIds.length} 个未阻塞节点 · 当前按稳定顺序排第 ${currentRootOrder} 个`}
-              </p>
-            </>
-          ) : (
-            <>
-              <p className="mt-3 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">暂无未阻塞节点</p>
-              <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                当前所有未终态节点都被依赖关系阻塞，可前往 DAG 视图检查阻塞来源。
-              </p>
-            </>
-          )}
-        </div>
-
-        <div className="flex flex-wrap gap-2">
-          {currentRootTask ? (
-            <Link
-              data-testid="task-current-root-link"
-              to="/tasks/$taskId"
-              params={{ taskId: currentRootTask.id }}
-              className="inline-flex items-center rounded-full bg-[#C75B3A] px-3 py-2 text-xs font-semibold text-white"
-            >
-              {isViewingCurrentRoot ? '查看当前根节点' : '跳到当前根节点'}
-            </Link>
-          ) : null}
-          <Link
-            data-testid="task-current-root-dag-link"
-            to="/tasks/dag"
-            className="inline-flex items-center rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+      <div className="flex items-start justify-between gap-3">
+        <p className="text-[11px] font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">
+          未阻塞节点 · {filteredTasks.length}
+        </p>
+        {shouldCollapse ? (
+          <button
+            type="button"
+            data-testid="task-current-root-card-collapse-toggle"
+            className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[#E7E5E4] px-2 py-1 text-[11px] font-medium text-[#78716C] dark:border-[#292524] dark:text-[#A8A29E]"
+            onClick={() => setCollapsed((value) => !value)}
           >
-            查看 DAG 视图
-          </Link>
-        </div>
+            {collapsed ? <ChevronDown size={14} /> : <ChevronUp size={14} />}
+            <span>{collapsed ? '展开' : '收起'}</span>
+          </button>
+        ) : null}
       </div>
+      {filteredTasks.length > 0 ? (
+        <ul className="mt-2 space-y-1">
+          {visibleTasks.map((task) => (
+            <li key={task.id} className="flex items-center gap-2">
+              <span className={`h-1.5 w-1.5 shrink-0 rounded-full ${STATUS_DOT[task.status] ?? 'bg-[#A8A29E]'}`} />
+              <Link
+                to="/tasks/$taskId"
+                params={{ taskId: task.id }}
+                data-testid={`task-current-root-card-link-${task.id}`}
+                className={cn(
+                  'truncate text-sm hover:underline',
+                  currentTaskId === task.id
+                    ? 'font-semibold text-[#C75B3A]'
+                    : 'text-[#1C1917] dark:text-[#FAFAF9]',
+                )}
+              >
+                {task.title}
+              </Link>
+              <span className="shrink-0 rounded-full bg-[#F5F0ED] px-1.5 py-0.5 text-[10px] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
+                {STATUS_LABEL[task.status]}
+              </span>
+            </li>
+          ))}
+        </ul>
+      ) : searchQuery ? (
+        <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+          没有匹配标题的未阻塞节点
+        </p>
+      ) : (
+        <p className="mt-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
+          所有未终态节点都被依赖关系阻塞
+        </p>
+      )}
     </section>
   );
 }

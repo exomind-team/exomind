@@ -145,6 +145,12 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   subscribeVoiceTranscriptSendModeChanges: () => () => {},
 }));
 
+vi.mock('@/config/input-send-mode', () => ({
+  getInputSendMode: () => 'ctrl-enter-send',
+  setInputSendMode: vi.fn(),
+  subscribeInputSendModeChanges: () => () => {},
+}));
+
 vi.mock('@/config/voice-shortcut-hotkey', () => ({
   VOICE_SHORTCUT_HOTKEY_VALUES: ['Alt+Q', 'Alt+W'],
   getVoiceShortcutHotkey: () => 'Alt+Q',

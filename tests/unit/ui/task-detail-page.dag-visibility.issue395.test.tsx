@@ -56,12 +56,15 @@ const loadActiveBlockMock = vi.fn<() => Promise<ActiveBlockData | null>>();
 const onBlockChangeMock = vi.fn(() => () => {});
 const pauseBlockMock = vi.fn<() => Promise<void>>();
 const calculateSpentMinutesMock = vi.fn<(taskId: string) => Promise<number>>();
-const getEventsMock = vi.fn<() => Promise<Array<{ id: string; content: string; createdAt: string; type?: string }>>>();
+const loadEventsMock = vi.fn<
+  () => Promise<Array<{ id: string; timestamp?: number | string | Date; content: string; tags?: Set<string> }>>
+>();
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
   useParams: () => ({ taskId: 'task-1' }),
   useNavigate: () => navigateMock,
+  useLocation: () => ({ pathname: '/tasks/task-1', searchStr: '' }),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -88,11 +91,8 @@ vi.mock('@/lib/services', () => ({
     calculateSpentMinutes: calculateSpentMinutesMock,
     startBlockForTask: vi.fn(),
   }),
-}));
-
-vi.mock('@/lib/storage/event-storage', () => ({
-  getEventStorage: () => ({
-    getEvents: getEventsMock,
+  getEventLogService: () => ({
+    loadEvents: loadEventsMock,
   }),
 }));
 
@@ -189,8 +189,8 @@ describe('TaskDetailPage DAG visibility issue #395', () => {
 
     calculateSpentMinutesMock.mockReset();
     calculateSpentMinutesMock.mockResolvedValue(15);
-    getEventsMock.mockReset();
-    getEventsMock.mockResolvedValue([]);
+    loadEventsMock.mockReset();
+    loadEventsMock.mockResolvedValue([]);
   });
 
   it('renders dependency graph and supports collapse / expand upstream from current task', async () => {
@@ -238,6 +238,54 @@ describe('TaskDetailPage DAG visibility issue #395', () => {
     expect(screen.getByTestId('task-dag-node-task-2')).toHaveTextContent('已隐藏 1 项');
     expect(screen.getByTestId('task-dag-node-task-1')).toHaveTextContent('已隐藏 1 项');
     expect(screen.getByTestId('task-dag-node-task-3')).toHaveTextContent('已隐藏 1 项');
+  });
+
+  it('supports collapse downstream from the dependency inspect card', async () => {
+    renderPage();
+
+    expect(await screen.findByText('依赖图')).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-toggle-downstream-task-1')).toBeEnabled();
+
+    fireEvent.click(screen.getByTestId('task-dag-toggle-downstream-task-1'));
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-node-task-3')).not.toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('task-dag-node-task-1')).toHaveTextContent('下游已隐藏 1 项');
+    expect(screen.getByTestId('task-dag-toggle-downstream-task-1')).toHaveTextContent('展开下游');
+  });
+
+  it('disables unsafe upstream collapse just like downstream（不安全的上游折叠同样禁用）', async () => {
+    tasksState = [
+      makeTask({
+        id: 'task-1',
+        title: '当前任务',
+        dependsOn: [{ taskId: 'task-2', type: 'hard' }],
+      }),
+      makeTask({
+        id: 'task-2',
+        title: '共享前置',
+      }),
+      makeTask({
+        id: 'task-3',
+        title: '范围外分支',
+        dependsOn: [
+          { taskId: 'task-2', type: 'hard' },
+          { taskId: 'task-4', type: 'hard' },
+        ],
+      }),
+      makeTask({
+        id: 'task-4',
+        title: '范围外前置',
+      }),
+    ];
+
+    renderPage();
+
+    expect(await screen.findByText('依赖图')).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-toggle-upstream-task-1')).toBeDisabled();
+    expect(screen.getByTestId('task-dag-toggle-downstream-task-1')).toBeDisabled();
   });
 
   it('disables current-root guidance in the detail panel when the source graph is cyclic', async () => {

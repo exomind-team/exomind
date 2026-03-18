@@ -1,4 +1,3 @@
-import { setTasksDefaultTab } from '@/config/tasks-default-tab';
 import type { CommandDefinition } from '@/lib/types/command-palette';
 
 export type CoreNavigationPath = '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/me' | '/agents';
@@ -6,11 +5,16 @@ export type CoreNavigationPath = '/eventlog' | '/tasks' | '/reminders' | '/setti
 interface CreateCoreNavigationCommandsOptions {
   navigate: (path: CoreNavigationPath) => Promise<void> | void;
   openReminderComposer?: () => void;
+  featureFlags?: {
+    mePageEnabled?: boolean;
+  };
 }
 
 export function createCoreNavigationCommands(
   options: CreateCoreNavigationCommandsOptions,
 ): CommandDefinition[] {
+  const mePageEnabled = options.featureFlags?.mePageEnabled ?? true;
+
   return [
     {
       id: 'navigate:now',
@@ -64,7 +68,7 @@ export function createCoreNavigationCommands(
         return { ok: true };
       },
     },
-    {
+    ...(mePageEnabled ? [{
       id: 'navigate:me',
       title: '打开 Me',
       description: '跳转到用户页面',
@@ -76,7 +80,7 @@ export function createCoreNavigationCommands(
         await options.navigate('/me');
         return { ok: true };
       },
-    },
+    } satisfies CommandDefinition] : []),
     {
       id: 'navigate:reminders',
       title: '打开提醒',
@@ -135,7 +139,6 @@ export function createCoreNavigationCommands(
       aliases: ['目标', 'goals', '长期'],
       keywords: ['长期任务', 'strategy'],
       async execute() {
-        setTasksDefaultTab('now');
         await options.navigate('/tasks');
         return { ok: true };
       },

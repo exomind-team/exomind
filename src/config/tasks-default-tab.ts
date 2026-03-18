@@ -1,6 +1,6 @@
 export const TASKS_DEFAULT_TAB_STORAGE_KEY = 'exomind:tasks-default-tab';
 
-export const TASKS_DEFAULT_TAB_VALUES = ['now', 'today', 'week', 'month'] as const;
+export const TASKS_DEFAULT_TAB_VALUES = ['now', 'today', 'week', 'month', 'dag'] as const;
 export type TasksDefaultTab = (typeof TASKS_DEFAULT_TAB_VALUES)[number];
 
 function normalizeTab(rawValue: string | null): TasksDefaultTab | null {

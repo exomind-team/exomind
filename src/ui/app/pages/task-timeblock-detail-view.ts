@@ -9,7 +9,7 @@ export interface TimeblockBadge {
 }
 
 export interface TimeblockSummaryMetric {
-  key: 'start' | 'end' | 'duration' | 'expected' | 'event_count';
+  key: 'start' | 'end' | 'duration' | 'expected' | 'event_count' | 'blockCount';
   label: string;
   value: string;
 }
@@ -57,7 +57,7 @@ export interface TimeblockAiSummary {
 }
 
 export interface TimeblockActionItem {
-  id: 'back-source' | 'open-task' | 'open-eventlog' | 'restart' | 'copy-summary';
+  id: 'open-task' | 'copy-summary';
   label: string;
   to?: string;
   search?: Record<string, string>;
@@ -70,6 +70,15 @@ export interface TimeblockEventLog {
   type?: string;
 }
 
+export interface LinkedBlockItem {
+  startId: string;
+  name: string;
+  startLabel: string;
+  endLabel: string;
+  durationLabel: string;
+  isActive: boolean;
+}
+
 export interface TaskTimeblockDetailViewModel {
   summary: TimeblockSummary;
   anchors: TimeblockAnchorItem[];
@@ -77,6 +86,7 @@ export interface TaskTimeblockDetailViewModel {
   timeline: TimeblockTimeline;
   aiSummary: TimeblockAiSummary;
   actions: TimeblockActionItem[];
+  linkedBlocks: LinkedBlockItem[];
 }
 
 export interface BuildTaskTimeblockDetailViewModelInput {
@@ -88,11 +98,6 @@ export interface BuildTaskTimeblockDetailViewModelInput {
   reviewMarkdown?: string;
   useMockData?: boolean;
   now?: Date;
-  backAction?: {
-    label: string;
-    to: string;
-    search?: Record<string, string>;
-  };
 }
 
 const STATUS_BADGE_LABEL: Record<TaskNode['status'], string> = {
@@ -133,19 +138,24 @@ function resolveBlockForTask(
   activeBlock: ActiveBlockData | null | undefined,
   preferredBlockId: string | undefined,
   nowTs: number,
-): TimeBlock {
+): TimeBlock | null {
   if (preferredBlockId) {
     const preferred = blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId);
     if (preferred) return preferred;
   }
 
-  const taskBlockIds = new Set((task.timeBlockIds ?? []).map((value) => value.trim()));
+  const taskBlockIds = new Set((task.timeBlockIds ?? []).map((value) => value.trim()).filter(Boolean));
   const linkedBlocks = blocks.filter((block) => taskBlockIds.has(block.startId) || taskBlockIds.has(block.id));
   const sortedLinkedBlocks = linkedBlocks.sort((left, right) => right.endTime - left.endTime);
   const latestLinked = sortedLinkedBlocks[0];
   if (latestLinked) return latestLinked;
 
-  if (activeBlock && activeBlock.taskId === task.id) {
+  const activeTaskIds = activeBlock?.taskIds ?? [];
+  const isLinkedActiveBlock = activeBlock
+    ? activeTaskIds.includes(task.id) || activeBlock.taskId === task.id
+    : false;
+
+  if (activeBlock && isLinkedActiveBlock) {
     return {
       id: activeBlock.startId,
       startId: activeBlock.startId,
@@ -158,20 +168,11 @@ function resolveBlockForTask(
     };
   }
 
-  const fallbackTs = task.updatedAt || nowTs;
-  return {
-    id: `task-${task.id}-fallback`,
-    startId: `task-${task.id}-fallback`,
-    endId: `task-${task.id}-fallback-end`,
-    name: task.title,
-    note: task.description,
-    tags: new Set(['block_feedback']),
-    startTime: fallbackTs,
-    endTime: fallbackTs,
-  };
+  return null;
 }
 
-function resolveDurationMinutes(block: TimeBlock): number {
+function resolveDurationMinutes(block: TimeBlock | null): number {
+  if (!block) return 0;
   return Math.max(0, Math.round((block.endTime - block.startTime) / 60_000));
 }
 
@@ -316,12 +317,21 @@ function resolveEventTone(type: string | undefined): TimeblockEventTone {
   return 'neutral';
 }
 
-function buildRealTimeline(block: TimeBlock, eventLogs: TimeblockEventLog[]): TimeblockTimeline {
+type TimeRange = { startTime: number; endTime: number };
+
+function buildRealTimeline(ranges: TimeRange[], eventLogs: TimeblockEventLog[]): TimeblockTimeline {
+  if (ranges.length === 0) {
+    return {
+      sectionTitle: '事件时间线',
+      items: [],
+    };
+  }
+
   const items = eventLogs
     .map((event) => {
       const timestamp = parseEventTimestamp(event.createdAt);
       if (timestamp === null) return null;
-      if (timestamp < block.startTime || timestamp > block.endTime) return null;
+      if (!ranges.some((range) => timestamp >= range.startTime && timestamp <= range.endTime)) return null;
 
       return {
         id: event.id,
@@ -344,10 +354,10 @@ function buildRealTimeline(block: TimeBlock, eventLogs: TimeblockEventLog[]): Ti
       sectionTitle: '事件时间线',
       items: [
         {
-          id: `${block.startId}-empty`,
+          id: 'timeline-empty',
           title: '暂无事件记录',
-          timeLabel: formatDateTime(block.startTime),
-          description: '该时间块范围内未检索到 EventLog 事件。',
+          timeLabel: '—',
+          description: '该时间块范围内未检索到事件日志。',
           tone: 'neutral',
         },
       ],
@@ -360,18 +370,20 @@ function buildRealTimeline(block: TimeBlock, eventLogs: TimeblockEventLog[]): Ti
   };
 }
 
-function buildPlanActual(task: TaskNode, block: TimeBlock, scheduleBadge: TimeblockBadge | null): TimeblockPlanActual {
+function buildPlanActual(task: TaskNode, block: TimeBlock | null, scheduleBadge: TimeblockBadge | null): TimeblockPlanActual {
   const planDuration = task.estimatedMinutes ? `（预计 ${formatMinutes(task.estimatedMinutes)}）` : '';
   const actualDuration = resolveDurationMinutes(block);
-  const diffReason = scheduleBadge
-    ? `与计划对比：${scheduleBadge.label}。`
-    : hasBlockerHint(block.note)
-      ? '执行中出现阻塞，已在时间块内处理并恢复。'
-      : '执行与计划基本一致。';
+  const diffReason = block
+    ? scheduleBadge
+      ? `与计划对比：${scheduleBadge.label}。`
+      : hasBlockerHint(block.note)
+        ? '执行中出现阻塞，已在时间块内处理并恢复。'
+        : '执行与计划基本一致。'
+    : '开始时间块后可生成实际记录。';
 
   return {
     planContent: `计划：${task.title}${planDuration}`,
-    actualContent: `实际：${block.name}（耗时 ${formatMinutes(actualDuration)}）${block.note ? `；备注：${block.note}` : ''}`,
+    actualContent: block ? `实际：${block.name}（耗时 ${formatMinutes(actualDuration)}）` : '实际：暂无时间块记录',
     diffReason,
   };
 }
@@ -387,37 +399,82 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     nowTs,
   );
   const actualMinutes = resolveDurationMinutes(block);
-  const scheduleBadge = resolveScheduleBadge(input.task.estimatedMinutes, actualMinutes);
+  const scheduleBadge = block ? resolveScheduleBadge(input.task.estimatedMinutes, actualMinutes) : null;
   const statusBadge: TimeblockBadge = {
     label: STATUS_BADGE_LABEL[input.task.status],
     tone: input.task.status === 'completed' ? 'success' : input.task.status === 'cancelled' ? 'danger' : 'neutral',
   };
-  const aiSummary = buildAiSummary(block.name, input.reviewMarkdown);
+  const summaryBlockName = block?.name ?? input.task.title;
+  const aiSummary = buildAiSummary(summaryBlockName, input.reviewMarkdown);
+
+  const taskBlockIds = new Set((input.task.timeBlockIds ?? []).map((v) => v.trim()).filter(Boolean));
+  const completedLinked = input.blocks
+    .filter((b) => taskBlockIds.has(b.startId) || taskBlockIds.has(b.id))
+    .sort((a, b) => b.endTime - a.endTime);
+  const timelineRanges: TimeRange[] = completedLinked.map((linked) => ({
+    startTime: linked.startTime,
+    endTime: linked.endTime,
+  }));
+  if (input.activeBlock && input.activeBlock.taskId === input.task.id) {
+    timelineRanges.push({ startTime: input.activeBlock.startTime, endTime: nowTs });
+  }
+
+  const mockBlock: TimeBlock = block ?? {
+    id: `task-${input.task.id}-mock`,
+    startId: `task-${input.task.id}-mock`,
+    endId: `task-${input.task.id}-mock`,
+    name: summaryBlockName,
+    note: input.task.description,
+    tags: new Set(['block_feedback']),
+    startTime: nowTs,
+    endTime: nowTs,
+  };
   const timeline = useMockData
-    ? buildMockTimeline(block, aiSummary, nowTs)
-    : buildRealTimeline(block, input.eventLogs ?? []);
+    ? timelineRanges.length > 0
+      ? buildMockTimeline(mockBlock, aiSummary, nowTs)
+      : { sectionTitle: '事件时间线', items: [] }
+    : buildRealTimeline(timelineRanges, input.eventLogs ?? []);
 
   const badges = scheduleBadge ? [statusBadge, scheduleBadge] : [statusBadge];
+  const blockCount = completedLinked.length;
+
+  const linkedBlocks: LinkedBlockItem[] = completedLinked.map((b) => ({
+    startId: b.startId,
+    name: b.name,
+    startLabel: formatDateTime(b.startTime),
+    endLabel: formatDateTime(b.endTime),
+    durationLabel: formatMinutes(resolveDurationMinutes(b)),
+    isActive: false,
+  }));
+
+  if (input.activeBlock && input.activeBlock.taskId === input.task.id) {
+    const ab = input.activeBlock;
+    linkedBlocks.unshift({
+      startId: ab.startId,
+      name: ab.name,
+      startLabel: formatDateTime(ab.startTime),
+      endLabel: '进行中',
+      durationLabel: formatMinutes(Math.max(0, Math.round((nowTs - ab.startTime) / 60_000))),
+      isActive: true,
+    });
+  }
+
   const metrics: TimeblockSummaryMetric[] = [
-    { key: 'start', label: '开始', value: formatClock(block.startTime) },
-    { key: 'end', label: '结束', value: formatClock(block.endTime) },
+    { key: 'start', label: '开始', value: block ? formatClock(block.startTime) : '—' },
+    { key: 'end', label: '结束', value: block ? formatClock(block.endTime) : '—' },
+    { key: 'expected', label: '预期', value: input.task.estimatedMinutes ? formatMinutes(input.task.estimatedMinutes) : '正计时' },
     { key: 'duration', label: '时长', value: formatMinutes(actualMinutes) },
-    { key: 'expected', label: '预期', value: input.task.estimatedMinutes ? formatMinutes(input.task.estimatedMinutes) : '未估时' },
     { key: 'event_count', label: '事件数', value: `${timeline.items.length}` },
+    { key: 'blockCount', label: '时间块数', value: String(blockCount) },
   ];
   const actions: TimeblockActionItem[] = [
-    ...(input.backAction
-      ? [{ id: 'back-source', label: input.backAction.label, to: input.backAction.to, search: input.backAction.search } as const]
-      : []),
     { id: 'open-task', label: '查看关联任务', to: `/tasks/${input.task.id}` },
-    { id: 'open-eventlog', label: '打开 EventLog', to: '/eventlog' },
-    { id: 'restart', label: '再来一个时间块' },
     { id: 'copy-summary', label: '复制总结' },
   ];
 
   return {
     summary: {
-      blockName: block.name,
+      blockName: summaryBlockName,
       badges,
       taskLinkLabel: input.task.title,
       metrics,
@@ -432,5 +489,6 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     timeline,
     aiSummary,
     actions,
+    linkedBlocks,
   };
 }

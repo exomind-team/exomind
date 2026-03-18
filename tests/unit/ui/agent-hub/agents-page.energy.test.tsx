@@ -1,12 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
 import type { AgentEnergySnapshot } from '@/lib/types/agent-hub';
 import type { RuntimeAggregatedAgent } from '@/services/runtime-manager';
 import {
   buildListSectionsFromRuntimeAgents,
   ENERGY_PHASE_COLORS,
   mapRuntimeStatusToNodeStatus,
-} from '@/ui/app/pages/AgentsPage';
+} from '@/ui/app/pages/agents/agents-utils';
 
 vi.mock('@xyflow/react', () => ({
   ReactFlow: () => null,

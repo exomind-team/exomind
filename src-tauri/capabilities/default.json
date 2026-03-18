@@ -9,6 +9,7 @@
     "clipboard-manager:allow-read-text",
     "clipboard-manager:allow-write-text",
     "core:window:allow-set-title",
+    "core:window:allow-set-fullscreen",
     "mcp-bridge:default",
     "global-shortcut:allow-register",
     "global-shortcut:allow-unregister",

@@ -227,6 +227,14 @@ describe('ChatPage 架构边界', () => {
     expect(source).not.toContain('getEventStorage(currentUser || undefined)');
     expect(source).toContain('activeProfileId');
   });
+
+  it('记录 Tab 复用时可显式关闭内置专注计时器（showTimerWidget）', () => {
+    const source = readFileSync('src/components/Chat/ChatPage.tsx', 'utf-8');
+
+    expect(source).toContain('showTimerWidget?: boolean');
+    expect(source).toContain('showTimerWidget = true');
+    expect(source).toContain("variant === 'new-mobile' && showTimerWidget ? (");
+  });
 });
 
 describe('ChatPage 消息发送逻辑', () => {

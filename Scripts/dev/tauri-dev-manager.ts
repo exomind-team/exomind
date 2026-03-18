@@ -5,7 +5,11 @@ import { createServer } from 'node:net';
 import { access, mkdir, open, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import {
+  appendManagedTauriLogSessionStart,
+  collectManagedTauriCleanupPids,
+  evaluateManagedTauriInstanceHealth,
   resolveManagedTauriInstancePaths,
+  type ManagedTauriInstanceHealthSnapshot,
   type ManagedTauriInstanceRecord,
   type TauriDevTarget,
 } from './tauri-dev-manager-lib';
@@ -19,6 +23,19 @@ type ParsedArgs = {
 
 const PROJECT_ROOT = process.cwd();
 const DEFAULT_WEB_PORT = 1420;
+const WINDOWS_TOOL_PROCESS_NAMES = new Set(['bun.exe', 'cargo.exe', 'node.exe', 'vite.exe']);
+const desktopProcessNameCache = new Map<string, Promise<string | null>>();
+
+type WindowsProcessInfo = {
+  ProcessId: number;
+  ParentProcessId: number;
+  Name: string;
+};
+
+type PortListenerInfo = {
+  LocalPort: number;
+  OwningProcess: number;
+};
 
 function printUsage(): never {
   console.log(`Usage:
@@ -171,6 +188,171 @@ function escapePowerShellLiteral(value: string): string {
   return value.replaceAll("'", "''");
 }
 
+function normalizeJsonArray<T>(value: T | T[] | null | undefined): T[] {
+  if (!value) return [];
+  return Array.isArray(value) ? value : [value];
+}
+
+function runPowerShellJson<T>(script: string): T[] {
+  const result = spawnSync(
+    'powershell.exe',
+    [
+      '-NoProfile',
+      '-Command',
+      script,
+    ],
+    {
+      cwd: PROJECT_ROOT,
+      encoding: 'utf8',
+      windowsHide: true,
+    },
+  );
+
+  if (result.status !== 0) {
+    const stderr = result.stderr?.trim();
+    const stdout = result.stdout?.trim();
+    throw new Error(stderr || stdout || 'powershell health probe failed');
+  }
+
+  const raw = result.stdout.trim();
+  if (!raw) {
+    return [];
+  }
+
+  return normalizeJsonArray(JSON.parse(raw) as T | T[] | null);
+}
+
+function getDescendantProcesses(processes: WindowsProcessInfo[], rootPid: number): WindowsProcessInfo[] {
+  const childrenByParent = new Map<number, WindowsProcessInfo[]>();
+  for (const processInfo of processes) {
+    const siblings = childrenByParent.get(processInfo.ParentProcessId) ?? [];
+    siblings.push(processInfo);
+    childrenByParent.set(processInfo.ParentProcessId, siblings);
+  }
+
+  const descendants: WindowsProcessInfo[] = [];
+  const queue = [...(childrenByParent.get(rootPid) ?? [])];
+  const seen = new Set<number>();
+
+  while (queue.length > 0) {
+    const current = queue.shift();
+    if (!current || seen.has(current.ProcessId)) {
+      continue;
+    }
+
+    seen.add(current.ProcessId);
+    descendants.push(current);
+    queue.push(...(childrenByParent.get(current.ProcessId) ?? []));
+  }
+
+  return descendants;
+}
+
+async function resolveDesktopProcessBaseName(projectRoot: string): Promise<string | null> {
+  const cached = desktopProcessNameCache.get(projectRoot);
+  if (cached) {
+    return await cached;
+  }
+
+  const pending = (async () => {
+    try {
+      const cargoTomlPath = path.join(projectRoot, 'src-tauri', 'Cargo.toml');
+      const cargoToml = await readFile(cargoTomlPath, 'utf8');
+      const packageSectionMatch = cargoToml.match(/\[package\][\s\S]*?^name\s*=\s*"([^"]+)"/m);
+      return packageSectionMatch?.[1]?.trim() || null;
+    } catch {
+      return null;
+    }
+  })();
+
+  desktopProcessNameCache.set(projectRoot, pending);
+  return await pending;
+}
+
+function matchesDesktopProcessName(name: string, expectedBaseName: string | null): boolean {
+  const normalized = name.trim().toLowerCase();
+  if (expectedBaseName) {
+    const expected = expectedBaseName.trim().toLowerCase();
+    return normalized === expected || normalized === `${expected}.exe`;
+  }
+
+  return !WINDOWS_TOOL_PROCESS_NAMES.has(normalized);
+}
+
+function groupListenerPidsByPort(portListeners: PortListenerInfo[], port: number): number[] {
+  return [...new Set(
+    portListeners
+      .filter((listener) => listener.LocalPort === port)
+      .map((listener) => listener.OwningProcess)
+      .filter((pid) => Number.isInteger(pid) && pid > 0),
+  )];
+}
+
+async function collectManagedTauriHealthSnapshot(
+  record: ManagedTauriInstanceRecord,
+): Promise<ManagedTauriInstanceHealthSnapshot> {
+  const rootPidAlive = isPidAlive(record.rootPid);
+  const portProbeScript = [
+    `$ports = @(${record.webPort}, ${record.hmrPort})`,
+    "Get-NetTCPConnection -State Listen -ErrorAction SilentlyContinue | Where-Object { $ports -contains $_.LocalPort } | Select-Object LocalPort, OwningProcess | ConvertTo-Json -Compress",
+  ].join('; ');
+  const portListeners = runPowerShellJson<PortListenerInfo>(portProbeScript);
+  const webPortPids = groupListenerPidsByPort(portListeners, record.webPort);
+  const hmrPortPids = groupListenerPidsByPort(portListeners, record.hmrPort);
+
+  if (record.target !== 'desktop') {
+    return {
+      rootPidAlive,
+      webPortListening: webPortPids.length > 0,
+      hmrPortListening: hmrPortPids.length > 0,
+      webPortPids,
+      hmrPortPids,
+    };
+  }
+
+  if (!rootPidAlive) {
+    return {
+      rootPidAlive,
+      webPortListening: webPortPids.length > 0,
+      hmrPortListening: hmrPortPids.length > 0,
+      appProcessAlive: false,
+      webPortPids,
+      hmrPortPids,
+      appPids: [],
+    };
+  }
+
+  const expectedDesktopProcess = await resolveDesktopProcessBaseName(record.projectRoot);
+  const processes = runPowerShellJson<WindowsProcessInfo>(
+    'Get-CimInstance Win32_Process | Select-Object ProcessId, ParentProcessId, Name | ConvertTo-Json -Compress',
+  );
+  const descendants = getDescendantProcesses(processes, record.rootPid);
+  const appPids = descendants
+    .filter((processInfo) => matchesDesktopProcessName(processInfo.Name, expectedDesktopProcess))
+    .map((processInfo) => processInfo.ProcessId);
+
+  return {
+    rootPidAlive,
+    webPortListening: webPortPids.length > 0,
+    hmrPortListening: hmrPortPids.length > 0,
+    appProcessAlive: appPids.length > 0,
+    webPortPids,
+    hmrPortPids,
+    appPids,
+  };
+}
+
+function stopWindowsProcess(pid: number): void {
+  const result = spawnSync('taskkill', ['/PID', String(pid), '/T', '/F'], {
+    encoding: 'utf8',
+    windowsHide: true,
+  });
+
+  if (result.status !== 0 && isPidAlive(pid)) {
+    throw new Error(result.stderr || result.stdout || `failed to stop PID ${pid}`);
+  }
+}
+
 function parseTarget(flags: Map<string, string | true>): TauriDevTarget {
   const raw = getFlagValue(flags, '--target');
   if (!raw) return 'desktop';
@@ -194,10 +376,6 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     throw new Error(`instance already running: ${paths.name} (PID ${existing.rootPid})`);
   }
 
-  if (await fileExists(paths.logPath)) {
-    await rm(paths.logPath, { force: true });
-  }
-
   const env = {
     ...process.env,
     EXOMIND_WEB_PORT: String(webPort),
@@ -205,6 +383,15 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     EXOMIND_TAURI_INSTANCE_NAME: paths.name,
     ...(enableWatch ? { EXOMIND_TAURI_ENABLE_WATCH: '1' } : {}),
   };
+  const startedAt = new Date().toISOString();
+
+  await appendManagedTauriLogSessionStart(paths.logPath, {
+    name: paths.name,
+    target,
+    webPort,
+    hmrPort,
+    startedAt,
+  });
 
   const logHandle = await open(paths.logPath, 'a');
   const tauriArgs = target === 'android'
@@ -228,7 +415,7 @@ async function startCommand(flags: Map<string, string | true>): Promise<void> {
     hmrPort,
     logPath: paths.logPath,
     metaPath: paths.metaPath,
-    startedAt: new Date().toISOString(),
+    startedAt,
     enableWatch,
     target,
   };
@@ -257,14 +444,19 @@ async function listCommand(): Promise<void> {
     return;
   }
 
-  const rows = records.map((record) => ({
-    name: record.name,
-    target: record.target ?? 'desktop',
-    pid: record.rootPid,
-    status: isPidAlive(record.rootPid) ? 'running' : 'stale',
-    web: `http://localhost:${record.webPort}`,
-    hmr: record.hmrPort,
-    log: path.relative(PROJECT_ROOT, record.logPath),
+  const rows = await Promise.all(records.map(async (record) => {
+    const snapshot = await collectManagedTauriHealthSnapshot(record);
+    const health = evaluateManagedTauriInstanceHealth(record, snapshot);
+    return {
+      name: record.name,
+      target: record.target ?? 'desktop',
+      pid: record.rootPid,
+      status: health.status,
+      detail: health.detail,
+      web: `http://localhost:${record.webPort}`,
+      hmr: record.hmrPort,
+      log: path.relative(PROJECT_ROOT, record.logPath),
+    };
   }));
 
   console.table(rows);
@@ -282,15 +474,11 @@ async function stopCommand(flags: Map<string, string | true>): Promise<void> {
     throw new Error(`instance not found: ${paths.name}`);
   }
 
-  if (isPidAlive(record.rootPid)) {
-    const result = spawnSync('taskkill', ['/PID', String(record.rootPid), '/T', '/F'], {
-      encoding: 'utf8',
-      windowsHide: true,
-    });
+  const snapshot = await collectManagedTauriHealthSnapshot(record);
+  const cleanupPids = collectManagedTauriCleanupPids(record, snapshot);
 
-    if (result.status !== 0) {
-      throw new Error(result.stderr || result.stdout || `failed to stop PID ${record.rootPid}`);
-    }
+  for (const pid of cleanupPids) {
+    stopWindowsProcess(pid);
   }
 
   await rm(paths.metaPath, { force: true });
@@ -339,7 +527,10 @@ async function pruneCommand(): Promise<void> {
   let removed = 0;
 
   for (const record of records) {
-    if (isPidAlive(record.rootPid)) {
+    const snapshot = await collectManagedTauriHealthSnapshot(record);
+    const cleanupPids = collectManagedTauriCleanupPids(record, snapshot);
+
+    if (snapshot.rootPidAlive || cleanupPids.length > 0) {
       continue;
     }
 

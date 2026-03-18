@@ -3,7 +3,7 @@ use std::sync::Mutex;
 
 use rusqlite::{params, Connection, OptionalExtension};
 
-use super::store::TaskStoreError;
+use super::store::{TaskStoreError, validate_dependency_update, validate_terminal_task_update};
 use super::types::{
     CreateTaskInput, Task, TaskDependency, TaskPriority, TaskStatus, UpdateTaskInput,
 };
@@ -149,8 +149,10 @@ impl SqliteTaskStore {
             .get_scoped(scope_key, id)?
             .ok_or_else(|| TaskStoreError::NotFound(id.to_string()))?;
 
-        if task.status.is_terminal() {
-            return Err(TaskStoreError::TerminalState(task.status));
+        validate_terminal_task_update(task.status, &input)?;
+        if let Some(depends_on) = input.depends_on.as_ref() {
+            let tasks = self.list_scoped(scope_key)?;
+            validate_dependency_update(id, depends_on, tasks.iter())?;
         }
 
         if let Some(title) = input.title {
@@ -175,7 +177,7 @@ impl SqliteTaskStore {
             task.due_at = Some(due_at);
         }
         if let Some(estimated_minutes) = input.estimated_minutes {
-            task.estimated_minutes = Some(estimated_minutes);
+            task.estimated_minutes = estimated_minutes;
         }
         if let Some(parent_id) = input.parent_id {
             task.parent_id = Some(parent_id);

@@ -12,6 +12,8 @@ export interface SessionsViewProps {
   onRefresh?: () => void;
   /** Callback when user clicks a session card */
   onSessionClick?: (session: SessionInfo) => void;
+  /** Callback when user stops a PTY session（停止 PTY 会话） */
+  onStopSession?: (session: SessionInfo) => void;
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -23,6 +25,7 @@ export function SessionsView({
   useMockData,
   onRefresh,
   onSessionClick,
+  onStopSession,
 }: SessionsViewProps) {
   // Sort: attention-needing first, then by last_active_at desc
   const sortedSessions = [...sessions].sort((a, b) => {
@@ -105,6 +108,7 @@ export function SessionsView({
             key={session.id}
             session={session}
             onClick={onSessionClick}
+            onStop={onStopSession}
           />
         ))}
       </div>

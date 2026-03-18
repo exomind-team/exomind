@@ -43,10 +43,12 @@ function sortEventsAscending(events: Event[]): Event[] {
 interface ChatPageProps {
   variant?: 'default' | 'new-mobile'; // new-mobile（新移动端外观）用于 v0.3.0 UI 重构
   hideHeader?: boolean;
+  showTimerWidget?: boolean;
 }
 
 const UNKNOWN_DEVICE_LABEL = '未知设备';
 const UNKNOWN_PLATFORM_LABEL = '未知平台';
+const CLOSED_PROFILE_EVENTLOG_NAME = '未名';
 
 function resolvePlatformLabel(platform?: string): string {
   if (!platform) {
@@ -66,6 +68,15 @@ function resolveAvatarInitial(name: string): string {
   const trimmed = name.trim();
   if (!trimmed) return '我';
   return trimmed.charAt(0).toUpperCase();
+}
+
+function resolveEventLogUserDisplayName(currentUser?: string | null): string {
+  if (typeof currentUser !== 'string') {
+    return CLOSED_PROFILE_EVENTLOG_NAME;
+  }
+
+  const trimmed = currentUser.trim();
+  return trimmed.length > 0 ? trimmed : CLOSED_PROFILE_EVENTLOG_NAME;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -102,7 +113,11 @@ function formatEventSourceLabel(event: Event): string {
   return `${resolvedDeviceName} · ${platformLabel}`;
 }
 
-export function ChatPage({ variant = 'default', hideHeader = false }: ChatPageProps = {}) {
+export function ChatPage({
+  variant = 'default',
+  hideHeader = false,
+  showTimerWidget = true,
+}: ChatPageProps = {}) {
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -124,7 +139,7 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
   const voiceMessageInputRef = useRef<VoiceMessageInputHandle | null>(null);
   const timeBlockWidgetRef = useRef<TimeBlockWidgetHandle | null>(null);
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
-  const userDisplayName = currentUser || 'Hailay';
+  const userDisplayName = useMemo(() => resolveEventLogUserDisplayName(currentUser), [currentUser]);
   const userAvatarInitial = useMemo(() => resolveAvatarInitial(userDisplayName), [userDisplayName]);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
@@ -475,11 +490,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       )}
 
       {/* TimeBlock 控件栏 */}
-      {variant === 'new-mobile' ? (
+      {variant === 'new-mobile' && showTimerWidget ? (
         <FocusTimerWidget ref={focusTimerWidgetRef} />
-      ) : (
+      ) : variant === 'default' ? (
         <TimeBlockWidget ref={timeBlockWidgetRef} variant="default" />
-      )}
+      ) : null}
 
       {/* 事件列表 */}
       <div
