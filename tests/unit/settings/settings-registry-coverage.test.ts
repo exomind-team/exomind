@@ -6,6 +6,7 @@ vi.mock('@tauri-apps/api/core', () => ({
 }));
 
 import '../components/settings/setup-settings-mocks.tsx';
+import { settingsPagePreferenceState } from '../components/settings/setup-settings-mocks.tsx';
 import {
   FEATURE_TOGGLE_SETTING_IDS,
   FEATURE_TOGGLE_SETTINGS,
@@ -26,6 +27,8 @@ const AUDITED_SETTINGS_IDS = [
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
   'voice-shortcut-hotkey',
+  'main-window-shortcut',
+  'main-window-shortcut-quick-focus',
   'voice-shortcut-asr-provider',
   'voice-shortcut-mic-prewarm',
   'voice-overlay-opacity',
@@ -85,9 +88,11 @@ const SELECT_ENUM_IDS = [] as const;
 
 const MULTI_ENUM_IDS = [
   'feedback-content',
+  'main-window-shortcut',
 ] as const;
 
 const BOOLEAN_IDS = [
+  'main-window-shortcut-quick-focus',
   'voice-shortcut-mic-prewarm',
   'task-page-fuzzy-search',
   'voice-overlay-show-diagnostics',
@@ -157,6 +162,7 @@ function getItem<T extends typeof SETTINGS_REGISTRY[number]['type']>(
 function getBaseCtx(): SettingsContext {
   return {
     isDesktop: false,
+    isTauriWindow: false,
     developerMode: false,
     desktopAdaptiveEnabled: false,
     voiceShortcutAsrProvider: 'moss',
@@ -299,11 +305,13 @@ describe('settings registry coverage audit', () => {
   });
 
   it('keeps every registry item reachable across supported settings contexts', () => {
+    settingsPagePreferenceState.isTauriWindow = true;
     const contexts: SettingsContext[] = [
       getBaseCtx(),
       {
         ...getBaseCtx(),
         isDesktop: true,
+        isTauriWindow: true,
       },
       {
         ...getBaseCtx(),
@@ -311,6 +319,8 @@ describe('settings registry coverage audit', () => {
       },
       {
         ...getBaseCtx(),
+        isDesktop: true,
+        isTauriWindow: true,
         developerMode: true,
         voiceShortcutAsrProvider: 'volcano',
       },

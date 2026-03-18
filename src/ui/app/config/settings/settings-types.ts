@@ -33,6 +33,7 @@ export type Category =
 
 export interface SettingsContext {
   isDesktop: boolean;
+  isTauriWindow?: boolean;
   isLandscape?: boolean;
   developerMode?: boolean;
   desktopAdaptiveEnabled?: boolean;
@@ -82,6 +83,7 @@ export interface MultiEnumSettingsItem extends SettingsItemBase {
   enumStyle?: 'segmented' | 'select' | 'dialog';
   controlTestId?: string;
   optionTestId?: (value: string, index: number) => string | undefined;
+  helperText?: (value: string[]) => string | null;
   dialogTitle?: string;
   dialogDescription?: string;
   options: { label: string; value: string; icon?: LucideIcon; description?: string; summaryLabel?: string }[];

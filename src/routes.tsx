@@ -22,6 +22,7 @@ import {
   resolveTasksRestorePath,
   shouldForceTasksMain,
 } from '@/ui/app/pages/task-route-memory';
+import { resolveEventlogRestoreTab } from '@/ui/app/pages/eventlog-route-memory';
 
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
@@ -640,6 +641,22 @@ const newEventlogRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/eventlog',
   component: function NewEventlog() {
+    const navigate = useNavigate();
+
+    useEffect(() => {
+      const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+      const restoreTab = resolveEventlogRestoreTab(currentSearch);
+      if (!restoreTab) {
+        return;
+      }
+
+      void navigate({
+        to: '/eventlog',
+        search: { tab: restoreTab },
+        replace: true,
+      });
+    }, [navigate]);
+
     return (
       <LazyPage>
         <FocusPage />

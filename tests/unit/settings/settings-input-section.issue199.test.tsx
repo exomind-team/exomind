@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import '../components/settings/setup-settings-mocks.tsx';
+import { settingsPagePreferenceState } from '../components/settings/setup-settings-mocks.tsx';
 import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setInputSendMode } from '@/config/input-send-mode';
@@ -9,6 +10,8 @@ import { setTaskCreateSuccessAction } from '@/config/task-create-success-action'
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { setVoiceShortcutSendMode } from '@/config/voice-shortcut-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
+import { setMainWindowShortcutSelection } from '@/config/main-window-shortcut';
+import { setMainWindowShortcutQuickFocusEnabled } from '@/config/main-window-shortcut-focus';
 import { setVoiceShortcutAsrProvider } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutMicPrewarmEnabled } from '@/config/voice-shortcut-mic-prewarm';
 import {
@@ -47,6 +50,9 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
       storage.removeItem('moss_api_key');
     }
 
+    settingsPagePreferenceState.isTauriWindow = false;
+    settingsPagePreferenceState.mainWindowShortcutSelection = ['Alt', 'E'];
+    settingsPagePreferenceState.mainWindowShortcutQuickFocusEnabled = false;
     isTauriMock.mockReturnValue(false);
     invokeMock.mockResolvedValue(null);
   });
@@ -61,6 +67,8 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
+    expect(screen.queryByText('主窗口全局快捷键')).not.toBeInTheDocument();
+    expect(screen.queryByText('唤起后快速聚焦输入')).not.toBeInTheDocument();
     expect(screen.getByText('快捷语音引擎')).toBeInTheDocument();
     expect(screen.getByText('预启动麦克风')).toBeInTheDocument();
     expect(screen.getByText('悬浮窗透明度')).toBeInTheDocument();
@@ -241,6 +249,69 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
       expect(setHotkeyMock).toHaveBeenCalledWith('Ctrl+Space');
       expect(setHotkeyMock).toHaveBeenCalledWith('Alt+W');
     });
+  });
+
+  it('shows main-window shortcut settings only on desktop tauri', () => {
+    settingsPagePreferenceState.isTauriWindow = true;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    render(<SettingsPage />);
+
+    expect(screen.getByText('主窗口全局快捷键')).toBeInTheDocument();
+    expect(screen.getByText('唤起后快速聚焦输入')).toBeInTheDocument();
+  });
+
+  it('updates main-window shortcut selection from input section', async () => {
+    settingsPagePreferenceState.isTauriWindow = true;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-main-window-shortcut-ctrl'));
+    fireEvent.click(screen.getByTestId('new-settings-main-window-shortcut-space'));
+    fireEvent.click(screen.getByTestId('new-settings-main-window-shortcut-e'));
+
+    await waitFor(() => {
+      expect(vi.mocked(setMainWindowShortcutSelection)).toHaveBeenCalled();
+    });
+  });
+
+  it('toggles main-window quick-focus from input section', () => {
+    settingsPagePreferenceState.isTauriWindow = true;
+    window.matchMedia = vi.fn().mockImplementation((query: string) => ({
+      matches: true,
+      media: query,
+      onchange: null,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      addListener: vi.fn(),
+      removeListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    }));
+
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-main-window-shortcut-quick-focus-switch'));
+
+    expect(vi.mocked(setMainWindowShortcutQuickFocusEnabled)).toHaveBeenCalledWith(true);
   });
 
   it.skip('syncs hotkey from runtime on mount in tauri（Tauri 挂载时同步运行时快捷键）— TODO: restore mount-time sync in registry version', async () => {

@@ -21,6 +21,10 @@ import {
   extractTaskTitleSearchQuery,
   filterTasksByTitleFuzzySearch,
 } from './task-title-fuzzy-search';
+import {
+  registerMainWindowFocusTarget,
+} from '@/services/main-window-focus-targets';
+import { MAIN_WINDOW_FOCUS_TARGET_TASKS_QUICK_ADD_INPUT } from '@/services/main-window-shortcut.service';
 
 const STATUS_DOT: Record<string, string> = {
   pending: 'bg-[#A8A29E]',
@@ -116,6 +120,12 @@ export function TasksPage() {
 
   useEffect(() => subscribeTaskPageFuzzySearchChanges(setTaskPageFuzzySearchEnabled), []);
   useEffect(() => subscribeTaskCreateSuccessActionChanges(setTaskCreateSuccessAction), []);
+  useEffect(() => registerMainWindowFocusTarget(
+    MAIN_WINDOW_FOCUS_TARGET_TASKS_QUICK_ADD_INPUT,
+    () => {
+      inputRef.current?.focusText();
+    },
+  ), []);
 
   useEffect(() => {
     if (!taskPageFuzzySearchEnabled) {

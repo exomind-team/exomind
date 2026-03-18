@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
+import { isTauriWindow } from '@/config/runtime-target';
 import { getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
 import { UserCard } from '@/ui/app/components/UserCard';
@@ -35,6 +36,7 @@ function useSettingsContext(): SettingsContext {
 
   return useMemo<SettingsContext>(() => ({
     isDesktop,
+    isTauriWindow: isTauriWindow(),
     isLandscape: isDesktop,
     developerMode,
     desktopAdaptiveEnabled,

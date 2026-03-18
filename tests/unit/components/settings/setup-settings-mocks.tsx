@@ -97,7 +97,10 @@ export const settingsPagePreferenceState = {
   agentPageEnabled: false,
   mePageEnabled: false,
   desktopAdaptiveEnabled: true,
+  isTauriWindow: false,
   voiceShortcutAsrProvider: 'moss' as string,
+  mainWindowShortcutSelection: ['Alt', 'E'] as string[],
+  mainWindowShortcutQuickFocusEnabled: false,
 };
 
 export const settingsPageDomainBackendState = {
@@ -191,6 +194,14 @@ vi.mock('@/config/desktop-adaptive', () => ({
   setDesktopAdaptiveEnabled: vi.fn(),
   subscribeDesktopAdaptiveChanges: vi.fn(() => () => {}),
 }));
+
+vi.mock('@/config/runtime-target', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@/config/runtime-target')>();
+  return {
+    ...actual,
+    isTauriWindow: vi.fn(() => settingsPagePreferenceState.isTauriWindow),
+  };
+});
 
 vi.mock('@/config/timer-preferences', () => ({
   getTimerPreferences: vi.fn(() => ({
@@ -290,6 +301,56 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
   subscribeVoiceShortcutHotkeyChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/main-window-shortcut', () => ({
+  MAIN_WINDOW_SHORTCUT_OPTION_VALUES: ['Ctrl', 'Alt', 'Q', 'E', 'Space'],
+  getMainWindowShortcutSelection: vi.fn(() => settingsPagePreferenceState.mainWindowShortcutSelection),
+  setMainWindowShortcutSelection: vi.fn((value: string[]) => {
+    settingsPagePreferenceState.mainWindowShortcutSelection = [...value];
+    return [...value];
+  }),
+  subscribeMainWindowShortcutSelectionChanges: vi.fn(() => () => {}),
+  validateMainWindowShortcutSelection: vi.fn((value: string[], voiceHotkey?: string) => {
+    const normalized = Array.from(new Set(value));
+    const primaryKeys = normalized.filter((entry) => ['Q', 'E', 'Space'].includes(entry));
+    if (primaryKeys.length === 0) {
+      return {
+        kind: 'invalid',
+        hotkey: null,
+        reason: 'missing-primary-key',
+        message: '当前组合无效，主窗口快捷键未启用；需要在 Q / E / Space 中恰好选择一个。',
+      };
+    }
+    if (primaryKeys.length > 1) {
+      return {
+        kind: 'invalid',
+        hotkey: null,
+        reason: 'multiple-primary-keys',
+        message: '当前组合无效，主窗口快捷键未启用；Q / E / Space 只能选择一个。',
+      };
+    }
+    const modifiers = ['Ctrl', 'Alt'].filter((entry) => normalized.includes(entry));
+    const hotkey = [...modifiers, primaryKeys[0]].join('+');
+    if (voiceHotkey && hotkey.toLowerCase() === voiceHotkey.toLowerCase()) {
+      return {
+        kind: 'conflict',
+        hotkey,
+        voiceHotkey,
+        message: `当前与全局语音快捷键 ${voiceHotkey} 冲突，主窗口快捷键未启用。`,
+      };
+    }
+    return { kind: 'valid', hotkey };
+  }),
+}));
+
+vi.mock('@/config/main-window-shortcut-focus', () => ({
+  getMainWindowShortcutQuickFocusEnabled: vi.fn(() => settingsPagePreferenceState.mainWindowShortcutQuickFocusEnabled),
+  setMainWindowShortcutQuickFocusEnabled: vi.fn((value: boolean) => {
+    settingsPagePreferenceState.mainWindowShortcutQuickFocusEnabled = value;
+    return value;
+  }),
+  subscribeMainWindowShortcutQuickFocusChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/voice-shortcut-asr-provider', () => {
   const listeners = new Set<(value: string) => void>();
   return {
@@ -338,6 +399,23 @@ vi.mock('@/config/voice-shortcut-mic-prewarm', () => ({
   getVoiceShortcutMicPrewarmEnabled: vi.fn(() => true),
   setVoiceShortcutMicPrewarmEnabled: vi.fn(),
   subscribeVoiceShortcutMicPrewarmChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/services/main-window-shortcut-runtime', () => ({
+  syncMainWindowShortcutSelectionWithRuntime: vi.fn(async ({ selection }: { selection?: string[] } = {}) => {
+    const nextSelection = selection ?? settingsPagePreferenceState.mainWindowShortcutSelection;
+    const primaryKeys = nextSelection.filter((entry) => ['Q', 'E', 'Space'].includes(entry));
+    if (primaryKeys.length !== 1) {
+      return {
+        kind: 'invalid',
+        hotkey: null,
+        reason: 'missing-primary-key',
+        message: '当前组合无效，主窗口快捷键未启用；需要在 Q / E / Space 中恰好选择一个。',
+      };
+    }
+    const hotkey = [...['Ctrl', 'Alt'].filter((entry) => nextSelection.includes(entry)), primaryKeys[0]].join('+');
+    return { kind: 'valid', hotkey };
+  }),
 }));
 
 vi.mock('@/config/feedback-preferences', () => ({

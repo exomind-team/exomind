@@ -4,14 +4,17 @@ import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociati
 import { FocusTimerWidget } from '@/ui/app/components/FocusTimerWidget';
 import { NowTodayTab } from '@/ui/app/components/NowTodayTab';
 import { useLocation, useNavigate } from '@tanstack/react-router';
+import { useEffect } from 'react';
+import {
+  EVENTLOG_TAB_VALUES,
+  normalizeEventlogTab,
+  setEventlogLastTab,
+} from '@/ui/app/pages/eventlog-route-memory';
 
-const NOW_TAB_VALUES = ['focus', 'record', 'today'] as const;
-type NowTabValue = (typeof NOW_TAB_VALUES)[number];
+type NowTabValue = (typeof EVENTLOG_TAB_VALUES)[number];
 
 function resolveNowTab(searchStr: string): NowTabValue {
-  const searchParams = new URLSearchParams(searchStr);
-  const tab = searchParams.get('tab');
-  return NOW_TAB_VALUES.includes(tab as NowTabValue) ? (tab as NowTabValue) : 'focus';
+  return normalizeEventlogTab(new URLSearchParams(searchStr).get('tab'));
 }
 
 export function NowPage() {
@@ -20,12 +23,16 @@ export function NowPage() {
   const activeTab = resolveNowTab(location.searchStr ?? '');
   const currentPath = location.pathname === '/' ? '/' : '/eventlog';
 
+  useEffect(() => {
+    setEventlogLastTab(activeTab);
+  }, [activeTab]);
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]">
       <Tabs
         value={activeTab}
         onValueChange={(nextValue) => {
-          const nextTab = NOW_TAB_VALUES.includes(nextValue as NowTabValue) ? (nextValue as NowTabValue) : 'focus';
+          const nextTab = EVENTLOG_TAB_VALUES.includes(nextValue as NowTabValue) ? (nextValue as NowTabValue) : 'focus';
           void navigate({
             to: currentPath,
             search: nextTab === 'focus' ? {} : { tab: nextTab },

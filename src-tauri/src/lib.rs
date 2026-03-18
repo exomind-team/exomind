@@ -30,8 +30,9 @@ use commands::runtime_commands::{
     runtime_service_status, runtime_service_stop, signal_publish_fast, RuntimeProcessState,
 };
 use commands::shortcut_commands::{
-    ensure_voice_overlay_window, register_voice_shortcut, simulate_enter, simulate_paste,
-    foreground_window_get,
+    ensure_voice_overlay_window, register_main_window_shortcut, register_voice_shortcut,
+    simulate_enter, simulate_paste, foreground_window_get, main_window_shortcut_get,
+    main_window_shortcut_set, MainWindowShortcutState,
     voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, VoiceShortcutState,
 };
@@ -101,6 +102,7 @@ pub fn run() {
     let runtime_process_state = std::sync::Arc::new(RuntimeProcessState::new());
     let runtime_process_state_for_setup = runtime_process_state.clone();
     let voice_shortcut_state = VoiceShortcutState::new();
+    let main_window_shortcut_state = MainWindowShortcutState::new();
     let volcano_asr_stream_state = std::sync::Arc::new(VolcanoAsrStreamState::default());
 
     let mut builder = tauri::Builder::default()
@@ -128,11 +130,18 @@ pub fn run() {
         .manage(ws_client_state.clone())
         .manage(runtime_process_state.clone())
         .manage(voice_shortcut_state)
+        .manage(main_window_shortcut_state)
         .manage(volcano_asr_stream_state)
         .setup(move |app| {
             // Register global voice shortcut (toggle, 按一次开始再按一次结束) and prewarm overlay window（预热悬浮窗）.
             let voice_shortcut_state = app.state::<VoiceShortcutState>();
+            let main_window_shortcut_state = app.state::<MainWindowShortcutState>();
             register_voice_shortcut(app.handle(), &voice_shortcut_state);
+            register_main_window_shortcut(
+                app.handle(),
+                &main_window_shortcut_state,
+                &voice_shortcut_state,
+            );
             if let Err(error) = ensure_voice_overlay_window(app.handle()) {
                 log::warn!("failed to prewarm voice overlay window: {error}");
             }
@@ -235,6 +244,8 @@ pub fn run() {
             now_workbench_overlay_set_position,
             voice_shortcut_set,
             voice_shortcut_get,
+            main_window_shortcut_set,
+            main_window_shortcut_get,
             voice_recording_set_active,
             foreground_window_get,
             // ASR 语音识别命令

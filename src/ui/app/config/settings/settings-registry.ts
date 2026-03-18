@@ -104,6 +104,19 @@ import {
   VOICE_SHORTCUT_HOTKEY_VALUES,
 } from '@/config/voice-shortcut-hotkey';
 import {
+  MAIN_WINDOW_SHORTCUT_OPTION_VALUES,
+  getMainWindowShortcutSelection,
+  setMainWindowShortcutSelection,
+  subscribeMainWindowShortcutSelectionChanges,
+  validateMainWindowShortcutSelection,
+  type MainWindowShortcutSelection,
+} from '@/config/main-window-shortcut';
+import {
+  getMainWindowShortcutQuickFocusEnabled,
+  setMainWindowShortcutQuickFocusEnabled,
+  subscribeMainWindowShortcutQuickFocusChanges,
+} from '@/config/main-window-shortcut-focus';
+import {
   getVoiceShortcutSendMode,
   setVoiceShortcutSendMode,
   subscribeVoiceShortcutSendModeChanges,
@@ -162,6 +175,7 @@ import {
   updateTimerPreferences,
   type CountdownEndMode,
 } from '@/config/timer-preferences';
+import { isTauriWindow } from '@/config/runtime-target';
 import { syncDevtoolsWithSettings } from '@/lib/debug/devtools-runtime';
 import { isMigrationCompleted, clearMigrationFlags } from '@/lib/migration/legacy-migration-flags';
 import {
@@ -186,6 +200,7 @@ import {
   getTimeblockBackendMode,
   setTimeblockBackendMode,
 } from '@/config/domain-backend-mode';
+import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-window-shortcut-runtime';
 
 /*
  * AGENT GUIDE: ADDING SETTINGS
@@ -303,6 +318,17 @@ function validateSyncServerUrl(value: string): string | null {
 }
 
 async function setVoiceShortcutHotkeyWithRuntime(value: string): Promise<void> {
+  const mainWindowShortcutStatus = validateMainWindowShortcutSelection(
+    getMainWindowShortcutSelection(),
+    getVoiceShortcutHotkey(),
+  );
+  if (
+    mainWindowShortcutStatus.kind === 'valid'
+    && mainWindowShortcutStatus.hotkey.toLowerCase() === value.trim().toLowerCase()
+  ) {
+    throw new Error(`与主窗口快捷键 ${mainWindowShortcutStatus.hotkey} 冲突`);
+  }
+
   if (!await isTauri()) {
     setVoiceShortcutHotkey(value);
     return;
@@ -316,6 +342,27 @@ async function setVoiceShortcutHotkeyWithRuntime(value: string): Promise<void> {
     setVoiceShortcutHotkey(runtimeHotkey, { emitEvent: false });
     throw error;
   }
+}
+
+async function setMainWindowShortcutSelectionWithRuntime(value: string[]): Promise<string[]> {
+  const normalized = setMainWindowShortcutSelection(value as MainWindowShortcutSelection);
+  await syncMainWindowShortcutSelectionWithRuntime({
+    notify: true,
+    selection: normalized,
+  });
+
+  return normalized;
+}
+
+function getMainWindowShortcutHelperText(value: string[]): string {
+  const status = validateMainWindowShortcutSelection(
+    value as MainWindowShortcutSelection,
+    getVoiceShortcutHotkey(),
+  );
+  if (status.kind === 'valid') {
+    return `当前生效：${status.hotkey}。按下后显示并聚焦主窗口；若主窗口已聚焦则最小化。`;
+  }
+  return status.message;
 }
 
 /**
@@ -345,6 +392,10 @@ function volcanoOnly(ctx: SettingsContext): boolean {
 
 function mossOnly(ctx: SettingsContext): boolean {
   return ctx.voiceShortcutAsrProvider === 'moss';
+}
+
+function desktopTauriOnly(ctx: SettingsContext): boolean {
+  return Boolean(ctx.isDesktop) && Boolean(ctx.isTauriWindow) && isTauriWindow();
 }
 
 function setDeveloperModeWithSideEffects(enabled: boolean): void {
@@ -651,6 +702,39 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     },
     subscribe: subscribeVoiceShortcutHotkeyChanges,
     errorMessagePrefix: '全局语音快捷键切换失败',
+  },
+  {
+    id: 'main-window-shortcut',
+    label: '主窗口全局快捷键',
+    icon: Monitor,
+    category: 'input',
+    description: '多选组合键；Ctrl / Alt 为修饰键，Q / E / Space 中必须且只能选择一个',
+    rowTestId: 'new-settings-main-window-shortcut-row',
+    type: 'enum',
+    multiSelect: true,
+    visible: desktopTauriOnly,
+    options: MAIN_WINDOW_SHORTCUT_OPTION_VALUES.map((value) => ({ label: value, value })),
+    optionTestId: (value) => `new-settings-main-window-shortcut-${value.toLowerCase()}`,
+    get: () => getMainWindowShortcutSelection(),
+    set: async (value: string[]) => {
+      return await setMainWindowShortcutSelectionWithRuntime(value);
+    },
+    subscribe: subscribeMainWindowShortcutSelectionChanges,
+    helperText: (value: string[]) => getMainWindowShortcutHelperText(value),
+  },
+  {
+    id: 'main-window-shortcut-quick-focus',
+    label: '唤起后快速聚焦输入',
+    icon: Search,
+    category: 'input',
+    description: '关闭时仅显示并聚焦主窗口；开启后会在当下记录页或任务主页面进一步聚焦输入框',
+    rowTestId: 'new-settings-main-window-shortcut-quick-focus-row',
+    controlTestId: 'new-settings-main-window-shortcut-quick-focus-switch',
+    type: 'boolean',
+    visible: desktopTauriOnly,
+    get: () => getMainWindowShortcutQuickFocusEnabled(),
+    set: (value: boolean) => setMainWindowShortcutQuickFocusEnabled(value),
+    subscribe: subscribeMainWindowShortcutQuickFocusChanges,
   },
   {
     id: 'voice-shortcut-asr-provider',

@@ -5,6 +5,7 @@ import path from 'node:path';
 import App from '@/App';
 
 const destroyVoiceShortcutService = vi.fn();
+const destroyMainWindowShortcutService = vi.fn();
 const initNowWorkbenchOverlayServiceMock = vi.fn();
 const destroyNowWorkbenchOverlayServiceMock = vi.fn();
 
@@ -64,6 +65,13 @@ vi.mock('@/services/voice-shortcut.service', () => ({
   })),
 }));
 
+vi.mock('@/services/main-window-shortcut.service', () => ({
+  initMainWindowShortcutService: vi.fn(),
+  getMainWindowShortcutService: vi.fn(() => ({
+    destroy: destroyMainWindowShortcutService,
+  })),
+}));
+
 vi.mock('@/services/now-workbench-overlay.service', () => ({
   getNowWorkbenchOverlayService: vi.fn(() => ({
     init: initNowWorkbenchOverlayServiceMock,
@@ -100,6 +108,7 @@ describe('App startup router context', () => {
   afterEach(() => {
     vi.restoreAllMocks();
     destroyVoiceShortcutService.mockReset();
+    destroyMainWindowShortcutService.mockReset();
     initNowWorkbenchOverlayServiceMock.mockReset();
     destroyNowWorkbenchOverlayServiceMock.mockReset();
   });

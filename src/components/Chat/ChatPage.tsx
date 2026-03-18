@@ -26,6 +26,8 @@ import type { Event } from '@/lib/types/event';
 import { getEventLogService } from '@/lib/services/eventlog.service';
 import { useSyncStore } from '@/ui/stores/sync-store';
 import { log } from '@/lib/logger';
+import { registerMainWindowFocusTarget } from '@/services/main-window-focus-targets';
+import { MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT } from '@/services/main-window-shortcut.service';
 
 const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
@@ -141,6 +143,13 @@ export function ChatPage({
   const focusTimerWidgetRef = useRef<FocusTimerWidgetHandle | null>(null);
   const userDisplayName = useMemo(() => resolveEventLogUserDisplayName(currentUser), [currentUser]);
   const userAvatarInitial = useMemo(() => resolveAvatarInitial(userDisplayName), [userDisplayName]);
+
+  useEffect(() => registerMainWindowFocusTarget(
+    MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT,
+    () => {
+      voiceMessageInputRef.current?.focusText();
+    },
+  ), []);
 
   const scrollToBottom = useCallback((behavior: ScrollBehavior = 'auto') => {
     listEndRef.current?.scrollIntoView({ behavior, block: 'end' });

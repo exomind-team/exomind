@@ -17,6 +17,10 @@ import {
   initVoiceShortcutService,
   getVoiceShortcutService,
 } from "@/services/voice-shortcut.service";
+import {
+  getMainWindowShortcutService,
+  initMainWindowShortcutService,
+} from "@/services/main-window-shortcut.service";
 import { getNowWorkbenchOverlayService } from "@/services/now-workbench-overlay.service";
 import "./App.css";
 
@@ -24,10 +28,12 @@ function App() {
   useEffect(() => {
     initUpdateChecker();
     initVoiceShortcutService();
+    initMainWindowShortcutService();
     void getNowWorkbenchOverlayService().init();
     return () => {
       destroyUpdateChecker();
       getVoiceShortcutService().destroy();
+      getMainWindowShortcutService().destroy();
       getNowWorkbenchOverlayService().destroy();
     };
   }, []);

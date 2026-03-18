@@ -613,9 +613,9 @@ function EnumRenderer({ item }: { item: EnumSettingsItem }) {
     }
   };
 
-  const helperText = !item.multiSelect && item.helperText
-    ? item.helperText(value as string)
-    : null;
+  const helperText = item.multiSelect
+    ? item.helperText?.(value as string[]) ?? null
+    : item.helperText?.(value as string) ?? null;
 
   if (item.enumStyle === 'dialog') {
     return (

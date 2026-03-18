@@ -47,4 +47,18 @@ describe('Settings Registry Consistency', () => {
     const result = hotkeyItem.set(hotkeyItem.options[0].value);
     await expect(Promise.resolve(result)).resolves.toBeUndefined();
   });
+
+  it('main-window-shortcut allows await when set returns a promise', async () => {
+    const shortcutItem = SETTINGS_REGISTRY.find((item) => item.id === 'main-window-shortcut');
+
+    expect(shortcutItem).toBeDefined();
+    expect(shortcutItem?.type).toBe('enum');
+
+    if (!shortcutItem || shortcutItem.type !== 'enum' || shortcutItem.multiSelect !== true) {
+      throw new Error('main-window-shortcut must be a multi enum registry item');
+    }
+
+    const result = shortcutItem.set(['Alt', 'E']);
+    await expect(Promise.resolve(result)).resolves.toEqual(['Alt', 'E']);
+  });
 });

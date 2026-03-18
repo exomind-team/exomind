@@ -11,6 +11,7 @@ use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, Webvi
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutEvent, ShortcutState};
 
 const DEFAULT_VOICE_SHORTCUT: &str = "Alt+Q";
+const DEFAULT_MAIN_WINDOW_SHORTCUT: &str = "Alt+E";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_CANCEL_SHORTCUT: &str = "Escape";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -30,6 +31,8 @@ static VOICE_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 static VOICE_CANCEL_KEY_DOWN: AtomicBool = AtomicBool::new(false);
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+static MAIN_WINDOW_SHORTCUT_KEY_DOWN: AtomicBool = AtomicBool::new(false);
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 static VOICE_OVERLAY_BOTTOM_MARGIN: AtomicI32 =
     AtomicI32::new(DEFAULT_VOICE_OVERLAY_BOTTOM_MARGIN);
 
@@ -37,6 +40,12 @@ static VOICE_OVERLAY_BOTTOM_MARGIN: AtomicI32 =
 #[derive(Default)]
 pub struct VoiceShortcutState {
     shortcut: Mutex<String>,
+}
+
+/// Main window shortcut runtime state（主窗口快捷键状态）.
+#[derive(Default)]
+pub struct MainWindowShortcutState {
+    shortcut: Mutex<Option<String>>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -67,6 +76,27 @@ impl VoiceShortcutState {
     }
 }
 
+impl MainWindowShortcutState {
+    pub fn new() -> Self {
+        Self {
+            shortcut: Mutex::new(Some(DEFAULT_MAIN_WINDOW_SHORTCUT.to_string())),
+        }
+    }
+
+    fn get(&self) -> Option<String> {
+        self.shortcut
+            .lock()
+            .map(|value| value.clone())
+            .unwrap_or_else(|_| Some(DEFAULT_MAIN_WINDOW_SHORTCUT.to_string()))
+    }
+
+    fn set(&self, shortcut: Option<String>) {
+        if let Ok(mut value) = self.shortcut.lock() {
+            *value = shortcut;
+        }
+    }
+}
+
 /// Register global voice shortcut at startup（全局语音快捷键）.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub fn register_voice_shortcut(app: &AppHandle, state: &VoiceShortcutState) {
@@ -76,6 +106,34 @@ pub fn register_voice_shortcut(app: &AppHandle, state: &VoiceShortcutState) {
     }
 }
 
+/// Register global main-window shortcut at startup（主窗口快捷键）.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn register_main_window_shortcut(
+    app: &AppHandle,
+    state: &MainWindowShortcutState,
+    voice_state: &VoiceShortcutState,
+) {
+    let Some(shortcut) = state.get() else {
+        return;
+    };
+
+    if shortcut.eq_ignore_ascii_case(&voice_state.get()) {
+        log::warn!("skip main window shortcut registration because it conflicts with voice shortcut");
+        return;
+    }
+
+    if let Err(error) = register_main_window_shortcut_listener(app, &shortcut) {
+        log::warn!("failed to register main window shortcut {shortcut}: {error}");
+    }
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn register_main_window_shortcut(
+    _app: &AppHandle,
+    _state: &MainWindowShortcutState,
+    _voice_state: &VoiceShortcutState,
+) {}
+
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn register_voice_shortcut(_app: &AppHandle, _state: &VoiceShortcutState) {}
 
@@ -84,9 +142,17 @@ pub fn register_voice_shortcut(_app: &AppHandle, _state: &VoiceShortcutState) {}
 pub fn apply_voice_shortcut(
     app: &AppHandle,
     state: &VoiceShortcutState,
+    main_window_state: &MainWindowShortcutState,
     raw_shortcut: &str,
 ) -> Result<String, String> {
     let next_shortcut = normalize_shortcut(raw_shortcut)?;
+    if let Some(main_window_shortcut) = main_window_state.get() {
+        if main_window_shortcut.eq_ignore_ascii_case(&next_shortcut) {
+            return Err(format!(
+                "shortcut conflicts with main window shortcut {main_window_shortcut}"
+            ));
+        }
+    }
     let current_shortcut = state.get();
 
     if current_shortcut.eq_ignore_ascii_case(&next_shortcut) {
@@ -117,9 +183,74 @@ pub fn apply_voice_shortcut(
 pub fn apply_voice_shortcut(
     _app: &AppHandle,
     state: &VoiceShortcutState,
+    _main_window_state: &MainWindowShortcutState,
     raw_shortcut: &str,
 ) -> Result<String, String> {
     let next_shortcut = normalize_shortcut(raw_shortcut)?;
+    state.set(next_shortcut.clone());
+    Ok(next_shortcut)
+}
+
+/// Apply main-window hotkey change at runtime（运行时热更新主窗口快捷键）.
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+pub fn apply_main_window_shortcut(
+    app: &AppHandle,
+    state: &MainWindowShortcutState,
+    voice_state: &VoiceShortcutState,
+    raw_shortcut: Option<&str>,
+) -> Result<Option<String>, String> {
+    let next_shortcut = raw_shortcut
+        .map(normalize_shortcut)
+        .transpose()?;
+    let current_shortcut = state.get();
+
+    if current_shortcut == next_shortcut {
+        return Ok(current_shortcut);
+    }
+
+    if let Some(next_shortcut_value) = next_shortcut.as_ref() {
+        let voice_shortcut = voice_state.get();
+        if voice_shortcut.eq_ignore_ascii_case(next_shortcut_value) {
+            return Err(format!(
+                "shortcut conflicts with voice shortcut {voice_shortcut}"
+            ));
+        }
+    }
+
+    if let Some(current_shortcut_value) = current_shortcut.as_ref() {
+        let was_registered = app
+            .global_shortcut()
+            .is_registered(current_shortcut_value.as_str());
+        if was_registered {
+            app.global_shortcut()
+                .unregister(current_shortcut_value.as_str())
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    if let Some(next_shortcut_value) = next_shortcut.as_ref() {
+        if let Err(error) = register_main_window_shortcut_listener(app, next_shortcut_value) {
+            if let Some(current_shortcut_value) = current_shortcut.as_ref() {
+                let _ = register_main_window_shortcut_listener(app, current_shortcut_value);
+            }
+            return Err(error);
+        }
+    }
+
+    state.set(next_shortcut.clone());
+    Ok(next_shortcut)
+}
+
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub fn apply_main_window_shortcut(
+    _app: &AppHandle,
+    state: &MainWindowShortcutState,
+    _voice_state: &VoiceShortcutState,
+    raw_shortcut: Option<&str>,
+) -> Result<Option<String>, String> {
+    let next_shortcut = raw_shortcut
+        .map(normalize_shortcut)
+        .transpose()?;
     state.set(next_shortcut.clone());
     Ok(next_shortcut)
 }
@@ -186,6 +317,16 @@ fn register_shortcut_listener(app: &AppHandle, shortcut: &str) -> Result<(), Str
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn register_main_window_shortcut_listener(app: &AppHandle, shortcut: &str) -> Result<(), String> {
+    let _ = app.global_shortcut().unregister(shortcut);
+    app.global_shortcut()
+        .on_shortcut(shortcut, |app, _shortcut, event| {
+            handle_main_window_shortcut_event(app, event);
+        })
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn handle_shortcut_event(app: &AppHandle, event: ShortcutEvent) {
     match event.state {
         ShortcutState::Pressed => {
@@ -200,6 +341,47 @@ fn handle_shortcut_event(app: &AppHandle, event: ShortcutEvent) {
             VOICE_SHORTCUT_KEY_DOWN.store(false, Ordering::SeqCst);
         }
     }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn handle_main_window_shortcut_event(app: &AppHandle, event: ShortcutEvent) {
+    match event.state {
+        ShortcutState::Pressed => {
+            if MAIN_WINDOW_SHORTCUT_KEY_DOWN.swap(true, Ordering::SeqCst) {
+                return;
+            }
+            let _ = toggle_main_window_from_shortcut(app);
+        }
+        ShortcutState::Released => {
+            MAIN_WINDOW_SHORTCUT_KEY_DOWN.store(false, Ordering::SeqCst);
+        }
+    }
+}
+
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn toggle_main_window_from_shortcut(app: &AppHandle) -> Result<(), String> {
+    let Some(window) = app.get_webview_window("main") else {
+        return Ok(());
+    };
+
+    let is_visible = window.is_visible().map_err(|error| error.to_string())?;
+    let is_minimized = window.is_minimized().map_err(|error| error.to_string())?;
+    let is_focused = window.is_focused().map_err(|error| error.to_string())?;
+
+    if is_visible && !is_minimized && is_focused {
+        window.minimize().map_err(|error| error.to_string())?;
+        return Ok(());
+    }
+
+    if !is_visible {
+        window.show().map_err(|error| error.to_string())?;
+    }
+    if is_minimized {
+        let _ = window.unminimize();
+    }
+    window.set_focus().map_err(|error| error.to_string())?;
+    app.emit("main-window-shortcut", "activate").ok();
+    Ok(())
 }
 
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
@@ -592,14 +774,34 @@ pub async fn voice_overlay_set_bottom_offset(
 pub async fn voice_shortcut_set(
     app: AppHandle,
     state: State<'_, VoiceShortcutState>,
+    main_window_state: State<'_, MainWindowShortcutState>,
     shortcut: String,
 ) -> Result<String, String> {
-    apply_voice_shortcut(&app, &state, &shortcut)
+    apply_voice_shortcut(&app, &state, &main_window_state, &shortcut)
 }
 
 /// Read current voice shortcut（读取当前快捷键）.
 #[tauri::command]
 pub async fn voice_shortcut_get(state: State<'_, VoiceShortcutState>) -> Result<String, String> {
+    Ok(state.get())
+}
+
+/// Update main window shortcut by settings page（设置页更新主窗口快捷键）.
+#[tauri::command]
+pub async fn main_window_shortcut_set(
+    app: AppHandle,
+    state: State<'_, MainWindowShortcutState>,
+    voice_state: State<'_, VoiceShortcutState>,
+    shortcut: Option<String>,
+) -> Result<Option<String>, String> {
+    apply_main_window_shortcut(&app, &state, &voice_state, shortcut.as_deref())
+}
+
+/// Read current main window shortcut（读取当前主窗口快捷键）.
+#[tauri::command]
+pub async fn main_window_shortcut_get(
+    state: State<'_, MainWindowShortcutState>,
+) -> Result<Option<String>, String> {
     Ok(state.get())
 }
 

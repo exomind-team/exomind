@@ -18,6 +18,11 @@ import { Textarea } from '@/components/ui/textarea';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { IASRPort, IASRConfig } from '@/lib/ports/asr-port';
 import { toast } from '@/components/ui/toast-hook';
+import {
+  getInputSendMode,
+  subscribeInputSendModeChanges,
+  type InputSendMode,
+} from '@/config/input-send-mode';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
 import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
@@ -72,6 +77,7 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
   variant = 'default',
 }: VoiceMessageInputProps, ref) {
   const [value, setValue] = useState('');
+  const [inputSendMode, setInputSendMode] = useState<InputSendMode>(() => getInputSendMode());
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
 
@@ -99,6 +105,8 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     resizeTextarea();
   }, [value, resizeTextarea]);
 
+  useEffect(() => subscribeInputSendModeChanges(setInputSendMode), []);
+
   // 发送消息
   const handleSend = useCallback(async () => {
     const trimmed = value.trim();
@@ -123,13 +131,19 @@ export const VoiceMessageInput = forwardRef<VoiceMessageInputHandle, VoiceMessag
     }
 
     if (e.key !== 'Enter') return;
-    if (!(e.ctrlKey || e.metaKey)) return;
-    if (e.altKey || e.shiftKey) return;
+    if (e.altKey) return;
+
+    const shouldSend = inputSendMode === 'enter-send'
+      ? !e.shiftKey && !e.ctrlKey && !e.metaKey
+      : !e.shiftKey && (e.ctrlKey || e.metaKey);
+    if (!shouldSend) {
+      return;
+    }
 
     e.preventDefault();
     if (value.trim()) {
       handleSend();
-    } else {
+    } else if (inputSendMode === 'ctrl-enter-send') {
       textareaRef.current?.blur();
       voiceButtonRef.current?.start();
     }
