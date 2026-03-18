@@ -109,6 +109,26 @@ describe('MainWindowShortcutService', () => {
     service.destroy();
   });
 
+  it('returns to tasks main page before focusing quick-add from tasks sub-routes', async () => {
+    const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
+    const { appRouter } = await import('@/routes');
+    appRouter.state.location.pathname = '/tasks/dag';
+    appRouter.state.location.searchStr = '';
+
+    const service = new MainWindowShortcutService();
+    await service.init();
+
+    await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/tasks',
+      search: { main: '1' },
+    });
+    expect(requestFocusTargetMock).toHaveBeenCalledWith('tasks-quick-add-input');
+
+    service.destroy();
+  });
+
   it('does nothing on unsupported routes or when quick-focus is disabled', async () => {
     const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
     const { appRouter } = await import('@/routes');

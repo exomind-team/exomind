@@ -8,6 +8,7 @@ import {
 import { subscribeVoiceShortcutHotkeyChanges } from '@/config/voice-shortcut-hotkey';
 import { requestMainWindowFocusTarget } from '@/services/main-window-focus-targets';
 import { syncMainWindowShortcutSelectionWithRuntime } from '@/services/main-window-shortcut-runtime';
+import { buildTasksMainSearch } from '@/ui/app/pages/task-route-memory';
 
 export const MAIN_WINDOW_SHORTCUT_EVENT_NAME = 'main-window-shortcut';
 export const MAIN_WINDOW_FOCUS_TARGET_EVENTLOG_RECORD_INPUT = 'eventlog-record-input';
@@ -30,6 +31,13 @@ async function navigateToEventlogRecord(): Promise<void> {
   await appRouter.navigate({
     to: '/eventlog',
     search: { tab: 'record' },
+  });
+}
+
+async function navigateToTasksMain(): Promise<void> {
+  await appRouter.navigate({
+    to: '/tasks',
+    search: buildTasksMainSearch(),
   });
 }
 
@@ -86,6 +94,12 @@ export class MainWindowShortcutService {
     }
 
     if (location.pathname === '/tasks') {
+      requestMainWindowFocusTarget(MAIN_WINDOW_FOCUS_TARGET_TASKS_QUICK_ADD_INPUT);
+      return;
+    }
+
+    if (location.pathname.startsWith('/tasks/')) {
+      await navigateToTasksMain();
       requestMainWindowFocusTarget(MAIN_WINDOW_FOCUS_TARGET_TASKS_QUICK_ADD_INPUT);
     }
   }
