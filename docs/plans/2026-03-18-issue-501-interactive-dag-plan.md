@@ -178,10 +178,11 @@ PR #552 已合并到 dev，完成了 DAG 的基础能力：
 
 **拖拽连线**：
 - 启用 ReactFlow 的 `nodesConnectable={true}`（仅连接模式下）
-- `onConnect` 事件处理：
-  - 左键拖拽（默认）→ 建立硬依赖
-  - 右键拖拽 → 建立软依赖（需自定义 Handle 或检测修饰键）
-- 右键菜单在连接模式下禁用
+- `onConnect` / `onConnectStart` 事件处理：
+  - 默认拖拽 → 建立硬依赖
+  - **Shift + 拖拽** → 建立软依赖（通过 `event.shiftKey` 检测）
+  - 拖拽时边线样式动态变化提示（实线=硬，虚线=软）
+- 右键菜单在连接模式下保留（内容可与浏览模式不同）
 
 **点击连线**：
 - 单击节点 A → A 边框变实线高亮（预览硬依赖）
@@ -240,7 +241,11 @@ PR #552 已合并到 dev，完成了 DAG 的基础能力：
   - 提交按钮
 - 提交后调用 `timeBlockService.endBlock(feedback)` + 逐个 `taskService.transitionTask(taskId, status)`
 
-**双击**：在执行模式下禁用（不进入任务详情页），保持当前面板交互
+**双击**：在执行模式下**保留**，双击进入任务详情页（与浏览模式一致）
+
+**右键菜单**（执行模式专属）：
+- 「结束时间块」→ 弹出多任务反馈对话框
+- 其他选项可保留（折叠等）
 
 #### 验收标准
 
@@ -277,26 +282,79 @@ PR #552 已合并到 dev，完成了 DAG 的基础能力：
 
 ---
 
-## 数据模型注意事项
+## 数据模型（已就位，无需 RT 改动）
 
 ### 一个时间块多个任务
 
-当前 `ActiveBlockData.taskId` 是 `string | undefined`（单任务）。执行模式需要支持多任务关联。
+**已实现**。RT 和前端都已支持：
 
-**方案**：
-- 新增 `taskIds: string[]` 字段到 `ActiveBlockData`
-- `taskId` 保留作为「主任务」向后兼容
-- `taskIds` 用于执行模式的多任务关联
-- 需同步修改 Rust RT 的 `ActiveBlockData` 结构
+- RT：`ActiveBlockData.task_ids: Vec<String>` + `task_association_log: Vec<BlockTaskAssociationEvent>`
+- RT：`task_id: Option<String>` 已标记 `#[serde(skip_serializing)]` deprecated
+- 前端：`ActiveBlockData.taskIds: UUID[]` + `normalizeTaskIdList()` 去重
+- 前端：`TimeBlockService.startBlock()` 已支持 `taskBinding: { taskIds: string[] }` 参数
+- 前端：`TimeBlockService.patchActiveTaskAssociation()` 可增量修改 taskIds
 
-### 依赖操作的后端接口
+**执行模式应操作 `taskIds` 数组**，不使用 deprecated 的 `taskId`。增删时用 `Set` 去重。
 
-当前依赖通过 `updateTask(taskId, { dependsOn: [...] })` 整体替换。连接模式需要精确的增/删/改操作。
+### 依赖操作
 
-**方案**：
-- 前端维护依赖列表，计算 diff 后整体 PUT
-- 或新增 RT 端点：`POST /tasks/:id/dependencies`、`DELETE /tasks/:id/dependencies/:depId`
-- 建议先用整体 PUT，后续优化
+前端通过 `updateTask(taskId, { dependsOn: [...] })` 整体 PUT。连接模式在前端计算 diff 后整体提交。无需新 RT 端点。
+
+---
+
+## ⚠️ 不要做清单（Codex 必读）
+
+| 禁止项 | 原因 |
+|--------|------|
+| **不要改动 TasksPage.tsx** | 任务列表页已稳定，本次只改 DAG 页 |
+| **不要改动 TaskDetailPage.tsx** | 任务详情页已稳定，双击导航用现有路由 |
+| **不要改动 FocusTimerWidget.tsx** | 只复用其反馈对话框模式，不修改组件本身 |
+| **不要重写 task-dag-visibility.ts** | 折叠算法已稳定且有测试，只调用不改 |
+| **不要改动 Rust RT 结构体** | `ActiveBlockData` 已有 `task_ids` 支持，前端直接用 |
+| **不要改动 RT 端点** | `PUT /timeblocks/active` 已支持完整的 ActiveBlockData |
+| **不要引入新依赖** | 只用现有的 ReactFlow + lucide-react + Tailwind |
+| **不要改动路由结构** | `/tasks/dag` 路由保持不变 |
+| **不要改动导航栏** | 左侧导航栏不在本次范围 |
+
+## ⚠️ 容易出错的关键点
+
+### 连接模式
+
+1. **拖拽连线**：默认 = 硬依赖，**Shift 按住** = 软依赖（不是右键！）
+2. **右键菜单**：连接模式下**保留**（不禁用），但菜单内容可能不同于浏览模式
+3. **Toggle 规则必须严格遵守**：同类型 = 删除，异类型 = 覆盖。不是「提示已存在」
+
+### 执行模式
+
+4. **单击 = 启动/关联**，**双击 = 进入详情页**。不要混淆
+5. **取消关联的最后一个任务时**：必须弹出结束对话框，不能静默结束
+6. **反馈对话框**：逐个任务选择状态（复用 TaskStatusSelector），不是统一选择
+7. **阻塞节点**：`opacity-50` + 不可点击 + hover 提示阻塞原因。不是隐藏
+
+### 全画布
+
+8. **面包屑保留在画布上方**，不是浮动在画布内部
+9. **浮动控件在画布内部**（absolute 定位），不在面包屑行
+
+---
+
+## 需要涉及 RT 的改动清单
+
+| 改动 | 涉及 RT？ | 说明 |
+|------|-----------|------|
+| 全画布布局 | ❌ | 纯前端 CSS |
+| 节点高亮 | ❌ | 纯前端样式 |
+| 过滤终态节点 | ❌ | 前端过滤 |
+| 搜索节点 | ❌ | 前端过滤 |
+| 详情侧栏/抽屉 | ❌ | 纯前端组件 |
+| 模式切换器 | ❌ | 纯前端状态 |
+| 连接模式建立依赖 | ❌ | 用现有 `updateTask({ dependsOn })` |
+| 连接模式删除依赖 | ❌ | 用现有 `updateTask({ dependsOn })` |
+| 执行模式启动时间块 | ❌ | 用现有 `startBlock({ taskIds })` |
+| 执行模式关联任务 | ❌ | 用现有 `patchActiveTaskAssociation()` |
+| 执行模式结束时间块 | ❌ | 用现有 `endBlock()` + `transitionTask()` |
+
+**结论：本次实施无需任何 RT 改动。**
 
 ---
 
@@ -306,7 +364,7 @@ PR #552 已合并到 dev，完成了 DAG 的基础能力：
 - Wave 1：验证画布占满、过滤/搜索功能、高亮效果
 - Wave 2：验证横竖屏切换、双击导航、面板打开/关闭
 - Wave 3：验证三模式切换、连接 Toggle 规则、执行模式时间块操作
-- Rust 后端变更需跑 `cargo test -p exomind-runtime`
+- **不需要跑 `cargo test`**（无 RT 改动）
 
 ---
 
@@ -314,7 +372,7 @@ PR #552 已合并到 dev，完成了 DAG 的基础能力：
 
 | 风险 | 等级 | 缓解 |
 |------|------|------|
-| Wave 3 执行模式复杂度高 | 高 | 先实现单击启动，再做多任务关联 |
-| ActiveBlockData.taskIds 需 Rust 改动 | 中 | 可先用 taskId 单任务，后续扩展 |
-| 连接模式右键拖拽 ReactFlow 不原生支持 | 中 | 改用修饰键（Shift+拖拽=软依赖）替代 |
-| 竖屏抽屉交互复杂 | 中 | 先做简单的固定高度抽屉，后续加拖拽 |
+| 执行模式状态机复杂 | 高 | 画状态机图，用 switch-case 而非嵌套 if |
+| 连接模式 Shift+拖拽检测 | 中 | ReactFlow `onConnectStart` 可读 event.shiftKey |
+| 竖屏抽屉交互 | 中 | 先做固定高度抽屉，后续加拖拽 |
+| 多任务反馈对话框 | 中 | 复用 TaskStatusSelector 组件，逐个任务渲染 |
