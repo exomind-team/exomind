@@ -1,4 +1,5 @@
-import { subscribeAIRegistryChanges } from '@/lib/ai-registry/storage';
+import { resolveOfferingForCapability } from '@/lib/ai-registry/resolution';
+import { getAIRegistrySnapshot, subscribeAIRegistryChanges } from '@/lib/ai-registry/storage';
 import {
   DEFAULT_LLM_BASE_URL,
   DEFAULT_LLM_CHANNEL_NAME,
@@ -10,6 +11,7 @@ import {
 const LEGACY_LLM_API_KEY_STORAGE_KEY = 'exomind:llmApiKey';
 const LEGACY_LLM_BASE_URL_STORAGE_KEY = 'exomind:llmBaseUrl';
 const LEGACY_LLM_MODEL_STORAGE_KEY = 'exomind:llmModel';
+const LEGACY_LLM_BOOTSTRAP_COMPLETED_STORAGE_KEY = 'exomind:ai-registry:legacy-llm-bootstrap-completed';
 
 export interface LLMSettings {
   apiKey: string;
@@ -17,12 +19,13 @@ export interface LLMSettings {
   model: string;
 }
 
-function getStorage(): Pick<Storage, 'getItem'> | null {
+function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   if (typeof window === 'undefined') return null;
   const localStorageLike = window.localStorage as Partial<Storage> | undefined;
   if (!localStorageLike) return null;
   if (typeof localStorageLike.getItem !== 'function') return null;
-  return localStorageLike as Pick<Storage, 'getItem'>;
+  if (typeof localStorageLike.setItem !== 'function') return null;
+  return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
 }
 
 function readLegacyLLMSettings(): LLMSettings {
@@ -42,9 +45,33 @@ function readLegacyLLMSettings(): LLMSettings {
   };
 }
 
+function hasResolvedRegistryLLMSettings(): boolean {
+  return Boolean(resolveOfferingForCapability(getAIRegistrySnapshot(), 'llm.chat'));
+}
+
+function isLegacyLLMBootstrapCompleted(): boolean {
+  const storage = getStorage();
+  if (!storage) {
+    return false;
+  }
+  return storage.getItem(LEGACY_LLM_BOOTSTRAP_COMPLETED_STORAGE_KEY) === 'true';
+}
+
+function markLegacyLLMBootstrapCompleted(): void {
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+  storage.setItem(LEGACY_LLM_BOOTSTRAP_COMPLETED_STORAGE_KEY, 'true');
+}
+
 function ensureRegistryBootstrappedFromLegacy(): void {
-  const registryDraft = getDefaultLLMRegistryDraft();
-  if (registryDraft.apiKey.trim()) {
+  if (hasResolvedRegistryLLMSettings()) {
+    markLegacyLLMBootstrapCompleted();
+    return;
+  }
+
+  if (isLegacyLLMBootstrapCompleted()) {
     return;
   }
 
@@ -59,14 +86,23 @@ function ensureRegistryBootstrappedFromLegacy(): void {
     model: legacy.model,
     apiKey: legacy.apiKey,
   });
+  markLegacyLLMBootstrapCompleted();
 }
 
 function getEffectiveLLMSettings(): LLMSettings {
   ensureRegistryBootstrappedFromLegacy();
   const registryDraft = getDefaultLLMRegistryDraft();
-  if (registryDraft.apiKey.trim()) {
+  if (hasResolvedRegistryLLMSettings()) {
     return {
       apiKey: registryDraft.apiKey,
+      baseUrl: registryDraft.baseUrl,
+      model: registryDraft.model,
+    };
+  }
+
+  if (isLegacyLLMBootstrapCompleted()) {
+    return {
+      apiKey: '',
       baseUrl: registryDraft.baseUrl,
       model: registryDraft.model,
     };

@@ -136,4 +136,50 @@ describe('llm-settings ai registry compat（LLM 设置注册中心兼容层）',
     expect(resolved?.model.displayName).toBe('gpt-5.4');
     expect(secretsModule.getAIEnergySecret(resolved?.energySource?.energySourceId ?? '')?.apiKey).toBe('sk-new-registry');
   });
+
+  it('does not resurrect legacy llm settings after registry default is deleted（删除默认供给项后不应复活旧 LLM 配置）', async () => {
+    const compatModule = await import('@/lib/ai-registry/compat');
+    const adminModule = await import('@/lib/ai-registry/admin');
+    const storageModule = await import('@/lib/ai-registry/storage');
+    const resolutionModule = await import('@/lib/ai-registry/resolution');
+    const llmSettingsModule = await import('@/config/llm-settings');
+
+    localStorage.setItem('exomind:llmApiKey', 'sk-legacy-openai');
+    localStorage.setItem('exomind:llmBaseUrl', 'https://legacy-openai.example/v1');
+    localStorage.setItem('exomind:llmModel', 'gpt-legacy');
+
+    expect(llmSettingsModule.getLLMSettings()).toEqual({
+      apiKey: 'sk-legacy-openai',
+      baseUrl: 'https://legacy-openai.example/v1',
+      model: 'gpt-legacy',
+    });
+
+    const resolvedBeforeDelete = resolutionModule.resolveOfferingForCapability(
+      storageModule.getAIRegistrySnapshot(),
+      'llm.chat',
+    );
+    expect(resolvedBeforeDelete?.offering.offeringId).toBeTruthy();
+
+    adminModule.deleteAIRegistryOffering(resolvedBeforeDelete!.offering.offeringId);
+
+    expect(
+      resolutionModule.resolveOfferingForCapability(
+        storageModule.getAIRegistrySnapshot(),
+        'llm.chat',
+      ),
+    ).toBeNull();
+
+    expect(llmSettingsModule.getLLMSettings()).toEqual({
+      apiKey: '',
+      baseUrl: compatModule.DEFAULT_LLM_BASE_URL,
+      model: compatModule.DEFAULT_LLM_MODEL,
+    });
+
+    expect(
+      resolutionModule.resolveOfferingForCapability(
+        storageModule.getAIRegistrySnapshot(),
+        'llm.chat',
+      ),
+    ).toBeNull();
+  });
 });

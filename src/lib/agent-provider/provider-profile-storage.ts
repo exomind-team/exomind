@@ -70,6 +70,12 @@ function ensureRegistryImportedFromLegacyStorage(): void {
   }
 }
 
+function normalizeRegistryBackedProfileId(profileId: string): string {
+  return profileId.startsWith('registry-')
+    ? profileId
+    : buildRegistryProfileIdFromSourceKey(profileId);
+}
+
 export function listProviderProfiles(): ProviderProfileMeta[] {
   ensureRegistryImportedFromLegacyStorage();
   return listRegistryProviderProfiles();
@@ -77,17 +83,17 @@ export function listProviderProfiles(): ProviderProfileMeta[] {
 
 export function getProviderProfileMeta(profileId: string): ProviderProfileMeta | null {
   ensureRegistryImportedFromLegacyStorage();
-  return getRegistryProviderProfileMeta(profileId);
+  return getRegistryProviderProfileMeta(normalizeRegistryBackedProfileId(profileId));
 }
 
 export function getProviderProfileSecret(profileId: string): ProviderProfileSecret | null {
   ensureRegistryImportedFromLegacyStorage();
-  return getRegistryProviderProfileSecret(profileId);
+  return getRegistryProviderProfileSecret(normalizeRegistryBackedProfileId(profileId));
 }
 
 export function resolveProviderProfile(profileId: string): ProviderProfileSnapshot | null {
   ensureRegistryImportedFromLegacyStorage();
-  return resolveRegistryProviderProfile(profileId);
+  return resolveRegistryProviderProfile(normalizeRegistryBackedProfileId(profileId));
 }
 
 export function createProviderProfile(input: CreateProviderProfileInput): ProviderProfileMeta {
@@ -100,10 +106,10 @@ export function updateProviderProfile(
   input: UpdateProviderProfileInput,
 ): ProviderProfileMeta | null {
   ensureRegistryImportedFromLegacyStorage();
-  return updateRegistryProviderProfile(profileId, input);
+  return updateRegistryProviderProfile(normalizeRegistryBackedProfileId(profileId), input);
 }
 
 export function markProviderProfileUsed(profileId: string): ProviderProfileMeta | null {
   ensureRegistryImportedFromLegacyStorage();
-  return markRegistryProviderProfileUsed(profileId);
+  return markRegistryProviderProfileUsed(normalizeRegistryBackedProfileId(profileId));
 }

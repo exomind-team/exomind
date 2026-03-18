@@ -144,4 +144,71 @@ describe('provider-profile-storage ai registry compat（Provider Profile 注册�
     const energySource = snapshot.energySources.find((item) => item.accountLabel === 'Anthropic Sonnet');
     expect(secretsModule.getAIEnergySecret(energySource?.energySourceId ?? '')?.apiKey).toBe('sk-anthropic-sonnet');
   });
+
+  it('keeps legacy profile ids addressable after import（导入后旧 profileId 仍可通过兼容入口访问）', async () => {
+    const providerModule = await import('@/lib/agent-provider/provider-profile-storage');
+
+    localStorage.setItem('exomind:agent-provider-profiles:index', JSON.stringify(['openai-main']));
+    localStorage.setItem(
+      'exomind:agent-provider-profiles:openai-main:meta',
+      JSON.stringify({
+        profileId: 'openai-main',
+        name: 'OpenAI Main',
+        provider: 'openai',
+        model: 'gpt-5',
+        baseUrl: 'https://api.openai.com/v1',
+        createdAt: '2026-03-18T08:00:00.000Z',
+        updatedAt: '2026-03-18T08:00:00.000Z',
+      }),
+    );
+    localStorage.setItem(
+      'exomind:agent-provider-profiles:openai-main:secret',
+      JSON.stringify({
+        profileId: 'openai-main',
+        apiKey: 'sk-legacy-openai-main',
+        updatedAt: '2026-03-18T08:00:00.000Z',
+      }),
+    );
+
+    const profiles = providerModule.listProviderProfiles();
+    expect(profiles).toHaveLength(1);
+    expect(profiles[0]?.profileId).toMatch(/^registry-/);
+
+    expect(providerModule.getProviderProfileMeta('openai-main')).toEqual(
+      expect.objectContaining({
+        name: 'OpenAI Main',
+        model: 'gpt-5',
+      }),
+    );
+    expect(providerModule.getProviderProfileSecret('openai-main')).toEqual(
+      expect.objectContaining({
+        apiKey: 'sk-legacy-openai-main',
+      }),
+    );
+    expect(providerModule.resolveProviderProfile('openai-main')).toEqual(
+      expect.objectContaining({
+        name: 'OpenAI Main',
+        apiKey: 'sk-legacy-openai-main',
+      }),
+    );
+
+    const updated = providerModule.updateProviderProfile('openai-main', {
+      name: 'OpenAI Main Updated',
+      apiKey: 'sk-legacy-openai-updated',
+    });
+    expect(updated).toEqual(
+      expect.objectContaining({
+        name: 'OpenAI Main Updated',
+      }),
+    );
+
+    const marked = providerModule.markProviderProfileUsed('openai-main');
+    expect(marked?.lastUsedAt).toBeTruthy();
+    expect(providerModule.resolveProviderProfile('openai-main')).toEqual(
+      expect.objectContaining({
+        name: 'OpenAI Main Updated',
+        apiKey: 'sk-legacy-openai-updated',
+      }),
+    );
+  });
 });
