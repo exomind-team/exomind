@@ -1,8 +1,7 @@
 # #564 Sugiyama 布局升级计划
 
 > **状态**：待执行
-> **分支**：从 dev 新建 `feature/issue-564-sugiyama-layout`
-> **PR 目标**：dev
+> **分支**：直接在 `dev` 上开发（无独立分支）
 > **关联 Issue**：#564
 
 ## Context
