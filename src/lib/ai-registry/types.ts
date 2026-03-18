@@ -57,6 +57,7 @@ export interface AIOffering {
   capabilityId: string;
   enabled: boolean;
   recommended: boolean;
+  lastUsedAt?: string;
   qualityScoreManual?: number;
   stabilityLevelManual?: AIStabilityLevel;
   latencyTierManual?: AILatencyTier;

@@ -2,14 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { ChevronRight, Key } from 'lucide-react';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { getLLMSettings } from '@/config/llm-settings';
-import { buildRegistryFromLegacySources } from '@/lib/ai-registry/migration';
 import { resolveOfferingForCapability } from '@/lib/ai-registry/resolution';
-import { getAIEnergySecret, saveAIEnergySecret } from '@/lib/ai-registry/secrets';
 import {
   getAIRegistrySnapshot,
-  saveAIRegistrySnapshot,
   subscribeAIRegistryChanges,
 } from '@/lib/ai-registry/storage';
+import {
+  DEFAULT_LLM_CHANNEL_NAME,
+  getDefaultLLMRegistryDraft,
+  saveDefaultLLMRegistryDraft,
+} from '@/lib/ai-registry/compat';
 import { SettingRow } from '@/ui/app/components/settings-shared';
 import type { SettingsContext } from '@/ui/app/config/settings/settings-types';
 
@@ -19,8 +21,6 @@ interface AIRegistryDraft {
   model: string;
   apiKey: string;
 }
-
-const DEFAULT_CHANNEL_NAME = 'Primary LLM Channel';
 
 function SecondaryValue({ value }: { value: string }) {
   return (
@@ -32,19 +32,14 @@ function SecondaryValue({ value }: { value: string }) {
 }
 
 function getInitialDraft(snapshot = getAIRegistrySnapshot()): AIRegistryDraft {
-  const resolved = resolveOfferingForCapability(snapshot, 'llm.chat');
-  if (resolved) {
-    return {
-      channelName: resolved.channel.name,
-      baseUrl: resolved.channel.apiHost,
-      model: resolved.model.displayName,
-      apiKey: getAIEnergySecret(resolved.energySource?.energySourceId ?? '')?.apiKey ?? '',
-    };
+  const draft = getDefaultLLMRegistryDraft();
+  if (draft.apiKey.trim() || snapshot.channels.length > 0) {
+    return draft;
   }
 
   const legacy = getLLMSettings();
   return {
-    channelName: DEFAULT_CHANNEL_NAME,
+    channelName: DEFAULT_LLM_CHANNEL_NAME,
     baseUrl: legacy.baseUrl,
     model: legacy.model,
     apiKey: legacy.apiKey,
@@ -53,7 +48,8 @@ function getInitialDraft(snapshot = getAIRegistrySnapshot()): AIRegistryDraft {
 
 function ensureRegistryBootstrapped(): void {
   const snapshot = getAIRegistrySnapshot();
-  if (snapshot.channels.length > 0) {
+  const resolved = resolveOfferingForCapability(snapshot, 'llm.chat');
+  if (resolved) {
     return;
   }
 
@@ -62,24 +58,12 @@ function ensureRegistryBootstrapped(): void {
     return;
   }
 
-  const nextSnapshot = buildRegistryFromLegacySources({
-    llmSettings: legacy,
-    providerProfiles: [],
+  saveDefaultLLMRegistryDraft({
+    channelName: DEFAULT_LLM_CHANNEL_NAME,
+    baseUrl: legacy.baseUrl,
+    model: legacy.model,
+    apiKey: legacy.apiKey,
   });
-  if (nextSnapshot.channels[0]) {
-    nextSnapshot.channels[0].name = DEFAULT_CHANNEL_NAME;
-  }
-  if (nextSnapshot.energySources[0]) {
-    nextSnapshot.energySources[0].accountLabel = DEFAULT_CHANNEL_NAME;
-  }
-
-  saveAIRegistrySnapshot(nextSnapshot);
-  if (nextSnapshot.energySources[0]) {
-    saveAIEnergySecret(nextSnapshot.energySources[0].energySourceId, {
-      apiKey: legacy.apiKey.trim(),
-      updatedAt: nextSnapshot.updatedAt,
-    });
-  }
 }
 
 function buildRegistrySummary(): string {
@@ -92,35 +76,12 @@ function buildRegistrySummary(): string {
 }
 
 function saveDefaultRegistryDraft(draft: AIRegistryDraft): void {
-  const trimmed = {
-    channelName: draft.channelName.trim() || DEFAULT_CHANNEL_NAME,
+  saveDefaultLLMRegistryDraft({
+    channelName: draft.channelName.trim() || DEFAULT_LLM_CHANNEL_NAME,
     baseUrl: draft.baseUrl.trim(),
     model: draft.model.trim(),
     apiKey: draft.apiKey.trim(),
-  };
-
-  const nextSnapshot = buildRegistryFromLegacySources({
-    llmSettings: {
-      apiKey: trimmed.apiKey,
-      baseUrl: trimmed.baseUrl,
-      model: trimmed.model,
-    },
-    providerProfiles: [],
   });
-  if (nextSnapshot.channels[0]) {
-    nextSnapshot.channels[0].name = trimmed.channelName;
-  }
-  if (nextSnapshot.energySources[0]) {
-    nextSnapshot.energySources[0].accountLabel = trimmed.channelName;
-  }
-
-  saveAIRegistrySnapshot(nextSnapshot);
-  if (nextSnapshot.energySources[0]) {
-    saveAIEnergySecret(nextSnapshot.energySources[0].energySourceId, {
-      apiKey: trimmed.apiKey,
-      updatedAt: nextSnapshot.updatedAt,
-    });
-  }
 }
 
 export function AIRegistrySetting(_props: { ctx: SettingsContext }) {

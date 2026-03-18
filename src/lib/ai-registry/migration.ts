@@ -87,10 +87,10 @@ function toLegacySourceRecords(input: LegacyRegistrySources): LegacySourceRecord
 }
 
 function buildChannel(record: LegacySourceRecord): AIChannel {
-  const hostId = sanitizeIdPart(record.apiHost || record.sourceId);
+  const sourceKey = sanitizeIdPart(record.sourceId || record.apiHost);
 
   return {
-    channelId: `channel-${hostId}`,
+    channelId: `channel-${sourceKey}`,
     name: record.sourceName,
     vendor: record.vendor,
     channelType: record.apiHost.includes('api.openai.com') || record.apiHost.includes('anthropic.com')
@@ -120,7 +120,7 @@ function buildModel(record: LegacySourceRecord): AIModel {
 
 function buildOffering(channelId: string, modelId: string): AIOffering {
   return {
-    offeringId: `${channelId}-${modelId}-llm-chat`,
+    offeringId: `${channelId}-llm-chat`,
     channelId,
     modelId,
     capabilityId: 'capability-llm-chat',
@@ -185,6 +185,6 @@ export function buildRegistryFromLegacySources(input: LegacyRegistrySources): AI
     offerings,
     energySources,
     resolutionRules: buildResolutionRules(offerings),
-    updatedAt: records.at(-1)?.updatedAt ?? DEFAULT_TIMESTAMP,
+    updatedAt: records.length > 0 ? records[records.length - 1]!.updatedAt : DEFAULT_TIMESTAMP,
   };
 }
