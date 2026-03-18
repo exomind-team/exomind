@@ -157,7 +157,7 @@ export function TaskDagDetailPanel({
               type="button"
               data-testid="task-dag-detail-start-timer"
               disabled
-              title="执行模式将在 Wave 3 激活"
+              title="请切换到执行模式后开始计时"
               className="inline-flex items-center gap-2 rounded-full border border-[#E7E5E4] px-4 py-2 text-sm font-semibold text-[#78716C] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3F3F46] dark:text-[#A8A29E]"
             >
               <Play size={14} />

@@ -47,6 +47,10 @@ export type TaskDagFlowNodeData = {
   isCollapsedDownstreamTarget: boolean;
   isBlocked: boolean;
   isExecutable: boolean;
+  blockedReason?: string | null;
+  showConnectHandles?: boolean;
+  connectPreviewType?: 'hard' | 'soft' | null;
+  executeState?: 'active' | 'executable' | 'blocked' | 'terminal';
   hiddenUpstreamCount: number;
   hiddenDownstreamCount: number;
 };
@@ -116,6 +120,10 @@ export function buildTaskDagFlow(graph: TaskGraph): {
           isCollapsedDownstreamTarget: false,
           isBlocked: node.isBlocked,
           isExecutable: node.isExecutable,
+          blockedReason: null,
+          showConnectHandles: false,
+          connectPreviewType: null,
+          executeState: undefined,
           hiddenUpstreamCount: 0,
           hiddenDownstreamCount: 0,
         },
@@ -207,6 +215,10 @@ export function buildVisibleTaskDagFlow(
           isCollapsedDownstreamTarget: node.isCollapsedDownstreamTarget,
           isBlocked: node.isBlocked,
           isExecutable: node.isExecutable,
+          blockedReason: null,
+          showConnectHandles: false,
+          connectPreviewType: null,
+          executeState: undefined,
           hiddenUpstreamCount: node.hiddenUpstreamCount,
           hiddenDownstreamCount: node.hiddenDownstreamCount,
         },

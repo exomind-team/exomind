@@ -236,6 +236,7 @@ impl TimeBlockStore {
     }
 
     pub fn put_active_scoped(&self, scope_key: Option<&str>, block: ActiveBlockData) -> Result<(), TimeBlockStoreError> {
+        let normalized_block = block.normalize_task_ids();
         match &self.backend {
             TimeBlockStoreBackend::Memory(state) => {
                 state
@@ -243,10 +244,10 @@ impl TimeBlockStore {
                     .unwrap()
                     .entry(normalize_scope_key(scope_key).to_string())
                     .or_default()
-                    .active = Some(block.normalize_task_ids());
+                    .active = Some(normalized_block.clone());
                 Ok(())
             }
-            TimeBlockStoreBackend::Sqlite(store) => store.put_active_scoped(normalize_scope_key(scope_key), &block),
+            TimeBlockStoreBackend::Sqlite(store) => store.put_active_scoped(normalize_scope_key(scope_key), &normalized_block),
         }
     }
 

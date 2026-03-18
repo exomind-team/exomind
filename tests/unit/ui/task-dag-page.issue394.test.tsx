@@ -6,6 +6,18 @@ import type { TaskNode } from '@/lib/types/task';
 
 const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
 const onTaskChangeMock = vi.fn(() => () => {});
+const addDependencyMock = vi.fn();
+const removeDependencyMock = vi.fn();
+const transitionTaskMock = vi.fn();
+const loadActiveBlockMock = vi.fn();
+const onBlockChangeMock = vi.fn(() => () => {});
+const markEndingMock = vi.fn();
+const endBlockMock = vi.fn();
+const startBlockForTaskMock = vi.fn();
+const calculateSpentMinutesMock = vi.fn();
+const addTaskToBlockMock = vi.fn();
+const removeTaskFromBlockMock = vi.fn();
+const onBlockEndForTasksMock = vi.fn();
 
 const flowApiMocks = vi.hoisted(() => ({
   setCenter: vi.fn(),
@@ -17,6 +29,7 @@ const flowApiMocks = vi.hoisted(() => ({
 
 const navigateMock = vi.hoisted(() => vi.fn());
 const isDesktopMock = vi.hoisted(() => vi.fn(() => true));
+const toastMock = vi.hoisted(() => vi.fn());
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
@@ -28,7 +41,27 @@ vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     listTasks: listTasksMock,
     onTaskChange: onTaskChangeMock,
+    addDependency: addDependencyMock,
+    removeDependency: removeDependencyMock,
+    transitionTask: transitionTaskMock,
   }),
+  getTimeBlockService: () => ({
+    loadActiveBlock: loadActiveBlockMock,
+    onBlockChange: onBlockChangeMock,
+    markEnding: markEndingMock,
+    endBlock: endBlockMock,
+  }),
+  getTaskTimerService: () => ({
+    startBlockForTask: startBlockForTaskMock,
+    calculateSpentMinutes: calculateSpentMinutesMock,
+    addTaskToBlock: addTaskToBlockMock,
+    removeTaskFromBlock: removeTaskFromBlockMock,
+    onBlockEndForTasks: onBlockEndForTasksMock,
+  }),
+}));
+
+vi.mock('@/components/ui/toast-hook', () => ({
+  toast: toastMock,
 }));
 
 vi.mock('@xyflow/react', () => ({
@@ -118,7 +151,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
   };
 }
 
-describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2）', () => {
+describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () => {
   beforeEach(() => {
     flowApiMocks.setCenter.mockReset();
     flowApiMocks.fitView.mockReset();
@@ -129,8 +162,34 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2）', () => {
     navigateMock.mockReset();
     isDesktopMock.mockReset();
     isDesktopMock.mockReturnValue(true);
+    toastMock.mockReset();
     listTasksMock.mockReset();
     onTaskChangeMock.mockClear();
+    addDependencyMock.mockReset();
+    removeDependencyMock.mockReset();
+    transitionTaskMock.mockReset();
+    loadActiveBlockMock.mockReset();
+    onBlockChangeMock.mockClear();
+    markEndingMock.mockReset();
+    endBlockMock.mockReset();
+    startBlockForTaskMock.mockReset();
+    calculateSpentMinutesMock.mockReset();
+    addTaskToBlockMock.mockReset();
+    removeTaskFromBlockMock.mockReset();
+    onBlockEndForTasksMock.mockReset();
+
+    loadActiveBlockMock.mockResolvedValue(null);
+    markEndingMock.mockResolvedValue(undefined);
+    endBlockMock.mockResolvedValue(null);
+    startBlockForTaskMock.mockResolvedValue(null);
+    calculateSpentMinutesMock.mockResolvedValue(0);
+    addTaskToBlockMock.mockResolvedValue(undefined);
+    removeTaskFromBlockMock.mockResolvedValue(undefined);
+    onBlockEndForTasksMock.mockResolvedValue(undefined);
+    transitionTaskMock.mockResolvedValue(null);
+    addDependencyMock.mockResolvedValue(null);
+    removeDependencyMock.mockResolvedValue(null);
+    window.localStorage.clear();
 
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-a', title: '梳理 DAG 基础层', createdAt: 10, updatedAt: 10 }),
@@ -152,7 +211,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2）', () => {
     ]);
   });
 
-  it('renders full-canvas workspace with floating controls and placeholder mode selector', async () => {
+  it('renders full-canvas workspace with floating controls and three enabled modes', async () => {
     render(<TaskDagPage />);
 
     await waitFor(() => {
@@ -162,8 +221,8 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2）', () => {
     expect(await screen.findByTestId('task-dag-page')).toBeInTheDocument();
     expect(screen.getByTestId('task-dag-canvas-shell')).toBeInTheDocument();
     expect(screen.getByTestId('task-dag-mode-browse')).toBeEnabled();
-    expect(screen.getByTestId('task-dag-mode-connect')).toBeDisabled();
-    expect(screen.getByTestId('task-dag-mode-execute')).toBeDisabled();
+    expect(screen.getByTestId('task-dag-mode-connect')).toBeEnabled();
+    expect(screen.getByTestId('task-dag-mode-execute')).toBeEnabled();
     expect(screen.getByTestId('task-dag-legend-hard-chip')).toBeInTheDocument();
     expect(screen.getByTestId('task-dag-legend-soft-chip')).toBeInTheDocument();
     expect(screen.queryByTestId('task-dag-current-root-summary')).not.toBeInTheDocument();
@@ -325,6 +384,155 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2）', () => {
       expect(screen.getByTestId('task-dag-node-task-a').className).toContain('opacity-35');
     });
     expect(screen.getByTestId('task-dag-node-task-b').className).toContain('ring-[#C75B3A]/35');
+  });
+
+  it('switches modes and persists the latest mode to localStorage', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
+    expect(screen.getByText(/连接模式：/)).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('execute');
+    expect(screen.getByText(/执行模式：/)).toBeInTheDocument();
+  });
+
+  it('supports connect mode dependency toggle rules and surfaces cycle rejection', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    expect(screen.getByText('准备硬依赖')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+    await waitFor(() => {
+      expect(removeDependencyMock).toHaveBeenCalledWith('task-b', 'task-a');
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    expect(screen.getByText('准备软依赖')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+    await waitFor(() => {
+      expect(addDependencyMock).toHaveBeenCalledWith('task-b', 'task-a', 'soft');
+    });
+
+    addDependencyMock.mockRejectedValueOnce(new Error('Adding dependency task-a → task-b would create a cycle'));
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      expect(toastMock).toHaveBeenCalledWith(expect.objectContaining({
+        title: '依赖更新失败',
+        description: '不允许循环依赖',
+        variant: 'destructive',
+      }));
+    });
+  });
+
+  it('disables double-click navigation while in connect mode to avoid conflicting with soft dependency gestures', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+    fireEvent.doubleClick(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('starts executable tasks in execute mode with remaining countdown config', async () => {
+    calculateSpentMinutesMock.mockResolvedValue(15);
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '可执行任务', estimatedMinutes: 40, createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: '受阻任务',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-a', { mode: 'countdown', minutes: 25 });
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+    expect(startBlockForTaskMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('opens the multi-task end dialog in execute mode and submits task outcomes', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '进行中的任务', status: 'in_progress', createdAt: 10, updatedAt: 10 }),
+      makeTask({ id: 'task-b', title: '可追加任务', createdAt: 20, updatedAt: 20 }),
+    ]);
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-1',
+      name: '进行中时间块',
+      mode: 'countup',
+      elapsed: 0,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-a'],
+      taskAssociationLog: [],
+    });
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+    await waitFor(() => {
+      expect(addTaskToBlockMock).toHaveBeenCalledWith('task-b');
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    await waitFor(() => {
+      expect(markEndingMock).toHaveBeenCalledTimes(1);
+    });
+
+    expect(await screen.findByTestId('task-dag-end-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('task-dag-end-dialog-feedback'), { target: { value: '总结反馈' } });
+    fireEvent.click(screen.getByTestId('feedback-task-status-completed'));
+    fireEvent.click(screen.getByTestId('task-dag-end-dialog-submit'));
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith('总结反馈', {
+        taskStatusOutcomes: { 'task-a': 'completed' },
+        taskTitles: { 'task-a': '进行中的任务' },
+      });
+    });
+    expect(onBlockEndForTasksMock).toHaveBeenCalledWith(['task-a'], 'block-1');
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-a', 'completed');
   });
 
   it('shows disabled upstream/downstream actions in the context menu when a node cannot be safely folded', async () => {

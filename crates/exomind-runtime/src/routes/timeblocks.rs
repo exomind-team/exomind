@@ -114,7 +114,7 @@ async fn get_active_timeblock(
         .get_active_scoped(scope_key)
         .map_err(|error| internal_error(error.to_string()))?
     {
-        Some(block) => Ok(Json(block)),
+        Some(block) => Ok(Json(block.normalize_task_ids())),
         None => Err((
             StatusCode::NOT_FOUND,
             Json(ErrorResponse {
@@ -132,7 +132,7 @@ async fn put_active_timeblock(
     let scope_key = query.profile_id.as_deref().or(query.user_id.as_deref());
     state
         .timeblock_store
-        .put_active_scoped(scope_key, payload)
+        .put_active_scoped(scope_key, payload.normalize_task_ids())
         .map_err(|error| internal_error(error.to_string()))?;
     Ok(StatusCode::NO_CONTENT)
 }

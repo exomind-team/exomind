@@ -12,7 +12,8 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
-import { getTaskService } from '@/lib/services';
+import { toast } from '@/components/ui/toast-hook';
+import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import {
   calculateTaskDagCollapseScope,
@@ -21,7 +22,9 @@ import {
   projectVisibleTaskGraph,
   type VisibleTaskGraph,
 } from '@/lib/task/task-dag-visibility';
+import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimerConfig } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
+import { MultiTaskEndDialog } from '@/ui/app/components/MultiTaskEndDialog';
 import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
 import {
   TaskDagDetailPanel,
@@ -29,6 +32,7 @@ import {
 } from '@/ui/app/components/TaskDagDetailPanel';
 import { TaskDagModeSelector, type TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
+import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import {
   buildVisibleTaskDagFlow,
   TASK_DAG_NODE_HEIGHT,
@@ -39,6 +43,11 @@ import {
 } from './task-dag-flow';
 import { extractTaskTitleSearchQuery, filterTasksByTitleFuzzySearch } from './task-title-fuzzy-search';
 import { TASKS_LAST_PATH_KEY } from './task-route-memory';
+
+type DagConnectType = 'hard' | 'soft';
+type DagConnectState = { sourceId: string; type: DagConnectType } | null;
+
+const TASK_DAG_MODE_STORAGE_KEY = 'exomind:dag-mode';
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return status === 'completed' || status === 'cancelled';
@@ -86,6 +95,124 @@ function buildDownstreamDependencies(taskId: string, tasks: TaskNode[]): TaskDag
     })));
 }
 
+function readStoredDagMode(): TaskDagMode {
+  if (typeof window === 'undefined') return 'browse';
+
+  try {
+    const saved = window.localStorage.getItem(TASK_DAG_MODE_STORAGE_KEY);
+    if (saved === 'connect' || saved === 'execute') {
+      return saved;
+    }
+  } catch {
+    // Ignore storage failures and fall back to browse mode.
+  }
+
+  return 'browse';
+}
+
+function resolveConnectTypeFromEvent(event: unknown): DagConnectType {
+  if (
+    event
+    && typeof event === 'object'
+    && 'shiftKey' in event
+    && Boolean((event as { shiftKey?: boolean }).shiftKey)
+  ) {
+    return 'soft';
+  }
+
+  return 'hard';
+}
+
+function buildBlockedReason(task: TaskNode, taskById: ReadonlyMap<string, TaskNode>): string | null {
+  const incompleteHardDependencies = task.dependsOn
+    .filter((dependency) => dependency.type === 'hard')
+    .map((dependency) => {
+      const predecessor = taskById.get(dependency.taskId);
+      if (!predecessor || predecessor.status === 'completed') {
+        return null;
+      }
+      return predecessor.title;
+    })
+    .filter((title): title is string => title !== null);
+
+  const pendingSoftDependencies = task.dependsOn
+    .filter((dependency) => dependency.type === 'soft')
+    .map((dependency) => {
+      const predecessor = taskById.get(dependency.taskId);
+      if (!predecessor || predecessor.status !== 'pending') {
+        return null;
+      }
+      return predecessor.title;
+    })
+    .filter((title): title is string => title !== null);
+
+  const reasons: string[] = [];
+  if (incompleteHardDependencies.length > 0) {
+    reasons.push(`硬依赖未完成：${incompleteHardDependencies.join('、')}`);
+  }
+  if (pendingSoftDependencies.length > 0) {
+    reasons.push(`软依赖尚未开始：${pendingSoftDependencies.join('、')}`);
+  }
+
+  return reasons.length > 0 ? reasons.join('；') : null;
+}
+
+function formatDependencyMutationError(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : String(error ?? '').trim();
+  const normalized = message.toLowerCase();
+
+  if (normalized.includes('cycle')) {
+    return '不允许循环依赖';
+  }
+  if (normalized.includes('not found')) {
+    return '依赖任务不存在，请刷新后重试';
+  }
+
+  return message || '依赖关系更新失败';
+}
+
+function formatExecuteActionError(error: unknown): string {
+  const message = error instanceof Error ? error.message.trim() : String(error ?? '').trim();
+  if (message.includes('hard dependencies not met')) {
+    return '所选任务存在未完成的硬依赖，当前不能执行或关联。';
+  }
+
+  return message || '执行模式操作失败，请稍后重试。';
+}
+
+function resolveExecuteState(
+  task: TaskNode,
+  isBlocked: boolean,
+  isExecutable: boolean,
+  activeTaskIdSet: ReadonlySet<string>,
+): TaskDagFlowNodeData['executeState'] {
+  if (activeTaskIdSet.has(task.id)) {
+    return 'active';
+  }
+  if (isTerminalStatus(task.status)) {
+    return 'terminal';
+  }
+  if (isExecutable) {
+    return 'executable';
+  }
+  if (isBlocked) {
+    return 'blocked';
+  }
+
+  return 'blocked';
+}
+
+function buildExecuteTimerConfig(task: TaskNode, spentMinutes: number): TimerConfig {
+  if (task.estimatedMinutes == null) {
+    return { mode: 'countup' };
+  }
+
+  return {
+    mode: 'countdown',
+    minutes: Math.max(1, Math.round(task.estimatedMinutes - spentMinutes)),
+  };
+}
+
 function filterTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGraph): VisibleTaskGraph {
   const terminalNodeIds = visibleGraph.nodes
     .filter((node) => isTerminalStatus(node.status))
@@ -123,36 +250,65 @@ function filterTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGraph): Vi
 function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
   const nodeData = data as TaskDagFlowNodeData;
   const handleStyle = {
-    width: 8,
-    height: 8,
-    border: 0,
-    opacity: 0,
-    pointerEvents: 'none' as const,
+    width: 10,
+    height: 10,
+    border: nodeData.showConnectHandles ? '2px solid #C75B3A' : 0,
+    background: nodeData.showConnectHandles ? '#FAF7F5' : 'transparent',
+    opacity: nodeData.showConnectHandles ? 1 : 0,
+    pointerEvents: nodeData.showConnectHandles ? 'auto' as const : 'none' as const,
   };
 
   return (
     <div
+      title={nodeData.blockedReason ?? undefined}
       data-testid={`task-dag-node-${id}`}
       className={[
         'w-64 rounded-2xl border bg-white px-4 py-3 text-left shadow-sm transition-all dark:bg-[#1C1917]',
-        nodeData.isSelected
-          ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]'
-          : nodeData.isCurrentRoot
-            ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
-            : nodeData.isCollapsedTarget
-              ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
-              : nodeData.isSearchMatch
-                ? 'border-[#2563EB] bg-[#EFF6FF] shadow-[0_10px_25px_-15px_rgba(37,99,235,0.65)] dark:border-[#60A5FA] dark:bg-[#172554]'
-                : nodeData.isBlocked
-                  ? 'border-[#EAB308]/60'
-                  : 'border-[#E7E5E4] dark:border-[#292524]',
-        nodeData.isSearchDimmed && !nodeData.isSelected ? 'opacity-35 saturate-[0.7]' : '',
+        nodeData.connectPreviewType === 'hard'
+          ? 'border-[#2563EB] ring-2 ring-[#2563EB]/30 bg-[#EFF6FF] shadow-[0_14px_32px_-18px_rgba(37,99,235,0.7)] dark:border-[#60A5FA] dark:bg-[#172554]'
+          : nodeData.connectPreviewType === 'soft'
+            ? 'border-dashed border-[#0F766E] ring-2 ring-[#14B8A6]/25 bg-[#F0FDFA] shadow-[0_14px_32px_-18px_rgba(20,184,166,0.7)] dark:border-[#2DD4BF] dark:bg-[#042F2E]'
+            : nodeData.executeState === 'active'
+              ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)] animate-pulse'
+              : nodeData.isSelected
+                ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]'
+                : nodeData.executeState === 'executable'
+                  ? 'border-[#16A34A]/60 bg-[#F0FDF4] shadow-[0_12px_28px_-18px_rgba(34,197,94,0.7)] dark:border-[#22C55E]/60 dark:bg-[#052E16]'
+                  : nodeData.executeState === 'blocked'
+                    ? 'border-[#EAB308]/60 opacity-60'
+                    : nodeData.executeState === 'terminal'
+                      ? 'border-[#D6D3D1] opacity-35 grayscale dark:border-[#44403C]'
+                      : nodeData.isCurrentRoot
+                        ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
+                        : nodeData.isCollapsedTarget
+                          ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
+                          : nodeData.isSearchMatch
+                            ? 'border-[#2563EB] bg-[#EFF6FF] shadow-[0_10px_25px_-15px_rgba(37,99,235,0.65)] dark:border-[#60A5FA] dark:bg-[#172554]'
+                            : nodeData.isBlocked
+                              ? 'border-[#EAB308]/60'
+                              : 'border-[#E7E5E4] dark:border-[#292524]',
+        nodeData.isSearchDimmed && !nodeData.isSelected && nodeData.executeState !== 'active' ? 'opacity-35 saturate-[0.7]' : '',
       ].join(' ')}
     >
       <Handle type="target" position={Position.Left} style={handleStyle} />
       <Handle type="source" position={Position.Right} style={handleStyle} />
 
       <div className="flex flex-wrap items-center gap-2">
+        {nodeData.connectPreviewType === 'hard' ? (
+          <span className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]">
+            准备硬依赖
+          </span>
+        ) : null}
+        {nodeData.connectPreviewType === 'soft' ? (
+          <span className="rounded-full bg-[#CCFBF1] px-2 py-0.5 text-[10px] font-medium text-[#0F766E] dark:bg-[#134E4A] dark:text-[#99F6E4]">
+            准备软依赖
+          </span>
+        ) : null}
+        {nodeData.executeState === 'active' ? (
+          <span className="rounded-full bg-[#FDE7DC] px-2 py-0.5 text-[10px] font-semibold text-[#C75B3A]">
+            专注中
+          </span>
+        ) : null}
         {nodeData.isCurrentRoot ? (
           <span
             data-testid={`task-dag-current-root-badge-${id}`}
@@ -210,14 +366,19 @@ export function TaskDagPage() {
   const location = useLocation();
   const navigate = useNavigate();
   const [tasks, setTasks] = useState<TaskNode[]>([]);
+  const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(EMPTY_TASK_DAG_VISIBILITY_STATE);
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const [hideTerminal, setHideTerminal] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
-  const [mode] = useState<TaskDagMode>('browse');
+  const [mode, setMode] = useState<TaskDagMode>(() => readStoredDagMode());
+  const [connectState, setConnectState] = useState<DagConnectState>(null);
+  const [endingDialogOpen, setEndingDialogOpen] = useState(false);
+  const [endingTaskIds, setEndingTaskIds] = useState<string[]>([]);
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
+  const connectDragTypeRef = useRef<DagConnectType>('hard');
 
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
@@ -225,6 +386,14 @@ export function TaskDagPage() {
       sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
     }
   }, [location.pathname, location.searchStr]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TASK_DAG_MODE_STORAGE_KEY, mode);
+    } catch {
+      // Ignore storage failures and keep mode in-memory only.
+    }
+  }, [mode]);
 
   useEffect(() => {
     let disposed = false;
@@ -249,6 +418,30 @@ export function TaskDagPage() {
   }, []);
 
   useEffect(() => {
+    let disposed = false;
+    const timeBlockService = getTimeBlockService();
+
+    const load = async () => {
+      const block = await timeBlockService.loadActiveBlock();
+      if (!disposed) {
+        setActiveBlock(block);
+      }
+    };
+
+    void load();
+    const unsubscribe = timeBlockService.onBlockChange((block) => {
+      if (!disposed) {
+        setActiveBlock(block);
+      }
+    });
+
+    return () => {
+      disposed = true;
+      unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
     const timeoutId = window.setTimeout(() => {
       setSearchQuery(extractTaskTitleSearchQuery(searchDraft));
     }, 300);
@@ -264,9 +457,29 @@ export function TaskDagPage() {
     return () => document.removeEventListener('click', handler);
   }, [contextMenu]);
 
+  useEffect(() => {
+    if (mode !== 'browse') {
+      setSelectedTaskId(null);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (mode !== 'connect') {
+      setConnectState(null);
+    }
+  }, [mode]);
+
+  useEffect(() => {
+    if (activeBlock) return;
+    setEndingDialogOpen(false);
+    setEndingTaskIds([]);
+  }, [activeBlock]);
+
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const graph = useMemo(() => buildTaskGraph(tasks), [tasks]);
   const graphNodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
+  const activeTaskIds = useMemo(() => resolveActiveBlockTaskIds(activeBlock), [activeBlock]);
+  const activeTaskIdSet = useMemo(() => new Set(activeTaskIds), [activeTaskIds]);
   const interactionGraph = useMemo(() => (
     hideTerminal
       ? buildTaskGraph(tasks.filter((task) => !isTerminalStatus(task.status)))
@@ -276,6 +489,10 @@ export function TaskDagPage() {
   const renderedVisibleGraph = useMemo(() => (
     hideTerminal ? filterTerminalNodesFromVisibleGraph(visibleGraph) : visibleGraph
   ), [hideTerminal, visibleGraph]);
+  const visibleNodeIdSet = useMemo(
+    () => new Set(renderedVisibleGraph.nodes.map((node) => node.id)),
+    [renderedVisibleGraph.nodes],
+  );
   const searchMatchedTaskIds = useMemo(() => {
     if (!searchQuery) {
       return new Set<string>();
@@ -290,18 +507,58 @@ export function TaskDagPage() {
       searchMatchedTaskIds.has(node.id) ? count + 1 : count
     ), 0);
   }, [renderedVisibleGraph.nodes, searchMatchedTaskIds, searchQuery]);
-  const flowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
-    selectedTaskId,
-    searchMatchedTaskIds,
-    hasActiveSearch: Boolean(searchQuery),
-  }), [renderedVisibleGraph, searchMatchedTaskIds, searchQuery, selectedTaskId]);
 
   useEffect(() => {
-    const visibleNodeIds = new Set(renderedVisibleGraph.nodes.map((node) => node.id));
-    if (selectedTaskId && !visibleNodeIds.has(selectedTaskId)) {
+    if (selectedTaskId && !visibleNodeIdSet.has(selectedTaskId)) {
       setSelectedTaskId(null);
     }
-  }, [renderedVisibleGraph.nodes, selectedTaskId]);
+  }, [selectedTaskId, visibleNodeIdSet]);
+
+  useEffect(() => {
+    if (connectState && !visibleNodeIdSet.has(connectState.sourceId)) {
+      setConnectState(null);
+    }
+  }, [connectState, visibleNodeIdSet]);
+
+  const flowGraph = useMemo(() => {
+    const baseFlowGraph = buildVisibleTaskDagFlow(renderedVisibleGraph, {
+      selectedTaskId: mode === 'browse' ? selectedTaskId : null,
+      searchMatchedTaskIds,
+      hasActiveSearch: Boolean(searchQuery),
+    });
+
+    return {
+      nodes: baseFlowGraph.nodes.map((node) => {
+        const task = taskById.get(node.id);
+        const graphNode = graphNodeById.get(node.id);
+        const blockedReason = task ? buildBlockedReason(task, taskById) : null;
+
+        return {
+          ...node,
+          data: {
+            ...node.data,
+            blockedReason,
+            showConnectHandles: mode === 'connect',
+            connectPreviewType: connectState?.sourceId === node.id ? connectState.type : null,
+            executeState: mode === 'execute' && task && graphNode
+              ? resolveExecuteState(task, graphNode.isBlocked, graphNode.isExecutable, activeTaskIdSet)
+              : undefined,
+          },
+        } satisfies TaskDagFlowNode;
+      }),
+      edges: baseFlowGraph.edges,
+    };
+  }, [
+    activeTaskIdSet,
+    connectState,
+    graphNodeById,
+    mode,
+    renderedVisibleGraph,
+    searchMatchedTaskIds,
+    searchQuery,
+    selectedTaskId,
+    taskById,
+  ]);
 
   const toggleCollapse = (direction: 'upstream' | 'downstream', nodeId: string) => {
     setDagVisibility((prev) => {
@@ -329,7 +586,9 @@ export function TaskDagPage() {
     const currentRootNode = flowGraph.nodes.find((node) => node.id === currentRootNodeId);
     if (!currentRootNode) return;
 
-    setSelectedTaskId(currentRootNodeId);
+    if (mode === 'browse') {
+      setSelectedTaskId(currentRootNodeId);
+    }
     const currentZoom = flowInstanceRef.current?.getViewport().zoom ?? 1;
     flowInstanceRef.current?.setCenter(
       currentRootNode.position.x + TASK_DAG_NODE_WIDTH / 2,
@@ -338,9 +597,15 @@ export function TaskDagPage() {
     );
   };
 
-  const selectedTaskTitle = selectedTaskId ? taskById.get(selectedTaskId)?.title ?? selectedTaskId : null;
-  const selectedTask = selectedTaskId ? taskById.get(selectedTaskId) ?? null : null;
-  const selectedGraphNode = selectedTaskId ? graphNodeById.get(selectedTaskId) ?? null : null;
+  const selectedTaskTitle = mode === 'browse' && selectedTaskId
+    ? taskById.get(selectedTaskId)?.title ?? selectedTaskId
+    : null;
+  const selectedTask = mode === 'browse' && selectedTaskId
+    ? taskById.get(selectedTaskId) ?? null
+    : null;
+  const selectedGraphNode = mode === 'browse' && selectedTaskId
+    ? graphNodeById.get(selectedTaskId) ?? null
+    : null;
   const selectedTaskExecutionHint = selectedTask && selectedGraphNode
     ? buildExecutionHint(selectedTask, selectedGraphNode.isBlocked, selectedGraphNode.isExecutable)
     : '';
@@ -359,6 +624,224 @@ export function TaskDagPage() {
     });
   };
 
+  const applyDependencyMutation = async (
+    sourceId: string,
+    targetId: string,
+    dependencyType: DagConnectType,
+  ) => {
+    if (!sourceId || !targetId || sourceId === targetId) {
+      return;
+    }
+
+    const targetTask = taskById.get(targetId);
+    if (!targetTask) {
+      return;
+    }
+
+    const existingDependency = targetTask.dependsOn.find((dependency) => dependency.taskId === sourceId);
+    try {
+      if (existingDependency?.type === dependencyType) {
+        await getTaskService().removeDependency(targetId, sourceId);
+        return;
+      }
+
+      await getTaskService().addDependency(targetId, sourceId, dependencyType);
+    } catch (error) {
+      toast({
+        title: '依赖更新失败',
+        description: formatDependencyMutationError(error),
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleConnectNodeClick = (nodeId: string) => {
+    setContextMenu(null);
+
+    if (!connectState) {
+      setConnectState({ sourceId: nodeId, type: 'hard' });
+      return;
+    }
+
+    if (connectState.sourceId === nodeId) {
+      setConnectState(connectState.type === 'hard'
+        ? { sourceId: nodeId, type: 'soft' }
+        : null);
+      return;
+    }
+
+    const pendingConnectState = connectState;
+    setConnectState(null);
+    void applyDependencyMutation(pendingConnectState.sourceId, nodeId, pendingConnectState.type);
+  };
+
+  const handleOpenEndDialog = async (taskIds: string[] = activeTaskIds) => {
+    const normalizedTaskIds = Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)));
+    if (normalizedTaskIds.length === 0) return;
+
+    try {
+      const timeBlockService = getTimeBlockService();
+      const block = await timeBlockService.loadActiveBlock();
+      if (block && block.phase !== 'feedback_in_progress') {
+        await timeBlockService.markEnding();
+      }
+      setEndingTaskIds(normalizedTaskIds);
+      setEndingDialogOpen(true);
+    } catch (error) {
+      toast({
+        title: '无法结束时间块',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleExecuteNodeClick = async (nodeId: string) => {
+    setContextMenu(null);
+
+    const task = taskById.get(nodeId);
+    const graphNode = graphNodeById.get(nodeId);
+    if (!task || !graphNode) {
+      return;
+    }
+
+    if (activeBlock?.phase === 'feedback_in_progress') {
+      setEndingTaskIds((current) => current.length > 0 ? current : activeTaskIds);
+      setEndingDialogOpen(true);
+      return;
+    }
+
+    if (isTerminalStatus(task.status)) {
+      return;
+    }
+
+    if (graphNode.isBlocked && !activeTaskIdSet.has(nodeId)) {
+      return;
+    }
+
+    try {
+      const taskTimerService = getTaskTimerService();
+      const taskService = getTaskService();
+
+      if (activeTaskIdSet.has(nodeId)) {
+        if (activeTaskIds.length <= 1) {
+          await handleOpenEndDialog(activeTaskIds);
+          return;
+        }
+
+        await taskTimerService.removeTaskFromBlock(nodeId);
+        if (task.status === 'in_progress') {
+          await taskService.transitionTask(nodeId, 'suspended');
+        }
+        return;
+      }
+
+      if (activeBlock) {
+        await taskTimerService.addTaskToBlock(nodeId);
+        return;
+      }
+
+      const spentMinutes = task.estimatedMinutes
+        ? await taskTimerService.calculateSpentMinutes(nodeId)
+        : 0;
+      await taskTimerService.startBlockForTask(nodeId, buildExecuteTimerConfig(task, spentMinutes));
+    } catch (error) {
+      toast({
+        title: '执行模式操作失败',
+        description: formatExecuteActionError(error),
+        variant: 'destructive',
+      });
+    }
+  };
+
+  const handleNodeClick = (_event: unknown, node: { id: string }) => {
+    if (mode === 'browse') {
+      setSelectedTaskId(node.id);
+      setContextMenu(null);
+      return;
+    }
+
+    if (mode === 'connect') {
+      handleConnectNodeClick(node.id);
+      return;
+    }
+
+    void handleExecuteNodeClick(node.id);
+  };
+
+  const endingDialogTaskIds = endingTaskIds.length > 0 ? endingTaskIds : activeTaskIds;
+  const endingDialogTasks = endingDialogTaskIds
+    .map((taskId) => taskById.get(taskId))
+    .filter((task): task is TaskNode => Boolean(task));
+  const subtitle = useMemo(() => {
+    if (mode === 'connect') {
+      if (connectState) {
+        const sourceTitle = taskById.get(connectState.sourceId)?.title ?? connectState.sourceId;
+        return `连接模式：已选“${sourceTitle}”作为${connectState.type === 'hard' ? '硬依赖' : '软依赖'}起点，再点目标节点即可。`;
+      }
+      return '连接模式：拖拽节点两端句柄，或依次点击两个节点建立依赖；再次点击同一节点可切换硬/软依赖。';
+    }
+
+    if (mode === 'execute') {
+      if (activeTaskIds.length > 0) {
+        return `执行模式：当前时间块关联 ${activeTaskIds.length} 个任务。单击节点可追加或移除关联，右键可结束时间块。`;
+      }
+      return '执行模式：单击可执行节点即可开始时间块，双击仍可进入任务详情页。';
+    }
+
+    if (selectedTaskTitle) {
+      return `当前聚焦：${selectedTaskTitle}。双击节点可进入任务详情页。`;
+    }
+
+    return '单击节点可查看详情，双击节点可进入任务详情页，右键节点可折叠上下游。';
+  }, [activeTaskIds.length, connectState, mode, selectedTaskTitle, taskById]);
+
+  const handleEndDialogSubmit = async (payload: {
+    feedback: string;
+    outcomes: Record<string, TaskStatusChoice>;
+  }) => {
+    const taskIdsSnapshot = endingDialogTaskIds;
+    const blockId = activeBlock?.startId;
+    const taskStatusOutcomes = Object.entries(payload.outcomes).reduce<Record<string, string>>((next, [taskId, status]) => {
+      if (status !== 'continue') {
+        next[taskId] = status;
+      }
+      return next;
+    }, {});
+    const taskTitles = taskIdsSnapshot.reduce<Record<string, string>>((next, taskId) => {
+      const title = taskById.get(taskId)?.title;
+      if (title) {
+        next[taskId] = title;
+      }
+      return next;
+    }, {});
+
+    try {
+      await getTimeBlockService().endBlock(payload.feedback || undefined, {
+        taskStatusOutcomes: Object.keys(taskStatusOutcomes).length > 0 ? taskStatusOutcomes : undefined,
+        taskTitles: Object.keys(taskTitles).length > 0 ? taskTitles : undefined,
+      });
+
+      if (blockId && taskIdsSnapshot.length > 0) {
+        await getTaskTimerService().onBlockEndForTasks(taskIdsSnapshot, blockId);
+      }
+
+      for (const [taskId, status] of Object.entries(taskStatusOutcomes)) {
+        await getTaskService().transitionTask(taskId, status as TaskStatus);
+      }
+
+      setEndingTaskIds([]);
+      setEndingDialogOpen(false);
+    } catch (error) {
+      toast({
+        title: '结束时间块失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+      throw error;
+    }
+  };
+
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="task-dag-page">
       <header className="px-5 py-4 md:px-8 lg:px-10">
@@ -369,11 +852,7 @@ export function TaskDagPage() {
         <div className="mt-2 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务依赖 DAG</h1>
-            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-              {selectedTaskTitle
-                ? `当前聚焦：${selectedTaskTitle}。双击节点可进入任务详情页。`
-                : '单击节点可查看详情，双击节点可进入任务详情页，右键节点可折叠上下游。'}
-            </p>
+            <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{subtitle}</p>
           </div>
         </div>
       </header>
@@ -384,8 +863,8 @@ export function TaskDagPage() {
       >
         <TaskDagModeSelector
           mode={mode}
-          enabledModes={['browse']}
-          onChange={() => {}}
+          enabledModes={['browse', 'connect', 'execute']}
+          onChange={setMode}
         />
         <TaskDagControlPanel
           searchValue={searchDraft}
@@ -409,7 +888,7 @@ export function TaskDagPage() {
           minZoom={TASK_DAG_MIN_ZOOM}
           fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}
           nodesDraggable={false}
-          nodesConnectable={false}
+          nodesConnectable={mode === 'connect'}
           elementsSelectable
           zoomOnDoubleClick={false}
           onInit={(instance) => {
@@ -417,16 +896,32 @@ export function TaskDagPage() {
             void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
           }}
           onPaneClick={() => {
-            setSelectedTaskId(null);
+            if (mode === 'browse') {
+              setSelectedTaskId(null);
+            }
+            if (mode === 'connect') {
+              setConnectState(null);
+            }
             setContextMenu(null);
           }}
-          onNodeClick={(_event, node) => {
-            setSelectedTaskId(node.id);
-            setContextMenu(null);
-          }}
+          onNodeClick={handleNodeClick}
           onNodeDoubleClick={(_event, node) => {
             setContextMenu(null);
+            if (mode === 'connect') {
+              return;
+            }
             handleNavigateToTaskDetail(node.id);
+          }}
+          onConnectStart={(event) => {
+            connectDragTypeRef.current = resolveConnectTypeFromEvent(event);
+          }}
+          onConnect={(connection) => {
+            setConnectState(null);
+            void applyDependencyMutation(
+              connection.source?.trim() ?? '',
+              connection.target?.trim() ?? '',
+              connectDragTypeRef.current,
+            );
           }}
           onNodeContextMenu={(event, node) => {
             event.preventDefault();
@@ -442,6 +937,19 @@ export function TaskDagPage() {
             className="fixed z-50 rounded-lg border border-[#E7E5E4] bg-white py-1 shadow-lg dark:border-[#292524] dark:bg-[#1C1917]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
+            {mode === 'execute' && activeTaskIds.length > 0 ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-end-block"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#C75B3A] hover:bg-[#FFF7ED] dark:text-[#FDBA74] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  setContextMenu(null);
+                  void handleOpenEndDialog(activeTaskIds);
+                }}
+              >
+                结束时间块
+              </button>
+            ) : null}
             <button
               type="button"
               data-testid="task-dag-context-toggle-upstream"
@@ -485,6 +993,13 @@ export function TaskDagPage() {
             onOpenDetail={() => handleNavigateToTaskDetail(selectedTask.id)}
           />
         ) : null}
+
+        <MultiTaskEndDialog
+          open={endingDialogOpen}
+          tasks={endingDialogTasks}
+          onOpenChange={setEndingDialogOpen}
+          onSubmit={handleEndDialogSubmit}
+        />
       </div>
     </div>
   );

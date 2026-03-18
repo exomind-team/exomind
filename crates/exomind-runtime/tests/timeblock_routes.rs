@@ -75,14 +75,23 @@ async fn put_and_get_active_timeblock() {
         "startTime": 1700000000000u64,
         "pauseAccumulatedMs": 0,
         "paused": false,
-        "taskIds": ["task-1"],
-        "taskAssociationLog": [{
-            "blockId": "active-1",
-            "taskId": "task-1",
-            "action": "associated",
-            "timestamp": 1700000000000u64,
-            "source": "block_start",
-        }]
+        "taskIds": ["task-1", "task-2"],
+        "taskAssociationLog": [
+            {
+                "blockId": "active-1",
+                "taskId": "task-1",
+                "action": "associated",
+                "timestamp": 1700000000000u64,
+                "source": "block_start"
+            },
+            {
+                "blockId": "active-1",
+                "taskId": "task-2",
+                "action": "associated",
+                "timestamp": 1700000010000u64,
+                "source": "manual"
+            }
+        ]
     });
 
     let put_response = app
@@ -110,7 +119,8 @@ async fn put_and_get_active_timeblock() {
     let parsed: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(parsed["startId"], "active-1");
     assert_eq!(parsed["mode"], "countdown");
-    assert_eq!(parsed["taskIds"], json!(["task-1"]));
+    assert_eq!(parsed["taskIds"], json!(["task-1", "task-2"]));
+    assert_eq!(parsed["taskAssociationLog"].as_array().map(|items| items.len()), Some(2));
     assert!(parsed.get("taskId").is_none(), "legacy taskId should not be serialized");
 }
 
