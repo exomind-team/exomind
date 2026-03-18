@@ -43,6 +43,7 @@ function sortEventsAscending(events: Event[]): Event[] {
 interface ChatPageProps {
   variant?: 'default' | 'new-mobile'; // new-mobile（新移动端外观）用于 v0.3.0 UI 重构
   hideHeader?: boolean;
+  showTimerWidget?: boolean;
 }
 
 const UNKNOWN_DEVICE_LABEL = '未知设备';
@@ -102,7 +103,11 @@ function formatEventSourceLabel(event: Event): string {
   return `${resolvedDeviceName} · ${platformLabel}`;
 }
 
-export function ChatPage({ variant = 'default', hideHeader = false }: ChatPageProps = {}) {
+export function ChatPage({
+  variant = 'default',
+  hideHeader = false,
+  showTimerWidget = true,
+}: ChatPageProps = {}) {
   const [events, setEvents] = useState<Event[]>([]);
   const [loadingOlder, setLoadingOlder] = useState(false);
   const [isInitialLoading, setIsInitialLoading] = useState(true);
@@ -475,11 +480,11 @@ export function ChatPage({ variant = 'default', hideHeader = false }: ChatPagePr
       )}
 
       {/* TimeBlock 控件栏 */}
-      {variant === 'new-mobile' ? (
+      {variant === 'new-mobile' && showTimerWidget ? (
         <FocusTimerWidget ref={focusTimerWidgetRef} />
-      ) : (
+      ) : variant === 'default' ? (
         <TimeBlockWidget ref={timeBlockWidgetRef} variant="default" />
-      )}
+      ) : null}
 
       {/* 事件列表 */}
       <div

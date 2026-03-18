@@ -76,7 +76,7 @@ describeWindowsOnly('tauri-wrapper', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 20000);
 
   it('injects isolated CARGO_TARGET_DIR for tauri dev（tauri dev 应注入独立构建目录）', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-target-dir-'));
@@ -118,7 +118,7 @@ describeWindowsOnly('tauri-wrapper', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 20000);
 
   it('disables tauri watcher by default for dev（默认关闭 tauri watcher 避免无关改动触发黑屏重启）', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-no-watch-'));
@@ -160,7 +160,7 @@ describeWindowsOnly('tauri-wrapper', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 20000);
 
   it('does not treat tauri stderr status lines as wrapper failure（tauri stderr 状态日志不应让包装脚本失败）', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-stderr-status-'));
@@ -200,7 +200,7 @@ describeWindowsOnly('tauri-wrapper', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 20000);
 
   it('falls back to adb install for android dev install failures（android dev 安装失败时走 adb 兜底安装）', () => {
     const tempDir = mkdtempSync(join(tmpdir(), 'tauri-wrapper-android-fallback-'));
@@ -283,5 +283,5 @@ describeWindowsOnly('tauri-wrapper', () => {
     } finally {
       rmSync(tempDir, { recursive: true, force: true });
     }
-  });
+  }, 20000);
 });

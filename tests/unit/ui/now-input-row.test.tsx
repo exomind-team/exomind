@@ -192,7 +192,7 @@ describe('NowInputRow', () => {
       getLatestVoiceProps()?.onResult?.('  直接发送内容  ');
     });
 
-    expect(onSend).toHaveBeenCalledWith('直接发送内容');
+    expect(onSend).toHaveBeenCalledWith('直接发送内容', ['voice']);
     expect((textarea as HTMLTextAreaElement).value).toBe('');
   });
 

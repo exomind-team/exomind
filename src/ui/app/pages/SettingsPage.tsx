@@ -50,10 +50,23 @@ export function SettingsPage() {
   const items = useMemo(() => getVisibleSettings(ctx), [ctx]);
 
   useEffect(() => {
-    if (!isTauri()) return;
-    invoke<string>('voice_shortcut_get')
-      .then((hotkey) => { if (hotkey) setVoiceShortcutHotkey(hotkey); })
-      .catch(() => {});
+    let cancelled = false;
+
+    void (async () => {
+      if (!(await isTauri())) return;
+
+      invoke<string>('voice_shortcut_get')
+        .then((hotkey) => {
+          if (!cancelled && hotkey) {
+            setVoiceShortcutHotkey(hotkey);
+          }
+        })
+        .catch(() => {});
+    })();
+
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   if (isDesktopVcLayout) {

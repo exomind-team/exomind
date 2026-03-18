@@ -35,7 +35,8 @@ impl SqliteTimeBlockStore {
     pub fn list_completed_scoped(&self, scope_key: &str) -> Result<Vec<TimeBlockData>, TimeBlockStoreError> {
         let connection = self.connection();
         let mut statement = connection.prepare(
-            "SELECT id, name, start_id, end_id, note, tags_json, start_time, end_time
+            "SELECT id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                    task_ids_json, task_status_outcomes_json, task_association_log_json
              FROM completed_timeblocks
              WHERE scope_key = ?1
              ORDER BY end_time DESC, id DESC",
@@ -52,6 +53,14 @@ impl SqliteTimeBlockStore {
                     .map_err(to_sqlite_conversion_error)?,
                 start_time: row.get(6)?,
                 end_time: row.get(7)?,
+                task_ids: serde_json::from_str::<Vec<String>>(&row.get::<_, String>(8)?)
+                    .map_err(to_sqlite_conversion_error)?,
+                task_status_outcomes: row
+                    .get::<_, Option<String>>(9)?
+                    .map(|value| serde_json::from_str(&value).map_err(to_sqlite_conversion_error))
+                    .transpose()?,
+                task_association_log: serde_json::from_str(&row.get::<_, String>(10)?)
+                    .map_err(to_sqlite_conversion_error)?,
             })
         })?;
 
@@ -72,8 +81,9 @@ impl SqliteTimeBlockStore {
         for block in blocks {
             tx.execute(
                 "INSERT INTO completed_timeblocks (
-                    scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time
-                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                    scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                    task_ids_json, task_status_outcomes_json, task_association_log_json
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)",
                 params![
                     normalize_scope_key(scope_key),
                     block.id,
@@ -84,6 +94,12 @@ impl SqliteTimeBlockStore {
                     serde_json::to_string(&block.tags)?,
                     block.start_time,
                     block.end_time,
+                    serde_json::to_string(&block.task_ids)?,
+                    block.task_status_outcomes
+                        .as_ref()
+                        .map(serde_json::to_string)
+                        .transpose()?,
+                    serde_json::to_string(&block.task_association_log)?,
                 ],
             )?;
         }
@@ -106,7 +122,10 @@ impl SqliteTimeBlockStore {
             .optional()?;
 
         payload
-            .map(|json| serde_json::from_str::<ActiveBlockData>(&json))
+            .map(|json| {
+                serde_json::from_str::<ActiveBlockData>(&json)
+                    .map(ActiveBlockData::normalize_task_ids)
+            })
             .transpose()
             .map_err(TimeBlockStoreError::from)
     }
@@ -124,7 +143,7 @@ impl SqliteTimeBlockStore {
             params![
                 normalize_scope_key(scope_key),
                 ACTIVE_BLOCK_SINGLETON_KEY,
-                serde_json::to_string(block)?,
+                serde_json::to_string(&block.clone().normalize_task_ids())?,
             ],
         )?;
         Ok(())
@@ -183,10 +202,7 @@ impl SqliteTimeBlockStore {
         )?;
 
         if has_completed_table {
-            let mut statement = connection.prepare("PRAGMA table_info(completed_timeblocks)")?;
-            let columns = statement
-                .query_map([], |row| row.get::<_, String>(1))?
-                .collect::<Result<Vec<_>, _>>()?;
+            let columns = completed_timeblock_columns(&connection)?;
             if !columns.iter().any(|column| column == "scope_key") {
                 connection.execute_batch(
                     "ALTER TABLE completed_timeblocks RENAME TO completed_timeblocks_legacy;
@@ -200,15 +216,42 @@ impl SqliteTimeBlockStore {
                         tags_json TEXT NOT NULL,
                         start_time INTEGER NOT NULL,
                         end_time INTEGER NOT NULL,
+                        task_ids_json TEXT NOT NULL DEFAULT '[]',
+                        task_status_outcomes_json TEXT NULL,
+                        task_association_log_json TEXT NOT NULL DEFAULT '[]',
                         PRIMARY KEY (scope_key, id)
                      );
                      INSERT INTO completed_timeblocks (
-                        scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time
+                        scope_key, id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                        task_ids_json, task_status_outcomes_json, task_association_log_json
                      )
                      SELECT
-                        'anonymous', id, name, start_id, end_id, note, tags_json, start_time, end_time
-                     FROM completed_timeblocks_legacy;
-                     DROP TABLE completed_timeblocks_legacy;",
+                        'anonymous', id, name, start_id, end_id, note, tags_json, start_time, end_time,
+                        '[]', NULL, '[]'
+                      FROM completed_timeblocks_legacy;
+                      DROP TABLE completed_timeblocks_legacy;",
+                )?;
+            }
+
+            let columns = completed_timeblock_columns(&connection)?;
+            if !columns.iter().any(|column| column == "task_ids_json") {
+                connection.execute(
+                    "ALTER TABLE completed_timeblocks ADD COLUMN task_ids_json TEXT NOT NULL DEFAULT '[]'",
+                    [],
+                )?;
+            }
+
+            if !columns.iter().any(|column| column == "task_status_outcomes_json") {
+                connection.execute(
+                    "ALTER TABLE completed_timeblocks ADD COLUMN task_status_outcomes_json TEXT NULL",
+                    [],
+                )?;
+            }
+
+            if !columns.iter().any(|column| column == "task_association_log_json") {
+                connection.execute(
+                    "ALTER TABLE completed_timeblocks ADD COLUMN task_association_log_json TEXT NOT NULL DEFAULT '[]'",
+                    [],
                 )?;
             }
         }
@@ -253,6 +296,9 @@ impl SqliteTimeBlockStore {
                 tags_json TEXT NOT NULL,
                 start_time INTEGER NOT NULL,
                 end_time INTEGER NOT NULL,
+                task_ids_json TEXT NOT NULL DEFAULT '[]',
+                task_status_outcomes_json TEXT NULL,
+                task_association_log_json TEXT NOT NULL DEFAULT '[]',
                 PRIMARY KEY (scope_key, id)
              );
              CREATE TABLE IF NOT EXISTS active_timeblock (
@@ -277,6 +323,14 @@ fn normalize_scope_key(scope_key: &str) -> &str {
     } else {
         normalized
     }
+}
+
+fn completed_timeblock_columns(connection: &Connection) -> Result<Vec<String>, TimeBlockStoreError> {
+    let mut statement = connection.prepare("PRAGMA table_info(completed_timeblocks)")?;
+    statement
+        .query_map([], |row| row.get::<_, String>(1))?
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(TimeBlockStoreError::from)
 }
 
 fn to_sqlite_conversion_error(error: serde_json::Error) -> rusqlite::Error {

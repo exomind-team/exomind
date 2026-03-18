@@ -14,12 +14,12 @@ describe('environment bootstrap', () => {
     expect(result.clipboard.constructor.name).toBe('WebClipboardAdapter');
     expect(result.storage.constructor.name).toBe('WebStorageAdapter');
     expect(result.eventlog.constructor.name).toBe('WebEventLogStorageAdapter');
-    expect(result.task.constructor.name).toBe('TaskPouchAdapter');
+    expect(result.task.constructor.name).toBe('TaskRtAdapter');
     expect(result.me.constructor.name).toBe('MeWebAdapter');
     expect(result.agent.constructor.name).toBe('AgentWebAdapter');
   });
 
-  it('createRuntimeBootstrap should use pouchdb eventlog adapter for tauri runtime', () => {
+  it('createRuntimeBootstrap should use RT adapters for tauri runtime by default', () => {
     const webResult = createRuntimeBootstrap({ runtime: 'web', useMockData: false });
     const tauriResult = createRuntimeBootstrap({ runtime: 'tauri', useMockData: false });
 
@@ -28,9 +28,9 @@ describe('environment bootstrap', () => {
     expect(tauriResult.clipboard.constructor.name).not.toBe(webResult.clipboard.constructor.name);
     expect(tauriResult.storage.constructor.name).toBe('TauriStorageAdapter');
     expect(tauriResult.storage.constructor.name).not.toBe(webResult.storage.constructor.name);
-    expect(tauriResult.eventlog.constructor.name).toBe('WebEventLogStorageAdapter');
-    expect(tauriResult.eventlog.constructor.name).toBe(webResult.eventlog.constructor.name);
-    expect(tauriResult.task.constructor.name).toBe('TaskPouchAdapter');
+    expect(tauriResult.eventlog.constructor.name).toBe('EventLogRtAdapter');
+    expect(tauriResult.eventlog.constructor.name).not.toBe(webResult.eventlog.constructor.name);
+    expect(tauriResult.task.constructor.name).toBe('TaskRtAdapter');
     expect(tauriResult.me.constructor.name).toBe('MeWebAdapter');
     expect(tauriResult.agent.constructor.name).toBe('AgentWebAdapter');
   });

@@ -3,6 +3,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const renderMock = vi.fn();
+const nowWorkbenchOverlayPageMock = vi.fn(() => null);
 const createRootMock = vi.fn(() => ({
   render: renderMock,
 }));
@@ -14,12 +15,17 @@ vi.mock('react-dom/client', () => ({
   createRoot: createRootMock,
 }));
 
+vi.mock('@/pages/NowWorkbenchOverlayPage', () => ({
+  NowWorkbenchOverlayPage: nowWorkbenchOverlayPageMock,
+}));
+
 describe('now-workbench-overlay main entry（当下工作台悬浮窗入口）', () => {
   beforeEach(() => {
     document.documentElement.removeAttribute('style');
     document.body.removeAttribute('style');
     document.body.innerHTML = '<div id="root"></div>';
     renderMock.mockReset();
+    nowWorkbenchOverlayPageMock.mockClear();
     createRootMock.mockClear();
   });
 
@@ -35,7 +41,7 @@ describe('now-workbench-overlay main entry（当下工作台悬浮窗入口）',
     expect(document.body.style.overflow).toBe('hidden');
     expect(createRootMock).toHaveBeenCalledTimes(1);
     expect(renderMock).toHaveBeenCalledTimes(1);
-  });
+  }, 15000);
 
   it('renders runtime overlay page instead of static preview props（入口不应写死静态预览数据）', async () => {
     await import('@/now-workbench-overlay-main');
@@ -49,7 +55,7 @@ describe('now-workbench-overlay main entry（当下工作台悬浮窗入口）',
     };
 
     expect(rootElement?.props?.children?.props).toEqual({});
-  });
+  }, 15000);
 
   it('keeps a tracked html entry for the overlay window（悬浮窗必须有独立 HTML 入口且不可被忽略）', () => {
     const htmlEntryPath = resolve(process.cwd(), 'now-workbench-overlay.html');

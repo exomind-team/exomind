@@ -51,6 +51,14 @@ export interface Event {
   metadata?: EventMetadata;
 }
 
+export interface BlockTaskAssociationEvent {
+  blockId: UUID;
+  taskId: UUID;
+  action: 'associated' | 'disassociated';
+  timestamp: Timestamp;
+  source: 'block_start' | 'manual';
+}
+
 // 时间块数据类型（存储用）
 export interface TimeBlockData {
   id: UUID;
@@ -61,6 +69,9 @@ export interface TimeBlockData {
   tags: string[];
   startTime: Timestamp;
   endTime: Timestamp;
+  taskIds?: UUID[];
+  taskStatusOutcomes?: Record<string, string>;
+  taskAssociationLog?: BlockTaskAssociationEvent[];
 }
 
 // 时间块类型（UI 使用）
@@ -73,6 +84,9 @@ export interface TimeBlock {
   tags: Set<Tag>;
   startTime: Timestamp;
   endTime: Timestamp;
+  taskIds?: UUID[];
+  taskStatusOutcomes?: Record<string, string>;
+  taskAssociationLog?: BlockTaskAssociationEvent[];
 }
 
 // 活跃时间块（进行中）
@@ -116,7 +130,10 @@ export interface ActiveBlockData {
   pauseAccumulatedMs?: number;
   paused: boolean;
   pausedAt?: Timestamp;
-  taskId?: string;  // Phase4: 关联任务 ID
+  taskIds: UUID[];
+  taskAssociationLog: BlockTaskAssociationEvent[];
+  /** @deprecated Use taskIds. Kept for deserialization compat only. */
+  taskId?: UUID;
 }
 
 // 计时器配置
@@ -131,4 +148,29 @@ export interface TimerConfig {
 export interface CreateEventOptions {
   content: NoteContent;
   tags?: Set<Tag>;
+}
+
+export function normalizeActiveBlockTaskIds<T extends { taskId?: UUID; taskIds?: UUID[] }>(
+  block: T,
+): Omit<T, 'taskId' | 'taskIds'> & { taskIds: UUID[]; taskId?: undefined } {
+  const taskIds = block.taskIds?.length
+    ? block.taskIds
+    : block.taskId
+      ? [block.taskId]
+      : [];
+
+  const { taskId: _legacyTaskId, taskIds: _taskIds, ...rest } = block;
+  return {
+    ...rest,
+    taskIds,
+  };
+}
+
+export function normalizeTimeBlockTaskIds<T extends { taskIds?: UUID[] }>(
+  block: T,
+): T & { taskIds: UUID[] } {
+  return {
+    ...block,
+    taskIds: block.taskIds ?? [],
+  };
 }

@@ -11,12 +11,18 @@ import { Clipboard, Image, Mic, SendHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
+import {
+  getVoiceTranscriptSendMode,
+  subscribeVoiceTranscriptSendModeChanges,
+  type VoiceTranscriptSendMode,
+} from '@/config/voice-transcript-send-mode';
 import { getClipboardService } from '@/lib/services';
 import type { ClipboardFailureReason } from '@/lib/services';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
+import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 
 interface NowInputRowProps {
   onSend: (content: string, tags?: string[]) => void | Promise<void>;
@@ -45,6 +51,9 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   placeholder = '记录当下的事实...',
 }, ref) {
   const [value, setValue] = useState('');
+  const [voiceTranscriptSendMode, setVoiceTranscriptSendMode] = useState<VoiceTranscriptSendMode>(() =>
+    getVoiceTranscriptSendMode(),
+  );
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const [attachmentFeedback, setAttachmentFeedback] = useState<'idle' | 'pending'>('idle');
   const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
@@ -68,6 +77,8 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   useEffect(() => {
     resizeTextarea();
   }, [value, resizeTextarea]);
+
+  useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
 
   useEffect(() => () => {
     if (pasteFeedbackTimerRef.current) {
@@ -142,7 +153,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   }, [insertClipboardText]);
 
   const handleVoiceResult = useCallback((text: string) => {
-    const normalized = text.trim();
+    const normalized = normalizeRecognitionText(text);
     if (!normalized) return;
 
     void publishVoiceTranscriptSignal({ text: normalized }, {
@@ -151,9 +162,16 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       log.warn(`[new-now-input][voice-signal] ${publishError instanceof Error ? publishError.message : String(publishError)}`);
     });
 
-    // 语音输入始终直接发送到事件日志——语音是即时事件，应该立即入库
-    onSend(normalized, ['voice']);
-  }, [onSend]);
+    if (voiceTranscriptSendMode === 'direct-send') {
+      void onSend(normalized, ['voice']);
+      return;
+    }
+
+    setValue((prev) => {
+      const trimmedPrev = prev.trim();
+      return trimmedPrev ? `${trimmedPrev} ${normalized}` : normalized;
+    });
+  }, [onSend, voiceTranscriptSendMode]);
 
   const handleVoiceError = useCallback((error: string) => {
     log.error(`[new-now-input][voice] ${error}`);

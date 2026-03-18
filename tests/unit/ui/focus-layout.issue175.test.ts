@@ -6,14 +6,13 @@ describe('new focus layout issue-175 structure', () => {
   const focusPagePath = path.resolve('src/ui/app/pages/FocusPage.tsx');
   const source = readFileSync(focusPagePath, 'utf-8');
 
-  it('removes legacy top hero card and keeps only chat container（移除旧顶部卡片）', () => {
-    expect(source).not.toContain('data-testid="new-now-task-card-glow"');
-    expect(source).not.toContain('data-testid="new-now-task-card"');
-    expect(source).not.toContain('设计系统重构');
+  it('turns FocusPage into a thin shell over NowPage（FocusPage 退化为 NowPage 壳层）', () => {
+    expect(source).toContain("import { NowPage } from './NowPage'");
+    expect(source).toContain('return <NowPage />');
   });
 
-  it('uses new-mobile chat variant consistently（当下页统一使用新移动端聊天样式）', () => {
-    expect(source).toContain('data-testid="new-now-chat-section"');
-    expect(source).toContain('<ChatPage variant="new-mobile" hideHeader />');
+  it('no longer renders ChatPage directly inside FocusPage（FocusPage 不再直接渲染 ChatPage）', () => {
+    expect(source).not.toContain('data-testid="new-now-chat-section"');
+    expect(source).not.toContain('<ChatPage variant="new-mobile" hideHeader />');
   });
 });

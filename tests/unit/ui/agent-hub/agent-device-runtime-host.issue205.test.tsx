@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { AgentsPage } from '@/ui/app/pages/AgentsPage';
 import { AGENT_HUB_MOCK_FIXTURE } from '@/lib/adapters/mock/fixtures/agent-hub';
@@ -47,6 +47,7 @@ vi.mock('@/lib/services/runtime-control.service', () => ({
 describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）', () => {
   let hosts: RuntimeHostRecord[];
   let hostState: Record<string, 'online' | 'offline' | 'error'>;
+  let fetchMock: ReturnType<typeof vi.fn>;
 
   const buildSnapshot = () => ({
     updatedAt: '2026-02-27T10:00:00.000Z',
@@ -85,6 +86,11 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
 
   beforeEach(() => {
     window.localStorage.clear();
+    fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => [],
+    }));
+    vi.stubGlobal('fetch', fetchMock);
 
     hosts = [
       {
@@ -159,6 +165,10 @@ describe('agent device runtime host issue-205（设备页 RuntimeHost 管理）'
       host: '127.0.0.1',
       port: DEFAULT_EMBEDDED_RUNTIME_PORT,
     });
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
   });
 
   it('opens manager sheet from device view and adds runtime host with host-only input（设备页支持 host-only 手工地址）', async () => {

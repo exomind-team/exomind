@@ -145,7 +145,12 @@ function resolveBlockForTask(
   const latestLinked = sortedLinkedBlocks[0];
   if (latestLinked) return latestLinked;
 
-  if (activeBlock && activeBlock.taskId === task.id) {
+  const activeTaskIds = activeBlock?.taskIds ?? [];
+  const isLinkedActiveBlock = activeBlock
+    ? activeTaskIds.includes(task.id) || activeBlock.taskId === task.id
+    : false;
+
+  if (activeBlock && isLinkedActiveBlock) {
     return {
       id: activeBlock.startId,
       startId: activeBlock.startId,

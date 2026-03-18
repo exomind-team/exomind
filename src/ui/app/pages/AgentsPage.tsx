@@ -135,6 +135,12 @@ import { RoutesTabView } from './agents/RoutesTabView';
 import { ListTabView, type NodeFilterType } from './agents/NodesTabView';
 import { SignalHistoryTabView } from './agents/SignalHistoryTabView';
 
+export {
+  buildListSectionsFromRuntimeAgents,
+  ENERGY_PHASE_COLORS,
+  mapRuntimeStatusToNodeStatus,
+} from './agents/agents-utils';
+
 function TabBar({
   value,
   onChange,

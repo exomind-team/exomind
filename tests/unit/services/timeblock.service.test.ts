@@ -700,4 +700,129 @@ describe('TimeBlockServiceImpl', () => {
       'event-6',
     ]);
   });
+
+  describe('#418 multi-task support', () => {
+    it('startBlock accepts taskIds object', async () => {
+      const env = createMemoryEnv();
+      const service = new TimeBlockServiceImpl(env as never);
+
+      const block = await service.startBlock('Test', { mode: 'countup' }, undefined, { taskIds: ['t1', 't2'] });
+
+      expect(block.taskIds).toEqual(['t1', 't2']);
+      expect(block.taskAssociationLog).toHaveLength(2);
+      expect(block.taskId).toBeUndefined();
+    });
+
+    it('startBlock with legacy string taskId still works', async () => {
+      const env = createMemoryEnv();
+      const service = new TimeBlockServiceImpl(env as never);
+
+      const block = await service.startBlock('Test', { mode: 'countup' }, undefined, 'single-task');
+
+      expect(block.taskIds).toEqual(['single-task']);
+      expect(block.taskAssociationLog).toEqual([
+        expect.objectContaining({
+          taskId: 'single-task',
+          action: 'associated',
+          source: 'block_start',
+        }),
+      ]);
+    });
+
+    it('updateActiveBlock returns null when no active block exists', async () => {
+      const env = createMemoryEnv();
+      const service = new TimeBlockServiceImpl(env as never);
+
+      await expect(service.updateActiveBlock({ taskIds: ['t1'] })).resolves.toBeNull();
+    });
+
+    it('updateActiveBlock patches taskIds on running block', async () => {
+      const env = createMemoryEnv();
+      const service = new TimeBlockServiceImpl(env as never);
+
+      await service.startBlock('Test', { mode: 'countup' });
+      const updated = await service.updateActiveBlock({ taskIds: ['t1'] });
+
+      expect(updated?.taskIds).toEqual(['t1']);
+      expect((await service.loadActiveBlock())?.taskIds).toEqual(['t1']);
+    });
+
+    it('updateActiveBlock returns null for feedback-submitted block and does not resurrect it', async () => {
+      const env = createMemoryEnv();
+      const service = new TimeBlockServiceImpl(env as never);
+
+      await service.startBlock('Test', { mode: 'countup' });
+      await service.markEnding();
+      await service.endBlock('done');
+
+      await expect(service.updateActiveBlock({ taskIds: ['t1'] })).resolves.toBeNull();
+      await expect(service.loadActiveBlock()).resolves.toBeNull();
+    });
+
+    it('endBlock writes taskIds and taskStatusOutcomes to completed block', async () => {
+      const env = createMemoryEnv();
+      const service = new TimeBlockServiceImpl(env as never);
+
+      await service.startBlock('Test', { mode: 'countup' }, undefined, { taskIds: ['t1', 't2'] });
+      await service.markEnding();
+      const completed = await service.endBlock('done', {
+        taskStatusOutcomes: {
+          t1: 'completed',
+          t2: 'continue',
+        },
+        taskTitles: {
+          t1: 'Task 1',
+          t2: 'Task 2',
+        },
+      });
+
+      expect(completed).toEqual(expect.objectContaining({
+        taskIds: ['t1', 't2'],
+        taskStatusOutcomes: {
+          t1: 'completed',
+          t2: 'continue',
+        },
+      }));
+      expect(completed?.taskAssociationLog).toHaveLength(2);
+    });
+
+    it('buildFeedbackReport includes task status section', () => {
+      const env = createMemoryEnv();
+      const service = new TimeBlockServiceImpl(env as never);
+
+      const report = (service as unknown as {
+        buildFeedbackReport: (input: Record<string, unknown>) => string
+      }).buildFeedbackReport({
+        timeBlockName: 'Test Block',
+        feedbackText: 'done',
+        hasFeedback: true,
+        feedbackPreferences: {
+          timingInfoEnabled: false,
+          statisticsEnabled: false,
+          quickFeedbackEnabled: true,
+        },
+        feedbackDurationMs: 1_000,
+        pausedDurationMs: 0,
+        workDurationMs: 5_000,
+        totalDurationMs: 6_000,
+        expectedDurationMs: null,
+        expectedEndAt: null,
+        actionStartAt: 1_700_000_000_000,
+        actionEndedAt: 1_700_000_005_000,
+        submittedAt: 1_700_000_006_000,
+        taskStatusOutcomes: {
+          t1: 'completed',
+          t2: 'continue',
+        },
+        taskTitles: {
+          t1: 'Task 1',
+          t2: 'Task 2',
+        },
+      });
+
+      expect(report).toContain('### 任务状态');
+      expect(report).toContain('- Task 1：已完成');
+      expect(report).toContain('- Task 2：将继续');
+    });
+  });
 });
