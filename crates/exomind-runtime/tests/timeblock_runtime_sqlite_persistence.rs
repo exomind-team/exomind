@@ -1,9 +1,10 @@
 use exomind_runtime::{
     AppState,
-    timeblock::{ActiveBlockData, TimeBlockData, TimeBlockStore},
+    timeblock::{ActiveBlockData, BlockTaskAssociationEvent, TimeBlockData, TimeBlockStore},
 };
 use tempfile::tempdir;
 use std::sync::Mutex;
+use std::collections::HashMap;
 
 static TIMEBLOCK_SQLITE_ENV_LOCK: Mutex<()> = Mutex::new(());
 
@@ -38,6 +39,15 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_for_completed_and_active() 
             tags: vec!["block_feedback".to_string()],
             start_time: 1_700_000_000_000,
             end_time: 1_700_000_060_000,
+            task_ids: vec!["task-1".to_string()],
+            task_status_outcomes: Some(HashMap::from([("task-1".to_string(), "continue".to_string())])),
+            task_association_log: vec![BlockTaskAssociationEvent {
+                block_id: "tb-1".to_string(),
+                task_id: "task-1".to_string(),
+                action: "associated".to_string(),
+                timestamp: 1_700_000_000_000,
+                source: "block_start".to_string(),
+            }],
         }])
         .unwrap();
 
@@ -63,6 +73,14 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_for_completed_and_active() 
             pause_accumulated_ms: Some(0),
             paused: false,
             paused_at: None,
+            task_ids: vec!["task-1".to_string()],
+            task_association_log: vec![BlockTaskAssociationEvent {
+                block_id: "start-active".to_string(),
+                task_id: "task-1".to_string(),
+                action: "associated".to_string(),
+                timestamp: 1_700_000_000_000,
+                source: "block_start".to_string(),
+            }],
             task_id: Some("task-1".to_string()),
         })
         .unwrap();
@@ -86,8 +104,9 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_for_completed_and_active() 
 
     assert_eq!(completed.len(), 1, "completed blocks should persist across runtime restarts");
     assert_eq!(completed[0].id, "tb-1");
+    assert_eq!(completed[0].task_ids, vec!["task-1".to_string()]);
     assert_eq!(active.as_ref().map(|block| block.start_id.as_str()), Some("start-active"));
-    assert_eq!(active.as_ref().and_then(|block| block.task_id.as_deref()), Some("task-1"));
+    assert_eq!(active.as_ref().map(|block| block.task_ids.clone()), Some(vec!["task-1".to_string()]));
 }
 
 #[test]
@@ -121,6 +140,9 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
             tags: vec!["block_feedback".to_string()],
             start_time: 1_700_000_000_000,
             end_time: 1_700_000_030_000,
+            task_ids: vec![],
+            task_status_outcomes: None,
+            task_association_log: vec![],
         }])
         .unwrap();
 
@@ -137,6 +159,15 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
                 tags: vec!["block_feedback".to_string()],
                 start_time: 1_700_000_100_000,
                 end_time: 1_700_000_160_000,
+                task_ids: vec!["task-profile-a".to_string()],
+                task_status_outcomes: Some(HashMap::from([("task-profile-a".to_string(), "completed".to_string())])),
+                task_association_log: vec![BlockTaskAssociationEvent {
+                    block_id: "tb-profile-a".to_string(),
+                    task_id: "task-profile-a".to_string(),
+                    action: "associated".to_string(),
+                    timestamp: 1_700_000_100_000,
+                    source: "block_start".to_string(),
+                }],
             }],
         )
         .unwrap();
@@ -165,6 +196,14 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
                 pause_accumulated_ms: Some(0),
                 paused: false,
                 paused_at: None,
+                task_ids: vec!["task-profile-a".to_string()],
+                task_association_log: vec![BlockTaskAssociationEvent {
+                    block_id: "active-profile-a".to_string(),
+                    task_id: "task-profile-a".to_string(),
+                    action: "associated".to_string(),
+                    timestamp: 1_700_000_100_000,
+                    source: "block_start".to_string(),
+                }],
                 task_id: Some("task-profile-a".to_string()),
             },
         )
@@ -202,9 +241,10 @@ fn app_state_runtime_reuses_timeblock_sqlite_storage_with_profile_scope() {
     assert_eq!(anonymous_completed[0].id, "tb-anonymous");
     assert_eq!(profile_a_completed.len(), 1, "profile scope should persist its own completed blocks");
     assert_eq!(profile_a_completed[0].id, "tb-profile-a");
+    assert_eq!(profile_a_completed[0].task_ids, vec!["task-profile-a".to_string()]);
     assert_eq!(
-        profile_a_active.as_ref().and_then(|block| block.task_id.as_deref()),
-        Some("task-profile-a"),
+        profile_a_active.as_ref().map(|block| block.task_ids.clone()),
+        Some(vec!["task-profile-a".to_string()]),
         "profile scope should persist its own active block",
     );
     assert!(profile_b_completed.is_empty(), "other profiles should not see scoped blocks");
@@ -226,6 +266,9 @@ fn timeblock_store_clearing_active_block_preserves_completed_blocks() {
             tags: vec!["block_feedback".to_string()],
             start_time: 1_700_000_100_000,
             end_time: 1_700_000_160_000,
+            task_ids: vec![],
+            task_status_outcomes: None,
+            task_association_log: vec![],
         }])
         .unwrap();
 
@@ -250,6 +293,8 @@ fn timeblock_store_clearing_active_block_preserves_completed_blocks() {
             pause_accumulated_ms: Some(5_000),
             paused: true,
             paused_at: Some(1_700_000_120_000),
+            task_ids: vec![],
+            task_association_log: vec![],
             task_id: None,
         })
         .unwrap();

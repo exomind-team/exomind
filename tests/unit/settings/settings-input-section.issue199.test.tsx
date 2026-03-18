@@ -74,8 +74,8 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     render(<SettingsPage />);
 
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
-    expect(screen.getByText('火山引擎 ASR 测试')).toBeInTheDocument();
-    expect(screen.getAllByText('可用')).toHaveLength(2);
+    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
+    expect(screen.getAllByText('可用')).toHaveLength(1);
   });
 
   it('switches shortcut voice provider from input section', async () => {

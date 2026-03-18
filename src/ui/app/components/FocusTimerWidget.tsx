@@ -103,6 +103,29 @@ function resolveExpectedOptionIndex(mode: TimerMode, minutes: number): number {
   return presetIndex >= 0 ? presetIndex + 1 : 4;
 }
 
+function resolveActiveTaskIds(block: ActiveBlockData | null): string[] {
+  if (!block) return [];
+  if (block.taskIds?.length) return block.taskIds;
+  return block.taskId ? [block.taskId] : [];
+}
+
+function buildTaskStatusChoices(
+  taskIds: string[],
+  previousChoices: Record<string, TaskStatusChoice> = {},
+): Record<string, TaskStatusChoice> {
+  return taskIds.reduce<Record<string, TaskStatusChoice>>((nextChoices, taskId) => {
+    nextChoices[taskId] = previousChoices[taskId] ?? 'continue';
+    return nextChoices;
+  }, {});
+}
+
+const TASK_STATUS_OPTIONS = [
+  { key: 'suspended' as const, label: '挂起' },
+  { key: 'continue' as const, label: '继续' },
+  { key: 'completed' as const, label: '完成' },
+  { key: 'cancelled' as const, label: '取消' },
+];
+
 export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWidgetProps>(function FocusTimerWidget(
   { surface = 'default' },
   ref,
@@ -115,6 +138,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
   const hardEndTriggeredRef = useRef(false);
+  const linkedTasksLoadRequestRef = useRef(0);
 
   const [uiState, setUiState] = useState<FocusUiState>('idle');
   const [runningSubState, setRunningSubState] = useState<RunningSubState>('running');
@@ -142,8 +166,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   // Task status selector in feedback dialog
   const activeBlockDataRef = useRef<ActiveBlockData | null>(null);
   const taskStatusChoiceBlockRef = useRef<string | null>(null);
-  const [linkedTask, setLinkedTask] = useState<TaskNode | null>(null);
-  const [taskStatusChoice, setTaskStatusChoice] = useState<TaskStatusChoice>('continue');
+  const [linkedTasks, setLinkedTasks] = useState<TaskNode[]>([]);
+  const [taskStatusChoices, setTaskStatusChoices] = useState<Record<string, TaskStatusChoice>>({});
 
   const isRunningUi = uiState === 'running';
   const isPaused = isRunningUi && runningSubState === 'paused';
@@ -250,6 +274,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const applyActiveBlock = useCallback((block: ActiveBlockData | null) => {
     activeBlockDataRef.current = block;
     if (!block) {
+      linkedTasksLoadRequestRef.current += 1;
       taskStatusChoiceBlockRef.current = null;
       setUiState('idle');
       setRunningSubState('running');
@@ -264,23 +289,39 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       hardEndTriggeredRef.current = false;
       setCountdownOvertimeMs(0);
       syncIdleElapsedFromMode(timerMode, countdownMinutes);
-      setLinkedTask(null);
-      setTaskStatusChoice('continue');
+      setLinkedTasks([]);
+      setTaskStatusChoices({});
       return;
     }
 
-    // Fetch linked task if taskId exists
-    if (block.taskId) {
-      void getTaskService().getTask(block.taskId).then((task) => {
-        setLinkedTask(task);
-      });
+    const resolvedTaskIds = resolveActiveTaskIds(block);
+    const taskLoadRequestId = linkedTasksLoadRequestRef.current + 1;
+    linkedTasksLoadRequestRef.current = taskLoadRequestId;
+
+    if (resolvedTaskIds.length > 0) {
+      void Promise.all(resolvedTaskIds.map((taskId) => getTaskService().getTask(taskId)))
+        .then((tasks) => {
+          if (linkedTasksLoadRequestRef.current !== taskLoadRequestId) {
+            return;
+          }
+          setLinkedTasks(tasks.filter((task): task is TaskNode => task !== null));
+        })
+        .catch(() => {
+          if (linkedTasksLoadRequestRef.current !== taskLoadRequestId) {
+            return;
+          }
+          setLinkedTasks([]);
+        });
     } else {
-      setLinkedTask(null);
+      setLinkedTasks([]);
     }
-    if (taskStatusChoiceBlockRef.current !== block.startId) {
-      taskStatusChoiceBlockRef.current = block.startId;
-      setTaskStatusChoice('continue');
-    }
+    setTaskStatusChoices((previousChoices) => {
+      if (taskStatusChoiceBlockRef.current !== block.startId) {
+        taskStatusChoiceBlockRef.current = block.startId;
+        return buildTaskStatusChoices(resolvedTaskIds);
+      }
+      return buildTaskStatusChoices(resolvedTaskIds, previousChoices);
+    });
 
     setTaskName(block.name);
     setTaskNameDraft(block.name);
@@ -545,7 +586,20 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     if (feedbackSubmitting) return;
     const trimmedFeedback = feedbackText?.trim() ?? '';
     const blockDataSnapshot = activeBlockDataRef.current;
-    const taskStatusChoiceSnapshot = taskStatusChoice;
+    const taskIdsSnapshot = resolveActiveTaskIds(blockDataSnapshot);
+    const linkedTasksSnapshot = linkedTasks;
+    const taskStatusChoicesSnapshot = { ...taskStatusChoices };
+    const taskTitles = linkedTasksSnapshot.reduce<Record<string, string>>((titles, task) => {
+      titles[task.id] = task.title;
+      return titles;
+    }, {});
+    const taskStatusOutcomes = taskIdsSnapshot.reduce<Record<string, string>>((outcomes, taskId) => {
+      const statusChoice = taskStatusChoicesSnapshot[taskId] ?? 'continue';
+      if (statusChoice !== 'continue') {
+        outcomes[taskId] = statusChoice;
+      }
+      return outcomes;
+    }, {});
     if (trimmedFeedback.length === 0) {
       if (skipFeedbackConfirmState === 'idle') {
         startSkipFeedbackConfirmCooldown();
@@ -564,7 +618,14 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
     try {
       await mutationQueueRef.current;
-      await timeBlockServiceRef.current.endBlock(trimmedFeedback || undefined);
+      if (taskIdsSnapshot.length > 0) {
+        await timeBlockServiceRef.current.endBlock(trimmedFeedback || undefined, {
+          taskStatusOutcomes: Object.keys(taskStatusOutcomes).length > 0 ? taskStatusOutcomes : undefined,
+          taskTitles: Object.keys(taskTitles).length > 0 ? taskTitles : undefined,
+        });
+      } else {
+        await timeBlockServiceRef.current.endBlock(trimmedFeedback || undefined);
+      }
     } catch (error) {
       log.error(`[TB-UI] endBlock failed ${error instanceof Error ? error.message : String(error)}`);
       try {
@@ -580,11 +641,14 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     log.info(`[TB-UI] click submit-end -> endBlock done ${JSON.stringify({ elapsedMs: Math.round(perfNow() - t0) })}`);
 
     // Record block association and apply task status transition
-    if (blockDataSnapshot?.taskId) {
+    if (blockDataSnapshot && taskIdsSnapshot.length > 0) {
       try {
-        await getTaskTimerService().onBlockEndForTask(blockDataSnapshot.taskId, blockDataSnapshot.startId);
-        if (taskStatusChoiceSnapshot !== 'continue') {
-          await getTaskService().transitionTask(blockDataSnapshot.taskId, taskStatusChoiceSnapshot as TaskStatus);
+        await getTaskTimerService().onBlockEndForTasks(taskIdsSnapshot, blockDataSnapshot.startId);
+        for (const taskId of taskIdsSnapshot) {
+          const taskStatusChoice = taskStatusChoicesSnapshot[taskId] ?? 'continue';
+          if (taskStatusChoice !== 'continue') {
+            await getTaskService().transitionTask(taskId, taskStatusChoice as TaskStatus);
+          }
         }
       } catch (error) {
         log.error(`[TB-UI] task status update failed ${error instanceof Error ? error.message : String(error)}`);
@@ -599,9 +663,9 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     setRunningSubState('running');
     setTaskName('');
     setTaskNameDraft('');
-    setLinkedTask(null);
+    setLinkedTasks([]);
     taskStatusChoiceBlockRef.current = null;
-    setTaskStatusChoice('continue');
+    setTaskStatusChoices({});
     countdownEndedRef.current = false;
     countdownOverrunRef.current = false;
     hardEndTriggeredRef.current = false;
@@ -615,7 +679,8 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     skipFeedbackConfirmState,
     startSkipFeedbackConfirmCooldown,
     syncIdleElapsedFromMode,
-    taskStatusChoice,
+    linkedTasks,
+    taskStatusChoices,
     timerMode,
   ]);
 
@@ -974,38 +1039,52 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
             placeholder="记录本次专注的反馈..."
             className="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
           />
-          {linkedTask && (
+          {linkedTasks.length > 0 && (
             <div data-testid="feedback-task-status-section" className="flex flex-col gap-1.5">
               <div className="flex items-center gap-2">
-                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">关联任务</span>
-                <span className="truncate text-[12px] text-[#1C1917] dark:text-[#FAFAF9]">{linkedTask.title}</span>
+                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">关联任务状态</span>
+                <span className="text-[12px] text-[#78716C] dark:text-[#A8A29E]">可分别设置结束后的任务状态</span>
               </div>
-              <div
-                className="relative overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
-                data-testid="feedback-task-status-selector"
-              >
-                <div className="relative z-10 grid grid-cols-4 gap-0">
-                  {([
-                    { key: 'suspended' as TaskStatusChoice, label: '挂起' },
-                    { key: 'continue' as TaskStatusChoice, label: '继续' },
-                    { key: 'completed' as TaskStatusChoice, label: '完成' },
-                    { key: 'cancelled' as TaskStatusChoice, label: '取消' },
-                  ] as const).map(({ key, label }) => (
-                    <button
-                      key={key}
-                      type="button"
-                      data-testid={`feedback-task-status-${key}`}
-                      onClick={() => setTaskStatusChoice(key)}
-                      className={`relative z-10 h-8 w-full whitespace-nowrap rounded-[8px] px-[8px] text-center text-[12px] transition-colors duration-200 ${
-                        taskStatusChoice === key
-                          ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9] bg-white/55 dark:bg-[#FFFFFF14] border border-[#FFFFFFCC] dark:border-[#FFFFFF66] shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
-                          : 'text-[#78716C] hover:text-[#57534E] dark:hover:text-[#D6D3D1]'
-                      }`}
+              <div className="flex flex-col gap-2">
+                {linkedTasks.map((task) => (
+                  <div
+                    key={task.id}
+                    data-testid={`feedback-task-status-row-${task.id}`}
+                    className="rounded-[12px] border border-[#E7E5E4] bg-[#F5F0ED]/50 p-2.5 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
+                  >
+                    <div className="mb-2 flex items-center justify-between gap-2">
+                      <span className="truncate text-[12px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</span>
+                      <span className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">{task.status}</span>
+                    </div>
+                    <div
+                      className="relative overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-white/70 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
+                      data-testid={`feedback-task-status-selector-${task.id}`}
                     >
-                      {label}
-                    </button>
-                  ))}
-                </div>
+                      <div className="relative z-10 grid grid-cols-4 gap-0">
+                        {TASK_STATUS_OPTIONS.map(({ key, label }) => (
+                          <button
+                            key={key}
+                            type="button"
+                            data-testid={`feedback-task-status-${task.id}-${key}`}
+                            onClick={() => {
+                              setTaskStatusChoices((previousChoices) => ({
+                                ...previousChoices,
+                                [task.id]: key,
+                              }));
+                            }}
+                            className={`relative z-10 h-8 w-full whitespace-nowrap rounded-[8px] px-[8px] text-center text-[12px] transition-colors duration-200 ${
+                              (taskStatusChoices[task.id] ?? 'continue') === key
+                                ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9] bg-white/55 dark:bg-[#FFFFFF14] border border-[#FFFFFFCC] dark:border-[#FFFFFF66] shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
+                                : 'text-[#78716C] hover:text-[#57534E] dark:hover:text-[#D6D3D1]'
+                            }`}
+                          >
+                            {label}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                ))}
               </div>
             </div>
           )}

@@ -3,6 +3,10 @@ import { render, screen } from '@testing-library/react';
 import { TiledGrid } from '@/ui/app/pages/agents/TiledGrid';
 import type { SessionInfo } from '@/lib/types/session';
 
+vi.mock('@/ui/app/components/PtyTerminal', () => ({
+  PtyTerminal: () => <div data-testid="mock-pty-terminal">Mock PTY Terminal</div>,
+}));
+
 function buildSession(overrides: Partial<SessionInfo>): SessionInfo {
   return {
     id: 'session-523',
