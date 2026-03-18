@@ -120,6 +120,9 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
 
     fireEvent.change(screen.getByTestId('pty-session-name'), { target: { value: 'resume-codex' } });
     fireEvent.change(screen.getByTestId('pty-session-workdir'), { target: { value: 'D:/project/exomind' } });
+    fireEvent.change(screen.getByTestId('pty-model'), { target: { value: 'gpt-5.4' } });
+    fireEvent.change(screen.getByTestId('pty-reasoning-effort'), { target: { value: 'xhigh' } });
+    fireEvent.change(screen.getByTestId('pty-extra-args'), { target: { value: '--search --full-auto' } });
     fireEvent.click(screen.getByTestId('pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab'));
 
     await waitFor(() => {
@@ -132,6 +135,9 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
             session_id: '019d0011-aaaa-bbbb-cccc-1234567890ab',
             name: 'resume-codex',
             workdir: 'D:/project/exomind',
+            model: 'gpt-5.4',
+            reasoning_effort: 'xhigh',
+            extra_args: ['--search', '--full-auto'],
           }),
         }),
       );
@@ -171,7 +177,7 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
     expect(screen.queryByTestId('pty-history-list')).not.toBeInTheDocument();
 
     fireEvent.change(screen.getByTestId('pty-custom-command'), { target: { value: 'node' } });
-    fireEvent.change(screen.getByTestId('pty-extra-args'), { target: { value: 'server.js --watch' } });
+    fireEvent.change(screen.getByTestId('pty-extra-args'), { target: { value: 'server.js --label \"alpha beta\" --watch' } });
     fireEvent.click(screen.getByTestId('pty-spawn-submit'));
 
     await waitFor(() => {
@@ -181,7 +187,7 @@ describe('PtySpawnDialog（终端会话启动弹窗）', () => {
           method: 'POST',
           body: JSON.stringify({
             command: 'node',
-            args: ['server.js', '--watch'],
+            args: ['server.js', '--label', 'alpha beta', '--watch'],
             rows: 24,
             cols: 80,
           }),

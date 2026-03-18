@@ -52,10 +52,43 @@ function formatRelativeTime(isoString: string): string {
 }
 
 function parseExtraArgs(input: string): string[] {
-  return input
-    .trim()
-    .split(/\s+/)
-    .filter(Boolean);
+  const tokens: string[] = [];
+  let current = '';
+  let quote: '"' | "'" | null = null;
+
+  for (let index = 0; index < input.length; index += 1) {
+    const char = input[index];
+
+    if (quote) {
+      if (char === quote) {
+        quote = null;
+      } else {
+        current += char;
+      }
+      continue;
+    }
+
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+
+    if (/\s/.test(char)) {
+      if (current) {
+        tokens.push(current);
+        current = '';
+      }
+      continue;
+    }
+
+    current += char;
+  }
+
+  if (current) {
+    tokens.push(current);
+  }
+
+  return tokens;
 }
 
 // ── Component ──────────────────────────────────────────────────
@@ -243,12 +276,20 @@ export function PtySpawnDialog({
       setError('');
 
       try {
-        const body: Record<string, string> = {
+        const parsedExtraArgs = parseExtraArgs(extraArgs);
+        const body: Record<string, string | string[]> = {
           agent_type: session.agent_type,
           session_id: session.session_id,
         };
         if (name.trim()) body.name = name.trim();
         if (workdir.trim()) body.workdir = workdir.trim();
+        if (model.trim()) body.model = model.trim();
+        if (session.agent_type === 'codex' && reasoningEffort.trim()) {
+          body.reasoning_effort = reasoningEffort.trim();
+        }
+        if (parsedExtraArgs.length > 0) {
+          body.extra_args = parsedExtraArgs;
+        }
 
         const res = await fetch(`${rtBaseUrl}/pty/resume`, {
           method: 'POST',
@@ -270,7 +311,7 @@ export function PtySpawnDialog({
         setLoading(false);
       }
     },
-    [name, workdir, rtBaseUrl, buildHeaders, onSpawned, onOpenChange],
+    [extraArgs, model, name, onOpenChange, onSpawned, reasoningEffort, rtBaseUrl, workdir, buildHeaders],
   );
 
   // ── Render ──────────────────────────────────────────────────

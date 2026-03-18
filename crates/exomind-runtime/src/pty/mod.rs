@@ -133,6 +133,12 @@ pub struct PtyResumeRequest {
     pub workdir: Option<String>,
     #[serde(default)]
     pub agent_type: PtyAgentType,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub reasoning_effort: Option<String>,
+    #[serde(default)]
+    pub extra_args: Vec<String>,
     pub session_id: String,
     #[serde(default = "default_rows")]
     pub rows: u16,
@@ -672,14 +678,36 @@ fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
         request.name
     };
 
-    let args = match request.agent_type {
-        PtyAgentType::Claude => vec!["--resume".to_string(), request.session_id.clone()],
-        PtyAgentType::Codex => vec![
-            "exec".to_string(),
-            "resume".to_string(),
-            request.session_id.clone(),
-        ],
-    };
+    let mut args = Vec::new();
+    match request.agent_type {
+        PtyAgentType::Claude => {
+            if let Some(model) = request.model.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+                args.push("--model".to_string());
+                args.push(model.to_string());
+            }
+            args.push("--resume".to_string());
+            args.push(request.session_id.clone());
+        }
+        PtyAgentType::Codex => {
+            args.push("exec".to_string());
+            args.push("resume".to_string());
+            if let Some(model) = request.model.as_deref().map(str::trim).filter(|value| !value.is_empty()) {
+                args.push("-m".to_string());
+                args.push(model.to_string());
+            }
+            if let Some(reasoning_effort) = request
+                .reasoning_effort
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+            {
+                args.push("-c".to_string());
+                args.push(format!("model_reasoning_effort=\"{reasoning_effort}\""));
+            }
+            args.push(request.session_id.clone());
+        }
+    }
+    args.extend(request.extra_args.clone());
 
     PtySpawnRequest {
         name,
@@ -752,6 +780,9 @@ mod tests {
         assert!(req.workdir.is_none());
         assert_eq!(req.session_id, "abc-12345678-xyz");
         assert_eq!(req.agent_type, PtyAgentType::Claude);
+        assert_eq!(req.model, None);
+        assert_eq!(req.reasoning_effort, None);
+        assert!(req.extra_args.is_empty());
         assert_eq!(req.rows, 24);
         assert_eq!(req.cols, 80);
     }
@@ -787,6 +818,9 @@ mod tests {
             name: "".to_string(),
             workdir: Some("D:/project/exomind".to_string()),
             agent_type: PtyAgentType::Codex,
+            model: None,
+            reasoning_effort: None,
+            extra_args: vec![],
             session_id: "019d0011-aaaa-bbbb-cccc-1234567890ab".to_string(),
             rows: 24,
             cols: 80,
@@ -803,6 +837,38 @@ mod tests {
             ]
         );
         assert_eq!(spawn_request.name, "Codex-019d0011");
+    }
+
+    #[test]
+    fn build_resume_spawn_request_for_codex_keeps_model_reasoning_and_extra_args() {
+        let req = PtyResumeRequest {
+            name: "resume-codex".to_string(),
+            workdir: Some("D:/project/exomind".to_string()),
+            agent_type: PtyAgentType::Codex,
+            model: Some("gpt-5.4".to_string()),
+            reasoning_effort: Some("xhigh".to_string()),
+            extra_args: vec!["--search".to_string(), "--full-auto".to_string()],
+            session_id: "019d0011-aaaa-bbbb-cccc-1234567890ab".to_string(),
+            rows: 24,
+            cols: 80,
+        };
+
+        let spawn_request = build_resume_spawn_request(req);
+        assert_eq!(spawn_request.command, "codex");
+        assert_eq!(
+            spawn_request.args,
+            vec![
+                "exec".to_string(),
+                "resume".to_string(),
+                "-m".to_string(),
+                "gpt-5.4".to_string(),
+                "-c".to_string(),
+                "model_reasoning_effort=\"xhigh\"".to_string(),
+                "019d0011-aaaa-bbbb-cccc-1234567890ab".to_string(),
+                "--search".to_string(),
+                "--full-auto".to_string(),
+            ]
+        );
     }
 
     #[test]
