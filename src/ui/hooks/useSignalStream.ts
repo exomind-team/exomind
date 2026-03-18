@@ -181,6 +181,10 @@ export function useSignalStream(): void {
 
     const handler = startSignalHandlers({
       onEventLogAppended: async (payload: EventLogAppendedPayload) => {
+        if (payload.inputMode !== 'external') {
+          return;
+        }
+
         const content = payload.text.trim();
         if (!content) {
           return;

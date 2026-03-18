@@ -12,6 +12,7 @@ use crate::signal::SignalPool;
 const EXTERNAL_INPUT_RECEIVED_TOPIC: &str = "external.input.received";
 const EXTERNAL_SOURCE_NAME: &str = "actor:external_source";
 const DEFAULT_DEDUP_CAPACITY: usize = 1000;
+const WEFLOW_FETCH_PAGE_SIZE: usize = 20;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ExternalSourceConfig {
@@ -68,6 +69,8 @@ impl Default for DedupState {
 struct WeFlowMessagesResponse {
     success: bool,
     talker: String,
+    #[serde(rename = "hasMore", default)]
+    has_more: bool,
     messages: Vec<WeFlowMessage>,
 }
 
@@ -129,12 +132,14 @@ async fn fetch_weflow_messages(
     base_url: &str,
     chatroom_id: &str,
     limit: usize,
-) -> Result<Vec<WeFlowMessage>, reqwest::Error> {
+    offset: usize,
+) -> Result<WeFlowMessagesResponse, reqwest::Error> {
     let response = client
         .get(format!("{}/api/v1/messages", base_url.trim_end_matches('/')))
         .query(&[
             ("talker", chatroom_id),
             ("limit", &limit.min(500).to_string()),
+            ("offset", &offset.to_string()),
         ])
         .send()
         .await?
@@ -143,10 +148,15 @@ async fn fetch_weflow_messages(
         .await?;
 
     if !response.success || response.talker != chatroom_id {
-        return Ok(Vec::new());
+        return Ok(WeFlowMessagesResponse {
+            success: false,
+            talker: chatroom_id.to_string(),
+            has_more: false,
+            messages: Vec::new(),
+        });
     }
 
-    Ok(response.messages)
+    Ok(response)
 }
 
 async fn poll_chatroom_once(
@@ -156,38 +166,58 @@ async fn poll_chatroom_once(
     chatroom: &WatchedChatroom,
     dedup: &mut DedupState,
 ) -> Result<usize, reqwest::Error> {
-    let messages = fetch_weflow_messages(client, base_url, &chatroom.id, 20).await?;
-    if messages.is_empty() {
-        return Ok(0);
-    }
-
     let previous_last_seen = dedup.last_seen_ts.get(&chatroom.id).copied().unwrap_or(0);
     let mut latest_seen = previous_last_seen;
     let mut publishable = Vec::new();
+    let mut offset = 0usize;
 
-    for message in messages {
-        let timestamp_ms = message_timestamp_ms(&message);
-        latest_seen = latest_seen.max(timestamp_ms);
-
-        if timestamp_ms <= previous_last_seen {
-            continue;
+    loop {
+        let page = fetch_weflow_messages(
+            client,
+            base_url,
+            &chatroom.id,
+            WEFLOW_FETCH_PAGE_SIZE,
+            offset,
+        )
+        .await?;
+        if page.messages.is_empty() {
+            break;
         }
 
-        let Some(text) = extract_message_text(&message) else {
-            continue;
-        };
+        let mut reached_old_messages = false;
+        let page_len = page.messages.len();
 
-        if should_skip_text(&text, message.local_type) {
-            continue;
+        for message in page.messages {
+            let timestamp_ms = message_timestamp_ms(&message);
+            latest_seen = latest_seen.max(timestamp_ms);
+
+            if timestamp_ms <= previous_last_seen {
+                reached_old_messages = true;
+                continue;
+            }
+
+            let Some(text) = extract_message_text(&message) else {
+                continue;
+            };
+
+            if should_skip_text(&text, message.local_type) {
+                continue;
+            }
+
+            let url = extract_first_url(&text);
+            let dedup_key = build_dedup_key(chatroom, &message, timestamp_ms, &text);
+            if dedup.seen_keys.iter().any(|key| key == &dedup_key) {
+                continue;
+            }
+
+            publishable.push((timestamp_ms, message, text, url, dedup_key));
         }
 
-        let url = extract_first_url(&text);
-        let dedup_key = build_dedup_key(chatroom, &message, timestamp_ms, &text);
-        if dedup.seen_keys.iter().any(|key| key == &dedup_key) {
-            continue;
+        if reached_old_messages || !page.has_more {
+            break;
         }
 
-        publishable.push((timestamp_ms, message, text, url, dedup_key));
+        offset += page_len;
     }
 
     if latest_seen > previous_last_seen {
@@ -313,6 +343,7 @@ mod tests {
     struct MessageQuery {
         talker: String,
         limit: Option<usize>,
+        offset: Option<usize>,
     }
 
     async fn spawn_weflow_server(
@@ -325,7 +356,26 @@ mod tests {
                 async move {
                     assert!(!query.talker.is_empty(), "talker query param should be present");
                     assert!(query.limit.unwrap_or_default() > 0, "limit should be positive");
-                    Json(response)
+                    let limit = query.limit.unwrap_or(20);
+                    let offset = query.offset.unwrap_or(0);
+                    let source_messages = response
+                        .get("messages")
+                        .and_then(|value| value.as_array())
+                        .cloned()
+                        .unwrap_or_default();
+                    let page = source_messages
+                        .iter()
+                        .skip(offset)
+                        .take(limit)
+                        .cloned()
+                        .collect::<Vec<_>>();
+                    Json(json!({
+                        "success": response.get("success").cloned().unwrap_or(json!(true)),
+                        "talker": response.get("talker").cloned().unwrap_or(json!(query.talker)),
+                        "count": page.len(),
+                        "hasMore": offset + page.len() < source_messages.len(),
+                        "messages": page,
+                    }))
                 }
             }),
         );
@@ -479,6 +529,65 @@ mod tests {
 
         let result = tokio::time::timeout(std::time::Duration::from_millis(200), rx.recv()).await;
         assert!(result.is_err(), "second poll should not publish more events");
+    }
+
+    #[tokio::test]
+    async fn poll_chatroom_consumes_bursts_larger_than_single_page() {
+        let messages = (0..25)
+            .rev()
+            .map(|index| {
+                let sequence = index + 1;
+                json!({
+                    "localId": sequence,
+                    "serverId": 5000 + sequence,
+                    "localType": 1,
+                    "createTime": 1773809000 + sequence,
+                    "sortSeq": 1773809000000_u64 + (sequence as u64 * 1000),
+                    "senderUsername": format!("wxid-{sequence}"),
+                    "content": format!("burst-message-{sequence}"),
+                    "rawContent": format!("wxid-{sequence}:\\nburst-message-{sequence}"),
+                    "parsedContent": format!("burst-message-{sequence}")
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let (base_url, _server) = spawn_weflow_server(json!({
+            "success": true,
+            "talker": "room-burst",
+            "messages": messages,
+        }))
+        .await;
+
+        let pool = Arc::new(SignalPool::new(None));
+        let client = Client::new();
+        let mut dedup = DedupState::default();
+        let chatroom = WatchedChatroom {
+            id: "room-burst".to_string(),
+            label: "room-burst".to_string(),
+        };
+        let mut rx = pool.subscribe();
+
+        let published =
+            poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
+                .await
+                .expect("burst poll should succeed");
+
+        assert_eq!(published, 25, "poll should page through all unseen messages");
+
+        let mut received_texts = Vec::new();
+        for _ in 0..25 {
+            let event = recv_next(&mut rx).await;
+            received_texts.push(event.payload["text"].as_str().unwrap_or_default().to_string());
+        }
+
+        assert!(received_texts.contains(&"burst-message-1".to_string()));
+        assert!(received_texts.contains(&"burst-message-25".to_string()));
+
+        let second_count =
+            poll_chatroom_once(&client, &pool, &base_url, &chatroom, &mut dedup)
+                .await
+                .expect("second burst poll should succeed");
+        assert_eq!(second_count, 0, "cursor should advance only after full backlog is consumed");
     }
 
     #[tokio::test]

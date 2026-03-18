@@ -235,4 +235,30 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
       }),
     }));
   });
+
+  it('ignores voice eventlog.appended payloads to avoid duplicate writes（忽略 voice eventlog.appended，避免重复写入）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    const onEventLogAppended = signalHandlerOptions[0].onEventLogAppended as
+      | ((payload: { text: string; ts: number; inputMode?: string; captureSource?: string }) => Promise<void>)
+      | undefined;
+
+    await onEventLogAppended?.({
+      text: 'voice duplicate candidate',
+      ts: 1773810310000,
+      inputMode: 'voice',
+      captureSource: 'global-shortcut',
+    });
+
+    expect(appendEventDataMock).not.toHaveBeenCalled();
+  });
 });
