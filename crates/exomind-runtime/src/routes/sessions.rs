@@ -353,7 +353,7 @@ async fn send_message(
     Json(input): Json<SendMessageInput>,
 ) -> Result<(StatusCode, Json<SessionMessage>), (StatusCode, String)> {
     // Verify target session exists
-    state
+    let session = state
         .session_store
         .get(&id)
         .map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?
@@ -371,6 +371,19 @@ async fn send_message(
     // Note: In V6 foundation, messages are fire-and-forget.
     // A proper message queue/store can be added when cross-session
     // communication becomes a core feature.
+
+    // Bridge to PTY stdin（桥接到 PTY 标准输入）when this session owns a terminal.
+    if let Some(pty_id) = session.pty_id.as_deref() {
+        let input = format!("{}\n", message.content);
+        if let Err(error) = state.pty_manager.write_input(pty_id, input.as_bytes()).await {
+            tracing::warn!(
+                session_id = %session.id,
+                pty_id = %pty_id,
+                error = %error,
+                "failed to forward session message to PTY stdin"
+            );
+        }
+    }
 
     Ok((StatusCode::CREATED, Json(message)))
 }
@@ -397,10 +410,33 @@ mod tests {
     use axum::body::Body;
     use axum::http::Request;
     use http_body_util::BodyExt;
+    use std::time::Duration;
     use tower::ServiceExt;
 
     fn test_state(host_id: &str) -> AppState {
         AppState::new_runtime(0, host_id.to_string(), None, None, false, None)
+    }
+
+    fn interactive_shell_spawn_request() -> crate::pty::PtySpawnRequest {
+        if cfg!(windows) {
+            crate::pty::PtySpawnRequest {
+                name: "bridge-shell".to_string(),
+                workdir: Some(".".to_string()),
+                command: "cmd".to_string(),
+                args: vec!["/Q".to_string(), "/K".to_string()],
+                rows: 24,
+                cols: 80,
+            }
+        } else {
+            crate::pty::PtySpawnRequest {
+                name: "bridge-shell".to_string(),
+                workdir: Some(".".to_string()),
+                command: "sh".to_string(),
+                args: vec![],
+                rows: 24,
+                cols: 80,
+            }
+        }
     }
 
     #[tokio::test]
@@ -467,5 +503,113 @@ mod tests {
             .find(|session| session.id == "sid-123")
             .expect("session should exist");
         assert_eq!(found.source_host_id.as_deref(), Some("session-host-2"));
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_created_for_non_pty_session() {
+        let state = test_state("session-host-3");
+        state
+            .session_store
+            .create(CreateSessionInput {
+                id: Some("sid-message-only".to_string()),
+                agent_kind: "codex".to_string(),
+                agent_id: None,
+                source_host_id: Some("session-host-3".to_string()),
+                role: Some("message-only".to_string()),
+                context: None,
+                interaction: Some(crate::session::InteractionMode::Structured),
+                pty_id: None,
+                inner_session_id: None,
+                parent_session_id: None,
+            })
+            .unwrap();
+
+        let (status, Json(message)) = send_message(
+            State(state),
+            Path("sid-message-only".to_string()),
+            Json(SendMessageInput {
+                content: "hello-from-user".to_string(),
+                from: Some(Participant::User),
+                reply_to: None,
+            }),
+        )
+        .await
+        .expect("send_message should succeed");
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(message.to_session_id, "sid-message-only");
+        assert_eq!(message.content, "hello-from-user");
+    }
+
+    #[tokio::test]
+    async fn send_message_bridges_content_to_pty_stdin() {
+        let state = test_state("session-host-4");
+        let pty = state
+            .pty_manager
+            .spawn(interactive_shell_spawn_request())
+            .await
+            .expect("pty shell should spawn");
+
+        state
+            .session_store
+            .create(CreateSessionInput {
+                id: Some("sid-pty-bridge".to_string()),
+                agent_kind: "codex".to_string(),
+                agent_id: None,
+                source_host_id: Some("session-host-4".to_string()),
+                role: Some("pty-bridge".to_string()),
+                context: None,
+                interaction: Some(crate::session::InteractionMode::Terminal),
+                pty_id: Some(pty.id.clone()),
+                inner_session_id: None,
+                parent_session_id: None,
+            })
+            .unwrap();
+
+        let (_buffer, mut rx) = state
+            .pty_manager
+            .subscribe_output(&pty.id)
+            .await
+            .expect("pty output subscription should succeed");
+
+        let marker = "exomind-pty-bridge-ok";
+        let payload = format!("echo {marker}");
+
+        let (status, Json(message)) = send_message(
+            State(state.clone()),
+            Path("sid-pty-bridge".to_string()),
+            Json(SendMessageInput {
+                content: payload,
+                from: Some(Participant::User),
+                reply_to: None,
+            }),
+        )
+        .await
+        .expect("send_message should succeed");
+
+        assert_eq!(status, StatusCode::CREATED);
+        assert_eq!(message.to_session_id, "sid-pty-bridge");
+
+        let bridged = tokio::time::timeout(Duration::from_secs(5), async move {
+            loop {
+                match rx.recv().await {
+                    Ok(crate::pty::PtyOutputMsg::Data(data)) => {
+                        let text = String::from_utf8_lossy(&data);
+                        if text.contains(marker) {
+                            return true;
+                        }
+                    }
+                    Ok(crate::pty::PtyOutputMsg::Eof) => return false,
+                    Err(_) => return false,
+                }
+            }
+        })
+        .await
+        .unwrap_or(false);
+
+        let _ = state.pty_manager.stop(&pty.id).await;
+        let _ = state.pty_manager.remove(&pty.id).await;
+
+        assert!(bridged, "session message should be forwarded into PTY stdin");
     }
 }
