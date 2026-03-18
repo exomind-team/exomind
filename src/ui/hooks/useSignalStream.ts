@@ -12,6 +12,7 @@ import { isTauri } from '@tauri-apps/api/core';
 import { SignalStreamService } from '@/lib/services/signal-stream.service';
 import {
   startSignalHandlers,
+  type EventLogAppendedPayload,
   type EventLogReplicationAppendedPayload,
   type ReviewCompletedPayload,
 } from '@/lib/services/signal-handlers';
@@ -30,6 +31,7 @@ import {
   type RuntimeTarget,
 } from '@/config/runtime-target';
 import { getRuntimeControlService } from '@/lib/services/runtime-control.service';
+import { getEventLogService } from '@/lib/services/eventlog.service';
 import { log } from '@/lib/logger';
 
 const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
@@ -59,6 +61,22 @@ function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
   }
 
   return lines.join('\n').trimEnd();
+}
+
+function buildSignalEventLogId(payload: EventLogAppendedPayload): string {
+  const fingerprint = [
+    payload.ts,
+    payload.captureSource ?? '',
+    payload.inputMode ?? '',
+    payload.text,
+  ].join('|');
+
+  let hash = 0;
+  for (let index = 0; index < fingerprint.length; index += 1) {
+    hash = ((hash * 31) + fingerprint.charCodeAt(index)) >>> 0;
+  }
+
+  return `signal-eventlog-${payload.ts}-${hash.toString(16)}`;
 }
 
 export function useSignalStream(): void {
@@ -162,6 +180,40 @@ export function useSignalStream(): void {
     });
 
     const handler = startSignalHandlers({
+      onEventLogAppended: async (payload: EventLogAppendedPayload) => {
+        if (payload.inputMode !== 'external') {
+          return;
+        }
+
+        const content = payload.text.trim();
+        if (!content) {
+          return;
+        }
+
+        const timestamp = Number.isFinite(payload.ts) && payload.ts > 0
+          ? payload.ts
+          : Date.now();
+
+        await getEventLogService().appendEventData({
+          id: buildSignalEventLogId({
+            ...payload,
+            text: content,
+            ts: timestamp,
+          }),
+          timestamp,
+          content,
+          tags: ['note'],
+          metadata: {
+            source: getEventSourceMetadata(),
+            signal: {
+              topic: 'eventlog.appended',
+              inputMode: payload.inputMode ?? null,
+              captureSource: payload.captureSource ?? null,
+            },
+          },
+        });
+        log.info('[SignalStream] eventlog.appended → EventLogService');
+      },
       onEventLogReplicationAppended: async (payload: EventLogReplicationAppendedPayload) => {
         const result = await projectEventLogReplicationAppend(payload);
         if (result === 'inserted') {
