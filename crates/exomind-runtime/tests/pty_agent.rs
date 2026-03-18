@@ -7,6 +7,7 @@
 
 use exomind_runtime::{start_with_options, RuntimeStartOptions};
 use serde_json::Value;
+use std::time::Duration;
 
 /// Helper: start a lightweight runtime with no builtin actors or TS agents.
 async fn start_test_runtime() -> (exomind_runtime::RuntimeHandle, String) {
@@ -289,6 +290,84 @@ async fn pty_list_sessions_by_agent_type() {
             }
         }
     }
+
+    handle.stop().await.expect("runtime should stop");
+}
+
+#[tokio::test]
+async fn pty_natural_exit_completes_session_and_stop_remains_idempotent() {
+    let (mut handle, base_url) = start_test_runtime().await;
+    let client = reqwest::Client::new();
+
+    let spawn_body = if cfg!(windows) {
+        serde_json::json!({
+            "name": "test-natural-exit",
+            "workdir": ".",
+            "command": "cmd",
+            "args": ["/C", "echo hello"]
+        })
+    } else {
+        serde_json::json!({
+            "name": "test-natural-exit",
+            "workdir": ".",
+            "command": "echo",
+            "args": ["hello"]
+        })
+    };
+
+    let spawn_resp = client
+        .post(format!("{base_url}/pty/spawn"))
+        .json(&spawn_body)
+        .send()
+        .await
+        .expect("spawn request should succeed");
+    assert_eq!(spawn_resp.status().as_u16(), 201);
+
+    let spawn_payload: Value = spawn_resp.json().await.expect("spawn response should be JSON");
+    let pty_id = spawn_payload["id"]
+        .as_str()
+        .expect("spawn response should include PTY id")
+        .to_string();
+
+    let started = std::time::Instant::now();
+    let mut completed = false;
+    while started.elapsed() < Duration::from_secs(5) {
+        let payload: Value = client
+            .get(format!("{base_url}/sessions"))
+            .send()
+            .await
+            .expect("sessions request should succeed")
+            .json()
+            .await
+            .expect("sessions response should be JSON");
+        completed = payload
+            .as_array()
+            .and_then(|sessions| {
+                sessions
+                    .iter()
+                    .find(|session| session["id"].as_str() == Some(pty_id.as_str()))
+            })
+            .map(|session| session["status"] == "completed")
+            .unwrap_or(false);
+        if completed {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+
+    assert!(completed, "short-lived PTY should auto-complete unified session after natural exit");
+
+    let stop_resp = client
+        .post(format!("{base_url}/pty/{pty_id}/stop"))
+        .send()
+        .await
+        .expect("stop request should succeed even after natural exit");
+
+    assert_eq!(
+        stop_resp.status().as_u16(),
+        200,
+        "stop should be idempotent after natural exit"
+    );
 
     handle.stop().await.expect("runtime should stop");
 }

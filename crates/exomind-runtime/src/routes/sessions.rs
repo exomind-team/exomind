@@ -11,6 +11,7 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
 use crate::AppState;
+use crate::pty::PtyError;
 use crate::session::{
     AgentSession, CreateSessionInput, Participant, QuickActionResponse,
     SendMessageInput, SessionMessage, SessionStatus, UpdateSessionInput,
@@ -86,6 +87,17 @@ fn fill_source_host_id(mut session: AgentSession, host_id: &str) -> AgentSession
         session.source_host_id = Some(host_id.to_string());
     }
     session
+}
+
+fn map_pty_delivery_error(pty_id: &str, error: PtyError) -> (StatusCode, String) {
+    let status = match error {
+        PtyError::NotFound { .. } | PtyError::IoError(_) => StatusCode::CONFLICT,
+        PtyError::SpawnFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (
+        status,
+        format!("failed to deliver message to PTY {pty_id}: {error}"),
+    )
 }
 
 // ── Handlers ────────────────────────────────────────────────────
@@ -375,14 +387,11 @@ async fn send_message(
     // Bridge to PTY stdin（桥接到 PTY 标准输入）when this session owns a terminal.
     if let Some(pty_id) = session.pty_id.as_deref() {
         let input = format!("{}\n", message.content);
-        if let Err(error) = state.pty_manager.write_input(pty_id, input.as_bytes()).await {
-            tracing::warn!(
-                session_id = %session.id,
-                pty_id = %pty_id,
-                error = %error,
-                "failed to forward session message to PTY stdin"
-            );
-        }
+        state
+            .pty_manager
+            .write_input(pty_id, input.as_bytes())
+            .await
+            .map_err(|error| map_pty_delivery_error(pty_id, error))?;
     }
 
     Ok((StatusCode::CREATED, Json(message)))
@@ -611,5 +620,40 @@ mod tests {
         let _ = state.pty_manager.remove(&pty.id).await;
 
         assert!(bridged, "session message should be forwarded into PTY stdin");
+    }
+
+    #[tokio::test]
+    async fn send_message_returns_conflict_when_pty_delivery_fails() {
+        let state = test_state("session-host-5");
+        state
+            .session_store
+            .create(CreateSessionInput {
+                id: Some("sid-pty-missing".to_string()),
+                agent_kind: "codex".to_string(),
+                agent_id: None,
+                source_host_id: Some("session-host-5".to_string()),
+                role: Some("pty-missing".to_string()),
+                context: None,
+                interaction: Some(crate::session::InteractionMode::Terminal),
+                pty_id: Some("missing-pty".to_string()),
+                inner_session_id: None,
+                parent_session_id: None,
+            })
+            .unwrap();
+
+        let error = send_message(
+            State(state),
+            Path("sid-pty-missing".to_string()),
+            Json(SendMessageInput {
+                content: "deliver-this".to_string(),
+                from: Some(Participant::User),
+                reply_to: None,
+            }),
+        )
+        .await
+        .expect_err("send_message should fail when PTY delivery fails");
+
+        assert_eq!(error.0, StatusCode::CONFLICT);
+        assert!(error.1.contains("missing-pty"));
     }
 }

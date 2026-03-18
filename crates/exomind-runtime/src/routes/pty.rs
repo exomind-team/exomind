@@ -7,6 +7,7 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::routes::sessions::{
@@ -141,6 +142,43 @@ fn complete_pty_session(
     }
 }
 
+fn watch_pty_lifecycle(state: AppState, id: String) {
+    tokio::spawn(async move {
+        loop {
+            match state.pty_manager.refresh_process_state(&id).await {
+                Ok(Some(info)) => match info.status {
+                    crate::pty::PtyAgentStatus::Exited { .. } => {
+                        match complete_pty_session(&state, &id) {
+                            Ok(Some(updated)) => {
+                                broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+                            }
+                            Ok(None) => {}
+                            Err((status, error)) => {
+                                tracing::warn!(
+                                    pty_id = %id,
+                                    status = %status,
+                                    error = %error,
+                                    "failed to complete PTY-backed session after natural exit"
+                                );
+                            }
+                        }
+                        break;
+                    }
+                    crate::pty::PtyAgentStatus::Stopped => break,
+                    crate::pty::PtyAgentStatus::Running => {}
+                },
+                Ok(None) => {}
+                Err(PtyError::NotFound { .. }) => break,
+                Err(error) => {
+                    tracing::warn!(pty_id = %id, error = %error, "failed to refresh PTY process state");
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+}
+
 // ── Handlers ────────────────────────────────────────────────────
 
 /// GET /pty — List all PTY agents.
@@ -158,6 +196,7 @@ async fn spawn_pty_agent(
         let _ = state.pty_manager.remove(&info.id).await;
         return Err(error);
     }
+    watch_pty_lifecycle(state.clone(), info.id.clone());
     Ok((StatusCode::CREATED, Json(info)))
 }
 
@@ -171,6 +210,7 @@ async fn resume_pty_agent(
         let _ = state.pty_manager.remove(&info.id).await;
         return Err(error);
     }
+    watch_pty_lifecycle(state.clone(), info.id.clone());
     Ok((StatusCode::CREATED, Json(info)))
 }
 

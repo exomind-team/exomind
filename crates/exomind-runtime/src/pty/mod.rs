@@ -381,6 +381,36 @@ impl PtyManager {
         Ok(())
     }
 
+    /// Refresh the PTY process state from the underlying child handle.
+    pub async fn refresh_process_state(&self, id: &str) -> Result<Option<PtyAgentInfo>, PtyError> {
+        let mut instances = self.instances.lock().await;
+        let instance = instances
+            .get_mut(id)
+            .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+
+        if !matches!(instance.info.status, PtyAgentStatus::Running) {
+            return Ok(Some(instance.info.clone()));
+        }
+
+        match instance.child.try_wait() {
+            Ok(Some(exit_status)) => {
+                let info = if matches!(instance.info.status, PtyAgentStatus::Running) {
+                    instance.info.status = PtyAgentStatus::Exited {
+                        code: exit_status.exit_code() as i32,
+                    };
+                    instance.info.clone()
+                } else {
+                    instance.info.clone()
+                };
+                drop(instances);
+                self.publish_lifecycle_signal("pty.exited", &info);
+                Ok(Some(info))
+            }
+            Ok(None) => Ok(None),
+            Err(error) => Err(PtyError::IoError(error)),
+        }
+    }
+
     /// Get the output buffer snapshot and a broadcast receiver for live output.
     ///
     /// The caller should:
@@ -434,6 +464,16 @@ impl PtyManager {
         let instance = instances
             .get_mut(id)
             .ok_or_else(|| PtyError::NotFound { id: id.to_string() })?;
+
+        if let Some(exit_status) = instance.child.try_wait().map_err(PtyError::IoError)? {
+            instance.info.status = PtyAgentStatus::Exited {
+                code: exit_status.exit_code() as i32,
+            };
+            let info = instance.info.clone();
+            drop(instances);
+            self.publish_lifecycle_signal("pty.exited", &info);
+            return Ok(info);
+        }
 
         instance.child.kill().map_err(|e| PtyError::IoError(e))?;
         instance.info.status = PtyAgentStatus::Stopped;
