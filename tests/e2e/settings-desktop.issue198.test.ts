@@ -70,7 +70,8 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await expect(page.getByTestId('new-settings-desktop-vc-section-theme')).toBeVisible();
     await expect(page.getByRole('button', { name: '外观主题', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '专注设置', exact: true })).toBeVisible();
-    await expect(page.getByRole('button', { name: '通知', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '输入', exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '服务', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '数据', exact: true })).toBeVisible();
     await expect(page.getByRole('button', { name: '危险区域', exact: true })).toBeVisible();
     await expect(page.getByText('语音转写后')).toBeVisible();
@@ -80,18 +81,17 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await aboutTab.click();
     await expect(aboutTab).toHaveAttribute('aria-pressed', 'true');
     await expect(page.getByTestId('new-settings-desktop-vc-section-about')).toBeVisible();
-    await expect(page.getByText('更新')).toBeVisible();
+    await expect(page.getByText('官网')).toBeVisible();
+    await expect(page.getByText('赞助开发者（Starlin）')).toBeVisible();
     await expect(page.getByText('法律与支持')).toBeVisible();
-    await expect(page.getByText('帮助中心')).toBeVisible();
-    await expect(page.getByText('反馈建议')).toBeVisible();
+    await expect(page.getByText('版本')).toBeVisible();
+    await expect(page.getByText('构建')).toBeVisible();
     await expect(page.getByText('隐私政策')).toHaveCount(0);
     await expect(page.getByText('用户协议')).toHaveCount(0);
     await expect(page.getByText('开源软件使用声明')).toHaveCount(0);
-    await expect(page.getByText('工作模式')).toHaveCount(0);
-    await expect(page.getByText('更新日志')).toHaveCount(0);
     await page.getByRole('button', { name: '数据', exact: true }).click();
     await expect(page.getByTestId('new-settings-desktop-vc-section-data')).toBeVisible();
-    await expect(page.getByRole('button', { name: '导出备份' })).toBeVisible();
+    await expect(page.getByRole('button', { name: '导出数据' })).toBeVisible();
     await expect(page.getByRole('button', { name: '导入数据' })).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-now')).toBeVisible();
     await expect(page.getByTestId('desktop-sidebar-item-tasks')).toBeVisible();
@@ -202,7 +202,7 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await footerEntry.click();
 
     await expect(page).toHaveURL(/\/settings$/);
-    await expect(page.getByText('打开本地档案')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '打开本地档案' })).toBeVisible();
   });
 
   test('desktop sidebar footer opens switch sheet for active profile（已登录时桌面侧栏左下角打开切换档案）', async ({ page }) => {
@@ -219,7 +219,7 @@ test.describe('Issue #198 settings desktop shell（设置页桌面壳层）', ()
     await footerEntry.click();
 
     await expect(page).toHaveURL(/\/settings$/);
-    await expect(page.getByText('切换本地档案')).toBeVisible();
+    await expect(page.getByRole('heading', { name: '切换本地档案' })).toBeVisible();
     await expect(page.getByRole('button', { name: '退出当前档案' })).toBeVisible();
   });
 });
