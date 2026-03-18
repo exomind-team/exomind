@@ -1845,6 +1845,11 @@ export function TaskDetailPage() {
     await getTaskService().updateTask(task.id, { description: trimmed ?? '' });
   }, [task?.id, descriptionDraft]);
 
+  const handleCancelDescription = useCallback(() => {
+    setDescriptionDraft(task?.description ?? '');
+    setIsEditingDescription(false);
+  }, [task?.description]);
+
   if (isLoading) {
     return (
       <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
@@ -1878,6 +1883,11 @@ export function TaskDetailPage() {
             value={descriptionDraft}
             onChange={(e) => setDescriptionDraft(e.target.value)}
             onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                handleCancelDescription();
+                return;
+              }
               if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault();
                 void handleSaveDescription();
@@ -1887,7 +1897,7 @@ export function TaskDetailPage() {
             className="min-h-[120px] border-none bg-transparent p-0 text-sm text-[#1C1917] shadow-none focus-visible:ring-0 dark:text-[#FAFAF9]"
           />
           <div className="mt-2 flex justify-end gap-2">
-            <button type="button" onClick={() => setIsEditingDescription(false)} className="rounded-lg px-3 py-1 text-xs text-[#78716C] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">取消</button>
+            <button type="button" onClick={handleCancelDescription} className="rounded-lg px-3 py-1 text-xs text-[#78716C] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">取消</button>
             <button type="button" onClick={handleSaveDescription} className="rounded-lg bg-[#1C1917] px-3 py-1 text-xs text-white dark:bg-[#FAFAF9] dark:text-[#1C1917]">保存</button>
           </div>
         </div>

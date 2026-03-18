@@ -609,4 +609,27 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
       expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
     });
   });
+
+  it('pressing Escape should cancel description editing and restore persisted text（Esc 取消描述编辑并恢复原值）', async () => {
+    mockMatchMedia(false);
+    const { container } = render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    const editButton = container.querySelector('button[class*="p-1.5"]');
+    expect(editButton).not.toBeNull();
+    fireEvent.click(editButton!);
+
+    const textarea = screen.getByPlaceholderText('输入任务描述...');
+    fireEvent.change(textarea, { target: { value: '临时修改，不应保存' } });
+    fireEvent.keyDown(textarea, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByPlaceholderText('输入任务描述...')).toBeNull();
+    });
+
+    expect(updateTaskMock).not.toHaveBeenCalled();
+    expect(screen.getByText('实现任务详情页首版')).toBeInTheDocument();
+    expect(screen.queryByText('临时修改，不应保存')).toBeNull();
+  });
 });
