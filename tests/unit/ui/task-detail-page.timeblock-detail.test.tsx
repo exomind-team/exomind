@@ -536,8 +536,8 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     mockMatchMedia(false);
     render(<TaskDetailPage />);
 
-    await screen.findByText('时间块详情');
+    await screen.findByText('任务详情');
 
-    expect(await screen.findByTestId('task-pause-button')).toHaveTextContent('暂停并前往当下');
+    expect(await screen.findByTestId('task-pause-button')).toHaveTextContent('前往当下');
   });
 });

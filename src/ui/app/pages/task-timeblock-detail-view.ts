@@ -447,7 +447,12 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     isActive: false,
   }));
 
-  if (input.activeBlock && input.activeBlock.taskId === input.task.id) {
+  const activeTaskIds = input.activeBlock?.taskIds ?? [];
+  const isLinkedActiveBlock = input.activeBlock
+    ? activeTaskIds.includes(input.task.id) || input.activeBlock.taskId === input.task.id
+    : false;
+
+  if (input.activeBlock && isLinkedActiveBlock) {
     const ab = input.activeBlock;
     linkedBlocks.unshift({
       startId: ab.startId,

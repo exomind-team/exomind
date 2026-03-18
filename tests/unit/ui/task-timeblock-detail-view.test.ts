@@ -345,5 +345,8 @@ describe('buildTaskTimeblockDetailViewModel（时间块详情视图模型）', (
 
     expect(model.summary.blockName).toBe('进行中的多任务块');
     expect(model.summary.metrics.find((item) => item.key === 'duration')?.value).toBe('1h 30m');
+    expect(model.linkedBlocks).toHaveLength(1);
+    expect(model.linkedBlocks[0].isActive).toBe(true);
+    expect(model.linkedBlocks[0].name).toBe('进行中的多任务块');
   });
 });
