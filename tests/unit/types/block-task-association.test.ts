@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   normalizeActiveBlockTaskIds,
   normalizeTimeBlockTaskIds,
+  resolveActiveBlockTaskIds,
   type BlockTaskAssociationEvent,
 } from '@/lib/types/event'
 
@@ -44,6 +45,35 @@ describe('normalizeActiveBlockTaskIds', () => {
     const result = normalizeActiveBlockTaskIds(empty)
 
     expect(result.taskIds).toEqual([])
+  })
+
+  it('replays association log when taskIds are missing', () => {
+    const legacy = {
+      taskAssociationLog: [
+        { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 1, source: 'block_start' },
+        { blockId: 'block-1', taskId: 'task-2', action: 'associated', timestamp: 2, source: 'manual' },
+        { blockId: 'block-1', taskId: 'task-1', action: 'disassociated', timestamp: 3, source: 'manual' },
+      ],
+    } as const
+
+    const result = normalizeActiveBlockTaskIds(legacy)
+
+    expect(result.taskIds).toEqual(['task-2'])
+  })
+})
+
+describe('resolveActiveBlockTaskIds', () => {
+  it('prefers explicit taskIds when present', () => {
+    expect(resolveActiveBlockTaskIds({
+      taskIds: ['task-1', 'task-2'],
+      taskAssociationLog: [
+        { blockId: 'block-1', taskId: 'task-3', action: 'associated', timestamp: 1, source: 'manual' },
+      ],
+    })).toEqual(['task-1', 'task-2'])
+  })
+
+  it('falls back to legacy taskId when no array or log exists', () => {
+    expect(resolveActiveBlockTaskIds({ taskId: 'task-legacy' })).toEqual(['task-legacy'])
   })
 })
 

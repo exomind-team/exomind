@@ -88,6 +88,10 @@ function resolveAutoTimerConfig(
   return { mode: 'countup' };
 }
 
+function buildNowFocusSearch(): Record<string, string> {
+  return { tab: 'focus' };
+}
+
 const MOBILE_ANCHOR_TARGETS = {
   overview: 'task-detail-overview',
   info: 'task-detail-info',
@@ -745,6 +749,7 @@ function MobileTimeblockDetail({
   hasActiveBlockOnTask,
   blockingReason,
   onStartTimer,
+  onAppendTaskToActiveBlock,
   onPauseAndGoEventlog,
   onCopySummary,
   rootGuidance,
@@ -774,6 +779,7 @@ function MobileTimeblockDetail({
   hasActiveBlockOnTask: boolean;
   blockingReason: string | null;
   onStartTimer: () => void;
+  onAppendTaskToActiveBlock: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
   rootGuidance?: ReactNode;
@@ -919,9 +925,11 @@ function MobileTimeblockDetail({
               </div>
             </div>
           ) : null}
-          <div className="mt-3">
-            {timerControls}
-          </div>
+          {!hasOtherActiveBlock ? (
+            <div className="mt-3">
+              {timerControls}
+            </div>
+          ) : null}
           <div className="mt-3 flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex flex-wrap gap-2">
@@ -933,8 +941,29 @@ function MobileTimeblockDetail({
                     className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
                   >
                     <Target size={14} />
-                    前往当下
+                    回到当下
                   </button>
+                ) : hasOtherActiveBlock ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onAppendTaskToActiveBlock}
+                      data-testid="task-append-association-button"
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                    >
+                      <Play size={14} />
+                      追加任务关联
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onPauseAndGoEventlog}
+                      data-testid="task-pause-button"
+                      className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                    >
+                      <Target size={14} />
+                      回到当下
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button
@@ -948,22 +977,22 @@ function MobileTimeblockDetail({
                     </button>
                     <button
                       type="button"
-                      onClick={onPauseAndGoEventlog}
-                      data-testid="task-pause-button"
-                      className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-                    >
-                      <Target size={14} />
-                      前往当下
-                    </button>
+                    onClick={onPauseAndGoEventlog}
+                    data-testid="task-pause-button"
+                    className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    <Target size={14} />
+                    回到当下
+                  </button>
                   </>
                 )}
               </div>
-              {autoTimerToggle}
+              {!hasOtherActiveBlock ? autoTimerToggle : null}
             </div>
             {blockingReason ? (
               <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
             ) : hasOtherActiveBlock ? (
-              <p className="text-xs text-[#A8A29E]">其他任务正在计时中</p>
+              <p className="text-xs text-[#A8A29E]">当前已有时间块进行中，可将本任务追加为关联任务。</p>
             ) : null}
           </div>
         </section>
@@ -1091,6 +1120,7 @@ function DesktopTimeblockDetail({
   hasActiveBlockOnTask,
   blockingReason,
   onStartTimer,
+  onAppendTaskToActiveBlock,
   onPauseAndGoEventlog,
   onCopySummary,
   rootGuidance,
@@ -1120,6 +1150,7 @@ function DesktopTimeblockDetail({
   hasActiveBlockOnTask: boolean;
   blockingReason: string | null;
   onStartTimer: () => void;
+  onAppendTaskToActiveBlock: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
   rootGuidance?: ReactNode;
@@ -1186,9 +1217,11 @@ function DesktopTimeblockDetail({
               </div>
             </div>
           ) : null}
-          <div className="mt-3">
-            {timerControls}
-          </div>
+          {!hasOtherActiveBlock ? (
+            <div className="mt-3">
+              {timerControls}
+            </div>
+          ) : null}
           <div className="mt-3 flex flex-col gap-2">
             <div className="flex flex-wrap items-center gap-2">
               <div className="flex flex-wrap gap-2">
@@ -1200,8 +1233,29 @@ function DesktopTimeblockDetail({
                     className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
                   >
                     <Target size={14} />
-                    前往当下
+                    回到当下
                   </button>
+                ) : hasOtherActiveBlock ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onAppendTaskToActiveBlock}
+                      data-testid="task-append-association-button"
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                    >
+                      <Play size={14} />
+                      追加任务关联
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onPauseAndGoEventlog}
+                      data-testid="task-pause-button"
+                      className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                    >
+                      <Target size={14} />
+                      回到当下
+                    </button>
+                  </>
                 ) : (
                   <>
                     <button
@@ -1215,22 +1269,22 @@ function DesktopTimeblockDetail({
                     </button>
                     <button
                       type="button"
-                      onClick={onPauseAndGoEventlog}
-                      data-testid="task-pause-button"
-                      className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-                    >
-                      <Target size={14} />
-                      前往当下
-                    </button>
+                    onClick={onPauseAndGoEventlog}
+                    data-testid="task-pause-button"
+                    className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    <Target size={14} />
+                    回到当下
+                  </button>
                   </>
                 )}
               </div>
-              {autoTimerToggle}
+              {!hasOtherActiveBlock ? autoTimerToggle : null}
             </div>
             {blockingReason ? (
               <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
             ) : hasOtherActiveBlock ? (
-              <p className="text-xs text-[#A8A29E]">其他任务正在计时中</p>
+              <p className="text-xs text-[#A8A29E]">当前已有时间块进行中，可将本任务追加为关联任务。</p>
             ) : null}
           </div>
         </section>
@@ -1718,19 +1772,28 @@ export function TaskDetailPage() {
     console.log('[TaskDetail] handleStartTimer', { taskId, timerConfig, timerMode, countdownMinutes });
     void getTaskTimerService().startBlockForTask(taskId, timerConfig).then((block) => {
       console.log('[TaskDetail] startBlockForTask OK', block ? { startId: block.startId, mode: block.mode, phase: block.phase, taskId: block.taskId, paused: block.paused, elapsed: block.elapsed } : 'NULL');
-      void navigate({ to: '/eventlog' });
+      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
     }).catch((err) => {
       console.error('[TaskDetail] startBlockForTask FAILED', err);
     });
   };
 
+  const handleAppendTaskToActiveBlock = () => {
+    if (!taskId) return;
+    void getTaskTimerService().addTaskToBlock(taskId).then(() => {
+      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
+    }).catch((err) => {
+      console.error('[TaskDetail] addTaskToBlock FAILED', err);
+    });
+  };
+
   const handlePauseAndGoEventlog = () => {
     if (!activeBlock) {
-      void navigate({ to: '/eventlog' });
+      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
       return;
     }
     void getTimeBlockService().pauseBlock().finally(() => {
-      void navigate({ to: '/eventlog' });
+      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
     });
   };
 
@@ -1866,6 +1929,7 @@ export function TaskDetailPage() {
         hasActiveBlockOnTask={Boolean(activeBlock)}
         blockingReason={blockingReason}
         onStartTimer={handleStartTimer}
+        onAppendTaskToActiveBlock={handleAppendTaskToActiveBlock}
         onPauseAndGoEventlog={handlePauseAndGoEventlog}
         onCopySummary={handleCopySummary}
         rootGuidance={rootGuidance}
@@ -1900,6 +1964,7 @@ export function TaskDetailPage() {
       hasActiveBlockOnTask={Boolean(activeBlock)}
       blockingReason={blockingReason}
       onStartTimer={handleStartTimer}
+      onAppendTaskToActiveBlock={handleAppendTaskToActiveBlock}
       onPauseAndGoEventlog={handlePauseAndGoEventlog}
       onCopySummary={handleCopySummary}
       rootGuidance={rootGuidance}

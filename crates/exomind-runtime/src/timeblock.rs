@@ -72,6 +72,11 @@ pub struct ActiveBlockData {
 impl ActiveBlockData {
     pub fn normalize_task_ids(mut self) -> Self {
         if self.task_ids.is_empty() {
+            let task_ids_from_log = current_task_ids_from_log(&self.task_association_log);
+            if !task_ids_from_log.is_empty() {
+                self.task_ids = task_ids_from_log;
+                return self;
+            }
             if let Some(task_id) = self
                 .task_id
                 .clone()
@@ -83,6 +88,32 @@ impl ActiveBlockData {
         }
         self
     }
+}
+
+fn current_task_ids_from_log(task_association_log: &[BlockTaskAssociationEvent]) -> Vec<String> {
+    let mut ordered_task_ids: Vec<String> = Vec::new();
+    let mut active_task_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for event in task_association_log {
+        let task_id = event.task_id.trim();
+        if task_id.is_empty() {
+            continue;
+        }
+
+        if event.action == "associated" {
+            if active_task_ids.insert(task_id.to_string()) {
+                ordered_task_ids.push(task_id.to_string());
+            }
+            continue;
+        }
+
+        active_task_ids.remove(task_id);
+    }
+
+    ordered_task_ids
+        .into_iter()
+        .filter(|task_id| active_task_ids.contains(task_id))
+        .collect()
 }
 
 #[derive(Debug, Error)]
@@ -393,6 +424,49 @@ mod tests {
 
         assert_eq!(normalized.task_ids, vec!["legacy-task".to_string()]);
         assert_eq!(serialized["taskIds"], json!(["legacy-task"]));
+        assert!(serialized.get("taskId").is_none());
+    }
+
+    #[test]
+    fn active_block_recovers_task_ids_from_association_log() {
+        let block: ActiveBlockData = serde_json::from_value(json!({
+            "startId": "log-active",
+            "name": "Log active",
+            "mode": "countup",
+            "elapsed": 10,
+            "paused": false,
+            "startTime": 123,
+            "taskAssociationLog": [
+                {
+                    "blockId": "log-active",
+                    "taskId": "task-1",
+                    "action": "associated",
+                    "timestamp": 1,
+                    "source": "block_start"
+                },
+                {
+                    "blockId": "log-active",
+                    "taskId": "task-2",
+                    "action": "associated",
+                    "timestamp": 2,
+                    "source": "manual"
+                },
+                {
+                    "blockId": "log-active",
+                    "taskId": "task-1",
+                    "action": "disassociated",
+                    "timestamp": 3,
+                    "source": "manual"
+                }
+            ]
+        }))
+        .unwrap();
+
+        let normalized = block.normalize_task_ids();
+        let serialized = serde_json::to_value(&normalized).unwrap();
+
+        assert_eq!(normalized.task_ids, vec!["task-2".to_string()]);
+        assert_eq!(serialized["taskIds"], json!(["task-2"]));
         assert!(serialized.get("taskId").is_none());
     }
 }

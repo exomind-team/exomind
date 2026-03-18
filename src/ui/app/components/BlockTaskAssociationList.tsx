@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import type { ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
@@ -13,29 +13,40 @@ export function BlockTaskAssociationList() {
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [tasksById, setTasksById] = useState<Map<string, TaskNode>>(new Map());
   const [selectedTaskId, setSelectedTaskId] = useState('');
+  const loadRequestIdRef = useRef(0);
 
   useEffect(() => {
     let disposed = false;
     const taskService = getTaskService();
     const timeBlockService = getTimeBlockService();
 
-    const load = async () => {
+    const loadSnapshot = async () => {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
       const [nextBlock, tasks] = await Promise.all([
         timeBlockService.loadActiveBlock(),
         taskService.listTasks(true),
       ]);
-      if (disposed) return;
+      if (disposed || requestId !== loadRequestIdRef.current) return;
       setActiveBlock(nextBlock);
       setTasksById(new Map(tasks.map((task) => [task.id, task])));
     };
 
-    void load();
+    const loadTasksOnly = async (nextBlock: ActiveBlockData | null) => {
+      const requestId = loadRequestIdRef.current + 1;
+      loadRequestIdRef.current = requestId;
+      const tasks = await taskService.listTasks(true);
+      if (disposed || requestId !== loadRequestIdRef.current) return;
+      setActiveBlock(nextBlock);
+      setTasksById(new Map(tasks.map((task) => [task.id, task])));
+    };
+
+    void loadSnapshot();
     const unsubscribeTasks = taskService.onTaskChange(() => {
-      void load();
+      void loadSnapshot();
     });
     const unsubscribeBlocks = timeBlockService.onBlockChange((block) => {
-      setActiveBlock(block);
-      void load();
+      void loadTasksOnly(block);
     });
 
     return () => {
@@ -117,7 +128,7 @@ export function BlockTaskAssociationList() {
         <select
           value={selectedTaskId}
           onChange={(event) => setSelectedTaskId(event.target.value)}
-          className="flex-1 rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+          className="min-w-0 flex-1 rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
         >
           <option value="">选择任务</option>
           {availableTasks.map((task) => (
@@ -133,7 +144,7 @@ export function BlockTaskAssociationList() {
             if (!selectedTaskId) return;
             void getTaskTimerService().addTaskToBlock(selectedTaskId);
           }}
-          className="rounded-xl bg-[#C75B3A] px-3 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+          className="shrink-0 whitespace-nowrap rounded-xl bg-[#C75B3A] px-3 py-2 text-center text-sm font-medium text-white min-w-[88px] disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
         >
           关联任务
         </button>

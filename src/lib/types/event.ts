@@ -150,14 +150,51 @@ export interface CreateEventOptions {
   tags?: Set<Tag>;
 }
 
-export function normalizeActiveBlockTaskIds<T extends { taskId?: UUID; taskIds?: UUID[] }>(
+function normalizeTaskIdList(taskIds: UUID[]): UUID[] {
+  return Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)));
+}
+
+export function resolveAssociatedTaskIdsFromLog(
+  taskAssociationLog: BlockTaskAssociationEvent[] | undefined,
+): UUID[] {
+  if (!taskAssociationLog?.length) return [];
+
+  const orderedTaskIds: UUID[] = [];
+  const activeTaskIds = new Set<UUID>();
+  for (const event of taskAssociationLog) {
+    const normalizedTaskId = event.taskId.trim();
+    if (!normalizedTaskId) continue;
+    if (event.action === 'associated') {
+      if (!activeTaskIds.has(normalizedTaskId)) {
+        orderedTaskIds.push(normalizedTaskId);
+      }
+      activeTaskIds.add(normalizedTaskId);
+      continue;
+    }
+    activeTaskIds.delete(normalizedTaskId);
+  }
+
+  return orderedTaskIds.filter((taskId) => activeTaskIds.has(taskId));
+}
+
+export function resolveActiveBlockTaskIds(
+  block: { taskId?: UUID; taskIds?: UUID[]; taskAssociationLog?: BlockTaskAssociationEvent[] } | null | undefined,
+): UUID[] {
+  if (!block) return [];
+  if (block.taskIds?.length) {
+    return normalizeTaskIdList(block.taskIds);
+  }
+  const taskIdsFromLog = resolveAssociatedTaskIdsFromLog(block.taskAssociationLog);
+  if (taskIdsFromLog.length > 0) {
+    return taskIdsFromLog;
+  }
+  return block.taskId ? normalizeTaskIdList([block.taskId]) : [];
+}
+
+export function normalizeActiveBlockTaskIds<T extends { taskId?: UUID; taskIds?: UUID[]; taskAssociationLog?: BlockTaskAssociationEvent[] }>(
   block: T,
 ): Omit<T, 'taskId' | 'taskIds'> & { taskIds: UUID[]; taskId?: undefined } {
-  const taskIds = block.taskIds?.length
-    ? block.taskIds
-    : block.taskId
-      ? [block.taskId]
-      : [];
+  const taskIds = resolveActiveBlockTaskIds(block);
 
   const { taskId: _legacyTaskId, taskIds: _taskIds, ...rest } = block;
   return {

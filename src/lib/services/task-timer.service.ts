@@ -10,7 +10,12 @@
  * - 关联查询与动态时长计算（spentMinutes 不持久化）
  */
 
-import type { ActiveBlockData, BlockTaskAssociationEvent, TimerConfig } from '@/lib/types/event'
+import {
+  resolveActiveBlockTaskIds,
+  type ActiveBlockData,
+  type BlockTaskAssociationEvent,
+  type TimerConfig,
+} from '@/lib/types/event'
 import { getTaskService, type TaskService } from './task.service'
 import { getTimeBlockService, type TimeBlockService } from './timeblock.service'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
@@ -66,6 +71,8 @@ export class TaskTimerServiceImpl implements TaskTimerService {
   ): Promise<ActiveBlockData | null> {
     const normalizedTaskIds = Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)))
     if (normalizedTaskIds.length === 0) return null
+    const existingBlock = await this.tbSvc.loadActiveBlock()
+    if (existingBlock) return existingBlock
 
     const tasks = await this.loadTasks(normalizedTaskIds)
     if (!tasks) return null
@@ -80,7 +87,17 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     const [primaryTask] = tasks
     if (!primaryTask) return null
 
-    return this.tbSvc.startBlock(primaryTask.title, config, undefined, { taskIds: normalizedTaskIds })
+    const block = await this.tbSvc.startBlock(primaryTask.title, config, undefined, { taskIds: normalizedTaskIds })
+    await this.tbSvc.updateActiveBlock({
+      taskIds: normalizedTaskIds,
+      taskAssociationLog: this.ensureStartAssociationLog(
+        block.taskAssociationLog ?? [],
+        block.startId,
+        normalizedTaskIds,
+      ),
+    })
+
+    return await this.tbSvc.loadActiveBlock() ?? block
   }
 
   async addTaskToBlock(taskId: string): Promise<void> {
@@ -94,7 +111,7 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     if (!task) return
     if (task.status === 'completed' || task.status === 'cancelled') return
 
-    const existingTaskIds = activeBlock.taskIds ?? []
+    const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
     if (existingTaskIds.includes(normalizedTaskId)) return
 
     const nextStatus = this.resolveAutoProgressStatus(task.status)
@@ -120,7 +137,7 @@ export class TaskTimerServiceImpl implements TaskTimerService {
     const activeBlock = await this.tbSvc.loadActiveBlock()
     if (!activeBlock) return
 
-    const existingTaskIds = activeBlock.taskIds ?? []
+    const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
     if (!existingTaskIds.includes(normalizedTaskId)) return
 
     await this.tbSvc.updateActiveBlock({
@@ -220,6 +237,33 @@ export class TaskTimerServiceImpl implements TaskTimerService {
         source: 'manual',
       },
     ]
+  }
+
+  private ensureStartAssociationLog(
+    existing: BlockTaskAssociationEvent[],
+    blockId: string,
+    taskIds: string[],
+  ): BlockTaskAssociationEvent[] {
+    const normalizedTaskIds = Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)))
+    if (normalizedTaskIds.length === 0) return existing
+
+    const existingKeys = new Set(
+      existing
+        .filter((event) => event.action === 'associated')
+        .map((event) => `${event.blockId}::${event.taskId}`),
+    )
+
+    const missingEvents = normalizedTaskIds
+      .filter((taskId) => !existingKeys.has(`${blockId}::${taskId}`))
+      .map((taskId) => ({
+        blockId,
+        taskId,
+        action: 'associated' as const,
+        timestamp: Date.now(),
+        source: 'block_start' as const,
+      }))
+
+    return missingEvents.length > 0 ? [...existing, ...missingEvents] : existing
   }
 }
 

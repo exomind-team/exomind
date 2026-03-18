@@ -102,9 +102,10 @@ function createMockTBService(
   activeBlock: ActiveBlockData | null = null,
   completedBlocks: TimeBlock[] = [],
 ): TimeBlockService {
+  let currentActiveBlock = activeBlock
   return {
     loadTimeBlocks: vi.fn(async () => completedBlocks),
-    loadActiveBlock: vi.fn(async () => activeBlock),
+    loadActiveBlock: vi.fn(async () => currentActiveBlock),
     startBlock: vi.fn(async (
       name: string,
       _config?: unknown,
@@ -114,7 +115,7 @@ function createMockTBService(
       const taskIds = typeof taskBinding === 'string'
         ? [taskBinding]
         : taskBinding?.taskIds ?? []
-      return makeActiveBlock({
+      currentActiveBlock = makeActiveBlock({
         name,
         startId: `block-${Date.now()}`,
         taskIds,
@@ -127,14 +128,15 @@ function createMockTBService(
           source: 'block_start',
         })),
       })
+      return currentActiveBlock
     }),
     updateActiveBlock: vi.fn(async (patch) => {
-      if (!activeBlock) return null
-      activeBlock = {
-        ...activeBlock,
+      if (!currentActiveBlock) return null
+      currentActiveBlock = {
+        ...currentActiveBlock,
         ...patch,
       }
-      return activeBlock
+      return currentActiveBlock
     }),
     markEnding: vi.fn(async () => {}),
     endBlock: vi.fn(async () => null),
@@ -401,6 +403,40 @@ describe('#418 multi-task association', () => {
     }))
   })
 
+  it('addTaskToBlock preserves existing associated tasks reconstructed from log-only active block', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],
+      ['task-2', makeTask({ id: 'task-2', status: 'in_progress' })],
+    ])
+    const activeBlock = makeActiveBlock({
+      startId: 'block-live',
+      taskIds: [],
+      taskAssociationLog: [
+        {
+          blockId: 'block-live',
+          taskId: 'task-1',
+          action: 'associated',
+          timestamp: 1,
+          source: 'block_start',
+        },
+      ],
+      taskId: undefined,
+    })
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService(activeBlock)
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await svc.addTaskToBlock('task-2')
+
+    expect(tbSvc.updateActiveBlock).toHaveBeenCalledWith(expect.objectContaining({
+      taskIds: ['task-1', 'task-2'],
+      taskAssociationLog: expect.arrayContaining([
+        expect.objectContaining({ taskId: 'task-1', action: 'associated', source: 'block_start' }),
+        expect.objectContaining({ taskId: 'task-2', action: 'associated', source: 'manual' }),
+      ]),
+    }))
+  })
+
   it('removeTaskFromBlock removes task with disassociation log', async () => {
     const tasks = new Map([
       ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],
@@ -454,5 +490,23 @@ describe('#418 multi-task association', () => {
 
     expect(block?.taskIds).toEqual(['task-1'])
     expect(tbSvc.startBlock).toHaveBeenCalledWith('Test Task', { mode: 'countup' }, undefined, { taskIds: ['task-1'] })
+  })
+
+  it('startBlockForTask seals task association onto the persisted active block', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', status: 'pending' })],
+    ])
+    const taskSvc = createMockTaskService(tasks)
+    const tbSvc = createMockTBService()
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await svc.startBlockForTask('task-1')
+
+    expect(tbSvc.updateActiveBlock).toHaveBeenCalledWith(expect.objectContaining({
+      taskIds: ['task-1'],
+      taskAssociationLog: expect.arrayContaining([
+        expect.objectContaining({ taskId: 'task-1', action: 'associated', source: 'block_start' }),
+      ]),
+    }))
   })
 })

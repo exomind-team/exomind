@@ -25,6 +25,7 @@ const pauseBlockMock = vi.fn<() => Promise<void>>();
 
 const calculateSpentMinutesMock = vi.fn<(taskId: string) => Promise<number>>();
 const startBlockForTaskMock = vi.fn();
+const addTaskToBlockMock = vi.fn();
 
 const loadEventsMock = vi.fn<
   () => Promise<Array<{ id: string; content: string; timestamp: number; tags: Set<string> }>>
@@ -64,6 +65,7 @@ vi.mock('@/lib/services', () => ({
   getTaskTimerService: () => ({
     calculateSpentMinutes: calculateSpentMinutesMock,
     startBlockForTask: startBlockForTaskMock,
+    addTaskToBlock: addTaskToBlockMock,
   }),
 }));
 
@@ -129,6 +131,10 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     });
     startBlockForTaskMock.mockReset();
     startBlockForTaskMock.mockResolvedValue(null);
+    addTaskToBlockMock.mockReset();
+    addTaskToBlockMock.mockResolvedValue(undefined);
+    pauseBlockMock.mockReset();
+    pauseBlockMock.mockResolvedValue(undefined);
     updateTaskMock.mockReset();
     updateTaskMock.mockImplementation(async (id, input) => makeTask({
       id,
@@ -371,6 +377,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 120 });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
     });
   });
 
@@ -392,6 +399,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countdown', minutes: 60 });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
     });
   });
 
@@ -448,6 +456,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-1', { mode: 'countup' });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
     });
   });
 
@@ -477,6 +486,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
     });
   });
 
@@ -517,6 +527,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await waitFor(() => {
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
     });
   });
 
@@ -538,6 +549,64 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     await screen.findByText('任务详情');
 
-    expect(await screen.findByTestId('task-pause-button')).toHaveTextContent('前往当下');
+    expect(await screen.findByTestId('task-pause-button')).toHaveTextContent('回到当下');
+  });
+
+  it('switches timer controls to append-association mode when another active block exists（已有时间块时改为追加关联）', async () => {
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'active-2',
+      name: '其他任务的时间块',
+      mode: 'countup',
+      startTime: new Date('2026-03-06T09:00:00+08:00').getTime(),
+      elapsed: 15 * 60 * 1000,
+      paused: false,
+      phase: 'running',
+      version: 1,
+      taskIds: ['task-root'],
+      taskAssociationLog: [],
+    });
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.queryByText('计时时长')).toBeNull();
+    expect(screen.queryByTestId('task-countdown-auto-fill-switch')).toBeNull();
+    expect(screen.getByTestId('task-append-association-button')).toHaveTextContent('追加任务关联');
+    expect(screen.getByTestId('task-pause-button')).toHaveTextContent('回到当下');
+    expect(screen.getByText('当前已有时间块进行中，可将本任务追加为关联任务。')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-append-association-button'));
+
+    await waitFor(() => {
+      expect(addTaskToBlockMock).toHaveBeenCalledWith('task-1');
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+    });
+  });
+
+  it('routes go-back-to-now button to focus tab（回到当下进入专注子页面）', async () => {
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'active-1',
+      name: '多任务块',
+      mode: 'countup',
+      startTime: new Date('2026-03-06T09:00:00+08:00').getTime(),
+      elapsed: 15 * 60 * 1000,
+      paused: false,
+      phase: 'running',
+      version: 1,
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    });
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    fireEvent.click(await screen.findByTestId('task-pause-button'));
+
+    await waitFor(() => {
+      expect(pauseBlockMock).toHaveBeenCalled();
+      expect(navigateMock).toHaveBeenCalledWith({ to: '/eventlog', search: { tab: 'focus' } });
+    });
   });
 });
