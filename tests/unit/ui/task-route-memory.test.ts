@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { buildTasksMainSearch, resolveTasksRestorePath, shouldForceTasksMain } from '@/ui/app/pages/task-route-memory';
 
@@ -16,5 +18,15 @@ describe('task route memory helpers', () => {
     expect(shouldForceTasksMain('')).toBe(false);
     expect(resolveTasksRestorePath('/tasks/dag', '')).toBe('/tasks/dag');
     expect(resolveTasksRestorePath('/agents', '')).toBeNull();
+  });
+
+  it('reads the tasks-root restore flag from router search state instead of window location', () => {
+    const routesSource = readFileSync(path.resolve('src/routes.tsx'), 'utf-8');
+    const tasksRouteStart = routesSource.indexOf('const newTasksRoute = createRoute({');
+    const remindersRouteStart = routesSource.indexOf('const newRemindersRoute = createRoute({');
+    const tasksRouteSource = routesSource.slice(tasksRouteStart, remindersRouteStart);
+
+    expect(tasksRouteSource).toContain("const currentSearch = location.searchStr ?? '';");
+    expect(tasksRouteSource).not.toContain('window.location.search');
   });
 });

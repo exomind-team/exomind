@@ -4,6 +4,7 @@ const listeners = new Map<string, (event: { payload: unknown }) => void | Promis
 const navigateMock = vi.fn(async () => undefined);
 const requestFocusTargetMock = vi.fn();
 const syncRuntimeMock = vi.fn(async () => ({ kind: 'valid', hotkey: 'Alt+E' }));
+const takePendingActivationMock = vi.fn(async () => false);
 const subscribeVoiceShortcutMock = vi.fn();
 const subscribeQuickFocusMock = vi.fn();
 
@@ -57,6 +58,7 @@ vi.mock('@/services/main-window-focus-targets', () => ({
 
 vi.mock('@/services/main-window-shortcut-runtime', () => ({
   syncMainWindowShortcutSelectionWithRuntime: (...args: unknown[]) => syncRuntimeMock(...args),
+  takePendingMainWindowShortcutActivation: (...args: unknown[]) => takePendingActivationMock(...args),
 }));
 
 describe('MainWindowShortcutService', () => {
@@ -65,6 +67,8 @@ describe('MainWindowShortcutService', () => {
     navigateMock.mockClear();
     requestFocusTargetMock.mockClear();
     syncRuntimeMock.mockClear();
+    takePendingActivationMock.mockReset();
+    takePendingActivationMock.mockResolvedValue(false);
     subscribeVoiceShortcutMock.mockClear();
     subscribeQuickFocusMock.mockClear();
     runtimeFlags.quickFocusEnabled = true;
@@ -80,6 +84,7 @@ describe('MainWindowShortcutService', () => {
     await service.init();
 
     expect(syncRuntimeMock).toHaveBeenCalledWith({ notify: false });
+    takePendingActivationMock.mockResolvedValueOnce(true);
 
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
 
@@ -100,6 +105,7 @@ describe('MainWindowShortcutService', () => {
 
     const service = new MainWindowShortcutService();
     await service.init();
+    takePendingActivationMock.mockResolvedValueOnce(true);
 
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
 
@@ -117,6 +123,7 @@ describe('MainWindowShortcutService', () => {
 
     const service = new MainWindowShortcutService();
     await service.init();
+    takePendingActivationMock.mockResolvedValueOnce(true);
 
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
 
@@ -138,6 +145,7 @@ describe('MainWindowShortcutService', () => {
     const service = new MainWindowShortcutService();
     await service.init();
 
+    takePendingActivationMock.mockResolvedValueOnce(true);
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
     expect(navigateMock).not.toHaveBeenCalled();
     expect(requestFocusTargetMock).not.toHaveBeenCalled();
@@ -147,9 +155,29 @@ describe('MainWindowShortcutService', () => {
     const quickFocusListener = subscribeQuickFocusMock.mock.calls[0]?.[0] as ((value: boolean) => void) | undefined;
     quickFocusListener?.(false);
 
+    takePendingActivationMock.mockResolvedValueOnce(true);
     await listeners.get('main-window-shortcut')?.({ payload: 'activate' });
     expect(navigateMock).not.toHaveBeenCalled();
     expect(requestFocusTargetMock).not.toHaveBeenCalled();
+
+    service.destroy();
+  });
+
+  it('consumes pending activation on init so shortcut survives a webview reload', async () => {
+    const { MainWindowShortcutService } = await import('@/services/main-window-shortcut.service');
+    const { appRouter } = await import('@/routes');
+    appRouter.state.location.pathname = '/tasks/task-1';
+    appRouter.state.location.searchStr = '';
+    takePendingActivationMock.mockResolvedValueOnce(true);
+
+    const service = new MainWindowShortcutService();
+    await service.init();
+
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/tasks',
+      search: { main: '1' },
+    });
+    expect(requestFocusTargetMock).toHaveBeenCalledWith('tasks-quick-add-input');
 
     service.destroy();
   });

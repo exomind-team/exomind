@@ -32,7 +32,7 @@ use commands::runtime_commands::{
 use commands::shortcut_commands::{
     ensure_voice_overlay_window, register_main_window_shortcut, register_voice_shortcut,
     simulate_enter, simulate_paste, foreground_window_get, main_window_shortcut_get,
-    main_window_shortcut_set, MainWindowShortcutState,
+    main_window_shortcut_set, main_window_shortcut_take_pending_activation, MainWindowShortcutState,
     voice_overlay_hide, voice_overlay_set_bottom_offset, voice_overlay_show,
     voice_recording_set_active, voice_shortcut_get, voice_shortcut_set, VoiceShortcutState,
 };
@@ -246,6 +246,7 @@ pub fn run() {
             voice_shortcut_get,
             main_window_shortcut_set,
             main_window_shortcut_get,
+            main_window_shortcut_take_pending_activation,
             voice_recording_set_active,
             foreground_window_get,
             // ASR 语音识别命令

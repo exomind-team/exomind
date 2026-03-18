@@ -36,6 +36,14 @@ async function applyMainWindowShortcutToRuntime(hotkey: string | null): Promise<
   await invoke('main_window_shortcut_set', { shortcut: hotkey });
 }
 
+export async function takePendingMainWindowShortcutActivation(): Promise<boolean> {
+  if (!await isTauri()) {
+    return false;
+  }
+
+  return invoke<boolean>('main_window_shortcut_take_pending_activation');
+}
+
 export async function syncMainWindowShortcutSelectionWithRuntime(
   options: SyncMainWindowShortcutOptions = {},
 ): Promise<MainWindowShortcutRuntimeStatus> {

@@ -46,6 +46,7 @@ pub struct VoiceShortcutState {
 #[derive(Default)]
 pub struct MainWindowShortcutState {
     shortcut: Mutex<Option<String>>,
+    pending_activation: AtomicBool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -80,6 +81,7 @@ impl MainWindowShortcutState {
     pub fn new() -> Self {
         Self {
             shortcut: Mutex::new(Some(DEFAULT_MAIN_WINDOW_SHORTCUT.to_string())),
+            pending_activation: AtomicBool::new(false),
         }
     }
 
@@ -94,6 +96,14 @@ impl MainWindowShortcutState {
         if let Ok(mut value) = self.shortcut.lock() {
             *value = shortcut;
         }
+    }
+
+    fn mark_activation_pending(&self) {
+        self.pending_activation.store(true, Ordering::SeqCst);
+    }
+
+    fn take_pending_activation(&self) -> bool {
+        self.pending_activation.swap(false, Ordering::SeqCst)
     }
 }
 
@@ -380,6 +390,7 @@ fn toggle_main_window_from_shortcut(app: &AppHandle) -> Result<(), String> {
         let _ = window.unminimize();
     }
     window.set_focus().map_err(|error| error.to_string())?;
+    app.state::<MainWindowShortcutState>().mark_activation_pending();
     app.emit("main-window-shortcut", "activate").ok();
     Ok(())
 }
@@ -803,6 +814,13 @@ pub async fn main_window_shortcut_get(
     state: State<'_, MainWindowShortcutState>,
 ) -> Result<Option<String>, String> {
     Ok(state.get())
+}
+
+#[tauri::command]
+pub async fn main_window_shortcut_take_pending_activation(
+    state: State<'_, MainWindowShortcutState>,
+) -> Result<bool, String> {
+    Ok(state.take_pending_activation())
 }
 
 /// Sync recording lifecycle（同步录音生命周期）to arm/disarm global Esc cancel.

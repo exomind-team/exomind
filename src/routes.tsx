@@ -670,10 +670,11 @@ const newTasksRoute = createRoute({
   path: '/tasks',
   component: function NewTasks() {
     const navigate = useNavigate();
+    const location = useLocation();
 
     // Redirect to the last visited tasks sub-path (e.g. /tasks/dag, /tasks/:id)
     useEffect(() => {
-      const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+      const currentSearch = location.searchStr ?? '';
       const saved = sessionStorage.getItem(TASKS_LAST_PATH_KEY);
 
       if (shouldForceTasksMain(currentSearch)) {
@@ -686,8 +687,7 @@ const newTasksRoute = createRoute({
       if (restorePath) {
         void navigate({ to: restorePath, replace: true });
       }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [navigate]);
+    }, [location.searchStr, navigate]);
 
     return (
       <LazyPage>
