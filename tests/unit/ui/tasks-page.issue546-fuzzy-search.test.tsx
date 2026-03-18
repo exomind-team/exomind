@@ -5,6 +5,8 @@ import { TasksPage } from '@/ui/app/pages/TasksPage';
 import type { TaskNode } from '@/lib/types/task';
 
 const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
+const navigateMock = vi.fn();
+const createTaskMock = vi.fn();
 const taskCurrentRootCardMock = vi.fn((props: Record<string, unknown>) => (
   <div
     data-testid="task-current-root-card"
@@ -36,14 +38,25 @@ const fuzzySearchState = vi.hoisted(() => {
   };
 });
 
+const taskCreateSuccessActionState = vi.hoisted(() => {
+  let value: 'refocus' | 'open-detail' = 'refocus';
+  return {
+    reset: () => {
+      value = 'refocus';
+    },
+    get: () => value,
+  };
+});
+
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
+  useNavigate: () => navigateMock,
 }));
 
 vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     listTasks: listTasksMock,
-    createTask: vi.fn(),
+    createTask: createTaskMock,
     getTask: vi.fn(),
     updateTask: vi.fn(),
     cancelTask: vi.fn(),
@@ -63,6 +76,12 @@ vi.mock('@/config/task-page-fuzzy-search', () => ({
   getTaskPageFuzzySearchEnabled: vi.fn(() => fuzzySearchState.getEnabled()),
   setTaskPageFuzzySearchEnabled: vi.fn((value: boolean) => fuzzySearchState.emit(value)),
   subscribeTaskPageFuzzySearchChanges: vi.fn((listener: (value: boolean) => void) => fuzzySearchState.subscribe(listener)),
+}));
+
+vi.mock('@/config/task-create-success-action', () => ({
+  getTaskCreateSuccessAction: vi.fn(() => taskCreateSuccessActionState.get()),
+  setTaskCreateSuccessAction: vi.fn((value: 'refocus' | 'open-detail') => value),
+  subscribeTaskCreateSuccessActionChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/ui/app/components/PageMoreMenu', () => ({
@@ -141,7 +160,10 @@ describe('TasksPage issue-546 fuzzy search', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     fuzzySearchState.reset();
+    taskCreateSuccessActionState.reset();
     listTasksMock.mockReset();
+    createTaskMock.mockReset();
+    navigateMock.mockReset();
     taskCurrentRootCardMock.mockClear();
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-1', title: 'aba', updatedAt: 10 }),

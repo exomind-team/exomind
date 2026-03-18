@@ -1,6 +1,6 @@
 import { Clock, Waypoints } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { Link, useNavigate } from '@tanstack/react-router';
 import { getTaskService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import { PageMoreMenu } from '@/ui/app/components/PageMoreMenu';
@@ -13,6 +13,10 @@ import {
   getTaskPageFuzzySearchEnabled,
   subscribeTaskPageFuzzySearchChanges,
 } from '@/config/task-page-fuzzy-search';
+import {
+  getTaskCreateSuccessAction,
+  subscribeTaskCreateSuccessActionChanges,
+} from '@/config/task-create-success-action';
 import {
   extractTaskTitleSearchQuery,
   filterTasksByTitleFuzzySearch,
@@ -69,7 +73,9 @@ export function TasksPage() {
   const [quickAddValue, setQuickAddValue] = useState('');
   const [debouncedQuickAddValue, setDebouncedQuickAddValue] = useState('');
   const [taskPageFuzzySearchEnabled, setTaskPageFuzzySearchEnabled] = useState<boolean>(() => getTaskPageFuzzySearchEnabled());
+  const [taskCreateSuccessAction, setTaskCreateSuccessAction] = useState(() => getTaskCreateSuccessAction());
   const inputRef = useRef<VoiceMessageInputHandle>(null);
+  const navigate = useNavigate();
 
   // Auto-focus input on Enter key when nothing is focused
   useEffect(() => {
@@ -109,6 +115,7 @@ export function TasksPage() {
   const taskTitleSearchQuery = useMemo(() => extractTaskTitleSearchQuery(debouncedQuickAddValue), [debouncedQuickAddValue]);
 
   useEffect(() => subscribeTaskPageFuzzySearchChanges(setTaskPageFuzzySearchEnabled), []);
+  useEffect(() => subscribeTaskCreateSuccessActionChanges(setTaskCreateSuccessAction), []);
 
   useEffect(() => {
     if (!taskPageFuzzySearchEnabled) {
@@ -144,7 +151,13 @@ export function TasksPage() {
       description,
     });
     setTasks((prev) => [created, ...prev]);
-  }, []);
+    if (taskCreateSuccessAction === 'open-detail') {
+      await navigate({
+        to: '/tasks/$taskId',
+        params: { taskId: created.id },
+      });
+    }
+  }, [navigate, taskCreateSuccessAction]);
 
   const emptyText = taskPageFuzzySearchEnabled && taskTitleSearchQuery ? EMPTY_SEARCH_TEXT : EMPTY_TEXT;
 

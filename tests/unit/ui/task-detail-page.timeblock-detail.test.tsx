@@ -307,6 +307,44 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
   it('renders current root guidance without DAG link（详情页复用当前根节点规则，#496 移除 DAG 链接）', async () => {
     mockMatchMedia(true);
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: 'task-root',
+        title: '优先收口 DAG 根节点',
+        status: 'pending',
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+      makeTask({
+        id: 'task-3',
+        title: '并行任务 A',
+        status: 'pending',
+        createdAt: 15,
+        updatedAt: 15,
+      }),
+      makeTask({
+        id: 'task-4',
+        title: '并行任务 B',
+        status: 'pending',
+        createdAt: 18,
+        updatedAt: 18,
+      }),
+      makeTask({
+        id: 'task-1',
+        title: '深度工作：EventLog 模块实现',
+        status: 'in_progress',
+        createdAt: 20,
+        updatedAt: 20,
+      }),
+      makeTask({
+        id: 'task-2',
+        title: '切换后的任务 B',
+        estimatedMinutes: 30,
+        status: 'pending',
+        createdAt: 30,
+        updatedAt: 30,
+      }),
+    ]);
     render(<TaskDetailPage />);
 
     await waitFor(() => {
@@ -315,6 +353,7 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     expect(await screen.findByTestId('task-current-root-card')).toHaveTextContent('优先收口 DAG 根节点');
     expect(screen.getByText('优先收口 DAG 根节点')).toBeInTheDocument();
+    expect(screen.getByTestId('task-current-root-card-collapse-toggle')).toBeInTheDocument();
     expect(screen.queryByTestId('task-current-root-dag-link')).toBeNull();
   });
 

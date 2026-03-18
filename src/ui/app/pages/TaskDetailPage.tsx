@@ -1526,7 +1526,7 @@ export function TaskDetailPage() {
   const taskGraph = useMemo(() => buildTaskGraph(allTasks), [allTasks]);
   const taskById = useMemo(() => new Map(allTasks.map((candidate) => [candidate.id, candidate])), [allTasks]);
   const rootGuidance = useMemo(() => (
-    <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
+    <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} collapsible={true} />
   ), [task?.id, taskById, taskGraph]);
   const canEditEstimatedTime = useMemo(
     () => (task ? allTasks.some((candidate) => candidate.id === task.id) && !isTerminalTaskStatus(task.status) : false),

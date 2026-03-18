@@ -8,9 +8,21 @@ const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
 const createTaskMock = vi.fn<
   (input: { title: string; description?: string; estimatedMinutes?: number }) => Promise<TaskNode>
 >();
+const navigateMock = vi.fn();
+
+const taskCreateSuccessActionState = vi.hoisted(() => {
+  let value: 'refocus' | 'open-detail' = 'refocus';
+  return {
+    get: () => value,
+    set: (next: 'refocus' | 'open-detail') => {
+      value = next;
+    },
+  };
+});
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
+  useNavigate: vi.fn(() => navigateMock),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -32,10 +44,18 @@ vi.mock('@/lib/services', () => ({
   }),
 }));
 
+vi.mock('@/config/task-create-success-action', () => ({
+  getTaskCreateSuccessAction: vi.fn(() => taskCreateSuccessActionState.get()),
+  setTaskCreateSuccessAction: vi.fn((value: 'refocus' | 'open-detail') => value),
+  subscribeTaskCreateSuccessActionChanges: vi.fn(() => () => {}),
+}));
+
 describe('TasksPage quick add estimate default', () => {
   beforeEach(() => {
     listTasksMock.mockReset();
     createTaskMock.mockReset();
+    navigateMock.mockReset();
+    taskCreateSuccessActionState.set('refocus');
 
     listTasksMock.mockResolvedValue([]);
     createTaskMock.mockImplementation(async (input) => ({
@@ -76,5 +96,30 @@ describe('TasksPage quick add estimate default', () => {
     expect(createInput.estimatedMinutes).toBeUndefined();
     expect(Object.prototype.hasOwnProperty.call(createInput, 'estimatedMinutes')).toBe(false);
     expect(await screen.findByText('未估时')).toBeInTheDocument();
+    expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('opens task detail after quick add when action is open-detail', async () => {
+    taskCreateSuccessActionState.set('open-detail');
+    render(<TasksPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledWith(true);
+    });
+
+    fireEvent.change(screen.getByTestId('new-now-input-textarea'), {
+      target: { value: '跳详情任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-now-send-button'));
+
+    await waitFor(() => {
+      expect(createTaskMock).toHaveBeenCalledTimes(1);
+    });
+    await waitFor(() => {
+      expect(navigateMock).toHaveBeenCalledWith({
+        to: '/tasks/$taskId',
+        params: { taskId: 'created-task' },
+      });
+    });
   });
 });

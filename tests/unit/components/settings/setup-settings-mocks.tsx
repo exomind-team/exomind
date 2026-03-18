@@ -266,6 +266,12 @@ vi.mock('@/config/task-page-fuzzy-search', () => ({
   subscribeTaskPageFuzzySearchChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/task-create-success-action', () => ({
+  getTaskCreateSuccessAction: vi.fn(() => 'refocus'),
+  setTaskCreateSuccessAction: vi.fn((value: string) => value),
+  subscribeTaskCreateSuccessActionChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/voice-shortcut-send-mode', () => ({
   getVoiceShortcutSendMode: vi.fn(() => 'insert-only'),
   setVoiceShortcutSendMode: vi.fn((value: string) => value),

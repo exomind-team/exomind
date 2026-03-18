@@ -5,6 +5,7 @@ import { SettingsPage } from '@/ui/app/pages/SettingsPage';
 import { getDeveloperModeEnabled } from '@/config/developer-mode';
 import { setInputSendMode } from '@/config/input-send-mode';
 import { setTaskPageFuzzySearchEnabled } from '@/config/task-page-fuzzy-search';
+import { setTaskCreateSuccessAction } from '@/config/task-create-success-action';
 import { setVoiceTranscriptSendMode } from '@/config/voice-transcript-send-mode';
 import { setVoiceShortcutSendMode } from '@/config/voice-shortcut-send-mode';
 import { getVoiceShortcutHotkey, setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
@@ -56,6 +57,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByTestId('new-settings-input-section')).toBeInTheDocument();
     expect(screen.getByText('输入框发送方式')).toBeInTheDocument();
     expect(screen.getByText('任务页输入框模糊搜索')).toBeInTheDocument();
+    expect(screen.getByText('创建任务后')).toBeInTheDocument();
     expect(screen.getByText('语音转写后')).toBeInTheDocument();
     expect(screen.getByText('聊天与外部输入语音完成后')).toBeInTheDocument();
     expect(screen.getByText('全局语音快捷键')).toBeInTheDocument();
@@ -68,6 +70,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('MOSS API Token')).toBeInTheDocument();
     expect(screen.getByText('统一控制「任务 / 当下」输入框使用 Enter 发送还是 Ctrl/Cmd+Enter 发送')).toBeInTheDocument();
     expect(screen.getByText('仅作用于任务页；开启后会用输入框第一行对任务标题做防抖模糊过滤')).toBeInTheDocument();
+    expect(screen.getByText('仅作用于任务页快速添加；默认继续回焦，也可切换为直接打开新建任务详情')).toBeInTheDocument();
     expect(screen.getByText('仅作用于「当下」页面输入框，默认插入输入框')).toBeInTheDocument();
     expect(screen.getByText('Shortcut Voice（快捷键语音）默认 Alt+Q，按一次开始再按一次结束')).toBeInTheDocument();
     expect(screen.queryByText('MOSS 语音测试')).not.toBeInTheDocument();
@@ -80,8 +83,8 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     render(<SettingsPage />);
 
     expect(screen.getByText('MOSS 语音测试')).toBeInTheDocument();
-    expect(screen.getByText('火山引擎 ASR 测试')).toBeInTheDocument();
-    expect(screen.getAllByText('可用')).toHaveLength(2);
+    expect(screen.queryByText('火山引擎 ASR 测试')).not.toBeInTheDocument();
+    expect(screen.getAllByText('可用')).toHaveLength(1);
   });
 
   it('switches shortcut voice provider from input section', async () => {
@@ -165,6 +168,16 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     fireEvent.click(screen.getByTestId('new-settings-task-page-fuzzy-search-switch'));
 
     expect(setEnabledMock).toHaveBeenCalledWith(false);
+  });
+
+  it('switches task create success action from input section', () => {
+    const setActionMock = vi.mocked(setTaskCreateSuccessAction);
+    render(<SettingsPage />);
+
+    fireEvent.click(screen.getByTestId('new-settings-task-create-success-action-open-detail'));
+
+    expect(setActionMock).toHaveBeenCalledWith('open-detail');
+    expect(screen.getByTestId('new-settings-task-create-success-action-open-detail')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('toggles overlay diagnostics visibility from input section', () => {

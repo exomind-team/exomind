@@ -93,6 +93,11 @@ import {
   subscribeTaskPageFuzzySearchChanges,
 } from '@/config/task-page-fuzzy-search';
 import {
+  getTaskCreateSuccessAction,
+  setTaskCreateSuccessAction,
+  subscribeTaskCreateSuccessActionChanges,
+} from '@/config/task-create-success-action';
+import {
   getVoiceShortcutHotkey,
   setVoiceShortcutHotkey,
   subscribeVoiceShortcutHotkeyChanges,
@@ -573,6 +578,25 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: () => getTaskPageFuzzySearchEnabled(),
     set: (value: boolean) => setTaskPageFuzzySearchEnabled(value),
     subscribe: subscribeTaskPageFuzzySearchChanges,
+  },
+  {
+    id: 'task-create-success-action',
+    label: '创建任务后',
+    icon: List,
+    category: 'input',
+    description: '仅作用于任务页快速添加；默认继续回焦，也可切换为直接打开新建任务详情',
+    rowTestId: 'new-settings-task-create-success-action-row',
+    type: 'enum',
+    options: [
+      { label: '继续快速输入', value: 'refocus' },
+      { label: '打开任务详情', value: 'open-detail' },
+    ],
+    optionTestId: (value) => `new-settings-task-create-success-action-${value}`,
+    get: () => getTaskCreateSuccessAction(),
+    set: (value: string) => {
+      setTaskCreateSuccessAction(value as 'refocus' | 'open-detail');
+    },
+    subscribe: subscribeTaskCreateSuccessActionChanges,
   },
   {
     id: 'voice-transcript-send-mode',

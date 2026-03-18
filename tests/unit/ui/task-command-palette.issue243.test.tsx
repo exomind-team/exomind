@@ -13,6 +13,7 @@ const runtimeFlags = vi.hoisted(() => ({
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children?: ReactNode }) => <a {...props}>{children}</a>,
+  useNavigate: () => vi.fn(),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -60,6 +61,12 @@ vi.mock('@/config/developer-mode', () => ({
 vi.mock('@/config/command-palette-enabled', () => ({
   getCommandPaletteEnabled: () => runtimeFlags.commandPaletteEnabled,
   subscribeCommandPaletteEnabledChanges: () => () => {},
+}));
+
+vi.mock('@/config/task-create-success-action', () => ({
+  getTaskCreateSuccessAction: vi.fn(() => 'refocus'),
+  setTaskCreateSuccessAction: vi.fn((value: string) => value),
+  subscribeTaskCreateSuccessActionChanges: vi.fn(() => () => {}),
 }));
 
 describe('new tasks page command palette entry issue-243（任务页命令面板入口）', () => {

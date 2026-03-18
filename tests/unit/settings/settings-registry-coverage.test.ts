@@ -22,6 +22,7 @@ const AUDITED_SETTINGS_IDS = [
   'feedback-content',
   'input-send-mode',
   'task-page-fuzzy-search',
+  'task-create-success-action',
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
   'voice-shortcut-hotkey',
@@ -67,6 +68,7 @@ const AUDITED_SETTINGS_IDS = [
 const INLINE_SINGLE_ENUM_IDS = [
   'theme',
   'input-send-mode',
+  'task-create-success-action',
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
   'voice-shortcut-hotkey',
