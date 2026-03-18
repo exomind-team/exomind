@@ -3,6 +3,9 @@
  * 用于依赖注入和测试 mock
  */
 
+import { execSync } from 'node:child_process';
+import { existsSync, mkdirSync, unlinkSync, writeFileSync } from 'node:fs';
+
 export interface IGitHubAPI {
   /**
    * 添加标签到 PR
@@ -57,28 +60,31 @@ export class RealGitHubAPI implements IGitHubAPI {
 
   async createComment(prNumber: number, body: string): Promise<number> {
     // 使用临时文件避免 shell 转义破坏换行符
-    const fs = await import('fs');
-
     // 确保临时目录存在
     const tempDir = '.exomind/temp';
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
+    if (!existsSync(tempDir)) {
+      mkdirSync(tempDir, { recursive: true });
     }
 
     const tempFile = `${tempDir}/comment-${Date.now()}.txt`;
-    fs.writeFileSync(tempFile, body, 'utf-8');
+    writeFileSync(tempFile, body, 'utf-8');
 
     try {
+      const createdAfter = new Date(Date.now() - 5000).toISOString();
       const result = this.gh(`pr comment ${prNumber} --body-file "${tempFile}"`);
       const match = result.match(/\/(\d+)$/);
       if (!match) {
-        throw new Error('Failed to extract comment ID from gh output');
+        const fallbackId = this.findCreatedCommentId(prNumber, body, createdAfter);
+        if (fallbackId === null) {
+          throw new Error('Failed to extract comment ID from gh output');
+        }
+        return fallbackId;
       }
       return parseInt(match[1]);
     } finally {
       // 清理临时文件
       try {
-        fs.unlinkSync(tempFile);
+        unlinkSync(tempFile);
       } catch (e) {
         // 忽略删除失败
       }
@@ -87,23 +93,21 @@ export class RealGitHubAPI implements IGitHubAPI {
 
   async updateComment(prNumber: number, commentId: number, body: string): Promise<void> {
     // 使用临时文件避免 shell 转义破坏换行符
-    const fs = await import('fs');
-
     // 确保临时目录存在
     const tempDir = '.exomind/temp';
-    if (!fs.existsSync(tempDir)) {
-      fs.mkdirSync(tempDir, { recursive: true });
+    if (!existsSync(tempDir)) {
+      mkdirSync(tempDir, { recursive: true });
     }
 
     const tempFile = `${tempDir}/comment-${Date.now()}.txt`;
-    fs.writeFileSync(tempFile, body, 'utf-8');
+    writeFileSync(tempFile, body, 'utf-8');
 
     try {
       this.gh(`api -X PATCH "/repos/${this.repo}/issues/comments/${commentId}" -F body=@"${tempFile}"`);
     } finally {
       // 清理临时文件
       try {
-        fs.unlinkSync(tempFile);
+        unlinkSync(tempFile);
       } catch (e) {
         // 忽略删除失败
       }
@@ -111,17 +115,36 @@ export class RealGitHubAPI implements IGitHubAPI {
   }
 
   async getComments(prNumber: number): Promise<Array<{ id: number; body: string; createdAt: string }>> {
-    const result = this.gh(`pr view ${prNumber} --json comments`);
-    const data = JSON.parse(result);
-    return data.comments.map((c: any) => ({
-      id: c.id,
-      body: c.body,
-      createdAt: c.createdAt
-    }));
+    const comments: Array<{ id: number; body: string; createdAt: string }> = [];
+    const perPage = 100;
+
+    for (let page = 1; page <= 50; page += 1) {
+      const url = `repos/${this.repo}/issues/${prNumber}/comments?per_page=${perPage}&page=${page}&sort=created&direction=asc`;
+      const result = this.gh(`api '${url}'`);
+      const trimmed = result.trim();
+      if (!trimmed) {
+        break;
+      }
+
+      const data = JSON.parse(trimmed);
+      if (!Array.isArray(data) || data.length === 0) {
+        break;
+      }
+
+      comments.push(
+        ...data.map((c: any) => ({
+          id: Number(c.id),
+          body: c.body,
+          createdAt: c.created_at ?? c.createdAt,
+        })),
+      );
+
+    }
+
+    return comments;
   }
 
   private gh(command: string): string {
-    const { execSync } = require('child_process');
     // gh api 命令不接受 --repo 参数，需要在 URL 中指定 repo
     const isApiCommand = command.trim().startsWith('api ');
     const fullCommand = isApiCommand
@@ -131,5 +154,64 @@ export class RealGitHubAPI implements IGitHubAPI {
       encoding: 'utf-8',
       stdio: ['pipe', 'pipe', 'pipe']
     });
+  }
+
+  private fetchViewerLogin(): string | null {
+    const result = this.gh('api user');
+    const trimmed = result.trim();
+    if (!trimmed) {
+      return null;
+    }
+
+    const data = JSON.parse(trimmed);
+    return typeof data?.login === 'string' && data.login.trim() ? data.login : null;
+  }
+
+  private findCreatedCommentId(prNumber: number, body: string, createdAfter: string): number | null {
+    const viewerLogin = this.fetchViewerLogin();
+    const createdAfterTs = Date.parse(createdAfter);
+    const perPage = 100;
+
+    for (let page = 1; page <= 5; page += 1) {
+      const url = `repos/${this.repo}/issues/${prNumber}/comments?per_page=${perPage}&page=${page}&sort=created&direction=desc`;
+      const result = this.gh(`api '${url}'`);
+      const trimmed = result.trim();
+      if (!trimmed) {
+        break;
+      }
+
+      const data = JSON.parse(trimmed);
+      if (!Array.isArray(data) || data.length === 0) {
+        break;
+      }
+
+      for (const comment of data) {
+        const createdAt = comment?.created_at ?? comment?.createdAt;
+        const createdAtTs = Date.parse(createdAt);
+        if (Number.isFinite(createdAfterTs) && Number.isFinite(createdAtTs) && createdAtTs < createdAfterTs) {
+          return null;
+        }
+
+        const id = Number(comment?.id);
+        if (!Number.isFinite(id)) {
+          continue;
+        }
+
+        const authorLogin = comment?.user?.login;
+        if (viewerLogin && authorLogin !== viewerLogin) {
+          continue;
+        }
+
+        if (comment?.body === body) {
+          return id;
+        }
+      }
+
+      if (data.length < perPage) {
+        break;
+      }
+    }
+
+    return null;
   }
 }

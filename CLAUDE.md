@@ -126,6 +126,12 @@ L1 Adapter → L2 Environment → L3 Service/Actor/Agent → L4 UI
 8. 允许一个 PR 同时解决两个相关 Issue；此时必须同步更新 PR 描述，明确覆盖范围与验收状态。
 9. 合并前再次检查是否存在新的 blocking review；若无阻塞且关键回归通过，合并到 `dev`，并切回 `dev` 继续后续工作。
 
+#### 工具链运行时原则（ESM Only）
+
+1. Scripts/ 工具链与 Node 脚本统一使用 ESM；禁止新增 `require()` 或 `.cjs`。
+2. 已有 CJS 视为历史债务，触碰即迁移；不得在新改动中扩大 CJS 面积。
+3. Node API 必须使用 `node:*` 前缀的 ESM import（例如 `import { execSync } from 'node:child_process'`）。
+
 ---
 
 ### GitHub Issue 依赖管理 ⭐
