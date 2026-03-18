@@ -69,6 +69,28 @@ describe('SyncStore', () => {
       expect((store as typeof store & { activeProfileId?: string | null }).activeProfileId).toBeNull();
       expect(store.conflicts).toEqual([]);
     });
+
+    it('没有激活档案 session 时不应保留旧 currentUser', async () => {
+      const profileModule = await import('@/lib/profile/profile-storage');
+      profileModule.createLocalProfile({
+        slug: 'hailay',
+        displayName: 'Hailay',
+      });
+      profileModule.setProfileSession({
+        version: 1,
+        activeProfileId: null,
+        unlockedProfileIds: [],
+      });
+
+      vi.resetModules();
+      const module = await import('@/ui/stores/sync-store');
+      const store = module.useSyncStore.getState();
+
+      expect(store.isLoggedIn).toBe(false);
+      expect(store.currentUser).toBeNull();
+      expect((store as typeof store & { activeProfileId?: string | null }).activeProfileId).toBeNull();
+      expect(store.credentials).toBeNull();
+    });
   });
 
   describe('setStatus', () => {

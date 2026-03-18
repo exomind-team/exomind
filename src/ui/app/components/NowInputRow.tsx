@@ -20,13 +20,24 @@ import { getClipboardService } from '@/lib/services';
 import type { ClipboardFailureReason } from '@/lib/services';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
+import { getInputSendMode, subscribeInputSendModeChanges, type InputSendMode } from '@/config/input-send-mode';
+import { clearInputDraft, readInputDraft, writeInputDraft } from '@/lib/storage/input-draft-storage';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
 import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 
 interface NowInputRowProps {
   onSend: (content: string, tags?: string[]) => void | Promise<void>;
+  onValueChange?: (value: string) => void;
   placeholder?: string;
+  draftStorageKey?: string | null;
+  draftDebounceMs?: number;
+}
+
+function buildAutoDraftStorageKey(placeholder: string): string {
+  const pathname = typeof window !== 'undefined' ? window.location.pathname || '/' : '/';
+  const normalizedPlaceholder = placeholder.trim() || 'default';
+  return `exomind:draft:now-input:${pathname}:${normalizedPlaceholder}`;
 }
 
 const getClipboardDebugSnapshot = () => {
@@ -46,14 +57,56 @@ function getPasteFailureLabel(reason: ClipboardFailureReason): string {
   return '未粘贴';
 }
 
+function shouldSendOnEnter(mode: InputSendMode, event: KeyboardEvent<HTMLTextAreaElement>): boolean {
+  if (event.key !== 'Enter') return false;
+  if (event.altKey) return false;
+
+  if (mode === 'enter-send') {
+    return !event.shiftKey && !event.ctrlKey && !event.metaKey;
+  }
+
+  if (event.shiftKey) return false;
+  return event.ctrlKey || event.metaKey;
+}
+
+function mergeTranscriptText(currentValue: string, transcript: string): string {
+  const trimmedCurrent = currentValue.trim();
+  if (!trimmedCurrent) return transcript;
+  return `${trimmedCurrent} ${transcript}`;
+}
+
+function insertTextareaNewline(textarea: HTMLTextAreaElement, onChangeValue: (nextValue: string) => void): void {
+  const start = textarea.selectionStart ?? textarea.value.length;
+  const end = textarea.selectionEnd ?? textarea.value.length;
+  const nextValue = `${textarea.value.slice(0, start)}\n${textarea.value.slice(end)}`;
+  const nextCursor = start + 1;
+
+  onChangeValue(nextValue);
+  requestAnimationFrame(() => {
+    textarea.selectionStart = nextCursor;
+    textarea.selectionEnd = nextCursor;
+    textarea.focus();
+  });
+}
+
+function focusTextarea(textarea: HTMLTextAreaElement | null): void {
+  textarea?.focus();
+  requestAnimationFrame(() => {
+    textarea?.focus();
+  });
+}
+
 export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>(function NowInputRow({
   onSend,
+  onValueChange,
   placeholder = '记录当下的事实...',
+  draftStorageKey,
+  draftDebounceMs = 300,
 }, ref) {
+  const effectiveDraftStorageKey = draftStorageKey === null ? null : draftStorageKey ?? buildAutoDraftStorageKey(placeholder);
   const [value, setValue] = useState('');
-  const [voiceTranscriptSendMode, setVoiceTranscriptSendMode] = useState<VoiceTranscriptSendMode>(() =>
-    getVoiceTranscriptSendMode(),
-  );
+  const [voiceTranscriptSendMode, setVoiceTranscriptSendMode] = useState<VoiceTranscriptSendMode>(() => getVoiceTranscriptSendMode());
+  const [inputSendMode, setInputSendMode] = useState<InputSendMode>(() => getInputSendMode());
   const [pasteFeedback, setPasteFeedback] = useState<'idle' | 'success' | 'error'>('idle');
   const [attachmentFeedback, setAttachmentFeedback] = useState<'idle' | 'pending'>('idle');
   const [pasteFailureLabel, setPasteFailureLabel] = useState('未粘贴');
@@ -61,6 +114,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   const voiceButtonRef = useRef<VoiceInputButtonHandle | null>(null);
   const pasteFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const attachmentFeedbackTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const draftPersistTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   const resizeTextarea = useCallback((target?: HTMLTextAreaElement | null) => {
     const el = target ?? textareaRef.current;
@@ -78,8 +132,13 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     resizeTextarea();
   }, [value, resizeTextarea]);
 
+  useEffect(() => {
+    onValueChange?.(value);
+  }, [onValueChange, value]);
+
   useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
 
+  useEffect(() => subscribeInputSendModeChanges(setInputSendMode), []);
   useEffect(() => () => {
     if (pasteFeedbackTimerRef.current) {
       clearTimeout(pasteFeedbackTimerRef.current);
@@ -89,7 +148,45 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       clearTimeout(attachmentFeedbackTimerRef.current);
       attachmentFeedbackTimerRef.current = null;
     }
+    if (draftPersistTimerRef.current) {
+      clearTimeout(draftPersistTimerRef.current);
+      draftPersistTimerRef.current = null;
+    }
   }, []);
+
+  useEffect(() => {
+    if (!effectiveDraftStorageKey) return;
+
+    const savedDraft = readInputDraft(effectiveDraftStorageKey);
+    if (savedDraft !== null) {
+      setValue(savedDraft);
+    }
+  }, [effectiveDraftStorageKey]);
+
+  useEffect(() => {
+    if (!effectiveDraftStorageKey) return;
+
+    if (draftPersistTimerRef.current) {
+      clearTimeout(draftPersistTimerRef.current);
+      draftPersistTimerRef.current = null;
+    }
+
+    draftPersistTimerRef.current = setTimeout(() => {
+      if (!value.trim()) {
+        clearInputDraft(effectiveDraftStorageKey);
+      } else {
+        writeInputDraft(effectiveDraftStorageKey, value);
+      }
+      draftPersistTimerRef.current = null;
+    }, draftDebounceMs);
+
+    return () => {
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+    };
+  }, [draftDebounceMs, effectiveDraftStorageKey, value]);
 
   const submitInput = useCallback(async () => {
     const trimmed = value.trim();
@@ -98,12 +195,28 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     setValue('');
     try {
       await onSend(trimmed);
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+      if (effectiveDraftStorageKey) {
+        clearInputDraft(effectiveDraftStorageKey);
+      }
+      focusTextarea(textareaRef.current);
     } catch (error) {
       setValue(saved);
+      if (draftPersistTimerRef.current) {
+        clearTimeout(draftPersistTimerRef.current);
+        draftPersistTimerRef.current = null;
+      }
+      if (effectiveDraftStorageKey) {
+        writeInputDraft(effectiveDraftStorageKey, saved);
+      }
+      focusTextarea(textareaRef.current);
       log.error(`[NowInputRow] send failed: ${error instanceof Error ? error.message : String(error)}`);
       toast({ title: '发送失败', description: '请检查网络连接后重试', variant: 'destructive' });
     }
-  }, [onSend, value]);
+  }, [effectiveDraftStorageKey, onSend, value]);
 
   const insertClipboardText = useCallback((text: string) => {
     if (!text) return;
@@ -167,9 +280,15 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       return;
     }
 
-    setValue((prev) => {
-      const trimmedPrev = prev.trim();
-      return trimmedPrev ? `${trimmedPrev} ${normalized}` : normalized;
+    setValue((prev) => mergeTranscriptText(prev, normalized));
+    requestAnimationFrame(() => {
+      textareaRef.current?.focus();
+      const nextValue = textareaRef.current?.value ?? '';
+      const end = nextValue.length;
+      if (textareaRef.current) {
+        textareaRef.current.selectionStart = end;
+        textareaRef.current.selectionEnd = end;
+      }
     });
   }, [onSend, voiceTranscriptSendMode]);
 
@@ -182,18 +301,29 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
       textareaRef.current?.blur();
       return;
     }
-    if (event.key !== 'Enter') return;
-    if (!(event.ctrlKey || event.metaKey)) return;
-    if (event.altKey || event.shiftKey) return;
+
+    if (event.key !== 'Enter' || event.altKey) return;
+
+    if (shouldSendOnEnter(inputSendMode, event)) {
+      event.preventDefault();
+      if (value.trim()) {
+        void submitInput();
+      } else if (inputSendMode === 'ctrl-enter-send' && (event.ctrlKey || event.metaKey)) {
+        textareaRef.current?.blur();
+        voiceButtonRef.current?.start();
+      }
+      return;
+    }
+
+    const textarea = textareaRef.current;
+    if (!textarea) return;
 
     event.preventDefault();
-    if (value.trim()) {
-      submitInput();
-    } else {
-      textareaRef.current?.blur();
-      voiceButtonRef.current?.start();
-    }
-  }, [submitInput, value]);
+    insertTextareaNewline(textarea, (nextValue) => {
+      setValue(nextValue);
+      resizeTextarea(textarea);
+    });
+  }, [inputSendMode, resizeTextarea, submitInput, value]);
 
   const handleAttachmentClick = useCallback(() => {
     if (attachmentFeedbackTimerRef.current) {
@@ -218,7 +348,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   }), []);
 
   return (
-    <div className="mb-2 shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]" data-testid="new-now-input-row">
+    <div className="shrink-0 border-t border-[#E7E5E4] bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#0C0A09]" data-testid="new-now-input-row">
       <div className="px-4 py-2">
         <div className="flex items-center gap-2">
           <button

@@ -20,6 +20,9 @@ const AUDITED_SETTINGS_IDS = [
   'sound-preset',
   'focus-bgm',
   'feedback-content',
+  'input-send-mode',
+  'task-page-fuzzy-search',
+  'task-create-success-action',
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
   'voice-shortcut-hotkey',
@@ -64,6 +67,8 @@ const AUDITED_SETTINGS_IDS = [
 
 const INLINE_SINGLE_ENUM_IDS = [
   'theme',
+  'input-send-mode',
+  'task-create-success-action',
   'voice-transcript-send-mode',
   'voice-shortcut-send-mode',
   'voice-shortcut-hotkey',
@@ -84,6 +89,7 @@ const MULTI_ENUM_IDS = [
 
 const BOOLEAN_IDS = [
   'voice-shortcut-mic-prewarm',
+  'task-page-fuzzy-search',
   'voice-overlay-show-diagnostics',
   'now-workbench-overlay-enabled',
   'developer-mode',
@@ -243,6 +249,7 @@ describe('settings registry coverage audit', () => {
     const featureToggles = getItem('feature-toggles', 'group');
     expect(featureToggles.groupStyle).toBe('adaptive-overlay');
     expect(featureToggles.children.map((child) => child.id)).toEqual([
+      'me-page-enabled',
       'agent-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',
@@ -318,6 +325,7 @@ describe('settings registry coverage audit', () => {
 
   it('keeps the feature toggles drawer checklist in sync with its audited child settings', () => {
     expect(FEATURE_TOGGLE_SETTING_IDS).toEqual([
+      'me-page-enabled',
       'agent-page-enabled',
       'desktop-adaptive',
       'command-palette-enabled',

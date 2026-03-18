@@ -21,6 +21,7 @@ import type { TaskNode } from '@/lib/types/task';
 import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-overlay-model';
 import type { ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
+import { TaskStatusSelector, type TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { useRef } from 'react';
 import { log } from '@/lib/logger';
 
@@ -54,7 +55,9 @@ interface NowWorkbenchOverlayPageContentProps {
   onSend: (content: string, tags?: string[]) => void;
   feedbackOpen: boolean;
   feedback: string;
+  taskStatusChoice: TaskStatusChoice;
   setFeedback(value: string): void;
+  setTaskStatusChoice(value: TaskStatusChoice): void;
   onConfirmEnd: () => void | Promise<void>;
 }
 
@@ -265,7 +268,9 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
         }}
         feedbackOpen={false}
         feedback=""
+        taskStatusChoice="continue"
         setFeedback={() => {}}
+        setTaskStatusChoice={() => {}}
         onConfirmEnd={() => {}}
       />
     );
@@ -303,7 +308,9 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
       debugInfo={controller.debugInfo}
       feedbackOpen={controller.feedbackOpen}
       feedback={controller.feedback}
+      taskStatusChoice={controller.taskStatusChoice}
       setFeedback={controller.setFeedback}
+      setTaskStatusChoice={controller.setTaskStatusChoice}
       onConfirmEnd={() => {
         void controller.handleConfirmEnd();
       }}
@@ -323,7 +330,9 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     onSend,
     feedbackOpen,
     feedback,
+    taskStatusChoice,
     setFeedback,
+    setTaskStatusChoice,
     onConfirmEnd,
   } = props;
   const now = Date.now();
@@ -487,6 +496,13 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
           >
             Enter / Ctrl+Enter 提交 · Shift+Enter 换行
           </div>
+          {model.activeBlock?.taskId && (
+            <TaskStatusSelector
+              value={taskStatusChoice}
+              onChange={setTaskStatusChoice}
+              linkedTaskTitle={model.title || undefined}
+            />
+          )}
           <Button
             type="button"
             data-testid="now-overlay-feedback-confirm"

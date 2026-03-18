@@ -18,6 +18,7 @@ import {
   Monitor,
   Moon,
   MoonStar,
+  Search,
   RefreshCw,
   ScrollText,
   Shield,
@@ -25,6 +26,7 @@ import {
   SunMoon,
   Tag,
   Timer,
+  UserRound,
   Waypoints,
   Wifi,
 } from 'lucide-react';
@@ -49,6 +51,11 @@ import {
   setAgentPageEnabled,
   subscribeAgentPageEnabledChanges,
 } from '@/config/agent-page-enabled';
+import {
+  getMePageEnabled,
+  setMePageEnabled,
+  subscribeMePageEnabledChanges,
+} from '@/config/me-page-enabled';
 import {
   getDesktopAdaptiveEnabled,
   setDesktopAdaptiveEnabled,
@@ -75,6 +82,21 @@ import {
   setVoiceTranscriptSendMode,
   subscribeVoiceTranscriptSendModeChanges,
 } from '@/config/voice-transcript-send-mode';
+import {
+  getInputSendMode,
+  setInputSendMode,
+  subscribeInputSendModeChanges,
+} from '@/config/input-send-mode';
+import {
+  getTaskPageFuzzySearchEnabled,
+  setTaskPageFuzzySearchEnabled,
+  subscribeTaskPageFuzzySearchChanges,
+} from '@/config/task-page-fuzzy-search';
+import {
+  getTaskCreateSuccessAction,
+  setTaskCreateSuccessAction,
+  subscribeTaskCreateSuccessActionChanges,
+} from '@/config/task-create-success-action';
 import {
   getVoiceShortcutHotkey,
   setVoiceShortcutHotkey,
@@ -358,12 +380,23 @@ function resolveBuildText(): string {
 }
 
 export const FEATURE_TOGGLE_SETTING_IDS = [
+  'me-page-enabled',
   'agent-page-enabled',
   'desktop-adaptive',
   'command-palette-enabled',
 ] as const;
 
 export const FEATURE_TOGGLE_SETTINGS = [
+  {
+    id: 'me-page-enabled',
+    label: 'Me 页面',
+    icon: UserRound,
+    rowTestId: 'feature-toggle-me-page-row',
+    controlTestId: 'feature-toggle-me-page-switch',
+    get: getMePageEnabled,
+    set: setMePageEnabled,
+    subscribe: subscribeMePageEnabledChanges,
+  },
   {
     id: 'agent-page-enabled',
     label: '网络页面',
@@ -513,6 +546,57 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     get: getFeedbackContentSelection,
     set: setFeedbackContentSelection,
     subscribe: (cb) => subscribeFeedbackPreferencesChanges(() => cb(getFeedbackContentSelection())),
+  },
+  {
+    id: 'input-send-mode',
+    label: '输入框发送方式',
+    icon: Key,
+    category: 'input',
+    description: '统一控制「任务 / 当下」输入框使用 Enter 发送还是 Ctrl/Cmd+Enter 发送',
+    rowTestId: 'new-settings-input-send-mode-row',
+    type: 'enum',
+    options: [
+      { label: 'Enter 发送', value: 'enter-send' },
+      { label: 'Ctrl+Enter 发送', value: 'ctrl-enter-send' },
+    ],
+    optionTestId: (value) => `new-settings-input-send-mode-${value}`,
+    get: () => getInputSendMode(),
+    set: (value: string) => {
+      setInputSendMode(value as 'enter-send' | 'ctrl-enter-send');
+    },
+    subscribe: subscribeInputSendModeChanges,
+  },
+  {
+    id: 'task-page-fuzzy-search',
+    label: '任务页输入框模糊搜索',
+    icon: Search,
+    category: 'input',
+    description: '仅作用于任务页；开启后会用输入框第一行对任务标题做防抖模糊过滤',
+    rowTestId: 'new-settings-task-page-fuzzy-search-row',
+    controlTestId: 'new-settings-task-page-fuzzy-search-switch',
+    type: 'boolean',
+    get: () => getTaskPageFuzzySearchEnabled(),
+    set: (value: boolean) => setTaskPageFuzzySearchEnabled(value),
+    subscribe: subscribeTaskPageFuzzySearchChanges,
+  },
+  {
+    id: 'task-create-success-action',
+    label: '创建任务后',
+    icon: List,
+    category: 'input',
+    description: '仅作用于任务页快速添加；默认继续回焦，也可切换为直接打开新建任务详情',
+    rowTestId: 'new-settings-task-create-success-action-row',
+    type: 'enum',
+    options: [
+      { label: '继续快速输入', value: 'refocus' },
+      { label: '打开任务详情', value: 'open-detail' },
+    ],
+    optionTestId: (value) => `new-settings-task-create-success-action-${value}`,
+    get: () => getTaskCreateSuccessAction(),
+    set: (value: string) => {
+      setTaskCreateSuccessAction(value as 'refocus' | 'open-detail');
+    },
+    subscribe: subscribeTaskCreateSuccessActionChanges,
   },
   {
     id: 'voice-transcript-send-mode',

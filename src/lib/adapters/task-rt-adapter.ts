@@ -100,18 +100,20 @@ function toRuntimeCreatePayload(input: CreateTaskInput): Record<string, unknown>
 }
 
 function toRuntimeUpdatePayload(input: UpdateTaskInput): Record<string, unknown> {
+  // Use `'key' in input` to detect explicitly provided fields (including undefined).
+  // When a field is explicitly set to undefined, send `null` so the backend clears it.
   return {
-    ...(input.title !== undefined ? { title: input.title } : {}),
-    ...(input.description !== undefined ? { description: input.description } : {}),
-    ...(input.doneCondition !== undefined ? { done_condition: input.doneCondition } : {}),
-    ...(input.priority !== undefined ? { priority: input.priority } : {}),
-    ...(input.dueAt !== undefined ? { due_at: input.dueAt } : {}),
-    ...(input.source !== undefined ? { source: input.source } : {}),
-    ...(input.parentId !== undefined ? { parent_id: input.parentId } : {}),
-    ...(input.dependsOn !== undefined ? { depends_on: input.dependsOn.map(toRuntimeDependency) } : {}),
-    ...(input.tags !== undefined ? { tags: input.tags } : {}),
-    ...(input.estimatedMinutes !== undefined ? { estimated_minutes: input.estimatedMinutes } : {}),
-    ...(input.timeBlockIds !== undefined ? { time_block_ids: input.timeBlockIds } : {}),
+    ...('title' in input ? { title: input.title } : {}),
+    ...('description' in input ? { description: input.description ?? null } : {}),
+    ...('doneCondition' in input ? { done_condition: input.doneCondition ?? null } : {}),
+    ...('priority' in input ? { priority: input.priority } : {}),
+    ...('dueAt' in input ? { due_at: input.dueAt ?? null } : {}),
+    ...('source' in input ? { source: input.source ?? null } : {}),
+    ...('parentId' in input ? { parent_id: input.parentId ?? null } : {}),
+    ...('dependsOn' in input && input.dependsOn ? { depends_on: input.dependsOn.map(toRuntimeDependency) } : {}),
+    ...('tags' in input ? { tags: input.tags } : {}),
+    ...('estimatedMinutes' in input ? { estimated_minutes: input.estimatedMinutes ?? null } : {}),
+    ...('timeBlockIds' in input ? { time_block_ids: input.timeBlockIds } : {}),
   };
 }
 

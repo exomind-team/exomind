@@ -95,6 +95,7 @@ export const settingsPageServiceMocks = {
 export const settingsPagePreferenceState = {
   developerMode: false,
   agentPageEnabled: false,
+  mePageEnabled: false,
   desktopAdaptiveEnabled: true,
   voiceShortcutAsrProvider: 'moss' as string,
 };
@@ -179,6 +180,12 @@ vi.mock('@/config/agent-page-enabled', () => ({
   subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/me-page-enabled', () => ({
+  getMePageEnabled: vi.fn(() => settingsPagePreferenceState.mePageEnabled),
+  setMePageEnabled: vi.fn(),
+  subscribeMePageEnabledChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: vi.fn(() => settingsPagePreferenceState.desktopAdaptiveEnabled),
   setDesktopAdaptiveEnabled: vi.fn(),
@@ -245,6 +252,24 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   getVoiceTranscriptSendMode: vi.fn(() => 'insert'),
   setVoiceTranscriptSendMode: vi.fn(),
   subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/input-send-mode', () => ({
+  getInputSendMode: vi.fn(() => 'ctrl-enter-send'),
+  setInputSendMode: vi.fn((value: string) => value),
+  subscribeInputSendModeChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/task-page-fuzzy-search', () => ({
+  getTaskPageFuzzySearchEnabled: vi.fn(() => true),
+  setTaskPageFuzzySearchEnabled: vi.fn((value: boolean) => value),
+  subscribeTaskPageFuzzySearchChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/task-create-success-action', () => ({
+  getTaskCreateSuccessAction: vi.fn(() => 'refocus'),
+  setTaskCreateSuccessAction: vi.fn((value: string) => value),
+  subscribeTaskCreateSuccessActionChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/voice-shortcut-send-mode', () => ({

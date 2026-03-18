@@ -1,20 +1,27 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, type LucideIcon } from 'lucide-react';
+import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
+import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
 import { getCommandPaletteEnabled, subscribeCommandPaletteEnabledChanges } from '@/config/command-palette-enabled';
 import { getCommandRegistryService } from '@/lib/services/command-registry.service';
 import { getCommandPaletteService } from '@/lib/services/command-palette.service';
 import { createCoreNavigationCommands, type CoreNavigationPath } from '@/lib/services/command-palette.commands';
+import { useTauriFullscreenShortcut } from '@/ui/app/hooks/useTauriFullscreenShortcut';
 import { CommandPalette } from '@/ui/app/components/CommandPalette';
 import { DesktopSidebarAccountEntry } from '@/ui/app/components/DesktopSidebarAccountEntry';
 import { ReminderNotifier } from '@/ui/app/components/ReminderNotifier';
 import { UpdateToast } from '@/ui/components/UpdateToast';
 import { requestReminderCompose } from '@/ui/stores/reminder-ui-store';
 import type { CommandContext } from '@/lib/types/command-palette';
+import {
+  TASKS_LAST_PATH_KEY,
+  resolveTasksRestorePath,
+  shouldForceTasksMain,
+} from '@/ui/app/pages/task-route-memory';
 
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
@@ -39,6 +46,11 @@ const TasksPage = lazy(async () => {
 const TaskDagPage = lazy(async () => {
   const module = await import('@/ui/app/pages/TaskDagPage');
   return { default: module.TaskDagPage };
+});
+
+const TaskTimeblocksPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskTimeblocksPage');
+  return { default: module.TaskTimeblocksPage };
 });
 
 const RemindersPage = lazy(async () => {
@@ -99,6 +111,11 @@ const AgentDetailPage = lazy(async () => {
 const ActorDetailPage = lazy(async () => {
   const module = await import('@/ui/app/pages/agents/ActorDetailPage');
   return { default: module.ActorDetailPage };
+});
+
+const SignalDetailPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/agents/SignalDetailPage');
+  return { default: module.SignalDetailPage };
 });
 
 const AgentConversationPage = lazy(async () => {
@@ -245,11 +262,29 @@ function MobileShell({
   );
 }
 
-function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
+function DesktopSidebar({
+  activePath,
+  agentPageEnabled,
+  mePageEnabled,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  activePath: string;
+  agentPageEnabled: boolean;
+  mePageEnabled: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
   const desktopNavItems = [
     { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
-    { key: 'me', title: 'Me', path: '/me', icon: UserRound, match: (path: string) => path === '/me' || path.startsWith('/me/') },
+    ...(mePageEnabled ? [{
+      key: 'me',
+      title: 'Me',
+      path: '/me',
+      icon: UserRound,
+      match: (path: string) => path === '/me' || path.startsWith('/me/'),
+    }] : []),
     ...(agentPageEnabled ? [{
       key: 'agents',
       title: '网络',
@@ -263,18 +298,50 @@ function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; 
   return (
     <aside
       data-testid="desktop-sidebar"
-      className="flex h-full w-64 shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))]"
+      data-state={collapsed ? 'collapsed' : 'expanded'}
+      className={cn(
+        'flex h-full shrink-0 flex-col border-r border-[hsl(var(--sidebar-border))] bg-[hsl(var(--sidebar))] text-[hsl(var(--sidebar-foreground))] transition-[width] duration-200 ease-out',
+        collapsed ? 'w-16' : 'w-64',
+      )}
     >
-      <div className="border-b border-[hsl(var(--sidebar-border))] p-3">
-        <div className="flex items-center gap-3 rounded-md px-2 py-2">
-          <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
-            <Brain size={16} />
+      <div className={cn('border-b border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
+        {collapsed ? (
+          <div className="flex flex-col items-center gap-2 rounded-md py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
+              <Brain size={16} />
+            </div>
+            <button
+              type="button"
+              data-testid="desktop-sidebar-toggle"
+              aria-label="展开侧边栏"
+              aria-expanded="false"
+              onClick={onToggleCollapsed}
+              className="inline-flex h-8 w-8 items-center justify-center rounded-md border border-[hsl(var(--sidebar-border))] text-[hsl(var(--sidebar-muted))] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]"
+            >
+              <PanelLeftOpen size={16} />
+            </button>
           </div>
-          <div className="min-w-0">
-            <p className="truncate text-sm font-semibold">ExoMind</p>
-            <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">外心</p>
+        ) : (
+          <div className="flex items-center gap-3 rounded-md px-2 py-2">
+            <div className="flex h-8 w-8 items-center justify-center rounded-md bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))]">
+              <Brain size={16} />
+            </div>
+            <div className="min-w-0 flex-1">
+              <p className="truncate text-sm font-semibold">ExoMind</p>
+              <p className="truncate text-xs text-[hsl(var(--sidebar-muted))]">外心</p>
+            </div>
+            <button
+              type="button"
+              data-testid="desktop-sidebar-toggle"
+              aria-label="收起侧边栏"
+              aria-expanded="true"
+              onClick={onToggleCollapsed}
+              className="inline-flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-[hsl(var(--sidebar-border))] text-[hsl(var(--sidebar-muted))] transition-colors hover:bg-[hsl(var(--sidebar-accent))] hover:text-[hsl(var(--sidebar-accent-foreground))]"
+            >
+              <PanelLeftClose size={16} />
+            </button>
           </div>
-        </div>
+        )}
       </div>
 
       <nav className="flex-1 space-y-1 p-2">
@@ -282,7 +349,8 @@ function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; 
           const Icon = item.icon;
           const active = item.match(activePath);
           const itemClassName = cn(
-            'flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm transition-colors',
+            'flex w-full items-center rounded-md text-sm transition-colors',
+            collapsed ? 'justify-center px-0 py-3' : 'gap-2 px-3 py-2',
             active
               ? 'bg-[hsl(var(--sidebar-accent))] text-[hsl(var(--sidebar-accent-foreground))] font-medium'
               : 'text-[hsl(var(--sidebar-foreground))]'
@@ -292,27 +360,47 @@ function DesktopSidebar({ activePath, agentPageEnabled }: { activePath: string; 
               key={item.path}
               to={item.path}
               data-testid={`desktop-sidebar-item-${item.key}`}
+              aria-label={item.title}
+              title={item.title}
               className={itemClassName}
             >
               <Icon size={16} />
-              <span>{item.title}</span>
+              {collapsed ? <span className="sr-only">{item.title}</span> : <span>{item.title}</span>}
             </Link>
           );
         })}
       </nav>
 
-      <div className="border-t border-[hsl(var(--sidebar-border))] p-3">
-        <DesktopSidebarAccountEntry />
+      <div className={cn('border-t border-[hsl(var(--sidebar-border))]', collapsed ? 'p-2' : 'p-3')}>
+        <DesktopSidebarAccountEntry collapsed={collapsed} />
       </div>
     </aside>
   );
 }
 
-function DesktopLayout({ activePath, agentPageEnabled }: { activePath: string; agentPageEnabled: boolean }) {
+function DesktopLayout({
+  activePath,
+  agentPageEnabled,
+  mePageEnabled,
+  collapsed,
+  onToggleCollapsed,
+}: {
+  activePath: string;
+  agentPageEnabled: boolean;
+  mePageEnabled: boolean;
+  collapsed: boolean;
+  onToggleCollapsed: () => void;
+}) {
   return (
     <div className="h-[100dvh] overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
       <div className="flex h-full w-full overflow-hidden bg-[#FAF7F5] dark:bg-[#0C0A09]">
-        <DesktopSidebar activePath={activePath} agentPageEnabled={agentPageEnabled} />
+        <DesktopSidebar
+          activePath={activePath}
+          agentPageEnabled={agentPageEnabled}
+          mePageEnabled={mePageEnabled}
+          collapsed={collapsed}
+          onToggleCollapsed={onToggleCollapsed}
+        />
         <main data-testid="desktop-settings-content" className="min-w-0 flex-1 overflow-y-auto bg-[#FAF7F5] dark:bg-[#0C0A09]">
           <Outlet />
         </main>
@@ -321,12 +409,40 @@ function DesktopLayout({ activePath, agentPageEnabled }: { activePath: string; a
   );
 }
 
+function MeRouteGate() {
+  const navigate = useNavigate();
+  const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
+
+  useEffect(() => {
+    return subscribeMePageEnabledChanges(setMePageEnabled);
+  }, []);
+
+  useEffect(() => {
+    if (!mePageEnabled) {
+      void navigate({ to: '/settings', replace: true });
+    }
+  }, [mePageEnabled, navigate]);
+
+  if (!mePageEnabled) {
+    return <PageFallback />;
+  }
+
+  return (
+    <LazyPage>
+      <MePage />
+    </LazyPage>
+  );
+}
+
 function NewLayout() {
   const location = useLocation();
+  useTauriFullscreenShortcut();
   const navigate = useNavigate();
   const isDesktop = useIsDesktop();
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
+  const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
@@ -336,6 +452,9 @@ function NewLayout() {
 
   useEffect(() => {
     return subscribeAgentPageEnabledChanges(setAgentPageEnabled);
+  }, []);
+  useEffect(() => {
+    return subscribeMePageEnabledChanges(setMePageEnabled);
   }, []);
   useEffect(() => {
     return subscribeDesktopAdaptiveChanges(setDesktopAdaptiveEnabledState);
@@ -355,12 +474,15 @@ function NewLayout() {
     registryService.setCommands('core-navigation', createCoreNavigationCommands({
       navigate: navigateTo,
       openReminderComposer: requestReminderCompose,
+      featureFlags: {
+        mePageEnabled,
+      },
     }));
 
     return () => {
       registryService.removeScope('core-navigation');
     };
-  }, [navigate, registryService]);
+  }, [mePageEnabled, navigate, registryService]);
 
   useEffect(() => {
     if (!commandPaletteActive) {
@@ -390,15 +512,16 @@ function NewLayout() {
     developerModeEnabled,
     commandPaletteEnabled: commandPaletteActive,
     featureFlags: {
+      mePageEnabled,
       agentPageEnabled,
       goalsV2Enabled: false,
     },
-  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname]);
+  }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname, mePageEnabled]);
 
   const navItems = [
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
-    { title: 'Me', path: '/me', icon: UserRound },
+    ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
     ...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : []),
     { title: '设置', path: '/settings', icon: Settings },
   ];
@@ -420,7 +543,13 @@ function NewLayout() {
   if (isDesktop && desktopAdaptiveEnabled && isDesktopAdaptiveRoute) {
     return (
       <>
-        <DesktopLayout activePath={location.pathname} agentPageEnabled={agentPageEnabled} />
+        <DesktopLayout
+          activePath={location.pathname}
+          agentPageEnabled={agentPageEnabled}
+          mePageEnabled={mePageEnabled}
+          collapsed={desktopSidebarCollapsed}
+          onToggleCollapsed={() => setDesktopSidebarCollapsed((current) => !current)}
+        />
         {commandPaletteActive ? <CommandPalette context={commandContext} /> : null}
         <ReminderNotifier />
       </>
@@ -523,6 +652,26 @@ const newTasksRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks',
   component: function NewTasks() {
+    const navigate = useNavigate();
+
+    // Redirect to the last visited tasks sub-path (e.g. /tasks/dag, /tasks/:id)
+    useEffect(() => {
+      const currentSearch = typeof window !== 'undefined' ? window.location.search : '';
+      const saved = sessionStorage.getItem(TASKS_LAST_PATH_KEY);
+
+      if (shouldForceTasksMain(currentSearch)) {
+        sessionStorage.removeItem(TASKS_LAST_PATH_KEY);
+        void navigate({ to: '/tasks', replace: true });
+        return;
+      }
+
+      const restorePath = resolveTasksRestorePath(saved, currentSearch);
+      if (restorePath) {
+        void navigate({ to: restorePath, replace: true });
+      }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [navigate]);
+
     return (
       <LazyPage>
         <TasksPage />
@@ -550,6 +699,18 @@ const newTaskDagRoute = createRoute({
     return (
       <LazyPage>
         <TaskDagPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newTaskTimeblocksRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/timeblocks',
+  component: function NewTaskTimeblocks() {
+    return (
+      <LazyPage>
+        <TaskTimeblocksPage />
       </LazyPage>
     );
   },
@@ -583,11 +744,7 @@ const newMeRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/me',
   component: function NewMe() {
-    return (
-      <LazyPage>
-        <MePage />
-      </LazyPage>
-    );
+    return <MeRouteGate />;
   },
 });
 
@@ -713,6 +870,18 @@ const newActorDetailRoute = createRoute({
   },
 });
 
+const newSignalDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/agents/signal/$signalId',
+  component: function NewSignalDetail() {
+    return (
+      <LazyPage>
+        <SignalDetailPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newAgentConversationRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/agents/chat/$agentId',
@@ -744,6 +913,7 @@ const newRouteTree = newRootRoute.addChildren([
   newEventlogRoute,
   newTasksRoute,
   newTaskDagRoute,
+  newTaskTimeblocksRoute,
   newRemindersRoute,
   newTimeblockDetailRoute,
   newTaskDetailRoute,
@@ -758,6 +928,7 @@ const newRouteTree = newRootRoute.addChildren([
   newUpdateRoute,
   newAgentDetailRoute,
   newActorDetailRoute,
+  newSignalDetailRoute,
   newAgentConversationRoute,
   newAgentMarketRoute,
 ]);

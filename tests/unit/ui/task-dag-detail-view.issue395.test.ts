@@ -35,7 +35,7 @@ describe('buildTaskDagDetailView issue #395', () => {
       dependsOn: [{ taskId: 'a', type: 'hard' }],
     });
 
-    const view = buildTaskDagDetailView(taskA, [taskA, taskB], { collapsedUpstreamOf: ['a'] });
+    const view = buildTaskDagDetailView(taskA, [taskA, taskB], { collapsedUpstreamOf: ['a'], collapsedDownstreamOf: [] });
 
     expect(view).not.toBeNull();
     expect(view).toMatchObject({
@@ -48,5 +48,38 @@ describe('buildTaskDagDetailView issue #395', () => {
       isSourceCurrentRootVisible: false,
     });
     expect(view?.nodes.every((node) => node.isVisibleCurrentRoot === false)).toBe(true);
+  });
+
+  it('disables upstream collapse when external descendants would leak semantics', () => {
+    const taskRoot = makeTask({ id: 'root', title: 'Root', createdAt: 10, updatedAt: 10 });
+    const taskCurrent = makeTask({
+      id: 'current',
+      title: 'Current',
+      createdAt: 20,
+      updatedAt: 20,
+      dependsOn: [{ taskId: 'root', type: 'hard' }],
+    });
+    const externalParent = makeTask({ id: 'external', title: 'External', createdAt: 15, updatedAt: 15 });
+    const externalChild = makeTask({
+      id: 'external-child',
+      title: 'External Child',
+      createdAt: 30,
+      updatedAt: 30,
+      dependsOn: [
+        { taskId: 'root', type: 'hard' },
+        { taskId: 'external', type: 'hard' },
+      ],
+    });
+
+    const view = buildTaskDagDetailView(taskCurrent, [taskRoot, taskCurrent, externalParent, externalChild], {
+      collapsedUpstreamOf: [],
+      collapsedDownstreamOf: [],
+    });
+
+    expect(view).not.toBeNull();
+    expect(view?.nodes.find((node) => node.id === 'current')).toMatchObject({
+      upstreamNodeCount: 1,
+      canCollapseUpstream: false,
+    });
   });
 });

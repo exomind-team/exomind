@@ -36,9 +36,10 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     })
 
     const graph = buildTaskGraph([taskC, taskA, taskB])
-    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['c'] })
+    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['c'], collapsedDownstreamOf: [] })
 
     expect(visible.state.collapsedUpstreamOf).toEqual(['c'])
+    expect(visible.state.collapsedDownstreamOf).toEqual([])
     expect(visible.hiddenNodeIds).toEqual(['a', 'b'])
     expect(visible.nodes).toEqual([
       expect.objectContaining({
@@ -64,7 +65,7 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     const sideRoot = makeTask({ id: 'side', title: 'Side', createdAt: 15, updatedAt: 15 })
 
     const graph = buildTaskGraph([child, sideRoot, root])
-    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: [] })
+    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: [], collapsedDownstreamOf: [] })
 
     expect(visible.hiddenNodeIds).toEqual([])
     expect(visible.nodes.map((node) => node.id)).toEqual(graph.nodes.map((node) => node.id))
@@ -100,7 +101,7 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     })
 
     const graph = buildTaskGraph([taskD, taskB, taskA, taskC])
-    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['c'] })
+    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['c'], collapsedDownstreamOf: [] })
 
     expect(visible.hiddenNodeIds).toEqual(['a', 'b'])
     expect(visible.nodes.map((node) => ({ id: node.id, hidden: node.hiddenUpstreamCount }))).toEqual([
@@ -136,8 +137,8 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     })
 
     const graph = buildTaskGraph([taskY, taskB, taskA, taskX])
-    const first = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['y', 'b', 'y'] })
-    const second = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['b', 'y'] })
+    const first = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['y', 'b', 'y'], collapsedDownstreamOf: [] })
+    const second = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['b', 'y'], collapsedDownstreamOf: [] })
 
     expect(first).toEqual(second)
     expect(first.hiddenNodeIds).toEqual(['a', 'x'])
@@ -174,7 +175,7 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
 
     const graph = buildTaskGraph([target, softSource, hardSource])
     const snapshot = JSON.parse(JSON.stringify(graph))
-    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['target'] })
+    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['target'], collapsedDownstreamOf: [] })
     const visibleTarget = visible.nodes.find((node) => node.id === 'target')
     const graphTarget = graph.nodes.find((node) => node.id === 'target')
 
@@ -197,7 +198,7 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     })
 
     const graph = buildTaskGraph([taskB, rootX, rootA])
-    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['b'] })
+    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['b'], collapsedDownstreamOf: [] })
 
     expect(graph.rootNodeIds).toEqual(['a', 'x'])
     expect(graph.currentRootNodeId).toBe('a')
@@ -223,8 +224,8 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     })
 
     const graph = buildTaskGraph([leaf, root, middle])
-    const first = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['leaf'] })
-    const second = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['leaf'] })
+    const first = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['leaf'], collapsedDownstreamOf: [] })
+    const second = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['leaf'], collapsedDownstreamOf: [] })
 
     expect(second).toEqual(first)
   })
@@ -246,7 +247,7 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     })
 
     const graph = buildTaskGraph([taskA, taskB])
-    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['a'] })
+    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: ['a'], collapsedDownstreamOf: [] })
 
     expect(graph.hasCycle).toBe(true)
     expect(graph.rootNodeIds).toEqual([])
@@ -255,5 +256,56 @@ describe('projectVisibleTaskGraph issue-395（任务 DAG 折叠投影第一阶�
     expect(visible.visibleRootNodeIds).toEqual(['a'])
     expect(visible.visibleCurrentRootNodeId).toBeNull()
     expect(visible.sourceCurrentRootNodeId).toBeNull()
+  })
+
+  it('collapses downstream while preserving external incoming edges via remapped anchor output', () => {
+    const taskA = makeTask({ id: 'a', title: 'A', createdAt: 10, updatedAt: 10 })
+    const taskB = makeTask({
+      id: 'b',
+      title: 'B',
+      createdAt: 20,
+      updatedAt: 20,
+      dependsOn: [{ taskId: 'a', type: 'hard' }],
+    })
+    const taskX = makeTask({ id: 'x', title: 'X', createdAt: 15, updatedAt: 15 })
+    const taskTarget = makeTask({
+      id: 'target',
+      title: 'Target',
+      createdAt: 30,
+      updatedAt: 30,
+      dependsOn: [
+        { taskId: 'b', type: 'hard' },
+        { taskId: 'x', type: 'hard' },
+      ],
+    })
+
+    const graph = buildTaskGraph([taskTarget, taskX, taskB, taskA])
+    const visible = projectVisibleTaskGraph(graph, { collapsedUpstreamOf: [], collapsedDownstreamOf: ['a'] })
+
+    expect(visible.hiddenNodeIds).toEqual(['b'])
+    expect(visible.nodes.map((node) => ({
+      id: node.id,
+      hiddenDownstreamCount: node.hiddenDownstreamCount,
+      isCollapsedDownstreamTarget: node.isCollapsedDownstreamTarget,
+    }))).toEqual([
+      { id: 'a', hiddenDownstreamCount: 1, isCollapsedDownstreamTarget: true },
+      { id: 'x', hiddenDownstreamCount: 0, isCollapsedDownstreamTarget: false },
+      { id: 'target', hiddenDownstreamCount: 0, isCollapsedDownstreamTarget: false },
+    ])
+    expect(visible.edges).toEqual([
+      {
+        id: 'edge:a->target:hard:collapsed-downstream',
+        source: 'a',
+        target: 'target',
+        type: 'hard',
+      },
+      {
+        id: 'edge:x->target:hard',
+        source: 'x',
+        target: 'target',
+        type: 'hard',
+      },
+    ])
+    expect(visible.visibleRootNodeIds).toEqual(['a', 'x'])
   })
 })

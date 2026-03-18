@@ -37,13 +37,12 @@ import type { ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { FocusBgmPanel } from '@/ui/app/components/settings/settings-custom-items';
 
-type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'cancelled';
-
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
 export type FocusTimerState = 'idle' | 'running' | 'paused';
 type SkipFeedbackConfirmState = 'idle' | 'cooldown' | 'armed';
 type FocusTimerSurface = 'default' | 'overlay'; // Surface Variant（表面样式变体）
+type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'cancelled';
 
 interface FocusTimerWidgetProps {
   surface?: FocusTimerSurface;
@@ -348,13 +347,16 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
   useEffect(() => {
     let cancelled = false;
+    console.log('[FocusTimer] useEffect: subscribing to onBlockChange');
     const unsubscribe = timeBlockServiceRef.current.onBlockChange((block) => {
-      if (cancelled) return;
+      console.log('[FocusTimer] onBlockChange fired', block ? { startId: block.startId, mode: block.mode, phase: block.phase, paused: block.paused, feedbackSubmittedAt: block.feedbackSubmittedAt } : 'NULL');
+      if (cancelled) { console.log('[FocusTimer] onBlockChange: cancelled, skipping'); return; }
       applyActiveBlock(block);
     });
 
     const load = async () => {
       const block = await timeBlockServiceRef.current.loadActiveBlock();
+      console.log('[FocusTimer] loadActiveBlock on mount', block ? { startId: block.startId, mode: block.mode, phase: block.phase } : 'NULL');
       if (cancelled) return;
       if (block) {
         applyActiveBlock(block);
@@ -363,6 +365,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
 
     void load();
     return () => {
+      console.log('[FocusTimer] useEffect cleanup: unsubscribing');
       cancelled = true;
       unsubscribe();
     };
@@ -716,7 +719,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const endActionTitle = feedbackInProgress ? '反馈中' : '结束';
   const endActionButtonClass = feedbackInProgress
     ? 'h-11 w-11 rounded-[12px] bg-brand p-0 text-white hover:bg-brand/90 hover:text-white'
-    : 'h-11 w-11 rounded-[12px] bg-[#FDECEB] dark:bg-[#C75B3A] p-0 text-[#C75B3A] dark:text-[#FAFAF9] hover:bg-[#F8DED9] dark:hover:bg-[#B24D2F]';
+    : 'h-11 w-11 rounded-[12px] bg-[#C75B3A] p-0 text-white hover:bg-[#B24D2F] hover:text-white';
   const endActionIcon = feedbackInProgress
     ? <NotepadText size={18} className="text-white" />
     : <Square size={18} />;
@@ -837,12 +840,12 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
               <div className="flex min-w-0 flex-col gap-1.5">
                 <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">预期时长</span>
                 <div
-                  className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#FFFFFF60] bg-white/35 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
+                  className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
                   data-testid="new-focus-expected-time-row"
                 >
                   <div
                     data-testid="new-focus-expected-active-indicator"
-                    className="pointer-events-none absolute inset-y-0 left-0 w-1/5 rounded-[8px] border border-[#FFFFFFCC] bg-white/55 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out dark:border-[#FFFFFF66] dark:bg-[#FFFFFF14]"
+                    className="pointer-events-none absolute inset-y-0 left-0 w-1/5 rounded-[8px] border border-brand-accent/40 bg-brand-accent/15 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out"
                     style={{ transform: `translateX(${activeExpectedIndex * 100}%)` }}
                   />
                   <div className="relative z-10 grid min-w-0 grid-cols-5 gap-0">
@@ -1096,7 +1099,7 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
               onClick={() => {
                 void handleConfirmEnd();
               }}
-              className="dark:rounded-[10px] dark:bg-[#C75B3A] dark:text-white dark:hover:bg-[#B24D2F]"
+              className="rounded-[10px] bg-brand-accent text-white hover:bg-brand-accent/90"
             >
               {feedbackConfirmLabel}
             </Button>

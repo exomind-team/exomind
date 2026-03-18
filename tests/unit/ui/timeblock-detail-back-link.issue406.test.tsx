@@ -172,7 +172,7 @@ describe('timeblock detail back link issue #406', () => {
     });
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
-    expect(backLink).toHaveTextContent(`← 返回${label}`);
+    expect(backLink).toHaveAttribute('aria-label', `返回${label}`);
     expect(backLink).toHaveAttribute('href', `/tasks?tab=${from}`);
   });
 
@@ -184,7 +184,7 @@ describe('timeblock detail back link issue #406', () => {
     });
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
-    expect(backLink).toHaveTextContent('← 返回任务');
+    expect(backLink).toHaveAttribute('aria-label', '返回任务');
     expect(backLink).toHaveAttribute('href', '/tasks');
   });
 
@@ -196,7 +196,7 @@ describe('timeblock detail back link issue #406', () => {
     });
 
     const backLink = await screen.findByTestId('timeblock-back-link-mobile');
-    expect(backLink).toHaveTextContent('← 返回任务');
+    expect(backLink).toHaveAttribute('aria-label', '返回任务');
     expect(backLink).toHaveAttribute('href', '/tasks');
   });
 
@@ -207,29 +207,22 @@ describe('timeblock detail back link issue #406', () => {
       expect(loadTimeBlocksMock).toHaveBeenCalled();
     });
 
-    expect(await screen.findByText('任务 > 今日 > 时间块详情')).toBeInTheDocument();
+    const breadcrumb = await screen.findByText((_content, element) =>
+      element?.tagName === 'P' && element.textContent === '任务 > 今日 > 任务详情',
+    );
+    expect(breadcrumb).toBeInTheDocument();
     const backLink = screen.getByTestId('timeblock-back-link-desktop');
     expect(backLink).toHaveTextContent('← 返回今日');
     expect(backLink).toHaveAttribute('href', '/tasks?tab=today');
   });
 
-  it('adds a back action into the view model actions list', () => {
+  it('does not include a back-source action in the view model (navigation via breadcrumb)', () => {
     const model = buildTaskTimeblockDetailViewModel({
       task: makeTask(),
       blocks: [makeBlock()],
       useMockData: true,
-      backAction: {
-        label: '← 返回今日',
-        to: '/tasks',
-        search: { tab: 'today' },
-      },
     });
 
-    expect(model.actions[0]).toEqual({
-      id: 'back-source',
-      label: '← 返回今日',
-      to: '/tasks',
-      search: { tab: 'today' },
-    });
+    expect(model.actions.every((a) => a.id !== 'back-source')).toBe(true);
   });
 });

@@ -11,6 +11,13 @@ const loadActiveBlockMock = vi.fn<() => Promise<ActiveBlockData | null>>();
 
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
+  useNavigate: () => vi.fn(),
+}));
+
+vi.mock('@/config/task-create-success-action', () => ({
+  getTaskCreateSuccessAction: vi.fn(() => 'refocus'),
+  setTaskCreateSuccessAction: vi.fn((value: string) => value),
+  subscribeTaskCreateSuccessActionChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -65,7 +72,7 @@ function makeBlock(overrides: { id: string; name: string; startTime: number; end
   };
 }
 
-describe('TasksPage today view（任务页今日时间块视图）', () => {
+describe('TasksPage current layout（任务页当前布局）', () => {
   const morning = new Date('2026-03-06T09:00:00.000+08:00').getTime();
   const afternoon = new Date('2026-03-06T15:00:00.000+08:00').getTime();
 
@@ -123,47 +130,38 @@ describe('TasksPage today view（任务页今日时间块视图）', () => {
 
     expect(await screen.findByTestId('task-current-root-card')).toHaveTextContent('实现下午编码任务');
     expect(screen.getByTestId('task-current-root-badge-task-2')).toBeInTheDocument();
-    expect(screen.getByTestId('task-current-root-dag-link')).toBeInTheDocument();
   });
 
-  it('renders today timeblock layout when 今日 tab is active', async () => {
+  it('renders top navigation links for timeblocks and dag', async () => {
     render(<TasksPage />);
 
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '今日' }));
-
-    expect(await screen.findByText('进行中')).toBeInTheDocument();
-    expect(screen.getByText('上午')).toBeInTheDocument();
-    expect(screen.getByText('下午')).toBeInTheDocument();
-    expect(screen.getAllByText('完成 Task List 视图设计').length).toBeGreaterThan(0);
+    expect(screen.getByText('时间块').closest('a')).toHaveAttribute('to', '/tasks/timeblocks');
+    expect(screen.getByText('DAG').closest('a')).toHaveAttribute('to', '/tasks/dag');
   });
 
-  it('keeps quick add input visible in today view', async () => {
+  it('keeps quick add input visible on the tasks page', async () => {
     render(<TasksPage />);
 
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '今日' }));
-
-    expect(screen.getByPlaceholderText('快速添加任务...')).toBeInTheDocument();
+    expect(screen.getByPlaceholderText('添加任务与描述...')).toBeInTheDocument();
   });
 
-  it('renders clickable links for each historical timeblock card', async () => {
+  it('renders clickable links for current visible tasks', async () => {
     render(<TasksPage />);
 
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
     });
 
-    fireEvent.click(screen.getByRole('button', { name: '今日' }));
-
-    expect(await screen.findByTestId('tasks-today-block-link-block-1')).toBeInTheDocument();
-    expect(screen.getByTestId('tasks-today-block-link-block-2')).toBeInTheDocument();
+    expect(await screen.findByTestId('tasks-page-task-link-task-1')).toBeInTheDocument();
+    expect(screen.getByTestId('tasks-page-task-link-task-2')).toBeInTheDocument();
   });
 
   afterEach(() => {

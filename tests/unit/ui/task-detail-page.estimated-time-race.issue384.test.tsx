@@ -146,7 +146,7 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
     const view = render(<TaskDetailPage />);
 
     await screen.findByText('关联任务：任务 A');
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：60 分钟');
+    expect(screen.getByTestId('estimated-time-preset-60')).toHaveAttribute('aria-pressed', 'true');
 
     fireEvent.click(screen.getByTestId('estimated-time-preset-45'));
 
@@ -158,13 +158,15 @@ describe('TaskDetailPage estimated minutes race issue #384', () => {
     view.rerender(<TaskDetailPage />);
 
     await screen.findByText('关联任务：任务 B');
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：30 分钟');
+    // Task B has estimatedMinutes=30 which is not a preset, so custom trigger should show
+    expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
 
     await act(async () => {
       pendingSave.resolve(makeTask({ id: 'task-1', title: '任务 A', estimatedMinutes: 45, updatedAt: 999 }));
       await pendingSave.promise;
     });
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：30 分钟');
+    // Stale save for task-1 should not affect task-2's display
+    expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
   });
 });
