@@ -269,15 +269,15 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
           : nodeData.connectPreviewType === 'soft'
             ? 'border-dashed border-[#0F766E] ring-2 ring-[#14B8A6]/25 bg-[#F0FDFA] shadow-[0_14px_32px_-18px_rgba(20,184,166,0.7)] dark:border-[#2DD4BF] dark:bg-[#042F2E]'
             : nodeData.executeState === 'active'
-              ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)] animate-pulse'
+              ? 'border-[2.5px] border-[#C75B3A] ring-[3px] ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)] animate-pulse'
               : nodeData.isSelected
                 ? 'border-[#C75B3A] ring-2 ring-[#C75B3A]/35 shadow-[0_12px_36px_-12px_rgba(199,91,58,0.55)]'
                 : nodeData.executeState === 'executable'
-                  ? 'border-[#16A34A]/60 bg-[#F0FDF4] shadow-[0_12px_28px_-18px_rgba(34,197,94,0.7)] dark:border-[#22C55E]/60 dark:bg-[#052E16]'
+                  ? 'border-[2.5px] border-[#16A34A]/60 ring-[3px] ring-[#22C55E]/20 bg-[#F0FDF4] shadow-[0_12px_28px_-18px_rgba(34,197,94,0.7)] dark:border-[#22C55E]/60 dark:bg-[#052E16]'
                   : nodeData.executeState === 'blocked'
-                    ? 'border-[#EAB308]/60 opacity-60'
+                    ? 'border-[2.5px] border-[#EAB308]/60 ring-[3px] ring-[#EAB308]/15 opacity-60'
                     : nodeData.executeState === 'terminal'
-                      ? 'border-[#D6D3D1] opacity-35 grayscale dark:border-[#44403C]'
+                      ? 'border-[2.5px] border-[#D6D3D1] ring-[3px] ring-[#D6D3D1]/15 opacity-35 grayscale dark:border-[#44403C] dark:ring-[#57534E]/15'
                       : nodeData.isCurrentRoot
                         ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
                         : nodeData.isCollapsedTarget
@@ -307,14 +307,6 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
         {nodeData.executeState === 'active' ? (
           <span className="rounded-full bg-[#FDE7DC] px-2 py-0.5 text-[10px] font-semibold text-[#C75B3A]">
             专注中
-          </span>
-        ) : null}
-        {nodeData.isCurrentRoot ? (
-          <span
-            data-testid={`task-dag-current-root-badge-${id}`}
-            className="rounded-full bg-[#FDE7DC] px-2 py-0.5 text-[10px] font-semibold text-[#C75B3A]"
-          >
-            当前根节点
           </span>
         ) : null}
         {nodeData.isCollapsedUpstreamTarget ? (
@@ -540,7 +532,7 @@ export function TaskDagPage() {
             blockedReason,
             showConnectHandles: mode === 'connect',
             connectPreviewType: connectState?.sourceId === node.id ? connectState.type : null,
-            executeState: mode === 'execute' && task && graphNode
+            executeState: task && graphNode
               ? resolveExecuteState(task, graphNode.isBlocked, graphNode.isExecutable, activeTaskIdSet)
               : undefined,
           },

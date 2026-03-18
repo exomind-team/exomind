@@ -226,7 +226,9 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(screen.getByTestId('task-dag-legend-hard-chip')).toBeInTheDocument();
     expect(screen.getByTestId('task-dag-legend-soft-chip')).toBeInTheDocument();
     expect(screen.queryByTestId('task-dag-current-root-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-current-root-badge-task-a')).not.toBeInTheDocument();
     expect(screen.queryByTestId('task-dag-selected-panel')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-node-task-a').className).toContain('border-[#16A34A]/60');
 
     fireEvent.click(screen.getByTestId('task-dag-jump-to-root'));
     expect(flowApiMocks.setCenter).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
