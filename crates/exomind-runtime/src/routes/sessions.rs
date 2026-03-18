@@ -11,7 +11,6 @@ use tokio_stream::wrappers::BroadcastStream;
 use tokio_stream::StreamExt;
 
 use crate::AppState;
-use crate::pty::PtyError;
 use crate::session::{
     AgentSession, CreateSessionInput, Participant, QuickActionResponse,
     SendMessageInput, SessionMessage, SessionStatus, UpdateSessionInput,
@@ -87,6 +86,55 @@ fn fill_source_host_id(mut session: AgentSession, host_id: &str) -> AgentSession
         session.source_host_id = Some(host_id.to_string());
     }
     session
+}
+
+#[cfg(not(target_os = "android"))]
+fn map_pty_delivery_error(
+    pty_id: &str,
+    error: crate::pty::PtyError,
+) -> (StatusCode, String) {
+    let status = match error {
+        crate::pty::PtyError::NotFound { .. } | crate::pty::PtyError::IoError(_) => {
+            StatusCode::CONFLICT
+        }
+        crate::pty::PtyError::SpawnFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
+    };
+    (
+        status,
+        format!("failed to deliver message to PTY {pty_id}: {error}"),
+    )
+}
+
+#[cfg(not(target_os = "android"))]
+async fn deliver_message_to_pty(
+    state: &AppState,
+    session: &AgentSession,
+    content: &str,
+) -> Result<(), (StatusCode, String)> {
+    if let Some(pty_id) = session.pty_id.as_deref() {
+        let input = format!("{content}\n");
+        state
+            .pty_manager
+            .write_input(pty_id, input.as_bytes())
+            .await
+            .map_err(|error| map_pty_delivery_error(pty_id, error))?;
+    }
+    Ok(())
+}
+
+#[cfg(target_os = "android")]
+async fn deliver_message_to_pty(
+    _state: &AppState,
+    session: &AgentSession,
+    _content: &str,
+) -> Result<(), (StatusCode, String)> {
+    if let Some(pty_id) = session.pty_id.as_deref() {
+        return Err((
+            StatusCode::CONFLICT,
+            format!("PTY delivery is not supported on Android runtime: {pty_id}"),
+        ));
+    }
+    Ok(())
 }
 
 fn map_pty_delivery_error(pty_id: &str, error: PtyError) -> (StatusCode, String) {
@@ -385,14 +433,7 @@ async fn send_message(
     // communication becomes a core feature.
 
     // Bridge to PTY stdin（桥接到 PTY 标准输入）when this session owns a terminal.
-    if let Some(pty_id) = session.pty_id.as_deref() {
-        let input = format!("{}\n", message.content);
-        state
-            .pty_manager
-            .write_input(pty_id, input.as_bytes())
-            .await
-            .map_err(|error| map_pty_delivery_error(pty_id, error))?;
-    }
+    deliver_message_to_pty(&state, &session, &message.content).await?;
 
     Ok((StatusCode::CREATED, Json(message)))
 }
@@ -426,6 +467,7 @@ mod tests {
         AppState::new_runtime(0, host_id.to_string(), None, None, false, None)
     }
 
+    #[cfg(not(target_os = "android"))]
     fn interactive_shell_spawn_request() -> crate::pty::PtySpawnRequest {
         if cfg!(windows) {
             crate::pty::PtySpawnRequest {
@@ -551,6 +593,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[cfg(not(target_os = "android"))]
     async fn send_message_bridges_content_to_pty_stdin() {
         let state = test_state("session-host-4");
         let pty = state
