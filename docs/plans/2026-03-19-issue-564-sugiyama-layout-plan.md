@@ -1,6 +1,6 @@
 # #564 Sugiyama 布局升级计划
 
-> **状态**：待执行
+> **状态**：已完成（2026-03-19）
 > **分支**：直接在 `dev` 上开发（无独立分支）
 > **关联 Issue**：#564
 
@@ -242,3 +242,11 @@ const flowGraph = useMemo(
 | 性能 | 100 节点 DAG | 布局 < 100ms，无明显卡顿 |
 | tsc | `bunx tsc --noEmit` | 零错误 |
 | 测试 | `bunx vitest run` | DAG 相关测试通过 |
+
+## 完成回填
+
+- 已引入 `@dagrejs/dagre`，并在 DAG 页面切换为 Sugiyama 布局。
+- 已新增 `TB / auto / LR` 方向切换，默认 `auto`：竖屏 `TB`、横屏 `LR`。
+- 已将边线切换为贝塞尔曲线，并同步修正节点句柄方向。
+- 已通过 `bunx tsc --noEmit`。
+- 已通过 `npx vitest run tests/unit/ui/task-dag-page.issue394.test.tsx tests/unit/ui/task-dag-flow.issue564.test.ts --pool forks --maxWorkers 1 --no-file-parallelism`。

@@ -93,7 +93,11 @@ vi.mock('@xyflow/react', () => ({
     }) => void;
     [key: string]: unknown;
   }) => {
-    flowApiMocks.lastProps = props;
+    flowApiMocks.lastProps = {
+      ...props,
+      nodes,
+      edges,
+    };
     onInit?.(flowApiMocks);
     return (
       <div data-testid="mock-react-flow">
@@ -114,7 +118,14 @@ vi.mock('@xyflow/react', () => ({
                 onNodeContextMenu?.({ preventDefault: () => {}, clientX: 32, clientY: 48 }, node);
               }}
             >
-              {NodeComponent ? <NodeComponent id={node.id} data={node.data ?? {}} /> : node.id}
+              {NodeComponent ? (
+                <NodeComponent
+                  id={node.id}
+                  data={node.data ?? {}}
+                  sourcePosition={node.sourcePosition}
+                  targetPosition={node.targetPosition}
+                />
+              ) : node.id}
             </button>
           );
         })}
@@ -129,7 +140,7 @@ vi.mock('@xyflow/react', () => ({
   Controls: () => <div data-testid="mock-react-flow-controls" />,
   Handle: () => null,
   MarkerType: { ArrowClosed: 'arrowclosed' },
-  Position: { Left: 'left', Right: 'right' },
+  Position: { Left: 'left', Right: 'right', Top: 'top', Bottom: 'bottom' },
 }));
 
 vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
@@ -255,6 +266,54 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(flowApiMocks.fitView).toHaveBeenCalledWith({
       padding: 0.2,
       minZoom: 0.01,
+    });
+  });
+
+  it('switches dag direction, persists selection, and re-fits the viewport', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    const fitViewCallCountBeforeChange = flowApiMocks.fitView.mock.calls.length;
+    fireEvent.click(screen.getByTestId('task-dag-direction-tb'));
+
+    await waitFor(() => {
+      expect(window.localStorage.getItem('exomind:dag-direction')).toBe('TB');
+      expect(flowApiMocks.fitView.mock.calls.length).toBeGreaterThan(fitViewCallCountBeforeChange);
+    });
+    expect(flowApiMocks.fitView).toHaveBeenLastCalledWith({
+      padding: 0.2,
+      minZoom: 0.01,
+    });
+
+    const lastProps = flowApiMocks.lastProps as {
+      nodes: Array<{ sourcePosition: string; targetPosition: string }>;
+      edges: Array<{ type: string }>;
+    };
+    expect(lastProps.nodes[0]).toMatchObject({
+      sourcePosition: 'bottom',
+      targetPosition: 'top',
+    });
+    expect(lastProps.edges[0]).toMatchObject({ type: 'default' });
+  });
+
+  it('uses top-bottom auto layout on mobile viewports', async () => {
+    isDesktopMock.mockReturnValue(false);
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    const lastProps = flowApiMocks.lastProps as {
+      nodes: Array<{ sourcePosition: string; targetPosition: string }>;
+    };
+    expect(window.localStorage.getItem('exomind:dag-direction')).toBe('auto');
+    expect(lastProps.nodes[0]).toMatchObject({
+      sourcePosition: 'bottom',
+      targetPosition: 'top',
     });
   });
 

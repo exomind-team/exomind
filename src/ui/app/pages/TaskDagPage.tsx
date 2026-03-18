@@ -30,6 +30,7 @@ import {
   TaskDagDetailPanel,
   type TaskDagDependencyItem,
 } from '@/ui/app/components/TaskDagDetailPanel';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { TaskDagModeSelector, type TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
@@ -41,6 +42,7 @@ import {
   type TaskDagFlowNode,
   type TaskDagFlowNodeData,
 } from './task-dag-flow';
+import { resolveDagDirection, type DagDirection } from './task-dag-layout';
 import { extractTaskTitleSearchQuery, filterTasksByTitleFuzzySearch } from './task-title-fuzzy-search';
 import { TASKS_LAST_PATH_KEY } from './task-route-memory';
 
@@ -48,6 +50,7 @@ type DagConnectType = 'hard' | 'soft';
 type DagConnectState = { sourceId: string; type: DagConnectType } | null;
 
 const TASK_DAG_MODE_STORAGE_KEY = 'exomind:dag-mode';
+const TASK_DAG_DIRECTION_STORAGE_KEY = 'exomind:dag-direction';
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return status === 'completed' || status === 'cancelled';
@@ -108,6 +111,21 @@ function readStoredDagMode(): TaskDagMode {
   }
 
   return 'browse';
+}
+
+function readStoredDagDirection(): DagDirection {
+  if (typeof window === 'undefined') return 'auto';
+
+  try {
+    const saved = window.localStorage.getItem(TASK_DAG_DIRECTION_STORAGE_KEY);
+    if (saved === 'TB' || saved === 'LR' || saved === 'auto') {
+      return saved;
+    }
+  } catch {
+    // Ignore storage failures and fall back to auto direction.
+  }
+
+  return 'auto';
 }
 
 function resolveConnectTypeFromEvent(event: unknown): DagConnectType {
@@ -247,7 +265,12 @@ function filterTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGraph): Vi
   };
 }
 
-function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
+function TaskDagNode({
+  id,
+  data,
+  sourcePosition = Position.Right,
+  targetPosition = Position.Left,
+}: FlowNodeProps<TaskDagFlowNode>) {
   const nodeData = data as TaskDagFlowNodeData;
   const handleStyle = {
     width: 10,
@@ -290,8 +313,8 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
         nodeData.isSearchDimmed && !nodeData.isSelected && nodeData.executeState !== 'active' ? 'opacity-35 saturate-[0.7]' : '',
       ].join(' ')}
     >
-      <Handle type="target" position={Position.Left} style={handleStyle} />
-      <Handle type="source" position={Position.Right} style={handleStyle} />
+      <Handle type="target" position={targetPosition} style={handleStyle} />
+      <Handle type="source" position={sourcePosition} style={handleStyle} />
 
       <div className="flex flex-wrap items-center gap-2">
         {nodeData.connectPreviewType === 'hard' ? (
@@ -357,6 +380,7 @@ const TASK_DAG_FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: TASK_DAG_MIN_ZOOM } a
 export function TaskDagPage() {
   const location = useLocation();
   const navigate = useNavigate();
+  const isDesktop = useIsDesktop();
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
@@ -365,12 +389,14 @@ export function TaskDagPage() {
   const [hideTerminal, setHideTerminal] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
+  const [dagDirection, setDagDirection] = useState<DagDirection>(() => readStoredDagDirection());
   const [mode, setMode] = useState<TaskDagMode>(() => readStoredDagMode());
   const [connectState, setConnectState] = useState<DagConnectState>(null);
   const [endingDialogOpen, setEndingDialogOpen] = useState(false);
   const [endingTaskIds, setEndingTaskIds] = useState<string[]>([]);
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
+  const hasMountedDirectionRef = useRef(false);
 
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
@@ -386,6 +412,14 @@ export function TaskDagPage() {
       // Ignore storage failures and keep mode in-memory only.
     }
   }, [mode]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TASK_DAG_DIRECTION_STORAGE_KEY, dagDirection);
+    } catch {
+      // Ignore storage failures and keep direction in-memory only.
+    }
+  }, [dagDirection]);
 
   useEffect(() => {
     let disposed = false;
@@ -467,6 +501,26 @@ export function TaskDagPage() {
     setEndingTaskIds([]);
   }, [activeBlock]);
 
+  const resolvedDirection = useMemo(
+    () => resolveDagDirection(dagDirection, isDesktop),
+    [dagDirection, isDesktop],
+  );
+
+  useEffect(() => {
+    if (!hasMountedDirectionRef.current) {
+      hasMountedDirectionRef.current = true;
+      return;
+    }
+
+    const timeoutId = window.setTimeout(() => {
+      void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
+    }, 50);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [resolvedDirection]);
+
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const graph = useMemo(() => buildTaskGraph(tasks), [tasks]);
   const graphNodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
@@ -514,6 +568,7 @@ export function TaskDagPage() {
 
   const flowGraph = useMemo(() => {
     const baseFlowGraph = buildVisibleTaskDagFlow(renderedVisibleGraph, {
+      direction: resolvedDirection,
       selectedTaskId: mode === 'browse' ? selectedTaskId : null,
       searchMatchedTaskIds,
       hasActiveSearch: Boolean(searchQuery),
@@ -546,6 +601,7 @@ export function TaskDagPage() {
     graphNodeById,
     mode,
     renderedVisibleGraph,
+    resolvedDirection,
     searchMatchedTaskIds,
     searchQuery,
     selectedTaskId,
@@ -859,9 +915,11 @@ export function TaskDagPage() {
           onChange={setMode}
         />
         <TaskDagControlPanel
+          direction={dagDirection}
           searchValue={searchDraft}
           searchMatchCount={searchMatchCount}
           hideTerminal={hideTerminal}
+          onDirectionChange={setDagDirection}
           onSearchValueChange={setSearchDraft}
           onToggleHideTerminal={() => setHideTerminal((value) => !value)}
           onFitView={() => {

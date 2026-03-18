@@ -1,9 +1,12 @@
 import { Crosshair, EyeOff, GitBranch, LocateFixed, Search } from 'lucide-react';
+import type { DagDirection } from '@/ui/app/pages/task-dag-layout';
 
 interface TaskDagControlPanelProps {
+  direction: DagDirection;
   searchValue: string;
   searchMatchCount: number;
   hideTerminal: boolean;
+  onDirectionChange: (direction: DagDirection) => void;
   onSearchValueChange: (value: string) => void;
   onToggleHideTerminal: () => void;
   onFitView: () => void;
@@ -24,9 +27,11 @@ function legendChip(label: string, title: string, className: string, testId: str
 }
 
 export function TaskDagControlPanel({
+  direction,
   searchValue,
   searchMatchCount,
   hideTerminal,
+  onDirectionChange,
   onSearchValueChange,
   onToggleHideTerminal,
   onFitView,
@@ -85,6 +90,48 @@ export function TaskDagControlPanel({
           <Crosshair size={12} />
           适配视口
         </button>
+
+        <div className="inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 p-1 shadow-sm dark:border-[#3C3836] dark:bg-[#120F0D]">
+          <button
+            type="button"
+            data-testid="task-dag-direction-tb"
+            onClick={() => onDirectionChange('TB')}
+            className={`inline-flex h-7 items-center rounded-full px-2 text-[11px] font-medium transition-colors ${
+              direction === 'TB'
+                ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                : 'text-[#57534E] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
+            }`}
+            title="纵向布局"
+          >
+            ↕
+          </button>
+          <button
+            type="button"
+            data-testid="task-dag-direction-auto"
+            onClick={() => onDirectionChange('auto')}
+            className={`inline-flex h-7 items-center rounded-full px-2 text-[11px] font-medium transition-colors ${
+              direction === 'auto'
+                ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                : 'text-[#57534E] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
+            }`}
+            title="自动布局方向"
+          >
+            A
+          </button>
+          <button
+            type="button"
+            data-testid="task-dag-direction-lr"
+            onClick={() => onDirectionChange('LR')}
+            className={`inline-flex h-7 items-center rounded-full px-2 text-[11px] font-medium transition-colors ${
+              direction === 'LR'
+                ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+                : 'text-[#57534E] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
+            }`}
+            title="横向布局"
+          >
+            ⟷
+          </button>
+        </div>
 
         {hasCurrentRoot && onJumpToCurrentRoot ? (
           <button
