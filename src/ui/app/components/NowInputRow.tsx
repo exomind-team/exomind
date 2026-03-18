@@ -17,6 +17,7 @@ import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/Voic
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
+import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 
 interface NowInputRowProps {
   onSend: (content: string, tags?: string[]) => void | Promise<void>;
@@ -142,7 +143,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   }, [insertClipboardText]);
 
   const handleVoiceResult = useCallback((text: string) => {
-    const normalized = text.trim();
+    const normalized = normalizeRecognitionText(text.trim());
     if (!normalized) return;
 
     void publishVoiceTranscriptSignal({ text: normalized }, {
