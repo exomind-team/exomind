@@ -363,13 +363,13 @@ vi.mock('@/components/ui/dialog', () => {
       dialogTitleText = '';
       return <div data-testid="dialog">{children}</div>;
     },
-    DialogContent: ({ children }: any) => {
+    DialogContent: ({ children, className, ...props }: any) => {
       const ref = (node: HTMLElement | null) => {
         if (node && dialogTitleText) {
           node.setAttribute('aria-label', dialogTitleText);
         }
       };
-      return <div role="dialog" ref={ref}>{children}</div>;
+      return <div role="dialog" ref={ref} className={className} {...props}>{children}</div>;
     },
     DialogHeader: ({ children }: any) => <div>{children}</div>,
     DialogTitle: ({ children }: any) => {
