@@ -1,5 +1,5 @@
 import { Waypoints } from 'lucide-react';
-import { useLocation } from '@tanstack/react-router';
+import { useLocation, useNavigate } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
@@ -23,6 +23,10 @@ import {
 } from '@/lib/task/task-dag-visibility';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
+import {
+  TaskDagDetailPanel,
+  type TaskDagDependencyItem,
+} from '@/ui/app/components/TaskDagDetailPanel';
 import { TaskDagModeSelector, type TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import {
@@ -38,6 +42,48 @@ import { TASKS_LAST_PATH_KEY } from './task-route-memory';
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return status === 'completed' || status === 'cancelled';
+}
+
+function buildExecutionHint(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
+  if (task.status === 'completed') {
+    return '该任务已经完成，可双击进入详情页回顾依赖关系与时间记录。';
+  }
+  if (task.status === 'cancelled') {
+    return '该任务已经取消，如需继续推进，请先在任务详情页中调整任务状态。';
+  }
+  if (task.status === 'in_progress') {
+    return '该任务正在推进中，可在详情页继续查看时间块、依赖与执行记录。';
+  }
+  if (task.status === 'suspended') {
+    return isExecutable
+      ? '该任务已挂起，但当前依赖已满足，可恢复执行。'
+      : '该任务已挂起，且仍受前置依赖限制，暂不适合恢复执行。';
+  }
+  if (isBlocked) {
+    return '该任务目前仍被前置任务阻塞，需先完成对应依赖后才能启动。';
+  }
+  if (isExecutable) {
+    return '该任务当前可执行，可继续在后续执行模式中直接发起时间块。';
+  }
+  return '该任务暂未开始，建议先确认依赖、估时与执行策略。';
+}
+
+function buildUpstreamDependencies(task: TaskNode, taskById: ReadonlyMap<string, TaskNode>): TaskDagDependencyItem[] {
+  return task.dependsOn.map((dependency) => ({
+    taskId: dependency.taskId,
+    title: taskById.get(dependency.taskId)?.title ?? dependency.taskId,
+    type: dependency.type,
+  }));
+}
+
+function buildDownstreamDependencies(taskId: string, tasks: TaskNode[]): TaskDagDependencyItem[] {
+  return tasks.flatMap((task) => task.dependsOn
+    .filter((dependency) => dependency.taskId === taskId)
+    .map((dependency) => ({
+      taskId: task.id,
+      title: task.title,
+      type: dependency.type,
+    })));
 }
 
 function filterTerminalNodesFromVisibleGraph(visibleGraph: VisibleTaskGraph): VisibleTaskGraph {
@@ -162,6 +208,7 @@ const TASK_DAG_FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: TASK_DAG_MIN_ZOOM } a
 
 export function TaskDagPage() {
   const location = useLocation();
+  const navigate = useNavigate();
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(EMPTY_TASK_DAG_VISIBILITY_STATE);
@@ -219,6 +266,7 @@ export function TaskDagPage() {
 
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const graph = useMemo(() => buildTaskGraph(tasks), [tasks]);
+  const graphNodeById = useMemo(() => new Map(graph.nodes.map((node) => [node.id, node])), [graph.nodes]);
   const interactionGraph = useMemo(() => (
     hideTerminal
       ? buildTaskGraph(tasks.filter((task) => !isTerminalStatus(task.status)))
@@ -251,14 +299,9 @@ export function TaskDagPage() {
   useEffect(() => {
     const visibleNodeIds = new Set(renderedVisibleGraph.nodes.map((node) => node.id));
     if (selectedTaskId && !visibleNodeIds.has(selectedTaskId)) {
-      setSelectedTaskId(renderedVisibleGraph.visibleCurrentRootNodeId ?? renderedVisibleGraph.nodes[0]?.id ?? null);
-      return;
+      setSelectedTaskId(null);
     }
-
-    if (!selectedTaskId && renderedVisibleGraph.nodes.length > 0) {
-      setSelectedTaskId(renderedVisibleGraph.visibleCurrentRootNodeId ?? renderedVisibleGraph.nodes[0]?.id ?? null);
-    }
-  }, [renderedVisibleGraph.nodes, renderedVisibleGraph.visibleCurrentRootNodeId, selectedTaskId]);
+  }, [renderedVisibleGraph.nodes, selectedTaskId]);
 
   const toggleCollapse = (direction: 'upstream' | 'downstream', nodeId: string) => {
     setDagVisibility((prev) => {
@@ -296,6 +339,25 @@ export function TaskDagPage() {
   };
 
   const selectedTaskTitle = selectedTaskId ? taskById.get(selectedTaskId)?.title ?? selectedTaskId : null;
+  const selectedTask = selectedTaskId ? taskById.get(selectedTaskId) ?? null : null;
+  const selectedGraphNode = selectedTaskId ? graphNodeById.get(selectedTaskId) ?? null : null;
+  const selectedTaskExecutionHint = selectedTask && selectedGraphNode
+    ? buildExecutionHint(selectedTask, selectedGraphNode.isBlocked, selectedGraphNode.isExecutable)
+    : '';
+  const selectedTaskUpstreamDependencies = selectedTask
+    ? buildUpstreamDependencies(selectedTask, taskById)
+    : [];
+  const selectedTaskDownstreamDependencies = selectedTask
+    ? buildDownstreamDependencies(selectedTask.id, tasks)
+    : [];
+
+  const handleNavigateToTaskDetail = (taskId: string) => {
+    void navigate({
+      to: '/tasks/$taskId',
+      params: { taskId },
+      search: { from: 'dag' } as never,
+    });
+  };
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="task-dag-page">
@@ -308,7 +370,9 @@ export function TaskDagPage() {
           <div>
             <h1 className="text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务依赖 DAG</h1>
             <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-              {selectedTaskTitle ? `当前选中：${selectedTaskTitle}` : '单击节点可高亮，右键节点可折叠上下游。'}
+              {selectedTaskTitle
+                ? `当前聚焦：${selectedTaskTitle}。双击节点可进入任务详情页。`
+                : '单击节点可查看详情，双击节点可进入任务详情页，右键节点可折叠上下游。'}
             </p>
           </div>
         </div>
@@ -360,6 +424,10 @@ export function TaskDagPage() {
             setSelectedTaskId(node.id);
             setContextMenu(null);
           }}
+          onNodeDoubleClick={(_event, node) => {
+            setContextMenu(null);
+            handleNavigateToTaskDetail(node.id);
+          }}
           onNodeContextMenu={(event, node) => {
             event.preventDefault();
             setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
@@ -405,6 +473,17 @@ export function TaskDagPage() {
               {dagVisibility.collapsedDownstreamOf.includes(contextMenu.nodeId) ? '展开下游' : '折叠下游'}
             </button>
           </div>
+        ) : null}
+
+        {selectedTask && selectedGraphNode ? (
+          <TaskDagDetailPanel
+            task={selectedTask}
+            executionHint={selectedTaskExecutionHint}
+            upstreamDependencies={selectedTaskUpstreamDependencies}
+            downstreamDependencies={selectedTaskDownstreamDependencies}
+            onClose={() => setSelectedTaskId(null)}
+            onOpenDetail={() => handleNavigateToTaskDetail(selectedTask.id)}
+          />
         ) : null}
       </div>
     </div>

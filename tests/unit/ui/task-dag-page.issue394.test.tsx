@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TaskDagPage } from '@/ui/app/pages/TaskDagPage';
 import type { TaskNode } from '@/lib/types/task';
 
@@ -15,9 +15,13 @@ const flowApiMocks = vi.hoisted(() => ({
   lastProps: null as null | Record<string, unknown>,
 }));
 
+const navigateMock = vi.hoisted(() => vi.fn());
+const isDesktopMock = vi.hoisted(() => vi.fn(() => true));
+
 vi.mock('@tanstack/react-router', () => ({
   Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
   useLocation: () => ({ pathname: '/tasks/dag', searchStr: '' }),
+  useNavigate: () => navigateMock,
 }));
 
 vi.mock('@/lib/services', () => ({
@@ -32,7 +36,9 @@ vi.mock('@xyflow/react', () => ({
     nodes,
     edges,
     children,
+    onPaneClick,
     onNodeClick,
+    onNodeDoubleClick,
     onNodeContextMenu,
     nodeTypes,
     onInit,
@@ -41,7 +47,9 @@ vi.mock('@xyflow/react', () => ({
     nodes?: Array<{ id: string; type?: string; data?: Record<string, unknown> }>;
     edges?: Array<{ id: string }>;
     children?: ReactNode;
+    onPaneClick?: () => void;
     onNodeClick?: (_event: unknown, node: { id: string; data?: Record<string, unknown> }) => void;
+    onNodeDoubleClick?: (_event: unknown, node: { id: string; data?: Record<string, unknown> }) => void;
     onNodeContextMenu?: (_event: { preventDefault: () => void; clientX: number; clientY: number }, node: { id: string; data?: Record<string, unknown> }) => void;
     nodeTypes?: Record<string, (props: { id: string; data: Record<string, unknown> }) => JSX.Element>;
     onInit?: (instance: {
@@ -56,6 +64,9 @@ vi.mock('@xyflow/react', () => ({
     onInit?.(flowApiMocks);
     return (
       <div data-testid="mock-react-flow">
+        <button type="button" data-testid="mock-react-flow-pane" onClick={() => onPaneClick?.()}>
+          pane
+        </button>
         {(nodes ?? []).map((node) => {
           const NodeComponent = node.type ? nodeTypes?.[node.type] : undefined;
           return (
@@ -64,6 +75,7 @@ vi.mock('@xyflow/react', () => ({
               type="button"
               data-testid={`mock-react-flow-node-${node.id}`}
               onClick={() => onNodeClick?.({}, node)}
+              onDoubleClick={() => onNodeDoubleClick?.({}, node)}
               onContextMenu={(event) => {
                 event.preventDefault();
                 onNodeContextMenu?.({ preventDefault: () => {}, clientX: 32, clientY: 48 }, node);
@@ -87,6 +99,10 @@ vi.mock('@xyflow/react', () => ({
   Position: { Left: 'left', Right: 'right' },
 }));
 
+vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
+  useIsDesktop: () => isDesktopMock(),
+}));
+
 function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }): TaskNode {
   return {
     id: overrides.id,
@@ -102,7 +118,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
   };
 }
 
-describe('TaskDagPage issue-394（任务 DAG Wave 1）', () => {
+describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2）', () => {
   beforeEach(() => {
     flowApiMocks.setCenter.mockReset();
     flowApiMocks.fitView.mockReset();
@@ -110,6 +126,9 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1）', () => {
     flowApiMocks.getViewport.mockReturnValue({ x: 0, y: 0, zoom: 0.12 });
     flowApiMocks.getNode.mockReset();
     flowApiMocks.lastProps = null;
+    navigateMock.mockReset();
+    isDesktopMock.mockReset();
+    isDesktopMock.mockReturnValue(true);
     listTasksMock.mockReset();
     onTaskChangeMock.mockClear();
 
@@ -191,6 +210,85 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1）', () => {
       expect(screen.getByTestId('task-dag-node-task-b').className).toContain('ring-[#C75B3A]/35');
     });
     expect(screen.queryByTestId('task-dag-selected-panel')).not.toBeInTheDocument();
+  });
+
+  it('opens the desktop detail panel on node click and shows dependency details', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+
+    const detailPanel = await screen.findByTestId('task-dag-detail-panel-desktop');
+    expect(detailPanel).toBeInTheDocument();
+    expect(within(detailPanel).getByText('接入任务列表引导')).toBeInTheDocument();
+    expect(within(detailPanel).getByText('该任务目前仍被前置任务阻塞，需先完成对应依赖后才能启动。')).toBeInTheDocument();
+    expect(within(detailPanel).getByTestId('task-dag-detail-upstream-list')).toHaveTextContent('梳理 DAG 基础层');
+    expect(within(detailPanel).getByText('当前节点没有后继依赖。')).toBeInTheDocument();
+  });
+
+  it('closes the detail panel on pane click and close button', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    expect(await screen.findByTestId('task-dag-detail-panel-desktop')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-detail-close'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-detail-panel-desktop')).not.toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    expect(await screen.findByTestId('task-dag-detail-panel-desktop')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-pane'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-detail-panel-desktop')).not.toBeInTheDocument();
+    });
+  });
+
+  it('renders the mobile drawer variant when the viewport is not desktop', async () => {
+    isDesktopMock.mockReturnValue(false);
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    expect(await screen.findByTestId('task-dag-detail-panel-mobile')).toBeInTheDocument();
+  });
+
+  it('navigates to task detail with dag source on node double click and panel action', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.doubleClick(screen.getByTestId('mock-react-flow-node-task-a'));
+    expect(navigateMock).toHaveBeenCalledWith({
+      to: '/tasks/$taskId',
+      params: { taskId: 'task-a' },
+      search: { from: 'dag' },
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+    expect(await screen.findByTestId('task-dag-detail-open-task')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-detail-open-task'));
+    expect(navigateMock).toHaveBeenLastCalledWith({
+      to: '/tasks/$taskId',
+      params: { taskId: 'task-b' },
+      search: { from: 'dag' },
+    });
   });
 
   it('filters completed nodes when hide terminal is enabled', async () => {
