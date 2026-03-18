@@ -6,30 +6,43 @@ const t = useTranslations('zh');
 
 const changelog = [
   {
-    version: 'v0.3.6',
-    date: '2026-03-18',
+    version: 'v0.3.6 开发中',
+    date: '未正式发布',
     changes: [
-      { type: '新功能', text: '官网首页、下载页、文档页与更新日志刷新为可公开宣传版本' },
-      { type: '优化', text: '公开入口统一为站内文档、下载与版本记录，不再依赖私有 GitHub 链接' },
-      { type: '优化', text: '下载页只展示真实可下载平台，未就绪平台明确标注发布时间状态' },
+      { type: '新功能', text: '任务系统继续演进：TaskNode 状态语义统一、依赖关系与今日时间块联动继续推进' },
+      { type: '新功能', text: '提醒系统、网络/Agent Hub 能力与 runtime/mesh 相关功能持续并入开发线' },
+      { type: '优化', text: 'Agent 与 LLM 接入正从 Claude CLI 逐步走向 OpenAI 兼容 API 与统一会话抽象' },
+      { type: '说明', text: '该版本目前对应开发线内容，仓库中尚无 release/v0.3.6 正式发布 tag' },
     ],
   },
   {
     version: 'v0.3.5',
-    date: '2026-03-06',
+    date: '2026-03-06（已发布）',
     changes: [
-      { type: '新功能', text: '发布链路产出官网可识别的 latest 元数据' },
-      { type: '修复', text: '官网下载 API 增强对真实安装包与发布元数据的兼容' },
-      { type: '优化', text: '自托管发布流程对 Windows 与 Android 构建链路进一步稳定化' },
+      { type: '新功能', text: 'Agent Hub UI 全量实现（T1-T9），补齐节点、路由、拓扑、历史与详情侧栏等核心视图' },
+      { type: '新功能', text: '完成桌面端适配，并继续补齐 history/chat、生命周期控制与 Android 安全快捷键' },
+      { type: '修复', text: '修复语音快捷键流程并稳定多轮 ASR 体验' },
+      { type: '优化', text: '发布链路修复 Linux/macOS 构建阻塞问题，支撑 v0.3.5 正式发布' },
     ],
   },
   {
     version: 'v0.3.2',
-    date: '2026-02-22',
+    date: '2026-02-22（已发布）',
     changes: [
-      { type: '新功能', text: '桌面端更新适配' },
-      { type: '新功能', text: '命令面板首期落地' },
-      { type: '修复', text: '同步命令面板滚动' },
+      { type: '新功能', text: '命令面板首期落地，并修复命令面板滚动与入口切换体验' },
+      { type: '新功能', text: '新版 UI 正式切为默认入口，同时保留回退路径' },
+      { type: '新功能', text: '新增 Agent 页面功能开关、Agent/Actor 详情与设备视图相关界面迭代' },
+      { type: '优化', text: '构建标签、预发布流程与官网基础能力继续成形，为后续网站与下载页铺路' },
+    ],
+  },
+  {
+    version: 'v0.3.1',
+    date: '2026-02-15（已发布）',
+    changes: [
+      { type: '新功能', text: '浅色新 UI 进入完整可用阶段' },
+      { type: '新功能', text: '设置页补齐多用户管理界面，并修复专注卡片自适应' },
+      { type: '新功能', text: '聊天消息复制能力上线' },
+      { type: '优化', text: '新版专注计时卡片交互与结束设置继续完善' },
     ],
   },
 ];
@@ -39,6 +52,7 @@ function tagClasses(type: string) {
     case '新功能': return 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300';
     case '修复': return 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
     case '优化': return 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300';
+    case '说明': return 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
     default: return 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400';
   }
 }
@@ -54,6 +68,9 @@ function tagClasses(type: string) {
         </h1>
         <p class="mt-4 text-lg leading-relaxed text-stone-500">
           {t('changelog.subtitle')}
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-stone-400">
+          说明：已发布版本基于仓库中的 `release/*` tag 整理；`v0.3.6` 当前展示的是开发线进展，不等同于正式 release。
         </p>
       </div>
     </div>

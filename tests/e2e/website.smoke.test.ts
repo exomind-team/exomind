@@ -23,7 +23,7 @@ test.describe('官网冒烟测试 (Website Smoke Tests)', () => {
 
   test('更新日志页应展示当前版本 (Changelog should show current release)', async ({ page }) => {
     await page.goto('/changelog');
-    await expect(page.getByText('v0.3.6')).toBeVisible();
+    await expect(page.getByText('v0.3.6 开发中')).toBeVisible();
   });
 
   test('下载页只宣传真实可下载平台 (Download page should only promote real installers)', async ({ page }) => {
