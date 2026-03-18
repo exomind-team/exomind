@@ -6,25 +6,27 @@ const t = useTranslations('zh');
 ---
 
 <BaseLayout title="首页">
-  <!-- Hero Section -->
   <section class="relative overflow-hidden pt-32 pb-24">
     <div class="section-container relative z-10">
-      <div class="mx-auto max-w-3xl text-center">
+      <div class="mx-auto max-w-4xl text-center">
         <div class="mb-6 inline-flex items-center gap-2 rounded-full border border-stone-200 bg-white/80 px-4 py-1.5 text-sm text-stone-600 backdrop-blur dark:border-stone-800 dark:bg-stone-900/80 dark:text-stone-400">
           <span class="inline-block h-1.5 w-1.5 rounded-full bg-brand animate-pulse"></span>
-          开源 · 本地优先 · AI 驱动
+          本地优先 · 事件驱动 · 认知主权
         </div>
         <h1 class="heading-display text-5xl leading-tight text-stone-900 sm:text-6xl lg:text-7xl dark:text-stone-50">
           {t('hero.title')}
         </h1>
-        <p class="mt-6 text-lg leading-relaxed text-stone-500 sm:text-xl">
+        <p class="mx-auto mt-6 max-w-3xl text-lg leading-relaxed text-stone-500 sm:text-xl">
           {t('hero.subtitle')}
+        </p>
+        <p class="mx-auto mt-4 max-w-2xl text-sm leading-relaxed text-stone-400 sm:text-base">
+          你不需要把记忆、任务、Agent 和工作流继续寄存在平台上。ExoMind 的目标，是把认知主权重新交还给你自己。
         </p>
         <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
           <a href="/download" class="btn-primary px-8 py-3.5 text-base">
             {t('hero.cta.download')}
           </a>
-          <a href="/features" class="btn-secondary px-8 py-3.5 text-base">
+          <a href="/docs" class="btn-secondary px-8 py-3.5 text-base">
             {t('hero.cta.learn')}
           </a>
         </div>
@@ -35,17 +37,15 @@ const t = useTranslations('zh');
     </div>
   </section>
 
-  <!-- Features Preview -->
-  <section class="py-24 bg-stone-100/50 dark:bg-stone-900/50">
+  <section class="bg-stone-100/50 py-24 dark:bg-stone-900/50">
     <div class="section-container">
-      <div class="mx-auto max-w-2xl text-center mb-16">
+      <div class="mx-auto mb-16 max-w-3xl text-center">
         <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">
           {t('features.title')}
         </h2>
         <p class="mt-4 text-stone-500">{t('features.subtitle')}</p>
       </div>
       <div class="grid gap-6 sm:grid-cols-2 lg:grid-cols-3">
-        <!-- Event Log -->
         <div class="card hover:-translate-y-1 transition-all duration-300">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
             <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -55,7 +55,6 @@ const t = useTranslations('zh');
           <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.eventlog.title')}</h3>
           <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.eventlog.desc')}</p>
         </div>
-        <!-- Time Blocks -->
         <div class="card hover:-translate-y-1 transition-all duration-300">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
             <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -65,7 +64,6 @@ const t = useTranslations('zh');
           <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.timeblock.title')}</h3>
           <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.timeblock.desc')}</p>
         </div>
-        <!-- AI Agents -->
         <div class="card hover:-translate-y-1 transition-all duration-300">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
             <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -75,7 +73,6 @@ const t = useTranslations('zh');
           <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.agents.title')}</h3>
           <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.agents.desc')}</p>
         </div>
-        <!-- Local First -->
         <div class="card hover:-translate-y-1 transition-all duration-300">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
             <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -85,7 +82,6 @@ const t = useTranslations('zh');
           <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.privacy.title')}</h3>
           <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.privacy.desc')}</p>
         </div>
-        <!-- Tasks -->
         <div class="card hover:-translate-y-1 transition-all duration-300">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
             <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -95,7 +91,6 @@ const t = useTranslations('zh');
           <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{t('features.tasks.title')}</h3>
           <p class="mt-2 text-sm leading-relaxed text-stone-500">{t('features.tasks.desc')}</p>
         </div>
-        <!-- Cross Platform -->
         <div class="card hover:-translate-y-1 transition-all duration-300">
           <div class="mb-4 flex h-12 w-12 items-center justify-center rounded-xl bg-brand-50 dark:bg-brand-900/30">
             <svg class="h-6 w-6 text-brand" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
@@ -107,7 +102,7 @@ const t = useTranslations('zh');
         </div>
       </div>
       <div class="mt-12 text-center">
-        <a href="/features" class="inline-flex items-center gap-2 text-brand font-medium hover:underline">
+        <a href="/features" class="inline-flex items-center gap-2 font-medium text-brand hover:underline">
           查看全部功能
           <svg class="h-4 w-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14"/><path d="m12 5 7 7-7 7"/></svg>
         </a>
@@ -115,71 +110,65 @@ const t = useTranslations('zh');
     </div>
   </section>
 
-  <!-- How It Works -->
   <section class="py-24">
     <div class="section-container">
-      <div class="mx-auto max-w-2xl text-center mb-16">
-        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">简单三步，开始成长</h2>
+      <div class="mx-auto mb-16 max-w-2xl text-center">
+        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">三步把认知主权拿回来</h2>
       </div>
-      <div class="relative mx-auto max-w-3xl">
-        <div class="absolute top-8 left-[calc(16.67%-1px)] right-[calc(16.67%-1px)] h-0.5 border-t-2 border-dashed border-stone-200 dark:border-stone-700 hidden sm:block"></div>
+      <div class="relative mx-auto max-w-4xl">
+        <div class="absolute left-[calc(16.67%-1px)] right-[calc(16.67%-1px)] top-8 hidden h-0.5 border-t-2 border-dashed border-stone-200 dark:border-stone-700 sm:block"></div>
         <div class="grid gap-12 sm:grid-cols-3 sm:gap-8">
           <div class="text-center">
-            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-white text-xl font-bold">1</div>
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">记录</h3>
-            <p class="mt-2 text-sm text-stone-500">用事件日志记录你的每一天，像写日记一样自然</p>
+            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-xl font-bold text-white">1</div>
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">记录事实</h3>
+            <p class="mt-2 text-sm text-stone-500">把日记、任务、操作和信号沉淀为可追溯的事件流，先把真实历史抓在手里。</p>
           </div>
           <div class="text-center">
-            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-white text-xl font-bold">2</div>
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">反思</h3>
-            <p class="mt-2 text-sm text-stone-500">AI 帮你发现生活中的模式和洞察，看见看不见的自己</p>
+            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-xl font-bold text-white">2</div>
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">调度 Agent</h3>
+            <p class="mt-2 text-sm text-stone-500">让 Agent 在你的工作空间和设备里理解上下文、执行动作，而不是只停留在聊天窗口。</p>
           </div>
           <div class="text-center">
-            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-white text-xl font-bold">3</div>
-            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">成长</h3>
-            <p class="mt-2 text-sm text-stone-500">基于数据和反思，做出更好的决策，持续进化</p>
+            <div class="relative mx-auto mb-6 flex h-16 w-16 items-center justify-center rounded-full bg-brand text-xl font-bold text-white">3</div>
+            <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">扩展身体</h3>
+            <p class="mt-2 text-sm text-stone-500">逐步把桌面、手机和服务器连接成一个持续演化的外心网络，让能力跨设备生长。</p>
           </div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- Privacy / Trust -->
-  <section class="py-24 bg-stone-100/50 dark:bg-stone-900/50">
+  <section class="bg-stone-100/50 py-24 dark:bg-stone-900/50">
     <div class="section-container">
-      <div class="mx-auto max-w-2xl text-center mb-16">
-        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">你的数据，只属于你</h2>
-        <p class="mt-4 text-stone-500">ExoMind 采用本地优先架构，所有数据存储在你的设备上。没有云端服务器，没有数据收集，没有隐私担忧。</p>
+      <div class="mx-auto mb-16 max-w-2xl text-center">
+        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">数据、Agent、工作流都留在你手里</h2>
+        <p class="mt-4 text-stone-500">这不是“更懂你的 SaaS”。这是把记忆、行动和协作基础设施从平台手中收回来，重新建立属于你的认知主权。</p>
       </div>
       <div class="grid gap-6 sm:grid-cols-3">
         <div class="rounded-2xl border border-stone-200 bg-white p-8 text-center dark:border-stone-800 dark:bg-stone-900">
           <div class="text-3xl font-bold text-brand">100%</div>
-          <div class="mt-2 text-sm text-stone-500">本地存储</div>
+          <div class="mt-2 text-sm text-stone-500">本地优先</div>
         </div>
         <div class="rounded-2xl border border-stone-200 bg-white p-8 text-center dark:border-stone-800 dark:bg-stone-900">
           <div class="text-3xl font-bold text-brand">零</div>
-          <div class="mt-2 text-sm text-stone-500">云端依赖</div>
+          <div class="mt-2 text-sm text-stone-500">平台抽租</div>
         </div>
         <div class="rounded-2xl border border-stone-200 bg-white p-8 text-center dark:border-stone-800 dark:bg-stone-900">
-          <div class="text-3xl font-bold text-brand">完全</div>
-          <div class="mt-2 text-sm text-stone-500">开源透明</div>
+          <div class="text-3xl font-bold text-brand">公开</div>
+          <div class="mt-2 text-sm text-stone-500">治理与更新</div>
         </div>
       </div>
     </div>
   </section>
 
-  <!-- CTA -->
   <section class="py-24">
     <div class="section-container">
       <div class="mx-auto max-w-2xl text-center">
-        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">准备好掌控你的生命过程了吗？</h2>
-        <p class="mt-4 text-stone-500">免费下载，本地运行，数据完全属于你。</p>
+        <h2 class="heading-display text-3xl text-stone-900 sm:text-4xl dark:text-stone-50">先读公开文档，再下载真实构建</h2>
+        <p class="mt-4 text-stone-500">本轮官网只展示当前公开可用的平台与入口，不再把未准备好的产物包装成“已经可用”的正式下载。</p>
         <div class="mt-10 flex flex-col items-center justify-center gap-4 sm:flex-row">
-          <a href="/download" class="btn-primary px-8 py-3.5 text-base">免费下载</a>
-          <a href="https://github.com/exomind-team/exomind" target="_blank" rel="noopener" class="btn-secondary px-8 py-3.5 text-base">
-            <svg class="mr-2 h-5 w-5" viewBox="0 0 24 24" fill="currentColor"><path d="M12 0c-6.626 0-12 5.373-12 12 0 5.302 3.438 9.8 8.207 11.387.599.111.793-.261.793-.577v-2.234c-3.338.726-4.033-1.416-4.033-1.416-.546-1.387-1.333-1.756-1.333-1.756-1.089-.745.083-.729.083-.729 1.205.084 1.839 1.237 1.839 1.237 1.07 1.834 2.807 1.304 3.492.997.107-.775.418-1.305.762-1.604-2.665-.305-5.467-1.334-5.467-5.931 0-1.311.469-2.381 1.236-3.221-.124-.303-.535-1.524.117-3.176 0 0 1.008-.322 3.301 1.23.957-.266 1.983-.399 3.003-.404 1.02.005 2.047.138 3.006.404 2.291-1.552 3.297-1.23 3.297-1.23.653 1.653.242 2.874.118 3.176.77.84 1.235 1.911 1.235 3.221 0 4.609-2.807 5.624-5.479 5.921.43.372.823 1.102.823 2.222v3.293c0 .319.192.694.801.576 4.765-1.589 8.199-6.086 8.199-11.386 0-6.627-5.373-12-12-12z"/></svg>
-            GitHub
-          </a>
+          <a href="/download" class="btn-primary px-8 py-3.5 text-base">查看下载</a>
+          <a href="/docs" class="btn-secondary px-8 py-3.5 text-base">查看公开文档</a>
         </div>
       </div>
     </div>

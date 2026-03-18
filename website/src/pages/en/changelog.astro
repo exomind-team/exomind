@@ -6,30 +6,30 @@ const t = useTranslations('en');
 
 const changelog = [
   {
+    version: 'v0.3.6',
+    date: 'Mar 18, 2026',
+    changes: [
+      { type: 'Feature', text: 'Refreshed the homepage, downloads, docs, and changelog for public-facing launch messaging' },
+      { type: 'Improvement', text: 'Unified public entry points around on-site docs, downloads, and release history instead of private GitHub links' },
+      { type: 'Improvement', text: 'Download page now promotes only real downloadable platforms and clearly marks the rest as rollout status' },
+    ],
+  },
+  {
+    version: 'v0.3.5',
+    date: 'Mar 6, 2026',
+    changes: [
+      { type: 'Feature', text: 'Release pipeline now emits website-compatible latest metadata' },
+      { type: 'Fix', text: 'Website download API hardened around real installer assets and release metadata' },
+      { type: 'Improvement', text: 'Self-hosted Windows and Android release flow became more stable' },
+    ],
+  },
+  {
     version: 'v0.3.2',
     date: 'Feb 22, 2026',
     changes: [
       { type: 'Feature', text: 'Desktop adaptation' },
       { type: 'Feature', text: 'Command palette' },
       { type: 'Fix', text: 'Sync scroll' },
-    ],
-  },
-  {
-    version: 'v0.3.1',
-    date: 'Feb 15, 2026',
-    changes: [
-      { type: 'Feature', text: 'Event log UI redesign' },
-      { type: 'Feature', text: 'Time block timer' },
-      { type: 'Improvement', text: 'Performance' },
-    ],
-  },
-  {
-    version: 'v0.3.0',
-    date: 'Feb 1, 2026',
-    changes: [
-      { type: 'Feature', text: 'AI agent framework' },
-      { type: 'Feature', text: 'Local storage engine' },
-      { type: 'Feature', text: 'Cross-platform builds' },
     ],
   },
 ];

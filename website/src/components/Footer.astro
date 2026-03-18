@@ -17,7 +17,7 @@ const t = useTranslations(lang);
           <span class="text-lg font-semibold tracking-tight">ExoMind</span>
         </a>
         <p class="mt-4 text-sm leading-relaxed text-stone-500">
-          {lang === 'zh' ? '你的生命成长助手' : 'Your Life Growth Companion'}
+          {lang === 'zh' ? '本地优先的个人 AI 外心系统' : 'A local-first personal AI exomind system'}
         </p>
       </div>
 
@@ -44,7 +44,8 @@ const t = useTranslations(lang);
       <div>
         <h3 class="text-sm font-semibold text-stone-900 dark:text-stone-50">{t('footer.community')}</h3>
         <ul class="mt-4 space-y-3">
-          <li><a href="https://github.com/exomind-team/exomind" target="_blank" rel="noopener" class="text-sm text-stone-500 hover:text-brand">{t('footer.github')}</a></li>
+          <li><a href={getLocalizedPath('/docs', lang)} class="text-sm text-stone-500 hover:text-brand">{t('footer.github')}</a></li>
+          <li><a href={getLocalizedPath('/changelog', lang)} class="text-sm text-stone-500 hover:text-brand">{t('footer.release_notes')}</a></li>
         </ul>
       </div>
     </div>

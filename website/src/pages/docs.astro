@@ -3,10 +3,45 @@ import BaseLayout from '../layouts/BaseLayout.astro';
 import { useTranslations } from '../i18n';
 
 const t = useTranslations('zh');
+
+const guideCards = [
+  {
+    title: '项目总览',
+    desc: 'ExoMind 是本地优先、事件驱动的个人 AI 外心系统，目标不是替你“消费 AI”，而是把记忆、Agent 和工作流重新组织到你自己的设备上。',
+    points: ['本地优先存储与同步', '事件日志作为长期记忆底座', 'Agent 在工作空间里运行'],
+  },
+  {
+    title: '治理与所有制',
+    desc: '治理 PR 这次补的是项目如何决策、资源如何分配、数据和代码分别归谁。对外页面先把这些公开必需信息讲清楚。',
+    points: ['认知主权归个人', '集体资源按贡献协作', '治理路线与角色边界公开'],
+  },
+  {
+    title: '参与方式',
+    desc: '本轮先开放“理解项目”和“跟踪版本”的入口。完整文档站还会继续整理，但已经不再是空白占位页。',
+    points: ['先读定位与路线', '再看当前可用版本', '按治理方式逐步参与'],
+  },
+];
+
+const publicEntries = [
+  {
+    title: '下载页',
+    href: '/download',
+    desc: '查看当前真实可下载的平台与状态，不再把未准备好的产物包装成正式下载。',
+  },
+  {
+    title: '更新日志',
+    href: '/changelog',
+    desc: '公开记录最近版本、发布能力和对外里程碑。',
+  },
+  {
+    title: '关于 ExoMind',
+    href: '/about',
+    desc: '快速理解项目愿景、命名方式和为什么要做这件事。',
+  },
+];
 ---
 
 <BaseLayout title={t('docs.title')}>
-  {/* Hero */}
   <section class="relative overflow-hidden pt-32 pb-16">
     <div class="section-container relative z-10">
       <div class="mx-auto max-w-3xl text-center">
@@ -23,35 +58,54 @@ const t = useTranslations('zh');
     </div>
   </section>
 
-  {/* Coming Soon */}
-  <section class="pb-24">
+  <section class="pb-16">
     <div class="section-container">
-      <div class="mx-auto max-w-2xl text-center">
-        {/* Icon */}
-        <div class="mx-auto flex h-24 w-24 items-center justify-center rounded-full bg-brand-50 dark:bg-brand-900/20">
-          <svg class="h-12 w-12 text-brand" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="1.5">
-            <path stroke-linecap="round" stroke-linejoin="round" d="M12 6.042A8.967 8.967 0 0 0 6 3.75c-1.052 0-2.062.18-3 .512v14.25A8.987 8.987 0 0 1 6 18c2.305 0 4.408.867 6 2.292m0-14.25a8.966 8.966 0 0 1 6-2.292c1.052 0 2.062.18 3 .512v14.25A8.987 8.987 0 0 0 18 18a8.967 8.967 0 0 0-6 2.292m0-14.25v14.25" />
-          </svg>
-        </div>
+      <div class="grid gap-6 lg:grid-cols-3">
+        {guideCards.map((card) => (
+          <article class="card p-8">
+            <h2 class="text-xl font-semibold text-stone-900 dark:text-stone-50">{card.title}</h2>
+            <p class="mt-3 text-sm leading-relaxed text-stone-500">{card.desc}</p>
+            <ul class="mt-5 space-y-2 text-sm text-stone-600 dark:text-stone-300">
+              {card.points.map((point) => (
+                <li class="flex items-start gap-2">
+                  <span class="mt-1 inline-block h-1.5 w-1.5 rounded-full bg-brand"></span>
+                  <span>{point}</span>
+                </li>
+              ))}
+            </ul>
+          </article>
+        ))}
+      </div>
+    </div>
+  </section>
 
-        {/* Message */}
-        <p class="mt-8 text-lg text-stone-500">
-          {t('docs.coming_soon')}
+  <section class="pb-16">
+    <div class="section-container">
+      <div class="card p-8 md:p-10">
+        <p class="text-sm font-medium uppercase tracking-[0.22em] text-brand">公开入口</p>
+        <h2 class="heading-display mt-3 text-3xl leading-tight text-stone-900 sm:text-4xl dark:text-stone-50">
+          从这里进入当前公开可读的内容
+        </h2>
+        <p class="mt-4 max-w-3xl text-base leading-relaxed text-stone-500">
+          这不是“稍后补”的占位文档页，而是本轮对外宣传的公开入口层。完整文档站后续会继续展开，但你现在已经可以从这里理解项目、跟踪版本、查看下载状态。
         </p>
 
-        {/* GitHub link */}
-        <a
-          href="https://github.com/exomind-team/exomind"
-          target="_blank"
-          rel="noopener"
-          class="btn-secondary mt-8 inline-flex items-center gap-2"
-        >
-          <svg class="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
-            <path d="M15 22v-4a4.8 4.8 0 0 0-1-3.5c3 0 6-2 6-5.5.08-1.25-.27-2.48-1-3.5.28-1.15.28-2.35 0-3.5 0 0-1 0-3 1.5-2.64-.5-5.36-.5-8 0C6 2 5 2 5 2c-.3 1.15-.3 2.35 0 3.5A5.403 5.403 0 0 0 4 9c0 3.5 3 5.5 6 5.5-.39.49-.68 1.05-.85 1.65-.17.6-.22 1.23-.15 1.85v4" />
-            <path d="M9 18c-4.51 2-5-2-7-2" />
-          </svg>
-          在 GitHub 上查看
-        </a>
+        <div class="mt-8 grid gap-4 md:grid-cols-3">
+          {publicEntries.map((entry) => (
+            <a href={entry.href} class="rounded-2xl border border-stone-200 bg-stone-50 p-5 transition-colors hover:border-brand/40 hover:bg-white dark:border-stone-800 dark:bg-stone-950 dark:hover:bg-stone-900">
+              <p class="text-base font-semibold text-stone-900 dark:text-stone-50">{entry.title}</p>
+              <p class="mt-2 text-sm leading-relaxed text-stone-500">{entry.desc}</p>
+            </a>
+          ))}
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="pb-24">
+    <div class="section-container">
+      <div class="mx-auto max-w-3xl rounded-2xl border border-dashed border-stone-300 px-6 py-8 text-center text-sm leading-relaxed text-stone-500 dark:border-stone-700">
+        完整文档站还会继续整理，但本页已经先把公开必需的说明、治理关键词和版本入口补齐，不再保留“敬请期待”的空白状态。
       </div>
     </div>
   </section>

@@ -6,30 +6,30 @@ const t = useTranslations('zh');
 
 const changelog = [
   {
+    version: 'v0.3.6',
+    date: '2026-03-18',
+    changes: [
+      { type: '新功能', text: '官网首页、下载页、文档页与更新日志刷新为可公开宣传版本' },
+      { type: '优化', text: '公开入口统一为站内文档、下载与版本记录，不再依赖私有 GitHub 链接' },
+      { type: '优化', text: '下载页只展示真实可下载平台，未就绪平台明确标注发布时间状态' },
+    ],
+  },
+  {
+    version: 'v0.3.5',
+    date: '2026-03-06',
+    changes: [
+      { type: '新功能', text: '发布链路产出官网可识别的 latest 元数据' },
+      { type: '修复', text: '官网下载 API 增强对真实安装包与发布元数据的兼容' },
+      { type: '优化', text: '自托管发布流程对 Windows 与 Android 构建链路进一步稳定化' },
+    ],
+  },
+  {
     version: 'v0.3.2',
     date: '2026-02-22',
     changes: [
       { type: '新功能', text: '桌面端更新适配' },
       { type: '新功能', text: '命令面板首期落地' },
       { type: '修复', text: '同步命令面板滚动' },
-    ],
-  },
-  {
-    version: 'v0.3.1',
-    date: '2026-02-15',
-    changes: [
-      { type: '新功能', text: '事件日志 UI 重构' },
-      { type: '新功能', text: '时间块计时器' },
-      { type: '优化', text: '性能优化' },
-    ],
-  },
-  {
-    version: 'v0.3.0',
-    date: '2026-02-01',
-    changes: [
-      { type: '新功能', text: 'AI 智能体框架' },
-      { type: '新功能', text: '本地存储引擎' },
-      { type: '新功能', text: '全平台构建支持' },
     ],
   },
 ];
