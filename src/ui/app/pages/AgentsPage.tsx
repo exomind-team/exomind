@@ -1533,6 +1533,10 @@ export function AgentsPage() {
               openPtyTerminal(session.pty_id, session.source_host_id);
             }
           }}
+          onStopSession={(session) => {
+            if (!session.pty_id) return;
+            void handleStopPtyAgent(session.pty_id, session.source_host_id);
+          }}
         />
       );
     }

@@ -286,6 +286,37 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
           json: async () => [],
         } as Response;
       }
+      if (url.includes('/pty/sessions?agent_type=claude')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [],
+        } as Response;
+      }
+      if (url.includes('/pty/sessions?agent_type=codex')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => [
+            {
+              agent_type: 'codex',
+              session_id: '019d0011-aaaa-bbbb-cccc-1234567890ab',
+              project_path: 'D:/project/exomind',
+              last_modified: '2026-03-18T02:20:32.696Z',
+            },
+          ],
+        } as Response;
+      }
+      if (url.endsWith('/pty/resume')) {
+        return {
+          ok: true,
+          status: 201,
+          json: async () => ({
+            id: 'pty-resume-523',
+            name: 'Codex-019d0011',
+          }),
+        } as Response;
+      }
       if (url.endsWith('/pty')) {
         return {
           ok: true,
@@ -428,6 +459,64 @@ describe('agents page session actions issue-523（会话动作接线）', () => 
     });
     await waitFor(() => {
       expect(screen.queryByTestId('agent-rightpanel-pty-terminal')).not.toBeInTheDocument();
+    });
+  });
+
+  it('stops PTY terminal agent from session list card（会话列表卡片可真正停止 Terminal Agent）', async () => {
+    sessionStreamState.sessions = [
+      buildSession({
+        id: 'session-card-stop',
+        interaction_mode: 'terminal',
+        pty_id: 'pty-523',
+        source_host_id: 'runtime-host-523',
+      }),
+    ];
+
+    render(<AgentsPage />);
+    fireEvent.click(await screen.findByTestId('agent-view-toggle-sessions'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('session-card-stop-session-card-stop')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('session-card-stop-session-card-stop'));
+
+    await waitFor(() => {
+      expect(runtimeClientMocks.stopPtyAgent).toHaveBeenCalledWith(
+        expect.objectContaining({ host: '127.0.0.1', port: 1919 }),
+        'pty-523',
+      );
+    });
+  });
+
+  it('opens PTY spawn dialog and resumes codex history（Agents 页可恢复 Codex 历史会话）', async () => {
+    render(<AgentsPage />);
+
+    fireEvent.click(await screen.findByTestId('pty-spawn-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-agent-type')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('pty-agent-type'), { target: { value: 'codex' } });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('pty-history-session-019d0011-aaaa-bbbb-cccc-1234567890ab'));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith(
+        'http://127.0.0.1:1919/pty/resume',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            agent_type: 'codex',
+            session_id: '019d0011-aaaa-bbbb-cccc-1234567890ab',
+          }),
+        }),
+      );
     });
   });
 });
