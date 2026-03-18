@@ -437,6 +437,30 @@ describe('#418 multi-task association', () => {
     }))
   })
 
+  it('addTaskToBlock rejects tasks blocked by hard dependencies', async () => {
+    const tasks = new Map([
+      ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],
+      ['task-2', makeTask({ id: 'task-2', status: 'pending', dependsOn: [{ taskId: 'dep-1', type: 'hard' }] })],
+    ])
+    const activeBlock = makeActiveBlock({
+      startId: 'block-live',
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    })
+    const taskSvc = createMockTaskService(tasks)
+    ;(taskSvc.checkDependenciesMet as ReturnType<typeof vi.fn>).mockResolvedValue({
+      met: false,
+      blocking: [{ taskId: 'dep-1', type: 'hard', status: 'pending' }],
+    })
+    const tbSvc = createMockTBService(activeBlock)
+    const svc = new TaskTimerServiceImpl(taskSvc, tbSvc)
+
+    await expect(svc.addTaskToBlock('task-2')).rejects.toThrow(
+      'Cannot associate task to active block: hard dependencies not met [dep-1]',
+    )
+    expect(tbSvc.updateActiveBlock).not.toHaveBeenCalled()
+  })
+
   it('removeTaskFromBlock removes task with disassociation log', async () => {
     const tasks = new Map([
       ['task-1', makeTask({ id: 'task-1', status: 'in_progress' })],

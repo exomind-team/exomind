@@ -155,11 +155,51 @@ describe('buildTasksTodayViewModel（任务页 today 时间块视图模型）', 
 
     expect(model.timelineSections).toHaveLength(1);
     expect(model.timelineSections[0].items[0]).toMatchObject({
-      taskId: 'task-1',
+      taskIds: ['task-1'],
+      linkedTasks: [{ taskId: 'task-1', title: '联调当下页读路径' }],
       title: '联调当下页读路径',
       tagLabel: '进行中',
       timeLabel: '09:00 - 进行中',
       meta: '预计 45min',
+    });
+  });
+
+  it('preserves all linked task ids for multi-task active block（多任务活跃时间块不应压扁为单个 taskId）', () => {
+    const model = buildTasksTodayViewModel({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          title: '联调专注页',
+          status: 'in_progress',
+          estimatedMinutes: 45,
+        }),
+        makeTask({
+          id: 'task-2',
+          title: '补充时间块回归',
+          status: 'pending',
+          estimatedMinutes: 30,
+        }),
+      ],
+      blocks: [],
+      now: today,
+      activeBlock: makeActiveBlock({
+        startId: 'active-multi',
+        name: '多任务专注块',
+        startTime: morning,
+        taskIds: ['task-1', 'task-2'],
+      }),
+    });
+
+    expect(model.timelineSections).toHaveLength(1);
+    expect(model.timelineSections[0].items[0]).toMatchObject({
+      taskIds: ['task-1', 'task-2'],
+      linkedTasks: [
+        { taskId: 'task-1', title: '联调专注页' },
+        { taskId: 'task-2', title: '补充时间块回归' },
+      ],
+      title: '联调专注页 / 补充时间块回归',
+      tagLabel: '多任务',
+      meta: '2 个关联任务',
     });
   });
 });

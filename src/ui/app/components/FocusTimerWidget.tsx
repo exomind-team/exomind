@@ -33,7 +33,7 @@ import { log } from '@/lib/logger';
 import { getTaskService, getTaskTimerService, getTimeBlockService, type TimerConfig, type TimerMode } from '@/lib/services';
 import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
-import type { ActiveBlockData } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { FocusBgmPanel } from '@/ui/app/components/settings/settings-custom-items';
 
@@ -103,9 +103,7 @@ function resolveExpectedOptionIndex(mode: TimerMode, minutes: number): number {
 }
 
 function resolveActiveTaskIds(block: ActiveBlockData | null): string[] {
-  if (!block) return [];
-  if (block.taskIds?.length) return block.taskIds;
-  return block.taskId ? [block.taskId] : [];
+  return resolveActiveBlockTaskIds(block);
 }
 
 function buildTaskStatusChoices(

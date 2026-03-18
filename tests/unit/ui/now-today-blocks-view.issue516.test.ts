@@ -116,4 +116,36 @@ describe('buildNowTodayBlocksView（今日 Tab 时间块视图模型）', () => 
       { taskId: 'task-b', title: '任务乙', outcome: undefined },
     ])
   })
+
+  it('replays linked tasks from association log when taskIds are absent（缺少 taskIds 时回放关联日志）', async () => {
+    const module = await import('@/ui/app/pages/now-today-blocks-view')
+    const view = module.buildNowTodayBlocksView({
+      now: new Date('2026-03-18T20:00:00+08:00'),
+      blocks: [
+        createBlock({
+          id: 'block-log',
+          startId: 'block-log',
+          endId: 'end-log',
+          name: '日志回放块',
+          startTime: new Date('2026-03-18T14:00:00+08:00').getTime(),
+          endTime: new Date('2026-03-18T15:00:00+08:00').getTime(),
+          taskIds: [],
+          taskAssociationLog: [
+            { blockId: 'block-log', taskId: 'task-a', action: 'associated', timestamp: 1, source: 'block_start' },
+            { blockId: 'block-log', taskId: 'task-b', action: 'associated', timestamp: 2, source: 'manual' },
+          ],
+        }),
+      ],
+      tasksById: new Map([
+        ['task-a', createTask({ id: 'task-a', title: '任务甲', status: 'completed' })],
+        ['task-b', createTask({ id: 'task-b', title: '任务乙', status: 'in_progress' })],
+      ]),
+    })
+
+    expect(view.items).toHaveLength(1)
+    expect(view.items[0]?.linkedTasks).toEqual([
+      { taskId: 'task-a', title: '任务甲', outcome: undefined },
+      { taskId: 'task-b', title: '任务乙', outcome: undefined },
+    ])
+  })
 })

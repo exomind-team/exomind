@@ -113,6 +113,12 @@ export class TaskTimerServiceImpl implements TaskTimerService {
 
     const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
     if (existingTaskIds.includes(normalizedTaskId)) return
+    const dependencyCheck = await this.taskSvc.checkDependenciesMet(normalizedTaskId)
+    const hardBlocking = dependencyCheck.blocking.filter((dependency) => dependency.type === 'hard')
+    if (hardBlocking.length > 0) {
+      const blockingIds = hardBlocking.map((dependency) => dependency.taskId).join(', ')
+      throw new Error(`Cannot associate task to active block: hard dependencies not met [${blockingIds}]`)
+    }
 
     const nextStatus = this.resolveAutoProgressStatus(task.status)
     if (nextStatus) {

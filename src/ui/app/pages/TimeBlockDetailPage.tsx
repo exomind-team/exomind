@@ -1,13 +1,12 @@
 import { Link, useParams } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
-import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 import { buildTimeBlockDetailView } from './timeblock-detail-view';
 
 function resolveActiveTaskIds(block: ActiveBlockData): string[] {
-  if (block.taskIds?.length) return block.taskIds;
-  return block.taskId ? [block.taskId] : [];
+  return resolveActiveBlockTaskIds(block);
 }
 
 function buildRunningTimeBlock(block: ActiveBlockData, now: number): TimeBlock {
@@ -47,7 +46,7 @@ export function TimeBlockDetailPage() {
         matchedBlock = buildRunningTimeBlock(activeBlock, Date.now());
       }
 
-      const taskIds = matchedBlock?.taskIds ?? [];
+      const taskIds = matchedBlock ? resolveActiveBlockTaskIds(matchedBlock) : [];
       const tasks = await Promise.all(taskIds.map((taskId) => taskService.getTask(taskId)));
 
       if (disposed) return;

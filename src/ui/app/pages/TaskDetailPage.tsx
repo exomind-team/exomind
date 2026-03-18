@@ -6,7 +6,7 @@ import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/
 import { getEventLogService, getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { isTerminalTaskStatus } from '@/lib/types/task';
 import type { TaskNode } from '@/lib/types/task';
-import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { getUseMockDataEnabled } from '@/config/mock-data';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
@@ -298,8 +298,7 @@ function buildVirtualTaskFromBlock(block: TimeBlock): TaskNode {
 
 function isTaskLinkedToActiveBlock(block: ActiveBlockData | null, taskId: string | undefined): boolean {
   if (!block || !taskId) return false;
-  const taskIds = block.taskIds ?? [];
-  return taskIds.includes(taskId) || block.taskId === taskId;
+  return resolveActiveBlockTaskIds(block).includes(taskId);
 }
 
 function DetailActionsCard({
@@ -1771,7 +1770,7 @@ export function TaskDetailPage() {
     if (!taskId) { console.error('[TaskDetail] handleStartTimer: no taskId'); return; }
     console.log('[TaskDetail] handleStartTimer', { taskId, timerConfig, timerMode, countdownMinutes });
     void getTaskTimerService().startBlockForTask(taskId, timerConfig).then((block) => {
-      console.log('[TaskDetail] startBlockForTask OK', block ? { startId: block.startId, mode: block.mode, phase: block.phase, taskId: block.taskId, paused: block.paused, elapsed: block.elapsed } : 'NULL');
+      console.log('[TaskDetail] startBlockForTask OK', block ? { startId: block.startId, mode: block.mode, phase: block.phase, taskIds: resolveActiveBlockTaskIds(block), paused: block.paused, elapsed: block.elapsed } : 'NULL');
       void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
     }).catch((err) => {
       console.error('[TaskDetail] startBlockForTask FAILED', err);

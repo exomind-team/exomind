@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Link } from '@tanstack/react-router';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
-import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 import { buildNowTodayBlocksView } from '@/ui/app/pages/now-today-blocks-view';
 
@@ -11,8 +11,7 @@ function isToday(timestamp: number, now: Date): boolean {
 }
 
 function resolveActiveTaskIds(block: ActiveBlockData): string[] {
-  if (block.taskIds?.length) return block.taskIds;
-  return block.taskId ? [block.taskId] : [];
+  return resolveActiveBlockTaskIds(block);
 }
 
 function buildRunningTimeBlock(block: ActiveBlockData, now: number): TimeBlock {
@@ -54,7 +53,7 @@ export function NowTodayTab() {
       }
 
       const taskIds = Array.from(new Set(
-        nextBlocks.flatMap((block) => block.taskIds ?? []).filter(Boolean),
+        nextBlocks.flatMap((block) => resolveActiveBlockTaskIds(block)).filter(Boolean),
       ));
       const tasks = await Promise.all(taskIds.map((taskId) => taskService.getTask(taskId)));
 

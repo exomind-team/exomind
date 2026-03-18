@@ -1,4 +1,4 @@
-import type { TimeBlock } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
 export interface TimeBlockDetailSummary {
@@ -57,6 +57,7 @@ function formatDuration(startTime: number, endTime: number): string {
 
 export function buildTimeBlockDetailView(input: BuildTimeBlockDetailViewInput): TimeBlockDetailView {
   const { block, tasksById } = input;
+  const taskIds = resolveActiveBlockTaskIds(block);
 
   return {
     summary: {
@@ -66,7 +67,7 @@ export function buildTimeBlockDetailView(input: BuildTimeBlockDetailViewInput): 
       durationLabel: formatDuration(block.startTime, block.endTime),
       feedback: block.note,
     },
-    linkedTasks: (block.taskIds ?? []).map((taskId) => ({
+    linkedTasks: taskIds.map((taskId) => ({
       taskId,
       title: tasksById.get(taskId)?.title ?? taskId,
       outcome: block.taskStatusOutcomes?.[taskId],

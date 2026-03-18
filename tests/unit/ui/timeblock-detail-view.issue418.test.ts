@@ -102,4 +102,39 @@ describe('buildTimeBlockDetailView（时间块详情视图模型）', () => {
       outcome: 'completed',
     })
   })
+
+  it('replays linked tasks from association log when taskIds are empty（taskIds 为空时从关联日志恢复多任务）', async () => {
+    const module = await import('@/ui/app/pages/timeblock-detail-view')
+    const view = module.buildTimeBlockDetailView({
+      block: {
+        ...createBlock(),
+        taskIds: [],
+        taskAssociationLog: [
+          {
+            blockId: 'block-1',
+            taskId: 'task-1',
+            action: 'associated',
+            timestamp: Date.UTC(2026, 2, 18, 9, 0, 0),
+            source: 'block_start',
+          },
+          {
+            blockId: 'block-1',
+            taskId: 'task-2',
+            action: 'associated',
+            timestamp: Date.UTC(2026, 2, 18, 9, 10, 0),
+            source: 'manual',
+          },
+        ],
+      },
+      tasksById: new Map([
+        ['task-1', createTask({ id: 'task-1', title: '任务一', status: 'completed' })],
+        ['task-2', createTask({ id: 'task-2', title: '任务二', status: 'in_progress' })],
+      ]),
+    })
+
+    expect(view.linkedTasks).toEqual([
+      { taskId: 'task-1', title: '任务一', outcome: 'completed' },
+      { taskId: 'task-2', title: '任务二', outcome: 'continue' },
+    ])
+  })
 })

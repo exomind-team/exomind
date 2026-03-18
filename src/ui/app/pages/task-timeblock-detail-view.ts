@@ -1,5 +1,6 @@
 ﻿import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
+import { resolveActiveBlockTaskIds } from '@/lib/types/event';
 
 export type TimeblockBadgeTone = 'neutral' | 'success' | 'warning' | 'danger';
 
@@ -132,6 +133,10 @@ function formatMinutes(minutes: number): string {
   return `${remain}m`;
 }
 
+function isTaskLinkedToActiveBlock(activeBlock: ActiveBlockData | null | undefined, taskId: string): boolean {
+  return resolveActiveBlockTaskIds(activeBlock).includes(taskId);
+}
+
 function resolveBlockForTask(
   task: TaskNode,
   blocks: TimeBlock[],
@@ -150,12 +155,7 @@ function resolveBlockForTask(
   const latestLinked = sortedLinkedBlocks[0];
   if (latestLinked) return latestLinked;
 
-  const activeTaskIds = activeBlock?.taskIds ?? [];
-  const isLinkedActiveBlock = activeBlock
-    ? activeTaskIds.includes(task.id) || activeBlock.taskId === task.id
-    : false;
-
-  if (activeBlock && isLinkedActiveBlock) {
+  if (activeBlock && isTaskLinkedToActiveBlock(activeBlock, task.id)) {
     return {
       id: activeBlock.startId,
       startId: activeBlock.startId,
@@ -415,7 +415,7 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     startTime: linked.startTime,
     endTime: linked.endTime,
   }));
-  if (input.activeBlock && input.activeBlock.taskId === input.task.id) {
+  if (input.activeBlock && isTaskLinkedToActiveBlock(input.activeBlock, input.task.id)) {
     timelineRanges.push({ startTime: input.activeBlock.startTime, endTime: nowTs });
   }
 
@@ -447,12 +447,7 @@ export function buildTaskTimeblockDetailViewModel(input: BuildTaskTimeblockDetai
     isActive: false,
   }));
 
-  const activeTaskIds = input.activeBlock?.taskIds ?? [];
-  const isLinkedActiveBlock = input.activeBlock
-    ? activeTaskIds.includes(input.task.id) || input.activeBlock.taskId === input.task.id
-    : false;
-
-  if (input.activeBlock && isLinkedActiveBlock) {
+  if (input.activeBlock && isTaskLinkedToActiveBlock(input.activeBlock, input.task.id)) {
     const ab = input.activeBlock;
     linkedBlocks.unshift({
       startId: ab.startId,

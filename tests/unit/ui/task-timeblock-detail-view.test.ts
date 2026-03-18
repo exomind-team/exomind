@@ -281,16 +281,13 @@ describe('buildTaskTimeblockDetailViewModel（时间块详情视图模型）', (
     const model = buildTaskTimeblockDetailViewModel({
       task,
       blocks: [doneBlock],
-      activeBlock: {
+      activeBlock: makeActiveBlock({
         startId: 'block-active',
         name: '当前块',
         startTime: start + 60 * 60_000,
-        taskId: 'task-active',
-        mode: 'countup',
-        phase: 'focus',
-        paused: false,
+        taskIds: ['task-active'],
         elapsed: 0,
-      },
+      }),
       reviewMarkdown: '',
       useMockData: true,
       now,
@@ -348,5 +345,42 @@ describe('buildTaskTimeblockDetailViewModel（时间块详情视图模型）', (
     expect(model.linkedBlocks).toHaveLength(1);
     expect(model.linkedBlocks[0].isActive).toBe(true);
     expect(model.linkedBlocks[0].name).toBe('进行中的多任务块');
+  });
+
+  it('includes active-block event range when linked through taskIds only（仅通过 taskIds 关联时也应纳入活跃时间线）', () => {
+    const task = makeTask({
+      id: 'task-active',
+      title: '活跃时间线回归',
+      status: 'in_progress',
+      estimatedMinutes: 30,
+    });
+
+    const model = buildTaskTimeblockDetailViewModel({
+      task,
+      blocks: [],
+      activeBlock: makeActiveBlock({
+        startId: 'active-block-timeline',
+        name: '进行中的多任务块',
+        startTime: start,
+        taskIds: ['task-active', 'task-sidecar'],
+      }),
+      now: new Date(end),
+      reviewMarkdown: '',
+      useMockData: false,
+      eventLogs: [
+        {
+          id: 'ev-1',
+          createdAt: new Date(start + 5 * 60_000).toISOString(),
+          content: '开始多任务时间块',
+          type: 'block_start',
+        },
+      ],
+    });
+
+    expect(model.timeline.items).toHaveLength(1);
+    expect(model.timeline.items[0]).toMatchObject({
+      title: '开始时间块',
+      description: '开始多任务时间块',
+    });
   });
 });

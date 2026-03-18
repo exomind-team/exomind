@@ -1,18 +1,28 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
-import type { ActiveBlockData } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
-function resolveActiveTaskIds(block: ActiveBlockData | null): string[] {
-  if (!block) return [];
-  if (block.taskIds?.length) return block.taskIds;
-  return block.taskId ? [block.taskId] : [];
+function hasHardBlockingDependency(
+  dependencyCheck: { blocking: Array<{ type: 'soft' | 'hard' }> },
+): boolean {
+  return dependencyCheck.blocking.some((dependency) => dependency.type === 'hard');
+}
+
+function formatAssociationError(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes('hard dependencies not met')) {
+    return '所选任务存在未完成的硬依赖，当前不能关联。';
+  }
+  return '关联任务失败，请稍后重试。';
 }
 
 export function BlockTaskAssociationList() {
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [tasksById, setTasksById] = useState<Map<string, TaskNode>>(new Map());
+  const [hardBlockedTaskIds, setHardBlockedTaskIds] = useState<Set<string>>(new Set());
   const [selectedTaskId, setSelectedTaskId] = useState('');
+  const [associationError, setAssociationError] = useState<string | null>(null);
   const loadRequestIdRef = useRef(0);
 
   useEffect(() => {
@@ -27,18 +37,44 @@ export function BlockTaskAssociationList() {
         timeBlockService.loadActiveBlock(),
         taskService.listTasks(true),
       ]);
+      const dependencyChecks = await Promise.all(tasks.map(async (task) => {
+        try {
+          const result = await taskService.checkDependenciesMet(task.id);
+          return [task.id, hasHardBlockingDependency(result)] as const;
+        } catch {
+          return [task.id, true] as const;
+        }
+      }));
       if (disposed || requestId !== loadRequestIdRef.current) return;
       setActiveBlock(nextBlock);
       setTasksById(new Map(tasks.map((task) => [task.id, task])));
+      setHardBlockedTaskIds(new Set(
+        dependencyChecks
+          .filter(([, isBlocked]) => isBlocked)
+          .map(([taskId]) => taskId),
+      ));
     };
 
     const loadTasksOnly = async (nextBlock: ActiveBlockData | null) => {
       const requestId = loadRequestIdRef.current + 1;
       loadRequestIdRef.current = requestId;
       const tasks = await taskService.listTasks(true);
+      const dependencyChecks = await Promise.all(tasks.map(async (task) => {
+        try {
+          const result = await taskService.checkDependenciesMet(task.id);
+          return [task.id, hasHardBlockingDependency(result)] as const;
+        } catch {
+          return [task.id, true] as const;
+        }
+      }));
       if (disposed || requestId !== loadRequestIdRef.current) return;
       setActiveBlock(nextBlock);
       setTasksById(new Map(tasks.map((task) => [task.id, task])));
+      setHardBlockedTaskIds(new Set(
+        dependencyChecks
+          .filter(([, isBlocked]) => isBlocked)
+          .map(([taskId]) => taskId),
+      ));
     };
 
     void loadSnapshot();
@@ -56,7 +92,7 @@ export function BlockTaskAssociationList() {
     };
   }, []);
 
-  const activeTaskIds = resolveActiveTaskIds(activeBlock);
+  const activeTaskIds = resolveActiveBlockTaskIds(activeBlock);
   const linkedTasks = activeTaskIds
     .map((taskId) => tasksById.get(taskId))
     .filter((task): task is TaskNode => Boolean(task));
@@ -65,9 +101,10 @@ export function BlockTaskAssociationList() {
     [...tasksById.values()].filter((task) => (
       task.status !== 'completed'
       && task.status !== 'cancelled'
+      && !hardBlockedTaskIds.has(task.id)
       && !activeTaskIds.includes(task.id)
     ))
-  ), [activeTaskIds, tasksById]);
+  ), [activeTaskIds, hardBlockedTaskIds, tasksById]);
 
   useEffect(() => {
     if (!selectedTaskId && availableTasks[0]) {
@@ -112,7 +149,10 @@ export function BlockTaskAssociationList() {
             <button
               type="button"
               onClick={() => {
-                void getTaskTimerService().removeTaskFromBlock(task.id);
+                setAssociationError(null);
+                void getTaskTimerService().removeTaskFromBlock(task.id).catch((error) => {
+                  setAssociationError(formatAssociationError(error));
+                });
               }}
               className="rounded-lg border border-[#E7E5E4] px-2.5 py-1 text-xs text-[#57534E] dark:border-[#3F3F46] dark:text-[#D6D3D1]"
             >
@@ -142,13 +182,19 @@ export function BlockTaskAssociationList() {
           disabled={!selectedTaskId}
           onClick={() => {
             if (!selectedTaskId) return;
-            void getTaskTimerService().addTaskToBlock(selectedTaskId);
+            setAssociationError(null);
+            void getTaskTimerService().addTaskToBlock(selectedTaskId).catch((error) => {
+              setAssociationError(formatAssociationError(error));
+            });
           }}
           className="shrink-0 whitespace-nowrap rounded-xl bg-[#C75B3A] px-3 py-2 text-center text-sm font-medium text-white min-w-[88px] disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
         >
           关联任务
         </button>
       </div>
+      {associationError ? (
+        <p className="mt-2 text-xs text-[#C75B3A] dark:text-[#FDBA74]">{associationError}</p>
+      ) : null}
     </section>
   );
 }

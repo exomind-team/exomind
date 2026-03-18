@@ -10,6 +10,7 @@ type MockTask = {
 
 const loadActiveBlockMock = vi.fn();
 const listTasksMock = vi.fn();
+const checkDependenciesMetMock = vi.fn();
 const addTaskToBlockMock = vi.fn();
 const removeTaskFromBlockMock = vi.fn();
 let blockChangeHandler: ((block: unknown) => void) | null = null;
@@ -29,6 +30,7 @@ vi.mock('@/lib/services', () => ({
   }),
   getTaskService: () => ({
     listTasks: listTasksMock,
+    checkDependenciesMet: checkDependenciesMetMock,
     onTaskChange: (handler: () => void) => {
       taskChangeHandler = handler;
       return () => {
@@ -66,6 +68,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     vi.clearAllMocks();
     blockChangeHandler = null;
     taskChangeHandler = null;
+    checkDependenciesMetMock.mockResolvedValue({ met: true, blocking: [] });
   });
 
   it('renders running association controls and calls add/remove actions', async () => {
@@ -93,6 +96,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     expect(screen.getByText('1 个任务')).toBeInTheDocument();
     expect(screen.getByText('任务一')).toBeInTheDocument();
 
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
     fireEvent.click(screen.getByText('关联任务'));
     await waitFor(() => {
       expect(addTaskToBlockMock).toHaveBeenCalledWith('task-2');
@@ -104,7 +108,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     });
   });
 
-  it('keeps newly associated task when a stale task-change reload resolves later', async () => {
+  it('keeps newly associated tasks when active block falls back to association log', async () => {
     const initialBlock = {
       startId: 'block-1',
       name: '进行中时间块',
@@ -118,7 +122,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     };
     const updatedBlock = {
       ...initialBlock,
-      taskIds: ['task-1', 'task-2'],
+      taskIds: [],
       taskAssociationLog: [
         { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 1, source: 'block_start' },
         { blockId: 'block-1', taskId: 'task-2', action: 'associated', timestamp: 2, source: 'manual' },
@@ -160,5 +164,66 @@ describe('BlockTaskAssociationList issue-418', () => {
 
     expect(screen.getByText('2 个任务')).toBeInTheDocument();
     expect(screen.getByText('任务二')).toBeInTheDocument();
+  });
+
+  it('filters out already linked and hard-blocked tasks from candidate options', async () => {
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-1',
+      name: '进行中时间块',
+      mode: 'countup',
+      elapsed: 0,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running',
+      taskIds: [],
+      taskAssociationLog: [
+        { blockId: 'block-1', taskId: 'task-1', action: 'associated', timestamp: 1, source: 'block_start' },
+      ],
+    });
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-1', title: '已关联任务', status: 'in_progress' }),
+      makeTask({ id: 'task-2', title: '被硬依赖阻塞的任务', status: 'pending' }),
+      makeTask({ id: 'task-3', title: '可追加任务', status: 'pending' }),
+    ]);
+    checkDependenciesMetMock.mockImplementation(async (taskId: string) => (
+      taskId === 'task-2'
+        ? { met: false, blocking: [{ taskId: 'dep-1', type: 'hard', status: 'pending' }] }
+        : { met: true, blocking: [] }
+    ));
+
+    render(<BlockTaskAssociationList />);
+
+    await screen.findByText('运行中可追加或移除关联任务。');
+
+    const options = screen.getAllByRole('option').map((option) => option.textContent);
+    expect(options).toEqual(expect.arrayContaining(['选择任务', '可追加任务']));
+    expect(options).not.toEqual(expect.arrayContaining(['已关联任务', '被硬依赖阻塞的任务']));
+  });
+
+  it('shows an inline error when addTaskToBlock rejects', async () => {
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-1',
+      name: '进行中时间块',
+      mode: 'countup',
+      elapsed: 0,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    });
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-1', title: '任务一', status: 'in_progress' }),
+      makeTask({ id: 'task-2', title: '任务二', status: 'pending' }),
+    ]);
+    addTaskToBlockMock.mockRejectedValue(new Error('Cannot associate task to active block: hard dependencies not met [dep-1]'));
+
+    render(<BlockTaskAssociationList />);
+
+    await screen.findByText('运行中可追加或移除关联任务。');
+    fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
+    fireEvent.click(screen.getByText('关联任务'));
+
+    expect(await screen.findByText('所选任务存在未完成的硬依赖，当前不能关联。')).toBeInTheDocument();
   });
 });

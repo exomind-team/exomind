@@ -1,12 +1,18 @@
-import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 
 export type TodayTimelineBucketId = 'morning' | 'noon' | 'afternoon' | 'night';
 
+export interface TodayTimelineLinkedTask {
+  taskId: string;
+  title: string;
+}
+
 export interface TodayTimelineItem {
   id: string;
   blockId: string;
-  taskId?: string;
+  taskIds: string[];
+  linkedTasks: TodayTimelineLinkedTask[];
   title: string;
   bucketId: TodayTimelineBucketId;
   bucketLabel: string;
@@ -114,33 +120,67 @@ function resolveTagLabel(task: TaskNode | undefined, block: TimeBlock): string {
   return '专注';
 }
 
-function buildTaskLookup(tasks: TaskNode[]): Map<string, TaskNode> {
-  const lookup = new Map<string, TaskNode>();
+function normalizeTaskIds(taskIds: string[] | undefined): string[] {
+  return Array.from(new Set((taskIds ?? []).map((taskId) => taskId.trim()).filter(Boolean)));
+}
+
+function buildTaskById(tasks: TaskNode[]): Map<string, TaskNode> {
+  return new Map(tasks.map((task) => [task.id, task]));
+}
+
+function buildTaskLookup(tasks: TaskNode[]): Map<string, string[]> {
+  const lookup = new Map<string, string[]>();
   for (const task of tasks) {
     for (const blockId of task.timeBlockIds ?? []) {
-      lookup.set(blockId, task);
+      const existing = lookup.get(blockId) ?? [];
+      if (!existing.includes(task.id)) {
+        existing.push(task.id);
+      }
+      lookup.set(blockId, existing);
     }
   }
   return lookup;
 }
 
-function resolveActiveBlockTask(activeBlock: ActiveBlockData, tasks: TaskNode[]): TaskNode | undefined {
-  const activeTaskIds = activeBlock.taskIds ?? [];
-  if (activeTaskIds.length === 0) {
-    return activeBlock.taskId ? tasks.find((item) => item.id === activeBlock.taskId) : undefined;
+function resolveBlockTaskIds(block: TimeBlock, taskLookup: Map<string, string[]>): string[] {
+  const explicitTaskIds = normalizeTaskIds(block.taskIds);
+  if (explicitTaskIds.length > 0) {
+    return explicitTaskIds;
   }
 
-  for (const taskId of activeTaskIds) {
-    const matchedTask = tasks.find((item) => item.id === taskId);
-    if (matchedTask) return matchedTask;
-  }
+  return normalizeTaskIds(taskLookup.get(block.id) ?? taskLookup.get(block.startId));
+}
 
+function buildLinkedTasks(taskIds: string[], taskById: Map<string, TaskNode>): TodayTimelineLinkedTask[] {
+  return taskIds.map((taskId) => ({
+    taskId,
+    title: taskById.get(taskId)?.title ?? taskId,
+  }));
+}
+
+function resolvePrimaryTask(taskIds: string[], taskById: Map<string, TaskNode>): TaskNode | undefined {
+  for (const taskId of taskIds) {
+    const task = taskById.get(taskId);
+    if (task) return task;
+  }
   return undefined;
+}
+
+function resolveTimelineTitle(linkedTasks: TodayTimelineLinkedTask[], fallbackTitle: string): string {
+  if (linkedTasks.length === 0) return fallbackTitle;
+  return linkedTasks.map((task) => task.title).join(' / ');
+}
+
+function resolveTimelineMeta(taskIds: string[], taskById: Map<string, TaskNode>): string {
+  if (taskIds.length === 0) return '未估时';
+  if (taskIds.length > 1) return `${taskIds.length} 个关联任务`;
+  return formatDurationMinutes(taskById.get(taskIds[0])?.estimatedMinutes);
 }
 
 export function buildTasksTodayViewModel(input: BuildTasksTodayViewModelInput): TasksTodayViewModel {
   const { tasks, blocks, now, activeBlock } = input;
   const todayRange = getTodayRange(now);
+  const taskById = buildTaskById(tasks);
   const taskLookup = buildTaskLookup(tasks);
   const inProgressTasks = tasks.filter((task) => task.status === 'in_progress');
   const todayBlocks = blocks
@@ -153,23 +193,26 @@ export function buildTasksTodayViewModel(input: BuildTasksTodayViewModelInput): 
   }
 
   for (const block of todayBlocks) {
-    const task = taskLookup.get(block.id) ?? taskLookup.get(block.startId);
+    const taskIds = resolveBlockTaskIds(block, taskLookup);
+    const linkedTasks = buildLinkedTasks(taskIds, taskById);
+    const primaryTask = resolvePrimaryTask(taskIds, taskById);
     const bucketId = resolveBucketId(block.startTime);
     const bucketSpec = SECTION_SPECS.find((section) => section.id === bucketId)!;
-    const actualText = task?.title ?? block.name;
-    const planText = task && block.name !== task.title ? block.name : undefined;
+    const actualText = resolveTimelineTitle(linkedTasks, block.name);
+    const planText = linkedTasks.length > 0 && block.name !== actualText ? block.name : undefined;
 
     sectionItems.get(bucketId)!.push({
       id: block.id,
       blockId: block.id,
-      taskId: task?.id,
+      taskIds,
+      linkedTasks,
       title: actualText,
       bucketId,
       bucketLabel: bucketSpec.label,
-      tagLabel: resolveTagLabel(task, block),
-      tone: resolveTone(task, block),
+      tagLabel: taskIds.length > 1 ? '多任务' : resolveTagLabel(primaryTask, block),
+      tone: resolveTone(primaryTask, block),
       timeLabel: `${formatClock(block.startTime)} - ${formatClock(block.endTime)}`,
-      meta: formatDurationMinutes(task?.estimatedMinutes),
+      meta: resolveTimelineMeta(taskIds, taskById),
       actualText,
       planText,
       note: block.note,
@@ -177,22 +220,26 @@ export function buildTasksTodayViewModel(input: BuildTasksTodayViewModelInput): 
   }
 
   if (activeBlock && activeBlock.startTime >= todayRange.start && activeBlock.startTime < todayRange.end) {
-    const task = resolveActiveBlockTask(activeBlock, tasks);
+    const taskIds = resolveActiveBlockTaskIds(activeBlock);
+    const linkedTasks = buildLinkedTasks(taskIds, taskById);
+    const primaryTask = resolvePrimaryTask(taskIds, taskById);
     const bucketId = resolveBucketId(activeBlock.startTime);
     const bucketSpec = SECTION_SPECS.find((section) => section.id === bucketId)!;
+    const actualText = resolveTimelineTitle(linkedTasks, activeBlock.name);
     sectionItems.get(bucketId)!.push({
       id: `active-${activeBlock.startId}`,
       blockId: activeBlock.startId,
-      taskId: task?.id ?? activeBlock.taskIds?.[0] ?? activeBlock.taskId,
-      title: task?.title ?? activeBlock.name,
+      taskIds,
+      linkedTasks,
+      title: actualText,
       bucketId,
       bucketLabel: bucketSpec.label,
-      tagLabel: task?.tags?.[0] ?? '进行中',
+      tagLabel: taskIds.length > 1 ? '多任务' : primaryTask?.tags?.[0] ?? '进行中',
       tone: 'orange',
       timeLabel: `${formatClock(activeBlock.startTime)} - 进行中`,
-      meta: formatDurationMinutes(task?.estimatedMinutes),
-      actualText: task?.title ?? activeBlock.name,
-      planText: task && activeBlock.name !== task.title ? activeBlock.name : undefined,
+      meta: resolveTimelineMeta(taskIds, taskById),
+      actualText,
+      planText: linkedTasks.length > 0 && activeBlock.name !== actualText ? activeBlock.name : undefined,
       note: '当前时间块进行中',
     });
   }
