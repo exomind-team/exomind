@@ -358,6 +358,57 @@ async fn voice_transcript_is_normalized_before_eventlog_append() {
     assert!(topics.iter().any(|topic| topic == "eventlog.appended"));
 }
 
+#[tokio::test]
+async fn external_input_is_normalized_before_eventlog_append() {
+    let pool = Arc::new(SignalPool::new(None));
+    let _external_input =
+        exomind_runtime::signal::actors::external_input_actor::spawn_external_input_actor(
+            Arc::clone(&pool),
+        );
+    let _eventlog = exomind_runtime::signal::actors::eventlog_actor::spawn_eventlog_actor(
+        Arc::clone(&pool),
+    );
+    yield_for_actor().await;
+
+    let mut rx = pool.subscribe();
+    pool.publish(make_event(
+        "external.input.received",
+        json!({
+            "source_type": "wechat",
+            "sender": "wxid-test",
+            "text": "外部输入进入 EventLog",
+            "media_type": "text",
+            "original_timestamp": 1773809500000_u64,
+            "chatroom_id": "room-external",
+            "dedup_key": "room-external:1:1"
+        }),
+    ));
+
+    let mut topics = Vec::new();
+    for _ in 0..4 {
+        let event = tokio::time::timeout(std::time::Duration::from_secs(2), rx.recv())
+            .await
+            .expect("timeout waiting for external ingest chain")
+            .expect("should receive signal");
+        topics.push(event.topic.clone());
+        if event.topic == "user.input.normalized" {
+            assert_eq!(event.payload["text"], "外部输入进入 EventLog");
+            assert_eq!(event.payload["inputMode"], "external");
+            assert_eq!(event.payload["captureSource"], "wechat:room-external");
+        }
+        if event.topic == "eventlog.appended" {
+            assert_eq!(event.payload["text"], "外部输入进入 EventLog");
+            assert_eq!(event.payload["inputMode"], "external");
+            assert_eq!(event.payload["captureSource"], "wechat:room-external");
+        }
+    }
+
+    assert!(topics.iter().any(|topic| topic == "external.input.received"));
+    assert!(topics.iter().any(|topic| topic == "user.input.normalized"));
+    assert!(topics.iter().any(|topic| topic == "external.input.ingested"));
+    assert!(topics.iter().any(|topic| topic == "eventlog.appended"));
+}
+
 /// Verify the session.end -> review.completed chain.
 /// This is driven by the Reviewer Agent (TypeScript side), but we test
 /// the signal routing infrastructure here.

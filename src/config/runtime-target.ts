@@ -97,7 +97,7 @@ export function isTauriWindow(): boolean {
     return false;
   }
 
-  return '__TAURI_INTERNALS__' in window;
+  return '__TAURI_INTERNALS__' in window || '__TAURI__' in window;
 }
 
 function resolveEmbeddedHost(): string {

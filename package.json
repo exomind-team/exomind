@@ -39,6 +39,7 @@
     "test:e2e:issue201": "node Scripts/test/playwright-runner.cjs test tests/e2e/agents-page.issue201.test.ts --config tests/e2e/playwright.issue201.config.ts",
     "test:e2e:issue245f": "node Scripts/test/playwright-runner.cjs test tests/e2e/agent-hub.signal-routes.issue245f.test.ts --config tests/e2e/playwright.issue245f.config.ts",
     "test:e2e:issue243": "node Scripts/test/playwright-runner.cjs test tests/e2e/command-palette.issue243.test.ts --config tests/e2e/playwright.issue243.config.ts",
+    "test:e2e:issue418-516": "node Scripts/test/playwright-runner.cjs test tests/e2e/now-tabs-timeblock-detail.issue418-516.test.ts --config tests/e2e/playwright.issue418-516.config.ts",
     "test:e2e:report": "node Scripts/test/playwright-runner.cjs test --reporter=html",
     "test:e2e:website": "node Scripts/test/playwright-runner.cjs test tests/e2e/website.dark-mode.test.ts tests/e2e/website.smoke.test.ts --config tests/e2e/playwright.website.config.ts",
     "test:e2e:website:prod": "node Scripts/test/playwright-runner.cjs test tests/e2e/website.smoke.test.ts --config tests/e2e/playwright.website.prod.config.ts",

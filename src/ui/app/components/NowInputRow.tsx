@@ -11,23 +11,20 @@ import { Clipboard, Image, Mic, SendHorizontal, X } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { toast } from '@/components/ui/toast-hook';
-import { getClipboardService } from '@/lib/services';
-import type { ClipboardFailureReason } from '@/lib/services';
-import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
-import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
-import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
-import { log } from '@/lib/logger';
-import { clearInputDraft, readInputDraft, writeInputDraft } from '@/lib/storage/input-draft-storage';
 import {
   getVoiceTranscriptSendMode,
   subscribeVoiceTranscriptSendModeChanges,
   type VoiceTranscriptSendMode,
 } from '@/config/voice-transcript-send-mode';
-import {
-  getInputSendMode,
-  subscribeInputSendModeChanges,
-  type InputSendMode,
-} from '@/config/input-send-mode';
+import { getClipboardService } from '@/lib/services';
+import type { ClipboardFailureReason } from '@/lib/services';
+import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
+import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
+import { getInputSendMode, subscribeInputSendModeChanges, type InputSendMode } from '@/config/input-send-mode';
+import { clearInputDraft, readInputDraft, writeInputDraft } from '@/lib/storage/input-draft-storage';
+import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
+import { log } from '@/lib/logger';
+import { normalizeRecognitionText } from '@/lib/voice/recognition-text';
 
 interface NowInputRowProps {
   onSend: (content: string, tags?: string[]) => void | Promise<void>;
@@ -142,7 +139,6 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   useEffect(() => subscribeVoiceTranscriptSendModeChanges(setVoiceTranscriptSendMode), []);
 
   useEffect(() => subscribeInputSendModeChanges(setInputSendMode), []);
-
   useEffect(() => () => {
     if (pasteFeedbackTimerRef.current) {
       clearTimeout(pasteFeedbackTimerRef.current);
@@ -270,7 +266,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
   }, [insertClipboardText]);
 
   const handleVoiceResult = useCallback((text: string) => {
-    const normalized = text.trim();
+    const normalized = normalizeRecognitionText(text);
     if (!normalized) return;
 
     void publishVoiceTranscriptSignal({ text: normalized }, {
@@ -280,7 +276,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
     });
 
     if (voiceTranscriptSendMode === 'direct-send') {
-      onSend(normalized, ['voice']);
+      void onSend(normalized, ['voice']);
       return;
     }
 

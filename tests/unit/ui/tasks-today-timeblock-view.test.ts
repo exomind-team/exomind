@@ -1,6 +1,6 @@
 ﻿import { describe, expect, it } from 'vitest';
 import type { TaskNode } from '@/lib/types/task';
-import type { TimeBlock } from '@/lib/types/event';
+import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import { buildTasksTodayViewModel } from '@/ui/app/pages/tasks-today-view';
 
 function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }): TaskNode {
@@ -28,6 +28,33 @@ function makeBlock(overrides: Partial<TimeBlock> & { id: string; name: string; s
     tags: overrides.tags ?? new Set(['block_feedback']),
     startTime: overrides.startTime,
     endTime: overrides.endTime,
+  };
+}
+
+function makeActiveBlock(overrides: Partial<ActiveBlockData> = {}): ActiveBlockData {
+  return {
+    startId: overrides.startId ?? 'active-block-1',
+    name: overrides.name ?? '进行中的时间块',
+    mode: overrides.mode ?? 'countup',
+    startTime: overrides.startTime ?? Date.now(),
+    elapsed: overrides.elapsed ?? 15 * 60 * 1000,
+    paused: overrides.paused ?? false,
+    phase: overrides.phase ?? 'running',
+    version: overrides.version ?? 1,
+    taskIds: overrides.taskIds ?? [],
+    taskAssociationLog: overrides.taskAssociationLog ?? [],
+    taskId: overrides.taskId,
+    updatedAt: overrides.updatedAt,
+    actorId: overrides.actorId,
+    lastTransitionAt: overrides.lastTransitionAt,
+    lastResumedAt: overrides.lastResumedAt,
+    accumulatedRunMs: overrides.accumulatedRunMs,
+    actionEndedAt: overrides.actionEndedAt,
+    feedbackStartedAt: overrides.feedbackStartedAt,
+    feedbackSubmittedAt: overrides.feedbackSubmittedAt,
+    pauseAccumulatedMs: overrides.pauseAccumulatedMs,
+    pausedAt: overrides.pausedAt,
+    targetMinutes: overrides.targetMinutes,
   };
 }
 
@@ -103,6 +130,36 @@ describe('buildTasksTodayViewModel（任务页 today 时间块视图模型）', 
       timeLabel: '09:00 - 10:30',
       note: '顺利完成，比预期快 30 分钟',
       meta: '预计 2h',
+    });
+  });
+
+  it('resolves active block task association through taskIds（进行中时间块通过 taskIds 反查任务）', () => {
+    const model = buildTasksTodayViewModel({
+      tasks: [
+        makeTask({
+          id: 'task-1',
+          title: '联调当下页读路径',
+          status: 'in_progress',
+          estimatedMinutes: 45,
+        }),
+      ],
+      blocks: [],
+      now: today,
+      activeBlock: makeActiveBlock({
+        startId: 'active-taskids',
+        name: '多任务专注块',
+        startTime: morning,
+        taskIds: ['task-1'],
+      }),
+    });
+
+    expect(model.timelineSections).toHaveLength(1);
+    expect(model.timelineSections[0].items[0]).toMatchObject({
+      taskId: 'task-1',
+      title: '联调当下页读路径',
+      tagLabel: '进行中',
+      timeLabel: '09:00 - 进行中',
+      meta: '预计 45min',
     });
   });
 });

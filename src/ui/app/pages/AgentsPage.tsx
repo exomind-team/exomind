@@ -135,6 +135,12 @@ import { RoutesTabView } from './agents/RoutesTabView';
 import { ListTabView, type NodeFilterType } from './agents/NodesTabView';
 import { SignalHistoryTabView } from './agents/SignalHistoryTabView';
 
+export {
+  buildListSectionsFromRuntimeAgents,
+  ENERGY_PHASE_COLORS,
+  mapRuntimeStatusToNodeStatus,
+} from './agents/agents-utils';
+
 function TabBar({
   value,
   onChange,
@@ -1530,6 +1536,10 @@ export function AgentsPage() {
             if (session.pty_id) {
               openPtyTerminal(session.pty_id, session.source_host_id);
             }
+          }}
+          onStopSession={(session) => {
+            if (!session.pty_id) return;
+            void handleStopPtyAgent(session.pty_id, session.source_host_id);
           }}
         />
       );

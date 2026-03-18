@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { appendFile, mkdir } from 'node:fs/promises';
 import { resolveTauriDevInstanceName } from './tauri-dev-target-dir-lib';
 
 export type ManagedTauriInstancePaths = {
@@ -21,6 +22,29 @@ export type ManagedTauriInstanceRecord = {
   startedAt: string;
   enableWatch: boolean;
   target: TauriDevTarget;
+};
+
+export type ManagedTauriLogSessionStart = {
+  name: string;
+  target: TauriDevTarget;
+  webPort: number;
+  hmrPort: number;
+  startedAt: string;
+};
+
+export type ManagedTauriInstanceHealthSnapshot = {
+  rootPidAlive: boolean;
+  webPortListening: boolean;
+  hmrPortListening: boolean;
+  appProcessAlive?: boolean;
+  webPortPids?: number[];
+  hmrPortPids?: number[];
+  appPids?: number[];
+};
+
+export type ManagedTauriInstanceHealth = {
+  status: 'running' | 'degraded' | 'stale';
+  detail: string;
 };
 
 export type BuildManagedTauriCommandInput = {
@@ -70,4 +94,109 @@ export function buildManagedTauriCommand(input: BuildManagedTauriCommandInput): 
   );
 
   return commands.join(' && ');
+}
+
+function collectListeningPortLabels(
+  record: ManagedTauriInstanceRecord,
+  snapshot: ManagedTauriInstanceHealthSnapshot,
+): string[] {
+  const labels: string[] = [];
+  if (snapshot.webPortListening) {
+    labels.push(`web=${record.webPort}`);
+  }
+  if (snapshot.hmrPortListening) {
+    labels.push(`hmr=${record.hmrPort}`);
+  }
+  return labels;
+}
+
+function uniquePositivePids(values: Array<number | undefined>): number[] {
+  return [...new Set(values.filter((value): value is number => Number.isInteger(value) && value > 0))];
+}
+
+export function formatManagedTauriLogSessionStart(input: ManagedTauriLogSessionStart): string {
+  const timestamp = input.startedAt.trim();
+  return [
+    '',
+    `===== manager session start [${timestamp}] name=${input.name} target=${input.target} web=${input.webPort} hmr=${input.hmrPort} =====`,
+    '',
+  ].join('\n');
+}
+
+export async function appendManagedTauriLogSessionStart(
+  logPath: string,
+  input: ManagedTauriLogSessionStart,
+): Promise<void> {
+  await mkdir(path.dirname(logPath), { recursive: true });
+  await appendFile(logPath, formatManagedTauriLogSessionStart(input), 'utf8');
+}
+
+export function evaluateManagedTauriInstanceHealth(
+  record: ManagedTauriInstanceRecord,
+  snapshot: ManagedTauriInstanceHealthSnapshot,
+): ManagedTauriInstanceHealth {
+  const listeningLabels = collectListeningPortLabels(record, snapshot);
+
+  if (!snapshot.rootPidAlive) {
+    if (listeningLabels.length > 0) {
+      return {
+        status: 'stale',
+        detail: `root pid exited; lingering listeners: ${listeningLabels.join(', ')}`,
+      };
+    }
+
+    return {
+      status: 'stale',
+      detail: 'root pid exited',
+    };
+  }
+
+  if (record.target === 'desktop' && snapshot.appProcessAlive === false) {
+    if (listeningLabels.length > 0) {
+      return {
+        status: 'stale',
+        detail: `desktop app process missing; lingering listeners: ${listeningLabels.join(', ')}`,
+      };
+    }
+
+    return {
+      status: 'stale',
+      detail: 'desktop app process missing',
+    };
+  }
+
+  const missingLabels: string[] = [];
+  if (!snapshot.webPortListening) {
+    missingLabels.push(`web=${record.webPort}`);
+  }
+  if (!snapshot.hmrPortListening) {
+    missingLabels.push(`hmr=${record.hmrPort}`);
+  }
+
+  if (missingLabels.length > 0) {
+    return {
+      status: 'degraded',
+      detail: `missing listeners: ${missingLabels.join(', ')}`,
+    };
+  }
+
+  return {
+    status: 'running',
+    detail: 'ok',
+  };
+}
+
+export function collectManagedTauriCleanupPids(
+  record: ManagedTauriInstanceRecord,
+  snapshot: ManagedTauriInstanceHealthSnapshot,
+): number[] {
+  if (snapshot.rootPidAlive) {
+    return uniquePositivePids([record.rootPid]);
+  }
+
+  return uniquePositivePids([
+    ...(snapshot.webPortPids ?? []),
+    ...(snapshot.hmrPortPids ?? []),
+    ...(snapshot.appPids ?? []),
+  ]);
 }

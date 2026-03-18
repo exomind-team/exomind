@@ -37,7 +37,8 @@ export interface RuntimeManagerSnapshot {
 export interface RuntimeManagerOptions {
   hostService?: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>
     & Partial<Pick<RuntimeHostService, 'mergeHostMetadata'>>;
-  runtimeClient?: Pick<RuntimeClient, 'getAgents' | 'getTopology' | 'getAllEnergy'>;
+  runtimeClient?: Pick<RuntimeClient, 'getAgents' | 'getTopology'>
+    & Partial<Pick<RuntimeClient, 'getAllEnergy'>>;
   runtimeMeshSyncService?: Pick<RuntimeMeshSyncService, 'ensurePeerPair'>;
   now?: () => Date;
 }
@@ -117,7 +118,8 @@ function parseHostAddress(hostAddress: string): { host: string; port: number } {
 export class RuntimeManager {
   private readonly hostService: Pick<RuntimeHostService, 'listHosts' | 'addHost' | 'removeHost'>
     & Partial<Pick<RuntimeHostService, 'mergeHostMetadata'>>;
-  private readonly runtimeClient: Pick<RuntimeClient, 'getAgents' | 'getTopology' | 'getAllEnergy'>;
+  private readonly runtimeClient: Pick<RuntimeClient, 'getAgents' | 'getTopology'>
+    & Partial<Pick<RuntimeClient, 'getAllEnergy'>>;
   private readonly runtimeMeshSyncService: Pick<RuntimeMeshSyncService, 'ensurePeerPair'>;
   private readonly now: () => Date;
 
@@ -166,13 +168,22 @@ export class RuntimeManager {
 
   private async buildHostSnapshot(host: RuntimeHostRecord): Promise<RuntimeHostSnapshot> {
     const topologyStartedAtMs = Date.now();
+    const energyRequest = this.runtimeClient.getAllEnergy
+      ? this.runtimeClient.getAllEnergy(host).catch(() => ({
+        ok: false as const,
+        error: { code: 'network' as const, message: 'energy fetch failed' },
+      }))
+      : Promise.resolve({
+        ok: false as const,
+        error: { code: 'invalid_payload' as const, message: 'energy endpoint unavailable' },
+      });
     const [agentsResult, topologyEnvelope, energyResult] = await Promise.all([
       this.runtimeClient.getAgents(host),
       this.runtimeClient.getTopology(host).then((result) => ({
         result,
         latencyMs: Math.max(1, Date.now() - topologyStartedAtMs),
       })),
-      this.runtimeClient.getAllEnergy(host).catch(() => ({ ok: false as const, error: { code: 'network' as const, message: 'energy fetch failed' } })),
+      energyRequest,
     ]);
     const topologyResult = topologyEnvelope.result;
 

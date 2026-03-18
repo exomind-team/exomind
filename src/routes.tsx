@@ -63,6 +63,11 @@ const TaskDetailPage = lazy(async () => {
   return { default: module.TaskDetailPage };
 });
 
+const TimeBlockDetailPage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TimeBlockDetailPage');
+  return { default: module.TimeBlockDetailPage };
+});
+
 const MePage = lazy(async () => {
   const module = await import('@/ui/app/pages/MePage');
   return { default: module.MePage };
@@ -729,7 +734,7 @@ const newTimeblockDetailRoute = createRoute({
   component: function NewTimeblockDetail() {
     return (
       <LazyPage>
-        <TaskDetailPage />
+        <TimeBlockDetailPage />
       </LazyPage>
     );
   },

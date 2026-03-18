@@ -519,4 +519,25 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
       expect(startBlockForTaskMock).toHaveBeenCalledWith('task-2', { mode: 'countdown', minutes: 30 });
     });
   });
+
+  it('recognizes active block through taskIds includes（通过 taskIds.includes 识别当前任务的活跃时间块）', async () => {
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'active-1',
+      name: '多任务块',
+      mode: 'countup',
+      startTime: new Date('2026-03-06T09:00:00+08:00').getTime(),
+      elapsed: 15 * 60 * 1000,
+      paused: false,
+      phase: 'running',
+      version: 1,
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    });
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('时间块详情');
+
+    expect(await screen.findByTestId('task-pause-button')).toHaveTextContent('暂停并前往当下');
+  });
 });

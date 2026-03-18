@@ -292,6 +292,12 @@ function buildVirtualTaskFromBlock(block: TimeBlock): TaskNode {
   };
 }
 
+function isTaskLinkedToActiveBlock(block: ActiveBlockData | null, taskId: string | undefined): boolean {
+  if (!block || !taskId) return false;
+  const taskIds = block.taskIds ?? [];
+  return taskIds.includes(taskId) || block.taskId === taskId;
+}
+
 function DetailActionsCard({
   model,
   onCopySummary,
@@ -1465,8 +1471,8 @@ export function TaskDetailPage() {
       setTask(nextTask);
       setAllTasks(listedTasks);
       setTimeBlocks(blocks);
-      setActiveBlock(nextTask && currentBlock?.taskId === nextTask.id ? currentBlock : null);
-      setHasOtherActiveBlock(Boolean(currentBlock && nextTask && currentBlock.taskId !== nextTask.id));
+      setActiveBlock(nextTask && isTaskLinkedToActiveBlock(currentBlock, nextTask.id) ? currentBlock : null);
+      setHasOtherActiveBlock(Boolean(currentBlock && nextTask && !isTaskLinkedToActiveBlock(currentBlock, nextTask.id)));
 
       if (nextTask) {
         const [events, calculatedSpentMinutes] = await Promise.all([
