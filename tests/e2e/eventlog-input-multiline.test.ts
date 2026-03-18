@@ -2,6 +2,9 @@ import { expect, test } from '@playwright/test';
 
 test.describe('事件日志输入框 - 多行与滚动', () => {
   test.beforeEach(async ({ page }) => {
+    await page.addInitScript(() => {
+      localStorage.setItem('exomind:inputSendMode', 'ctrl-enter-send');
+    });
     await page.goto('/eventlog');
     await page.waitForLoadState('networkidle');
   });

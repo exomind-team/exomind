@@ -454,6 +454,9 @@ mod tests {
                             tags: vec!["focus".to_string()],
                             start_time: 1_700_000_000_000,
                             end_time: 1_700_000_060_000,
+                            task_ids: vec![],
+                            task_status_outcomes: None,
+                            task_association_log: vec![],
                         }])
                         .unwrap(),
                     ))
@@ -480,6 +483,18 @@ mod tests {
                             tags: vec!["focus".to_string()],
                             start_time: 1_700_000_100_000,
                             end_time: 1_700_000_160_000,
+                            task_ids: vec!["task-profile-a".to_string()],
+                            task_status_outcomes: Some(std::collections::HashMap::from([(
+                                "task-profile-a".to_string(),
+                                "continue".to_string(),
+                            )])),
+                            task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
+                                block_id: "tb-profile-a".to_string(),
+                                task_id: "task-profile-a".to_string(),
+                                action: "associated".to_string(),
+                                timestamp: 1_700_000_100_000,
+                                source: "block_start".to_string(),
+                            }],
                         }])
                         .unwrap(),
                     ))
@@ -517,6 +532,14 @@ mod tests {
                             pause_accumulated_ms: Some(0),
                             paused: false,
                             paused_at: None,
+                            task_ids: vec!["task-profile-a".to_string()],
+                            task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
+                                block_id: "active-profile-a".to_string(),
+                                task_id: "task-profile-a".to_string(),
+                                action: "associated".to_string(),
+                                timestamp: 1_700_000_100_000,
+                                source: "block_start".to_string(),
+                            }],
                             task_id: Some("task-profile-a".to_string()),
                         })
                         .unwrap(),
@@ -572,7 +595,9 @@ mod tests {
         assert_eq!(anonymous_blocks[0]["id"], "tb-anonymous");
         assert_eq!(profile_a_blocks.len(), 1);
         assert_eq!(profile_a_blocks[0]["id"], "tb-profile-a");
-        assert_eq!(profile_a_active["taskId"], "task-profile-a");
+        assert_eq!(profile_a_blocks[0]["taskIds"], serde_json::json!(["task-profile-a"]));
+        assert_eq!(profile_a_active["taskIds"], serde_json::json!(["task-profile-a"]));
+        assert!(profile_a_active.get("taskId").is_none());
         assert_eq!(timeblock_store.list_completed().unwrap().len(), 1);
         assert_eq!(timeblock_store.list_completed_in_scope(Some("profile-a")).unwrap().len(), 1);
     }
@@ -601,6 +626,18 @@ mod tests {
                             tags: vec!["focus".to_string()],
                             start_time: 1_700_000_100_000,
                             end_time: 1_700_000_160_000,
+                            task_ids: vec!["task-user-a".to_string()],
+                            task_status_outcomes: Some(std::collections::HashMap::from([(
+                                "task-user-a".to_string(),
+                                "continue".to_string(),
+                            )])),
+                            task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
+                                block_id: "tb-user-a".to_string(),
+                                task_id: "task-user-a".to_string(),
+                                action: "associated".to_string(),
+                                timestamp: 1_700_000_100_000,
+                                source: "block_start".to_string(),
+                            }],
                         }])
                         .unwrap(),
                     ))
@@ -638,6 +675,14 @@ mod tests {
                             pause_accumulated_ms: Some(0),
                             paused: false,
                             paused_at: None,
+                            task_ids: vec!["task-user-a".to_string()],
+                            task_association_log: vec![crate::timeblock::BlockTaskAssociationEvent {
+                                block_id: "active-user-a".to_string(),
+                                task_id: "task-user-a".to_string(),
+                                action: "associated".to_string(),
+                                timestamp: 1_700_000_100_000,
+                                source: "block_start".to_string(),
+                            }],
                             task_id: Some("task-user-a".to_string()),
                         })
                         .unwrap(),
@@ -677,7 +722,9 @@ mod tests {
 
         assert_eq!(scoped_blocks.len(), 1);
         assert_eq!(scoped_blocks[0]["id"], "tb-user-a");
-        assert_eq!(scoped_active["taskId"], "task-user-a");
+        assert_eq!(scoped_blocks[0]["taskIds"], serde_json::json!(["task-user-a"]));
+        assert_eq!(scoped_active["taskIds"], serde_json::json!(["task-user-a"]));
+        assert!(scoped_active.get("taskId").is_none());
         assert!(timeblock_store.list_completed().unwrap().is_empty(), "default anonymous scope should stay isolated");
         assert_eq!(timeblock_store.list_completed_in_scope(Some("user-a")).unwrap().len(), 1);
     }

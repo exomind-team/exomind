@@ -1,5 +1,6 @@
 ﻿import { buildTaskGraph, type TaskGraphEdge } from '@/lib/task/task-dag-graph';
 import {
+  calculateTaskDagCollapseScope,
   projectVisibleTaskGraph,
   type TaskDagVisibilityState,
   type VisibleTaskGraphNode,
@@ -22,7 +23,9 @@ const EDGE_TYPE_LABELS: Record<TaskGraphEdge['type'], string> = {
 export interface TaskDagDetailViewNode extends VisibleTaskGraphNode {
   statusLabel: string;
   upstreamNodeCount: number;
+  downstreamNodeCount: number;
   canCollapseUpstream: boolean;
+  canCollapseDownstream: boolean;
   isCurrentTask: boolean;
   isVisibleRoot: boolean;
   isVisibleCurrentRoot: boolean;
@@ -147,6 +150,40 @@ function collectUpstreamNodeIds(nodeId: string, incomingEdgesByTarget: Map<strin
   return upstreamNodeIds;
 }
 
+function buildGraphOutgoingEdgeMap(edges: TaskGraphEdge[]): Map<string, TaskGraphEdge[]> {
+  const outgoingEdgesBySource = new Map<string, TaskGraphEdge[]>();
+
+  for (const edge of edges) {
+    const current = outgoingEdgesBySource.get(edge.source);
+    if (current) {
+      current.push(edge);
+      continue;
+    }
+    outgoingEdgesBySource.set(edge.source, [edge]);
+  }
+
+  return outgoingEdgesBySource;
+}
+
+function collectDownstreamNodeIds(nodeId: string, outgoingEdgesBySource: Map<string, TaskGraphEdge[]>): Set<string> {
+  const downstreamNodeIds = new Set<string>();
+  const pendingNodeIds = (outgoingEdgesBySource.get(nodeId) ?? []).map((edge) => edge.target);
+
+  while (pendingNodeIds.length > 0) {
+    const currentNodeId = pendingNodeIds.pop();
+    if (!currentNodeId || downstreamNodeIds.has(currentNodeId)) {
+      continue;
+    }
+
+    downstreamNodeIds.add(currentNodeId);
+    for (const edge of outgoingEdgesBySource.get(currentNodeId) ?? []) {
+      pendingNodeIds.push(edge.target);
+    }
+  }
+
+  return downstreamNodeIds;
+}
+
 export function buildTaskDagDetailView(
   currentTask: TaskNode,
   allTasks: TaskNode[],
@@ -164,16 +201,22 @@ export function buildTaskDagDetailView(
   const visibleRootNodeIdSet = new Set(visibleGraph.visibleRootNodeIds);
   const sourceRootNodeIdSet = new Set(visibleGraph.sourceRootNodeIds);
   const incomingEdgesByTarget = buildGraphIncomingEdgeMap(taskGraph.edges);
+  const outgoingEdgesBySource = buildGraphOutgoingEdgeMap(taskGraph.edges);
   const graphNodeById = new Map(taskGraph.nodes.map((node) => [node.id, node]));
 
   const nodes = visibleGraph.nodes.map((node) => {
     const upstreamNodeCount = collectUpstreamNodeIds(node.id, incomingEdgesByTarget).size;
+    const downstreamNodeCount = collectDownstreamNodeIds(node.id, outgoingEdgesBySource).size;
+    const upstreamScopeSize = calculateTaskDagCollapseScope(taskGraph, visibilityState, 'upstream', node.id).size;
+    const downstreamScopeSize = calculateTaskDagCollapseScope(taskGraph, visibilityState, 'downstream', node.id).size;
 
     return {
       ...node,
       statusLabel: STATUS_LABELS[node.status],
       upstreamNodeCount,
-      canCollapseUpstream: upstreamNodeCount > 0,
+      downstreamNodeCount,
+      canCollapseUpstream: upstreamScopeSize > 1 || visibilityState.collapsedUpstreamOf.includes(node.id),
+      canCollapseDownstream: downstreamScopeSize > 1 || visibilityState.collapsedDownstreamOf.includes(node.id),
       isCurrentTask: node.id === currentTask.id,
       isVisibleRoot: visibleRootNodeIdSet.has(node.id),
       isVisibleCurrentRoot: node.id === visibleGraph.visibleCurrentRootNodeId,

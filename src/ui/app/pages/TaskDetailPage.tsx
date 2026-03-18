@@ -1,20 +1,24 @@
-import { ArrowLeft, Ellipsis, Pause, Play } from 'lucide-react';
-import { Link, useNavigate, useParams } from '@tanstack/react-router';
+import { ArrowLeft, Ellipsis, NotepadText, Target, Play } from 'lucide-react';
+import { Link, useNavigate, useParams, useLocation } from '@tanstack/react-router';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useState, type ReactNode } from 'react';
-import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
+import { TASKS_LAST_PATH_KEY, buildTasksMainSearch } from './task-route-memory';
+import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/TaskBreadcrumb';
+import { getEventLogService, getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
+import { isTerminalTaskStatus } from '@/lib/types/task';
 import type { TaskNode } from '@/lib/types/task';
 import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
-import { getEventStorage } from '@/lib/storage/event-storage';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { getUseMockDataEnabled } from '@/config/mock-data';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import { TaskCurrentRootCard } from '@/ui/app/components/TaskCurrentRootCard';
 import { EstimatedTimeEditor } from '@/ui/app/components/EstimatedTimeEditor';
+import { Switch } from '@/components/ui/switch';
 import {
   buildTaskTimeblockDetailViewModel,
   type TimeblockEventLog,
   type TaskTimeblockDetailViewModel,
   type TimeblockBadge,
+  type LinkedBlockItem,
 } from './task-timeblock-detail-view';
 import {
   buildTaskDependencyView,
@@ -28,28 +32,84 @@ import {
 import type { TaskDagVisibilityState } from '@/lib/task/task-dag-visibility';
 import { TimerConfigPanel } from '@/ui/app/components/TimerConfigPanel';
 import { useTimerConfig } from '@/ui/app/hooks/useTimerConfig';
+import { Pencil } from 'lucide-react';
+import { Textarea } from '@/components/ui/textarea';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
+import remarkBreaks from 'remark-breaks';
 
 type DependencyType = 'soft' | 'hard';
-type TimeblockSourceTab = 'now' | 'today' | 'week' | 'month';
-
-const TIMEBLOCK_SOURCE_LABEL: Record<TimeblockSourceTab, string> = {
-  now: '当下',
-  today: '今日',
-  week: '一周',
-  month: '本月',
+const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
+  dag: { label: 'DAG', to: '/tasks/dag' },
+  timeblocks: { label: '时间块', to: '/tasks/timeblocks' },
 };
-
-function isTimeblockSourceTab(value: string): value is TimeblockSourceTab {
-  return Object.prototype.hasOwnProperty.call(TIMEBLOCK_SOURCE_LABEL, value);
-}
+const TASK_TIMER_AUTO_FILL_STORAGE_KEY = 'exomind:task-timer:auto-fill';
 
 interface TimeblockSourceBackLink {
   to: string;
   search?: Record<string, string>;
   label: string;
-  breadcrumb: string;
   sourceLabel: string;
 }
+
+function readTaskTimerAutoFillEnabled(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(TASK_TIMER_AUTO_FILL_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeTaskTimerAutoFillEnabled(enabled: boolean): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(TASK_TIMER_AUTO_FILL_STORAGE_KEY, enabled ? '1' : '0');
+  } catch {
+    // Ignore storage failures and keep the preference in-memory only.
+  }
+}
+
+function resolveAutoTimerConfig(
+  estimatedMinutes?: number,
+  spentMinutes?: number,
+): { mode: 'countup' } | { mode: 'countdown'; minutes: number } | null {
+  if (estimatedMinutes == null || spentMinutes == null) {
+    return null;
+  }
+
+  const remainingMinutes = Math.round(estimatedMinutes - spentMinutes);
+  if (remainingMinutes > 0) {
+    return { mode: 'countdown', minutes: remainingMinutes };
+  }
+
+  return { mode: 'countup' };
+}
+
+function buildNowFocusSearch(): Record<string, string> {
+  return { tab: 'focus' };
+}
+
+const MOBILE_ANCHOR_TARGETS = {
+  overview: 'task-detail-overview',
+  info: 'task-detail-info',
+  timer: 'task-detail-timer',
+  root: 'task-detail-root-guidance',
+  linked: 'task-detail-linked-blocks',
+  timeline: 'task-detail-timeline',
+  'ai-summary': 'task-detail-ai-summary',
+  plan: 'task-detail-plan-actual',
+  dependency: 'task-detail-dependency',
+  actions: 'task-detail-actions',
+} as const;
+
+type MobileAnchorId = keyof typeof MOBILE_ANCHOR_TARGETS;
+type MobileSectionAnchor = {
+  id: MobileAnchorId;
+  label: string;
+};
 
 function badgeClassName(badge: TimeblockBadge): string {
   if (badge.tone === 'success') return 'bg-[#DCFCE7] text-[#15803D]';
@@ -85,6 +145,94 @@ function selectReviewMarkdown(task: TaskNode, blockName: string, events: Array<{
   return preferred?.content ?? feedbackEvents[0].content;
 }
 
+const EVENT_TYPE_PRIORITY = [
+  'block_start',
+  'block_pause',
+  'block_resume',
+  'block_end',
+  'block_feedback',
+  'agent_feedback',
+  'error',
+];
+
+function resolveEventTypeFromTags(tags?: Set<string>): string | undefined {
+  if (!tags || tags.size === 0) return undefined;
+  for (const type of EVENT_TYPE_PRIORITY) {
+    if (tags.has(type)) return type;
+  }
+  return undefined;
+}
+
+function resolveEventCreatedAt(timestamp: number): string {
+  if (!Number.isFinite(timestamp)) {
+    return new Date().toISOString();
+  }
+  return new Date(timestamp).toISOString();
+}
+
+function scrollToMobileAnchor(anchorId: MobileAnchorId): void {
+  if (typeof document === 'undefined') return;
+  const target = document.getElementById(MOBILE_ANCHOR_TARGETS[anchorId]);
+  target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+function resolveActiveMobileAnchor(): MobileAnchorId {
+  if (typeof document === 'undefined') return 'overview';
+  const offset = 132;
+  let active: MobileAnchorId = 'overview';
+  for (const anchorId of Object.keys(MOBILE_ANCHOR_TARGETS) as MobileAnchorId[]) {
+    const element = document.getElementById(MOBILE_ANCHOR_TARGETS[anchorId]);
+    if (!element) continue;
+    const rect = element.getBoundingClientRect();
+    const hasLayout = rect.height > 0 || rect.bottom > rect.top;
+    if (!hasLayout) continue;
+    if (rect.top <= offset && rect.bottom >= offset) {
+      return anchorId;
+    }
+    if (rect.top <= offset) {
+      active = anchorId;
+    }
+  }
+  return active;
+}
+
+function MobileSectionTabs({
+  anchors,
+  activeAnchorId,
+  onSelect,
+}: {
+  anchors: MobileSectionAnchor[];
+  activeAnchorId: MobileAnchorId;
+  onSelect: (anchorId: MobileAnchorId) => void;
+}) {
+  return (
+    <div
+      data-testid="task-mobile-section-tabs"
+      className="sticky top-[57px] z-[9] border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-4 py-2 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95"
+    >
+      <div role="tablist" aria-label="任务详情分区导航" className="scrollbar-none flex gap-2 overflow-x-auto">
+        {anchors.map((anchor) => (
+          <button
+            key={anchor.id}
+            type="button"
+            role="tab"
+            aria-selected={activeAnchorId === anchor.id}
+            aria-controls={MOBILE_ANCHOR_TARGETS[anchor.id]}
+            onClick={() => onSelect(anchor.id)}
+            className={`shrink-0 rounded-full px-3 py-1.5 text-xs transition-colors ${
+              activeAnchorId === anchor.id
+                ? 'bg-[#C75B3A] font-semibold text-white'
+                : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'
+            }`}
+          >
+            {anchor.label}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function resolvePreferredBlockId(): string | undefined {
   if (typeof window === 'undefined') return undefined;
 
@@ -103,23 +251,31 @@ function resolveTimeblockSourceBackLink(): TimeblockSourceBackLink {
     return {
       to: '/tasks',
       label: '← 返回任务',
-      breadcrumb: '任务 > 时间块详情',
       sourceLabel: '任务',
     };
   }
 
   const searchParams = new URLSearchParams(window.location.search);
   const from = searchParams.get('from')?.trim();
-  const sourceTab = from && isTimeblockSourceTab(from) ? from : undefined;
-  const sourceLabel = sourceTab ? TIMEBLOCK_SOURCE_LABEL[sourceTab] : '任务';
+  const sourceConfig = from ? SOURCE_CONFIG[from] : undefined;
 
   return {
-    to: '/tasks',
-    search: sourceTab ? { tab: sourceTab } : undefined,
-    label: `← 返回${sourceLabel}`,
-    breadcrumb: sourceTab ? `任务 > ${sourceLabel} > 时间块详情` : '任务 > 时间块详情',
-    sourceLabel,
+    to: sourceConfig?.to ?? '/tasks',
+    label: `← 返回${sourceConfig?.label ?? '任务'}`,
+    sourceLabel: sourceConfig?.label ?? '任务',
   };
+}
+
+function buildDetailBreadcrumbSegments(backLink: TimeblockSourceBackLink): TaskBreadcrumbSegment[] {
+  const segments: TaskBreadcrumbSegment[] = [{ label: '任务', to: '/tasks' }];
+  if (backLink.sourceLabel !== '任务') {
+    segments.push({
+      label: backLink.sourceLabel,
+      to: backLink.to,
+      search: backLink.search,
+    });
+  }
+  return segments;
 }
 
 function buildVirtualTaskFromBlock(block: TimeBlock): TaskNode {
@@ -140,31 +296,34 @@ function buildVirtualTaskFromBlock(block: TimeBlock): TaskNode {
   };
 }
 
+function isTaskLinkedToActiveBlock(block: ActiveBlockData | null, taskId: string | undefined): boolean {
+  if (!block || !taskId) return false;
+  const taskIds = block.taskIds ?? [];
+  return taskIds.includes(taskId) || block.taskId === taskId;
+}
+
 function DetailActionsCard({
   model,
-  onRestart,
   onCopySummary,
 }: {
   model: TaskTimeblockDetailViewModel;
-  onRestart: () => void;
   onCopySummary: () => void;
 }) {
   return (
     <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-      <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">操作</h3>
+      <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">其他操作</h3>
       <div className="mt-3 space-y-2">
         {model.actions.map((action) => {
-          if (action.id === 'back-source' || action.id === 'open-task' || action.id === 'open-eventlog') {
+          if (action.id === 'open-task') {
             return (
               <Link
                 key={action.id}
                 to={action.to!}
                 search={action.search}
                 className="flex w-full items-center justify-between rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#44403C] transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#E7E5E4] dark:hover:bg-[#292524]"
-                data-testid={action.id === 'back-source' ? 'timeblock-action-back-link' : undefined}
               >
                 <span>{action.label}</span>
-                <span className="text-xs text-[#A8A29E]">{action.id === 'back-source' ? '返回' : '打开'}</span>
+                <span className="text-xs text-[#A8A29E]">打开</span>
               </Link>
             );
           }
@@ -173,14 +332,57 @@ function DetailActionsCard({
             <button
               key={action.id}
               type="button"
-              onClick={action.id === 'restart' ? onRestart : onCopySummary}
+              onClick={onCopySummary}
               className="flex w-full items-center justify-between rounded-xl border border-[#E7E5E4] px-3 py-2 text-left text-sm text-[#44403C] transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:text-[#E7E5E4] dark:hover:bg-[#292524]"
             >
               <span>{action.label}</span>
-              <span className="text-xs text-[#A8A29E]">{action.id === 'restart' ? '执行' : '复制'}</span>
+              <span className="text-xs text-[#A8A29E]">复制</span>
             </button>
           );
         })}
+      </div>
+    </section>
+  );
+}
+
+function LinkedBlocksCard({
+  linkedBlocks,
+  taskId,
+}: {
+  linkedBlocks: LinkedBlockItem[];
+  taskId: string;
+}) {
+  if (linkedBlocks.length === 0) {
+    return (
+      <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">关联时间块</h3>
+        <p className="mt-2 text-xs text-[#A8A29E]">暂无关联时间块，开始计时后会自动出现。</p>
+      </section>
+    );
+  }
+
+  return (
+    <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+      <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">关联时间块</h3>
+      <div className="mt-3 space-y-2">
+        {linkedBlocks.map((item) => (
+          <Link
+            key={item.startId}
+            to={`/tasks/${taskId}`}
+            search={{ blockId: item.startId }}
+            className="block rounded-xl border border-[#E7E5E4] px-3 py-2 transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:hover:bg-[#292524]"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <span className="truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.name}</span>
+              {item.isActive ? (
+                <span className="shrink-0 rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[11px] font-semibold text-[#15803D]">进行中</span>
+              ) : (
+                <span className="shrink-0 text-xs text-[#A8A29E]">{item.durationLabel}</span>
+              )}
+            </div>
+            <p className="mt-1 text-[11px] text-[#A8A29E]">{item.startLabel} ~ {item.endLabel}</p>
+          </Link>
+        ))}
       </div>
     </section>
   );
@@ -193,12 +395,14 @@ function DependencyCard({
   selectedType,
   errorMessage,
   isSaving,
+  hideAddDependency,
   onSelectedTaskChange,
   onSelectedTypeChange,
   onAddDependency,
   onChangeDependencyType,
   onRemoveDependency,
   onToggleCollapseUpstream,
+  onToggleCollapseDownstream,
 }: {
   dependencyView: TaskDependencyViewModel;
   taskDagView: TaskDagDetailView | null;
@@ -206,12 +410,14 @@ function DependencyCard({
   selectedType: DependencyType;
   errorMessage: string | null;
   isSaving: boolean;
+  hideAddDependency?: boolean;
   onSelectedTaskChange: (value: string) => void;
   onSelectedTypeChange: (value: DependencyType) => void;
   onAddDependency: () => void;
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
   onToggleCollapseUpstream: (taskId: string) => void;
+  onToggleCollapseDownstream: (taskId: string) => void;
 }) {
   const selectedCandidate = dependencyView.candidates.find((candidate) => candidate.id === selectedTaskId) ?? null;
 
@@ -252,7 +458,7 @@ function DependencyCard({
 
             {taskDagView.hiddenNodeCount > 0 ? (
               <p className="mt-2 text-xs text-[#C75B3A] dark:text-[#FDBA74]">
-                当前折叠共隐藏 {taskDagView.hiddenNodeCount} 个上游节点。
+                当前折叠共隐藏 {taskDagView.hiddenNodeCount} 个相关节点。
               </p>
             ) : null}
 
@@ -267,7 +473,11 @@ function DependencyCard({
                 <article
                   key={node.id}
                   data-testid={`task-dag-node-${node.id}`}
-                  className="rounded-xl border border-[#E7E5E4] bg-white px-3 py-3 dark:border-[#3F3F46] dark:bg-[#1C1917]"
+                  className={`rounded-xl bg-white px-3 py-3 dark:bg-[#1C1917] ${
+                    node.isCollapsedTarget
+                      ? 'border-2 border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
+                      : 'border border-[#E7E5E4] dark:border-[#3F3F46]'
+                  }`}
                 >
                   <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
@@ -304,7 +514,9 @@ function DependencyCard({
 
                       <div className="mt-2 flex flex-wrap gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
                         <span>上游节点：{node.upstreamNodeCount}</span>
-                        {node.isCollapsedTarget ? <span>已折叠上游</span> : null}
+                        <span>下游节点：{node.downstreamNodeCount}</span>
+                        {node.isCollapsedUpstreamTarget ? <span>已折叠上游</span> : null}
+                        {node.isCollapsedDownstreamTarget ? <span>已折叠下游</span> : null}
                       </div>
 
                       {node.hiddenUpstreamCount > 0 ? (
@@ -315,17 +527,36 @@ function DependencyCard({
                           已隐藏 {node.hiddenUpstreamCount} 项
                         </p>
                       ) : null}
+                      {node.hiddenDownstreamCount > 0 ? (
+                        <p
+                          data-testid={`task-dag-hidden-downstream-summary-${node.id}`}
+                          className="mt-2 rounded-lg bg-[#ECFDF5] px-2.5 py-1.5 text-xs text-[#047857] dark:bg-[#052E2B] dark:text-[#6EE7B7]"
+                        >
+                          下游已隐藏 {node.hiddenDownstreamCount} 项
+                        </p>
+                      ) : null}
                     </div>
 
-                    <button
-                      type="button"
-                      data-testid={`task-dag-toggle-upstream-${node.id}`}
-                      disabled={!node.canCollapseUpstream}
-                      onClick={() => onToggleCollapseUpstream(node.id)}
-                      className="rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#57534E] transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
-                    >
-                      {node.isCollapsedTarget ? '展开上游' : '折叠上游'}
-                    </button>
+                    <div className="flex flex-wrap gap-2">
+                      <button
+                        type="button"
+                        data-testid={`task-dag-toggle-upstream-${node.id}`}
+                        disabled={!node.canCollapseUpstream}
+                        onClick={() => onToggleCollapseUpstream(node.id)}
+                        className="rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#57534E] transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
+                      >
+                        {node.isCollapsedUpstreamTarget ? '展开上游' : '折叠上游'}
+                      </button>
+                      <button
+                        type="button"
+                        data-testid={`task-dag-toggle-downstream-${node.id}`}
+                        disabled={!node.canCollapseDownstream}
+                        onClick={() => onToggleCollapseDownstream(node.id)}
+                        className="rounded-xl border border-[#E7E5E4] px-3 py-2 text-sm text-[#57534E] transition-colors hover:bg-[#FAF7F5] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#3F3F46] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
+                      >
+                        {node.isCollapsedDownstreamTarget ? '展开下游' : '折叠下游'}
+                      </button>
+                    </div>
                   </div>
                 </article>
               ))}
@@ -410,6 +641,7 @@ function DependencyCard({
           </div>
         </div>
 
+        {!hideAddDependency && (
         <div className="rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
           <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">新增依赖</h4>
           <div className="mt-3 grid gap-2 sm:grid-cols-[minmax(0,1fr)_140px_auto]">
@@ -466,6 +698,8 @@ function DependencyCard({
             </div>
           </div>
         </div>
+        )}
+
 
         <div>
           <h4 className="text-xs font-semibold uppercase tracking-[0.12em] text-[#A8A29E]">谁依赖我</h4>
@@ -499,6 +733,7 @@ function DependencyCard({
 }
 
 function MobileTimeblockDetail({
+  descriptionBlock,
   task,
   model,
   backLink,
@@ -509,9 +744,12 @@ function MobileTimeblockDetail({
   dependencyError,
   isDependencySaving,
   timerControls,
+  autoTimerToggle,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
+  blockingReason,
   onStartTimer,
+  onAppendTaskToActiveBlock,
   onPauseAndGoEventlog,
   onCopySummary,
   rootGuidance,
@@ -523,7 +761,9 @@ function MobileTimeblockDetail({
   onChangeDependencyType,
   onRemoveDependency,
   onToggleCollapseUpstream,
+  onToggleCollapseDownstream,
 }: {
+  descriptionBlock: ReactNode;
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
   backLink: TimeblockSourceBackLink;
@@ -534,9 +774,12 @@ function MobileTimeblockDetail({
   dependencyError: string | null;
   isDependencySaving: boolean;
   timerControls: ReactNode;
+  autoTimerToggle: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
+  blockingReason: string | null;
   onStartTimer: () => void;
+  onAppendTaskToActiveBlock: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
   rootGuidance?: ReactNode;
@@ -548,28 +791,73 @@ function MobileTimeblockDetail({
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
   onToggleCollapseUpstream: (taskId: string) => void;
+  onToggleCollapseDownstream: (taskId: string) => void;
 }) {
+  const [activeAnchorId, setActiveAnchorId] = useState<MobileAnchorId>('overview');
+  const showTimerCard = !isTerminalTaskStatus(task.status);
+  const mobileAnchors = useMemo<MobileSectionAnchor[]>(() => {
+    const anchors: MobileSectionAnchor[] = [
+      { id: 'overview', label: '概览' },
+      { id: 'info', label: '信息面板' },
+    ];
+
+    if (showTimerCard) {
+      anchors.push({ id: 'timer', label: '计时控制' });
+    }
+
+    anchors.push(
+      { id: 'root', label: '未阻塞节点' },
+      { id: 'linked', label: '关联时间块' },
+      { id: 'timeline', label: '事件时间线' },
+      { id: 'ai-summary', label: 'AI 总结' },
+      { id: 'plan', label: '计划 vs 实际' },
+      { id: 'dependency', label: '依赖关系' },
+      { id: 'actions', label: '操作' },
+    );
+
+    return anchors;
+  }, [showTimerCard]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return undefined;
+
+    const syncActiveAnchor = () => {
+      setActiveAnchorId(resolveActiveMobileAnchor());
+    };
+
+    syncActiveAnchor();
+    window.addEventListener('scroll', syncActiveAnchor, { passive: true });
+    window.addEventListener('resize', syncActiveAnchor);
+    return () => {
+      window.removeEventListener('scroll', syncActiveAnchor);
+      window.removeEventListener('resize', syncActiveAnchor);
+    };
+  }, []);
+
+  useEffect(() => {
+    setActiveAnchorId('overview');
+  }, [task.id]);
+
+  const handleSelectAnchor = useCallback((anchorId: MobileAnchorId) => {
+    setActiveAnchorId(anchorId);
+    scrollToMobileAnchor(anchorId);
+  }, []);
+
   return (
-    <div className="min-h-full bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
+    <div className="scrollbar-none h-full overflow-y-auto bg-[#FAF7F5] pb-10 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
       <header className="sticky top-0 z-10 flex items-start justify-between gap-3 border-b border-[#F0ECE8] bg-[#FAF7F5]/95 px-4 py-3 backdrop-blur dark:border-[#292524] dark:bg-[#0C0A09]/95">
         <Link
           to={backLink.to}
-          search={backLink.search}
+          search={backLink.to === '/tasks' ? buildTasksMainSearch(backLink.search) : backLink.search}
+          onClick={() => sessionStorage.removeItem(TASKS_LAST_PATH_KEY)}
           className="inline-flex h-8 w-8 items-center justify-center rounded-full bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]"
           aria-label={`返回${backLink.sourceLabel}`}
+          data-testid="timeblock-back-link-mobile"
         >
           <ArrowLeft size={16} />
         </Link>
         <div className="min-w-0 flex-1 pt-0.5">
-          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">时间块详情</h1>
-          <Link
-            to={backLink.to}
-            search={backLink.search}
-            className="mt-1 inline-flex text-xs font-medium text-[#78716C] underline-offset-2 hover:underline dark:text-[#A8A29E]"
-            data-testid="timeblock-back-link-mobile"
-          >
-            {backLink.label}
-          </Link>
+          <h1 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务详情</h1>
         </div>
         <button
           type="button"
@@ -580,8 +868,17 @@ function MobileTimeblockDetail({
         </button>
       </header>
 
+      <MobileSectionTabs
+        anchors={mobileAnchors}
+        activeAnchorId={activeAnchorId}
+        onSelect={handleSelectAnchor}
+      />
+
       <div className="space-y-3 px-4 pt-3">
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <section
+          id={MOBILE_ANCHOR_TARGETS.overview}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
           <div className="flex flex-wrap items-center gap-2">
             {model.summary.badges.map((badge) => (
               <span key={badge.label} className={`rounded-full px-2.5 py-1 text-xs font-semibold ${badgeClassName(badge)}`}>
@@ -591,14 +888,15 @@ function MobileTimeblockDetail({
           </div>
           <h2 className="mt-3 text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h2>
           <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">关联任务：{task.title}</p>
-          {canEditEstimatedTime ? (
-            <EstimatedTimeEditor
-              taskId={task.id}
-              currentMinutes={task.estimatedMinutes}
-              onUpdate={onEstimatedMinutesUpdate}
-            />
-          ) : null}
-          <div className="mt-3 grid grid-cols-2 gap-2">
+          {descriptionBlock}
+        </section>
+
+        <section
+          id={MOBILE_ANCHOR_TARGETS.info}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信息面板</h3>
+          <div className="mt-2 grid grid-cols-2 gap-2">
             {model.summary.metrics.map((metric) => (
               <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
                 <p className="text-[11px] text-[#A8A29E]">{metric.label}</p>
@@ -608,49 +906,154 @@ function MobileTimeblockDetail({
           </div>
         </section>
 
-        {rootGuidance}
-
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-2 dark:border-[#292524] dark:bg-[#1C1917]">
-          <div className="flex gap-1 overflow-x-auto">
-            {model.anchors.map((anchor) => (
-              <button
-                key={anchor.id}
-                type="button"
-                className={`shrink-0 rounded-xl px-3 py-1.5 text-xs ${anchor.active ? 'bg-[#C75B3A] font-semibold text-white' : 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]'}`}
-              >
-                {anchor.label}
-              </button>
-            ))}
+        {showTimerCard && (
+        <section
+          id={MOBILE_ANCHOR_TARGETS.timer}
+          data-testid="task-timer-card"
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
+          {canEditEstimatedTime ? (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">任务估时</p>
+              <div className="mt-1">
+                <EstimatedTimeEditor
+                  taskId={task.id}
+                  currentMinutes={task.estimatedMinutes}
+                  onUpdate={onEstimatedMinutesUpdate}
+                />
+              </div>
+            </div>
+          ) : null}
+          {!hasOtherActiveBlock ? (
+            <div className="mt-3">
+              {timerControls}
+            </div>
+          ) : null}
+          <div className="mt-3 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-2">
+                {hasActiveBlockOnTask ? (
+                  <button
+                    type="button"
+                    onClick={onPauseAndGoEventlog}
+                    data-testid="task-pause-button"
+                    className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                  >
+                    <Target size={14} />
+                    回到当下
+                  </button>
+                ) : hasOtherActiveBlock ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onAppendTaskToActiveBlock}
+                      data-testid="task-append-association-button"
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                    >
+                      <Play size={14} />
+                      追加任务关联
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onPauseAndGoEventlog}
+                      data-testid="task-pause-button"
+                      className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                    >
+                      <Target size={14} />
+                      回到当下
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onStartTimer}
+                      disabled={hasOtherActiveBlock || Boolean(blockingReason)}
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+                    >
+                      <Play size={14} />
+                      开始计时
+                    </button>
+                    <button
+                      type="button"
+                    onClick={onPauseAndGoEventlog}
+                    data-testid="task-pause-button"
+                    className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    <Target size={14} />
+                    回到当下
+                  </button>
+                  </>
+                )}
+              </div>
+              {!hasOtherActiveBlock ? autoTimerToggle : null}
+            </div>
+            {blockingReason ? (
+              <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
+            ) : hasOtherActiveBlock ? (
+              <p className="text-xs text-[#A8A29E]">当前已有时间块进行中，可将本任务追加为关联任务。</p>
+            ) : null}
           </div>
         </section>
+        )}
 
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计划 vs 实际</h3>
-          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.planContent}</p>
-          <p className="mt-1 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.actualContent}</p>
-          <p className="mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">{model.planActual.diffReason}</p>
-        </section>
+        <div id={MOBILE_ANCHOR_TARGETS.root}>
+          {rootGuidance}
+        </div>
 
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <div id={MOBILE_ANCHOR_TARGETS.linked}>
+          <LinkedBlocksCard linkedBlocks={model.linkedBlocks} taskId={task.id} />
+        </div>
+
+        <section
+          id={MOBILE_ANCHOR_TARGETS.timeline}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h3>
-          <div className="mt-3 space-y-3">
-            {model.timeline.items.map((item) => (
-              <article key={item.id} className="flex gap-3">
-                <div className="mt-1 flex flex-col items-center">
-                  <span className={`h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
-                  <span className="mt-1 h-full w-px bg-[#E7E5E4] dark:bg-[#292524]" />
-                </div>
-                <div className="min-w-0 flex-1 pb-2">
-                  <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
-                  <p className="mt-1 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                  <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.description}</p>
-                </div>
-              </article>
-            ))}
-          </div>
+          {model.timeline.items.length === 0 && (task.timeBlockIds ?? []).length === 0 && model.linkedBlocks.length === 0 ? (
+            <p className="mt-2 text-xs text-[#A8A29E]">暂无关联时间块，开始一个时间块后即可在此查看事件。</p>
+          ) : (
+            <div className="mt-3 space-y-3">
+              {model.timeline.items.map((item) => (
+                <article key={item.id} className="flex gap-3">
+                  <div className="mt-1 flex flex-col items-center">
+                    <span className={`h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
+                    <span className="mt-1 h-full w-px bg-[#E7E5E4] dark:bg-[#292524]" />
+                  </div>
+                  <div className="min-w-0 flex-1 pb-2">
+                    <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
+                    <p className="mt-1 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                    <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                      <ReactMarkdown
+                        remarkPlugins={[remarkGfm, remarkBreaks]}
+                        components={{
+                          p: ({ ...props }) => <p className="m-0" {...props} />,
+                          ul: ({ ...props }) => <ul className="my-1 list-disc pl-4" {...props} />,
+                          ol: ({ ...props }) => <ol className="my-1 list-decimal pl-4" {...props} />,
+                          li: ({ ...props }) => <li className="my-0" {...props} />,
+                          code: ({ className, ...props }) => (
+                            <code
+                              className={`rounded bg-[#F5F0ED] px-1 py-0.5 dark:bg-[#292524] ${className ?? ''}`}
+                              {...props}
+                            />
+                          ),
+                        }}
+                      >
+                        {item.description}
+                      </ReactMarkdown>
+                    </div>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )}
         </section>
 
-        <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <section
+          id={MOBILE_ANCHOR_TARGETS['ai-summary']}
+          className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">AI 总结</h3>
           <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.aiSummary.summaryText}</p>
           <div className="mt-3 space-y-2 rounded-xl bg-[#F8F5F2] p-3 dark:bg-[#292524]">
@@ -660,60 +1063,48 @@ function MobileTimeblockDetail({
           </div>
         </section>
 
-        <DependencyCard
-          dependencyView={dependencyView}
-          taskDagView={taskDagView}
-          selectedTaskId={dependencySelectedTaskId}
-          selectedType={dependencySelectedType}
-          errorMessage={dependencyError}
-          isSaving={isDependencySaving}
-          onSelectedTaskChange={onDependencySelectedTaskChange}
-          onSelectedTypeChange={onDependencySelectedTypeChange}
-          onAddDependency={onAddDependency}
-          onChangeDependencyType={onChangeDependencyType}
-          onRemoveDependency={onRemoveDependency}
-          onToggleCollapseUpstream={onToggleCollapseUpstream}
-        />
-
-        <DetailActionsCard
-          model={model}
-          onRestart={onStartTimer}
-          onCopySummary={onCopySummary}
-        />
-
         <section
-          data-testid="task-timer-card"
+          id={MOBILE_ANCHOR_TARGETS.plan}
           className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
         >
-          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
-          {timerControls}
-          <div className="mt-3 flex gap-2">
-            <button
-              type="button"
-              onClick={onStartTimer}
-              disabled={hasOtherActiveBlock}
-              className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
-            >
-              <Play size={14} />
-              开始计时
-            </button>
-            <button
-              type="button"
-              data-testid="task-pause-button"
-              onClick={onPauseAndGoEventlog}
-              className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-            >
-              <Pause size={14} />
-              {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
-            </button>
-          </div>
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计划 vs 实际</h3>
+          <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.planContent}</p>
+          <p className="mt-1 text-sm text-[#44403C] dark:text-[#E7E5E4]">{model.planActual.actualContent}</p>
+          <p className="mt-2 rounded-xl bg-[#FFF7ED] px-3 py-2 text-xs text-[#C75B3A] dark:bg-[#2A231B]">{model.planActual.diffReason}</p>
         </section>
+
+        <div id={MOBILE_ANCHOR_TARGETS.dependency}>
+          <DependencyCard
+            dependencyView={dependencyView}
+            taskDagView={taskDagView}
+            selectedTaskId={dependencySelectedTaskId}
+            selectedType={dependencySelectedType}
+            errorMessage={dependencyError}
+            isSaving={isDependencySaving}
+            hideAddDependency={isTerminalTaskStatus(task.status)}
+            onSelectedTaskChange={onDependencySelectedTaskChange}
+            onSelectedTypeChange={onDependencySelectedTypeChange}
+            onAddDependency={onAddDependency}
+            onChangeDependencyType={onChangeDependencyType}
+            onRemoveDependency={onRemoveDependency}
+            onToggleCollapseUpstream={onToggleCollapseUpstream}
+            onToggleCollapseDownstream={onToggleCollapseDownstream}
+          />
+        </div>
+
+        <div id={MOBILE_ANCHOR_TARGETS.actions}>
+          <DetailActionsCard
+            model={model}
+            onCopySummary={onCopySummary}
+          />
+        </div>
       </div>
     </div>
   );
 }
 
 function DesktopTimeblockDetail({
+  descriptionBlock,
   task,
   model,
   backLink,
@@ -724,9 +1115,12 @@ function DesktopTimeblockDetail({
   dependencyError,
   isDependencySaving,
   timerControls,
+  autoTimerToggle,
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
+  blockingReason,
   onStartTimer,
+  onAppendTaskToActiveBlock,
   onPauseAndGoEventlog,
   onCopySummary,
   rootGuidance,
@@ -738,7 +1132,9 @@ function DesktopTimeblockDetail({
   onChangeDependencyType,
   onRemoveDependency,
   onToggleCollapseUpstream,
+  onToggleCollapseDownstream,
 }: {
+  descriptionBlock: ReactNode;
   task: TaskNode;
   model: TaskTimeblockDetailViewModel;
   backLink: TimeblockSourceBackLink;
@@ -749,9 +1145,12 @@ function DesktopTimeblockDetail({
   dependencyError: string | null;
   isDependencySaving: boolean;
   timerControls: ReactNode;
+  autoTimerToggle: ReactNode;
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
+  blockingReason: string | null;
   onStartTimer: () => void;
+  onAppendTaskToActiveBlock: () => void;
   onPauseAndGoEventlog: () => void;
   onCopySummary: () => void;
   rootGuidance?: ReactNode;
@@ -763,22 +1162,18 @@ function DesktopTimeblockDetail({
   onChangeDependencyType: (taskId: string, type: DependencyType) => void;
   onRemoveDependency: (taskId: string) => void;
   onToggleCollapseUpstream: (taskId: string) => void;
+  onToggleCollapseDownstream: (taskId: string) => void;
 }) {
   return (
-    <div className="min-h-full bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
-      <header className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <p className="text-xs text-[#A8A29E]">{backLink.breadcrumb}</p>
-        <div className="mt-2 flex items-center justify-between gap-3">
+    <div className="scrollbar-none h-full overflow-y-auto bg-[#FAF7F5] px-8 py-6 dark:bg-[#0C0A09]" data-testid="new-task-detail-page">
+      <TaskBreadcrumb
+        segments={buildDetailBreadcrumbSegments(backLink)}
+        current={{ label: '任务详情', icon: NotepadText }}
+      />
+      <header className="mt-3 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+        <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
             <h1 className="text-2xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{model.summary.blockName}</h1>
-            <Link
-              to={backLink.to}
-              search={backLink.search}
-              className="mt-2 inline-flex text-sm font-medium text-[#78716C] underline-offset-2 hover:underline dark:text-[#A8A29E]"
-              data-testid="timeblock-back-link-desktop"
-            >
-              {backLink.label}
-            </Link>
           </div>
           <div className="flex flex-wrap items-center gap-2">
             {model.summary.badges.map((badge) => (
@@ -788,54 +1183,161 @@ function DesktopTimeblockDetail({
             ))}
           </div>
         </div>
+        {descriptionBlock}
       </header>
 
-      <section className="mt-4 rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
-        <div className="grid grid-cols-5 gap-3">
-          {model.summary.metrics.map((metric) => (
-            <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
-              <p className="text-xs text-[#A8A29E]">{metric.label}</p>
-              <p className="mt-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
+      <div className="mt-4 grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <section className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]">
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">信息面板</h3>
+          <div className="mt-3 grid grid-cols-2 gap-3 xl:grid-cols-3">
+            {model.summary.metrics.map((metric) => (
+              <div key={metric.key} className="rounded-xl bg-[#F8F5F2] px-3 py-2 dark:bg-[#292524]">
+                <p className="text-xs text-[#A8A29E]">{metric.label}</p>
+                <p className="mt-1 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{metric.value}</p>
+              </div>
+            ))}
+          </div>
+        </section>
+
+        {!isTerminalTaskStatus(task.status) && (
+        <section
+          data-testid="task-timer-card"
+          className="rounded-2xl border border-[#E7E5E4] bg-white px-6 py-4 dark:border-[#292524] dark:bg-[#1C1917]"
+        >
+          <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
+          {canEditEstimatedTime ? (
+            <div className="mt-3">
+              <p className="text-xs font-medium text-[#57534E] dark:text-[#A8A29E]">任务估时</p>
+              <div className="mt-1">
+                <EstimatedTimeEditor
+                  taskId={task.id}
+                  currentMinutes={task.estimatedMinutes}
+                  onUpdate={onEstimatedMinutesUpdate}
+                />
+              </div>
             </div>
-          ))}
-        </div>
-        {canEditEstimatedTime ? (
-          <EstimatedTimeEditor
-            taskId={task.id}
-            currentMinutes={task.estimatedMinutes}
-            onUpdate={onEstimatedMinutesUpdate}
-          />
-        ) : null}
-      </section>
+          ) : null}
+          {!hasOtherActiveBlock ? (
+            <div className="mt-3">
+              {timerControls}
+            </div>
+          ) : null}
+          <div className="mt-3 flex flex-col gap-2">
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="flex flex-wrap gap-2">
+                {hasActiveBlockOnTask ? (
+                  <button
+                    type="button"
+                    onClick={onPauseAndGoEventlog}
+                    data-testid="task-pause-button"
+                    className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                  >
+                    <Target size={14} />
+                    回到当下
+                  </button>
+                ) : hasOtherActiveBlock ? (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onAppendTaskToActiveBlock}
+                      data-testid="task-append-association-button"
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                    >
+                      <Play size={14} />
+                      追加任务关联
+                    </button>
+                    <button
+                      type="button"
+                      onClick={onPauseAndGoEventlog}
+                      data-testid="task-pause-button"
+                      className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                    >
+                      <Target size={14} />
+                      回到当下
+                    </button>
+                  </>
+                ) : (
+                  <>
+                    <button
+                      type="button"
+                      onClick={onStartTimer}
+                      disabled={hasOtherActiveBlock || Boolean(blockingReason)}
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
+                    >
+                      <Play size={14} />
+                      开始计时
+                    </button>
+                    <button
+                      type="button"
+                    onClick={onPauseAndGoEventlog}
+                    data-testid="task-pause-button"
+                    className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    <Target size={14} />
+                    回到当下
+                  </button>
+                  </>
+                )}
+              </div>
+              {!hasOtherActiveBlock ? autoTimerToggle : null}
+            </div>
+            {blockingReason ? (
+              <p className="text-xs text-[#C75B3A] dark:text-[#FDBA74]">{blockingReason}</p>
+            ) : hasOtherActiveBlock ? (
+              <p className="text-xs text-[#A8A29E]">当前已有时间块进行中，可将本任务追加为关联任务。</p>
+            ) : null}
+          </div>
+        </section>
+        )}
+      </div>
 
       <section className="mt-4 grid grid-cols-[minmax(0,1fr)_340px] gap-4">
         <div className="space-y-3">
+          <LinkedBlocksCard linkedBlocks={model.linkedBlocks} taskId={task.id} />
+
           <section className="rounded-2xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">
-            <h2 className="text-base font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h2>
-            <div className="mt-4 space-y-3">
-              {model.timeline.items.map((item) => (
-                <article key={item.id} className="flex gap-3">
-                  <span className={`mt-1 h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
-                  <div className="min-w-0 flex-1">
-                    <div className="flex items-center justify-between gap-3">
-                      <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
-                      <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
+            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">事件时间线</h3>
+            {model.timeline.items.length === 0 && (task.timeBlockIds ?? []).length === 0 && model.linkedBlocks.length === 0 ? (
+              <p className="mt-2 text-xs text-[#A8A29E]">暂无关联时间块，开始一个时间块后即可在此查看事件。</p>
+            ) : (
+              <div className="mt-4 space-y-3">
+                {model.timeline.items.map((item) => (
+                  <article key={item.id} className="flex gap-3">
+                    <span className={`mt-1 h-2 w-2 rounded-full ${toneDotClassName(item.tone)}`} />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{item.title}</p>
+                        <p className="text-xs text-[#A8A29E]">{item.timeLabel}</p>
+                      </div>
+                      <div className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                        <ReactMarkdown
+                          remarkPlugins={[remarkGfm, remarkBreaks]}
+                          components={{
+                            p: ({ ...props }) => <p className="m-0" {...props} />,
+                            ul: ({ ...props }) => <ul className="my-1 list-disc pl-4" {...props} />,
+                            ol: ({ ...props }) => <ol className="my-1 list-decimal pl-4" {...props} />,
+                            li: ({ ...props }) => <li className="my-0" {...props} />,
+                            code: ({ className, ...props }) => (
+                              <code
+                                className={`rounded bg-[#F5F0ED] px-1 py-0.5 dark:bg-[#292524] ${className ?? ''}`}
+                                {...props}
+                              />
+                            ),
+                          }}
+                        >
+                          {item.description}
+                        </ReactMarkdown>
+                      </div>
                     </div>
-                    <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{item.description}</p>
-                  </div>
-                </article>
-              ))}
-            </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         </div>
 
         <aside className="space-y-3">
           {rootGuidance}
-
-          <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
-            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">洞察</h3>
-            <p className="mt-2 text-sm text-[#44403C] dark:text-[#E7E5E4]">{task.title}</p>
-          </section>
 
           <DependencyCard
             dependencyView={dependencyView}
@@ -844,12 +1346,14 @@ function DesktopTimeblockDetail({
             selectedType={dependencySelectedType}
             errorMessage={dependencyError}
             isSaving={isDependencySaving}
+            hideAddDependency={isTerminalTaskStatus(task.status)}
             onSelectedTaskChange={onDependencySelectedTaskChange}
             onSelectedTypeChange={onDependencySelectedTypeChange}
             onAddDependency={onAddDependency}
             onChangeDependencyType={onChangeDependencyType}
             onRemoveDependency={onRemoveDependency}
             onToggleCollapseUpstream={onToggleCollapseUpstream}
+            onToggleCollapseDownstream={onToggleCollapseDownstream}
           />
 
           <section className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]">
@@ -869,37 +1373,8 @@ function DesktopTimeblockDetail({
 
           <DetailActionsCard
             model={model}
-            onRestart={onStartTimer}
             onCopySummary={onCopySummary}
           />
-
-          <section
-            data-testid="task-timer-card"
-            className="rounded-2xl border border-[#E7E5E4] bg-white p-4 dark:border-[#292524] dark:bg-[#1C1917]"
-          >
-            <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">计时控制</h3>
-            {timerControls}
-            <div className="mt-3 flex gap-2">
-              <button
-                type="button"
-                onClick={onStartTimer}
-                disabled={hasOtherActiveBlock}
-                className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
-              >
-                <Play size={14} />
-                开始计时
-              </button>
-              <button
-                type="button"
-                data-testid="task-pause-button"
-                onClick={onPauseAndGoEventlog}
-                className="inline-flex items-center gap-1 rounded-xl border border-[#E7E5E4] px-4 py-2 text-sm font-medium text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
-              >
-                <Pause size={14} />
-                {hasActiveBlockOnTask ? '暂停并前往当下' : '前往当下'}
-              </button>
-            </div>
-          </section>
         </aside>
       </section>
     </div>
@@ -909,51 +1384,101 @@ function DesktopTimeblockDetail({
 export function TaskDetailPage() {
   const { taskId, blockId: blockIdParam } = useParams({ strict: false }) as { taskId?: string; blockId?: string };
   const navigate = useNavigate();
+  const location = useLocation();
   const isDesktop = useIsDesktop();
   const preferredBlockId = blockIdParam || resolvePreferredBlockId();
   const backLink = resolveTimeblockSourceBackLink();
+
+  // Persist current tasks sub-path for nav tab memory
+  useEffect(() => {
+    const fullPath = location.pathname + (location.searchStr || '');
+    if (fullPath.startsWith('/tasks/')) {
+      sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+    }
+  }, [location.pathname, location.searchStr]);
 
   const [task, setTask] = useState<TaskNode | null>(null);
   const [timeBlocks, setTimeBlocks] = useState<TimeBlock[]>([]);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
   const [hasOtherActiveBlock, setHasOtherActiveBlock] = useState(false);
+  const [spentMinutes, setSpentMinutes] = useState<number | undefined>(undefined);
   const [isLoading, setIsLoading] = useState(true);
   const [reviewMarkdown, setReviewMarkdown] = useState('');
   const [eventLogs, setEventLogs] = useState<TimeblockEventLog[]>([]);
   const [allTasks, setAllTasks] = useState<TaskNode[]>([]);
   const [dependencySelectedTaskId, setDependencySelectedTaskId] = useState('');
   const [dependencySelectedType, setDependencySelectedType] = useState<DependencyType>('soft');
-  const [dagVisibilityState, setDagVisibilityState] = useState<TaskDagVisibilityState>({ collapsedUpstreamOf: [] });
+  const [dagVisibilityState, setDagVisibilityState] = useState<TaskDagVisibilityState>({
+    collapsedUpstreamOf: [],
+    collapsedDownstreamOf: [],
+  });
   const [dependencyLoadError, setDependencyLoadError] = useState<string | null>(null);
   const [dependencyActionError, setDependencyActionError] = useState<string | null>(null);
   const [isDependencySaving, setIsDependencySaving] = useState(false);
   const [dependencyReloadKey, setDependencyReloadKey] = useState(0);
+  const [isEditingDescription, setIsEditingDescription] = useState(false);
+  const [descriptionDraft, setDescriptionDraft] = useState('');
+  const [isTimerAutoFillEnabled, setIsTimerAutoFillEnabled] = useState(() => readTaskTimerAutoFillEnabled());
   const timerResetKey = taskId ?? preferredBlockId ?? task?.id;
-  const timerInitialMinutes = taskId
+  const taskEstimatedMinutes = taskId
     ? task?.id === taskId ? task.estimatedMinutes : undefined
     : task?.estimatedMinutes;
+  const autoTimerConfig = useMemo(
+    () => resolveAutoTimerConfig(taskEstimatedMinutes, spentMinutes),
+    [spentMinutes, taskEstimatedMinutes],
+  );
+  const timerInitialMinutes = useMemo(() => {
+    if (isTimerAutoFillEnabled) {
+      if (autoTimerConfig?.mode === 'countdown') {
+        return autoTimerConfig.minutes;
+      }
+
+      if (autoTimerConfig?.mode === 'countup') {
+        return undefined;
+      }
+    }
+
+    return taskEstimatedMinutes;
+  }, [autoTimerConfig, isTimerAutoFillEnabled, taskEstimatedMinutes]);
   const {
     timerMode,
     countdownMinutes,
     setTimerMode,
     setCountdownMinutes,
+    syncTimerConfig,
     customDurationDraft,
     setCustomDurationDraft,
     commitCustomDuration,
     timerConfig,
   } = useTimerConfig(timerInitialMinutes, timerResetKey);
 
+  useEffect(() => {
+    writeTaskTimerAutoFillEnabled(isTimerAutoFillEnabled);
+  }, [isTimerAutoFillEnabled]);
+
+  useEffect(() => {
+    if (!isTimerAutoFillEnabled || !autoTimerConfig) {
+      return;
+    }
+
+    syncTimerConfig(autoTimerConfig);
+  }, [autoTimerConfig, isTimerAutoFillEnabled, syncTimerConfig]);
+
   useLayoutEffect(() => {
     setIsLoading(true);
     setTask(null);
     setActiveBlock(null);
     setHasOtherActiveBlock(false);
+    setSpentMinutes(undefined);
     setEventLogs([]);
     setReviewMarkdown('');
   }, [dependencyReloadKey, preferredBlockId, taskId]);
 
   useEffect(() => {
-    setDagVisibilityState({ collapsedUpstreamOf: [] });
+    setDagVisibilityState({
+      collapsedUpstreamOf: [],
+      collapsedDownstreamOf: [],
+    });
   }, [task?.id]);
 
   useEffect(() => {
@@ -1000,24 +1525,30 @@ export function TaskDetailPage() {
       setTask(nextTask);
       setAllTasks(listedTasks);
       setTimeBlocks(blocks);
-      setActiveBlock(nextTask && currentBlock?.taskId === nextTask.id ? currentBlock : null);
-      setHasOtherActiveBlock(Boolean(currentBlock && nextTask && currentBlock.taskId !== nextTask.id));
+      setActiveBlock(nextTask && isTaskLinkedToActiveBlock(currentBlock, nextTask.id) ? currentBlock : null);
+      setHasOtherActiveBlock(Boolean(currentBlock && nextTask && !isTaskLinkedToActiveBlock(currentBlock, nextTask.id)));
 
       if (nextTask) {
-        const events = await getEventStorage().getEvents();
+        const [events, calculatedSpentMinutes] = await Promise.all([
+          getEventLogService().loadEvents(),
+          getTaskTimerService().calculateSpentMinutes(nextTask.id).catch(() => 0),
+        ]);
         const matchedBlockName = preferredBlockId
           ? blocks.find((block) => block.id === preferredBlockId || block.startId === preferredBlockId)?.name
           : undefined;
         if (!disposed) {
-          setEventLogs(events.map((event) => ({
+          const normalizedEvents = events.map((event) => ({
             id: event.id,
-            createdAt: event.createdAt,
+            createdAt: resolveEventCreatedAt(event.timestamp),
             content: event.content,
-            type: event.type,
-          })));
-          setReviewMarkdown(selectReviewMarkdown(nextTask, matchedBlockName ?? nextTask.title, events));
+            type: resolveEventTypeFromTags(event.tags),
+          }));
+          setSpentMinutes(calculatedSpentMinutes);
+          setEventLogs(normalizedEvents);
+          setReviewMarkdown(selectReviewMarkdown(nextTask, matchedBlockName ?? nextTask.title, normalizedEvents));
         }
       } else {
+        setSpentMinutes(undefined);
         setEventLogs([]);
         setReviewMarkdown('');
       }
@@ -1049,23 +1580,46 @@ export function TaskDetailPage() {
       eventLogs,
       reviewMarkdown,
       useMockData: getUseMockDataEnabled(),
-      backAction: {
-        label: backLink.label,
-        to: backLink.to,
-        search: backLink.search,
-      },
     });
-  }, [activeBlock, backLink.label, backLink.search, backLink.to, eventLogs, preferredBlockId, reviewMarkdown, task, timeBlocks]);
+  }, [activeBlock, eventLogs, preferredBlockId, reviewMarkdown, task, timeBlocks]);
 
   const taskGraph = useMemo(() => buildTaskGraph(allTasks), [allTasks]);
   const taskById = useMemo(() => new Map(allTasks.map((candidate) => [candidate.id, candidate])), [allTasks]);
   const rootGuidance = useMemo(() => (
-    <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} />
+    <TaskCurrentRootCard graph={taskGraph} taskById={taskById} currentTaskId={task?.id} collapsible={true} />
   ), [task?.id, taskById, taskGraph]);
   const canEditEstimatedTime = useMemo(
-    () => (task ? allTasks.some((candidate) => candidate.id === task.id) : false),
+    () => (task ? allTasks.some((candidate) => candidate.id === task.id) && !isTerminalTaskStatus(task.status) : false),
     [allTasks, task],
   );
+  const blockingReason = useMemo(() => {
+    if (!task) return null;
+    const reasons: string[] = [];
+    const incompleteHardDeps = task.dependsOn
+      .filter((dep) => dep.type === 'hard')
+      .map((dep) => {
+        const predecessor = taskById.get(dep.taskId);
+        if (!predecessor || predecessor.status === 'completed') return null;
+        return predecessor.title;
+      })
+      .filter((title): title is string => title !== null);
+    if (incompleteHardDeps.length > 0) {
+      reasons.push(`硬依赖未完成：${incompleteHardDeps.join('、')}`);
+    }
+    const pendingSoftDeps = task.dependsOn
+      .filter((dep) => dep.type === 'soft')
+      .map((dep) => {
+        const predecessor = taskById.get(dep.taskId);
+        if (!predecessor || predecessor.status !== 'pending') return null;
+        return predecessor.title;
+      })
+      .filter((title): title is string => title !== null);
+    if (pendingSoftDeps.length > 0) {
+      reasons.push(pendingSoftDeps.map((title) => `软依赖「${title}」尚未开始`).join('、'));
+    }
+    if (reasons.length === 0) return null;
+    return reasons.join('；');
+  }, [task, taskById]);
   const timerControls = (
     <TimerConfigPanel
       timerMode={timerMode}
@@ -1075,7 +1629,35 @@ export function TaskDetailPage() {
       customDurationDraft={customDurationDraft}
       setCustomDurationDraft={setCustomDurationDraft}
       commitCustomDuration={commitCustomDuration}
+      showCountupOption
     />
+  );
+  const autoTimerStatusText = taskEstimatedMinutes == null
+    ? '未设估时'
+    : spentMinutes == null
+      ? '等待时间块统计'
+      : autoTimerConfig?.mode === 'countdown'
+        ? `剩余 ${autoTimerConfig.minutes}min`
+        : '已超预期，自动正计时';
+  const autoTimerToggle = (
+    <label
+      data-testid="task-countdown-auto-fill-toggle"
+      className="ml-auto inline-flex items-center gap-2 rounded-xl border border-[#E7E5E4] bg-[#FAF7F5] px-3 py-2 dark:border-[#292524] dark:bg-[#0C0A09]"
+    >
+      <div className="text-right">
+        <p className="text-[11px] font-medium text-[#57534E] dark:text-[#D6D3D1]">自动补全</p>
+        <p data-testid="task-countdown-auto-fill-status" className="text-[11px] text-[#A8A29E] dark:text-[#78716C]">
+          {autoTimerStatusText}
+        </p>
+      </div>
+      <Switch
+        checked={isTimerAutoFillEnabled}
+        onCheckedChange={setIsTimerAutoFillEnabled}
+        disabled={taskEstimatedMinutes == null || spentMinutes == null}
+        aria-label="自动补全计时时长"
+        data-testid="task-countdown-auto-fill-switch"
+      />
+    </label>
   );
 
   const dependencyView = useMemo(() => {
@@ -1096,9 +1678,19 @@ export function TaskDetailPage() {
 
   const handleToggleCollapseUpstream = (targetTaskId: string) => {
     setDagVisibilityState((currentState) => ({
+      ...currentState,
       collapsedUpstreamOf: currentState.collapsedUpstreamOf.includes(targetTaskId)
         ? currentState.collapsedUpstreamOf.filter((taskId) => taskId !== targetTaskId)
         : [...currentState.collapsedUpstreamOf, targetTaskId],
+    }));
+  };
+
+  const handleToggleCollapseDownstream = (targetTaskId: string) => {
+    setDagVisibilityState((currentState) => ({
+      ...currentState,
+      collapsedDownstreamOf: currentState.collapsedDownstreamOf.includes(targetTaskId)
+        ? currentState.collapsedDownstreamOf.filter((taskId) => taskId !== targetTaskId)
+        : [...currentState.collapsedDownstreamOf, targetTaskId],
     }));
   };
 
@@ -1176,19 +1768,32 @@ export function TaskDetailPage() {
   };
 
   const handleStartTimer = () => {
+    if (!taskId) { console.error('[TaskDetail] handleStartTimer: no taskId'); return; }
+    console.log('[TaskDetail] handleStartTimer', { taskId, timerConfig, timerMode, countdownMinutes });
+    void getTaskTimerService().startBlockForTask(taskId, timerConfig).then((block) => {
+      console.log('[TaskDetail] startBlockForTask OK', block ? { startId: block.startId, mode: block.mode, phase: block.phase, taskId: block.taskId, paused: block.paused, elapsed: block.elapsed } : 'NULL');
+      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
+    }).catch((err) => {
+      console.error('[TaskDetail] startBlockForTask FAILED', err);
+    });
+  };
+
+  const handleAppendTaskToActiveBlock = () => {
     if (!taskId) return;
-    void getTaskTimerService().startBlockForTask(taskId, timerConfig).then(() => {
-      void navigate({ to: '/eventlog' });
+    void getTaskTimerService().addTaskToBlock(taskId).then(() => {
+      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
+    }).catch((err) => {
+      console.error('[TaskDetail] addTaskToBlock FAILED', err);
     });
   };
 
   const handlePauseAndGoEventlog = () => {
     if (!activeBlock) {
-      void navigate({ to: '/eventlog' });
+      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
       return;
     }
     void getTimeBlockService().pauseBlock().finally(() => {
-      void navigate({ to: '/eventlog' });
+      void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
     });
   };
 
@@ -1205,6 +1810,14 @@ export function TaskDetailPage() {
     if (!sourceTaskId) return;
 
     const updatedAt = Date.now();
+    const nextAutoTimerConfig = resolveAutoTimerConfig(minutes, spentMinutes);
+    if (isTimerAutoFillEnabled && nextAutoTimerConfig) {
+      syncTimerConfig(nextAutoTimerConfig);
+    } else if (minutes == null) {
+      setTimerMode('countup');
+    } else {
+      setCountdownMinutes(minutes);
+    }
     setTask((current) => {
       if (!current || current.id !== sourceTaskId) return current;
       return {
@@ -1222,7 +1835,20 @@ export function TaskDetailPage() {
           }
         : candidate
     )));
-  }, [task?.id]);
+  }, [isTimerAutoFillEnabled, setCountdownMinutes, setTimerMode, spentMinutes, syncTimerConfig, task?.id]);
+
+  const handleSaveDescription = useCallback(async () => {
+    if (!task?.id) return;
+    const trimmed = descriptionDraft.trim() || undefined;
+    setIsEditingDescription(false);
+    setTask((current) => current ? { ...current, description: trimmed } : current);
+    await getTaskService().updateTask(task.id, { description: trimmed ?? '' });
+  }, [task?.id, descriptionDraft]);
+
+  const handleCancelDescription = useCallback(() => {
+    setDescriptionDraft(task?.description ?? '');
+    setIsEditingDescription(false);
+  }, [task?.description]);
 
   if (isLoading) {
     return (
@@ -1235,7 +1861,11 @@ export function TaskDetailPage() {
   if (!task || !viewModel || !dependencyView) {
     return (
       <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
-        <Link to={backLink.to} search={backLink.search} className="inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
+        <Link
+          to={backLink.to}
+          search={backLink.to === '/tasks' ? buildTasksMainSearch(backLink.search) : backLink.search}
+          className="inline-flex items-center gap-1 text-sm text-[#78716C] dark:text-[#A8A29E]"
+        >
           <ArrowLeft size={16} />
           {backLink.label.replace('← ', '')}
         </Link>
@@ -1244,9 +1874,56 @@ export function TaskDetailPage() {
     );
   }
 
+  const descriptionBlock = (
+    <>
+      {isEditingDescription ? (
+        <div className="mt-3">
+          <Textarea
+            autoFocus
+            value={descriptionDraft}
+            onChange={(e) => setDescriptionDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === 'Escape') {
+                e.preventDefault();
+                handleCancelDescription();
+                return;
+              }
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault();
+                void handleSaveDescription();
+              }
+            }}
+            placeholder="输入任务描述..."
+            className="min-h-[120px] border-none bg-transparent p-0 text-sm text-[#1C1917] shadow-none focus-visible:ring-0 dark:text-[#FAFAF9]"
+          />
+          <div className="mt-2 flex justify-end gap-2">
+            <button type="button" onClick={handleCancelDescription} className="rounded-lg px-3 py-1 text-xs text-[#78716C] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">取消</button>
+            <button type="button" onClick={handleSaveDescription} className="rounded-lg bg-[#1C1917] px-3 py-1 text-xs text-white dark:bg-[#FAFAF9] dark:text-[#1C1917]">保存</button>
+          </div>
+        </div>
+      ) : task.description ? (
+        <div className="mt-3 flex items-start justify-between gap-3">
+          <div className="prose prose-sm dark:prose-invert max-w-none text-sm text-[#78716C] dark:text-[#A8A29E] prose-p:my-1 prose-ul:my-1 prose-ol:my-1 prose-li:my-0 prose-headings:my-1 prose-headings:text-[#44403C] dark:prose-headings:text-[#D6D3D1] prose-a:text-[#C75B3A] prose-code:text-[#78716C] dark:prose-code:text-[#A8A29E] prose-pre:bg-[#F5F0ED] dark:prose-pre:bg-[#292524]">
+            <ReactMarkdown remarkPlugins={[remarkGfm, remarkBreaks]}>{task.description}</ReactMarkdown>
+          </div>
+          {!isTerminalTaskStatus(task.status) && (
+            <button type="button" onClick={() => { setDescriptionDraft(task.description ?? ''); setIsEditingDescription(true); }} className="shrink-0 rounded-lg p-1.5 text-[#A8A29E] hover:bg-[#F5F0ED] dark:hover:bg-[#292524]">
+              <Pencil size={14} />
+            </button>
+          )}
+        </div>
+      ) : !isTerminalTaskStatus(task.status) ? (
+        <button type="button" onClick={() => { setDescriptionDraft(''); setIsEditingDescription(true); }} className="mt-3 text-sm text-[#A8A29E] hover:text-[#78716C] dark:hover:text-[#D6D3D1]">
+          + 添加任务描述
+        </button>
+      ) : null}
+    </>
+  );
+
   if (isDesktop) {
     return (
       <DesktopTimeblockDetail
+        descriptionBlock={descriptionBlock}
         task={task}
         model={viewModel}
         backLink={backLink}
@@ -1257,9 +1934,12 @@ export function TaskDetailPage() {
         dependencyError={dependencyError}
         isDependencySaving={isDependencySaving}
         timerControls={timerControls}
+        autoTimerToggle={autoTimerToggle}
         hasOtherActiveBlock={hasOtherActiveBlock}
         hasActiveBlockOnTask={Boolean(activeBlock)}
+        blockingReason={blockingReason}
         onStartTimer={handleStartTimer}
+        onAppendTaskToActiveBlock={handleAppendTaskToActiveBlock}
         onPauseAndGoEventlog={handlePauseAndGoEventlog}
         onCopySummary={handleCopySummary}
         rootGuidance={rootGuidance}
@@ -1271,12 +1951,14 @@ export function TaskDetailPage() {
         onChangeDependencyType={handleChangeDependencyType}
         onRemoveDependency={handleRemoveDependency}
         onToggleCollapseUpstream={handleToggleCollapseUpstream}
+        onToggleCollapseDownstream={handleToggleCollapseDownstream}
       />
     );
   }
 
   return (
     <MobileTimeblockDetail
+      descriptionBlock={descriptionBlock}
       task={task}
       model={viewModel}
       backLink={backLink}
@@ -1287,9 +1969,12 @@ export function TaskDetailPage() {
       dependencyError={dependencyError}
       isDependencySaving={isDependencySaving}
       timerControls={timerControls}
+      autoTimerToggle={autoTimerToggle}
       hasOtherActiveBlock={hasOtherActiveBlock}
       hasActiveBlockOnTask={Boolean(activeBlock)}
+      blockingReason={blockingReason}
       onStartTimer={handleStartTimer}
+      onAppendTaskToActiveBlock={handleAppendTaskToActiveBlock}
       onPauseAndGoEventlog={handlePauseAndGoEventlog}
       onCopySummary={handleCopySummary}
       rootGuidance={rootGuidance}
@@ -1301,6 +1986,7 @@ export function TaskDetailPage() {
       onChangeDependencyType={handleChangeDependencyType}
       onRemoveDependency={handleRemoveDependency}
       onToggleCollapseUpstream={handleToggleCollapseUpstream}
+      onToggleCollapseDownstream={handleToggleCollapseDownstream}
     />
   );
 }

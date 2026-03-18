@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { TaskNode } from '@/lib/types/task';
-import type { TimeBlock } from '@/lib/types/event';
+import type { ActiveBlockData, TimeBlock } from '@/lib/types/event';
 import { buildTaskTimeblockDetailViewModel } from '@/ui/app/pages/task-timeblock-detail-view';
 
 function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }): TaskNode {
@@ -30,6 +30,33 @@ function makeBlock(overrides: Partial<TimeBlock> & { id: string; name: string; s
     tags: overrides.tags ?? new Set(['block_feedback']),
     startTime: overrides.startTime,
     endTime: overrides.endTime,
+  };
+}
+
+function makeActiveBlock(overrides: Partial<ActiveBlockData> = {}): ActiveBlockData {
+  return {
+    startId: overrides.startId ?? 'active-block',
+    name: overrides.name ?? '进行中时间块',
+    mode: overrides.mode ?? 'countup',
+    startTime: overrides.startTime ?? Date.now(),
+    elapsed: overrides.elapsed ?? 20 * 60 * 1000,
+    paused: overrides.paused ?? false,
+    phase: overrides.phase ?? 'running',
+    version: overrides.version ?? 1,
+    taskIds: overrides.taskIds ?? [],
+    taskAssociationLog: overrides.taskAssociationLog ?? [],
+    taskId: overrides.taskId,
+    updatedAt: overrides.updatedAt,
+    actorId: overrides.actorId,
+    lastTransitionAt: overrides.lastTransitionAt,
+    lastResumedAt: overrides.lastResumedAt,
+    accumulatedRunMs: overrides.accumulatedRunMs,
+    actionEndedAt: overrides.actionEndedAt,
+    feedbackStartedAt: overrides.feedbackStartedAt,
+    feedbackSubmittedAt: overrides.feedbackSubmittedAt,
+    pauseAccumulatedMs: overrides.pauseAccumulatedMs,
+    pausedAt: overrides.pausedAt,
+    targetMinutes: overrides.targetMinutes,
   };
 }
 
@@ -193,5 +220,133 @@ describe('buildTaskTimeblockDetailViewModel（时间块详情视图模型）', (
 
     expect(model.timeline.items.map((item) => item.title)).toEqual(['开始时间块', '事件记录', '结束时间块']);
     expect(model.timeline.items[1].description).toContain('处理中途阻塞');
+  });
+
+  it('linkedBlocks contains all blocks matched by task.timeBlockIds（linkedBlocks 包含任务关联的所有已完成时间块）', () => {
+    const task = makeTask({
+      id: 'task-linked',
+      title: '关联时间块展示',
+      estimatedMinutes: 60,
+      timeBlockIds: ['block-a', 'block-b'],
+    });
+    const blockA = makeBlock({
+      id: 'block-a',
+      name: '上午块',
+      startTime: start,
+      endTime: start + 30 * 60_000,
+    });
+    const blockB = makeBlock({
+      id: 'block-b',
+      name: '下午块',
+      startTime: start + 4 * 60 * 60_000,
+      endTime: start + 5 * 60 * 60_000,
+    });
+    const unrelated = makeBlock({
+      id: 'block-other',
+      name: '无关块',
+      startTime: start,
+      endTime: end,
+    });
+
+    const model = buildTaskTimeblockDetailViewModel({
+      task,
+      blocks: [blockA, blockB, unrelated],
+      reviewMarkdown: '',
+      useMockData: true,
+    });
+
+    expect(model.linkedBlocks).toHaveLength(2);
+    expect(model.linkedBlocks.map((b) => b.name)).toEqual(['下午块', '上午块']);
+    expect(model.linkedBlocks.every((b) => !b.isActive)).toBe(true);
+    expect(model.linkedBlocks[0].durationLabel).toBe('1h');
+    expect(model.linkedBlocks[1].durationLabel).toBe('30m');
+  });
+
+  it('linkedBlocks includes active block when present（进行中的活跃时间块出现在 linkedBlocks 列表开头）', () => {
+    const task = makeTask({
+      id: 'task-active',
+      title: '活跃块测试',
+      status: 'in_progress',
+      estimatedMinutes: 60,
+      timeBlockIds: ['block-done'],
+    });
+    const doneBlock = makeBlock({
+      id: 'block-done',
+      name: '已完成块',
+      startTime: start,
+      endTime: start + 45 * 60_000,
+    });
+
+    const now = new Date(start + 2 * 60 * 60_000);
+    const model = buildTaskTimeblockDetailViewModel({
+      task,
+      blocks: [doneBlock],
+      activeBlock: {
+        startId: 'block-active',
+        name: '当前块',
+        startTime: start + 60 * 60_000,
+        taskId: 'task-active',
+        mode: 'countup',
+        phase: 'focus',
+        paused: false,
+        elapsed: 0,
+      },
+      reviewMarkdown: '',
+      useMockData: true,
+      now,
+    });
+
+    expect(model.linkedBlocks).toHaveLength(2);
+    expect(model.linkedBlocks[0].isActive).toBe(true);
+    expect(model.linkedBlocks[0].name).toBe('当前块');
+    expect(model.linkedBlocks[0].endLabel).toBe('进行中');
+    expect(model.linkedBlocks[1].isActive).toBe(false);
+    expect(model.linkedBlocks[1].name).toBe('已完成块');
+  });
+
+  it('linkedBlocks is empty when task has no timeBlockIds（无关联时间块 ID 时返回空列表）', () => {
+    const task = makeTask({
+      id: 'task-empty',
+      title: '空时间块任务',
+      estimatedMinutes: 60,
+      timeBlockIds: [],
+    });
+
+    const model = buildTaskTimeblockDetailViewModel({
+      task,
+      blocks: [],
+      reviewMarkdown: '',
+      useMockData: true,
+    });
+
+    expect(model.linkedBlocks).toHaveLength(0);
+  });
+
+  it('treats active block taskIds as linked to the task（activeBlock.taskIds 包含任务时应识别为当前任务时间块）', () => {
+    const task = makeTask({
+      id: 'task-active',
+      title: '处理 activeBlock 多任务兼容',
+      estimatedMinutes: 30,
+    });
+
+    const model = buildTaskTimeblockDetailViewModel({
+      task,
+      blocks: [],
+      activeBlock: makeActiveBlock({
+        startId: 'active-block-1',
+        name: '进行中的多任务块',
+        startTime: start,
+        taskIds: ['task-active'],
+      }),
+      now: new Date(end),
+      reviewMarkdown: '',
+      useMockData: true,
+    });
+
+    expect(model.summary.blockName).toBe('进行中的多任务块');
+    expect(model.summary.metrics.find((item) => item.key === 'duration')?.value).toBe('1h 30m');
+    expect(model.linkedBlocks).toHaveLength(1);
+    expect(model.linkedBlocks[0].isActive).toBe(true);
+    expect(model.linkedBlocks[0].name).toBe('进行中的多任务块');
   });
 });

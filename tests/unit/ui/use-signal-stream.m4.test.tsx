@@ -9,10 +9,13 @@ const {
   stopMock,
   onSignalMock,
   signalServiceOptions,
+  signalHandlerOptions,
+  appendEventDataMock,
   MockSignalStreamService,
 } = vi.hoisted(() => {
   const queuedStatuses: RuntimeStatus[] = [];
   const queuedSignalServiceOptions: Array<Record<string, unknown>> = [];
+  const queuedSignalHandlerOptions: Array<Record<string, unknown>> = [];
   const queuedGetStatusMock = vi.fn<() => Promise<RuntimeStatus>>(async () => {
     if (queuedStatuses.length === 0) {
       throw new Error('runtime status queue exhausted（运行时状态队列已耗尽）');
@@ -27,6 +30,7 @@ const {
   const queuedStartMock = vi.fn();
   const queuedStopMock = vi.fn();
   const queuedOnSignalMock = vi.fn(() => () => {});
+  const queuedAppendEventDataMock = vi.fn(async () => undefined);
 
   class HoistedMockSignalStreamService {
     constructor(options: Record<string, unknown>) {
@@ -45,6 +49,8 @@ const {
     stopMock: queuedStopMock,
     onSignalMock: queuedOnSignalMock,
     signalServiceOptions: queuedSignalServiceOptions,
+    signalHandlerOptions: queuedSignalHandlerOptions,
+    appendEventDataMock: queuedAppendEventDataMock,
     MockSignalStreamService: HoistedMockSignalStreamService,
   };
 });
@@ -70,7 +76,16 @@ vi.mock('@/lib/services/signal-stream.service', () => ({
 }));
 
 vi.mock('@/lib/services/signal-handlers', () => ({
-  startSignalHandlers: vi.fn(() => async () => {}),
+  startSignalHandlers: vi.fn((options: Record<string, unknown>) => {
+    signalHandlerOptions.push(options);
+    return async () => {};
+  }),
+}));
+
+vi.mock('@/lib/services/eventlog.service', () => ({
+  getEventLogService: () => ({
+    appendEventData: appendEventDataMock,
+  }),
 }));
 
 vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
@@ -115,10 +130,12 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     window.localStorage.clear();
     runtimeStatuses.length = 0;
     signalServiceOptions.length = 0;
+    signalHandlerOptions.length = 0;
     getStatusMock.mockClear();
     startMock.mockClear();
     stopMock.mockClear();
     onSignalMock.mockClear();
+    appendEventDataMock.mockClear();
     setRuntimeTargetMode('embedded');
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
@@ -181,5 +198,67 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     });
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"port":48202');
     expect(window.localStorage.getItem(EMBEDDED_RUNTIME_STATUS_STORAGE_KEY)).toContain('"authSecret":"embedded-secret"');
+  });
+
+  it('bridges eventlog.appended into EventLogService（把 eventlog.appended 桥接进 EventLogService）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    expect(signalHandlerOptions).toHaveLength(1);
+    const onEventLogAppended = signalHandlerOptions[0].onEventLogAppended as
+      | ((payload: { text: string; ts: number; inputMode?: string; captureSource?: string }) => Promise<void>)
+      | undefined;
+
+    expect(onEventLogAppended).toEqual(expect.any(Function));
+
+    await onEventLogAppended?.({
+      text: 'external-pipeline-manual-verify-1305',
+      ts: 1773810305000,
+      inputMode: 'external',
+      captureSource: 'manual',
+    });
+
+    expect(appendEventDataMock).toHaveBeenCalledWith(expect.objectContaining({
+      content: 'external-pipeline-manual-verify-1305',
+      timestamp: 1773810305000,
+      tags: ['note'],
+      metadata: expect.objectContaining({
+        source: expect.any(Object),
+      }),
+    }));
+  });
+
+  it('ignores voice eventlog.appended payloads to avoid duplicate writes（忽略 voice eventlog.appended，避免重复写入）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    const onEventLogAppended = signalHandlerOptions[0].onEventLogAppended as
+      | ((payload: { text: string; ts: number; inputMode?: string; captureSource?: string }) => Promise<void>)
+      | undefined;
+
+    await onEventLogAppended?.({
+      text: 'voice duplicate candidate',
+      ts: 1773810310000,
+      inputMode: 'voice',
+      captureSource: 'global-shortcut',
+    });
+
+    expect(appendEventDataMock).not.toHaveBeenCalled();
   });
 });

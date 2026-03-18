@@ -9,6 +9,7 @@ function createContext(overrides: Partial<CommandContext> = {}): CommandContext 
     developerModeEnabled: true,
     commandPaletteEnabled: true,
     featureFlags: {
+      mePageEnabled: false,
       agentPageEnabled: true,
       goalsV2Enabled: false,
       ...overrides.featureFlags,

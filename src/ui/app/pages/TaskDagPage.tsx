@@ -1,6 +1,8 @@
-import { ArrowLeft, Crosshair, Waypoints } from 'lucide-react';
-import { Link } from '@tanstack/react-router';
+import { Crosshair, Waypoints } from 'lucide-react';
+import { Link, useLocation } from '@tanstack/react-router';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { TASKS_LAST_PATH_KEY } from './task-route-memory';
+import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 import {
   Background,
   Controls,
@@ -12,17 +14,33 @@ import {
   type ReactFlowInstance,
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
+import {
+  calculateTaskDagCollapseScope,
+  type TaskDagVisibilityState,
+  EMPTY_TASK_DAG_VISIBILITY_STATE,
+  projectVisibleTaskGraph,
+} from '@/lib/task/task-dag-visibility';
 import { getTaskService } from '@/lib/services';
 import type { TaskNode } from '@/lib/types/task';
 import {
-  buildTaskDagFlow,
+  buildVisibleTaskDagFlow,
   TASK_DAG_NODE_HEIGHT,
   TASK_DAG_NODE_WIDTH,
   type TaskDagFlowEdge,
   type TaskDagFlowNode,
   type TaskDagFlowNodeData,
 } from './task-dag-flow';
+import type { TaskStatus } from '@/lib/types/task';
+
+const STATUS_LABELS: Record<TaskStatus, string> = {
+  pending: '待办',
+  in_progress: '进行中',
+  suspended: '已挂起',
+  completed: '已完成',
+  cancelled: '已取消',
+};
 
 function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
   const nodeData = data as TaskDagFlowNodeData;
@@ -41,6 +59,8 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
         'w-64 rounded-2xl border bg-white px-4 py-3 text-left shadow-sm dark:bg-[#1C1917]',
         nodeData.isCurrentRoot
           ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:ring-[#4A2317]'
+          : nodeData.isCollapsedTarget
+            ? 'border-[#C75B3A] ring-2 ring-[#FDE7DC] dark:border-[#FDBA74] dark:ring-[#4A2317]'
           : nodeData.isBlocked
             ? 'border-[#EAB308]/60'
             : 'border-[#E7E5E4] dark:border-[#292524]',
@@ -58,9 +78,35 @@ function TaskDagNode({ id, data }: FlowNodeProps<TaskDagFlowNode>) {
             当前根节点
           </span>
         ) : null}
+        {nodeData.isCollapsedUpstreamTarget ? (
+          <span className="rounded-full bg-[#FFF7ED] px-2 py-0.5 text-[10px] font-medium text-[#C75B3A]">
+            已折叠上游
+          </span>
+        ) : null}
+        {nodeData.isCollapsedDownstreamTarget ? (
+          <span className="rounded-full bg-[#ECFDF5] px-2 py-0.5 text-[10px] font-medium text-[#047857]">
+            已折叠下游
+          </span>
+        ) : null}
         <span className="rounded-full bg-[#F5F0ED] px-2 py-0.5 text-[10px] font-medium text-[#78716C] dark:bg-[#292524] dark:text-[#A8A29E]">
           {nodeData.statusLabel}
         </span>
+        {nodeData.hiddenUpstreamCount > 0 && (
+          <span
+            data-testid={`task-dag-hidden-upstream-badge-${id}`}
+            className="rounded-full bg-[#DBEAFE] px-2 py-0.5 text-[10px] font-medium text-[#1D4ED8] dark:bg-[#1E3A5F] dark:text-[#93C5FD]"
+          >
+            {`+${nodeData.hiddenUpstreamCount} 已折叠`}
+          </span>
+        )}
+        {nodeData.hiddenDownstreamCount > 0 && (
+          <span
+            data-testid={`task-dag-hidden-downstream-badge-${id}`}
+            className="rounded-full bg-[#DCFCE7] px-2 py-0.5 text-[10px] font-medium text-[#15803D] dark:bg-[#14532D] dark:text-[#BBF7D0]"
+          >
+            {`+${nodeData.hiddenDownstreamCount} 下游已折叠`}
+          </span>
+        )}
       </div>
 
       <p className="mt-3 text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{nodeData.title}</p>
@@ -74,10 +120,27 @@ const TASK_DAG_NODE_TYPES = {
   taskDag: TaskDagNode,
 } satisfies NodeTypes;
 
+const TASK_DAG_MIN_ZOOM = 0.01;
+const TASK_DAG_FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: TASK_DAG_MIN_ZOOM } as const;
+
 export function TaskDagPage() {
+  console.log('[DAG] TaskDagPage rendered, pathname:', window.location.pathname);
+  const location = useLocation();
   const [tasks, setTasks] = useState<TaskNode[]>([]);
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
+  const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(EMPTY_TASK_DAG_VISIBILITY_STATE);
+  const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
+
+  // Persist current tasks sub-path for nav tab memory
+  useEffect(() => {
+    const fullPath = location.pathname + (location.searchStr || '');
+    // Only save task-related paths; useLocation fires with the NEW target path before unmount
+    if (fullPath.startsWith('/tasks/')) {
+      console.log('[DAG] saving path to sessionStorage:', fullPath);
+      sessionStorage.setItem(TASKS_LAST_PATH_KEY, fullPath);
+    }
+  }, [location.pathname, location.searchStr]);
 
   useEffect(() => {
     let disposed = false;
@@ -102,8 +165,9 @@ export function TaskDagPage() {
   }, []);
 
   const graph = useMemo(() => buildTaskGraph(tasks), [tasks]);
+  const visibleGraph = useMemo(() => projectVisibleTaskGraph(graph, dagVisibility), [graph, dagVisibility]);
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
-  const flowGraph = useMemo(() => buildTaskDagFlow(graph), [graph]);
+  const flowGraph = useMemo(() => buildVisibleTaskDagFlow(visibleGraph), [visibleGraph]);
 
   useEffect(() => {
     if (graph.currentRootNodeId && !selectedTaskId) {
@@ -116,11 +180,48 @@ export function TaskDagPage() {
     }
   }, [graph.currentRootNodeId, graph.topologicalOrder, selectedTaskId, tasks]);
 
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = () => setContextMenu(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [contextMenu]);
+
   const currentRootTask = graph.currentRootNodeId ? taskById.get(graph.currentRootNodeId) ?? null : null;
   const selectedTask = selectedTaskId ? taskById.get(selectedTaskId) ?? null : null;
   const selectedNode = selectedTaskId
     ? graph.nodes.find((node) => node.id === selectedTaskId) ?? null
     : null;
+  const selectedCollapseScope = useMemo(() => {
+    if (!selectedTaskId) {
+      return { upstreamSize: 0, downstreamSize: 0 };
+    }
+
+    return {
+      upstreamSize: calculateTaskDagCollapseScope(graph, dagVisibility, 'upstream', selectedTaskId).size,
+      downstreamSize: calculateTaskDagCollapseScope(graph, dagVisibility, 'downstream', selectedTaskId).size,
+    };
+  }, [dagVisibility, graph, selectedTaskId]);
+
+  const toggleCollapse = (direction: 'upstream' | 'downstream', nodeId: string) => {
+    setDagVisibility((prev) => {
+      if (direction === 'upstream') {
+        return {
+          ...prev,
+          collapsedUpstreamOf: prev.collapsedUpstreamOf.includes(nodeId)
+            ? prev.collapsedUpstreamOf.filter((id) => id !== nodeId)
+            : [...prev.collapsedUpstreamOf, nodeId],
+        };
+      }
+
+      return {
+        ...prev,
+        collapsedDownstreamOf: prev.collapsedDownstreamOf.includes(nodeId)
+          ? prev.collapsedDownstreamOf.filter((id) => id !== nodeId)
+          : [...prev.collapsedDownstreamOf, nodeId],
+      };
+    });
+  };
 
   const handleJumpToCurrentRoot = () => {
     if (!graph.currentRootNodeId) return;
@@ -128,10 +229,11 @@ export function TaskDagPage() {
     if (!currentRootNode) return;
 
     setSelectedTaskId(graph.currentRootNodeId);
+    const currentZoom = flowInstanceRef.current?.getViewport().zoom ?? 1;
     flowInstanceRef.current?.setCenter(
       currentRootNode.position.x + TASK_DAG_NODE_WIDTH / 2,
       currentRootNode.position.y + TASK_DAG_NODE_HEIGHT / 2,
-      { zoom: 1, duration: 250 },
+      { zoom: currentZoom, duration: 250 },
     );
   };
 
@@ -139,21 +241,11 @@ export function TaskDagPage() {
     <div className="min-h-full bg-[#FAF7F5] px-5 py-4 dark:bg-[#0C0A09] md:px-8 lg:px-10" data-testid="task-dag-page">
       <header className="flex flex-wrap items-center justify-between gap-3">
         <div>
-          <div className="inline-flex items-center gap-2 text-xs text-[#78716C] dark:text-[#A8A29E]">
-            <Link to="/tasks" className="inline-flex items-center gap-1 hover:text-[#1C1917] dark:hover:text-[#FAFAF9]">
-              <ArrowLeft size={14} />
-              返回任务
-            </Link>
-            <span>/</span>
-            <span className="inline-flex items-center gap-1">
-              <Waypoints size={14} />
-              DAG 视图
-            </span>
-          </div>
+          <TaskBreadcrumb
+            segments={[{ label: '任务', to: '/tasks' }]}
+            current={{ label: 'DAG 视图', icon: Waypoints }}
+          />
           <h1 className="mt-2 text-xl font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务依赖 DAG</h1>
-          <p className="mt-1 text-sm text-[#78716C] dark:text-[#A8A29E]">
-            基于 `dependsOn` 的只读执行图，不把 `parentId` 并入 DAG 边。
-          </p>
         </div>
         <div className="flex flex-wrap gap-2">
           <button
@@ -170,6 +262,7 @@ export function TaskDagPage() {
             <Link
               to="/tasks/$taskId"
               params={{ taskId: graph.currentRootNodeId }}
+              search={{ from: 'dag' }}
               className="inline-flex items-center rounded-full border border-[#E7E5E4] px-4 py-2 text-sm font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
             >
               打开当前根节点
@@ -203,7 +296,7 @@ export function TaskDagPage() {
               </div>
               <div data-testid="task-dag-legend-soft" className="flex items-center gap-2">
                 <span className="h-px w-8 border-t-2 border-dashed border-[#78716C]" />
-                <span>软依赖：前置待办会提示阻塞，但仍可直接开工</span>
+                <span>软依赖：前置任务开始后即可开始</span>
               </div>
             </div>
           </section>
@@ -216,19 +309,45 @@ export function TaskDagPage() {
             {selectedTask && selectedNode ? (
               <>
                 <p className="mt-3 text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{selectedTask.title}</p>
-                <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">状态：{selectedNode.status}</p>
-                <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
-                  {selectedNode.isExecutable ? '可执行' : '不可直接执行'}
-                  {selectedNode.isBlocked ? ' · 有阻塞提醒' : ''}
-                </p>
+                <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">状态：{STATUS_LABELS[selectedNode.status] ?? selectedNode.status}</p>
+                {selectedNode.status !== 'completed' && selectedNode.status !== 'cancelled' && (
+                  <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">
+                    {selectedNode.isBlocked
+                      ? '受阻 · 有未满足的依赖'
+                      : selectedNode.isExecutable
+                        ? '可直接执行'
+                        : '待处理'}
+                  </p>
+                )}
                 <Link
                   data-testid="task-dag-selected-link"
                   to="/tasks/$taskId"
                   params={{ taskId: selectedTask.id }}
+                  search={{ from: 'dag' }}
                   className="mt-3 inline-flex items-center rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
                 >
                   打开任务详情
                 </Link>
+                <div className="mt-3 flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    data-testid="task-dag-selected-toggle-upstream"
+                    disabled={selectedCollapseScope.upstreamSize <= 1 && !dagVisibility.collapsedUpstreamOf.includes(selectedTask.id)}
+                    onClick={() => toggleCollapse('upstream', selectedTask.id)}
+                    className="inline-flex items-center rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    {dagVisibility.collapsedUpstreamOf.includes(selectedTask.id) ? '展开上游' : '折叠上游'}
+                  </button>
+                  <button
+                    type="button"
+                    data-testid="task-dag-selected-toggle-downstream"
+                    disabled={selectedCollapseScope.downstreamSize <= 1 && !dagVisibility.collapsedDownstreamOf.includes(selectedTask.id)}
+                    onClick={() => toggleCollapse('downstream', selectedTask.id)}
+                    className="inline-flex items-center rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] disabled:cursor-not-allowed disabled:opacity-60 dark:border-[#292524] dark:text-[#D6D3D1]"
+                  >
+                    {dagVisibility.collapsedDownstreamOf.includes(selectedTask.id) ? '展开下游' : '折叠下游'}
+                  </button>
+                </div>
               </>
             ) : (
               <p className="mt-3 text-xs text-[#78716C] dark:text-[#A8A29E]">点击节点可查看详情。</p>
@@ -243,25 +362,84 @@ export function TaskDagPage() {
             nodes={flowGraph.nodes}
             edges={flowGraph.edges}
             nodeTypes={TASK_DAG_NODE_TYPES}
+            proOptions={{ hideAttribution: true }}
             fitView
-            fitViewOptions={{ padding: 0.2 }}
+            minZoom={TASK_DAG_MIN_ZOOM}
+            fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}
             nodesDraggable={false}
             nodesConnectable={false}
             elementsSelectable
             zoomOnDoubleClick={false}
             onInit={(instance) => {
               flowInstanceRef.current = instance;
-              void instance.fitView({ padding: 0.2 });
+              void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
             }}
             onNodeClick={(_event, node) => {
               setSelectedTaskId(node.id);
             }}
+            onNodeContextMenu={(event, node) => {
+              event.preventDefault();
+              setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+            }}
           >
             <Background gap={20} color="#E7E5E4" />
-            <Controls />
+            <Controls className="!rounded-lg !border-[#E7E3E0] !bg-white/90 !shadow-sm dark:!border-[#3C3836] dark:!bg-[#1C1917]/90 [&>button]:!border-[#E7E3E0] [&>button]:!bg-transparent [&>button]:!fill-[#57534E] dark:[&>button]:!border-[#3C3836] dark:[&>button]:!fill-[#A8A29E] [&>button:hover]:!bg-[#F5F0ED] dark:[&>button:hover]:!bg-[#292524]" />
+            <TaskDagControlPanel
+              onFitView={() => { void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS); }}
+              onJumpToCurrentRoot={graph.currentRootNodeId ? () => {
+                const node = flowInstanceRef.current?.getNode(graph.currentRootNodeId!);
+                if (node) {
+                  void flowInstanceRef.current?.fitView({
+                    ...TASK_DAG_FIT_VIEW_OPTIONS,
+                    nodes: [node],
+                    padding: 0.5,
+                    duration: 300,
+                  });
+                }
+              } : undefined}
+              hasCurrentRoot={Boolean(graph.currentRootNodeId)}
+            />
           </ReactFlow>
         </div>
       </section>
+
+      {contextMenu && (
+        <div
+          className="fixed z-50 rounded-lg border border-[#E7E5E4] bg-white py-1 shadow-lg dark:border-[#292524] dark:bg-[#1C1917]"
+          style={{ left: contextMenu.x, top: contextMenu.y }}
+        >
+          <button
+            type="button"
+            data-testid="task-dag-context-toggle-upstream"
+            className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+            onClick={() => {
+              toggleCollapse('upstream', contextMenu.nodeId);
+              setContextMenu(null);
+            }}
+            disabled={
+              calculateTaskDagCollapseScope(graph, dagVisibility, 'upstream', contextMenu.nodeId).size <= 1
+              && !dagVisibility.collapsedUpstreamOf.includes(contextMenu.nodeId)
+            }
+          >
+            {dagVisibility.collapsedUpstreamOf.includes(contextMenu.nodeId) ? '展开上游' : '折叠上游'}
+          </button>
+          <button
+            type="button"
+            data-testid="task-dag-context-toggle-downstream"
+            className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+            onClick={() => {
+              toggleCollapse('downstream', contextMenu.nodeId);
+              setContextMenu(null);
+            }}
+            disabled={
+              calculateTaskDagCollapseScope(graph, dagVisibility, 'downstream', contextMenu.nodeId).size <= 1
+              && !dagVisibility.collapsedDownstreamOf.includes(contextMenu.nodeId)
+            }
+          >
+            {dagVisibility.collapsedDownstreamOf.includes(contextMenu.nodeId) ? '展开下游' : '折叠下游'}
+          </button>
+        </div>
+      )}
     </div>
   );
 }

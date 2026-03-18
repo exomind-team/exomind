@@ -34,7 +34,6 @@ describe('EstimatedTimeEditor issue #384', () => {
   it('renders current estimatedMinutes and highlights current preset（显示当前估时并高亮预设）', () => {
     render(<EstimatedTimeEditor taskId="task-1" currentMinutes={25} />);
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：25 分钟');
     expect(screen.getByTestId('estimated-time-preset-25')).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -47,7 +46,6 @@ describe('EstimatedTimeEditor issue #384', () => {
       expect(updateTaskMock).toHaveBeenCalledWith('task-1', { estimatedMinutes: 45 });
     });
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：45 分钟');
     expect(screen.getByTestId('estimated-time-preset-45')).toHaveAttribute('aria-pressed', 'true');
   });
 
@@ -62,21 +60,19 @@ describe('EstimatedTimeEditor issue #384', () => {
       expect(updateTaskMock).toHaveBeenCalledWith('task-1', { estimatedMinutes: 90 });
     });
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：90 分钟');
     expect(screen.getByTestId('estimated-time-custom-trigger')).toHaveAttribute('aria-pressed', 'true');
   });
 
-  it('clear resets the value to undefined（清空估时）', async () => {
+  it('"无" preset resets the value to undefined（选择"无"清空估时）', async () => {
     render(<EstimatedTimeEditor taskId="task-1" currentMinutes={60} />);
 
-    fireEvent.click(screen.getByTestId('estimated-time-clear'));
+    fireEvent.click(screen.getByTestId('estimated-time-preset-none'));
 
     await waitFor(() => {
       expect(updateTaskMock).toHaveBeenCalledWith('task-1', { estimatedMinutes: undefined });
     });
 
-    expect(screen.getByTestId('estimated-time-current')).toHaveTextContent('当前：未估时');
-    expect(screen.getByTestId('estimated-time-clear')).toHaveAttribute('aria-pressed', 'true');
+    expect(screen.getByTestId('estimated-time-preset-none')).toHaveAttribute('aria-pressed', 'true');
   });
 
   it('calls onUpdate after successful save（保存成功后回调 onUpdate）', async () => {

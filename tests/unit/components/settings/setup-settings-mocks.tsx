@@ -95,6 +95,7 @@ export const settingsPageServiceMocks = {
 export const settingsPagePreferenceState = {
   developerMode: false,
   agentPageEnabled: false,
+  mePageEnabled: false,
   desktopAdaptiveEnabled: true,
   voiceShortcutAsrProvider: 'moss' as string,
 };
@@ -179,6 +180,12 @@ vi.mock('@/config/agent-page-enabled', () => ({
   subscribeAgentPageEnabledChanges: vi.fn(() => () => {}),
 }));
 
+vi.mock('@/config/me-page-enabled', () => ({
+  getMePageEnabled: vi.fn(() => settingsPagePreferenceState.mePageEnabled),
+  setMePageEnabled: vi.fn(),
+  subscribeMePageEnabledChanges: vi.fn(() => () => {}),
+}));
+
 vi.mock('@/config/desktop-adaptive', () => ({
   getDesktopAdaptiveEnabled: vi.fn(() => settingsPagePreferenceState.desktopAdaptiveEnabled),
   setDesktopAdaptiveEnabled: vi.fn(),
@@ -235,6 +242,11 @@ vi.mock('@/config/llm-settings', () => ({
   getLLMApiKey: vi.fn(() => ''),
   getLLMBaseUrl: vi.fn(() => 'https://api.openai.com/v1'),
   getLLMModel: vi.fn(() => 'gpt-4o'),
+  getLLMSettings: vi.fn(() => ({
+    apiKey: '',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o',
+  })),
   setLLMApiKey: vi.fn(),
   setLLMBaseUrl: vi.fn(),
   setLLMModel: vi.fn(),
@@ -245,6 +257,24 @@ vi.mock('@/config/voice-transcript-send-mode', () => ({
   getVoiceTranscriptSendMode: vi.fn(() => 'insert'),
   setVoiceTranscriptSendMode: vi.fn(),
   subscribeVoiceTranscriptSendModeChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/input-send-mode', () => ({
+  getInputSendMode: vi.fn(() => 'ctrl-enter-send'),
+  setInputSendMode: vi.fn((value: string) => value),
+  subscribeInputSendModeChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/task-page-fuzzy-search', () => ({
+  getTaskPageFuzzySearchEnabled: vi.fn(() => true),
+  setTaskPageFuzzySearchEnabled: vi.fn((value: boolean) => value),
+  subscribeTaskPageFuzzySearchChanges: vi.fn(() => () => {}),
+}));
+
+vi.mock('@/config/task-create-success-action', () => ({
+  getTaskCreateSuccessAction: vi.fn(() => 'refocus'),
+  setTaskCreateSuccessAction: vi.fn((value: string) => value),
+  subscribeTaskCreateSuccessActionChanges: vi.fn(() => () => {}),
 }));
 
 vi.mock('@/config/voice-shortcut-send-mode', () => ({
@@ -358,13 +388,13 @@ vi.mock('@/components/ui/dialog', () => {
       dialogTitleText = '';
       return <div data-testid="dialog">{children}</div>;
     },
-    DialogContent: ({ children }: any) => {
+    DialogContent: ({ children, className, ...props }: any) => {
       const ref = (node: HTMLElement | null) => {
         if (node && dialogTitleText) {
           node.setAttribute('aria-label', dialogTitleText);
         }
       };
-      return <div role="dialog" ref={ref}>{children}</div>;
+      return <div role="dialog" ref={ref} className={className} {...props}>{children}</div>;
     },
     DialogHeader: ({ children }: any) => <div>{children}</div>,
     DialogTitle: ({ children }: any) => {

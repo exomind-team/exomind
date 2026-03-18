@@ -74,7 +74,15 @@ async fn put_and_get_active_timeblock() {
         "accumulatedRunMs": 0,
         "startTime": 1700000000000u64,
         "pauseAccumulatedMs": 0,
-        "paused": false
+        "paused": false,
+        "taskIds": ["task-1"],
+        "taskAssociationLog": [{
+            "blockId": "active-1",
+            "taskId": "task-1",
+            "action": "associated",
+            "timestamp": 1700000000000u64,
+            "source": "block_start",
+        }]
     });
 
     let put_response = app
@@ -102,6 +110,8 @@ async fn put_and_get_active_timeblock() {
     let parsed: Value = serde_json::from_slice(&body).unwrap();
     assert_eq!(parsed["startId"], "active-1");
     assert_eq!(parsed["mode"], "countdown");
+    assert_eq!(parsed["taskIds"], json!(["task-1"]));
+    assert!(parsed.get("taskId").is_none(), "legacy taskId should not be serialized");
 }
 
 #[tokio::test]
@@ -119,6 +129,15 @@ async fn exports_sqlite_snapshot_and_backend_status() {
             tags: vec!["block_feedback".to_string()],
             start_time: 1700000000000,
             end_time: 1700000060000,
+            task_ids: vec!["task-1".to_string()],
+            task_status_outcomes: Some(std::collections::HashMap::from([("task-1".to_string(), "completed".to_string())])),
+            task_association_log: vec![exomind_runtime::timeblock::BlockTaskAssociationEvent {
+                block_id: "tb-1".to_string(),
+                task_id: "task-1".to_string(),
+                action: "associated".to_string(),
+                timestamp: 1700000000000,
+                source: "block_start".to_string(),
+            }],
         }])
         .unwrap();
     let app = test_router(test_state_with_timeblock_store(store));
@@ -166,6 +185,9 @@ async fn imports_json_backup_with_overwrite() {
             tags: vec!["block_feedback".to_string()],
             start_time: 1700000000000,
             end_time: 1700000060000,
+            task_ids: vec![],
+            task_status_outcomes: None,
+            task_association_log: vec![],
         }])
         .unwrap();
 
@@ -180,7 +202,16 @@ async fn imports_json_backup_with_overwrite() {
                 "endId": "end-new",
                 "tags": ["block_feedback"],
                 "startTime": 1700000100000u64,
-                "endTime": 1700000160000u64
+                "endTime": 1700000160000u64,
+                "taskIds": ["task-new"],
+                "taskStatusOutcomes": { "task-new": "continue" },
+                "taskAssociationLog": [{
+                    "blockId": "new-block",
+                    "taskId": "task-new",
+                    "action": "associated",
+                    "timestamp": 1700000100000u64,
+                    "source": "block_start"
+                }]
             }
         ],
         "active_block": {
@@ -189,7 +220,16 @@ async fn imports_json_backup_with_overwrite() {
             "mode": "countup",
             "elapsed": 30000,
             "paused": false,
-            "startTime": 1700000200000u64
+            "startTime": 1700000200000u64,
+            "taskId": "task-legacy",
+            "taskIds": ["task-new"],
+            "taskAssociationLog": [{
+                "blockId": "active-new",
+                "taskId": "task-new",
+                "action": "associated",
+                "timestamp": 1700000200000u64,
+                "source": "block_start"
+            }]
         }
     });
 
@@ -225,4 +265,6 @@ async fn imports_json_backup_with_overwrite() {
     let active_body = active_response.into_body().collect().await.unwrap().to_bytes();
     let active_payload: Value = serde_json::from_slice(&active_body).unwrap();
     assert_eq!(active_payload["startId"], "active-new");
+    assert_eq!(active_payload["taskIds"], json!(["task-new"]));
+    assert!(active_payload.get("taskId").is_none());
 }

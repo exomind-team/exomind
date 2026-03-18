@@ -2,7 +2,7 @@ const AGENT_PAGE_ENABLED_STORAGE_KEY = 'exomind:agentPageEnabled'; // agent 页�
 const AGENT_PAGE_ENABLED_CHANGED_EVENT = 'exomind:agent-page-enabled-changed'; // 自定义事件
 
 function normalizeBoolean(rawValue: string | null | undefined): boolean {
-  return rawValue === 'true';
+  return rawValue !== 'false';
 }
 
 export function getAgentPageEnabled(): boolean {

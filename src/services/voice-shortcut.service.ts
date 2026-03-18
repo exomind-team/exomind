@@ -26,7 +26,7 @@ import {
 } from '../lib/media/microphone-capture';
 import { convertWebmBlobToWav } from '../lib/media/wav-audio';
 import type { ASRResult } from '../lib/ports/asr-port';
-import { log } from '@/lib/logger';
+import { log, setConsoleMinLevel } from '@/lib/logger';
 import {
   getVoiceShortcutAsrProvider,
   subscribeVoiceShortcutAsrProviderChanges,
@@ -161,6 +161,7 @@ export class VoiceShortcutService {
   private frozenForegroundWindowContext: ForegroundWindowContext | null = null;
   private frozenForegroundWindowContextPromise: Promise<ForegroundWindowContext | null> | null = null;
   private foregroundWindowCaptureToken = 0;
+  private destroyed = false;
 
   constructor(livePreviewSource: VoiceLivePreviewSource = createDefaultVoiceLivePreviewSource()) {
     this.adapter = new MOSSASRAdapter();
@@ -191,13 +192,19 @@ export class VoiceShortcutService {
     }
   }
 
+  private syncDeveloperConsoleLevel(): void {
+    setConsoleMinLevel(this.developerModeEnabled ? 'DEBUG' : 'INFO');
+  }
+
   async init(): Promise<void> {
     if (this.unlisten || this.initializing) return;
     if (!isTauri()) {
       this.debugWarn(LOG_TAG, 'not in Tauri environment, service disabled');
       return;
     }
+    this.destroyed = false;
     this.initializing = true;
+    this.syncDeveloperConsoleLevel();
 
     try {
       await this.applyShortcut(getVoiceShortcutHotkey());
@@ -222,6 +229,7 @@ export class VoiceShortcutService {
 
       this.unlistenDeveloperMode = subscribeDeveloperModeChanges((enabled) => {
         this.developerModeEnabled = enabled;
+        this.syncDeveloperConsoleLevel();
       });
 
       this.unlistenOverlayBottomOffset = subscribeVoiceOverlayBottomOffsetChanges((offset) => {
@@ -254,6 +262,10 @@ export class VoiceShortcutService {
   }
 
   destroy(): void {
+    if (this.destroyed) {
+      return;
+    }
+    this.destroyed = true;
     this.unlisten?.();
     this.unlisten = null;
     this.unlistenVolcanoStream?.();
@@ -283,6 +295,7 @@ export class VoiceShortcutService {
     this.releaseResources();
     this.clearFrozenForegroundWindowContext();
     this.clearAutoHide();
+    setConsoleMinLevel('INFO');
   }
 
   getState(): VoiceShortcutState {
@@ -290,6 +303,9 @@ export class VoiceShortcutService {
   }
 
   private readonly handleAppForeground = (): void => {
+    if (this.destroyed) {
+      return;
+    }
     if (this.startPending || this.state === 'recording' || this.state === 'recognizing') {
       return;
     }
@@ -297,6 +313,9 @@ export class VoiceShortcutService {
   };
 
   private readonly handleVisibilityChange = (): void => {
+    if (this.destroyed) {
+      return;
+    }
     if (typeof document !== 'undefined' && document.visibilityState !== 'visible') {
       return;
     }
@@ -419,7 +438,7 @@ export class VoiceShortcutService {
     this.clearWarmRotateTimer();
     this.warmRotateTimer = setTimeout(() => {
       void (async () => {
-        if (this.warmVolcanoSessionId !== sessionId || this.startPending) {
+        if (this.destroyed || this.warmVolcanoSessionId !== sessionId || this.startPending) {
           return;
         }
         const warmAgeMs = Math.max(0, Date.now() - createdAtMs);
@@ -441,7 +460,7 @@ export class VoiceShortcutService {
 
     this.warmMaintenanceTimer = setInterval(() => {
       void (async () => {
-        if (this.startPending || this.state === 'recording' || this.state === 'recognizing') {
+        if (this.destroyed || this.startPending || this.state === 'recording' || this.state === 'recognizing') {
           return;
         }
         await this.prewarmVolcanoSessionIfPossible();
@@ -456,6 +475,9 @@ export class VoiceShortcutService {
   }
 
   private async prewarmResourcesForProvider(): Promise<void> {
+    if (this.destroyed) {
+      return;
+    }
     if (!this.micPrewarmEnabled) {
       await this.cancelWarmVolcanoSession();
       this.releaseWarmStream();
@@ -499,6 +521,10 @@ export class VoiceShortcutService {
           (constraints) => navigator.mediaDevices.getUserMedia(constraints),
           { audio: DEFAULT_RECORDING_AUDIO_CONSTRAINTS },
         );
+        if (this.destroyed) {
+          stream.getTracks().forEach((track) => track.stop());
+          return null;
+        }
         this.warmStream = stream;
         return stream;
       } catch (error) {
@@ -632,6 +658,9 @@ export class VoiceShortcutService {
   }
 
   private async prewarmVolcanoSessionIfPossible(): Promise<string | null> {
+    if (this.destroyed) {
+      return null;
+    }
     let config: VolcanoRuntimeConfig;
     try {
       config = this.getVolcanoRuntimeConfigOrThrow();
@@ -666,7 +695,7 @@ export class VoiceShortcutService {
     this.warmVolcanoSessionPromise = (async () => {
       try {
         const sessionId = await invoke<string>('volcano_asr_stream_start', { config });
-        if (this.warmVolcanoSessionKey !== warmKey) {
+        if (this.destroyed || this.warmVolcanoSessionKey !== warmKey) {
           invoke('volcano_asr_stream_cancel', { sessionId }).catch(() => {});
           return null;
         }
@@ -1229,7 +1258,7 @@ export class VoiceShortcutService {
         sessionWarmReason: sessionResult.value.warmReason,
         activationMs: this.completeActivationTracking(),
       });
-      if (this.micPrewarmEnabled) {
+      if (this.micPrewarmEnabled && !this.destroyed) {
         void this.prewarmVolcanoSessionIfPossible();
       }
       void this.syncRecordingActive(true);
@@ -1274,7 +1303,9 @@ export class VoiceShortcutService {
       this.handleError(`识别失败: ${error}`);
     } finally {
       this.cleanupVolcanoStreamingState();
-      void this.prewarmVolcanoSessionIfPossible();
+      if (!this.destroyed) {
+        void this.prewarmVolcanoSessionIfPossible();
+      }
     }
   }
 
@@ -1293,7 +1324,9 @@ export class VoiceShortcutService {
     } finally {
       this.cleanupVolcanoStreamingState();
       this.releaseResources();
-      void this.prewarmVolcanoSessionIfPossible();
+      if (!this.destroyed) {
+        void this.prewarmVolcanoSessionIfPossible();
+      }
     }
   }
 
@@ -1324,7 +1357,7 @@ export class VoiceShortcutService {
       if (payload.errorMessage) {
         this.debugInfo(LOG_TAG, `[warm] standby volcano session closed, replenishing: ${payload.errorMessage}`);
         this.logWarmSessionClosed(this.clearWarmVolcanoSessionState(), payload.errorMessage);
-        if (this.micPrewarmEnabled && this.asrProvider === 'volcano' && !this.startPending) {
+        if (this.micPrewarmEnabled && this.asrProvider === 'volcano' && !this.startPending && !this.destroyed) {
           void this.prewarmVolcanoSessionIfPossible();
         }
       }

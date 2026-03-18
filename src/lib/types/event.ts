@@ -51,6 +51,14 @@ export interface Event {
   metadata?: EventMetadata;
 }
 
+export interface BlockTaskAssociationEvent {
+  blockId: UUID;
+  taskId: UUID;
+  action: 'associated' | 'disassociated';
+  timestamp: Timestamp;
+  source: 'block_start' | 'manual';
+}
+
 // 时间块数据类型（存储用）
 export interface TimeBlockData {
   id: UUID;
@@ -61,6 +69,9 @@ export interface TimeBlockData {
   tags: string[];
   startTime: Timestamp;
   endTime: Timestamp;
+  taskIds?: UUID[];
+  taskStatusOutcomes?: Record<string, string>;
+  taskAssociationLog?: BlockTaskAssociationEvent[];
 }
 
 // 时间块类型（UI 使用）
@@ -73,6 +84,9 @@ export interface TimeBlock {
   tags: Set<Tag>;
   startTime: Timestamp;
   endTime: Timestamp;
+  taskIds?: UUID[];
+  taskStatusOutcomes?: Record<string, string>;
+  taskAssociationLog?: BlockTaskAssociationEvent[];
 }
 
 // 活跃时间块（进行中）
@@ -116,7 +130,10 @@ export interface ActiveBlockData {
   pauseAccumulatedMs?: number;
   paused: boolean;
   pausedAt?: Timestamp;
-  taskId?: string;  // Phase4: 关联任务 ID
+  taskIds: UUID[];
+  taskAssociationLog: BlockTaskAssociationEvent[];
+  /** @deprecated Use taskIds. Kept for deserialization compat only. */
+  taskId?: UUID;
 }
 
 // 计时器配置
@@ -131,4 +148,66 @@ export interface TimerConfig {
 export interface CreateEventOptions {
   content: NoteContent;
   tags?: Set<Tag>;
+}
+
+function normalizeTaskIdList(taskIds: UUID[]): UUID[] {
+  return Array.from(new Set(taskIds.map((taskId) => taskId.trim()).filter(Boolean)));
+}
+
+export function resolveAssociatedTaskIdsFromLog(
+  taskAssociationLog: BlockTaskAssociationEvent[] | undefined,
+): UUID[] {
+  if (!taskAssociationLog?.length) return [];
+
+  const orderedTaskIds: UUID[] = [];
+  const activeTaskIds = new Set<UUID>();
+  for (const event of taskAssociationLog) {
+    const normalizedTaskId = event.taskId.trim();
+    if (!normalizedTaskId) continue;
+    if (event.action === 'associated') {
+      if (!activeTaskIds.has(normalizedTaskId)) {
+        orderedTaskIds.push(normalizedTaskId);
+      }
+      activeTaskIds.add(normalizedTaskId);
+      continue;
+    }
+    activeTaskIds.delete(normalizedTaskId);
+  }
+
+  return orderedTaskIds.filter((taskId) => activeTaskIds.has(taskId));
+}
+
+export function resolveActiveBlockTaskIds(
+  block: { taskId?: UUID; taskIds?: UUID[]; taskAssociationLog?: BlockTaskAssociationEvent[] } | null | undefined,
+): UUID[] {
+  if (!block) return [];
+  if (block.taskIds?.length) {
+    return normalizeTaskIdList(block.taskIds);
+  }
+  const taskIdsFromLog = resolveAssociatedTaskIdsFromLog(block.taskAssociationLog);
+  if (taskIdsFromLog.length > 0) {
+    return taskIdsFromLog;
+  }
+  return block.taskId ? normalizeTaskIdList([block.taskId]) : [];
+}
+
+export function normalizeActiveBlockTaskIds<T extends { taskId?: UUID; taskIds?: UUID[]; taskAssociationLog?: BlockTaskAssociationEvent[] }>(
+  block: T,
+): Omit<T, 'taskId' | 'taskIds'> & { taskIds: UUID[]; taskId?: undefined } {
+  const taskIds = resolveActiveBlockTaskIds(block);
+
+  const { taskId: _legacyTaskId, taskIds: _taskIds, ...rest } = block;
+  return {
+    ...rest,
+    taskIds,
+  };
+}
+
+export function normalizeTimeBlockTaskIds<T extends { taskIds?: UUID[] }>(
+  block: T,
+): T & { taskIds: UUID[] } {
+  return {
+    ...block,
+    taskIds: block.taskIds ?? [],
+  };
 }

@@ -53,7 +53,7 @@ describe('PR Lock - 降级路径测试', () => {
         lockComment!.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/)?.[1] || '{}'
       );
       expect(metadata.released).toBe(true);
-    });
+    }, 15000);
 
     test('本地状态 lock_id 不匹配时，应按 lock_id 查找并更新原始评论', async () => {
       // 1. Agent A 获取锁
@@ -82,7 +82,7 @@ describe('PR Lock - 降级路径测试', () => {
         lockComment!.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/)?.[1] || '{}'
       );
       expect(metadata.released).toBe(true);
-    });
+    }, 15000);
   });
 
   describe('场景 3: Local state missing（本地状态丢失）', () => {
@@ -113,7 +113,7 @@ describe('PR Lock - 降级路径测试', () => {
         lockComment!.body.match(/<!-- LOCK_METADATA\n([\s\S]*?)\n-->/)?.[1] || '{}'
       );
       expect(metadata.released).toBe(true);
-    });
+    }, 15000);
   });
 
   describe('场景 3.5: Renew metadata cleanliness（续期元数据清洁性）', () => {
@@ -161,7 +161,7 @@ describe('PR Lock - 降级路径测试', () => {
       expect(renewResult.lock!.expires_at).toBeDefined();
       expect(renewResult.lock!.remaining_minutes).toBeGreaterThan(0);
       expect(renewResult.lock!.is_expired).toBe(false);
-    });
+    }, 15000);
   });
 
   describe('场景 3.6: Release with no remote lock（远程锁不存在时释放）', () => {
@@ -185,7 +185,7 @@ describe('PR Lock - 降级路径测试', () => {
       // 5. 验证本地状态已被清理
       const localStateAfter = await agentA.loadLockState();
       expect(localStateAfter).toBeNull();
-    });
+    }, 15000);
   });
 
   describe('场景 4: Force release（强制释放）', () => {

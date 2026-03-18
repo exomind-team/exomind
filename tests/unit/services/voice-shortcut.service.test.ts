@@ -695,6 +695,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
 
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
     const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
     const logSpy = vi.spyOn(console, 'log').mockImplementation(() => {});
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
@@ -704,11 +705,13 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await emitVoiceShortcut('start');
     await flushAsync();
 
+    expect(debugSpy).not.toHaveBeenCalled();
     expect(infoSpy).not.toHaveBeenCalled();
     expect(logSpy).not.toHaveBeenCalled();
     expect(warnSpy).not.toHaveBeenCalled();
 
     service.destroy();
+    debugSpy.mockRestore();
     infoSpy.mockRestore();
     logSpy.mockRestore();
     warnSpy.mockRestore();
@@ -722,7 +725,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
 
-    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
 
     const service = new VoiceShortcutService();
     await service.init();
@@ -730,11 +733,11 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     await flushAsync();
 
     expect(
-      infoSpy.mock.calls.some((call) => call.map(String).join(' ').includes('[trace voice-'))
+      debugSpy.mock.calls.some((call) => call.map(String).join(' ').includes('[trace voice-'))
     ).toBe(true);
 
     service.destroy();
-    infoSpy.mockRestore();
+    debugSpy.mockRestore();
   });
 
   it('rotates standby session before the idle window expires（待命会话在空闲窗口到期前主动轮换）', async () => {
@@ -831,7 +834,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.accessKey, 'test-access-key');
     window.localStorage.setItem(VOLCANO_STORAGE_KEYS.resourceId, 'volc.seedasr.sauc.duration');
 
-    const infoSpy = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const debugSpy = vi.spyOn(console, 'debug').mockImplementation(() => {});
     let now = 1000;
     const nowSpy = vi.spyOn(Date, 'now').mockImplementation(() => now);
 
@@ -865,7 +868,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
     });
     await flushAsync();
 
-    const loggedMessages = infoSpy.mock.calls.map((call) => call.map(String).join(' '));
+    const loggedMessages = debugSpy.mock.calls.map((call) => call.map(String).join(' '));
     expect(
       loggedMessages.some((message) =>
         message.includes('standby prepared')
@@ -886,7 +889,7 @@ describe('VoiceShortcutService（全局语音快捷键服务）', () => {
 
     service.destroy();
     nowSpy.mockRestore();
-    infoSpy.mockRestore();
+    debugSpy.mockRestore();
   });
 
   it('recreates missing warmed volcano session before first start（warm session 已失效时首按自动重建）', async () => {
