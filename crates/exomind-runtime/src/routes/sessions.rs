@@ -137,17 +137,6 @@ async fn deliver_message_to_pty(
     Ok(())
 }
 
-fn map_pty_delivery_error(pty_id: &str, error: PtyError) -> (StatusCode, String) {
-    let status = match error {
-        PtyError::NotFound { .. } | PtyError::IoError(_) => StatusCode::CONFLICT,
-        PtyError::SpawnFailed { .. } => StatusCode::INTERNAL_SERVER_ERROR,
-    };
-    (
-        status,
-        format!("failed to deliver message to PTY {pty_id}: {error}"),
-    )
-}
-
 // ── Handlers ────────────────────────────────────────────────────
 
 async fn create_session(
