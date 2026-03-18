@@ -38,6 +38,9 @@ export type TaskDagFlowNodeData = {
   statusLabel: string;
   priorityLabel: string;
   executionLabel: string;
+  isSelected: boolean;
+  isSearchMatch: boolean;
+  isSearchDimmed: boolean;
   isCurrentRoot: boolean;
   isCollapsedTarget: boolean;
   isCollapsedUpstreamTarget: boolean;
@@ -50,6 +53,12 @@ export type TaskDagFlowNodeData = {
 
 export type TaskDagFlowNode = Node<TaskDagFlowNodeData, 'taskDag'>;
 export type TaskDagFlowEdge = Edge;
+
+export interface BuildTaskDagFlowOptions {
+  selectedTaskId?: string | null;
+  searchMatchedTaskIds?: ReadonlySet<string>;
+  hasActiveSearch?: boolean;
+}
 
 export function buildTaskDagFlow(graph: TaskGraph): {
   nodes: TaskDagFlowNode[];
@@ -98,6 +107,9 @@ export function buildTaskDagFlow(graph: TaskGraph): {
           statusLabel: STATUS_LABEL[node.status],
           priorityLabel: PRIORITY_LABEL[node.priority],
           executionLabel: resolveExecutionLabel(node),
+          isSelected: false,
+          isSearchMatch: false,
+          isSearchDimmed: false,
           isCurrentRoot: node.id === graph.currentRootNodeId,
           isCollapsedTarget: false,
           isCollapsedUpstreamTarget: false,
@@ -132,10 +144,16 @@ export function buildTaskDagFlow(graph: TaskGraph): {
   return { nodes, edges };
 }
 
-export function buildVisibleTaskDagFlow(visibleGraph: VisibleTaskGraph): {
+export function buildVisibleTaskDagFlow(
+  visibleGraph: VisibleTaskGraph,
+  options: BuildTaskDagFlowOptions = {},
+): {
   nodes: TaskDagFlowNode[];
   edges: TaskDagFlowEdge[];
 } {
+  const selectedTaskId = options.selectedTaskId ?? null;
+  const searchMatchedTaskIds = options.searchMatchedTaskIds ?? new Set<string>();
+  const hasActiveSearch = options.hasActiveSearch ?? false;
   const nodeById = new Map(visibleGraph.nodes.map((node) => [node.id, node]));
   const topologicalOrder = visibleGraph.nodes.map((node) => node.id);
   const incomingByTarget = new Map<string, string[]>();
@@ -180,6 +198,9 @@ export function buildVisibleTaskDagFlow(visibleGraph: VisibleTaskGraph): {
           statusLabel: STATUS_LABEL[node.status],
           priorityLabel: PRIORITY_LABEL[node.priority],
           executionLabel: resolveExecutionLabel(node),
+          isSelected: node.id === selectedTaskId,
+          isSearchMatch: hasActiveSearch && searchMatchedTaskIds.has(node.id),
+          isSearchDimmed: hasActiveSearch && !searchMatchedTaskIds.has(node.id),
           isCurrentRoot: node.id === visibleGraph.visibleCurrentRootNodeId,
           isCollapsedTarget: node.isCollapsedTarget,
           isCollapsedUpstreamTarget: node.isCollapsedUpstreamTarget,

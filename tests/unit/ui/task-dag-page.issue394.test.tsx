@@ -1,4 +1,4 @@
-﻿import type { ReactNode } from 'react';
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TaskDagPage } from '@/ui/app/pages/TaskDagPage';
@@ -102,7 +102,7 @@ function makeTask(overrides: Partial<TaskNode> & { id: string; title: string }):
   };
 }
 
-describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
+describe('TaskDagPage issue-394（任务 DAG Wave 1）', () => {
   beforeEach(() => {
     flowApiMocks.setCenter.mockReset();
     flowApiMocks.fitView.mockReset();
@@ -125,6 +125,7 @@ describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
       makeTask({
         id: 'task-c',
         title: '补充详情页提示',
+        status: 'completed',
         createdAt: 30,
         updatedAt: 30,
         dependsOn: [{ taskId: 'task-a', type: 'soft' }],
@@ -132,7 +133,7 @@ describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
     ]);
   });
 
-  it('renders nodes, legends, current root summary and jump action', async () => {
+  it('renders full-canvas workspace with floating controls and placeholder mode selector', async () => {
     render(<TaskDagPage />);
 
     await waitFor(() => {
@@ -140,12 +141,16 @@ describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
     });
 
     expect(await screen.findByTestId('task-dag-page')).toBeInTheDocument();
-    expect(screen.getByTestId('task-dag-current-root-summary')).toHaveTextContent('梳理 DAG 基础层');
-    expect(screen.getByTestId('task-dag-current-root-badge-task-a')).toBeInTheDocument();
-    expect(screen.getByTestId('task-dag-legend-hard')).toHaveTextContent('硬依赖');
-    expect(screen.getByTestId('task-dag-legend-soft')).toHaveTextContent('软依赖');
+    expect(screen.getByTestId('task-dag-canvas-shell')).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-mode-browse')).toBeEnabled();
+    expect(screen.getByTestId('task-dag-mode-connect')).toBeDisabled();
+    expect(screen.getByTestId('task-dag-mode-execute')).toBeDisabled();
+    expect(screen.getByTestId('task-dag-legend-hard-chip')).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-legend-soft-chip')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-current-root-summary')).not.toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-selected-panel')).not.toBeInTheDocument();
 
-    fireEvent.click(screen.getByTestId('task-dag-current-root-jump'));
+    fireEvent.click(screen.getByTestId('task-dag-jump-to-root'));
     expect(flowApiMocks.setCenter).toHaveBeenCalledWith(expect.any(Number), expect.any(Number), {
       duration: 250,
       zoom: 0.12,
@@ -173,36 +178,7 @@ describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
     });
   });
 
-  it('uses unblocked unfinished node as current root when structural roots are terminal', async () => {
-    listTasksMock.mockResolvedValue([
-      makeTask({
-        id: 'done-root',
-        title: '已完成根节点',
-        status: 'completed',
-        createdAt: 10,
-        updatedAt: 10,
-      }),
-      makeTask({
-        id: 'downstream-open',
-        title: '下游可执行节点',
-        createdAt: 20,
-        updatedAt: 20,
-        dependsOn: [{ taskId: 'done-root', type: 'hard' }],
-      }),
-    ]);
-
-    render(<TaskDagPage />);
-
-    await waitFor(() => {
-      expect(listTasksMock).toHaveBeenCalledWith(true);
-    });
-
-    expect(await screen.findByTestId('task-dag-current-root-summary')).toHaveTextContent('下游可执行节点');
-    expect(screen.getByTestId('task-dag-current-root-summary')).toHaveTextContent('未阻塞节点 1 个');
-    expect(screen.queryByText('暂无未阻塞节点')).not.toBeInTheDocument();
-  });
-
-  it('updates the side panel when selecting another node', async () => {
+  it('highlights the selected node instead of showing the old side panel', async () => {
     render(<TaskDagPage />);
 
     await waitFor(() => {
@@ -212,44 +188,45 @@ describe('TaskDagPage issue-394（任务 DAG 只读视图）', () => {
     fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
 
     await waitFor(() => {
-      expect(screen.getByTestId('task-dag-selected-panel')).toHaveTextContent('接入任务列表引导');
+      expect(screen.getByTestId('task-dag-node-task-b').className).toContain('ring-[#C75B3A]/35');
     });
-    expect(screen.getByTestId('task-dag-selected-link')).toBeInTheDocument();
+    expect(screen.queryByTestId('task-dag-selected-panel')).not.toBeInTheDocument();
   });
 
-  it('supports collapse downstream from the selected inspect panel', async () => {
-    listTasksMock.mockResolvedValue([
-      makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
-      makeTask({
-        id: 'task-b',
-        title: 'B',
-        createdAt: 20,
-        updatedAt: 20,
-        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
-      }),
-      makeTask({
-        id: 'task-c',
-        title: 'C',
-        createdAt: 30,
-        updatedAt: 30,
-        dependsOn: [{ taskId: 'task-b', type: 'hard' }],
-      }),
-    ]);
-
+  it('filters completed nodes when hide terminal is enabled', async () => {
     render(<TaskDagPage />);
 
     await waitFor(() => {
-      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-c')).toBeInTheDocument();
     });
 
-    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
-    fireEvent.click(screen.getByTestId('task-dag-selected-toggle-downstream'));
+    fireEvent.click(screen.getByTestId('task-dag-hide-terminal-toggle'));
 
     await waitFor(() => {
       expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
     });
+    expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+  });
 
-    expect(screen.getByTestId('task-dag-selected-toggle-downstream')).toHaveTextContent('展开下游');
+  it('highlights search matches and fades unmatched nodes', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.change(screen.getByTestId('task-dag-search-input'), { target: { value: '引导' } });
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-search-match-count')).toHaveTextContent('1');
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-node-task-a').className).toContain('opacity-35');
+    });
+    expect(screen.getByTestId('task-dag-node-task-b').className).toContain('ring-[#C75B3A]/35');
   });
 
   it('shows disabled upstream/downstream actions in the context menu when a node cannot be safely folded', async () => {
