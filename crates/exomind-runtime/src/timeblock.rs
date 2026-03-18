@@ -14,10 +14,28 @@ pub struct TimeBlockData {
     pub name: String,
     pub start_id: String,
     pub end_id: String,
+    #[serde(default)]
     pub note: Option<String>,
+    #[serde(default)]
     pub tags: Vec<String>,
     pub start_time: u64,
     pub end_time: u64,
+    #[serde(default)]
+    pub task_ids: Vec<String>,
+    #[serde(default)]
+    pub task_status_outcomes: Option<HashMap<String, String>>,
+    #[serde(default)]
+    pub task_association_log: Vec<BlockTaskAssociationEvent>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct BlockTaskAssociationEvent {
+    pub block_id: String,
+    pub task_id: String,
+    pub action: String,
+    pub timestamp: u64,
+    pub source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -42,7 +60,60 @@ pub struct ActiveBlockData {
     pub pause_accumulated_ms: Option<u64>,
     pub paused: bool,
     pub paused_at: Option<u64>,
+    #[serde(default)]
+    pub task_ids: Vec<String>,
+    #[serde(default)]
+    pub task_association_log: Vec<BlockTaskAssociationEvent>,
+    /// Deprecated: legacy single-task field. Read for compat, never written.
+    #[serde(default, skip_serializing)]
     pub task_id: Option<String>,
+}
+
+impl ActiveBlockData {
+    pub fn normalize_task_ids(mut self) -> Self {
+        if self.task_ids.is_empty() {
+            let task_ids_from_log = current_task_ids_from_log(&self.task_association_log);
+            if !task_ids_from_log.is_empty() {
+                self.task_ids = task_ids_from_log;
+                return self;
+            }
+            if let Some(task_id) = self
+                .task_id
+                .clone()
+                .map(|value| value.trim().to_string())
+                .filter(|value| !value.is_empty())
+            {
+                self.task_ids = vec![task_id];
+            }
+        }
+        self
+    }
+}
+
+fn current_task_ids_from_log(task_association_log: &[BlockTaskAssociationEvent]) -> Vec<String> {
+    let mut ordered_task_ids: Vec<String> = Vec::new();
+    let mut active_task_ids: std::collections::HashSet<String> = std::collections::HashSet::new();
+
+    for event in task_association_log {
+        let task_id = event.task_id.trim();
+        if task_id.is_empty() {
+            continue;
+        }
+
+        if event.action == "associated" {
+            if active_task_ids.insert(task_id.to_string()) {
+                ordered_task_ids.push(task_id.to_string());
+            }
+            continue;
+        }
+
+        active_task_ids.remove(task_id);
+    }
+
+    ordered_task_ids
+        .into_iter()
+        .filter(|task_id| active_task_ids.contains(task_id))
+        .collect()
 }
 
 #[derive(Debug, Error)]
@@ -151,7 +222,7 @@ impl TimeBlockStore {
                 .read()
                 .unwrap()
                 .get(normalize_scope_key(scope_key))
-                .and_then(|scope| scope.active.clone())),
+                .and_then(|scope| scope.active.clone().map(ActiveBlockData::normalize_task_ids))),
             TimeBlockStoreBackend::Sqlite(store) => store.get_active_scoped(normalize_scope_key(scope_key)),
         }
     }
@@ -172,7 +243,7 @@ impl TimeBlockStore {
                     .unwrap()
                     .entry(normalize_scope_key(scope_key).to_string())
                     .or_default()
-                    .active = Some(block);
+                    .active = Some(block.normalize_task_ids());
                 Ok(())
             }
             TimeBlockStoreBackend::Sqlite(store) => store.put_active_scoped(normalize_scope_key(scope_key), &block),
@@ -247,6 +318,7 @@ impl Default for TimeBlockStore {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serde_json::json;
     use tempfile::tempdir;
 
     #[test]
@@ -264,6 +336,15 @@ mod tests {
             tags: vec!["block_feedback".to_string()],
             start_time: 1,
             end_time: 2,
+            task_ids: vec!["task-a".to_string()],
+            task_status_outcomes: Some(HashMap::from([("task-a".to_string(), "continue".to_string())])),
+            task_association_log: vec![BlockTaskAssociationEvent {
+                block_id: "tb-a".to_string(),
+                task_id: "task-a".to_string(),
+                action: "associated".to_string(),
+                timestamp: 1,
+                source: "block_start".to_string(),
+            }],
         }]).unwrap();
         store.replace_completed_scoped(Some("profile-b"), &[TimeBlockData {
             id: "tb-b".to_string(),
@@ -274,6 +355,9 @@ mod tests {
             tags: vec!["block_feedback".to_string()],
             start_time: 3,
             end_time: 4,
+            task_ids: vec![],
+            task_status_outcomes: None,
+            task_association_log: vec![],
         }]).unwrap();
 
         store.put_active_scoped(Some("profile-a"), ActiveBlockData {
@@ -296,6 +380,14 @@ mod tests {
             pause_accumulated_ms: None,
             paused: false,
             paused_at: None,
+            task_ids: vec!["task-a".to_string()],
+            task_association_log: vec![BlockTaskAssociationEvent {
+                block_id: "active-a".to_string(),
+                task_id: "task-a".to_string(),
+                action: "associated".to_string(),
+                timestamp: 10,
+                source: "block_start".to_string(),
+            }],
             task_id: None,
         }).unwrap();
 
@@ -306,9 +398,75 @@ mod tests {
 
         assert_eq!(completed_a.len(), 1);
         assert_eq!(completed_a[0].id, "tb-a");
+        assert_eq!(completed_a[0].task_ids, vec!["task-a".to_string()]);
         assert_eq!(completed_b.len(), 1);
         assert_eq!(completed_b[0].id, "tb-b");
         assert_eq!(active_a.as_ref().map(|block| block.start_id.as_str()), Some("active-a"));
+        assert_eq!(active_a.as_ref().map(|block| block.task_ids.clone()), Some(vec!["task-a".to_string()]));
         assert!(active_b.is_none());
+    }
+
+    #[test]
+    fn active_block_promotes_legacy_task_id_to_task_ids() {
+        let block: ActiveBlockData = serde_json::from_value(json!({
+            "startId": "legacy-active",
+            "name": "Legacy active",
+            "mode": "countup",
+            "elapsed": 10,
+            "paused": false,
+            "startTime": 123,
+            "taskId": "legacy-task",
+        }))
+        .unwrap();
+
+        let normalized = block.normalize_task_ids();
+        let serialized = serde_json::to_value(&normalized).unwrap();
+
+        assert_eq!(normalized.task_ids, vec!["legacy-task".to_string()]);
+        assert_eq!(serialized["taskIds"], json!(["legacy-task"]));
+        assert!(serialized.get("taskId").is_none());
+    }
+
+    #[test]
+    fn active_block_recovers_task_ids_from_association_log() {
+        let block: ActiveBlockData = serde_json::from_value(json!({
+            "startId": "log-active",
+            "name": "Log active",
+            "mode": "countup",
+            "elapsed": 10,
+            "paused": false,
+            "startTime": 123,
+            "taskAssociationLog": [
+                {
+                    "blockId": "log-active",
+                    "taskId": "task-1",
+                    "action": "associated",
+                    "timestamp": 1,
+                    "source": "block_start"
+                },
+                {
+                    "blockId": "log-active",
+                    "taskId": "task-2",
+                    "action": "associated",
+                    "timestamp": 2,
+                    "source": "manual"
+                },
+                {
+                    "blockId": "log-active",
+                    "taskId": "task-1",
+                    "action": "disassociated",
+                    "timestamp": 3,
+                    "source": "manual"
+                }
+            ]
+        }))
+        .unwrap();
+
+        let normalized = block.normalize_task_ids();
+        let serialized = serde_json::to_value(&normalized).unwrap();
+
+        assert_eq!(normalized.task_ids, vec!["task-2".to_string()]);
+        assert_eq!(serialized["taskIds"], json!(["task-2"]));
+        assert!(serialized.get("taskId").is_none());
     }
 }

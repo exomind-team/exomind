@@ -3,10 +3,11 @@ import { describe, expect, it } from 'vitest';
 import { useTimerConfig } from '@/ui/app/hooks/useTimerConfig';
 
 describe('useTimerConfig', () => {
-  it('defaults to 25-minute countdown config（默认返回 25 分钟倒计时配置）', () => {
+  it('defaults to countup config without estimated minutes（未传估时时默认返回正计时配置）', () => {
     const { result } = renderHook(() => useTimerConfig());
 
-    expect(result.current.timerConfig).toEqual({ mode: 'countdown', minutes: 25 });
+    expect(result.current.countdownMinutes).toBe(25);
+    expect(result.current.timerConfig).toEqual({ mode: 'countup' });
   });
 
   it('uses provided initial minutes（使用传入的初始分钟数）', () => {
@@ -43,5 +44,24 @@ describe('useTimerConfig', () => {
     expect(result.current.countdownMinutes).toBe(30);
     expect(result.current.customDurationDraft).toBe('30');
     expect(result.current.timerConfig).toEqual({ mode: 'countdown', minutes: 30 });
+  });
+
+  it('syncTimerConfig does not block later estimated-minute sync（自动同步不应阻断后续估时同步）', () => {
+    const { result, rerender } = renderHook(
+      ({ initialMinutes }: { initialMinutes?: number }) => useTimerConfig(initialMinutes, 'task-1'),
+      {
+        initialProps: { initialMinutes: 120 },
+      },
+    );
+
+    act(() => {
+      result.current.syncTimerConfig({ mode: 'countdown', minutes: 30 });
+    });
+
+    rerender({ initialMinutes: 60 });
+
+    expect(result.current.timerMode).toBe('countdown');
+    expect(result.current.countdownMinutes).toBe(60);
+    expect(result.current.timerConfig).toEqual({ mode: 'countdown', minutes: 60 });
   });
 });

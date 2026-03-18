@@ -35,6 +35,8 @@ describe('TimeBlockRtAdapter（RT 时间块适配器）', () => {
           tags: ['block_feedback'],
           startTime: 1700000000000,
           endTime: 1700000060000,
+          taskIds: [],
+          taskAssociationLog: [],
         },
       ]),
     }));
@@ -56,6 +58,8 @@ describe('TimeBlockRtAdapter（RT 时间块适配器）', () => {
         tags: ['block_feedback'],
         startTime: 1700000000000,
         endTime: 1700000060000,
+        taskIds: [],
+        taskAssociationLog: [],
       },
     ]);
     const [requestUrl] = fetchImpl.mock.calls[0] as [string, RequestInit];
@@ -92,6 +96,8 @@ describe('TimeBlockRtAdapter（RT 时间块适配器）', () => {
       elapsed: 300000,
       paused: false,
       startTime: 1700000000000,
+      taskIds: [],
+      taskAssociationLog: [],
     });
     await adapter.deleteActiveBlock();
 
@@ -108,6 +114,8 @@ describe('TimeBlockRtAdapter（RT 时间块适配器）', () => {
       elapsed: 300000,
       paused: false,
       startTime: 1700000000000,
+      taskIds: [],
+      taskAssociationLog: [],
     });
 
     const [deleteUrl, deleteInit] = fetchImpl.mock.calls[1] as [string, RequestInit];

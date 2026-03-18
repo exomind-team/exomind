@@ -144,9 +144,10 @@ export class PRLockManager {
     const lockFile = '.exomind/lock-state.json';
     const contextDir = '.exomind';
 
-    // 确保目录存在
+    // 确保目录存在（Windows/Unix 通用）
     try {
-      execSync(`mkdir -p ${contextDir}`, { stdio: 'ignore' });
+      const fs = await import('fs');
+      fs.mkdirSync(contextDir, { recursive: true });
     } catch (e) {
       console.warn('[PRLock] Failed to create .exomind directory:', e);
       return;
@@ -201,7 +202,8 @@ export class PRLockManager {
     const lockFile = '.exomind/lock-state.json';
 
     try {
-      execSync(`rm -f ${lockFile}`, { stdio: 'ignore' });
+      const fs = await import('fs');
+      fs.rmSync(lockFile, { force: true });
       console.log('[PRLock] Lock state deleted');
     } catch (e) {
       console.warn('[PRLock] Failed to delete lock state:', e);

@@ -124,6 +124,20 @@ function buildTaskLookup(tasks: TaskNode[]): Map<string, TaskNode> {
   return lookup;
 }
 
+function resolveActiveBlockTask(activeBlock: ActiveBlockData, tasks: TaskNode[]): TaskNode | undefined {
+  const activeTaskIds = activeBlock.taskIds ?? [];
+  if (activeTaskIds.length === 0) {
+    return activeBlock.taskId ? tasks.find((item) => item.id === activeBlock.taskId) : undefined;
+  }
+
+  for (const taskId of activeTaskIds) {
+    const matchedTask = tasks.find((item) => item.id === taskId);
+    if (matchedTask) return matchedTask;
+  }
+
+  return undefined;
+}
+
 export function buildTasksTodayViewModel(input: BuildTasksTodayViewModelInput): TasksTodayViewModel {
   const { tasks, blocks, now, activeBlock } = input;
   const todayRange = getTodayRange(now);
@@ -163,13 +177,13 @@ export function buildTasksTodayViewModel(input: BuildTasksTodayViewModelInput): 
   }
 
   if (activeBlock && activeBlock.startTime >= todayRange.start && activeBlock.startTime < todayRange.end) {
-    const task = activeBlock.taskId ? tasks.find((item) => item.id === activeBlock.taskId) : undefined;
+    const task = resolveActiveBlockTask(activeBlock, tasks);
     const bucketId = resolveBucketId(activeBlock.startTime);
     const bucketSpec = SECTION_SPECS.find((section) => section.id === bucketId)!;
     sectionItems.get(bucketId)!.push({
       id: `active-${activeBlock.startId}`,
       blockId: activeBlock.startId,
-      taskId: activeBlock.taskId,
+      taskId: task?.id ?? activeBlock.taskIds?.[0] ?? activeBlock.taskId,
       title: task?.title ?? activeBlock.name,
       bucketId,
       bucketLabel: bucketSpec.label,

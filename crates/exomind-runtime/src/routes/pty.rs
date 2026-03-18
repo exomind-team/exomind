@@ -1,4 +1,4 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{delete, get, post};
@@ -7,13 +7,15 @@ use base64::engine::general_purpose::STANDARD as BASE64;
 use base64::Engine;
 use serde::{Deserialize, Serialize};
 use std::convert::Infallible;
+use std::time::Duration;
 use tokio_stream::wrappers::ReceiverStream;
 
 use crate::routes::sessions::{
     broadcast_session_created, broadcast_session_updated,
 };
 use crate::pty::{
-    ClaudeSessionInfo, PtyAgentInfo, PtyError, PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
+    ClaudeSessionInfo, PtyAgentInfo, PtyAgentType, PtyError, PtyHistoricalSessionInfo,
+    PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
 };
 use crate::session::{CreateSessionInput, InteractionMode, SessionStatus, UpdateSessionInput, WorkContext};
 use crate::AppState;
@@ -35,6 +37,11 @@ struct PtyResizeBody {
 struct PtyRemoveResponse {
     status: String,
     id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoricalSessionsQuery {
+    agent_type: PtyAgentType,
 }
 
 // ── Error mapping ───────────────────────────────────────────────
@@ -135,6 +142,43 @@ fn complete_pty_session(
     }
 }
 
+fn watch_pty_lifecycle(state: AppState, id: String) {
+    tokio::spawn(async move {
+        loop {
+            match state.pty_manager.refresh_process_state(&id).await {
+                Ok(Some(info)) => match info.status {
+                    crate::pty::PtyAgentStatus::Exited { .. } => {
+                        match complete_pty_session(&state, &id) {
+                            Ok(Some(updated)) => {
+                                broadcast_session_updated(state.session_event_tx.as_ref(), &updated);
+                            }
+                            Ok(None) => {}
+                            Err((status, error)) => {
+                                tracing::warn!(
+                                    pty_id = %id,
+                                    status = %status,
+                                    error = %error,
+                                    "failed to complete PTY-backed session after natural exit"
+                                );
+                            }
+                        }
+                        break;
+                    }
+                    crate::pty::PtyAgentStatus::Stopped => break,
+                    crate::pty::PtyAgentStatus::Running => {}
+                },
+                Ok(None) => {}
+                Err(PtyError::NotFound { .. }) => break,
+                Err(error) => {
+                    tracing::warn!(pty_id = %id, error = %error, "failed to refresh PTY process state");
+                    break;
+                }
+            }
+            tokio::time::sleep(Duration::from_millis(100)).await;
+        }
+    });
+}
+
 // ── Handlers ────────────────────────────────────────────────────
 
 /// GET /pty — List all PTY agents.
@@ -152,6 +196,7 @@ async fn spawn_pty_agent(
         let _ = state.pty_manager.remove(&info.id).await;
         return Err(error);
     }
+    watch_pty_lifecycle(state.clone(), info.id.clone());
     Ok((StatusCode::CREATED, Json(info)))
 }
 
@@ -165,12 +210,22 @@ async fn resume_pty_agent(
         let _ = state.pty_manager.remove(&info.id).await;
         return Err(error);
     }
+    watch_pty_lifecycle(state.clone(), info.id.clone());
     Ok((StatusCode::CREATED, Json(info)))
 }
 
 /// GET /pty/claude-sessions — List local Claude CLI sessions.
 async fn list_claude_sessions() -> Json<Vec<ClaudeSessionInfo>> {
     Json(crate::pty::PtyManager::list_claude_sessions())
+}
+
+/// GET /pty/sessions?agent_type=... — List local PTY historical sessions by agent type.
+async fn list_historical_sessions(
+    Query(query): Query<HistoricalSessionsQuery>,
+) -> Json<Vec<PtyHistoricalSessionInfo>> {
+    Json(crate::pty::PtyManager::list_historical_sessions(
+        query.agent_type,
+    ))
 }
 
 /// GET /pty/{id}/stream — SSE stream of PTY output (base64-encoded).
@@ -330,6 +385,7 @@ pub fn router() -> Router<AppState> {
         .route("/pty", get(list_pty_agents))
         .route("/pty/spawn", post(spawn_pty_agent))
         .route("/pty/resume", post(resume_pty_agent))
+        .route("/pty/sessions", get(list_historical_sessions))
         .route("/pty/claude-sessions", get(list_claude_sessions))
         .route("/pty/:id/stream", get(stream_pty_output))
         .route("/pty/:id/input", post(write_pty_input))

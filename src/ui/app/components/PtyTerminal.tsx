@@ -160,12 +160,39 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
 
     // ── ResizeObserver → refit terminal ──────────────────────
 
-    const resizeObserver = new ResizeObserver(() => {
+    let connectScheduled = false;
+    let initialLayoutReady = false;
+    let connectTimer: ReturnType<typeof setTimeout> | null = null;
+
+    const syncTerminalLayout = () => {
+      // Wait for a measurable container before attaching stream output.
+      if (container.clientWidth <= 0 || container.clientHeight <= 0) {
+        return false;
+      }
+
       try {
         fitAddon.fit();
+        terminal.refresh(0, Math.max(terminal.rows - 1, 0));
       } catch {
-        // Ignore fit errors during rapid resizing
+        // Ignore fit/refresh errors during rapid resizing
       }
+
+      sendResize(terminal.rows, terminal.cols);
+
+      if (!initialLayoutReady && !connectScheduled) {
+        initialLayoutReady = true;
+        connectScheduled = true;
+        connectTimer = setTimeout(() => {
+          connectTimer = null;
+          connectSSE();
+        }, 50);
+      }
+
+      return true;
+    };
+
+    const resizeObserver = new ResizeObserver(() => {
+      syncTerminalLayout();
     });
     resizeObserver.observe(container);
     resizeObserverRef.current = resizeObserver;
@@ -204,21 +231,16 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       };
     };
 
-    // Use rAF to ensure container has layout dimensions, then:
+    // Use rAF to wait for first measurable layout, then:
     // 1. fit terminal to container
-    // 2. send resize to PTY backend
-    // 3. connect SSE only after resize is dispatched
+    // 2. refresh terminal canvas / rows
+    // 3. send resize to PTY backend
+    // 4. connect SSE only after resize is dispatched
     requestAnimationFrame(() => {
-      try {
-        fitAddon.fit();
-      } catch {
-        // Ignore
+      if (syncTerminalLayout()) {
+        // Auto-focus the terminal only when layout is ready
+        terminal.focus();
       }
-      sendResize(terminal.rows, terminal.cols);
-      // Auto-focus the terminal so keyboard/paste events reach it
-      terminal.focus();
-      // Small delay to let the resize reach the PTY before output streams in
-      setTimeout(() => connectSSE(), 50);
     });
 
     // ── Cleanup ──────────────────────────────────────────────
@@ -236,6 +258,10 @@ export function PtyTerminal({ rtBaseUrl, ptyId, authToken }: PtyTerminalProps) {
       if (eventSourceRef.current) {
         eventSourceRef.current.close();
         eventSourceRef.current = null;
+      }
+      if (connectTimer) {
+        clearTimeout(connectTimer);
+        connectTimer = null;
       }
       if (eventSource) {
         eventSource.close();

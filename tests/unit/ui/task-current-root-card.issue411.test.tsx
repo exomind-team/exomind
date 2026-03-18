@@ -55,9 +55,7 @@ describe('TaskCurrentRootCard issue-411（当前根节点按未阻塞判定）',
     expect(graph.currentRootNodeId).toBe('downstream-open');
     expect(screen.getByTestId('task-current-root-card')).toHaveTextContent('下游可执行节点');
     expect(screen.queryByText('暂无未阻塞节点')).not.toBeInTheDocument();
-    expect(screen.getByTestId('task-current-root-card')).toHaveTextContent(
-      '共 1 个未阻塞节点 · 当前按稳定顺序排第 1 个',
-    );
+    expect(screen.getByTestId('task-current-root-card')).toHaveTextContent('未阻塞节点 · 1');
   });
 
   it('does not pick a node whose hard dependency is unfinished', () => {

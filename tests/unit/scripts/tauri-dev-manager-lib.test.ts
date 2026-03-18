@@ -1,7 +1,12 @@
 import path from 'node:path';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { describe, expect, it } from 'vitest';
 import {
+  appendManagedTauriLogSessionStart,
   buildManagedTauriCommand,
+  collectManagedTauriCleanupPids,
+  evaluateManagedTauriInstanceHealth,
   resolveManagedTauriInstancePaths,
 } from '../../../Scripts/dev/tauri-dev-manager-lib';
 
@@ -44,5 +49,112 @@ describe('tauri-dev-manager-lib', () => {
     });
 
     expect(command).toContain('set "EXOMIND_TAURI_ENABLE_WATCH=1"');
+  });
+
+  it('appends a new manager session marker instead of truncating old logs（启动新会话应追加旧日志而不是覆盖）', async () => {
+    const tempDir = await mkdtemp(path.join(tmpdir(), 'tauri-dev-manager-log-'));
+    const logPath = path.join(tempDir, 'desktop.log');
+
+    try {
+      await writeFile(logPath, 'previous line\n', 'utf8');
+      await appendManagedTauriLogSessionStart(logPath, {
+        name: 'desktop',
+        target: 'desktop',
+        webPort: 1420,
+        hmrPort: 1421,
+        startedAt: '2026-03-18T10:02:03.000Z',
+      });
+
+      const content = await readFile(logPath, 'utf8');
+      expect(content).toContain('previous line');
+      expect(content).toContain('manager session start');
+      expect(content).toContain('name=desktop');
+      expect(content).toContain('web=1420');
+      expect(content.indexOf('previous line')).toBeLessThan(content.indexOf('manager session start'));
+    } finally {
+      await rm(tempDir, { recursive: true, force: true });
+    }
+  });
+
+  it('marks desktop instances stale when the Tauri app process is gone even if web ports still listen（桌面窗口进程消失但端口残留时应判定为 stale）', () => {
+    const health = evaluateManagedTauriInstanceHealth(
+      {
+        name: 'desktop',
+        projectRoot: 'D:\\project\\exomind',
+        rootPid: 1234,
+        webPort: 1420,
+        hmrPort: 1421,
+        logPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.log',
+        metaPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.json',
+        startedAt: '2026-03-18T10:02:03.000Z',
+        enableWatch: false,
+        target: 'desktop',
+      },
+      {
+        rootPidAlive: true,
+        webPortListening: true,
+        hmrPortListening: true,
+        appProcessAlive: false,
+      },
+    );
+
+    expect(health.status).toBe('stale');
+    expect(health.detail).toContain('desktop app process missing');
+    expect(health.detail).toContain('web=1420');
+    expect(health.detail).toContain('hmr=1421');
+  });
+
+  it('keeps desktop instances running only when root pid app process and ports are all healthy（桌面实例需进程和端口都健康才算 running）', () => {
+    const health = evaluateManagedTauriInstanceHealth(
+      {
+        name: 'desktop',
+        projectRoot: 'D:\\project\\exomind',
+        rootPid: 1234,
+        webPort: 1420,
+        hmrPort: 1421,
+        logPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.log',
+        metaPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.json',
+        startedAt: '2026-03-18T10:02:03.000Z',
+        enableWatch: false,
+        target: 'desktop',
+      },
+      {
+        rootPidAlive: true,
+        webPortListening: true,
+        hmrPortListening: true,
+        appProcessAlive: true,
+      },
+    );
+
+    expect(health.status).toBe('running');
+    expect(health.detail).toBe('ok');
+  });
+
+  it('collects leftover listener pids when the root process already died（根进程已死时 stop 应回收残留监听进程）', () => {
+    const cleanupPids = collectManagedTauriCleanupPids(
+      {
+        name: 'desktop',
+        projectRoot: 'D:\\project\\exomind',
+        rootPid: 1234,
+        webPort: 1420,
+        hmrPort: 1421,
+        logPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.log',
+        metaPath: 'D:\\project\\exomind\\.tmp\\tauri-dev-instances\\desktop.json',
+        startedAt: '2026-03-18T10:02:03.000Z',
+        enableWatch: false,
+        target: 'desktop',
+      },
+      {
+        rootPidAlive: false,
+        webPortListening: true,
+        hmrPortListening: true,
+        appProcessAlive: false,
+        webPortPids: [333436],
+        hmrPortPids: [333436],
+        appPids: [],
+      },
+    );
+
+    expect(cleanupPids).toEqual([333436]);
   });
 });

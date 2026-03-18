@@ -24,6 +24,8 @@ export interface TaskAutoCreatedPayload {
 export interface EventLogAppendedPayload {
   text: string;
   ts: number;
+  inputMode?: string;
+  captureSource?: string;
 }
 
 /** Payload shape for eventlog.replication.appended signals. */

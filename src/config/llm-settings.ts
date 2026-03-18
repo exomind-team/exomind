@@ -1,10 +1,17 @@
-const LLM_API_KEY_STORAGE_KEY = 'exomind:llmApiKey';
-const LLM_BASE_URL_STORAGE_KEY = 'exomind:llmBaseUrl';
-const LLM_MODEL_STORAGE_KEY = 'exomind:llmModel';
-const LLM_SETTINGS_CHANGED_EVENT = 'exomind:llm-settings-changed';
+import { resolveOfferingForCapability } from '@/lib/ai-registry/resolution';
+import { getAIRegistrySnapshot, subscribeAIRegistryChanges } from '@/lib/ai-registry/storage';
+import {
+  DEFAULT_LLM_BASE_URL,
+  DEFAULT_LLM_CHANNEL_NAME,
+  DEFAULT_LLM_MODEL,
+  getDefaultLLMRegistryDraft,
+  saveDefaultLLMRegistryDraft,
+} from '@/lib/ai-registry/compat';
 
-const DEFAULT_BASE_URL = 'https://api.openai.com/v1';
-const DEFAULT_MODEL = 'gpt-4o';
+const LEGACY_LLM_API_KEY_STORAGE_KEY = 'exomind:llmApiKey';
+const LEGACY_LLM_BASE_URL_STORAGE_KEY = 'exomind:llmBaseUrl';
+const LEGACY_LLM_MODEL_STORAGE_KEY = 'exomind:llmModel';
+const LEGACY_LLM_BOOTSTRAP_COMPLETED_STORAGE_KEY = 'exomind:ai-registry:legacy-llm-bootstrap-completed';
 
 export interface LLMSettings {
   apiKey: string;
@@ -21,96 +28,141 @@ function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   return localStorageLike as Pick<Storage, 'getItem' | 'setItem'>;
 }
 
-export function getLLMApiKey(): string {
+function readLegacyLLMSettings(): LLMSettings {
   const storage = getStorage();
-  if (!storage) return '';
-  return storage.getItem(LLM_API_KEY_STORAGE_KEY) ?? '';
+  if (!storage) {
+    return {
+      apiKey: '',
+      baseUrl: DEFAULT_LLM_BASE_URL,
+      model: DEFAULT_LLM_MODEL,
+    };
+  }
+
+  return {
+    apiKey: storage.getItem(LEGACY_LLM_API_KEY_STORAGE_KEY)?.trim() ?? '',
+    baseUrl: storage.getItem(LEGACY_LLM_BASE_URL_STORAGE_KEY)?.trim() || DEFAULT_LLM_BASE_URL,
+    model: storage.getItem(LEGACY_LLM_MODEL_STORAGE_KEY)?.trim() || DEFAULT_LLM_MODEL,
+  };
+}
+
+function hasResolvedRegistryLLMSettings(): boolean {
+  return Boolean(resolveOfferingForCapability(getAIRegistrySnapshot(), 'llm.chat'));
+}
+
+function isLegacyLLMBootstrapCompleted(): boolean {
+  const storage = getStorage();
+  if (!storage) {
+    return false;
+  }
+  return storage.getItem(LEGACY_LLM_BOOTSTRAP_COMPLETED_STORAGE_KEY) === 'true';
+}
+
+function markLegacyLLMBootstrapCompleted(): void {
+  const storage = getStorage();
+  if (!storage) {
+    return;
+  }
+  storage.setItem(LEGACY_LLM_BOOTSTRAP_COMPLETED_STORAGE_KEY, 'true');
+}
+
+function ensureRegistryBootstrappedFromLegacy(): void {
+  if (hasResolvedRegistryLLMSettings()) {
+    markLegacyLLMBootstrapCompleted();
+    return;
+  }
+
+  if (isLegacyLLMBootstrapCompleted()) {
+    return;
+  }
+
+  const legacy = readLegacyLLMSettings();
+  if (!legacy.apiKey.trim()) {
+    return;
+  }
+
+  saveDefaultLLMRegistryDraft({
+    channelName: DEFAULT_LLM_CHANNEL_NAME,
+    baseUrl: legacy.baseUrl,
+    model: legacy.model,
+    apiKey: legacy.apiKey,
+  });
+  markLegacyLLMBootstrapCompleted();
+}
+
+function getEffectiveLLMSettings(): LLMSettings {
+  ensureRegistryBootstrappedFromLegacy();
+  const registryDraft = getDefaultLLMRegistryDraft();
+  if (hasResolvedRegistryLLMSettings()) {
+    return {
+      apiKey: registryDraft.apiKey,
+      baseUrl: registryDraft.baseUrl,
+      model: registryDraft.model,
+    };
+  }
+
+  if (isLegacyLLMBootstrapCompleted()) {
+    return {
+      apiKey: '',
+      baseUrl: registryDraft.baseUrl,
+      model: registryDraft.model,
+    };
+  }
+
+  return readLegacyLLMSettings();
+}
+
+function updateDefaultDraft(patch: Partial<RegistryDefaultDraft>): void {
+  ensureRegistryBootstrappedFromLegacy();
+  const current = getDefaultLLMRegistryDraft();
+  saveDefaultLLMRegistryDraft({
+    channelName: patch.channelName ?? current.channelName,
+    baseUrl: patch.baseUrl ?? current.baseUrl,
+    model: patch.model ?? current.model,
+    apiKey: patch.apiKey ?? current.apiKey,
+  });
+}
+
+interface RegistryDefaultDraft {
+  channelName: string;
+  baseUrl: string;
+  model: string;
+  apiKey: string;
+}
+
+export function getLLMApiKey(): string {
+  return getEffectiveLLMSettings().apiKey;
 }
 
 export function setLLMApiKey(apiKey: string): void {
-  const storage = getStorage();
-  if (!storage) return;
-  storage.setItem(LLM_API_KEY_STORAGE_KEY, apiKey.trim());
-  emitChanged();
+  updateDefaultDraft({ apiKey: apiKey.trim() });
 }
 
 export function getLLMBaseUrl(): string {
-  const storage = getStorage();
-  if (!storage) return DEFAULT_BASE_URL;
-  return storage.getItem(LLM_BASE_URL_STORAGE_KEY) || DEFAULT_BASE_URL;
+  return getEffectiveLLMSettings().baseUrl;
 }
 
 export function setLLMBaseUrl(baseUrl: string): void {
-  const storage = getStorage();
-  if (!storage) return;
-  storage.setItem(LLM_BASE_URL_STORAGE_KEY, baseUrl.trim());
-  emitChanged();
+  updateDefaultDraft({ baseUrl: baseUrl.trim() || DEFAULT_LLM_BASE_URL });
 }
 
 export function getLLMModel(): string {
-  const storage = getStorage();
-  if (!storage) return DEFAULT_MODEL;
-  return storage.getItem(LLM_MODEL_STORAGE_KEY) || DEFAULT_MODEL;
+  return getEffectiveLLMSettings().model;
 }
 
 export function setLLMModel(model: string): void {
-  const storage = getStorage();
-  if (!storage) return;
-  storage.setItem(LLM_MODEL_STORAGE_KEY, model.trim());
-  emitChanged();
+  updateDefaultDraft({ model: model.trim() || DEFAULT_LLM_MODEL });
 }
 
 export function getLLMSettings(): LLMSettings {
-  return {
-    apiKey: getLLMApiKey(),
-    baseUrl: getLLMBaseUrl(),
-    model: getLLMModel(),
-  };
+  return getEffectiveLLMSettings();
 }
 
 export function isLLMConfigured(): boolean {
   return getLLMApiKey().length > 0;
 }
 
-function emitChanged(): void {
-  if (typeof window === 'undefined') return;
-  window.dispatchEvent(
-    new CustomEvent<LLMSettings>(LLM_SETTINGS_CHANGED_EVENT, {
-      detail: getLLMSettings(),
-    }),
-  );
-}
-
 export function subscribeLLMSettingsChanges(listener: (settings: LLMSettings) => void): () => void {
-  if (typeof window === 'undefined') {
-    return () => {};
-  }
-
-  const handleStorage = (event: StorageEvent) => {
-    if (
-      event.key !== LLM_API_KEY_STORAGE_KEY
-      && event.key !== LLM_BASE_URL_STORAGE_KEY
-      && event.key !== LLM_MODEL_STORAGE_KEY
-    ) {
-      return;
-    }
+  return subscribeAIRegistryChanges(() => {
     listener(getLLMSettings());
-  };
-
-  const handleCustomEvent = (event: Event) => {
-    const customEvent = event as CustomEvent<LLMSettings>;
-    if (customEvent.detail) {
-      listener(customEvent.detail);
-      return;
-    }
-    listener(getLLMSettings());
-  };
-
-  window.addEventListener('storage', handleStorage);
-  window.addEventListener(LLM_SETTINGS_CHANGED_EVENT, handleCustomEvent);
-
-  return () => {
-    window.removeEventListener('storage', handleStorage);
-    window.removeEventListener(LLM_SETTINGS_CHANGED_EVENT, handleCustomEvent);
-  };
+  });
 }

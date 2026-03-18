@@ -170,12 +170,12 @@ describe('filterToday（"今日" tab）', () => {
     expect(filterToday([task], today)).toEqual([]);
   });
 
-  it('sorts results by due date', () => {
-    const late = makeTask({ id: 'late', dueAt: todayStart + 50_000, updatedAt: todayStart });
-    const early = makeTask({ id: 'early', dueAt: todayStart + 10_000, updatedAt: todayStart });
+  it('sorts results by status group (in_progress first, then by updatedAt desc)', () => {
+    const late = makeTask({ id: 'late', dueAt: todayStart + 50_000, updatedAt: todayStart + 2000 });
+    const early = makeTask({ id: 'early', dueAt: todayStart + 10_000, updatedAt: todayStart + 1000 });
     const noDue = makeTask({ id: 'noDue', status: 'in_progress', updatedAt: todayStart + 1000 });
     const result = filterToday([late, noDue, early], today);
-    expect(result.map((t) => t.id)).toEqual(['early', 'late', 'noDue']);
+    expect(result.map((t) => t.id)).toEqual(['noDue', 'late', 'early']);
   });
 });
 
@@ -205,12 +205,12 @@ describe('filterWeek（"一周" tab）', () => {
     expect(filterWeek([task], now)).toEqual([]);
   });
 
-  it('sorts: dueAt asc, no-due at bottom', () => {
-    const far = makeTask({ id: 'far', dueAt: nowMs + 5 * 86_400_000, updatedAt: nowMs });
-    const near = makeTask({ id: 'near', dueAt: nowMs + 1 * 86_400_000, updatedAt: nowMs });
+  it('sorts by status group (in_progress first, then by updatedAt desc)', () => {
+    const far = makeTask({ id: 'far', dueAt: nowMs + 5 * 86_400_000, updatedAt: nowMs + 2000 });
+    const near = makeTask({ id: 'near', dueAt: nowMs + 1 * 86_400_000, updatedAt: nowMs + 1000 });
     const noDue = makeTask({ id: 'noDue', status: 'in_progress', updatedAt: nowMs });
     const result = filterWeek([far, noDue, near], now);
-    expect(result.map((t) => t.id)).toEqual(['near', 'far', 'noDue']);
+    expect(result.map((t) => t.id)).toEqual(['noDue', 'far', 'near']);
   });
 });
 
