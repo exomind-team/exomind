@@ -1,4 +1,4 @@
-use axum::extract::{Path, State};
+use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
 use axum::response::sse::{Event, Sse};
 use axum::routing::{delete, get, post};
@@ -13,7 +13,8 @@ use crate::routes::sessions::{
     broadcast_session_created, broadcast_session_updated,
 };
 use crate::pty::{
-    ClaudeSessionInfo, PtyAgentInfo, PtyError, PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
+    ClaudeSessionInfo, PtyAgentInfo, PtyAgentType, PtyError, PtyHistoricalSessionInfo,
+    PtyOutputMsg, PtyResumeRequest, PtySpawnRequest,
 };
 use crate::session::{CreateSessionInput, InteractionMode, SessionStatus, UpdateSessionInput, WorkContext};
 use crate::AppState;
@@ -35,6 +36,11 @@ struct PtyResizeBody {
 struct PtyRemoveResponse {
     status: String,
     id: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct HistoricalSessionsQuery {
+    agent_type: PtyAgentType,
 }
 
 // ── Error mapping ───────────────────────────────────────────────
@@ -171,6 +177,15 @@ async fn resume_pty_agent(
 /// GET /pty/claude-sessions — List local Claude CLI sessions.
 async fn list_claude_sessions() -> Json<Vec<ClaudeSessionInfo>> {
     Json(crate::pty::PtyManager::list_claude_sessions())
+}
+
+/// GET /pty/sessions?agent_type=... — List local PTY historical sessions by agent type.
+async fn list_historical_sessions(
+    Query(query): Query<HistoricalSessionsQuery>,
+) -> Json<Vec<PtyHistoricalSessionInfo>> {
+    Json(crate::pty::PtyManager::list_historical_sessions(
+        query.agent_type,
+    ))
 }
 
 /// GET /pty/{id}/stream — SSE stream of PTY output (base64-encoded).
@@ -330,6 +345,7 @@ pub fn router() -> Router<AppState> {
         .route("/pty", get(list_pty_agents))
         .route("/pty/spawn", post(spawn_pty_agent))
         .route("/pty/resume", post(resume_pty_agent))
+        .route("/pty/sessions", get(list_historical_sessions))
         .route("/pty/claude-sessions", get(list_claude_sessions))
         .route("/pty/:id/stream", get(stream_pty_output))
         .route("/pty/:id/input", post(write_pty_input))

@@ -2,8 +2,11 @@ use chrono::{DateTime, Utc};
 use portable_pty::{native_pty_system, Child, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs::File;
+use std::io::BufRead;
+use std::io::BufReader;
 use std::io::{Read, Write};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use thiserror::Error;
 use tokio::sync::{broadcast, Mutex};
@@ -55,6 +58,35 @@ pub enum PtyAgentStatus {
     Exited { code: i32 },
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "lowercase")]
+pub enum PtyAgentType {
+    Claude,
+    Codex,
+}
+
+impl Default for PtyAgentType {
+    fn default() -> Self {
+        Self::Claude
+    }
+}
+
+impl PtyAgentType {
+    fn command(self) -> String {
+        match self {
+            Self::Claude => "claude".to_string(),
+            Self::Codex => "codex".to_string(),
+        }
+    }
+
+    fn display_prefix(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude",
+            Self::Codex => "Codex",
+        }
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PtyAgentInfo {
     pub id: String,
@@ -99,6 +131,8 @@ pub struct PtyResumeRequest {
     pub name: String,
     #[serde(default)]
     pub workdir: Option<String>,
+    #[serde(default)]
+    pub agent_type: PtyAgentType,
     pub session_id: String,
     #[serde(default = "default_rows")]
     pub rows: u16,
@@ -107,11 +141,14 @@ pub struct PtyResumeRequest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-pub struct ClaudeSessionInfo {
+pub struct PtyHistoricalSessionInfo {
+    pub agent_type: PtyAgentType,
     pub session_id: String,
     pub project_path: String,
     pub last_modified: String,
 }
+
+pub type ClaudeSessionInfo = PtyHistoricalSessionInfo;
 
 // ---------------------------------------------------------------------------
 // Internal PTY instance (not serializable — holds OS resources)
@@ -172,7 +209,8 @@ impl PtyManager {
                 reason: format!("openpty failed: {e}"),
             })?;
 
-        let mut cmd = CommandBuilder::new(&request.command);
+        let resolved_command = resolve_spawn_command(&request.command);
+        let mut cmd = CommandBuilder::new(&resolved_command);
         for arg in &request.args {
             cmd.arg(arg);
         }
@@ -295,37 +333,12 @@ impl PtyManager {
         }
     }
 
-    /// Resume an existing Claude session by spawning with `--resume <session-id>`.
-    ///
-    /// Uses `--resume` (not `--continue --session-id`) because:
-    /// - `--resume <id>` directly resumes the specified session
-    /// - `--continue --session-id <id>` tries to continue the most recent session
-    ///   while forcing a specific session ID, causing "session ID already in use" errors
-    /// - `--fork-session` creates a new session ID to avoid modifying the original
     pub async fn resume(&self, request: PtyResumeRequest) -> Result<PtyAgentInfo, PtyError> {
-        // Generate default name from session_id if not provided
-        let name = if request.name.is_empty() {
-            let len = 8.min(request.session_id.len());
-            format!("Claude-{}", &request.session_id[..len])
-        } else {
-            request.name
-        };
-
-        let spawn_request = PtySpawnRequest {
-            name,
-            workdir: request.workdir,
-            command: default_command(),
-            args: vec![
-                "--resume".to_string(),
-                request.session_id.clone(),
-            ],
-            rows: request.rows,
-            cols: request.cols,
-        };
-
+        let session_id = request.session_id.clone();
+        let spawn_request = build_resume_spawn_request(request);
         let mut info = self.spawn(spawn_request).await?;
         // Attach the session_id to the info and update the stored instance.
-        info.session_id = Some(request.session_id);
+        info.session_id = Some(session_id);
         {
             let mut instances = self.instances.lock().await;
             if let Some(instance) = instances.get_mut(&info.id) {
@@ -442,12 +455,23 @@ impl PtyManager {
         instances.values().map(|i| i.info.clone()).collect()
     }
 
+    /// Discover existing historical CLI sessions by agent type.
+    pub fn list_historical_sessions(agent_type: PtyAgentType) -> Vec<PtyHistoricalSessionInfo> {
+        match agent_type {
+            PtyAgentType::Claude => match dirs_claude_projects() {
+                Some(projects_dir) => discover_claude_sessions(&projects_dir),
+                None => Vec::new(),
+            },
+            PtyAgentType::Codex => match dirs_codex_sessions() {
+                Some(sessions_dir) => discover_codex_sessions(&sessions_dir),
+                None => Vec::new(),
+            },
+        }
+    }
+
     /// Discover existing Claude CLI sessions from ~/.claude/projects/.
     pub fn list_claude_sessions() -> Vec<ClaudeSessionInfo> {
-        match dirs_claude_projects() {
-            Some(projects_dir) => discover_claude_sessions(&projects_dir),
-            None => Vec::new(),
-        }
+        Self::list_historical_sessions(PtyAgentType::Claude)
     }
 
     /// Kill all running PTY child processes and clear instances (graceful shutdown).
@@ -492,10 +516,21 @@ fn dirs_claude_projects() -> Option<PathBuf> {
     }
 }
 
+/// Returns the path to `~/.codex/sessions/` if it exists.
+fn dirs_codex_sessions() -> Option<PathBuf> {
+    let home = dirs::home_dir()?;
+    let sessions = home.join(".codex").join("sessions");
+    if sessions.is_dir() {
+        Some(sessions)
+    } else {
+        None
+    }
+}
+
 /// Scan the Claude projects directory for session JSONL files.
 ///
 /// Directory structure: `~/.claude/projects/<encoded-project-path>/<session-id>.jsonl`
-fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<ClaudeSessionInfo> {
+fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<PtyHistoricalSessionInfo> {
     let mut sessions = Vec::new();
 
     let entries = match std::fs::read_dir(projects_dir) {
@@ -540,7 +575,8 @@ fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<ClaudeSessionInfo> {
                 })
                 .unwrap_or_default();
 
-            sessions.push(ClaudeSessionInfo {
+            sessions.push(PtyHistoricalSessionInfo {
+                agent_type: PtyAgentType::Claude,
                 session_id,
                 project_path: project_name.clone(),
                 last_modified,
@@ -553,6 +589,119 @@ fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<ClaudeSessionInfo> {
     sessions
 }
 
+fn discover_codex_sessions(sessions_dir: &Path) -> Vec<PtyHistoricalSessionInfo> {
+    let mut sessions = Vec::new();
+    let mut stack = vec![sessions_dir.to_path_buf()];
+
+    while let Some(dir) = stack.pop() {
+        let entries = match std::fs::read_dir(&dir) {
+            Ok(entries) => entries,
+            Err(_) => continue,
+        };
+
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                stack.push(path);
+                continue;
+            }
+
+            if path.extension().and_then(|value| value.to_str()) != Some("jsonl") {
+                continue;
+            }
+
+            let Some((session_id, project_path)) = read_codex_session_meta(&path) else {
+                continue;
+            };
+
+            let last_modified = path
+                .metadata()
+                .ok()
+                .and_then(|m| m.modified().ok())
+                .map(|t| {
+                    let dt: DateTime<Utc> = t.into();
+                    dt.to_rfc3339()
+                })
+                .unwrap_or_default();
+
+            sessions.push(PtyHistoricalSessionInfo {
+                agent_type: PtyAgentType::Codex,
+                session_id,
+                project_path,
+                last_modified,
+            });
+        }
+    }
+
+    sessions.sort_by(|a, b| b.last_modified.cmp(&a.last_modified));
+    sessions
+}
+
+fn read_codex_session_meta(path: &Path) -> Option<(String, String)> {
+    let file = File::open(path).ok()?;
+    let reader = BufReader::new(file);
+
+    for line in reader.lines().take(20).flatten() {
+        let value: serde_json::Value = serde_json::from_str(&line).ok()?;
+        if value.get("type").and_then(|kind| kind.as_str()) != Some("session_meta") {
+            continue;
+        }
+
+        let payload = value.get("payload")?;
+        let session_id = payload.get("id").and_then(|id| id.as_str())?;
+        let cwd = payload
+            .get("cwd")
+            .and_then(|cwd| cwd.as_str())
+            .unwrap_or_default();
+
+        return Some((session_id.to_string(), cwd.to_string()));
+    }
+
+    None
+}
+
+fn build_resume_spawn_request(request: PtyResumeRequest) -> PtySpawnRequest {
+    let name = if request.name.is_empty() {
+        let len = 8.min(request.session_id.len());
+        format!(
+            "{}-{}",
+            request.agent_type.display_prefix(),
+            &request.session_id[..len]
+        )
+    } else {
+        request.name
+    };
+
+    let args = match request.agent_type {
+        PtyAgentType::Claude => vec!["--resume".to_string(), request.session_id.clone()],
+        PtyAgentType::Codex => vec![
+            "exec".to_string(),
+            "resume".to_string(),
+            request.session_id.clone(),
+        ],
+    };
+
+    PtySpawnRequest {
+        name,
+        workdir: request.workdir,
+        command: request.agent_type.command(),
+        args,
+        rows: request.rows,
+        cols: request.cols,
+    }
+}
+
+fn resolve_spawn_command(command: &str) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        if command.eq_ignore_ascii_case("codex") {
+            return "codex.cmd".to_string();
+        }
+    }
+
+    command.to_string()
+}
+
 // ---------------------------------------------------------------------------
 // Tests
 // ---------------------------------------------------------------------------
@@ -561,6 +710,7 @@ fn discover_claude_sessions(projects_dir: &PathBuf) -> Vec<ClaudeSessionInfo> {
 mod tests {
     use super::*;
     use std::fs;
+    use tempfile::tempdir;
 
     #[test]
     fn pty_agent_status_serializes() {
@@ -601,8 +751,58 @@ mod tests {
         assert_eq!(req.name, "");
         assert!(req.workdir.is_none());
         assert_eq!(req.session_id, "abc-12345678-xyz");
+        assert_eq!(req.agent_type, PtyAgentType::Claude);
         assert_eq!(req.rows, 24);
         assert_eq!(req.cols, 80);
+    }
+
+    #[test]
+    fn discover_codex_sessions_reads_rollout_metadata() {
+        let dir = tempdir().unwrap();
+        let day_dir = dir.path().join("2026").join("03").join("18");
+        fs::create_dir_all(&day_dir).unwrap();
+        let session_path = day_dir.join(
+            "rollout-2026-03-18T10-20-30-019d0011-aaaa-bbbb-cccc-1234567890ab.jsonl",
+        );
+        fs::write(
+            &session_path,
+            concat!(
+                "{\"timestamp\":\"2026-03-18T02:20:32.696Z\",\"type\":\"session_meta\",",
+                "\"payload\":{\"id\":\"019d0011-aaaa-bbbb-cccc-1234567890ab\",",
+                "\"cwd\":\"D:\\\\project\\\\exomind\",\"originator\":\"codex_cli_rs\"}}\n"
+            ),
+        )
+        .unwrap();
+
+        let sessions = discover_codex_sessions(&day_dir);
+        assert_eq!(sessions.len(), 1);
+        assert_eq!(sessions[0].agent_type, PtyAgentType::Codex);
+        assert_eq!(sessions[0].session_id, "019d0011-aaaa-bbbb-cccc-1234567890ab");
+        assert_eq!(sessions[0].project_path, "D:\\project\\exomind");
+    }
+
+    #[test]
+    fn build_resume_spawn_request_supports_codex_exec_resume() {
+        let req = PtyResumeRequest {
+            name: "".to_string(),
+            workdir: Some("D:/project/exomind".to_string()),
+            agent_type: PtyAgentType::Codex,
+            session_id: "019d0011-aaaa-bbbb-cccc-1234567890ab".to_string(),
+            rows: 24,
+            cols: 80,
+        };
+
+        let spawn_request = build_resume_spawn_request(req);
+        assert_eq!(spawn_request.command, "codex");
+        assert_eq!(
+            spawn_request.args,
+            vec![
+                "exec".to_string(),
+                "resume".to_string(),
+                "019d0011-aaaa-bbbb-cccc-1234567890ab".to_string(),
+            ]
+        );
+        assert_eq!(spawn_request.name, "Codex-019d0011");
     }
 
     #[test]

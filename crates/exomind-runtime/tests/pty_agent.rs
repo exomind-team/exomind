@@ -245,3 +245,50 @@ async fn pty_list_claude_sessions() {
 
     handle.stop().await.expect("runtime should stop");
 }
+
+#[tokio::test]
+async fn pty_list_sessions_by_agent_type() {
+    let (mut handle, base_url) = start_test_runtime().await;
+    let client = reqwest::Client::new();
+
+    for agent_type in ["claude", "codex"] {
+        let resp = client
+            .get(format!("{base_url}/pty/sessions"))
+            .query(&[("agent_type", agent_type)])
+            .send()
+            .await
+            .expect("pty sessions request should succeed");
+
+        assert_eq!(
+            resp.status().as_u16(),
+            200,
+            "GET /pty/sessions?agent_type={agent_type} should return 200"
+        );
+
+        let payload: Value = resp.json().await.expect("response should be JSON");
+        assert!(
+            payload.is_array(),
+            "pty sessions response for {agent_type} should be a JSON array"
+        );
+
+        if let Some(sessions) = payload.as_array() {
+            for session in sessions {
+                assert_eq!(
+                    session["agent_type"].as_str(),
+                    Some(agent_type),
+                    "each returned session should keep the requested agent_type"
+                );
+                assert!(
+                    session["session_id"].is_string(),
+                    "each session should have a string session_id"
+                );
+                assert!(
+                    session["project_path"].is_string(),
+                    "each session should have a string project_path"
+                );
+            }
+        }
+    }
+
+    handle.stop().await.expect("runtime should stop");
+}
