@@ -235,6 +235,11 @@ vi.mock('@/config/llm-settings', () => ({
   getLLMApiKey: vi.fn(() => ''),
   getLLMBaseUrl: vi.fn(() => 'https://api.openai.com/v1'),
   getLLMModel: vi.fn(() => 'gpt-4o'),
+  getLLMSettings: vi.fn(() => ({
+    apiKey: '',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o',
+  })),
   setLLMApiKey: vi.fn(),
   setLLMBaseUrl: vi.fn(),
   setLLMModel: vi.fn(),

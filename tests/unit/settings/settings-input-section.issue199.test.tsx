@@ -315,10 +315,10 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     expect(screen.getByText('悬浮窗距任务栏间距')).toBeInTheDocument();
   });
 
-  it('uses dev dialog input classes for AI settings fields（AI 设置输入框严格复用 dev 焦点样式）', () => {
+  it('uses dev dialog input classes for AI registry fields（AI 注册中心输入框严格复用 dev 焦点样式）', () => {
     render(<SettingsPage />);
 
-    fireEvent.click(screen.getByText('AI API Key').closest('button') as HTMLButtonElement);
+    fireEvent.click(screen.getByText('AI Registry').closest('button') as HTMLButtonElement);
 
     const apiKeyInput = screen.getByPlaceholderText('sk-...');
     const baseUrlInput = screen.getByPlaceholderText('https://api.openai.com/v1');
