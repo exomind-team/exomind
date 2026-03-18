@@ -170,7 +170,6 @@ import {
 } from '@/lib/media/timer-end-sounds';
 import { resolveVersionBuildInfo } from '@/config/version-build-info';
 import {
-  AiApiKeySetting,
   DataTransferSetting,
   DevInstanceDiagnosticsSetting,
   DevicePairingSetting,
@@ -178,6 +177,7 @@ import {
   MossVoiceTestSetting,
   VolcanoVoiceTestSetting,
 } from '@/ui/app/components/settings/settings-custom-items';
+import { AIRegistrySetting } from '@/ui/app/components/settings/ai-registry-settings-card';
 import {
   getEventlogBackendMode,
   setEventlogBackendMode,
@@ -808,7 +808,7 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: 'MOSS 语音测试',
     category: 'input',
     type: 'custom',
-    visible: (ctx) => devOnly(ctx) && mossOnly(ctx),
+    visible: devOnly,
     component: MossVoiceTestSetting,
   },
   {
@@ -816,15 +816,15 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
     label: '火山引擎 ASR 测试',
     category: 'input',
     type: 'custom',
-    visible: (ctx) => devOnly(ctx) && volcanoOnly(ctx),
+    visible: devOnly,
     component: VolcanoVoiceTestSetting,
   },
   {
-    id: 'ai-api-key',
-    label: 'AI API Key',
+    id: 'ai-registry',
+    label: 'AI Registry',
     category: 'ai',
     type: 'custom',
-    component: AiApiKeySetting,
+    component: AIRegistrySetting,
   },
   {
     id: 'sync-server-url',

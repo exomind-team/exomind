@@ -242,6 +242,11 @@ vi.mock('@/config/llm-settings', () => ({
   getLLMApiKey: vi.fn(() => ''),
   getLLMBaseUrl: vi.fn(() => 'https://api.openai.com/v1'),
   getLLMModel: vi.fn(() => 'gpt-4o'),
+  getLLMSettings: vi.fn(() => ({
+    apiKey: '',
+    baseUrl: 'https://api.openai.com/v1',
+    model: 'gpt-4o',
+  })),
   setLLMApiKey: vi.fn(),
   setLLMBaseUrl: vi.fn(),
   setLLMModel: vi.fn(),
@@ -383,13 +388,13 @@ vi.mock('@/components/ui/dialog', () => {
       dialogTitleText = '';
       return <div data-testid="dialog">{children}</div>;
     },
-    DialogContent: ({ children }: any) => {
+    DialogContent: ({ children, className, ...props }: any) => {
       const ref = (node: HTMLElement | null) => {
         if (node && dialogTitleText) {
           node.setAttribute('aria-label', dialogTitleText);
         }
       };
-      return <div role="dialog" ref={ref}>{children}</div>;
+      return <div role="dialog" ref={ref} className={className} {...props}>{children}</div>;
     },
     DialogHeader: ({ children }: any) => <div>{children}</div>,
     DialogTitle: ({ children }: any) => {

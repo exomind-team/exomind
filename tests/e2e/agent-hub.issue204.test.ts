@@ -43,8 +43,6 @@ test.describe('Issue #204 Agent Hub（Agent Hub 全视图）', () => {
 
   test('main views + add node sheet + list-to-detail navigation（主视图和详情跳转）', async ({ page }) => {
     await page.goto('/agents');
-    await page.waitForLoadState('networkidle');
-
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await expect(page.getByTestId('agent-topology-view')).toBeVisible();
 
@@ -53,27 +51,24 @@ test.describe('Issue #204 Agent Hub（Agent Hub 全视图）', () => {
 
     await page.getByTestId('agent-add-node-button').click();
     await expect(page.getByTestId('agent-add-node-sheet')).toBeVisible();
-    await expect(page.getByText('从市场安装')).toBeVisible();
+    await expect(page.getByText('API Agent')).toBeVisible();
     await page.getByTestId('agent-add-node-close').click();
     await expect(page.getByTestId('agent-add-node-sheet')).toBeHidden();
 
-    await page.getByTestId('agent-list-item-agent-daily').click();
-    await expect(page).toHaveURL(/\/agents\/agent\/agent-daily$/);
-    await expect(page.getByTestId('agent-detail-page')).toBeVisible();
-    await expect(page.getByRole('heading', { name: '日报 Agent' })).toBeVisible();
+    await page.getByText('Classifier Agent').click();
+    await expect(page.getByText('Agent 详情')).toBeVisible();
+    await expect(page.getByText('classifier', { exact: true })).toBeVisible();
+    await expect(page.getByRole('button', { name: '开始聊天' })).toBeVisible();
   });
 
   test('chat streaming + market browse（对话流式与市场浏览）', async ({ page }) => {
     await page.goto('/agents/chat/agent-daily');
-    await page.waitForLoadState('networkidle');
-
     await expect(page.getByTestId('agent-conversation-page')).toBeVisible();
     await page.getByPlaceholder('输入消息...').fill('今天情况如何');
     await page.getByTestId('agent-chat-send-button').click();
     await expect(page.getByText(/已收到|今天共收集了/)).toBeVisible();
 
     await page.goto('/agents/market');
-    await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('agent-market-page')).toBeVisible();
     await expect(page.getByText('热门推荐')).toBeVisible();
     await expect(page.getByText('Code Review Agent')).toBeVisible();
@@ -122,7 +117,6 @@ test.describe('Issue #204 Agent Hub runtime toggle（运行时切换测试数据
     });
 
     await page.goto('/agents');
-    await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
     await expect(page.getByTestId('agent-topology-node-agent-daily')).toHaveCount(0);
 
@@ -131,7 +125,6 @@ test.describe('Issue #204 Agent Hub runtime toggle（运行时切换测试数据
     await page.getByTestId('new-settings-use-mock-data-switch').click();
 
     await page.goto('/agents');
-    await page.waitForLoadState('networkidle');
     await expect(page.getByTestId('agent-hub-page')).toBeVisible();
 
     const pageBackground = await page.getByTestId('agent-hub-page').evaluate((node) => {

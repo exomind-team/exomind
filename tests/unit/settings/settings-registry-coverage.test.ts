@@ -37,7 +37,7 @@ const AUDITED_SETTINGS_IDS = [
   'moss-api-token',
   'moss-voice-test',
   'volcano-asr-test',
-  'ai-api-key',
+  'ai-registry',
   'sync-server-url',
   'eventlog-backend-mode',
   'task-backend-mode',
@@ -127,7 +127,7 @@ const CUSTOM_ITEM_IDS = [
   'focus-bgm',
   'moss-voice-test',
   'volcano-asr-test',
-  'ai-api-key',
+  'ai-registry',
   'data-transfer',
   'instance-diagnostics',
   'device-pairing',
@@ -267,7 +267,7 @@ describe('settings registry coverage audit', () => {
     expect(customIds).toEqual(CUSTOM_ITEM_IDS);
   });
 
-  it('keeps developer-only and provider-only entries behind their intended gates', () => {
+  it('keeps developer-only and provider-sensitive entries behind their intended gates', () => {
     const baseIds = getVisibleSettings(getBaseCtx()).map((item) => item.id);
     const developerIds = getVisibleSettings({
       ...getBaseCtx(),
@@ -284,15 +284,15 @@ describe('settings registry coverage audit', () => {
       expect(developerIds).toContain(id);
     });
 
-    // moss-voice-test: dev + moss provider
+    // 语音测试项现已统一为“仅开发者模式可见”，不再受 provider 限制
     expect(baseIds).not.toContain('moss-voice-test');
     expect(developerIds).toContain('moss-voice-test');
-    expect(volcanoIds).not.toContain('moss-voice-test');
-    // volcano-asr-test: dev + volcano provider
+    expect(volcanoIds).toContain('moss-voice-test');
     expect(baseIds).not.toContain('volcano-asr-test');
-    expect(developerIds).not.toContain('volcano-asr-test');
+    expect(developerIds).toContain('volcano-asr-test');
     expect(volcanoIds).toContain('volcano-asr-test');
 
+    // 资源模型仍然只在 volcano provider 下可见
     expect(baseIds).not.toContain('volcano-resource-model');
     expect(developerIds).not.toContain('volcano-resource-model');
     expect(volcanoIds).toContain('volcano-resource-model');
