@@ -1,6 +1,6 @@
 import { createRootRoute, createRouter, createRoute, Outlet, Link, useLocation, useNavigate, useParams, type ErrorComponentProps } from '@tanstack/react-router';
 import { Suspense, lazy, useEffect, useMemo, useState } from 'react';
-import { Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, type LucideIcon } from 'lucide-react';
+import { House, Target, Settings, Waypoints, SquareCheckBig, UserRound, Brain, PanelLeftClose, PanelLeftOpen, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { getAgentPageEnabled, subscribeAgentPageEnabledChanges } from '@/config/agent-page-enabled';
 import { getMePageEnabled, subscribeMePageEnabledChanges } from '@/config/me-page-enabled';
@@ -27,6 +27,11 @@ import { resolveEventlogRestoreTab } from '@/ui/app/pages/eventlog-route-memory'
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
   return { default: module.FocusPage };
+});
+
+const RitualHomePage = lazy(async () => {
+  const module = await import('@/ui/app/pages/RitualHomePage');
+  return { default: module.RitualHomePage };
 });
 
 const SettingsPage = lazy(async () => {
@@ -237,9 +242,9 @@ function MobileShell({
               {navItems.map((item) => {
                 const Icon = item.icon;
                 const active = locationPath === item.path
-                  || (item.path === '/eventlog' && locationPath === '/')
                   || (item.path === '/tasks' && locationPath.startsWith('/tasks'))
                   || (item.path === '/me' && locationPath.startsWith('/me'))
+                  || (item.path === '/agents' && locationPath.startsWith('/agents'))
                   || (item.path === '/settings' && locationPath.startsWith('/settings'));
                 return (
                   <Link
@@ -277,7 +282,8 @@ function DesktopSidebar({
   onToggleCollapsed: () => void;
 }) {
   const desktopNavItems = [
-    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' || path === '/' },
+    { key: 'home', title: '首页', path: '/', icon: House, match: (path: string) => path === '/' },
+    { key: 'now', title: '当下', path: '/eventlog', icon: Target, match: (path: string) => path === '/eventlog' },
     { key: 'tasks', title: '任务', path: '/tasks', icon: SquareCheckBig, match: (path: string) => path === '/tasks' || path.startsWith('/tasks/') },
     ...(mePageEnabled ? [{
       key: 'me',
@@ -520,6 +526,7 @@ function NewLayout() {
   }), [agentPageEnabled, commandPaletteActive, developerModeEnabled, location.pathname, mePageEnabled]);
 
   const navItems = [
+    { title: '首页', path: '/', icon: House },
     { title: '当下', path: '/eventlog', icon: Target },
     { title: '任务', path: '/tasks', icon: SquareCheckBig },
     ...(mePageEnabled ? [{ title: 'Me', path: '/me', icon: UserRound }] : []),
@@ -619,7 +626,7 @@ const newHomeRoute = createRoute({
   component: function NewHome() {
     return (
       <LazyPage>
-        <FocusPage />
+        <RitualHomePage />
       </LazyPage>
     );
   },

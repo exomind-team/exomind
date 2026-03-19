@@ -58,7 +58,7 @@ describe('Settings Registry Consistency', () => {
       throw new Error('main-window-shortcut must be a multi enum registry item');
     }
 
-    const result = shortcutItem.set(['Alt', 'E']);
-    await expect(Promise.resolve(result)).resolves.toEqual(['Alt', 'E']);
+    const result = shortcutItem.set(['Ctrl', 'E']);
+    await expect(Promise.resolve(result)).resolves.toEqual(['Ctrl', 'E']);
   });
 });

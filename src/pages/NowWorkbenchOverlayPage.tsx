@@ -707,7 +707,30 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
 
     return (
       <div className="now-workbench-overlay-root now-workbench-overlay-root--mini">
-        <div className="now-workbench-overlay-shell now-workbench-overlay-shell--mini">
+        <div className="now-workbench-overlay-shell now-workbench-overlay-shell--mini space-y-3">
+          {model.nudge ? (
+            <section
+              data-testid="now-overlay-ritual-nudge"
+              className="w-[320px] rounded-[18px] border border-[#F0D8D0] bg-[#FFF6F3] px-4 py-3 text-[#7C2D12] shadow-[0_18px_36px_-28px_rgba(0,0,0,0.4)] backdrop-blur-[18px] dark:border-[#4A2C24] dark:bg-[#2A1712] dark:text-[#FED7AA]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[13px] font-semibold">{model.nudge.title}</p>
+                  <p className="mt-1 text-[12px] leading-5 text-[#9A3412] dark:text-[#FCD9B6]">{model.nudge.body}</p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={onReturnToMain}
+                  className="shrink-0 rounded-[10px] border-[#E9B8A7] bg-white/75 text-[#9A3412] hover:bg-[#FFF1EB] dark:border-[#6B3F32] dark:bg-[#3A211A] dark:text-[#FED7AA] dark:hover:bg-[#4A2C24]"
+                >
+                  {model.nudge.ctaLabel}
+                </Button>
+              </div>
+            </section>
+          ) : null}
+
           {isIdleExpanded ? (
             <div
               data-testid="now-overlay-idle-expanded"
@@ -966,6 +989,33 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
           data-testid="now-overlay-scroll-region"
           className="mt-4 flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto pr-1"
         >
+          {model.nudge ? (
+            <section
+              data-testid="now-overlay-ritual-nudge"
+              className="rounded-[20px] border border-[#F0D8D0] bg-[#FFF6F3] px-4 py-4 dark:border-[#4A2C24] dark:bg-[#2A1712]"
+            >
+              <div className="flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <h2 className="text-[13px] font-semibold text-[#7C2D12] dark:text-[#FDBA74]">
+                    {model.nudge.title}
+                  </h2>
+                  <p className="mt-1 text-[12px] leading-5 text-[#9A3412] dark:text-[#FED7AA]">
+                    {model.nudge.body}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={onReturnToMain}
+                  className="shrink-0 rounded-[12px] border-[#E9B8A7] bg-white/75 text-[#9A3412] hover:bg-[#FFF1EB] dark:border-[#6B3F32] dark:bg-[#3A211A] dark:text-[#FED7AA] dark:hover:bg-[#4A2C24]"
+                >
+                  {model.nudge.ctaLabel}
+                </Button>
+              </div>
+            </section>
+          ) : null}
+
           {isStaticPreview
             ? (
               model.mode === 'running'

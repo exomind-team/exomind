@@ -28,6 +28,7 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   });
 
   it('keeps me entry behind feature flag in desktop nav（桌面导航中的 Me 入口受功能开关控制）', () => {
+    expect(desktopNavBlock).toContain("title: '首页', path: '/'");
     expect(desktopNavBlock).toContain("title: '当下', path: '/eventlog'");
     expect(desktopNavBlock).toContain("title: '任务', path: '/tasks'");
     expect(desktopNavBlock).toContain('...(mePageEnabled ? [{');
@@ -46,8 +47,14 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   });
 
   it('uses network label and waypoints icon in mobile shell nav（移动端底栏使用网络文案与拓扑图标）', () => {
+    expect(source).toContain("{ title: '首页', path: '/', icon: House }");
     expect(source).toContain("...(agentPageEnabled ? [{ title: '网络', path: '/agents', icon: Waypoints }] : [])");
     expect(source).not.toContain("...(agentPageEnabled ? [{ title: 'Agent', path: '/agents', icon: Bot }] : [])");
+  });
+
+  it('does not treat root as eventlog active anymore（根路由不再归到当下标签）', () => {
+    expect(source).not.toContain("|| (item.path === '/eventlog' && locationPath === '/')");
+    expect(desktopNavBlock).not.toContain("path === '/eventlog' || path === '/'");
   });
 
   it('registers dashboard route（注册dashboard路由）', () => {

@@ -11,7 +11,7 @@ use tauri::{Emitter, Manager, PhysicalPosition, WebviewUrl, WebviewWindow, Webvi
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutEvent, ShortcutState};
 
 const DEFAULT_VOICE_SHORTCUT: &str = "Alt+Q";
-const DEFAULT_MAIN_WINDOW_SHORTCUT: &str = "Alt+E";
+const DEFAULT_MAIN_WINDOW_SHORTCUT: &str = "Ctrl+E";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 const VOICE_CANCEL_SHORTCUT: &str = "Escape";
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
