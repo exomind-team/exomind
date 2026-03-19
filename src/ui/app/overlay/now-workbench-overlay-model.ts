@@ -4,6 +4,13 @@ import { filterNow } from '@/ui/app/pages/task-tab-filters';
 
 export type NowWorkbenchOverlayMode = 'running' | 'idle_with_tasks' | 'idle_input_only';
 
+export interface NowWorkbenchOverlayNudge {
+  kind: 'status_check' | 'shutdown_ready';
+  title: string;
+  body: string;
+  ctaLabel: string;
+}
+
 export interface NowWorkbenchOverlayRecentEvent {
   id: string;
   content: string;
@@ -17,6 +24,7 @@ export interface NowWorkbenchOverlayModel {
   activeBlock: ActiveBlockData | null;
   visibleTasks: TaskNode[];
   recentEvents: NowWorkbenchOverlayRecentEvent[];
+  nudge?: NowWorkbenchOverlayNudge;
 }
 
 export interface BuildNowWorkbenchOverlayModelInput {
@@ -24,6 +32,9 @@ export interface BuildNowWorkbenchOverlayModelInput {
   tasks: TaskNode[];
   events: Event[];
   now: number;
+  ritual?: {
+    stage?: string;
+  };
 }
 
 function resolveRunningStatusLabel(block: ActiveBlockData): string {
@@ -59,6 +70,14 @@ export function buildNowWorkbenchOverlayModel(
 ): NowWorkbenchOverlayModel {
   const visibleTasks = filterNow(input.tasks);
   const recentEvents = summarizeRecentEvents(input.events);
+  const nudge = input.ritual?.stage === 'shutdown_ready'
+    ? {
+      kind: 'shutdown_ready' as const,
+      title: '准备收工',
+      body: '今天已经可以先收住了，回主程序完成正式收工。',
+      ctaLabel: '回主程序收工',
+    }
+    : undefined;
 
   if (input.activeBlock) {
     return {
@@ -68,6 +87,7 @@ export function buildNowWorkbenchOverlayModel(
       activeBlock: input.activeBlock,
       visibleTasks,
       recentEvents,
+      nudge,
     };
   }
 
@@ -79,6 +99,7 @@ export function buildNowWorkbenchOverlayModel(
       activeBlock: null,
       visibleTasks,
       recentEvents,
+      nudge,
     };
   }
 
@@ -89,5 +110,6 @@ export function buildNowWorkbenchOverlayModel(
     activeBlock: null,
     visibleTasks: [],
     recentEvents,
+    nudge,
   };
 }
