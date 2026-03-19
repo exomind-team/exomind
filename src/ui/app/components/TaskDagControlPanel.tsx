@@ -1,5 +1,6 @@
 import { EyeOff, LocateFixed, Maximize2, Search } from 'lucide-react';
 import type { DagDirection } from '@/ui/app/pages/task-dag-layout';
+import { SlidingSegmentedControl } from '@/ui/app/components/SlidingSegmentedControl';
 
 interface TaskDagControlPanelProps {
   direction: DagDirection;
@@ -27,6 +28,17 @@ function legendChip(label: string, title: string, className: string, testId: str
     </span>
   );
 }
+
+const DIRECTION_OPTIONS: ReadonlyArray<{
+  key: DagDirection;
+  label: string;
+  title: string;
+  testId: string;
+}> = [
+  { key: 'TB', label: '↕', title: '纵向布局', testId: 'task-dag-direction-tb' },
+  { key: 'auto', label: 'A', title: '自动布局方向', testId: 'task-dag-direction-auto' },
+  { key: 'LR', label: '⟷', title: '横向布局', testId: 'task-dag-direction-lr' },
+];
 
 export function TaskDagControlPanel({
   direction,
@@ -109,47 +121,14 @@ export function TaskDagControlPanel({
           {immersive ? '退出沉浸' : '沉浸模式'}
         </button>
 
-        <div className="inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 p-1 shadow-sm dark:border-[#3C3836] dark:bg-[#120F0D]">
-          <button
-            type="button"
-            data-testid="task-dag-direction-tb"
-            onClick={() => onDirectionChange('TB')}
-            className={`inline-flex h-7 items-center rounded-full px-2 text-[11px] font-medium transition-colors ${
-              direction === 'TB'
-                ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
-                : 'text-[#57534E] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
-            }`}
-            title="纵向布局"
-          >
-            ↕
-          </button>
-          <button
-            type="button"
-            data-testid="task-dag-direction-auto"
-            onClick={() => onDirectionChange('auto')}
-            className={`inline-flex h-7 items-center rounded-full px-2 text-[11px] font-medium transition-colors ${
-              direction === 'auto'
-                ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
-                : 'text-[#57534E] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
-            }`}
-            title="自动布局方向"
-          >
-            A
-          </button>
-          <button
-            type="button"
-            data-testid="task-dag-direction-lr"
-            onClick={() => onDirectionChange('LR')}
-            className={`inline-flex h-7 items-center rounded-full px-2 text-[11px] font-medium transition-colors ${
-              direction === 'LR'
-                ? 'bg-[#FFF7ED] text-[#C75B3A] dark:bg-[#2A231B] dark:text-[#FDBA74]'
-                : 'text-[#57534E] hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]'
-            }`}
-            title="横向布局"
-          >
-            ⟷
-          </button>
-        </div>
+        <SlidingSegmentedControl
+          options={DIRECTION_OPTIONS}
+          value={direction}
+          onChange={onDirectionChange}
+          className="bg-white/80 dark:border-[#3C3836] dark:bg-[#120F0D]"
+          buttonClassName="h-7 px-2"
+          minButtonWidthClassName="min-w-[32px]"
+        />
 
         {hasCurrentRoot && onJumpToCurrentRoot ? (
           <button

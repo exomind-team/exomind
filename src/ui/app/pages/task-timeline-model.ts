@@ -1,7 +1,16 @@
 import { SYSTEM_TAGS, type Event, type TimeBlock } from '@/lib/types/event'
 import type { TaskNode } from '@/lib/types/task'
 
-export type TimelineRange = 'today' | '3d' | '7d' | { start: number; end: number }
+export type TimelinePresetRange = '8h' | '1d' | '3d' | '7d' | '1m' | '3m' | '1y'
+export type TimelineCustomScaleUnit = 'h' | 'd' | 'm' | 'y'
+
+export interface TimelineCustomRange {
+  kind: 'custom'
+  value: number
+  unit: TimelineCustomScaleUnit
+}
+
+export type TimelineRange = TimelinePresetRange | TimelineCustomRange
 
 export interface TaskStatusSegment {
   taskId: string
@@ -39,6 +48,7 @@ export interface TaskTimelineModel {
 }
 
 const DAY_MS = 86_400_000
+const HOUR_MS = 3_600_000
 const TASK_EVENT_TAGS = new Set([
   SYSTEM_TAGS.TASK_CREATED,
   SYSTEM_TAGS.TASK_STARTED,
@@ -73,22 +83,65 @@ function readTaskTransitionStatus(event: Event): TaskEventStatus | null {
 }
 
 export function resolveTimeRange(range: TimelineRange, now: number): { start: number; end: number } {
-  if (typeof range === 'object') {
-    return range
+  const nowDate = new Date(now)
+  const todayStart = new Date(nowDate)
+  todayStart.setHours(0, 0, 0, 0)
+  const todayEnd = new Date(todayStart)
+  todayEnd.setHours(23, 59, 59, 999)
+  const currentMonthStart = new Date(nowDate.getFullYear(), nowDate.getMonth(), 1)
+  const currentMonthEnd = new Date(nowDate.getFullYear(), nowDate.getMonth() + 1, 0, 23, 59, 59, 999)
+  const currentYearStart = new Date(nowDate.getFullYear(), 0, 1)
+  const currentYearEnd = new Date(nowDate.getFullYear(), 11, 31, 23, 59, 59, 999)
+
+  if (typeof range === 'object' && range.kind === 'custom') {
+    const safeValue = Math.max(1, Math.floor(range.value))
+    if (range.unit === 'h') {
+      return {
+        start: now - safeValue * HOUR_MS,
+        end: now,
+      }
+    }
+
+    if (range.unit === 'd') {
+      return {
+        start: todayStart.getTime() - DAY_MS * (safeValue - 1),
+        end: todayEnd.getTime(),
+      }
+    }
+
+    if (range.unit === 'm') {
+      return {
+        start: new Date(nowDate.getFullYear(), nowDate.getMonth() - (safeValue - 1), 1).getTime(),
+        end: currentMonthEnd.getTime(),
+      }
+    }
+
+    return {
+      start: new Date(nowDate.getFullYear() - (safeValue - 1), 0, 1).getTime(),
+      end: currentYearEnd.getTime(),
+    }
   }
 
-  const todayStart = new Date(now)
-  todayStart.setHours(0, 0, 0, 0)
-  const end = now
-
   switch (range) {
+    case '8h':
+      return { start: now - 8 * HOUR_MS, end: now }
+    case '1d':
+      return { start: todayStart.getTime(), end: todayEnd.getTime() }
     case '3d':
-      return { start: todayStart.getTime() - DAY_MS * 2, end }
+      return { start: todayStart.getTime() - DAY_MS * 2, end: todayEnd.getTime() }
     case '7d':
-      return { start: todayStart.getTime() - DAY_MS * 6, end }
-    case 'today':
+      return { start: todayStart.getTime() - DAY_MS * 6, end: todayEnd.getTime() }
+    case '1m':
+      return { start: currentMonthStart.getTime(), end: currentMonthEnd.getTime() }
+    case '3m':
+      return {
+        start: new Date(nowDate.getFullYear(), nowDate.getMonth() - 2, 1).getTime(),
+        end: currentMonthEnd.getTime(),
+      }
+    case '1y':
+      return { start: currentYearStart.getTime(), end: currentYearEnd.getTime() }
     default:
-      return { start: todayStart.getTime(), end }
+      return { start: todayStart.getTime(), end: todayEnd.getTime() }
   }
 }
 
@@ -96,7 +149,7 @@ function buildSegmentsFromEvents(
   taskId: string,
   taskTitle: string,
   events: Event[],
-  timeRange: { start: number; end: number },
+  timelineEnd: number,
 ): { segments: TaskStatusSegment[]; terminalMarker: TaskTerminalMarker | null } {
   const taskEvents = events
     .filter((event) => isTaskEvent(event) && readTaskEventTaskId(event) === taskId)
@@ -168,7 +221,7 @@ function buildSegmentsFromEvents(
       taskTitle,
       status: currentStatus,
       startTime: segmentStart,
-      endTime: timeRange.end,
+      endTime: timelineEnd,
       inferred: false,
     })
   }
@@ -179,7 +232,7 @@ function buildSegmentsFromEvents(
 function buildSegmentsFromTimeBlocks(
   task: TaskNode,
   timeBlocks: TimeBlock[],
-  timeRange: { start: number; end: number },
+  timelineEnd: number,
 ): { segments: TaskStatusSegment[]; terminalMarker: TaskTerminalMarker | null } {
   const blockIds = new Set(task.timeBlockIds ?? [])
   const relatedBlocks = timeBlocks
@@ -193,7 +246,7 @@ function buildSegmentsFromTimeBlocks(
         taskTitle: task.title,
         status: 'pending',
         startTime: task.createdAt,
-        endTime: timeRange.end,
+        endTime: timelineEnd,
         inferred: true,
       }],
       terminalMarker: task.status === 'completed' || task.status === 'cancelled'
@@ -253,10 +306,39 @@ function resolveEntryEnd(entry: TaskTimelineEntry): number {
     ?? 0
 }
 
+function resolveEntryStart(entry: TaskTimelineEntry): number {
+  return entry.segments[0]?.startTime
+    ?? entry.terminalMarker?.timestamp
+    ?? 0
+}
+
+function resolveModelTimeRange(
+  entries: TaskTimelineEntry[],
+  fallbackRange: { start: number; end: number },
+): { start: number; end: number } {
+  if (entries.length === 0) {
+    return fallbackRange
+  }
+
+  let start = Number.POSITIVE_INFINITY
+  let end = Number.NEGATIVE_INFINITY
+
+  for (const entry of entries) {
+    start = Math.min(start, resolveEntryStart(entry))
+    end = Math.max(end, resolveEntryEnd(entry))
+  }
+
+  if (!Number.isFinite(start) || !Number.isFinite(end) || end <= start) {
+    return fallbackRange
+  }
+
+  return { start, end }
+}
+
 function assignLanes(entries: TaskTimelineEntry[]): SwimLane[] {
   const sortedEntries = [...entries].sort((left, right) => {
-    const leftStart = left.segments[0]?.startTime ?? Number.MAX_SAFE_INTEGER
-    const rightStart = right.segments[0]?.startTime ?? Number.MAX_SAFE_INTEGER
+    const leftStart = resolveEntryStart(left) || Number.MAX_SAFE_INTEGER
+    const rightStart = resolveEntryStart(right) || Number.MAX_SAFE_INTEGER
     return leftStart - rightStart
   })
 
@@ -290,26 +372,20 @@ export function buildTaskTimelineModel(
   range: TimelineRange,
   options: { showPending: boolean } = { showPending: false },
 ): TaskTimelineModel {
-  const timeRange = resolveTimeRange(range, Date.now())
+  const scaleRange = resolveTimeRange(range, Date.now())
+  const timelineEnd = Date.now()
   const entries: TaskTimelineEntry[] = []
 
   for (const task of tasks) {
     const hasTaskEvents = events.some((event) => isTaskEvent(event) && readTaskEventTaskId(event) === task.id)
     const timeline = hasTaskEvents
-      ? buildSegmentsFromEvents(task.id, task.title, events, timeRange)
-      : buildSegmentsFromTimeBlocks(task, timeBlocks, timeRange)
+      ? buildSegmentsFromEvents(task.id, task.title, events, timelineEnd)
+      : buildSegmentsFromTimeBlocks(task, timeBlocks, timelineEnd)
 
-    const filteredSegments = timeline.segments.filter((segment) =>
-      segment.endTime > timeRange.start && segment.startTime < timeRange.end,
-    )
     const visibleSegments = options.showPending
-      ? filteredSegments
-      : filteredSegments.filter((segment) => segment.status !== 'pending')
+      ? timeline.segments
+      : timeline.segments.filter((segment) => segment.status !== 'pending')
     const terminalMarker = timeline.terminalMarker
-      && timeline.terminalMarker.timestamp >= timeRange.start
-      && timeline.terminalMarker.timestamp <= timeRange.end
-      ? timeline.terminalMarker
-      : null
 
     if (visibleSegments.length === 0 && !terminalMarker) {
       continue
@@ -326,7 +402,7 @@ export function buildTaskTimelineModel(
 
   return {
     lanes: assignLanes(entries),
-    timeRange,
+    timeRange: resolveModelTimeRange(entries, scaleRange),
     entries,
   }
 }

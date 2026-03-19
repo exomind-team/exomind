@@ -60,28 +60,48 @@ describe('task-timeline-model', () => {
   })
 
   describe('resolveTimeRange', () => {
-    it('resolves today from local midnight to now', () => {
+    it('resolves 1d to the full current day window', () => {
       const now = new Date('2026-03-19T14:30:00.000+08:00').getTime()
-      expect(resolveTimeRange('today', now)).toEqual({
+      expect(resolveTimeRange('1d', now)).toEqual({
         start: new Date('2026-03-19T00:00:00.000+08:00').getTime(),
-        end: now,
+        end: new Date('2026-03-19T23:59:59.999+08:00').getTime(),
       })
     })
 
-    it('resolves 3d starting two days before today', () => {
+    it('resolves 3d as the recent three full days window', () => {
       const now = new Date('2026-03-19T14:30:00.000+08:00').getTime()
       expect(resolveTimeRange('3d', now)).toEqual({
         start: new Date('2026-03-17T00:00:00.000+08:00').getTime(),
+        end: new Date('2026-03-19T23:59:59.999+08:00').getTime(),
+      })
+    })
+
+    it('resolves custom day scale as trailing full days ending today', () => {
+      const now = new Date('2026-03-19T14:30:00.000+08:00').getTime()
+      expect(resolveTimeRange({ kind: 'custom', value: 5, unit: 'd' }, now)).toEqual({
+        start: new Date('2026-03-15T00:00:00.000+08:00').getTime(),
+        end: new Date('2026-03-19T23:59:59.999+08:00').getTime(),
+      })
+    })
+
+    it('resolves custom hour scale as trailing hours ending now', () => {
+      const now = new Date('2026-03-19T14:30:00.000+08:00').getTime()
+      expect(resolveTimeRange({ kind: 'custom', value: 6, unit: 'h' }, now)).toEqual({
+        start: new Date('2026-03-19T08:30:00.000+08:00').getTime(),
         end: now,
       })
     })
 
-    it('keeps custom range unchanged', () => {
-      const range = {
-        start: new Date('2026-03-10T00:00:00.000+08:00').getTime(),
-        end: new Date('2026-03-12T23:59:59.999+08:00').getTime(),
-      }
-      expect(resolveTimeRange(range, Date.now())).toEqual(range)
+    it('resolves month and year scales to calendar boundaries', () => {
+      const now = new Date('2026-03-19T14:30:00.000+08:00').getTime()
+      expect(resolveTimeRange('1m', now)).toEqual({
+        start: new Date('2026-03-01T00:00:00.000+08:00').getTime(),
+        end: new Date('2026-03-31T23:59:59.999+08:00').getTime(),
+      })
+      expect(resolveTimeRange({ kind: 'custom', value: 2, unit: 'y' }, now)).toEqual({
+        start: new Date('2025-01-01T00:00:00.000+08:00').getTime(),
+        end: new Date('2026-12-31T23:59:59.999+08:00').getTime(),
+      })
     })
   })
 
@@ -135,7 +155,7 @@ describe('task-timeline-model', () => {
         }),
       ]
 
-      const model = buildTaskTimelineModel([task], events, [], 'today', { showPending: true })
+      const model = buildTaskTimelineModel([task], events, [], '1d', { showPending: true })
 
       expect(model.entries).toHaveLength(1)
       expect(model.entries[0]?.segments).toEqual([
@@ -189,7 +209,7 @@ describe('task-timeline-model', () => {
         }),
       ]
 
-      const model = buildTaskTimelineModel([task], [], blocks, 'today', { showPending: true })
+      const model = buildTaskTimelineModel([task], [], blocks, '1d', { showPending: true })
 
       expect(model.entries[0]?.segments).toEqual([
         expect.objectContaining({
@@ -235,10 +255,59 @@ describe('task-timeline-model', () => {
         }),
       ]
 
-      const model = buildTaskTimelineModel([task], [], blocks, 'today')
+      const model = buildTaskTimelineModel([task], [], blocks, '1d')
 
       expect(model.entries[0]?.segments).toHaveLength(1)
       expect(model.entries[0]?.segments[0]?.status).toBe('in_progress')
+    })
+
+    it('keeps full history in the model when scale is 1d', () => {
+      const now = new Date('2026-03-19T20:00:00.000+08:00').getTime()
+      vi.spyOn(Date, 'now').mockReturnValue(now)
+
+      const task = makeTask({
+        id: 'task-4',
+        title: '历史任务',
+        status: 'completed',
+        createdAt: new Date('2026-03-16T08:00:00.000+08:00').getTime(),
+        updatedAt: new Date('2026-03-16T11:00:00.000+08:00').getTime(),
+      })
+
+      const events = [
+        makeEvent({
+          id: 'task-4-created',
+          timestamp: new Date('2026-03-16T08:00:00.000+08:00').getTime(),
+          tags: [SYSTEM_TAGS.TASK_CREATED],
+          taskId: 'task-4',
+          taskTitle: '历史任务',
+        }),
+        makeEvent({
+          id: 'task-4-started',
+          timestamp: new Date('2026-03-16T09:00:00.000+08:00').getTime(),
+          tags: [SYSTEM_TAGS.TASK_STARTED],
+          taskId: 'task-4',
+          taskTitle: '历史任务',
+          fromStatus: 'pending',
+          toStatus: 'in_progress',
+        }),
+        makeEvent({
+          id: 'task-4-completed',
+          timestamp: new Date('2026-03-16T11:00:00.000+08:00').getTime(),
+          tags: [SYSTEM_TAGS.TASK_COMPLETED],
+          taskId: 'task-4',
+          taskTitle: '历史任务',
+          fromStatus: 'in_progress',
+          toStatus: 'completed',
+        }),
+      ]
+
+      const model = buildTaskTimelineModel([task], events, [], '1d', { showPending: true })
+
+      expect(model.entries).toHaveLength(1)
+      expect(model.timeRange).toEqual({
+        start: new Date('2026-03-16T08:00:00.000+08:00').getTime(),
+        end: new Date('2026-03-16T11:00:00.000+08:00').getTime(),
+      })
     })
   })
 })
