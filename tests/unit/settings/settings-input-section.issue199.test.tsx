@@ -51,7 +51,7 @@ describe('SettingsPage input section（输入分组语音配置）', () => {
     }
 
     settingsPagePreferenceState.isTauriWindow = false;
-    settingsPagePreferenceState.mainWindowShortcutSelection = ['Alt', 'E'];
+    settingsPagePreferenceState.mainWindowShortcutSelection = ['Ctrl', 'E'];
     settingsPagePreferenceState.mainWindowShortcutQuickFocusEnabled = false;
     isTauriMock.mockReturnValue(false);
     invokeMock.mockResolvedValue(null);

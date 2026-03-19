@@ -12,9 +12,9 @@ describe('main window shortcut config（主窗口快捷键配置）', () => {
     window.localStorage.clear();
   });
 
-  it('uses Alt+E as default selection and hotkey', () => {
-    expect(getMainWindowShortcutSelection()).toEqual(['Alt', 'E']);
-    expect(getResolvedMainWindowShortcutHotkey()).toBe('Alt+E');
+  it('uses Ctrl+E as default selection and hotkey', () => {
+    expect(getMainWindowShortcutSelection()).toEqual(['Ctrl', 'E']);
+    expect(getResolvedMainWindowShortcutHotkey()).toBe('Ctrl+E');
   });
 
   it('normalizes deduplicated ordered selections', () => {

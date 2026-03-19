@@ -4,7 +4,7 @@ const MAIN_WINDOW_SHORTCUT_SELECTION_CHANGED_EVENT = 'exomind:main-window-shortc
 export const MAIN_WINDOW_SHORTCUT_OPTION_VALUES = ['Ctrl', 'Alt', 'Q', 'E', 'Space'] as const;
 export const MAIN_WINDOW_SHORTCUT_MODIFIER_VALUES = ['Ctrl', 'Alt'] as const;
 export const MAIN_WINDOW_SHORTCUT_PRIMARY_KEY_VALUES = ['Q', 'E', 'Space'] as const;
-export const DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION = ['Alt', 'E'] as const;
+export const DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION = ['Ctrl', 'E'] as const;
 
 export type MainWindowShortcutOption = (typeof MAIN_WINDOW_SHORTCUT_OPTION_VALUES)[number];
 export type MainWindowShortcutModifier = (typeof MAIN_WINDOW_SHORTCUT_MODIFIER_VALUES)[number];

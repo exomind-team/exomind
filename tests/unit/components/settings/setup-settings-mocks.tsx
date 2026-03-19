@@ -99,7 +99,7 @@ export const settingsPagePreferenceState = {
   desktopAdaptiveEnabled: true,
   isTauriWindow: false,
   voiceShortcutAsrProvider: 'moss' as string,
-  mainWindowShortcutSelection: ['Alt', 'E'] as string[],
+  mainWindowShortcutSelection: ['Ctrl', 'E'] as string[],
   mainWindowShortcutQuickFocusEnabled: false,
 };
 

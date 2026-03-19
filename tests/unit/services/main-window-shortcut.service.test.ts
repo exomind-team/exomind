@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 const listeners = new Map<string, (event: { payload: unknown }) => void | Promise<void>>();
 const navigateMock = vi.fn(async () => undefined);
 const requestFocusTargetMock = vi.fn();
-const syncRuntimeMock = vi.fn(async () => ({ kind: 'valid', hotkey: 'Alt+E' }));
+const syncRuntimeMock = vi.fn(async () => ({ kind: 'valid', hotkey: 'Ctrl+E' }));
 const takePendingActivationMock = vi.fn(async () => false);
 const subscribeVoiceShortcutMock = vi.fn();
 const subscribeQuickFocusMock = vi.fn();

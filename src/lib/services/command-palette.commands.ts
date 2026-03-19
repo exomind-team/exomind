@@ -1,6 +1,6 @@
 import type { CommandDefinition } from '@/lib/types/command-palette';
 
-export type CoreNavigationPath = '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/me' | '/agents';
+export type CoreNavigationPath = '/' | '/eventlog' | '/tasks' | '/reminders' | '/settings' | '/me' | '/agents';
 
 interface CreateCoreNavigationCommandsOptions {
   navigate: (path: CoreNavigationPath) => Promise<void> | void;
@@ -16,6 +16,19 @@ export function createCoreNavigationCommands(
   const mePageEnabled = options.featureFlags?.mePageEnabled ?? true;
 
   return [
+    {
+      id: 'navigate:home',
+      title: '打开首页',
+      description: '跳转到仪式首页',
+      category: 'navigation',
+      permissionTier: 'safe',
+      aliases: ['首页', 'home', 'ritual'],
+      keywords: ['开机', '收工', '主页'],
+      async execute() {
+        await options.navigate('/');
+        return { ok: true };
+      },
+    },
     {
       id: 'navigate:now',
       title: '打开当下',
