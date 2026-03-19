@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
@@ -44,6 +45,18 @@ vi.mock('@/lib/services', () => ({
     addTaskToBlock: addTaskToBlockMock,
     removeTaskFromBlock: removeTaskFromBlockMock,
   }),
+}));
+
+vi.mock('@tanstack/react-router', () => ({
+  Link: ({ children, to, params, ...props }: {
+    children: ReactNode;
+    to: string;
+    params?: { taskId?: string };
+    [key: string]: unknown;
+  }) => {
+    const href = to === '/tasks/$taskId' && params?.taskId ? `/tasks/${params.taskId}` : to;
+    return <a href={href} {...props}>{children}</a>;
+  },
 }));
 
 function makeTask(overrides: Partial<MockTask>): MockTask {
@@ -97,6 +110,7 @@ describe('BlockTaskAssociationList issue-418', () => {
     expect(screen.getByText('任务一')).toBeInTheDocument();
     expect(screen.queryByText('运行中可追加或移除关联任务。')).toBeNull();
     expect(screen.queryByText('in_progress')).toBeNull();
+    expect(screen.getByRole('link', { name: '打开任务详情：任务一' })).toHaveAttribute('href', '/tasks/task-1');
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
     fireEvent.click(screen.getByText('关联任务'));
@@ -104,7 +118,7 @@ describe('BlockTaskAssociationList issue-418', () => {
       expect(addTaskToBlockMock).toHaveBeenCalledWith('task-2');
     });
 
-    fireEvent.click(screen.getByText('移除'));
+    fireEvent.click(screen.getByRole('button', { name: '移除关联任务：任务一' }));
     await waitFor(() => {
       expect(removeTaskFromBlockMock).toHaveBeenCalledWith('task-1');
     });

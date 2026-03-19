@@ -1,4 +1,6 @@
+import { NotepadText, X } from 'lucide-react';
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { Link } from '@tanstack/react-router';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
@@ -135,64 +137,81 @@ export function BlockTaskAssociationList() {
         </span>
       </div>
 
-      <div className="mt-3 space-y-2">
-        {linkedTasks.length > 0 ? linkedTasks.map((task) => (
-          <div
-            key={task.id}
-            className="flex items-center justify-between rounded-xl border border-[#E7E5E4] px-3 py-2 dark:border-[#3F3F46]"
-          >
-            <div className="min-w-0">
-              <p className="truncate text-sm text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+      <div className="mt-3 space-y-3" data-testid="task-association-content">
+        <div className="space-y-2" data-testid="task-association-linked-list">
+          {linkedTasks.length > 0 ? linkedTasks.map((task) => (
+            <div
+              key={task.id}
+              className="flex min-h-[44px] items-center justify-between rounded-xl border border-[#E7E5E4] px-3 py-2 dark:border-[#3F3F46]"
+            >
+              <div className="min-w-0">
+                <p className="truncate text-sm text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
+              </div>
+              <div className="ml-3 flex shrink-0 items-center gap-2">
+                <Link
+                  to="/tasks/$taskId"
+                  params={{ taskId: task.id }}
+                  aria-label={`打开任务详情：${task.title}`}
+                  title="任务详情"
+                  className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-lg text-[#57534E] transition-colors hover:bg-[#F8F5F2] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
+                >
+                  <NotepadText size={17} />
+                </Link>
+                <button
+                  type="button"
+                  aria-label={`移除关联任务：${task.title}`}
+                  title="移除关联"
+                  onClick={() => {
+                    setAssociationError(null);
+                    void getTaskTimerService().removeTaskFromBlock(task.id).catch((error) => {
+                      setAssociationError(formatAssociationError(error));
+                    });
+                  }}
+                  className="inline-flex h-[32px] w-[32px] items-center justify-center rounded-lg text-[#57534E] transition-colors hover:bg-[#F8F5F2] dark:text-[#D6D3D1] dark:hover:bg-[#292524]"
+                >
+                  <X size={17} />
+                </button>
+              </div>
             </div>
+          )) : (
+            <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">当前还没有关联任务。</p>
+          )}
+        </div>
+
+        <div data-testid="task-association-actions">
+          <div className="flex gap-2">
+            <select
+              value={selectedTaskId}
+              onChange={(event) => setSelectedTaskId(event.target.value)}
+              className="h-[44px] min-w-0 flex-1 rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
+            >
+              <option value="">选择任务</option>
+              {availableTasks.map((task) => (
+                <option key={task.id} value={task.id}>
+                  {task.title}
+                </option>
+              ))}
+            </select>
             <button
               type="button"
+              disabled={!selectedTaskId}
               onClick={() => {
+                if (!selectedTaskId) return;
                 setAssociationError(null);
-                void getTaskTimerService().removeTaskFromBlock(task.id).catch((error) => {
+                void getTaskTimerService().addTaskToBlock(selectedTaskId).catch((error) => {
                   setAssociationError(formatAssociationError(error));
                 });
               }}
-              className="rounded-lg border border-[#E7E5E4] px-2.5 py-1 text-xs text-[#57534E] dark:border-[#3F3F46] dark:text-[#D6D3D1]"
+              className="h-[44px] min-w-[88px] shrink-0 whitespace-nowrap rounded-xl bg-[#C75B3A] px-3 py-2 text-center text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
             >
-              移除
+              关联任务
             </button>
           </div>
-        )) : (
-          <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">当前还没有关联任务。</p>
-        )}
+          {associationError ? (
+            <p className="mt-2 text-xs text-[#C75B3A] dark:text-[#FDBA74]">{associationError}</p>
+          ) : null}
+        </div>
       </div>
-
-      <div className="mt-4 flex gap-2">
-        <select
-          value={selectedTaskId}
-          onChange={(event) => setSelectedTaskId(event.target.value)}
-          className="min-w-0 flex-1 rounded-xl border border-[#E7E5E4] bg-white px-3 py-2 text-sm text-[#44403C] dark:border-[#3F3F46] dark:bg-[#1C1917] dark:text-[#E7E5E4]"
-        >
-          <option value="">选择任务</option>
-          {availableTasks.map((task) => (
-            <option key={task.id} value={task.id}>
-              {task.title}
-            </option>
-          ))}
-        </select>
-        <button
-          type="button"
-          disabled={!selectedTaskId}
-          onClick={() => {
-            if (!selectedTaskId) return;
-            setAssociationError(null);
-            void getTaskTimerService().addTaskToBlock(selectedTaskId).catch((error) => {
-              setAssociationError(formatAssociationError(error));
-            });
-          }}
-          className="shrink-0 whitespace-nowrap rounded-xl bg-[#C75B3A] px-3 py-2 text-center text-sm font-medium text-white min-w-[88px] disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
-        >
-          关联任务
-        </button>
-      </div>
-      {associationError ? (
-        <p className="mt-2 text-xs text-[#C75B3A] dark:text-[#FDBA74]">{associationError}</p>
-      ) : null}
     </section>
   );
 }
