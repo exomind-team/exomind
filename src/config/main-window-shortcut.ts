@@ -1,10 +1,12 @@
 const MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY = 'exomind:mainWindowShortcutSelection';
+const MAIN_WINDOW_SHORTCUT_CUSTOMIZED_STORAGE_KEY = 'exomind:mainWindowShortcutSelectionCustomized';
 const MAIN_WINDOW_SHORTCUT_SELECTION_CHANGED_EVENT = 'exomind:main-window-shortcut-selection-changed';
 
 export const MAIN_WINDOW_SHORTCUT_OPTION_VALUES = ['Ctrl', 'Alt', 'Q', 'E', 'Space'] as const;
 export const MAIN_WINDOW_SHORTCUT_MODIFIER_VALUES = ['Ctrl', 'Alt'] as const;
 export const MAIN_WINDOW_SHORTCUT_PRIMARY_KEY_VALUES = ['Q', 'E', 'Space'] as const;
 export const DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION = ['Ctrl', 'E'] as const;
+const LEGACY_DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION = ['Alt', 'E'] as const;
 
 export type MainWindowShortcutOption = (typeof MAIN_WINDOW_SHORTCUT_OPTION_VALUES)[number];
 export type MainWindowShortcutModifier = (typeof MAIN_WINDOW_SHORTCUT_MODIFIER_VALUES)[number];
@@ -28,6 +30,7 @@ export type MainWindowShortcutValidationResult =
 
 type SetMainWindowShortcutSelectionOptions = {
   emitEvent?: boolean;
+  customized?: boolean;
 };
 
 function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
@@ -72,8 +75,40 @@ function normalizeMainWindowShortcutSelection(rawValue: unknown): MainWindowShor
   return [...selected];
 }
 
-function stringifySelection(selection: MainWindowShortcutSelection): string {
+function stringifySelection(selection: readonly MainWindowShortcutOption[]): string {
   return JSON.stringify(normalizeMainWindowShortcutSelection(selection));
+}
+
+function isSameSelection(
+  left: readonly MainWindowShortcutOption[],
+  right: readonly MainWindowShortcutOption[],
+): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index]);
+}
+
+function isCustomizedSelection(storage: Pick<Storage, 'getItem' | 'setItem'>): boolean {
+  return storage.getItem(MAIN_WINDOW_SHORTCUT_CUSTOMIZED_STORAGE_KEY) === 'true';
+}
+
+function readStoredMainWindowShortcutSelection(
+  storage: Pick<Storage, 'getItem' | 'setItem'>,
+): MainWindowShortcutSelection {
+  const normalized = normalizeMainWindowShortcutSelection(
+    storage.getItem(MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY),
+  );
+
+  if (
+    !isCustomizedSelection(storage)
+    && isSameSelection(normalized, LEGACY_DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION)
+  ) {
+    storage.setItem(
+      MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY,
+      stringifySelection(DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION),
+    );
+    return [...DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION];
+  }
+
+  return normalized;
 }
 
 function buildHotkey(selection: MainWindowShortcutSelection): string | null {
@@ -96,9 +131,7 @@ export function getMainWindowShortcutSelection(): MainWindowShortcutSelection {
     return [...DEFAULT_MAIN_WINDOW_SHORTCUT_SELECTION];
   }
 
-  return normalizeMainWindowShortcutSelection(
-    storage.getItem(MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY),
-  );
+  return readStoredMainWindowShortcutSelection(storage);
 }
 
 export function setMainWindowShortcutSelection(
@@ -114,6 +147,10 @@ export function setMainWindowShortcutSelection(
   storage.setItem(
     MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY,
     stringifySelection(normalized),
+  );
+  storage.setItem(
+    MAIN_WINDOW_SHORTCUT_CUSTOMIZED_STORAGE_KEY,
+    options.customized === false ? 'false' : 'true',
   );
 
   if (options.emitEvent !== false) {
@@ -134,6 +171,55 @@ export function resolveMainWindowShortcutHotkey(
 
 export function getResolvedMainWindowShortcutHotkey(): string | null {
   return buildHotkey(getMainWindowShortcutSelection());
+}
+
+export function parseMainWindowShortcutSelection(
+  hotkey: string | null | undefined,
+): MainWindowShortcutSelection | null {
+  if (!hotkey) {
+    return null;
+  }
+
+  const tokens = hotkey
+    .split('+')
+    .map((token) => token.trim().toLowerCase())
+    .filter(Boolean);
+  if (tokens.length === 0) {
+    return null;
+  }
+
+  const normalized: MainWindowShortcutSelection = [];
+  const addOption = (option: MainWindowShortcutOption) => {
+    if (!normalized.includes(option)) {
+      normalized.push(option);
+    }
+  };
+
+  for (const token of tokens) {
+    if (token === 'ctrl' || token === 'control' || token === 'cmdorctrl') {
+      addOption('Ctrl');
+      continue;
+    }
+    if (token === 'alt' || token === 'option') {
+      addOption('Alt');
+      continue;
+    }
+    if (token === 'q') {
+      addOption('Q');
+      continue;
+    }
+    if (token === 'e') {
+      addOption('E');
+      continue;
+    }
+    if (token === 'space' || token === 'spacebar') {
+      addOption('Space');
+      continue;
+    }
+    return null;
+  }
+
+  return normalizeMainWindowShortcutSelection(normalized);
 }
 
 export function validateMainWindowShortcutSelection(
@@ -194,7 +280,7 @@ export function subscribeMainWindowShortcutSelectionChanges(
 
   const handleStorage = (event: StorageEvent) => {
     if (event.key !== MAIN_WINDOW_SHORTCUT_SELECTION_STORAGE_KEY) return;
-    listener(normalizeMainWindowShortcutSelection(event.newValue));
+    listener(getMainWindowShortcutSelection());
   };
 
   const handleCustomEvent = (event: Event) => {

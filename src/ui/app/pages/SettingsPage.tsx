@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { invoke, isTauri } from '@tauri-apps/api/core';
 import { getDesktopAdaptiveEnabled, subscribeDesktopAdaptiveChanges } from '@/config/desktop-adaptive';
 import { getDeveloperModeEnabled, subscribeDeveloperModeChanges } from '@/config/developer-mode';
+import { parseMainWindowShortcutSelection, setMainWindowShortcutSelection } from '@/config/main-window-shortcut';
 import { isTauriWindow } from '@/config/runtime-target';
 import { getVoiceShortcutAsrProvider, subscribeVoiceShortcutAsrProviderChanges } from '@/config/voice-shortcut-asr-provider';
 import { setVoiceShortcutHotkey } from '@/config/voice-shortcut-hotkey';
@@ -61,6 +62,19 @@ export function SettingsPage() {
         .then((hotkey) => {
           if (!cancelled && hotkey) {
             setVoiceShortcutHotkey(hotkey);
+          }
+        })
+        .catch(() => {});
+
+      invoke<string | null>('main_window_shortcut_get')
+        .then((hotkey) => {
+          if (cancelled) {
+            return;
+          }
+
+          const selection = parseMainWindowShortcutSelection(hotkey);
+          if (selection) {
+            setMainWindowShortcutSelection(selection, { emitEvent: false, customized: false });
           }
         })
         .catch(() => {});

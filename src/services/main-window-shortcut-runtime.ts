@@ -51,7 +51,9 @@ export async function syncMainWindowShortcutSelectionWithRuntime(
   const voiceHotkey = getVoiceShortcutHotkey();
   const status = validateMainWindowShortcutSelection(selection, voiceHotkey);
 
-  setMainWindowShortcutSelection(selection, { emitEvent: false });
+  if (!options.selection) {
+    setMainWindowShortcutSelection(selection, { emitEvent: false, customized: false });
+  }
 
   if (status.kind !== 'valid') {
     await applyMainWindowShortcutToRuntime(null);

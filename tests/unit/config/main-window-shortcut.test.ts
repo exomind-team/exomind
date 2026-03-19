@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import {
   getMainWindowShortcutSelection,
   getResolvedMainWindowShortcutHotkey,
+  parseMainWindowShortcutSelection,
   setMainWindowShortcutSelection,
   subscribeMainWindowShortcutSelectionChanges,
   validateMainWindowShortcutSelection,
@@ -22,6 +23,21 @@ describe('main window shortcut config（主窗口快捷键配置）', () => {
 
     expect(getMainWindowShortcutSelection()).toEqual(['Ctrl', 'Alt', 'E']);
     expect(getResolvedMainWindowShortcutHotkey()).toBe('Ctrl+Alt+E');
+  });
+
+  it('migrates legacy default Alt+E storage to Ctrl+E when not customized', () => {
+    window.localStorage.setItem('exomind:mainWindowShortcutSelection', JSON.stringify(['Alt', 'E']));
+
+    expect(getMainWindowShortcutSelection()).toEqual(['Ctrl', 'E']);
+    expect(window.localStorage.getItem('exomind:mainWindowShortcutSelection')).toBe(JSON.stringify(['Ctrl', 'E']));
+  });
+
+  it('keeps explicit Alt+E customization when customized flag is set', () => {
+    window.localStorage.setItem('exomind:mainWindowShortcutSelection', JSON.stringify(['Alt', 'E']));
+    window.localStorage.setItem('exomind:mainWindowShortcutSelectionCustomized', 'true');
+
+    expect(getMainWindowShortcutSelection()).toEqual(['Alt', 'E']);
+    expect(getResolvedMainWindowShortcutHotkey()).toBe('Alt+E');
   });
 
   it('flags multiple primary keys as invalid', () => {
@@ -50,5 +66,11 @@ describe('main window shortcut config（主窗口快捷键配置）', () => {
 
     expect(listener).toHaveBeenCalledWith(['Ctrl', 'Space']);
     unsubscribe();
+  });
+
+  it('parses runtime hotkey strings back into selection arrays', () => {
+    expect(parseMainWindowShortcutSelection('Ctrl+Alt+Space')).toEqual(['Ctrl', 'Alt', 'Space']);
+    expect(parseMainWindowShortcutSelection('control+e')).toEqual(['Ctrl', 'E']);
+    expect(parseMainWindowShortcutSelection('Shift+E')).toBeNull();
   });
 });

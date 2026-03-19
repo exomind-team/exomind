@@ -304,11 +304,43 @@ vi.mock('@/config/voice-shortcut-hotkey', () => ({
 vi.mock('@/config/main-window-shortcut', () => ({
   MAIN_WINDOW_SHORTCUT_OPTION_VALUES: ['Ctrl', 'Alt', 'Q', 'E', 'Space'],
   getMainWindowShortcutSelection: vi.fn(() => settingsPagePreferenceState.mainWindowShortcutSelection),
-  setMainWindowShortcutSelection: vi.fn((value: string[]) => {
+  setMainWindowShortcutSelection: vi.fn((value: string[], options?: { emitEvent?: boolean; customized?: boolean }) => {
+    void options;
     settingsPagePreferenceState.mainWindowShortcutSelection = [...value];
     return [...value];
   }),
   subscribeMainWindowShortcutSelectionChanges: vi.fn(() => () => {}),
+  parseMainWindowShortcutSelection: vi.fn((hotkey: string | null | undefined) => {
+    if (!hotkey) {
+      return null;
+    }
+    const tokens = hotkey.split('+').map((entry) => entry.trim().toLowerCase()).filter(Boolean);
+    const normalized: string[] = [];
+    for (const token of tokens) {
+      if (token === 'ctrl' || token === 'control' || token === 'cmdorctrl') {
+        if (!normalized.includes('Ctrl')) normalized.push('Ctrl');
+        continue;
+      }
+      if (token === 'alt' || token === 'option') {
+        if (!normalized.includes('Alt')) normalized.push('Alt');
+        continue;
+      }
+      if (token === 'q') {
+        if (!normalized.includes('Q')) normalized.push('Q');
+        continue;
+      }
+      if (token === 'e') {
+        if (!normalized.includes('E')) normalized.push('E');
+        continue;
+      }
+      if (token === 'space' || token === 'spacebar') {
+        if (!normalized.includes('Space')) normalized.push('Space');
+        continue;
+      }
+      return null;
+    }
+    return normalized;
+  }),
   validateMainWindowShortcutSelection: vi.fn((value: string[], voiceHotkey?: string) => {
     const normalized = Array.from(new Set(value));
     const primaryKeys = normalized.filter((entry) => ['Q', 'E', 'Space'].includes(entry));
