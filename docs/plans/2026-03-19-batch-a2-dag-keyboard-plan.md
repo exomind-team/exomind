@@ -2,8 +2,8 @@
 
 > **状态**：待执行
 > **分支**：直接在 `dev` 上开发（无独立分支）
-> **关联 Issue**：#600, #601, #598, #599
-> **依赖链**：#600 → #601 → #598 → #599（#599 依赖 #598 的键盘焦点基础设施）
+> **关联 Issue**：#600, #603, #601, #598, #602, #599
+> **依赖链**：#600 → #603 → #601 → #598 → #602 → #599（#599 和 #602 依赖 #598 的键盘焦点基础设施）
 
 ---
 
@@ -12,9 +12,11 @@
 DAG 一期（批次 A）已完成 Sugiyama 布局、三模式交互、搜索/过滤/折叠/详情栏/沉浸模式/快速建任务。本批次聚焦四个遗留项：
 
 1. **#600**（bug）：隐藏已结束开关缺少 localStorage 持久化
-2. **#601**（feature）：连接模式下已选起点后，空白单击改为带依赖语义的快速创建
-3. **#598**（feature）：基础键盘导航——模式切换、画布平移、WASD 节点方向导航
-4. **#599**（feature）：连接模式高级键盘建边——Enter/Space 建边、Tab/Shift+Tab 快速创建上下游
+2. **#603**（bug）：沉浸模式缺少 localStorage 持久化（与 #600 同构）
+3. **#601**（feature）：连接模式下已选起点后，空白单击改为带依赖语义的快速创建
+4. **#598**（feature）：基础键盘导航——模式切换、画布平移、WASD 节点方向导航
+5. **#602**（feature）：右下角动态按键提示板（依赖 #598 的键盘状态）
+6. **#599**（feature）：连接模式高级键盘建边——Enter/Space 建边、Tab/Shift+Tab 快速创建上下游
 
 ---
 
@@ -63,6 +65,43 @@ npx tsc --noEmit
 - 打开隐藏已结束 → 离开 DAG → 返回 → 仍然隐藏 ✓
 - 刷新页面 → 仍然隐藏 ✓
 - 关闭隐藏已结束 → 刷新 → 不隐藏 ✓
+
+---
+
+## 步骤 1b：#603 沉浸模式持久化
+
+### 1b.1 改动
+
+**文件**：`src/ui/app/pages/TaskDagPage.tsx`
+
+与 #600 完全同构，对 `immersive` 状态做 localStorage 读写：
+
+```ts
+const TASK_DAG_IMMERSIVE_KEY = 'exomind:dag-immersive';
+
+function readStoredImmersive(): boolean {
+  if (typeof window === 'undefined') return false;
+  try {
+    return window.localStorage.getItem(TASK_DAG_IMMERSIVE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+// 替换原来的 useState(false)：
+const [immersive, setImmersive] = useState(() => readStoredImmersive());
+
+// 新增 effect 持久化：
+useEffect(() => {
+  try {
+    window.localStorage.setItem(TASK_DAG_IMMERSIVE_KEY, immersive ? '1' : '0');
+  } catch { /* ignore */ }
+}, [immersive]);
+```
+
+### 1b.2 验证
+
+**手动验证**：进入沉浸模式 → 离开 DAG → 返回 → 仍然沉浸 ✓
 
 ---
 
@@ -548,9 +587,95 @@ describe('findNearestNodeInDirection', () => {
 
 ---
 
-## 步骤 4：#599 键盘建边 + 快速创建上下游
+## 步骤 4：#602 右下角动态按键提示板
 
-### 4.1 扩展 useTaskDagKeyboard：连接模式键盘建边
+### 4.1 新建提示板组件
+
+**新建文件**：`src/ui/app/components/TaskDagKeyHints.tsx`
+
+根据当前 mode、selectedTaskId、connectState、immersive 状态，动态显示可用操作提示。
+
+```tsx
+interface TaskDagKeyHintsProps {
+  mode: TaskDagMode;
+  hasSelectedNode: boolean;
+  hasConnectSource: boolean;
+  immersive: boolean;
+}
+
+export function TaskDagKeyHints({ mode, hasSelectedNode, hasConnectSource, immersive }: TaskDagKeyHintsProps) {
+  if (immersive) return null; // 沉浸模式下隐藏
+
+  const hints: Array<{ keys: string; label: string }> = [];
+
+  // 通用
+  hints.push({ keys: 'Ctrl+←/→', label: '切换模式' });
+  hints.push({ keys: '↑↓←→', label: '平移画布' });
+
+  if (hasSelectedNode) {
+    hints.push({ keys: 'WASD', label: '导航节点' });
+  } else {
+    hints.push({ keys: 'WASD', label: '平移画布' });
+  }
+
+  // 模式特定
+  if (mode === 'connect') {
+    if (!hasConnectSource && hasSelectedNode) {
+      hints.push({ keys: 'Enter', label: '设为连接起点' });
+    }
+    if (hasConnectSource) {
+      hints.push({ keys: 'Enter', label: '建立依赖' });
+      hints.push({ keys: 'Esc', label: '取消连接' });
+      hints.push({ keys: '空白单击', label: '创建下游任务' });
+      hints.push({ keys: 'Shift+空白', label: '创建上游任务' });
+    }
+    if (hasSelectedNode) {
+      hints.push({ keys: 'Tab', label: '快速新增下游' });
+      hints.push({ keys: 'Shift+Tab', label: '快速新增上游' });
+    }
+  }
+
+  return (
+    <div
+      data-testid="task-dag-key-hints"
+      className="pointer-events-none absolute bottom-3 right-3 z-10 flex flex-wrap justify-end gap-x-3 gap-y-1 rounded-xl border border-[#E7E3E0] bg-white/90 px-3 py-2 text-[10px] text-[#78716C] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#A8A29E]"
+    >
+      {hints.map((hint) => (
+        <span key={hint.keys}>
+          <kbd className="rounded bg-[#F5F0ED] px-1 py-0.5 font-mono text-[9px] dark:bg-[#292524]">{hint.keys}</kbd>
+          {' '}{hint.label}
+        </span>
+      ))}
+    </div>
+  );
+}
+```
+
+### 4.2 集成到 TaskDagPage
+
+在 canvas shell 内、Controls 旁渲染：
+
+```tsx
+<TaskDagKeyHints
+  mode={mode}
+  hasSelectedNode={Boolean(selectedTaskId)}
+  hasConnectSource={Boolean(connectState)}
+  immersive={immersive}
+/>
+```
+
+### 4.3 验证
+
+- 浏览模式无选中 → 显示基础平移提示 ✓
+- 浏览模式选中节点 → WASD 改为"导航节点" ✓
+- 连接模式选中起点 → 显示 Enter/Esc/Tab 提示 ✓
+- 沉浸模式 → 提示板隐藏 ✓
+
+---
+
+## 步骤 5：#599 键盘建边 + 快速创建上下游
+
+### 5.1 扩展 useTaskDagKeyboard：连接模式键盘建边
 
 **文件**：`src/ui/app/hooks/useTaskDagKeyboard.ts`
 
@@ -610,7 +735,7 @@ if (key === 'Tab' && mode === 'connect' && selectedTaskId) {
 }
 ```
 
-### 4.2 连接模式下 WASD 移动连接终点候选
+### 5.2 连接模式下 WASD 移动连接终点候选
 
 在步骤 3 的 WASD 处理中，connect 模式下已设起点时的行为需要补全：
 
@@ -623,7 +748,7 @@ const focusNodeId = (mode === 'connect' && connectState)
 
 即：connect 模式已设起点后，WASD 在节点间移动 `selectedTaskId`（作为连接终点候选），Enter/Space 完成连接。
 
-### 4.3 TaskDagPage 集成
+### 5.3 TaskDagPage 集成
 
 **文件**：`src/ui/app/pages/TaskDagPage.tsx`
 
@@ -692,7 +817,7 @@ async function handleQuickCreateTask(title: string, description: string) {
 }
 ```
 
-### 4.4 pendingFocusTaskId 自动聚焦
+### 5.4 pendingFocusTaskId 自动聚焦
 
 ```tsx
 // 监听新节点出现，自动聚焦
@@ -713,7 +838,7 @@ useEffect(() => {
 }, [pendingFocusTaskId, visibleNodeIdSet]);
 ```
 
-### 4.5 TaskQuickCreateDialog 支持 Ctrl/Cmd+Enter
+### 5.5 TaskQuickCreateDialog 支持 Ctrl/Cmd+Enter
 
 **文件**：`src/ui/app/components/TaskQuickCreateDialog.tsx`
 
@@ -732,7 +857,7 @@ onKeyDown={(event) => {
 
 同理在 title input 上也加同样的快捷键。
 
-### 4.6 验证
+### 5.6 验证
 
 ```bash
 npx tsc --noEmit
@@ -755,8 +880,9 @@ npx vitest run tests/unit/ui/ --pool forks --maxWorkers 1 --no-file-parallelism
 
 | 文件 | 改动类型 | Issue |
 |------|---------|-------|
-| `src/ui/app/pages/TaskDagPage.tsx` | 持久化 + 空白建任务 + 集成键盘 | #600 #601 #598 #599 |
+| `src/ui/app/pages/TaskDagPage.tsx` | 持久化 + 空白建任务 + 集成键盘 + 提示板 | #600 #603 #601 #598 #602 #599 |
 | `src/ui/app/hooks/useTaskDagKeyboard.ts` | **新建** 键盘事件中枢 | #598 #599 |
+| `src/ui/app/components/TaskDagKeyHints.tsx` | **新建** 动态按键提示板 | #602 |
 | `src/ui/app/components/TaskQuickCreateDialog.tsx` | 加 Ctrl+Enter 快捷键 | #599 |
 | 设置页相关文件 | 新增平移速度设置项 | #598 |
 | `tests/unit/ui/task-dag-keyboard.test.ts` | **新建** | #598 |
