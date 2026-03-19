@@ -24,6 +24,32 @@ import {
 } from '@/ui/app/pages/task-route-memory';
 import { resolveEventlogRestoreTab } from '@/ui/app/pages/eventlog-route-memory';
 
+const DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY = 'exomind:desktop-sidebar-collapsed';
+
+function readStoredDesktopSidebarCollapsed(): boolean {
+  if (typeof window === 'undefined') {
+    return false;
+  }
+
+  try {
+    return window.localStorage.getItem(DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function writeStoredDesktopSidebarCollapsed(collapsed: boolean): void {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  try {
+    window.localStorage.setItem(DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY, collapsed ? '1' : '0');
+  } catch {
+    // Ignore storage failures and keep UI responsive.
+  }
+}
+
 const FocusPage = lazy(async () => {
   const module = await import('@/ui/app/pages/FocusPage');
   return { default: module.FocusPage };
@@ -454,7 +480,7 @@ function NewLayout() {
 
   const [agentPageEnabled, setAgentPageEnabled] = useState(() => getAgentPageEnabled());
   const [mePageEnabled, setMePageEnabled] = useState(() => getMePageEnabled());
-  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(false);
+  const [desktopSidebarCollapsed, setDesktopSidebarCollapsed] = useState(() => readStoredDesktopSidebarCollapsed());
   const [desktopAdaptiveEnabled, setDesktopAdaptiveEnabledState] = useState(() => getDesktopAdaptiveEnabled());
   const [developerModeEnabled, setDeveloperModeEnabled] = useState(() => getDeveloperModeEnabled());
   const [commandPaletteEnabled, setCommandPaletteEnabled] = useState(() => getCommandPaletteEnabled());
@@ -477,6 +503,9 @@ function NewLayout() {
   useEffect(() => {
     return subscribeCommandPaletteEnabledChanges(setCommandPaletteEnabled);
   }, []);
+  useEffect(() => {
+    writeStoredDesktopSidebarCollapsed(desktopSidebarCollapsed);
+  }, [desktopSidebarCollapsed]);
 
   useEffect(() => {
     const navigateTo = async (path: CoreNavigationPath) => {

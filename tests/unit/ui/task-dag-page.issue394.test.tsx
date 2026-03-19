@@ -225,12 +225,14 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     addDependencyMock.mockResolvedValue(null);
     removeDependencyMock.mockResolvedValue(null);
     window.localStorage.clear();
+    window.sessionStorage.clear();
 
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-a', title: '梳理 DAG 基础层', createdAt: 10, updatedAt: 10 }),
       makeTask({
         id: 'task-b',
         title: '接入任务列表引导',
+        description: '## 说明\n\n需要在浏览模式展示 **Markdown** 描述。',
         createdAt: 20,
         updatedAt: 20,
         dependsOn: [{ taskId: 'task-a', type: 'hard' }],
@@ -286,6 +288,32 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
         padding: 0.2,
         minZoom: 0.01,
       },
+    });
+    expect(flowApiMocks.fitView).toHaveBeenCalledWith({
+      padding: 0.2,
+      minZoom: 0.01,
+    });
+  });
+
+  it('waits for nodes to load before running the initial fit view', async () => {
+    let resolveTasks: ((tasks: TaskNode[]) => void) | null = null;
+    listTasksMock.mockImplementationOnce(() => new Promise<TaskNode[]>((resolve) => {
+      resolveTasks = resolve;
+    }));
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledWith(true);
+    });
+    expect(flowApiMocks.fitView).not.toHaveBeenCalled();
+
+    resolveTasks?.([
+      makeTask({ id: 'task-a', title: '异步返回节点', createdAt: 10, updatedAt: 10 }),
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
     });
     expect(flowApiMocks.fitView).toHaveBeenCalledWith({
       padding: 0.2,
@@ -356,6 +384,25 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(screen.queryByTestId('task-dag-selected-panel')).not.toBeInTheDocument();
   });
 
+  it('clears the selected node with Escape when no higher-priority mode state is active', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-detail-panel-desktop')).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-detail-panel-desktop')).not.toBeInTheDocument();
+    });
+  });
+
   it('opens the desktop detail panel on node click and shows dependency details', async () => {
     render(<TaskDagPage />);
 
@@ -371,6 +418,24 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(within(detailPanel).getByText('该任务目前仍被前置任务阻塞，需先完成对应依赖后才能启动。')).toBeInTheDocument();
     expect(within(detailPanel).getByTestId('task-dag-detail-upstream-list')).toHaveTextContent('梳理 DAG 基础层');
     expect(within(detailPanel).getByText('当前节点没有后继依赖。')).toBeInTheDocument();
+    expect(within(detailPanel).getByText('任务描述')).toBeInTheDocument();
+    expect(within(detailPanel).getByText((content) => content.includes('需要在浏览模式展示'))).toBeInTheDocument();
+    expect(detailPanel.className).toContain('bottom-24');
+  });
+
+  it('keeps selected node highlight visible in connect mode', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-node-task-a').className).toContain('ring-[#2563EB]/30');
+    });
   });
 
   it('closes the detail panel on pane click and close button', async () => {
@@ -532,7 +597,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     fireEvent.keyDown(document, { key: 'ArrowLeft' });
     expect(flowApiMocks.setViewport).toHaveBeenCalledWith({
-      x: 40,
+      x: 8,
       y: 0,
       zoom: 0.12,
     });
@@ -546,7 +611,10 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
 
     expect(screen.getByText('切换模式')).toBeInTheDocument();
-    expect(screen.getAllByText('平移画布')).toHaveLength(2);
+    expect(screen.getAllByText('长按平移')).toHaveLength(2);
+    expect(screen.getByText('长按缩放')).toBeInTheDocument();
+    expect(screen.getByText('聚焦屏幕中心最近节点')).toBeInTheDocument();
+    expect(screen.getByText('空白单击 取消选中')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
     await waitFor(() => {
@@ -555,11 +623,14 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
     expect(screen.getByText('设为连接起点')).toBeInTheDocument();
+    expect(screen.getByText('双击空白处 快速创建任务')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
     await waitFor(() => {
       expect(screen.getByText('取消连接')).toBeInTheDocument();
     });
+    expect(screen.getByText('快速新增下游')).toBeInTheDocument();
+    expect(screen.getByText('空白单击 新建下游')).toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('task-dag-immersive-toggle'));
     await waitFor(() => {
@@ -777,6 +848,52 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
+  it('reuses the current connect state when keyboard quick-create adds a soft dependency', async () => {
+    createTaskMock.mockResolvedValueOnce(makeTask({ id: 'task-soft-downstream', title: '键盘软依赖下游任务' }));
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    expect(screen.getByText('准备软依赖')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(await screen.findByTestId('task-quick-create-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('task-quick-create-title'), { target: { value: '键盘软依赖下游任务' } });
+    fireEvent.click(screen.getByTestId('task-quick-create-submit'));
+
+    await waitFor(() => {
+      expect(addDependencyMock).toHaveBeenCalledWith('task-soft-downstream', 'task-a', 'soft');
+    });
+  });
+
+  it('toggles downstream collapse with Alt+F from the current focused node', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.keyDown(document, { key: 'F', altKey: true });
+
+    await waitFor(() => {
+      expect(screen.queryByTestId('mock-react-flow-node-task-b')).not.toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(document, { key: 'F', altKey: true });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+    });
+  });
+
   it('starts executable tasks in execute mode with remaining countdown config', async () => {
     calculateSpentMinutesMock.mockResolvedValue(15);
     listTasksMock.mockResolvedValue([
@@ -886,6 +1003,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     expect(await screen.findByTestId('task-dag-disassociate-dialog')).toBeInTheDocument();
     expect(removeTaskFromBlockMock).not.toHaveBeenCalled();
+    expect(screen.queryByTestId('task-dag-disassociate-status-continue')).not.toBeInTheDocument();
 
     fireEvent.click(screen.getByTestId('task-dag-disassociate-status-completed'));
     fireEvent.click(screen.getByTestId('task-dag-disassociate-submit'));
@@ -896,7 +1014,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(transitionTaskMock).toHaveBeenCalledWith('task-a', 'completed');
   });
 
-  it('shows disabled upstream/downstream actions in the context menu when a node cannot be safely folded', async () => {
+  it('hides unavailable upstream/downstream actions in the context menu when a node cannot be safely folded', async () => {
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-a', title: 'A', createdAt: 10, updatedAt: 10 }),
       makeTask({
@@ -934,7 +1052,9 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     fireEvent.contextMenu(screen.getByTestId('mock-react-flow-node-task-b'));
 
-    expect(await screen.findByTestId('task-dag-context-toggle-upstream')).toBeDisabled();
-    expect(screen.getByTestId('task-dag-context-toggle-downstream')).toBeDisabled();
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-context-toggle-upstream')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('task-dag-context-toggle-downstream')).not.toBeInTheDocument();
+    });
   });
 });

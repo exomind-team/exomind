@@ -1,4 +1,5 @@
 import { ArrowRight, Play, X } from 'lucide-react';
+import { EventMarkdown } from '@/components/Chat/EventMarkdown';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
@@ -79,7 +80,7 @@ export function TaskDagDetailPanel({
       data-testid={isDesktop ? 'task-dag-detail-panel-desktop' : 'task-dag-detail-panel-mobile'}
       className={
         isDesktop
-          ? 'pointer-events-auto absolute inset-y-4 right-4 z-20 w-[340px] overflow-hidden rounded-[28px] border border-[#E7E5E4] bg-white/95 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.2)] backdrop-blur dark:border-[#292524] dark:bg-[#1C1917]/95'
+          ? 'pointer-events-auto absolute right-4 top-4 bottom-24 z-20 w-[340px] overflow-hidden rounded-[28px] border border-[#E7E5E4] bg-white/95 shadow-[0_20px_50px_-20px_rgba(0,0,0,0.2)] backdrop-blur dark:border-[#292524] dark:bg-[#1C1917]/95'
           : 'pointer-events-auto absolute inset-x-0 bottom-0 z-20 max-h-[72vh] overflow-hidden rounded-t-[28px] border border-b-0 border-[#E7E5E4] bg-white/95 shadow-[0_-20px_50px_-20px_rgba(0,0,0,0.25)] backdrop-blur dark:border-[#292524] dark:bg-[#1C1917]/95'
       }
     >
@@ -119,6 +120,22 @@ export function TaskDagDetailPanel({
             <p className="mt-2 rounded-2xl bg-[#FAF7F5] px-4 py-3 text-sm text-[#57534E] dark:bg-[#120F0D] dark:text-[#D6D3D1]">
               {executionHint}
             </p>
+          </section>
+
+          <section>
+            <div className="flex items-center justify-between gap-3">
+              <h3 className="text-xs font-semibold uppercase tracking-[0.08em] text-[#A8A29E]">任务描述</h3>
+              <span className="text-[11px] text-[#A8A29E]">{task.description?.trim() ? 'Markdown' : '空'}</span>
+            </div>
+            <div className="mt-2 rounded-2xl bg-[#FAF7F5] px-4 py-3 text-sm text-[#57534E] dark:bg-[#120F0D] dark:text-[#D6D3D1]">
+              {task.description?.trim() ? (
+                <div className="[&_.prose]:max-w-none [&_.prose]:text-inherit [&_.prose_a]:text-[#C75B3A] [&_.prose_code]:text-inherit">
+                  <EventMarkdown content={task.description} />
+                </div>
+              ) : (
+                <p className="text-sm text-[#78716C] dark:text-[#A8A29E]">当前任务还没有描述。</p>
+              )}
+            </div>
           </section>
 
           <section>

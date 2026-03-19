@@ -1,6 +1,6 @@
 import { Waypoints } from 'lucide-react';
 import { useLocation, useNavigate } from '@tanstack/react-router';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Background,
   Controls,
@@ -44,8 +44,17 @@ import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { ensureNodeVisible, useTaskDagKeyboard } from '@/ui/app/hooks/useTaskDagKeyboard';
 import { TaskDagModeSelector, type TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
-import { TaskStatusSelector, type TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
-import { getTaskDagPanSpeed, subscribeTaskDagPanSpeedChanges } from '@/config/task-dag-keyboard-preferences';
+import {
+  TaskStatusSelector,
+  TASK_STATUS_SELECTOR_END_OPTIONS,
+  type TaskStatusChoice,
+} from '@/ui/app/components/TaskStatusSelector';
+import {
+  getTaskDagPanSpeed,
+  getTaskDagZoomSpeed,
+  subscribeTaskDagPanSpeedChanges,
+  subscribeTaskDagZoomSpeedChanges,
+} from '@/config/task-dag-keyboard-preferences';
 import {
   buildVisibleTaskDagFlow,
   TASK_DAG_NODE_HEIGHT,
@@ -472,11 +481,13 @@ export function TaskDagPage() {
   const [pendingFocusTaskId, setPendingFocusTaskId] = useState<string | null>(null);
   const [disassociateDialogOpen, setDisassociateDialogOpen] = useState(false);
   const [disassociateTargetTaskId, setDisassociateTargetTaskId] = useState<string | null>(null);
-  const [disassociateChoice, setDisassociateChoice] = useState<TaskStatusChoice>('continue');
+  const [disassociateChoice, setDisassociateChoice] = useState<TaskStatusChoice>('suspended');
   const [panSpeed, setPanSpeed] = useState(() => getTaskDagPanSpeed());
+  const [zoomSpeed, setZoomSpeed] = useState(() => getTaskDagZoomSpeed());
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
   const hasMountedDirectionRef = useRef(false);
+  const hasInitialViewportFitRef = useRef(false);
 
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
@@ -587,12 +598,6 @@ export function TaskDagPage() {
   }, [paneContextMenu]);
 
   useEffect(() => {
-    if (mode === 'execute') {
-      setSelectedTaskId(null);
-    }
-  }, [mode]);
-
-  useEffect(() => {
     if (mode !== 'connect') {
       setConnectState(null);
       setPaneContextMenu(null);
@@ -606,6 +611,7 @@ export function TaskDagPage() {
   }, [activeBlock]);
 
   useEffect(() => subscribeTaskDagPanSpeedChanges(setPanSpeed), []);
+  useEffect(() => subscribeTaskDagZoomSpeedChanges(setZoomSpeed), []);
 
   const resolvedDirection = useMemo(
     () => resolveDagDirection(dagDirection, isDesktop),
@@ -618,6 +624,10 @@ export function TaskDagPage() {
       return;
     }
 
+    if (tasks.length === 0) {
+      return;
+    }
+
     const timeoutId = window.setTimeout(() => {
       void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
     }, 50);
@@ -625,7 +635,7 @@ export function TaskDagPage() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [resolvedDirection]);
+  }, [resolvedDirection, tasks.length]);
 
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const graph = useMemo(() => buildTaskGraph(tasks), [tasks]);
@@ -675,7 +685,7 @@ export function TaskDagPage() {
   const flowGraph = useMemo(() => {
     const baseFlowGraph = buildVisibleTaskDagFlow(renderedVisibleGraph, {
       direction: resolvedDirection,
-      selectedTaskId: mode === 'browse' ? selectedTaskId : null,
+      selectedTaskId,
       searchMatchedTaskIds,
       hasActiveSearch: Boolean(searchQuery),
     });
@@ -705,7 +715,6 @@ export function TaskDagPage() {
     activeTaskIdSet,
     connectState,
     graphNodeById,
-    mode,
     renderedVisibleGraph,
     resolvedDirection,
     searchMatchedTaskIds,
@@ -732,6 +741,26 @@ export function TaskDagPage() {
     };
   }, [flowGraph.nodes, pendingFocusTaskId, visibleNodeIdSet]);
 
+  useEffect(() => {
+    if (flowGraph.nodes.length === 0) {
+      hasInitialViewportFitRef.current = false;
+      return;
+    }
+
+    if (!flowInstanceRef.current || hasInitialViewportFitRef.current) {
+      return;
+    }
+
+    hasInitialViewportFitRef.current = true;
+    const timeoutId = window.setTimeout(() => {
+      void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
+    }, 50);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [flowGraph.nodes.length]);
+
   const toggleCollapse = (direction: 'upstream' | 'downstream', nodeId: string) => {
     setDagVisibility((prev) => {
       if (direction === 'upstream') {
@@ -752,15 +781,38 @@ export function TaskDagPage() {
     });
   };
 
+  const resolveCollapseActionState = useCallback((direction: 'upstream' | 'downstream', nodeId: string) => {
+    const collapsed = direction === 'upstream'
+      ? dagVisibility.collapsedUpstreamOf.includes(nodeId)
+      : dagVisibility.collapsedDownstreamOf.includes(nodeId);
+    const scope = calculateTaskDagCollapseScope(interactionGraph, dagVisibility, direction, nodeId);
+    return {
+      collapsed,
+      visible: collapsed || scope.size > 1,
+    };
+  }, [dagVisibility, interactionGraph]);
+
+  const resolveContextMenuState = useCallback((nodeId: string) => {
+    const upstream = resolveCollapseActionState('upstream', nodeId);
+    const downstream = resolveCollapseActionState('downstream', nodeId);
+    return {
+      showEndBlock: mode === 'execute' && activeTaskIds.length > 0,
+      upstream,
+      downstream,
+    };
+  }, [activeTaskIds.length, mode, resolveCollapseActionState]);
+
+  const contextMenuState = useMemo(() => (
+    contextMenu ? resolveContextMenuState(contextMenu.nodeId) : null
+  ), [contextMenu, resolveContextMenuState]);
+
   const handleJumpToCurrentRoot = () => {
     const currentRootNodeId = renderedVisibleGraph.visibleCurrentRootNodeId;
     if (!currentRootNodeId) return;
     const currentRootNode = flowGraph.nodes.find((node) => node.id === currentRootNodeId);
     if (!currentRootNode) return;
 
-    if (mode === 'browse') {
-      setSelectedTaskId(currentRootNodeId);
-    }
+    setSelectedTaskId(currentRootNodeId);
     const currentZoom = flowInstanceRef.current?.getViewport().zoom ?? 1;
     flowInstanceRef.current?.setCenter(
       currentRootNode.position.x + TASK_DAG_NODE_WIDTH / 2,
@@ -800,17 +852,27 @@ export function TaskDagPage() {
   };
 
   const handleQuickCreateUpstream = (fromNodeId: string) => {
-    setQuickCreateDependency(null);
-    setQuickCreateDirection('upstream');
-    setQuickCreateFromNodeId(fromNodeId);
+    const dependencyType = connectState?.sourceId === fromNodeId ? connectState.type : null;
+    setQuickCreateDependency(dependencyType ? {
+      sourceTaskId: fromNodeId,
+      type: dependencyType,
+      direction: 'upstream',
+    } : null);
+    setQuickCreateDirection(dependencyType ? null : 'upstream');
+    setQuickCreateFromNodeId(dependencyType ? null : fromNodeId);
     setConnectState(null);
     setQuickCreateOpen(true);
   };
 
   const handleQuickCreateDownstream = (fromNodeId: string) => {
-    setQuickCreateDependency(null);
-    setQuickCreateDirection('downstream');
-    setQuickCreateFromNodeId(fromNodeId);
+    const dependencyType = connectState?.sourceId === fromNodeId ? connectState.type : null;
+    setQuickCreateDependency(dependencyType ? {
+      sourceTaskId: fromNodeId,
+      type: dependencyType,
+      direction: 'downstream',
+    } : null);
+    setQuickCreateDirection(dependencyType ? null : 'downstream');
+    setQuickCreateFromNodeId(dependencyType ? null : fromNodeId);
     setConnectState(null);
     setQuickCreateOpen(true);
   };
@@ -881,7 +943,7 @@ export function TaskDagPage() {
       }
       setDisassociateDialogOpen(false);
       setDisassociateTargetTaskId(null);
-      setDisassociateChoice('continue');
+      setDisassociateChoice('suspended');
     } catch (error) {
       toast({
         title: '取消任务关联失败',
@@ -966,6 +1028,7 @@ export function TaskDagPage() {
 
   const handleExecuteNodeClick = async (nodeId: string) => {
     setContextMenu(null);
+    setSelectedTaskId(nodeId);
 
     const task = taskById.get(nodeId);
     const graphNode = graphNodeById.get(nodeId);
@@ -997,7 +1060,7 @@ export function TaskDagPage() {
         }
 
         setDisassociateTargetTaskId(nodeId);
-        setDisassociateChoice('continue');
+        setDisassociateChoice('suspended');
         setDisassociateDialogOpen(true);
         return;
       }
@@ -1043,6 +1106,7 @@ export function TaskDagPage() {
     flowNodes: flowGraph.nodes,
     flowInstance: flowInstanceRef.current,
     panSpeed,
+    zoomSpeed,
     onModeChange: setMode,
     onImmersiveChange: setImmersive,
     onSelectedTaskIdChange: setSelectedTaskId,
@@ -1052,6 +1116,8 @@ export function TaskDagPage() {
     },
     onQuickCreateUpstream: handleQuickCreateUpstream,
     onQuickCreateDownstream: handleQuickCreateDownstream,
+    onToggleCollapse: toggleCollapse,
+    canToggleCollapse: (direction, nodeId) => resolveCollapseActionState(direction, nodeId).visible,
   });
 
   const endingDialogTaskIds = endingTaskIds.length > 0 ? endingTaskIds : activeTaskIds;
@@ -1208,7 +1274,10 @@ export function TaskDagPage() {
             zoomOnDoubleClick={false}
             onInit={(instance) => {
               flowInstanceRef.current = instance;
-              void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
+              if (flowGraph.nodes.length > 0 && !hasInitialViewportFitRef.current) {
+                hasInitialViewportFitRef.current = true;
+                void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
+              }
             }}
             onPaneClick={(event) => {
               if (mode === 'browse') {
@@ -1251,6 +1320,11 @@ export function TaskDagPage() {
             onNodeContextMenu={(event, node) => {
               event.preventDefault();
               setPaneContextMenu(null);
+              const menuState = resolveContextMenuState(node.id);
+              if (!menuState.showEndBlock && !menuState.upstream.visible && !menuState.downstream.visible) {
+                setContextMenu(null);
+                return;
+              }
               setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
             }}
           >
@@ -1273,7 +1347,7 @@ export function TaskDagPage() {
             className="fixed z-50 rounded-lg border border-[#E7E5E4] bg-white py-1 shadow-lg dark:border-[#292524] dark:bg-[#1C1917]"
             style={{ left: contextMenu.x, top: contextMenu.y }}
           >
-            {mode === 'execute' && activeTaskIds.length > 0 ? (
+            {contextMenuState?.showEndBlock ? (
               <button
                 type="button"
                 data-testid="task-dag-context-end-block"
@@ -1286,36 +1360,32 @@ export function TaskDagPage() {
                 结束时间块
               </button>
             ) : null}
-            <button
-              type="button"
-              data-testid="task-dag-context-toggle-upstream"
-              className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#A8A29E] dark:hover:bg-[#292524]"
-              onClick={() => {
-                toggleCollapse('upstream', contextMenu.nodeId);
-                setContextMenu(null);
-              }}
-              disabled={
-                calculateTaskDagCollapseScope(interactionGraph, dagVisibility, 'upstream', contextMenu.nodeId).size <= 1
-                && !dagVisibility.collapsedUpstreamOf.includes(contextMenu.nodeId)
-              }
-            >
-              {dagVisibility.collapsedUpstreamOf.includes(contextMenu.nodeId) ? '展开上游' : '折叠上游'}
-            </button>
-            <button
-              type="button"
-              data-testid="task-dag-context-toggle-downstream"
-              className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] disabled:cursor-not-allowed disabled:opacity-60 dark:text-[#A8A29E] dark:hover:bg-[#292524]"
-              onClick={() => {
-                toggleCollapse('downstream', contextMenu.nodeId);
-                setContextMenu(null);
-              }}
-              disabled={
-                calculateTaskDagCollapseScope(interactionGraph, dagVisibility, 'downstream', contextMenu.nodeId).size <= 1
-                && !dagVisibility.collapsedDownstreamOf.includes(contextMenu.nodeId)
-              }
-            >
-              {dagVisibility.collapsedDownstreamOf.includes(contextMenu.nodeId) ? '展开下游' : '折叠下游'}
-            </button>
+            {contextMenuState?.upstream.visible ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-toggle-upstream"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  toggleCollapse('upstream', contextMenu.nodeId);
+                  setContextMenu(null);
+                }}
+              >
+                {contextMenuState.upstream.collapsed ? '展开上游' : '折叠上游'}
+              </button>
+            ) : null}
+            {contextMenuState?.downstream.visible ? (
+              <button
+                type="button"
+                data-testid="task-dag-context-toggle-downstream"
+                className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+                onClick={() => {
+                  toggleCollapse('downstream', contextMenu.nodeId);
+                  setContextMenu(null);
+                }}
+              >
+                {contextMenuState.downstream.collapsed ? '展开下游' : '折叠下游'}
+              </button>
+            ) : null}
           </div>
         ) : null}
 
@@ -1377,7 +1447,7 @@ export function TaskDagPage() {
             setDisassociateDialogOpen(open);
             if (!open) {
               setDisassociateTargetTaskId(null);
-              setDisassociateChoice('continue');
+              setDisassociateChoice('suspended');
             }
           }}
         >
@@ -1396,6 +1466,7 @@ export function TaskDagPage() {
             <TaskStatusSelector
               value={disassociateChoice}
               onChange={setDisassociateChoice}
+              allowedChoices={TASK_STATUS_SELECTOR_END_OPTIONS}
               helperHint="取消关联后，请选择任务状态。"
               optionTestIdPrefix="task-dag-disassociate-status"
               data-testid="task-dag-disassociate-status-selector"
@@ -1407,7 +1478,7 @@ export function TaskDagPage() {
                 onClick={() => {
                   setDisassociateDialogOpen(false);
                   setDisassociateTargetTaskId(null);
-                  setDisassociateChoice('continue');
+                  setDisassociateChoice('suspended');
                 }}
                 className="rounded-full px-4 py-2 text-sm font-medium text-[#78716C] transition-colors hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
               >

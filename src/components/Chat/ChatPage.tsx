@@ -33,6 +33,16 @@ const PAGE_SIZE = 50;
 const TOP_LOAD_THRESHOLD = 40;
 const NEAR_BOTTOM_THRESHOLD = 120;
 const RT_REFRESH_INTERVAL_MS = 2_000;
+const TASK_SYSTEM_EVENT_TAGS = [
+  'task_created',
+  'task_started',
+  'task_resumed',
+  'task_suspended',
+  'task_completed',
+  'task_cancelled',
+  'task_linked',
+  'task_unlinked',
+] as const;
 
 function perfNow(): number {
   return typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -394,6 +404,7 @@ export function ChatPage({
     if (event.tags.has('block_resume')) return <Play size={14} />;
     if (event.tags.has('block_end')) return <Square size={14} />;
     if (event.tags.has('block_feedback')) return <NotepadText size={14} />;
+    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) return <FileText size={14} />;
     return <FileText size={14} />;
   };
 
@@ -405,6 +416,7 @@ export function ChatPage({
     if (event.tags.has('block_resume')) return 'bg-success';
     if (event.tags.has('block_end')) return 'bg-destructive';
     if (event.tags.has('block_feedback')) return 'bg-brand';
+    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) return 'bg-brand';
     return 'bg-brand';
   };
 
@@ -424,6 +436,9 @@ export function ChatPage({
     }
     if (event.tags.has('block_end')) {
       return 'bg-red-100 text-red-800 dark:bg-red-950 dark:text-red-100 rounded-br-md';
+    }
+    if (TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))) {
+      return 'bg-stone-100 text-stone-800 dark:bg-stone-900 dark:text-stone-100 rounded-br-md';
     }
     return 'bg-muted rounded-bl-md';
   };
@@ -449,6 +464,11 @@ export function ChatPage({
     || event.tags.has('block_end')
     || event.tags.has('block_feedback')
     || event.tags.has('agent_feedback')
+    || TASK_SYSTEM_EVENT_TAGS.some((tag) => event.tags.has(tag))
+  );
+
+  const getSystemEventActorLabel = (event: Event) => (
+    event.tags.has('agent_feedback') ? 'AI 助理' : '系统'
   );
 
   // 按日期分组
@@ -564,7 +584,7 @@ export function ChatPage({
                         className="mb-1 flex items-center gap-1 text-[11px] leading-[1.4]"
                         data-testid="new-mobile-message-meta"
                       >
-                        <span className="text-xs font-semibold text-strong">AI 助理</span>
+                        <span className="text-xs font-semibold text-strong">{getSystemEventActorLabel(event)}</span>
                         <span className="text-muted">{eventSourceLabel}</span>
                         <span className="text-muted">{formatMessageTime(event.timestamp)}</span>
                       </div>

@@ -1,9 +1,14 @@
 export const TASK_DAG_PAN_SPEED_STORAGE_KEY = 'exomind:dag-pan-speed';
 export const TASK_DAG_PAN_SPEED_CHANGED_EVENT = 'exomind:dag-pan-speed-changed';
+export const TASK_DAG_ZOOM_SPEED_STORAGE_KEY = 'exomind:dag-zoom-speed';
+export const TASK_DAG_ZOOM_SPEED_CHANGED_EVENT = 'exomind:dag-zoom-speed-changed';
 
-export const DEFAULT_TASK_DAG_PAN_SPEED = 40;
-export const MIN_TASK_DAG_PAN_SPEED = 10;
-export const MAX_TASK_DAG_PAN_SPEED = 200;
+export const DEFAULT_TASK_DAG_PAN_SPEED = 480;
+export const MIN_TASK_DAG_PAN_SPEED = 120;
+export const MAX_TASK_DAG_PAN_SPEED = 2400;
+export const DEFAULT_TASK_DAG_ZOOM_SPEED = 30;
+export const MIN_TASK_DAG_ZOOM_SPEED = 10;
+export const MAX_TASK_DAG_ZOOM_SPEED = 80;
 
 function getStorage(): Pick<Storage, 'getItem' | 'setItem'> | null {
   if (typeof window === 'undefined') {
@@ -29,6 +34,17 @@ function clampTaskDagPanSpeed(value: number): number {
   return Math.min(
     MAX_TASK_DAG_PAN_SPEED,
     Math.max(MIN_TASK_DAG_PAN_SPEED, Math.round(value)),
+  );
+}
+
+function clampTaskDagZoomSpeed(value: number): number {
+  if (!Number.isFinite(value)) {
+    return DEFAULT_TASK_DAG_ZOOM_SPEED;
+  }
+
+  return Math.min(
+    MAX_TASK_DAG_ZOOM_SPEED,
+    Math.max(MIN_TASK_DAG_ZOOM_SPEED, Math.round(value)),
   );
 }
 
@@ -70,6 +86,44 @@ export function setTaskDagPanSpeed(value: number): number {
   return normalizedValue;
 }
 
+export function getTaskDagZoomSpeed(): number {
+  const storage = getStorage();
+  if (!storage) {
+    return DEFAULT_TASK_DAG_ZOOM_SPEED;
+  }
+
+  try {
+    const rawValue = storage.getItem(TASK_DAG_ZOOM_SPEED_STORAGE_KEY);
+    if (!rawValue) {
+      return DEFAULT_TASK_DAG_ZOOM_SPEED;
+    }
+
+    return clampTaskDagZoomSpeed(Number.parseInt(rawValue, 10));
+  } catch {
+    return DEFAULT_TASK_DAG_ZOOM_SPEED;
+  }
+}
+
+export function setTaskDagZoomSpeed(value: number): number {
+  const normalizedValue = clampTaskDagZoomSpeed(value);
+  const storage = getStorage();
+  if (!storage) {
+    return normalizedValue;
+  }
+
+  try {
+    storage.setItem(TASK_DAG_ZOOM_SPEED_STORAGE_KEY, String(normalizedValue));
+    window.dispatchEvent(new CustomEvent(
+      TASK_DAG_ZOOM_SPEED_CHANGED_EVENT,
+      { detail: { value: normalizedValue } },
+    ));
+  } catch {
+    // Ignore localStorage write errors.
+  }
+
+  return normalizedValue;
+}
+
 export function subscribeTaskDagPanSpeedChanges(listener: (value: number) => void): () => void {
   if (typeof window === 'undefined') {
     return () => {};
@@ -97,6 +151,37 @@ export function subscribeTaskDagPanSpeedChanges(listener: (value: number) => voi
   window.addEventListener('storage', storageHandler);
   return () => {
     window.removeEventListener(TASK_DAG_PAN_SPEED_CHANGED_EVENT, handler);
+    window.removeEventListener('storage', storageHandler);
+  };
+}
+
+export function subscribeTaskDagZoomSpeedChanges(listener: (value: number) => void): () => void {
+  if (typeof window === 'undefined') {
+    return () => {};
+  }
+
+  const handler = (event: Event) => {
+    const detail = (event as CustomEvent<{ value?: unknown }>).detail;
+    if (detail && typeof detail.value === 'number') {
+      listener(clampTaskDagZoomSpeed(detail.value));
+      return;
+    }
+
+    listener(getTaskDagZoomSpeed());
+  };
+
+  const storageHandler = (event: StorageEvent) => {
+    if (event.key !== TASK_DAG_ZOOM_SPEED_STORAGE_KEY) {
+      return;
+    }
+
+    listener(clampTaskDagZoomSpeed(Number.parseInt(event.newValue ?? '', 10)));
+  };
+
+  window.addEventListener(TASK_DAG_ZOOM_SPEED_CHANGED_EVENT, handler);
+  window.addEventListener('storage', storageHandler);
+  return () => {
+    window.removeEventListener(TASK_DAG_ZOOM_SPEED_CHANGED_EVENT, handler);
     window.removeEventListener('storage', storageHandler);
   };
 }

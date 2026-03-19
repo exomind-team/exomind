@@ -1,5 +1,11 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { ensureNodeVisible, findNearestNodeInDirection } from '@/ui/app/hooks/useTaskDagKeyboard';
+import { fireEvent, renderHook } from '@testing-library/react';
+import {
+  ensureNodeVisible,
+  findNearestNodeInDirection,
+  findNearestNodeToViewportCenter,
+  useTaskDagKeyboard,
+} from '@/ui/app/hooks/useTaskDagKeyboard';
 import type { TaskDagFlowNode } from '@/ui/app/pages/task-dag-flow';
 
 function makeNode(id: string, x: number, y: number, width = 256, height = 140): TaskDagFlowNode {
@@ -87,5 +93,104 @@ describe('useTaskDagKeyboard helpers', () => {
       { x: -196, y: -100, zoom: 1 },
       { duration: 150 },
     );
+  });
+
+  it('finds the node closest to the viewport center（定位屏幕中心最近节点）', () => {
+    const shell = document.createElement('div');
+    shell.dataset.testid = 'task-dag-canvas-shell';
+    Object.defineProperty(shell, 'clientWidth', { configurable: true, value: 800 });
+    Object.defineProperty(shell, 'clientHeight', { configurable: true, value: 600 });
+    document.body.appendChild(shell);
+
+    const flowInstance = {
+      getViewport: () => ({ x: 0, y: 0, zoom: 1 }),
+    } as unknown as {
+      getViewport: () => { x: number; y: number; zoom: number };
+    };
+
+    const nodes = [
+      makeNode('far-left', 0, 0),
+      makeNode('center-near', 280, 220),
+      makeNode('far-right', 900, 400),
+    ];
+
+    expect(findNearestNodeToViewportCenter(flowInstance as never, nodes)).toBe('center-near');
+  });
+
+  it('switches zoom direction with Shift while holding Z and stops after releasing Z（按住 Z 时 Shift 实时切方向，松开 Z 后停止）', () => {
+    const shell = document.createElement('div');
+    shell.dataset.testid = 'task-dag-canvas-shell';
+    Object.defineProperty(shell, 'clientWidth', { configurable: true, value: 800 });
+    Object.defineProperty(shell, 'clientHeight', { configurable: true, value: 600 });
+    document.body.appendChild(shell);
+
+    const viewport = { x: 0, y: 0, zoom: 1 };
+    const setViewport = vi.fn((next: { x: number; y: number; zoom: number }) => {
+      viewport.x = next.x;
+      viewport.y = next.y;
+      viewport.zoom = next.zoom;
+    });
+    const flowInstance = {
+      getViewport: () => ({ ...viewport }),
+      setViewport,
+    } as unknown as {
+      getViewport: () => { x: number; y: number; zoom: number };
+      setViewport: (next: { x: number; y: number; zoom: number }) => void;
+    };
+
+    const rafCallbacks = new Map<number, FrameRequestCallback>();
+    let rafId = 1;
+    const requestAnimationFrameSpy = vi.spyOn(window, 'requestAnimationFrame').mockImplementation((callback) => {
+      const id = rafId++;
+      rafCallbacks.set(id, callback);
+      return id;
+    });
+    const cancelAnimationFrameSpy = vi.spyOn(window, 'cancelAnimationFrame').mockImplementation((id) => {
+      rafCallbacks.delete(id);
+    });
+
+    const latestRaf = () => {
+      const callback = Array.from(rafCallbacks.values()).at(-1);
+      expect(callback).toBeTypeOf('function');
+      return callback as FrameRequestCallback;
+    };
+
+    renderHook(() => useTaskDagKeyboard({
+      mode: 'browse',
+      immersive: false,
+      selectedTaskId: null,
+      connectState: null,
+      flowNodes: [makeNode('current', 0, 0)],
+      flowInstance: flowInstance as never,
+      panSpeed: 480,
+      zoomSpeed: 30,
+      onModeChange: vi.fn(),
+      onImmersiveChange: vi.fn(),
+      onSelectedTaskIdChange: vi.fn(),
+      onConnectStateChange: vi.fn(),
+      onConnectExecute: vi.fn(),
+      onQuickCreateUpstream: vi.fn(),
+      onQuickCreateDownstream: vi.fn(),
+      onToggleCollapse: vi.fn(),
+      canToggleCollapse: vi.fn(() => false),
+    }));
+
+    fireEvent.keyDown(document, { key: 'z' });
+    expect(viewport.zoom).toBeGreaterThan(1);
+
+    latestRaf()(16);
+    const zoomBeforeShift = viewport.zoom;
+
+    fireEvent.keyDown(document, { key: 'Shift' });
+    latestRaf()(32);
+    expect(viewport.zoom).toBeLessThan(zoomBeforeShift);
+
+    const callCountBeforeRelease = setViewport.mock.calls.length;
+    fireEvent.keyUp(document, { key: 'Z' });
+    latestRaf()(48);
+    expect(setViewport).toHaveBeenCalledTimes(callCountBeforeRelease);
+
+    requestAnimationFrameSpy.mockRestore();
+    cancelAnimationFrameSpy.mockRestore();
   });
 });

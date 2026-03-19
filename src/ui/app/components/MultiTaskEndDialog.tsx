@@ -46,7 +46,7 @@ export function MultiTaskEndDialog({
     setFeedback('');
     setOutcomes(
       normalizedTaskIds.reduce<Record<string, TaskStatusChoice>>((next, taskId) => {
-        next[taskId] = 'continue';
+        next[taskId] = 'suspended';
         return next;
       }, {}),
     );

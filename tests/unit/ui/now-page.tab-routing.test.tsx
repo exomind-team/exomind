@@ -3,6 +3,7 @@ import { createContext, useContext } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen } from '@testing-library/react';
 import { NowPage } from '@/ui/app/pages/NowPage';
+import { EVENTLOG_LAST_TAB_KEY } from '@/ui/app/pages/eventlog-route-memory';
 
 const navigateMock = vi.fn();
 let locationState = {
@@ -85,6 +86,7 @@ vi.mock('@/ui/app/components/NowTodayTab', () => ({
 describe('NowPage tab routing', () => {
   beforeEach(() => {
     navigateMock.mockReset();
+    window.sessionStorage.clear();
     locationState = {
       pathname: '/eventlog',
       searchStr: '',
@@ -118,5 +120,13 @@ describe('NowPage tab routing', () => {
       search: {},
       replace: true,
     });
+  });
+
+  it('does not overwrite remembered tab when the route search is empty（空 search 不覆盖已记忆页签）', () => {
+    window.sessionStorage.setItem(EVENTLOG_LAST_TAB_KEY, 'today');
+
+    render(<NowPage />);
+
+    expect(window.sessionStorage.getItem(EVENTLOG_LAST_TAB_KEY)).toBe('today');
   });
 });

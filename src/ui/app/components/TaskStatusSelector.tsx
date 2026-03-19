@@ -1,10 +1,16 @@
 export type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'cancelled';
 
-const STATUS_OPTIONS: readonly { key: TaskStatusChoice; label: string }[] = [
+export const TASK_STATUS_SELECTOR_OPTIONS: readonly { key: TaskStatusChoice; label: string }[] = [
   { key: 'suspended', label: '挂起' },
   { key: 'continue', label: '继续' },
   { key: 'completed', label: '完成' },
   { key: 'cancelled', label: '取消' },
+] as const;
+
+export const TASK_STATUS_SELECTOR_END_OPTIONS: readonly TaskStatusChoice[] = [
+  'suspended',
+  'completed',
+  'cancelled',
 ] as const;
 
 interface TaskStatusSelectorProps {
@@ -12,6 +18,7 @@ interface TaskStatusSelectorProps {
   onChange: (choice: TaskStatusChoice) => void;
   helperLabel?: string;
   helperHint?: string;
+  allowedChoices?: readonly TaskStatusChoice[];
   optionTestIdPrefix?: string;
   'data-testid'?: string;
 }
@@ -21,11 +28,15 @@ export function TaskStatusSelector({
   onChange,
   helperLabel = '关联任务下一步状态',
   helperHint = '请选择',
+  allowedChoices,
   optionTestIdPrefix,
   'data-testid': testId = 'feedback-task-status-selector',
 }: TaskStatusSelectorProps) {
-  const activeIndex = Math.max(0, STATUS_OPTIONS.findIndex((option) => option.key === value));
-  const indicatorWidth = `${100 / STATUS_OPTIONS.length}%`;
+  const statusOptions = TASK_STATUS_SELECTOR_OPTIONS.filter((option) => (
+    !allowedChoices || allowedChoices.includes(option.key)
+  ));
+  const activeIndex = Math.max(0, statusOptions.findIndex((option) => option.key === value));
+  const indicatorWidth = `${100 / Math.max(1, statusOptions.length)}%`;
   const helperId = `${testId}-helper`;
 
   return (
@@ -46,8 +57,11 @@ export function TaskStatusSelector({
           className="pointer-events-none absolute inset-y-0 left-0 rounded-[8px] border border-brand-accent/40 bg-brand-accent/15 shadow-[0_1px_2px_rgba(0,0,0,0.05)] transition-transform duration-200 ease-out"
           style={{ width: indicatorWidth, transform: `translateX(${activeIndex * 100}%)` }}
         />
-        <div className="relative z-10 grid min-w-0 grid-cols-4 gap-0">
-          {STATUS_OPTIONS.map(({ key, label }) => (
+        <div
+          className="relative z-10 grid min-w-0 gap-0"
+          style={{ gridTemplateColumns: `repeat(${Math.max(1, statusOptions.length)}, minmax(0, 1fr))` }}
+        >
+          {statusOptions.map(({ key, label }) => (
             <button
               key={key}
               type="button"

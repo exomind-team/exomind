@@ -9,7 +9,11 @@ import {
 } from '@/components/ui/dialog';
 import { Textarea } from '@/components/ui/textarea';
 import { cn } from '@/lib/utils';
-import { TaskStatusSelector, type TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+import {
+  TaskStatusSelector,
+  TASK_STATUS_SELECTOR_END_OPTIONS,
+  type TaskStatusChoice,
+} from '@/ui/app/components/TaskStatusSelector';
 import type { TaskNode } from '@/lib/types/task';
 
 const TASK_STATUS_LABEL: Record<TaskNode['status'], string> = {
@@ -121,7 +125,8 @@ export function TimeBlockFeedbackDialog({
                   <TaskStatusSelector
                     data-testid={taskStatusTestIds?.selector?.(task.id) ?? `task-dag-end-dialog-status-${task.id}`}
                     optionTestIdPrefix={taskStatusTestIds?.optionPrefix?.(task.id)}
-                    value={outcomes[task.id] ?? 'continue'}
+                    value={outcomes[task.id] ?? 'suspended'}
+                    allowedChoices={TASK_STATUS_SELECTOR_END_OPTIONS}
                     onChange={(choice) => onOutcomeChange?.(task.id, choice)}
                   />
                 </div>

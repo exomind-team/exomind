@@ -73,6 +73,9 @@ describe('issue-198 desktop settings shell（桌面设置壳层）', () => {
   it('adds collapsible desktop sidebar state and toggle（桌面侧栏支持收起状态与切换按钮）', () => {
     expect(source).toContain('desktopSidebarCollapsed');
     expect(source).toContain('setDesktopSidebarCollapsed');
+    expect(source).toContain("const DESKTOP_SIDEBAR_COLLAPSED_STORAGE_KEY = 'exomind:desktop-sidebar-collapsed'");
+    expect(source).toContain('readStoredDesktopSidebarCollapsed');
+    expect(source).toContain('writeStoredDesktopSidebarCollapsed');
     expect(source).toContain('data-testid="desktop-sidebar-toggle"');
     expect(source).toContain('收起侧边栏');
     expect(source).toContain('展开侧边栏');

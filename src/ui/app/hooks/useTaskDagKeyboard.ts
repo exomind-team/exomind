@@ -1,4 +1,4 @@
-import { useCallback, useEffect } from 'react';
+import { useCallback, useEffect, useRef } from 'react';
 import type { ReactFlowInstance } from '@xyflow/react';
 import type { TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 import type { TaskDagFlowEdge, TaskDagFlowNode } from '@/ui/app/pages/task-dag-flow';
@@ -16,13 +16,9 @@ const DIRECTION_ANGLES: Record<Direction, number> = {
 
 const WASD_DIRECTION: Record<string, Direction> = {
   w: 'up',
-  W: 'up',
   a: 'left',
-  A: 'left',
   s: 'down',
-  S: 'down',
   d: 'right',
-  D: 'right',
 };
 
 const ARROW_DIRECTION: Record<string, Direction> = {
@@ -32,6 +28,8 @@ const ARROW_DIRECTION: Record<string, Direction> = {
   ArrowRight: 'right',
 };
 
+const TASK_DAG_MIN_ZOOM = 0.01;
+const TASK_DAG_MAX_ZOOM = 2.5;
 export interface TaskDagKeyboardOptions {
   mode: TaskDagMode;
   immersive: boolean;
@@ -40,6 +38,7 @@ export interface TaskDagKeyboardOptions {
   flowNodes: TaskDagFlowNode[];
   flowInstance: ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null;
   panSpeed: number;
+  zoomSpeed: number;
   onModeChange: (mode: TaskDagMode) => void;
   onImmersiveChange: (immersive: boolean) => void;
   onSelectedTaskIdChange: (taskId: string | null) => void;
@@ -47,6 +46,8 @@ export interface TaskDagKeyboardOptions {
   onConnectExecute: (sourceId: string, targetId: string, type: 'hard' | 'soft') => void;
   onQuickCreateUpstream: (fromNodeId: string) => void;
   onQuickCreateDownstream: (fromNodeId: string) => void;
+  onToggleCollapse: (direction: 'upstream' | 'downstream', nodeId: string) => void;
+  canToggleCollapse: (direction: 'upstream' | 'downstream', nodeId: string) => boolean;
 }
 
 function isInputFocused(): boolean {
@@ -63,6 +64,21 @@ function isInputFocused(): boolean {
     || tagName === 'select'
     || element.isContentEditable
   );
+}
+
+function normalizeContinuousKey(key: string): string {
+  if (key === 'Shift') {
+    return 'Shift';
+  }
+
+  if (key.length === 1) {
+    const lowered = key.toLowerCase();
+    if (lowered === 'w' || lowered === 'a' || lowered === 's' || lowered === 'd' || lowered === 'z') {
+      return lowered;
+    }
+  }
+
+  return key;
 }
 
 export function findNearestNodeInDirection(
@@ -116,6 +132,58 @@ export function findNearestNodeInDirection(
   return bestId;
 }
 
+function getCanvasShell(): HTMLElement | null {
+  return document.querySelector<HTMLElement>('[data-testid="task-dag-canvas-shell"]');
+}
+
+function getNodeScreenCenter(
+  node: TaskDagFlowNode,
+  viewport: { x: number; y: number; zoom: number },
+): { x: number; y: number } {
+  const nodeWidth = node.measured?.width ?? 256;
+  const nodeHeight = node.measured?.height ?? 140;
+  return {
+    x: node.position.x * viewport.zoom + viewport.x + (nodeWidth * viewport.zoom) / 2,
+    y: node.position.y * viewport.zoom + viewport.y + (nodeHeight * viewport.zoom) / 2,
+  };
+}
+
+export function findNearestNodeToViewportCenter(
+  flowInstance: ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null,
+  nodes: TaskDagFlowNode[],
+): string | null {
+  if (!flowInstance || nodes.length === 0) {
+    return null;
+  }
+
+  const container = getCanvasShell();
+  if (!container) {
+    return null;
+  }
+
+  const viewport = flowInstance.getViewport();
+  const viewportCenter = {
+    x: container.clientWidth / 2,
+    y: container.clientHeight / 2,
+  };
+
+  let bestId: string | null = null;
+  let bestDistance = Infinity;
+
+  for (const node of nodes) {
+    const center = getNodeScreenCenter(node, viewport);
+    const dx = center.x - viewportCenter.x;
+    const dy = center.y - viewportCenter.y;
+    const distance = Math.sqrt(dx * dx + dy * dy);
+    if (distance < bestDistance) {
+      bestDistance = distance;
+      bestId = node.id;
+    }
+  }
+
+  return bestId;
+}
+
 export function ensureNodeVisible(
   nodeId: string,
   flowInstance: ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null,
@@ -138,7 +206,7 @@ export function ensureNodeVisible(
   const screenY = node.position.y * zoom + viewport.y;
   const screenWidth = nodeWidth * zoom;
   const screenHeight = nodeHeight * zoom;
-  const container = document.querySelector<HTMLElement>('[data-testid="task-dag-canvas-shell"]');
+  const container = getCanvasShell();
   if (!container) {
     return;
   }
@@ -173,6 +241,7 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     flowNodes,
     flowInstance,
     panSpeed,
+    zoomSpeed,
     onModeChange,
     onImmersiveChange,
     onSelectedTaskIdChange,
@@ -180,7 +249,137 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     onConnectExecute,
     onQuickCreateUpstream,
     onQuickCreateDownstream,
+    onToggleCollapse,
+    canToggleCollapse,
   } = options;
+
+  const pressedKeysRef = useRef<Set<string>>(new Set());
+  const frameRef = useRef<number | null>(null);
+  const lastFrameTimeRef = useRef<number | null>(null);
+
+  const resolveFocusNodeId = useCallback(() => {
+    if (mode === 'connect' && connectState) {
+      return selectedTaskId ?? connectState.sourceId;
+    }
+    return selectedTaskId;
+  }, [connectState, mode, selectedTaskId]);
+
+  const stopContinuousLoop = useCallback(() => {
+    if (frameRef.current !== null) {
+      window.cancelAnimationFrame(frameRef.current);
+      frameRef.current = null;
+    }
+    lastFrameTimeRef.current = null;
+  }, []);
+
+  const applyPan = useCallback((direction: Direction, deltaMs: number) => {
+    if (!flowInstance) {
+      return;
+    }
+
+    const viewport = flowInstance.getViewport();
+    const step = panSpeed * (deltaMs / 1000);
+    const panMap: Record<Direction, { x: number; y: number }> = {
+      up: { x: 0, y: step },
+      down: { x: 0, y: -step },
+      left: { x: step, y: 0 },
+      right: { x: -step, y: 0 },
+    };
+    const pan = panMap[direction];
+    flowInstance.setViewport({
+      x: viewport.x + pan.x,
+      y: viewport.y + pan.y,
+      zoom: viewport.zoom,
+    });
+  }, [flowInstance, panSpeed]);
+
+  const applyZoom = useCallback((zoomOut: boolean, deltaMs: number) => {
+    if (!flowInstance) {
+      return;
+    }
+
+    const viewport = flowInstance.getViewport();
+    const zoomDelta = (zoomSpeed / 100) * (deltaMs / 1000);
+    const nextZoom = zoomOut
+      ? viewport.zoom - zoomDelta
+      : viewport.zoom + zoomDelta;
+    const normalizedZoom = Math.min(TASK_DAG_MAX_ZOOM, Math.max(TASK_DAG_MIN_ZOOM, nextZoom));
+    const container = getCanvasShell();
+    if (!container) {
+      flowInstance.setViewport({
+        x: viewport.x,
+        y: viewport.y,
+        zoom: normalizedZoom,
+      });
+      return;
+    }
+
+    const centerX = container.clientWidth / 2;
+    const centerY = container.clientHeight / 2;
+    const worldCenterX = (centerX - viewport.x) / viewport.zoom;
+    const worldCenterY = (centerY - viewport.y) / viewport.zoom;
+    flowInstance.setViewport({
+      x: centerX - worldCenterX * normalizedZoom,
+      y: centerY - worldCenterY * normalizedZoom,
+      zoom: normalizedZoom,
+    });
+  }, [flowInstance, zoomSpeed]);
+
+  const applyContinuousAction = useCallback((key: string, deltaMs: number) => {
+    const normalizedKey = normalizeContinuousKey(key);
+    const wasdDirection = WASD_DIRECTION[normalizedKey];
+    const arrowDirection = ARROW_DIRECTION[normalizedKey];
+    if (wasdDirection) {
+      applyPan(wasdDirection, deltaMs);
+      return;
+    }
+    if (arrowDirection) {
+      applyPan(arrowDirection, deltaMs);
+      return;
+    }
+
+    if (normalizedKey === 'z') {
+      applyZoom(pressedKeysRef.current.has('Shift'), deltaMs);
+    }
+  }, [applyPan, applyZoom]);
+
+  const runContinuousLoop = useCallback((timestamp: number) => {
+    if (pressedKeysRef.current.size === 0) {
+      stopContinuousLoop();
+      return;
+    }
+
+    const lastFrameTime = lastFrameTimeRef.current ?? timestamp;
+    const deltaMs = Math.max(16, Math.min(64, timestamp - lastFrameTime));
+    lastFrameTimeRef.current = timestamp;
+
+    for (const key of pressedKeysRef.current) {
+      applyContinuousAction(key, deltaMs);
+    }
+
+    frameRef.current = window.requestAnimationFrame(runContinuousLoop);
+  }, [applyContinuousAction, stopContinuousLoop]);
+
+  const startContinuousAction = useCallback((key: string) => {
+    const normalizedKey = normalizeContinuousKey(key);
+    if (pressedKeysRef.current.has(normalizedKey)) {
+      return;
+    }
+
+    pressedKeysRef.current.add(normalizedKey);
+    applyContinuousAction(normalizedKey, 1000 / 60);
+    if (frameRef.current === null) {
+      lastFrameTimeRef.current = null;
+      frameRef.current = window.requestAnimationFrame(runContinuousLoop);
+    }
+  }, [applyContinuousAction, runContinuousLoop]);
+
+  const stopContinuousAction = useCallback((key: string) => {
+    pressedKeysRef.current.delete(normalizeContinuousKey(key));
+    if (pressedKeysRef.current.size === 0) {
+      stopContinuousLoop();
+    }
+  }, [stopContinuousLoop]);
 
   const handleKeyDown = useCallback((event: KeyboardEvent) => {
     if (isInputFocused()) {
@@ -188,6 +387,13 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     }
 
     const key = event.key;
+    const normalizedKey = normalizeContinuousKey(key);
+    const focusNodeId = resolveFocusNodeId();
+
+    if (normalizedKey === 'Shift') {
+      pressedKeysRef.current.add('Shift');
+      return;
+    }
 
     if (key === 'Escape') {
       if (immersive) {
@@ -198,6 +404,23 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
       if (mode === 'connect' && connectState) {
         onConnectStateChange(null);
         event.preventDefault();
+        return;
+      }
+      if (selectedTaskId) {
+        onSelectedTaskIdChange(null);
+        event.preventDefault();
+      }
+      return;
+    }
+
+    if (key === 'E' || key === 'e') {
+      if (!focusNodeId) {
+        const nearestNodeId = findNearestNodeToViewportCenter(flowInstance, flowNodes);
+        if (nearestNodeId) {
+          onSelectedTaskIdChange(nearestNodeId);
+          ensureNodeVisible(nearestNodeId, flowInstance, flowNodes);
+          event.preventDefault();
+        }
       }
       return;
     }
@@ -211,15 +434,27 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
       return;
     }
 
+    if (event.altKey && (key === 'f' || key === 'F')) {
+      const collapseTargetId = mode === 'connect' && connectState
+        ? connectState.sourceId
+        : focusNodeId;
+      const direction = event.shiftKey ? 'upstream' : 'downstream';
+      if (collapseTargetId && canToggleCollapse(direction, collapseTargetId)) {
+        onToggleCollapse(direction, collapseTargetId);
+        event.preventDefault();
+      }
+      return;
+    }
+
     if ((key === 'Enter' || key === ' ') && mode === 'connect') {
       event.preventDefault();
 
-      if (!connectState && selectedTaskId) {
-        onConnectStateChange({ sourceId: selectedTaskId, type: 'hard' });
+      if (!connectState && focusNodeId) {
+        onConnectStateChange({ sourceId: focusNodeId, type: 'hard' });
         return;
       }
 
-      if (connectState && selectedTaskId === connectState.sourceId) {
+      if (connectState && focusNodeId === connectState.sourceId) {
         if (connectState.type === 'hard') {
           onConnectStateChange({ sourceId: connectState.sourceId, type: 'soft' });
         } else {
@@ -228,28 +463,29 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
         return;
       }
 
-      if (connectState && selectedTaskId && selectedTaskId !== connectState.sourceId) {
-        onConnectExecute(connectState.sourceId, selectedTaskId, connectState.type);
+      if (connectState && focusNodeId && focusNodeId !== connectState.sourceId) {
+        onConnectExecute(connectState.sourceId, focusNodeId, connectState.type);
         onConnectStateChange(null);
       }
       return;
     }
 
-    if (key === 'Tab' && mode === 'connect' && selectedTaskId) {
+    if (key === 'Tab' && mode === 'connect') {
+      const quickCreateAnchorId = connectState?.sourceId ?? focusNodeId;
+      if (!quickCreateAnchorId) {
+        return;
+      }
       event.preventDefault();
       if (event.shiftKey) {
-        onQuickCreateUpstream(selectedTaskId);
+        onQuickCreateUpstream(quickCreateAnchorId);
       } else {
-        onQuickCreateDownstream(selectedTaskId);
+        onQuickCreateDownstream(quickCreateAnchorId);
       }
       return;
     }
 
-    const wasdDirection = WASD_DIRECTION[key];
+    const wasdDirection = WASD_DIRECTION[normalizedKey];
     if (wasdDirection) {
-      const focusNodeId = mode === 'connect' && connectState
-        ? selectedTaskId ?? connectState.sourceId
-        : selectedTaskId;
       if (focusNodeId) {
         const nextId = findNearestNodeInDirection(focusNodeId, wasdDirection, flowNodes);
         if (nextId) {
@@ -260,43 +496,23 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
         return;
       }
 
-      if (flowInstance) {
-        const viewport = flowInstance.getViewport();
-        const panMap: Record<Direction, { x: number; y: number }> = {
-          up: { x: 0, y: panSpeed },
-          down: { x: 0, y: -panSpeed },
-          left: { x: panSpeed, y: 0 },
-          right: { x: -panSpeed, y: 0 },
-        };
-        const pan = panMap[wasdDirection];
-        flowInstance.setViewport({
-          x: viewport.x + pan.x,
-          y: viewport.y + pan.y,
-          zoom: viewport.zoom,
-        });
-        event.preventDefault();
-      }
+      startContinuousAction(normalizedKey);
+      event.preventDefault();
       return;
     }
 
-    const arrowDirection = ARROW_DIRECTION[key];
-    if (arrowDirection && flowInstance) {
-      const viewport = flowInstance.getViewport();
-      const panMap: Record<Direction, { x: number; y: number }> = {
-        up: { x: 0, y: panSpeed },
-        down: { x: 0, y: -panSpeed },
-        left: { x: panSpeed, y: 0 },
-        right: { x: -panSpeed, y: 0 },
-      };
-      const pan = panMap[arrowDirection];
-      flowInstance.setViewport({
-        x: viewport.x + pan.x,
-        y: viewport.y + pan.y,
-        zoom: viewport.zoom,
-      });
+    if (ARROW_DIRECTION[normalizedKey]) {
+      startContinuousAction(normalizedKey);
+      event.preventDefault();
+      return;
+    }
+
+    if (normalizedKey === 'z' && !event.ctrlKey && !event.metaKey && !event.altKey) {
+      startContinuousAction(normalizedKey);
       event.preventDefault();
     }
   }, [
+    canToggleCollapse,
     connectState,
     flowInstance,
     flowNodes,
@@ -308,15 +524,31 @@ export function useTaskDagKeyboard(options: TaskDagKeyboardOptions): void {
     onQuickCreateDownstream,
     onQuickCreateUpstream,
     onSelectedTaskIdChange,
-    panSpeed,
-    selectedTaskId,
     onConnectExecute,
+    onToggleCollapse,
+    resolveFocusNodeId,
+    startContinuousAction,
   ]);
+
+  const handleKeyUp = useCallback((event: KeyboardEvent) => {
+    stopContinuousAction(event.key);
+  }, [stopContinuousAction]);
+
+  const handleWindowBlur = useCallback(() => {
+    pressedKeysRef.current.clear();
+    stopContinuousLoop();
+  }, [stopContinuousLoop]);
 
   useEffect(() => {
     document.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keyup', handleKeyUp);
+    window.addEventListener('blur', handleWindowBlur);
     return () => {
       document.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keyup', handleKeyUp);
+      window.removeEventListener('blur', handleWindowBlur);
+      pressedKeysRef.current.clear();
+      stopContinuousLoop();
     };
-  }, [handleKeyDown]);
+  }, [handleKeyDown, handleKeyUp, handleWindowBlur, stopContinuousLoop]);
 }

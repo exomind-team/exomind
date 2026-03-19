@@ -13,6 +13,11 @@ import {
 
 type NowTabValue = (typeof EVENTLOG_TAB_VALUES)[number];
 
+function readExplicitNowTab(searchStr: string): NowTabValue | null {
+  const rawValue = new URLSearchParams(searchStr).get('tab');
+  return EVENTLOG_TAB_VALUES.includes(rawValue as NowTabValue) ? rawValue as NowTabValue : null;
+}
+
 function resolveNowTab(searchStr: string): NowTabValue {
   return normalizeEventlogTab(new URLSearchParams(searchStr).get('tab'));
 }
@@ -22,10 +27,13 @@ export function NowPage() {
   const navigate = useNavigate();
   const activeTab = resolveNowTab(location.searchStr ?? '');
   const currentPath = location.pathname === '/' ? '/' : '/eventlog';
+  const explicitTab = readExplicitNowTab(location.searchStr ?? '');
 
   useEffect(() => {
-    setEventlogLastTab(activeTab);
-  }, [activeTab]);
+    if (explicitTab) {
+      setEventlogLastTab(explicitTab);
+    }
+  }, [explicitTab]);
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]">
@@ -33,6 +41,7 @@ export function NowPage() {
         value={activeTab}
         onValueChange={(nextValue) => {
           const nextTab = EVENTLOG_TAB_VALUES.includes(nextValue as NowTabValue) ? (nextValue as NowTabValue) : 'focus';
+          setEventlogLastTab(nextTab);
           void navigate({
             to: currentPath,
             search: nextTab === 'focus' ? {} : { tab: nextTab },
