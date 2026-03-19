@@ -20,7 +20,12 @@ import { getClipboardService } from '@/lib/services';
 import type { ClipboardFailureReason } from '@/lib/services';
 import { VoiceInputButton, type VoiceInputButtonHandle } from '@/components/VoiceInputButton';
 import type { VoiceMessageInputHandle } from '@/components/VoiceMessageInput';
-import { getInputSendMode, subscribeInputSendModeChanges, type InputSendMode } from '@/config/input-send-mode';
+import {
+  getInputSendMode,
+  subscribeInputSendModeChanges,
+  shouldSubmitOnEnter,
+  type InputSendMode,
+} from '@/config/input-send-mode';
 import { clearInputDraft, readInputDraft, writeInputDraft } from '@/lib/storage/input-draft-storage';
 import { publishVoiceTranscriptSignal } from '@/lib/services/voice-signal.service';
 import { log } from '@/lib/logger';
@@ -55,18 +60,6 @@ function getPasteFailureLabel(reason: ClipboardFailureReason): string {
   if (reason === 'not-focused') return '未激活';
   if (reason === 'insecure-context' || reason === 'not-supported') return '不支持';
   return '未粘贴';
-}
-
-function shouldSendOnEnter(mode: InputSendMode, event: KeyboardEvent<HTMLTextAreaElement>): boolean {
-  if (event.key !== 'Enter') return false;
-  if (event.altKey) return false;
-
-  if (mode === 'enter-send') {
-    return !event.shiftKey && !event.ctrlKey && !event.metaKey;
-  }
-
-  if (event.shiftKey) return false;
-  return event.ctrlKey || event.metaKey;
 }
 
 function mergeTranscriptText(currentValue: string, transcript: string): string {
@@ -304,7 +297,7 @@ export const NowInputRow = forwardRef<VoiceMessageInputHandle, NowInputRowProps>
 
     if (event.key !== 'Enter' || event.altKey) return;
 
-    if (shouldSendOnEnter(inputSendMode, event)) {
+    if (shouldSubmitOnEnter(inputSendMode, event)) {
       event.preventDefault();
       if (value.trim()) {
         void submitInput();

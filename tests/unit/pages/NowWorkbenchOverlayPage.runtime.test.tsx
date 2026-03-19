@@ -2,6 +2,7 @@
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { clearRitualSession, getTodayRitualDayKey, saveRitualSession } from '@/ui/app/ritual/ritual-session-storage';
+import { setInputSendMode } from '@/config/input-send-mode';
 
 const currentUserState = {
   userId: 'overlay-test-user',
@@ -187,6 +188,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     vi.restoreAllMocks();
     vi.resetModules();
     clearRitualSession();
+    setInputSendMode('ctrl-enter-send');
     blockListener = null;
     taskStorageListener = null;
     eventStorageListener = null;
@@ -570,11 +572,11 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
 
     const textarea = await screen.findByTestId('now-overlay-feedback-textarea');
     expect(screen.getByTestId('now-overlay-feedback-surface')).toBeInTheDocument();
-    expect(screen.getByTestId('now-overlay-feedback-shortcut-hint')).toHaveTextContent('Enter / Ctrl+Enter 提交 · Shift+Enter 换行');
+    expect(screen.getByTestId('now-overlay-feedback-shortcut-hint')).toHaveTextContent('Ctrl+Enter 提交 · Enter / Shift+Enter 换行');
     expect(screen.getByTestId('now-overlay-feedback-confirm')).toBeInTheDocument();
 
     fireEvent.change(textarea, { target: { value: '悬浮窗反馈提交' } });
-    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter' });
+    fireEvent.keyDown(textarea, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
     await waitFor(() => {
       expect(endBlockMock).toHaveBeenCalledWith('悬浮窗反馈提交');

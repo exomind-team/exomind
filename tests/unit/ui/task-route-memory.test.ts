@@ -11,7 +11,9 @@ describe('task route memory helpers', () => {
 
   it('skips restore when the search explicitly requests the tasks root', () => {
     expect(shouldForceTasksMain('?main=1')).toBe(true);
+    expect(shouldForceTasksMain('?main=%221%22')).toBe(true);
     expect(resolveTasksRestorePath('/tasks/dag', '?main=1')).toBeNull();
+    expect(resolveTasksRestorePath('/tasks/dag', '?main=%221%22')).toBeNull();
   });
 
   it('restores the saved sub-route when no force-main flag is present', () => {

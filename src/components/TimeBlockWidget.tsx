@@ -18,16 +18,7 @@ import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
 import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-  DialogFooter,
-} from '@/components/ui/dialog';
 import { useToast } from '@/components/ui/toast-hook';
-import { FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS } from '@/config/feedback-preferences';
 import { getTimeBlockService, TimerMode, TimerConfig } from '@/lib/services';
 import type { ActiveBlockData } from '@/lib/types/event';
 import {
@@ -39,6 +30,11 @@ import {
 import { resolveCountdownOverrunMs } from '@/lib/timeblock/countdown-overrun';
 import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
 import { log } from '@/lib/logger';
+import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
+import {
+  resolveFeedbackSubmitLabel,
+  useFeedbackSubmitControls,
+} from '@/ui/app/components/useFeedbackSubmitControls';
 
 interface TimeBlockWidgetProps {
   /** 是否展开高级选项 */
@@ -62,8 +58,6 @@ export interface TimeBlockWidgetHandle {
   /** 弹出反馈对话框 */
   endDialog: () => void;
 }
-
-type SkipFeedbackConfirmState = 'idle' | 'cooldown' | 'armed';
 
 function isFeedbackStage(block: ActiveBlockData): boolean {
   if (block.feedbackSubmittedAt) {
@@ -92,8 +86,14 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const [feedback, setFeedback] = useState('');
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<SkipFeedbackConfirmState>('idle');
-  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
+  const {
+    canSubmitFeedback,
+    handleFeedbackKeyDown,
+    isSkipFeedbackCoolingDown,
+    resetSkipFeedbackConfirm,
+    skipFeedbackConfirmState,
+    skipFeedbackCountdownSec,
+  } = useFeedbackSubmitControls();
 
   // 倒计时结束动作（纯前端配置，不持久化）
   const [countdownEndSoundEnabled, setCountdownEndSoundEnabled] = useState(true);
@@ -115,41 +115,9 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const countdownEndedRef = useRef(false);
   const countdownOverrunRef = useRef(false);
   const endingMarkedRef = useRef(false);
-  const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
   // Service
   const timeBlockService = getTimeBlockService();
-
-  const clearSkipFeedbackConfirmInterval = useCallback(() => {
-    if (!skipFeedbackConfirmIntervalRef.current) {
-      return;
-    }
-    clearInterval(skipFeedbackConfirmIntervalRef.current);
-    skipFeedbackConfirmIntervalRef.current = null;
-  }, []);
-
-  const resetSkipFeedbackConfirm = useCallback(() => {
-    clearSkipFeedbackConfirmInterval();
-    setSkipFeedbackConfirmState('idle');
-    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
-  }, [clearSkipFeedbackConfirmInterval]);
-
-  const startSkipFeedbackConfirmCooldown = useCallback(() => {
-    clearSkipFeedbackConfirmInterval();
-    setSkipFeedbackConfirmState('cooldown');
-    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
-
-    skipFeedbackConfirmIntervalRef.current = setInterval(() => {
-      setSkipFeedbackCountdownSec((previousSeconds) => {
-        if (previousSeconds <= 1) {
-          clearSkipFeedbackConfirmInterval();
-          setSkipFeedbackConfirmState('armed');
-          return 0;
-        }
-        return previousSeconds - 1;
-      });
-    }, 1000);
-  }, [clearSkipFeedbackConfirmInterval]);
 
   const playCountdownEndSound = useCallback(async () => {
     if (!countdownEndSoundEnabled) return;
@@ -424,17 +392,9 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
     if (feedbackSubmitting) return;
 
     const trimmedFeedback = feedbackText?.trim() ?? '';
-    if (trimmedFeedback.length === 0) {
-      if (skipFeedbackConfirmState === 'idle') {
-        startSkipFeedbackConfirmCooldown();
-        return;
-      }
-      if (skipFeedbackConfirmState === 'cooldown') {
-        return;
-      }
+    if (!canSubmitFeedback(trimmedFeedback)) {
+      return;
     }
-
-    resetSkipFeedbackConfirm();
     setFeedbackSubmitting(true);
 
     const normalizedFeedback = trimmedFeedback || undefined;
@@ -522,14 +482,11 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   };
 
   // 清理定时器
-  useEffect(() => {
-    return () => {
-      clearSkipFeedbackConfirmInterval();
-      if (timerRef.current) {
-        cancelAnimationFrame(timerRef.current);
-      }
-    };
-  }, [clearSkipFeedbackConfirmInterval]);
+  useEffect(() => () => {
+    if (timerRef.current) {
+      cancelAnimationFrame(timerRef.current);
+    }
+  }, []);
 
   // 按钮状态
   const isIdle = timerState === 'idle';
@@ -553,8 +510,6 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
       now: Date.now(),
     })
     : null;
-  const isEmptyFeedback = feedback.trim().length === 0;
-  const isSkipFeedbackCoolingDown = isEmptyFeedback && skipFeedbackConfirmState === 'cooldown';
   const isEndActionDisabled = feedbackInProgress && feedbackOpen;
   const endActionTitle = feedbackInProgress ? '反馈中' : '结束';
   const endActionButtonVariant = feedbackInProgress ? 'brand' : 'destructive';
@@ -568,13 +523,13 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
   const endActionIcon = feedbackInProgress
     ? <NotepadText size={16} className="text-white" />
     : <Square size={16} />;
-  const feedbackConfirmLabel = feedbackSubmitting
-    ? '提交中...'
-    : (isEmptyFeedback && skipFeedbackConfirmState === 'cooldown')
-      ? `确认跳过反馈(${skipFeedbackCountdownSec}s)`
-      : (isEmptyFeedback && skipFeedbackConfirmState === 'armed')
-        ? '确认跳过反馈'
-        : '确认结束';
+  const feedbackConfirmLabel = resolveFeedbackSubmitLabel({
+    feedback,
+    isSubmitting: feedbackSubmitting,
+    skipConfirmState: skipFeedbackConfirmState,
+    skipConfirmCountdownSec: skipFeedbackCountdownSec,
+    defaultLabel: '确认结束',
+  });
   const rootClassName = variant === 'new-mobile' ? 'border-y border-[#E8E3DE] bg-white/80' : 'border-b bg-muted/30';
 
   return (
@@ -915,47 +870,33 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
         </div>
       )}
 
-      {/* 身心反馈对话框 */}
-      <Dialog open={feedbackOpen} onOpenChange={handleFeedbackDialogOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>时间块结束</DialogTitle>
-            <DialogDescription>
-              {taskName || '未命名任务'} 完成了，请输入身心状态反馈：
-            </DialogDescription>
-          </DialogHeader>
-          <Textarea
-            placeholder="身心状态如何？"
-            value={feedback}
-            onChange={(e) => {
-              resetSkipFeedbackConfirm();
-              setFeedback(e.target.value);
-            }}
-            onKeyDown={(e) => {
-              if (e.key !== 'Enter') return;
-              if (e.shiftKey || e.ctrlKey) return;
-              e.preventDefault();
-              void handleEndBlock(feedback);
-            }}
-            autoFocus
-            className="min-h-[88px] resize-none"
-            rows={4}
-            data-testid="timeblock-feedback-textarea"
-          />
-          <DialogFooter>
-            <Button
-              size="sm"
-              data-testid="timeblock-feedback-confirm"
-              disabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
-              onClick={() => {
-                void handleEndBlock(feedback);
-              }}
-            >
-              {feedbackConfirmLabel}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TimeBlockFeedbackDialog
+        open={feedbackOpen}
+        onOpenChange={handleFeedbackDialogOpenChange}
+        title="时间块结束"
+        description={`${taskName || '未命名任务'} 完成了，请输入身心状态反馈：`}
+        feedback={feedback}
+        onFeedbackChange={(value) => {
+          resetSkipFeedbackConfirm();
+          setFeedback(value);
+        }}
+        onFeedbackKeyDown={(e) => {
+          handleFeedbackKeyDown(e, async () => {
+            await handleEndBlock(feedback);
+          });
+        }}
+        feedbackPlaceholder="身心状态如何？"
+        feedbackTestId="timeblock-feedback-textarea"
+        onSubmit={() => {
+          void handleEndBlock(feedback);
+        }}
+        submitLabel={feedbackConfirmLabel}
+        submitDisabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
+        submitTestId="timeblock-feedback-confirm"
+        submitButtonClassName="inline-flex items-center justify-center rounded-md bg-primary px-3 py-2 text-sm font-medium text-primary-foreground shadow-sm disabled:pointer-events-none disabled:opacity-50 hover:bg-primary/90"
+        textareaClassName="min-h-[88px] resize-none"
+        autoFocusFeedback
+      />
     </div>
   );
 });
