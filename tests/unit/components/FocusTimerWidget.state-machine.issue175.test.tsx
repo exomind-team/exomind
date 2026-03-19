@@ -1,6 +1,7 @@
 import React, { createRef } from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { setInputSendMode } from '@/config/input-send-mode';
 import { BlockTaskAssociationList } from '@/ui/app/components/BlockTaskAssociationList';
 import { FocusTimerWidget, type FocusTimerWidgetHandle } from '@/ui/app/components/FocusTimerWidget';
 
@@ -59,6 +60,7 @@ vi.mock('@/lib/services', () => ({
 
 describe('FocusTimerWidget state machine（新专注计时组件状态机）', () => {
   beforeEach(() => {
+    setInputSendMode('ctrl-enter-send');
     originalRequestAnimationFrame = globalThis.requestAnimationFrame;
     originalCancelAnimationFrame = globalThis.cancelAnimationFrame;
     globalThis.requestAnimationFrame = vi.fn(() => 1) as unknown as typeof globalThis.requestAnimationFrame;
@@ -466,6 +468,30 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     await waitFor(() => expect(screen.queryByTestId('new-focus-feedback-textarea')).toBeNull());
   });
 
+  it('confirms feedback end with Enter in enter-send mode（反馈弹窗 Enter 模式确认结束）', async () => {
+    setInputSendMode('enter-send');
+    render(<FocusTimerWidget />);
+
+    fireEvent.click(screen.getByTestId('new-focus-idle-card'));
+    fireEvent.change(screen.getByTestId('new-focus-task-input'), {
+      target: { value: '反馈 Enter 模式任务' },
+    });
+    fireEvent.click(screen.getByTestId('new-focus-start-button'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('new-focus-state-running')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('new-focus-end-button'));
+    const feedback = await screen.findByTestId('new-focus-feedback-textarea');
+    fireEvent.change(feedback, { target: { value: 'Enter 提交反馈' } });
+    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith('Enter 提交反馈');
+    });
+  });
+
   it('keeps task status transition when endBlock clears active block immediately（issue-374 结束瞬间清空活跃块仍更新任务状态）', async () => {
     const now = Date.now();
     loadActiveBlockMock.mockResolvedValueOnce({
@@ -505,7 +531,7 @@ describe('FocusTimerWidget state machine（新专注计时组件状态机）', (
     fireEvent.click(screen.getByTestId('new-focus-end-button'));
     await screen.findByTestId('new-focus-feedback-textarea');
     await waitFor(() => {
-      expect(screen.getByTestId('feedback-task-status-section')).toBeInTheDocument();
+      expect(screen.getAllByTestId('feedback-task-status-section')).toHaveLength(2);
       expect(screen.getByTestId('feedback-task-status-row-task-1')).toBeInTheDocument();
       expect(screen.getByTestId('feedback-task-status-row-task-2')).toBeInTheDocument();
     });

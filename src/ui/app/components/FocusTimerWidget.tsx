@@ -13,13 +13,11 @@ import {
   Dialog,
   DialogContent,
   DialogDescription,
-  DialogFooter,
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
 import { Textarea } from '@/components/ui/textarea';
-import { FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS } from '@/config/feedback-preferences';
 import {
   getTimerPreferences,
   subscribeTimerPreferencesChanges,
@@ -36,13 +34,17 @@ import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-tim
 import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { FocusBgmPanel } from '@/ui/app/components/settings/settings-custom-items';
+import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
+import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+import {
+  resolveFeedbackSubmitLabel,
+  useFeedbackSubmitControls,
+} from '@/ui/app/components/useFeedbackSubmitControls';
 
 type FocusUiState = 'idle' | 'config' | 'running'; // UI State Machine（界面状态机）
 type RunningSubState = 'running' | 'paused'; // Running Sub-state（运行子状态）
 export type FocusTimerState = 'idle' | 'running' | 'paused';
-type SkipFeedbackConfirmState = 'idle' | 'cooldown' | 'armed';
 type FocusTimerSurface = 'default' | 'overlay'; // Surface Variant（表面样式变体）
-type TaskStatusChoice = 'continue' | 'suspended' | 'completed' | 'cancelled';
 
 interface FocusTimerWidgetProps {
   surface?: FocusTimerSurface;
@@ -116,13 +118,6 @@ function buildTaskStatusChoices(
   }, {});
 }
 
-const TASK_STATUS_OPTIONS = [
-  { key: 'suspended' as const, label: '挂起' },
-  { key: 'continue' as const, label: '继续' },
-  { key: 'completed' as const, label: '完成' },
-  { key: 'cancelled' as const, label: '取消' },
-];
-
 export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWidgetProps>(function FocusTimerWidget(
   { surface = 'default' },
   ref,
@@ -156,9 +151,14 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const [feedback, setFeedback] = useState('');
   const [feedbackInProgress, setFeedbackInProgress] = useState(false);
   const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
-  const [skipFeedbackConfirmState, setSkipFeedbackConfirmState] = useState<SkipFeedbackConfirmState>('idle');
-  const [skipFeedbackCountdownSec, setSkipFeedbackCountdownSec] = useState(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
-  const skipFeedbackConfirmIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const {
+    canSubmitFeedback,
+    handleFeedbackKeyDown,
+    isSkipFeedbackCoolingDown,
+    resetSkipFeedbackConfirm,
+    skipFeedbackConfirmState,
+    skipFeedbackCountdownSec,
+  } = useFeedbackSubmitControls();
 
   // Task status selector in feedback dialog
   const activeBlockDataRef = useRef<ActiveBlockData | null>(null);
@@ -187,37 +187,6 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       now: Date.now(),
     })
     : null;
-
-  const clearSkipFeedbackConfirmInterval = useCallback(() => {
-    if (!skipFeedbackConfirmIntervalRef.current) {
-      return;
-    }
-    clearInterval(skipFeedbackConfirmIntervalRef.current);
-    skipFeedbackConfirmIntervalRef.current = null;
-  }, []);
-
-  const resetSkipFeedbackConfirm = useCallback(() => {
-    clearSkipFeedbackConfirmInterval();
-    setSkipFeedbackConfirmState('idle');
-    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
-  }, [clearSkipFeedbackConfirmInterval]);
-
-  const startSkipFeedbackConfirmCooldown = useCallback(() => {
-    clearSkipFeedbackConfirmInterval();
-    setSkipFeedbackConfirmState('cooldown');
-    setSkipFeedbackCountdownSec(FEEDBACK_SKIP_CONFIRM_COOLDOWN_SECONDS);
-
-    skipFeedbackConfirmIntervalRef.current = setInterval(() => {
-      setSkipFeedbackCountdownSec((previousSeconds) => {
-        if (previousSeconds <= 1) {
-          clearSkipFeedbackConfirmInterval();
-          setSkipFeedbackConfirmState('armed');
-          return 0;
-        }
-        return previousSeconds - 1;
-      });
-    }, 1000);
-  }, [clearSkipFeedbackConfirmInterval]);
 
   const syncIdleElapsedFromMode = useCallback((mode: TimerMode, minutes: number) => {
     setElapsedMs(mode === 'countdown' ? minutes * 60 * 1000 : 0);
@@ -601,17 +570,9 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
       }
       return outcomes;
     }, {});
-    if (trimmedFeedback.length === 0) {
-      if (skipFeedbackConfirmState === 'idle') {
-        startSkipFeedbackConfirmCooldown();
-        return;
-      }
-      if (skipFeedbackConfirmState === 'cooldown') {
-        return;
-      }
+    if (!canSubmitFeedback(trimmedFeedback)) {
+      return;
     }
-
-    resetSkipFeedbackConfirm();
     setFeedbackSubmitting(true);
 
     const t0 = perfNow();
@@ -674,11 +635,9 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     syncIdleElapsedFromMode(timerMode, countdownMinutes);
   }, [
     applyActiveBlock,
+    canSubmitFeedback,
     countdownMinutes,
     feedbackSubmitting,
-    resetSkipFeedbackConfirm,
-    skipFeedbackConfirmState,
-    startSkipFeedbackConfirmCooldown,
     syncIdleElapsedFromMode,
     linkedTasks,
     taskStatusChoices,
@@ -694,24 +653,6 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
     setFeedbackOpen(nextOpen);
   }, []);
 
-  const handleFeedbackKeyDown = useCallback((event: KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.nativeEvent.isComposing) return;
-    if (event.key !== 'Enter') return;
-    if (!(event.ctrlKey || event.metaKey)) return;
-    if (event.altKey || event.shiftKey) return;
-
-    event.preventDefault();
-    void handleConfirmEnd();
-  }, [handleConfirmEnd]);
-
-  useEffect(() => {
-    return () => {
-      clearSkipFeedbackConfirmInterval();
-    };
-  }, [clearSkipFeedbackConfirmInterval]);
-
-  const isEmptyFeedback = feedback.trim().length === 0;
-  const isSkipFeedbackCoolingDown = isEmptyFeedback && skipFeedbackConfirmState === 'cooldown';
   const isEndActionDisabled = feedbackInProgress && feedbackOpen;
   const endActionAriaLabel = feedbackInProgress ? '反馈中（Feedback in progress）' : '结束（End）';
   const endActionTitle = feedbackInProgress ? '反馈中' : '结束';
@@ -721,13 +662,13 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
   const endActionIcon = feedbackInProgress
     ? <NotepadText size={18} className="text-white" />
     : <Square size={18} />;
-  const feedbackConfirmLabel = feedbackSubmitting
-    ? '提交中...'
-    : (isEmptyFeedback && skipFeedbackConfirmState === 'cooldown')
-      ? `确认跳过反馈(${skipFeedbackCountdownSec}s)`
-      : (isEmptyFeedback && skipFeedbackConfirmState === 'armed')
-        ? '确认跳过反馈'
-        : '确认结束';
+  const feedbackConfirmLabel = resolveFeedbackSubmitLabel({
+    feedback,
+    isSubmitting: feedbackSubmitting,
+    skipConfirmState: skipFeedbackConfirmState,
+    skipConfirmCountdownSec: skipFeedbackCountdownSec,
+    defaultLabel: '确认结束',
+  });
 
   useImperativeHandle(
     ref,
@@ -1023,87 +964,43 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
         </section>
       )}
 
-      <Dialog open={feedbackOpen} onOpenChange={handleFeedbackDialogOpenChange}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>结束专注并记录反馈</DialogTitle>
-            <DialogDescription>记录本次专注反馈后将结束当前时间块</DialogDescription>
-          </DialogHeader>
-          <Textarea
-            data-testid="new-focus-feedback-textarea"
-            value={feedback}
-            onChange={(event) => {
-              resetSkipFeedbackConfirm();
-              setFeedback(event.target.value);
-            }}
-            onKeyDown={handleFeedbackKeyDown}
-            placeholder="记录本次专注的反馈..."
-            className="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
-          />
-          {linkedTasks.length > 0 && (
-            <div data-testid="feedback-task-status-section" className="flex flex-col gap-1.5">
-              <div className="flex items-center gap-2">
-                <span className="text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">关联任务状态</span>
-                <span className="text-[12px] text-[#78716C] dark:text-[#A8A29E]">可分别设置结束后的任务状态</span>
-              </div>
-              <div className="flex flex-col gap-2">
-                {linkedTasks.map((task) => (
-                  <div
-                    key={task.id}
-                    data-testid={`feedback-task-status-row-${task.id}`}
-                    className="rounded-[12px] border border-[#E7E5E4] bg-[#F5F0ED]/50 p-2.5 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
-                  >
-                    <div className="mb-2 flex items-center justify-between gap-2">
-                      <span className="truncate text-[12px] font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</span>
-                      <span className="text-[11px] text-[#78716C] dark:text-[#A8A29E]">{task.status}</span>
-                    </div>
-                    <div
-                      className="relative overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-white/70 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
-                      data-testid={`feedback-task-status-selector-${task.id}`}
-                    >
-                      <div className="relative z-10 grid grid-cols-4 gap-0">
-                        {TASK_STATUS_OPTIONS.map(({ key, label }) => (
-                          <button
-                            key={key}
-                            type="button"
-                            data-testid={`feedback-task-status-${task.id}-${key}`}
-                            onClick={() => {
-                              setTaskStatusChoices((previousChoices) => ({
-                                ...previousChoices,
-                                [task.id]: key,
-                              }));
-                            }}
-                            className={`relative z-10 h-8 w-full whitespace-nowrap rounded-[8px] px-[8px] text-center text-[12px] transition-colors duration-200 ${
-                              (taskStatusChoices[task.id] ?? 'continue') === key
-                                ? 'font-semibold text-[#1C1917] dark:text-[#FAFAF9] bg-white/55 dark:bg-[#FFFFFF14] border border-[#FFFFFFCC] dark:border-[#FFFFFF66] shadow-[0_1px_2px_rgba(0,0,0,0.05)]'
-                                : 'text-[#78716C] hover:text-[#57534E] dark:hover:text-[#D6D3D1]'
-                            }`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-          <DialogFooter>
-            <Button
-              type="button"
-              data-testid="new-focus-feedback-confirm"
-              disabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
-              onClick={() => {
-                void handleConfirmEnd();
-              }}
-              className="rounded-[10px] bg-brand-accent text-white hover:bg-brand-accent/90"
-            >
-              {feedbackConfirmLabel}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <TimeBlockFeedbackDialog
+        open={feedbackOpen}
+        onOpenChange={handleFeedbackDialogOpenChange}
+        title="结束专注并记录反馈"
+        description="记录本次专注反馈后将结束当前时间块"
+        feedback={feedback}
+        onFeedbackChange={(value) => {
+          resetSkipFeedbackConfirm();
+          setFeedback(value);
+        }}
+        onFeedbackKeyDown={(event) => {
+          handleFeedbackKeyDown(event, handleConfirmEnd);
+        }}
+        feedbackPlaceholder="记录本次专注的反馈..."
+        feedbackTestId="new-focus-feedback-textarea"
+        onSubmit={() => {
+          void handleConfirmEnd();
+        }}
+        submitLabel={feedbackConfirmLabel}
+        submitDisabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
+        submitTestId="new-focus-feedback-confirm"
+        submitButtonClassName="inline-flex items-center justify-center rounded-[10px] bg-brand-accent px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60 hover:bg-brand-accent/90"
+        textareaClassName="min-h-[96px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
+        tasks={linkedTasks}
+        outcomes={taskStatusChoices}
+        onOutcomeChange={(taskId, choice) => {
+          setTaskStatusChoices((previousChoices) => ({
+            ...previousChoices,
+            [taskId]: choice,
+          }));
+        }}
+        taskStatusTestIds={{
+          row: (taskId) => `feedback-task-status-row-${taskId}`,
+          selector: (taskId) => `feedback-task-status-selector-${taskId}`,
+          optionPrefix: (taskId) => `feedback-task-status-${taskId}`,
+        }}
+      />
 
       <Dialog open={focusBgmDialogOpen} onOpenChange={setFocusBgmDialogOpen}>
         <DialogContent className="rounded-2xl">

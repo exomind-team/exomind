@@ -1,14 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
+import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
+import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
-import { TaskStatusSelector, type TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+  resolveFeedbackSubmitLabel,
+  useFeedbackSubmitControls,
+} from '@/ui/app/components/useFeedbackSubmitControls';
 import type { TaskNode } from '@/lib/types/task';
 
 interface MultiTaskEndDialogProps {
@@ -30,6 +26,14 @@ export function MultiTaskEndDialog({
   const [feedback, setFeedback] = useState('');
   const [outcomes, setOutcomes] = useState<Record<string, TaskStatusChoice>>({});
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const {
+    canSubmitFeedback,
+    handleFeedbackKeyDown,
+    isSkipFeedbackCoolingDown,
+    resetSkipFeedbackConfirm,
+    skipFeedbackConfirmState,
+    skipFeedbackCountdownSec,
+  } = useFeedbackSubmitControls();
 
   const normalizedTaskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
 
@@ -38,6 +42,7 @@ export function MultiTaskEndDialog({
       return;
     }
 
+    resetSkipFeedbackConfirm();
     setFeedback('');
     setOutcomes(
       normalizedTaskIds.reduce<Record<string, TaskStatusChoice>>((next, taskId) => {
@@ -45,10 +50,11 @@ export function MultiTaskEndDialog({
         return next;
       }, {}),
     );
-  }, [normalizedTaskIds, open]);
+  }, [normalizedTaskIds, open, resetSkipFeedbackConfirm]);
 
   const handleSubmit = async () => {
     if (isSubmitting) return;
+    if (!canSubmitFeedback(feedback)) return;
 
     setIsSubmitting(true);
     try {
@@ -63,61 +69,39 @@ export function MultiTaskEndDialog({
   };
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent data-testid="task-dag-end-dialog" className="rounded-2xl">
-        <DialogHeader>
-          <DialogTitle>结束时间块</DialogTitle>
-          <DialogDescription>记录反馈，并分别设置本次关联任务的后续状态。</DialogDescription>
-        </DialogHeader>
-
-        <Textarea
-          data-testid="task-dag-end-dialog-feedback"
-          value={feedback}
-          onChange={(event) => setFeedback(event.target.value)}
-          placeholder="记录本次执行反馈..."
-          className="min-h-[104px] resize-none dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
-        />
-
-        <div data-testid="task-dag-end-dialog-task-list" className="space-y-3">
-          {tasks.map((task) => (
-            <section
-              key={task.id}
-              data-testid={`task-dag-end-dialog-task-${task.id}`}
-              className="rounded-2xl border border-[#E7E5E4] bg-[#FAF7F5] p-3 dark:border-[#292524] dark:bg-[#120F0D]"
-            >
-              <div className="mb-2 flex items-center justify-between gap-3">
-                <p className="min-w-0 truncate text-sm font-medium text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
-                <span className="shrink-0 text-[11px] text-[#A8A29E]">{task.status}</span>
-              </div>
-              <TaskStatusSelector
-                data-testid={`task-dag-end-dialog-status-${task.id}`}
-                linkedTaskTitle={task.title}
-                value={outcomes[task.id] ?? 'continue'}
-                onChange={(choice) => {
-                  setOutcomes((current) => ({
-                    ...current,
-                    [task.id]: choice,
-                  }));
-                }}
-              />
-            </section>
-          ))}
-        </div>
-
-        <DialogFooter>
-          <button
-            type="button"
-            data-testid="task-dag-end-dialog-submit"
-            disabled={isSubmitting}
-            onClick={() => {
-              void handleSubmit();
-            }}
-            className="inline-flex items-center justify-center rounded-full bg-[#C75B3A] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            提交反馈并结束
-          </button>
-        </DialogFooter>
-      </DialogContent>
-    </Dialog>
+    <TimeBlockFeedbackDialog
+      open={open}
+      onOpenChange={onOpenChange}
+      title="结束时间块"
+      description="记录反馈，并分别设置本次关联任务的后续状态。"
+      feedback={feedback}
+      onFeedbackChange={(value) => {
+        resetSkipFeedbackConfirm();
+        setFeedback(value);
+      }}
+      onFeedbackKeyDown={(event) => {
+        handleFeedbackKeyDown(event, handleSubmit);
+      }}
+      feedbackPlaceholder="记录本次执行反馈..."
+      onSubmit={() => {
+        void handleSubmit();
+      }}
+      submitLabel={resolveFeedbackSubmitLabel({
+        feedback,
+        isSubmitting,
+        skipConfirmState: skipFeedbackConfirmState,
+        skipConfirmCountdownSec: skipFeedbackCountdownSec,
+        defaultLabel: '提交反馈并结束',
+      })}
+      submitDisabled={isSubmitting || isSkipFeedbackCoolingDown}
+      tasks={tasks}
+      outcomes={outcomes}
+      onOutcomeChange={(taskId, choice) => {
+        setOutcomes((current) => ({
+          ...current,
+          [taskId]: choice,
+        }));
+      }}
+    />
   );
 }

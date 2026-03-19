@@ -2,6 +2,7 @@ import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { TimeBlockWidget } from '@/components/TimeBlockWidget';
+import { setInputSendMode } from '@/config/input-send-mode';
 
 const {
   loadActiveBlockMock,
@@ -46,6 +47,7 @@ describe('TimeBlockWidget feedback shortcuts', () => {
   const now = new Date('2026-02-13T11:00:00.000Z').getTime();
 
   beforeEach(() => {
+    setInputSendMode('ctrl-enter-send');
     vi.stubGlobal('requestAnimationFrame', vi.fn(() => 1));
     vi.stubGlobal('cancelAnimationFrame', vi.fn());
 
@@ -81,7 +83,7 @@ describe('TimeBlockWidget feedback shortcuts', () => {
     vi.unstubAllGlobals();
   });
 
-  it('pressing Enter in feedback textarea should confirm end', async () => {
+  it('pressing Ctrl+Enter in feedback textarea should confirm end by default', async () => {
     render(<TimeBlockWidget />);
 
     await waitFor(() => {
@@ -96,14 +98,14 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
     const feedback = await screen.findByTestId('timeblock-feedback-textarea');
     fireEvent.change(feedback, { target: { value: '有点累，但完成了' } });
-    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter' });
+    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
     await waitFor(() => {
       expect(endBlockMock).toHaveBeenCalledWith('有点累，但完成了');
     });
   });
 
-  it('pressing Shift/Ctrl+Enter in feedback textarea should not confirm end', async () => {
+  it('pressing Enter or Shift+Enter in feedback textarea should not confirm end by default', async () => {
     render(<TimeBlockWidget />);
 
     await waitFor(() => {
@@ -118,10 +120,33 @@ describe('TimeBlockWidget feedback shortcuts', () => {
 
     const feedback = await screen.findByTestId('timeblock-feedback-textarea');
     fireEvent.change(feedback, { target: { value: '第一行' } });
+    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter' });
     fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter', shiftKey: true });
-    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter', ctrlKey: true });
 
     expect(endBlockMock).not.toHaveBeenCalled();
+  });
+
+  it('pressing Enter in feedback textarea should confirm end in enter-send mode', async () => {
+    setInputSendMode('enter-send');
+    render(<TimeBlockWidget />);
+
+    await waitFor(() => {
+      expect(loadActiveBlockMock).toHaveBeenCalledTimes(1);
+    });
+
+    fireEvent.click(screen.getByRole('button', { name: '结束' }));
+
+    await waitFor(() => {
+      expect(markEndingMock).toHaveBeenCalledTimes(1);
+    });
+
+    const feedback = await screen.findByTestId('timeblock-feedback-textarea');
+    fireEvent.change(feedback, { target: { value: 'Enter 模式结束' } });
+    fireEvent.keyDown(feedback, { key: 'Enter', code: 'Enter' });
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith('Enter 模式结束');
+    });
   });
 
   it('allows closing feedback dialog on Escape and reopening it via end button', async () => {

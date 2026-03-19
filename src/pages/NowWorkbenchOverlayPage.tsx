@@ -4,16 +4,14 @@ import { LogicalSize } from '@tauri-apps/api/dpi';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { ArrowUpRight, ChevronDown, ChevronUp } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from '@/components/ui/dialog';
-import { Textarea } from '@/components/ui/textarea';
 import { NowInputRow } from '@/ui/app/components/NowInputRow';
 import { FocusTimerWidget, type FocusTimerWidgetHandle } from '@/ui/app/components/FocusTimerWidget';
+import { TimeBlockFeedbackDialog } from '@/ui/app/components/TimeBlockFeedbackDialog';
+import {
+  resolveFeedbackShortcutHint,
+  resolveFeedbackSubmitLabel,
+  useFeedbackSubmitControls,
+} from '@/ui/app/components/useFeedbackSubmitControls';
 import { resolveCountdownEndTimeDisplay } from '@/lib/timeblock/expected-end-time';
 import { resolveCountdownTiming } from '@/lib/timeblock/countdown-progress';
 import { setNowWorkbenchOverlayPosition } from '@/config/now-workbench-overlay-preferences';
@@ -344,6 +342,16 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   const [isIdleInputFocused, setIsIdleInputFocused] = useState(false);
   const [isIdleConfigVisible, setIsIdleConfigVisible] = useState(false);
   const [pendingIdleTaskTitle, setPendingIdleTaskTitle] = useState<string | null>(null);
+  const [feedbackSubmitting, setFeedbackSubmitting] = useState(false);
+  const {
+    canSubmitFeedback,
+    handleFeedbackKeyDown,
+    inputSendMode,
+    isSkipFeedbackCoolingDown,
+    resetSkipFeedbackConfirm,
+    skipFeedbackConfirmState,
+    skipFeedbackCountdownSec,
+  } = useFeedbackSubmitControls();
 
   useEffect(() => {
     if (!isTauri()) {
@@ -400,6 +408,17 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
   }, [model.mode]);
 
   useEffect(() => {
+    if (feedbackOpen) {
+      resetSkipFeedbackConfirm();
+      setFeedbackSubmitting(false);
+      return;
+    }
+
+    resetSkipFeedbackConfirm();
+    setFeedbackSubmitting(false);
+  }, [feedbackOpen, resetSkipFeedbackConfirm]);
+
+  useEffect(() => {
     if (!isIdleConfigVisible || !pendingIdleTaskTitle || !focusTimerWidgetRef.current) {
       return;
     }
@@ -454,66 +473,70 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       });
   }, [targetOverlaySize.height, targetOverlaySize.width]);
 
-  const handleOverlayFeedbackKeyDown = useCallback((event: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    if (event.nativeEvent.isComposing) {
+  const handleOverlayConfirmEnd = useCallback(async () => {
+    if (feedbackSubmitting) {
       return;
     }
-    if (event.key !== 'Enter') {
-      return;
-    }
-    if (event.shiftKey || event.altKey) {
+    if (!canSubmitFeedback(feedback)) {
       return;
     }
 
-    event.preventDefault();
-    void onConfirmEnd();
-  }, [onConfirmEnd]);
+    setFeedbackSubmitting(true);
+    try {
+      await onConfirmEnd();
+    } finally {
+      setFeedbackSubmitting(false);
+    }
+  }, [canSubmitFeedback, feedback, feedbackSubmitting, onConfirmEnd]);
+
   const feedbackDialog = (
-    <Dialog open={feedbackOpen} onOpenChange={() => {}}>
-      <DialogContent
-        data-testid="now-overlay-feedback-surface"
-        className="w-[min(320px,calc(100vw-24px))] max-w-[320px] rounded-[20px] border border-white/55 bg-[linear-gradient(180deg,rgba(250,247,245,0.96)_0%,rgba(255,255,255,0.84)_100%)] p-0 shadow-[0_24px_56px_-32px_rgba(0,0,0,0.55)] backdrop-blur-[24px] dark:border-white/10 dark:bg-[linear-gradient(180deg,rgba(28,25,23,0.94)_0%,rgba(12,10,9,0.86)_100%)]"
-      >
-        <div className="space-y-3 px-4 py-4">
-          <DialogHeader className="space-y-1">
-            <DialogTitle className="text-[15px]">结束专注并记录反馈</DialogTitle>
-            <DialogDescription className="text-[12px] text-[#78716C] dark:text-[#A8A29E]">
-              悬浮窗内可直接提交反馈，无需切回主程序。
-            </DialogDescription>
-          </DialogHeader>
-          <Textarea
-            autoFocus
-            data-testid="now-overlay-feedback-textarea"
-            value={feedback}
-            onChange={(event) => setFeedback(event.target.value)}
-            onKeyDown={handleOverlayFeedbackKeyDown}
-            placeholder="记录本次专注的反馈..."
-            className="min-h-[88px] rounded-[14px] border-[#E7E5E4] bg-white/80 resize-none text-[13px] dark:border-[#FFFFFF18] dark:bg-[#FFFFFF08] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
-          />
+    <TimeBlockFeedbackDialog
+      open={feedbackOpen}
+      onOpenChange={() => {}}
+      title="结束专注并记录反馈"
+      description="悬浮窗内可直接提交反馈，无需切回主程序。"
+      feedback={feedback}
+      onFeedbackChange={(value) => {
+        resetSkipFeedbackConfirm();
+        setFeedback(value);
+      }}
+      onFeedbackKeyDown={(event) => {
+        handleFeedbackKeyDown(event, handleOverlayConfirmEnd);
+      }}
+      feedbackPlaceholder="记录本次专注的反馈..."
+      onSubmit={handleOverlayConfirmEnd}
+      submitLabel={resolveFeedbackSubmitLabel({
+        feedback,
+        isSubmitting: feedbackSubmitting,
+        skipConfirmState: skipFeedbackConfirmState,
+        skipConfirmCountdownSec: skipFeedbackCountdownSec,
+        defaultLabel: '提交反馈',
+      })}
+      dialogTestId="now-overlay-feedback-surface"
+      feedbackTestId="now-overlay-feedback-textarea"
+      submitTestId="now-overlay-feedback-confirm"
+      textareaClassName="min-h-[88px] resize-none text-[13px] dark:bg-[rgba(255,255,255,0.06)] dark:border-[#FFFFFF15] dark:text-[#FAFAF9] dark:placeholder:text-[#78716C]"
+      submitButtonClassName="h-10 w-full rounded-[12px] bg-[#C75B3A] text-white hover:bg-[#B24D2F] disabled:cursor-not-allowed disabled:opacity-60"
+      submitDisabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
+      autoFocusFeedback
+      extraContent={(
+        <div className="space-y-3">
           <div
             data-testid="now-overlay-feedback-shortcut-hint"
             className="text-[11px] text-[#78716C] dark:text-[#A8A29E]"
           >
-            Enter / Ctrl+Enter 提交 · Shift+Enter 换行
+            {resolveFeedbackShortcutHint(inputSendMode)}
           </div>
-          {model.activeBlock?.taskId && (
+          {model.activeBlock?.taskId ? (
             <TaskStatusSelector
               value={taskStatusChoice}
               onChange={setTaskStatusChoice}
-              linkedTaskTitle={model.title || undefined}
+              helperLabel="任务下一步状态"
             />
-          )}
-          <Button
-            type="button"
-            data-testid="now-overlay-feedback-confirm"
-            className="h-10 w-full rounded-[12px] bg-[#C75B3A] text-white hover:bg-[#B24D2F]"
-            onClick={onConfirmEnd}
-          >
-            提交反馈
-          </Button>
+          ) : null}
         </div>
-      </DialogContent>
-    </Dialog>
+      )}
+    />
   );
 
   const handleIdleExpandedFocusCapture = useCallback(() => {
