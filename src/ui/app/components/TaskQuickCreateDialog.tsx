@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react';
+import { type FormEvent, type KeyboardEvent, useEffect, useState } from 'react';
 import {
   Dialog,
   DialogContent,
@@ -51,6 +51,14 @@ export function TaskQuickCreateDialog({
     }
   }
 
+  function handleSubmitShortcut(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
+    if ((event.ctrlKey || event.metaKey) && event.key === 'Enter') {
+      event.preventDefault();
+      const form = event.currentTarget.closest('form');
+      form?.requestSubmit();
+    }
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
@@ -77,6 +85,7 @@ export function TaskQuickCreateDialog({
                   setError(null);
                 }
               }}
+              onKeyDown={handleSubmitShortcut}
               placeholder="输入任务标题..."
               className="mt-1 block w-full rounded-xl border border-[#E7E5E4] bg-transparent px-3 py-2 text-sm text-[#1C1917] outline-none transition-colors focus:border-[#C75B3A] dark:border-[#292524] dark:text-[#FAFAF9]"
             />
@@ -94,6 +103,7 @@ export function TaskQuickCreateDialog({
               data-testid="task-quick-create-description"
               value={description}
               onChange={(event) => setDescription(event.target.value)}
+              onKeyDown={handleSubmitShortcut}
               placeholder="输入任务描述..."
               rows={4}
               className="mt-1 block w-full resize-y rounded-xl border border-[#E7E5E4] bg-transparent px-3 py-2 text-sm text-[#1C1917] outline-none transition-colors focus:border-[#C75B3A] dark:border-[#292524] dark:text-[#FAFAF9]"

@@ -1043,4 +1043,26 @@ npx vitest run tests/unit/ui/ --pool forks --maxWorkers 1 --no-file-parallelism
 
 ## 完成回填
 
-（Codex 执行完毕后在此填写）
+- 完成时间：2026-03-19
+- 实际完成：
+  - `#600`：`TaskDagPage` 的“隐藏已结束”改为 localStorage 持久化，并补首屏恢复测试。
+  - `#603`：`TaskDagPage` 的“沉浸模式”改为 localStorage 持久化，并补首屏恢复测试。
+  - `#605`：`useSignalStream` 为 `active_block.replication.snapshot` 增加签名去重；`NowTodayTab` 改为稳定化订阅 active block，避免每次 snapshot 都全量 reload，并新增 issue605 回归测试。
+  - `#601`：连接模式下已有起点时，空白单击改为带依赖语义的快速创建；支持 `Shift+空白` 反转为上游任务；补回归测试。
+  - `#606`：执行模式下取消多任务关联时，新增状态选择弹窗；补回归测试。
+  - `#598`：新增 `useTaskDagKeyboard`，统一处理 `Esc`、`Ctrl+←/→`、方向键平移、WASD 双模导航；`selectedTaskId` 仅在 execute 模式切换时清空；新增 DAG 键盘平移速度设置项并接入设置页；补 helper 与页面回归测试。
+  - `#602`：新增 `TaskDagKeyHints` 右下角动态按键提示板，并在 DAG 页面接入；补页面回归测试。
+  - `#599`：连接模式新增键盘建边、`Tab/Shift+Tab` 快速创建上下游、创建后待聚焦新节点、`TaskQuickCreateDialog` 的 `Ctrl/Cmd+Enter` 提交；补页面回归测试。
+- 新增文件：
+  - `src/config/task-dag-keyboard-preferences.ts`
+  - `src/ui/app/hooks/useTaskDagKeyboard.ts`
+  - `src/ui/app/components/TaskDagKeyHints.tsx`
+  - `tests/unit/ui/now-today-tab.issue605.test.tsx`
+  - `tests/unit/ui/task-dag-keyboard.test.ts`
+- 验证命令：
+  - `bunx tsc --noEmit`
+  - `bunx vitest run tests/unit/ui/task-dag-page.issue394.test.tsx tests/unit/ui/use-signal-stream.m4.test.tsx tests/unit/ui/now-today-tab.issue605.test.tsx`
+  - `bunx vitest run tests/unit/ui/task-dag-page.issue394.test.tsx tests/unit/ui/task-dag-keyboard.test.ts`
+- 验证结果：
+  - `bunx tsc --noEmit` 通过
+  - 上述相关 `vitest` 全部通过

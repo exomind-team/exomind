@@ -13,6 +13,14 @@ import {
 } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { toast } from '@/components/ui/toast-hook';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { buildTaskGraph } from '@/lib/task/task-dag-graph';
 import {
@@ -26,15 +34,18 @@ import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimerConfig } fro
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { MultiTaskEndDialog } from '@/ui/app/components/MultiTaskEndDialog';
 import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
+import { TaskDagKeyHints } from '@/ui/app/components/TaskDagKeyHints';
 import { TaskQuickCreateDialog } from '@/ui/app/components/TaskQuickCreateDialog';
 import {
   TaskDagDetailPanel,
   type TaskDagDependencyItem,
 } from '@/ui/app/components/TaskDagDetailPanel';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
+import { ensureNodeVisible, useTaskDagKeyboard } from '@/ui/app/hooks/useTaskDagKeyboard';
 import { TaskDagModeSelector, type TaskDagMode } from '@/ui/app/components/TaskDagModeSelector';
 import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
-import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+import { TaskStatusSelector, type TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+import { getTaskDagPanSpeed, subscribeTaskDagPanSpeedChanges } from '@/config/task-dag-keyboard-preferences';
 import {
   buildVisibleTaskDagFlow,
   TASK_DAG_NODE_HEIGHT,
@@ -49,9 +60,16 @@ import { TASKS_LAST_PATH_KEY } from './task-route-memory';
 
 type DagConnectType = 'hard' | 'soft';
 type DagConnectState = { sourceId: string; type: DagConnectType } | null;
+type QuickCreateDependencyContext = {
+  sourceTaskId: string;
+  type: DagConnectType;
+  direction: 'upstream' | 'downstream';
+} | null;
 
 const TASK_DAG_MODE_STORAGE_KEY = 'exomind:dag-mode';
 const TASK_DAG_DIRECTION_STORAGE_KEY = 'exomind:dag-direction';
+const TASK_DAG_HIDE_TERMINAL_KEY = 'exomind:dag-hide-terminal';
+const TASK_DAG_IMMERSIVE_KEY = 'exomind:dag-immersive';
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return status === 'completed' || status === 'cancelled';
@@ -129,6 +147,26 @@ function readStoredDagDirection(): DagDirection {
   return 'auto';
 }
 
+function readStoredHideTerminal(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(TASK_DAG_HIDE_TERMINAL_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
+function readStoredImmersive(): boolean {
+  if (typeof window === 'undefined') return false;
+
+  try {
+    return window.localStorage.getItem(TASK_DAG_IMMERSIVE_KEY) === '1';
+  } catch {
+    return false;
+  }
+}
+
 function resolveConnectTypeFromEvent(event: unknown): DagConnectType {
   if (
     event
@@ -140,6 +178,19 @@ function resolveConnectTypeFromEvent(event: unknown): DagConnectType {
   }
 
   return 'hard';
+}
+
+function shouldCreateUpstreamFromPaneEvent(event: unknown): boolean {
+  if (
+    event
+    && typeof event === 'object'
+    && 'shiftKey' in event
+    && Boolean((event as { shiftKey?: boolean }).shiftKey)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function isPaneInteractionTarget(target: EventTarget | null): boolean {
@@ -405,8 +456,8 @@ export function TaskDagPage() {
   const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(EMPTY_TASK_DAG_VISIBILITY_STATE);
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
   const [paneContextMenu, setPaneContextMenu] = useState<{ x: number; y: number } | null>(null);
-  const [hideTerminal, setHideTerminal] = useState(false);
-  const [immersive, setImmersive] = useState(false);
+  const [hideTerminal, setHideTerminal] = useState(() => readStoredHideTerminal());
+  const [immersive, setImmersive] = useState(() => readStoredImmersive());
   const [searchDraft, setSearchDraft] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [dagDirection, setDagDirection] = useState<DagDirection>(() => readStoredDagDirection());
@@ -415,6 +466,14 @@ export function TaskDagPage() {
   const [endingDialogOpen, setEndingDialogOpen] = useState(false);
   const [endingTaskIds, setEndingTaskIds] = useState<string[]>([]);
   const [quickCreateOpen, setQuickCreateOpen] = useState(false);
+  const [quickCreateDependency, setQuickCreateDependency] = useState<QuickCreateDependencyContext>(null);
+  const [quickCreateDirection, setQuickCreateDirection] = useState<'upstream' | 'downstream' | null>(null);
+  const [quickCreateFromNodeId, setQuickCreateFromNodeId] = useState<string | null>(null);
+  const [pendingFocusTaskId, setPendingFocusTaskId] = useState<string | null>(null);
+  const [disassociateDialogOpen, setDisassociateDialogOpen] = useState(false);
+  const [disassociateTargetTaskId, setDisassociateTargetTaskId] = useState<string | null>(null);
+  const [disassociateChoice, setDisassociateChoice] = useState<TaskStatusChoice>('continue');
+  const [panSpeed, setPanSpeed] = useState(() => getTaskDagPanSpeed());
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
   const hasMountedDirectionRef = useRef(false);
@@ -441,6 +500,22 @@ export function TaskDagPage() {
       // Ignore storage failures and keep direction in-memory only.
     }
   }, [dagDirection]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TASK_DAG_HIDE_TERMINAL_KEY, hideTerminal ? '1' : '0');
+    } catch {
+      // Ignore storage failures and keep hide-terminal state in-memory only.
+    }
+  }, [hideTerminal]);
+
+  useEffect(() => {
+    try {
+      window.localStorage.setItem(TASK_DAG_IMMERSIVE_KEY, immersive ? '1' : '0');
+    } catch {
+      // Ignore storage failures and keep immersive state in-memory only.
+    }
+  }, [immersive]);
 
   useEffect(() => {
     let disposed = false;
@@ -512,7 +587,7 @@ export function TaskDagPage() {
   }, [paneContextMenu]);
 
   useEffect(() => {
-    if (mode !== 'browse') {
+    if (mode === 'execute') {
       setSelectedTaskId(null);
     }
   }, [mode]);
@@ -530,18 +605,7 @@ export function TaskDagPage() {
     setEndingTaskIds([]);
   }, [activeBlock]);
 
-  useEffect(() => {
-    if (!immersive) return;
-
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        setImmersive(false);
-      }
-    };
-
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [immersive]);
+  useEffect(() => subscribeTaskDagPanSpeedChanges(setPanSpeed), []);
 
   const resolvedDirection = useMemo(
     () => resolveDagDirection(dagDirection, isDesktop),
@@ -650,6 +714,24 @@ export function TaskDagPage() {
     taskById,
   ]);
 
+  useEffect(() => {
+    if (!pendingFocusTaskId || !visibleNodeIdSet.has(pendingFocusTaskId)) {
+      return;
+    }
+
+    setSelectedTaskId(pendingFocusTaskId);
+    const focusTaskId = pendingFocusTaskId;
+    setPendingFocusTaskId(null);
+
+    const timeoutId = window.setTimeout(() => {
+      ensureNodeVisible(focusTaskId, flowInstanceRef.current, flowGraph.nodes);
+    }, 50);
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [flowGraph.nodes, pendingFocusTaskId, visibleNodeIdSet]);
+
   const toggleCollapse = (direction: 'upstream' | 'downstream', nodeId: string) => {
     setDagVisibility((prev) => {
       if (direction === 'upstream') {
@@ -705,6 +787,9 @@ export function TaskDagPage() {
   const selectedTaskDownstreamDependencies = selectedTask
     ? buildDownstreamDependencies(selectedTask.id, tasks)
     : [];
+  const disassociateTargetTask = disassociateTargetTaskId
+    ? taskById.get(disassociateTargetTaskId) ?? null
+    : null;
 
   const handleNavigateToTaskDetail = (taskId: string) => {
     void navigate({
@@ -714,12 +799,62 @@ export function TaskDagPage() {
     });
   };
 
+  const handleQuickCreateUpstream = (fromNodeId: string) => {
+    setQuickCreateDependency(null);
+    setQuickCreateDirection('upstream');
+    setQuickCreateFromNodeId(fromNodeId);
+    setConnectState(null);
+    setQuickCreateOpen(true);
+  };
+
+  const handleQuickCreateDownstream = (fromNodeId: string) => {
+    setQuickCreateDependency(null);
+    setQuickCreateDirection('downstream');
+    setQuickCreateFromNodeId(fromNodeId);
+    setConnectState(null);
+    setQuickCreateOpen(true);
+  };
+
   const handleQuickCreateTask = async (title: string, description: string) => {
     try {
-      await getTaskService().createTask({
+      const created = await getTaskService().createTask({
         title,
         description: description || undefined,
       });
+
+      if (quickCreateDirection && quickCreateFromNodeId) {
+        if (quickCreateDirection === 'downstream') {
+          await getTaskService().addDependency(created.id, quickCreateFromNodeId, 'hard');
+        } else {
+          await getTaskService().addDependency(quickCreateFromNodeId, created.id, 'hard');
+        }
+        setPendingFocusTaskId(created.id);
+        setQuickCreateDirection(null);
+        setQuickCreateFromNodeId(null);
+      }
+
+      if (quickCreateDependency) {
+        if (quickCreateDependency.direction === 'downstream') {
+          await getTaskService().addDependency(
+            created.id,
+            quickCreateDependency.sourceTaskId,
+            quickCreateDependency.type,
+          );
+        } else {
+          await getTaskService().addDependency(
+            quickCreateDependency.sourceTaskId,
+            created.id,
+            quickCreateDependency.type,
+          );
+        }
+        setPendingFocusTaskId(created.id);
+        setConnectState(null);
+        setQuickCreateDependency(null);
+      }
+
+      setQuickCreateDirection(null);
+      setQuickCreateFromNodeId(null);
+
       toast({
         title: '任务已创建',
         description: title,
@@ -731,6 +866,28 @@ export function TaskDagPage() {
         variant: 'destructive',
       });
       throw error;
+    }
+  };
+
+  const handleDisassociateSubmit = async () => {
+    if (!disassociateTargetTask) {
+      return;
+    }
+
+    try {
+      await getTaskTimerService().removeTaskFromBlock(disassociateTargetTask.id);
+      if (disassociateChoice !== 'continue') {
+        await getTaskService().transitionTask(disassociateTargetTask.id, disassociateChoice as TaskStatus);
+      }
+      setDisassociateDialogOpen(false);
+      setDisassociateTargetTaskId(null);
+      setDisassociateChoice('continue');
+    } catch (error) {
+      toast({
+        title: '取消任务关联失败',
+        description: formatExecuteActionError(error),
+        variant: 'destructive',
+      });
     }
   };
 
@@ -767,6 +924,7 @@ export function TaskDagPage() {
 
   const handleConnectNodeClick = (nodeId: string) => {
     setContextMenu(null);
+    setSelectedTaskId(nodeId);
 
     if (!connectState) {
       setConnectState({ sourceId: nodeId, type: 'hard' });
@@ -831,7 +989,6 @@ export function TaskDagPage() {
 
     try {
       const taskTimerService = getTaskTimerService();
-      const taskService = getTaskService();
 
       if (activeTaskIdSet.has(nodeId)) {
         if (activeTaskIds.length <= 1) {
@@ -839,10 +996,9 @@ export function TaskDagPage() {
           return;
         }
 
-        await taskTimerService.removeTaskFromBlock(nodeId);
-        if (task.status === 'in_progress') {
-          await taskService.transitionTask(nodeId, 'suspended');
-        }
+        setDisassociateTargetTaskId(nodeId);
+        setDisassociateChoice('continue');
+        setDisassociateDialogOpen(true);
         return;
       }
 
@@ -878,6 +1034,25 @@ export function TaskDagPage() {
 
     void handleExecuteNodeClick(node.id);
   };
+
+  useTaskDagKeyboard({
+    mode,
+    immersive,
+    selectedTaskId,
+    connectState,
+    flowNodes: flowGraph.nodes,
+    flowInstance: flowInstanceRef.current,
+    panSpeed,
+    onModeChange: setMode,
+    onImmersiveChange: setImmersive,
+    onSelectedTaskIdChange: setSelectedTaskId,
+    onConnectStateChange: setConnectState,
+    onConnectExecute: (sourceId, targetId, type) => {
+      void applyDependencyMutation(sourceId, targetId, type);
+    },
+    onQuickCreateUpstream: handleQuickCreateUpstream,
+    onQuickCreateDownstream: handleQuickCreateDownstream,
+  });
 
   const endingDialogTaskIds = endingTaskIds.length > 0 ? endingTaskIds : activeTaskIds;
   const endingDialogTasks = endingDialogTaskIds
@@ -1005,6 +1180,9 @@ export function TaskDagPage() {
             }
             setContextMenu(null);
             setPaneContextMenu(null);
+            setQuickCreateDependency(null);
+            setQuickCreateDirection(null);
+            setQuickCreateFromNodeId(null);
             setQuickCreateOpen(true);
           }}
           onContextMenu={(event) => {
@@ -1032,12 +1210,21 @@ export function TaskDagPage() {
               flowInstanceRef.current = instance;
               void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
             }}
-            onPaneClick={() => {
+            onPaneClick={(event) => {
               if (mode === 'browse') {
                 setSelectedTaskId(null);
               }
               if (mode === 'connect') {
-                setConnectState(null);
+                if (connectState) {
+                  setQuickCreateDirection(null);
+                  setQuickCreateFromNodeId(null);
+                  setQuickCreateDependency({
+                    sourceTaskId: connectState.sourceId,
+                    type: connectState.type,
+                    direction: shouldCreateUpstreamFromPaneEvent(event) ? 'upstream' : 'downstream',
+                  });
+                  setQuickCreateOpen(true);
+                }
               }
               setContextMenu(null);
               setPaneContextMenu(null);
@@ -1073,6 +1260,13 @@ export function TaskDagPage() {
             )}
           </ReactFlow>
         </div>
+
+        <TaskDagKeyHints
+          mode={mode}
+          hasSelectedNode={Boolean(selectedTaskId)}
+          hasConnectSource={Boolean(connectState)}
+          immersive={immersive}
+        />
 
         {contextMenu ? (
           <div
@@ -1137,6 +1331,9 @@ export function TaskDagPage() {
               className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
               onClick={() => {
                 setPaneContextMenu(null);
+                setQuickCreateDependency(null);
+                setQuickCreateDirection(null);
+                setQuickCreateFromNodeId(null);
                 setQuickCreateOpen(true);
               }}
             >
@@ -1164,9 +1361,71 @@ export function TaskDagPage() {
         />
         <TaskQuickCreateDialog
           open={quickCreateOpen}
-          onOpenChange={setQuickCreateOpen}
+          onOpenChange={(open) => {
+            setQuickCreateOpen(open);
+            if (!open) {
+              setQuickCreateDependency(null);
+              setQuickCreateDirection(null);
+              setQuickCreateFromNodeId(null);
+            }
+          }}
           onSubmit={handleQuickCreateTask}
         />
+        <Dialog
+          open={disassociateDialogOpen}
+          onOpenChange={(open) => {
+            setDisassociateDialogOpen(open);
+            if (!open) {
+              setDisassociateTargetTaskId(null);
+              setDisassociateChoice('continue');
+            }
+          }}
+        >
+          <DialogContent
+            data-testid="task-dag-disassociate-dialog"
+            className="w-[calc(100vw-2rem)] max-w-md rounded-2xl"
+          >
+            <DialogHeader>
+              <DialogTitle>
+                {disassociateTargetTask ? `取消关联「${disassociateTargetTask.title}」` : '取消关联任务'}
+              </DialogTitle>
+              <DialogDescription>
+                从当前时间块移除该任务时，可同步选择它的下一步状态。
+              </DialogDescription>
+            </DialogHeader>
+            <TaskStatusSelector
+              value={disassociateChoice}
+              onChange={setDisassociateChoice}
+              helperHint="取消关联后，请选择任务状态。"
+              optionTestIdPrefix="task-dag-disassociate-status"
+              data-testid="task-dag-disassociate-status-selector"
+            />
+            <DialogFooter>
+              <button
+                type="button"
+                data-testid="task-dag-disassociate-cancel"
+                onClick={() => {
+                  setDisassociateDialogOpen(false);
+                  setDisassociateTargetTaskId(null);
+                  setDisassociateChoice('continue');
+                }}
+                className="rounded-full px-4 py-2 text-sm font-medium text-[#78716C] transition-colors hover:text-[#1C1917] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+              >
+                关闭
+              </button>
+              <button
+                type="button"
+                data-testid="task-dag-disassociate-submit"
+                onClick={() => {
+                  void handleDisassociateSubmit();
+                }}
+                className="inline-flex items-center justify-center rounded-full bg-[#C75B3A] px-4 py-2 text-sm font-semibold text-white disabled:cursor-not-allowed disabled:opacity-60"
+              >
+                确认取消关联
+              </button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </div>
   );

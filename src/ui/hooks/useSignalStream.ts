@@ -36,6 +36,17 @@ import { log } from '@/lib/logger';
 
 const EMBEDDED_RUNTIME_STATUS_RETRY_MS = 1_000;
 
+function buildActiveBlockSnapshotSignature(payload: ActiveBlockReplicationSnapshotPayload): string {
+  return [
+    payload.cursor.startId,
+    payload.cursor.version,
+    payload.cursor.lastTransitionAt,
+    payload.cursor.actorId ?? '',
+    payload.block.phase ?? '',
+    payload.block.paused ? '1' : '0',
+  ].join('|');
+}
+
 function formatReviewAsMarkdown(payload: ReviewCompletedPayload): string {
   const isTimeblock = payload.review_type === 'timeblock';
   const title = isTimeblock
@@ -224,28 +235,40 @@ export function useSignalStream(): void {
       // (dozens per second), causing UI state overwrites. Cap at 1s. See #554.
       onActiveBlockReplicationSnapshot: (() => {
         let lastProcessedAt = 0;
+        let lastProcessedSignature: string | null = null;
         let pendingPayload: ActiveBlockReplicationSnapshotPayload | null = null;
+        let pendingSignature: string | null = null;
         let pendingTimer: ReturnType<typeof setTimeout> | null = null;
 
         return async (payload: ActiveBlockReplicationSnapshotPayload) => {
+          const signature = buildActiveBlockSnapshotSignature(payload);
+          if (signature === lastProcessedSignature || signature === pendingSignature) {
+            return;
+          }
+
           const now = Date.now();
           const elapsed = now - lastProcessedAt;
 
           if (elapsed >= 1000) {
             lastProcessedAt = now;
+            lastProcessedSignature = signature;
             await projectActiveBlockSnapshot(payload);
             return;
           }
 
           // Throttle: queue the latest payload and process after cooldown
           pendingPayload = payload;
+          pendingSignature = signature;
           if (!pendingTimer) {
             pendingTimer = setTimeout(async () => {
               pendingTimer = null;
               if (pendingPayload) {
                 lastProcessedAt = Date.now();
                 const p = pendingPayload;
+                const queuedSignature = pendingSignature;
                 pendingPayload = null;
+                pendingSignature = null;
+                lastProcessedSignature = queuedSignature;
                 await projectActiveBlockSnapshot(p);
               }
             }, 1000 - elapsed);

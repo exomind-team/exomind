@@ -98,6 +98,13 @@ import {
   subscribeTaskCreateSuccessActionChanges,
 } from '@/config/task-create-success-action';
 import {
+  getTaskDagPanSpeed,
+  setTaskDagPanSpeed,
+  subscribeTaskDagPanSpeedChanges,
+  MIN_TASK_DAG_PAN_SPEED,
+  MAX_TASK_DAG_PAN_SPEED,
+} from '@/config/task-dag-keyboard-preferences';
+import {
   getVoiceShortcutHotkey,
   setVoiceShortcutHotkey,
   subscribeVoiceShortcutHotkeyChanges,
@@ -648,6 +655,23 @@ export const SETTINGS_REGISTRY: SettingsItem[] = [
       setTaskCreateSuccessAction(value as 'refocus' | 'open-detail');
     },
     subscribe: subscribeTaskCreateSuccessActionChanges,
+  },
+  {
+    id: 'task-dag-pan-speed',
+    label: 'DAG 键盘平移速度',
+    icon: Waypoints,
+    category: 'input',
+    description: '仅作用于任务 DAG；控制方向键与无焦点 WASD 的画布平移速度。',
+    rowTestId: 'new-settings-task-dag-pan-speed-row',
+    controlTestId: 'new-settings-task-dag-pan-speed-slider',
+    type: 'number',
+    min: MIN_TASK_DAG_PAN_SPEED,
+    max: MAX_TASK_DAG_PAN_SPEED,
+    step: 5,
+    unit: 'px',
+    get: () => getTaskDagPanSpeed(),
+    set: setTaskDagPanSpeed,
+    subscribe: subscribeTaskDagPanSpeedChanges,
   },
   {
     id: 'voice-transcript-send-mode',

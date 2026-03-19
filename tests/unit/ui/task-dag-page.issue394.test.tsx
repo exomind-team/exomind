@@ -23,6 +23,7 @@ const onBlockEndForTasksMock = vi.fn();
 const flowApiMocks = vi.hoisted(() => ({
   setCenter: vi.fn(),
   fitView: vi.fn(),
+  setViewport: vi.fn(),
   getViewport: vi.fn(() => ({ x: 0, y: 0, zoom: 0.12 })),
   getNode: vi.fn(),
   lastProps: null as null | Record<string, unknown>,
@@ -84,7 +85,7 @@ vi.mock('@xyflow/react', () => ({
     nodes?: Array<{ id: string; type?: string; data?: Record<string, unknown> }>;
     edges?: Array<{ id: string }>;
     children?: ReactNode;
-    onPaneClick?: () => void;
+    onPaneClick?: (event: { shiftKey?: boolean }) => void;
     onPaneDoubleClick?: () => void;
     onPaneContextMenu?: (_event: { preventDefault: () => void; clientX: number; clientY: number }) => void;
     onNodeClick?: (_event: unknown, node: { id: string; data?: Record<string, unknown> }) => void;
@@ -94,6 +95,7 @@ vi.mock('@xyflow/react', () => ({
     onInit?: (instance: {
       setCenter: typeof flowApiMocks.setCenter;
       fitView: typeof flowApiMocks.fitView;
+      setViewport: typeof flowApiMocks.setViewport;
       getViewport: typeof flowApiMocks.getViewport;
       getNode: typeof flowApiMocks.getNode;
     }) => void;
@@ -107,7 +109,7 @@ vi.mock('@xyflow/react', () => ({
     onInit?.(flowApiMocks);
     return (
       <div data-testid="mock-react-flow">
-        <button type="button" data-testid="mock-react-flow-pane" onClick={() => onPaneClick?.()}>
+        <button type="button" data-testid="mock-react-flow-pane" onClick={(event) => onPaneClick?.(event)}>
           pane
         </button>
         <button type="button" data-testid="mock-react-flow-pane-double" onDoubleClick={() => onPaneDoubleClick?.()}>
@@ -185,6 +187,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
   beforeEach(() => {
     flowApiMocks.setCenter.mockReset();
     flowApiMocks.fitView.mockReset();
+    flowApiMocks.setViewport.mockReset();
     flowApiMocks.getViewport.mockClear();
     flowApiMocks.getViewport.mockReturnValue({ x: 0, y: 0, zoom: 0.12 });
     flowApiMocks.getNode.mockReset();
@@ -444,8 +447,24 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     await waitFor(() => {
       expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
     });
+    expect(window.localStorage.getItem('exomind:dag-hide-terminal')).toBe('1');
     expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
     expect(screen.getByTestId('mock-react-flow-node-task-b')).toBeInTheDocument();
+  });
+
+  it('restores hide-terminal and immersive preferences from localStorage on first render', async () => {
+    window.localStorage.setItem('exomind:dag-hide-terminal', '1');
+    window.localStorage.setItem('exomind:dag-immersive', '1');
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    expect(screen.queryByTestId('mock-react-flow-node-task-c')).not.toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-page-header')).toHaveClass('hidden');
+    expect(screen.queryByTestId('mock-react-flow-controls')).not.toBeInTheDocument();
   });
 
   it('highlights search matches and fades unmatched nodes', async () => {
@@ -490,6 +509,64 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
+  it('supports keyboard mode switching, escape cleanup, and pan shortcuts from the centralized dag hook', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true });
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    expect(screen.getByText('准备硬依赖')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+    await waitFor(() => {
+      expect(screen.queryByText('准备硬依赖')).not.toBeInTheDocument();
+    });
+
+    fireEvent.keyDown(document, { key: 'ArrowRight', ctrlKey: true });
+    expect(window.localStorage.getItem('exomind:dag-mode')).toBe('execute');
+
+    fireEvent.keyDown(document, { key: 'ArrowLeft' });
+    expect(flowApiMocks.setViewport).toHaveBeenCalledWith({
+      x: 40,
+      y: 0,
+      zoom: 0.12,
+    });
+  });
+
+  it('renders dynamic key hints and hides them in immersive mode', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-key-hints')).toBeInTheDocument();
+    });
+
+    expect(screen.getByText('切换模式')).toBeInTheDocument();
+    expect(screen.getAllByText('平移画布')).toHaveLength(2);
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    await waitFor(() => {
+      expect(screen.getByText('导航节点')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+    expect(screen.getByText('设为连接起点')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    await waitFor(() => {
+      expect(screen.getByText('取消连接')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-immersive-toggle'));
+    await waitFor(() => {
+      expect(screen.queryByTestId('task-dag-key-hints')).not.toBeInTheDocument();
+    });
+  });
+
   it('supports connect mode dependency toggle rules and surfaces cycle rejection', async () => {
     render(<TaskDagPage />);
 
@@ -530,6 +607,29 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
+  it('supports enter cycling for keyboard-driven connect mode source selection', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(screen.getByText('准备硬依赖')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Enter' });
+    expect(screen.getByText('准备软依赖')).toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Enter' });
+    await waitFor(() => {
+      expect(screen.queryByText('准备硬依赖')).not.toBeInTheDocument();
+      expect(screen.queryByText('准备软依赖')).not.toBeInTheDocument();
+    });
+  });
+
   it('disables double-click navigation while in connect mode to avoid conflicting with soft dependency gestures', async () => {
     render(<TaskDagPage />);
 
@@ -558,6 +658,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     await waitFor(() => {
       expect(screen.getByTestId('task-dag-page-header')).toHaveClass('hidden');
     });
+    expect(window.localStorage.getItem('exomind:dag-immersive')).toBe('1');
     expect(screen.queryByTestId('mock-react-flow-controls')).not.toBeInTheDocument();
 
     fireEvent.keyDown(document, { key: 'Escape' });
@@ -565,6 +666,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     await waitFor(() => {
       expect(screen.getByTestId('task-dag-page-header')).toBeInTheDocument();
     });
+    expect(window.localStorage.getItem('exomind:dag-immersive')).toBe('0');
     expect(screen.getByTestId('mock-react-flow-controls')).toBeInTheDocument();
   });
 
@@ -601,6 +703,78 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(await screen.findByTestId('task-dag-pane-context-menu')).toBeInTheDocument();
     fireEvent.click(screen.getByTestId('task-dag-pane-context-create'));
     expect(await screen.findByTestId('task-quick-create-dialog')).toBeInTheDocument();
+  });
+
+  it('creates dependency-aware quick tasks from pane click in connect mode, including upstream reversal', async () => {
+    createTaskMock
+      .mockResolvedValueOnce(makeTask({ id: 'task-new-downstream', title: '连接模式下游任务' }))
+      .mockResolvedValueOnce(makeTask({ id: 'task-new-upstream', title: '连接模式上游任务' }));
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-pane'));
+
+    expect(await screen.findByTestId('task-quick-create-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('task-quick-create-title'), { target: { value: '连接模式下游任务' } });
+    fireEvent.click(screen.getByTestId('task-quick-create-submit'));
+
+    await waitFor(() => {
+      expect(addDependencyMock).toHaveBeenCalledWith('task-new-downstream', 'task-a', 'hard');
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-pane'), { shiftKey: true });
+
+    expect(await screen.findByTestId('task-quick-create-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('task-quick-create-title'), { target: { value: '连接模式上游任务' } });
+    fireEvent.click(screen.getByTestId('task-quick-create-submit'));
+
+    await waitFor(() => {
+      expect(addDependencyMock).toHaveBeenCalledWith('task-a', 'task-new-upstream', 'soft');
+    });
+  });
+
+  it('supports keyboard quick-create shortcuts and Ctrl+Enter submission in connect mode', async () => {
+    createTaskMock
+      .mockResolvedValueOnce(makeTask({ id: 'task-keyboard-downstream', title: '键盘下游任务' }))
+      .mockResolvedValueOnce(makeTask({ id: 'task-keyboard-upstream', title: '键盘上游任务' }));
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+
+    fireEvent.keyDown(document, { key: 'Tab' });
+    expect(await screen.findByTestId('task-quick-create-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('task-quick-create-title'), { target: { value: '键盘下游任务' } });
+    fireEvent.change(screen.getByTestId('task-quick-create-description'), { target: { value: '使用 Ctrl+Enter 提交' } });
+    fireEvent.keyDown(screen.getByTestId('task-quick-create-description'), { key: 'Enter', ctrlKey: true });
+
+    await waitFor(() => {
+      expect(addDependencyMock).toHaveBeenCalledWith('task-keyboard-downstream', 'task-a', 'hard');
+    });
+
+    fireEvent.keyDown(document, { key: 'Tab', shiftKey: true });
+    expect(await screen.findByTestId('task-quick-create-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('task-quick-create-title'), { target: { value: '键盘上游任务' } });
+    fireEvent.change(screen.getByTestId('task-quick-create-description'), { target: { value: '再次用快捷键提交' } });
+    fireEvent.keyDown(screen.getByTestId('task-quick-create-title'), { key: 'Enter', ctrlKey: true });
+
+    await waitFor(() => {
+      expect(addDependencyMock).toHaveBeenCalledWith('task-a', 'task-keyboard-upstream', 'hard');
+    });
   });
 
   it('starts executable tasks in execute mode with remaining countdown config', async () => {
@@ -680,6 +854,45 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       });
     });
     expect(onBlockEndForTasksMock).toHaveBeenCalledWith(['task-a'], 'block-1');
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-a', 'completed');
+  });
+
+  it('opens a status dialog before removing one task from a multi-task active block', async () => {
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '进行中的任务 A', status: 'in_progress', createdAt: 10, updatedAt: 10 }),
+      makeTask({ id: 'task-b', title: '进行中的任务 B', status: 'in_progress', createdAt: 20, updatedAt: 20 }),
+      makeTask({ id: 'task-c', title: '可追加任务', createdAt: 30, updatedAt: 30 }),
+    ]);
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'block-2',
+      name: '多任务时间块',
+      mode: 'countup',
+      elapsed: 0,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-a', 'task-b'],
+      taskAssociationLog: [],
+    });
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    expect(await screen.findByTestId('task-dag-disassociate-dialog')).toBeInTheDocument();
+    expect(removeTaskFromBlockMock).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByTestId('task-dag-disassociate-status-completed'));
+    fireEvent.click(screen.getByTestId('task-dag-disassociate-submit'));
+
+    await waitFor(() => {
+      expect(removeTaskFromBlockMock).toHaveBeenCalledWith('task-a');
+    });
     expect(transitionTaskMock).toHaveBeenCalledWith('task-a', 'completed');
   });
 

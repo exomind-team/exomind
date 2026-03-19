@@ -11,6 +11,7 @@ const {
   signalServiceOptions,
   signalHandlerOptions,
   appendEventDataMock,
+  projectActiveBlockSnapshotMock,
   MockSignalStreamService,
 } = vi.hoisted(() => {
   const queuedStatuses: RuntimeStatus[] = [];
@@ -31,6 +32,7 @@ const {
   const queuedStopMock = vi.fn();
   const queuedOnSignalMock = vi.fn(() => () => {});
   const queuedAppendEventDataMock = vi.fn(async () => undefined);
+  const queuedProjectActiveBlockSnapshotMock = vi.fn(async () => undefined);
 
   class HoistedMockSignalStreamService {
     constructor(options: Record<string, unknown>) {
@@ -51,6 +53,7 @@ const {
     signalServiceOptions: queuedSignalServiceOptions,
     signalHandlerOptions: queuedSignalHandlerOptions,
     appendEventDataMock: queuedAppendEventDataMock,
+    projectActiveBlockSnapshotMock: queuedProjectActiveBlockSnapshotMock,
     MockSignalStreamService: HoistedMockSignalStreamService,
   };
 });
@@ -94,7 +97,7 @@ vi.mock('@/lib/services/ecs-eventlog-replication.service', () => ({
 }));
 
 vi.mock('@/lib/services/ecs-active-block-replication.service', () => ({
-  projectActiveBlockReplicationSnapshot: vi.fn(async () => undefined),
+  projectActiveBlockReplicationSnapshot: projectActiveBlockSnapshotMock,
 }));
 
 vi.mock('@/lib/services/runtime-control.service', () => ({
@@ -136,6 +139,7 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     stopMock.mockClear();
     onSignalMock.mockClear();
     appendEventDataMock.mockClear();
+    projectActiveBlockSnapshotMock.mockClear();
     setRuntimeTargetMode('embedded');
     Object.defineProperty(window, '__TAURI_INTERNALS__', {
       configurable: true,
@@ -260,5 +264,99 @@ describe('useSignalStream m4（SSE Runtime 目标切换）', () => {
     });
 
     expect(appendEventDataMock).not.toHaveBeenCalled();
+  });
+
+  it('deduplicates repeated active-block snapshots and only flushes the latest throttled payload（活跃时间块快照去重并只投影节流窗口中的最新值）', async () => {
+    runtimeStatuses.push({
+      running: true,
+      host: '127.0.0.1',
+      port: 19574,
+      hostId: 'desktop-host',
+      authSecret: 'embedded-secret',
+    });
+
+    render(<HookHarness />);
+    await flushMicrotasks();
+
+    const onActiveBlockReplicationSnapshot = signalHandlerOptions[0].onActiveBlockReplicationSnapshot as
+      | ((payload: {
+        schemaVersion: 1;
+        block: {
+          startId: string;
+          startTime: number;
+          name: string;
+          mode: 'countup';
+          elapsed: number;
+          paused: boolean;
+          phase: 'running';
+          version: number;
+          lastTransitionAt: number;
+          taskIds: string[];
+          taskAssociationLog: unknown[];
+        };
+        cursor: {
+          kind: 'active_block_snapshot';
+          startId: string;
+          version: number;
+          lastTransitionAt: number;
+          actorId?: string;
+        };
+      }) => Promise<void>)
+      | undefined;
+
+    const payloadV1 = {
+      schemaVersion: 1 as const,
+      block: {
+        startId: 'block-1',
+        startTime: 1773810310000,
+        name: '专注中',
+        mode: 'countup' as const,
+        elapsed: 10,
+        paused: false,
+        phase: 'running' as const,
+        version: 1,
+        lastTransitionAt: 1773810310000,
+        taskIds: ['task-a'],
+        taskAssociationLog: [],
+      },
+      cursor: {
+        kind: 'active_block_snapshot' as const,
+        startId: 'block-1',
+        version: 1,
+        lastTransitionAt: 1773810310000,
+        actorId: 'rt-a',
+      },
+    };
+    const payloadV2 = {
+      ...payloadV1,
+      block: {
+        ...payloadV1.block,
+        version: 2,
+        lastTransitionAt: 1773810311000,
+      },
+      cursor: {
+        ...payloadV1.cursor,
+        version: 2,
+        lastTransitionAt: 1773810311000,
+      },
+    };
+
+    await onActiveBlockReplicationSnapshot?.(payloadV1);
+    expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(1);
+    expect(projectActiveBlockSnapshotMock).toHaveBeenLastCalledWith(payloadV1);
+
+    await onActiveBlockReplicationSnapshot?.(payloadV1);
+    expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(1);
+
+    await onActiveBlockReplicationSnapshot?.(payloadV2);
+    await onActiveBlockReplicationSnapshot?.(payloadV2);
+    expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(1);
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(1_000);
+    });
+
+    expect(projectActiveBlockSnapshotMock).toHaveBeenCalledTimes(2);
+    expect(projectActiveBlockSnapshotMock).toHaveBeenLastCalledWith(payloadV2);
   });
 });
