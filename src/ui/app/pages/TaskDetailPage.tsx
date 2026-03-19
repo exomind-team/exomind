@@ -5,7 +5,7 @@ import { TASKS_LAST_PATH_KEY, buildTasksMainSearch } from './task-route-memory';
 import { TaskBreadcrumb, type TaskBreadcrumbSegment } from '@/ui/app/components/TaskBreadcrumb';
 import { getEventLogService, getTaskService, getTaskTimerService, getTimeBlockService } from '@/lib/services';
 import { isTerminalTaskStatus } from '@/lib/types/task';
-import type { TaskNode } from '@/lib/types/task';
+import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
 import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 import { getUseMockDataEnabled } from '@/config/mock-data';
@@ -39,6 +39,12 @@ import remarkGfm from 'remark-gfm';
 import remarkBreaks from 'remark-breaks';
 
 type DependencyType = 'soft' | 'hard';
+type TaskTransitionAction = {
+  status: TaskStatus;
+  label: string;
+  tone: 'neutral' | 'success' | 'warning' | 'danger';
+};
+
 const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
   dag: { label: 'DAG', to: '/tasks/dag' },
   timeblocks: { label: '时间块', to: '/tasks/timeblocks' },
@@ -123,6 +129,26 @@ function toneDotClassName(tone: 'neutral' | 'success' | 'warning' | 'danger'): s
   if (tone === 'warning') return 'bg-[#C75B3A]';
   if (tone === 'danger') return 'bg-[#E7000B]';
   return 'bg-[#78716C]';
+}
+
+function taskTransitionButtonClassName(tone: TaskTransitionAction['tone']): string {
+  if (tone === 'success') {
+    return 'bg-[#DCFCE7] text-[#166534] hover:bg-[#BBF7D0] dark:bg-[#16351F] dark:text-[#86EFAC] dark:hover:bg-[#1B4729]';
+  }
+  if (tone === 'warning') {
+    return 'bg-[#FFF7ED] text-[#C75B3A] hover:bg-[#FFEDD5] dark:bg-[#2A231B] dark:text-[#FDBA74] dark:hover:bg-[#382C20]';
+  }
+  if (tone === 'danger') {
+    return 'bg-[#FEE2E2] text-[#B91C1C] hover:bg-[#FECACA] dark:bg-[#3F1D1D] dark:text-[#FCA5A5] dark:hover:bg-[#522020]';
+  }
+  return 'bg-[#F5F0ED] text-[#57534E] hover:bg-[#E7E5E4] dark:bg-[#292524] dark:text-[#D6D3D1] dark:hover:bg-[#3A3632]';
+}
+
+function formatTaskTransitionError(error: unknown): string {
+  if (error instanceof Error && error.message.trim()) {
+    return error.message;
+  }
+  return '任务状态更新失败，请稍后重试。';
 }
 
 function buildSummaryText(model: TaskTimeblockDetailViewModel): string {
@@ -731,6 +757,49 @@ function DependencyCard({
   );
 }
 
+function TaskStatusActionGroup({
+  actions,
+  errorMessage,
+  pendingStatus,
+  onAction,
+}: {
+  actions: TaskTransitionAction[];
+  errorMessage: string | null;
+  pendingStatus: TaskStatus | null;
+  onAction: (status: TaskStatus) => void;
+}) {
+  if (actions.length === 0) {
+    return null;
+  }
+
+  return (
+    <div data-testid="task-status-actions" className="rounded-2xl border border-[#E7E5E4] bg-[#FAF7F5] p-3 dark:border-[#292524] dark:bg-[#120F0D]">
+      <p className="text-xs font-medium text-[#57534E] dark:text-[#D6D3D1]">任务状态</p>
+      <div className="mt-2 flex flex-wrap gap-2">
+        {actions.map((action) => {
+          const isPending = pendingStatus === action.status;
+          return (
+            <button
+              key={action.status}
+              type="button"
+              data-testid={`task-transition-action-${action.status}`}
+              aria-label={action.label}
+              disabled={pendingStatus !== null}
+              onClick={() => onAction(action.status)}
+              className={`inline-flex items-center rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${taskTransitionButtonClassName(action.tone)}`}
+            >
+              {isPending ? '处理中…' : action.label}
+            </button>
+          );
+        })}
+      </div>
+      {errorMessage ? (
+        <p role="alert" className="mt-2 text-xs text-[#B91C1C] dark:text-[#FCA5A5]">{errorMessage}</p>
+      ) : null}
+    </div>
+  );
+}
+
 function MobileTimeblockDetail({
   descriptionBlock,
   task,
@@ -747,6 +816,7 @@ function MobileTimeblockDetail({
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
   blockingReason,
+  taskStatusActions,
   onStartTimer,
   onAppendTaskToActiveBlock,
   onPauseAndGoEventlog,
@@ -777,6 +847,7 @@ function MobileTimeblockDetail({
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
   blockingReason: string | null;
+  taskStatusActions?: ReactNode;
   onStartTimer: () => void;
   onAppendTaskToActiveBlock: () => void;
   onPauseAndGoEventlog: () => void;
@@ -993,6 +1064,7 @@ function MobileTimeblockDetail({
             ) : hasOtherActiveBlock ? (
               <p className="text-xs text-[#A8A29E]">当前已有时间块进行中，可将本任务追加为关联任务。</p>
             ) : null}
+            {taskStatusActions}
           </div>
         </section>
         )}
@@ -1118,6 +1190,7 @@ function DesktopTimeblockDetail({
   hasOtherActiveBlock,
   hasActiveBlockOnTask,
   blockingReason,
+  taskStatusActions,
   onStartTimer,
   onAppendTaskToActiveBlock,
   onPauseAndGoEventlog,
@@ -1148,6 +1221,7 @@ function DesktopTimeblockDetail({
   hasOtherActiveBlock: boolean;
   hasActiveBlockOnTask: boolean;
   blockingReason: string | null;
+  taskStatusActions?: ReactNode;
   onStartTimer: () => void;
   onAppendTaskToActiveBlock: () => void;
   onPauseAndGoEventlog: () => void;
@@ -1285,6 +1359,7 @@ function DesktopTimeblockDetail({
             ) : hasOtherActiveBlock ? (
               <p className="text-xs text-[#A8A29E]">当前已有时间块进行中，可将本任务追加为关联任务。</p>
             ) : null}
+            {taskStatusActions}
           </div>
         </section>
         )}
@@ -1418,6 +1493,8 @@ export function TaskDetailPage() {
   const [isEditingDescription, setIsEditingDescription] = useState(false);
   const [descriptionDraft, setDescriptionDraft] = useState('');
   const [isTimerAutoFillEnabled, setIsTimerAutoFillEnabled] = useState(() => readTaskTimerAutoFillEnabled());
+  const [taskTransitionError, setTaskTransitionError] = useState<string | null>(null);
+  const [taskTransitionPendingTo, setTaskTransitionPendingTo] = useState<TaskStatus | null>(null);
   const timerResetKey = taskId ?? preferredBlockId ?? task?.id;
   const taskEstimatedMinutes = taskId
     ? task?.id === taskId ? task.estimatedMinutes : undefined
@@ -1478,6 +1555,11 @@ export function TaskDetailPage() {
       collapsedUpstreamOf: [],
       collapsedDownstreamOf: [],
     });
+  }, [task?.id]);
+
+  useEffect(() => {
+    setTaskTransitionError(null);
+    setTaskTransitionPendingTo(null);
   }, [task?.id]);
 
   useEffect(() => {
@@ -1670,10 +1752,50 @@ export function TaskDetailPage() {
   }, [allTasks, dagVisibilityState, task]);
 
   const dependencyError = dependencyActionError ?? dependencyLoadError;
+  const taskTransitionActions = useMemo<TaskTransitionAction[]>(() => {
+    if (!task) return [];
+    if (task.status === 'in_progress') {
+      return [
+        { status: 'completed', label: '完成（Complete）', tone: 'success' },
+        { status: 'suspended', label: '挂起（Suspend）', tone: 'warning' },
+        { status: 'cancelled', label: '取消（Cancel）', tone: 'danger' },
+      ];
+    }
+    if (task.status === 'suspended') {
+      return [
+        { status: 'in_progress', label: '恢复执行（Resume）', tone: 'neutral' },
+        { status: 'completed', label: '完成（Complete）', tone: 'success' },
+        { status: 'cancelled', label: '取消（Cancel）', tone: 'danger' },
+      ];
+    }
+    return [];
+  }, [task]);
 
   const reloadDependencies = () => {
     setDependencyReloadKey((value) => value + 1);
   };
+
+  const handleTaskStatusTransition = useCallback(async (nextStatus: TaskStatus) => {
+    if (!task || taskTransitionPendingTo !== null) return;
+
+    setTaskTransitionError(null);
+    setTaskTransitionPendingTo(nextStatus);
+    try {
+      const transitioned = await getTaskService().transitionTask(task.id, nextStatus);
+      if (!transitioned) {
+        setTaskTransitionError('当前任务不存在，状态未更新。');
+        return;
+      }
+      setTask(transitioned);
+      setAllTasks((current) => current.map((candidate) => (
+        candidate.id === transitioned.id ? transitioned : candidate
+      )));
+    } catch (error) {
+      setTaskTransitionError(formatTaskTransitionError(error));
+    } finally {
+      setTaskTransitionPendingTo(null);
+    }
+  }, [task, taskTransitionPendingTo]);
 
   const handleToggleCollapseUpstream = (targetTaskId: string) => {
     setDagVisibilityState((currentState) => ({
@@ -1918,6 +2040,14 @@ export function TaskDetailPage() {
       ) : null}
     </>
   );
+  const taskStatusActionGroup = (
+    <TaskStatusActionGroup
+      actions={taskTransitionActions}
+      errorMessage={taskTransitionError}
+      pendingStatus={taskTransitionPendingTo}
+      onAction={handleTaskStatusTransition}
+    />
+  );
 
   if (isDesktop) {
     return (
@@ -1937,6 +2067,7 @@ export function TaskDetailPage() {
         hasOtherActiveBlock={hasOtherActiveBlock}
         hasActiveBlockOnTask={Boolean(activeBlock)}
         blockingReason={blockingReason}
+        taskStatusActions={taskStatusActionGroup}
         onStartTimer={handleStartTimer}
         onAppendTaskToActiveBlock={handleAppendTaskToActiveBlock}
         onPauseAndGoEventlog={handlePauseAndGoEventlog}
@@ -1972,6 +2103,7 @@ export function TaskDetailPage() {
       hasOtherActiveBlock={hasOtherActiveBlock}
       hasActiveBlockOnTask={Boolean(activeBlock)}
       blockingReason={blockingReason}
+      taskStatusActions={taskStatusActionGroup}
       onStartTimer={handleStartTimer}
       onAppendTaskToActiveBlock={handleAppendTaskToActiveBlock}
       onPauseAndGoEventlog={handlePauseAndGoEventlog}

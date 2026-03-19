@@ -14,6 +14,7 @@ const updateTaskMock = vi.fn<(id: string, input: Partial<TaskNode>) => Promise<T
 const addDependencyMock = vi.fn<(taskId: string, depTaskId: string, type: 'soft' | 'hard') => Promise<TaskNode | null>>();
 const removeDependencyMock = vi.fn<(taskId: string, depTaskId: string) => Promise<TaskNode | null>>();
 const getAvailableTransitionsMock = vi.fn<(id: string) => Promise<Array<TaskNode['status']>>>();
+const transitionTaskMock = vi.fn<(id: string, to: TaskNode['status']) => Promise<TaskNode | null>>();
 const getChildTasksMock = vi.fn<(parentId: string) => Promise<TaskNode[]>>();
 const checkDependenciesMetMock = vi.fn<(taskId: string) => Promise<{ met: boolean; blocking: Array<{ taskId: string; type: 'soft' | 'hard'; status: TaskNode['status'] }> }>>();
 const onTaskChangeMock = vi.fn(() => () => {});
@@ -49,7 +50,7 @@ vi.mock('@/lib/services', () => ({
     getChildTasks: getChildTasksMock,
     checkDependenciesMet: checkDependenciesMetMock,
     onTaskChange: onTaskChangeMock,
-    transitionTask: vi.fn(),
+    transitionTask: transitionTaskMock,
     updateTask: updateTaskMock,
     cancelTask: vi.fn(),
   }),
@@ -182,6 +183,13 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     addDependencyMock.mockResolvedValue(makeTask());
     removeDependencyMock.mockResolvedValue(makeTask());
     getAvailableTransitionsMock.mockResolvedValue(['in_progress']);
+    transitionTaskMock.mockReset();
+    transitionTaskMock.mockImplementation(async (id, status) => makeTask({
+      id,
+      status,
+      updatedAt: Date.now(),
+      ...(status === 'completed' || status === 'cancelled' ? { completedAt: Date.now() } : {}),
+    }));
     getChildTasksMock.mockResolvedValue([]);
     checkDependenciesMetMock.mockResolvedValue({ met: true, blocking: [] });
     loadTimeBlocksMock.mockResolvedValue([makeBlock()]);
@@ -254,6 +262,56 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
 
     expect(document.getElementById('task-detail-dependency')).not.toBeNull();
     expect(scrollIntoViewMock).toHaveBeenCalledWith({ behavior: 'smooth', block: 'start' });
+  });
+
+  it('shows direct transition actions for in-progress tasks and triggers transition（进行中任务可直接完成/挂起/取消）', async () => {
+    mockMatchMedia(true);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByRole('button', { name: '完成（Complete）' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '挂起（Suspend）' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消（Cancel）' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '完成（Complete）' }));
+
+    await waitFor(() => {
+      expect(transitionTaskMock).toHaveBeenCalledWith('task-1', 'completed');
+    });
+  });
+
+  it('shows resume action for suspended tasks（已挂起任务提供恢复执行入口）', async () => {
+    getTaskMock.mockImplementation(async () => makeTask({
+      status: 'suspended',
+      createdAt: 20,
+      updatedAt: 20,
+    }));
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: 'task-root',
+        title: '优先收口 DAG 根节点',
+        status: 'pending',
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+      makeTask({
+        id: 'task-1',
+        title: '深度工作：EventLog 模块实现',
+        status: 'suspended',
+        createdAt: 20,
+        updatedAt: 20,
+      }),
+    ]);
+
+    mockMatchMedia(true);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByRole('button', { name: '恢复执行（Resume）' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '完成（Complete）' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消（Cancel）' })).toBeInTheDocument();
   });
 
   it('hides task detail scrollbars while preserving scroll containers（任务详情隐藏滚动条）', async () => {

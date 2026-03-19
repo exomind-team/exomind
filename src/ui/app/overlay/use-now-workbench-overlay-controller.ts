@@ -5,9 +5,10 @@ import { getCurrentUserId, getEventStorage, type Event as StoredEvent } from '@/
 import {
   getEventLogService,
   getTaskService,
+  getTaskTimerService,
   getTimeBlockService,
 } from '@/lib/services';
-import type { ActiveBlockData, Event as UiEvent } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData, type Event as UiEvent } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { buildNowWorkbenchOverlayModel, type NowWorkbenchOverlayMode } from './now-workbench-overlay-model';
@@ -77,6 +78,7 @@ const EMPTY_MODEL = buildNowWorkbenchOverlayModel({
 export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayController {
   const timeBlockService = useMemo(() => getTimeBlockService(), []);
   const taskService = useMemo(() => getTaskService(), []);
+  const taskTimerService = useMemo(() => getTaskTimerService(), []);
   const eventLogService = useMemo(() => getEventLogService(), []);
   const overlayService = useMemo(() => getNowWorkbenchOverlayService(), []);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
@@ -328,11 +330,33 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   const handleConfirmEnd = useCallback(async () => {
     try {
       const blockBeforeEnd = activeBlock;
-      await timeBlockService.endBlock(feedback);
+      const taskIds = resolveActiveBlockTaskIds(blockBeforeEnd);
+      const taskStatusOutcomes = taskStatusChoice !== 'continue'
+        ? taskIds.reduce<Record<string, string>>((outcomes, taskId) => {
+          outcomes[taskId] = taskStatusChoice;
+          return outcomes;
+        }, {})
+        : undefined;
 
-      if (taskStatusChoice !== 'continue' && blockBeforeEnd?.taskId) {
+      await timeBlockService.endBlock(feedback, {
+        taskStatusOutcomes: taskStatusOutcomes && Object.keys(taskStatusOutcomes).length > 0 ? taskStatusOutcomes : undefined,
+      });
+
+      if (blockBeforeEnd && taskIds.length > 0) {
         try {
-          await taskService.transitionTask(blockBeforeEnd.taskId, taskStatusChoice as TaskStatus);
+          await taskTimerService.onBlockEndForTasks(taskIds, blockBeforeEnd.startId);
+        } catch (associationError) {
+          updateDebugInfo({
+            lastAction: `end-block:task-link-error:${associationError instanceof Error ? associationError.message : String(associationError)}`,
+          });
+        }
+      }
+
+      if (taskStatusChoice !== 'continue' && taskIds.length > 0) {
+        try {
+          for (const taskId of taskIds) {
+            await taskService.transitionTask(taskId, taskStatusChoice as TaskStatus);
+          }
         } catch (transitionError) {
           updateDebugInfo({
             lastAction: `end-block:task-transition-error:${transitionError instanceof Error ? transitionError.message : String(transitionError)}`,
@@ -350,7 +374,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
         lastAction: `end-block:error:${error instanceof Error ? error.message : String(error)}`,
       });
     }
-  }, [activeBlock, feedback, reloadAll, taskService, taskStatusChoice, timeBlockService, updateDebugInfo]);
+  }, [activeBlock, feedback, reloadAll, taskService, taskStatusChoice, taskTimerService, timeBlockService, updateDebugInfo]);
 
   const handleStartTask = useCallback(async (task: TaskNode) => {
     updateDebugInfo({ lastAction: `task-select:open-config:${task.id}` });

@@ -17,7 +17,7 @@ import { resolveCountdownTiming } from '@/lib/timeblock/countdown-progress';
 import { setNowWorkbenchOverlayPosition } from '@/config/now-workbench-overlay-preferences';
 import type { TaskNode } from '@/lib/types/task';
 import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-overlay-model';
-import type { ActiveBlockData } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
 import { TaskStatusSelector, type TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { useRef } from 'react';
@@ -488,6 +488,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       setFeedbackSubmitting(false);
     }
   }, [canSubmitFeedback, feedback, feedbackSubmitting, onConfirmEnd]);
+  const showTaskStatusSelector = resolveActiveBlockTaskIds(model.activeBlock).length > 0;
 
   const feedbackDialog = (
     <TimeBlockFeedbackDialog
@@ -527,7 +528,7 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
           >
             {resolveFeedbackShortcutHint(inputSendMode)}
           </div>
-          {model.activeBlock?.taskId ? (
+          {showTaskStatusSelector ? (
             <TaskStatusSelector
               value={taskStatusChoice}
               onChange={setTaskStatusChoice}
