@@ -29,6 +29,11 @@ const FocusPage = lazy(async () => {
   return { default: module.FocusPage };
 });
 
+const RitualHomePage = lazy(async () => {
+  const module = await import('@/ui/app/pages/RitualHomePage');
+  return { default: module.RitualHomePage };
+});
+
 const SettingsPage = lazy(async () => {
   const module = await import('@/ui/app/pages/SettingsPage');
   return { default: module.SettingsPage };
@@ -619,7 +624,7 @@ const newHomeRoute = createRoute({
   component: function NewHome() {
     return (
       <LazyPage>
-        <FocusPage />
+        <RitualHomePage />
       </LazyPage>
     );
   },
