@@ -19,7 +19,7 @@ import type { TaskNode } from '@/lib/types/task';
 import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-overlay-model';
 import type { ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
-import { TaskStatusSelector, type TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { useRef } from 'react';
 import { log } from '@/lib/logger';
 
@@ -53,9 +53,10 @@ interface NowWorkbenchOverlayPageContentProps {
   onSend: (content: string, tags?: string[]) => void;
   feedbackOpen: boolean;
   feedback: string;
-  taskStatusChoice: TaskStatusChoice;
+  activeBlockTasks: TaskNode[];
+  taskStatusChoices: Record<string, TaskStatusChoice>;
   setFeedback(value: string): void;
-  setTaskStatusChoice(value: TaskStatusChoice): void;
+  setTaskStatusChoice(taskId: string, value: TaskStatusChoice): void;
   onConfirmEnd: () => void | Promise<void>;
 }
 
@@ -266,7 +267,8 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
         }}
         feedbackOpen={false}
         feedback=""
-        taskStatusChoice="continue"
+        activeBlockTasks={[]}
+        taskStatusChoices={{}}
         setFeedback={() => {}}
         setTaskStatusChoice={() => {}}
         onConfirmEnd={() => {}}
@@ -306,7 +308,8 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
       debugInfo={controller.debugInfo}
       feedbackOpen={controller.feedbackOpen}
       feedback={controller.feedback}
-      taskStatusChoice={controller.taskStatusChoice}
+      activeBlockTasks={controller.activeBlockTasks}
+      taskStatusChoices={controller.taskStatusChoices}
       setFeedback={controller.setFeedback}
       setTaskStatusChoice={controller.setTaskStatusChoice}
       onConfirmEnd={() => {
@@ -328,7 +331,8 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     onSend,
     feedbackOpen,
     feedback,
-    taskStatusChoice,
+    activeBlockTasks,
+    taskStatusChoices,
     setFeedback,
     setTaskStatusChoice,
     onConfirmEnd,
@@ -522,6 +526,9 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       submitButtonClassName="h-10 w-full rounded-[12px] bg-[#C75B3A] text-white hover:bg-[#B24D2F] disabled:cursor-not-allowed disabled:opacity-60"
       submitDisabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
       autoFocusFeedback
+      tasks={activeBlockTasks}
+      outcomes={taskStatusChoices}
+      onOutcomeChange={setTaskStatusChoice}
       extraContent={(
         <div className="space-y-3">
           <div
@@ -530,13 +537,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
           >
             {resolveFeedbackShortcutHint(inputSendMode)}
           </div>
-          {model.activeBlock?.taskId ? (
-            <TaskStatusSelector
-              value={taskStatusChoice}
-              onChange={setTaskStatusChoice}
-              helperLabel="任务下一步状态"
-            />
-          ) : null}
         </div>
       )}
     />

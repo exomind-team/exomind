@@ -5,9 +5,10 @@ import { getCurrentUserId, getEventStorage, type Event as StoredEvent } from '@/
 import {
   getEventLogService,
   getTaskService,
+  getTaskTimerService,
   getTimeBlockService,
 } from '@/lib/services';
-import type { ActiveBlockData, Event as UiEvent } from '@/lib/types/event';
+import { resolveActiveBlockTaskIds, type ActiveBlockData, type Event as UiEvent } from '@/lib/types/event';
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { buildNowWorkbenchOverlayModel, type NowWorkbenchOverlayMode } from './now-workbench-overlay-model';
@@ -17,7 +18,8 @@ interface NowWorkbenchOverlayController {
   model: ReturnType<typeof buildNowWorkbenchOverlayModel>;
   feedbackOpen: boolean;
   feedback: string;
-  taskStatusChoice: TaskStatusChoice;
+  activeBlockTasks: TaskNode[];
+  taskStatusChoices: Record<string, TaskStatusChoice>;
   debugInfo: {
     userId: string;
     mode: string;
@@ -29,7 +31,7 @@ interface NowWorkbenchOverlayController {
     lastAction: string;
   };
   setFeedback(value: string): void;
-  setTaskStatusChoice(value: TaskStatusChoice): void;
+  setTaskStatusChoice(taskId: string, value: TaskStatusChoice): void;
   handleHide(): Promise<void>;
   handleReturnToMain(): Promise<void>;
   handlePauseOrResume(): Promise<void>;
@@ -77,6 +79,7 @@ const EMPTY_MODEL = buildNowWorkbenchOverlayModel({
 export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayController {
   const timeBlockService = useMemo(() => getTimeBlockService(), []);
   const taskService = useMemo(() => getTaskService(), []);
+  const taskTimerService = useMemo(() => getTaskTimerService(), []);
   const eventLogService = useMemo(() => getEventLogService(), []);
   const overlayService = useMemo(() => getNowWorkbenchOverlayService(), []);
   const [activeBlock, setActiveBlock] = useState<ActiveBlockData | null>(null);
@@ -85,7 +88,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   const [now, setNow] = useState(() => Date.now());
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [taskStatusChoice, setTaskStatusChoice] = useState<TaskStatusChoice>('continue');
+  const [taskStatusChoices, setTaskStatusChoices] = useState<Record<string, TaskStatusChoice>>({});
   const [debugInfo, setDebugInfo] = useState<NowWorkbenchOverlayDebugInfo>(() => ({
     userId: getCurrentUserId(),
     mode: EMPTY_MODEL.mode,
@@ -241,6 +244,16 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     events,
     now,
   }), [activeBlock, events, now, tasks]);
+  const activeBlockTaskIds = useMemo(() => resolveActiveBlockTaskIds(activeBlock), [activeBlock]);
+  const activeBlockTasks = useMemo(() => {
+    if (activeBlockTaskIds.length === 0) {
+      return [];
+    }
+    const taskMap = new Map(tasks.map((task) => [task.id, task]));
+    return activeBlockTaskIds
+      .map((taskId) => taskMap.get(taskId))
+      .filter((task): task is TaskNode => Boolean(task));
+  }, [activeBlockTaskIds, tasks]);
 
   useEffect(() => {
     updateDebugInfo({
@@ -258,6 +271,37 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
       }),
     });
   }, [model, updateDebugInfo]);
+
+  useEffect(() => {
+    setTaskStatusChoices((current) => {
+      if (activeBlockTaskIds.length === 0) {
+        return Object.keys(current).length === 0 ? current : {};
+      }
+
+      const nextChoices = activeBlockTaskIds.reduce<Record<string, TaskStatusChoice>>((choices, taskId) => {
+        choices[taskId] = current[taskId] ?? 'continue';
+        return choices;
+      }, {});
+
+      const currentKeys = Object.keys(current);
+      const nextKeys = Object.keys(nextChoices);
+      if (
+        currentKeys.length === nextKeys.length
+        && nextKeys.every((taskId) => current[taskId] === nextChoices[taskId])
+      ) {
+        return current;
+      }
+
+      return nextChoices;
+    });
+  }, [activeBlockTaskIds]);
+
+  const setTaskStatusChoice = useCallback((taskId: string, value: TaskStatusChoice) => {
+    setTaskStatusChoices((current) => ({
+      ...current,
+      [taskId]: value,
+    }));
+  }, []);
 
   const handleHide = useCallback(async () => {
     if (!isTauri()) {
@@ -312,10 +356,15 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     try {
       const block = await timeBlockService.loadActiveBlock();
       if (!block) return;
+      const nextTaskIds = resolveActiveBlockTaskIds(block);
       if (!isFeedbackStage(block)) {
         await timeBlockService.markEnding();
       }
       await loadActiveBlock();
+      setTaskStatusChoices(nextTaskIds.reduce<Record<string, TaskStatusChoice>>((choices, taskId) => {
+        choices[taskId] = 'continue';
+        return choices;
+      }, {}));
       setFeedbackOpen(true);
       updateDebugInfo({ lastAction: 'open-end-dialog:success' });
     } catch (error) {
@@ -328,11 +377,37 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   const handleConfirmEnd = useCallback(async () => {
     try {
       const blockBeforeEnd = activeBlock;
-      await timeBlockService.endBlock(feedback);
+      const taskIdsSnapshot = resolveActiveBlockTaskIds(blockBeforeEnd);
+      const taskTitles = activeBlockTasks.reduce<Record<string, string>>((titles, task) => {
+        titles[task.id] = task.title;
+        return titles;
+      }, {});
+      const taskStatusOutcomes = taskIdsSnapshot.reduce<Record<string, string>>((outcomes, taskId) => {
+        const taskStatusChoice = taskStatusChoices[taskId] ?? 'continue';
+        if (taskStatusChoice !== 'continue') {
+          outcomes[taskId] = taskStatusChoice;
+        }
+        return outcomes;
+      }, {});
 
-      if (taskStatusChoice !== 'continue' && blockBeforeEnd?.taskId) {
+      if (taskIdsSnapshot.length > 0) {
+        await timeBlockService.endBlock(feedback, {
+          taskStatusOutcomes: Object.keys(taskStatusOutcomes).length > 0 ? taskStatusOutcomes : undefined,
+          taskTitles: Object.keys(taskTitles).length > 0 ? taskTitles : undefined,
+        });
+      } else {
+        await timeBlockService.endBlock(feedback);
+      }
+
+      if (blockBeforeEnd && taskIdsSnapshot.length > 0) {
         try {
-          await taskService.transitionTask(blockBeforeEnd.taskId, taskStatusChoice as TaskStatus);
+          await taskTimerService.onBlockEndForTasks(taskIdsSnapshot, blockBeforeEnd.startId);
+          for (const taskId of taskIdsSnapshot) {
+            const taskStatusChoice = taskStatusChoices[taskId] ?? 'continue';
+            if (taskStatusChoice !== 'continue') {
+              await taskService.transitionTask(taskId, taskStatusChoice as TaskStatus);
+            }
+          }
         } catch (transitionError) {
           updateDebugInfo({
             lastAction: `end-block:task-transition-error:${transitionError instanceof Error ? transitionError.message : String(transitionError)}`,
@@ -342,7 +417,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
 
       setFeedback('');
       setFeedbackOpen(false);
-      setTaskStatusChoice('continue');
+      setTaskStatusChoices({});
       await reloadAll();
       updateDebugInfo({ lastAction: 'end-block:success' });
     } catch (error) {
@@ -350,7 +425,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
         lastAction: `end-block:error:${error instanceof Error ? error.message : String(error)}`,
       });
     }
-  }, [activeBlock, feedback, reloadAll, taskService, taskStatusChoice, timeBlockService, updateDebugInfo]);
+  }, [activeBlock, activeBlockTasks, feedback, reloadAll, taskService, taskStatusChoices, taskTimerService, timeBlockService, updateDebugInfo]);
 
   const handleStartTask = useCallback(async (task: TaskNode) => {
     updateDebugInfo({ lastAction: `task-select:open-config:${task.id}` });
@@ -378,7 +453,8 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     model: model ?? EMPTY_MODEL,
     feedbackOpen,
     feedback,
-    taskStatusChoice,
+    activeBlockTasks,
+    taskStatusChoices,
     debugInfo,
     setFeedback,
     setTaskStatusChoice,

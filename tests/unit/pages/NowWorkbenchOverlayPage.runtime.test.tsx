@@ -27,9 +27,11 @@ const runtimeStateByUser: Record<string, {
 const loadActiveBlockMock = vi.fn();
 const onBlockChangeMock = vi.fn();
 const listTasksMock = vi.fn();
+const transitionTaskMock = vi.fn();
 const addEventMock = vi.fn();
 const endBlockMock = vi.fn();
 const markEndingMock = vi.fn();
+const onBlockEndForTasksMock = vi.fn();
 const loadEventsPageMock = vi.fn();
 const getEventStorageByUserMock = vi.fn();
 const taskStorageOnChangeMock = vi.fn();
@@ -131,9 +133,11 @@ vi.mock('@/lib/services', () => ({
   }),
   getTaskService: () => ({
     listTasks: (...args: unknown[]) => listTasksMock(...args),
+    transitionTask: (...args: unknown[]) => transitionTaskMock(...args),
   }),
   getTaskTimerService: () => ({
     startBlockForTask: vi.fn(),
+    onBlockEndForTasks: (...args: unknown[]) => onBlockEndForTasksMock(...args),
   }),
   getEventLogService: () => ({
     addEvent: (...args: unknown[]) => addEventMock(...args),
@@ -211,6 +215,8 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     });
     listTasksMock.mockReset();
     listTasksMock.mockImplementation(async () => runtimeStateByUser[currentUserState.userId].tasks);
+    transitionTaskMock.mockReset();
+    transitionTaskMock.mockResolvedValue(undefined);
     addEventMock.mockReset();
     addEventMock.mockResolvedValue(undefined);
     markEndingMock.mockReset();
@@ -219,6 +225,8 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     endBlockMock.mockImplementation(async () => {
       runtimeStateByUser[currentUserState.userId].activeBlock = null;
     });
+    onBlockEndForTasksMock.mockReset();
+    onBlockEndForTasksMock.mockResolvedValue(undefined);
     loadEventsPageMock.mockReset();
     loadEventsPageMock.mockImplementation(async () => ({
       events: runtimeStateByUser[currentUserState.userId].events,
@@ -560,6 +568,62 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     await waitFor(() => {
       expect(endBlockMock).toHaveBeenCalledWith('悬浮窗反馈提交');
     });
+  });
+
+  it('submits multi-task outcomes from overlay feedback dialog（悬浮窗反馈弹窗会提交多任务后续状态）', async () => {
+    runtimeStateByUser['overlay-test-user'].activeBlock = {
+      startId: 'block-feedback-multi',
+      name: '结束反馈多任务测试',
+      mode: 'countup',
+      startTime: Date.UTC(2026, 2, 11, 9, 0, 0),
+      elapsed: 0,
+      paused: false,
+      phase: 'feedback_in_progress',
+      actionEndedAt: Date.UTC(2026, 2, 11, 9, 30, 0),
+      feedbackStartedAt: Date.UTC(2026, 2, 11, 9, 30, 0),
+      taskIds: ['task-a', 'task-b'],
+    };
+    runtimeStateByUser['overlay-test-user'].tasks = [
+      {
+        id: 'task-a',
+        title: '任务 A',
+        status: 'in_progress',
+      },
+      {
+        id: 'task-b',
+        title: '任务 B',
+        status: 'in_progress',
+      },
+    ];
+
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+    render(<NowWorkbenchOverlayPage />);
+
+    const textarea = await screen.findByTestId('now-overlay-feedback-textarea');
+    expect(await screen.findByTestId('task-dag-end-dialog-task-task-a')).toBeInTheDocument();
+    expect(await screen.findByTestId('task-dag-end-dialog-task-task-b')).toBeInTheDocument();
+
+    fireEvent.click(screen.getAllByTestId('feedback-task-status-completed')[0]!);
+    fireEvent.click(screen.getAllByTestId('feedback-task-status-cancelled')[1]!);
+    fireEvent.change(textarea, { target: { value: '多任务反馈提交' } });
+    fireEvent.click(screen.getByTestId('now-overlay-feedback-confirm'));
+
+    await waitFor(() => {
+      expect(endBlockMock).toHaveBeenCalledWith('多任务反馈提交', {
+        taskStatusOutcomes: {
+          'task-a': 'completed',
+          'task-b': 'cancelled',
+        },
+        taskTitles: {
+          'task-a': '任务 A',
+          'task-b': '任务 B',
+        },
+      });
+    });
+
+    expect(onBlockEndForTasksMock).toHaveBeenCalledWith(['task-a', 'task-b'], 'block-feedback-multi');
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-a', 'completed');
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-b', 'cancelled');
   });
 
   it('refreshes against the latest current user context after prewarm（预热窗口后刷新会重新读取当前用户）', { timeout: 30000 }, async () => {
