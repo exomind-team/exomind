@@ -66,7 +66,7 @@ function isTaskExecutable(task: TaskNode, taskById: Map<string, TaskNode>): bool
     return false
   }
 
-  return !task.dependsOn.some((dependency) => {
+  const hasBlockingHardDependency = task.dependsOn.some((dependency) => {
     if (dependency.type !== 'hard') {
       return false
     }
@@ -77,6 +77,23 @@ function isTaskExecutable(task: TaskNode, taskById: Map<string, TaskNode>): bool
     }
 
     return predecessor.status !== 'completed'
+  })
+
+  if (hasBlockingHardDependency) {
+    return false
+  }
+
+  return !task.dependsOn.some((dependency) => {
+    if (dependency.type !== 'soft') {
+      return false
+    }
+
+    const predecessor = taskById.get(dependency.taskId)
+    if (!predecessor) {
+      return false
+    }
+
+    return predecessor.status === 'pending'
   })
 }
 

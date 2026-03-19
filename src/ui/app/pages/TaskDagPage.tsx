@@ -26,6 +26,7 @@ import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimerConfig } fro
 import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import { MultiTaskEndDialog } from '@/ui/app/components/MultiTaskEndDialog';
 import { TaskDagControlPanel } from '@/ui/app/components/TaskDagControlPanel';
+import { TaskQuickCreateDialog } from '@/ui/app/components/TaskQuickCreateDialog';
 import {
   TaskDagDetailPanel,
   type TaskDagDependencyItem,
@@ -139,6 +140,23 @@ function resolveConnectTypeFromEvent(event: unknown): DagConnectType {
   }
 
   return 'hard';
+}
+
+function isPaneInteractionTarget(target: EventTarget | null): boolean {
+  if (!(target instanceof HTMLElement)) {
+    return false;
+  }
+
+  if (target.closest('.react-flow__node') || target.closest('[data-testid^="mock-react-flow-node-"]')) {
+    return false;
+  }
+
+  return Boolean(
+    target.closest('.react-flow__pane')
+    || target.closest('[data-testid="mock-react-flow-pane"]')
+    || target.closest('[data-testid="mock-react-flow-pane-double"]')
+    || target.closest('[data-testid="mock-react-flow-pane-context"]'),
+  );
 }
 
 function buildBlockedReason(task: TaskNode, taskById: ReadonlyMap<string, TaskNode>): string | null {
@@ -386,7 +404,9 @@ export function TaskDagPage() {
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [dagVisibility, setDagVisibility] = useState<TaskDagVisibilityState>(EMPTY_TASK_DAG_VISIBILITY_STATE);
   const [contextMenu, setContextMenu] = useState<{ nodeId: string; x: number; y: number } | null>(null);
+  const [paneContextMenu, setPaneContextMenu] = useState<{ x: number; y: number } | null>(null);
   const [hideTerminal, setHideTerminal] = useState(false);
+  const [immersive, setImmersive] = useState(false);
   const [searchDraft, setSearchDraft] = useState('');
   const [searchQuery, setSearchQuery] = useState('');
   const [dagDirection, setDagDirection] = useState<DagDirection>(() => readStoredDagDirection());
@@ -394,6 +414,7 @@ export function TaskDagPage() {
   const [connectState, setConnectState] = useState<DagConnectState>(null);
   const [endingDialogOpen, setEndingDialogOpen] = useState(false);
   const [endingTaskIds, setEndingTaskIds] = useState<string[]>([]);
+  const [quickCreateOpen, setQuickCreateOpen] = useState(false);
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
   const hasMountedDirectionRef = useRef(false);
@@ -484,6 +505,13 @@ export function TaskDagPage() {
   }, [contextMenu]);
 
   useEffect(() => {
+    if (!paneContextMenu) return;
+    const handler = () => setPaneContextMenu(null);
+    document.addEventListener('click', handler);
+    return () => document.removeEventListener('click', handler);
+  }, [paneContextMenu]);
+
+  useEffect(() => {
     if (mode !== 'browse') {
       setSelectedTaskId(null);
     }
@@ -492,6 +520,7 @@ export function TaskDagPage() {
   useEffect(() => {
     if (mode !== 'connect') {
       setConnectState(null);
+      setPaneContextMenu(null);
     }
   }, [mode]);
 
@@ -500,6 +529,19 @@ export function TaskDagPage() {
     setEndingDialogOpen(false);
     setEndingTaskIds([]);
   }, [activeBlock]);
+
+  useEffect(() => {
+    if (!immersive) return;
+
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        setImmersive(false);
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [immersive]);
 
   const resolvedDirection = useMemo(
     () => resolveDagDirection(dagDirection, isDesktop),
@@ -670,6 +712,26 @@ export function TaskDagPage() {
       params: { taskId },
       search: { from: 'dag' } as never,
     });
+  };
+
+  const handleQuickCreateTask = async (title: string, description: string) => {
+    try {
+      await getTaskService().createTask({
+        title,
+        description: description || undefined,
+      });
+      toast({
+        title: '任务已创建',
+        description: title,
+      });
+    } catch (error) {
+      toast({
+        title: '创建任务失败',
+        description: error instanceof Error ? error.message : String(error),
+        variant: 'destructive',
+      });
+      throw error;
+    }
   };
 
   const applyDependencyMutation = async (
@@ -892,7 +954,10 @@ export function TaskDagPage() {
 
   return (
     <div className="flex h-full min-h-0 flex-col bg-[#FAF7F5] dark:bg-[#0C0A09]" data-testid="task-dag-page">
-      <header className="px-5 py-4 md:px-8 lg:px-10">
+      <header
+        data-testid="task-dag-page-header"
+        className={immersive ? 'hidden' : 'px-5 py-4 md:px-8 lg:px-10'}
+      >
         <TaskBreadcrumb
           segments={[{ label: '任务', to: '/tasks' }]}
           current={{ label: 'DAG 视图', icon: Waypoints }}
@@ -913,15 +978,18 @@ export function TaskDagPage() {
           mode={mode}
           enabledModes={['browse', 'connect', 'execute']}
           onChange={setMode}
+          immersive={immersive}
         />
         <TaskDagControlPanel
           direction={dagDirection}
           searchValue={searchDraft}
           searchMatchCount={searchMatchCount}
           hideTerminal={hideTerminal}
+          immersive={immersive}
           onDirectionChange={setDagDirection}
           onSearchValueChange={setSearchDraft}
           onToggleHideTerminal={() => setHideTerminal((value) => !value)}
+          onToggleImmersive={() => setImmersive((value) => !value)}
           onFitView={() => {
             void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
           }}
@@ -929,58 +997,82 @@ export function TaskDagPage() {
           hasCurrentRoot={Boolean(renderedVisibleGraph.visibleCurrentRootNodeId)}
         />
 
-        <ReactFlow<TaskDagFlowNode, TaskDagFlowEdge>
-          nodes={flowGraph.nodes}
-          edges={flowGraph.edges}
-          nodeTypes={TASK_DAG_NODE_TYPES}
-          proOptions={{ hideAttribution: true }}
-          fitView
-          minZoom={TASK_DAG_MIN_ZOOM}
-          fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}
-          nodesDraggable={false}
-          nodesConnectable={mode === 'connect'}
-          elementsSelectable
-          zoomOnDoubleClick={false}
-          onInit={(instance) => {
-            flowInstanceRef.current = instance;
-            void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
-          }}
-          onPaneClick={() => {
-            if (mode === 'browse') {
-              setSelectedTaskId(null);
-            }
-            if (mode === 'connect') {
-              setConnectState(null);
-            }
-            setContextMenu(null);
-          }}
-          onNodeClick={handleNodeClick}
-          onNodeDoubleClick={(_event, node) => {
-            setContextMenu(null);
-            if (mode === 'connect') {
+        <div
+          className="h-full w-full"
+          onDoubleClick={(event) => {
+            if (mode !== 'connect' || !isPaneInteractionTarget(event.target)) {
               return;
             }
-            handleNavigateToTaskDetail(node.id);
+            setContextMenu(null);
+            setPaneContextMenu(null);
+            setQuickCreateOpen(true);
           }}
-          onConnectStart={(event) => {
-            connectDragTypeRef.current = resolveConnectTypeFromEvent(event);
-          }}
-          onConnect={(connection) => {
-            setConnectState(null);
-            void applyDependencyMutation(
-              connection.source?.trim() ?? '',
-              connection.target?.trim() ?? '',
-              connectDragTypeRef.current,
-            );
-          }}
-          onNodeContextMenu={(event, node) => {
+          onContextMenu={(event) => {
+            if (mode !== 'connect' || !isPaneInteractionTarget(event.target)) {
+              return;
+            }
             event.preventDefault();
-            setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+            setContextMenu(null);
+            setPaneContextMenu({ x: event.clientX, y: event.clientY });
           }}
         >
-          <Background gap={20} color="#E7E5E4" />
-          <Controls className="!rounded-lg !border-[#E7E3E0] !bg-white/90 !shadow-sm dark:!border-[#3C3836] dark:!bg-[#1C1917]/90 [&>button]:!border-[#E7E3E0] [&>button]:!bg-transparent [&>button]:!fill-[#57534E] dark:[&>button]:!border-[#3C3836] dark:[&>button]:!fill-[#A8A29E] [&>button:hover]:!bg-[#F5F0ED] dark:[&>button:hover]:!bg-[#292524]" />
-        </ReactFlow>
+          <ReactFlow<TaskDagFlowNode, TaskDagFlowEdge>
+            nodes={flowGraph.nodes}
+            edges={flowGraph.edges}
+            nodeTypes={TASK_DAG_NODE_TYPES}
+            proOptions={{ hideAttribution: true }}
+            fitView
+            minZoom={TASK_DAG_MIN_ZOOM}
+            fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}
+            nodesDraggable={false}
+            nodesConnectable={mode === 'connect'}
+            elementsSelectable
+            zoomOnDoubleClick={false}
+            onInit={(instance) => {
+              flowInstanceRef.current = instance;
+              void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
+            }}
+            onPaneClick={() => {
+              if (mode === 'browse') {
+                setSelectedTaskId(null);
+              }
+              if (mode === 'connect') {
+                setConnectState(null);
+              }
+              setContextMenu(null);
+              setPaneContextMenu(null);
+            }}
+            onNodeClick={handleNodeClick}
+            onNodeDoubleClick={(_event, node) => {
+              setContextMenu(null);
+              if (mode === 'connect') {
+                return;
+              }
+              handleNavigateToTaskDetail(node.id);
+            }}
+            onConnectStart={(event) => {
+              connectDragTypeRef.current = resolveConnectTypeFromEvent(event);
+            }}
+            onConnect={(connection) => {
+              setConnectState(null);
+              void applyDependencyMutation(
+                connection.source?.trim() ?? '',
+                connection.target?.trim() ?? '',
+                connectDragTypeRef.current,
+              );
+            }}
+            onNodeContextMenu={(event, node) => {
+              event.preventDefault();
+              setPaneContextMenu(null);
+              setContextMenu({ nodeId: node.id, x: event.clientX, y: event.clientY });
+            }}
+          >
+            <Background gap={20} color="#E7E5E4" />
+            {immersive ? null : (
+              <Controls className="!rounded-lg !border-[#E7E3E0] !bg-white/90 !shadow-sm dark:!border-[#3C3836] dark:!bg-[#1C1917]/90 [&>button]:!border-[#E7E3E0] [&>button]:!bg-transparent [&>button]:!fill-[#57534E] dark:[&>button]:!border-[#3C3836] dark:[&>button]:!fill-[#A8A29E] [&>button:hover]:!bg-[#F5F0ED] dark:[&>button:hover]:!bg-[#292524]" />
+            )}
+          </ReactFlow>
+        </div>
 
         {contextMenu ? (
           <div
@@ -1033,6 +1125,26 @@ export function TaskDagPage() {
           </div>
         ) : null}
 
+        {paneContextMenu && mode === 'connect' ? (
+          <div
+            data-testid="task-dag-pane-context-menu"
+            className="fixed z-50 rounded-lg border border-[#E7E5E4] bg-white py-1 shadow-lg dark:border-[#292524] dark:bg-[#1C1917]"
+            style={{ left: paneContextMenu.x, top: paneContextMenu.y }}
+          >
+            <button
+              type="button"
+              data-testid="task-dag-pane-context-create"
+              className="block w-full px-4 py-1.5 text-left text-xs text-[#57534E] hover:bg-[#F5F0ED] dark:text-[#A8A29E] dark:hover:bg-[#292524]"
+              onClick={() => {
+                setPaneContextMenu(null);
+                setQuickCreateOpen(true);
+              }}
+            >
+              快速创建任务
+            </button>
+          </div>
+        ) : null}
+
         {selectedTask && selectedGraphNode ? (
           <TaskDagDetailPanel
             task={selectedTask}
@@ -1049,6 +1161,11 @@ export function TaskDagPage() {
           tasks={endingDialogTasks}
           onOpenChange={setEndingDialogOpen}
           onSubmit={handleEndDialogSubmit}
+        />
+        <TaskQuickCreateDialog
+          open={quickCreateOpen}
+          onOpenChange={setQuickCreateOpen}
+          onSubmit={handleQuickCreateTask}
         />
       </div>
     </div>

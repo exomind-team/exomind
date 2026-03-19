@@ -6,6 +6,7 @@ import type { TaskNode } from '@/lib/types/task';
 
 const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
 const onTaskChangeMock = vi.fn(() => () => {});
+const createTaskMock = vi.fn();
 const addDependencyMock = vi.fn();
 const removeDependencyMock = vi.fn();
 const transitionTaskMock = vi.fn();
@@ -41,6 +42,7 @@ vi.mock('@/lib/services', () => ({
   getTaskService: () => ({
     listTasks: listTasksMock,
     onTaskChange: onTaskChangeMock,
+    createTask: createTaskMock,
     addDependency: addDependencyMock,
     removeDependency: removeDependencyMock,
     transitionTask: transitionTaskMock,
@@ -70,6 +72,8 @@ vi.mock('@xyflow/react', () => ({
     edges,
     children,
     onPaneClick,
+    onPaneDoubleClick,
+    onPaneContextMenu,
     onNodeClick,
     onNodeDoubleClick,
     onNodeContextMenu,
@@ -81,6 +85,8 @@ vi.mock('@xyflow/react', () => ({
     edges?: Array<{ id: string }>;
     children?: ReactNode;
     onPaneClick?: () => void;
+    onPaneDoubleClick?: () => void;
+    onPaneContextMenu?: (_event: { preventDefault: () => void; clientX: number; clientY: number }) => void;
     onNodeClick?: (_event: unknown, node: { id: string; data?: Record<string, unknown> }) => void;
     onNodeDoubleClick?: (_event: unknown, node: { id: string; data?: Record<string, unknown> }) => void;
     onNodeContextMenu?: (_event: { preventDefault: () => void; clientX: number; clientY: number }, node: { id: string; data?: Record<string, unknown> }) => void;
@@ -103,6 +109,19 @@ vi.mock('@xyflow/react', () => ({
       <div data-testid="mock-react-flow">
         <button type="button" data-testid="mock-react-flow-pane" onClick={() => onPaneClick?.()}>
           pane
+        </button>
+        <button type="button" data-testid="mock-react-flow-pane-double" onDoubleClick={() => onPaneDoubleClick?.()}>
+          pane-double
+        </button>
+        <button
+          type="button"
+          data-testid="mock-react-flow-pane-context"
+          onContextMenu={(event) => {
+            event.preventDefault();
+            onPaneContextMenu?.({ preventDefault: () => {}, clientX: 96, clientY: 128 });
+          }}
+        >
+          pane-context
         </button>
         {(nodes ?? []).map((node) => {
           const NodeComponent = node.type ? nodeTypes?.[node.type] : undefined;
@@ -176,6 +195,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     toastMock.mockReset();
     listTasksMock.mockReset();
     onTaskChangeMock.mockClear();
+    createTaskMock.mockReset();
     addDependencyMock.mockReset();
     removeDependencyMock.mockReset();
     transitionTaskMock.mockReset();
@@ -198,6 +218,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     removeTaskFromBlockMock.mockResolvedValue(undefined);
     onBlockEndForTasksMock.mockResolvedValue(undefined);
     transitionTaskMock.mockResolvedValue(null);
+    createTaskMock.mockResolvedValue(null);
     addDependencyMock.mockResolvedValue(null);
     removeDependencyMock.mockResolvedValue(null);
     window.localStorage.clear();
@@ -457,10 +478,16 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
     expect(window.localStorage.getItem('exomind:dag-mode')).toBe('connect');
     expect(screen.getByText(/连接模式：/)).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-mode-active-indicator')).toHaveStyle({
+      transform: 'translateX(100%)',
+    });
 
     fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
     expect(window.localStorage.getItem('exomind:dag-mode')).toBe('execute');
     expect(screen.getByText(/执行模式：/)).toBeInTheDocument();
+    expect(screen.getByTestId('task-dag-mode-active-indicator')).toHaveStyle({
+      transform: 'translateX(200%)',
+    });
   });
 
   it('supports connect mode dependency toggle rules and surfaces cycle rejection', async () => {
@@ -514,6 +541,66 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     fireEvent.doubleClick(screen.getByTestId('mock-react-flow-node-task-a'));
 
     expect(navigateMock).not.toHaveBeenCalled();
+  });
+
+  it('toggles immersive mode and hides page chrome plus flow controls', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    expect(screen.getByTestId('task-dag-page-header')).toBeInTheDocument();
+    expect(screen.getByTestId('mock-react-flow-controls')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-immersive-toggle'));
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-page-header')).toHaveClass('hidden');
+    });
+    expect(screen.queryByTestId('mock-react-flow-controls')).not.toBeInTheDocument();
+
+    fireEvent.keyDown(document, { key: 'Escape' });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('task-dag-page-header')).toBeInTheDocument();
+    });
+    expect(screen.getByTestId('mock-react-flow-controls')).toBeInTheDocument();
+  });
+
+  it('opens quick create from pane gestures in connect mode and submits a new task', async () => {
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    fireEvent.doubleClick(screen.getByTestId('mock-react-flow-pane-double'));
+    expect(screen.queryByTestId('task-quick-create-dialog')).not.toBeInTheDocument();
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-connect'));
+    fireEvent.doubleClick(screen.getByTestId('mock-react-flow-pane-double'));
+
+    expect(await screen.findByTestId('task-quick-create-dialog')).toBeInTheDocument();
+    fireEvent.change(screen.getByTestId('task-quick-create-title'), { target: { value: '连接模式新增任务' } });
+    fireEvent.change(screen.getByTestId('task-quick-create-description'), { target: { value: '由测试创建' } });
+    fireEvent.click(screen.getByTestId('task-quick-create-submit'));
+
+    await waitFor(() => {
+      expect(createTaskMock).toHaveBeenCalledWith({
+        title: '连接模式新增任务',
+        description: '由测试创建',
+      });
+    });
+    expect(toastMock).toHaveBeenCalledWith({
+      title: '任务已创建',
+      description: '连接模式新增任务',
+    });
+
+    fireEvent.contextMenu(screen.getByTestId('mock-react-flow-pane-context'));
+    expect(await screen.findByTestId('task-dag-pane-context-menu')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('task-dag-pane-context-create'));
+    expect(await screen.findByTestId('task-quick-create-dialog')).toBeInTheDocument();
   });
 
   it('starts executable tasks in execute mode with remaining countdown config', async () => {

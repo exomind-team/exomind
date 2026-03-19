@@ -1,4 +1,4 @@
-import { Crosshair, EyeOff, GitBranch, LocateFixed, Search } from 'lucide-react';
+import { EyeOff, LocateFixed, Maximize2, Search } from 'lucide-react';
 import type { DagDirection } from '@/ui/app/pages/task-dag-layout';
 
 interface TaskDagControlPanelProps {
@@ -6,10 +6,12 @@ interface TaskDagControlPanelProps {
   searchValue: string;
   searchMatchCount: number;
   hideTerminal: boolean;
+  immersive: boolean;
   onDirectionChange: (direction: DagDirection) => void;
   onSearchValueChange: (value: string) => void;
   onToggleHideTerminal: () => void;
   onFitView: () => void;
+  onToggleImmersive: () => void;
   onJumpToCurrentRoot?: () => void;
   hasCurrentRoot: boolean;
 }
@@ -31,10 +33,12 @@ export function TaskDagControlPanel({
   searchValue,
   searchMatchCount,
   hideTerminal,
+  immersive,
   onDirectionChange,
   onSearchValueChange,
   onToggleHideTerminal,
-  onFitView,
+  onFitView: _onFitView,
+  onToggleImmersive,
   onJumpToCurrentRoot,
   hasCurrentRoot,
 }: TaskDagControlPanelProps) {
@@ -42,12 +46,22 @@ export function TaskDagControlPanel({
 
   return (
     <div className="pointer-events-none absolute right-3 top-3 z-10 flex max-w-[min(28rem,calc(100%-1.5rem))] flex-col items-end gap-2">
-      <div className="pointer-events-auto flex items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/90 px-2 py-1 text-[11px] text-[#57534E] shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]">
+      <div
+        className={[
+          'pointer-events-auto flex items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/90 px-2 py-1 text-[11px] text-[#57534E] shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90 dark:text-[#D6D3D1]',
+          immersive ? 'opacity-0 hover:opacity-100 focus-within:opacity-100' : '',
+        ].join(' ')}
+      >
         {legendChip('H', '硬依赖：前置必须完成后才能开始', 'bg-[#FDE7DC] text-[#C75B3A]', 'task-dag-legend-hard-chip')}
         {legendChip('S', '软依赖：前置任务开始后即可开始', 'bg-[#F5F0ED] text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]', 'task-dag-legend-soft-chip')}
       </div>
 
-      <div className="pointer-events-auto flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 shadow-sm backdrop-blur dark:border-[#3C3836] dark:bg-[#1C1917]/90">
+      <div
+        className={[
+          'pointer-events-auto flex flex-wrap items-center justify-end gap-2 rounded-2xl border border-[#E7E3E0] bg-white/90 p-2 shadow-sm backdrop-blur transition-opacity duration-300 dark:border-[#3C3836] dark:bg-[#1C1917]/90',
+          immersive ? 'opacity-0 hover:opacity-100 focus-within:opacity-100' : '',
+        ].join(' ')}
+      >
         <label className="flex min-w-[220px] items-center gap-2 rounded-full border border-[#E7E3E0] bg-white/80 px-3 py-2 text-[11px] text-[#57534E] dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E]">
           <Search size={12} />
           <input
@@ -83,12 +97,16 @@ export function TaskDagControlPanel({
 
         <button
           type="button"
-          data-testid="task-dag-fit-view"
-          onClick={onFitView}
-          className="inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 px-3 py-2 text-[11px] font-medium text-[#57534E] shadow-sm transition-colors hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E] dark:hover:text-[#FAFAF9]"
+          data-testid="task-dag-immersive-toggle"
+          onClick={onToggleImmersive}
+          className={`inline-flex items-center gap-1 rounded-full border px-3 py-2 text-[11px] font-medium shadow-sm transition-colors ${
+            immersive
+              ? 'border-[#C75B3A] bg-[#FFF7ED] text-[#C75B3A] dark:border-[#FDBA74] dark:bg-[#2A231B] dark:text-[#FDBA74]'
+              : 'border-[#E7E3E0] bg-white/80 text-[#57534E] dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E]'
+          }`}
         >
-          <Crosshair size={12} />
-          适配视口
+          <Maximize2 size={12} />
+          {immersive ? '退出沉浸' : '沉浸模式'}
         </button>
 
         <div className="inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 p-1 shadow-sm dark:border-[#3C3836] dark:bg-[#120F0D]">
@@ -145,13 +163,6 @@ export function TaskDagControlPanel({
           </button>
         ) : null}
 
-        <span
-          title="当前波次只开放浏览模式；连接/执行模式将在后续 Wave 激活。"
-          className="inline-flex items-center gap-1 rounded-full border border-[#E7E3E0] bg-white/80 px-3 py-2 text-[11px] font-medium text-[#57534E] shadow-sm dark:border-[#3C3836] dark:bg-[#120F0D] dark:text-[#A8A29E]"
-        >
-          <GitBranch size={12} />
-          Wave 1
-        </span>
       </div>
     </div>
   );
