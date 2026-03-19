@@ -129,7 +129,6 @@ export function BlockTaskAssociationList() {
       <div className="flex items-center justify-between gap-3">
         <div>
           <h3 className="text-sm font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务关联</h3>
-          <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">运行中可追加或移除关联任务。</p>
         </div>
         <span className="rounded-full bg-[#F5F0ED] px-2 py-1 text-xs text-[#78716C] dark:bg-[#292524] dark:text-[#D6D3D1]">
           {linkedTasks.length} 个任务
@@ -144,7 +143,6 @@ export function BlockTaskAssociationList() {
           >
             <div className="min-w-0">
               <p className="truncate text-sm text-[#1C1917] dark:text-[#FAFAF9]">{task.title}</p>
-              <p className="mt-1 text-xs text-[#78716C] dark:text-[#A8A29E]">{task.status}</p>
             </div>
             <button
               type="button"

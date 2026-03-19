@@ -44,7 +44,7 @@ describe('BlockTaskAssociationList layout', () => {
   it('keeps the select shrinkable and the action button single-line with a minimum width（选择框可收缩且按钮单行保底宽度）', async () => {
     render(<BlockTaskAssociationList />);
 
-    await screen.findByText('运行中可追加或移除关联任务。');
+    await screen.findByText('任务关联');
 
     const select = screen.getByRole('combobox');
     const button = screen.getByRole('button', { name: '关联任务' });

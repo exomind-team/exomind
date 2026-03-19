@@ -948,8 +948,9 @@ function MobileTimeblockDetail({
                     <button
                       type="button"
                       onClick={onAppendTaskToActiveBlock}
+                      disabled={Boolean(blockingReason)}
                       data-testid="task-append-association-button"
-                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
                     >
                       <Play size={14} />
                       追加任务关联
@@ -1240,8 +1241,9 @@ function DesktopTimeblockDetail({
                     <button
                       type="button"
                       onClick={onAppendTaskToActiveBlock}
+                      disabled={Boolean(blockingReason)}
                       data-testid="task-append-association-button"
-                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white"
+                      className="inline-flex items-center gap-1 rounded-xl bg-[#C75B3A] px-4 py-2 text-sm font-medium text-white disabled:cursor-not-allowed disabled:bg-[#D6D3D1]"
                     >
                       <Play size={14} />
                       追加任务关联
@@ -1779,7 +1781,7 @@ export function TaskDetailPage() {
   };
 
   const handleAppendTaskToActiveBlock = () => {
-    if (!taskId) return;
+    if (!taskId || blockingReason) return;
     void getTaskTimerService().addTaskToBlock(taskId).then(() => {
       void navigate({ to: '/eventlog', search: buildNowFocusSearch() });
     }).catch((err) => {

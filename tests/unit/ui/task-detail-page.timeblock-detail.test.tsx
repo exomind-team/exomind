@@ -584,6 +584,56 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     });
   });
 
+  it('disables append-association when the task is blocked by unfinished hard dependency（被阻塞任务禁用追加关联）', async () => {
+    getTaskMock.mockResolvedValue(makeTask({
+      status: 'pending',
+      dependsOn: [{ taskId: 'task-root', type: 'hard' }],
+    }));
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: 'task-root',
+        title: '试用电饭锅',
+        status: 'pending',
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+      makeTask({
+        id: 'task-1',
+        title: '深度工作：EventLog 模块实现',
+        status: 'pending',
+        dependsOn: [{ taskId: 'task-root', type: 'hard' }],
+        createdAt: 20,
+        updatedAt: 20,
+      }),
+    ]);
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'active-2',
+      name: '其他任务的时间块',
+      mode: 'countup',
+      startTime: new Date('2026-03-06T09:00:00+08:00').getTime(),
+      elapsed: 15 * 60 * 1000,
+      paused: false,
+      phase: 'running',
+      version: 1,
+      taskIds: ['task-root'],
+      taskAssociationLog: [],
+    });
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    const appendButton = screen.getByTestId('task-append-association-button');
+    expect(appendButton).toBeDisabled();
+    expect(screen.getByText('硬依赖未完成：试用电饭锅')).toBeInTheDocument();
+
+    fireEvent.click(appendButton);
+
+    await waitFor(() => {
+      expect(addTaskToBlockMock).not.toHaveBeenCalled();
+    });
+  });
+
   it('routes go-back-to-now button to focus tab（回到当下进入专注子页面）', async () => {
     loadActiveBlockMock.mockResolvedValue({
       startId: 'active-1',

@@ -92,9 +92,11 @@ describe('BlockTaskAssociationList issue-418', () => {
 
     render(<BlockTaskAssociationList />);
 
-    await screen.findByText('运行中可追加或移除关联任务。');
+    await screen.findByText('任务关联');
     expect(screen.getByText('1 个任务')).toBeInTheDocument();
     expect(screen.getByText('任务一')).toBeInTheDocument();
+    expect(screen.queryByText('运行中可追加或移除关联任务。')).toBeNull();
+    expect(screen.queryByText('in_progress')).toBeNull();
 
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
     fireEvent.click(screen.getByText('关联任务'));
@@ -193,7 +195,7 @@ describe('BlockTaskAssociationList issue-418', () => {
 
     render(<BlockTaskAssociationList />);
 
-    await screen.findByText('运行中可追加或移除关联任务。');
+    await screen.findByRole('combobox');
 
     const options = screen.getAllByRole('option').map((option) => option.textContent);
     expect(options).toEqual(expect.arrayContaining(['选择任务', '可追加任务']));
@@ -220,7 +222,7 @@ describe('BlockTaskAssociationList issue-418', () => {
 
     render(<BlockTaskAssociationList />);
 
-    await screen.findByText('运行中可追加或移除关联任务。');
+    await screen.findByText('任务关联');
     fireEvent.change(screen.getByRole('combobox'), { target: { value: 'task-2' } });
     fireEvent.click(screen.getByText('关联任务'));
 
