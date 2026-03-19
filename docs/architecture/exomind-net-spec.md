@@ -694,7 +694,7 @@ struct Permissions {
 
 Flags (bitflags):
   bit 0: COMPRESSED   负载已压缩（zstd）
-  bit 1: ENCRYPTED    端到端加密
+  bit 1: ENCRYPTED    端到端加密（默认开启，所有设备间通信均加密）
   bit 2: FRAGMENTED   大消息分片
   bit 3: STREAM       流式消息
   bit 4: PRIORITY     高优先级
@@ -703,7 +703,7 @@ Flags (bitflags):
 ### 9.2 编解码流程
 
 ```
-编码：上层消息 → MessagePack序列化 → zstd压缩(>1KB时) → E2E加密(可选) → 组帧
+编码：上层消息 → MessagePack序列化 → zstd压缩(>1KB时) → E2E加密（默认开启） → 组帧
 解码：拆帧 → 解密 → 解压 → MessagePack反序列化 → 上层消息
 ```
 
