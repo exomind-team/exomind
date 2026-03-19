@@ -2,8 +2,8 @@
 
 > **状态**：待执行
 > **分支**：直接在 `dev` 上开发（无独立分支）
-> **关联 Issue**：#600, #603, #601, #598, #602, #599
-> **依赖链**：#600 → #603 → #601 → #598 → #602 → #599（#599 和 #602 依赖 #598 的键盘焦点基础设施）
+> **关联 Issue**：#600, #603, #605, #601, #606, #598, #602, #599
+> **依赖链**：#600 → #603 → #605 → #601 → #606 → #598 → #602 → #599
 
 ---
 
@@ -13,10 +13,12 @@ DAG 一期（批次 A）已完成 Sugiyama 布局、三模式交互、搜索/过
 
 1. **#600**（bug）：隐藏已结束开关缺少 localStorage 持久化
 2. **#603**（bug）：沉浸模式缺少 localStorage 持久化（与 #600 同构）
-3. **#601**（feature）：连接模式下已选起点后，空白单击改为带依赖语义的快速创建
-4. **#598**（feature）：基础键盘导航——模式切换、画布平移、WASD 节点方向导航
-5. **#602**（feature）：右下角动态按键提示板（依赖 #598 的键盘状态）
-6. **#599**（feature）：连接模式高级键盘建边——Enter/Space 建边、Tab/Shift+Tab 快速创建上下游
+3. **#605**（P1 bug）：活跃时间块快照重复触发变更，导致当下/今日页面每秒闪烁
+4. **#601**（feature）：连接模式下已选起点后，空白单击改为带依赖语义的快速创建
+5. **#606**（feature）：取消任务关联时也提供任务状态设置弹窗
+6. **#598**（feature）：基础键盘导航——模式切换、画布平移、WASD 节点方向导航
+7. **#602**（feature）：右下角动态按键提示板（依赖 #598 的键盘状态）
+8. **#599**（feature）：连接模式高级键盘建边——Enter/Space 建边、Tab/Shift+Tab 快速创建上下游
 
 ---
 
@@ -102,6 +104,38 @@ useEffect(() => {
 ### 1b.2 验证
 
 **手动验证**：进入沉浸模式 → 离开 DAG → 返回 → 仍然沉浸 ✓
+
+---
+
+## 步骤 1c：#605 活跃时间块快照闪烁修复
+
+### 1c.1 问题
+
+**当下/今日页面**（NowTodayTab）每秒整页刷新闪烁。原因是活跃时间块的复制快照（`active_block.replication.snapshot`）高频触发组件变更。
+
+类似旧 #554（信号刷屏），之前在 `useSignalStream.ts` 中加了 1 秒节流，但可能在批次 B 的改动中被绕过或回归。
+
+### 1c.2 修复方向
+
+**文件**：检查以下位置的信号/事件监听是否有去抖或节流：
+
+1. `src/ui/hooks/useSignalStream.ts` — 检查 `active_block.replication.snapshot` 的节流是否仍有效
+2. `src/ui/app/components/NowTodayTab.tsx` — 检查 `onBlockChange` 回调是否触发了不必要的全量重渲染
+3. `src/lib/services/timeblock.service.ts` — 检查 `loadActiveBlock` 是否在每次 snapshot 时都触发
+
+**修复策略**：
+- 对 `active_block.replication.snapshot` 信号做稳定的浅比较（`JSON.stringify` 或逐字段比较），变化时才触发 state 更新
+- 或在 NowTodayTab 的 `useEffect` 中对 blocks 数据做 `useMemo` / 引用稳定化，避免相同数据触发重渲染
+
+### 1c.3 验证
+
+```bash
+npx tsc --noEmit
+```
+
+**手动验证**：
+- 启动时间块后切到"当下>今日" → 页面不闪烁 ✓
+- 时间块运行中页面内容正常更新（每分钟或手动刷新）✓
 
 ---
 
@@ -246,6 +280,66 @@ npx tsc --noEmit
 - 选中起点（soft），空白单击 → 创建后自动 soft 依赖 ✓
 - Esc 可清空起点 ✓
 - 再次点击起点节点 → hard→soft→清空循环 ✓
+
+---
+
+## 步骤 2b：#606 取消任务关联时提供状态设置弹窗
+
+### 2b.1 背景
+
+当前 DAG 执行模式下，点击已关联节点可移除关联（`removeTaskFromBlock`），但移除时不提供任务状态选择弹窗。用户可能希望在取消关联时同时将任务设为"挂起"或"完成"。
+
+### 2b.2 改动
+
+**文件**：`src/ui/app/pages/TaskDagPage.tsx`
+
+在执行模式的 `handleNodeClick` 中，当用户点击已关联节点（即取消关联操作）时，弹出一个简单的状态选择弹窗（复用 `TaskStatusSelector` 或 `MultiTaskEndDialog` 的单任务版本），让用户选择：
+- **继续**（只取消关联，不改状态）
+- **挂起**（取消关联 + 设为 suspended）
+- **完成**（取消关联 + 设为 completed）
+- **取消**（取消关联 + 设为 cancelled）
+
+```tsx
+// 执行模式点击已关联节点时：
+if (activeTaskIdSet.has(nodeId)) {
+  // 不直接 removeTaskFromBlock，先弹出状态选择
+  setDisassociateTargetTaskId(nodeId);
+  setDisassociateDialogOpen(true);
+  return;
+}
+```
+
+新增一个简单的确认弹窗（可复用 `TaskStatusSelector` 组件）：
+
+```tsx
+{disassociateDialogOpen && disassociateTargetTask ? (
+  <Dialog open onOpenChange={(open) => { if (!open) setDisassociateDialogOpen(false); }}>
+    <DialogContent>
+      <DialogHeader>
+        <DialogTitle>取消关联「{disassociateTargetTask.title}」</DialogTitle>
+      </DialogHeader>
+      <TaskStatusSelector
+        value="continue"
+        onChange={async (choice) => {
+          await getTaskTimerService().removeTaskFromBlock(disassociateTargetTask.id);
+          if (choice !== 'continue') {
+            await getTaskService().transitionTask(disassociateTargetTask.id, choice as TaskStatus);
+          }
+          setDisassociateDialogOpen(false);
+          setDisassociateTargetTaskId(null);
+        }}
+      />
+    </DialogContent>
+  </Dialog>
+) : null}
+```
+
+### 2b.3 验证
+
+- 执行模式点击已关联节点 → 弹出状态选择 ✓
+- 选"继续" → 只取消关联 ✓
+- 选"挂起" → 取消关联 + 设 suspended ✓
+- 选"完成" → 取消关联 + 设 completed ✓
 
 ---
 
