@@ -12,6 +12,8 @@ import type { TaskNode, TaskStatus } from '@/lib/types/task';
 import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { buildNowWorkbenchOverlayModel, type NowWorkbenchOverlayMode } from './now-workbench-overlay-model';
 import { getNowWorkbenchOverlayService } from '@/services/now-workbench-overlay.service';
+import { loadRitualSession } from '@/ui/app/ritual/ritual-session-storage';
+import { resolveRitualStage } from '@/ui/app/ritual/ritual-session';
 
 interface NowWorkbenchOverlayController {
   model: ReturnType<typeof buildNowWorkbenchOverlayModel>;
@@ -240,6 +242,12 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     tasks,
     events,
     now,
+    ritual: {
+      stage: resolveRitualStage(loadRitualSession(), {
+        hasActiveBlock: Boolean(activeBlock),
+        isEvening: new Date(now).getHours() >= 20,
+      }),
+    },
   }), [activeBlock, events, now, tasks]);
 
   useEffect(() => {

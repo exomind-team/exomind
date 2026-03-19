@@ -1,6 +1,7 @@
 ﻿import React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { clearRitualSession, getTodayRitualDayKey, saveRitualSession } from '@/ui/app/ritual/ritual-session-storage';
 
 const currentUserState = {
   userId: 'overlay-test-user',
@@ -185,6 +186,7 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
   beforeEach(() => {
     vi.restoreAllMocks();
     vi.resetModules();
+    clearRitualSession();
     blockListener = null;
     taskStorageListener = null;
     eventStorageListener = null;
@@ -238,6 +240,25 @@ describe('NowWorkbenchOverlayPage runtime wiring（当下工作台悬浮窗运�
     focusMainWindowMock.mockResolvedValue(undefined);
     overlaySetSizeMock.mockReset();
     overlaySetSizeMock.mockResolvedValue(undefined);
+  });
+
+  it('shows shutdown-ready nudge from ritual session storage（待收工会话会驱动悬浮窗提醒）', async () => {
+    vi.spyOn(Date, 'now').mockReturnValue(new Date(2026, 2, 19, 21, 30, 0).getTime());
+    saveRitualSession({
+      dayKey: getTodayRitualDayKey(),
+      bootedAt: new Date(2026, 2, 19, 9, 0, 0).getTime(),
+      selectedPlanId: 'carry-over',
+      mainTaskCompletedAt: new Date(2026, 2, 19, 20, 30, 0).getTime(),
+      shutdownCompletedAt: null,
+    });
+
+    const { NowWorkbenchOverlayPage } = await import('@/pages/NowWorkbenchOverlayPage');
+    render(<NowWorkbenchOverlayPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('now-overlay-ritual-nudge')).toBeInTheDocument();
+    });
+    expect(screen.getByText('准备收工')).toBeInTheDocument();
   });
 
   it('loads running state from services when no explicit model is provided（无显式 model 时从服务加载运行态）', { timeout: 20000 }, async () => {
