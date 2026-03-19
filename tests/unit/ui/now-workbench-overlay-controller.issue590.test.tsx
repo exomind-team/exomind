@@ -93,7 +93,12 @@ describe('useNowWorkbenchOverlayController issue #590', () => {
       makeTask({ id: 'task-2', title: '任务 B' }),
     ]);
     transitionTaskMock.mockReset();
-    transitionTaskMock.mockResolvedValue(null);
+    transitionTaskMock.mockImplementation(async (id, status) => makeTask({
+      id,
+      status,
+      updatedAt: Date.now(),
+      ...(status === 'completed' || status === 'cancelled' ? { completedAt: Date.now() } : {}),
+    }));
     onBlockEndForTasksMock.mockReset();
     onBlockEndForTasksMock.mockResolvedValue(undefined);
     addEventMock.mockReset();
@@ -114,14 +119,19 @@ describe('useNowWorkbenchOverlayController issue #590', () => {
     await waitFor(() => {
       expect(loadActiveBlockMock).toHaveBeenCalled();
       expect(result.current.model.activeBlock?.startId).toBe('block-1');
+      expect(result.current.endingTasks).toHaveLength(2);
+      expect(result.current.taskStatusChoices['task-1']).toBe('continue');
+      expect(result.current.taskStatusChoices['task-2']).toBe('continue');
     });
 
     act(() => {
-      result.current.setTaskStatusChoice('completed');
+      result.current.setTaskStatusChoice('task-1', 'completed');
+      result.current.setTaskStatusChoice('task-2', 'completed');
     });
 
     await waitFor(() => {
-      expect(result.current.taskStatusChoice).toBe('completed');
+      expect(result.current.taskStatusChoices['task-1']).toBe('completed');
+      expect(result.current.taskStatusChoices['task-2']).toBe('completed');
     });
 
     await act(async () => {
@@ -138,5 +148,54 @@ describe('useNowWorkbenchOverlayController issue #590', () => {
     expect(transitionTaskMock).toHaveBeenCalledTimes(2);
     expect(transitionTaskMock).toHaveBeenNthCalledWith(1, 'task-1', 'completed');
     expect(transitionTaskMock).toHaveBeenNthCalledWith(2, 'task-2', 'completed');
+  });
+
+  it('does not transition tasks when block-task linking fails（关联时间块回写失败时不继续转换任务状态）', async () => {
+    loadActiveBlockMock.mockResolvedValue(makeActiveBlock());
+    onBlockEndForTasksMock.mockRejectedValue(new Error('link failed'));
+
+    const { result } = renderHook(() => useNowWorkbenchOverlayController());
+
+    await waitFor(() => {
+      expect(result.current.model.activeBlock?.startId).toBe('block-1');
+    });
+
+    act(() => {
+      result.current.setTaskStatusChoice('task-1', 'completed');
+      result.current.setTaskStatusChoice('task-2', 'completed');
+    });
+
+    await act(async () => {
+      await result.current.handleConfirmEnd();
+    });
+
+    expect(onBlockEndForTasksMock).toHaveBeenCalledWith(['task-1', 'task-2'], 'block-1');
+    expect(transitionTaskMock).not.toHaveBeenCalled();
+  });
+
+  it('only transitions tasks whose outcome is not continue（只转换被显式设置结果的任务）', async () => {
+    loadActiveBlockMock.mockResolvedValue(makeActiveBlock());
+
+    const { result } = renderHook(() => useNowWorkbenchOverlayController());
+
+    await waitFor(() => {
+      expect(result.current.endingTasks).toHaveLength(2);
+    });
+
+    act(() => {
+      result.current.setTaskStatusChoice('task-1', 'completed');
+    });
+
+    await act(async () => {
+      await result.current.handleConfirmEnd();
+    });
+
+    expect(endBlockMock).toHaveBeenCalledWith('', {
+      taskStatusOutcomes: {
+        'task-1': 'completed',
+      },
+    });
+    expect(transitionTaskMock).toHaveBeenCalledTimes(1);
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-1', 'completed');
   });
 });

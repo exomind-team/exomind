@@ -761,11 +761,15 @@ function TaskStatusActionGroup({
   actions,
   errorMessage,
   pendingStatus,
+  disabled,
+  disabledReason,
   onAction,
 }: {
   actions: TaskTransitionAction[];
   errorMessage: string | null;
   pendingStatus: TaskStatus | null;
+  disabled?: boolean;
+  disabledReason?: string | null;
   onAction: (status: TaskStatus) => void;
 }) {
   if (actions.length === 0) {
@@ -784,7 +788,7 @@ function TaskStatusActionGroup({
               type="button"
               data-testid={`task-transition-action-${action.status}`}
               aria-label={action.label}
-              disabled={pendingStatus !== null}
+              disabled={pendingStatus !== null || disabled}
               onClick={() => onAction(action.status)}
               className={`inline-flex items-center rounded-xl px-3 py-2 text-sm font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-60 ${taskTransitionButtonClassName(action.tone)}`}
             >
@@ -795,6 +799,9 @@ function TaskStatusActionGroup({
       </div>
       {errorMessage ? (
         <p role="alert" className="mt-2 text-xs text-[#B91C1C] dark:text-[#FCA5A5]">{errorMessage}</p>
+      ) : null}
+      {!errorMessage && disabledReason ? (
+        <p className="mt-2 text-xs text-[#A8A29E] dark:text-[#D6D3D1]">{disabledReason}</p>
       ) : null}
     </div>
   );
@@ -1770,6 +1777,10 @@ export function TaskDetailPage() {
     }
     return [];
   }, [task]);
+  const taskTransitionBlockedByActiveBlock = Boolean(activeBlock) || hasOtherActiveBlock;
+  const taskTransitionDisabledReason = taskTransitionBlockedByActiveBlock
+    ? '当前已有进行中的时间块，请先回到当下结束或暂停时间块，再修改任务状态。'
+    : null;
 
   const reloadDependencies = () => {
     setDependencyReloadKey((value) => value + 1);
@@ -2045,6 +2056,8 @@ export function TaskDetailPage() {
       actions={taskTransitionActions}
       errorMessage={taskTransitionError}
       pendingStatus={taskTransitionPendingTo}
+      disabled={taskTransitionBlockedByActiveBlock}
+      disabledReason={taskTransitionDisabledReason}
       onAction={handleTaskStatusTransition}
     />
   );

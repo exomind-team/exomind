@@ -36,4 +36,18 @@ describe('TaskStatusSelector issue-493', () => {
     expect(screen.getByTestId('feedback-task-status-task-1-continue')).toBeInTheDocument();
     expect(screen.getByTestId('feedback-task-status-task-1-cancelled')).toBeInTheDocument();
   });
+
+  it('exposes radiogroup semantics for assistive tech（为辅助技术暴露单选组语义）', () => {
+    render(
+      <TaskStatusSelector
+        value="completed"
+        onChange={vi.fn()}
+      />,
+    );
+
+    const group = screen.getByRole('radiogroup', { name: '关联任务下一步状态' });
+    expect(group).toBeInTheDocument();
+    expect(screen.getByRole('radio', { name: '完成' })).toHaveAttribute('aria-checked', 'true');
+    expect(screen.getByRole('radio', { name: '继续' })).toHaveAttribute('aria-checked', 'false');
+  });
 });

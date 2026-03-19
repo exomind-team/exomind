@@ -312,6 +312,77 @@ describe('TaskDetailPage timeblock detail layout（任务详情布局）', () =>
     expect(screen.getByRole('button', { name: '恢复执行（Resume）' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '完成（Complete）' })).toBeInTheDocument();
     expect(screen.getByRole('button', { name: '取消（Cancel）' })).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: '恢复执行（Resume）' }));
+
+    await waitFor(() => {
+      expect(transitionTaskMock).toHaveBeenCalledWith('task-1', 'in_progress');
+    });
+  });
+
+  it('disables direct transition actions while the task still has an active block（任务仍在活动时间块中时禁用直接状态变更）', async () => {
+    loadActiveBlockMock.mockResolvedValue({
+      startId: 'active-block-1',
+      name: '深度工作：EventLog 模块实现',
+      mode: 'countup',
+      elapsed: 10 * 60 * 1000,
+      startTime: Date.now() - 10 * 60 * 1000,
+      paused: false,
+      taskIds: ['task-1'],
+      taskAssociationLog: [],
+    });
+
+    mockMatchMedia(true);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByRole('button', { name: '完成（Complete）' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '挂起（Suspend）' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: '取消（Cancel）' })).toBeDisabled();
+    expect(screen.getByText('当前已有进行中的时间块，请先回到当下结束或暂停时间块，再修改任务状态。')).toBeInTheDocument();
+  });
+
+  it('shows direct transition actions on mobile detail too（移动端详情同样展示直接状态按钮）', async () => {
+    mockMatchMedia(false);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.getByRole('button', { name: '完成（Complete）' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '挂起（Suspend）' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '取消（Cancel）' })).toBeInTheDocument();
+  });
+
+  it('does not show direct transition actions for pending tasks（待办任务不展示直接状态按钮）', async () => {
+    getTaskMock.mockImplementation(async () => makeTask({
+      status: 'pending',
+      createdAt: 20,
+      updatedAt: 20,
+    }));
+    listTasksMock.mockResolvedValue([
+      makeTask({
+        id: 'task-root',
+        title: '优先收口 DAG 根节点',
+        status: 'pending',
+        createdAt: 10,
+        updatedAt: 10,
+      }),
+      makeTask({
+        id: 'task-1',
+        title: '深度工作：EventLog 模块实现',
+        status: 'pending',
+        createdAt: 20,
+        updatedAt: 20,
+      }),
+    ]);
+
+    mockMatchMedia(true);
+    render(<TaskDetailPage />);
+
+    await screen.findByText('任务详情');
+
+    expect(screen.queryByTestId('task-status-actions')).toBeNull();
   });
 
   it('hides task detail scrollbars while preserving scroll containers（任务详情隐藏滚动条）', async () => {

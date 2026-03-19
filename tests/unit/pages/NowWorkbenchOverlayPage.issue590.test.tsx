@@ -15,7 +15,17 @@ const controllerState = {
   },
   feedbackOpen: true,
   feedback: '',
-  taskStatusChoice: 'continue' as const,
+  endingTasks: [] as Array<{
+    id: string;
+    title: string;
+    status: 'in_progress';
+    priority: 'high';
+    dependsOn: [];
+    tags: [];
+    createdAt: number;
+    updatedAt: number;
+  }>,
+  taskStatusChoices: {} as Record<string, 'continue' | 'suspended' | 'completed' | 'cancelled'>,
   debugInfo: {
     userId: 'overlay-user',
     mode: 'running',
@@ -84,7 +94,19 @@ describe('NowWorkbenchOverlayPage issue #590', () => {
   beforeEach(() => {
     controllerState.feedbackOpen = true;
     controllerState.feedback = '';
-    controllerState.taskStatusChoice = 'continue';
+    controllerState.endingTasks = [
+      {
+        id: 'task-1',
+        title: '任务 A',
+        status: 'in_progress',
+        priority: 'high',
+        dependsOn: [],
+        tags: [],
+        createdAt: Date.now(),
+        updatedAt: Date.now(),
+      },
+    ];
+    controllerState.taskStatusChoices = { 'task-1': 'continue' };
     controllerState.model = {
       mode: 'running',
       title: '悬浮窗专注',

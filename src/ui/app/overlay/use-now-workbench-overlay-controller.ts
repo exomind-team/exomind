@@ -18,7 +18,8 @@ interface NowWorkbenchOverlayController {
   model: ReturnType<typeof buildNowWorkbenchOverlayModel>;
   feedbackOpen: boolean;
   feedback: string;
-  taskStatusChoice: TaskStatusChoice;
+  endingTasks: TaskNode[];
+  taskStatusChoices: Record<string, TaskStatusChoice>;
   debugInfo: {
     userId: string;
     mode: string;
@@ -30,7 +31,7 @@ interface NowWorkbenchOverlayController {
     lastAction: string;
   };
   setFeedback(value: string): void;
-  setTaskStatusChoice(value: TaskStatusChoice): void;
+  setTaskStatusChoice(taskId: string, value: TaskStatusChoice): void;
   handleHide(): Promise<void>;
   handleReturnToMain(): Promise<void>;
   handlePauseOrResume(): Promise<void>;
@@ -87,7 +88,7 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
   const [now, setNow] = useState(() => Date.now());
   const [feedbackOpen, setFeedbackOpen] = useState(false);
   const [feedback, setFeedback] = useState('');
-  const [taskStatusChoice, setTaskStatusChoice] = useState<TaskStatusChoice>('continue');
+  const [taskStatusChoices, setTaskStatusChoices] = useState<Record<string, TaskStatusChoice>>({});
   const [debugInfo, setDebugInfo] = useState<NowWorkbenchOverlayDebugInfo>(() => ({
     userId: getCurrentUserId(),
     mode: EMPTY_MODEL.mode,
@@ -243,6 +244,15 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     events,
     now,
   }), [activeBlock, events, now, tasks]);
+  const endingTasks = useMemo(() => {
+    const activeTaskIds = resolveActiveBlockTaskIds(activeBlock);
+    if (activeTaskIds.length === 0) return [];
+
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    return activeTaskIds
+      .map((taskId) => taskById.get(taskId))
+      .filter((task): task is TaskNode => Boolean(task));
+  }, [activeBlock, tasks]);
 
   useEffect(() => {
     updateDebugInfo({
@@ -260,6 +270,27 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
       }),
     });
   }, [model, updateDebugInfo]);
+
+  useEffect(() => {
+    const activeTaskIds = resolveActiveBlockTaskIds(activeBlock);
+    setTaskStatusChoices((current) => {
+      if (activeTaskIds.length === 0) {
+        return Object.keys(current).length === 0 ? current : {};
+      }
+
+      const next = activeTaskIds.reduce<Record<string, TaskStatusChoice>>((choices, taskId) => {
+        choices[taskId] = current[taskId] ?? 'continue';
+        return choices;
+      }, {});
+
+      const currentKeys = Object.keys(current);
+      const nextKeys = Object.keys(next);
+      const isUnchanged = currentKeys.length === nextKeys.length
+        && nextKeys.every((taskId) => current[taskId] === next[taskId]);
+
+      return isUnchanged ? current : next;
+    });
+  }, [activeBlock]);
 
   const handleHide = useCallback(async () => {
     if (!isTauri()) {
@@ -331,50 +362,50 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     try {
       const blockBeforeEnd = activeBlock;
       const taskIds = resolveActiveBlockTaskIds(blockBeforeEnd);
-      const taskStatusOutcomes = taskStatusChoice !== 'continue'
-        ? taskIds.reduce<Record<string, string>>((outcomes, taskId) => {
-          outcomes[taskId] = taskStatusChoice;
-          return outcomes;
-        }, {})
-        : undefined;
+      const taskStatusOutcomes = Object.entries(taskStatusChoices).reduce<Record<string, string>>((outcomes, [taskId, choice]) => {
+        if (choice !== 'continue') {
+          outcomes[taskId] = choice;
+        }
+        return outcomes;
+      }, {});
+      let endAction = 'end-block:success';
 
       await timeBlockService.endBlock(feedback, {
-        taskStatusOutcomes: taskStatusOutcomes && Object.keys(taskStatusOutcomes).length > 0 ? taskStatusOutcomes : undefined,
+        taskStatusOutcomes: Object.keys(taskStatusOutcomes).length > 0 ? taskStatusOutcomes : undefined,
       });
 
       if (blockBeforeEnd && taskIds.length > 0) {
         try {
           await taskTimerService.onBlockEndForTasks(taskIds, blockBeforeEnd.startId);
         } catch (associationError) {
-          updateDebugInfo({
-            lastAction: `end-block:task-link-error:${associationError instanceof Error ? associationError.message : String(associationError)}`,
-          });
+          endAction = `end-block:task-link-error:${associationError instanceof Error ? associationError.message : String(associationError)}`;
         }
       }
 
-      if (taskStatusChoice !== 'continue' && taskIds.length > 0) {
+      if (endAction === 'end-block:success' && Object.keys(taskStatusOutcomes).length > 0) {
         try {
-          for (const taskId of taskIds) {
-            await taskService.transitionTask(taskId, taskStatusChoice as TaskStatus);
+          for (const [taskId, choice] of Object.entries(taskStatusOutcomes)) {
+            const transitioned = await taskService.transitionTask(taskId, choice as TaskStatus);
+            if (!transitioned) {
+              throw new Error(`Task ${taskId} not found during end-block transition`);
+            }
           }
         } catch (transitionError) {
-          updateDebugInfo({
-            lastAction: `end-block:task-transition-error:${transitionError instanceof Error ? transitionError.message : String(transitionError)}`,
-          });
+          endAction = `end-block:task-transition-error:${transitionError instanceof Error ? transitionError.message : String(transitionError)}`;
         }
       }
 
       setFeedback('');
       setFeedbackOpen(false);
-      setTaskStatusChoice('continue');
+      setTaskStatusChoices({});
       await reloadAll();
-      updateDebugInfo({ lastAction: 'end-block:success' });
+      updateDebugInfo({ lastAction: endAction });
     } catch (error) {
       updateDebugInfo({
         lastAction: `end-block:error:${error instanceof Error ? error.message : String(error)}`,
       });
     }
-  }, [activeBlock, feedback, reloadAll, taskService, taskStatusChoice, taskTimerService, timeBlockService, updateDebugInfo]);
+  }, [activeBlock, feedback, reloadAll, taskService, taskStatusChoices, taskTimerService, timeBlockService, updateDebugInfo]);
 
   const handleStartTask = useCallback(async (task: TaskNode) => {
     updateDebugInfo({ lastAction: `task-select:open-config:${task.id}` });
@@ -402,10 +433,16 @@ export function useNowWorkbenchOverlayController(): NowWorkbenchOverlayControlle
     model: model ?? EMPTY_MODEL,
     feedbackOpen,
     feedback,
-    taskStatusChoice,
+    endingTasks,
+    taskStatusChoices,
     debugInfo,
     setFeedback,
-    setTaskStatusChoice,
+    setTaskStatusChoice: (taskId, value) => {
+      setTaskStatusChoices((current) => ({
+        ...current,
+        [taskId]: value,
+      }));
+    },
     handleHide,
     handleReturnToMain,
     handlePauseOrResume,

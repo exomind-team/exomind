@@ -26,14 +26,18 @@ export function TaskStatusSelector({
 }: TaskStatusSelectorProps) {
   const activeIndex = Math.max(0, STATUS_OPTIONS.findIndex((option) => option.key === value));
   const indicatorWidth = `${100 / STATUS_OPTIONS.length}%`;
+  const helperId = `${testId}-helper`;
 
   return (
     <div data-testid="feedback-task-status-section" className="min-w-0 flex flex-col gap-1.5">
-      <div className="flex min-w-0 items-start gap-2">
+      <div id={helperId} className="flex min-w-0 items-start gap-2">
         <span className="shrink-0 text-[12px] font-medium text-[#57534E] dark:text-[#A8A29E]">{helperLabel}</span>
         <span className="min-w-0 text-[12px] text-[#78716C] dark:text-[#A8A29E]">{helperHint}</span>
       </div>
       <div
+        role="radiogroup"
+        aria-label={helperLabel}
+        aria-describedby={helperId}
         className="relative min-w-0 overflow-hidden rounded-[10px] border border-[#E7E5E4] bg-[#F5F0ED]/50 dark:border-[#FFFFFF20] dark:bg-[#FFFFFF08]"
         data-testid={testId}
       >
@@ -47,6 +51,8 @@ export function TaskStatusSelector({
             <button
               key={key}
               type="button"
+              role="radio"
+              aria-checked={value === key}
               data-testid={optionTestIdPrefix ? `${optionTestIdPrefix}-${key}` : `feedback-task-status-${key}`}
               onClick={() => onChange(key)}
               className={`relative z-10 min-w-0 h-8 w-full whitespace-nowrap rounded-[8px] px-[8px] text-center text-[12px] transition-colors duration-200 ${

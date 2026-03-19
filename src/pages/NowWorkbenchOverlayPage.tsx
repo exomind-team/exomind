@@ -17,9 +17,9 @@ import { resolveCountdownTiming } from '@/lib/timeblock/countdown-progress';
 import { setNowWorkbenchOverlayPosition } from '@/config/now-workbench-overlay-preferences';
 import type { TaskNode } from '@/lib/types/task';
 import type { NowWorkbenchOverlayModel } from '@/ui/app/overlay/now-workbench-overlay-model';
-import { resolveActiveBlockTaskIds, type ActiveBlockData } from '@/lib/types/event';
+import type { ActiveBlockData } from '@/lib/types/event';
 import { useNowWorkbenchOverlayController } from '@/ui/app/overlay/use-now-workbench-overlay-controller';
-import { TaskStatusSelector, type TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
+import type { TaskStatusChoice } from '@/ui/app/components/TaskStatusSelector';
 import { useRef } from 'react';
 import { log } from '@/lib/logger';
 
@@ -51,11 +51,12 @@ interface NowWorkbenchOverlayPageContentProps {
   onEndBlock: () => void | Promise<void>;
   onStartTask: (task: TaskNode) => void;
   onSend: (content: string, tags?: string[]) => void;
+  endingTasks: TaskNode[];
   feedbackOpen: boolean;
   feedback: string;
-  taskStatusChoice: TaskStatusChoice;
+  taskStatusChoices: Record<string, TaskStatusChoice>;
   setFeedback(value: string): void;
-  setTaskStatusChoice(value: TaskStatusChoice): void;
+  setTaskStatusChoice(taskId: string, value: TaskStatusChoice): void;
   onConfirmEnd: () => void | Promise<void>;
 }
 
@@ -254,6 +255,7 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
         onEndBlock={props.onEndBlock ?? (() => {})}
         onStartTask={props.onStartTask ?? (() => {})}
         onSend={props.onSend ?? (() => {})}
+        endingTasks={[]}
         debugInfo={{
           userId: 'static-preview',
           mode: props.model.mode,
@@ -266,7 +268,7 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
         }}
         feedbackOpen={false}
         feedback=""
-        taskStatusChoice="continue"
+        taskStatusChoices={{}}
         setFeedback={() => {}}
         setTaskStatusChoice={() => {}}
         onConfirmEnd={() => {}}
@@ -303,10 +305,11 @@ export function NowWorkbenchOverlayPage(props: NowWorkbenchOverlayPageProps) {
       onEndBlock={onEndBlock}
       onStartTask={onStartTask}
       onSend={onSend}
+      endingTasks={controller.endingTasks}
       debugInfo={controller.debugInfo}
       feedbackOpen={controller.feedbackOpen}
       feedback={controller.feedback}
-      taskStatusChoice={controller.taskStatusChoice}
+      taskStatusChoices={controller.taskStatusChoices}
       setFeedback={controller.setFeedback}
       setTaskStatusChoice={controller.setTaskStatusChoice}
       onConfirmEnd={() => {
@@ -326,9 +329,10 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
     onEndBlock,
     onStartTask,
     onSend,
+    endingTasks,
     feedbackOpen,
     feedback,
-    taskStatusChoice,
+    taskStatusChoices,
     setFeedback,
     setTaskStatusChoice,
     onConfirmEnd,
@@ -488,8 +492,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       setFeedbackSubmitting(false);
     }
   }, [canSubmitFeedback, feedback, feedbackSubmitting, onConfirmEnd]);
-  const showTaskStatusSelector = resolveActiveBlockTaskIds(model.activeBlock).length > 0;
-
   const feedbackDialog = (
     <TimeBlockFeedbackDialog
       open={feedbackOpen}
@@ -520,6 +522,9 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
       submitButtonClassName="h-10 w-full rounded-[12px] bg-[#C75B3A] text-white hover:bg-[#B24D2F] disabled:cursor-not-allowed disabled:opacity-60"
       submitDisabled={feedbackSubmitting || isSkipFeedbackCoolingDown}
       autoFocusFeedback
+      tasks={endingTasks}
+      outcomes={taskStatusChoices}
+      onOutcomeChange={setTaskStatusChoice}
       extraContent={(
         <div className="space-y-3">
           <div
@@ -528,13 +533,6 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
           >
             {resolveFeedbackShortcutHint(inputSendMode)}
           </div>
-          {showTaskStatusSelector ? (
-            <TaskStatusSelector
-              value={taskStatusChoice}
-              onChange={setTaskStatusChoice}
-              helperLabel="任务下一步状态"
-            />
-          ) : null}
         </div>
       )}
     />
