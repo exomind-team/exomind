@@ -3,7 +3,7 @@
 > 日期：2026-03-19
 > 状态：已在对话中确认
 > 适用仓库：`D:/project/exomind`
-> 工作分支：`feature/ritual-home-entry`
+> 工作分支：`feature/issue-591-ritual-home-entry`
 > 工作区：`D:/project/exomind/.worktrees/feature/ritual-home-entry`
 
 ---
@@ -375,4 +375,3 @@
 这次首页改造的核心不是“做一个更漂亮的首页”，而是：
 
 `把 ExoMind 从“模块集合”变成“每天真正能走进去的一条主线”。`
-

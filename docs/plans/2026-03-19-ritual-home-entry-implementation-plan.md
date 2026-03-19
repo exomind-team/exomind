@@ -407,7 +407,73 @@ git commit -m "feat: add ritual shutdown handoff"
 
 ---
 
-### Task 6: Final verification and docs alignment（最终验证与文档对齐）
+### Task 6: Launch a managed ExoMind desktop instance（使用 Manager 启动受管桌面实例）
+
+**Files:**
+- Modify: `docs/plans/2026-03-19-ritual-home-entry-implementation-plan.md`
+- Test: 受管桌面实例联调（Manager-managed desktop run / Manager 受管桌面启动）
+
+**Step 1: Start a managed Tauri desktop instance**
+
+Run:
+
+```bash
+bun run tauri:manager -- start --name ritual-home
+```
+
+Expected:
+
+- manager 返回实例名与端口
+- 新桌面实例成功拉起
+- 根路由 `/` 正常进入 Ritual Home 首页骨架
+
+**Step 2: Inspect managed instance state**
+
+Run:
+
+```bash
+bun run tauri:manager -- list
+bun run tauri:manager -- logs --name ritual-home --follow
+```
+
+Expected:
+
+- `list` 中可见 `ritual-home`
+- `logs` 中无启动级报错
+- 可观察到页面、overlay、快捷键相关日志正常输出
+
+**Step 3: Manual sanity checks（人工冒烟检查）**
+
+Check:
+
+- 开机首页是否显示安静主卡，而不是旧的 Focus/Now 组合页
+- `/eventlog` 是否仍保留白天执行入口能力
+- now overlay 是否仍可打开
+- 若 ritual stage 为 `shutdown_ready`，overlay 是否显示轻提醒入口
+
+**Step 4: Stop the managed instance**
+
+Run:
+
+```bash
+bun run tauri:manager -- stop --name ritual-home
+```
+
+Expected:
+
+- 实例被精确停止
+- 没有误杀其他开发实例
+
+**Step 5: Commit**
+
+```bash
+git add docs/plans/2026-03-19-ritual-home-entry-implementation-plan.md
+git commit -m "docs: add manager validation steps for ritual home"
+```
+
+---
+
+### Task 7: Final verification and docs alignment（最终验证与文档对齐）
 
 **Files:**
 - Modify: `docs/product/PRD.md`
@@ -461,4 +527,3 @@ Expected:
 git add docs/product/PRD.md docs/architecture/overview.md docs/architecture/ARCH-signal-pool-agent-process.md tests/home-page.test.ts tests/unit/pages/ritual-home-page.test.tsx tests/unit/pages/ritual-home-shutdown.test.tsx tests/unit/ui/now-workbench-overlay-model.test.ts tests/unit/ui/now-workbench-overlay-ritual-nudges.test.ts
 git commit -m "docs: align ritual home and overlay flow"
 ```
-
