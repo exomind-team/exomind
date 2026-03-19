@@ -80,7 +80,10 @@ export function MultiTaskEndDialog({
         setFeedback(value);
       }}
       onFeedbackKeyDown={(event) => {
-        handleFeedbackKeyDown(event, handleSubmit);
+        handleFeedbackKeyDown(event, handleSubmit, (nextValue) => {
+          resetSkipFeedbackConfirm();
+          setFeedback(nextValue);
+        });
       }}
       feedbackPlaceholder="记录本次执行反馈..."
       onSubmit={() => {

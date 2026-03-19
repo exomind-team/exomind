@@ -975,7 +975,10 @@ export const FocusTimerWidget = forwardRef<FocusTimerWidgetHandle, FocusTimerWid
           setFeedback(value);
         }}
         onFeedbackKeyDown={(event) => {
-          handleFeedbackKeyDown(event, handleConfirmEnd);
+          handleFeedbackKeyDown(event, handleConfirmEnd, (nextValue) => {
+            resetSkipFeedbackConfirm();
+            setFeedback(nextValue);
+          });
         }}
         feedbackPlaceholder="记录本次专注的反馈..."
         feedbackTestId="new-focus-feedback-textarea"

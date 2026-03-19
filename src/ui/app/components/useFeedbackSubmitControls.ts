@@ -90,6 +90,23 @@ export function useFeedbackSubmitControls() {
     clearSkipFeedbackConfirmInterval();
   }, [clearSkipFeedbackConfirmInterval]);
 
+  const insertTextareaNewline = useCallback((
+    textarea: HTMLTextAreaElement,
+    onChangeValue: (nextValue: string) => void,
+  ) => {
+    const start = textarea.selectionStart ?? textarea.value.length;
+    const end = textarea.selectionEnd ?? textarea.value.length;
+    const nextValue = `${textarea.value.slice(0, start)}\n${textarea.value.slice(end)}`;
+    const nextCursor = start + 1;
+
+    onChangeValue(nextValue);
+    requestAnimationFrame(() => {
+      textarea.selectionStart = nextCursor;
+      textarea.selectionEnd = nextCursor;
+      textarea.focus();
+    });
+  }, []);
+
   const canSubmitFeedback = useCallback((rawFeedback: string | undefined) => {
     const trimmedFeedback = rawFeedback?.trim() ?? '';
     if (trimmedFeedback.length > 0) {
@@ -113,13 +130,26 @@ export function useFeedbackSubmitControls() {
   const handleFeedbackKeyDown = useCallback((
     event: KeyboardEvent<HTMLTextAreaElement>,
     onSubmit: () => void | Promise<void>,
+    onChangeValue?: (nextValue: string) => void,
   ) => {
     if (event.nativeEvent.isComposing) return;
-    if (!shouldSubmitOnEnter(inputSendMode, event)) return;
+    if (shouldSubmitOnEnter(inputSendMode, event)) {
+      event.preventDefault();
+      void onSubmit();
+      return;
+    }
 
-    event.preventDefault();
-    void onSubmit();
-  }, [inputSendMode]);
+    if (
+      inputSendMode === 'enter-send'
+      && (event.ctrlKey || event.metaKey)
+      && !event.altKey
+      && event.key === 'Enter'
+      && onChangeValue
+    ) {
+      event.preventDefault();
+      insertTextareaNewline(event.currentTarget, onChangeValue);
+    }
+  }, [inputSendMode, insertTextareaNewline]);
 
   return {
     inputSendMode,

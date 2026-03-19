@@ -501,7 +501,10 @@ function NowWorkbenchOverlayPageContent(props: NowWorkbenchOverlayPageContentPro
         setFeedback(value);
       }}
       onFeedbackKeyDown={(event) => {
-        handleFeedbackKeyDown(event, handleOverlayConfirmEnd);
+        handleFeedbackKeyDown(event, handleOverlayConfirmEnd, (nextValue) => {
+          resetSkipFeedbackConfirm();
+          setFeedback(nextValue);
+        });
       }}
       feedbackPlaceholder="记录本次专注的反馈..."
       onSubmit={handleOverlayConfirmEnd}

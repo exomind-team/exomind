@@ -139,6 +139,10 @@ describe('MultiTaskEndDialog overflow regression', () => {
 
     const textareaWithEnterSend = screen.getByTestId('task-dag-end-dialog-feedback');
     fireEvent.change(textareaWithEnterSend, { target: { value: 'Enter 模式提交' } });
+    fireEvent.keyDown(textareaWithEnterSend, { key: 'Enter', code: 'Enter', ctrlKey: true });
+    expect(onSubmit).not.toHaveBeenCalled();
+    expect(textareaWithEnterSend).toHaveValue('Enter 模式提交\n');
+
     fireEvent.keyDown(textareaWithEnterSend, { key: 'Enter', code: 'Enter' });
 
     await waitFor(() => {

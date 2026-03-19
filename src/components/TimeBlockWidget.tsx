@@ -883,6 +883,9 @@ export const TimeBlockWidget = forwardRef<TimeBlockWidgetHandle, TimeBlockWidget
         onFeedbackKeyDown={(e) => {
           handleFeedbackKeyDown(e, async () => {
             await handleEndBlock(feedback);
+          }, (nextValue) => {
+            resetSkipFeedbackConfirm();
+            setFeedback(nextValue);
           });
         }}
         feedbackPlaceholder="身心状态如何？"

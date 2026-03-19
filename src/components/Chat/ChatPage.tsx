@@ -314,11 +314,17 @@ export function ChatPage({
 
       // 如果焦点在按钮/链接上，让默认 Enter 行为触发
       const activeEl = document.activeElement;
-      if (activeEl && (
-        activeEl.tagName === 'BUTTON' ||
-        activeEl.getAttribute('role') === 'button' ||
-        activeEl instanceof HTMLAnchorElement
-      )) {
+      if (
+        !e.ctrlKey
+        && !e.metaKey
+        && !e.shiftKey
+        && activeEl
+        && (
+          activeEl.tagName === 'BUTTON' ||
+          activeEl.getAttribute('role') === 'button' ||
+          activeEl instanceof HTMLAnchorElement
+        )
+      ) {
         return;
       }
 
@@ -328,12 +334,14 @@ export function ChatPage({
         ? focusTimerWidgetRef.current
         : timeBlockWidgetRef.current;
 
-      // Ctrl+Enter: 弹出反馈对话框（正在计时或暂停中）
-      if (e.ctrlKey) {
+      // Ctrl+Enter: 运行中时弹出反馈对话框；空闲时展开并聚焦时间块输入框
+      if (e.ctrlKey || e.metaKey) {
         e.preventDefault();
         const timerState = timerWidget?.getTimerState();
         if (timerState === 'running' || timerState === 'paused') {
           timerWidget?.endDialog();
+        } else {
+          timerWidget?.expandAndFocusTaskName();
         }
         return;
       }
