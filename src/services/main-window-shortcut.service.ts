@@ -105,6 +105,7 @@ export class MainWindowShortcutService {
     if (location.pathname.startsWith('/tasks/')) {
       await navigateToTasksMain();
       requestMainWindowFocusTarget(MAIN_WINDOW_FOCUS_TARGET_TASKS_QUICK_ADD_INPUT);
+      return;
     }
   }
 

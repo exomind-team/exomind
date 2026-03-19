@@ -9,9 +9,24 @@ export function buildTasksMainSearch(search?: Record<string, string>): Record<st
   };
 }
 
+function normalizeForceMainValue(rawValue: string | null): string | null {
+  if (rawValue == null) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(rawValue) as unknown;
+    return typeof parsed === 'string' ? parsed : rawValue;
+  } catch {
+    return rawValue;
+  }
+}
+
 export function shouldForceTasksMain(search: string): boolean {
   const normalizedSearch = search.startsWith('?') ? search.slice(1) : search;
-  return new URLSearchParams(normalizedSearch).get(TASKS_FORCE_MAIN_QUERY_KEY) === TASKS_FORCE_MAIN_QUERY_VALUE;
+  return normalizeForceMainValue(
+    new URLSearchParams(normalizedSearch).get(TASKS_FORCE_MAIN_QUERY_KEY),
+  ) === TASKS_FORCE_MAIN_QUERY_VALUE;
 }
 
 export function resolveTasksRestorePath(savedPath: string | null, search: string): string | null {

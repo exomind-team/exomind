@@ -686,6 +686,7 @@ const newTasksRoute = createRoute({
       const restorePath = resolveTasksRestorePath(saved, currentSearch);
       if (restorePath) {
         void navigate({ to: restorePath, replace: true });
+        return;
       }
     }, [location.searchStr, navigate]);
 
