@@ -9,5 +9,7 @@ describe('RitualHomePage', () => {
 
     expect(screen.getByText('开始今天')).toBeInTheDocument();
     expect(screen.getByText('昨天停在哪')).toBeInTheDocument();
+    expect(screen.getByText('系统推荐的今天主线')).toBeInTheDocument();
+    expect(screen.getAllByRole('button', { name: '选择这条主线' }).length).toBeGreaterThan(0);
   });
 });

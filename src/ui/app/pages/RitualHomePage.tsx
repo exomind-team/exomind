@@ -1,11 +1,22 @@
+import { Button } from '@/components/ui/button';
+import { buildMorningPlanCandidates, type MorningPlanCandidate } from '@/ui/app/ritual/ritual-recommendation';
+
 type RitualHomeStage = 'pre_boot' | 'intent_setup' | 'day_hub' | 'shutdown_ready' | 'shutdown_done';
 
 interface RitualHomePageProps {
   stage?: RitualHomeStage;
+  morningPlans?: MorningPlanCandidate[];
 }
 
-export function RitualHomePage({ stage = 'pre_boot' }: RitualHomePageProps) {
+export function RitualHomePage({ stage = 'pre_boot', morningPlans }: RitualHomePageProps) {
   if (stage === 'pre_boot') {
+    const plans = morningPlans ?? buildMorningPlanCandidates({
+      carryOverTask: '先把今天主线往前推进一小步',
+      blockers: ['把最影响推进的阻塞先清掉'],
+      fixedPoints: ['晚上收工前做一次回看'],
+      energy: 'medium',
+    });
+
     return (
       <main className="flex min-h-full flex-col bg-[#F7F2EE] px-4 py-6 text-[#1C1917] dark:bg-[#0C0A09] dark:text-[#FAFAF9] md:px-6">
         <div className="mx-auto flex w-full max-w-3xl flex-1 flex-col justify-center">
@@ -33,6 +44,37 @@ export function RitualHomePage({ stage = 'pre_boot' }: RitualHomePageProps) {
                 </p>
               </section>
             </div>
+
+            <section className="mt-6 rounded-[22px] border border-[#E7E5E4] bg-white/82 px-4 py-4 dark:border-[#292524] dark:bg-[#1C1917]/74">
+              <div className="flex items-start justify-between gap-3">
+                <div>
+                  <h2 className="text-sm font-semibold">系统推荐的今天主线</h2>
+                  <p className="mt-1 text-sm leading-6 text-[#57534E] dark:text-[#D6D3D1]">
+                    先从 2 到 3 条收束后的建议里选一条，再决定今天怎么开始。
+                  </p>
+                </div>
+              </div>
+
+              <div className="mt-4 grid gap-3">
+                {plans.map((plan) => (
+                  <section
+                    key={plan.id}
+                    className="rounded-[18px] border border-[#E7E5E4] bg-[#FAF7F5] px-4 py-4 dark:border-[#3A3632] dark:bg-[#15110F]"
+                  >
+                    <h3 className="text-sm font-semibold">{plan.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-[#57534E] dark:text-[#D6D3D1]">
+                      目标结果：{plan.targetOutcome}
+                    </p>
+                    <p className="mt-2 text-xs leading-5 text-[#8C7D78] dark:text-[#A8A29E]">
+                      建议节奏：{plan.suggestedWindows.join(' · ')}
+                    </p>
+                    <Button type="button" variant="outline" className="mt-3 rounded-[12px]">
+                      选择这条主线
+                    </Button>
+                  </section>
+                ))}
+              </div>
+            </section>
           </section>
         </div>
       </main>
