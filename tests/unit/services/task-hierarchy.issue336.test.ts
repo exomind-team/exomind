@@ -6,7 +6,13 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('@/lib/services/task-event-emitter', () => ({
+  emitTaskCreated: vi.fn(),
+  emitTaskTransition: vi.fn(),
+}))
+
 import { TaskServiceImpl } from '@/lib/services/task.service'
+import { emitTaskCreated, emitTaskTransition } from '@/lib/services/task-event-emitter'
 import type { ITaskPort } from '@/lib/environment/interfaces/task.port'
 import type { TaskNode, TaskStatus, Dependency } from '@/lib/types/task'
 
@@ -67,6 +73,11 @@ function createMockPort(tasks: TaskNode[]): ITaskPort {
   }
 }
 
+beforeEach(() => {
+  vi.mocked(emitTaskCreated).mockClear()
+  vi.mocked(emitTaskTransition).mockClear()
+})
+
 /* ── tests ── */
 
 describe('TaskService Phase3: parent-child hierarchy', () => {
@@ -125,6 +136,15 @@ describe('TaskService Phase3: parent-child hierarchy', () => {
     const task = await service.createTask({ title: 'root' })
     expect(task.title).toBe('root')
     expect(task.parentId).toBeUndefined()
+  })
+
+  it('createTask emits task_created after success', async () => {
+    port = createMockPort([])
+    service = new TaskServiceImpl({ task: port })
+
+    const task = await service.createTask({ title: 'emit me' })
+
+    expect(emitTaskCreated).toHaveBeenCalledWith(task.id, 'emit me')
   })
 })
 
@@ -358,6 +378,26 @@ describe('TaskService Phase3: dependency-aware transitions', () => {
     const result = await service.transitionTask('task', 'completed')
     expect(result).not.toBeNull()
     expect(result!.status).toBe('completed')
+  })
+
+  it('transitionTask emits fromStatus -> toStatus after success', async () => {
+    const task = makeTask({ id: 'task', status: 'pending', title: '测试任务' })
+    port = createMockPort([task])
+    service = new TaskServiceImpl({ task: port })
+
+    await service.transitionTask('task', 'in_progress')
+
+    expect(emitTaskTransition).toHaveBeenCalledWith('task', '测试任务', 'pending', 'in_progress')
+  })
+
+  it('cancelTask emits cancelled transition after success', async () => {
+    const task = makeTask({ id: 'task', status: 'in_progress', title: '测试任务' })
+    port = createMockPort([task])
+    service = new TaskServiceImpl({ task: port })
+
+    await service.cancelTask('task')
+
+    expect(emitTaskTransition).toHaveBeenCalledWith('task', '测试任务', 'in_progress', 'cancelled')
   })
 })
 

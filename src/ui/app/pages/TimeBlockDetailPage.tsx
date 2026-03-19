@@ -1,9 +1,10 @@
-import { Link, useParams } from '@tanstack/react-router';
+import { Link, useLocation, useParams } from '@tanstack/react-router';
 import { useEffect, useMemo, useState } from 'react';
 import { getTaskService, getTimeBlockService } from '@/lib/services';
 import { resolveActiveBlockTaskIds, type ActiveBlockData, type TimeBlock } from '@/lib/types/event';
 import type { TaskNode } from '@/lib/types/task';
 import { buildTimeBlockDetailView } from './timeblock-detail-view';
+import { TaskBreadcrumb } from '@/ui/app/components/TaskBreadcrumb';
 
 function resolveActiveTaskIds(block: ActiveBlockData): string[] {
   return resolveActiveBlockTaskIds(block);
@@ -26,9 +27,14 @@ function buildRunningTimeBlock(block: ActiveBlockData, now: number): TimeBlock {
 
 export function TimeBlockDetailPage() {
   const { blockId } = useParams({ strict: false }) as { blockId?: string };
+  const location = useLocation();
   const [block, setBlock] = useState<TimeBlock | null>(null);
   const [tasksById, setTasksById] = useState<Map<string, TaskNode>>(new Map());
   const [loading, setLoading] = useState(true);
+  const isNowDomain = location.pathname.startsWith('/eventlog/');
+  const backLink = isNowDomain
+    ? { label: '当下', to: '/eventlog' }
+    : { label: '任务', to: '/tasks' };
 
   useEffect(() => {
     let disposed = false;
@@ -72,7 +78,7 @@ export function TimeBlockDetailPage() {
   if (!block || !view) {
     return (
       <div className="px-6 py-6">
-        <Link to="/tasks" className="text-sm text-[#78716C] dark:text-[#A8A29E]">← 返回任务</Link>
+        <Link to={backLink.to} className="text-sm text-[#78716C] dark:text-[#A8A29E]">← 返回{backLink.label}</Link>
         <p className="mt-4 text-sm text-[#78716C] dark:text-[#A8A29E]">未找到对应时间块。</p>
       </div>
     );
@@ -81,7 +87,10 @@ export function TimeBlockDetailPage() {
   return (
     <div className="min-h-full bg-[#FAF7F5] px-6 py-6 dark:bg-[#0C0A09]">
       <div className="mx-auto max-w-4xl space-y-4">
-        <Link to="/tasks" className="text-sm text-[#78716C] dark:text-[#A8A29E]">← 返回任务</Link>
+        <TaskBreadcrumb
+          segments={[backLink]}
+          current={{ label: '时间块详情' }}
+        />
 
         <section className="rounded-2xl border border-[#E7E5E4] bg-white p-5 dark:border-[#292524] dark:bg-[#1C1917]">
           <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">{view.summary.title}</h1>

@@ -50,7 +50,7 @@ export function TaskTimeblocksPage() {
 
   // Persist path for route memory
   useEffect(() => {
-    sessionStorage.setItem(TASKS_LAST_PATH_KEY, '/tasks/timeblocks');
+    sessionStorage.setItem(TASKS_LAST_PATH_KEY, '/tasks/timeline');
   }, []);
 
   // Load all blocks once, then slice by day count

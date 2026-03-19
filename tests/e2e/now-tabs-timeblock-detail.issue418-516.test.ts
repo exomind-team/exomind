@@ -85,7 +85,7 @@ test.describe('Issue #418/#516 Now tabs + timeblock detail（当下三 Tab 与�
     await expect(page.getByText('实现 CRUD 服务层 · continue')).toBeVisible();
 
     await page.getByRole('link', { name: /Issue 418\/516 联调时间块/ }).click();
-    await expect(page).toHaveURL(/\/tasks\/block\/issue418516-block-1$/);
+    await expect(page).toHaveURL(/\/eventlog\/timeblocks\/issue418516-block-1$/);
 
     const linkedTasksSection = page.locator('section').filter({
       has: page.getByRole('heading', { name: '关联任务' }),

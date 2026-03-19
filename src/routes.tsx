@@ -59,6 +59,11 @@ const TaskTimeblocksPage = lazy(async () => {
   return { default: module.TaskTimeblocksPage };
 });
 
+const TaskTimelinePage = lazy(async () => {
+  const module = await import('@/ui/app/pages/TaskTimelinePage');
+  return { default: module.TaskTimelinePage };
+});
+
 const RemindersPage = lazy(async () => {
   const module = await import('@/ui/app/pages/RemindersPage');
   return { default: module.RemindersPage };
@@ -672,6 +677,18 @@ const newEventlogRoute = createRoute({
   },
 });
 
+const newEventlogTimeblockDetailRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/eventlog/timeblocks/$blockId',
+  component: function NewEventlogTimeblockDetail() {
+    return (
+      <LazyPage>
+        <TimeBlockDetailPage />
+      </LazyPage>
+    );
+  },
+});
+
 const newTasksRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks',
@@ -733,9 +750,27 @@ const newTaskTimeblocksRoute = createRoute({
   getParentRoute: () => newRootRoute,
   path: '/tasks/timeblocks',
   component: function NewTaskTimeblocks() {
+    const navigate = useNavigate();
+
+    useEffect(() => {
+      void navigate({ to: '/tasks/timeline', replace: true });
+    }, [navigate]);
+
     return (
       <LazyPage>
         <TaskTimeblocksPage />
+      </LazyPage>
+    );
+  },
+});
+
+const newTaskTimelineRoute = createRoute({
+  getParentRoute: () => newRootRoute,
+  path: '/tasks/timeline',
+  component: function NewTaskTimeline() {
+    return (
+      <LazyPage>
+        <TaskTimelinePage />
       </LazyPage>
     );
   },
@@ -936,9 +971,11 @@ const newRouteTree = newRootRoute.addChildren([
   newHomeRoute,
   newDashboardRoute,
   newEventlogRoute,
+  newEventlogTimeblockDetailRoute,
   newTasksRoute,
   newTaskDagRoute,
   newTaskTimeblocksRoute,
+  newTaskTimelineRoute,
   newRemindersRoute,
   newTimeblockDetailRoute,
   newTaskDetailRoute,

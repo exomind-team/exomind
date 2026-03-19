@@ -41,7 +41,8 @@ import remarkBreaks from 'remark-breaks';
 type DependencyType = 'soft' | 'hard';
 const SOURCE_CONFIG: Record<string, { label: string; to: string }> = {
   dag: { label: 'DAG', to: '/tasks/dag' },
-  timeblocks: { label: '时间块', to: '/tasks/timeblocks' },
+  timeblocks: { label: '时间线', to: '/tasks/timeline' },
+  timeline: { label: '时间线', to: '/tasks/timeline' },
 };
 const TASK_TIMER_AUTO_FILL_STORAGE_KEY = 'exomind:task-timer:auto-fill';
 

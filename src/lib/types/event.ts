@@ -22,6 +22,21 @@ export interface EventMetadata {
   [key: string]: unknown;
 }
 
+export interface TaskEventMetadata extends EventMetadata {
+  taskId: UUID;
+  taskTitle: string;
+}
+
+export interface TaskTransitionEventMetadata extends TaskEventMetadata {
+  fromStatus: string;
+  toStatus: string;
+}
+
+export interface TaskLinkEventMetadata extends TaskEventMetadata {
+  blockId: UUID;
+  blockName?: string;
+}
+
 // 标签常量
 export const SYSTEM_TAGS = {
   BLOCK_START: 'block_start' as Tag,
@@ -31,6 +46,14 @@ export const SYSTEM_TAGS = {
   BLOCK_FEEDBACK: 'block_feedback' as Tag,
   AGENT_FEEDBACK: 'agent_feedback' as Tag,
   NOTE: 'note' as Tag,
+  TASK_CREATED: 'task_created' as Tag,
+  TASK_STARTED: 'task_started' as Tag,
+  TASK_RESUMED: 'task_resumed' as Tag,
+  TASK_SUSPENDED: 'task_suspended' as Tag,
+  TASK_COMPLETED: 'task_completed' as Tag,
+  TASK_CANCELLED: 'task_cancelled' as Tag,
+  TASK_LINKED: 'task_linked' as Tag,
+  TASK_UNLINKED: 'task_unlinked' as Tag,
 } as const;
 
 // 事件数据类型（存储用）

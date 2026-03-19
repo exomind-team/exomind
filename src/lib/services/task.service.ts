@@ -1,6 +1,7 @@
 import { ExoMindEnvironment } from '@/lib/environment/environment'
 import type { ITaskPort, CreateTaskInput, UpdateTaskInput } from '@/lib/environment/interfaces/task.port'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
+import { emitTaskCreated, emitTaskTransition } from './task-event-emitter'
 
 type TaskEnvironmentLike = {
   task: ITaskPort
@@ -55,6 +56,7 @@ export class TaskServiceImpl implements TaskService {
     }
     const created = await this.env.task.createTask(input)
     this.notifyChangeListeners()
+    emitTaskCreated(created.id, created.title)
     return created
   }
 
@@ -67,14 +69,21 @@ export class TaskServiceImpl implements TaskService {
   }
 
   async cancelTask(id: string) {
+    const before = await this.env.task.getTaskById(id)
+    const fromStatus = before?.status ?? 'pending'
     const task = await this.env.task.cancelTask(id)
     if (task) {
       this.notifyChangeListeners()
+      emitTaskTransition(task.id, task.title, fromStatus, 'cancelled')
     }
     return task
   }
 
   async transitionTask(id: string, to: TaskStatus): Promise<TaskNode | null> {
+    const before = await this.env.task.getTaskById(id)
+    if (!before) return null
+    const fromStatus = before.status
+
     if (to === 'in_progress') {
       const depCheck = await this.checkDependenciesMet(id)
       const hardBlocking = depCheck.blocking.filter((b) => b.type === 'hard')
@@ -86,6 +95,7 @@ export class TaskServiceImpl implements TaskService {
     const transitioned = await this.env.task.transitionTask(id, to)
     if (transitioned) {
       this.notifyChangeListeners()
+      emitTaskTransition(transitioned.id, transitioned.title, fromStatus, to)
     }
     return transitioned
   }

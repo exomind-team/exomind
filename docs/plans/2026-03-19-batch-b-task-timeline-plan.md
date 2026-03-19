@@ -1,6 +1,6 @@
 # 批次 B：事件时间线计划
 
-> **状态**：待执行
+> **状态**：已完成
 > **分支**：直接在 `dev` 上开发（无独立分支）
 > **关联 Issue**：#585, #583, #584
 > **依赖链**：#585 → #584，#583 → #584（#585 和 #583 可并行，但本计划顺序执行）
@@ -1300,4 +1300,41 @@ describe('task-timeline-model', () => {
 
 ## 完成回填
 
-（Codex 执行完毕后在此填写）
+已按计划顺序完成 `#585 -> #583 -> #584`，且每一步完成后都单独执行了类型检查与相关单测。
+
+### 实际完成情况
+
+- `#585` 已完成：
+  - 在 `src/lib/types/event.ts` 补齐 `task_created / task_started / task_resumed / task_suspended / task_completed / task_cancelled / task_linked / task_unlinked`
+  - 新建 `src/lib/services/task-event-emitter.ts`，统一通过 `appendEventWithEcsReplication` 发射 ECS 事件
+  - `src/lib/services/task.service.ts` 已在 `createTask / transitionTask / cancelTask` 成功后发射生命周期事件
+  - `src/lib/services/task-timer.service.ts` 已在 `startBlockForTasks / addTaskToBlock / removeTaskFromBlock` 成功后发射关联事件
+  - 额外修正了 `fromStatus` 读取时机，避免底层 port 原地修改对象时把旧状态覆盖掉
+
+- `#583` 已完成：
+  - 在 `src/routes.tsx` 新增 `/eventlog/timeblocks/$blockId`
+  - `src/ui/app/pages/TimeBlockDetailPage.tsx` 已根据当前路径切换返回语义
+  - `src/ui/app/components/NowTodayTab.tsx` 与 `src/ui/app/pages/now-today-blocks-view.ts` 已改为跳转 `/eventlog/timeblocks/$blockId`
+  - `/tasks/block/$blockId` 任务域路由保持保留
+
+- `#584` 已完成：
+  - 在 `src/routes.tsx` 新增 `/tasks/timeline`
+  - `/tasks/timeblocks` 现通过路由层 `navigate(...replace)` 重定向到 `/tasks/timeline`
+  - 新建 `src/ui/app/pages/task-timeline-model.ts`，实现 task.* 精确建模、旧任务时间块推导、泳道分配与 pending 过滤
+  - 新建 `src/ui/app/pages/TaskTimelinePage.tsx`，用 HTML div + Tailwind 实现泳道图，不引入新图表库
+  - `src/ui/app/pages/TasksPage.tsx` 顶部入口已改为“时间线”
+  - `src/ui/app/pages/TaskDetailPage.tsx` 已支持从 `timeline` 来源返回
+
+### 实际验证命令
+
+- `#585`
+  - `bunx tsc --noEmit`
+  - `bunx vitest run tests/unit/services/task-event-emitter.test.ts tests/unit/services/task-hierarchy.issue336.test.ts tests/unit/services/task-timer.issue337.test.ts`
+
+- `#583`
+  - `bunx tsc --noEmit`
+  - `bunx vitest run tests/unit/ui/now-today-blocks-view.issue516.test.ts tests/unit/ui/task-routing.issue213.test.ts tests/unit/ui/timeblock-detail-domain.issue583.test.tsx`
+
+- `#584`
+  - `bunx tsc --noEmit`
+  - `bunx vitest run tests/unit/ui/task-timeline-model.test.ts tests/unit/ui/tasks-page-today-view.test.tsx tests/unit/ui/task-routing.issue213.test.ts`

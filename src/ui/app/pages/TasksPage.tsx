@@ -177,11 +177,11 @@ export function TasksPage() {
         <h1 className="text-lg font-semibold text-[#1C1917] dark:text-[#FAFAF9]">任务</h1>
         <div className="flex items-center gap-2">
           <Link
-            to="/tasks/timeblocks"
+            to="/tasks/timeline"
             className="inline-flex items-center gap-1 rounded-full border border-[#E7E5E4] px-3 py-2 text-xs font-semibold text-[#57534E] dark:border-[#292524] dark:text-[#D6D3D1]"
           >
             <Clock size={16} />
-            <span className="hidden md:inline">时间块</span>
+            <span className="hidden md:inline">时间线</span>
           </Link>
           <Link
             to="/tasks/dag"

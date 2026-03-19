@@ -9,10 +9,14 @@ const listTasksMock = vi.fn<() => Promise<TaskNode[]>>();
 const loadTimeBlocksMock = vi.fn<() => Promise<TimeBlock[]>>();
 const loadActiveBlockMock = vi.fn<() => Promise<ActiveBlockData | null>>();
 
-vi.mock('@tanstack/react-router', () => ({
-  Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
-  useNavigate: () => vi.fn(),
-}));
+vi.mock('@tanstack/react-router', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@tanstack/react-router')>();
+  return {
+    ...actual,
+    Link: ({ children, ...props }: { children: ReactNode }) => <a {...props}>{children}</a>,
+    useNavigate: () => vi.fn(),
+  };
+});
 
 vi.mock('@/config/task-create-success-action', () => ({
   getTaskCreateSuccessAction: vi.fn(() => 'refocus'),
@@ -132,14 +136,14 @@ describe('TasksPage current layout（任务页当前布局）', () => {
     expect(screen.getByTestId('task-current-root-badge-task-2')).toBeInTheDocument();
   });
 
-  it('renders top navigation links for timeblocks and dag', async () => {
+  it('renders top navigation links for timeline and dag', async () => {
     render(<TasksPage />);
 
     await waitFor(() => {
       expect(listTasksMock).toHaveBeenCalled();
     });
 
-    expect(screen.getByText('时间块').closest('a')).toHaveAttribute('to', '/tasks/timeblocks');
+    expect(screen.getByText('时间线').closest('a')).toHaveAttribute('to', '/tasks/timeline');
     expect(screen.getByText('DAG').closest('a')).toHaveAttribute('to', '/tasks/dag');
   });
 

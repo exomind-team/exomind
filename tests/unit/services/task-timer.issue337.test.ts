@@ -12,7 +12,13 @@
  */
 
 import { beforeEach, describe, expect, it, vi } from 'vitest'
+vi.mock('@/lib/services/task-event-emitter', () => ({
+  emitTaskLinked: vi.fn(),
+  emitTaskUnlinked: vi.fn(),
+}))
+
 import { TaskTimerServiceImpl } from '@/lib/services/task-timer.service'
+import { emitTaskLinked, emitTaskUnlinked } from '@/lib/services/task-event-emitter'
 import type { TaskService } from '@/lib/services/task.service'
 import type { TimeBlockService } from '@/lib/services/timeblock.service'
 import type { TaskNode } from '@/lib/types/task'
@@ -148,6 +154,11 @@ function createMockTBService(
     stopSync: vi.fn(async () => {}),
   }
 }
+
+beforeEach(() => {
+  vi.mocked(emitTaskLinked).mockClear()
+  vi.mocked(emitTaskUnlinked).mockClear()
+})
 
 /* ── tests ── */
 
@@ -377,6 +388,8 @@ describe('#418 multi-task association', () => {
     expect(tbSvc.startBlock).toHaveBeenCalledWith('Task 1', { mode: 'countup' }, undefined, { taskIds: ['task-1', 'task-2'] })
     expect(taskSvc.transitionTask).toHaveBeenCalledTimes(2)
     expect(block?.taskIds).toEqual(['task-1', 'task-2'])
+    expect(emitTaskLinked).toHaveBeenCalledWith('task-1', 'Task 1', expect.any(String), 'Task 1')
+    expect(emitTaskLinked).toHaveBeenCalledWith('task-2', 'Task 2', expect.any(String), 'Task 1')
   })
 
   it('addTaskToBlock adds task to running block with audit log', async () => {
@@ -401,6 +414,7 @@ describe('#418 multi-task association', () => {
         expect.objectContaining({ taskId: 'task-2', action: 'associated', source: 'manual' }),
       ]),
     }))
+    expect(emitTaskLinked).toHaveBeenCalledWith('task-2', 'Test Task', 'block-live', 'Test Task')
   })
 
   it('addTaskToBlock preserves existing associated tasks reconstructed from log-only active block', async () => {
@@ -483,6 +497,7 @@ describe('#418 multi-task association', () => {
         expect.objectContaining({ taskId: 'task-2', action: 'disassociated', source: 'manual' }),
       ]),
     }))
+    expect(emitTaskUnlinked).toHaveBeenCalledWith('task-2', 'Test Task', 'block-live', 'Test Task')
   })
 
   it('onBlockEndForTasks only writes timeBlockIds for tasks still associated at end', async () => {

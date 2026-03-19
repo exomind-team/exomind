@@ -97,7 +97,7 @@ export function NowTodayTab() {
       {view.items.map((item) => (
         <Link
           key={item.blockId}
-          to="/tasks/block/$blockId"
+          to="/eventlog/timeblocks/$blockId"
           params={{ blockId: item.blockId }}
           className="block rounded-2xl border border-[#E7E5E4] bg-white p-4 transition-colors hover:bg-[#FAF7F5] dark:border-[#292524] dark:bg-[#1C1917] dark:hover:bg-[#292524]"
         >

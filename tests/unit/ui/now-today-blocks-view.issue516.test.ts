@@ -74,7 +74,7 @@ describe('buildNowTodayBlocksView（今日 Tab 时间块视图模型）', () => 
 
     expect(view.items.map((item: { blockId: string }) => item.blockId)).toEqual(['block-2', 'block-1'])
     expect(view.items[0]?.title).toBe('下午联调')
-    expect(view.items[0]?.href).toBe('/tasks/block/block-2')
+    expect(view.items[0]?.href).toBe('/eventlog/timeblocks/block-2')
   })
 
   it('only includes blocks started today and exposes linked task outcomes（仅保留今日时间块并展开关联任务结果）', async () => {

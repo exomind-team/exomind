@@ -58,7 +58,7 @@ export function buildNowTodayBlocksView(input: BuildNowTodayBlocksViewInput): No
       title: block.name,
       timeLabel: `${formatClock(block.startTime)} - ${formatClock(block.endTime)}`,
       linkedTasks: buildLinkedTasks(block, input.tasksById),
-      href: `/tasks/block/${block.id}`,
+      href: `/eventlog/timeblocks/${block.id}`,
       note: block.note,
     }));
 

@@ -19,6 +19,7 @@ import {
 import { getTaskService, type TaskService } from './task.service'
 import { getTimeBlockService, type TimeBlockService } from './timeblock.service'
 import type { TaskNode, TaskStatus } from '@/lib/types/task'
+import { emitTaskLinked, emitTaskUnlinked } from './task-event-emitter'
 
 export interface TaskTimerService {
   /** 从任务快速启动一个时间块，自动关联 */
@@ -96,6 +97,9 @@ export class TaskTimerServiceImpl implements TaskTimerService {
         normalizedTaskIds,
       ),
     })
+    for (const task of tasks) {
+      emitTaskLinked(task.id, task.title, block.startId, block.name)
+    }
 
     return await this.tbSvc.loadActiveBlock() ?? block
   }
@@ -134,6 +138,7 @@ export class TaskTimerServiceImpl implements TaskTimerService {
         'associated',
       ),
     })
+    emitTaskLinked(normalizedTaskId, task.title, activeBlock.startId, activeBlock.name)
   }
 
   async removeTaskFromBlock(taskId: string): Promise<void> {
@@ -145,6 +150,7 @@ export class TaskTimerServiceImpl implements TaskTimerService {
 
     const existingTaskIds = resolveActiveBlockTaskIds(activeBlock)
     if (!existingTaskIds.includes(normalizedTaskId)) return
+    const task = await this.taskSvc.getTask(normalizedTaskId)
 
     await this.tbSvc.updateActiveBlock({
       taskIds: existingTaskIds.filter((existingTaskId) => existingTaskId !== normalizedTaskId),
@@ -155,6 +161,7 @@ export class TaskTimerServiceImpl implements TaskTimerService {
         'disassociated',
       ),
     })
+    emitTaskUnlinked(normalizedTaskId, task?.title ?? normalizedTaskId, activeBlock.startId, activeBlock.name)
   }
 
   async onBlockEndForTask(
