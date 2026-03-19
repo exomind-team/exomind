@@ -7,7 +7,7 @@ describe('RitualHomePage', () => {
   it('shows boot card in pre_boot stage（未开机阶段显示开机主卡）', () => {
     render(<RitualHomePage stage="pre_boot" />);
 
-    expect(screen.getByText('开始今天')).toBeInTheDocument();
+    expect(screen.getByRole('heading', { name: '开始今天' })).toBeInTheDocument();
     expect(screen.getByText('昨天停在哪')).toBeInTheDocument();
     expect(screen.getByText('系统推荐的今天主线')).toBeInTheDocument();
     expect(screen.getAllByRole('button', { name: '选择这条主线' }).length).toBeGreaterThan(0);
