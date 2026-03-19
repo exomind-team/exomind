@@ -1,687 +1,734 @@
 ---
-title: ExoMind-Net 技术规范
-version: 0.1.0-draft
+title: "ExoMind-Net 设计方案 v3：八层认知通讯基础设施"
+version: v3.0
 created: 2026-03-19
-tags: [exomind, networking, protocol-stack, P2P, libp2p, distributed, rust]
+updated: 2026-03-19
+tags: [exomind, architecture, protocol-stack, signal-network, distributed, standard]
 ---
 
-# ExoMind-Net 技术规范
+# ExoMind-Net 设计方案 v3
 
-> ExoMind 分布式认知网络协议栈完整设计文档
+## 八层认知通讯基础设施
+
+> **这是什么**：一份从物理设备到认知事件的统一分布式信号网络的完整设计方案。
 >
-> 版本：0.1.0-draft
+> **做什么**：让个人和组织的所有计算设备——手机、电脑、手表、服务器、嵌入式传感器——自组织为一个统一整体，提供通讯、计算、存储和认知能力。
 >
-> 作者：HailayLin
+> - **个人层面**：你的所有设备互联互通，数据在自己手里，认知工具为你服务
+> - **组织层面**：集体成员的设备资源共享，计算/存储/网络按贡献分配，基础设施归集体所有
 >
-> 日期：2026-03-19
-
-> [!NOTE]
-> 本文档定义 ExoMind 的**软件协议栈**（七层 P2P 网络设计）。
-> 物理基础设施部署方案见星云网络文档（个人知识库）。
-> 星云网络阶段一二用 WireGuard Mesh，阶段三迁移到本文档定义的 libp2p 协议栈。
-
----
-
-## 目录
-
-1. [概述](#1-概述)
-2. [设计哲学](#2-设计哲学)
-3. [七层协议栈总览](#3-七层协议栈总览)
-4. [L1 承载层 Bearer](#4-l1-承载层-bearer)
-5. [L2 连接链路层 Link](#5-l2-连接链路层-link)
-6. [L3 路由寻址层 Routing](#6-l3-路由寻址层-routing)
-7. [L4 服务传输层 Service](#7-l4-服务传输层-service)
-8. [L5 会话管理层 Session](#8-l5-会话管理层-session)
-9. [L6 编码表示层 Representation](#9-l6-编码表示层-representation)
-10. [L7 认知应用层 Cognitive](#10-l7-认知应用层-cognitive)
-11. [安全体系](#11-安全体系)
-12. [DHT 自发现原理](#12-dht-自发现原理)
-13. [任务迁移机制](#13-任务迁移机制)
-14. [sing-box 集成与代理承载](#14-sing-box-集成与代理承载)
-15. [组件拆分与 Crate 结构](#15-组件拆分与-crate-结构)
-16. [实现路线图](#16-实现路线图)
-17. [与现有方案对比](#17-与现有方案对比)
+> **为什么**：让认知生产资料——计算、存储、网络、数据——归个人和集体所有，不归资本平台。在信息世界中实现生产资料公有制，每个人的认知工具为自己服务，集体的基础设施为集体服务。
+>
+> **聚焦**：个人域（1-20 台设备）优先设计和实现，逐步扩展到集体域（组织内设备共享）、社区域、文明域。
 
 ---
 
-## 1. 概述
+## 一、设计目标
 
-### 1.1 ExoMind-Net 是什么
+| # | 目标 | 含义 |
+|---|------|------|
+| 1 | 全分布式 | 节点自组织、自连接、自发现，无中心依赖 |
+| 2 | 以人为中心 | 用户设备和数据归用户，认知工具为用户服务 |
+| 3 | 自治 | 配对后资源（计算/存储/通讯）自动整合 |
+| 4 | 认知生命科学引导 | 以认知生命科学理论框架指导设计 |
+| 5 | 认知承载 | 承载人的认知 + Agent 的认知 |
+| 6 | 生命实验环境 | 为创造认知生命提供可追溯的实验平台 |
+| 7 | 文明基础设施 | 从个人设备到全人类设备的可扩展通讯标准 |
 
-ExoMind-Net 是 ExoMind 分布式认知操作系统的网络协议栈，负责将用户的所有设备——从嵌入式传感器、手机、电脑到云端服务器——组成一个无中心的 P2P 网络。
+---
 
-它参照 OSI 七层模型设计，在 P2P 网络之上承载信号传输、文件传输、流式推送、代理服务、分布式计算、分布式存储和认知循环同步。
+## 二、八层全景
 
-### 1.2 核心目标
+### 2.1 总览图
 
-- **全分布式**：无中心依赖，节点平等，任何节点挂掉网络自愈
-- **异构设备覆盖**：从 BLE 手表到云端服务器，统一协议栈
-- **认知承载**：不只是网络通信，最高层承载认知循环和 AI Agent
-- **代理承载**：网络本身可承载代理流量，集成 sing-box 管理
-- **安全自主**：自证明身份，端到端加密，不依赖任何第三方 CA
+```mermaid
+graph TB
+    subgraph L7["L7 认知应用层 Cognitive"]
+        direction LR
+        L7A["认知循环引擎"]
+        L7B["Agent 协作"]
+        L7C["CRDT 事件同步"]
+    end
 
-### 1.3 技术栈选择
+    subgraph L6["L6 编码表示层 Representation"]
+        direction LR
+        L6A["MessagePack"]
+        L6B["zstd 压缩"]
+        L6C["E2E 加密"]
+        L6D["链式签名"]
+    end
 
-- **语言**：Rust（从嵌入式到服务器统一）
-- **底层网络库**：rust-libp2p（L1-L2 基础，不重复造轮子）
-- **传输协议**：QUIC（UDP 基础，打洞友好，多路复用，内置加密）
-- **序列化**：MessagePack（高效二进制，Rust/TS 两端成熟）
-- **前端集成**：通过 Tauri Command 暴露给前端
+    subgraph L5["L5 会话管理层 Session"]
+        direction LR
+        L5A["身份认证"]
+        L5B["权限控制"]
+        L5C["设备配对"]
+    end
 
-### 1.4 与星云网络的关系
+    subgraph L4["L4 服务传输层 Service"]
+        direction LR
+        L4A["Signal"]
+        L4B["File"]
+        L4C["Stream"]
+        L4D["Proxy"]
+        L4E["Compute"]
+        L4F["Storage"]
+    end
+
+    subgraph L3["L3 路由寻址层 Routing"]
+        direction LR
+        L3A["Kademlia DHT"]
+        L3B["Spanning Tree"]
+        L3C["Subject 路由"]
+    end
+
+    subgraph L2["L2 连接链路层 Link"]
+        direction LR
+        L2A["QUIC"]
+        L2B["NAT 穿透"]
+        L2C["中继"]
+    end
+
+    subgraph L1["L1 承载层 Bearer"]
+        direction LR
+        L1A["UDP/TCP"]
+        L1B["BLE"]
+        L1C["本地 IPC"]
+    end
+
+    subgraph L0["L0 设备层 Device"]
+        direction LR
+        L0A["传感器"]
+        L0B["执行器"]
+        L0C["物理资源"]
+    end
+
+    L7 --> L6 --> L5 --> L4 --> L3 --> L2 --> L1 --> L0
+
+    L7 -.->|"反向管控（可达任意下层）"| L6
+    L7 -.-> L5
+    L7 -.-> L4
+    L7 -.-> L3
+    L7 -.-> L2
+    L7 -.-> L1
+    L7 -.-> L0
+```
+
+### 2.2 各层职责
 
 ```
-星云网络（基础设施层）          ExoMind-Net（软件协议层）
-━━━━━━━━━━━━━━━━━━━━         ━━━━━━━━━━━━━━━━━━━━━━━
-VPS 采购 / ISP 选择            协议栈设计 / Rust 实现
-WireGuard Mesh（阶段一二）      libp2p P2P（阶段三替代）
-sing-box 手动配置               SingBoxManager 自动管控
-mihomo 分流规则                 TrafficPolicyEngine 动态策略
-手动运维                       Agent 自动管理
+层    名称                     职责                              关键技术
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+L7   认知应用层 Cognitive      认知循环 / Agent 协作              CognitiveEvent / CRDT
+L6   编码表示层 Representation 序列化 / 压缩 / 加密 / 链式签名    MessagePack / zstd / E2E
+L5   会话管理层 Session        身份 / 权限 / 设备配对             PAKE / Key Pinning / Ed25519
+L4   服务传输层 Service        六类服务 + QoS                    Signal/File/Compute/Storage/Proxy/Stream
+L3   路由寻址层 Routing        双模路由 / 服务发现                Kademlia + Spanning Tree
+L2   连接链路层 Link           加密连接 / 多路复用 / 穿透         QUIC / NAT punch / relay
+L1   承载层 Bearer             多网络适配                        UDP / BLE / LoRa / IPC
+L0   设备层 Device             物理世界接口                      传感器 / 执行器 / 资源声明
+```
 
-星云网络是"骨骼+皮肤"
-ExoMind-Net 是"神经系统+大脑"
+### 2.3 一条信号从物理世界到认知世界
+
+以手环心率信号为例，完整展示八层如何协作：
+
+```mermaid
+sequenceDiagram
+    participant HW as 手环硬件
+    participant L0 as L0 设备层
+    participant L1 as L1 承载层
+    participant L2 as L2 连接层
+    participant L3 as L3 路由层
+    participant L4 as L4 服务层
+    participant L5 as L5 会话层
+    participant L6 as L6 编码层
+    participant L7 as L7 认知层
+
+    HW->>L0: 心率传感器采样：72 bpm
+    L0->>L0: SensorDescriptor 封装为 RawSignal
+    L0->>L1: 通过 BLE Bearer 发送
+    L1->>L2: BLE → LightReliableTransport（BLE 专用轻量传输）
+    L2->>L3: 路由查找：topic "sensor.heartrate.wristband-01"
+    L3->>L3: Hierarchical Subject 匹配订阅者
+    L3->>L4: 封装为 Signal 消息（QoS: BestEffort + TransientLocal）
+    L4->>L5: 权限验证（OwnDevice — 这是自己的手环）
+    L5->>L6: MessagePack 序列化 + E2E 加密 + 链式签名（prev_hash）
+    L6->>L7: 认知事件到达 → Agent 处理：心率正常，记录
+
+    Note over L7,L0: 反向管控：Agent 决定调整采样率
+
+    L7->>L6: 管控命令：set_sampling_rate(0.5 Hz)
+    L6->>L5: 签名 + 权限检查
+    L5->>L4: 封装为 Compute 任务
+    L4->>L3: 路由到手环节点
+    L3->>L2: 选路
+    L2->>L1: BLE 传输
+    L1->>L0: 执行：调整心率传感器采样率
+    L0->>HW: 硬件配置更新
 ```
 
 ---
 
-## 2. 设计哲学
+## 三、L0 设备层：物理世界接口
 
-### 2.1 生命原理
+> L0 是信号网络与物理世界的边界。传感器是输入，执行器是输出，物理资源是约束。
 
-ExoMind-Net 的设计基于认知生命科学的理论框架，用生命的组织原理指导网络设计：
+### 3.1 L0 做什么
 
-| 生命特征                      | 网络实现               |
-| ------------------------- | ------------------ |
-| 自创生（Autopoiesis）          | 节点自发现、自连接、自修复网络拓扑  |
-| 自我边界（Self-distinction）    | 密钥身份、设备配对、权限系统     |
-| 稳态调节（Homeostasis）         | 认知循环持续运行，网络健康自监控   |
-| 内在驱力（Intrinsic drive）     | 主动维持连通性、数据完整性、资源均衡 |
-| 结构耦合（Structural coupling） | 任务迁移、网络自愈、策略学习     |
-| 分布式认知                     | 无"大脑"节点，每个节点参与认知   |
+```mermaid
+graph LR
+    subgraph World["物理世界"]
+        HR["心率 72bpm"]
+        GPS["位置 23.1°N"]
+        TEMP["温度 26°C"]
+        CAM["画面"]
+        MIC["声音"]
+    end
 
-### 2.2 节点平等
+    subgraph L0["L0 设备层"]
+        REG["设备注册<br/>传感器/执行器/资源<br/>声明到信号网络"]
+        READ["信号采集<br/>PhysicalSignalSource<br/>read() → RawSignal"]
+        CTRL["设备管控<br/>PhysicalDeviceControl<br/>configure() / trigger()"]
+    end
 
-没有"服务器"和"客户端"之分，只有节点能力的差异：
+    subgraph L1up["L1+ 信号网络"]
+        NET["网络传输 → 认知处理"]
+    end
+
+    World -->|"采集"| READ
+    READ -->|"RawSignal"| NET
+    NET -->|"管控命令"| CTRL
+    CTRL -->|"执行"| World
+    REG ---|"能力声明写入 DHT"| NET
+```
+
+### 3.2 设备描述
+
+每台设备加入信号网络时，L0 层向网络注册自己的物理能力：
 
 ```rust
-enum NodeClass {
-    /// 随身设备：手机、手表，电池敏感，随时可能离线
-    Portable { battery_aware: bool },
-    /// 桌面设备：电脑，算力强但会关机
-    Desktop { gpu: Option<GpuInfo> },
-    /// 常驻节点：VPS/服务器，7×24 在线，带宽稳定
-    Persistent { guaranteed_uptime: f64 },
-    /// 嵌入式：手表、传感器，极低功耗，能力受限
-    Embedded { power_budget_mw: u32 },
+struct DeviceLayer {
+    node_id: NodeId,
+    device_class: DeviceClass,         // Desktop / Portable / Persistent / Embedded
+    sensors: Vec<SensorDescriptor>,    // 我有哪些传感器
+    actuators: Vec<ActuatorDescriptor>,// 我有哪些执行器
+    resources: DeviceResources,        // 我有多少计算/存储/能量资源
+}
+
+struct SensorDescriptor {
+    sensor_type: SensorType,   // Heartrate / GPS / Camera / Microphone / Temperature ...
+    sample_rate: SampleRate,
+    data_format: DataFormat,
+    power_cost: PowerCost,
+}
+
+struct ActuatorDescriptor {
+    actuator_type: ActuatorType, // Display / Speaker / Vibration / Motor / LED ...
+    control_interface: ControlInterface,
+}
+
+struct DeviceResources {
+    cpu: CpuInfo,
+    ram: MemoryInfo,
+    gpu: Option<GpuInfo>,
+    storage: StorageInfo,
+    battery: Option<BatteryInfo>,
+    power_source: PowerSource,     // Battery / AC / Solar
 }
 ```
 
-所有节点都跑完整的 ExoMind 协议栈（嵌入式跑精简版）。广州 VPS 不是"服务器"，只是一个"比较稳定的节点"。
+### 3.3 L0 与 L7 的双向因果
 
-### 2.3 渐进复杂度
+L7 认知层可以通过标准的 L4 Compute 服务管控 L0 的任何设备：
 
+```mermaid
+graph TB
+    L7["L7 认知层"] -->|"调整采样率"| L0S["L0 传感器"]
+    L7 -->|"触发振动提醒"| L0A["L0 执行器"]
+    L7 -->|"查询电池状态"| L0R["L0 资源"]
+    L7 -->|"重启 sing-box"| L1["L1 网络配置"]
+    L7 -->|"切换 QUIC 参数"| L2["L2 连接配置"]
+    L7 -->|"更新路由策略"| L3["L3 路由策略"]
+    L7 -->|"变更 QoS 级别"| L4["L4 服务配置"]
+    L7 -->|"调整权限规则"| L5["L5 会话配置"]
+    L7 -->|"切换压缩算法"| L6["L6 编码配置"]
+
+    style L7 fill:#e1f5fe
 ```
-单机可用 → 两台设备同步 → 多设备组网 → 社区互联
-每一步都是完整可用的产品状态
-```
+
+关键点：L7 能反向管控**任意下层的任意层级**（L0 到 L6），不限于特定层。所有管控命令都走标准 L4 Compute 路径（opaque task），不破坏分层原则。
 
 ---
 
-## 3. 七层协议栈总览
+## 四、L1 承载层：多网络适配
 
-```
-OSI 参照            ExoMind 协议栈 (EPS)         职责
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-L7 应用层     →    认知应用层 Cognitive         认知循环 / Agent 协作
-L6 表示层     →    编码表示层 Representation    序列化 / 压缩 / 加密信封
-L5 会话层     →    会话管理层 Session           认证 / 权限 / 会话生命周期
-L4 传输层     →    服务传输层 Service           信号/文件/流/代理/计算/存储
-L3 网络层     →    路由寻址层 Routing           DHT / 寻址 / 路由 / 流量策略
-L2 数据链路层  →    连接链路层 Link             QUIC / 多路复用 / 打洞 / 中继
-L1 物理层     →    承载层 Bearer               UDP / TCP / BLE / USB / LoRa
-```
-
-数据流转示例（手机远程让电脑跑 Agent）：
-
-```
-手机                                           电脑
-━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-L7  AgentCommand("重构函数")           →   L7  收到，启动 Agent
-L6  MessagePack 序列化 + zstd 压缩     →   L6  解压 + 反序列化
-L5  验证会话(OwnDevice) + 签名         →   L5  验签 + 检查权限
-L4  封装为 Compute 消息                →   L4  路由到 Agent 执行器
-L3  查路由表 → 对端虚拟IP              →   L3  接收
-L2  选 QUIC stream(STREAM_AGENT)       →   L2  stream 解复用
-L1  UDP 发送                           →   L1  UDP 接收
-```
-
----
-
-## 4. L1 承载层 Bearer
-
-适配不同的底层网络环境，对上层暴露统一的发包/收包接口。
+> L1 适配不同的底层网络，对上层暴露统一的发包/收包接口。
 
 ### 4.1 承载类型
 
-```rust
-enum BearerType {
-    // ---- 互联网承载 ----
-    /// 主力：UDP socket，QUIC 跑在上面
-    Udp { socket: UdpSocket },
-    /// 降级：某些网络封 UDP（企业防火墙、部分运营商）
-    TcpWebSocket { stream: TlsStream<TcpStream> },
-    /// 极端环境：HTTP/2 伪装，过严格 DPI
-    Http2Tunnel { h2_connection: H2Connection },
+```mermaid
+graph TB
+    subgraph Internet["互联网承载"]
+        UDP["UDP（主力，QUIC 载体）"]
+        WS["TCP-WebSocket（UDP 受限时降级）"]
+        H2["HTTP/2 隧道（严格 DPI 环境）"]
+    end
 
-    // ---- 近场承载 ----
-    /// 传统蓝牙，带宽高（~2Mbps）
-    BluetoothClassic { rfcomm_channel: u8 },
-    /// BLE，功耗极低，MTU 小（23-517 bytes）
-    BluetoothLowEnergy { service_uuid: Uuid, mtu: u16 },
+    subgraph Near["近场承载"]
+        BTC["Bluetooth Classic（~2 Mbps）"]
+        BLE["BLE（23-517 B MTU，~100-200 kbps）"]
+    end
 
-    // ---- 本地承载 ----
-    /// 同机进程间通信
-    UnixSocket { path: PathBuf },
-    /// 同机高速通道
-    SharedMemory { region: ShmRegion },
+    subgraph Local["本地承载"]
+        UNIX["Unix Socket（同机进程间）"]
+        SHM["共享内存（同机高速）"]
+    end
 
-    // ---- 未来扩展 ----
-    /// 超远距离低速
-    LoRa { frequency_mhz: f32, spreading_factor: u8 },
-    /// USB 有线直连
-    UsbSerial { port: String, baud_rate: u32 },
-}
+    subgraph Future["扩展承载"]
+        LORA["LoRa（超远距离低速）"]
+        USB["USB Serial（有线直连）"]
+    end
+
+    subgraph L1["L1 统一接口"]
+        SEND["send(packet, dest)"]
+        RECV["recv() → packet"]
+        PROBE["probe() → 最优 bearer"]
+    end
+
+    Internet --> L1
+    Near --> L1
+    Local --> L1
+    Future --> L1
 ```
 
-### 4.2 多承载并存与自动降级
+### 4.2 BLE 专用适配
 
-```rust
-struct BearerLayer {
-    /// 同时持有多种 bearer，自动选最优
-    bearers: Vec<ActiveBearer>,
-    /// 网络探测器：启动时检测 UDP 是否可用、MTU、是否受限网络
-    probe: NetworkProbe,
-}
+QUIC 对 BLE 太重（握手开销大、头部占比高）。设计了 LightReliableTransport：
 
-impl BearerLayer {
-    /// 对上层暴露统一接口
-    async fn send(&self, packet: &[u8], dest: Endpoint) -> Result<()> {
-        let bearer = self.select_best_bearer(dest).await;
-        bearer.send(packet).await
-    }
+- 滑动窗口 1-4（极小）
+- 分片器：大帧 → BLE 小包（适配 23-517 B MTU）
+- 简单重传定时器
+- 不做拥塞控制（BLE 带宽本就很低）
 
-    /// 网络切换时（WiFi→4G）自动迁移
-    async fn on_network_change(&mut self, new_interface: NetworkInterface) {
-        // 重新探测，切换 bearer，通知 L2 做连接迁移
-    }
-}
-```
+### 4.3 自动降级与迁移
 
-### 4.3 BLE 适配
-
-BLE 包小（MTU 通常 23-517 字节）、带宽低（~100-200 kbps），需要特殊处理：
-
-```rust
-struct BleAdapter {
-    mtu: u16,
-    /// BLE 上不跑 QUIC（太重），用轻量可靠传输
-    transport: LightReliableTransport,
-}
-
-/// 轻量传输协议（替代 QUIC，用于 BLE）
-struct LightReliableTransport {
-    window_size: u8,       // 1-4 即可
-    retransmit_ms: u32,
-    fragmenter: Fragmenter, // 大帧 → BLE 小包
-}
-```
+- 同时持有多种 Bearer，运行时自动选最优
+- WiFi → 4G 切换时，QUIC 连接迁移（Connection ID 不变）
+- UDP 被封 → 自动降级到 TCP-WebSocket → HTTP/2 隧道
 
 ---
 
-## 5. L2 连接链路层 Link
+## 五、L2 连接链路层：QUIC + NAT 穿透
 
-在两个节点之间建立可靠、加密、多路复用的连接。
+> L2 在两个节点之间建立可靠、加密、多路复用的连接。
 
-### 5.1 核心结构
+### 5.1 连接架构
 
-```rust
-struct LinkLayer {
-    /// QUIC endpoint
-    quic: quinn::Endpoint,
-    /// 活跃连接池
-    connections: HashMap<NodeId, PeerConnection>,
-    /// 打洞引擎
-    hole_puncher: HolePunchEngine,
-    /// 中继管理
-    relay_manager: RelayManager,
-}
+```mermaid
+graph TB
+    subgraph L2["L2 连接层"]
+        QUIC["QUIC Endpoint<br/>（quinn 库，内置 TLS 1.3）"]
+        POOL["连接池<br/>HashMap<NodeId, PeerConnection>"]
+        PUNCH["NAT 穿透引擎"]
+        RELAY["中继管理器"]
+        MUX["Stream 多路复用器"]
+    end
 
-struct PeerConnection {
-    node_id: NodeId,
-    quic_conn: quinn::Connection,
-    path: ConnectionPath,
-    streams: StreamMultiplexer,
-    metrics: ConnectionMetrics,
-}
+    subgraph Streams["9 类 Stream"]
+        S0["0x0000 CONTROL"]
+        S1["0x0001 SIGNAL"]
+        S2["0x0002 FILE"]
+        S3["0x0003 AGENT"]
+        S4["0x0004 COMPUTE"]
+        S5["0x0005 STORAGE"]
+        S6["0x0006 PROXY"]
+        S7["0x0007 TERMINAL"]
+        S8["0x0008 TUNNEL"]
+    end
 
-enum ConnectionPath {
-    Direct,                                      // 直连
-    HolePunched { technique: PunchTechnique },   // 打洞
-    Relayed { via: Vec<NodeId> },                // 中继
-    Tunneled { bearer: BearerType },             // 伪装隧道
-}
+    QUIC --> POOL
+    POOL --> MUX
+    MUX --> Streams
+    PUNCH --> POOL
+    RELAY --> POOL
 ```
 
-### 5.2 Stream 多路复用
-
-一条 QUIC 连接上通过 stream 类型 ID 区分不同服务：
-
-```rust
-// 预定义 stream 类型
-const STREAM_CONTROL: u16   = 0x0000;  // 控制信道
-const STREAM_SIGNAL: u16    = 0x0001;  // 信号消息
-const STREAM_FILE: u16      = 0x0002;  // 文件传输
-const STREAM_AGENT: u16     = 0x0003;  // Agent IO
-const STREAM_COMPUTE: u16   = 0x0004;  // 分布式计算
-const STREAM_STORAGE: u16   = 0x0005;  // 分布式存储
-const STREAM_PROXY: u16     = 0x0006;  // 代理流量
-const STREAM_TERMINAL: u16  = 0x0007;  // 终端 PTY
-const STREAM_TUNNEL: u16    = 0x0008;  // 通用隧道（sing-box）
-
-/// 开一个新 stream 时，第一个字节标识类型
-async fn open_typed_stream(
-    conn: &quinn::Connection,
-    stream_type: u16,
-) -> Result<(SendStream, RecvStream)> {
-    let (mut send, recv) = conn.open_bi().await?;
-    send.write_all(&stream_type.to_be_bytes()).await?;
-    Ok((send, recv))
-}
-```
-
-### 5.3 NAT 打洞
-
-```rust
-struct HolePunchEngine {
-    strategies: Vec<Box<dyn PunchStrategy>>,
-}
-```
-
-国内运营商 NAT 环境下的策略：
+### 5.2 NAT 穿透策略
 
 | 双方 NAT 类型 | 策略 | 成功率 |
 |-------------|------|-------|
-| 双方锥形 NAT | 简单 UDP 打洞 | >90% |
-| 一方对称 NAT | 端口预测 + 生日攻击 | ~40% |
-| 双方对称 NAT | 基本不可能 | <5% |
-| 运营商级 CGNAT | 打洞困难 | ~20% |
+| 双方锥形 | 简单 UDP 打洞 | >90% |
+| 一方对称 | 端口预测 + 生日攻击 | ~40% |
+| 双方对称 | 基本不可能 | <5% |
+| 运营商 CGNAT | 打洞困难 | ~20% |
 
-打洞失败时自动降级为中继。**任何节点都可以做中继**，不只是固定服务器。
+打洞失败 → 自动降级为中继。**任何节点都可以做中继**，不只是固定服务器。
 
-### 5.4 连接建立时的能力协商
+### 5.3 能力协商
+
+连接建立时交换 NodeCapabilities（包含 L0 设备层的物理资源声明）：
 
 ```rust
 struct NodeCapabilities {
+    device_class: DeviceClass,
     can_relay: bool,
     relay_bandwidth_mbps: u32,
     storage_available_gb: u64,
     compute_cores: u32,
     gpu_vram_mb: u32,
+    sensors: Vec<SensorType>,       // L0 传感器列表
+    actuators: Vec<ActuatorType>,   // L0 执行器列表
+    battery_percent: Option<u8>,    // L0 电池状态
     protocol_version: u32,
     supported_streams: Vec<u16>,
-    available_models: Vec<ModelAvailability>,
-}
-```
-
-### 5.5 使用 libp2p 的最小实现
-
-```toml
-[dependencies]
-libp2p = { version = "0.54", features = [
-    "tokio", "noise", "yamux", "quic",
-    "mdns",               # 局域网发现
-    "relay", "dcutr",     # 中继 + 打洞
-    "kad",                # DHT
-    "identify",           # 身份交换
-    "request-response",   # 请求-响应
-] }
-```
-
----
-
-## 6. L3 路由寻址层 Routing
-
-全局寻址与路由决策。
-
-### 6.1 节点身份与地址
-
-```rust
-struct NodeIdentity {
-    /// 公钥即身份，不依赖任何中心分配
-    public_key: Ed25519PublicKey,
-    /// 节点 ID = 公钥的 SHA-256 前 20 字节
-    node_id: [u8; 20],
-    /// 人类可读名字（可选）
-    alias: Option<String>,
-}
-
-struct ExoAddress {
-    node_id: [u8; 20],
-    /// 虚拟 IP（overlay 网络中的地址，便于 sing-box 路由）
-    /// 从 NodeId 确定性生成：10.{id[0]}.{id[1]}.{id[2]}
-    virtual_ip: Ipv4Addr,
-}
-```
-
-### 6.2 节点发现：三层机制并行
-
-| 机制 | 范围 | 依赖 |
-|------|------|------|
-| mDNS | 局域网 | 无，零配置 |
-| BLE 广播 | 近场（~10m） | 蓝牙硬件 |
-| Kademlia DHT | 广域网 | 至少知道一个 bootstrap 节点 |
-
-节点启动流程：
-
-```rust
-async fn bootstrap(&mut self) {
-    // 1. mDNS 发现局域网节点
-    let local_peers = self.mdns_discover().await;
-
-    // 2. BLE 扫描近场设备
-    let ble_peers = self.ble_discover().await;
-
-    // 3. 如果本地没找到，连 bootstrap 节点
-    if local_peers.is_empty() && ble_peers.is_empty() {
-        self.dht.add_contact("gz-node.exomind.net:9900").await;
-    }
-
-    // 4. DHT 查找自己，填充路由表
-    self.dht.find_node(self.node_id).await;
-
-    // 5. 定期刷新路由表
-    self.dht.start_refresh_loop().await;
-}
-```
-
-### 6.3 Kademlia DHT 详解
-
-**核心概念**：
-
-- 每个节点有 160-bit ID，距离 = ID 异或（XOR）
-- 路由表分 160 个桶，第 i 桶存距离在 2^i ~ 2^(i+1) 的节点，每桶最多 K=20 个
-- 查找节点：O(log N) 轮迭代逼近，20 轮可在百万节点中找到目标
-
-**DHT 存储三种数据**：
-
-```
-1. 节点位置：key=NodeId, value=公网地址
-   → 节点发现
-
-2. 服务声明：key=hash("service:proxy:hk"), value=提供该服务的节点列表
-   → 服务发现（"谁有香港代理出口？"）
-
-3. 内容索引：key=文件hash, value=持有该文件的节点列表
-   → 分布式存储寻址
-```
-
-**路由表维护**：
-
-```rust
-fn on_seen_node(&mut self, node: NodeContact) {
-    let bucket = &mut self.buckets[self.bucket_for(node.id)];
-    if bucket.contains(node.id) {
-        bucket.move_to_tail(node.id); // 标记为最近活跃
-    } else if bucket.len() < K {
-        bucket.push(node);
-    } else {
-        // 桶满了，ping 最老的节点
-        // 活着就保留（长寿节点更可靠），死了就替换
-        if !bucket.head().ping().await {
-            bucket.replace_head(node);
-        }
-    }
-}
-```
-
-### 6.4 流量策略引擎
-
-决定流量怎么走，是代理承载的核心：
-
-```rust
-struct TrafficPolicyEngine {
-    rules: Vec<TrafficRule>,
-}
-
-struct TrafficRule {
-    matcher: TrafficMatcher,
-    action: TrafficAction,
-    priority: u32,
-}
-
-enum TrafficMatcher {
-    IntraNetwork { dest_node: Option<NodeId> }, // ExoMind 内部
-    ExternalDomain { domain_rules: Vec<DomainRule> }, // 外部域名
-    ExternalIp { cidr: IpNetwork },             // 外部 IP 段
-    Protocol { protocol: ProtocolType },         // 协议类型
-    All,
-}
-
-enum TrafficAction {
-    Direct,                                 // 直连
-    ProxyVia { exit_node: NodeId },         // 经出口节点代理
-    LoadBalance { exit_nodes: Vec<NodeId> }, // 负载均衡
-    Chain { hops: Vec<NodeId> },            // 链式代理
-    Reject,                                 // 拒绝
 }
 ```
 
 ---
 
-## 7. L4 服务传输层 Service
+## 六、L3 路由寻址层：双模路由
 
-把 L2 的原始 stream 封装为具体服务。
+> L3 负责"信号发到哪去"——精确查找用 DHT，组播/广播用 Spanning Tree。
 
-### 7.1 服务注册
+### 6.1 双模路由架构
 
-每个节点声明自己提供的服务：
+```mermaid
+graph TB
+    EVENT["SignalEvent 发出"] --> DECIDE{"路由决策"}
 
-```rust
-enum ServiceType {
-    Signal,                  // 信号传输（轻量消息）
-    FileTransfer,            // 文件传输（大数据，断点续传）
-    Stream,                  // 流式推送（Agent 输出、终端流）
-    Proxy(ProxyService),     // 代理服务
-    Compute(ComputeService), // 分布式计算
-    Storage(StorageService), // 分布式存储
-    Terminal,                // 终端 PTY
-}
+    DECIDE -->|"SignalTarget::Node(id)"| KAD["Kademlia DHT<br/>O(log N) 精确查找"]
+    KAD --> T1["目标节点"]
+
+    DECIDE -->|"SignalTarget::Group(topic)"| HS["Hierarchical Subject 匹配"]
+    HS --> SUB["查找所有匹配的订阅者"]
+    SUB --> ST["Spanning Tree 定向推送"]
+    ST --> T2["订阅者节点（1 到 N 个）"]
+
+    DECIDE -->|"SignalTarget::Broadcast"| BC{"广播余额检查"}
+    BC -->|"余额充足"| ST2["Spanning Tree 洪泛"]
+    ST2 --> T3["全网节点"]
+    BC -->|"余额不足"| REJECT["拒绝广播"]
 ```
 
-### 7.2 信号传输
+### 6.2 Hierarchical Subject 路由
 
-小数据、低延迟，用于指令、状态同步、事件通知：
+Subject 支持通配符，用前缀树（Trie）匹配：
+
+```
+精确匹配：  "agent.life.exploring"     → 只匹配这一个
+单层通配：  "agent.life.*"             → 匹配 agent.life.exploring、agent.life.dormant
+多层通配：  "agent.>"                  → 匹配 agent 下所有子 topic
+```
+
+```mermaid
+graph TB
+    ROOT["root"] --> AGENT["agent"]
+    ROOT --> SENSOR["sensor"]
+    ROOT --> SYSTEM["system"]
+
+    AGENT --> LIFE["life"]
+    AGENT --> COMPUTE["compute"]
+    LIFE --> EXPLORING["exploring ●"]
+    LIFE --> DORMANT["dormant ●"]
+    COMPUTE --> STARTED["started ●"]
+
+    SENSOR --> HR["heartrate"]
+    SENSOR --> GPS["gps"]
+    HR --> WRIST["wristband-01 ●"]
+
+    SYSTEM --> NET["network"]
+    NET --> STATUS["status ●"]
+
+    style EXPLORING fill:#c8e6c9
+    style DORMANT fill:#c8e6c9
+    style STARTED fill:#c8e6c9
+    style WRIST fill:#c8e6c9
+    style STATUS fill:#c8e6c9
+```
+
+订阅 `sensor.heartrate.*` → 匹配所有心率传感器的信号。
+
+### 6.3 广播模型
+
+```mermaid
+graph TB
+    subgraph Types["广播类型"]
+        LOCAL["本地广播<br/>进程内 tokio::broadcast<br/>无限制"]
+        DIRECTED["订阅者定向推送<br/>Interest-based routing<br/>默认模式"]
+        GLOBAL["全网广播<br/>Spanning Tree 洪泛<br/>消耗广播余额"]
+    end
+
+    subgraph Balance["广播余额机制"]
+        INIT["初始余额：N 次/时间窗口"]
+        CONSUME["每次全网广播消耗 1 余额"]
+        RECOVER["余额按时间恢复"]
+        BLOCK["余额为 0 → 无法全网广播"]
+    end
+
+    subgraph Filter["接收方过滤"]
+        ACCEPT["接收并处理"]
+        IGNORE["忽略（不感兴趣的 topic）"]
+        MUTE["屏蔽该节点（垃圾信息）"]
+    end
+
+    GLOBAL --> Balance
+    GLOBAL --> Filter
+```
+
+**广播余额机制**：
+- 每个节点有广播余额（如每小时 N 次全网广播）
+- 每次全网广播消耗 1 余额
+- 余额随时间恢复
+- 余额为 0 时无法发起全网广播
+- 仅限全网广播消耗余额；订阅者定向推送不受限
+
+**接收方权利**：
+- 每个节点有权过滤收到的广播
+- 可按 topic 忽略
+- 可按来源节点屏蔽
+- 这是信号网络的基本设计——接收方始终有自主权
+
+**关于政府/监管的讨论**：
+
+在完全去中心化的信号网络中，不存在"保证所有人必须接收某条信息"的技术机制——每个节点有过滤权。这带来两个需要思考的问题：
+
+1. **紧急公共信息**（如自然灾害预警）：可以设计一种"紧急广播"信号类型，由多个信任节点联合签名背书（类似多签），接收方的默认策略是不过滤紧急广播。但这是建议性的——技术上无法强制。
+
+2. **政府监管需求**：完全去中心化的网络天然不支持中心化监管。这不是技术缺陷——这是设计目标的一部分（目标 2：以人为中心）。如何在去中心化与合规之间找到平衡，需要在更广泛的社会讨论中解决，不在本技术设计的范围内。但我们不回避这个问题——在论文四（政治经济学）中应展开讨论。
+
+### 6.4 节点身份与地址
+
+- **NodeId**：Ed25519 公钥 → SHA-256 前 20 字节（自证明身份）
+- **虚拟 IP**：10.{id[0]}.{id[1]}.{id[2]}（确定性生成，便于路由）
+- **三级发现**：mDNS（局域网）+ BLE 广播（近场 ~10 m）+ Kademlia DHT（广域网）
+
+---
+
+## 七、L4 服务传输层：六类服务 + QoS
+
+> L4 把 L2 的原始 QUIC stream 封装为具体服务。每种服务有默认 QoS。
+
+### 7.1 QoS 框架
+
+```mermaid
+graph LR
+    subgraph QoS["QoS 四维度"]
+        R["Reliability<br/>BestEffort<br/>Reliable<br/>ReliableOrdered"]
+        P["Priority<br/>Low / Normal<br/>High / Critical"]
+        D["Deadline<br/>超时后丢弃<br/>（实时场景）"]
+        DU["Durability<br/>Volatile<br/>TransientLocal<br/>Persistent"]
+    end
+```
+
+| 信号类型      | Reliability     | Priority | Deadline | Durability     |
+| --------- | --------------- | -------- | -------- | -------------- |
+| 认知事件      | ReliableOrdered | High     | —        | Persistent     |
+| 心跳        | BestEffort      | Low      | 10s      | Volatile       |
+| 管控命令      | Reliable        | Critical | 5s       | —              |
+| 传感器采样     | BestEffort      | Normal   | —        | TransientLocal |
+| 文件块       | Reliable        | Normal   | —        | Persistent     |
+| Agent 输出流 | BestEffort      | High     | —        | Volatile       |
+
+### 7.2 六类服务
+
+```mermaid
+graph TB
+    subgraph Services["L4 六类服务"]
+        SIG["Signal 信号<br/>小数据 / 低延迟<br/>点对点 / 组播 / 广播<br/>payload: type_id + data（泛型）"]
+        FILE["File 文件<br/>大数据 / 断点续传<br/>自适应分块 128KiB-16MiB<br/>delta sync 增量同步"]
+        STR["Stream 流<br/>实时推送<br/>Agent 输出 / 终端 PTY<br/>帧: Data/Heartbeat/FlowControl/End"]
+        PRX["Proxy 代理<br/>sing-box 集成<br/>出口节点声明<br/>动态流量策略"]
+        CMP["Compute 计算<br/>泛型任务封装<br/>task_type + input + requirements<br/>异构感知调度"]
+        STO["Storage 存储<br/>内容寻址 Block（blake3）<br/>签名可变记录 MutableRecord<br/>在线 DHT + 离线 gossip"]
+    end
+```
+
+### 7.3 签名事件链
+
+每条 SignalEvent 引用前一条的哈希，构成不可篡改的因果链：
+
+```mermaid
+graph LR
+    E1["Event 1<br/>seq: 1<br/>prev: 0x0000<br/>hash: a3f2..."] --> E2["Event 2<br/>seq: 2<br/>prev: a3f2<br/>hash: 7b1c..."]
+    E2 --> E3["Event 3<br/>seq: 3<br/>prev: 7b1c<br/>hash: d9e4..."]
+    E3 --> E4["Event 4<br/>seq: 4<br/>prev: d9e4<br/>hash: 52a8..."]
+```
 
 ```rust
-struct Signal {
-    id: u64,
+struct SignalEvent {
+    id: Uuid,
+    topic: String,
     timestamp: u64,
-    from: NodeId,
-    to: SignalTarget,
-    payload: SignalPayload,
-}
-
-enum SignalTarget {
-    Node(NodeId),    // 点对点
-    Group(GroupId),  // 组播
-    Broadcast,       // 广播（DHT 洪泛，慎用）
-}
-
-enum SignalPayload {
-    Awareness(AwarenessEvent),
-    Choice(ChoiceEvent),
-    Action(ActionEvent),
-    Record(RecordEvent),
-    Feedback(FeedbackEvent),
-    AgentCommand(AgentCommand),
-    AgentOutput(AgentOutput),
-    Custom { topic: String, data: Bytes },
-}
-```
-
-### 7.3 文件传输
-
-大数据、高吞吐，支持断点续传和多源并行下载：
-
-```rust
-struct FileMetadata {
-    name: String,
-    size: u64,
-    blake3_hash: [u8; 32],
-    chunk_size: u32,            // 默认 256KB
-    chunk_hashes: Vec<[u8; 32]>, // 每块哈希，用于校验和断点续传
-}
-```
-
-### 7.4 流式推送
-
-Agent 输出、终端流等实时场景：
-
-```rust
-struct StreamFrame {
+    source: String,
+    origin_host_id: Uuid,
+    hop: u8,
+    payload: Bytes,
+    // 链式签名（新增）
+    prev_hash: [u8; 32],
     sequence: u64,
-    frame_type: FrameType,
-    data: Bytes,
-}
-
-enum FrameType {
-    Data,
-    Heartbeat,
-    FlowControl { window: u32 },
-    End,
-}
-```
-
-### 7.5 代理服务
-
-```rust
-struct ProxyService {
-    is_exit_node: bool,
-    exit_info: Option<ExitNodeInfo>,
-    singbox_manager: Option<SingBoxManager>,
-}
-
-struct ExitNodeInfo {
-    line_type: LineType,     // Direct / IPLC / IEPL / BGP
-    region: String,
-    bandwidth_mbps: u32,
-    supported_protocols: Vec<ProxyProtocol>, // SS / VMess / VLESS / Trojan / Hysteria2
-}
-```
-
-### 7.6 分布式计算
-
-```rust
-struct ComputeTask {
-    task_id: u64,
-    task_type: ComputeType,
-    input: TaskInput,
-    requirements: ResourceReq,
-}
-
-enum ComputeType {
-    /// Agent 推理
-    AgentInference { model: String, messages: Vec<Message>, stream: bool },
-    /// 代码执行
-    CodeExecution { runtime: Runtime, code: String, sandbox: SandboxConfig },
-    /// WASM 沙箱任务
-    WasmTask { wasm_module_hash: [u8; 32], entry: String, args: Vec<Value> },
-}
-
-struct ResourceReq {
-    min_memory_mb: u32,
-    needs_gpu: bool,
-    min_gpu_vram_mb: u32,
-    max_duration_secs: u32,
-}
-```
-
-### 7.7 分布式存储
-
-内容寻址 + DHT 索引：
-
-```rust
-struct Block {
-    hash: Blake3Hash,     // blake3(data)，内容即地址
-    data: Bytes,          // 最大 256KB
-    links: Vec<BlockLink>, // 引用其他 block（组合大文件/目录）
-}
-
-/// 可变数据：签名指针
-struct MutableRecord {
-    publisher: NodeId,
-    path: String,              // "/exomind/events/latest"
-    content_hash: Blake3Hash,
-    sequence: u64,             // 单调递增，防回滚
     signature: Ed25519Signature,
 }
 ```
 
-存储/获取流程：
+- 篡改任何一条 → 后续所有事件的 prev_hash 验证失败
+- 离线验证：收到事件链后本地即可验证完整性
+- 为 CRDT 提供因果序基础
 
+### 7.4 异构感知调度
+
+```mermaid
+graph TB
+    TASK["任务提交<br/>task_type + requirements"] --> COLLECT["采集节点实时 Metrics<br/>CPU/GPU/RAM/VRAM/电池/延迟"]
+    COLLECT --> FILTER["硬约束过滤<br/>RAM 不够？无 GPU？电池 < 10%？"]
+    FILTER --> SCORE["多维评分<br/>resource_match × latency<br/>× load × energy_budget"]
+    SCORE --> DECIDE{"分片？"}
+    DECIDE -->|"单节点够"| SINGLE["分配到最优节点"]
+    DECIDE -->|"需要分片"| SHARD["分割到多个节点<br/>（如 LLM 模型分 shard）"]
+    SINGLE --> EXEC["执行"]
+    SHARD --> EXEC
+    EXEC --> RETURN["结果回传"]
 ```
-存储：本地写入 → DHT 宣告 "我有这个 block" → 按策略复制到其他节点
-获取：查本地 → DHT 查 provider → 从最快节点拉取 → 校验哈希 → 本地缓存
-```
 
----
+### 7.5 Source Chain：节点行为日志
 
-## 8. L5 会话管理层 Session
-
-管理认证、权限、会话生命周期。
-
-### 8.1 会话类型与权限
+每个节点维护本地 append-only 日志（SQLite），记录发出和处理的所有事件：
 
 ```rust
-enum SessionType {
-    OwnDevice,                              // 自己的设备，最高权限
-    TrustedPeer { trust_level: TrustLevel }, // 受信任的朋友/同事
-    ProxyClient,                            // 只能用代理服务
-    ComputeWorker,                          // 只能在沙箱内执行
-    Anonymous,                              // 匿名/临时
+struct SourceChain {
+    node_id: NodeId,
+    // SQLite append-only 表
 }
 
-struct Permissions {
-    can_execute_code: bool,
-    can_access_filesystem: bool,
-    can_use_proxy: bool,
-    can_use_compute: bool,
-    can_access_storage: bool,
-    allowed_paths: Vec<PathBuf>,
-    bandwidth_limit: Option<u64>,
-    proxy_permissions: ProxyPermissions,
+struct SourceEntry {
+    sequence: u64,
+    timestamp: u64,
+    prev_hash: [u8; 32],
+    action: Action,            // Publish / Receive / Execute / Migrate
+    event_ref: Option<EventId>,
+    signature: Ed25519Signature,
 }
 ```
 
-### 8.2 设备配对流程
-
-```
-1. 两台设备在近距离（同WiFi / 扫码 / 输入配对码）
-2. 用 PAKE（SPAKE2）协议交换密钥：
-   - 配对码作为共享秘密
-   - 派生出共享密钥
-   - 中间人无法破解（不知道配对码）
-3. 交换公钥，签名验证
-4. 双方存储对方公钥，标记为 OwnDevice
-5. 此后通信只认公钥，不需要第三方
-```
+Source Chain 是签名事件链在节点级别的体现：
+- 签名事件链：证明"这条事件确实存在且未被篡改"
+- Source Chain：证明"这个节点确实做了这些事情"
 
 ---
 
-## 9. L6 编码表示层 Representation
+## 八、L5 会话管理层：身份、认证与权限
 
-统一处理序列化、压缩、加密信封。
+> L5 解决三个问题：你是谁（身份）、我信不信你（认证）、你能做什么（权限）。
+
+### 8.1 身份：自证明，不依赖第三方
+
+```mermaid
+graph LR
+    KEY["生成 Ed25519 密钥对"] --> PUB["公钥"]
+    KEY --> PRIV["私钥（本地保管）"]
+    PUB --> HASH["SHA-256(公钥)"]
+    HASH --> NID["NodeId = 前 20 字节"]
+    NID --> VIP["虚拟 IP = 10.{id[0]}.{id[1]}.{id[2]}"]
+
+    NID --> PROOF["身份证明：<br/>出示公钥 + 签名挑战<br/>验证者检查 Hash(公钥) == NodeId"]
+```
+
+身份来自密码学，不来自任何第三方：
+- 节点启动 → 生成 Ed25519 密钥对
+- 公钥的哈希就是身份（NodeId）
+- 要证明"我是 NodeId_X"：出示公钥 + 用私钥签名一个挑战
+- 任何人都能验证，不需要 CA
+
+### 8.2 认证：个人域的设备配对
+
+个人域（1-20 台设备）的核心场景是"把新设备加入我的网络"。
+
+```mermaid
+sequenceDiagram
+    participant A as 设备 A（已在网络中）
+    participant U as 用户
+    participant B as 设备 B（新设备）
+
+    Note over A,B: 步骤 1：近距离接触（同 WiFi / 扫码 / 输入配对码）
+
+    A->>U: 显示 6 位 PIN 码
+    U->>B: 手动输入 PIN 码
+
+    Note over A,B: 步骤 2：PAKE 协议（SPAKE2）
+
+    A->>B: SPAKE2 消息 1（基于 PIN 的密钥协商）
+    B->>A: SPAKE2 消息 2
+    Note over A,B: 双方得到相同的强共享密钥 K<br/>中间人不知道 PIN → 无法得到 K
+
+    Note over A,B: 步骤 3：公钥交换
+
+    A->>B: 用 K 加密发送 A 的公钥
+    B->>A: 用 K 加密发送 B 的公钥
+
+    Note over A,B: 步骤 4：Key Pinning
+
+    A->>A: 存储 B 的公钥 → 标记为 OwnDevice
+    B->>B: 存储 A 的公钥 → 标记为 OwnDevice
+
+    Note over A,B: 此后：只认公钥，不需要第三方
+```
+
+配对完成后，两台设备建立了持久的信任关系：
+- 后续连接只需出示公钥 + 签名验证
+- Key Pinning：如果对方出示了不认识的公钥 → 拒绝（有人冒充）
+- 不需要 CA、不需要协调服务器
+
+### 8.3 权限：按身份分级
+
+```mermaid
+graph TB
+    subgraph Levels["五级权限"]
+        OD["OwnDevice<br/>自己的设备<br/>全部权限"]
+        TP["TrustedPeer<br/>受信任的人<br/>大部分权限"]
+        PC["ProxyClient<br/>代理使用者<br/>仅代理服务"]
+        CW["ComputeWorker<br/>计算参与者<br/>仅沙箱内执行"]
+        AN["Anonymous<br/>匿名/临时<br/>最低权限"]
+    end
+
+    OD --> TP --> PC --> CW --> AN
+```
+
+| 权限          | OwnDevice | TrustedPeer | ProxyClient | ComputeWorker | Anonymous |
+| ----------- | :-------: | :---------: | :---------: | :-----------: | :-------: |
+| 执行代码        |     是     |      是      |      否      |      沙箱内      |     否     |
+| 访问文件系统      |     是     |    受限路径     |      否      |       否       |     否     |
+| 使用代理        |     是     |      是      |      是      |       否       |     否     |
+| 调度计算        |     是     |      是      |      否      |       否       |     否     |
+| 访问存储        |     是     |      是      |      否      |       否       |     否     |
+| 管控设备（L0-L6） |     是     |      否      |      否      |       否       |     否     |
+
+### 8.4 安全防御
+
+**三层重放防御**：
+1. QUIC/TLS 包序列号 + AEAD → 重复序列号自动丢弃
+2. ExoMind 帧 nonce（8 字节随机数）→ 已见 nonce 集合 + 5 分钟超时窗口
+3. 业务层幂等 → 事件全局唯一 ID（ULID），相同 ID 只处理一次
+
+**密钥吊销**：
+- 设备被盗/被黑 → 在其他设备操作"移除此设备"
+- 将该公钥加入黑名单 → 主密钥签名吊销声明 → DHT 广播
+
+**Eclipse 攻击防御**：
+- 路由表多样性 + 签名验证 + 多路径查询
+
+### 8.5 公共域（简述）
+
+> 公共域的完整设计需要结合集体所有制模型，详见 独立文档（待撰写）。此处仅概述接入方式。
+
+公共域节点通过自证明身份加入网络（无需 PAKE 配对），权限受限于 Anonymous 或更高级别（由公共域的治理规则决定）。公共域支持的应用场景包括分布式论坛、文件共享、即时通讯、虚拟世界等——任何人可以开发应用接入信号网络的 L4 服务接口。
+
+详见 独立文档（待撰写）。
+
+---
+
+## 九、L6 编码表示层：帧格式与编解码
+
+> L6 把上层的结构化消息变成可在网络中传输的字节流。
 
 ### 9.1 帧格式
 
@@ -690,551 +737,282 @@ struct Permissions {
 │ Magic(2) │ Flags(1) │ Nonce(8) │ Len(4)   │ TypeId(2)│ Payload  │
 │ 0xEE 0x4D│          │ 防重放   │ 负载长度  │ 消息类型  │ 序列化数据│
 └──────────┴──────────┴──────────┴──────────┴──────────┴──────────┘
-  "EM" = ExoMind
-
-Flags (bitflags):
-  bit 0: COMPRESSED   负载已压缩（zstd）
-  bit 1: ENCRYPTED    端到端加密（默认开启，所有设备间通信均加密）
-  bit 2: FRAGMENTED   大消息分片
-  bit 3: STREAM       流式消息
-  bit 4: PRIORITY     高优先级
 ```
 
-### 9.2 编解码流程
-
+Flags（bitflags）：
 ```
-编码：上层消息 → MessagePack序列化 → zstd压缩(>1KB时) → E2E加密（默认开启） → 组帧
-解码：拆帧 → 解密 → 解压 → MessagePack反序列化 → 上层消息
-```
-
----
-
-## 10. L7 认知应用层 Cognitive
-
-ExoMind 特有的应用语义，协议栈最高层。
-
-### 10.1 认知循环事件
-
-```rust
-struct CognitiveEvent {
-    id: EventId,               // ULID，时间有序+全局唯一
-    timestamp: u64,
-    origin_node: NodeId,
-    phase: CognitivePhase,
-    content_ref: ContentRef,   // 内容哈希（存在分布式存储中）
-    caused_by: Vec<EventId>,   // 因果链
-    vector_clock: VectorClock, // 多设备因果序
-}
-
-enum CognitivePhase {
-    Awareness(AwarenessData),  // 觉察
-    Choice(ChoiceData),        // 选择
-    Action(ActionData),        // 行动
-    Record(RecordData),        // 记录
-    Feedback(FeedbackData),    // 反馈
-}
+bit 0: COMPRESSED    zstd 压缩
+bit 1: ENCRYPTED     E2E 加密（默认开启）
+bit 2: FRAGMENTED    大消息分片
+bit 3: STREAM        流式消息
+bit 4: PRIORITY      高优先级
+bit 5: CHAINED       链式签名（引用 prev_hash）
 ```
 
-设备间同步用 **CRDT（无冲突复制数据类型）** 保证多设备并发不冲突。
+### 9.2 编解码管线
 
-### 10.2 Agent 管理
+```mermaid
+graph LR
+    MSG["上层消息"] --> MP["MessagePack 序列化"]
+    MP --> ZS{"大于 1 KB?"}
+    ZS -->|"是"| ZSTD["zstd 压缩"]
+    ZS -->|"否"| E2E
+    ZSTD --> E2E["E2E 加密（默认开启）"]
+    E2E --> CHAIN["链式签名（prev_hash + signature）"]
+    CHAIN --> FRAME["组帧（Magic + Flags + Nonce + Len + TypeId + Payload）"]
 
-```rust
-struct AgentSession {
-    id: SessionId,
-    execution_node: NodeId, // Agent 在哪个节点执行
-    control_node: NodeId,   // 控制端在哪
-    config: AgentConfig,
-}
-
-struct AgentConfig {
-    model: String,
-    api_backend: ApiBackend,
-    workspace: PathBuf,
-    tools: Vec<ToolConfig>,
-    sandbox: SandboxConfig,
-}
-```
-
-### 10.3 节点编排
-
-```rust
-struct NodeOrchestrator {
-    node_capabilities: HashMap<NodeId, NodeCapabilities>,
-}
-
-impl NodeOrchestrator {
-    fn select_node(&self, task: &TaskRequirements) -> NodeId {
-        // 评分：资源匹配 × 网络延迟 × 当前负载 × 信任等级 × API key 可用性
-        self.node_capabilities.iter()
-            .filter(|(_, cap)| cap.satisfies(task))
-            .max_by_key(|(_, cap)| cap.score_for(task))
-            .map(|(id, _)| *id)
-            .unwrap_or(self.local_node_id)
-    }
-}
+    FRAME2["收到帧"] --> UNFRAME["拆帧"]
+    UNFRAME --> VCHAIN["验证链式签名"]
+    VCHAIN --> DECRYPT["E2E 解密"]
+    DECRYPT --> DECOMP["zstd 解压"]
+    DECOMP --> DESER["MessagePack 反序列化"]
+    DESER --> MSG2["上层消息"]
 ```
 
 ---
 
-## 11. 安全体系
+## 十、L7 认知应用层：承载接口
 
-### 11.1 核心原则
+> L7 是信号网络的最高层。本文档定义 L7 的承载接口；认知语义的详细设计见论文三。
 
-**不依赖任何第三方 CA。** 安全性来自密码学原语，不来自外部权威。
-
-```
-传统 CA 体系：第三方说你是你 → 中心化 → 他创生
-ExoMind：    你自己证明你是你 → 去中心化 → 自创生
-```
-
-### 11.2 身份体系
+L7 通过 L4 的 opaque payload 接口与 L0-L6 解耦：
 
 ```
-节点启动 → 生成 Ed25519 密钥对
-公钥 = 身份（NodeId = SHA-256(公钥) 前20字节）
-私钥 = 证明能力
+L4 Signal payload:   type_id: u16 + data: Bytes（泛型）
+L7 注册认知类型:      Awareness=0x0100, Choice=0x0101, Action=0x0102 ...
+
+L4 Compute task:     task_type: String + input: Bytes + requirements: ResourceReq
+L7 定义任务类型:      "agent_inference", "code_execution", "knowledge_search" ...
 ```
 
-### 11.3 威胁防御
-
-| 威胁 | 防御 | 需要 CA |
-|------|------|--------|
-| 中间人攻击（首次连接） | PAKE/SAS 配对码验证 | 不需要 |
-| 中间人攻击（后续连接） | 公钥绑定 Key Pinning | 不需要 |
-| 重放攻击 | QUIC 序列号 + 消息层 nonce + 业务幂等 | 不需要 |
-| 身份冒充 | 挑战-签名验证 | 不需要 |
-| 节点被劫持 | 自签名密钥吊销 + DHT 广播 | 不需要 |
-| Eclipse 攻击（DHT） | 路由表多样性 + 签名验证 + 多路径查询 | 不需要 |
-
-### 11.4 中间人防御详解
-
-**首次配对**（PAKE 协议）：
-
-```
-1. 手机生成随机 6 位配对码，显示在屏幕上
-2. 用户在电脑上输入配对码
-3. 双方用配对码运行 SPAKE2 协议
-4. 配对码正确 → 双方得到相同共享密钥
-5. 中间人不知道配对码 → 无法得到正确密钥
-6. 用共享密钥加密公钥交换
-```
-
-**后续连接**（Key Pinning）：
-
-```
-手机收到连接请求 → 对方出示公钥
-→ 检查：这个公钥是配对时存的那个吗？
-→ 是 → 通过
-→ 不是 → 拒绝（有人冒充）
-```
-
-### 11.5 重放防御详解
-
-三层防御：
-
-```
-第一层：QUIC/TLS 包序列号 + AEAD
-  → 重复序列号自动丢弃
-
-第二层：ExoMind 帧 nonce（8字节随机数）
-  → 接收方维护已见 nonce 集合
-  → 重复 nonce 丢弃
-  → 超时窗口（5分钟）后清除旧 nonce
-
-第三层：业务层幂等
-  → 认知事件有全局唯一 ID（ULID），相同 ID 只处理一次
-  → Agent 指令有 request_id，执行过的返回缓存结果
-```
-
-### 11.6 密钥吊销
-
-```
-设备被盗/被黑 → 在其他设备上操作"移除此设备"
-→ 将该公钥加入黑名单
-→ 用主密钥签名吊销声明
-→ 通过 DHT 广播
-→ 网络中其他节点拒绝该公钥
-```
+L0-L6 不解释 L7 的内容（内容无关性 / opaque payload）。这保证了信号网络的通用性——同一网络既能传物理管控命令，也能传认知事件，也能传第三方应用的自定义消息。
 
 ---
 
-## 12. DHT 自发现原理
+## 十一、上层管控下层：自管理能力
 
-### 12.1 核心思想
+```mermaid
+graph TB
+    subgraph MAPE["MAPE-K 控制环"]
+        MON["Monitor<br/>Sentinel Agent 采集状态"]
+        ANA["Analyze<br/>异常检测"]
+        PLAN["Plan<br/>决策生成"]
+        EXEC["Execute<br/>L4 Compute 下发命令"]
+        KNOW["Knowledge<br/>DHT 共享拓扑+能力"]
+    end
 
-每个节点只存一小部分信息，大家合作拼出全局。离自己近的区域知道得详细，远的区域只知道几个代表。
+    MON --> ANA --> PLAN --> EXEC
+    KNOW --- MON
+    KNOW --- ANA
+    KNOW --- PLAN
 
-### 12.2 XOR 距离
+    EXEC -->|"opaque task"| TARGETS["L0: 调整传感器<br/>L1: 切换 Bearer<br/>L2: 调整 QUIC 参数<br/>L3: 更新路由策略<br/>L4: 变更 QoS<br/>L5: 修改权限规则<br/>L6: 切换压缩算法"]
 
-```
-距离(A, B) = A.node_id XOR B.node_id
-```
-
-不是物理距离，是数学距离。对任意目标，ID 空间可按距离逐层减半划分。
-
-### 12.3 K-桶路由表
-
-```
-160 个桶，第 i 个桶存距离在 [2^i, 2^(i+1)) 的节点，每桶最多 K=20 个
-
-效果：
-  桶0:   距离 1       （最多1个可能的ID）  存 ≤20 个
-  桶1:   距离 2-3     （2个可能）          存 ≤20 个
-  ...
-  桶159: 距离 2^159+  （一半的ID空间）     存 ≤20 个
+    TARGETS -->|"状态上报"| MON
 ```
 
-### 12.4 查找过程
+这是信号网络与传统网络栈的根本区别：
+- 传统网络：物理层承载上层，单向
+- ExoMind-Net：上层通过标准 L4 服务管控任意下层，双向
 
-```
-想找节点 T：
-1. 从路由表找离 T 最近的 α=3 个节点
-2. 并行问它们："你知道谁离 T 更近？"
-3. 拿到结果，继续问更近的
-4. 重复，直到找到 T 或不能更近
-→ O(log N) 轮，20 轮找遍百万节点
-```
-
-### 12.5 数据存储
-
-```
-存：找到离 key 最近的 K 个节点，把数据交给它们保管
-取：找到离 key 最近的节点，问它们要数据
-```
+管控命令对网络来说只是一个 opaque Compute task——不破坏分层原则。
 
 ---
 
-## 13. 任务迁移机制
+## 十二、公共域应用生态
 
-### 13.1 可迁移任务
+> 信号网络不只服务 ExoMind——它是一个开放的应用平台。
 
-```rust
-struct MigratableTask {
-    task_id: TaskId,
-    spec: TaskSpec,         // 任务定义（不可变）
-    state: TaskState,       // 可序列化的 checkpoint
-    migration_policy: MigrationPolicy,
-}
+```mermaid
+graph TB
+    subgraph Net["ExoMind-Net 信号网络 L0-L6"]
+        SIG["L4 Signal"]
+        FILE["L4 File"]
+        CMP["L4 Compute"]
+        STO["L4 Storage"]
+        PRX["L4 Proxy"]
+        STR["L4 Stream"]
+    end
 
-struct TaskState {
-    conversation: Vec<Message>, // Agent 上下文
-    execution_step: u64,
-    artifacts: Vec<ContentRef>, // 工作产物
-    checkpoint_at: u64,
-}
+    subgraph Apps["L7 应用（任何人可开发）"]
+        EXOMIND["ExoMind<br/>个人认知助手"]
+        FORUM["分布式论坛<br/>topic 讨论"]
+        FS["分布式文件共享<br/>内容寻址"]
+        MSG["分布式通讯<br/>替代微信/Telegram"]
+        WORLD["分布式虚拟世界<br/>3D 空间 / 游戏"]
+        OTHER["其他应用<br/>开发者自定义"]
+    end
 
-enum MigrationPolicy {
-    Manual,
-    AutoOnShutdown { prefer: Vec<NodeClass>, timeout_secs: u32 },
-    FollowBest { scoring: ScoringCriteria, cooldown_secs: u32 },
-}
+    SIG --> EXOMIND
+    SIG --> MSG
+    SIG --> FORUM
+    FILE --> FS
+    CMP --> WORLD
+    CMP --> EXOMIND
+    STO --> FS
+    STO --> FORUM
+    PRX --> OTHER
+    STR --> WORLD
+    STR --> MSG
 ```
 
-### 13.2 关机自动迁移流程
-
-```
-1. 检测到关机信号（OS shutdown hook）
-2. 遍历本地任务，检查 migration_policy
-3. 对每个需要迁移的任务：
-   a. 序列化 TaskState → checkpoint
-   b. 上传 checkpoint 到分布式存储
-   c. DHT 查找合适目标节点（优先 Persistent 节点）
-   d. 发送迁移请求
-   e. 目标节点确认接收
-4. 全部迁移完成（或超时），正常关机
-
-目标节点（如广州 VPS）：
-1. 收到迁移请求
-2. 从分布式存储拉取 checkpoint
-3. 恢复 TaskState，继续执行
-4. 产出结果同步到分布式存储
-
-用户次日开机：
-1. 节点上线，通知网络
-2. 查看任务状态
-3. 可选择迁移回本地或继续远端执行
-```
+核心原则：
+- ExoMind 是信号网络上的**一个**应用，不是唯一的
+- 所有应用通过 L4 六类服务接口接入
+- 谁使用谁贡献计算资源
+- 没有任何一个人控制整个平台
+- 公共域的治理和资源分配详见 独立文档（待撰写）
 
 ---
 
-## 14. sing-box 集成与代理承载
+## 十三、设计规模
 
-### 14.1 代理流量路径
+> 个人域优先。每一层都是完整可用的产品状态。
 
-```
-┌─ 本地设备 ─────────────────────────────────────────┐
-│                                                     │
-│  App → tun:exomind0 → sing-box(本地) → 路由判断     │
-│                          │                          │
-│              ┌───────────┼───────────┐              │
-│              ▼           ▼           ▼              │
-│          直连出去     ExoMind代理   ExoMind代理      │
-│         (国内网站)    (走HK节点)    (走US节点)       │
-└──────────────┼───────────┼──────────────────────────┘
-               │           │
-  QUIC 隧道 (L2)          QUIC 隧道 (L2)
-               │           │
-        ┌──────▼──┐  ┌─────▼───┐
-        │ HK 节点  │  │ US 节点  │
-        │sing-box │  │sing-box  │
-        │  出口    │  │  出口    │
-        └────┬────┘  └────┬────┘
-             ▼            ▼
-          互联网        互联网
+```mermaid
+graph LR
+    T1["Tier 1<br/>个人域<br/>1-20 节点"] -->|"跑通后"| T2["Tier 2<br/>集体域<br/>20-200 节点"]
+    T2 -->|"验证后"| T3["Tier 3<br/>社区域<br/>200-10K 节点"]
+    T3 -->|"成熟后"| T4["Tier 4<br/>文明域<br/>10K+ 节点"]
 ```
 
-### 14.2 sing-box 管理器
-
-```rust
-struct SingBoxManager {
-    binary_path: PathBuf,
-    instance: Option<SingBoxInstance>,
-    config_builder: SingBoxConfigBuilder,
-}
-
-impl SingBoxManager {
-    /// ExoMind 流量策略 → sing-box 配置
-    fn build_config(&self,
-        traffic_policy: &TrafficPolicyEngine,
-        exit_nodes: &[ExitNodeInfo],
-    ) -> SingBoxConfig { ... }
-
-    /// 运行时热更新（新节点加入/退出时）
-    async fn hot_reload(&self, new_config: SingBoxConfig) -> Result<()> { ... }
-}
-```
-
-### 14.3 远程 sing-box 管控
-
-通过 L4 Compute 服务远程操作任意节点上的 sing-box：
-
-```rust
-enum SingBoxCommand {
-    Deploy { binary_hash: Blake3Hash },
-    UpdateConfig { config: SingBoxConfig },
-    AddUser { user_id: String, quota_gb: f64 },
-    RemoveUser { user_id: String },
-    GetStatus,
-    GetTrafficStats { user_id: Option<String> },
-    Start, Stop, Restart,
-}
-```
+| 规模 | 发现 | 路由 | 安全 | 聚焦 |
+|------|------|------|------|------|
+| **个人域 (1-20)** | mDNS + BLE | Kademlia | PAKE 配对 | **当前优先** |
+| 集体域 (20-200) | DHT | Kademlia | PAKE + 公共域 | 中期 |
+| 社区域 (200-10K) | DHT | Kademlia + Spanning Tree | 公共域分级 | 远期 |
+| 文明域 (10K+) | 分层 DHT | 分层 DHT + 联邦 | 联邦认证 | 长期愿景 |
 
 ---
 
-## 15. 组件拆分与 Crate 结构
+## 十四、社会意义
+
+### 14.1 我们在做什么
+
+在信息世界中实现生产资料公有制：
+
+| 维度  | 当前（资本平台）             | ExoMind-Net      |
+| --- | -------------------- | ---------------- |
+| 计算  | AWS/Azure 按时计费       | 个人/集体设备池化        |
+| 存储  | Google Drive 数据在别人手里 | 个人设备加密存储 + 集体冗余  |
+| 通讯  | 微信/Slack 平台垄断        | P2P 信号网络，无中心     |
+| 认知  | ChatGPT API 认知外包给资本  | Agent 在自己设备上运行   |
+| 数据  | 用户数据是平台的产品           | 用户数据归用户（个人域不可侵犯） |
+
+### 14.2 与比特币的对标
+
+| 维度   | 比特币（Nakamoto 2008） | ExoMind-Net        |
+| ---- | ------------------ | ------------------ |
+| 提出什么 | P2P 电子现金系统         | P2P 认知通讯基础设施       |
+| 解决什么 | 无需信任第三方的价值转移       | 无需信任第三方的认知协作       |
+| 技术核心 | 哈希链 + 工作量证明        | 签名事件链 + 自证明身份      |
+| 社会意义 | 去中心化金融（但仍在资本逻辑内）   | 认知生产资料的公有制——超越资本逻辑 |
+
+比特币在金融领域实现了去中心化，但仍服务于资本增殖。ExoMind-Net 的目标不同——让计算、存储、通讯、认知这些生产资料归个人和集体所有，不是为了赚钱，而是为了人的全面发展。
+
+### 14.3 论文 vs 白皮书
+
+```mermaid
+graph TB
+    subgraph WP["白皮书（标准提案）"]
+        WPC["完整八层设计 + 愿景 + 社会意义<br/>面向所有人<br/>先发，锁 DOI"]
+    end
+
+    subgraph Papers["论文系列（学术深度）"]
+        P1["论文一：认知生命科学（理论）"]
+        P2["论文二：L0-L6 信号网络（技术）"]
+        P3["论文三：L7 认知引擎（技术）"]
+        P4["论文四：政治经济学（社会）"]
+    end
+
+    WP <-->|"互相引用"| Papers
+    P1 -->|"理论基础"| WP
+    P2 -->|"网络技术"| WP
+    P3 -->|"认知技术"| WP
+    P4 -->|"社会理论"| WP
+```
+
+建议并行推进：白皮书先发（全景概览 + DOI 锁定），论文系列提供技术深度。
+
+---
+
+## 十五、工程实现
+
+### 15.1 Crate 结构
 
 ```
-exomind/                          # 顶层 workspace
-│
-├── exomind-core/                 # 公共基础
-│   ├── identity.rs               #   NodeId, 密钥, 签名
-│   ├── types.rs                  #   公共枚举, 错误类型
-│   └── config.rs                 #   配置结构
-│
-├── exomind-net/                  # 网络协议栈 (L1-L3)
-│   ├── bearer/                   #   L1 承载层
-│   │   ├── udp.rs
-│   │   ├── bluetooth.rs
-│   │   ├── ble.rs
-│   │   └── local.rs
-│   ├── link/                     #   L2 连接层
-│   │   ├── quic.rs
-│   │   ├── punch.rs
-│   │   ├── relay.rs
-│   │   ├── multiplex.rs
-│   │   └── light.rs              #     BLE 轻量传输
-│   ├── routing/                  #   L3 路由层
-│   │   ├── dht.rs
-│   │   ├── mdns.rs
-│   │   ├── ble_discover.rs
-│   │   └── traffic.rs
-│   └── repr/                     #   L6 表示层
-│       ├── frame.rs
-│       ├── codec.rs
-│       └── envelope.rs
-│
-├── exomind-session/              # L5 会话层
-│   ├── auth.rs
-│   ├── pairing.rs
-│   ├── acl.rs
-│   └── session.rs
-│
-├── exomind-svc/                  # L4 服务层
-│   ├── signal/
-│   ├── file/
-│   ├── proxy/
-│   │   └── singbox.rs
-│   ├── compute/
-│   │   ├── scheduler.rs
-│   │   ├── migration.rs
-│   │   └── sandbox.rs
-│   ├── storage/
-│   │   ├── block.rs
-│   │   ├── provider.rs
-│   │   └── mutable.rs
-│   └── terminal/
-│
-├── exomind-rt/                   # L7 认知运行时（已有）
-│   ├── cognitive/
-│   ├── agent/
-│   ├── orchestrator/
-│   └── crdt/
-│
-├── exomind-embedded/             # 嵌入式精简版 (no_std)
-│   ├── ble_node.rs
+exomind/
+├── exomind-core/           # 公共基础：NodeId、密钥、配置
+├── exomind-device/         # L0 设备层 [新增]
 │   ├── sensor.rs
-│   └── light_cognitive.rs
-│
-├── exomind-app/                  # Tauri 桌面/移动端
-├── exomind-node/                 # 完整节点程序
-│   ├── desktop.rs
-│   ├── server.rs
-│   └── mobile.rs
-│
-└── exomind-cli/                  # 命令行工具
+│   ├── actuator.rs
+│   └── resources.rs
+├── exomind-net/            # L1-L3 + L6：网络协议栈
+│   ├── bearer/             #   L1 承载层
+│   ├── link/               #   L2 连接层
+│   ├── routing/            #   L3 路由层（Kademlia + Spanning Tree）
+│   └── repr/               #   L6 表示层
+├── exomind-session/        # L5 会话层
+├── exomind-svc/            # L4 服务层
+│   ├── signal/  file/  proxy/  compute/  storage/  terminal/
+│   └── qos.rs              #   QoS 框架 [新增]
+├── exomind-rt/             # L7 认知运行时（见论文三）
+├── exomind-embedded/       # 嵌入式精简版 (no_std)
+├── exomind-app/            # Tauri 桌面/移动端
+├── exomind-node/           # 完整节点程序
+└── exomind-cli/            # 命令行工具
 ```
 
-### Feature Flags
+### 15.2 层间依赖
 
-```toml
-# exomind-net/Cargo.toml
-[features]
-default = ["quic", "mdns"]
-quic = ["quinn"]
-bluetooth = ["btleplug"]
-ble-only = ["bluetooth"]     # 纯 BLE 嵌入式
-full = ["quic", "bluetooth", "mdns"]
-
-# exomind-svc/Cargo.toml
-[features]
-default = ["signal", "file"]
-proxy = ["singbox-api"]
-compute = ["wasmtime"]
-storage = []
-all = ["signal", "file", "proxy", "compute", "storage", "terminal"]
-```
-
-### 层间依赖关系
-
-```
-exomind-rt（L7 认知运行时）
-    │ 依赖
-    ▼
-exomind-svc（L4 服务层）
-    │ 依赖
-    ▼
-exomind-session（L5 会话层）
-    │ 依赖
-    ▼
-exomind-net（L1-L3 + L6 网络栈）
-    │ 依赖
-    ▼
-exomind-core（基础类型）
+```mermaid
+graph TB
+    RT["exomind-rt (L7)"] --> SVC["exomind-svc (L4)"]
+    SVC --> SESSION["exomind-session (L5)"]
+    SESSION --> NET["exomind-net (L1-L3, L6)"]
+    NET --> DEVICE["exomind-device (L0)"]
+    DEVICE --> CORE["exomind-core"]
+    NET --> CORE
+    SESSION --> CORE
+    SVC --> CORE
+    RT --> CORE
 ```
 
 ---
 
-## 16. 实现路线图
+## 十六、v1 → v3 差异总表
 
-### 第一阶段：最小组网（2周）
-
-```
-目标：两台设备通过 P2P 传消息
-
-Week 1 - 局域网
-├── rust-libp2p 集成（QUIC + mDNS + request-response）
-├── 同 WiFi 下自动发现并传消息
-└── 接入 Tauri 前端
-
-Week 2 - 广域网
-├── 广州 VPS 跑 relay + bootstrap 节点
-├── 加入 Kademlia DHT + dcutr 打洞
-└── 不同网络下的两台设备能通信
-```
-
-### 第二阶段：功能上网（2周）
-
-```
-目标：已有功能通过网络同步
-
-├── 认知事件通过 P2P 同步到对端
-├── CRDT 合并多设备事件
-├── 任务管理 + 时间块跨设备可见
-```
-
-### 第三阶段：远程 Agent（2周）
-
-```
-目标：手机操控电脑跑 Agent
-
-├── Agent IO stream 实现
-├── 手机发指令 → 电脑执行 → 流式结果回传
-├── 终端 PTY 远程访问
-```
-
-### 第四阶段：任务迁移（2周）
-
-```
-目标：关机 → 任务转移 → 恢复
-
-├── TaskState checkpoint 序列化
-├── 迁移协议实现
-├── 广州 VPS 接收并继续执行
-```
-
-### 第五阶段：代理与存储（持续）
-
-```
-├── sing-box 集成
-├── 分布式存储 block store
-├── BLE 嵌入式支持
-```
+| 维度 | v1（七层） | v3（八层） | 来源 |
+|------|-----------|-----------|------|
+| 层数 | L1-L7 | L0-L7 | 用户确认 |
+| L0 设备层 | 无 | 传感器/执行器/物理资源 | 用户确认 |
+| L3 路由 | Kademlia 单模 | Kademlia + Spanning Tree 双模 | Yggdrasil |
+| L3 Subject | 精确匹配 | Hierarchical 通配符 | NATS |
+| L3 广播 | 无约束 | 广播余额 + 接收方过滤 | 用户反馈 |
+| L4 QoS | 无 | reliability/priority/deadline/durability | DDS/ROS 2 |
+| L4 File | 256KB 固定分块 | 128 KiB-16 MiB 自适应 + delta sync | Syncthing BEP |
+| L4 Compute | 简单评分 | 异构感知多维调度 + 实时 metrics | Prima.cpp Halda |
+| L4 签名 | 单条签名 | 链式签名（prev_hash） | SSB + Holochain |
+| L5 认证 | 纯个人域 | 个人域优先 + 公共域简述 | 用户反馈 |
+| L6 E2E | 可选 | 默认开启 | Matrix + 用户确认 |
+| L7 管控范围 | L1 物理配置 | L0-L6 任意层级 | 用户确认 |
+| Source Chain | 无 | SQLite append-only | Holochain |
+| 规模 | 未定义 | 四层（个人→文明），个人域优先 | 用户反馈 |
+| 定位 | 技术规范 | 标准提案/白皮书级 | 用户确认 |
+| 社会意义 | 未涉及 | 认知生产资料公有制 | 用户确认 |
 
 ---
 
-## 17. 与现有方案对比
+## 十七、下一步
 
-| 维度 | libp2p | Tailscale | Nebula | ZeroTier | IPFS | ExoMind-Net |
-|------|--------|-----------|--------|----------|------|-------------|
-| 定位 | P2P 网络库 | Mesh VPN | Mesh VPN | L2 虚拟网络 | 分布式文件系统 | 认知网络协议栈 |
-| 去中心化程度 | 完全 | 需要协调服务器 | 需要 lighthouse | 需要控制器 | 完全 | 完全 |
-| 认知/应用层 | 无 | 无 | 无 | 无 | 无 | 有（L7） |
-| Agent 支持 | 无 | 无 | 无 | 无 | 无 | 有 |
-| 任务迁移 | 无 | 无 | 无 | 无 | 无 | 有 |
-| BLE/嵌入式 | 有限 | 无 | 无 | 无 | 无 | 有 |
-| 代理承载 | 无 | 有（exit node） | 无 | 无 | 无 | 有（sing-box） |
-| 语言 | Rust/Go/JS | Go | Go | C++ | Go | Rust |
-| 与 ExoMind 关系 | L1-L2 基础 | 参考 | 参考 | — | L4 存储参考 | 核心组件 |
-
-**ExoMind-Net 基于 rust-libp2p 构建 L1-L2，在其上实现 L3-L7 的独创部分。**
+1. **用户确认本方案** → 更新 ExoMind-Net 技术规范至 v0.2
+2. **起草白皮书初稿**（基于本文档，通俗语言重写）
+3. **更新论文二框架**（八层架构 + 新实验设计）
+4. **同步代码库** PR #595
+5. **公共域独立文档** → 已有 独立文档（待撰写），持续更新
 
 ---
 
-## 附录 A：术语表
-
-| 术语 | 含义 |
-|------|------|
-| NodeId | 节点身份标识，Ed25519 公钥的 SHA-256 前 20 字节 |
-| Bearer | L1 承载类型（UDP/TCP/BLE 等） |
-| Stream | QUIC 连接内的多路复用通道 |
-| DHT | 分布式哈希表（Kademlia），用于节点发现和数据索引 |
-| PAKE | 密码认证密钥交换，用于设备配对 |
-| CRDT | 无冲突复制数据类型，用于多设备状态同步 |
-| TOFU | Trust On First Use，首次使用时建立信任 |
-| Key Pinning | 公钥绑定，将对端身份绑定到已知公钥 |
-| Checkpoint | 任务状态的可序列化快照，用于迁移 |
-| Block | 分布式存储的基本单位，内容寻址（hash=地址） |
-
-## 附录 B：命名约定
-
-- **项目全名**：exomind-（如 exomind-net, exomind-rt）
-- **代码内部模块缩写**：exm（如 exm::net::Link）
-- **协议栈缩写**：EPS（ExoMind Protocol Stack）
-- **帧魔数**：0xEE 0x4D（"EM" = ExoMind）
-
----
-
-> 本文档基于认知生命科学的理论框架设计。
-> ExoMind 是一个开源项目，代码属于所有人。
+*文档版本：v3.0*
+*创建日期：2026-03-19*
+*负责人：architect teammate*
