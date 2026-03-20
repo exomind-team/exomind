@@ -274,7 +274,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
-  it('allows fit view to zoom out below the old lower bound', async () => {
+  it('keeps fit-view zoom options available without auto-fitting on first load', async () => {
     render(<TaskDagPage />);
 
     await waitFor(() => {
@@ -282,20 +282,81 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
 
     expect(flowApiMocks.lastProps).toMatchObject({
-      fitView: true,
       minZoom: 0.01,
       fitViewOptions: {
         padding: 0.2,
         minZoom: 0.01,
       },
     });
-    expect(flowApiMocks.fitView).toHaveBeenCalledWith({
-      padding: 0.2,
-      minZoom: 0.01,
+    expect(flowApiMocks.fitView).not.toHaveBeenCalled();
+  });
+
+  it('keeps ReactFlow auto-fit disabled so execute-mode state changes do not re-fit the viewport', async () => {
+    calculateSpentMinutesMock.mockResolvedValue(15);
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '可执行任务', estimatedMinutes: 40, createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: '受阻任务',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+    expect(flowApiMocks.lastProps).not.toHaveProperty('fitView');
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-a', { mode: 'countdown', minutes: 25 });
     });
   });
 
-  it('waits for nodes to load before running the initial fit view', async () => {
+  it('keeps node positions stable when execute-mode state changes only affect node appearance', async () => {
+    calculateSpentMinutesMock.mockResolvedValue(15);
+    listTasksMock.mockResolvedValue([
+      makeTask({ id: 'task-a', title: '可执行任务', estimatedMinutes: 40, createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-b',
+        title: '后继任务',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-a', type: 'hard' }],
+      }),
+    ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
+    });
+
+    const beforeExecute = (flowApiMocks.lastProps as {
+      nodes: Array<{ id: string; position: { x: number; y: number } }>;
+    }).nodes.map((node) => ({ id: node.id, position: node.position }));
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-a'));
+
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-a', { mode: 'countdown', minutes: 25 });
+    });
+
+    const afterExecute = (flowApiMocks.lastProps as {
+      nodes: Array<{ id: string; position: { x: number; y: number } }>;
+    }).nodes.map((node) => ({ id: node.id, position: node.position }));
+
+    expect(afterExecute).toEqual(beforeExecute);
+  });
+
+  it('does not auto-fit after nodes finish loading when no saved viewport exists', async () => {
     let resolveTasks: ((tasks: TaskNode[]) => void) | null = null;
     listTasksMock.mockImplementationOnce(() => new Promise<TaskNode[]>((resolve) => {
       resolveTasks = resolve;
@@ -315,10 +376,32 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     await waitFor(() => {
       expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
     });
-    expect(flowApiMocks.fitView).toHaveBeenCalledWith({
-      padding: 0.2,
-      minZoom: 0.01,
+    expect(flowApiMocks.fitView).not.toHaveBeenCalled();
+    expect(flowApiMocks.setViewport).not.toHaveBeenCalled();
+  });
+
+  it('restores the saved dag viewport instead of refitting when revisiting the page', async () => {
+    window.localStorage.setItem('exomind:dag-viewport', JSON.stringify({
+      direction: 'auto',
+      x: -320,
+      y: -180,
+      zoom: 0.42,
+    }));
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-a')).toBeInTheDocument();
     });
+
+    await waitFor(() => {
+      expect(flowApiMocks.setViewport).toHaveBeenCalledWith({
+        x: -320,
+        y: -180,
+        zoom: 0.42,
+      });
+    });
+    expect(flowApiMocks.fitView).not.toHaveBeenCalled();
   });
 
   it('switches dag direction, persists selection, and re-fits the viewport', async () => {

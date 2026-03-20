@@ -79,9 +79,34 @@ const TASK_DAG_MODE_STORAGE_KEY = 'exomind:dag-mode';
 const TASK_DAG_DIRECTION_STORAGE_KEY = 'exomind:dag-direction';
 const TASK_DAG_HIDE_TERMINAL_KEY = 'exomind:dag-hide-terminal';
 const TASK_DAG_IMMERSIVE_KEY = 'exomind:dag-immersive';
+const TASK_DAG_VIEWPORT_KEY = 'exomind:dag-viewport';
+
+const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
+  pending: '待办',
+  in_progress: '进行中',
+  suspended: '已挂起',
+  completed: '已完成',
+  cancelled: '已取消',
+};
+
+const TASK_PRIORITY_LABELS: Record<TaskNode['priority'], string> = {
+  low: '低优先级',
+  medium: '中优先级',
+  high: '高优先级',
+};
 
 function isTerminalStatus(status: TaskStatus): boolean {
   return status === 'completed' || status === 'cancelled';
+}
+
+function resolveTaskDagExecutionLabel(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
+  if (task.status === 'completed') return '已完成';
+  if (task.status === 'cancelled') return '已取消';
+  if (task.status === 'in_progress') return '进行中';
+  if (task.status === 'suspended') return '已挂起';
+  if (isBlocked) return '受阻';
+  if (isExecutable) return '可执行';
+  return '待处理';
 }
 
 function buildExecutionHint(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
@@ -173,6 +198,47 @@ function readStoredImmersive(): boolean {
     return window.localStorage.getItem(TASK_DAG_IMMERSIVE_KEY) === '1';
   } catch {
     return false;
+  }
+}
+
+function readStoredDagViewport(direction: DagDirection): { x: number; y: number; zoom: number } | null {
+  if (typeof window === 'undefined') return null;
+
+  try {
+    const raw = window.localStorage.getItem(TASK_DAG_VIEWPORT_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { x?: unknown; y?: unknown; zoom?: unknown; direction?: unknown };
+    if (parsed.direction !== direction) {
+      return null;
+    }
+    if (
+      typeof parsed.x !== 'number'
+      || typeof parsed.y !== 'number'
+      || typeof parsed.zoom !== 'number'
+      || !Number.isFinite(parsed.x)
+      || !Number.isFinite(parsed.y)
+      || !Number.isFinite(parsed.zoom)
+    ) {
+      return null;
+    }
+    return { x: parsed.x, y: parsed.y, zoom: parsed.zoom };
+  } catch {
+    return null;
+  }
+}
+
+function writeStoredDagViewport(direction: DagDirection, viewport: { x: number; y: number; zoom: number }): void {
+  if (typeof window === 'undefined') return;
+
+  try {
+    window.localStorage.setItem(TASK_DAG_VIEWPORT_KEY, JSON.stringify({
+      direction,
+      x: viewport.x,
+      y: viewport.y,
+      zoom: viewport.zoom,
+    }));
+  } catch {
+    // Ignore storage failures and keep viewport only in memory.
   }
 }
 
@@ -487,7 +553,7 @@ export function TaskDagPage() {
   const flowInstanceRef = useRef<ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null>(null);
   const connectDragTypeRef = useRef<DagConnectType>('hard');
   const hasMountedDirectionRef = useRef(false);
-  const hasInitialViewportFitRef = useRef(false);
+  const hasAppliedInitialViewportRef = useRef(false);
 
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
@@ -635,7 +701,7 @@ export function TaskDagPage() {
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [resolvedDirection, tasks.length]);
+  }, [resolvedDirection]);
 
   const taskById = useMemo(() => new Map(tasks.map((task) => [task.id, task])), [tasks]);
   const graph = useMemo(() => buildTaskGraph(tasks), [tasks]);
@@ -651,6 +717,10 @@ export function TaskDagPage() {
   const renderedVisibleGraph = useMemo(() => (
     hideTerminal ? filterTerminalNodesFromVisibleGraph(visibleGraph) : visibleGraph
   ), [hideTerminal, visibleGraph]);
+  const renderedVisibleNodeById = useMemo(
+    () => new Map(renderedVisibleGraph.nodes.map((node) => [node.id, node])),
+    [renderedVisibleGraph.nodes],
+  );
   const visibleNodeIdSet = useMemo(
     () => new Set(renderedVisibleGraph.nodes.map((node) => node.id)),
     [renderedVisibleGraph.nodes],
@@ -682,24 +752,47 @@ export function TaskDagPage() {
     }
   }, [connectState, visibleNodeIdSet]);
 
+  const layoutSignature = useMemo(() => JSON.stringify({
+    direction: resolvedDirection,
+    nodeIds: renderedVisibleGraph.nodes.map((node) => node.id),
+    edges: renderedVisibleGraph.edges.map((edge) => [edge.id, edge.source, edge.target, edge.type]),
+  }), [renderedVisibleGraph.edges, renderedVisibleGraph.nodes, resolvedDirection]);
+
+  const layoutFlowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
+    direction: resolvedDirection,
+  }), [layoutSignature, renderedVisibleGraph, resolvedDirection]);
+
   const flowGraph = useMemo(() => {
-    const baseFlowGraph = buildVisibleTaskDagFlow(renderedVisibleGraph, {
-      direction: resolvedDirection,
-      selectedTaskId,
-      searchMatchedTaskIds,
-      hasActiveSearch: Boolean(searchQuery),
-    });
+    const hasActiveSearch = Boolean(searchQuery);
 
     return {
-      nodes: baseFlowGraph.nodes.map((node) => {
+      nodes: layoutFlowGraph.nodes.map((node) => {
         const task = taskById.get(node.id);
         const graphNode = graphNodeById.get(node.id);
+        const visibleNode = renderedVisibleNodeById.get(node.id);
         const blockedReason = task ? buildBlockedReason(task, taskById) : null;
 
         return {
           ...node,
           data: {
             ...node.data,
+            title: task?.title ?? visibleNode?.title ?? node.data.title,
+            statusLabel: task ? TASK_STATUS_LABELS[task.status] : node.data.statusLabel,
+            priorityLabel: task ? TASK_PRIORITY_LABELS[task.priority] : node.data.priorityLabel,
+            executionLabel: task && graphNode
+              ? resolveTaskDagExecutionLabel(task, graphNode.isBlocked, graphNode.isExecutable)
+              : node.data.executionLabel,
+            isSelected: node.id === selectedTaskId,
+            isSearchMatch: hasActiveSearch && searchMatchedTaskIds.has(node.id),
+            isSearchDimmed: hasActiveSearch && !searchMatchedTaskIds.has(node.id),
+            isCurrentRoot: node.id === renderedVisibleGraph.visibleCurrentRootNodeId,
+            isCollapsedTarget: visibleNode?.isCollapsedTarget ?? node.data.isCollapsedTarget,
+            isCollapsedUpstreamTarget: visibleNode?.isCollapsedUpstreamTarget ?? node.data.isCollapsedUpstreamTarget,
+            isCollapsedDownstreamTarget: visibleNode?.isCollapsedDownstreamTarget ?? node.data.isCollapsedDownstreamTarget,
+            isBlocked: graphNode?.isBlocked ?? visibleNode?.isBlocked ?? node.data.isBlocked,
+            isExecutable: graphNode?.isExecutable ?? visibleNode?.isExecutable ?? node.data.isExecutable,
+            hiddenUpstreamCount: visibleNode?.hiddenUpstreamCount ?? node.data.hiddenUpstreamCount,
+            hiddenDownstreamCount: visibleNode?.hiddenDownstreamCount ?? node.data.hiddenDownstreamCount,
             blockedReason,
             showConnectHandles: mode === 'connect',
             connectPreviewType: connectState?.sourceId === node.id ? connectState.type : null,
@@ -709,14 +802,16 @@ export function TaskDagPage() {
           },
         } satisfies TaskDagFlowNode;
       }),
-      edges: baseFlowGraph.edges,
+      edges: layoutFlowGraph.edges,
     };
   }, [
     activeTaskIdSet,
     connectState,
     graphNodeById,
+    layoutFlowGraph.edges,
+    layoutFlowGraph.nodes,
     renderedVisibleGraph,
-    resolvedDirection,
+    renderedVisibleNodeById,
     searchMatchedTaskIds,
     searchQuery,
     selectedTaskId,
@@ -743,23 +838,35 @@ export function TaskDagPage() {
 
   useEffect(() => {
     if (flowGraph.nodes.length === 0) {
-      hasInitialViewportFitRef.current = false;
+      hasAppliedInitialViewportRef.current = false;
       return;
     }
 
-    if (!flowInstanceRef.current || hasInitialViewportFitRef.current) {
+    if (!flowInstanceRef.current || hasAppliedInitialViewportRef.current) {
       return;
     }
 
-    hasInitialViewportFitRef.current = true;
+    hasAppliedInitialViewportRef.current = true;
+    const storedViewport = readStoredDagViewport(dagDirection);
+    if (!storedViewport) {
+      return;
+    }
+
     const timeoutId = window.setTimeout(() => {
-      void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
+      flowInstanceRef.current?.setViewport(storedViewport);
     }, 50);
 
     return () => {
       window.clearTimeout(timeoutId);
     };
-  }, [flowGraph.nodes.length]);
+  }, [dagDirection, flowGraph.nodes.length]);
+
+  useEffect(() => () => {
+    const viewport = flowInstanceRef.current?.getViewport();
+    if (viewport) {
+      writeStoredDagViewport(dagDirection, viewport);
+    }
+  }, [dagDirection]);
 
   const toggleCollapse = (direction: 'upstream' | 'downstream', nodeId: string) => {
     setDagVisibility((prev) => {
@@ -1265,7 +1372,6 @@ export function TaskDagPage() {
             edges={flowGraph.edges}
             nodeTypes={TASK_DAG_NODE_TYPES}
             proOptions={{ hideAttribution: true }}
-            fitView
             minZoom={TASK_DAG_MIN_ZOOM}
             fitViewOptions={TASK_DAG_FIT_VIEW_OPTIONS}
             nodesDraggable={false}
@@ -1274,9 +1380,18 @@ export function TaskDagPage() {
             zoomOnDoubleClick={false}
             onInit={(instance) => {
               flowInstanceRef.current = instance;
-              if (flowGraph.nodes.length > 0 && !hasInitialViewportFitRef.current) {
-                hasInitialViewportFitRef.current = true;
-                void instance.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
+              if (flowGraph.nodes.length > 0 && !hasAppliedInitialViewportRef.current) {
+                hasAppliedInitialViewportRef.current = true;
+                const storedViewport = readStoredDagViewport(dagDirection);
+                if (storedViewport) {
+                  instance.setViewport(storedViewport);
+                }
+              }
+            }}
+            onMoveEnd={() => {
+              const viewport = flowInstanceRef.current?.getViewport();
+              if (viewport) {
+                writeStoredDagViewport(dagDirection, viewport);
               }
             }}
             onPaneClick={(event) => {
