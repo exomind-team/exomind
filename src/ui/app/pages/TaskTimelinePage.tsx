@@ -17,7 +17,6 @@ import {
   type TimelineRange,
   resolveTimeRange,
 } from './task-timeline-model'
-import { resolveTimelineTitleLayout } from './task-timeline-title-layout'
 
 const STATUS_COLORS = {
   pending: {
@@ -568,6 +567,7 @@ function TimelineTaskTitleButton({
   endPrimaryPx,
   collapsedPrimarySizePx,
   viewportPrimaryOffsetPx,
+  viewportPrimarySizePx,
   onSelectTask,
 }: {
   taskId: string
@@ -578,6 +578,7 @@ function TimelineTaskTitleButton({
   endPrimaryPx: number
   collapsedPrimarySizePx: number
   viewportPrimaryOffsetPx: number
+  viewportPrimarySizePx: number
   onSelectTask: (taskId: string) => void
 }) {
   const labelRef = useRef<HTMLSpanElement | null>(null)
@@ -602,15 +603,16 @@ function TimelineTaskTitleButton({
 
   const primarySizePx = isHovered ? expandedPrimarySizePx : collapsedPrimarySizePxState
   const edgeInsetPx = isHorizontal ? TITLE_EDGE_INSET_PX : VERTICAL_TITLE_EDGE_INSET_PX
-  const titleLayout = resolveTimelineTitleLayout({
-    trackStartPx: startPrimaryPx,
-    trackEndPx: endPrimaryPx,
-    viewportStartPx: viewportPrimaryOffsetPx,
-    edgeInsetPx,
-    desiredPrimarySizePx: primarySizePx,
-  })
+  const viewportPrimaryEndPx = viewportPrimaryOffsetPx + viewportPrimarySizePx
+  const anchoredStartPrimaryPx = Math.max(startPrimaryPx + edgeInsetPx, viewportPrimaryOffsetPx + edgeInsetPx)
+  const maxRenderablePrimarySizePx = Math.max(endPrimaryPx - edgeInsetPx - anchoredStartPrimaryPx, 0)
+  const renderedPrimarySizePx = Math.min(primarySizePx, maxRenderablePrimarySizePx)
+  const shouldHide =
+    endPrimaryPx <= viewportPrimaryOffsetPx
+    || endPrimaryPx > viewportPrimaryEndPx
+    || renderedPrimarySizePx <= 0
 
-  if (titleLayout.hidden) {
+  if (shouldHide) {
     return null
   }
 
@@ -621,7 +623,7 @@ function TimelineTaskTitleButton({
       onClick={() => onSelectTask(taskId)}
       onMouseEnter={() => setIsHovered(true)}
       onMouseLeave={() => setIsHovered(false)}
-      className={`absolute z-10 box-border overflow-hidden border text-xs transition-[width,height] duration-[250ms] ease-out ${
+      className={`absolute z-10 overflow-hidden border text-xs transition-[width,height] duration-[250ms] ease-out ${
         isHorizontal
           ? 'top-1/2 flex items-center whitespace-nowrap -translate-y-1/2 rounded-full px-3 text-left leading-5'
           : 'left-1/2 flex items-center justify-center -translate-x-1/2 rounded-[18px] px-1 py-2 text-center leading-4'
@@ -632,14 +634,14 @@ function TimelineTaskTitleButton({
       }`}
       style={isHorizontal
         ? {
-            left: `${titleLayout.offsetPx}px`,
+            left: `${anchoredStartPrimaryPx}px`,
             height: `${TITLE_BUTTON_THICKNESS_PX}px`,
-            width: `${titleLayout.sizePx}px`,
+            width: `${renderedPrimarySizePx}px`,
           }
         : {
-            top: `${titleLayout.offsetPx}px`,
+            top: `${anchoredStartPrimaryPx}px`,
             width: `${VERTICAL_TITLE_BUTTON_THICKNESS_PX}px`,
-            height: `${titleLayout.sizePx}px`,
+            height: `${renderedPrimarySizePx}px`,
           }}
     >
       <span ref={labelRef} className={`block overflow-hidden ${isHorizontal ? 'truncate' : 'text-center'}`}>
@@ -712,6 +714,7 @@ function TimelineSwimLane({
   onBackgroundClick,
   primaryCanvasSize,
   viewportPrimaryOffsetPx,
+  viewportPrimarySizePx,
 }: {
   model: TaskTimelineModel
   displayTimeRange: { start: number; end: number }
@@ -722,6 +725,7 @@ function TimelineSwimLane({
   onBackgroundClick: () => void
   primaryCanvasSize: number
   viewportPrimaryOffsetPx: number
+  viewportPrimarySizePx: number
 }) {
   const duration = displayTimeRange.end - displayTimeRange.start
   if (duration <= 0) {
@@ -800,6 +804,7 @@ function TimelineSwimLane({
                       endPrimaryPx={entryEndPx}
                       collapsedPrimarySizePx={titleMaxWidthPx}
                       viewportPrimaryOffsetPx={viewportPrimaryOffsetPx}
+                      viewportPrimarySizePx={viewportPrimarySizePx}
                       onSelectTask={onSelectTask}
                     />
                     {entry.segments.map((segment, index) => {
@@ -908,6 +913,7 @@ function TimelineSwimLane({
                     endPrimaryPx={entryEndPx}
                     collapsedPrimarySizePx={titleMaxHeightPx}
                     viewportPrimaryOffsetPx={viewportPrimaryOffsetPx}
+                    viewportPrimarySizePx={viewportPrimarySizePx}
                     onSelectTask={onSelectTask}
                   />
                   {entry.segments.map((segment, index) => {
@@ -1421,6 +1427,7 @@ export function TaskTimelinePage() {
           onBackgroundClick={handleTimelineBackgroundClick}
           primaryCanvasSize={timelineMetrics.primaryCanvasSize}
           viewportPrimaryOffsetPx={isHorizontalTimeline ? timelineScrollOffset.left : timelineScrollOffset.top}
+          viewportPrimarySizePx={timelineMetrics.viewportPrimarySize}
         />
       </div>
 

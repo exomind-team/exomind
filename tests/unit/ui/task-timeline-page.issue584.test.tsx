@@ -2,7 +2,6 @@ import type { ReactNode } from 'react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { TaskTimelinePage } from '@/ui/app/pages/TaskTimelinePage'
-import { resolveTimelineTitleLayout } from '@/ui/app/pages/task-timeline-title-layout'
 import { SYSTEM_TAGS, type Event, type TimeBlock } from '@/lib/types/event'
 import type { TaskNode } from '@/lib/types/task'
 
@@ -247,59 +246,33 @@ describe('TaskTimelinePage scale controls（任务时间线比例尺控件）', 
     expect(titleButton.style.left).toBe('604px')
   })
 
-  it('keeps the title visible when the task continues to the right of the viewport', async () => {
+  it('hides the title when the task end is beyond the current viewport right edge', async () => {
     listTasksMock.mockResolvedValue([
-      makeTask({ id: 'task-clamped', title: '右侧边界裁切标题测试标题很长用于验证按钮不会超过任务条终点' }),
-      makeTask({ id: 'task-tail', title: '延长时间范围的辅助任务' }),
+      makeTask({ id: 'task-hidden', title: '右侧超出隐藏标题测试' }),
     ])
     loadEventsMock.mockResolvedValue([
       makeEvent({
-        id: 'task-clamped-created',
+        id: 'task-hidden-created',
         timestamp: new Date('2026-03-19T12:50:00.000+08:00').getTime(),
         tags: [SYSTEM_TAGS.TASK_CREATED],
-        taskId: 'task-clamped',
-        taskTitle: '右侧边界裁切标题测试标题很长用于验证按钮不会超过任务条终点',
+        taskId: 'task-hidden',
+        taskTitle: '右侧超出隐藏标题测试',
       }),
       makeEvent({
-        id: 'task-clamped-started',
+        id: 'task-hidden-started',
         timestamp: new Date('2026-03-19T13:00:00.000+08:00').getTime(),
         tags: [SYSTEM_TAGS.TASK_STARTED],
-        taskId: 'task-clamped',
-        taskTitle: '右侧边界裁切标题测试标题很长用于验证按钮不会超过任务条终点',
+        taskId: 'task-hidden',
+        taskTitle: '右侧超出隐藏标题测试',
         fromStatus: 'pending',
         toStatus: 'in_progress',
       }),
       makeEvent({
-        id: 'task-clamped-completed',
-        timestamp: new Date('2026-03-19T13:31:00.000+08:00').getTime(),
-        tags: [SYSTEM_TAGS.TASK_COMPLETED],
-        taskId: 'task-clamped',
-        taskTitle: '右侧边界裁切标题测试标题很长用于验证按钮不会超过任务条终点',
-        fromStatus: 'in_progress',
-        toStatus: 'completed',
-      }),
-      makeEvent({
-        id: 'task-tail-created',
-        timestamp: new Date('2026-03-19T14:40:00.000+08:00').getTime(),
-        tags: [SYSTEM_TAGS.TASK_CREATED],
-        taskId: 'task-tail',
-        taskTitle: '延长时间范围的辅助任务',
-      }),
-      makeEvent({
-        id: 'task-tail-started',
-        timestamp: new Date('2026-03-19T14:45:00.000+08:00').getTime(),
-        tags: [SYSTEM_TAGS.TASK_STARTED],
-        taskId: 'task-tail',
-        taskTitle: '延长时间范围的辅助任务',
-        fromStatus: 'pending',
-        toStatus: 'in_progress',
-      }),
-      makeEvent({
-        id: 'task-tail-completed',
+        id: 'task-hidden-completed',
         timestamp: new Date('2026-03-19T14:50:00.000+08:00').getTime(),
         tags: [SYSTEM_TAGS.TASK_COMPLETED],
-        taskId: 'task-tail',
-        taskTitle: '延长时间范围的辅助任务',
+        taskId: 'task-hidden',
+        taskTitle: '右侧超出隐藏标题测试',
         fromStatus: 'in_progress',
         toStatus: 'completed',
       }),
@@ -316,22 +289,8 @@ describe('TaskTimelinePage scale controls（任务时间线比例尺控件）', 
     Object.defineProperty(viewport, 'scrollLeft', { configurable: true, writable: true, value: 600 })
     fireEvent.scroll(viewport)
 
-    const titleButton = await screen.findByTestId('timeline-title-task-clamped')
-    expect(titleButton.style.left).toBe('604px')
-    expect(titleButton).toBeInTheDocument()
-  })
-
-  it('computes title boundaries only from track bounds, viewport bounds, and inset', () => {
-    expect(resolveTimelineTitleLayout({
-      trackStartPx: 200,
-      trackEndPx: 820,
-      viewportStartPx: 600,
-      edgeInsetPx: 4,
-      desiredPrimarySizePx: 999,
-    })).toEqual({
-      offsetPx: 604,
-      sizePx: 212,
-      hidden: false,
+    await waitFor(() => {
+      expect(screen.queryByTestId('timeline-title-task-hidden')).toBeNull()
     })
   })
 
