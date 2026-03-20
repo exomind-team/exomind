@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "postinstall": "node Scripts/dev/prepare-workers-website-build.mjs",
     "icon:sync-source": "bun -e \"await Bun.write('src-tauri/app-icon.png', Bun.file('app_qwen_icon.png'))\"",
     "icon:tauri": "bunx tauri icon src-tauri/app-icon.png -o src-tauri/icons",
     "icon:web": "bunx tauri icon src-tauri/app-icon.png --png 16 --png 32 --png 180 --png 192 --png 512 -o public/icons",

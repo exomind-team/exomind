@@ -13,6 +13,7 @@ const platforms = [
     active: true,
     req: t('download.sysreq.windows'),
     assetKey: 'windows-x64-setup',
+    rollout: '当前公开可下载',
   },
   {
     name: 'Android',
@@ -20,26 +21,28 @@ const platforms = [
     active: true,
     req: t('download.sysreq.android'),
     assetKey: 'android-arm64',
+    rollout: '当前公开可下载',
   },
   {
     name: 'macOS',
     icon: 'macos',
-    active: true,
+    active: false,
     req: t('download.sysreq.macos'),
     assetKey: 'macos-aarch64',
+    rollout: '正式安装包准备中',
   },
   {
     name: 'Linux',
     icon: 'linux',
-    active: true,
+    active: false,
     req: t('download.sysreq.linux'),
     assetKey: 'linux-x64-appimage',
+    rollout: '正式安装包准备中',
   },
 ];
 ---
 
 <BaseLayout title="下载">
-  {/* Hero */}
   <section class="relative overflow-hidden pt-32 pb-16">
     <div class="section-container relative z-10">
       <div class="mx-auto max-w-3xl text-center">
@@ -56,21 +59,14 @@ const platforms = [
     </div>
   </section>
 
-  {/* Channel Toggle */}
   <section class="pb-8">
     <div class="section-container">
       <div class="mx-auto flex max-w-xs items-center justify-center">
         <div id="channel-toggle" class="inline-flex rounded-xl border border-stone-200 bg-white p-1 dark:border-stone-800 dark:bg-stone-900">
-          <button
-            data-channel="release"
-            class="channel-btn active rounded-lg px-5 py-2 text-sm font-medium transition-all"
-          >
+          <button data-channel="release" class="channel-btn active rounded-lg px-5 py-2 text-sm font-medium transition-all">
             稳定版
           </button>
-          <button
-            data-channel="preview"
-            class="channel-btn rounded-lg px-5 py-2 text-sm font-medium transition-all"
-          >
+          <button data-channel="preview" class="channel-btn rounded-lg px-5 py-2 text-sm font-medium transition-all">
             预览版
           </button>
         </div>
@@ -78,18 +74,18 @@ const platforms = [
     </div>
   </section>
 
-  {/* Platform Cards */}
-  <section class="pb-20">
+  <section class="pb-12">
     <div class="section-container">
-      <div id="cards-container" class="mx-auto grid max-w-3xl gap-6 sm:grid-cols-2">
-        {/* Loading skeleton */}
+      <div id="cards-container" class="mx-auto grid max-w-4xl gap-6 sm:grid-cols-2">
         {platforms.map((platform) => (
           <div
-            class="card flex flex-col items-center p-8 text-center"
+            class:list={[
+              'card flex flex-col items-center p-8 text-center',
+              platform.active ? '' : 'border-dashed bg-stone-50/60 dark:bg-stone-900/40',
+            ]}
             data-platform={platform.assetKey}
             data-active={platform.active ? 'true' : 'false'}
           >
-            {/* Icon */}
             <div class="mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-stone-100 text-stone-700 dark:bg-stone-800 dark:text-stone-300">
               {platform.icon === 'windows' && (
                 <svg xmlns="http://www.w3.org/2000/svg" width="32" height="32" viewBox="0 0 30 30" fill="currentColor">
@@ -116,14 +112,12 @@ const platforms = [
               )}
             </div>
 
-            {/* Platform name */}
             <h3 class="text-lg font-semibold text-stone-900 dark:text-stone-50">{platform.name}</h3>
 
-            {/* Dynamic content area */}
             <div class="card-content mt-2 w-full">
               {platform.active ? (
                 <div class="card-dynamic">
-                  {/* Skeleton loading state */}
+                  <p class="mb-3 text-xs uppercase tracking-[0.18em] text-brand">{platform.rollout}</p>
                   <div class="card-skeleton">
                     <div class="mx-auto mt-1 h-4 w-20 animate-pulse rounded bg-stone-200 dark:bg-stone-700"></div>
                     <div class="mx-auto mt-2 h-3 w-32 animate-pulse rounded bg-stone-100 dark:bg-stone-800"></div>
@@ -131,7 +125,6 @@ const platforms = [
                       <div class="mx-auto h-10 w-28 animate-pulse rounded-xl bg-stone-200 dark:bg-stone-700"></div>
                     </div>
                   </div>
-                  {/* Loaded state (hidden initially) */}
                   <div class="card-loaded hidden">
                     <p class="card-version text-sm text-stone-400"></p>
                     <p class="card-meta mt-1 text-xs text-stone-400"></p>
@@ -142,19 +135,18 @@ const platforms = [
                     </div>
                     <div class="card-extra-links mt-3 flex flex-wrap justify-center gap-3"></div>
                   </div>
-                  {/* Error state (hidden initially) */}
                   <div class="card-error hidden">
-                    <p class="mt-1 text-sm text-stone-400">暂无可用版本</p>
+                    <p class="mt-1 text-sm text-stone-400">当前暂无公开下载，请稍后重试</p>
                     <div class="mt-4">
-                      <a href="https://github.com/exomind-team/exomind/releases" target="_blank" rel="noopener noreferrer" class="btn-secondary px-5 py-2 text-sm">
-                        前往 GitHub
+                      <a href="/docs" class="btn-secondary px-5 py-2 text-sm">
+                        查看公开文档
                       </a>
                     </div>
                   </div>
                 </div>
               ) : (
                 <div>
-                  <p class="mt-1 text-sm text-stone-400">{t('download.version')}</p>
+                  <p class="mt-1 text-sm text-stone-400">{platform.rollout}</p>
                   <div class="mt-4">
                     <span class="inline-flex items-center rounded-lg border border-dashed border-stone-300 px-4 py-2 text-sm text-stone-400 dark:border-stone-700">
                       {t('download.coming_soon')}
@@ -169,18 +161,23 @@ const platforms = [
     </div>
   </section>
 
-  {/* Preview Version List (hidden by default, shown in preview channel) */}
+  <section class="pb-20">
+    <div class="section-container">
+      <div class="mx-auto max-w-4xl rounded-2xl border border-stone-200 bg-stone-50 px-6 py-6 text-sm leading-relaxed text-stone-600 dark:border-stone-800 dark:bg-stone-900 dark:text-stone-300">
+        Windows 与 Android 当前提供公开下载。macOS 与 Linux 暂不把 runtime 压缩包当作正式安装包对外宣传，等真实桌面安装形态准备好后再开放。
+      </div>
+    </div>
+  </section>
+
   <section id="version-list-section" class="hidden pb-20">
     <div class="section-container">
-      <div class="mx-auto max-w-3xl">
+      <div class="mx-auto max-w-4xl">
         <h2 class="heading-display mb-6 text-center text-2xl text-stone-900 sm:text-3xl dark:text-stone-50">
-          历史版本
+          预览构建历史
         </h2>
-        <div id="version-list" class="space-y-3">
-          {/* Populated by JS */}
-        </div>
+        <div id="version-list" class="space-y-3"></div>
         <div id="version-list-expand" class="mt-4 hidden text-center">
-          <button class="text-sm font-medium text-brand hover:text-brand-600 transition-colors">
+          <button class="text-sm font-medium text-brand transition-colors hover:text-brand-600">
             查看更多版本
           </button>
         </div>
@@ -188,7 +185,6 @@ const platforms = [
     </div>
   </section>
 
-  {/* System Requirements */}
   <section class="pb-24">
     <div class="section-container">
       <div class="mx-auto max-w-2xl">
@@ -198,7 +194,7 @@ const platforms = [
         <div class="mt-8 space-y-4">
           {platforms.map((platform) => (
             <div class="flex items-center gap-4 rounded-xl border border-stone-200 bg-white px-6 py-4 dark:border-stone-800 dark:bg-stone-900">
-              <span class="font-medium text-stone-900 dark:text-stone-50 w-24 shrink-0">{platform.name}</span>
+              <span class="w-24 shrink-0 font-medium text-stone-900 dark:text-stone-50">{platform.name}</span>
               <span class="text-sm text-stone-500 dark:text-stone-400">{platform.req}</span>
             </div>
           ))}
@@ -228,7 +224,6 @@ const platforms = [
 </style>
 
 <script>
-  // --- Helpers ---
   function formatSize(bytes: number): string {
     const mb = bytes / (1024 * 1024);
     return `${mb.toFixed(1)} MB`;
@@ -242,18 +237,15 @@ const platforms = [
     return `${y}-${m}-${day}`;
   }
 
-  // --- State ---
   let currentChannel: 'release' | 'preview' = 'release';
-  let cache: Record<string, any> = {};
+  const cache: Record<string, any> = {};
 
-  // --- DOM refs ---
   const toggleBtns = document.querySelectorAll<HTMLButtonElement>('.channel-btn');
   const cards = document.querySelectorAll<HTMLElement>('[data-platform]');
-  const versionListSection = document.getElementById('version-list-section')!;
-  const versionList = document.getElementById('version-list')!;
-  const versionListExpand = document.getElementById('version-list-expand')!;
+  const versionListSection = document.getElementById('version-list-section') as HTMLElement;
+  const versionList = document.getElementById('version-list') as HTMLElement;
+  const versionListExpand = document.getElementById('version-list-expand') as HTMLElement;
 
-  // --- Channel toggle ---
   toggleBtns.forEach((btn) => {
     btn.addEventListener('click', () => {
       const channel = btn.dataset.channel as 'release' | 'preview';
@@ -267,20 +259,17 @@ const platforms = [
     });
   });
 
-  // --- Fetch & render ---
   async function loadChannel(channel: string) {
-    // Show skeletons
     cards.forEach((card) => {
       if (card.dataset.active !== 'true') return;
-      const skeleton = card.querySelector('.card-skeleton') as HTMLElement;
-      const loaded = card.querySelector('.card-loaded') as HTMLElement;
-      const error = card.querySelector('.card-error') as HTMLElement;
-      if (skeleton) skeleton.classList.remove('hidden');
-      if (loaded) loaded.classList.add('hidden');
-      if (error) error.classList.add('hidden');
+      const skeleton = card.querySelector('.card-skeleton') as HTMLElement | null;
+      const loaded = card.querySelector('.card-loaded') as HTMLElement | null;
+      const error = card.querySelector('.card-error') as HTMLElement | null;
+      skeleton?.classList.remove('hidden');
+      loaded?.classList.add('hidden');
+      error?.classList.add('hidden');
     });
 
-    // Hide version list while loading
     versionListSection.classList.add('hidden');
 
     try {
@@ -299,13 +288,12 @@ const platforms = [
       }
     } catch (err) {
       console.error('Failed to load versions:', err);
-      // Show error state
       cards.forEach((card) => {
         if (card.dataset.active !== 'true') return;
-        const skeleton = card.querySelector('.card-skeleton') as HTMLElement;
-        const error = card.querySelector('.card-error') as HTMLElement;
-        if (skeleton) skeleton.classList.add('hidden');
-        if (error) error.classList.remove('hidden');
+        const skeleton = card.querySelector('.card-skeleton') as HTMLElement | null;
+        const error = card.querySelector('.card-error') as HTMLElement | null;
+        skeleton?.classList.add('hidden');
+        error?.classList.remove('hidden');
       });
     }
   }
@@ -319,22 +307,21 @@ const platforms = [
 
       const platformKey = card.dataset.platform!;
       const asset = latest.assets?.[platformKey];
-      const skeleton = card.querySelector('.card-skeleton') as HTMLElement;
-      const loaded = card.querySelector('.card-loaded') as HTMLElement;
-      const error = card.querySelector('.card-error') as HTMLElement;
+      const skeleton = card.querySelector('.card-skeleton') as HTMLElement | null;
+      const loaded = card.querySelector('.card-loaded') as HTMLElement | null;
+      const error = card.querySelector('.card-error') as HTMLElement | null;
 
-      if (skeleton) skeleton.classList.add('hidden');
+      skeleton?.classList.add('hidden');
 
       if (!asset) {
-        if (error) error.classList.remove('hidden');
-        if (loaded) loaded.classList.add('hidden');
+        error?.classList.remove('hidden');
+        loaded?.classList.add('hidden');
         return;
       }
 
-      // Fill in data
-      const versionEl = card.querySelector('.card-version') as HTMLElement;
-      const metaEl = card.querySelector('.card-meta') as HTMLElement;
-      const downloadBtn = card.querySelector('.card-download-btn') as HTMLAnchorElement;
+      const versionEl = card.querySelector('.card-version') as HTMLElement | null;
+      const metaEl = card.querySelector('.card-meta') as HTMLElement | null;
+      const downloadBtn = card.querySelector('.card-download-btn') as HTMLAnchorElement | null;
 
       if (versionEl) versionEl.textContent = latest.version;
       if (metaEl) {
@@ -347,14 +334,12 @@ const platforms = [
         downloadBtn.href = `/api/download/${data.channel}/${latest.version}/${platformKey}`;
       }
 
-      // Render extra architecture links for Android
-      const extraLinks = card.querySelector('.card-extra-links') as HTMLElement;
+      const extraLinks = card.querySelector('.card-extra-links') as HTMLElement | null;
       if (extraLinks) {
         extraLinks.innerHTML = '';
         const archMap: Record<string, string[]> = {
           'windows-x64-setup': ['windows-x64-installer'],
           'android-arm64': ['android-x86'],
-          'linux-x64-appimage': ['linux-x64-deb'],
         };
         const extras = archMap[platformKey] || [];
         for (const extraKey of extras) {
@@ -363,16 +348,15 @@ const platforms = [
           const labelMap: Record<string, string> = {
             'windows-x64-installer': 'MSI 安装包',
             'android-x86': 'x86 版本',
-            'linux-x64-deb': 'DEB 包',
           };
           const label = labelMap[extraKey] || extraKey;
           const href = `/api/download/${data.channel}/${latest.version}/${extraKey}`;
-          extraLinks.innerHTML += `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand hover:text-brand-600 transition-colors underline underline-offset-2">${label}${extraAsset.size ? ' (' + formatSize(extraAsset.size) + ')' : ''}</a>`;
+          extraLinks.innerHTML += `<a href="${href}" target="_blank" rel="noopener noreferrer" class="text-xs text-brand underline underline-offset-2 transition-colors hover:text-brand-600">${label}${extraAsset.size ? ' (' + formatSize(extraAsset.size) + ')' : ''}</a>`;
         }
       }
 
-      if (loaded) loaded.classList.remove('hidden');
-      if (error) error.classList.add('hidden');
+      loaded?.classList.remove('hidden');
+      error?.classList.add('hidden');
     });
   }
 
@@ -387,14 +371,10 @@ const platforms = [
           (v: any) => `
         <div class="flex items-center justify-between rounded-xl border border-stone-200 bg-white px-6 py-4 dark:border-stone-800 dark:bg-stone-900">
           <div>
-            <span class="font-medium text-stone-900 dark:text-stone-50">v${v.version}</span>
+            <span class="font-medium text-stone-900 dark:text-stone-50">${v.version.startsWith('v') ? v.version : `v${v.version}`}</span>
             ${v.published_at ? `<span class="ml-3 text-xs text-stone-400">${formatDate(v.published_at)}</span>` : ''}
           </div>
-          <a href="https://github.com/exomind-team/exomind/releases/tag/${encodeURIComponent(v.tag || v.version)}"
-             target="_blank" rel="noopener noreferrer"
-             class="text-sm font-medium text-brand hover:text-brand-600 transition-colors">
-            查看
-          </a>
+          <span class="text-xs text-stone-400">${v.tag || 'preview build'}</span>
         </div>
       `
         )
@@ -406,7 +386,7 @@ const platforms = [
 
     if (versions.length > INITIAL_COUNT) {
       versionListExpand.classList.remove('hidden');
-      const expandBtn = versionListExpand.querySelector('button')!;
+      const expandBtn = versionListExpand.querySelector('button') as HTMLButtonElement;
       expandBtn.textContent = showAll ? '收起' : '查看更多版本';
       expandBtn.onclick = () => {
         showAll = !showAll;
@@ -418,6 +398,5 @@ const platforms = [
     }
   }
 
-  // --- Init ---
   loadChannel('release');
 </script>

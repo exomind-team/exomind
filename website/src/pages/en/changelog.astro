@@ -6,30 +6,43 @@ const t = useTranslations('en');
 
 const changelog = [
   {
-    version: 'v0.3.2',
-    date: 'Feb 22, 2026',
+    version: 'v0.3.6 In Development',
+    date: 'Not formally released',
     changes: [
-      { type: 'Feature', text: 'Desktop adaptation' },
-      { type: 'Feature', text: 'Command palette' },
-      { type: 'Fix', text: 'Sync scroll' },
+      { type: 'Feature', text: 'The task system keeps evolving around unified TaskNode semantics, dependency handling, and tighter today/timeblock linkage' },
+      { type: 'Feature', text: 'Reminders, Agent Hub / network capabilities, and runtime-mesh work continue to land on the development line' },
+      { type: 'Improvement', text: 'Agent and LLM integration is moving from Claude CLI toward OpenAI-compatible APIs and a unified session abstraction' },
+      { type: 'Note', text: 'This reflects current development-line progress. The repository does not yet contain a formal release/v0.3.6 tag' },
+    ],
+  },
+  {
+    version: 'v0.3.5',
+    date: 'Mar 6, 2026 (Released)',
+    changes: [
+      { type: 'Feature', text: 'Agent Hub UI reached the full T1-T9 scope with nodes, routes, topology, history, and detail side panels' },
+      { type: 'Feature', text: 'Desktop adaptation was completed, together with history/chat flows, lifecycle controls, and Android-safe shortcuts' },
+      { type: 'Fix', text: 'The voice shortcut flow was repaired and multi-round ASR became more stable' },
+      { type: 'Improvement', text: 'The release pipeline unblocked Linux and macOS builds for the official v0.3.5 release' },
+    ],
+  },
+  {
+    version: 'v0.3.2',
+    date: 'Feb 22, 2026 (Released)',
+    changes: [
+      { type: 'Feature', text: 'The first command palette shipped, along with follow-up fixes for scrolling and entry switching' },
+      { type: 'Feature', text: 'The new UI became the default entry while still preserving a fallback path' },
+      { type: 'Feature', text: 'Agent page toggles, Agent/Actor details, and device-view related UI iterations landed' },
+      { type: 'Improvement', text: 'Build-tag, prerelease, and website foundations continued to solidify ahead of later public distribution work' },
     ],
   },
   {
     version: 'v0.3.1',
-    date: 'Feb 15, 2026',
+    date: 'Feb 15, 2026 (Released)',
     changes: [
-      { type: 'Feature', text: 'Event log UI redesign' },
-      { type: 'Feature', text: 'Time block timer' },
-      { type: 'Improvement', text: 'Performance' },
-    ],
-  },
-  {
-    version: 'v0.3.0',
-    date: 'Feb 1, 2026',
-    changes: [
-      { type: 'Feature', text: 'AI agent framework' },
-      { type: 'Feature', text: 'Local storage engine' },
-      { type: 'Feature', text: 'Cross-platform builds' },
+      { type: 'Feature', text: 'The light-theme new UI reached a fully usable stage' },
+      { type: 'Feature', text: 'Settings gained multi-user management and focus-card responsiveness fixes' },
+      { type: 'Feature', text: 'Chat message copy support shipped' },
+      { type: 'Improvement', text: 'The new focus timer card interactions and end-state settings were further refined' },
     ],
   },
 ];
@@ -39,6 +52,7 @@ function tagClasses(type: string) {
     case 'Feature': return 'bg-brand-50 text-brand-700 dark:bg-brand-900/30 dark:text-brand-300';
     case 'Fix': return 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-300';
     case 'Improvement': return 'bg-green-50 text-green-700 dark:bg-green-900/30 dark:text-green-300';
+    case 'Note': return 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-300';
     default: return 'bg-stone-100 text-stone-600 dark:bg-stone-800 dark:text-stone-400';
   }
 }
@@ -54,6 +68,9 @@ function tagClasses(type: string) {
         </h1>
         <p class="mt-4 text-lg leading-relaxed text-stone-500">
           {t('changelog.subtitle')}
+        </p>
+        <p class="mt-3 text-sm leading-relaxed text-stone-400">
+          Note: released versions are summarized from real `release/*` tags in the repository. `v0.3.6` currently represents development-line progress, not a formal release tag.
         </p>
       </div>
     </div>

@@ -10,7 +10,9 @@ interface Props {
 }
 
 const lang = getLangFromUrl(Astro.url);
-const defaultDescription = lang === 'zh' ? 'ExoMind - 你的生命成长助手' : 'ExoMind - Your Life Growth Companion';
+const defaultDescription = lang === 'zh'
+  ? 'ExoMind - 本地优先、事件驱动的个人 AI 外心系统'
+  : 'ExoMind - A local-first, event-driven personal AI exomind system';
 const { title, description = defaultDescription } = Astro.props;
 const themeBootScript = String.raw`
 (() => {

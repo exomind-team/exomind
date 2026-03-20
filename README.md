@@ -1,6 +1,6 @@
 # ExoMind
 
-> 本地优先（Local-first / 本地优先）的个人 AI 助手，聚焦事件日志（Event Log / 事件日志）、时间块（TimeBlock / 时间块）与多端同步（Multi-device Sync / 多端同步）。
+> 本地优先（Local-first / 本地优先）、事件驱动（Event-driven / 事件驱动）的个人 AI 外心系统，目标是把记忆、Agent 与工作流重新组织到你自己的设备上。
 
 ## CI/CD
 
@@ -10,13 +10,19 @@
 
 ExoMind 是一个基于 Tauri v2 的跨平台应用（Windows/macOS/Linux/Android），前端使用 React + TypeScript，数据层使用 PouchDB（IndexedDB）并支持局域网同步。
 
+它当前聚焦三个方向：
+
+- 认知主权（Cognitive Sovereignty / 认知主权）：数据、记忆、行为记录优先留在你自己的设备。
+- 事件日志（Event Log / 事件日志）：把事实沉淀成可追溯的长期记忆。
+- Agent 工作空间（Agent Workspace / Agent 工作空间）：让 Agent 在你的上下文里感知、思考、行动，而不是只停留在聊天窗口。
+
 当前主线版本：
 
-- App Version（应用版本）: `0.2.1`
+- App Version（应用版本）: `0.3.6`
 - Package Name（包名）: `com.exomind.app`
 - Rust Crate（Rust 包名）: `exomind`
 
-## 当前功能（v0.2.1）
+## 当前能力（v0.3.6）
 
 | 模块                     | 状态     | 说明                                                |
 | ------------------------ | -------- | --------------------------------------------------- |
