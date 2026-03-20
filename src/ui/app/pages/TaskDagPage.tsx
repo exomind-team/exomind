@@ -205,6 +205,68 @@ function summarizeFlowViewport(
   };
 }
 
+function summarizeRenderedFlowNodes(): {
+  renderedCount: number;
+  renderedNodeIds: string[];
+  visibleRenderedCount: number;
+  visibleRenderedNodeIds: string[];
+  zeroRectNodeIds: string[];
+} {
+  if (typeof document === 'undefined') {
+    return {
+      renderedCount: 0,
+      renderedNodeIds: [],
+      visibleRenderedCount: 0,
+      visibleRenderedNodeIds: [],
+      zeroRectNodeIds: [],
+    };
+  }
+
+  const container = getTaskDagCanvasShell();
+  const containerRect = container?.getBoundingClientRect() ?? null;
+  const elements = Array.from(
+    document.querySelectorAll<HTMLElement>('.react-flow__node[data-id]'),
+  );
+
+  const renderedNodeIds: string[] = [];
+  const visibleRenderedNodeIds: string[] = [];
+  const zeroRectNodeIds: string[] = [];
+
+  for (const element of elements) {
+    const nodeId = element.dataset.id ?? '';
+    if (!nodeId) {
+      continue;
+    }
+
+    renderedNodeIds.push(nodeId);
+    const rect = element.getBoundingClientRect();
+    if (rect.width === 0 || rect.height === 0) {
+      zeroRectNodeIds.push(nodeId);
+      continue;
+    }
+
+    if (containerRect) {
+      const intersectsContainer = (
+        rect.right >= containerRect.left
+        && rect.left <= containerRect.right
+        && rect.bottom >= containerRect.top
+        && rect.top <= containerRect.bottom
+      );
+      if (intersectsContainer) {
+        visibleRenderedNodeIds.push(nodeId);
+      }
+    }
+  }
+
+  return {
+    renderedCount: renderedNodeIds.length,
+    renderedNodeIds,
+    visibleRenderedCount: visibleRenderedNodeIds.length,
+    visibleRenderedNodeIds,
+    zeroRectNodeIds,
+  };
+}
+
 function buildExecutionHint(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
   if (task.status === 'completed') {
     return '该任务已经完成，可双击进入详情页回顾依赖关系与时间记录。';
@@ -978,6 +1040,18 @@ export function TaskDagPage() {
       edgeCount: flowGraph.edges.length,
       layoutSummary,
     });
+
+    const rafId = window.requestAnimationFrame(() => {
+      debugTaskDagExecute('flowGraph:dom-update', {
+        resolvedDirection,
+        nodeCount: flowGraph.nodes.length,
+        domSummary: summarizeRenderedFlowNodes(),
+      });
+    });
+
+    return () => {
+      window.cancelAnimationFrame(rafId);
+    };
   }, [flowGraph.edges, flowGraph.nodes, resolvedDirection]);
 
   useEffect(() => {
