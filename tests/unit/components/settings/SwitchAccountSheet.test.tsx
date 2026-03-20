@@ -3,10 +3,20 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { SwitchAccountSheet } from '@/ui/app/components/SwitchAccountSheet';
 
+vi.mock('@/components/ui/dialog', () => ({
+  Dialog: ({ children, open }: { children: ReactNode; open: boolean }) => (open ? <div data-testid="mock-dialog-root">{children}</div> : null),
+  DialogContent: ({ children, className }: { children: ReactNode; className?: string }) => <div data-testid="mock-dialog-content" className={className}>{children}</div>,
+  DialogTitle: ({ children, className }: { children: ReactNode; className?: string }) => <div className={className}>{children}</div>,
+}));
+
 vi.mock('@/components/ui/drawer', () => ({
-  Drawer: ({ children, open }: { children: ReactNode; open: boolean }) => (open ? <div>{children}</div> : null),
-  DrawerContent: ({ children }: { children: ReactNode }) => <div>{children}</div>,
-  DrawerTitle: ({ children }: { children: ReactNode }) => <div>{children}</div>,
+  Drawer: ({ children, open }: { children: ReactNode; open: boolean }) => (open ? <div data-testid="mock-drawer-root">{children}</div> : null),
+  DrawerContent: ({ children, className }: { children: ReactNode; className?: string }) => <div data-testid="mock-drawer-content" className={className}>{children}</div>,
+  DrawerTitle: ({ children, className }: { children: ReactNode; className?: string }) => <div className={className}>{children}</div>,
+}));
+
+vi.mock('@/ui/app/hooks/useIsDesktop', () => ({
+  useIsDesktop: vi.fn(),
 }));
 
 vi.mock('@/lib/profile/profile-storage', () => ({
@@ -19,13 +29,16 @@ vi.mock('@/ui/stores/sync-store', () => ({
 
 import { listLocalProfiles } from '@/lib/profile/profile-storage';
 import { useSyncStore } from '@/ui/stores/sync-store';
+import { useIsDesktop } from '@/ui/app/hooks/useIsDesktop';
 
 const mockListLocalProfiles = vi.mocked(listLocalProfiles);
 const mockUseSyncStore = vi.mocked(useSyncStore);
+const mockUseIsDesktop = vi.mocked(useIsDesktop);
 
 describe('SwitchAccountSheet', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+    mockUseIsDesktop.mockReturnValue(false);
     mockListLocalProfiles.mockReturnValue([
       {
         profileId: 'profile-1',
@@ -38,6 +51,70 @@ describe('SwitchAccountSheet', () => {
         defaultSyncPolicy: 'local-only',
       },
     ] as any);
+  });
+
+  it('uses Drawer on mobile and Dialog on desktop（移动端 Drawer，桌面端 Dialog）', () => {
+    mockUseSyncStore.mockReturnValue({
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn().mockResolvedValue(undefined),
+      isLoggedIn: true,
+      activeProfileId: 'profile-1',
+    } as any);
+
+    const { rerender } = render(
+      <SwitchAccountSheet
+        open
+        onOpenChange={vi.fn()}
+        initialMode="switch"
+      />
+    );
+
+    expect(screen.getByTestId('mock-drawer-root')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-dialog-root')).toBeNull();
+
+    mockUseIsDesktop.mockReturnValue(true);
+    rerender(
+      <SwitchAccountSheet
+        open
+        onOpenChange={vi.fn()}
+        initialMode="switch"
+      />
+    );
+
+    expect(screen.getByTestId('mock-dialog-root')).toBeInTheDocument();
+    expect(screen.queryByTestId('mock-drawer-root')).toBeNull();
+  });
+
+  it('adds dark mode classes to desktop and mobile container（容器带深色模式类）', () => {
+    mockUseSyncStore.mockReturnValue({
+      login: vi.fn(),
+      register: vi.fn(),
+      logout: vi.fn().mockResolvedValue(undefined),
+      isLoggedIn: true,
+      activeProfileId: 'profile-1',
+    } as any);
+
+    const { rerender } = render(
+      <SwitchAccountSheet
+        open
+        onOpenChange={vi.fn()}
+        initialMode="switch"
+      />
+    );
+
+    expect(screen.getByTestId('mock-drawer-content').className).toContain('dark:bg-[#1C1917]');
+
+    mockUseIsDesktop.mockReturnValue(true);
+    rerender(
+      <SwitchAccountSheet
+        open
+        onOpenChange={vi.fn()}
+        initialMode="switch"
+      />
+    );
+
+    expect(screen.getByTestId('mock-dialog-content').className).toContain('dark:bg-[#1C1917]');
   });
 
   it('shows logout entry when local profile is active（打开档案后显示退出入口）', () => {
