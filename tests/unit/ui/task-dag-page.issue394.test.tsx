@@ -1,6 +1,6 @@
 import type { ReactNode } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { TaskDagPage } from '@/ui/app/pages/TaskDagPage';
 import type { TaskNode } from '@/lib/types/task';
 
@@ -1005,6 +1005,85 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
 
     fireEvent.click(screen.getByTestId('mock-react-flow-node-task-b'));
     expect(startBlockForTaskMock).toHaveBeenCalledTimes(1);
+  });
+
+  it('ignores stale task reload results so execute-mode updates do not collapse the dag to one node', async () => {
+    let taskChangeCallback: (() => void) | null = null;
+    let resolveStaleReload: ((tasks: TaskNode[]) => void) | null = null;
+
+    onTaskChangeMock.mockImplementation((callback) => {
+      taskChangeCallback = callback;
+      return () => {};
+    });
+
+    listTasksMock
+      .mockResolvedValueOnce([
+        makeTask({ id: 'task-root', title: '测试根', createdAt: 10, updatedAt: 10 }),
+        makeTask({
+          id: 'task-child',
+          title: '下级任务',
+          createdAt: 20,
+          updatedAt: 20,
+          dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+        }),
+        makeTask({
+          id: 'task-grandchild',
+          title: '再下级任务',
+          createdAt: 30,
+          updatedAt: 30,
+          dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+        }),
+      ])
+      .mockImplementationOnce(() => new Promise<TaskNode[]>((resolve) => {
+        resolveStaleReload = resolve;
+      }))
+      .mockResolvedValueOnce([
+        makeTask({ id: 'task-root', title: '测试根', status: 'in_progress', createdAt: 10, updatedAt: 40 }),
+        makeTask({
+          id: 'task-child',
+          title: '下级任务',
+          status: 'suspended',
+          createdAt: 20,
+          updatedAt: 41,
+          dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+        }),
+        makeTask({
+          id: 'task-grandchild',
+          title: '再下级任务',
+          createdAt: 30,
+          updatedAt: 42,
+          dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+        }),
+      ]);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-root')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-child')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-grandchild')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+
+    await act(async () => {
+      taskChangeCallback?.();
+      taskChangeCallback?.();
+    });
+
+    await waitFor(() => {
+      expect(listTasksMock).toHaveBeenCalledTimes(3);
+    });
+
+    resolveStaleReload?.([
+      makeTask({ id: 'task-root', title: '测试根', status: 'in_progress', createdAt: 10, updatedAt: 39 }),
+    ]);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-root')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-child')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-grandchild')).toBeInTheDocument();
+    });
   });
 
   it('opens the multi-task end dialog in execute mode and submits task outcomes', async () => {

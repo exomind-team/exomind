@@ -80,6 +80,7 @@ const TASK_DAG_DIRECTION_STORAGE_KEY = 'exomind:dag-direction';
 const TASK_DAG_HIDE_TERMINAL_KEY = 'exomind:dag-hide-terminal';
 const TASK_DAG_IMMERSIVE_KEY = 'exomind:dag-immersive';
 const TASK_DAG_VIEWPORT_KEY = 'exomind:dag-viewport';
+const TASK_DAG_EXECUTE_DEBUG_TAG = '[TaskDag][ExecuteDebug]';
 
 const TASK_STATUS_LABELS: Record<TaskStatus, string> = {
   pending: '待办',
@@ -107,6 +108,19 @@ function resolveTaskDagExecutionLabel(task: TaskNode, isBlocked: boolean, isExec
   if (isBlocked) return '受阻';
   if (isExecutable) return '可执行';
   return '待处理';
+}
+
+function debugTaskDagExecute(message: string, payload?: Record<string, unknown>): void {
+  if (!import.meta.env.DEV || typeof console === 'undefined') {
+    return;
+  }
+
+  if (payload) {
+    console.log(TASK_DAG_EXECUTE_DEBUG_TAG, message, payload);
+    return;
+  }
+
+  console.log(TASK_DAG_EXECUTE_DEBUG_TAG, message);
 }
 
 function buildExecutionHint(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
@@ -554,6 +568,7 @@ export function TaskDagPage() {
   const connectDragTypeRef = useRef<DagConnectType>('hard');
   const hasMountedDirectionRef = useRef(false);
   const hasAppliedInitialViewportRef = useRef(false);
+  const taskLoadRequestIdRef = useRef(0);
 
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
@@ -598,16 +613,42 @@ export function TaskDagPage() {
     let disposed = false;
     const taskService = getTaskService();
 
-    const load = async () => {
+    const load = async (reason: 'mount' | 'task-change') => {
+      const requestId = ++taskLoadRequestIdRef.current;
+      debugTaskDagExecute('loadTasks:start', {
+        reason,
+        requestId,
+      });
       const list = await taskService.listTasks(true);
-      if (!disposed) {
-        setTasks(list);
+      if (disposed) {
+        debugTaskDagExecute('loadTasks:skip-disposed', {
+          reason,
+          requestId,
+        });
+        return;
       }
+      if (requestId !== taskLoadRequestIdRef.current) {
+        debugTaskDagExecute('loadTasks:skip-stale', {
+          reason,
+          requestId,
+          latestRequestId: taskLoadRequestIdRef.current,
+          taskIds: list.map((task) => task.id),
+        });
+        return;
+      }
+
+      debugTaskDagExecute('loadTasks:apply', {
+        reason,
+        requestId,
+        taskIds: list.map((task) => task.id),
+      });
+      setTasks(list);
     };
 
-    void load();
+    void load('mount');
     const unsubscribe = taskService.onTaskChange(() => {
-      void load();
+      debugTaskDagExecute('taskChange:event');
+      void load('task-change');
     });
 
     return () => {
@@ -623,6 +664,12 @@ export function TaskDagPage() {
     const load = async () => {
       const block = await timeBlockService.loadActiveBlock();
       if (!disposed) {
+        debugTaskDagExecute('activeBlock:load', {
+          blockStartId: block?.startId ?? null,
+          taskIds: block ? resolveActiveBlockTaskIds(block) : [],
+          phase: block?.phase ?? null,
+          paused: block?.paused ?? null,
+        });
         setActiveBlock(block);
       }
     };
@@ -630,6 +677,12 @@ export function TaskDagPage() {
     void load();
     const unsubscribe = timeBlockService.onBlockChange((block) => {
       if (!disposed) {
+        debugTaskDagExecute('activeBlock:onBlockChange', {
+          blockStartId: block?.startId ?? null,
+          taskIds: block ? resolveActiveBlockTaskIds(block) : [],
+          phase: block?.phase ?? null,
+          paused: block?.paused ?? null,
+        });
         setActiveBlock(block);
       }
     });
@@ -739,6 +792,18 @@ export function TaskDagPage() {
       searchMatchedTaskIds.has(node.id) ? count + 1 : count
     ), 0);
   }, [renderedVisibleGraph.nodes, searchMatchedTaskIds, searchQuery]);
+
+  useEffect(() => {
+    debugTaskDagExecute('visibleGraph:update', {
+      mode,
+      taskIds: tasks.map((task) => task.id),
+      activeTaskIds,
+      visibleNodeIds: renderedVisibleGraph.nodes.map((node) => node.id),
+      hiddenNodeIds: renderedVisibleGraph.hiddenNodeIds,
+      collapsedUpstreamOf: dagVisibility.collapsedUpstreamOf,
+      collapsedDownstreamOf: dagVisibility.collapsedDownstreamOf,
+    });
+  }, [activeTaskIds, dagVisibility, mode, renderedVisibleGraph.hiddenNodeIds, renderedVisibleGraph.nodes, tasks]);
 
   useEffect(() => {
     if (selectedTaskId && !visibleNodeIdSet.has(selectedTaskId)) {
@@ -1136,6 +1201,14 @@ export function TaskDagPage() {
   const handleExecuteNodeClick = async (nodeId: string) => {
     setContextMenu(null);
     setSelectedTaskId(nodeId);
+    debugTaskDagExecute('handleExecuteNodeClick', {
+      nodeId,
+      activeTaskIds,
+      activeBlockStartId: activeBlock?.startId ?? null,
+      activeBlockPhase: activeBlock?.phase ?? null,
+      taskIds: tasks.map((task) => task.id),
+      visibleNodeIds: renderedVisibleGraph.nodes.map((node) => node.id),
+    });
 
     const task = taskById.get(nodeId);
     const graphNode = graphNodeById.get(nodeId);
