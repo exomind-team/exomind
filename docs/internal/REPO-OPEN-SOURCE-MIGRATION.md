@@ -14,7 +14,7 @@
 
 | 决策项 | 结论 |
 |--------|------|
-| 方案 | C 过滤克隆（新仓库 + 过滤历史） |
+| 方案 | C 过滤克隆（新仓库 `exomind-app` + 过滤历史） |
 | 工具 | git-filter-repo |
 | 代码边界 | 认知生命理论相关的代码也要隔离 |
 | 历史保留 | 尽量保留完整（非 squash） |
@@ -310,34 +310,30 @@ cargo test
 
 ### Phase 3: 发布（估计 30 分钟）
 
-#### 2.3.1 重命名原仓库
-
-```bash
-# 将原仓库改名为 exomind-legacy
-gh repo rename exomind-legacy --repo exomind-team/exomind --yes
-```
-
-#### 2.3.2 创建新仓库并推送
+#### 2.3.1 创建新仓库并推送
 
 ```bash
 # 创建新的公开仓库（先私有创建，验证后再公开）
-gh repo create exomind-team/exomind --private --description "ExoMind - Personal & Collective Growth Assistant"
+gh repo create exomind-team/exomind-app --private --description "ExoMind - Personal & Collective Growth Assistant"
 
 # 推送过滤后的历史
 cd /tmp/exomind-clean
-git remote add public https://github.com/exomind-team/exomind.git
+git remote add public https://github.com/exomind-team/exomind-app.git
 git push public --all
 git push public --tags
 ```
 
-#### 2.3.3 配置新仓库
+> **注意**：原仓库 `exomind-team/exomind` 保持不动（私有），无需改名。
+> 接受 URL 从 `exomind-team/exomind` 变为 `exomind-team/exomind-app`。
+
+#### 2.3.2 配置新仓库
 
 ```bash
 # 设置默认分支
-gh api repos/exomind-team/exomind -X PATCH -f default_branch=main
+gh api repos/exomind-team/exomind-app -X PATCH -f default_branch=main
 
 # 配置分支保护（按需）
-# gh api repos/exomind-team/exomind/branches/main/protection ...
+# gh api repos/exomind-team/exomind-app/branches/main/protection ...
 
 # 迁移 Secrets（手动在 GitHub Settings 中操作）
 # - CLOUDFLARE_API_TOKEN
@@ -346,14 +342,14 @@ gh api repos/exomind-team/exomind -X PATCH -f default_branch=main
 
 # 迁移 CI/CD workflows（已在代码中，自动可用）
 # 验证 GitHub Actions 是否正常
-gh workflow list --repo exomind-team/exomind
+gh workflow list --repo exomind-team/exomind-app
 ```
 
-#### 2.3.4 最终公开
+#### 2.3.3 最终公开
 
 ```bash
 # 确认一切正常后，设为公开
-gh repo edit exomind-team/exomind --visibility public
+gh repo edit exomind-team/exomind-app --visibility public
 ```
 
 ---
@@ -370,7 +366,7 @@ gh repo create exomind-team/exomind-theory --private --description "ExoMind Cogn
 
 ```bash
 # 从原始仓库克隆
-git clone https://github.com/exomind-team/exomind-legacy /tmp/exomind-theory
+git clone https://github.com/exomind-team/exomind /tmp/exomind-theory
 cd /tmp/exomind-theory
 
 # 使用 filter-repo 只保留理论文件（白名单模式）
@@ -401,10 +397,10 @@ git push theory --tags
 
 ```bash
 # 重新克隆公开仓库作为主开发目录
-git clone https://github.com/exomind-team/exomind ~/projects/exomind
+git clone https://github.com/exomind-team/exomind-app ~/projects/exomind-app
 
 # 安装依赖
-cd ~/projects/exomind
+cd ~/projects/exomind-app
 bun install
 
 # 验证开发环境
@@ -415,20 +411,20 @@ bun dev
 
 ## 3. 迁移后的日常工作流
 
-### 3.1 公开仓库（主战场）
+### 3.1 公开仓库 `exomind-app`（主战场）
 
 - 所有日常开发在此进行
 - Issue、PR、CI/CD 全在此
 - 不包含任何认知生命理论内容
 
-### 3.2 理论私有仓库（低频）
+### 3.2 理论私有仓库 `exomind-theory`（低频）
 
 - 仅在需要修改/扩展认知生命理论代码时使用
 - 未来如需将理论代码集成到公开版，可通过 git submodule 或 npm/crate 包方式
 
-### 3.3 遗留仓库（存档）
+### 3.3 原仓库 `exomind`（存档）
 
-- `exomind-legacy` 保持私有
+- 保持私有，不改名
 - 仅作为回溯参考，不再活跃开发
 - 可在确认迁移完全成功后归档（Archive）
 
@@ -444,7 +440,7 @@ bun dev
 | 公开后发现残留 | 低 | 高 | 立即私有化，从原仓库重做 |
 | 理论仓库历史不完整 | 低 | 低 | 从 exomind-legacy 重新提取 |
 
-**总体回退策略**：原仓库（exomind-legacy）始终完好无损，任何阶段都可以从头重做。
+**总体回退策略**：原仓库（`exomind-team/exomind`）始终完好无损，任何阶段都可以从头重做。
 
 ---
 
@@ -474,8 +470,7 @@ bun dev
 - [ ] 人工抽查完成
 
 ### Phase 3 发布
-- [ ] 原仓库已改名为 exomind-legacy
-- [ ] 新仓库已创建
+- [ ] 新仓库 `exomind-app` 已创建
 - [ ] 历史已推送
 - [ ] 默认分支已设置
 - [ ] Secrets 已迁移
@@ -485,8 +480,8 @@ bun dev
 ### Phase 4 归档
 - [ ] 理论私有仓库已创建
 - [ ] 理论文件已提取并推送
-- [ ] 本地开发环境已切换到新仓库
-- [ ] exomind-legacy 已 Archive
+- [ ] 本地开发环境已切换到 exomind-app
+- [ ] 原仓库 exomind 已 Archive
 
 ---
 
