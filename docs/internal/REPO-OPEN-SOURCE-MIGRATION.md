@@ -20,7 +20,7 @@
 | 历史保留 | 尽量保留完整（非 squash） |
 | 开发主体 | 公开仓库主导 |
 | Issue/PR | 可以抛弃 |
-| 理论归属 | 单独私有仓库 |
+| 理论归属 | `exomind-team/exomind-team` 集体库 |
 
 **选择理由**：方案 C 是帕累托最优解——在安全性(5)、历史保留(5)、可逆性(5)、维护成本(5)上均为最优，加权总分 111 分（满分 125），高于方案 A 的 96 分。
 
@@ -356,44 +356,51 @@ gh repo edit exomind-team/exomind-app --visibility public
 
 ### Phase 4: 理论归档（估计 30 分钟）
 
-#### 2.4.1 创建理论私有仓库
+#### 2.4.1 提取理论文件到集体库
+
+将理论文件从原仓库提取，归入已有的 `exomind-team/exomind-team` 集体库。
 
 ```bash
-gh repo create exomind-team/exomind-theory --private --description "ExoMind Cognitive Life Science Theory (Private)"
+# 克隆集体库
+git clone https://github.com/exomind-team/exomind-team /tmp/exomind-team-repo
+cd /tmp/exomind-team-repo
+
+# 创建 exomind-theory/ 子目录，手动复制理论文件
+mkdir -p exomind-theory/{code,docs,architecture,specs}
+
+# 从原仓库复制理论代码
+cp /path/to/exomind/crates/exomind-runtime/src/agent/life.rs       exomind-theory/code/
+cp /path/to/exomind/crates/exomind-runtime/src/agent/cognition.rs  exomind-theory/code/
+cp /path/to/exomind/crates/exomind-runtime/src/agent/llm_cognition.rs exomind-theory/code/
+cp /path/to/exomind/crates/exomind-runtime/src/agent/heartbeat.rs  exomind-theory/code/
+cp /path/to/exomind/crates/exomind-runtime/src/energy.rs           exomind-theory/code/
+cp /path/to/exomind/crates/exomind-runtime/src/routes/energy.rs    exomind-theory/code/
+cp /path/to/exomind/crates/exomind-runtime/src/tick.rs             exomind-theory/code/
+
+# 从原仓库复制理论文档
+cp /path/to/exomind/docs/plans/archive/AUTONOMOUS_LIFE_SPEC.md     exomind-theory/docs/
+cp /path/to/exomind/docs/plans/2026-03-07-personal-growth-to-civilization-roadmap.md exomind-theory/docs/
+cp /path/to/exomind/docs/plans/product-plan.md                     exomind-theory/docs/
+cp /path/to/exomind/docs/plans/2026-03-08-life-demo-energy-tick.md exomind-theory/docs/
+cp /path/to/exomind/docs/memory/logs.md                            exomind-theory/docs/
+cp /path/to/exomind/docs/memory/project-overview.md                exomind-theory/docs/
+
+# 从原仓库复制理论架构文档
+cp /path/to/exomind/docs/architecture/ARCH-signal-pool-agent-process.md exomind-theory/architecture/
+cp /path/to/exomind/docs/specs/.archive/SPEC-004_ENERGY_POOL.md    exomind-theory/specs/
+
+# 复制内部文档
+cp -r /path/to/exomind/docs/internal/ exomind-theory/internal/
+
+# 提交
+git add exomind-theory/
+git commit -m "docs: archive exomind cognitive life science theory
+
+Ref: exomind-team/exomind#613"
+git push origin main
 ```
 
-#### 2.4.2 提取理论文件
-
-```bash
-# 从原始仓库克隆
-git clone https://github.com/exomind-team/exomind /tmp/exomind-theory
-cd /tmp/exomind-theory
-
-# 使用 filter-repo 只保留理论文件（白名单模式）
-git filter-repo \
-  --path crates/exomind-runtime/src/agent/life.rs \
-  --path crates/exomind-runtime/src/agent/cognition.rs \
-  --path crates/exomind-runtime/src/agent/llm_cognition.rs \
-  --path crates/exomind-runtime/src/agent/heartbeat.rs \
-  --path crates/exomind-runtime/src/energy.rs \
-  --path crates/exomind-runtime/src/routes/energy.rs \
-  --path crates/exomind-runtime/src/tick.rs \
-  --path docs/plans/archive/AUTONOMOUS_LIFE_SPEC.md \
-  --path docs/plans/2026-03-07-personal-growth-to-civilization-roadmap.md \
-  --path docs/plans/product-plan.md \
-  --path docs/plans/2026-03-08-life-demo-energy-tick.md \
-  --path docs/architecture/ARCH-signal-pool-agent-process.md \
-  --path docs/specs/.archive/SPEC-004_ENERGY_POOL.md \
-  --path docs/internal/ \
-  --force
-
-# 推送到理论仓库
-git remote add theory https://github.com/exomind-team/exomind-theory.git
-git push theory --all
-git push theory --tags
-```
-
-#### 2.4.3 更新本地开发环境
+#### 2.4.2 更新本地开发环境
 
 ```bash
 # 重新克隆公开仓库作为主开发目录
@@ -417,8 +424,9 @@ bun dev
 - Issue、PR、CI/CD 全在此
 - 不包含任何认知生命理论内容
 
-### 3.2 理论私有仓库 `exomind-theory`（低频）
+### 3.2 集体库 `exomind-team`（低频）
 
+- 理论代码、文档、架构存放在 `exomind-theory/` 子目录下
 - 仅在需要修改/扩展认知生命理论代码时使用
 - 未来如需将理论代码集成到公开版，可通过 git submodule 或 npm/crate 包方式
 
@@ -438,7 +446,7 @@ bun dev
 | 编译依赖断裂 | 高 | 低 | Phase 1.4 修复，已预列可能需要修改的文件 |
 | CI/CD Secrets 遗漏 | 中 | 低 | 手动迁移，逐个验证 |
 | 公开后发现残留 | 低 | 高 | 立即私有化，从原仓库重做 |
-| 理论仓库历史不完整 | 低 | 低 | 从 exomind-legacy 重新提取 |
+| 理论文件遗漏 | 低 | 低 | 从原仓库 exomind 重新提取 |
 
 **总体回退策略**：原仓库（`exomind-team/exomind`）始终完好无损，任何阶段都可以从头重做。
 
@@ -478,8 +486,7 @@ bun dev
 - [ ] 仓库已设为 public
 
 ### Phase 4 归档
-- [ ] 理论私有仓库已创建
-- [ ] 理论文件已提取并推送
+- [ ] 理论文件已提取到 `exomind-team/exomind-team` 的 `exomind-theory/` 目录
 - [ ] 本地开发环境已切换到 exomind-app
 - [ ] 原仓库 exomind 已 Archive
 
