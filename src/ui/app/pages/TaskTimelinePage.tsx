@@ -563,16 +563,22 @@ function TimelineTaskTitleButton({
   taskTitle,
   isSelected,
   isHorizontal,
-  startPosition,
+  startPrimaryPx,
+  endPrimaryPx,
   collapsedPrimarySizePx,
+  viewportPrimaryOffsetPx,
+  viewportPrimarySizePx,
   onSelectTask,
 }: {
   taskId: string
   taskTitle: string
   isSelected: boolean
   isHorizontal: boolean
-  startPosition: number
+  startPrimaryPx: number
+  endPrimaryPx: number
   collapsedPrimarySizePx: number
+  viewportPrimaryOffsetPx: number
+  viewportPrimarySizePx: number
   onSelectTask: (taskId: string) => void
 }) {
   const labelRef = useRef<HTMLSpanElement | null>(null)
@@ -596,6 +602,19 @@ function TimelineTaskTitleButton({
   }, [collapsedPrimarySizePx, isHorizontal, taskTitle])
 
   const primarySizePx = isHovered ? expandedPrimarySizePx : collapsedPrimarySizePxState
+  const edgeInsetPx = isHorizontal ? TITLE_EDGE_INSET_PX : VERTICAL_TITLE_EDGE_INSET_PX
+  const viewportPrimaryEndPx = viewportPrimaryOffsetPx + viewportPrimarySizePx
+  const anchoredStartPrimaryPx = Math.max(startPrimaryPx + edgeInsetPx, viewportPrimaryOffsetPx + edgeInsetPx)
+  const maxRenderablePrimarySizePx = Math.max(endPrimaryPx - edgeInsetPx - anchoredStartPrimaryPx, 0)
+  const renderedPrimarySizePx = Math.min(primarySizePx, maxRenderablePrimarySizePx)
+  const shouldHide =
+    endPrimaryPx <= viewportPrimaryOffsetPx
+    || endPrimaryPx > viewportPrimaryEndPx
+    || renderedPrimarySizePx <= 0
+
+  if (shouldHide) {
+    return null
+  }
 
   return (
     <button
@@ -615,14 +634,14 @@ function TimelineTaskTitleButton({
       }`}
       style={isHorizontal
         ? {
-            left: `calc(${startPosition}% + ${TITLE_EDGE_INSET_PX}px)`,
+            left: `${anchoredStartPrimaryPx}px`,
             height: `${TITLE_BUTTON_THICKNESS_PX}px`,
-            width: `${primarySizePx}px`,
+            width: `${renderedPrimarySizePx}px`,
           }
         : {
-            top: `calc(${startPosition}% + ${VERTICAL_TITLE_EDGE_INSET_PX}px)`,
+            top: `${anchoredStartPrimaryPx}px`,
             width: `${VERTICAL_TITLE_BUTTON_THICKNESS_PX}px`,
-            height: `${primarySizePx}px`,
+            height: `${renderedPrimarySizePx}px`,
           }}
     >
       <span ref={labelRef} className={`block overflow-hidden ${isHorizontal ? 'truncate' : 'text-center'}`}>
@@ -694,6 +713,8 @@ function TimelineSwimLane({
   onSelectTask,
   onBackgroundClick,
   primaryCanvasSize,
+  viewportPrimaryOffsetPx,
+  viewportPrimarySizePx,
 }: {
   model: TaskTimelineModel
   displayTimeRange: { start: number; end: number }
@@ -703,6 +724,8 @@ function TimelineSwimLane({
   onSelectTask: (taskId: string | null) => void
   onBackgroundClick: () => void
   primaryCanvasSize: number
+  viewportPrimaryOffsetPx: number
+  viewportPrimarySizePx: number
 }) {
   const duration = displayTimeRange.end - displayTimeRange.start
   if (duration <= 0) {
@@ -767,6 +790,8 @@ function TimelineSwimLane({
                   0,
                 )
                 const isSelected = selectedTaskId === entry.taskId
+                const entryStartPx = (entryStartPosition / 100) * primaryCanvasSize
+                const entryEndPx = (entryEndPosition / 100) * primaryCanvasSize
 
                 return (
                   <div key={entry.taskId}>
@@ -775,8 +800,11 @@ function TimelineSwimLane({
                       taskTitle={entry.taskTitle}
                       isSelected={isSelected}
                       isHorizontal={true}
-                      startPosition={entryStartPosition}
+                      startPrimaryPx={entryStartPx}
+                      endPrimaryPx={entryEndPx}
                       collapsedPrimarySizePx={titleMaxWidthPx}
+                      viewportPrimaryOffsetPx={viewportPrimaryOffsetPx}
+                      viewportPrimarySizePx={viewportPrimarySizePx}
                       onSelectTask={onSelectTask}
                     />
                     {entry.segments.map((segment, index) => {
@@ -871,6 +899,8 @@ function TimelineSwimLane({
                 0,
               )
               const isSelected = selectedTaskId === entry.taskId
+              const entryStartPx = (entryStartPosition / 100) * primaryCanvasSize
+              const entryEndPx = (entryEndPosition / 100) * primaryCanvasSize
 
               return (
                 <div key={entry.taskId}>
@@ -879,8 +909,11 @@ function TimelineSwimLane({
                     taskTitle={entry.taskTitle}
                     isSelected={isSelected}
                     isHorizontal={false}
-                    startPosition={entryStartPosition}
+                    startPrimaryPx={entryStartPx}
+                    endPrimaryPx={entryEndPx}
                     collapsedPrimarySizePx={titleMaxHeightPx}
+                    viewportPrimaryOffsetPx={viewportPrimaryOffsetPx}
+                    viewportPrimarySizePx={viewportPrimarySizePx}
                     onSelectTask={onSelectTask}
                   />
                   {entry.segments.map((segment, index) => {
@@ -1010,6 +1043,7 @@ export function TaskTimelinePage() {
   const [isCustomScaleEditing, setIsCustomScaleEditing] = useState(false)
   const [customScaleDraft, setCustomScaleDraft] = useState(initialCustomScaleDraft)
   const [timelineViewportSize, setTimelineViewportSize] = useState({ width: 0, height: 0 })
+  const [timelineScrollOffset, setTimelineScrollOffset] = useState({ left: 0, top: 0 })
   const isHorizontalTimeline = resolveTimelineIsHorizontal(layoutMode, isDesktop)
   const scaleOptions = TIMELINE_SCALE_OPTIONS
   const selectedScaleIndex = isCustomScaleEditing || typeof range === 'object'
@@ -1134,6 +1168,10 @@ export function TaskTimelinePage() {
       setTimelineViewportSize({
         width: viewport.clientWidth,
         height: viewport.clientHeight,
+      })
+      setTimelineScrollOffset({
+        left: viewport.scrollLeft,
+        top: viewport.scrollTop,
       })
     }
 
@@ -1364,6 +1402,13 @@ export function TaskTimelinePage() {
         ref={scrollViewportRef}
         data-testid="task-timeline-scroll-viewport"
         onWheel={handleTimelineWheel}
+        onScroll={(event) => {
+          const currentTarget = event.currentTarget
+          setTimelineScrollOffset({
+            left: currentTarget.scrollLeft,
+            top: currentTarget.scrollTop,
+          })
+        }}
         onClick={(event) => {
           const target = event.target
           if (target instanceof HTMLElement && target === event.currentTarget) {
@@ -1381,6 +1426,8 @@ export function TaskTimelinePage() {
           onSelectTask={handleSelectTask}
           onBackgroundClick={handleTimelineBackgroundClick}
           primaryCanvasSize={timelineMetrics.primaryCanvasSize}
+          viewportPrimaryOffsetPx={isHorizontalTimeline ? timelineScrollOffset.left : timelineScrollOffset.top}
+          viewportPrimarySizePx={timelineMetrics.viewportPrimarySize}
         />
       </div>
 
