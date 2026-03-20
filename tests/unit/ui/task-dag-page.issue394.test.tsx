@@ -1086,6 +1086,248 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     });
   });
 
+  it('keeps all execute-mode nodes visible and leaves the viewport untouched across suspend and restart cycles', async () => {
+    let taskChangeCallback: (() => void) | null = null;
+    let blockChangeCallback: ((block: {
+      startId: string;
+      name: string;
+      mode: 'countup';
+      elapsed: number;
+      startTime: number;
+      paused: boolean;
+      phase: 'running';
+      taskIds: string[];
+      taskAssociationLog: [];
+    } | null) => void) | null = null;
+
+    let currentTasks: TaskNode[] = [
+      makeTask({ id: 'task-root', title: '测试根', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-child',
+        title: '下级任务',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+      }),
+      makeTask({
+        id: 'task-grandchild',
+        title: '再下级任务',
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+      }),
+    ];
+
+    onTaskChangeMock.mockImplementation((callback) => {
+      taskChangeCallback = callback;
+      return () => {};
+    });
+    onBlockChangeMock.mockImplementation((callback) => {
+      blockChangeCallback = callback;
+      return () => {};
+    });
+    listTasksMock.mockImplementation(async () => currentTasks);
+
+    const emitTaskAndBlock = async (
+      nextTasks: TaskNode[],
+      block: {
+        startId: string;
+        name: string;
+        mode: 'countup';
+        elapsed: number;
+        startTime: number;
+        paused: boolean;
+        phase: 'running';
+        taskIds: string[];
+        taskAssociationLog: [];
+      } | null,
+    ) => {
+      currentTasks = nextTasks;
+      await act(async () => {
+        blockChangeCallback?.(block);
+        taskChangeCallback?.();
+      });
+      await waitFor(() => {
+        expect(screen.getByTestId('mock-react-flow-node-task-root')).toBeInTheDocument();
+        expect(screen.getByTestId('mock-react-flow-node-task-child')).toBeInTheDocument();
+        expect(screen.getByTestId('mock-react-flow-node-task-grandchild')).toBeInTheDocument();
+      });
+    };
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-root')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-child')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-grandchild')).toBeInTheDocument();
+    });
+
+    fireEvent.click(screen.getByTestId('task-dag-mode-execute'));
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-root'));
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledWith('task-root', { mode: 'countup' });
+    });
+
+    await emitTaskAndBlock([
+      makeTask({ id: 'task-root', title: '测试根', status: 'in_progress', createdAt: 10, updatedAt: 40 }),
+      makeTask({
+        id: 'task-child',
+        title: '下级任务',
+        createdAt: 20,
+        updatedAt: 41,
+        dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+      }),
+      makeTask({
+        id: 'task-grandchild',
+        title: '再下级任务',
+        createdAt: 30,
+        updatedAt: 42,
+        dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+      }),
+    ], {
+      startId: 'block-1',
+      name: '执行时间块',
+      mode: 'countup',
+      elapsed: 0,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-root'],
+      taskAssociationLog: [],
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-child'));
+    await waitFor(() => {
+      expect(addTaskToBlockMock).toHaveBeenCalledWith('task-child');
+    });
+
+    await emitTaskAndBlock([
+      makeTask({ id: 'task-root', title: '测试根', status: 'in_progress', createdAt: 10, updatedAt: 50 }),
+      makeTask({
+        id: 'task-child',
+        title: '下级任务',
+        status: 'in_progress',
+        createdAt: 20,
+        updatedAt: 51,
+        dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+      }),
+      makeTask({
+        id: 'task-grandchild',
+        title: '再下级任务',
+        createdAt: 30,
+        updatedAt: 52,
+        dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+      }),
+    ], {
+      startId: 'block-1',
+      name: '执行时间块',
+      mode: 'countup',
+      elapsed: 3,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-root', 'task-child'],
+      taskAssociationLog: [],
+    });
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-child'));
+    expect(await screen.findByTestId('task-dag-disassociate-dialog')).toBeInTheDocument();
+    fireEvent.click(screen.getByTestId('task-dag-disassociate-submit'));
+
+    await waitFor(() => {
+      expect(removeTaskFromBlockMock).toHaveBeenCalledWith('task-child');
+    });
+    expect(transitionTaskMock).toHaveBeenCalledWith('task-child', 'suspended');
+
+    await emitTaskAndBlock([
+      makeTask({ id: 'task-root', title: '测试根', status: 'in_progress', createdAt: 10, updatedAt: 60 }),
+      makeTask({
+        id: 'task-child',
+        title: '下级任务',
+        status: 'suspended',
+        createdAt: 20,
+        updatedAt: 61,
+        dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+      }),
+      makeTask({
+        id: 'task-grandchild',
+        title: '再下级任务',
+        createdAt: 30,
+        updatedAt: 62,
+        dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+      }),
+    ], {
+      startId: 'block-1',
+      name: '执行时间块',
+      mode: 'countup',
+      elapsed: 8,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-root'],
+      taskAssociationLog: [],
+    });
+
+    await emitTaskAndBlock([
+      makeTask({ id: 'task-root', title: '测试根', status: 'suspended', createdAt: 10, updatedAt: 70 }),
+      makeTask({
+        id: 'task-child',
+        title: '下级任务',
+        status: 'suspended',
+        createdAt: 20,
+        updatedAt: 71,
+        dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+      }),
+      makeTask({
+        id: 'task-grandchild',
+        title: '再下级任务',
+        createdAt: 30,
+        updatedAt: 72,
+        dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+      }),
+    ], null);
+
+    fireEvent.click(screen.getByTestId('mock-react-flow-node-task-root'));
+    await waitFor(() => {
+      expect(startBlockForTaskMock).toHaveBeenCalledTimes(2);
+    });
+
+    await emitTaskAndBlock([
+      makeTask({ id: 'task-root', title: '测试根', status: 'in_progress', createdAt: 10, updatedAt: 80 }),
+      makeTask({
+        id: 'task-child',
+        title: '下级任务',
+        status: 'suspended',
+        createdAt: 20,
+        updatedAt: 81,
+        dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+      }),
+      makeTask({
+        id: 'task-grandchild',
+        title: '再下级任务',
+        createdAt: 30,
+        updatedAt: 82,
+        dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+      }),
+    ], {
+      startId: 'block-2',
+      name: '重新开始的时间块',
+      mode: 'countup',
+      elapsed: 0,
+      startTime: Date.now(),
+      paused: false,
+      phase: 'running',
+      taskIds: ['task-root'],
+      taskAssociationLog: [],
+    });
+
+    expect((flowApiMocks.lastProps as { nodes: Array<{ id: string }> }).nodes).toHaveLength(3);
+    expect(flowApiMocks.fitView).not.toHaveBeenCalled();
+    expect(flowApiMocks.setViewport).not.toHaveBeenCalled();
+    expect(flowApiMocks.setCenter).not.toHaveBeenCalled();
+  });
+
   it('opens the multi-task end dialog in execute mode and submits task outcomes', async () => {
     listTasksMock.mockResolvedValue([
       makeTask({ id: 'task-a', title: '进行中的任务', status: 'in_progress', createdAt: 10, updatedAt: 10 }),

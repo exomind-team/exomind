@@ -123,6 +123,20 @@ function debugTaskDagExecute(message: string, payload?: Record<string, unknown>)
   console.log(TASK_DAG_EXECUTE_DEBUG_TAG, message);
 }
 
+function snapshotViewport(
+  flowInstance: ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null,
+): { x: number; y: number; zoom: number } | null {
+  if (!flowInstance) {
+    return null;
+  }
+
+  try {
+    return flowInstance.getViewport();
+  } catch {
+    return null;
+  }
+}
+
 function buildExecutionHint(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
   if (task.status === 'completed') {
     return '该任务已经完成，可双击进入详情页回顾依赖关系与时间记录。';
@@ -748,6 +762,10 @@ export function TaskDagPage() {
     }
 
     const timeoutId = window.setTimeout(() => {
+      debugTaskDagExecute('viewport:fitView:direction-change', {
+        direction: resolvedDirection,
+        viewportBefore: snapshotViewport(flowInstanceRef.current),
+      });
       void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
     }, 50);
 
@@ -802,6 +820,7 @@ export function TaskDagPage() {
       hiddenNodeIds: renderedVisibleGraph.hiddenNodeIds,
       collapsedUpstreamOf: dagVisibility.collapsedUpstreamOf,
       collapsedDownstreamOf: dagVisibility.collapsedDownstreamOf,
+      viewport: snapshotViewport(flowInstanceRef.current),
     });
   }, [activeTaskIds, dagVisibility, mode, renderedVisibleGraph.hiddenNodeIds, renderedVisibleGraph.nodes, tasks]);
 
@@ -918,6 +937,10 @@ export function TaskDagPage() {
     }
 
     const timeoutId = window.setTimeout(() => {
+      debugTaskDagExecute('viewport:setViewport:restore-effect', {
+        direction: dagDirection,
+        viewport: storedViewport,
+      });
       flowInstanceRef.current?.setViewport(storedViewport);
     }, 50);
 
@@ -986,6 +1009,11 @@ export function TaskDagPage() {
 
     setSelectedTaskId(currentRootNodeId);
     const currentZoom = flowInstanceRef.current?.getViewport().zoom ?? 1;
+    debugTaskDagExecute('viewport:setCenter:jump-to-root', {
+      nodeId: currentRootNodeId,
+      zoom: currentZoom,
+      viewportBefore: snapshotViewport(flowInstanceRef.current),
+    });
     flowInstanceRef.current?.setCenter(
       currentRootNode.position.x + TASK_DAG_NODE_WIDTH / 2,
       currentRootNode.position.y + TASK_DAG_NODE_HEIGHT / 2,
@@ -1412,6 +1440,9 @@ export function TaskDagPage() {
           onToggleHideTerminal={() => setHideTerminal((value) => !value)}
           onToggleImmersive={() => setImmersive((value) => !value)}
           onFitView={() => {
+            debugTaskDagExecute('viewport:fitView:manual', {
+              viewportBefore: snapshotViewport(flowInstanceRef.current),
+            });
             void flowInstanceRef.current?.fitView(TASK_DAG_FIT_VIEW_OPTIONS);
           }}
           onJumpToCurrentRoot={renderedVisibleGraph.visibleCurrentRootNodeId ? handleJumpToCurrentRoot : undefined}
@@ -1453,10 +1484,17 @@ export function TaskDagPage() {
             zoomOnDoubleClick={false}
             onInit={(instance) => {
               flowInstanceRef.current = instance;
+              debugTaskDagExecute('viewport:onInit', {
+                viewport: snapshotViewport(instance),
+              });
               if (flowGraph.nodes.length > 0 && !hasAppliedInitialViewportRef.current) {
                 hasAppliedInitialViewportRef.current = true;
                 const storedViewport = readStoredDagViewport(dagDirection);
                 if (storedViewport) {
+                  debugTaskDagExecute('viewport:setViewport:on-init-restore', {
+                    direction: dagDirection,
+                    viewport: storedViewport,
+                  });
                   instance.setViewport(storedViewport);
                 }
               }
@@ -1464,6 +1502,10 @@ export function TaskDagPage() {
             onMoveEnd={() => {
               const viewport = flowInstanceRef.current?.getViewport();
               if (viewport) {
+                debugTaskDagExecute('viewport:onMoveEnd', {
+                  direction: dagDirection,
+                  viewport,
+                });
                 writeStoredDagViewport(dagDirection, viewport);
               }
             }}
