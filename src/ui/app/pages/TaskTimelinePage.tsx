@@ -62,6 +62,7 @@ const TASK_TIMELINE_SHOW_PENDING_KEY = 'task-timeline-show-pending'
 const TASK_TIMELINE_LAYOUT_MODE_KEY = 'task-timeline-layout-mode'
 const CUSTOM_SCALE_SLOT_PADDING_PX = 4
 const TIMELINE_SCALE_OPTIONS = [
+  { id: '1h', label: '1h' },
   { id: '8h', label: '8h' },
   { id: '1d', label: '1d' },
   { id: '3d', label: '3d' },
@@ -139,7 +140,7 @@ function parseTimelineRange(rawValue: string | null): TimelineRange {
   if (rangeText === 'today') {
     return '1d'
   }
-  if (rangeText === '8h' || rangeText === '1d' || rangeText === '3d' || rangeText === '7d' || rangeText === '1m' || rangeText === '3m' || rangeText === '1y') {
+  if (rangeText === '1h' || rangeText === '8h' || rangeText === '1d' || rangeText === '3d' || rangeText === '7d' || rangeText === '1m' || rangeText === '3m' || rangeText === '1y') {
     range = rangeText
   } else {
     const customMatch = rangeText.match(/^custom:(\d+)([hdmy])$/i) ?? rangeText.match(/^(\d+)([hdmy])$/i)
@@ -218,6 +219,9 @@ function resolveCustomScaleDraft(range: TimelineRange): TimelineCustomRange {
   if (typeof range === 'object') {
     return range
   }
+  if (range === '1h') {
+    return { kind: 'custom', value: 1, unit: 'h' }
+  }
   if (range === '8h') {
     return { kind: 'custom', value: 8, unit: 'h' }
   }
@@ -286,6 +290,7 @@ function resolveTimelineScrollOffset(
 }
 
 function normalizeTimelineRange(range: TimelineCustomRange): TimelineRange {
+  if (range.unit === 'h' && range.value === 1) return '1h'
   if (range.unit === 'h' && range.value === 8) return '8h'
   if (range.unit === 'd' && range.value === 1) return '1d'
   if (range.unit === 'd' && range.value === 3) return '3d'
@@ -301,6 +306,8 @@ function resolveRangeScale(range: TimelineRange): TimelineCustomRange {
     return range
   }
   switch (range) {
+    case '1h':
+      return { kind: 'custom', value: 1, unit: 'h' }
     case '8h':
       return { kind: 'custom', value: 8, unit: 'h' }
     case '1d':
@@ -1319,13 +1326,14 @@ export function TaskTimelinePage() {
             <button
               type="button"
               onClick={() => handleSetShowPending(!showPending)}
+              aria-pressed={showPending}
               className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
                 showPending
                   ? 'border-[#C75B3A] bg-[#FFF7ED] text-[#C75B3A] dark:border-[#FDBA74] dark:bg-[#2A231B] dark:text-[#FDBA74]'
                   : 'border-[#E7E3E0] bg-white text-[#57534E] hover:text-[#1C1917] dark:border-[#3C3836] dark:bg-[#1C1917] dark:text-[#A8A29E]'
               }`}
             >
-              {showPending ? '隐藏待办段' : '显示待办段'}
+              显示待办段
             </button>
             <button
               type="button"

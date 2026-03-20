@@ -146,7 +146,7 @@ describe('TaskTimelinePage scale controls（任务时间线比例尺控件）', 
     await screen.findByTestId('timeline-segment-task-1-1')
     expect(screen.getByRole('button', { name: '1d' })).toBeInTheDocument()
 
-    expect(screen.getByRole('button', { name: '隐藏待办段' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '显示待办段' })).toHaveAttribute('aria-pressed', 'true')
 
     fireEvent.click(screen.getByRole('button', { name: '3d' }))
 
@@ -154,7 +154,7 @@ describe('TaskTimelinePage scale controls（任务时间线比例尺控件）', 
       expect(localStorage.getItem('task-timeline-range')).toBe('3d')
     })
     expect(localStorage.getItem('task-timeline-show-pending')).toBe('1')
-    expect(screen.getByRole('button', { name: '隐藏待办段' })).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: '显示待办段' })).toHaveAttribute('aria-pressed', 'true')
 
     fireEvent.click(screen.getByTestId('timeline-segment-task-1-1'))
 
@@ -168,6 +168,35 @@ describe('TaskTimelinePage scale controls（任务时间线比例尺控件）', 
     await waitFor(() => {
       expect(localStorage.getItem('task-timeline-selected-task')).toBeNull()
     })
+  })
+
+  it('uses active style to mean pending segments are shown while keeping a stable label', async () => {
+    render(<TaskTimelinePage />)
+
+    await screen.findByTestId('task-timeline-page')
+
+    const toggle = screen.getByRole('button', { name: '显示待办段' })
+    expect(toggle).toHaveAttribute('aria-pressed', 'false')
+
+    fireEvent.click(toggle)
+
+    await waitFor(() => {
+      expect(localStorage.getItem('task-timeline-show-pending')).toBe('1')
+    })
+    expect(screen.getByRole('button', { name: '显示待办段' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('supports 1h as the smallest preset scale', async () => {
+    render(<TaskTimelinePage />)
+
+    await screen.findByTestId('task-timeline-page')
+
+    fireEvent.click(screen.getByRole('button', { name: '1h' }))
+
+    await waitFor(() => {
+      expect(localStorage.getItem('task-timeline-range')).toBe('1h')
+    })
+    expect(screen.getByText('比例尺：1小时')).toBeInTheDocument()
   })
 
   it('scrolls back to now without changing scale state', async () => {

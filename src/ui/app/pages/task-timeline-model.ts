@@ -1,7 +1,7 @@
 import { SYSTEM_TAGS, type Event, type TimeBlock } from '@/lib/types/event'
 import type { TaskNode } from '@/lib/types/task'
 
-export type TimelinePresetRange = '8h' | '1d' | '3d' | '7d' | '1m' | '3m' | '1y'
+export type TimelinePresetRange = '1h' | '8h' | '1d' | '3d' | '7d' | '1m' | '3m' | '1y'
 export type TimelineCustomScaleUnit = 'h' | 'd' | 'm' | 'y'
 
 export interface TimelineCustomRange {
@@ -123,6 +123,8 @@ export function resolveTimeRange(range: TimelineRange, now: number): { start: nu
   }
 
   switch (range) {
+    case '1h':
+      return { start: now - HOUR_MS, end: now }
     case '8h':
       return { start: now - 8 * HOUR_MS, end: now }
     case '1d':
