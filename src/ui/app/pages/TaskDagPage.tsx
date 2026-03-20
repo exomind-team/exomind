@@ -137,6 +137,74 @@ function snapshotViewport(
   }
 }
 
+function getTaskDagCanvasShell(): HTMLElement | null {
+  if (typeof document === 'undefined') {
+    return null;
+  }
+
+  return document.querySelector<HTMLElement>('[data-testid="task-dag-canvas-shell"]');
+}
+
+function summarizeFlowViewport(
+  flowInstance: ReactFlowInstance<TaskDagFlowNode, TaskDagFlowEdge> | null,
+  nodes: TaskDagFlowNode[],
+): {
+  viewport: { x: number; y: number; zoom: number } | null;
+  container: { width: number; height: number } | null;
+  bounds: { minX: number; maxX: number; minY: number; maxY: number } | null;
+  inViewportCount: number;
+  inViewportNodeIds: string[];
+} {
+  const viewport = snapshotViewport(flowInstance);
+  const container = getTaskDagCanvasShell();
+  if (!viewport || !container || nodes.length === 0) {
+    return {
+      viewport,
+      container: container ? { width: container.clientWidth, height: container.clientHeight } : null,
+      bounds: null,
+      inViewportCount: 0,
+      inViewportNodeIds: [],
+    };
+  }
+
+  let minX = Number.POSITIVE_INFINITY;
+  let maxX = Number.NEGATIVE_INFINITY;
+  let minY = Number.POSITIVE_INFINITY;
+  let maxY = Number.NEGATIVE_INFINITY;
+  const inViewportNodeIds: string[] = [];
+
+  for (const node of nodes) {
+    const width = node.measured?.width ?? TASK_DAG_NODE_WIDTH;
+    const height = node.measured?.height ?? TASK_DAG_NODE_HEIGHT;
+    minX = Math.min(minX, node.position.x);
+    maxX = Math.max(maxX, node.position.x + width);
+    minY = Math.min(minY, node.position.y);
+    maxY = Math.max(maxY, node.position.y + height);
+
+    const screenX = node.position.x * viewport.zoom + viewport.x;
+    const screenY = node.position.y * viewport.zoom + viewport.y;
+    const screenWidth = width * viewport.zoom;
+    const screenHeight = height * viewport.zoom;
+    const intersectsViewport = (
+      screenX + screenWidth >= 0
+      && screenX <= container.clientWidth
+      && screenY + screenHeight >= 0
+      && screenY <= container.clientHeight
+    );
+    if (intersectsViewport) {
+      inViewportNodeIds.push(node.id);
+    }
+  }
+
+  return {
+    viewport,
+    container: { width: container.clientWidth, height: container.clientHeight },
+    bounds: { minX, maxX, minY, maxY },
+    inViewportCount: inViewportNodeIds.length,
+    inViewportNodeIds,
+  };
+}
+
 function buildExecutionHint(task: TaskNode, isBlocked: boolean, isExecutable: boolean): string {
   if (task.status === 'completed') {
     return '该任务已经完成，可双击进入详情页回顾依赖关系与时间记录。';
@@ -549,6 +617,14 @@ const TASK_DAG_NODE_TYPES = {
 const TASK_DAG_MIN_ZOOM = 0.01;
 const TASK_DAG_FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: TASK_DAG_MIN_ZOOM } as const;
 
+type StableTaskDagLayoutSnapshot = {
+  direction: DagDirection;
+  resolvedDirection: 'TB' | 'LR';
+  visibilitySignature: string;
+  nodeIds: string[];
+  positions: Map<string, { x: number; y: number }>;
+};
+
 export function TaskDagPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -583,6 +659,7 @@ export function TaskDagPage() {
   const hasMountedDirectionRef = useRef(false);
   const hasAppliedInitialViewportRef = useRef(false);
   const taskLoadRequestIdRef = useRef(0);
+  const stableLayoutSnapshotRef = useRef<StableTaskDagLayoutSnapshot | null>(null);
 
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
@@ -836,15 +913,61 @@ export function TaskDagPage() {
     }
   }, [connectState, visibleNodeIdSet]);
 
+  const dagVisibilitySignature = useMemo(() => JSON.stringify({
+    collapsedUpstreamOf: [...dagVisibility.collapsedUpstreamOf].sort(),
+    collapsedDownstreamOf: [...dagVisibility.collapsedDownstreamOf].sort(),
+  }), [dagVisibility.collapsedDownstreamOf, dagVisibility.collapsedUpstreamOf]);
+
   const layoutSignature = useMemo(() => JSON.stringify({
     direction: resolvedDirection,
     nodeIds: renderedVisibleGraph.nodes.map((node) => node.id),
     edges: renderedVisibleGraph.edges.map((edge) => [edge.id, edge.source, edge.target, edge.type]),
   }), [renderedVisibleGraph.edges, renderedVisibleGraph.nodes, resolvedDirection]);
 
-  const layoutFlowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
+  const baseLayoutFlowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
     direction: resolvedDirection,
   }), [layoutSignature, renderedVisibleGraph, resolvedDirection]);
+
+  const layoutFlowGraph = useMemo(() => {
+    const previousSnapshot = stableLayoutSnapshotRef.current;
+    const nextNodeIds = baseLayoutFlowGraph.nodes.map((node) => node.id);
+    const canReuseStablePositions = (
+      hideTerminal
+      && previousSnapshot !== null
+      && previousSnapshot.direction === dagDirection
+      && previousSnapshot.resolvedDirection === resolvedDirection
+      && previousSnapshot.visibilitySignature === dagVisibilitySignature
+      && nextNodeIds.length <= previousSnapshot.nodeIds.length
+      && nextNodeIds.every((nodeId) => previousSnapshot.positions.has(nodeId))
+    );
+
+    return {
+      nodes: baseLayoutFlowGraph.nodes.map((node) => {
+        const reusedPosition = canReuseStablePositions
+          ? previousSnapshot?.positions.get(node.id)
+          : undefined;
+        return reusedPosition ? { ...node, position: reusedPosition } : node;
+      }),
+      edges: baseLayoutFlowGraph.edges,
+    };
+  }, [
+    baseLayoutFlowGraph.edges,
+    baseLayoutFlowGraph.nodes,
+    dagDirection,
+    dagVisibilitySignature,
+    hideTerminal,
+    resolvedDirection,
+  ]);
+
+  useEffect(() => {
+    stableLayoutSnapshotRef.current = {
+      direction: dagDirection,
+      resolvedDirection,
+      visibilitySignature: dagVisibilitySignature,
+      nodeIds: layoutFlowGraph.nodes.map((node) => node.id),
+      positions: new Map(layoutFlowGraph.nodes.map((node) => [node.id, node.position])),
+    };
+  }, [dagDirection, dagVisibilitySignature, layoutFlowGraph.nodes, resolvedDirection]);
 
   const flowGraph = useMemo(() => {
     const hasActiveSearch = Boolean(searchQuery);
@@ -901,6 +1024,16 @@ export function TaskDagPage() {
     selectedTaskId,
     taskById,
   ]);
+
+  useEffect(() => {
+    const layoutSummary = summarizeFlowViewport(flowInstanceRef.current, flowGraph.nodes);
+    debugTaskDagExecute('flowGraph:update', {
+      resolvedDirection,
+      nodeCount: flowGraph.nodes.length,
+      edgeCount: flowGraph.edges.length,
+      layoutSummary,
+    });
+  }, [flowGraph.edges, flowGraph.nodes, resolvedDirection]);
 
   useEffect(() => {
     if (!pendingFocusTaskId || !visibleNodeIdSet.has(pendingFocusTaskId)) {
@@ -1502,9 +1635,11 @@ export function TaskDagPage() {
             onMoveEnd={() => {
               const viewport = flowInstanceRef.current?.getViewport();
               if (viewport) {
+                const layoutSummary = summarizeFlowViewport(flowInstanceRef.current, flowGraph.nodes);
                 debugTaskDagExecute('viewport:onMoveEnd', {
                   direction: dagDirection,
                   viewport,
+                  layoutSummary,
                 });
                 writeStoredDagViewport(dagDirection, viewport);
               }

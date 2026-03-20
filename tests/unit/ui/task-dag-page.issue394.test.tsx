@@ -356,6 +356,91 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(afterExecute).toEqual(beforeExecute);
   });
 
+  it('keeps visible node positions stable when hide-terminal filters completed neighbors after execute updates', async () => {
+    let taskChangeCallback: (() => void) | null = null;
+    let currentTasks: TaskNode[] = [
+      makeTask({ id: 'task-root', title: '测试根', createdAt: 10, updatedAt: 10 }),
+      makeTask({
+        id: 'task-child',
+        title: '下级任务',
+        createdAt: 20,
+        updatedAt: 20,
+        dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+      }),
+      makeTask({
+        id: 'task-grandchild',
+        title: '再下级任务',
+        createdAt: 30,
+        updatedAt: 30,
+        dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+      }),
+      makeTask({ id: 'task-side', title: '旁支任务', createdAt: 40, updatedAt: 40 }),
+    ];
+
+    window.localStorage.setItem('exomind:dag-hide-terminal', '1');
+    onTaskChangeMock.mockImplementation((callback) => {
+      taskChangeCallback = callback;
+      return () => {};
+    });
+    listTasksMock.mockImplementation(async () => currentTasks);
+
+    render(<TaskDagPage />);
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-child')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-side')).toBeInTheDocument();
+    });
+
+    const beforeFilteredUpdate = (flowApiMocks.lastProps as {
+      nodes: Array<{ id: string; position: { x: number; y: number } }>;
+    }).nodes.reduce<Record<string, { x: number; y: number }>>((positions, node) => {
+      positions[node.id] = node.position;
+      return positions;
+    }, {});
+
+    currentTasks = [
+      makeTask({ id: 'task-root', title: '测试根', status: 'completed', createdAt: 10, updatedAt: 50 }),
+      makeTask({
+        id: 'task-child',
+        title: '下级任务',
+        status: 'in_progress',
+        createdAt: 20,
+        updatedAt: 51,
+        dependsOn: [{ taskId: 'task-root', type: 'soft' }],
+      }),
+      makeTask({
+        id: 'task-grandchild',
+        title: '再下级任务',
+        status: 'completed',
+        createdAt: 30,
+        updatedAt: 52,
+        dependsOn: [{ taskId: 'task-child', type: 'soft' }],
+      }),
+      makeTask({ id: 'task-side', title: '旁支任务', createdAt: 40, updatedAt: 53 }),
+    ];
+
+    await act(async () => {
+      taskChangeCallback?.();
+    });
+
+    await waitFor(() => {
+      expect(screen.getByTestId('mock-react-flow-node-task-child')).toBeInTheDocument();
+      expect(screen.getByTestId('mock-react-flow-node-task-side')).toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-root')).not.toBeInTheDocument();
+      expect(screen.queryByTestId('mock-react-flow-node-task-grandchild')).not.toBeInTheDocument();
+    });
+
+    const afterFilteredUpdate = (flowApiMocks.lastProps as {
+      nodes: Array<{ id: string; position: { x: number; y: number } }>;
+    }).nodes.reduce<Record<string, { x: number; y: number }>>((positions, node) => {
+      positions[node.id] = node.position;
+      return positions;
+    }, {});
+
+    expect(afterFilteredUpdate['task-child']).toEqual(beforeFilteredUpdate['task-child']);
+    expect(afterFilteredUpdate['task-side']).toEqual(beforeFilteredUpdate['task-side']);
+  });
+
   it('does not auto-fit after nodes finish loading when no saved viewport exists', async () => {
     let resolveTasks: ((tasks: TaskNode[]) => void) | null = null;
     listTasksMock.mockImplementationOnce(() => new Promise<TaskNode[]>((resolve) => {
