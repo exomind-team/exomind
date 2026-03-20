@@ -617,14 +617,6 @@ const TASK_DAG_NODE_TYPES = {
 const TASK_DAG_MIN_ZOOM = 0.01;
 const TASK_DAG_FIT_VIEW_OPTIONS = { padding: 0.2, minZoom: TASK_DAG_MIN_ZOOM } as const;
 
-type StableTaskDagLayoutSnapshot = {
-  direction: DagDirection;
-  resolvedDirection: 'TB' | 'LR';
-  visibilitySignature: string;
-  nodeIds: string[];
-  positions: Map<string, { x: number; y: number }>;
-};
-
 export function TaskDagPage() {
   const location = useLocation();
   const navigate = useNavigate();
@@ -659,7 +651,6 @@ export function TaskDagPage() {
   const hasMountedDirectionRef = useRef(false);
   const hasAppliedInitialViewportRef = useRef(false);
   const taskLoadRequestIdRef = useRef(0);
-  const stableLayoutSnapshotRef = useRef<StableTaskDagLayoutSnapshot | null>(null);
 
   useEffect(() => {
     const fullPath = location.pathname + (location.searchStr || '');
@@ -913,61 +904,15 @@ export function TaskDagPage() {
     }
   }, [connectState, visibleNodeIdSet]);
 
-  const dagVisibilitySignature = useMemo(() => JSON.stringify({
-    collapsedUpstreamOf: [...dagVisibility.collapsedUpstreamOf].sort(),
-    collapsedDownstreamOf: [...dagVisibility.collapsedDownstreamOf].sort(),
-  }), [dagVisibility.collapsedDownstreamOf, dagVisibility.collapsedUpstreamOf]);
-
   const layoutSignature = useMemo(() => JSON.stringify({
     direction: resolvedDirection,
     nodeIds: renderedVisibleGraph.nodes.map((node) => node.id),
     edges: renderedVisibleGraph.edges.map((edge) => [edge.id, edge.source, edge.target, edge.type]),
   }), [renderedVisibleGraph.edges, renderedVisibleGraph.nodes, resolvedDirection]);
 
-  const baseLayoutFlowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
+  const layoutFlowGraph = useMemo(() => buildVisibleTaskDagFlow(renderedVisibleGraph, {
     direction: resolvedDirection,
   }), [layoutSignature, renderedVisibleGraph, resolvedDirection]);
-
-  const layoutFlowGraph = useMemo(() => {
-    const previousSnapshot = stableLayoutSnapshotRef.current;
-    const nextNodeIds = baseLayoutFlowGraph.nodes.map((node) => node.id);
-    const canReuseStablePositions = (
-      hideTerminal
-      && previousSnapshot !== null
-      && previousSnapshot.direction === dagDirection
-      && previousSnapshot.resolvedDirection === resolvedDirection
-      && previousSnapshot.visibilitySignature === dagVisibilitySignature
-      && nextNodeIds.length <= previousSnapshot.nodeIds.length
-      && nextNodeIds.every((nodeId) => previousSnapshot.positions.has(nodeId))
-    );
-
-    return {
-      nodes: baseLayoutFlowGraph.nodes.map((node) => {
-        const reusedPosition = canReuseStablePositions
-          ? previousSnapshot?.positions.get(node.id)
-          : undefined;
-        return reusedPosition ? { ...node, position: reusedPosition } : node;
-      }),
-      edges: baseLayoutFlowGraph.edges,
-    };
-  }, [
-    baseLayoutFlowGraph.edges,
-    baseLayoutFlowGraph.nodes,
-    dagDirection,
-    dagVisibilitySignature,
-    hideTerminal,
-    resolvedDirection,
-  ]);
-
-  useEffect(() => {
-    stableLayoutSnapshotRef.current = {
-      direction: dagDirection,
-      resolvedDirection,
-      visibilitySignature: dagVisibilitySignature,
-      nodeIds: layoutFlowGraph.nodes.map((node) => node.id),
-      positions: new Map(layoutFlowGraph.nodes.map((node) => [node.id, node.position])),
-    };
-  }, [dagDirection, dagVisibilitySignature, layoutFlowGraph.nodes, resolvedDirection]);
 
   const flowGraph = useMemo(() => {
     const hasActiveSearch = Boolean(searchQuery);

@@ -356,7 +356,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
     expect(afterExecute).toEqual(beforeExecute);
   });
 
-  it('keeps visible node positions stable when hide-terminal filters completed neighbors after execute updates', async () => {
+  it('recomputes layout when hide-terminal removes visible nodes after execute updates', async () => {
     let taskChangeCallback: (() => void) | null = null;
     let currentTasks: TaskNode[] = [
       makeTask({ id: 'task-root', title: '测试根', createdAt: 10, updatedAt: 10 }),
@@ -437,8 +437,7 @@ describe('TaskDagPage issue-394（任务 DAG Wave 1 / Wave 2 / Wave 3）', () =>
       return positions;
     }, {});
 
-    expect(afterFilteredUpdate['task-child']).toEqual(beforeFilteredUpdate['task-child']);
-    expect(afterFilteredUpdate['task-side']).toEqual(beforeFilteredUpdate['task-side']);
+    expect(afterFilteredUpdate['task-child']).not.toEqual(beforeFilteredUpdate['task-child']);
   });
 
   it('does not auto-fit after nodes finish loading when no saved viewport exists', async () => {
